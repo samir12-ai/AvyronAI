@@ -640,11 +640,13 @@ async function processAccount(accountId: string) {
           await scrapeUserChannels(accountId, activeCampaignId);
         }
         // Build delta context from the latest snapshot per channel (uses deltaFromPrevious JSON)
+        // campaignId filter is required to prevent cross-campaign data contamination
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const recentSnaps = await db.select()
           .from(userChannelSnapshots)
           .where(and(
             eq(userChannelSnapshots.accountId, accountId),
+            eq(userChannelSnapshots.campaignId, activeCampaignId),
             gte(userChannelSnapshots.scrapedAt, sevenDaysAgo)
           ))
           .orderBy(desc(userChannelSnapshots.scrapedAt))

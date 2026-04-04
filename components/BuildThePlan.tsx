@@ -330,11 +330,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     if (!profileCampaignId) return;
     setDualAnalysisLoading(true);
     try {
-      const res = await authFetch(getApiUrl(`/api/agent/dual-analysis/${profileCampaignId}`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      const res = await authFetch(getApiUrl(`/api/agent/dual-analysis/${profileCampaignId}`));
       if (res.ok) {
         const data = await safeApiJson(res);
         if (data.analysis) {

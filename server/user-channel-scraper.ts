@@ -77,28 +77,35 @@ function isBlockWarning(warnings: string[]): boolean {
   );
 }
 
+/**
+ * Returns the most recent snapshot for this exact channel identity (platform + channelKey).
+ * channelKey = handle for Instagram, normalized URL for website.
+ * Keying by channel identity prevents stale snapshots from a different handle/URL
+ * from suppressing re-scrapes after the user updates their channel configuration.
+ */
 async function getPreviousSnapshot(
   accountId: string,
   campaignId: string,
   platform: string,
+  channelKey: string | null,
 ): Promise<UserChannelSnapshotData | null> {
-  // Fetch two most recent snapshots — index [0] = latest, [1] = previous
+  const conditions = [
+    eq(userChannelSnapshots.accountId, accountId),
+    eq(userChannelSnapshots.campaignId, campaignId),
+    eq(userChannelSnapshots.platform, platform),
+  ];
+  if (channelKey) {
+    conditions.push(eq(userChannelSnapshots.handle, channelKey));
+  }
+
   const rows = await db
     .select()
     .from(userChannelSnapshots)
-    .where(
-      and(
-        eq(userChannelSnapshots.accountId, accountId),
-        eq(userChannelSnapshots.campaignId, campaignId),
-        eq(userChannelSnapshots.platform, platform),
-      )
-    )
+    .where(and(...conditions))
     .orderBy(desc(userChannelSnapshots.scrapedAt))
-    .limit(2);
+    .limit(1);
 
   if (rows.length === 0) return null;
-
-  // Return the most recent completed snapshot for delta computation
   const row = rows[0];
   if (!row.snapshotData) return null;
   try {
@@ -390,24 +397,31 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
 
   for (const profile of profiles) {
     try {
-      // Determine first-scrape vs incremental for this platform
-      const previousSnapshot = await getPreviousSnapshot(accountId, campaignId, profile.platform);
+      // Channel identity key: handle for Instagram, URL for website
+      // Using both platform + channelKey prevents stale snapshots from a different handle/URL
+      // from suppressing re-scrapes after the user updates their channel config.
+      const channelKey: string | null = profile.handle ?? profile.url ?? null;
 
-      // Per-profile freshness check: skip if this profile's last snapshot is still fresh
+      // Determine first-scrape vs incremental for this exact channel identity
+      const previousSnapshot = await getPreviousSnapshot(accountId, campaignId, profile.platform, channelKey);
+
+      // Per-profile freshness check: skip if this exact channel's last snapshot is still fresh
       if (previousSnapshot) {
+        const conditions = [
+          eq(userChannelSnapshots.accountId, accountId),
+          eq(userChannelSnapshots.campaignId, campaignId),
+          eq(userChannelSnapshots.platform, profile.platform),
+        ];
+        if (channelKey) conditions.push(eq(userChannelSnapshots.handle, channelKey));
         const latestForProfile = await db
           .select()
           .from(userChannelSnapshots)
-          .where(and(
-            eq(userChannelSnapshots.accountId, accountId),
-            eq(userChannelSnapshots.campaignId, campaignId),
-            eq(userChannelSnapshots.platform, profile.platform),
-          ))
+          .where(and(...conditions))
           .orderBy(desc(userChannelSnapshots.scrapedAt))
           .limit(1);
         if (latestForProfile.length > 0 && latestForProfile[0].scrapedAt) {
           if (latestForProfile[0].scrapedAt.getTime() >= scrapeIntervalCutoff) {
-            console.log(`[UserChannelScraper] Skipping fresh profile: ${profile.platform}:${profile.handle ?? profile.url}`);
+            console.log(`[UserChannelScraper] Skipping fresh profile: ${profile.platform}:${channelKey ?? "unknown"}`);
             continue;
           }
         }
@@ -428,11 +442,12 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
       const delta = computeDelta(snapshot, previousSnapshot);
 
       // ── DB write only — no engine calls ────────────────────────────────
+      // Store channelKey (handle for Instagram, URL for website) so queries can key by channel identity.
       await db.insert(userChannelSnapshots).values({
         accountId,
         campaignId,
         platform: profile.platform,
-        handle: profile.handle,
+        handle: channelKey, // normalized channel identity — URL stored here for website profiles
         snapshotData: JSON.stringify(snapshot),
         deltaFromPrevious: JSON.stringify(delta),
         scrapedAt: new Date(),
@@ -471,20 +486,23 @@ export async function needsUserChannelScrape(accountId: string, campaignId: stri
   const cutoff = Date.now() - SCRAPE_INTERVAL_MS;
 
   for (const profile of profiles) {
+    // Key by channel identity (platform + handle/URL) — not just platform
+    const channelKey: string | null = profile.handle ?? profile.url ?? null;
+    const conditions = [
+      eq(userChannelSnapshots.accountId, accountId),
+      eq(userChannelSnapshots.campaignId, campaignId),
+      eq(userChannelSnapshots.platform, profile.platform),
+    ];
+    if (channelKey) conditions.push(eq(userChannelSnapshots.handle, channelKey));
+
     const latestSnap = await db
       .select()
       .from(userChannelSnapshots)
-      .where(
-        and(
-          eq(userChannelSnapshots.accountId, accountId),
-          eq(userChannelSnapshots.campaignId, campaignId),
-          eq(userChannelSnapshots.platform, profile.platform),
-        )
-      )
+      .where(and(...conditions))
       .orderBy(desc(userChannelSnapshots.scrapedAt))
       .limit(1);
 
-    if (latestSnap.length === 0) return true; // No snapshot for this profile → scrape needed
+    if (latestSnap.length === 0) return true; // No snapshot for this exact channel → scrape needed
     const lastScrape = latestSnap[0].scrapedAt;
     if (!lastScrape || lastScrape.getTime() < cutoff) return true; // Stale → scrape needed
   }
