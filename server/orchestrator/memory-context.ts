@@ -27,7 +27,7 @@ export function extractFormatConstraints(block: MemoryBlock): FormatConstraints 
   const reason: Record<string, string> = {};
 
   for (const slot of block.reinforceSlots) {
-    if (!slot.isWinner || slot.score === 0) continue;
+    if (!slot.isWinner) continue;
     const lbl = (slot.label + " " + (slot.details ?? "")).toLowerCase();
     for (const [fmt, keywords] of Object.entries(FORMAT_KEYWORDS)) {
       if (keywords.some(k => lbl.includes(k)) && !boostedFormats.includes(fmt)) {
