@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { runOrchestrator, getOrchestratorStatus, getLatestOrchestratorRun } from "./index";
+import { ENGINE_PRIORITY_ORDER } from "./priority-matrix";
 import { loadSystemContext, buildSystemPrompt } from "./agent-context";
 import { db } from "../db";
 import {
@@ -27,6 +28,19 @@ export function registerOrchestratorV2Routes(app: Express) {
       const { campaignId, forceRefresh, resumeFromEngine, pausedJobId, scopedEngines } = req.body;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      // Validate scopedEngines against known engine IDs — reject unknown IDs with 400
+      if (Array.isArray(scopedEngines) && scopedEngines.length > 0) {
+        const validEngineIds = new Set(ENGINE_PRIORITY_ORDER.map(e => e.id));
+        const invalidIds = scopedEngines.filter((id: string) => !validEngineIds.has(id as any));
+        if (invalidIds.length > 0) {
+          return res.status(400).json({
+            error: "Invalid engine IDs in scopedEngines",
+            invalidIds,
+            validIds: Array.from(validEngineIds),
+          });
+        }
       }
 
       const accountId = resolveAccountId(req);
