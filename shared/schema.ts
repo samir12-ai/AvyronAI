@@ -194,6 +194,7 @@ export const strategyMemory = pgTable("strategy_memory", {
   score: doublePrecision("score").default(0),
   usageCount: integer("usage_count").default(0),
   lastUsed: timestamp("last_used"),
+  /** @deprecated backward-compat alias — always kept in sync with direction. Read-path derives this as direction === 'reinforce'. Write-path must set isWinner = (direction === 'reinforce'). */
   isWinner: boolean("is_winner").default(false),
   engineName: text("engine_name"),
   planId: varchar("plan_id"),

@@ -59,9 +59,9 @@ export async function applyMemoryMutation(
         : confidence;
 
       const updatedDirection: "reinforce" | "avoid" | "neutral" = entry.direction
-        ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? (blendedScore < 0 ? "avoid" : "neutral") : undefined)
+        ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? "avoid" : undefined)
         ?? (prev.direction as "reinforce" | "avoid" | "neutral" | undefined)
-        ?? (blendedScore >= 0.5 ? "reinforce" : blendedScore < 0 ? "avoid" : "neutral");
+        ?? "neutral";
       const updatedIsWinner = updatedDirection === "reinforce";
       const updatedConfidence = entry.confidenceScore
         ?? (updatedDirection === "reinforce" ? 0.85 : updatedDirection === "avoid" ? 0.15 : 0.5);
@@ -84,8 +84,8 @@ export async function applyMemoryMutation(
     } else {
       const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
       const insertDirection: "reinforce" | "avoid" | "neutral" = entry.direction
-        ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? (confidence < 0 ? "avoid" : "neutral") : undefined)
-        ?? (confidence >= 0.5 ? "reinforce" : confidence < 0 ? "avoid" : "neutral");
+        ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? "avoid" : undefined)
+        ?? "neutral";
       const insertIsWinner = insertDirection === "reinforce";
       const insertConfidence = entry.confidenceScore
         ?? (insertDirection === "reinforce" ? 0.85 : insertDirection === "avoid" ? 0.15 : 0.5);

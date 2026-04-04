@@ -369,9 +369,10 @@ Return ONLY valid JSON with this structure:
             label: mem.label,
             details: mem.details,
             score: mem.score || 0,
-            isWinner: mem.isWinner || false,
-            confidenceScore: mem.isWinner ? 0.85 : (mem.score && mem.score < 0 ? 0.15 : 0.5),
-            direction: mem.isWinner ? "reinforce" : (mem.score && mem.score < 0 ? "avoid" : "neutral"),
+            direction: mem.isWinner ? "reinforce" : "neutral",
+            isWinner: mem.isWinner ? true : false,
+            confidenceScore: mem.isWinner ? 0.85 : 0.5,
+            lastValidatedAt: new Date(),
           });
         }
       }
@@ -580,9 +581,10 @@ Return JSON:
             label: improvement,
             details: `Auto-generated improvement from weekly report on ${now.toISOString().split('T')[0]}`,
             score: 0.5,
+            direction: "neutral",
             isWinner: false,
             confidenceScore: 0.5,
-            direction: "neutral",
+            lastValidatedAt: new Date(),
           });
         }
       }
