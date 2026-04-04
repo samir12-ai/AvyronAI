@@ -8,6 +8,7 @@ import { decomposeGoal, generateSimulation, normalizeGoal, computeFunnelMath, ch
 import { checkPlanReadiness, resolveArchetype } from "../plan-gate";
 import { composeTasks } from "../task-composer";
 import { logAssumptions, type AssumptionEntry } from "../conflict-resolver";
+import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
 import type { OrchestratorConfig } from "./index";
 import type { EngineId, EngineStepResult } from "./priority-matrix";
 
@@ -268,6 +269,7 @@ async function generatePlanWithAI(
   lockedDecisions?: string,
   accountId: string = "default",
   memoryContextBlock?: string,
+  campaignId: string = "",
 ): Promise<SynthesizedPlan> {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
@@ -407,15 +409,24 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
     return JSON.parse(content) as SynthesizedPlan;
   } catch (err: any) {
     console.warn(`[PlanSynthesis] AI synthesis failed, using deterministic fallback: ${err.message}`);
-    return buildDeterministicPlan(businessData, campaign, objective);
+    return buildDeterministicPlan(businessData, campaign, objective, campaignId, accountId);
   }
 }
 
-function buildDeterministicPlan(businessData: any, campaign: any, objective: string): SynthesizedPlan {
+async function buildDeterministicPlan(businessData: any, campaign: any, objective: string, campaignId: string, accountId: string): Promise<SynthesizedPlan> {
   const businessType = businessData?.businessType || "general business";
   const location = campaign?.location || "target market";
   const budget = businessData?.monthlyBudget || "available budget";
-  const objectiveUpper = objective.toUpperCase();
+
+  let rhythm: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; reasoning: string; performanceBasis: string } = {
+    reelsPerWeek: 4, carouselsPerWeek: 2, storiesPerDay: 2, postsPerWeek: 1,
+    reasoning: "default balanced distribution", performanceBasis: "default_balanced",
+  };
+  try {
+    rhythm = await computeAdaptiveRhythm(campaignId, accountId);
+  } catch (err: any) {
+    console.warn(`[PlanSynthesis] AdaptiveRhythm fallback failed, using default:`, err.message);
+  }
 
   return {
     strategicSummary: {
@@ -436,12 +447,12 @@ function buildDeterministicPlan(businessData: any, campaign: any, objective: str
       performanceExpectations: "Steady improvement over 30-day period with weekly benchmarks",
     },
     contentDistribution: {
-      reelsPerWeek: objectiveUpper === "AWARENESS" || objectiveUpper === "FOLLOWERS" ? 5 : objectiveUpper === "SALES" || objectiveUpper === "REVENUE" ? 4 : 4,
-      postsPerWeek: 1,
-      storiesPerDay: 2,
-      carouselsPerWeek: objectiveUpper === "SALES" || objectiveUpper === "REVENUE" ? 3 : 2,
+      reelsPerWeek: rhythm.reelsPerWeek,
+      postsPerWeek: rhythm.postsPerWeek,
+      storiesPerDay: rhythm.storiesPerDay,
+      carouselsPerWeek: rhythm.carouselsPerWeek,
       videosPerWeek: 0,
-      rationale: `Platform-aware distribution biased toward Reels for algorithm reach. ${objectiveUpper === "AWARENESS" ? "Reels 70%, Carousels 20%, Posts 10%" : objectiveUpper === "SALES" || objectiveUpper === "REVENUE" ? "Reels 50%, Carousels 35%, Posts 15%" : "Reels 60%, Carousels 30%, Posts 10%"} — short-form video drives discovery on Instagram.`,
+      rationale: `Adaptive rhythm based on ${rhythm.performanceBasis}: ${rhythm.reasoning}`,
       contentPillars: [
         { pillar: "Educational", percentage: "40%", examples: ["How-to content", "Tips and insights"] },
         { pillar: "Social Proof", percentage: "30%", examples: ["Testimonials", "Case studies"] },
@@ -692,7 +703,7 @@ export async function synthesizePlan(
 
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock);
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId);
 
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);

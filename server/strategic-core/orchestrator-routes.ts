@@ -159,7 +159,7 @@ const SECTION_SPECS: SectionSpec[] = [
     key: "contentDistributionPlan",
     label: "Content Distribution",
     maxTokens: 800,
-    systemPrompt: `You generate a content distribution plan for Instagram marketing. Use the confirmed blueprint for positioning and the Business Data Layer for distribution parameters. Business type determines format mix. Funnel objective determines purpose distribution (AWARENESS→Reels+Stories, LEADS→Carousels+Posts, SALES→balanced, AUTHORITY→Carousels+Posts). Budget determines volume. Conversion channel determines CTA placement. Geo-scope to the specified location. No hardcoded defaults. Respond with ONLY valid JSON.`,
+    systemPrompt: `You generate a content distribution plan for Instagram marketing. Use the confirmed blueprint for positioning and the Business Data Layer for distribution parameters. The weekly content volume (reels/carousels/stories/posts) is pre-computed and provided as a constraint — do NOT override it with objective-based templates. Business type and positioning determine format purpose, not volume. Budget determines CTA intensity and boost strategy. Conversion channel determines CTA placement. Geo-scope to the specified location. Accept the provided rhythm as authoritative. No hardcoded objective→format mappings. Respond with ONLY valid JSON.`,
     schemaHint: `{"contentDistributionPlan":{"platforms":[{"platform":"string","frequency":"string","priority":"primary|secondary","contentTypes":[{"type":"string","percentage":"string","weeklyCount":"number","rationale":"string"}],"bestPostingTimes":["string"],"hashtagStrategy":"string"}],"contentPillars":[{"pillar":"string","percentage":"string","examples":["string"]}]}}`,
   },
   {

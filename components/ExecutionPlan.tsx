@@ -34,6 +34,7 @@ interface ContentDnaData {
   hookStyles?: string[];
   messagingThemes?: string[];
   contentMixRatio?: { problemAgitation: number; mechanismEducation: number; proof: number; conversion: number };
+  rhythmReasoning?: string;
 }
 
 interface ExecutionActionsData {
@@ -147,6 +148,7 @@ function PlanCard({ config, plan, isDark }: { config: CardConfig; plan: BuildPla
         const hooks = plan.contentDna.hookStyles || [];
         const themes = plan.contentDna.messagingThemes || [];
         const mix = plan.contentDna.contentMixRatio;
+        const rhythmReasoning = plan.contentDna.rhythmReasoning;
         return (
           <View>
             <View style={s.dnaGrid}>
@@ -163,6 +165,12 @@ function PlanCard({ config, plan, isDark }: { config: CardConfig; plan: BuildPla
                 <Text style={[s.dnaCellLabel, { color: textSecondary }]}>Stories/wk</Text>
               </View>
             </View>
+            {!!rhythmReasoning && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingHorizontal: 2 }}>
+                <Ionicons name="analytics-outline" size={12} color={textSecondary} />
+                <Text style={{ fontSize: 11, color: textSecondary, flex: 1, lineHeight: 16 }}>{rhythmReasoning}</Text>
+              </View>
+            )}
             {mix && (
               <View style={[s.mixBar, { backgroundColor: isDark ? '#1E2736' : '#F3F4F6', marginTop: 10, borderRadius: 8, padding: 10 }]}>
                 <Text style={[s.dnaCellLabel, { color: textSecondary, marginBottom: 6, fontWeight: '600' as const }]}>Content Mix</Text>
@@ -511,6 +519,7 @@ const s = StyleSheet.create({
   dnaCell: { flex: 1, borderRadius: 8, padding: 10, alignItems: 'center' },
   dnaCellNum: { fontSize: 22, fontWeight: '700' as const },
   dnaCellLabel: { fontSize: 10, marginTop: 2 },
+  mixBar: {},
   dnaTypes: { gap: 10 },
   dnaTypeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   dnaTypeIcon: { marginTop: 2 },

@@ -58,6 +58,7 @@ import {
 } from "./memory-context";
 import { strategyMemory } from "@shared/schema";
 import { snapshotPreMetrics } from "../outcome-tracker";
+import { applyMemoryMutation } from "../memory-mutation/engine";
 
 import { MarketIntelligenceV3 } from "../market-intelligence-v3/engine";
 import { runAudienceEngine } from "../audience-engine/engine";
@@ -1378,40 +1379,10 @@ async function writeStrategyMemoryEntries(
       }
     }
 
-    for (const entry of entries) {
-      const fingerprint = makeStrategyFingerprint(
-        entry.engineName,
-        entry.label,
-        entry.details,
-      );
-
-      const [memRow] = await db
-        .insert(strategyMemory)
-        .values({
-          accountId: config.accountId,
-          campaignId: config.campaignId,
-          memoryType: entry.memoryType,
-          label: entry.label,
-          details: entry.details,
-          score: 0,
-          isWinner: false,
-          engineName: entry.engineName,
-          planId: planId,
-          strategyFingerprint: fingerprint,
-        })
-        .returning();
-
-      try {
-        await snapshotPreMetrics(memRow.id, config.accountId, entry.memoryType);
-      } catch (snapErr: any) {
-        console.warn(
-          `[Orchestrator] MEMORY_SNAPSHOT_FAILED | id=${memRow.id} | error=${snapErr.message}`,
-        );
-      }
-    }
+    const mutationResult = await applyMemoryMutation(config.campaignId, config.accountId, entries as any, planId);
 
     console.log(
-      `[Orchestrator] MEMORY_WRITTEN | planId=${planId} | entries=${entries.length}`,
+      `[Orchestrator] MEMORY_WRITTEN | planId=${planId} | entries=${entries.length} | written=${mutationResult.written} | updated=${mutationResult.updated} | decayed=${mutationResult.decayed}`,
     );
   } catch (memErr: any) {
     console.warn(
@@ -1474,11 +1445,16 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   let memoryContextBlock = "";
   try {
-    const memBlock = await buildMemoryContext(config.campaignId, config.accountId);
+    const bizDataForMemory = await getBusinessData(config.accountId, config.campaignId).catch(() => null);
+    const memBlock = await buildMemoryContext(config.campaignId, config.accountId, bizDataForMemory ? {
+      funnelObjective: bizDataForMemory.funnelObjective,
+      businessType: bizDataForMemory.businessType,
+      monthlyBudget: bizDataForMemory.monthlyBudget,
+    } : null);
     memoryContextBlock = serializeMemoryContextForPrompt(memBlock);
     if (memoryContextBlock) {
       ctx.memoryContext = memoryContextBlock;
-      console.log(`[Orchestrator] MEMORY_CONTEXT_LOADED | reinforce=${memBlock.reinforcePatterns.length} | avoid=${memBlock.avoidPatterns.length} | pending=${memBlock.pendingPatterns.length}`);
+      console.log(`[Orchestrator] MEMORY_CONTEXT_LOADED | reinforce=${memBlock.reinforceSlots.length} | avoid=${memBlock.avoidSlots.length} | pending=${memBlock.pendingSlots.length}`);
     }
   } catch (memLoadErr: any) {
     console.warn(`[Orchestrator] MEMORY_CONTEXT_LOAD_FAILED | error=${memLoadErr.message}`);
