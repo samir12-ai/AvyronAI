@@ -13,6 +13,7 @@ interface MemoryMutationEntry {
   label: string;
   details?: string | null;
   confidenceScore?: number;
+  direction?: "reinforce" | "avoid" | "neutral";
   isWinner?: boolean;
   planId?: string | null;
 }
@@ -57,8 +58,13 @@ export async function applyMemoryMutation(
         ? 0.6 * (prev.score ?? 0) + 0.4 * confidence
         : confidence;
 
-      const updatedIsWinner = entry.isWinner ?? prev.isWinner ?? false;
-      const updatedDirection = updatedIsWinner ? "reinforce" : (blendedScore < 0 ? "avoid" : "neutral");
+      const updatedDirection: "reinforce" | "avoid" | "neutral" = entry.direction
+        ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? (blendedScore < 0 ? "avoid" : "neutral") : undefined)
+        ?? (prev.direction as "reinforce" | "avoid" | "neutral" | undefined)
+        ?? (blendedScore >= 0.5 ? "reinforce" : blendedScore < 0 ? "avoid" : "neutral");
+      const updatedIsWinner = updatedDirection === "reinforce";
+      const updatedConfidence = entry.confidenceScore
+        ?? (updatedDirection === "reinforce" ? 0.85 : updatedDirection === "avoid" ? 0.15 : 0.5);
       await db
         .update(strategyMemory)
         .set({
@@ -66,7 +72,7 @@ export async function applyMemoryMutation(
           details: entry.details ?? prev.details,
           score: blendedScore,
           isWinner: updatedIsWinner,
-          confidenceScore: updatedIsWinner ? 0.85 : (blendedScore < 0 ? 0.15 : 0.5),
+          confidenceScore: updatedConfidence,
           direction: updatedDirection,
           lastValidatedAt: new Date(),
           planId: planId,
@@ -77,6 +83,12 @@ export async function applyMemoryMutation(
       updated++;
     } else {
       const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const insertDirection: "reinforce" | "avoid" | "neutral" = entry.direction
+        ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? (confidence < 0 ? "avoid" : "neutral") : undefined)
+        ?? (confidence >= 0.5 ? "reinforce" : confidence < 0 ? "avoid" : "neutral");
+      const insertIsWinner = insertDirection === "reinforce";
+      const insertConfidence = entry.confidenceScore
+        ?? (insertDirection === "reinforce" ? 0.85 : insertDirection === "avoid" ? 0.15 : 0.5);
       await db.insert(strategyMemory).values({
         id: memId,
         accountId,
@@ -86,9 +98,9 @@ export async function applyMemoryMutation(
         label: entry.label,
         details: entry.details ?? null,
         score: confidence,
-        isWinner: entry.isWinner ?? false,
-        confidenceScore: entry.isWinner ? 0.85 : (confidence < 0 ? 0.15 : 0.5),
-        direction: entry.isWinner ? "reinforce" : (confidence < 0 ? "avoid" : "neutral"),
+        isWinner: insertIsWinner,
+        confidenceScore: insertConfidence,
+        direction: insertDirection,
         lastValidatedAt: new Date(),
         planId,
         strategyFingerprint: fingerprint,
@@ -147,7 +159,7 @@ export async function recordWinnerMemory(
   entry: MemoryMutationEntry,
   planId: string,
 ): Promise<void> {
-  await applyMemoryMutation(campaignId, accountId, [{ ...entry, isWinner: true, confidenceScore: 0.75 }], planId);
+  await applyMemoryMutation(campaignId, accountId, [{ ...entry, direction: "reinforce", isWinner: true, confidenceScore: entry.confidenceScore ?? 0.85 }], planId);
 }
 
 export async function recordAvoidMemory(
@@ -156,5 +168,5 @@ export async function recordAvoidMemory(
   entry: MemoryMutationEntry,
   planId: string,
 ): Promise<void> {
-  await applyMemoryMutation(campaignId, accountId, [{ ...entry, isWinner: false, confidenceScore: -0.5 }], planId);
+  await applyMemoryMutation(campaignId, accountId, [{ ...entry, direction: "avoid", isWinner: false, confidenceScore: entry.confidenceScore ?? 0.15 }], planId);
 }

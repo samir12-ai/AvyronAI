@@ -200,13 +200,12 @@ export function buildConfidenceWeightedConstraints(block: MemoryBlock): Confiden
   for (const slot of block.reinforceSlots) {
     const effectiveConfidence = computeEffectiveConfidence(slot);
     const { strength, multiplier } = resolveEnforcement(effectiveConfidence);
-    if (strength === "none") continue;
     constraints.push({
       label: slot.label,
       details: slot.details,
       direction: slot.direction,
-      enforcementStrength: strength,
-      enforcementMultiplier: multiplier,
+      enforcementStrength: strength === "none" ? "soft" : strength,
+      enforcementMultiplier: strength === "none" ? 0.05 : multiplier,
       confidenceScore: slot.confidenceScore,
       effectiveConfidence,
       memoryType: slot.memoryType,
@@ -217,13 +216,12 @@ export function buildConfidenceWeightedConstraints(block: MemoryBlock): Confiden
   for (const slot of block.avoidSlots) {
     const effectiveConfidence = computeEffectiveConfidence(slot);
     const { strength, multiplier } = resolveEnforcement(effectiveConfidence);
-    if (strength === "none") continue;
     constraints.push({
       label: slot.label,
       details: slot.details,
       direction: slot.direction,
-      enforcementStrength: strength,
-      enforcementMultiplier: -multiplier,
+      enforcementStrength: strength === "none" ? "soft" : strength,
+      enforcementMultiplier: strength === "none" ? -0.05 : -multiplier,
       confidenceScore: slot.confidenceScore,
       effectiveConfidence,
       memoryType: slot.memoryType,

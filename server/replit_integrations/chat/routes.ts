@@ -273,9 +273,9 @@ async function writeAgentActionMemory(
       label: toolName,
       details: `${justification} | Result: ${result.summary}`,
       performance: result.success ? "success" : "failure",
-      score: result.success ? 0.7 : 0.3,
+      score: result.success ? 0.85 : 0.15,
       isWinner: result.success,
-      confidenceScore: result.success ? 0.7 : 0.3,
+      confidenceScore: result.success ? 0.85 : 0.15,
       direction: result.success ? "reinforce" : "avoid",
       lastValidatedAt: new Date(),
     });
