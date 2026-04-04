@@ -1445,6 +1445,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   let needsInputPayload: NeedsInputPayload | undefined;
 
   let memoryContextBlock = "";
+  let loadedMemoryBlock: import("../memory-system/types").MemoryBlock | null = null;
   try {
     const bizDataForMemory = await getBusinessData(config.accountId, config.campaignId).catch(() => null);
     const memBlock = await buildMemoryContext(config.campaignId, config.accountId, bizDataForMemory ? {
@@ -1452,6 +1453,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       businessType: bizDataForMemory.businessType,
       monthlyBudget: bizDataForMemory.monthlyBudget,
     } : null);
+    loadedMemoryBlock = memBlock;
     memoryContextBlock = serializeMemoryContextForPrompt(memBlock);
     if (memoryContextBlock) {
       ctx.memoryContext = memoryContextBlock;
@@ -1614,7 +1616,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   if (overallStatus !== "BLOCKED") {
     try {
-      const planResult = await synthesizePlan(config, ctx, results, memoryContextBlock || undefined);
+      const planResult = await synthesizePlan(config, ctx, results, memoryContextBlock || undefined, loadedMemoryBlock);
       planId = planResult.planId;
       if (planId) {
         await writeStrategyMemoryEntries(config, results, planId, planResult.plan);

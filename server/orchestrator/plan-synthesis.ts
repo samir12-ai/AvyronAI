@@ -9,6 +9,8 @@ import { checkPlanReadiness, resolveArchetype } from "../plan-gate";
 import { composeTasks } from "../task-composer";
 import { logAssumptions, type AssumptionEntry } from "../conflict-resolver";
 import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
+import { applyMemoryConstraints } from "./memory-context";
+import type { MemoryBlock } from "../memory-system/types";
 import type { OrchestratorConfig } from "./index";
 import type { EngineId, EngineStepResult } from "./priority-matrix";
 
@@ -63,6 +65,7 @@ export interface SynthesizedPlan {
     contentPillarToDna?: Array<{ pillar: string; dnaElements: string[]; hookApproach: string; ctaStyle: string }>;
     weeklyDnaApplication?: string;
   };
+  memoryOverrides?: Array<{ field: string; originalValue: number; correctedValue: number; memoryLabel: string }>;
 }
 
 function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string {
@@ -654,6 +657,7 @@ export async function synthesizePlan(
   ctx: any,
   results: Map<EngineId, EngineStepResult>,
   memoryContextBlock?: string,
+  memoryBlock?: import("../memory-system/types").MemoryBlock | null,
 ): Promise<{ planId: string; plan: SynthesizedPlan }> {
   const [bizData] = await db
     .select()
@@ -717,6 +721,20 @@ export async function synthesizePlan(
   }
 
   const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm);
+
+  if (memoryBlock && (memoryBlock.reinforceSlots.length > 0 || memoryBlock.avoidSlots.length > 0)) {
+    try {
+      const baseline = memoryBlock.industryBaseline ?? undefined;
+      const { adjusted, overrides } = applyMemoryConstraints(synthesized.contentDistribution, memoryBlock, baseline);
+      if (overrides.length > 0) {
+        synthesized.contentDistribution = { ...synthesized.contentDistribution, ...adjusted };
+        synthesized.memoryOverrides = overrides;
+        console.log(`[PlanSynthesis] MEMORY_CONSTRAINTS_APPLIED | overrides=${overrides.length} | fields=${overrides.map(o => o.field).join(",")}`);
+      }
+    } catch (memErr: any) {
+      console.warn(`[PlanSynthesis] Memory constraint enforcement failed (non-blocking):`, memErr.message);
+    }
+  }
 
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);

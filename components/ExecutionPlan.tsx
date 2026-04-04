@@ -49,6 +49,13 @@ interface KpiRulesData {
   conversionTargets: string;
 }
 
+interface MemoryOverrideItem {
+  field: string;
+  originalValue: number;
+  correctedValue: number;
+  memoryLabel: string;
+}
+
 interface BuildPlanData {
   positioning: string;
   differentiation: string;
@@ -58,6 +65,7 @@ interface BuildPlanData {
   contentDna: ContentDnaData;
   executionActions?: ExecutionActionsData;
   kpiRules: KpiRulesData;
+  memoryOverrides?: MemoryOverrideItem[];
 }
 
 interface BuildPlanResponse {
@@ -462,6 +470,32 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
             <PlanCard key={cardConfig.key} config={cardConfig} plan={plan} isDark={isDark} />
           ))}
 
+          {plan.memoryOverrides && plan.memoryOverrides.length > 0 && (
+            <View style={[s.memoryAppliedCard, { backgroundColor: isDark ? '#151B24' : '#F8F9FF', borderColor: isDark ? '#6366F130' : '#6366F120' }]}>
+              <View style={s.memoryAppliedHeader}>
+                <View style={s.memoryAppliedIconWrap}>
+                  <Ionicons name="hardware-chip-outline" size={14} color="#8B5CF6" />
+                </View>
+                <Text style={[s.memoryAppliedTitle, { color: isDark ? '#A78BFA' : '#6366F1' }]}>Memory Applied</Text>
+                <Text style={[s.memoryAppliedSub, { color: isDark ? '#8892A4' : '#546478' }]}>Past decisions constrained this plan</Text>
+              </View>
+              {plan.memoryOverrides.map((ov, i) => {
+                const fieldLabel = ov.field.replace('PerWeek', '/wk').replace('PerDay', '/day').replace('reels', 'Reels').replace('carousels', 'Carousels').replace('stories', 'Stories').replace('posts', 'Posts');
+                return (
+                  <View key={i} style={[s.memoryOverrideRow, i > 0 && { borderTopWidth: 1, borderTopColor: isDark ? '#1E2736' : '#E5E7EB', marginTop: 6, paddingTop: 6 }]}>
+                    <Text style={[s.memoryOverrideField, { color: isDark ? '#8892A4' : '#546478' }]}>{fieldLabel}</Text>
+                    <View style={s.memoryOverrideValues}>
+                      <Text style={[s.memoryOverrideOld, { color: isDark ? '#6B7280' : '#9CA3AF' }]}>{ov.originalValue}</Text>
+                      <Ionicons name="arrow-forward" size={10} color="#8B5CF6" style={{ marginHorizontal: 4 }} />
+                      <Text style={[s.memoryOverrideNew, { color: isDark ? '#A78BFA' : '#6366F1' }]}>{ov.correctedValue}</Text>
+                    </View>
+                    <Text style={[s.memoryOverrideLabel, { color: isDark ? '#6B7280' : '#9CA3AF' }]} numberOfLines={1}>{ov.memoryLabel}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
           <Pressable onPress={() => router.push('/(tabs)/calendar')} style={s.calendarCta}>
             <LinearGradient colors={['#10B981', '#34D399']} style={s.calendarCtaInner} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
               <Ionicons name="calendar-outline" size={20} color="#FFF" />
@@ -532,6 +566,17 @@ const s = StyleSheet.create({
   kpiContent: { flex: 1 },
   kpiLabel: { fontSize: 11, fontWeight: '600' as const, letterSpacing: 0.3, marginBottom: 2 },
   kpiValue: { fontSize: 13, lineHeight: 18 },
+  memoryAppliedCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 4, gap: 0 },
+  memoryAppliedHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
+  memoryAppliedIconWrap: { width: 22, height: 22, borderRadius: 6, backgroundColor: '#6366F118', alignItems: 'center', justifyContent: 'center' },
+  memoryAppliedTitle: { fontSize: 13, fontWeight: '600' as const },
+  memoryAppliedSub: { fontSize: 11, flex: 1 },
+  memoryOverrideRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  memoryOverrideField: { fontSize: 12, fontWeight: '600' as const, minWidth: 68 },
+  memoryOverrideValues: { flexDirection: 'row', alignItems: 'center' },
+  memoryOverrideOld: { fontSize: 12, textDecorationLine: 'line-through' as const },
+  memoryOverrideNew: { fontSize: 12, fontWeight: '700' as const },
+  memoryOverrideLabel: { fontSize: 11, flex: 1 },
   calendarCta: { borderRadius: 12, overflow: 'hidden', marginTop: 4 },
   calendarCtaInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 14, borderRadius: 12 },
   calendarCtaText: { color: '#FFF', fontSize: 16, fontWeight: '700' as const },

@@ -14,6 +14,7 @@ import {
 } from "@shared/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { computeAdaptiveRhythm, type AdaptiveRhythm } from "../adaptive-rhythm/engine";
+import { buildMemoryContext, applyMemoryConstraints, type MemoryOverride } from "../orchestrator/memory-context";
 
 export type { AdaptiveRhythm };
 
@@ -42,6 +43,7 @@ export interface BuildPlanOutput {
     contentMix: string;
     conversionTargets: string;
   };
+  memoryOverrides?: MemoryOverride[];
 }
 
 export interface BuildPlanResult {
@@ -495,6 +497,13 @@ export async function runBuildPlanLayer(
 
   console.log(`[BuildPlanLayer] Adaptive rhythm: reels=${adaptiveRhythm.reelsPerWeek}/wk carousels=${adaptiveRhythm.carouselsPerWeek}/wk stories=${adaptiveRhythm.storiesPerDay}/day posts=${adaptiveRhythm.postsPerWeek}/wk | basis=${adaptiveRhythm.performanceBasis}`);
 
+  let memoryBlockForConstraints: import("../memory-system/types").MemoryBlock | null = null;
+  try {
+    memoryBlockForConstraints = await buildMemoryContext(campaignId, accountId);
+  } catch (memErr: any) {
+    console.warn(`[BuildPlanLayer] Memory context load failed (non-blocking):`, memErr.message);
+  }
+
   const engineContext = buildEngineContext(snapshots);
   let lastFailedBlocks: string[] = [];
 
@@ -525,6 +534,22 @@ export async function runBuildPlanLayer(
 
       const actionability = enforceActionability(plan);
       console.log(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`);
+
+      if (memoryBlockForConstraints && (memoryBlockForConstraints.reinforceSlots.length > 0 || memoryBlockForConstraints.avoidSlots.length > 0)) {
+        try {
+          const baseline = memoryBlockForConstraints.industryBaseline ?? undefined;
+          const ws = plan.contentDna.weeklyStructure;
+          const distribution = { reelsPerWeek: ws.reels, carouselsPerWeek: ws.carousels, storiesPerDay: ws.stories };
+          const { adjusted, overrides } = applyMemoryConstraints(distribution, memoryBlockForConstraints, baseline);
+          if (overrides.length > 0) {
+            plan.contentDna.weeklyStructure = { reels: adjusted.reelsPerWeek ?? ws.reels, carousels: adjusted.carouselsPerWeek ?? ws.carousels, stories: adjusted.storiesPerDay ?? ws.stories };
+            plan.memoryOverrides = overrides;
+            console.log(`[BuildPlanLayer] MEMORY_CONSTRAINTS_APPLIED | overrides=${overrides.length} | fields=${overrides.map(o => o.field).join(",")}`);
+          }
+        } catch (memApplyErr: any) {
+          console.warn(`[BuildPlanLayer] Memory constraint application failed (non-blocking):`, memApplyErr.message);
+        }
+      }
 
       if (actionability.passed) {
         return {
