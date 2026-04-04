@@ -8,6 +8,7 @@ import { runAllHealthChecks } from "./meta-token-manager";
 import { migrateStrategyMemoryColumns } from "./migrations/002-strategy-memory-columns";
 import { migrateUserChannelTables } from "./migrations/003-user-channel-tables";
 import { migrateMemoryConfidenceDirection } from "./migrations/004-memory-confidence-direction";
+import { migrateCalendarExplorationFields } from "./migrations/005-calendar-exploration-fields";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import { authMiddleware, optionalAuth } from "./auth";
 import * as fs from "fs";
@@ -348,6 +349,7 @@ function setupErrorHandler(app: express.Application) {
       migrateStrategyMemoryColumns().catch(err => console.error("[Migration-002] strategy_memory column migration error:", err));
       migrateUserChannelTables().catch(err => console.error("[Migration-003] user channel tables migration error:", err));
       migrateMemoryConfidenceDirection().catch(err => console.error("[Migration-004] memory confidence direction migration error:", err));
+      migrateCalendarExplorationFields().catch(err => console.error("[Migration-005] calendar exploration fields migration error:", err));
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));

@@ -56,6 +56,20 @@ interface MemoryOverrideItem {
   memoryLabel: string;
 }
 
+interface ExplorationSlotItem {
+  format: string;
+  count: number;
+  intent: 'retest' | 'discovery';
+  hypothesis: string;
+}
+
+interface ExplorationPlanData {
+  explorationPercent: number;
+  totalExplorationCount: number;
+  rationale: string;
+  slots: ExplorationSlotItem[];
+}
+
 interface BuildPlanData {
   positioning: string;
   differentiation: string;
@@ -66,6 +80,7 @@ interface BuildPlanData {
   executionActions?: ExecutionActionsData;
   kpiRules: KpiRulesData;
   memoryOverrides?: MemoryOverrideItem[];
+  explorationPlan?: ExplorationPlanData;
 }
 
 interface BuildPlanResponse {
@@ -496,6 +511,43 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
             </View>
           )}
 
+          {plan.explorationPlan && plan.explorationPlan.slots.length > 0 && (
+            <View style={[s.explorationCard, { backgroundColor: isDark ? '#0F1A14' : '#F0FDF4', borderColor: isDark ? '#10B98130' : '#10B98120' }]}>
+              <View style={s.explorationHeader}>
+                <View style={s.explorationIconWrap}>
+                  <Ionicons name="flask-outline" size={14} color="#10B981" />
+                </View>
+                <Text style={[s.explorationTitle, { color: isDark ? '#6EE7B7' : '#059669' }]}>Exploration Plan</Text>
+                <View style={[s.explorationBadge, { backgroundColor: isDark ? '#10B98120' : '#D1FAE5' }]}>
+                  <Text style={[s.explorationBadgeText, { color: isDark ? '#6EE7B7' : '#059669' }]}>{plan.explorationPlan.explorationPercent}% budget</Text>
+                </View>
+              </View>
+              <Text style={[s.explorationRationale, { color: isDark ? '#8892A4' : '#546478' }]} numberOfLines={2}>{plan.explorationPlan.rationale}</Text>
+              <View style={s.explorationSlots}>
+                {plan.explorationPlan.slots.map((slot, i) => (
+                  <View key={i} style={[s.explorationSlot, { backgroundColor: isDark ? '#151B24' : '#FFFFFF', borderColor: isDark ? '#1E2736' : '#E5E7EB' }]}>
+                    <View style={s.explorationSlotHeader}>
+                      <Ionicons
+                        name={slot.intent === 'retest' ? 'refresh-circle-outline' : 'telescope-outline'}
+                        size={14}
+                        color={slot.intent === 'retest' ? P.orange : P.mint}
+                      />
+                      <Text style={[s.explorationSlotFormat, { color: isDark ? '#E8ECF0' : '#1A2332' }]}>
+                        {slot.format.charAt(0).toUpperCase() + slot.format.slice(1)} × {slot.count}
+                      </Text>
+                      <View style={[s.explorationIntentBadge, { backgroundColor: slot.intent === 'retest' ? P.orange + '20' : P.mint + '20' }]}>
+                        <Text style={[s.explorationIntentText, { color: slot.intent === 'retest' ? P.orange : P.mint }]}>
+                          {slot.intent}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={[s.explorationHypothesis, { color: isDark ? '#8892A4' : '#546478' }]}>{slot.hypothesis}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
           <Pressable onPress={() => router.push('/(tabs)/calendar')} style={s.calendarCta}>
             <LinearGradient colors={['#10B981', '#34D399']} style={s.calendarCtaInner} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
               <Ionicons name="calendar-outline" size={20} color="#FFF" />
@@ -582,4 +634,18 @@ const s = StyleSheet.create({
   calendarCtaText: { color: '#FFF', fontSize: 16, fontWeight: '700' as const },
   regenerateBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderWidth: 1, borderRadius: 10 },
   regenerateText: { fontSize: 13 },
+  explorationCard: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 0 },
+  explorationHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' },
+  explorationIconWrap: { width: 22, height: 22, borderRadius: 6, backgroundColor: '#10B98118', alignItems: 'center', justifyContent: 'center' },
+  explorationTitle: { fontSize: 13, fontWeight: '600' as const },
+  explorationBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  explorationBadgeText: { fontSize: 10, fontWeight: '600' as const },
+  explorationRationale: { fontSize: 11, lineHeight: 16, marginBottom: 10 },
+  explorationSlots: { gap: 8 },
+  explorationSlot: { borderRadius: 10, borderWidth: 1, padding: 10, gap: 4 },
+  explorationSlotHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  explorationSlotFormat: { fontSize: 13, fontWeight: '600' as const, flex: 1 },
+  explorationIntentBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  explorationIntentText: { fontSize: 10, fontWeight: '600' as const },
+  explorationHypothesis: { fontSize: 12, lineHeight: 17 },
 });

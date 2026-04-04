@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { loadMemoryBlock } from "../memory-system/manager";
-import { computeExplorationBudget } from "./engine";
+import { computeLegacyExplorationBudget } from "./engine";
 import { db } from "../db";
 import { businessDataLayer } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
@@ -28,7 +28,7 @@ export function registerExplorationBudgetRoutes(app: Express): void {
         monthlyBudget: bizSnap.monthlyBudget,
       } : null);
 
-      const explorationBudget = await computeExplorationBudget(campaignId, accountId, memBlock, totalWeeklySlots);
+      const explorationBudget = await computeLegacyExplorationBudget(campaignId, accountId, memBlock, totalWeeklySlots);
 
       res.json({ success: true, explorationBudget });
     } catch (err: any) {

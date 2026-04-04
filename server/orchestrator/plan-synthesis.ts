@@ -10,7 +10,9 @@ import { composeTasks } from "../task-composer";
 import { logAssumptions, type AssumptionEntry } from "../conflict-resolver";
 import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
 import { applyMemoryConstraints } from "./memory-context";
+import { computeExplorationBudget } from "../exploration-budget/engine";
 import type { MemoryBlock } from "../memory-system/types";
+import type { ExplorationSlot } from "../exploration-budget/engine";
 import type { OrchestratorConfig } from "./index";
 import type { EngineId, EngineStepResult } from "./priority-matrix";
 
@@ -66,6 +68,12 @@ export interface SynthesizedPlan {
     weeklyDnaApplication?: string;
   };
   memoryOverrides?: Array<{ field: string; originalValue: number; correctedValue: number; memoryLabel: string }>;
+  explorationPlan?: {
+    explorationPercent: number;
+    totalExplorationCount: number;
+    rationale: string;
+    slots: ExplorationSlot[];
+  };
 }
 
 function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string {
@@ -553,7 +561,8 @@ function generateCalendarSlots(
   accountId: string,
   planId: string,
   rootBundleId: string | null = null,
-  rootBundleVersion: number | null = null
+  rootBundleVersion: number | null = null,
+  explorationSlots: ExplorationSlot[] = [],
 ): Array<{
   planId: string;
   campaignId: string;
@@ -565,6 +574,9 @@ function generateCalendarSlots(
   status: string;
   rootBundleId: string | null;
   rootBundleVersion: number | null;
+  isExploration?: boolean;
+  explorationIntent?: string | null;
+  explorationHypothesis?: string | null;
 }> {
   const slots: any[] = [];
   const startDate = new Date();
@@ -599,6 +611,7 @@ function generateCalendarSlots(
           status: "PENDING",
           rootBundleId,
           rootBundleVersion,
+          isExploration: false,
         });
       }
 
@@ -614,6 +627,7 @@ function generateCalendarSlots(
           status: "PENDING",
           rootBundleId,
           rootBundleVersion,
+          isExploration: false,
         });
       }
 
@@ -629,6 +643,7 @@ function generateCalendarSlots(
           status: "PENDING",
           rootBundleId,
           rootBundleVersion,
+          isExploration: false,
         });
       }
     }
@@ -645,6 +660,39 @@ function generateCalendarSlots(
         status: "PENDING",
         rootBundleId,
         rootBundleVersion,
+        isExploration: false,
+      });
+    }
+  }
+
+  const weeks = Math.ceil(periodDays / 7);
+  let explorationDayIndex = 0;
+
+  for (const expSlot of explorationSlots) {
+    const contentType = expSlot.format.toUpperCase();
+    const time = postingTimes[contentType] || "14:00";
+
+    for (let i = 0; i < expSlot.count; i++) {
+      const weekNum = Math.floor(i / Math.max(1, expSlot.count / weeks));
+      const dayOffset = weekNum * 7 + (explorationDayIndex % 5) + 1;
+      explorationDayIndex++;
+      const date = new Date(startDate);
+      date.setDate(date.getDate() + Math.min(dayOffset, periodDays - 1));
+      const dateStr = date.toISOString().split("T")[0];
+      slots.push({
+        planId,
+        campaignId,
+        accountId,
+        contentType,
+        scheduledDate: dateStr,
+        scheduledTime: time,
+        title: `[Exploration] ${expSlot.format} — ${expSlot.intent}`,
+        status: "PENDING",
+        rootBundleId,
+        rootBundleVersion,
+        isExploration: true,
+        explorationIntent: expSlot.intent,
+        explorationHypothesis: expSlot.hypothesis,
       });
     }
   }
@@ -736,6 +784,40 @@ export async function synthesizePlan(
     }
   }
 
+  let explorationSlotList: import("../exploration-budget/engine").ExplorationSlot[] = [];
+  if (memoryBlock) {
+    try {
+      const expBudget = await computeExplorationBudget(
+        synthesized,
+        memoryBlock.industryBaseline,
+        memoryBlock,
+        config.campaignId,
+        config.accountId,
+      );
+      explorationSlotList = expBudget.explorationSlots;
+      synthesized.explorationPlan = {
+        explorationPercent: expBudget.explorationPercent,
+        totalExplorationCount: expBudget.totalExplorationCount,
+        rationale: expBudget.rationale,
+        slots: expBudget.explorationSlots,
+      };
+
+      const totalExplorationCount = expBudget.totalExplorationCount;
+      const reductionFactor = 1 - (expBudget.explorationPercent / 100);
+      synthesized.contentDistribution = {
+        ...synthesized.contentDistribution,
+        reelsPerWeek: Math.max(0, Math.round(synthesized.contentDistribution.reelsPerWeek * reductionFactor)),
+        postsPerWeek: Math.max(0, Math.round(synthesized.contentDistribution.postsPerWeek * reductionFactor)),
+        storiesPerDay: Math.max(0, Math.round(synthesized.contentDistribution.storiesPerDay * reductionFactor)),
+        carouselsPerWeek: Math.max(0, Math.round(synthesized.contentDistribution.carouselsPerWeek * reductionFactor)),
+        videosPerWeek: Math.max(0, Math.round(synthesized.contentDistribution.videosPerWeek * reductionFactor)),
+      };
+      console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} slots=${expBudget.explorationSlots.length}`);
+    } catch (expErr: any) {
+      console.warn(`[PlanSynthesis] Exploration budget computation failed (non-blocking):`, expErr.message);
+    }
+  }
+
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);
 
@@ -788,7 +870,8 @@ export async function synthesizePlan(
     config.accountId,
     plan.id,
     rootBundle?.id || null,
-    rootBundle?.version || null
+    rootBundle?.version || null,
+    explorationSlotList,
   );
 
   if (calendarSlots.length > 0) {

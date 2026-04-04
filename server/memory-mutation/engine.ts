@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { strategyMemory, contentPerformanceSnapshots } from "@shared/schema";
+import { strategyMemory, contentPerformanceSnapshots, calendarEntries } from "@shared/schema";
 import { eq, and, lt, gt, desc, isNotNull } from "drizzle-orm";
 import { makeStrategyFingerprint } from "../memory-system/manager";
 import { checkResultsOverrideMemory } from "../orchestrator/memory-context";
@@ -249,6 +249,101 @@ function countConsecutiveConfirmed(
   return count;
 }
 
+const EXPLORATION_BASELINE_MULTIPLIER = 1.1;
+
+async function processExplorationResults(
+  accountId: string,
+  campaignId: string,
+  industryBaseline: number,
+): Promise<void> {
+  try {
+    const explorationEntries = await db
+      .select()
+      .from(calendarEntries)
+      .where(
+        and(
+          eq(calendarEntries.accountId, accountId),
+          eq(calendarEntries.campaignId, campaignId),
+          eq(calendarEntries.isExploration, true),
+        ),
+      )
+      .limit(50);
+
+    if (explorationEntries.length === 0) return;
+
+    const formatGroups = new Map<string, typeof explorationEntries>();
+    for (const entry of explorationEntries) {
+      const fmt = entry.contentType.toLowerCase();
+      if (!formatGroups.has(fmt)) formatGroups.set(fmt, []);
+      formatGroups.get(fmt)!.push(entry);
+    }
+
+    for (const [fmt, entries] of formatGroups) {
+      const firstEntry = entries[0];
+      const snaps = await db
+        .select({
+          smoothedPerformanceScore: contentPerformanceSnapshots.smoothedPerformanceScore,
+          createdAt: contentPerformanceSnapshots.createdAt,
+        })
+        .from(contentPerformanceSnapshots)
+        .where(
+          and(
+            eq(contentPerformanceSnapshots.accountId, accountId),
+            eq(contentPerformanceSnapshots.campaignId, campaignId),
+            eq(contentPerformanceSnapshots.contentType, fmt),
+          ),
+        )
+        .orderBy(desc(contentPerformanceSnapshots.createdAt))
+        .limit(3);
+
+      if (snaps.length === 0) continue;
+
+      const aboveBaseline = industryBaseline * EXPLORATION_BASELINE_MULTIPLIER;
+      const strongPeriods = snaps.filter((s) => (s.smoothedPerformanceScore ?? 0) >= aboveBaseline);
+
+      if (strongPeriods.length >= 1) {
+        const existingProvisional = await db
+          .select()
+          .from(strategyMemory)
+          .where(
+            and(
+              eq(strategyMemory.accountId, accountId),
+              eq(strategyMemory.campaignId, campaignId),
+              eq(strategyMemory.engineName, "exploration-result"),
+            ),
+          )
+          .limit(100);
+
+        const alreadyExists = existingProvisional.some(
+          (r) => r.label.toLowerCase().includes(fmt),
+        );
+
+        if (!alreadyExists) {
+          const hypothesis = firstEntry.explorationHypothesis || `${fmt} showed above-baseline performance during exploration.`;
+          const provId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+          await db.insert(strategyMemory).values({
+            id: provId,
+            accountId,
+            campaignId,
+            memoryType: "content_distribution",
+            engineName: "exploration-result",
+            label: `${fmt} exploration result — provisional reinforce`,
+            details: hypothesis,
+            score: 0.5,
+            isWinner: true,
+            confidenceScore: 0.5,
+            direction: "reinforce",
+            lastValidatedAt: new Date(),
+          });
+          console.log(`[MemoryMutation] EXPLORATION_RESULT | format=${fmt} strongPeriods=${strongPeriods.length} → provisional reinforce created`);
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[MemoryMutation] processExplorationResults error (non-blocking): ${err.message}`);
+  }
+}
+
 async function resolveIndustryBaseline(accountId: string, campaignId: string): Promise<number> {
   try {
     const { loadMemoryBlock } = await import("../memory-system/manager");
@@ -464,6 +559,8 @@ export async function runMemoryMutation(
         .where(eq(strategyMemory.id, row.id));
     }
   }
+
+  await processExplorationResults(accountId, campaignId, industryBaseline);
 
   const logId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
   const logDetails = JSON.stringify({

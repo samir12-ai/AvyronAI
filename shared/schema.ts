@@ -1298,6 +1298,9 @@ export const calendarEntries = pgTable("calendar_entries", {
   sourceLabel: text("source_label"),
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),
+  isExploration: boolean("is_exploration").default(false),
+  explorationIntent: text("exploration_intent"),
+  explorationHypothesis: text("exploration_hypothesis"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
