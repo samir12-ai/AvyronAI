@@ -666,34 +666,35 @@ function generateCalendarSlots(
   }
 
   const weeks = Math.ceil(periodDays / 7);
-  let explorationDayIndex = 0;
+  let explorationDayOffset = 0;
 
   for (const expSlot of explorationSlots) {
     const contentType = expSlot.format.toUpperCase();
     const time = postingTimes[contentType] || "14:00";
 
-    for (let i = 0; i < expSlot.count; i++) {
-      const weekNum = Math.floor(i / Math.max(1, expSlot.count / weeks));
-      const dayOffset = weekNum * 7 + (explorationDayIndex % 5) + 1;
-      explorationDayIndex++;
-      const date = new Date(startDate);
-      date.setDate(date.getDate() + Math.min(dayOffset, periodDays - 1));
-      const dateStr = date.toISOString().split("T")[0];
-      slots.push({
-        planId,
-        campaignId,
-        accountId,
-        contentType,
-        scheduledDate: dateStr,
-        scheduledTime: time,
-        title: `[Exploration] ${expSlot.format} — ${expSlot.intent}`,
-        status: "PENDING",
-        rootBundleId,
-        rootBundleVersion,
-        isExploration: true,
-        explorationIntent: expSlot.intent,
-        explorationHypothesis: expSlot.hypothesis,
-      });
+    for (let week = 0; week < weeks; week++) {
+      for (let i = 0; i < expSlot.count; i++) {
+        const dayOffset = week * 7 + (explorationDayOffset % 5) + 1;
+        explorationDayOffset++;
+        const date = new Date(startDate);
+        date.setDate(date.getDate() + Math.min(dayOffset, periodDays - 1));
+        const dateStr = date.toISOString().split("T")[0];
+        slots.push({
+          planId,
+          campaignId,
+          accountId,
+          contentType,
+          scheduledDate: dateStr,
+          scheduledTime: time,
+          title: `[Exploration] ${expSlot.format} — ${expSlot.intent} (W${week + 1})`,
+          status: "PENDING",
+          rootBundleId,
+          rootBundleVersion,
+          isExploration: true,
+          explorationIntent: expSlot.intent,
+          explorationHypothesis: expSlot.hypothesis,
+        });
+      }
     }
   }
 
@@ -857,25 +858,27 @@ export async function synthesizePlan(
         }
       }
 
+      const newStoriesPerDay = Math.floor(deducted.storiesPerWeek / 7);
       synthesized.contentDistribution = {
         ...dist,
         reelsPerWeek: deducted.reelsPerWeek,
         postsPerWeek: deducted.postsPerWeek,
         carouselsPerWeek: deducted.carouselsPerWeek,
-        storiesPerDay: Math.floor(deducted.storiesPerWeek / 7),
+        storiesPerDay: newStoriesPerDay,
         videosPerWeek: deducted.videosPerWeek,
       };
 
       const actualDeducted = totalExplorationCount - remaining;
+      const persistedStoriesWeekly = newStoriesPerDay * 7;
       const newMainWeekly =
         deducted.reelsPerWeek +
         deducted.postsPerWeek +
         deducted.carouselsPerWeek +
-        deducted.storiesPerWeek +
+        persistedStoriesWeekly +
         deducted.videosPerWeek;
       const combinedTotal = newMainWeekly + totalExplorationCount;
-      if (Math.abs(combinedTotal - weeklyTotal) > 1) {
-        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${totalExplorationCount} combined=${combinedTotal} residual=${remaining}`);
+      if (Math.abs(combinedTotal - weeklyTotal) > 7) {
+        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${totalExplorationCount} combined=${combinedTotal} storyFloor=${deducted.storiesPerWeek - persistedStoriesWeekly}`);
       } else {
         console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly} volumeOk=true`);
       }
