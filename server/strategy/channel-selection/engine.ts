@@ -1093,9 +1093,14 @@ export function runChannelSelectionEngine(
   budget: ChannelBudgetInput | null,
   validation: ChannelValidationInput | null,
   channelMode: ChannelMode = "automatic",
+  memoryContext?: string,
 ): ChannelSelectionResult {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+
+  if (memoryContext) {
+    console.log(`[ChannelSelectionEngine] Memory context active (${memoryContext.length} chars) — avoid/reinforce patterns available for channel scoring`);
+  }
 
   const reliability = assessDataReliability(audience, awareness, persuasion, offer, budget, validation);
 

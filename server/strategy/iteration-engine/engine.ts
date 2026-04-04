@@ -731,8 +731,13 @@ export async function runIterationEngine(
   funnel: IterationFunnelInput | null,
   creative: IterationCreativeInput | null,
   persuasion: IterationPersuasionInput | null,
+  memoryContext?: string,
 ): Promise<IterationResult> {
   const startTime = Date.now();
+
+  if (memoryContext) {
+    console.log(`[IterationEngine] Memory context active (${memoryContext.length} chars) — avoid/reinforce patterns available for optimization target selection`);
+  }
 
   const effectiveFunnel = funnel;
   const effectiveCreative = creative;

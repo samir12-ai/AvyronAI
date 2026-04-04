@@ -1049,7 +1049,8 @@ async function executeEngine(
         const validationInput = ctx.statisticalValidation || {};
         const result = runChannelSelectionEngine(
           audInput, awarenessInput, persuasionInput, offerInput,
-          budgetInput, validationInput, "INTELLIGENT"
+          budgetInput, validationInput, "INTELLIGENT",
+          ctx.memoryContext || undefined
         );
         output = result;
         ctx.channelSelection = result;
@@ -1111,7 +1112,8 @@ async function executeEngine(
           hasAnyPerf ? performance : null,
           ctx.funnel || null,
           null,
-          ctx.persuasion || null
+          ctx.persuasion || null,
+          ctx.memoryContext || undefined
         );
         output = result;
         ctx.iteration = result;
