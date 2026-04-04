@@ -532,9 +532,6 @@ export async function runBuildPlanLayer(
         continue;
       }
 
-      const actionability = enforceActionability(plan);
-      console.log(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`);
-
       if (memoryBlockForConstraints && (memoryBlockForConstraints.reinforceSlots.length > 0 || memoryBlockForConstraints.avoidSlots.length > 0)) {
         try {
           const baseline = memoryBlockForConstraints.industryBaseline ?? undefined;
@@ -550,6 +547,9 @@ export async function runBuildPlanLayer(
           console.warn(`[BuildPlanLayer] Memory constraint application failed (non-blocking):`, memApplyErr.message);
         }
       }
+
+      const actionability = enforceActionability(plan);
+      console.log(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`);
 
       if (actionability.passed) {
         return {

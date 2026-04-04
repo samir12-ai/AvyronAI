@@ -57,35 +57,40 @@ function clampedAdjust(value: number, delta: number, min: number = 0): number {
   return Math.max(min, value + Math.max(-MAX_DELTA, Math.min(MAX_DELTA, delta)));
 }
 
-export function applyMemoryConstraints<T extends {
+type FormatDistribution = {
   reelsPerWeek?: number;
   carouselsPerWeek?: number;
   storiesPerDay?: number;
   postsPerWeek?: number;
-}>(
+};
+
+type FormatDistributionKey = keyof FormatDistribution;
+
+function setDistributionField(
+  result: FormatDistribution,
+  key: FormatDistributionKey,
+  value: number,
+): void {
+  result[key] = value;
+}
+
+export function applyMemoryConstraints<T extends FormatDistribution>(
   distribution: T,
   block: MemoryBlock,
   baseline?: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number } | null,
 ): { adjusted: T; overrides: MemoryOverride[] } {
   const constraints = extractFormatConstraints(block);
   const overrides: MemoryOverride[] = [];
-  const result = { ...distribution };
+  const result: T = { ...distribution };
 
-  const base = baseline ?? {
+  const base: Required<FormatDistribution> = baseline ?? {
     reelsPerWeek: 3,
     carouselsPerWeek: 2,
     storiesPerDay: 2,
     postsPerWeek: 3,
   };
 
-  const fields: Array<{ key: keyof typeof base; distKey: keyof T }> = [
-    { key: "reelsPerWeek", distKey: "reelsPerWeek" as keyof T },
-    { key: "carouselsPerWeek", distKey: "carouselsPerWeek" as keyof T },
-    { key: "storiesPerDay", distKey: "storiesPerDay" as keyof T },
-    { key: "postsPerWeek", distKey: "postsPerWeek" as keyof T },
-  ];
-
-  const fmtToFieldKey: Record<string, keyof typeof base> = {
+  const fmtToFieldKey: Record<string, FormatDistributionKey> = {
     reels: "reelsPerWeek",
     carousels: "carouselsPerWeek",
     stories: "storiesPerDay",
@@ -95,17 +100,15 @@ export function applyMemoryConstraints<T extends {
   for (const fmt of constraints.reducedFormats) {
     const fieldKey = fmtToFieldKey[fmt];
     if (!fieldKey) continue;
-    const field = fields.find(f => f.key === fieldKey);
-    if (!field) continue;
 
-    const current = (result[field.distKey] as number | undefined) ?? (base[fieldKey] as number);
-    const baselineVal = base[fieldKey] as number;
+    const current = result[fieldKey] ?? base[fieldKey];
+    const baselineVal = base[fieldKey];
 
     if (current > baselineVal) {
       const corrected = clampedAdjust(current, -(current - baselineVal), 0);
       if (corrected !== current) {
-        (result as any)[field.distKey] = corrected;
-        overrides.push({ field: String(field.distKey), originalValue: current, correctedValue: corrected, memoryLabel: constraints.reason[fmt] });
+        setDistributionField(result, fieldKey, corrected);
+        overrides.push({ field: fieldKey, originalValue: current, correctedValue: corrected, memoryLabel: constraints.reason[fmt] });
       }
     }
   }
@@ -113,17 +116,15 @@ export function applyMemoryConstraints<T extends {
   for (const fmt of constraints.boostedFormats) {
     const fieldKey = fmtToFieldKey[fmt];
     if (!fieldKey) continue;
-    const field = fields.find(f => f.key === fieldKey);
-    if (!field) continue;
 
-    const current = (result[field.distKey] as number | undefined) ?? (base[fieldKey] as number);
-    const baselineVal = base[fieldKey] as number;
+    const current = result[fieldKey] ?? base[fieldKey];
+    const baselineVal = base[fieldKey];
 
     if (current < baselineVal) {
       const corrected = clampedAdjust(current, baselineVal - current, 0);
       if (corrected !== current) {
-        (result as any)[field.distKey] = corrected;
-        overrides.push({ field: String(field.distKey), originalValue: current, correctedValue: corrected, memoryLabel: constraints.reason[fmt] });
+        setDistributionField(result, fieldKey, corrected);
+        overrides.push({ field: fieldKey, originalValue: current, correctedValue: corrected, memoryLabel: constraints.reason[fmt] });
       }
     }
   }
@@ -145,7 +146,7 @@ export async function buildMemoryContext(
 export function serializeMemoryContextForPrompt(block: MemoryBlock): string {
   const base = serializeMemoryBlockForPrompt(block);
   if (!base) return base;
-  return `[MEMORY SYSTEM — ENFORCED]\nNote: Content format allocations (reels, carousels, stories, posts/week) ARE code-enforced AFTER AI generation and WILL be corrected to comply with the following memory rules. Do not attempt to override them — treat them as hard constraints:\n\n${base}`;
+  return `[MEMORY SYSTEM — HARD CONSTRAINTS]\nThe following content format rules are already applied to your output by the system. Your generated content format allocations (reels, carousels, stories, posts/week) must not contradict these constraints — they are hard limits enforced at the system level and will be reflected in the final plan:\n\n${base}`;
 }
 
 export { makeStrategyFingerprint };
