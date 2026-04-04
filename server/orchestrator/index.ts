@@ -99,6 +99,8 @@ export interface OrchestratorConfig {
   pausedJobId?: string;
   preassignedJobId?: string;
   onProgress?: (event: AgentProgressEvent) => void;
+  /** When set, only run the specified engine IDs (dual-analysis scoped run). All dependency-gathering engines still run. */
+  scopedEngines?: string[];
 }
 
 export interface OrchestratorRunResult {
@@ -1488,8 +1490,24 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   const ENGINE_TIMEOUT_MS = 120_000; // 2-minute hard ceiling per engine
 
+  // Engines that can be skipped when scopedEngines is set (dependency engines always run for context)
+  const SCOPED_SKIPPABLE_ENGINES = new Set(["channel_selection", "iteration", "retention"]);
+
   for (let i = startIndex >= 0 ? startIndex : 0; i < ENGINE_PRIORITY_ORDER.length; i++) {
     const engineDef = ENGINE_PRIORITY_ORDER[i];
+
+    // When scopedEngines is provided, skip scoppable engines that aren't in the requested scope
+    if (
+      config.scopedEngines &&
+      config.scopedEngines.length > 0 &&
+      SCOPED_SKIPPABLE_ENGINES.has(engineDef.id) &&
+      !config.scopedEngines.includes(engineDef.id)
+    ) {
+      console.log(`[Orchestrator] SCOPED_SKIP | Skipping ${engineDef.name} (not in scopedEngines: ${config.scopedEngines.join(",")})`);
+      results.set(engineDef.id as EngineId, { engineId: engineDef.id as EngineId, status: "SKIPPED", output: null, durationMs: 0 });
+      continue;
+    }
+
     console.log(`[Orchestrator] Running engine ${i + 1}/${ENGINE_PRIORITY_ORDER.length}: ${engineDef.name}`);
 
     const stepResult = await Promise.race([

@@ -33,42 +33,52 @@ export interface DualAnalysisResult {
   generatedAt: string;
 }
 
-// ── Classification rules (deterministic guard) ────────────────────────────────
+// ── Deterministic engine mapping (server-enforced, not AI-chosen) ─────────────
+
+/**
+ * Maps a classification to a deterministic list of recommended engines.
+ * This is the authoritative mapping — AI output for engines is ignored.
+ */
+const CLASSIFICATION_ENGINE_MAP: Record<DualAnalysisClassification, string[]> = {
+  market_shift_only:  ["channel_selection", "content_dna"],
+  execution_gap_only: ["iteration", "retention"],
+  both_changed:       ["channel_selection", "iteration", "content_dna"],
+  no_change:          [],
+  no_data:            [],
+};
+
+function getRecommendedEnginesForClassification(classification: DualAnalysisClassification): string[] {
+  return CLASSIFICATION_ENGINE_MAP[classification] ?? [];
+}
+
+// ── Classification guard (deterministic post-processing) ──────────────────────
 
 function applyClassificationGuard(
-  parsed: { classification: string; recommendedEngines: string[]; summary: string; confidence: number },
+  raw: string,
   hasCompetitorData: boolean,
   hasUserData: boolean,
-  userSnapsHaveDeltas: boolean,
-  competitorHasSignals: boolean,
 ): DualAnalysisClassification {
-  const raw = parsed.classification as DualAnalysisClassification;
-
-  // Validate the AI's classification against what data is actually present
+  const valid = raw as DualAnalysisClassification;
   const validClassifications: DualAnalysisClassification[] = [
     "market_shift_only", "execution_gap_only", "both_changed", "no_change", "no_data",
   ];
-  if (!validClassifications.includes(raw)) {
-    // Fallback: derive deterministically from data presence
+
+  if (!validClassifications.includes(valid)) {
     if (hasCompetitorData && hasUserData) return "both_changed";
     if (hasCompetitorData) return "market_shift_only";
     if (hasUserData) return "execution_gap_only";
     return "no_data";
   }
 
-  // Guard: cannot return "no_data" when we have data
-  if (raw === "no_data" && (hasCompetitorData || hasUserData)) {
+  // Structural guards: prevent classifications impossible with current data
+  if (valid === "no_data" && (hasCompetitorData || hasUserData)) {
     if (hasCompetitorData && hasUserData) return "both_changed";
     return hasCompetitorData ? "market_shift_only" : "execution_gap_only";
   }
+  if (valid === "market_shift_only" && !hasCompetitorData) return "execution_gap_only";
+  if (valid === "execution_gap_only" && !hasUserData) return "market_shift_only";
 
-  // Guard: cannot return "market_shift_only" when there's no competitor data
-  if (raw === "market_shift_only" && !hasCompetitorData) return "execution_gap_only";
-
-  // Guard: cannot return "execution_gap_only" when there's no user data
-  if (raw === "execution_gap_only" && !hasUserData) return "market_shift_only";
-
-  return raw;
+  return valid;
 }
 
 // ── Build data context strings ────────────────────────────────────────────────
@@ -215,14 +225,11 @@ Respond ONLY as valid JSON with no markdown:
     const parsed = JSON.parse(raw);
 
     const classification = applyClassificationGuard(
-      parsed, hasCompetitorData, hasUserData, userSnapsHaveDeltas, competitorHasSignals
+      parsed.classification, hasCompetitorData, hasUserData,
     );
 
-    const recommendedEngines = Array.isArray(parsed.recommendedEngines)
-      ? parsed.recommendedEngines.filter((e: string) =>
-          ["channel_selection", "iteration", "retention", "content_dna", "objection_map"].includes(e)
-        )
-      : [];
+    // Deterministic engine mapping — overrides AI engine selection entirely
+    const recommendedEngines = getRecommendedEnginesForClassification(classification);
 
     console.log(`[DualAnalysis] account=${accountId} campaign=${campaignId} classification=${classification} engines=${recommendedEngines.join(",")} confidence=${parsed.confidence}`);
 
@@ -246,7 +253,7 @@ Respond ONLY as valid JSON with no markdown:
 
     return {
       classification,
-      recommendedEngines: ["channel_selection"],
+      recommendedEngines: getRecommendedEnginesForClassification(classification),
       summary: "Dual analysis encountered an issue. Review your channel data and competitor intelligence manually.",
       confidence: 10,
       competitorSignals: hasCompetitorData ? (mi?.threatSignals || null) : null,
@@ -259,6 +266,21 @@ Respond ONLY as valid JSON with no markdown:
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerDualAnalysisRoutes(app: Express) {
+  // Primary route — POST per spec (task requirement)
+  app.post("/api/agent/dual-analysis/:campaignId", async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = req.params;
+      const accountId = resolveAccountId(req);
+
+      const result = await runDualAnalysis(accountId, campaignId);
+      res.json({ success: true, analysis: result });
+    } catch (error: any) {
+      console.error("[DualAnalysisRoutes] POST error:", error.message);
+      res.status(500).json({ code: "DUAL_ANALYSIS_FAILED", message: "Failed to run dual analysis" });
+    }
+  });
+
+  // GET alias — for UI polling on component mount (read-only convenience)
   app.get("/api/agent/dual-analysis/:campaignId", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
@@ -272,18 +294,5 @@ export function registerDualAnalysisRoutes(app: Express) {
     }
   });
 
-  app.post("/api/agent/dual-analysis/:campaignId/refresh", async (req: Request, res: Response) => {
-    try {
-      const { campaignId } = req.params;
-      const accountId = resolveAccountId(req);
-
-      const result = await runDualAnalysis(accountId, campaignId);
-      res.json({ success: true, analysis: result });
-    } catch (error: any) {
-      console.error("[DualAnalysisRoutes] POST refresh error:", error.message);
-      res.status(500).json({ code: "DUAL_ANALYSIS_FAILED", message: "Failed to refresh dual analysis" });
-    }
-  });
-
-  console.log("[DualAnalysisRoutes] Routes registered: GET /api/agent/dual-analysis/:campaignId, POST /api/agent/dual-analysis/:campaignId/refresh");
+  console.log("[DualAnalysisRoutes] Routes registered: POST+GET /api/agent/dual-analysis/:campaignId");
 }

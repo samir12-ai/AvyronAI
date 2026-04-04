@@ -330,7 +330,11 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     if (!profileCampaignId) return;
     setDualAnalysisLoading(true);
     try {
-      const res = await authFetch(getApiUrl(`/api/agent/dual-analysis/${profileCampaignId}`));
+      const res = await authFetch(getApiUrl(`/api/agent/dual-analysis/${profileCampaignId}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
       if (res.ok) {
         const data = await safeApiJson(res);
         if (data.analysis) {
@@ -353,10 +357,13 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     if (!profileCampaignId) return;
     setRunNowLoading(true);
     try {
+      const scopedEngines = dualAnalysis?.recommendedEngines?.length > 0
+        ? dualAnalysis.recommendedEngines
+        : undefined;
       await authFetch(getApiUrl('/api/orchestrator/run'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: profileCampaignId }),
+        body: JSON.stringify({ campaignId: profileCampaignId, scopedEngines }),
       });
       setDualAnalysisDismissed(true);
     } catch (err) {
@@ -364,7 +371,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     } finally {
       setRunNowLoading(false);
     }
-  }, [profileCampaignId]);
+  }, [profileCampaignId, dualAnalysis]);
 
   const saveUserChannels = useCallback(async () => {
     if (!profileCampaignId) return;

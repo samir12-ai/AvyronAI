@@ -24,7 +24,7 @@ import { resolveAccountId } from "../auth";
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
     try {
-      const { campaignId, forceRefresh, resumeFromEngine, pausedJobId } = req.body;
+      const { campaignId, forceRefresh, resumeFromEngine, pausedJobId, scopedEngines } = req.body;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
@@ -81,6 +81,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         resumeFromEngine,
         pausedJobId: pausedJobId || undefined,
         preassignedJobId: pausedJobId ? undefined : pendingJobId,
+        scopedEngines: Array.isArray(scopedEngines) ? scopedEngines : undefined,
       }).then(result => {
         console.log(`[OrchestratorV2] Run complete: ${result.status} | ${result.completedEngines.length} engines | Plan: ${result.planId || "none"} | NeedsInput: ${result.needsInput?.engine || "none"}`);
       }).catch(err => {

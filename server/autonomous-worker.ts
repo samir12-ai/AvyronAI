@@ -11,6 +11,7 @@ import {
   strategicPlans,
   calendarEntries,
   requiredWork,
+  userChannelSnapshots,
 } from "@shared/schema";
 import { ACTIVE_PLAN_STATUSES_SQL } from "./plan-constants";
 
@@ -101,7 +102,8 @@ async function runStrategyAnalysis(
   baselines: any,
   guardrailResult: any,
   outcomeContext: string,
-  planContext?: { planId: string; planSummary: string; calendarProgress: string } | null
+  planContext?: { planId: string; planSummary: string; calendarProgress: string } | null,
+  userChannelDeltaContext?: string | null
 ): Promise<Array<{
   trigger: string;
   action: string;
@@ -172,6 +174,10 @@ Calendar Progress: ${planContext.calendarProgress}
 IMPORTANT: All decisions MUST reference this planId. Actions must be derived from plan artifacts only.`
     : "\nNO ACTIVE PLAN — decisions are limited to monitoring and optimization only.";
 
+  const userChannelBlock = userChannelDeltaContext
+    ? `\nUSER'S OWN CHANNEL PERFORMANCE (weekly delta):\n${userChannelDeltaContext}\nCONSIDER: If engagement or follower deltas are negative, prioritize iteration/retention decisions. If new post count is low, flag execution gap.`
+    : "";
+
   const systemPrompt = `You are a MOAT BUILDER AI Strategy Engine operating in AUTONOMOUS mode. You generate actionable marketing decisions based on performance data, memory, and guardrail state.
 
 RULES:
@@ -195,7 +201,7 @@ ${memorySummary}
 
 GUARDRAIL STATE:
 ${guardrailContext}
-
+${userChannelBlock}
 ${outcomeContext}`;
 
   const userPrompt = `Analyze current performance and generate autonomous marketing decisions.
@@ -622,7 +628,51 @@ async function processAccount(accountId: string) {
       return;
     }
 
-    const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext, activePlanContext);
+    // Run user-channel scrape (awaited, within lock lifecycle — fix for concurrency correctness)
+    let userChannelDeltaContext: string | null = null;
+    try {
+      const { needsUserChannelScrape, scrapeUserChannels } = await import("./user-channel-scraper");
+      const activeCampaignId = await getActiveCampaignId(accountId);
+      if (activeCampaignId) {
+        const shouldScrape = await needsUserChannelScrape(accountId, activeCampaignId);
+        if (shouldScrape) {
+          console.log(`[Worker] Awaiting user channel scrape for account=${accountId} campaign=${activeCampaignId}`);
+          await scrapeUserChannels(accountId, activeCampaignId);
+        }
+        // Build delta context from last 2 snapshots per channel
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const recentSnaps = await db.select()
+          .from(userChannelSnapshots)
+          .where(and(
+            eq(userChannelSnapshots.accountId, accountId),
+            gte(userChannelSnapshots.scrapedAt, sevenDaysAgo)
+          ))
+          .orderBy(desc(userChannelSnapshots.scrapedAt))
+          .limit(20);
+        if (recentSnaps.length > 0) {
+          const channelMap = new Map<string, typeof recentSnaps>();
+          for (const snap of recentSnaps) {
+            const key = snap.platform + ":" + snap.profileId;
+            if (!channelMap.has(key)) channelMap.set(key, []);
+            channelMap.get(key)!.push(snap);
+          }
+          const lines: string[] = [];
+          for (const [key, snaps] of channelMap) {
+            if (snaps.length < 2) continue;
+            const [latest, prev] = snaps;
+            const followerDelta = (latest.followerCount ?? 0) - (prev.followerCount ?? 0);
+            const engDelta = ((latest.avgEngagementRate ?? 0) - (prev.avgEngagementRate ?? 0)).toFixed(2);
+            const newPosts = (latest.recentPostCount ?? 0) - (prev.recentPostCount ?? 0);
+            lines.push(`${key}: followers ${followerDelta >= 0 ? "+" : ""}${followerDelta}, engagement ${engDelta}%, new posts ${newPosts >= 0 ? "+" : ""}${newPosts}`);
+          }
+          if (lines.length > 0) userChannelDeltaContext = lines.join("\n");
+        }
+      }
+    } catch (scrapeErr: any) {
+      console.error(`[Worker] User channel scrape/delta error for ${accountId}:`, scrapeErr.message);
+    }
+
+    const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext, activePlanContext, userChannelDeltaContext);
 
     for (const decision of aiDecisions) {
       const riskResult = classifyDecisionRisk(
@@ -772,21 +822,6 @@ async function processAccount(accountId: string) {
       console.error(`[Worker] Lead engine processing error for ${accountId}:`, leadErr);
     }
 
-    try {
-      const { needsUserChannelScrape, scrapeUserChannels } = await import("./user-channel-scraper");
-      const activeCampaignId = await getActiveCampaignId(accountId);
-      if (activeCampaignId) {
-        const shouldScrape = await needsUserChannelScrape(accountId, activeCampaignId);
-        if (shouldScrape) {
-          console.log(`[Worker] Triggering user channel scrape for account=${accountId} campaign=${activeCampaignId}`);
-          scrapeUserChannels(accountId, activeCampaignId).catch((err: any) =>
-            console.error(`[Worker] User channel scrape error for ${accountId}:`, err.message)
-          );
-        }
-      }
-    } catch (scrapeErr: any) {
-      console.error(`[Worker] User channel scrape check error for ${accountId}:`, scrapeErr.message);
-    }
 
     await db.update(accountState)
       .set({ lastWorkerRun: new Date(), updatedAt: new Date() })
