@@ -164,6 +164,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [memoryEntries, setMemoryEntries] = useState<any[]>([]);
   const [memoryExpanded, setMemoryExpanded] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
+  const prevBlueprintStatus = useRef<string | null>(null);
 
   const isMetaReal = metaConnection?.isConnected === true;
   const profileCampaignId = selectedCampaign?.selectedCampaignId;
@@ -887,6 +888,15 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       runOrchestrator();
     }
   }, [autoRetryAfterRegenerate, blueprint?.status, loading, runOrchestrator]);
+
+  useEffect(() => {
+    const current = blueprint?.status || null;
+    const prev = prevBlueprintStatus.current;
+    prevBlueprintStatus.current = current;
+    if (current === 'ORCHESTRATED' && prev !== 'ORCHESTRATED') {
+      loadStrategyMemory();
+    }
+  }, [blueprint?.status]);
 
   const regeneratePlan = useCallback(async () => {
     if (!blueprint) return;

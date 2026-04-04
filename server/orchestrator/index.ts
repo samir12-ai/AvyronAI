@@ -144,6 +144,7 @@ interface EngineContext {
   depthGateStatus?: Record<string, string>;
   sglState?: SignalGovernanceState;
   integrityReport?: IntegrityReport;
+  memoryContext?: string;
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -1214,6 +1215,7 @@ async function executeEngine(
           postPurchaseObjections: [],
           campaignId: config.campaignId,
           accountId: config.accountId,
+          memoryContext: ctx.memoryContext || undefined,
         });
         output = result;
         ctx.retention = result;
@@ -1471,7 +1473,8 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     const memBlock = await buildMemoryContext(config.campaignId, config.accountId);
     memoryContextBlock = serializeMemoryContextForPrompt(memBlock);
     if (memoryContextBlock) {
-      console.log(`[Orchestrator] MEMORY_CONTEXT_LOADED | reinforce=${memBlock.reinforcePatterns.length} | avoid=${memBlock.avoidPatterns.length}`);
+      ctx.memoryContext = memoryContextBlock;
+      console.log(`[Orchestrator] MEMORY_CONTEXT_LOADED | reinforce=${memBlock.reinforcePatterns.length} | avoid=${memBlock.avoidPatterns.length} | pending=${memBlock.pendingPatterns.length}`);
     }
   } catch (memLoadErr: any) {
     console.warn(`[Orchestrator] MEMORY_CONTEXT_LOAD_FAILED | error=${memLoadErr.message}`);

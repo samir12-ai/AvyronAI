@@ -5,6 +5,7 @@ export interface RetentionInput {
   postPurchaseObjections: PostPurchaseObjection[];
   campaignId: string;
   accountId: string;
+  memoryContext?: string;
 }
 
 export interface CustomerJourneyData {

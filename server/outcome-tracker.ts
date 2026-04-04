@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { decisionOutcomes, performanceSnapshots, strategyDecisions } from "@shared/schema";
+import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory } from "@shared/schema";
 import { eq, sql, gte, isNull, lte, desc, and } from "drizzle-orm";
 import { logAudit } from "./audit";
 
@@ -92,6 +92,16 @@ export async function evaluatePendingOutcomes(accountId: string) {
     await db.update(strategyDecisions)
       .set({ outcomeStatus: outcome })
       .where(eq(strategyDecisions.id, p.decisionId));
+
+    try {
+      const score = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
+      const isWinner = outcome === "success";
+      await db.update(strategyMemory)
+        .set({ score, isWinner, updatedAt: new Date() })
+        .where(eq(strategyMemory.id, p.decisionId));
+    } catch {
+      // strategy_memory row may not exist for this decisionId — not an error
+    }
 
     await logAudit(accountId, "OUTCOME_EVALUATED", {
       decisionId: p.decisionId,

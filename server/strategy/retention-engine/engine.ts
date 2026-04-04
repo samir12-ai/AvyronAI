@@ -225,6 +225,12 @@ Respond ONLY with a JSON object (no markdown, no explanation) with this exact st
     }
   ]
 }`;
+
+  if (input.memoryContext) {
+    prompt += `\n\n${input.memoryContext}\n`;
+  }
+
+  return prompt;
 }
 
 function buildFallbackResult(input: RetentionInput, guardResult: RetentionGuardResult, startTime: number): RetentionResult {
