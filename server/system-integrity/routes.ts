@@ -9,6 +9,11 @@ export function storeIntegrityReport(campaignId: string, accountId: string, repo
   integrityReports.set(key, report);
 }
 
+export function getStoredIntegrityReport(campaignId: string, accountId: string): IntegrityReport | null {
+  const key = `${accountId}:${campaignId}`;
+  return integrityReports.get(key) ?? null;
+}
+
 export function registerIntegrityRoutes(app: Express) {
   app.get("/api/system-integrity/:campaignId", authMiddleware, (req: AuthRequest, res: Response) => {
     const accountId = resolveAccountId(req);

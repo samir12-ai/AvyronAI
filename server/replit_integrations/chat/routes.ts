@@ -1,19 +1,15 @@
 import type { Express, Request, Response } from "express";
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import { chatStorage } from "./storage";
 import { loadSystemContext, buildSystemPrompt } from "../../orchestrator/agent-context";
 import { resolveAccountId, AuthRequest } from "../../auth";
 import { computeAdaptiveRhythm } from "../../adaptive-rhythm/engine";
-import { runSystemIntegrityValidation } from "../../system-integrity/engine";
 import { getLatestGoalDecomposition, getLatestSimulation } from "../../goal-math";
+import { getOpenAI, PRIMARY_CHAT_MODEL } from "../../ai-client";
+import { getStoredIntegrityReport } from "../../system-integrity/routes";
 import { db } from "../../db";
 import { strategyMemory, orchestratorJobs } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 const AGENT_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
   {
@@ -141,6 +137,7 @@ async function handleToolCall(
 
       case "get_system_status": {
         const context = await loadSystemContext(accountId, campaignId);
+        const integrityReport = getStoredIntegrityReport(campaignId, accountId);
 
         const engineCount = Object.keys(context.engineSnapshots || {}).length;
         const lastRun = context.engineStatus;
@@ -166,9 +163,13 @@ async function handleToolCall(
           .from(strategyMemory)
           .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId)));
 
+        const integrityStatus = integrityReport
+          ? `Integrity: ${integrityReport.overallStatus} (${integrityReport.engineChecks?.length || 0} engine checks${integrityReport.failureReasons?.length ? `, ${integrityReport.failureReasons.length} failure(s)` : ""})`
+          : "Integrity: no report (run orchestrator first)";
+
         return {
           success: true,
-          summary: `System status: ${engineCount}/14 engines have snapshots. ${lastRunText}. Plan: ${context.activePlan?.status || "none"}. Memory entries: ${memoryCount.length}. ${context.warnings.length > 0 ? "Warnings: " + context.warnings.join("; ") : "No warnings."}`,
+          summary: `System status: ${engineCount}/14 engines have snapshots. ${lastRunText}. Plan: ${context.activePlan?.status || "none"}. Memory entries: ${memoryCount.length}. ${integrityStatus}. ${context.warnings.length > 0 ? "Warnings: " + context.warnings.join("; ") : "No warnings."}`,
           data: {
             engineSnapshotCount: engineCount,
             planStatus: context.activePlan?.status || null,
@@ -176,6 +177,15 @@ async function handleToolCall(
             lastOrchestratorRun: lastRun || null,
             contentRhythmLabel: rhythmMemory[0]?.label || null,
             memoryEntryCount: memoryCount.length,
+            integrity: integrityReport
+              ? {
+                  overallStatus: integrityReport.overallStatus,
+                  engineCheckCount: integrityReport.engineChecks?.length || 0,
+                  failureReasons: integrityReport.failureReasons || [],
+                  signalFlowVerified: integrityReport.signalFlowVerified,
+                  traceabilityComplete: integrityReport.traceabilityComplete,
+                }
+              : null,
             warnings: context.warnings,
             rootBundle: context.rootBundle,
           },
@@ -364,8 +374,8 @@ export function registerChatRoutes(app: Express): void {
       let fullResponse = "";
       let toolCallsExecuted: Array<{ name: string; result: ToolCallResult }> = [];
 
-      const stream = await openai.chat.completions.create({
-        model: "gpt-4.1-mini",
+      const stream = await getOpenAI().chat.completions.create({
+        model: PRIMARY_CHAT_MODEL,
         messages: messageHistory,
         tools: campaignId ? AGENT_TOOLS : undefined,
         tool_choice: campaignId ? "auto" : undefined,
@@ -433,8 +443,8 @@ export function registerChatRoutes(app: Express): void {
           pendingToolName = "";
           pendingToolArgs = "";
 
-          const continuationStream = await openai.chat.completions.create({
-            model: "gpt-4.1-mini",
+          const continuationStream = await getOpenAI().chat.completions.create({
+            model: PRIMARY_CHAT_MODEL,
             messages: messageHistory,
             stream: true,
             max_completion_tokens: 1024,

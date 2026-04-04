@@ -4,6 +4,8 @@ import { GoogleGenAI, Modality } from "@google/genai";
 const DEFAULT_MAX_TOKENS = 800;
 const HARD_TIMEOUT_MS = 45000;
 
+export const PRIMARY_CHAT_MODEL = "gpt-4.1-mini";
+
 let openaiInstance: OpenAI | null = null;
 let geminiInstance: GoogleGenAI | null = null;
 
