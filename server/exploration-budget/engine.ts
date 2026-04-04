@@ -119,6 +119,7 @@ export async function computeExplorationBudget(
 
   const avoidFormats: Array<{ format: string; confidence: number }> = [];
   const testedFormats = new Set<string>();
+  const highConfidenceAvoidFormats = new Set<string>();
 
   for (const slot of memoryBlock.reinforceSlots) {
     const fmt = detectFormat(slot.label);
@@ -126,7 +127,12 @@ export async function computeExplorationBudget(
   }
   for (const slot of memoryBlock.avoidSlots) {
     const fmt = detectFormat(slot.label);
-    if (fmt) testedFormats.add(fmt);
+    if (fmt) {
+      testedFormats.add(fmt);
+      if ((slot.confidenceScore ?? 0) >= 0.75) {
+        highConfidenceAvoidFormats.add(fmt);
+      }
+    }
   }
 
   for (const slot of memoryBlock.avoidSlots) {
@@ -137,7 +143,7 @@ export async function computeExplorationBudget(
   }
 
   const discoveryFormats = CONTENT_FORMATS.filter(
-    (f) => !testedFormats.has(f),
+    (f) => !testedFormats.has(f) && !highConfidenceAvoidFormats.has(f),
   );
 
   const candidateSlots: ExplorationSlot[] = [];
@@ -161,9 +167,13 @@ export async function computeExplorationBudget(
   }
 
   if (candidateSlots.length === 0 && explorationCount > 0) {
-    const fallbackFormat = CONTENT_FORMATS.find((f) => (formatDist[f] ?? 0) < 2) ?? "reel";
-    const hypothesis = await generateHypothesis(fallbackFormat, "discovery", null, accountId);
-    candidateSlots.push({ format: fallbackFormat, count: explorationCount, intent: "discovery", hypothesis });
+    const eligibleFallback = CONTENT_FORMATS.find(
+      (f) => !highConfidenceAvoidFormats.has(f) && (formatDist[f] ?? 0) < 2,
+    ) ?? CONTENT_FORMATS.find((f) => !highConfidenceAvoidFormats.has(f));
+    if (eligibleFallback) {
+      const hypothesis = await generateHypothesis(eligibleFallback, "discovery", null, accountId);
+      candidateSlots.push({ format: eligibleFallback, count: explorationCount, intent: "discovery", hypothesis });
+    }
   }
 
   const baselineValue = baseline?.confidenceScore ?? null;

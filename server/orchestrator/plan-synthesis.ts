@@ -807,23 +807,25 @@ export async function synthesizePlan(
       const totalExplorationCount = expBudget.totalExplorationCount;
       const dist = { ...synthesized.contentDistribution };
 
-      const weeklyUnits: Record<string, number> = {
+      const weeklyPool: Record<string, number> = {
         reelsPerWeek: dist.reelsPerWeek ?? 0,
         postsPerWeek: dist.postsPerWeek ?? 0,
         carouselsPerWeek: dist.carouselsPerWeek ?? 0,
-        storiesPerWeek: (dist.storiesPerDay ?? 0) * 7,
         videosPerWeek: dist.videosPerWeek ?? 0,
       };
-      const weeklyTotal = Object.values(weeklyUnits).reduce((s, v) => s + v, 0);
-      const deducted: Record<string, number> = { ...weeklyUnits };
-      let remaining = Math.min(totalExplorationCount, weeklyTotal);
+      const weeklyPoolTotal = Object.values(weeklyPool).reduce((s, v) => s + v, 0);
+      const storiesWeekly = (dist.storiesPerDay ?? 0) * 7;
+      const weeklyTotal = weeklyPoolTotal + storiesWeekly;
 
-      if (weeklyTotal > 0 && remaining > 0) {
-        const formatKeys = Object.keys(weeklyUnits);
+      const deducted: Record<string, number> = { ...weeklyPool };
+      let remaining = Math.min(totalExplorationCount, weeklyPoolTotal);
+
+      if (weeklyPoolTotal > 0 && remaining > 0) {
+        const formatKeys = Object.keys(weeklyPool);
         const idealDeductions: Record<string, number> = {};
         let idealSum = 0;
         for (const key of formatKeys) {
-          const share = weeklyUnits[key] / weeklyTotal;
+          const share = weeklyPool[key] / weeklyPoolTotal;
           const ideal = Math.floor(totalExplorationCount * share);
           idealDeductions[key] = ideal;
           idealSum += ideal;
@@ -832,13 +834,13 @@ export async function synthesizePlan(
         const sortedByRemainder = formatKeys
           .slice()
           .sort((a, b) => {
-            const remA = (totalExplorationCount * weeklyUnits[a] / weeklyTotal) - idealDeductions[a];
-            const remB = (totalExplorationCount * weeklyUnits[b] / weeklyTotal) - idealDeductions[b];
+            const remA = (totalExplorationCount * weeklyPool[a] / weeklyPoolTotal) - idealDeductions[a];
+            const remB = (totalExplorationCount * weeklyPool[b] / weeklyPoolTotal) - idealDeductions[b];
             return remB - remA;
           });
         for (const key of sortedByRemainder) {
           if (residual <= 0) break;
-          if (idealDeductions[key] < weeklyUnits[key]) {
+          if (idealDeductions[key] < weeklyPool[key]) {
             idealDeductions[key]++;
             residual--;
           }
@@ -858,27 +860,24 @@ export async function synthesizePlan(
         }
       }
 
-      const newStoriesPerDay = Math.floor(deducted.storiesPerWeek / 7);
       synthesized.contentDistribution = {
         ...dist,
         reelsPerWeek: deducted.reelsPerWeek,
         postsPerWeek: deducted.postsPerWeek,
         carouselsPerWeek: deducted.carouselsPerWeek,
-        storiesPerDay: newStoriesPerDay,
         videosPerWeek: deducted.videosPerWeek,
       };
 
       const actualDeducted = totalExplorationCount - remaining;
-      const persistedStoriesWeekly = newStoriesPerDay * 7;
       const newMainWeekly =
         deducted.reelsPerWeek +
         deducted.postsPerWeek +
         deducted.carouselsPerWeek +
-        persistedStoriesWeekly +
+        storiesWeekly +
         deducted.videosPerWeek;
       const combinedTotal = newMainWeekly + totalExplorationCount;
-      if (Math.abs(combinedTotal - weeklyTotal) > 7) {
-        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${totalExplorationCount} combined=${combinedTotal} storyFloor=${deducted.storiesPerWeek - persistedStoriesWeekly}`);
+      if (combinedTotal !== weeklyTotal) {
+        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${totalExplorationCount} combined=${combinedTotal} residual=${remaining}`);
       } else {
         console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly} volumeOk=true`);
       }
