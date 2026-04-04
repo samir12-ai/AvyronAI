@@ -7,7 +7,8 @@ export type MemoryClass =
   | "content_distribution"
   | "self_improvement"
   | "industry_baseline"
-  | "exploration_budget";
+  | "exploration_budget"
+  | "agent_action";
 
 export type EnforcementStrength = "none" | "soft" | "moderate" | "strong";
 

@@ -12,9 +12,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { getApiUrl , authFetch } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
-import { fetch } from 'expo/fetch';
 
 const P = {
   mint: '#8B5CF6',
@@ -30,12 +29,46 @@ const P = {
   textLight: '#1A2332',
   mutedDark: '#8892A4',
   mutedLight: '#546478',
+  actionBg: '#1A1030',
+  actionBorder: '#6D28D9',
+  actionBgLight: '#F3F0FF',
+  actionBorderLight: '#8B5CF6',
 };
 
-interface Message {
+const TOOL_LABELS: Record<string, string> = {
+  trigger_plan_rerun: 'Plan Re-run Triggered',
+  update_content_rhythm: 'Content Rhythm Updated',
+  get_system_status: 'System Status Retrieved',
+  explain_forecast_model: 'Forecast Model Explained',
+};
+
+const TOOL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  trigger_plan_rerun: 'refresh-circle',
+  update_content_rhythm: 'pulse',
+  get_system_status: 'stats-chart',
+  explain_forecast_model: 'bar-chart',
+};
+
+type MessageRole = 'user' | 'assistant';
+
+interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: MessageRole;
   content: string;
+}
+
+interface AgentActionEvent {
+  id: string;
+  type: 'tool_call';
+  name: string;
+  success: boolean;
+  summary: string;
+}
+
+type MessageItem = ChatMessage | AgentActionEvent;
+
+function isAgentAction(item: MessageItem): item is AgentActionEvent {
+  return (item as AgentActionEvent).type === 'tool_call';
 }
 
 export default function DashboardChat() {
@@ -44,7 +77,7 @@ export default function DashboardChat() {
   const baseUrl = getApiUrl();
   const { selectedCampaignId } = useCampaign();
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<MessageItem[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
@@ -65,6 +98,8 @@ export default function DashboardChat() {
   const cardBg = isDark ? P.darkCard : P.lightCard;
   const cardBorder = isDark ? P.darkCardBorder : P.lightCardBorder;
   const surfaceBg = isDark ? P.darkSurface : P.lightSurface;
+  const actionBg = isDark ? P.actionBg : P.actionBgLight;
+  const actionBorder = isDark ? P.actionBorder : P.actionBorderLight;
 
   const sendMessage = useCallback(async (overrideInput?: string) => {
     const text = (overrideInput || input).trim();
@@ -89,7 +124,7 @@ export default function DashboardChat() {
       }
     }
 
-    const userMsg: Message = {
+    const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: text,
@@ -143,19 +178,31 @@ export default function DashboardChat() {
             if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
-                if (data.content) {
+
+                if (data.type === 'tool_call') {
+                  const actionEvent: AgentActionEvent = {
+                    id: `action_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                    type: 'tool_call',
+                    name: data.name,
+                    success: data.result?.success ?? true,
+                    summary: data.result?.summary || `${data.name} executed`,
+                  };
+                  setMessages(prev => [...prev, actionEvent]);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                } else if (data.content) {
                   fullContent += data.content;
                   setStreamingContent(fullContent);
-                }
-                if (data.done) {
+                } else if (data.done) {
                   receivedDone = true;
-                  const assistantMsg: Message = {
-                    id: (Date.now() + 1).toString(),
-                    role: 'assistant',
-                    content: fullContent,
-                  };
-                  setMessages(prev => [...prev, assistantMsg]);
-                  setStreamingContent('');
+                  if (fullContent) {
+                    const assistantMsg: ChatMessage = {
+                      id: (Date.now() + 1).toString(),
+                      role: 'assistant',
+                      content: fullContent,
+                    };
+                    setMessages(prev => [...prev, assistantMsg]);
+                    setStreamingContent('');
+                  }
                 }
               } catch {}
             }
@@ -164,7 +211,7 @@ export default function DashboardChat() {
       }
 
       if (!receivedDone && fullContent) {
-        const assistantMsg: Message = {
+        const assistantMsg: ChatMessage = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
           content: fullContent,
@@ -174,7 +221,7 @@ export default function DashboardChat() {
       }
     } catch (err) {
       console.error('Failed to send message:', err);
-      const errorMsg: Message = {
+      const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: 'Sorry, I encountered an error. Please try again.',
@@ -186,8 +233,12 @@ export default function DashboardChat() {
     }
   }, [input, sending, activeConvId, baseUrl, selectedCampaignId]);
 
-  const allMessages = streamingContent
-    ? [...messages, { id: 'streaming', role: 'assistant' as const, content: streamingContent }]
+  const streamingItem: ChatMessage | null = streamingContent
+    ? { id: 'streaming', role: 'assistant', content: streamingContent }
+    : null;
+
+  const allMessages: MessageItem[] = streamingItem
+    ? [...messages, streamingItem]
     : messages;
 
   const handleNewChat = useCallback(() => {
@@ -206,12 +257,58 @@ export default function DashboardChat() {
 
   const suggestions = [
     "What should I create today?",
-    "Explain my current plan",
+    "Update my content rhythm",
     "What's my execution progress?",
-    "Suggest content ideas",
+    "Explain my forecast model",
   ];
 
   const hasMessages = allMessages.length > 0;
+
+  const renderItem = useCallback(({ item }: { item: MessageItem }) => {
+    if (isAgentAction(item)) {
+      const icon = TOOL_ICONS[item.name] || 'flash';
+      const label = TOOL_LABELS[item.name] || item.name;
+      return (
+        <View style={[st.actionCard, { backgroundColor: actionBg, borderColor: actionBorder }]}>
+          <View style={st.actionHeader}>
+            <Ionicons name={icon} size={14} color={P.mint} />
+            <Text style={[st.actionLabel, { color: P.mint }]}>{label}</Text>
+            <View style={[st.actionStatus, { backgroundColor: item.success ? '#16a34a20' : '#dc262620' }]}>
+              <Text style={[st.actionStatusText, { color: item.success ? '#16a34a' : '#dc2626' }]}>
+                {item.success ? 'done' : 'failed'}
+              </Text>
+            </View>
+          </View>
+          <Text style={[st.actionSummary, { color: textMuted }]} numberOfLines={3}>
+            {item.summary}
+          </Text>
+        </View>
+      );
+    }
+
+    const isUser = item.role === 'user';
+    return (
+      <View style={[st.msgRow, { justifyContent: isUser ? 'flex-end' : 'flex-start' }]}>
+        {!isUser && (
+          <View style={[st.avatar, { backgroundColor: P.mint + '20' }]}>
+            <Ionicons name="sparkles" size={12} color={P.mint} />
+          </View>
+        )}
+        <View style={[
+          st.bubble,
+          isUser
+            ? { backgroundColor: P.mint, maxWidth: '75%' }
+            : { backgroundColor: surfaceBg, borderWidth: 1, borderColor: cardBorder, maxWidth: '85%' }
+        ]}>
+          <Text style={[st.msgText, { color: isUser ? '#fff' : textPrimary }]}>
+            {item.content}
+            {item.id === 'streaming' && '▍'}
+          </Text>
+        </View>
+      </View>
+    );
+  }, [actionBg, actionBorder, textMuted, textPrimary, surfaceBg, cardBorder]);
+
   return (
     <View style={[st.container, { backgroundColor: cardBg, borderColor: cardBorder }]} testID="dashboard-chat">
       <View style={st.header}>
@@ -244,7 +341,7 @@ export default function DashboardChat() {
       {!hasMessages ? (
         <View style={st.suggestionsWrap}>
           <Text style={[st.suggestionsLabel, { color: textMuted }]}>
-            Ask about your strategy, plan, execution, or get marketing guidance
+            Ask about your strategy, trigger actions, or get marketing guidance
           </Text>
           <View style={st.suggestionsGrid}>
             {suggestions.map((s, i) => (
@@ -265,29 +362,7 @@ export default function DashboardChat() {
             ref={flatListRef}
             data={allMessages}
             keyExtractor={item => item.id}
-            renderItem={({ item }) => {
-              const isUser = item.role === 'user';
-              return (
-                <View style={[st.msgRow, { justifyContent: isUser ? 'flex-end' : 'flex-start' }]}>
-                  {!isUser && (
-                    <View style={[st.avatar, { backgroundColor: P.mint + '20' }]}>
-                      <Ionicons name="sparkles" size={12} color={P.mint} />
-                    </View>
-                  )}
-                  <View style={[
-                    st.bubble,
-                    isUser
-                      ? { backgroundColor: P.mint, maxWidth: '75%' }
-                      : { backgroundColor: surfaceBg, borderWidth: 1, borderColor: cardBorder, maxWidth: '85%' }
-                  ]}>
-                    <Text style={[st.msgText, { color: isUser ? '#fff' : textPrimary }]}>
-                      {item.content}
-                      {item.id === 'streaming' && '▍'}
-                    </Text>
-                  </View>
-                </View>
-              );
-            }}
+            renderItem={renderItem}
             contentContainerStyle={st.messagesList}
             onContentSizeChange={() => {
               if (allMessages.length > 0) {
@@ -308,7 +383,12 @@ export default function DashboardChat() {
             <Ionicons name="sparkles" size={12} color={P.mint} />
           </View>
           <Text style={[st.previewText, { color: textPrimary }]} numberOfLines={2}>
-            {allMessages[allMessages.length - 1]?.content || ''}
+            {(() => {
+              const lastMsg = allMessages[allMessages.length - 1];
+              if (!lastMsg) return '';
+              if (isAgentAction(lastMsg)) return `Agent action: ${TOOL_LABELS[lastMsg.name] || lastMsg.name}`;
+              return lastMsg.content;
+            })()}
           </Text>
           <Ionicons name="chevron-down" size={16} color={textMuted} />
         </Pressable>
@@ -443,6 +523,38 @@ const st = StyleSheet.create({
   msgText: {
     fontSize: 13,
     lineHeight: 19,
+  },
+  actionCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 8,
+    marginHorizontal: 0,
+  },
+  actionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  actionLabel: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    flex: 1,
+  },
+  actionStatus: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  actionStatusText: {
+    fontSize: 10,
+    fontWeight: '600' as const,
+  },
+  actionSummary: {
+    fontSize: 12,
+    lineHeight: 17,
   },
   collapsedPreview: {
     flexDirection: 'row',

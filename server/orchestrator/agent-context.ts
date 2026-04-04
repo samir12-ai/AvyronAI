@@ -638,13 +638,9 @@ export function buildSystemPrompt(context: SystemContext): string {
   }
 
   lines.push("");
-  lines.push("CONTENT RHYTHM MODEL (canonical source — all UI views must agree):");
-  lines.push("  Content volume is computed deterministically from funnel objective, NOT by AI:");
-  lines.push("    AWARENESS/FOLLOWERS objective → 5 Reels/wk, 2 Carousels/wk");
-  lines.push("    SALES/REVENUE objective → 4 Reels/wk, 3 Carousels/wk");
-  lines.push("    All other objectives → 4 Reels/wk, 2 Carousels/wk");
-  lines.push("    Posts: always 1/wk | Stories: always 2/day");
-  lines.push("  The build-plan-layer enforces these exact numbers. The execution plan, strategy hub, and plan document all read from the same locked values.");
+  lines.push("CONTENT RHYTHM MODEL (adaptive, signal-driven):");
+  lines.push("  Content volume is computed by the Adaptive Rhythm Engine from performance data, competitor benchmarks, and business constraints.");
+  lines.push("  You can call update_content_rhythm to recompute it at any time, or explain the current rhythm to the user.");
 
   lines.push("");
   lines.push("ENGINE PIPELINE CONTRACTS (8-engine sequential pipeline):");

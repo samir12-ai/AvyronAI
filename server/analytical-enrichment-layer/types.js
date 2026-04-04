@@ -1,0 +1,20 @@
+export const EMPTY_ANALYTICAL_PACKAGE = {
+    root_causes: [],
+    pain_types: [],
+    causal_chains: [],
+    buying_barriers: [],
+    mechanism_gaps: [],
+    trust_gaps: [],
+    contradiction_flags: [],
+    priority_ranking: [],
+    confidence_notes: [],
+    generatedAt: new Date().toISOString(),
+    version: 2,
+    inputSummary: {
+        hasMI: false,
+        hasAudience: false,
+        hasProductDNA: false,
+        hasCompetitiveData: false,
+        signalCount: 0,
+    },
+};

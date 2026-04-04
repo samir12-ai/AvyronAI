@@ -1,0 +1,1260 @@
+import { db } from "../db";
+import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, growthCampaigns } from "@shared/schema";
+import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
+import { inArray, eq, and, desc, sql } from "drizzle-orm";
+import { AUDIENCE_ENGINE_VERSION, AUDIENCE_THRESHOLDS, PAIN_CLUSTERS, DESIRE_CLUSTERS, OBJECTION_CLUSTERS, TRANSFORMATION_PATTERNS, EMOTIONAL_DRIVER_PATTERNS, AWARENESS_PATTERNS, MATURITY_KEYWORDS, INTENT_KEYWORDS, LANGUAGE_PATTERNS, SYNTHETIC_FILTERS, CONFIDENCE_WEIGHTS, OBJECTION_CONTEXT_RULES, MIN_EVIDENCE_PER_SIGNAL, } from "./constants";
+import { MI_COST_LIMITS } from "../market-intelligence-v3/constants";
+import { pruneOldSnapshots, assessDataReliability as sharedAssessDataReliability, detectGenericOutput } from "../engine-hardening";
+import { aiChat } from "../ai-client";
+import { createSourceLineageEntry } from "../shared/signal-lineage";
+import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity } from "./semantic-bridge";
+function sanitizeTexts(texts) {
+    let removed = 0;
+    const clean = [];
+    for (const text of texts) {
+        const lower = text.toLowerCase();
+        let isSynthetic = false;
+        for (const filter of SYNTHETIC_FILTERS) {
+            if (lower.includes(filter)) {
+                isSynthetic = true;
+                removed++;
+                break;
+            }
+        }
+        if (!isSynthetic) {
+            clean.push(text);
+        }
+    }
+    return { clean, removed };
+}
+const MARKET_DETECTION_KEYWORDS = {
+    fitness: ["workout", "exercise", "gym", "training", "muscle", "body", "weight loss", "bulk", "lean", "cardio", "تمرين", "رياضة", "جيم"],
+    health: ["health", "nutrition", "diet", "wellness", "medical", "therapy", "condition", "صحة", "تغذية", "علاج"],
+    marketing: ["marketing", "brand", "audience", "content", "social media", "ads", "campaign", "تسويق", "علامة تجارية"],
+    ecommerce: ["store", "product", "shop", "buy", "sell", "ecommerce", "dropship", "متجر", "منتج"],
+    education: ["course", "learn", "student", "teacher", "school", "education", "certificate", "تعليم", "دورة", "طالب"],
+    finance: ["invest", "stock", "crypto", "money", "wealth", "trading", "portfolio", "استثمار", "مال"],
+    tech: ["software", "app", "code", "developer", "startup", "saas", "tech", "تقنية", "برمجة"],
+    beauty: ["beauty", "skin", "makeup", "cosmetic", "hair", "skincare", "جمال", "بشرة", "مكياج"],
+    food: ["recipe", "cook", "restaurant", "food", "bake", "chef", "طبخ", "أكل", "مطعم"],
+    universal: [],
+};
+let _lastMarketScopeMetadata = {
+    scopeConfidence: 0,
+    matchedKeywordDensity: 0,
+    scopeAmbiguityFlag: false,
+};
+function getMarketScopeMetadata() {
+    return { ..._lastMarketScopeMetadata };
+}
+function detectMarketScope(texts, businessContext) {
+    const allText = [...texts.slice(0, 200), businessContext.industry, businessContext.coreOffer].join(" ").toLowerCase();
+    const totalWords = allText.split(/\s+/).length || 1;
+    const scores = {};
+    let totalKeywordMatches = 0;
+    for (const [scope, keywords] of Object.entries(MARKET_DETECTION_KEYWORDS)) {
+        if (scope === "universal")
+            continue;
+        let count = 0;
+        for (const kw of keywords) {
+            const regex = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            const matches = allText.match(regex);
+            if (matches)
+                count += matches.length;
+        }
+        scores[scope] = count;
+        totalKeywordMatches += count;
+    }
+    const matchedKeywordDensity = Math.min(1, totalKeywordMatches / totalWords);
+    const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]).filter(([, v]) => v > 0);
+    if (sorted.length === 0) {
+        _lastMarketScopeMetadata = { scopeConfidence: 0, matchedKeywordDensity: 0, scopeAmbiguityFlag: false };
+        return ["universal"];
+    }
+    const topScore = sorted[0][1];
+    const secondScore = sorted[1]?.[1] || 0;
+    const scopeAmbiguityFlag = secondScore > 0 && (topScore - secondScore) / topScore < 0.20;
+    const separationFactor = secondScore > 0 ? (topScore - secondScore) / topScore : 1;
+    const densityFactor = Math.min(1, totalKeywordMatches / 10);
+    const scopeConfidence = Math.round(Math.min(1, Math.max(0, separationFactor * 0.5 + densityFactor * 0.5)) * 1000) / 1000;
+    _lastMarketScopeMetadata = { scopeConfidence, matchedKeywordDensity, scopeAmbiguityFlag };
+    const detected = sorted.filter(([, v]) => v >= topScore * 0.3).map(([k]) => k);
+    return detected.length > 0 ? detected : ["universal"];
+}
+function filterClustersByMarket(clusters, detectedMarkets) {
+    return clusters.filter(cluster => {
+        if (!cluster.marketScope)
+            return true;
+        if (detectedMarkets.includes("universal"))
+            return true;
+        return cluster.marketScope.some(s => detectedMarkets.includes(s));
+    });
+}
+function applyObjectionContextRules(objectionMap, texts) {
+    const allTextLower = texts.join(" ").toLowerCase();
+    const result = [];
+    const fallbackMerge = new Map();
+    for (const item of objectionMap) {
+        const rule = OBJECTION_CONTEXT_RULES[item.canonical];
+        if (!rule) {
+            result.push(item);
+            continue;
+        }
+        const hasContext = rule.requireKeywords.some(kw => allTextLower.includes(kw.toLowerCase()));
+        if (hasContext) {
+            result.push(item);
+            continue;
+        }
+        const existing = fallbackMerge.get(rule.fallbackCanonical);
+        if (existing) {
+            existing.frequency += item.frequency;
+            existing.evidenceCount += item.evidenceCount;
+            existing.evidence = [...existing.evidence, ...item.evidence].slice(0, 3);
+            existing.confidenceScore = Math.max(existing.confidenceScore, item.confidenceScore);
+        }
+        else {
+            const existingInResult = result.find(r => r.canonical === rule.fallbackCanonical);
+            if (existingInResult) {
+                existingInResult.frequency += item.frequency;
+                existingInResult.evidenceCount += item.evidenceCount;
+                existingInResult.evidence = [...existingInResult.evidence, ...item.evidence].slice(0, 3);
+            }
+            else {
+                fallbackMerge.set(rule.fallbackCanonical, { ...item, canonical: rule.fallbackCanonical });
+            }
+        }
+    }
+    for (const [, merged] of fallbackMerge) {
+        result.push(merged);
+    }
+    return result;
+}
+function applyEvidenceIntegrityFilter(signals) {
+    return signals.filter(s => s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL);
+}
+function computeSegmentSimilarity(segA, segB) {
+    const tokensA = new Set([
+        ...segA.name.toLowerCase().split(/\s+/),
+        ...segA.painProfile.map(p => p.toLowerCase()),
+        ...segA.desireProfile.map(d => d.toLowerCase()),
+        ...(segA.objectionProfile || []).map(o => o.toLowerCase()),
+        ...(segA.motivationProfile || []).map(m => m.toLowerCase()),
+    ]);
+    const tokensB = new Set([
+        ...segB.name.toLowerCase().split(/\s+/),
+        ...segB.painProfile.map(p => p.toLowerCase()),
+        ...segB.desireProfile.map(d => d.toLowerCase()),
+        ...(segB.objectionProfile || []).map(o => o.toLowerCase()),
+        ...(segB.motivationProfile || []).map(m => m.toLowerCase()),
+    ]);
+    let intersection = 0;
+    for (const t of tokensA) {
+        if (tokensB.has(t))
+            intersection++;
+    }
+    const union = new Set([...tokensA, ...tokensB]).size;
+    return union > 0 ? intersection / union : 0;
+}
+function canonicalizeSegments(segments) {
+    if (segments.length <= 1)
+        return segments;
+    const SIMILARITY_THRESHOLD = 0.80;
+    const MAX_SEGMENTS = 4;
+    const merged = [];
+    const used = new Set();
+    for (let i = 0; i < segments.length; i++) {
+        if (used.has(i))
+            continue;
+        let canonical = { ...segments[i] };
+        const mergeGroup = [segments[i]];
+        for (let j = i + 1; j < segments.length; j++) {
+            if (used.has(j))
+                continue;
+            const similarity = computeSegmentSimilarity(canonical, segments[j]);
+            if (similarity >= SIMILARITY_THRESHOLD) {
+                mergeGroup.push(segments[j]);
+                used.add(j);
+            }
+        }
+        if (mergeGroup.length > 1) {
+            const best = mergeGroup.sort((a, b) => (b.estimatedPercentage || 0) - (a.estimatedPercentage || 0))[0];
+            const combinedPercentage = mergeGroup.reduce((s, seg) => s + (seg.estimatedPercentage || 0), 0);
+            const allPains = [...new Set(mergeGroup.flatMap(s => s.painProfile))];
+            const allDesires = [...new Set(mergeGroup.flatMap(s => s.desireProfile))];
+            const allObjections = [...new Set(mergeGroup.flatMap(s => s.objectionProfile || []))];
+            const allMotivations = [...new Set(mergeGroup.flatMap(s => s.motivationProfile || []))];
+            const allSourceSignals = [...new Set(mergeGroup.flatMap(s => s.sourceSignals || []))];
+            const totalEvidence = mergeGroup.reduce((s, seg) => s + (seg.evidenceCount || 0), 0);
+            canonical = {
+                ...best,
+                estimatedPercentage: combinedPercentage,
+                painProfile: allPains,
+                desireProfile: allDesires,
+                objectionProfile: allObjections,
+                motivationProfile: allMotivations,
+                evidenceCount: totalEvidence,
+                confidenceScore: Math.min(0.95, (best.confidenceScore || 0.5) + mergeGroup.length * 0.05),
+                sourceSignals: allSourceSignals,
+            };
+        }
+        merged.push(canonical);
+        used.add(i);
+    }
+    if (merged.length <= MAX_SEGMENTS)
+        return merged;
+    const sorted = merged.sort((a, b) => (b.estimatedPercentage || 0) - (a.estimatedPercentage || 0));
+    const kept = sorted.slice(0, MAX_SEGMENTS - 1);
+    const overflow = sorted.slice(MAX_SEGMENTS - 1);
+    const overflowPercentage = overflow.reduce((s, seg) => s + (seg.estimatedPercentage || 0), 0);
+    const overflowEvidence = overflow.reduce((s, seg) => s + (seg.evidenceCount || 0), 0);
+    kept.push({
+        name: "Secondary Segment Cluster",
+        description: `Merged cluster of ${overflow.length} smaller audience segments`,
+        painProfile: [...new Set(overflow.flatMap(s => s.painProfile).slice(0, 5))],
+        desireProfile: [...new Set(overflow.flatMap(s => s.desireProfile).slice(0, 5))],
+        objectionProfile: [...new Set(overflow.flatMap(s => s.objectionProfile || []).slice(0, 3))],
+        motivationProfile: [...new Set(overflow.flatMap(s => s.motivationProfile || []).slice(0, 3))],
+        estimatedPercentage: overflowPercentage,
+        evidenceCount: overflowEvidence,
+        confidenceScore: 0.3,
+        sourceSignals: ["merged-overflow"],
+        inputSnapshotId: overflow[0]?.inputSnapshotId || null,
+    });
+    return kept;
+}
+function computeCalibratedConfidence(frequency, totalTexts, sourceTypes, competitorCount) {
+    const freqScore = totalTexts > 0 ? Math.min(1, frequency / Math.max(totalTexts * 0.1, 1)) : 0;
+    const diversityScore = Math.min(1, sourceTypes.length / 3);
+    const competitorScore = Math.min(1, competitorCount / MI_COST_LIMITS.MAX_COMPETITORS);
+    const raw = freqScore * CONFIDENCE_WEIGHTS.SIGNAL_FREQUENCY +
+        diversityScore * CONFIDENCE_WEIGHTS.SOURCE_DIVERSITY +
+        competitorScore * CONFIDENCE_WEIGHTS.COMPETITOR_OVERLAP;
+    return Math.min(0.95, Math.max(0.05, raw));
+}
+function matchPatternClusters(texts, clusters, inputSnapshotId, sourceTypes, competitorCount) {
+    const results = new Map();
+    for (const cluster of clusters) {
+        results.set(cluster.canonical, { count: 0, evidence: [], matchedPatterns: new Set() });
+    }
+    for (const text of texts) {
+        const lower = text.toLowerCase();
+        for (const cluster of clusters) {
+            for (const pattern of cluster.patterns) {
+                if (lower.includes(pattern)) {
+                    const entry = results.get(cluster.canonical);
+                    entry.count++;
+                    entry.matchedPatterns.add(pattern);
+                    if (entry.evidence.length < 3) {
+                        entry.evidence.push(text.slice(0, 150));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    return Array.from(results.entries())
+        .filter(([, v]) => v.count > 0)
+        .sort((a, b) => b[1].count - a[1].count)
+        .map(([canonical, data]) => ({
+        canonical,
+        frequency: data.count,
+        evidence: data.evidence,
+        evidenceCount: data.count,
+        confidenceScore: computeCalibratedConfidence(data.count, texts.length, sourceTypes, competitorCount),
+        sourceSignals: Array.from(data.matchedPatterns),
+        inputSnapshotId,
+    }));
+}
+function analyzeLanguage(comments, captions, inputSnapshotId, competitorCount) {
+    const allText = [...comments, ...captions];
+    const result = {
+        problemExpressions: { count: 0, samples: [] },
+        questionPatterns: { count: 0, samples: [] },
+        goalExpressions: { count: 0, samples: [] },
+        totalAnalyzed: allText.length,
+        evidenceCount: 0,
+        confidenceScore: 0,
+        sourceSignals: [],
+        inputSnapshotId,
+    };
+    for (const text of allText) {
+        const lower = text.toLowerCase();
+        for (const pattern of LANGUAGE_PATTERNS.PROBLEM_EXPRESSIONS) {
+            if (lower.includes(pattern)) {
+                result.problemExpressions.count++;
+                if (result.problemExpressions.samples.length < 3) {
+                    result.problemExpressions.samples.push(text.slice(0, 120));
+                }
+                break;
+            }
+        }
+        for (const pattern of LANGUAGE_PATTERNS.QUESTION_PATTERNS) {
+            if (lower.includes(pattern)) {
+                result.questionPatterns.count++;
+                if (result.questionPatterns.samples.length < 3) {
+                    result.questionPatterns.samples.push(text.slice(0, 120));
+                }
+                break;
+            }
+        }
+        for (const pattern of LANGUAGE_PATTERNS.GOAL_EXPRESSIONS) {
+            if (lower.includes(pattern)) {
+                result.goalExpressions.count++;
+                if (result.goalExpressions.samples.length < 3) {
+                    result.goalExpressions.samples.push(text.slice(0, 120));
+                }
+                break;
+            }
+        }
+    }
+    const total = result.problemExpressions.count + result.questionPatterns.count + result.goalExpressions.count;
+    result.evidenceCount = total;
+    const sourceTypes = [];
+    if (comments.length > 0)
+        sourceTypes.push("comments");
+    if (captions.length > 0)
+        sourceTypes.push("captions");
+    result.confidenceScore = computeCalibratedConfidence(total, allText.length, sourceTypes, competitorCount);
+    result.sourceSignals = sourceTypes;
+    return result;
+}
+function detectAwareness(comments, inputSnapshotId, competitorCount, miObjectionDensity = 0, miObjectionCount = 0) {
+    const distribution = {
+        unaware: 0,
+        problem_aware: 0,
+        solution_aware: 0,
+        product_aware: 0,
+        most_aware: 0,
+    };
+    const levelKeys = [
+        ["most_aware", AWARENESS_PATTERNS.MOST_AWARE],
+        ["product_aware", AWARENESS_PATTERNS.PRODUCT_AWARE],
+        ["solution_aware", AWARENESS_PATTERNS.SOLUTION_AWARE],
+        ["problem_aware", AWARENESS_PATTERNS.PROBLEM_AWARE],
+        ["unaware", AWARENESS_PATTERNS.UNAWARE],
+    ];
+    let totalMatched = 0;
+    for (const text of comments) {
+        const lower = text.toLowerCase();
+        let matched = false;
+        for (const [level, patterns] of levelKeys) {
+            for (const p of patterns) {
+                if (lower.includes(p)) {
+                    distribution[level]++;
+                    totalMatched++;
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched)
+                break;
+        }
+    }
+    if (totalMatched < 3) {
+        if (miObjectionCount >= 3 && miObjectionDensity > 0.1) {
+            return {
+                level: "problem_aware",
+                distribution: { problem_aware: 100 },
+                evidenceCount: miObjectionCount,
+                confidenceScore: Math.min(miObjectionDensity + 0.1, 0.6),
+                sourceSignals: ["mi_narrative_objections"],
+                inputSnapshotId,
+            };
+        }
+        return {
+            level: "insufficient_signals",
+            distribution: {},
+            evidenceCount: totalMatched,
+            confidenceScore: 0,
+            sourceSignals: ["comments"],
+            inputSnapshotId,
+        };
+    }
+    let dominantLevel = "problem_aware";
+    let maxCount = 0;
+    for (const [level, count] of Object.entries(distribution)) {
+        if (count > maxCount) {
+            maxCount = count;
+            dominantLevel = level;
+        }
+    }
+    if (dominantLevel === "unaware" && miObjectionCount >= 3 && miObjectionDensity > 0.15) {
+        const problemAwareCount = distribution["problem_aware"] || 0;
+        const solutionAwareCount = distribution["solution_aware"] || 0;
+        if (solutionAwareCount > problemAwareCount && solutionAwareCount > 0) {
+            dominantLevel = "solution_aware";
+        }
+        else {
+            dominantLevel = "problem_aware";
+        }
+        console.log(`[AudienceEngine-V3] OBJECTION_DENSITY_OVERRIDE | miObjections=${miObjectionCount} | density=${miObjectionDensity} | overrideFrom=unaware | overrideTo=${dominantLevel}`);
+    }
+    const pct = {};
+    for (const [level, count] of Object.entries(distribution)) {
+        pct[level] = Math.round((count / totalMatched) * 100);
+    }
+    return {
+        level: dominantLevel,
+        distribution: pct,
+        evidenceCount: totalMatched,
+        confidenceScore: computeCalibratedConfidence(totalMatched, comments.length, ["comments"], competitorCount),
+        sourceSignals: ["comments"],
+        inputSnapshotId,
+    };
+}
+function detectMaturity(comments, captions, inputSnapshotId, competitorCount) {
+    const allText = [...comments, ...captions];
+    const signals = { beginner: 0, developing: 0, mature: 0 };
+    const indicators = [];
+    for (const text of allText) {
+        const lower = text.toLowerCase();
+        for (const kw of MATURITY_KEYWORDS.MATURE) {
+            if (lower.includes(kw)) {
+                signals.mature++;
+                if (indicators.length < 5)
+                    indicators.push(kw);
+                break;
+            }
+        }
+        for (const kw of MATURITY_KEYWORDS.DEVELOPING) {
+            if (lower.includes(kw)) {
+                signals.developing++;
+                break;
+            }
+        }
+        for (const kw of MATURITY_KEYWORDS.BEGINNER) {
+            if (lower.includes(kw)) {
+                signals.beginner++;
+                break;
+            }
+        }
+    }
+    const total = signals.beginner + signals.developing + signals.mature;
+    if (total < 3) {
+        return {
+            level: "insufficient_signals",
+            distribution: {},
+            indicators: [],
+            evidenceCount: total,
+            confidenceScore: 0,
+            sourceSignals: ["comments", "captions"],
+            inputSnapshotId,
+        };
+    }
+    const dist = {
+        beginner: Math.round((signals.beginner / total) * 100),
+        developing: Math.round((signals.developing / total) * 100),
+        mature: Math.round((signals.mature / total) * 100),
+    };
+    let level = "beginner";
+    if (signals.mature > signals.developing && signals.mature > signals.beginner)
+        level = "mature";
+    else if (signals.developing > signals.beginner)
+        level = "developing";
+    const sourceTypes = [];
+    if (comments.length > 0)
+        sourceTypes.push("comments");
+    if (captions.length > 0)
+        sourceTypes.push("captions");
+    return {
+        level,
+        distribution: dist,
+        indicators,
+        evidenceCount: total,
+        confidenceScore: computeCalibratedConfidence(total, allText.length, sourceTypes, competitorCount),
+        sourceSignals: sourceTypes,
+        inputSnapshotId,
+    };
+}
+function classifyIntents(comments, inputSnapshotId, competitorCount) {
+    let curiosity = 0;
+    let learning = 0;
+    let comparison = 0;
+    let purchaseIntent = 0;
+    let totalClassified = 0;
+    for (const text of comments) {
+        const lower = text.toLowerCase();
+        let classified = false;
+        for (const kw of INTENT_KEYWORDS.PURCHASE_INTENT) {
+            if (lower.includes(kw)) {
+                purchaseIntent++;
+                classified = true;
+                break;
+            }
+        }
+        if (!classified) {
+            for (const kw of INTENT_KEYWORDS.COMPARISON) {
+                if (lower.includes(kw)) {
+                    comparison++;
+                    classified = true;
+                    break;
+                }
+            }
+        }
+        if (!classified) {
+            for (const kw of INTENT_KEYWORDS.LEARNING) {
+                if (lower.includes(kw)) {
+                    learning++;
+                    classified = true;
+                    break;
+                }
+            }
+        }
+        if (!classified) {
+            for (const kw of INTENT_KEYWORDS.CURIOSITY) {
+                if (lower.includes(kw)) {
+                    curiosity++;
+                    classified = true;
+                    break;
+                }
+            }
+        }
+        if (classified)
+            totalClassified++;
+    }
+    if (totalClassified === 0) {
+        return {
+            curiosity: 0, learning: 0, comparison: 0, purchaseIntent: 0,
+            totalClassified: 0,
+            evidenceCount: 0,
+            confidenceScore: 0,
+            sourceSignals: ["comments"],
+            inputSnapshotId,
+        };
+    }
+    return {
+        curiosity: Math.round((curiosity / totalClassified) * 100),
+        learning: Math.round((learning / totalClassified) * 100),
+        comparison: Math.round((comparison / totalClassified) * 100),
+        purchaseIntent: Math.round((purchaseIntent / totalClassified) * 100),
+        totalClassified,
+        evidenceCount: totalClassified,
+        confidenceScore: computeCalibratedConfidence(totalClassified, comments.length, ["comments"], competitorCount),
+        sourceSignals: ["comments"],
+        inputSnapshotId,
+    };
+}
+function deriveIntentTemperature(intentDist) {
+    if (intentDist.totalClassified === 0)
+        return "cold";
+    const weighted = intentDist.curiosity * 0.1 +
+        intentDist.learning * 0.3 +
+        intentDist.comparison * 0.6 +
+        intentDist.purchaseIntent * 1.0;
+    const normalizedTemp = weighted / 100;
+    if (normalizedTemp >= 0.55)
+        return "very_hot";
+    if (normalizedTemp >= 0.35)
+        return "hot";
+    if (normalizedTemp >= 0.20)
+        return "warm";
+    return "cold";
+}
+function computeSegmentDensity(painMap, desireMap, segments, inputSnapshotId) {
+    const totalSignals = painMap.reduce((s, p) => s + p.frequency, 0) + desireMap.reduce((s, d) => s + d.frequency, 0);
+    const rawDensities = segments.map(seg => {
+        let signalCount = 0;
+        for (const pain of painMap) {
+            if (seg.painProfile.some(p => pain.canonical.toLowerCase().includes(p.toLowerCase()))) {
+                signalCount += pain.frequency;
+            }
+        }
+        for (const desire of desireMap) {
+            if (seg.desireProfile.some(d => desire.canonical.toLowerCase().includes(d.toLowerCase()))) {
+                signalCount += desire.frequency;
+            }
+        }
+        return { segment: seg.name, signalCount };
+    });
+    const rawTotal = rawDensities.reduce((s, d) => s + d.signalCount, 0);
+    const items = rawDensities.map(d => ({
+        segment: d.segment,
+        rawDensity: rawTotal > 0 ? (d.signalCount / rawTotal) * 100 : 0,
+        signalCount: d.signalCount,
+    }));
+    const floored = items.map(d => ({ ...d, densityScore: Math.floor(d.rawDensity) }));
+    let remainder = 100 - floored.reduce((s, d) => s + d.densityScore, 0);
+    const sorted = floored.map((d, i) => ({ ...d, idx: i, frac: d.rawDensity - d.densityScore }))
+        .sort((a, b) => b.frac - a.frac);
+    for (const item of sorted) {
+        if (remainder <= 0)
+            break;
+        floored[item.idx].densityScore += 1;
+        remainder--;
+    }
+    return floored.map(d => ({
+        segment: d.segment,
+        densityScore: rawTotal > 0 ? d.densityScore : 0,
+        signalCount: d.signalCount,
+        evidenceCount: d.signalCount,
+        confidenceScore: rawTotal > 0 ? Math.min(0.95, d.signalCount / rawTotal) : 0,
+        sourceSignals: ["painMap", "desireMap"],
+        inputSnapshotId,
+    }));
+}
+async function constructSegments(painMap, desireMap, objectionMap, emotionalDrivers, maturity, awareness, businessContext, commentSamples, accountId, inputSnapshotId) {
+    try {
+        let multiSourceSection = "";
+        try {
+            const { loadMultiSourceContext, buildMultiSourcePromptSection, buildSourceFallbackContext } = await import("../shared/multi-source-loader");
+            if (inputSnapshotId) {
+                const msCtx = await loadMultiSourceContext(inputSnapshotId);
+                if (msCtx && (msCtx.hasMeaningfulWebData || msCtx.hasMeaningfulBlogData)) {
+                    multiSourceSection = buildMultiSourcePromptSection(msCtx);
+                    multiSourceSection += "\n\nIMPORTANT: Use website headlines and blog titles to infer audience pains even when comments are absent. Website copy reveals what the market responds to. Blog topics reveal what questions the audience asks repeatedly.";
+                }
+                else {
+                    multiSourceSection = buildSourceFallbackContext(msCtx);
+                }
+            }
+        }
+        catch { }
+        const productDnaBlock = businessContext.productDna ? formatProductDNAForPrompt(businessContext.productDna) : "";
+        const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
+
+BUSINESS: ${businessContext.industry} — ${businessContext.coreOffer}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
+
+PAIN MAP (from real audience data):
+${painMap.slice(0, 8).map(p => `- ${p.canonical}: frequency=${p.frequency}, confidence=${(p.confidenceScore * 100).toFixed(0)}%`).join("\n")}
+
+DESIRE MAP:
+${desireMap.slice(0, 8).map(d => `- ${d.canonical}: frequency=${d.frequency}`).join("\n")}
+
+OBJECTION MAP:
+${objectionMap.slice(0, 6).map(o => `- ${o.canonical}: frequency=${o.frequency}`).join("\n")}
+
+EMOTIONAL DRIVERS:
+${emotionalDrivers.slice(0, 6).map(e => `- ${e.canonical}: frequency=${e.frequency}`).join("\n")}
+
+MARKET MATURITY: ${maturity.level}
+AWARENESS LEVEL: ${awareness.level}
+${multiSourceSection}
+
+SAMPLE COMMENTS (real audience language):
+${commentSamples.slice(0, 12).map(c => `"${c.slice(0, 100)}"`).join("\n")}
+
+Return a JSON array of 2-4 segments. Each segment:
+{
+  "name": "segment name",
+  "description": "brief description",
+  "painProfile": ["pain1", "pain2"],
+  "desireProfile": ["desire1", "desire2"],
+  "objectionProfile": ["objection1"],
+  "motivationProfile": ["motivation1", "motivation2"],
+  "estimatedPercentage": number (must total ~100)
+}
+
+Return ONLY the JSON array, no markdown.`;
+        const response = await aiChat({
+            model: "gpt-4.1-mini",
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.4,
+            max_tokens: 2000,
+            endpoint: "audience-engine-v3-segments",
+            accountId,
+        });
+        const content = response.choices[0]?.message?.content?.trim() || "[]";
+        const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        const parsed = JSON.parse(cleaned);
+        return parsed.map(seg => {
+            const segPains = (seg.painProfile || []);
+            const segDesires = (seg.desireProfile || []);
+            const segObjections = (seg.objectionProfile || []);
+            let painDesireMatchCount = 0;
+            for (const p of segPains) {
+                if (painMap.some(pm => pm.canonical.toLowerCase().includes(p.toLowerCase())))
+                    painDesireMatchCount++;
+            }
+            for (const d of segDesires) {
+                if (desireMap.some(dm => dm.canonical.toLowerCase().includes(d.toLowerCase())))
+                    painDesireMatchCount++;
+            }
+            const totalProfileItems = segPains.length + segDesires.length;
+            const signalCoverage = totalProfileItems > 0 ? Math.min(1, painDesireMatchCount / totalProfileItems) : 0;
+            const painDesireDensity = Math.min(1, (painMap.length + desireMap.length) / 10);
+            const allOtherSegments = parsed.filter((s) => s.name !== seg.name);
+            let avgSim = 0;
+            if (allOtherSegments.length > 0) {
+                let simSum = 0;
+                for (const other of allOtherSegments) {
+                    const overlap = [...segPains, ...segDesires].filter(t => [...(other.painProfile || []), ...(other.desireProfile || [])].some((o) => o.toLowerCase() === t.toLowerCase())).length;
+                    const totalTokens = new Set([...segPains, ...segDesires, ...(other.painProfile || []), ...(other.desireProfile || [])]).size;
+                    simSum += totalTokens > 0 ? overlap / totalTokens : 0;
+                }
+                avgSim = simSum / allOtherSegments.length;
+            }
+            const segmentDistinctiveness = 1 - avgSim;
+            const evidenceSupport = Math.min(1, (segObjections.length > 0 ? 0.5 : 0) + (segPains.length >= 2 ? 0.3 : 0.1) + (segDesires.length >= 2 ? 0.2 : 0.1));
+            const segmentConfidence = Math.round(Math.min(0.95, Math.max(0.05, signalCoverage * 0.40 + painDesireDensity * 0.30 + segmentDistinctiveness * 0.20 + evidenceSupport * 0.10)) * 1000) / 1000;
+            return {
+                ...seg,
+                evidenceCount: painMap.length + desireMap.length + objectionMap.length,
+                confidenceScore: segmentConfidence,
+                sourceSignals: ["painMap", "desireMap", "objectionMap", "emotionalDrivers"],
+                inputSnapshotId,
+            };
+        });
+    }
+    catch (err) {
+        console.error("[AudienceEngine-V3] Segment construction failed:", err.message);
+        return [{
+                name: "Primary Audience",
+                description: "Main audience segment based on available data",
+                painProfile: painMap.slice(0, 3).map(p => p.canonical),
+                desireProfile: desireMap.slice(0, 3).map(d => d.canonical),
+                objectionProfile: objectionMap.slice(0, 2).map(o => o.canonical),
+                motivationProfile: emotionalDrivers.slice(0, 2).map(e => e.canonical),
+                estimatedPercentage: 100,
+                evidenceCount: painMap.length + desireMap.length,
+                confidenceScore: 0.3,
+                sourceSignals: ["painMap", "desireMap"],
+                inputSnapshotId,
+            }];
+    }
+}
+const ADS_PRESCRIPTIVE_PATTERNS = [
+    /\bset (?:your |the )?budget\b/i,
+    /\ballocate \$?\d/i,
+    /\bspend \$?\d/i,
+    /\bdaily budget\b/i,
+    /\blifetime budget\b/i,
+    /\bcreate (?:a |an )?(?:ad set|campaign|ad group)\b/i,
+    /\bgo to ads manager\b/i,
+    /\bselect (?:conversion|traffic|reach) objective\b/i,
+    /\bconfigure (?:the |your )?pixel\b/i,
+    /\benable (?:CBO|ABO|advantage\+)\b/i,
+    /\boptimize for (?:conversions|clicks|reach|impressions)\b/i,
+    /\buse (?:automatic|manual) placements\b/i,
+    /\bscale (?:the |your )?campaign\b/i,
+    /\bincrease (?:the |your )?budget\b/i,
+    /\ba\/b test (?:the |your )/i,
+];
+function sanitizeAdsTargetingHint(hint) {
+    if (hint.rationale) {
+        for (const pattern of ADS_PRESCRIPTIVE_PATTERNS) {
+            if (pattern.test(hint.rationale)) {
+                hint.rationale = hint.rationale.replace(pattern, "[hint]").trim();
+            }
+        }
+    }
+    return hint;
+}
+async function translateToAdsTargeting(segments, maturity, businessContext, accountId, inputSnapshotId) {
+    try {
+        const prompt = `You are a Meta Ads targeting expert. Translate audience segments into Meta Ads Manager targeting suggestions.
+
+BUSINESS: ${businessContext.industry} — ${businessContext.coreOffer}
+LOCATION: ${businessContext.location || "Not specified"}
+MARKET MATURITY: ${maturity.level}
+
+SEGMENTS:
+${segments.map(s => `- ${s.name}: Pains=${s.painProfile.join(", ")}. Desires=${s.desireProfile.join(", ")}. Objections=${s.objectionProfile.join(", ")}`).join("\n")}
+
+For each segment, return:
+{
+  "suggestedInterests": ["real Meta interest categories"],
+  "suggestedBehaviors": ["real Meta behavior targeting options"],
+  "suggestedAgeRange": { "min": number, "max": number },
+  "suggestedGender": "all" | "male" | "female",
+  "suggestedLocations": ["country/region suggestions"],
+  "rationale": "brief explanation"
+}
+
+Return ONLY a JSON array matching the segments count. Use real Meta Ads targeting options.`;
+        const response = await aiChat({
+            model: "gpt-4.1-mini",
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.3,
+            max_tokens: 1500,
+            endpoint: "audience-engine-v3-ads-targeting",
+            accountId,
+        });
+        const content = response.choices[0]?.message?.content?.trim() || "[]";
+        const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        const parsed = JSON.parse(cleaned);
+        return parsed.map(hint => sanitizeAdsTargetingHint({
+            ...hint,
+            evidenceCount: segments.length,
+            confidenceScore: 0.6,
+            sourceSignals: ["audienceSegments", "maturityIndex"],
+            inputSnapshotId,
+        }));
+    }
+    catch (err) {
+        console.error("[AudienceEngine-V3] Ads targeting failed:", err.message);
+        return [{
+                suggestedInterests: [businessContext.industry],
+                suggestedBehaviors: ["Engaged shoppers"],
+                suggestedAgeRange: { min: 18, max: 55 },
+                suggestedGender: "all",
+                suggestedLocations: [businessContext.location || "United States"],
+                rationale: "Fallback targeting based on business context",
+                evidenceCount: 0,
+                confidenceScore: 0.2,
+                sourceSignals: ["fallback"],
+                inputSnapshotId,
+            }];
+    }
+}
+function buildStructuredSignals(painMap, desireMap, objectionMap, transformationMap, emotionalDrivers, awarenessLevel, intentDistribution) {
+    const toCluster = (items, layer) => items.map((item, i) => ({
+        id: `${layer}_${i}_${item.canonical.replace(/\s+/g, "_").toLowerCase().slice(0, 30)}`,
+        label: item.canonical,
+        frequency: item.frequency,
+        confidence: item.confidenceScore,
+        evidence: item.evidence.slice(0, 3),
+        sourceLayer: layer,
+    }));
+    const pain_clusters = toCluster(painMap, "surface");
+    const desire_clusters = toCluster(desireMap, "surface");
+    const allFrequencyItems = [...painMap, ...desireMap, ...objectionMap].filter(s => s.frequency >= 2);
+    const sortedByFreq = allFrequencyItems.sort((a, b) => b.frequency - a.frequency);
+    const pattern_clusters = toCluster(sortedByFreq.slice(0, 10), "pattern");
+    const rootCauseInputs = [];
+    const highConfPains = painMap.filter(p => p.confidenceScore >= 0.4);
+    const highConfObjections = objectionMap.filter(o => o.confidenceScore >= 0.3);
+    for (const pain of highConfPains) {
+        const relatedDriver = emotionalDrivers.find(d => d.evidence.some(e => pain.evidence.some(pe => e.toLowerCase().includes(pe.toLowerCase().slice(0, 20)) || pe.toLowerCase().includes(e.toLowerCase().slice(0, 20)))));
+        rootCauseInputs.push({
+            ...pain,
+            canonical: relatedDriver
+                ? `${pain.canonical} driven by ${relatedDriver.canonical}`
+                : `${pain.canonical} (recurring audience friction)`,
+            confidenceScore: Math.min(0.95, pain.confidenceScore + (relatedDriver ? 0.1 : 0)),
+        });
+    }
+    for (const obj of highConfObjections.slice(0, 3)) {
+        if (!rootCauseInputs.some(r => r.canonical.toLowerCase().includes(obj.canonical.toLowerCase()))) {
+            rootCauseInputs.push({
+                ...obj,
+                canonical: `Buying barrier: ${obj.canonical}`,
+            });
+        }
+    }
+    const root_causes = toCluster(rootCauseInputs.sort((a, b) => b.confidenceScore - a.confidenceScore).slice(0, 8), "interpretation");
+    const psychDriverInputs = emotionalDrivers.map(d => ({
+        ...d,
+        canonical: d.canonical,
+    }));
+    if (awarenessLevel.level !== "insufficient_signals") {
+        psychDriverInputs.push({
+            canonical: `Awareness state: ${awarenessLevel.level} — audience ${awarenessLevel.level === "unaware" ? "doesn't know the problem exists" : awarenessLevel.level === "problem_aware" ? "feels the pain but doesn't know solutions" : awarenessLevel.level === "solution_aware" ? "knows solutions exist but hasn't chosen" : "is evaluating specific products"}`,
+            frequency: awarenessLevel.evidenceCount,
+            evidence: [],
+            evidenceCount: awarenessLevel.evidenceCount,
+            confidenceScore: awarenessLevel.confidenceScore,
+            sourceSignals: ["awareness"],
+            inputSnapshotId: awarenessLevel.inputSnapshotId,
+        });
+    }
+    if (intentDistribution.totalClassified > 0) {
+        const dominantIntent = intentDistribution.purchaseIntent >= 30 ? "purchase-ready"
+            : intentDistribution.comparison >= 30 ? "comparison-shopping"
+                : intentDistribution.learning >= 30 ? "learning-phase"
+                    : "curiosity-stage";
+        psychDriverInputs.push({
+            canonical: `Dominant intent: ${dominantIntent} (${intentDistribution.totalClassified} signals classified)`,
+            frequency: intentDistribution.totalClassified,
+            evidence: [],
+            evidenceCount: intentDistribution.totalClassified,
+            confidenceScore: intentDistribution.confidenceScore,
+            sourceSignals: ["intent"],
+            inputSnapshotId: null,
+        });
+    }
+    for (const t of transformationMap.slice(0, 3)) {
+        psychDriverInputs.push({
+            ...t,
+            canonical: `Desired transformation: ${t.canonical}`,
+        });
+    }
+    const psychological_drivers = toCluster(psychDriverInputs.sort((a, b) => b.confidenceScore - a.confidenceScore).slice(0, 8), "interpretation");
+    return { pain_clusters, desire_clusters, pattern_clusters, root_causes, psychological_drivers };
+}
+const EMPTY_STRUCTURED_SIGNALS = {
+    pain_clusters: [],
+    desire_clusters: [],
+    pattern_clusters: [],
+    root_causes: [],
+    psychological_drivers: [],
+};
+function buildEmptyResult(status, statusMessage, inputSummary, executionTimeMs, snapshotId) {
+    const emptyMeta = { evidenceCount: 0, confidenceScore: 0, sourceSignals: [], inputSnapshotId: inputSummary.miSnapshotId };
+    return {
+        status,
+        statusMessage,
+        defensiveMode: status === "DEFENSIVE_MODE",
+        languageSignals: { ...emptyMeta, problemExpressions: { count: 0, samples: [] }, questionPatterns: { count: 0, samples: [] }, goalExpressions: { count: 0, samples: [] }, totalAnalyzed: 0 },
+        painMap: [],
+        desireMap: [],
+        objectionMap: [],
+        transformationMap: [],
+        emotionalDrivers: [],
+        audienceSegments: [],
+        segmentDensity: [],
+        awarenessLevel: { ...emptyMeta, level: "insufficient_signals", distribution: {} },
+        maturityIndex: { ...emptyMeta, level: "insufficient_signals", distribution: {}, indicators: [] },
+        intentDistribution: { ...emptyMeta, curiosity: 0, learning: 0, comparison: 0, purchaseIntent: 0, totalClassified: 0 },
+        adsTargetingHints: [],
+        structuredSignals: EMPTY_STRUCTURED_SIGNALS,
+        inputSummary,
+        engineVersion: AUDIENCE_ENGINE_VERSION,
+        executionTimeMs,
+        snapshotId,
+    };
+}
+export async function runAudienceEngine(accountId, campaignId) {
+    const startTime = Date.now();
+    console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}`);
+    const [latestSnapshot] = await db.select().from(miSnapshots)
+        .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"])))
+        .orderBy(desc(miSnapshots.createdAt))
+        .limit(1);
+    const miSnapshotId = latestSnapshot?.id || null;
+    const miSnapshotAge = latestSnapshot?.createdAt
+        ? `${Math.round((Date.now() - new Date(latestSnapshot.createdAt).getTime()) / 3600000)}h ago`
+        : null;
+    let miFreshnessMetadata = null;
+    if (latestSnapshot) {
+        const { logFreshnessTraceability, buildFreshnessMetadata } = await import("../shared/snapshot-trust");
+        miFreshnessMetadata = buildFreshnessMetadata(latestSnapshot);
+        logFreshnessTraceability("AudienceEngine", latestSnapshot, miFreshnessMetadata);
+        if (miFreshnessMetadata.blockedForStrategy) {
+            console.log(`[AudienceEngine-V3] MI freshness BLOCKED | class=${miFreshnessMetadata.freshnessClass} | age=${miFreshnessMetadata.ageInDays}d | trust=${miFreshnessMetadata.trustScore} | schema=${miFreshnessMetadata.schemaRecommendation}`);
+            const executionTimeMs = Date.now() - startTime;
+            return buildEmptyResult("MISSING_DEPENDENCY", miFreshnessMetadata.warning || `MI data freshness check failed (${miFreshnessMetadata.freshnessClass}). Re-run Market Intelligence before audience analysis.`, { postsAnalyzed: 0, commentsAnalyzed: 0, competitorsAnalyzed: 0, sanitizedCount: 0, miSnapshotId: miSnapshotId, miSnapshotAge: miSnapshotAge }, executionTimeMs, "");
+        }
+    }
+    if (latestSnapshot && latestSnapshot.analysisVersion !== undefined) {
+        const { ENGINE_VERSION: MI_EV } = await import("../market-intelligence-v3/constants");
+        if (latestSnapshot.analysisVersion !== MI_EV) {
+            console.log(`[AudienceEngine-V3] MI snapshot version mismatch: got v${latestSnapshot.analysisVersion}, expected v${MI_EV} — results may use stale MI data`);
+        }
+    }
+    const competitors = await db.select().from(ciCompetitors)
+        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
+    const enrichedCount = competitors.filter(c => c.enrichmentStatus === "ENRICHED").length;
+    const pendingCount = competitors.filter(c => c.enrichmentStatus === "PENDING" || !c.enrichmentStatus).length;
+    if (competitors.length > 0) {
+        console.log(`[AudienceEngine-V3] INVENTORY_STATUS | total=${competitors.length} | enriched=${enrichedCount} | pending=${pendingCount}`);
+    }
+    const competitorIds = competitors.map(c => c.id);
+    const competitorCount = competitorIds.length;
+    let posts = [];
+    let rawComments = [];
+    if (competitorIds.length > 0) {
+        const idList = sql.join(competitorIds.map(id => sql `${id}`), sql `, `);
+        posts = await db.select({ caption: ciCompetitorPosts.caption })
+            .from(ciCompetitorPosts)
+            .where(sql `${ciCompetitorPosts.competitorId} IN (${idList})`)
+            .orderBy(desc(ciCompetitorPosts.createdAt))
+            .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE);
+        rawComments = await db.select({ commentText: ciCompetitorComments.commentText })
+            .from(ciCompetitorComments)
+            .where(sql `${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL)`)
+            .orderBy(desc(ciCompetitorComments.createdAt))
+            .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE);
+    }
+    const rawCaptions = posts.map(p => p.caption).filter((c) => !!c && c.length > 5);
+    const rawCommentTexts = rawComments.map(c => c.commentText).filter((c) => !!c && c.length > 3);
+    const captionSanitized = sanitizeTexts(rawCaptions);
+    const commentSanitized = sanitizeTexts(rawCommentTexts);
+    const captions = captionSanitized.clean;
+    const commentTexts = commentSanitized.clean;
+    const totalSanitized = captionSanitized.removed + commentSanitized.removed;
+    console.log(`[AudienceEngine-V3] Data: ${competitorCount} competitors, ${captions.length} captions, ${commentTexts.length} comments (sanitized ${totalSanitized} synthetic signals)`);
+    const baseInputSummary = {
+        postsAnalyzed: captions.length,
+        commentsAnalyzed: commentTexts.length,
+        competitorsAnalyzed: competitorCount,
+        sanitizedCount: totalSanitized,
+        miSnapshotId,
+        miSnapshotAge,
+        detectedMarkets: [],
+    };
+    let bridgeResult = null;
+    if (latestSnapshot) {
+        bridgeResult = executeSemanticBridge(latestSnapshot);
+        const bridgeValidation = validateBridgeIntegrity(bridgeResult);
+        if (!bridgeValidation.valid) {
+            console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_VALIDATION_FAIL | issues=${bridgeValidation.issues.join("; ")}`);
+            bridgeResult = null;
+        }
+        else {
+            console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_ACTIVE | pains=${bridgeResult.painSignals.length} | desires=${bridgeResult.desireSignals.length} | objections=${bridgeResult.objectionSignals.length} | integrity=${bridgeResult.bridgeIntegrity}`);
+        }
+    }
+    const bridgeCanRescue = bridgeResult && bridgeResult.bridgeIntegrity && bridgeResult.totalPassed >= AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI;
+    if (competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
+        captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS) {
+        if (bridgeCanRescue) {
+            console.log(`[AudienceEngine-V3] DATASET_TOO_SMALL bypassed — Semantic Bridge provides ${bridgeResult.totalPassed} quality-gated signals from MIv3 contentDnaData (bridge-only mode)`);
+        }
+        else {
+            const msg = `DATASET TOO SMALL FOR RELIABLE AUDIENCE INTELLIGENCE — Need ≥${AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS} competitors (have ${competitorCount}), ≥${AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS} posts (have ${captions.length}), comments available: ${commentTexts.length}${latestSnapshot ? `, bridge signals: ${bridgeResult?.totalPassed || 0}` : ", no MI snapshot"}`;
+            console.log(`[AudienceEngine-V3] ${msg}`);
+            const executionTimeMs = Date.now() - startTime;
+            const [inserted] = await db.insert(audienceSnapshots).values({
+                accountId, campaignId, miSnapshotId,
+                engineVersion: AUDIENCE_ENGINE_VERSION,
+                inputSummary: JSON.stringify({ ...baseInputSummary, status: "DATASET_TOO_SMALL", statusMessage: msg }),
+                executionTimeMs,
+            }).returning({ id: audienceSnapshots.id });
+            await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
+            const emptyResult = buildEmptyResult("DATASET_TOO_SMALL", msg, baseInputSummary, executionTimeMs, inserted.id);
+            return { ...emptyResult, freshnessMetadata: miFreshnessMetadata };
+        }
+    }
+    if (commentTexts.length === 0) {
+        console.log(`[AudienceEngine-V3] NO_COMMENT_TEXT — proceeding with ${captions.length} captions${bridgeCanRescue ? " + semantic bridge signals" : " only"}`);
+    }
+    const [campaign] = await db.select().from(growthCampaigns)
+        .where(eq(growthCampaigns.id, campaignId))
+        .limit(1);
+    const productDna = await loadProductDNA(campaignId, accountId);
+    const businessContext = {
+        industry: productDna?.businessType || productDna?.productCategory || campaign?.name || "General",
+        coreOffer: productDna?.coreOffer || campaign?.name || "Products/Services",
+        targetAudience: productDna?.targetDecisionMaker || productDna?.targetAudienceSegment || "Market audience",
+        location: "",
+        productDna: productDna || undefined,
+    };
+    if (productDna) {
+        console.log(`[AudienceEngine-V3] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"} | advantage=${productDna.strategicAdvantage || "n/a"}`);
+    }
+    const allText = [...commentTexts, ...captions];
+    const sourceTypes = [];
+    if (commentTexts.length > 0)
+        sourceTypes.push("comments");
+    if (captions.length > 0)
+        sourceTypes.push("captions");
+    const detectedMarkets = detectMarketScope(allText, businessContext);
+    baseInputSummary.detectedMarkets = detectedMarkets;
+    const scopeMetadata = getMarketScopeMetadata();
+    console.log(`[AudienceEngine-V3] Market scope detected: ${detectedMarkets.join(", ")} | scopeConfidence=${scopeMetadata.scopeConfidence} | ambiguity=${scopeMetadata.scopeAmbiguityFlag}`);
+    const scopedPainClusters = filterClustersByMarket(PAIN_CLUSTERS, detectedMarkets);
+    const scopedDesireClusters = filterClustersByMarket(DESIRE_CLUSTERS, detectedMarkets);
+    const scopedObjectionClusters = filterClustersByMarket(OBJECTION_CLUSTERS, detectedMarkets);
+    const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId, competitorCount);
+    const rawPainMap = matchPatternClusters(allText, scopedPainClusters, miSnapshotId, sourceTypes, competitorCount);
+    const rawDesireMap = matchPatternClusters(allText, scopedDesireClusters, miSnapshotId, sourceTypes, competitorCount);
+    let rawObjectionMap = matchPatternClusters(allText, scopedObjectionClusters, miSnapshotId, sourceTypes, competitorCount);
+    const rawTransformationMap = matchPatternClusters(allText, TRANSFORMATION_PATTERNS, miSnapshotId, sourceTypes, competitorCount);
+    const rawEmotionalDrivers = matchPatternClusters(allText, EMOTIONAL_DRIVER_PATTERNS, miSnapshotId, sourceTypes, competitorCount);
+    rawObjectionMap = applyObjectionContextRules(rawObjectionMap, allText);
+    let painMap = applyEvidenceIntegrityFilter(rawPainMap);
+    let desireMap = applyEvidenceIntegrityFilter(rawDesireMap);
+    let objectionMap = applyEvidenceIntegrityFilter(rawObjectionMap);
+    const transformationMap = applyEvidenceIntegrityFilter(rawTransformationMap);
+    const emotionalDrivers = applyEvidenceIntegrityFilter(rawEmotionalDrivers);
+    let totalBridgeConflicts = 0;
+    if (bridgeResult && bridgeResult.bridgeIntegrity) {
+        const painMerge = mergeBridgedIntoAudienceMap(painMap, bridgeResult.painSignals, miSnapshotId);
+        painMap = painMerge.merged;
+        totalBridgeConflicts += painMerge.conflictsResolved;
+        const desireMerge = mergeBridgedIntoAudienceMap(desireMap, bridgeResult.desireSignals, miSnapshotId);
+        desireMap = desireMerge.merged;
+        totalBridgeConflicts += desireMerge.conflictsResolved;
+        const objectionMerge = mergeBridgedIntoAudienceMap(objectionMap, bridgeResult.objectionSignals, miSnapshotId);
+        objectionMap = objectionMerge.merged;
+        totalBridgeConflicts += objectionMerge.conflictsResolved;
+        if (totalBridgeConflicts > 0) {
+            console.log(`[AudienceEngine-V3] CONFLICT_RESOLUTION | conflictsResolved=${totalBridgeConflicts} | anchor=MIv3_QUALITY_GATED`);
+        }
+        console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_MERGED | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length}`);
+    }
+    let miObjectionDensity = 0;
+    let miObjectionCount = 0;
+    if (latestSnapshot?.objectionMapData) {
+        try {
+            const miObjMap = JSON.parse(latestSnapshot.objectionMapData);
+            miObjectionDensity = miObjMap?.objectionDensity || 0;
+            miObjectionCount = miObjMap?.totalObjectionsDetected || 0;
+            if (miObjectionCount > 0) {
+                console.log(`[AudienceEngine-V3] MI_NARRATIVE_OBJECTIONS | count=${miObjectionCount} | density=${miObjectionDensity} | multiCompetitor=${miObjMap?.objectionsFromMultipleCompetitors || 0}`);
+            }
+        }
+        catch { }
+    }
+    const awarenessInput = commentTexts.length > 0 ? commentTexts : captions;
+    const awarenessLevel = detectAwareness(awarenessInput, miSnapshotId, competitorCount, miObjectionDensity, miObjectionCount);
+    const maturityIndex = detectMaturity(commentTexts, captions, miSnapshotId, competitorCount);
+    const intentInput = commentTexts.length > 0 ? commentTexts : captions;
+    const intentDistribution = classifyIntents(intentInput, miSnapshotId, competitorCount);
+    const intentTemperature = deriveIntentTemperature(intentDistribution);
+    console.log(`[AudienceEngine-V3] Intent temperature: ${intentTemperature} (curiosity=${intentDistribution.curiosity}% learning=${intentDistribution.learning}% comparison=${intentDistribution.comparison}% purchase=${intentDistribution.purchaseIntent}%)`);
+    const totalSignalMatches = painMap.length + desireMap.length + objectionMap.length + transformationMap.length + emotionalDrivers.length;
+    const totalSignalFrequency = [painMap, desireMap, objectionMap, transformationMap, emotionalDrivers]
+        .flat().reduce((sum, s) => sum + s.frequency, 0);
+    const dataReliability = sharedAssessDataReliability(competitorCount, totalSignalMatches, false, false, true, 0.5);
+    if (dataReliability.isWeak) {
+        console.log(`[AudienceEngine-V3] DATA_RELIABILITY_WEAK | reliability=${dataReliability.overallReliability.toFixed(3)} | advisories=${dataReliability.advisories.join("; ")}`);
+    }
+    const genericCheck = detectGenericOutput(allText.join(" ").substring(0, 2000));
+    if (genericCheck.genericDetected) {
+        console.log(`[AudienceEngine-V3] GENERIC_OUTPUT_DETECTED | penalty=${genericCheck.penalty.toFixed(3)} | matches=${genericCheck.genericPhrases.join(", ")}`);
+    }
+    const isDefensiveMode = totalSignalFrequency < AUDIENCE_THRESHOLDS.DEFENSIVE_MODE_SIGNAL_THRESHOLD;
+    let audienceSegments = [];
+    let adsTargetingHints = [];
+    if (totalSignalMatches < AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI) {
+        console.log(`[AudienceEngine-V3] INSUFFICIENT SIGNALS for AI layers — ${totalSignalMatches} signal matches (need ≥${AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI})`);
+    }
+    else if (isDefensiveMode) {
+        console.log(`[AudienceEngine-V3] DEFENSIVE MODE — signal density too low (${totalSignalFrequency} total frequency), skipping AI layers`);
+    }
+    else {
+        const rawSegments = await constructSegments(painMap, desireMap, objectionMap, emotionalDrivers, maturityIndex, awarenessLevel, businessContext, commentTexts, accountId, miSnapshotId);
+        audienceSegments = canonicalizeSegments(rawSegments);
+        console.log(`[AudienceEngine-V3] Canonicalization: ${rawSegments.length} raw → ${audienceSegments.length} canonical segments`);
+        adsTargetingHints = await translateToAdsTargeting(audienceSegments, maturityIndex, businessContext, accountId, miSnapshotId);
+    }
+    const segmentDensity = computeSegmentDensity(painMap, desireMap, audienceSegments, miSnapshotId);
+    const executionTimeMs = Date.now() - startTime;
+    let status = "COMPLETE";
+    let statusMessage = null;
+    if (totalSignalMatches < AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI) {
+        status = "INSUFFICIENT_SIGNALS";
+        statusMessage = "INSUFFICIENT DATA FOR RELIABLE AUDIENCE INTELLIGENCE — AI layers skipped due to weak signal coverage";
+    }
+    else if (awarenessLevel?.level === "insufficient_signals" && intentDistribution?.totalClassified === 0) {
+        status = "INSUFFICIENT_SIGNALS";
+        statusMessage = "Key classifiers returned insufficient signals — awareness and intent data unreliable";
+    }
+    else if (isDefensiveMode) {
+        status = "DEFENSIVE_MODE";
+        statusMessage = "Low signal environment detected — Audience intelligence limited — More market data required";
+    }
+    const inputSummary = {
+        ...baseInputSummary,
+        ...(bridgeResult ? {
+            semanticBridge: {
+                totalIngested: bridgeResult.totalIngested,
+                totalPassed: bridgeResult.totalPassed,
+                conflictsResolved: totalBridgeConflicts,
+                bridgeIntegrity: bridgeResult.bridgeIntegrity,
+                cleanPipeEnforced: bridgeResult.cleanPipeEnforced,
+            },
+        } : {}),
+    };
+    const audienceLineage = [];
+    painMap.forEach((p, i) => {
+        if (p.canonical)
+            audienceLineage.push(createSourceLineageEntry("audience", "audience_pain", p.canonical, i));
+    });
+    desireMap.forEach((d, i) => {
+        if (d.canonical)
+            audienceLineage.push(createSourceLineageEntry("audience", "audience_desire", d.canonical, i));
+    });
+    objectionMap.forEach((o, i) => {
+        if (o.canonical)
+            audienceLineage.push(createSourceLineageEntry("audience", "audience_objection", o.canonical, i));
+    });
+    (emotionalDrivers || []).forEach((d, i) => {
+        const text = typeof d === "string" ? d : (d?.driver || d?.description || d?.canonical || "");
+        if (text)
+            audienceLineage.push(createSourceLineageEntry("audience", "emotional_driver", text, i));
+    });
+    if (bridgeResult && bridgeResult.bridgeIntegrity) {
+        const allBridgedSignals = [...bridgeResult.painSignals, ...bridgeResult.desireSignals, ...bridgeResult.objectionSignals];
+        allBridgedSignals.forEach((bs, i) => {
+            audienceLineage.push(createSourceLineageEntry("audience", `bridge_${bs.category}_${bs.bridgeSource}`, `${bs.canonical} [parent:${bs.parentSignalId}]`, i));
+        });
+    }
+    console.log(`[AudienceEngine-V3] LINEAGE_GENERATED | entries=${audienceLineage.length} | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length} | bridged=${bridgeResult?.totalPassed || 0}`);
+    const structuredSignals = buildStructuredSignals(painMap, desireMap, objectionMap, transformationMap, emotionalDrivers, awarenessLevel, intentDistribution);
+    console.log(`[AudienceEngine-V3] STRUCTURED_SIGNALS | pains=${structuredSignals.pain_clusters.length} | desires=${structuredSignals.desire_clusters.length} | patterns=${structuredSignals.pattern_clusters.length} | rootCauses=${structuredSignals.root_causes.length} | psychDrivers=${structuredSignals.psychological_drivers.length}`);
+    const [inserted] = await db.insert(audienceSnapshots).values({
+        accountId, campaignId, miSnapshotId,
+        engineVersion: AUDIENCE_ENGINE_VERSION,
+        languageSignals: JSON.stringify(languageSignals),
+        audiencePains: JSON.stringify(painMap),
+        desireMap: JSON.stringify(desireMap),
+        objectionMap: JSON.stringify(objectionMap),
+        transformationMap: JSON.stringify(transformationMap),
+        emotionalDrivers: JSON.stringify(emotionalDrivers),
+        audienceSegments: JSON.stringify(audienceSegments),
+        segmentDensity: JSON.stringify(segmentDensity),
+        awarenessLevel: JSON.stringify(awarenessLevel),
+        maturityIndex: JSON.stringify(maturityIndex),
+        audienceIntentDistribution: JSON.stringify(intentDistribution),
+        adsTargetingHints: JSON.stringify(adsTargetingHints),
+        inputSummary: JSON.stringify(inputSummary),
+        signalLineage: JSON.stringify(audienceLineage),
+        structuredSignals: JSON.stringify(structuredSignals),
+        executionTimeMs,
+    }).returning({ id: audienceSnapshots.id });
+    await pruneOldSnapshots(db, audienceSnapshots, campaignId, 20, accountId);
+    try {
+        const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
+        const inv = await invalidateDownstreamOnRegeneration(campaignId, accountId, "audience");
+        if (inv.supersededRoots > 0) {
+            console.log(`[AudienceEngine-V3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
+        }
+    }
+    catch (invErr) {
+        console.error(`[AudienceEngine-V3] Root invalidation failed (non-blocking): ${invErr.message}`);
+    }
+    console.log(`[AudienceEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | signals=${totalSignalMatches} | freq=${totalSignalFrequency} | segments=${audienceSegments.length} | defensive=${isDefensiveMode}`);
+    return {
+        status,
+        statusMessage,
+        defensiveMode: isDefensiveMode,
+        languageSignals,
+        painMap,
+        desireMap,
+        objectionMap,
+        transformationMap,
+        emotionalDrivers,
+        audienceSegments,
+        segmentDensity,
+        awarenessLevel,
+        maturityIndex,
+        intentDistribution,
+        adsTargetingHints,
+        structuredSignals,
+        inputSummary,
+        engineVersion: AUDIENCE_ENGINE_VERSION,
+        executionTimeMs,
+        snapshotId: inserted.id,
+        freshnessMetadata: miFreshnessMetadata,
+    };
+}
+export async function getLatestAudienceSnapshot(accountId, campaignId) {
+    const [snapshot] = await db.select().from(audienceSnapshots)
+        .where(and(eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.campaignId, campaignId)))
+        .orderBy(desc(audienceSnapshots.createdAt))
+        .limit(1);
+    if (!snapshot)
+        return null;
+    let freshnessMetadata = null;
+    if (snapshot.miSnapshotId) {
+        const [miSnap] = await db.select().from(miSnapshots)
+            .where(and(eq(miSnapshots.id, snapshot.miSnapshotId), eq(miSnapshots.accountId, accountId)))
+            .limit(1);
+        if (miSnap) {
+            const { buildFreshnessMetadata } = await import("../shared/snapshot-trust");
+            freshnessMetadata = buildFreshnessMetadata(miSnap);
+        }
+    }
+    return {
+        ...snapshot,
+        languageSignals: JSON.parse(snapshot.languageSignals || "{}"),
+        painMap: JSON.parse(snapshot.audiencePains || "[]"),
+        desireMap: JSON.parse(snapshot.desireMap || "[]"),
+        objectionMap: JSON.parse(snapshot.objectionMap || "[]"),
+        transformationMap: JSON.parse(snapshot.transformationMap || "[]"),
+        emotionalDrivers: JSON.parse(snapshot.emotionalDrivers || "[]"),
+        audienceSegments: JSON.parse(snapshot.audienceSegments || "[]"),
+        segmentDensity: JSON.parse(snapshot.segmentDensity || "[]"),
+        awarenessLevel: JSON.parse(snapshot.awarenessLevel || "{}"),
+        maturityIndex: JSON.parse(snapshot.maturityIndex || "{}"),
+        intentDistribution: JSON.parse(snapshot.audienceIntentDistribution || "{}"),
+        adsTargetingHints: JSON.parse(snapshot.adsTargetingHints || "[]"),
+        structuredSignals: JSON.parse(snapshot.structuredSignals || '{"pain_clusters":[],"desire_clusters":[],"pattern_clusters":[],"root_causes":[],"psychological_drivers":[]}'),
+        inputSummary: JSON.parse(snapshot.inputSummary || "{}"),
+        freshnessMetadata,
+    };
+}
+export { detectMarketScope, getMarketScopeMetadata, filterClustersByMarket, applyObjectionContextRules, applyEvidenceIntegrityFilter, computeSegmentSimilarity, canonicalizeSegments, computeSegmentDensity, deriveIntentTemperature, };

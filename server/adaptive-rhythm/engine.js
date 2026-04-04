@@ -1,0 +1,335 @@
+import { db } from "../db";
+import { contentPerformanceSnapshots, strategyMemory, miSnapshots, businessDataLayer, } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { loadMemoryBlock } from "../memory-system/manager";
+import { computeExplorationBudget } from "../exploration-budget/engine";
+const FORMAT_KEYS = ["reel", "carousel", "story", "post"];
+function capitalize(s) {
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function parseBudgetToMonthly(budgetStr) {
+    const n = parseFloat(budgetStr.toString().replace(/[^0-9.]/g, ""));
+    return isNaN(n) ? 1000 : n;
+}
+function weeklySlotBudget(monthlyBudget) {
+    if (monthlyBudget < 500)
+        return 7;
+    if (monthlyBudget < 1500)
+        return 9;
+    if (monthlyBudget < 5000)
+        return 11;
+    return 12;
+}
+function extractCompetitorVelocity(miData) {
+    const defaults = { reel: 0.40, carousel: 0.25, story: 0.25, post: 0.10 };
+    if (!miData)
+        return defaults;
+    try {
+        let rawCompetitorData = miData.competitorData;
+        if (typeof rawCompetitorData === "string") {
+            try {
+                rawCompetitorData = JSON.parse(rawCompetitorData);
+            }
+            catch {
+                rawCompetitorData = null;
+            }
+        }
+        const competitors = Array.isArray(rawCompetitorData) ? rawCompetitorData : [];
+        const formatCounts = { reel: 0, carousel: 0, story: 0, post: 0 };
+        let totalSeen = 0;
+        for (const comp of competitors) {
+            const formats = comp.contentFormats || comp.formats || comp.postTypes || [];
+            for (const fmt of formats) {
+                const fmtStr = (typeof fmt === "string" ? fmt : fmt.type || "").toLowerCase();
+                if (fmtStr.includes("reel") || fmtStr.includes("video")) {
+                    formatCounts.reel++;
+                    totalSeen++;
+                }
+                else if (fmtStr.includes("carousel") || fmtStr.includes("album")) {
+                    formatCounts.carousel++;
+                    totalSeen++;
+                }
+                else if (fmtStr.includes("story") || fmtStr.includes("stories")) {
+                    formatCounts.story++;
+                    totalSeen++;
+                }
+                else if (fmtStr.includes("post") || fmtStr.includes("image")) {
+                    formatCounts.post++;
+                    totalSeen++;
+                }
+            }
+        }
+        if (totalSeen > 0) {
+            return {
+                reel: formatCounts.reel / totalSeen,
+                carousel: formatCounts.carousel / totalSeen,
+                story: formatCounts.story / totalSeen,
+                post: formatCounts.post / totalSeen,
+            };
+        }
+        return defaults;
+    }
+    catch {
+        return defaults;
+    }
+}
+export async function computeAdaptiveRhythm(campaignId, accountId) {
+    const perfByFormat = {
+        reel: null, carousel: null, story: null, post: null,
+    };
+    let hasPerformanceData = false;
+    for (const fmt of FORMAT_KEYS) {
+        const snaps = await db
+            .select({ smoothedPerformanceScore: contentPerformanceSnapshots.smoothedPerformanceScore })
+            .from(contentPerformanceSnapshots)
+            .where(and(eq(contentPerformanceSnapshots.accountId, accountId), eq(contentPerformanceSnapshots.campaignId, campaignId), eq(contentPerformanceSnapshots.contentType, fmt)))
+            .orderBy(desc(contentPerformanceSnapshots.createdAt))
+            .limit(3);
+        if (snaps.length > 0) {
+            hasPerformanceData = true;
+            const scores = snaps.map((s) => s.smoothedPerformanceScore ?? 0);
+            const recencyWeights = [3, 1.5, 1];
+            let wSum = 0;
+            let wTotal = 0;
+            for (let i = 0; i < scores.length; i++) {
+                const w = recencyWeights[i] ?? 1;
+                wSum += scores[i] * w;
+                wTotal += w;
+            }
+            perfByFormat[fmt] = wTotal > 0 ? wSum / wTotal : 0;
+        }
+    }
+    const [miSnap] = await db
+        .select()
+        .from(miSnapshots)
+        .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId)))
+        .orderBy(desc(miSnapshots.createdAt))
+        .limit(1);
+    const compVelocity = extractCompetitorVelocity(miSnap);
+    const [bizSnap] = await db
+        .select()
+        .from(businessDataLayer)
+        .where(and(eq(businessDataLayer.accountId, accountId), eq(businessDataLayer.campaignId, campaignId)))
+        .orderBy(desc(businessDataLayer.createdAt))
+        .limit(1);
+    const monthlyBudget = parseBudgetToMonthly(bizSnap?.monthlyBudget || "1000");
+    const totalWeeklySlots = weeklySlotBudget(monthlyBudget);
+    const memBlock = await loadMemoryBlock(campaignId, accountId).catch(() => null);
+    let explorationBudget = null;
+    if (memBlock) {
+        explorationBudget = await computeExplorationBudget(campaignId, accountId, memBlock, totalWeeklySlots).catch(() => null);
+    }
+    const [prevRhythmMem] = await db
+        .select()
+        .from(strategyMemory)
+        .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), eq(strategyMemory.memoryType, "content_rhythm"), eq(strategyMemory.engineName, "adaptive-rhythm")))
+        .orderBy(desc(strategyMemory.updatedAt))
+        .limit(1);
+    let prevRhythm = null;
+    if (prevRhythmMem?.details) {
+        try {
+            prevRhythm = JSON.parse(prevRhythmMem.details);
+        }
+        catch {
+            prevRhythm = null;
+        }
+    }
+    const allMemory = memBlock
+        ? [...memBlock.reinforceSlots, ...memBlock.avoidSlots]
+        : [];
+    const FORMAT_NAME_MAP = {
+        reel: "reel", reels: "reel", "short-form video": "reel", "short form video": "reel",
+        carousel: "carousel", carousels: "carousel", "carousel post": "carousel",
+        post: "post", posts: "post", "static post": "post", "feed post": "post",
+        story: "story", stories: "story", "instagram story": "story",
+    };
+    const memoryFormatBias = { reel: 0, carousel: 0, post: 0, story: 0 };
+    for (const slot of allMemory) {
+        if (slot.confidenceScore < 0.4)
+            continue;
+        const labelLower = slot.label.toLowerCase();
+        for (const [keyword, fmt] of Object.entries(FORMAT_NAME_MAP)) {
+            if (labelLower.includes(keyword)) {
+                const weight = slot.isWinner ? slot.confidenceScore : -slot.confidenceScore * 0.5;
+                memoryFormatBias[fmt] = (memoryFormatBias[fmt] ?? 0) + weight;
+                break;
+            }
+        }
+    }
+    const hasMemorySignal = Object.values(memoryFormatBias).some((v) => Math.abs(v) > 0.01);
+    let formatWeights;
+    let performanceBasis;
+    let confidenceScore;
+    const reasoningParts = [];
+    if (hasPerformanceData) {
+        performanceBasis = "performance_data";
+        const rawWeights = {};
+        for (const fmt of FORMAT_KEYS) {
+            if (fmt === "story") {
+                rawWeights.story = perfByFormat.story !== null ? Math.max(0.01, perfByFormat.story) : compVelocity.story * 0.5;
+            }
+            else {
+                rawWeights[fmt] = perfByFormat[fmt] !== null
+                    ? Math.max(0.01, perfByFormat[fmt])
+                    : compVelocity[fmt] * 0.5;
+            }
+        }
+        const nonStoryTotal = rawWeights.reel + rawWeights.carousel + rawWeights.post;
+        formatWeights = {
+            reel: nonStoryTotal > 0 ? rawWeights.reel / nonStoryTotal : 0.55,
+            carousel: nonStoryTotal > 0 ? rawWeights.carousel / nonStoryTotal : 0.30,
+            story: rawWeights.story,
+            post: nonStoryTotal > 0 ? rawWeights.post / nonStoryTotal : 0.15,
+        };
+        const dataCount = FORMAT_KEYS.filter((f) => perfByFormat[f] !== null).length;
+        confidenceScore = Math.min(0.95, 0.45 + dataCount * 0.12);
+        const ranked = ["reel", "carousel", "post"]
+            .filter((f) => perfByFormat[f] !== null)
+            .sort((a, b) => perfByFormat[b] - perfByFormat[a]);
+        if (ranked.length >= 1) {
+            const best = ranked[0];
+            reasoningParts.push(`${capitalize(best)}s lead at score ${perfByFormat[best].toFixed(2)}`);
+        }
+        if (ranked.length >= 2) {
+            const worst = ranked[ranked.length - 1];
+            reasoningParts.push(`${capitalize(worst)}s underperform at ${perfByFormat[worst].toFixed(2)}`);
+        }
+    }
+    else if (compVelocity.reel + compVelocity.carousel + compVelocity.post > 0) {
+        performanceBasis = "competitor_benchmark";
+        const compTotal = compVelocity.reel + compVelocity.carousel + compVelocity.post;
+        formatWeights = {
+            reel: compTotal > 0 ? compVelocity.reel / compTotal : 0.55,
+            carousel: compTotal > 0 ? compVelocity.carousel / compTotal : 0.30,
+            story: compVelocity.story,
+            post: compTotal > 0 ? compVelocity.post / compTotal : 0.15,
+        };
+        confidenceScore = 0.35;
+        reasoningParts.push("No performance data yet — using competitor posting patterns as baseline");
+    }
+    else {
+        performanceBasis = "default_balanced";
+        formatWeights = { reel: 0.55, carousel: 0.30, story: 0.25, post: 0.15 };
+        confidenceScore = 0.25;
+        reasoningParts.push("Balanced default — no performance data or competitor signals available");
+    }
+    if (hasMemorySignal) {
+        const blendFactor = 0.25;
+        for (const fmt of ["reel", "carousel", "post"]) {
+            const bias = memoryFormatBias[fmt] ?? 0;
+            if (Math.abs(bias) > 0.01) {
+                const biasClamped = Math.max(-0.3, Math.min(0.3, bias * blendFactor));
+                formatWeights[fmt] = Math.max(0.05, (formatWeights[fmt] ?? 0) + biasClamped);
+            }
+        }
+        const nonStoryWeightTotal = formatWeights.reel + formatWeights.carousel + formatWeights.post;
+        if (nonStoryWeightTotal > 0) {
+            formatWeights.reel /= nonStoryWeightTotal;
+            formatWeights.carousel /= nonStoryWeightTotal;
+            formatWeights.post /= nonStoryWeightTotal;
+        }
+        const memoryWinners = allMemory.filter(s => s.isWinner && Object.keys(FORMAT_NAME_MAP).some(k => s.label.toLowerCase().includes(k)));
+        if (memoryWinners.length > 0) {
+            reasoningParts.push(`Memory: ${memoryWinners.length} format winner(s) applied as bias`);
+        }
+    }
+    const bizTimelineConstraint = bizSnap?.goalTimeline
+        ? `${bizSnap.goalTimeline} timeline`
+        : null;
+    const bizBandwidthNote = bizSnap?.goalTarget ? `target: ${bizSnap.goalTarget}` : null;
+    if (bizTimelineConstraint || bizBandwidthNote) {
+        const constraints = [bizTimelineConstraint, bizBandwidthNote].filter(Boolean);
+        reasoningParts.push(`Business constraints: ${constraints.join(", ")}`);
+    }
+    const nonStorySlots = Math.round(totalWeeklySlots * 0.75);
+    const rawReels = Math.max(1, Math.round(nonStorySlots * formatWeights.reel));
+    const rawCarousels = Math.max(1, Math.round(nonStorySlots * formatWeights.carousel));
+    const rawPosts = Math.max(1, Math.round(nonStorySlots * formatWeights.post));
+    const rawStories = totalWeeklySlots >= 10 ? 2 : 1;
+    const MAX_DELTA = 2;
+    function stabilize(val, prev) {
+        if (prev === undefined)
+            return val;
+        return Math.max(prev - MAX_DELTA, Math.min(prev + MAX_DELTA, val));
+    }
+    const reelsPerWeek = stabilize(rawReels, prevRhythm?.reels);
+    const carouselsPerWeek = stabilize(rawCarousels, prevRhythm?.carousels);
+    const postsPerWeek = stabilize(rawPosts, prevRhythm?.posts);
+    const storiesPerDay = stabilize(rawStories, prevRhythm?.stories);
+    const deltaFromPrevious = {
+        reels: reelsPerWeek - (prevRhythm?.reels ?? reelsPerWeek),
+        carousels: carouselsPerWeek - (prevRhythm?.carousels ?? carouselsPerWeek),
+        stories: storiesPerDay - (prevRhythm?.stories ?? storiesPerDay),
+        posts: postsPerWeek - (prevRhythm?.posts ?? postsPerWeek),
+    };
+    if (prevRhythm) {
+        const changes = [];
+        if (deltaFromPrevious.reels !== 0) {
+            changes.push(`Reels ${deltaFromPrevious.reels > 0 ? "+" : ""}${deltaFromPrevious.reels}/wk`);
+        }
+        if (deltaFromPrevious.carousels !== 0) {
+            changes.push(`Carousels ${deltaFromPrevious.carousels > 0 ? "+" : ""}${deltaFromPrevious.carousels}/wk`);
+        }
+        if (deltaFromPrevious.posts !== 0) {
+            changes.push(`Posts ${deltaFromPrevious.posts > 0 ? "+" : ""}${deltaFromPrevious.posts}/wk`);
+        }
+        reasoningParts.push(changes.length > 0 ? `vs previous: ${changes.join(", ")}` : "rhythm unchanged from previous run");
+    }
+    const reasoning = reasoningParts.join(". ");
+    const newDetails = JSON.stringify({
+        reels: reelsPerWeek,
+        carousels: carouselsPerWeek,
+        stories: storiesPerDay,
+        posts: postsPerWeek,
+    });
+    const rhythmLabel = `Reels ${reelsPerWeek}/wk · Carousels ${carouselsPerWeek}/wk · Stories ${storiesPerDay}/day · Posts ${postsPerWeek}/wk`;
+    try {
+        if (prevRhythmMem) {
+            await db
+                .update(strategyMemory)
+                .set({
+                label: rhythmLabel,
+                details: newDetails,
+                performance: reasoning,
+                score: confidenceScore,
+                isWinner: true,
+                updatedAt: new Date(),
+            })
+                .where(eq(strategyMemory.id, prevRhythmMem.id));
+        }
+        else {
+            const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+            await db.insert(strategyMemory).values({
+                id: memId,
+                accountId,
+                campaignId,
+                memoryType: "content_rhythm",
+                label: rhythmLabel,
+                details: newDetails,
+                performance: reasoning,
+                score: confidenceScore,
+                engineName: "adaptive-rhythm",
+                isWinner: true,
+            });
+        }
+    }
+    catch (memErr) {
+        console.warn(`[AdaptiveRhythm] Memory write failed (non-blocking):`, memErr.message);
+    }
+    const explorationNote = explorationBudget
+        ? ` | exploration=${Math.round(explorationBudget.explorationRate * 100)}% (${explorationBudget.explorationSlots}/${totalWeeklySlots} slots)`
+        : "";
+    console.log(`[AdaptiveRhythm] reels=${reelsPerWeek}/wk carousels=${carouselsPerWeek}/wk stories=${storiesPerDay}/day posts=${postsPerWeek}/wk | basis=${performanceBasis} confidence=${confidenceScore.toFixed(2)}${explorationNote}`);
+    return {
+        reelsPerWeek,
+        carouselsPerWeek,
+        storiesPerDay,
+        postsPerWeek,
+        reasoning: explorationBudget
+            ? `${reasoning} | Exploration: ${Math.round(explorationBudget.explorationRate * 100)}% of slots (${explorationBudget.basis})`
+            : reasoning,
+        confidenceScore,
+        performanceBasis,
+        deltaFromPrevious,
+    };
+}

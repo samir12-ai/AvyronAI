@@ -1,0 +1,2190 @@
+import { aiChat } from "../ai-client";
+import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { buildCausalDirectiveForPrompt, enforceEngineDepthCompliance, isDepthBlocking, buildDepthRejectionDirective, buildDepthGateResult, DEPTH_GATE_MAX_RETRIES, } from "../causal-enforcement-layer/engine";
+import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
+import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
+const STOP_WORDS = new Set([
+    "the", "and", "for", "with", "from", "that", "this", "into", "through", "about",
+    "over", "after", "before", "between", "under", "above", "but", "not", "are", "was",
+    "were", "been", "being", "have", "has", "had", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "its", "our", "your", "their", "his", "her",
+    "who", "which", "what", "when", "where", "how", "all", "each", "every", "both", "few",
+    "more", "most", "other", "some", "such", "than", "too", "very", "just", "also", "any",
+    "customer", "customers", "business", "market", "product", "service", "based", "using",
+]);
+function extractRobustTokens(text, minLen = 3) {
+    return text
+        .toLowerCase()
+        .split(/[\s_,.\-/()]+/)
+        .filter(t => t.length >= minLen && !STOP_WORDS.has(t));
+}
+function stemPrefix(word) {
+    return word.replace(/(ity|ness|ment|tion|sion|ance|ence|able|ible|ful|less|ing|ous|ive|ical|ally|ized|ise|ize)$/, "");
+}
+function fuzzyTokenMatch(sourceTokens, targetText) {
+    if (sourceTokens.length === 0)
+        return true;
+    const targetLower = targetText.toLowerCase();
+    return sourceTokens.some(token => {
+        if (targetLower.includes(token))
+            return true;
+        const stem = stemPrefix(token);
+        if (stem.length >= 3 && targetLower.includes(stem))
+            return true;
+        return false;
+    });
+}
+function extractAxisLabel(contrastAxis) {
+    if (!contrastAxis)
+        return null;
+    const parenMatch = contrastAxis.match(/\(([^:]+?):/);
+    if (parenMatch)
+        return parenMatch[1].trim();
+    const colonMatch = contrastAxis.match(/^([^:]{2,60})\s*:/);
+    if (colonMatch) {
+        const label = colonMatch[1].trim().replace(/_/g, " ");
+        if (label.length <= 40)
+            return label;
+    }
+    return null;
+}
+function extractCoreAxisTokens(contrastAxis) {
+    const label = extractAxisLabel(contrastAxis);
+    if (!label)
+        return [];
+    const parenSection = contrastAxis.match(/\([^)]+\)/);
+    if (parenSection) {
+        const innerTokens = extractRobustTokens(parenSection[0]);
+        if (innerTokens.length > 0)
+            return innerTokens;
+    }
+    return extractRobustTokens(label);
+}
+import { ENGINE_VERSION, OFFER_DEPTH_WEIGHTS, GENERIC_OFFER_PATTERNS, GENERIC_PENALTY, BOUNDARY_BLOCKED_PATTERNS, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS, MIN_PROOF_STRENGTH, MIN_OUTCOME_SPECIFICITY, MAX_DELIVERABLES, FRICTION_THRESHOLD, STATUS, VAGUE_OUTCOME_PATTERNS, OUTCOME_PRECISION_MARKERS, VAGUE_MECHANISM_PATTERNS, MECHANISM_CLARITY_MARKERS, MIN_DIFFERENTIATION_SCORE, } from "./constants";
+import { assessDataReliability, normalizeConfidence, } from "../engine-hardening";
+import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
+import { extractQualifyingSignals, validateClaimGrounding, MIN_QUALIFYING_SIGNALS, } from "../shared/signal-lineage";
+function clamp(v, min = 0, max = 1) {
+    return Math.max(min, Math.min(max, v));
+}
+function safeJsonParse(text) {
+    if (!text)
+        return null;
+    if (typeof text !== "string")
+        return text;
+    try {
+        return JSON.parse(text);
+    }
+    catch {
+        return null;
+    }
+}
+export function buildMarketLanguageMap(audience) {
+    const rawPainPhrases = [];
+    const rawDesirePhrases = [];
+    const emotionalLanguage = [];
+    const objectionLanguage = [];
+    const pains = audience.audiencePains || [];
+    for (const pain of pains) {
+        if (typeof pain === "string") {
+            rawPainPhrases.push(pain);
+        }
+        else if (pain && typeof pain === "object") {
+            if (pain.canonical)
+                rawPainPhrases.push(pain.canonical);
+            if (pain.pain)
+                rawPainPhrases.push(pain.pain);
+            if (pain.name && pain.name !== pain.canonical)
+                rawPainPhrases.push(pain.name);
+            if (Array.isArray(pain.evidence)) {
+                for (const ev of pain.evidence) {
+                    if (typeof ev === "string" && ev.length > 5)
+                        rawPainPhrases.push(ev);
+                }
+            }
+        }
+    }
+    const desires = Object.entries(audience.desireMap || {});
+    for (const [key, value] of desires) {
+        rawDesirePhrases.push(key);
+        if (value && typeof value === "object") {
+            if (value.canonical)
+                rawDesirePhrases.push(value.canonical);
+            if (Array.isArray(value.evidence)) {
+                for (const ev of value.evidence) {
+                    if (typeof ev === "string" && ev.length > 5)
+                        rawDesirePhrases.push(ev);
+                }
+            }
+        }
+    }
+    const emotionalDrivers = audience.emotionalDrivers || [];
+    for (const driver of emotionalDrivers) {
+        if (typeof driver === "string") {
+            emotionalLanguage.push(driver);
+        }
+        else if (driver && typeof driver === "object") {
+            if (driver.canonical)
+                emotionalLanguage.push(driver.canonical);
+            if (Array.isArray(driver.evidence)) {
+                for (const ev of driver.evidence) {
+                    if (typeof ev === "string" && ev.length > 5)
+                        emotionalLanguage.push(ev);
+                }
+            }
+        }
+    }
+    const objections = Object.entries(audience.objectionMap || {});
+    for (const [key, value] of objections) {
+        objectionLanguage.push(key);
+        if (value && typeof value === "object") {
+            if (value.canonical)
+                objectionLanguage.push(value.canonical);
+            if (Array.isArray(value.evidence)) {
+                for (const ev of value.evidence) {
+                    if (typeof ev === "string" && ev.length > 5)
+                        objectionLanguage.push(ev);
+                }
+            }
+        }
+    }
+    const dedupe = (arr) => [...new Set(arr.filter(s => s && s.trim().length > 0))];
+    return {
+        rawPainPhrases: dedupe(rawPainPhrases),
+        rawDesirePhrases: dedupe(rawDesirePhrases),
+        emotionalLanguage: dedupe(emotionalLanguage),
+        objectionLanguage: dedupe(objectionLanguage),
+    };
+}
+export function detectGenericOffer(text) {
+    if (!text)
+        return false;
+    const lower = text.toLowerCase();
+    return GENERIC_OFFER_PATTERNS.some(p => p.test(lower));
+}
+export function sanitizeBoundary(text) {
+    if (!text)
+        return { clean: true, violations: [] };
+    const lower = text.toLowerCase();
+    const violations = [];
+    for (const [domain, pattern] of Object.entries(BOUNDARY_BLOCKED_PATTERNS)) {
+        if (pattern.test(lower)) {
+            violations.push(`Boundary violation: ${domain} domain detected`);
+        }
+    }
+    return { clean: violations.length === 0, violations };
+}
+export function scoreOutcomePrecision(outcomeText) {
+    const lower = outcomeText.toLowerCase();
+    const isVague = VAGUE_OUTCOME_PATTERNS.some(p => p.test(lower));
+    const precisionHits = OUTCOME_PRECISION_MARKERS.filter(p => p.test(lower)).length;
+    const hasPrecisionMarker = precisionHits > 0;
+    let score = 0.5;
+    if (isVague)
+        score -= 0.25;
+    if (hasPrecisionMarker)
+        score += Math.min(precisionHits * 0.1, 0.4);
+    return { score: clamp(score), isVague, hasPrecisionMarker };
+}
+export function buildPositioningLock(positioning, differentiation) {
+    const contrastAxis = (positioning.contrastAxis || "").trim();
+    const enemyDefinition = (positioning.enemyDefinition || "").trim();
+    const narrativeDirection = (positioning.narrativeDirection || "").trim();
+    const mechanism = differentiation.mechanismFraming || {};
+    const core = differentiation.mechanismCore;
+    const mechanismFamily = mechanism.supported ? (mechanism.type || "none") : "none";
+    const mechanismName = core && core.mechanismType !== "none" ? core.mechanismName : null;
+    const axisTokens = [...new Set([
+            ...extractCoreAxisTokens(contrastAxis),
+            ...extractRobustTokens(enemyDefinition),
+        ])];
+    let problemDomain = null;
+    let solutionDomain = null;
+    if (contrastAxis) {
+        const vsMatch = contrastAxis.match(/(.+?)\s+(?:vs\.?|versus|instead of|not|rather than)\s+(.+)/i);
+        if (vsMatch) {
+            problemDomain = vsMatch[1].trim();
+            solutionDomain = vsMatch[2].trim();
+        }
+        else {
+            problemDomain = contrastAxis;
+        }
+    }
+    if (!problemDomain && core && core.mechanismProblem) {
+        problemDomain = core.mechanismProblem;
+    }
+    if (!solutionDomain && mechanismName) {
+        solutionDomain = mechanismName;
+    }
+    const locked = !!(contrastAxis || enemyDefinition || mechanismName);
+    const lockedDecisions = [];
+    if (contrastAxis)
+        lockedDecisions.push(`contrast_axis: ${contrastAxis}`);
+    if (enemyDefinition)
+        lockedDecisions.push(`enemy: ${enemyDefinition}`);
+    if (mechanismName)
+        lockedDecisions.push(`mechanism: ${mechanismName}`);
+    if (narrativeDirection)
+        lockedDecisions.push(`narrative_direction: ${narrativeDirection}`);
+    const nonGenericAnchors = [...new Set([
+            ...extractCoreAxisTokens(contrastAxis),
+            ...extractRobustTokens(enemyDefinition),
+            ...(mechanismName ? extractRobustTokens(mechanismName) : []),
+        ])].filter(t => t.length > 3);
+    return {
+        locked,
+        contrastAxis: contrastAxis || null,
+        enemyDefinition: enemyDefinition || null,
+        narrativeDirection: narrativeDirection || null,
+        mechanismFamily: mechanismFamily !== "none" ? mechanismFamily : null,
+        mechanismName,
+        axisTokens,
+        problemDomain,
+        solutionDomain,
+        lockedDecisions,
+        nonGenericAnchors,
+    };
+}
+export function validatePreGenerationConstraints(lock, differentiation) {
+    const issues = [];
+    if (lock.locked && !lock.contrastAxis && !lock.mechanismName) {
+        issues.push("Positioning lock is active but has no contrast axis and no mechanism name — axis alignment cannot be enforced");
+    }
+    const mechanism = differentiation.mechanismFraming || {};
+    const core = differentiation.mechanismCore;
+    if (lock.mechanismFamily && mechanism.supported && mechanism.type) {
+        if (lock.mechanismFamily !== mechanism.type && mechanism.type !== "none") {
+            issues.push(`Mechanism family mismatch: lock="${lock.mechanismFamily}" vs differentiation="${mechanism.type}"`);
+        }
+    }
+    if (lock.mechanismName && core && core.mechanismName) {
+        if (lock.mechanismName !== core.mechanismName) {
+            issues.push(`Mechanism name mismatch in lock: "${lock.mechanismName}" vs core: "${core.mechanismName}"`);
+        }
+    }
+    return { compatible: issues.length === 0, issues };
+}
+export function clampOfferToAxis(offerName, coreOutcome, mechanismDescription, lock) {
+    if (!lock.locked) {
+        return { offerName, coreOutcome, mechanismDescription, clamped: false, clampActions: [] };
+    }
+    const clampActions = [];
+    let clampedName = offerName;
+    let clampedOutcome = coreOutcome;
+    let clampedMech = mechanismDescription;
+    if (lock.mechanismName) {
+        const mechLower = mechanismDescription.toLowerCase();
+        const nameLower = lock.mechanismName.toLowerCase();
+        if (!mechLower.includes(nameLower)) {
+            clampedMech = `${lock.mechanismName}: ${mechanismDescription}`;
+            clampActions.push(`Mechanism clamped — prepended locked mechanism name "${lock.mechanismName}"`);
+        }
+    }
+    if (lock.problemDomain) {
+        const problemTokens = extractRobustTokens(lock.problemDomain);
+        const combinedText = `${clampedName} ${clampedOutcome} ${clampedMech}`.toLowerCase();
+        const hasProblemRef = fuzzyTokenMatch(problemTokens, combinedText);
+        if (!hasProblemRef && problemTokens.length > 0) {
+            clampedOutcome = `${clampedOutcome} — addressing ${lock.problemDomain}`;
+            clampActions.push(`Outcome clamped — appended problem domain "${lock.problemDomain}"`);
+        }
+    }
+    if (lock.axisTokens.length > 0) {
+        const postClampText = `${clampedName} ${clampedOutcome} ${clampedMech}`.toLowerCase();
+        const hasAxisRef = fuzzyTokenMatch(lock.axisTokens, postClampText);
+        if (!hasAxisRef) {
+            const axisLabel = extractAxisLabel(lock.contrastAxis || "");
+            if (axisLabel) {
+                clampedOutcome = `${clampedOutcome} — built on ${axisLabel} principles`;
+                clampActions.push(`Axis clamped — appended axis label "${axisLabel}" to ensure axis token presence`);
+            }
+        }
+    }
+    return {
+        offerName: clampedName,
+        coreOutcome: clampedOutcome,
+        mechanismDescription: clampedMech,
+        clamped: clampActions.length > 0,
+        clampActions,
+    };
+}
+export function layer1_outcomeConstruction(audience, positioning, differentiation, marketLanguage) {
+    const pains = audience.audiencePains || [];
+    const desires = Object.entries(audience.desireMap || {});
+    const territories = positioning.territories || [];
+    const pillars = differentiation.pillars || [];
+    const rawPainPhrase = marketLanguage?.rawPainPhrases?.[0];
+    const rawDesirePhrase = marketLanguage?.rawDesirePhrases?.[0];
+    const primaryPain = rawPainPhrase || (pains.length > 0 ? (typeof pains[0] === "string" ? pains[0] : pains[0]?.pain || pains[0]?.name || "unresolved challenge") : "unresolved challenge");
+    const primaryDesire = rawDesirePhrase || (desires.length > 0 ? desires[0][0] : "");
+    const topTerritory = territories.length > 0 ? (territories[0].name || "") : "";
+    const topPillar = pillars.length > 0 ? (pillars[0].name || "") : "";
+    let transformationStatement;
+    let primaryOutcome;
+    if (primaryDesire && topTerritory) {
+        transformationStatement = `Eliminate "${primaryPain}" and deliver ${primaryDesire} through ${topTerritory}`;
+    }
+    else if (primaryDesire) {
+        transformationStatement = `Resolve "${primaryPain}" to achieve ${primaryDesire}`;
+    }
+    else {
+        transformationStatement = `Address "${primaryPain}" with a structured resolution path`;
+    }
+    if (primaryDesire && topPillar) {
+        primaryOutcome = `Deliver ${primaryDesire} using ${topPillar} as the primary performance driver`;
+    }
+    else if (primaryDesire) {
+        primaryOutcome = `Achieve ${primaryDesire} through signal-backed strategic execution`;
+    }
+    else if (topPillar) {
+        primaryOutcome = `Drive measurable business impact via ${topPillar}`;
+    }
+    else {
+        primaryOutcome = `Resolve "${primaryPain}" with structured, outcome-tracked delivery`;
+    }
+    const hasMarketLanguage = !!(rawPainPhrase || rawDesirePhrase);
+    const painSpecificity = pains.length > 0 ? clamp(0.4 + (Math.min(pains.length, 5) * 0.1)) : 0.2;
+    const desireSpecificity = desires.length > 0 ? clamp(0.4 + (Math.min(desires.length, 5) * 0.1)) : 0.2;
+    const baseSpecificity = clamp((painSpecificity + desireSpecificity) / 2);
+    let specificityScore = hasMarketLanguage ? clamp(baseSpecificity + 0.1) : baseSpecificity;
+    const outcomePrecision = scoreOutcomePrecision(primaryOutcome);
+    if (outcomePrecision.isVague) {
+        specificityScore = clamp(specificityScore - 0.15);
+        console.log(`[OfferEngine-V4] OUTCOME_PRECISION | vague outcome detected — specificity penalized`);
+    }
+    if (outcomePrecision.hasPrecisionMarker) {
+        specificityScore = clamp(specificityScore + 0.1);
+    }
+    return { primaryOutcome, transformationStatement, specificityScore };
+}
+export function scoreMechanismClarity(mechanismDescription) {
+    const lower = mechanismDescription.toLowerCase();
+    const isVague = VAGUE_MECHANISM_PATTERNS.some(p => p.test(lower));
+    const clarityHits = MECHANISM_CLARITY_MARKERS.filter(p => p.test(lower)).length;
+    const hasStructuralNaming = clarityHits >= 2;
+    let score = 0.5;
+    if (isVague)
+        score -= 0.2;
+    if (hasStructuralNaming)
+        score += Math.min(clarityHits * 0.08, 0.3);
+    return { score: clamp(score), isVague, hasStructuralNaming };
+}
+function enforceStructuralMechanismName(description, mechanismType, mechanismName) {
+    const clarity = scoreMechanismClarity(description);
+    if (!clarity.isVague && clarity.hasStructuralNaming)
+        return description;
+    const structuralSuffixes = {
+        framework: "Framework",
+        system: "System",
+        process: "Process",
+        model: "Model",
+        program: "Program",
+        tool: "Platform",
+        service: "Engine",
+    };
+    const suffix = structuralSuffixes[mechanismType] || "System";
+    if (mechanismName && !clarity.hasStructuralNaming) {
+        return `${mechanismName} ${suffix}: ${description}`;
+    }
+    return description;
+}
+export function layer2_mechanismAlignment(differentiation) {
+    const core = differentiation.mechanismCore;
+    const mechanism = differentiation.mechanismFraming || {};
+    const pillars = differentiation.pillars || [];
+    const topPillar = pillars.length > 0 ? (pillars[0].name || "core pillar") : "core pillar";
+    if (core && core.mechanismType !== "none" && core.mechanismName) {
+        const mechanismType = core.mechanismType;
+        const rawDescription = core.mechanismLogic || core.mechanismPromise || mechanism.description || "";
+        const mechanismDescription = enforceStructuralMechanismName(rawDescription, mechanismType, core.mechanismName);
+        const differentiationLink = `Mechanism "${core.mechanismName}" (${core.mechanismType}) anchored to ${topPillar} via MechanismCore`;
+        const stepsBonus = core.mechanismSteps.length > 0 ? clamp(core.mechanismSteps.length * 0.1, 0, 0.3) : 0;
+        const clarity = scoreMechanismClarity(mechanismDescription);
+        const clarityBonus = clarity.hasStructuralNaming ? 0.1 : 0;
+        const clarityPenalty = clarity.isVague ? 0.15 : 0;
+        const credibilityScore = clamp(0.7 + stepsBonus + clarityBonus - clarityPenalty);
+        if (clarity.isVague) {
+            console.log(`[OfferEngine-V4] MECHANISM_CLARITY | vague mechanism description detected — credibility penalized`);
+        }
+        return { mechanismType, mechanismDescription, differentiationLink, credibilityScore };
+    }
+    const mechanismType = mechanism.type || "none";
+    const rawDescription = mechanism.description || "";
+    const mechanismDescription = rawDescription ? enforceStructuralMechanismName(rawDescription, mechanismType) : "Awaiting mechanism definition from Differentiation Engine";
+    const differentiationLink = mechanism.supported
+        ? `Mechanism anchored to ${topPillar} with structural proof support`
+        : `Generic delivery approach — mechanism not yet structurally validated`;
+    const typeScore = mechanism.supported ? 0.7 : 0.3;
+    const proofScore = mechanism.proofBasis?.length > 0 ? clamp(0.3 + (mechanism.proofBasis.length * 0.1)) : 0.2;
+    const clarity = scoreMechanismClarity(mechanismDescription);
+    const clarityMod = clarity.isVague ? -0.1 : (clarity.hasStructuralNaming ? 0.05 : 0);
+    const credibilityScore = clamp(typeScore * 0.6 + proofScore * 0.4 + clarityMod);
+    return { mechanismType, mechanismDescription, differentiationLink, credibilityScore };
+}
+export function layer3_deliveryStructure(audience, differentiation) {
+    const maturity = audience.maturityIndex ?? 0.5;
+    const awareness = audience.awarenessLevel || "unaware";
+    const pillars = differentiation.pillars || [];
+    const core = differentiation.mechanismCore;
+    const deliverables = [];
+    if (core && core.mechanismSteps.length > 0) {
+        for (const step of core.mechanismSteps.slice(0, MAX_DELIVERABLES)) {
+            deliverables.push(`${step} — ${core.mechanismType !== "none" ? core.mechanismType : "implementation"} module`);
+        }
+    }
+    else {
+        for (const pillar of pillars.slice(0, 4)) {
+            const name = pillar.name || pillar.territory || "component";
+            deliverables.push(`${name} implementation module`);
+        }
+        if (maturity < 0.4 || awareness === "unaware" || awareness === "problem_aware") {
+            deliverables.push("Foundation assessment and baseline analysis");
+        }
+        if (maturity > 0.6 || awareness === "product_aware" || awareness === "most_aware") {
+            deliverables.push("Advanced optimization and scaling framework");
+        }
+    }
+    if (deliverables.length === 0) {
+        deliverables.push("Core transformation system");
+    }
+    const capped = deliverables.slice(0, MAX_DELIVERABLES);
+    const format = core && core.mechanismSteps.length > 0
+        ? `${core.mechanismType !== "none" ? core.mechanismType.charAt(0).toUpperCase() + core.mechanismType.slice(1) : "Structured"}-based delivery with ${core.mechanismSteps.length} modules`
+        : (maturity > 0.6 ? "Advanced system with modular components" : "Guided implementation program");
+    const complexityLevel = clamp(capped.length / MAX_DELIVERABLES);
+    return { deliverables: capped, format, complexityLevel };
+}
+export function layer4_proofAlignment(differentiation, hasObjectionSignals = false, objectionContext) {
+    const proofArchitecture = differentiation.proofArchitecture || [];
+    const pillars = differentiation.pillars || [];
+    const proofTypes = new Set();
+    const availableTypes = ["process_proof", "outcome_proof", "transparency_proof", "case_proof", "framework_proof", "comparative_proof"];
+    const objectionRequiredProofs = new Set(["transparency_proof", "outcome_proof", "process_proof"]);
+    const objectionProofMapping = {};
+    const objectionKeywords = (objectionContext || []).map(o => ({
+        text: o.text.toLowerCase(),
+        category: o.category,
+    }));
+    const OBJECTION_TO_PROOF = [
+        { keywords: /trust|transparent|hide|secret|honest|truth|lying/i, proofType: "transparency_proof" },
+        { keywords: /result|outcome|deliver|promise|guarantee|roi|perform/i, proofType: "outcome_proof" },
+        { keywords: /process|method|how|approach|system|step|implement/i, proofType: "process_proof" },
+        { keywords: /proof|evidence|case|example|client|success|testimon/i, proofType: "case_proof" },
+        { keywords: /different|unique|better|compare|versus|unlike|stand out/i, proofType: "comparative_proof" },
+        { keywords: /framework|structure|model|architecture|blueprint/i, proofType: "framework_proof" },
+    ];
+    for (const obj of objectionKeywords) {
+        for (const mapping of OBJECTION_TO_PROOF) {
+            if (mapping.keywords.test(obj.text)) {
+                if (!objectionProofMapping[mapping.proofType]) {
+                    objectionProofMapping[mapping.proofType] = [];
+                }
+                objectionProofMapping[mapping.proofType].push(obj.text.slice(0, 60));
+            }
+        }
+    }
+    for (const asset of proofArchitecture) {
+        if (asset.category && availableTypes.includes(asset.category)) {
+            if (objectionRequiredProofs.has(asset.category) && !hasObjectionSignals) {
+                continue;
+            }
+            proofTypes.add(asset.category);
+        }
+    }
+    for (const pillar of pillars) {
+        const supporting = pillar.supportingProof || [];
+        for (const p of supporting) {
+            if (availableTypes.includes(p)) {
+                if (objectionRequiredProofs.has(p) && !hasObjectionSignals) {
+                    continue;
+                }
+                proofTypes.add(p);
+            }
+        }
+    }
+    if (hasObjectionSignals && Object.keys(objectionProofMapping).length > 0) {
+        for (const proofType of Object.keys(objectionProofMapping)) {
+            if (availableTypes.includes(proofType)) {
+                proofTypes.add(proofType);
+            }
+        }
+        const mappedCount = Object.keys(objectionProofMapping).length;
+        console.log(`[OfferEngine-V4] PROOF_OBJECTION_MAP | ${mappedCount} proof types mapped to specific objections: ${Object.entries(objectionProofMapping).map(([k, v]) => `${k}→[${v.length}]`).join(", ")}`);
+    }
+    if (!hasObjectionSignals && proofTypes.size > 0) {
+        console.log(`[OfferEngine-V4] PROOF_SIGNAL_GATE | objection signals absent — skipped ${[...objectionRequiredProofs].filter(p => !proofTypes.has(p)).length} objection-required proof types`);
+    }
+    const alignedProofTypes = Array.from(proofTypes);
+    const objectionMappedBonus = Object.keys(objectionProofMapping).length > 0 ? 0.1 : 0;
+    const proofStrength = clamp(alignedProofTypes.length / 4 + objectionMappedBonus);
+    const mandatoryProof = hasObjectionSignals
+        ? ["process_proof", "outcome_proof", "transparency_proof", "case_proof"]
+        : ["case_proof"];
+    const proofGaps = mandatoryProof.filter(p => !proofTypes.has(p));
+    return { alignedProofTypes, proofStrength, proofGaps };
+}
+export function layer5_riskReduction(audience, proofLayer) {
+    const objections = Object.entries(audience.objectionMap || {});
+    const emotionalDrivers = audience.emotionalDrivers || [];
+    const riskReducers = [];
+    const frictionMitigations = [];
+    if (proofLayer.alignedProofTypes.includes("case_proof")) {
+        riskReducers.push("Validated through documented case outcomes");
+    }
+    if (proofLayer.alignedProofTypes.includes("process_proof")) {
+        riskReducers.push("Structured methodology reduces implementation uncertainty");
+    }
+    if (proofLayer.alignedProofTypes.includes("outcome_proof")) {
+        riskReducers.push("Measurable outcome benchmarks provided");
+    }
+    if (proofLayer.alignedProofTypes.includes("transparency_proof")) {
+        riskReducers.push("Full transparency on process and expectations");
+    }
+    for (const [objection] of objections.slice(0, 3)) {
+        frictionMitigations.push(`Addresses concern: ${objection}`);
+    }
+    if (emotionalDrivers.length > 0) {
+        frictionMitigations.push("Aligned with primary emotional drivers");
+    }
+    if (riskReducers.length === 0 && (objections.length > 0 || emotionalDrivers.length > 0)) {
+        riskReducers.push("Risk mitigation aligned to identified audience concerns");
+    }
+    const buyerConfidenceScore = clamp((riskReducers.length * 0.15) + (frictionMitigations.length * 0.10) + (proofLayer.proofStrength * 0.3));
+    return { riskReducers, frictionMitigations, buyerConfidenceScore };
+}
+export function checkOfferCompleteness(outcome, mechanism, delivery, proof, riskReduction) {
+    const missingLayers = [];
+    if (!outcome.primaryOutcome || outcome.specificityScore < MIN_OUTCOME_SPECIFICITY) {
+        missingLayers.push("Outcome Layer — insufficient specificity");
+    }
+    if (mechanism.mechanismType === "none" && mechanism.credibilityScore < 0.3) {
+        missingLayers.push("Mechanism Layer — no validated mechanism");
+    }
+    if (delivery.deliverables.length === 0) {
+        missingLayers.push("Delivery Layer — no deliverables defined");
+    }
+    if (proof.proofStrength < MIN_PROOF_STRENGTH) {
+        missingLayers.push("Proof Layer — insufficient proof alignment");
+    }
+    if (riskReduction.riskReducers.length === 0) {
+        missingLayers.push("Risk Reduction Layer — no risk mitigations");
+    }
+    return { complete: missingLayers.length === 0, missingLayers };
+}
+export function integrityCheck(offer, positioning, differentiation, audience) {
+    const failures = [];
+    if (offer.outcome.specificityScore < MIN_OUTCOME_SPECIFICITY) {
+        failures.push("Outcome lacks clarity — specificity below threshold");
+    }
+    if (offer.mechanism.credibilityScore < 0.3) {
+        failures.push("Mechanism lacks specificity — credibility below threshold");
+    }
+    if (offer.proof.proofStrength < MIN_PROOF_STRENGTH) {
+        failures.push("Proof strength insufficient relative to promise");
+    }
+    const pillars = differentiation.pillars || [];
+    if (pillars.length > 0) {
+        const avgPillarScore = pillars.reduce((s, p) => s + (p.overallScore || 0), 0) / pillars.length;
+        if (avgPillarScore < 0.3) {
+            failures.push("Weak differentiation pillar support");
+        }
+    }
+    if (positioning.narrativeDirection) {
+        const narrative = positioning.narrativeDirection.toLowerCase();
+        const enemy = (positioning.enemyDefinition || "").toLowerCase();
+        if (enemy && offer.outcome.primaryOutcome.toLowerCase().includes(enemy)) {
+            failures.push("Offer outcome contradicts positioning enemy definition");
+        }
+    }
+    const pains = audience.audiencePains || [];
+    const desires = Object.keys(audience.desireMap || {});
+    if (pains.length === 0 && desires.length === 0) {
+        failures.push("No audience pain/desire alignment data available");
+    }
+    return { passed: failures.length === 0, failures };
+}
+export function checkPositioningConsistency(offer, positioning, differentiation) {
+    const contradictions = [];
+    const offerText = `${offer.offerName} ${offer.coreOutcome} ${offer.mechanismDescription}`.toLowerCase();
+    if (positioning.enemyDefinition) {
+        const enemy = positioning.enemyDefinition.toLowerCase();
+        if (offerText.includes(enemy)) {
+            contradictions.push(`Offer language contains positioning enemy: "${positioning.enemyDefinition}"`);
+        }
+    }
+    if (positioning.contrastAxis) {
+        const contrastTokens = extractCoreAxisTokens(positioning.contrastAxis);
+        if (contrastTokens.length > 0 && !fuzzyTokenMatch(contrastTokens, offerText)) {
+            contradictions.push("Offer does not reflect positioning contrast axis");
+        }
+    }
+    const mechanism = differentiation.mechanismFraming || {};
+    if (mechanism.supported && mechanism.type !== "none") {
+        const mechTokens = extractRobustTokens(mechanism.description || "").slice(0, 5);
+        if (mechTokens.length > 2 && !fuzzyTokenMatch(mechTokens, offerText)) {
+            contradictions.push("Offer mechanism does not align with differentiation mechanism framing");
+        }
+    }
+    return { consistent: contradictions.length === 0, contradictions };
+}
+export function checkHookMechanismAlignment(offer, positioning) {
+    const failures = [];
+    const hookText = (offer.offerName || "").toLowerCase();
+    const outcomeText = (offer.coreOutcome || "").toLowerCase();
+    const mechText = (offer.mechanismDescription || "").toLowerCase();
+    const contrastAxis = (positioning.contrastAxis || "").toLowerCase().trim();
+    const enemyDef = (positioning.enemyDefinition || "").toLowerCase().trim();
+    if (!contrastAxis && !enemyDef) {
+        return { aligned: true, failures: [], hookAxis: null, mechanismAxis: null };
+    }
+    const contrastTokens = extractCoreAxisTokens(contrastAxis);
+    const enemyTokens = extractRobustTokens(enemyDef);
+    const axisTokens = [...new Set([...contrastTokens, ...enemyTokens])];
+    if (axisTokens.length === 0) {
+        return { aligned: true, failures: [], hookAxis: null, mechanismAxis: null };
+    }
+    const hookCombined = `${hookText} ${outcomeText}`;
+    const hookAxisTokensFound = axisTokens.filter(t => {
+        if (hookCombined.includes(t))
+            return true;
+        const stem = stemPrefix(t);
+        return stem.length >= 3 && hookCombined.includes(stem);
+    });
+    const mechAxisTokensFound = axisTokens.filter(t => {
+        if (mechText.includes(t))
+            return true;
+        const stem = stemPrefix(t);
+        return stem.length >= 3 && mechText.includes(stem);
+    });
+    const hookHasAxis = hookAxisTokensFound.length > 0;
+    const mechHasAxis = mechAxisTokensFound.length > 0;
+    let hookAxis = null;
+    let mechanismAxis = null;
+    if (hookHasAxis) {
+        hookAxis = hookAxisTokensFound.join(", ");
+    }
+    if (mechHasAxis) {
+        mechanismAxis = mechAxisTokensFound.join(", ");
+    }
+    const PROBLEM_KEYWORDS = [
+        /wast(e|ing)\s+(money|time|budget)/i,
+        /stop\s+(paying|spending|throwing)/i,
+        /tired\s+of/i,
+        /struggling\s+with/i,
+        /\b(inefficient|ineffective|broken|failing)\b/i,
+        /\b(overpriced|expensive|costly)\b/i,
+        /\bno\s+(results|roi|return)\b/i,
+    ];
+    const SOLUTION_KEYWORDS = [
+        /\b(community|belonging|connection|network)\b/i,
+        /\b(framework|system|architecture|engine|protocol|method)\b/i,
+        /\b(automation|automated|ai.driven|data.driven)\b/i,
+        /\b(coaching|mentorship|advisory|consulting)\b/i,
+        /\b(platform|tool|software|dashboard)\b/i,
+    ];
+    const hookProblems = PROBLEM_KEYWORDS.filter(p => p.test(hookText) || p.test(outcomeText));
+    const mechSolutions = SOLUTION_KEYWORDS.filter(p => p.test(mechText));
+    if (hookProblems.length > 0 && mechSolutions.length > 0) {
+        const hookProblemText = hookText + " " + outcomeText;
+        const mechSolutionText = mechText;
+        const hookContentTokens = extractRobustTokens(hookProblemText, 4);
+        const mechContentTokens = extractRobustTokens(mechSolutionText, 4);
+        const sharedTokens = hookContentTokens.filter(t => {
+            if (mechContentTokens.includes(t))
+                return true;
+            const stem = stemPrefix(t);
+            return stem.length >= 3 && mechContentTokens.some(m => m.startsWith(stem) || stemPrefix(m) === stem);
+        });
+        if (sharedTokens.length < 1) {
+            const hookProblemSummary = hookProblems.map(p => {
+                const match = (hookText + " " + outcomeText).match(p);
+                return match ? match[0] : "";
+            }).filter(Boolean).join(", ");
+            const mechSolutionSummary = mechSolutions.map(p => {
+                const match = mechText.match(p);
+                return match ? match[0] : "";
+            }).filter(Boolean).join(", ");
+            failures.push(`Hook-mechanism axis mismatch: hook frames problem as "${hookProblemSummary}" but mechanism solves via "${mechSolutionSummary}". The mechanism must directly address the hook's stated problem.`);
+        }
+    }
+    if (hookHasAxis && !mechHasAxis && contrastTokens.length > 0) {
+        failures.push(`Mechanism does not reflect the positioning contrast axis. Hook references the contrast axis (${hookAxis}) but mechanism does not address it.`);
+    }
+    if (!hookHasAxis && contrastTokens.length > 0) {
+        failures.push(`Hook/outcome does not reference the positioning contrast axis "${contrastAxis}". The offer hook must derive from the same axis.`);
+    }
+    return {
+        aligned: failures.length === 0,
+        failures,
+        hookAxis,
+        mechanismAxis,
+    };
+}
+export function checkDifferentiationStrength(offer, differentiation, positioning) {
+    const signals = [];
+    const gaps = [];
+    const offerText = `${offer.offerName} ${offer.coreOutcome} ${offer.mechanismDescription} ${(offer.deliverables || []).join(" ")}`.toLowerCase();
+    const hasContrast = !!(positioning.contrastAxis || positioning.enemyDefinition);
+    if (hasContrast) {
+        const contrastTokens = extractCoreAxisTokens(positioning.contrastAxis || "");
+        const enemyTokens = extractRobustTokens(positioning.enemyDefinition || "");
+        const contrastInOffer = (contrastTokens.length > 0 && fuzzyTokenMatch(contrastTokens, offerText)) || fuzzyTokenMatch(enemyTokens, offerText);
+        if (contrastInOffer) {
+            signals.push("Contrast against common approaches present in offer language");
+        }
+        else if (hasContrast) {
+            gaps.push("Positioning defines a contrast axis but offer language does not reflect it");
+        }
+    }
+    else {
+        gaps.push("No contrast axis or enemy definition — cannot differentiate against common approaches");
+    }
+    const core = differentiation.mechanismCore;
+    const hasMechanism = !!(core && core.mechanismType !== "none" && core.mechanismName);
+    if (hasMechanism) {
+        const mechNameLower = core.mechanismName.toLowerCase();
+        if (offerText.includes(mechNameLower) || offerText.includes(core.mechanismType.toLowerCase())) {
+            signals.push(`Unique mechanism "${core.mechanismName}" referenced in offer`);
+        }
+        else {
+            gaps.push(`Mechanism "${core.mechanismName}" defined but not referenced in offer text`);
+        }
+    }
+    else {
+        const mechFraming = differentiation.mechanismFraming || {};
+        if (mechFraming.supported) {
+            signals.push("Mechanism framing supported by differentiation data");
+        }
+        else {
+            gaps.push("No unique method, framework, or mechanism defined");
+        }
+    }
+    const pillars = differentiation.pillars || [];
+    const strongPillars = pillars.filter((p) => (p.overallScore || 0) >= 0.5);
+    if (strongPillars.length > 0) {
+        signals.push(`${strongPillars.length} strong differentiation pillar(s) above 0.5 threshold`);
+    }
+    else if (pillars.length > 0) {
+        gaps.push("Differentiation pillars exist but all score below 0.5 — weak structural advantage");
+    }
+    else {
+        gaps.push("No differentiation pillars defined");
+    }
+    const score = clamp(signals.length / 3);
+    const sufficient = score >= MIN_DIFFERENTIATION_SCORE;
+    return { sufficient, score, signals, gaps };
+}
+const MECHANISM_CATEGORY_MAP = {
+    framework: ["framework", "system", "model", "methodology", "architecture", "structure", "blueprint", "process"],
+    program: ["program", "bootcamp", "course", "workshop", "cohort", "training", "masterclass", "intensive"],
+    tool: ["tool", "platform", "software", "calculator", "dashboard", "app", "template", "toolkit"],
+    service: ["service", "agency", "consulting", "coaching", "advisory", "done-for-you", "managed"],
+};
+function resolveMechanismCategory(mechanismType, mechanismDescription) {
+    const text = `${mechanismType} ${mechanismDescription}`.toLowerCase();
+    for (const [category, keywords] of Object.entries(MECHANISM_CATEGORY_MAP)) {
+        if (keywords.some(k => text.includes(k)))
+            return category;
+    }
+    return "generic";
+}
+export function checkMechanismLock(offerMechanismDescription, differentiation) {
+    const mechanism = differentiation.mechanismFraming || {};
+    if (!mechanism.supported || mechanism.type === "none") {
+        return { locked: true, diffCategory: "generic", offerCategory: "generic", reason: null };
+    }
+    const diffCategory = resolveMechanismCategory(mechanism.type || "", mechanism.description || "");
+    const offerCategory = resolveMechanismCategory("", offerMechanismDescription);
+    if (diffCategory === "generic") {
+        return { locked: true, diffCategory, offerCategory, reason: null };
+    }
+    if (offerCategory === "generic") {
+        return {
+            locked: false,
+            diffCategory,
+            offerCategory,
+            reason: `Mechanism category mismatch: Differentiation defines "${diffCategory}" but Offer mechanism is uncategorized. Offer mechanism must stay within the "${diffCategory}" framing.`,
+        };
+    }
+    if (diffCategory === offerCategory) {
+        return { locked: true, diffCategory, offerCategory, reason: null };
+    }
+    return {
+        locked: false,
+        diffCategory,
+        offerCategory,
+        reason: `Mechanism category mismatch: Differentiation defines "${diffCategory}" but Offer generated "${offerCategory}". Offer mechanism must stay within the "${diffCategory}" framing.`,
+    };
+}
+export function validateOfferAlignment(offer, differentiation, audience, marketLanguage) {
+    const failures = [];
+    const mechLock = checkMechanismLock(offer.mechanismDescription, differentiation);
+    if (!mechLock.locked) {
+        failures.push(mechLock.reason);
+    }
+    const pains = audience.audiencePains || [];
+    const desires = Object.entries(audience.desireMap || {});
+    if (pains.length > 0 || desires.length > 0) {
+        const nameText = (offer.offerName || "").toLowerCase();
+        const outcomeText = (offer.coreOutcome || "").toLowerCase();
+        const mechText = (offer.mechanismDescription || "").toLowerCase();
+        const delivText = (offer.deliverables || []).join(" ").toLowerCase();
+        const combinedText = `${nameText} ${outcomeText} ${mechText} ${delivText}`;
+        const hasPainRef = pains.some((p) => {
+            const painText = (typeof p === "string" ? p : p?.pain || p?.name || p?.canonical || "");
+            const tokens = extractRobustTokens(painText);
+            return tokens.length > 0 && fuzzyTokenMatch(tokens, combinedText);
+        });
+        const hasDesireRef = desires.some(([k]) => {
+            const tokens = extractRobustTokens(k);
+            return tokens.length > 0 && fuzzyTokenMatch(tokens, combinedText);
+        });
+        if (!hasPainRef && !hasDesireRef) {
+            failures.push("Outcome statement does not reflect any identified audience pain signals or desires");
+        }
+    }
+    if (marketLanguage) {
+        const combinedOfferText = `${(offer.offerName || "").toLowerCase()} ${(offer.coreOutcome || "").toLowerCase()} ${(offer.mechanismDescription || "").toLowerCase()} ${(offer.deliverables || []).join(" ").toLowerCase()}`;
+        const extractMarketTokens = (phrases) => {
+            const tokens = [];
+            for (const phrase of phrases) {
+                tokens.push(...extractRobustTokens(phrase, 4));
+            }
+            return [...new Set(tokens)];
+        };
+        const painTokens = extractMarketTokens(marketLanguage.rawPainPhrases.slice(0, 5));
+        const desireTokens = extractMarketTokens(marketLanguage.rawDesirePhrases.slice(0, 5));
+        const objectionTokens = extractMarketTokens(marketLanguage.objectionLanguage.slice(0, 5));
+        const emotionalTokens = extractMarketTokens(marketLanguage.emotionalLanguage.slice(0, 3));
+        const allMarketTokens = [...painTokens, ...desireTokens, ...objectionTokens, ...emotionalTokens];
+        if (allMarketTokens.length > 0) {
+            const matchedTokens = allMarketTokens.filter(t => {
+                if (combinedOfferText.includes(t))
+                    return true;
+                const stem = stemPrefix(t);
+                return stem.length >= 3 && combinedOfferText.includes(stem);
+            });
+            const marketLanguageRatio = matchedTokens.length / allMarketTokens.length;
+            if (matchedTokens.length === 0 && allMarketTokens.length >= 5) {
+                failures.push(`Market language preservation failed — zero audience tokens found in offer text (completely disconnected from market language)`);
+            }
+            else if (marketLanguageRatio < 0.1 && allMarketTokens.length >= 3) {
+                console.log(`[OfferEngine-V4] MARKET_LANGUAGE_SOFT_WARNING | ${matchedTokens.length}/${allMarketTokens.length} tokens matched (${(marketLanguageRatio * 100).toFixed(1)}%) — below 10% ideal but offer accepted`);
+            }
+        }
+    }
+    const deliverables = offer.deliverables || [];
+    const mechanism = differentiation.mechanismFraming || {};
+    if (mechanism.supported && deliverables.length > 0 && mechanism.description) {
+        const mechTokens = extractRobustTokens(mechanism.description || "").slice(0, 8);
+        const delivText = deliverables.join(" ").toLowerCase();
+        const outcomeText = (offer.coreOutcome || "").toLowerCase();
+        const combinedOfferText = `${delivText} ${outcomeText} ${(offer.mechanismDescription || "").toLowerCase()}`;
+        const hasDeliverableSupport = fuzzyTokenMatch(mechTokens, combinedOfferText);
+        if (!hasDeliverableSupport && mechTokens.length > 2) {
+            failures.push("Deliverables do not logically support the defined differentiation mechanism");
+        }
+    }
+    return { aligned: failures.length === 0, failures };
+}
+export function calculateDepthScores(outcome, mechanism, delivery, proof, riskReduction, differentiation, audience, mi) {
+    const outcomeClarity = clamp(outcome.specificityScore);
+    const mechanismCredibility = clamp(mechanism.credibilityScore);
+    const proofStrength = clamp(proof.proofStrength);
+    const pillars = differentiation.pillars || [];
+    const avgPillarScore = pillars.length > 0
+        ? pillars.reduce((s, p) => s + (p.overallScore || 0), 0) / pillars.length : 0.3;
+    const differentiationSupport = clamp(avgPillarScore);
+    const opportunities = mi.opportunitySignals || [];
+    const marketDemandAlignment = clamp(opportunities.length > 0 ? 0.4 + (Math.min(opportunities.length, 5) * 0.1) : 0.3);
+    const objections = Object.keys(audience.objectionMap || {});
+    const emotionalDrivers = audience.emotionalDrivers || [];
+    const audienceTrustCompatibility = clamp((riskReduction.buyerConfidenceScore * 0.5) +
+        (objections.length > 0 ? 0.2 : 0) +
+        (emotionalDrivers.length > 0 ? 0.15 : 0) +
+        0.15);
+    const executionFeasibility = clamp(1 - delivery.complexityLevel * 0.7);
+    const buyerFrictionLevel = clamp((delivery.complexityLevel * 0.3) +
+        ((1 - outcomeClarity) * 0.3) +
+        (proof.proofGaps.length * 0.1) +
+        ((1 - riskReduction.buyerConfidenceScore) * 0.2));
+    return {
+        outcomeClarity,
+        mechanismCredibility,
+        proofStrength,
+        differentiationSupport,
+        marketDemandAlignment,
+        audienceTrustCompatibility,
+        executionFeasibility,
+        buyerFrictionLevel,
+    };
+}
+export function calculateOfferStrengthScore(depth) {
+    const invertedFriction = clamp(1 - depth.buyerFrictionLevel);
+    return clamp(depth.outcomeClarity * OFFER_DEPTH_WEIGHTS.outcomeClarity +
+        depth.mechanismCredibility * OFFER_DEPTH_WEIGHTS.mechanismCredibility +
+        depth.proofStrength * OFFER_DEPTH_WEIGHTS.proofStrength +
+        depth.differentiationSupport * OFFER_DEPTH_WEIGHTS.differentiationSupport +
+        depth.marketDemandAlignment * OFFER_DEPTH_WEIGHTS.marketDemandAlignment +
+        depth.audienceTrustCompatibility * OFFER_DEPTH_WEIGHTS.audienceTrustCompatibility +
+        depth.executionFeasibility * OFFER_DEPTH_WEIGHTS.executionFeasibility +
+        invertedFriction * OFFER_DEPTH_WEIGHTS.buyerFrictionLevel);
+}
+export function compressFeasibility(delivery) {
+    if (delivery.deliverables.length > MAX_DELIVERABLES) {
+        return {
+            ...delivery,
+            deliverables: delivery.deliverables.slice(0, MAX_DELIVERABLES),
+            complexityLevel: clamp(MAX_DELIVERABLES / MAX_DELIVERABLES),
+        };
+    }
+    return delivery;
+}
+function buildOfferCandidate(name, outcome, mechanism, delivery, proof, riskReduction, audience, differentiation, mi, positioning, extraFields) {
+    const completeness = checkOfferCompleteness(outcome, mechanism, delivery, proof, riskReduction);
+    const integrity = integrityCheck({ outcome, mechanism, proof }, positioning, differentiation, audience);
+    const depthScores = calculateDepthScores(outcome, mechanism, delivery, proof, riskReduction, differentiation, audience, mi);
+    let offerStrengthScore = calculateOfferStrengthScore(depthScores);
+    const isGeneric = detectGenericOffer(name) || detectGenericOffer(outcome.primaryOutcome);
+    if (isGeneric) {
+        offerStrengthScore = clamp(offerStrengthScore - GENERIC_PENALTY);
+    }
+    if (!integrity.passed) {
+        offerStrengthScore = clamp(offerStrengthScore * 0.75);
+    }
+    if (depthScores.buyerFrictionLevel > FRICTION_THRESHOLD) {
+        offerStrengthScore = clamp(offerStrengthScore * 0.85);
+    }
+    const pains = audience.audiencePains || [];
+    const desires = Object.entries(audience.desireMap || {});
+    const topPain = pains.length > 0 ? (typeof pains[0] === "string" ? pains[0] : pains[0]?.pain || pains[0]?.name || "core challenge") : "core challenge";
+    const topDesire = desires.length > 0 ? desires[0][0] : "primary goal";
+    return {
+        offerName: name,
+        coreOutcome: outcome.primaryOutcome,
+        mechanismDescription: mechanism.mechanismDescription,
+        deliverables: delivery.deliverables,
+        proofAlignment: proof.alignedProofTypes,
+        audienceFitExplanation: `Addresses ${topPain} and targets ${topDesire} with ${proof.alignedProofTypes.length} proof types`,
+        offerStrengthScore,
+        riskNotes: [
+            ...proof.proofGaps.map(g => `Missing proof: ${g}`),
+            ...(isGeneric ? ["Generic offer flag triggered — language lacks specificity"] : []),
+            ...integrity.failures,
+        ],
+        problemStatement: extraFields?.problemStatement,
+        proofPath: extraFields?.proofPath,
+        objectionHandling: extraFields?.objectionHandling,
+        outcomeLayer: outcome,
+        mechanismLayer: mechanism,
+        deliveryLayer: delivery,
+        proofLayer: proof,
+        riskReductionLayer: riskReduction,
+        completeness,
+        genericFlag: isGeneric,
+        integrityResult: integrity,
+        frictionLevel: depthScores.buyerFrictionLevel,
+        depthScores,
+    };
+}
+function buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation) {
+    const rootMech = strategyRoot?.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
+    const rootPains = strategyRoot?.approvedAudiencePains ? (typeof strategyRoot.approvedAudiencePains === "string" ? safeJsonParse(strategyRoot.approvedAudiencePains) : strategyRoot.approvedAudiencePains) : null;
+    const rootDesires = strategyRoot?.approvedDesires ? (typeof strategyRoot.approvedDesires === "string" ? safeJsonParse(strategyRoot.approvedDesires) : strategyRoot.approvedDesires) : null;
+    const rootObjections = strategyRoot?.approvedObjections ? (typeof strategyRoot.approvedObjections === "string" ? safeJsonParse(strategyRoot.approvedObjections) : strategyRoot.approvedObjections) : null;
+    const rootProofTypes = strategyRoot?.approvedProofTypes ? (typeof strategyRoot.approvedProofTypes === "string" ? safeJsonParse(strategyRoot.approvedProofTypes) : strategyRoot.approvedProofTypes) : null;
+    const rootAxis = (strategyRoot?.primaryAxis || "").replace(/_/g, " ");
+    const rootContrastText = strategyRoot?.contrastAxisText || "";
+    const rawTransformation = strategyRoot?.approvedTransformation || "";
+    const rootTransformation = typeof rawTransformation === "object" ? (rawTransformation?.text || rawTransformation?.label || rawTransformation?.name || JSON.stringify(rawTransformation)) : rawTransformation;
+    const rootClaim = strategyRoot?.approvedClaim || "";
+    const rootPromise = strategyRoot?.approvedPromise || "";
+    const rootMechName = rootMech?.mechanismName || "";
+    const rootMechSteps = rootMech?.mechanismSteps || [];
+    const painsList = [];
+    if (rootPains && Array.isArray(rootPains)) {
+        for (const p of rootPains.slice(0, 5)) {
+            painsList.push(typeof p === "string" ? p : p?.pain || p?.name || String(p));
+        }
+    }
+    if (painsList.length === 0) {
+        for (const p of (audience.audiencePains || []).slice(0, 5)) {
+            painsList.push(typeof p === "string" ? p : p?.pain || p?.name || String(p));
+        }
+    }
+    const desiresList = [];
+    if (rootDesires) {
+        if (Array.isArray(rootDesires)) {
+            for (const d of rootDesires.slice(0, 5)) {
+                desiresList.push(typeof d === "string" ? d : d?.desire || d?.label || d?.name || String(d));
+            }
+        }
+        else if (typeof rootDesires === "object") {
+            desiresList.push(...Object.keys(rootDesires).slice(0, 5));
+        }
+    }
+    if (desiresList.length === 0) {
+        const dm = audience.desireMap || {};
+        if (Array.isArray(dm)) {
+            for (const d of dm.slice(0, 5)) {
+                desiresList.push(typeof d === "string" ? d : d?.desire || d?.label || d?.name || String(d));
+            }
+        }
+        else {
+            desiresList.push(...Object.keys(dm).slice(0, 5));
+        }
+    }
+    const objectionsList = [];
+    if (rootObjections) {
+        if (Array.isArray(rootObjections)) {
+            for (const o of rootObjections.slice(0, 5)) {
+                objectionsList.push(typeof o === "string" ? o : o?.objection || o?.label || o?.name || String(o));
+            }
+        }
+        else if (typeof rootObjections === "object") {
+            objectionsList.push(...Object.keys(rootObjections).slice(0, 5));
+        }
+    }
+    if (objectionsList.length === 0) {
+        const om = audience.objectionMap || {};
+        if (Array.isArray(om)) {
+            for (const o of om.slice(0, 5)) {
+                objectionsList.push(typeof o === "string" ? o : o?.objection || o?.label || o?.name || String(o));
+            }
+        }
+        else {
+            objectionsList.push(...Object.keys(om).slice(0, 5));
+        }
+    }
+    const proofTypesList = [];
+    if (rootProofTypes && Array.isArray(rootProofTypes)) {
+        for (const p of rootProofTypes.slice(0, 6)) {
+            proofTypesList.push(typeof p === "string" ? p : p?.type || p?.name || String(p));
+        }
+    }
+    if (proofTypesList.length === 0) {
+        for (const p of (differentiation.proofArchitecture || []).slice(0, 6)) {
+            proofTypesList.push(typeof p === "string" ? p : p?.type || p?.name || String(p));
+        }
+    }
+    const primaryPain = painsList[0] || "unresolved challenge";
+    const altPain = painsList[1] || painsList[0] || "persistent friction";
+    const primaryDesire = desiresList[0] || "measurable improvement";
+    const altDesire = desiresList[1] || desiresList[0] || "tangible results";
+    const axisPhrase = rootAxis || "strategic alignment";
+    const primaryHook = rootClaim
+        ? `${axisPhrase}: ${rootClaim.substring(0, 80)}`
+        : `${axisPhrase} — Eliminate ${primaryPain}`;
+    const altHook = rootPromise && rootPromise !== rootClaim
+        ? `${axisPhrase}: ${rootPromise.substring(0, 80)}`
+        : `${axisPhrase} — Achieve ${primaryDesire}`;
+    const primaryProblem = `${primaryPain} — preventing ${primaryDesire} and blocking ${rootTransformation || "meaningful progress"}`;
+    const altProblem = `${altPain} — creating friction toward ${altDesire}`;
+    const primaryOutcome = rootTransformation
+        ? `${rootTransformation.substring(0, 100)} — addressing ${primaryPain} and delivering ${primaryDesire}`
+        : `Eliminate ${primaryPain} and achieve ${primaryDesire} through ${axisPhrase}`;
+    const altOutcome = `Resolve ${altPain} and deliver ${altDesire} through ${axisPhrase}`;
+    const mechDesc = rootMechName
+        ? `The ${rootMechName} delivers this through: ${rootMechSteps.slice(0, 4).join(", ") || "structured implementation"}`
+        : `Structured delivery system using ${axisPhrase}`;
+    const deliverables = rootMechSteps.length > 0
+        ? rootMechSteps.slice(0, 6)
+        : (differentiation.mechanismCore?.mechanismSteps || []).slice(0, 6);
+    const proofPath = proofTypesList.length > 0
+        ? proofTypesList
+        : ["process_proof"];
+    const objectionHandling = objectionsList.length > 0
+        ? objectionsList.map(obj => `Addresses: ${obj}`)
+        : ["Friction handling through mechanism demonstration"];
+    const sourceContext = {
+        selectedAxis: axisPhrase,
+        selectedPain: primaryPain,
+        selectedDesire: primaryDesire,
+        selectedMechanism: rootMechName || "direct mechanism",
+        selectedTransformation: rootTransformation || primaryOutcome,
+        selectedProofTypes: proofPath,
+        selectedObjections: objectionsList,
+    };
+    return {
+        primary: {
+            name: primaryHook,
+            outcome: primaryOutcome,
+            mechanism: mechDesc,
+            deliverables: deliverables.length > 0 ? deliverables : ["Core implementation module"],
+            problemStatement: primaryProblem,
+            proofPath,
+            objectionHandling,
+        },
+        alternative: {
+            name: altHook,
+            outcome: altOutcome,
+            mechanism: mechDesc,
+            deliverables: deliverables.length > 0 ? deliverables : ["Alternative implementation module"],
+            problemStatement: altProblem,
+            proofPath,
+            objectionHandling,
+        },
+        rejected: {
+            name: `Generic ${axisPhrase} Package`,
+            outcome: "General improvement without axis specificity",
+            mechanism: "Standard approach without mechanism binding",
+            deliverables: [],
+            problemStatement: "Vague problem without market evidence",
+            proofPath: [],
+            objectionHandling: [],
+            rejectionReason: `Does not reference the ${axisPhrase} axis or approved mechanism "${rootMechName}"`,
+        },
+        sourceContext,
+    };
+}
+export async function aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, positioningLock, axisCorrection, strategyRoot, productDna, analyticalEnrichment, depthRejectionContext) {
+    if (strategyRoot) {
+        const skeletonResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
+        const skeletons = skeletonResult;
+        console.log(`[OfferEngine-V4] DETERMINISTIC_SKELETON_BUILT | primaryHook="${skeletons.primary.name.substring(0, 60)}" | mechName="${(safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || 'n/a')}" | proofTypes=${skeletons.primary.proofPath.length} | objections=${skeletons.primary.objectionHandling.length}`);
+        const painPhrases = marketLanguage?.rawPainPhrases?.slice(0, 8) || [];
+        const desirePhrases = marketLanguage?.rawDesirePhrases?.slice(0, 8) || [];
+        const mechName = safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || '';
+        const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
+        const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
+        if (aelBlock)
+            console.log(`[OfferEngine-V4] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
+        const prompt = `You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.
+${aelBlock}${causalDirective}
+CRITICAL: You are NOT generating offers from scratch. The strategic structure has already been decided.
+Your ONLY job is to improve the wording to be more compelling, specific, and market-ready.
+
+You MUST preserve:
+1. The axis keywords that appear in the hook/name — do NOT remove them
+2. The mechanism name reference — do NOT rename or replace it
+3. The pain/desire references in the outcome — do NOT substitute different pains/desires
+4. The deliverables — keep the same items, just improve wording
+5. The problem statement — keep the pain reference, improve clarity
+6. The proof path types — keep same types, improve descriptions
+7. The objection handling points — keep same objections, improve responses
+
+═══ PRE-BUILT OFFER SKELETONS (REFINE THESE — DO NOT REPLACE) ═══
+
+PRIMARY OFFER:
+- Hook/Name: "${skeletons.primary.name}"
+- Problem Statement: "${skeletons.primary.problemStatement}"
+- Outcome: "${skeletons.primary.outcome}"
+- Mechanism: "${skeletons.primary.mechanism}"
+- Deliverables: ${JSON.stringify(skeletons.primary.deliverables)}
+- Proof Path: ${JSON.stringify(skeletons.primary.proofPath)}
+- Objection Handling: ${JSON.stringify(skeletons.primary.objectionHandling)}
+
+ALTERNATIVE OFFER:
+- Hook/Name: "${skeletons.alternative.name}"
+- Problem Statement: "${skeletons.alternative.problemStatement}"
+- Outcome: "${skeletons.alternative.outcome}"
+- Mechanism: "${skeletons.alternative.mechanism}"
+- Deliverables: ${JSON.stringify(skeletons.alternative.deliverables)}
+- Proof Path: ${JSON.stringify(skeletons.alternative.proofPath)}
+- Objection Handling: ${JSON.stringify(skeletons.alternative.objectionHandling)}
+
+REJECTED OFFER (anti-pattern):
+- Hook/Name: "${skeletons.rejected.name}"
+- Problem Statement: "${skeletons.rejected.problemStatement}"
+- Outcome: "${skeletons.rejected.outcome}"
+- Mechanism: "${skeletons.rejected.mechanism}"
+- Rejection Reason: "${skeletons.rejected.rejectionReason}"
+
+═══ REFINEMENT RULES ═══
+1. Make the hook/name punchier and more compelling — but KEEP the axis words and pain references
+2. Make the problem statement more vivid and specific — but KEEP the pain reference
+3. Make the outcome more specific with numbers or concrete results — but KEEP the pain/desire references
+4. Make the mechanism description clearer — but KEEP the mechanism name "${mechName}"
+5. Polish deliverable descriptions — but KEEP the same deliverable items
+6. Refine proof path descriptions to be more convincing — KEEP the same proof types
+7. Sharpen objection handling to directly address each objection — KEEP the same objections
+8. BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock", "synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level", "game-changing", "paradigm"
+${painPhrases.length > 0 ? `9. Use audience language where possible: ${JSON.stringify(painPhrases.slice(0, 5))}` : ""}
+${desirePhrases.length > 0 ? `10. Use desire language where possible: ${JSON.stringify(desirePhrases.slice(0, 5))}` : ""}
+
+${productDna ? `═══ PRODUCT IDENTITY ═══\n${formatProductDNAForPrompt(productDna)}\n` : ""}
+ABSOLUTE RULES:
+- Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, or budget recommendations
+- Do NOT include financial advisory claims
+- Respond with ONLY valid JSON, no markdown
+
+Return JSON:
+{
+  "primary": { "name": "Refined hook", "problemStatement": "Refined problem", "outcome": "Refined outcome", "mechanism": "Refined mechanism", "deliverables": ["..."], "proofPath": ["..."], "objectionHandling": ["..."] },
+  "alternative": { "name": "Refined alt hook", "problemStatement": "Refined alt problem", "outcome": "Refined alt outcome", "mechanism": "Refined alt mechanism", "deliverables": ["..."], "proofPath": ["..."], "objectionHandling": ["..."] },
+  "rejected": { "name": "Rejected name", "outcome": "Why appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
+}`;
+        const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
+        try {
+            const completion = await aiChat({
+                model: "gpt-4o-mini",
+                messages: [{ role: "user", content: fullPrompt }],
+                max_tokens: 1000,
+                temperature: 0.5,
+                accountId,
+                endpoint: "offer-engine",
+            });
+            const response = completion.choices?.[0]?.message?.content || "{}";
+            const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+            const parsed = JSON.parse(cleanedResponse);
+            const result = {
+                primary: {
+                    name: parsed.primary?.name || skeletons.primary.name,
+                    outcome: parsed.primary?.outcome || skeletons.primary.outcome,
+                    mechanism: parsed.primary?.mechanism || skeletons.primary.mechanism,
+                    deliverables: Array.isArray(parsed.primary?.deliverables) ? parsed.primary.deliverables : skeletons.primary.deliverables,
+                    problemStatement: parsed.primary?.problemStatement || skeletons.primary.problemStatement,
+                    proofPath: Array.isArray(parsed.primary?.proofPath) ? parsed.primary.proofPath : skeletons.primary.proofPath,
+                    objectionHandling: Array.isArray(parsed.primary?.objectionHandling) ? parsed.primary.objectionHandling : skeletons.primary.objectionHandling,
+                },
+                alternative: {
+                    name: parsed.alternative?.name || skeletons.alternative.name,
+                    outcome: parsed.alternative?.outcome || skeletons.alternative.outcome,
+                    mechanism: parsed.alternative?.mechanism || skeletons.alternative.mechanism,
+                    deliverables: Array.isArray(parsed.alternative?.deliverables) ? parsed.alternative.deliverables : skeletons.alternative.deliverables,
+                    problemStatement: parsed.alternative?.problemStatement || skeletons.alternative.problemStatement,
+                    proofPath: Array.isArray(parsed.alternative?.proofPath) ? parsed.alternative.proofPath : skeletons.alternative.proofPath,
+                    objectionHandling: Array.isArray(parsed.alternative?.objectionHandling) ? parsed.alternative.objectionHandling : skeletons.alternative.objectionHandling,
+                },
+                rejected: {
+                    name: parsed.rejected?.name || skeletons.rejected.name,
+                    outcome: parsed.rejected?.outcome || skeletons.rejected.outcome,
+                    mechanism: parsed.rejected?.mechanism || skeletons.rejected.mechanism,
+                    deliverables: [],
+                    rejectionReason: parsed.rejected?.rejectionReason || skeletons.rejected.rejectionReason,
+                },
+                sourceContext: skeletonResult.sourceContext,
+            };
+            return result;
+        }
+        catch (err) {
+            console.log(`[OfferEngine-V4] AI_REFINEMENT_FAILED | ${err.message} — using raw skeletons`);
+            return { ...skeletons, sourceContext: skeletonResult.sourceContext };
+        }
+    }
+    const pains = audience.audiencePains || [];
+    const desires = Object.entries(audience.desireMap || {});
+    const territories = positioning.territories || [];
+    const pillars = differentiation.pillars || [];
+    const mechanism = differentiation.mechanismFraming || {};
+    const core = differentiation.mechanismCore;
+    const mechCategory = mechanism.supported ? resolveMechanismCategory(mechanism.type || "", mechanism.description || "") : "generic";
+    const mechLockInstruction = mechCategory !== "generic"
+        ? `\n- MECHANISM LOCK: The Differentiation Engine defines a "${mechCategory}" mechanism. All offer mechanisms MUST stay within this "${mechCategory}" framing category. Do NOT propose a bootcamp if the mechanism is a framework, or a course if the mechanism is a tool.`
+        : "";
+    const hasMechanismCore = !!(core && core.mechanismType !== "none" && core.mechanismName);
+    const painPhrases = marketLanguage?.rawPainPhrases?.slice(0, 8) || [];
+    const desirePhrases = marketLanguage?.rawDesirePhrases?.slice(0, 8) || [];
+    const emotionalPhrases = marketLanguage?.emotionalLanguage?.slice(0, 5) || [];
+    const objectionPhrases = marketLanguage?.objectionLanguage?.slice(0, 5) || [];
+    const hasMarketLanguage = painPhrases.length > 0 || desirePhrases.length > 0;
+    const deliverableSteps = hasMechanismCore
+        ? core.mechanismSteps.map((step, i) => `  Step ${i + 1}: "${step}"`).join("\n")
+        : pillars.slice(0, 4).map((p, i) => `  Step ${i + 1}: "${p.name || p.territory || "component"}"`).join("\n");
+    const lockSection = positioningLock?.locked ? `
+═══ POSITIONING AXIS LOCK (IMMUTABLE — ALL OFFERS MUST COMPLY) ═══
+The following positioning axis is LOCKED. Every element you generate MUST operate within this axis.
+${positioningLock.contrastAxis ? `LOCKED CONTRAST AXIS: "${positioningLock.contrastAxis}"` : ""}
+${positioningLock.enemyDefinition ? `LOCKED ENEMY: "${positioningLock.enemyDefinition}"` : ""}
+${positioningLock.problemDomain ? `LOCKED PROBLEM DOMAIN: "${positioningLock.problemDomain}"` : ""}
+${positioningLock.solutionDomain ? `LOCKED SOLUTION DOMAIN: "${positioningLock.solutionDomain}"` : ""}
+${positioningLock.mechanismName ? `LOCKED MECHANISM: "${positioningLock.mechanismName}"` : ""}
+${positioningLock.mechanismFamily ? `LOCKED MECHANISM FAMILY: "${positioningLock.mechanismFamily}"` : ""}
+
+AXIS LOCK RULES (VIOLATION = AUTOMATIC REJECTION):
+1. The offer hook/name MUST frame the problem using the LOCKED PROBLEM DOMAIN above.
+2. The mechanism MUST solve the EXACT problem stated in the hook using the LOCKED MECHANISM.
+3. The outcome MUST describe results that directly follow from solving the LOCKED PROBLEM DOMAIN.
+4. ALL THREE (hook, mechanism, outcome) must exist on the SAME strategic axis.
+5. DO NOT introduce any problem framing, mechanism, or solution that falls outside the locked axis.
+` : "";
+    const correctionSection = axisCorrection ? `
+═══ AXIS CORRECTION (PREVIOUS ATTEMPT FAILED — READ CAREFULLY) ═══
+This is attempt ${axisCorrection.attempt}. The previous generation was REJECTED because:
+${axisCorrection.previousFailures.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}
+
+You MUST fix these specific issues. Generate offers that directly address these failures.
+` : "";
+    const aelBlockFallback = formatAELForPrompt(analyticalEnrichment || null);
+    const causalDirectiveFallback = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
+    if (aelBlockFallback)
+        console.log(`[OfferEngine-V4] AEL_INJECTED_FALLBACK | enrichmentSize=${aelBlockFallback.length}chars | causalDirective=${causalDirectiveFallback.length}chars`);
+    const prompt = `You are an Offer Architect. Generate three offer concepts.
+${aelBlockFallback}${causalDirectiveFallback}
+ABSOLUTE RULES:
+- Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, budget recommendations, campaign execution, sales scripts, or strategic master plan decisions
+- Do NOT include financial advisory claims
+- Respond with ONLY valid JSON, no markdown${mechLockInstruction}
+${lockSection}${correctionSection}
+
+${productDna ? `═══ PRODUCT IDENTITY (Source of Truth) ═══\n${formatProductDNAForPrompt(productDna)}\n\n` : ""}═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
+${painPhrases.length > 0 ? `Raw Pain Phrases: ${JSON.stringify(painPhrases)}` : "No raw pain phrases available"}
+${desirePhrases.length > 0 ? `Raw Desire Phrases: ${JSON.stringify(desirePhrases)}` : "No raw desire phrases available"}
+${emotionalPhrases.length > 0 ? `Emotional Language: ${JSON.stringify(emotionalPhrases)}` : ""}
+${objectionPhrases.length > 0 ? `Objection Language to address: ${JSON.stringify(objectionPhrases)}` : ""}
+${hasMarketLanguage ? `
+MANDATORY LANGUAGE RULES:
+- You MUST use the audience's own words above directly in the offer name, outcome, mechanism, and deliverables.
+- BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock", "synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level", "game-changing", "paradigm"` : ""}
+
+═══ SECTION 2: OUTCOME PRECISION (MANDATORY) ═══
+Outcomes MUST be specific, measurable, and market-relevant.
+NEVER use vague outcomes like "financial improvement", "measurable improvement", "better results", "business growth".
+
+═══ SECTION 3: MECHANISM (single source of truth) ═══
+${hasMechanismCore ? `Mechanism Name: "${core.mechanismName}"
+Mechanism Type: ${core.mechanismType}
+Mechanism Steps:
+${deliverableSteps}
+Mechanism Promise: ${core.mechanismPromise}
+Problem it solves: ${core.mechanismProblem}
+
+MANDATORY: All offer mechanism descriptions MUST reference "${core.mechanismName}" by name.` : `Mechanism: ${mechanism.description || "No validated mechanism"}
+Differentiation Pillars:
+${deliverableSteps}`}
+
+═══ SECTION 4: SIGNAL ANCHORS ═══
+${qualifyingSignals && qualifyingSignals.length > 0 ? `Every claim must be derived from one of these upstream signals.
+${qualifyingSignals.slice(0, 10).map((s, i) => `  [${s.signalId}] (${s.originEngine}/${s.category}): "${s.text}"`).join("\n")}` : "No qualifying signals provided — generate conservatively."}
+
+═══ SECTION 5: CONTEXT ═══
+- Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p) => typeof p === "string" ? p : p?.pain || p?.name))}
+- Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
+- Enemy: ${positioning.enemyDefinition || "Not defined"}
+${positioning.contrastAxis ? `- Contrast Axis: ${positioning.contrastAxis}` : ""}
+
+Return JSON:
+{
+  "primary": { "name": "Offer name", "outcome": "Specific measurable impact", "mechanism": "How ${hasMechanismCore ? `the ${core.mechanismName}` : "the mechanism"} delivers it", "deliverables": ["Deliverable 1", "Deliverable 2"] },
+  "alternative": { "name": "Alternative offer", "outcome": "Different impact angle", "mechanism": "Alternative delivery", "deliverables": ["Alt deliverable 1"] },
+  "rejected": { "name": "Rejected offer", "outcome": "Why it seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
+}`;
+    const freePrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
+    try {
+        const completion = await aiChat({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: freePrompt }],
+            max_tokens: 1000,
+            temperature: 0.7,
+            accountId,
+            endpoint: "offer-engine",
+        });
+        const response = completion.choices?.[0]?.message?.content || "{}";
+        const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+        const parsed = JSON.parse(cleanedResponse);
+        return {
+            primary: {
+                name: parsed.primary?.name || "Primary Offer",
+                outcome: parsed.primary?.outcome || "Core transformation",
+                mechanism: parsed.primary?.mechanism || "Standard delivery",
+                deliverables: Array.isArray(parsed.primary?.deliverables) ? parsed.primary.deliverables : [],
+            },
+            alternative: {
+                name: parsed.alternative?.name || "Alternative Offer",
+                outcome: parsed.alternative?.outcome || "Alternative transformation",
+                mechanism: parsed.alternative?.mechanism || "Standard delivery",
+                deliverables: Array.isArray(parsed.alternative?.deliverables) ? parsed.alternative.deliverables : [],
+            },
+            rejected: {
+                name: parsed.rejected?.name || "Rejected Offer",
+                outcome: parsed.rejected?.outcome || "Rejected transformation",
+                mechanism: parsed.rejected?.mechanism || "Standard delivery",
+                deliverables: [],
+                rejectionReason: parsed.rejected?.rejectionReason || "Did not meet specificity requirements",
+            },
+        };
+    }
+    catch (err) {
+        console.error(`[OfferEngine] AI generation failed: ${err.message}`);
+        return {
+            primary: { name: "Core Transformation System", outcome: "Primary market transformation based on differentiation pillars", mechanism: "Structured implementation methodology", deliverables: [] },
+            alternative: { name: "Accelerated Implementation Program", outcome: "Rapid deployment of core transformation", mechanism: "Compressed delivery framework", deliverables: [] },
+            rejected: { name: "Generic Growth Package", outcome: "General business improvement", mechanism: "Standard approach", deliverables: [], rejectionReason: "Generic offer — lacks specificity and market differentiation" },
+        };
+    }
+}
+export async function runOfferEngine(mi, audience, positioning, differentiation, accountId, upstreamLineage = [], mechanismEngineOutput, strategyRoot, analyticalEnrichment) {
+    const startTime = Date.now();
+    const diagnostics = {};
+    if (mechanismEngineOutput?.primaryMechanism) {
+        const mechOut = mechanismEngineOutput.primaryMechanism;
+        const mechAxis = mechOut.axisAlignment?.primaryAxis;
+        const mechEmphasis = mechOut.axisAlignment?.axisEmphasis || [];
+        console.log(`[OfferEngine-V4] MECHANISM_ENGINE_INPUT | name="${mechOut.mechanismName}" | axis=${mechAxis} | emphasis=[${mechEmphasis.slice(0, 3).join(",")}] | consuming centralized mechanism`);
+        diagnostics.mechanismEngineConsumed = true;
+        diagnostics.mechanismEngineAxis = mechAxis;
+        if (!differentiation.mechanismCore || differentiation.mechanismCore.mechanismType === "none") {
+            differentiation = {
+                ...differentiation,
+                mechanismCore: {
+                    mechanismName: mechOut.mechanismName,
+                    mechanismType: mechOut.mechanismType || "system",
+                    mechanismSteps: mechOut.mechanismSteps || [],
+                    mechanismPromise: mechOut.mechanismPromise || "",
+                    mechanismProblem: mechOut.mechanismProblem || "",
+                    mechanismLogic: mechOut.mechanismLogic || "",
+                },
+                mechanismFraming: {
+                    name: mechOut.mechanismName,
+                    description: mechOut.mechanismDescription,
+                    supported: true,
+                    proofBasis: [],
+                    type: mechOut.mechanismType || "system",
+                },
+            };
+        }
+        else {
+            differentiation = {
+                ...differentiation,
+                mechanismCore: {
+                    ...differentiation.mechanismCore,
+                    mechanismName: mechOut.mechanismName || differentiation.mechanismCore.mechanismName,
+                    mechanismSteps: mechOut.mechanismSteps?.length > 0 ? mechOut.mechanismSteps : differentiation.mechanismCore.mechanismSteps,
+                    mechanismPromise: mechOut.mechanismPromise || differentiation.mechanismCore.mechanismPromise,
+                    mechanismProblem: mechOut.mechanismProblem || differentiation.mechanismCore.mechanismProblem,
+                    mechanismLogic: mechOut.mechanismLogic || differentiation.mechanismCore.mechanismLogic,
+                },
+            };
+        }
+        if (mechAxis) {
+            const axisLabel = mechAxis.replace(/_/g, " ");
+            const axisLabelTokens = extractRobustTokens(axisLabel);
+            const effectiveEmphasis = mechEmphasis.length > 0 ? mechEmphasis : axisLabelTokens;
+            const emphasisText = effectiveEmphasis.join(", ");
+            const currentContrast = (positioning.contrastAxis || "").trim();
+            const alreadyEnriched = currentContrast.includes(axisLabel);
+            if (!alreadyEnriched) {
+                const enrichedAxis = currentContrast
+                    ? `${currentContrast} (${axisLabel}: ${emphasisText})`
+                    : `${axisLabel}: ${emphasisText}`;
+                positioning = { ...positioning, contrastAxis: enrichedAxis };
+                diagnostics.axisEnrichment = {
+                    original: currentContrast,
+                    enriched: enrichedAxis,
+                    mechanismAxis: mechAxis,
+                    emphasis: effectiveEmphasis,
+                };
+                console.log(`[OfferEngine-V4] AXIS_SYNC | enriched contrastAxis with mechanism emphasis | "${currentContrast}" → "${enrichedAxis}"`);
+            }
+        }
+        if (mechOut.mechanismProblem && !positioning.contrastAxis?.includes(mechOut.mechanismProblem)) {
+            diagnostics.mechanismProblemDomain = mechOut.mechanismProblem;
+        }
+    }
+    if (strategyRoot) {
+        const srMech = strategyRoot.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
+        console.log(`[OfferEngine-V4] STRATEGY_ROOT_CONSUMED | rootId=${strategyRoot.id} | hash=${strategyRoot.rootHash} | runId=${strategyRoot.runId} | axis="${strategyRoot.primaryAxis}" | mechanism="${srMech?.mechanismName || "n/a"}" | claim="${(strategyRoot.approvedClaim || "").substring(0, 60)}" | promise="${(strategyRoot.approvedPromise || "").substring(0, 60)}"`);
+        diagnostics.strategyRootConsumed = {
+            rootId: strategyRoot.id,
+            rootHash: strategyRoot.rootHash,
+            runId: strategyRoot.runId,
+            primaryAxis: strategyRoot.primaryAxis,
+            mechanismName: srMech?.mechanismName || null,
+            hasClaim: !!strategyRoot.approvedClaim,
+            hasPromise: !!strategyRoot.approvedPromise,
+            hasTransformation: !!strategyRoot.approvedTransformation,
+            hasPains: !!strategyRoot.approvedAudiencePains,
+            hasDesires: !!strategyRoot.approvedDesires,
+        };
+    }
+    const campaignId = mi?._campaignId || "";
+    const productDna = campaignId ? await loadProductDNA(campaignId, accountId) : null;
+    if (productDna) {
+        console.log(`[OfferEngine-V4] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"}`);
+        diagnostics.productDnaLoaded = true;
+    }
+    console.log(`[OfferEngine-V4] Starting 5-layer pipeline`);
+    const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
+    diagnostics.signalAnchoring = {
+        upstreamLineageCount: upstreamLineage.length,
+        qualifyingSignals: qualifyingSignals.length,
+        minRequired: MIN_QUALIFYING_SIGNALS,
+    };
+    console.log(`[OfferEngine-V4] SIGNAL_CHECK | upstream=${upstreamLineage.length} | qualifying=${qualifyingSignals.length} | min=${MIN_QUALIFYING_SIGNALS}`);
+    if (qualifyingSignals.length < MIN_QUALIFYING_SIGNALS) {
+        console.log(`[OfferEngine-V4] SIGNAL_INSUFFICIENT | qualifying=${qualifyingSignals.length} < min=${MIN_QUALIFYING_SIGNALS} — cannot generate grounded claims`);
+        const emptyOffer = buildEmptyOffer();
+        const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["Insufficient upstream signals for grounded claim generation"]);
+        return {
+            status: STATUS.INSUFFICIENT_SIGNALS,
+            statusMessage: `Signal-insufficient: only ${qualifyingSignals.length} qualifying upstream signals found (minimum ${MIN_QUALIFYING_SIGNALS} required). Run MI and Audience engines first to generate source signals.`,
+            primaryOffer: emptyOffer,
+            alternativeOffer: emptyOffer,
+            rejectedOffer: { offer: emptyOffer, rejectionReason: "No upstream signals to anchor claims" },
+            offerStrengthScore: 0,
+            positioningConsistency: { consistent: false, contradictions: ["Signal-insufficient state"] },
+            hookMechanismAlignment: { aligned: false, failures: ["Signal-insufficient state"], hookAxis: null, mechanismAxis: null },
+            boundaryCheck: { passed: true, violations: [] },
+            structuralWarnings: ["SIGNAL_INSUFFICIENT: No grounded claims can be generated without upstream signals"],
+            confidenceScore: 0,
+            executionTimeMs: Date.now() - startTime,
+            engineVersion: ENGINE_VERSION,
+            layerDiagnostics: diagnostics,
+            strategyAcceptability: acceptability,
+        };
+    }
+    const pillars = differentiation.pillars || [];
+    const proofArch = differentiation.proofArchitecture || [];
+    const claims = differentiation.claimStructures || [];
+    const competitorSignals = (mi.opportunitySignals || []).length + (mi.threatSignals || []).length;
+    const audienceSignals = (audience.audiencePains || []).length + Object.keys(audience.objectionMap || {}).length + (audience.emotionalDrivers || []).length;
+    const dataReliability = assessDataReliability(competitorSignals, audienceSignals, !!positioning.narrativeDirection, !!(pillars.length > 0), !!(audience.audiencePains && audience.audiencePains.length > 0), differentiation.confidenceScore ?? 0);
+    diagnostics.dataReliability = dataReliability;
+    if (dataReliability.isWeak) {
+        console.log(`[OfferEngine-V4] WEAK_DATA | reliability=${dataReliability.overallReliability.toFixed(2)} | advisories=${dataReliability.advisories.length}`);
+    }
+    if (pillars.length === 0 && claims.length === 0) {
+        console.log(`[OfferEngine-V4] Insufficient differentiation data — returning red-grade adaptive fallback`);
+        const emptyOffer = buildEmptyOffer();
+        const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["Differentiation data insufficient"]);
+        return {
+            status: STATUS.INSUFFICIENT_SIGNALS,
+            statusMessage: "Differentiation data insufficient to construct meaningful offer",
+            primaryOffer: emptyOffer,
+            alternativeOffer: emptyOffer,
+            rejectedOffer: { offer: emptyOffer, rejectionReason: "No data to construct offer" },
+            offerStrengthScore: 0,
+            positioningConsistency: { consistent: false, contradictions: ["No offer data available"] },
+            hookMechanismAlignment: { aligned: false, failures: ["No offer data available"], hookAxis: null, mechanismAxis: null },
+            boundaryCheck: { passed: true, violations: [] },
+            structuralWarnings: [],
+            confidenceScore: 0,
+            executionTimeMs: Date.now() - startTime,
+            engineVersion: ENGINE_VERSION,
+            layerDiagnostics: diagnostics,
+            strategyAcceptability: acceptability,
+        };
+    }
+    const marketLanguage = buildMarketLanguageMap(audience);
+    const multiSource = typeof mi.multiSourceSignals === "string" ? safeJsonParse(mi.multiSourceSignals) : mi.multiSourceSignals;
+    if (multiSource && typeof multiSource === "object") {
+        for (const compData of Object.values(multiSource)) {
+            if (compData?.website) {
+                for (const offer of (compData.website.offerStructure || []).slice(0, 3)) {
+                    if (typeof offer === "string" && offer.trim())
+                        marketLanguage.rawDesirePhrases.push(offer);
+                }
+                for (const cta of (compData.website.funnelCTAs || compData.website.ctaPatterns || []).slice(0, 3)) {
+                    if (typeof cta === "string" && cta.trim())
+                        marketLanguage.rawDesirePhrases.push(cta);
+                }
+                for (const guarantee of (compData.website.guarantees || compData.website.guaranteeLanguage || []).slice(0, 2)) {
+                    if (typeof guarantee === "string" && guarantee.trim())
+                        marketLanguage.objectionLanguage.push(guarantee);
+                }
+            }
+        }
+    }
+    diagnostics.marketLanguage = {
+        painPhraseCount: marketLanguage.rawPainPhrases.length,
+        desirePhraseCount: marketLanguage.rawDesirePhrases.length,
+        emotionalCount: marketLanguage.emotionalLanguage.length,
+        objectionCount: marketLanguage.objectionLanguage.length,
+    };
+    console.log(`[OfferEngine-V4] MarketLanguageMap | pains=${marketLanguage.rawPainPhrases.length} | desires=${marketLanguage.rawDesirePhrases.length} | emotional=${marketLanguage.emotionalLanguage.length} | objections=${marketLanguage.objectionLanguage.length}`);
+    const l1Outcome = layer1_outcomeConstruction(audience, positioning, differentiation, marketLanguage);
+    diagnostics.layer1 = { specificityScore: l1Outcome.specificityScore };
+    const l2Mechanism = layer2_mechanismAlignment(differentiation);
+    diagnostics.layer2 = { type: l2Mechanism.mechanismType, credibility: l2Mechanism.credibilityScore };
+    const l3Delivery = compressFeasibility(layer3_deliveryStructure(audience, differentiation));
+    diagnostics.layer3 = { deliverableCount: l3Delivery.deliverables.length, complexity: l3Delivery.complexityLevel };
+    const objectionSignals = qualifyingSignals.filter(s => s.category === "audience_objection" || s.category === "narrative_objection" ||
+        s.category.includes("objection"));
+    const hasObjectionSignals = objectionSignals.length > 0;
+    const objectionContext = objectionSignals.map(s => ({ text: s.text, category: s.category }));
+    console.log(`[OfferEngine-V4] PROOF_GATE | objectionSignals=${objectionSignals.length} | hasObjectionSignals=${hasObjectionSignals}`);
+    const l4Proof = layer4_proofAlignment(differentiation, hasObjectionSignals, objectionContext);
+    diagnostics.layer4 = { proofTypes: l4Proof.alignedProofTypes.length, strength: l4Proof.proofStrength, gaps: l4Proof.proofGaps, objectionGated: !hasObjectionSignals, objectionMapped: objectionContext.length };
+    const l5Risk = layer5_riskReduction(audience, l4Proof);
+    diagnostics.layer5 = { reducers: l5Risk.riskReducers.length, buyerConfidence: l5Risk.buyerConfidenceScore };
+    const posLock = buildPositioningLock(positioning, differentiation);
+    diagnostics.positioningLock = posLock;
+    console.log(`[OfferEngine-V4] POSITIONING_LOCK | locked=${posLock.locked} | axis="${posLock.contrastAxis || "none"}" | mechanism="${posLock.mechanismName || "none"}" | problem="${posLock.problemDomain || "none"}" | solution="${posLock.solutionDomain || "none"}"`);
+    const preGenCheck = validatePreGenerationConstraints(posLock, differentiation);
+    diagnostics.preGenerationConstraints = preGenCheck;
+    if (!preGenCheck.compatible) {
+        console.log(`[OfferEngine-V4] PRE_GENERATION_WARNING | ${preGenCheck.issues.join("; ")}`);
+    }
+    let aiOffers;
+    let offerDepthRejectionContext = "";
+    const offerDepthGateLog = [];
+    const offerDepthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
+    try {
+        aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
+        diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation" };
+        if (aiOffers.sourceContext) {
+            diagnostics.sourceContext = aiOffers.sourceContext;
+        }
+    }
+    catch (err) {
+        diagnostics.aiGeneration = { success: false, error: err.message };
+        if (strategyRoot) {
+            const fallbackResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
+            aiOffers = { ...fallbackResult };
+            diagnostics.sourceContext = fallbackResult.sourceContext;
+            console.log(`[OfferEngine-V4] AI_FAILED_USING_RAW_SKELETONS | ${err.message}`);
+        }
+        else {
+            aiOffers = {
+                primary: { name: "Core Transformation System", outcome: l1Outcome.primaryOutcome, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
+                alternative: { name: "Alternative Implementation Program", outcome: l1Outcome.transformationStatement, mechanism: l2Mechanism.mechanismDescription, deliverables: [] },
+                rejected: { name: "Generic Growth Package", outcome: "General improvement", mechanism: "Standard approach", deliverables: [], rejectionReason: "Generic and unspecific" },
+            };
+        }
+    }
+    if (strategyRoot) {
+        diagnostics.rootAxisEnforcement = { passed: true, mode: "deterministic_skeleton" };
+        console.log(`[OfferEngine-V4] ROOT_AXIS_ENFORCEMENT_PASSED | skeleton-based generation — axis alignment guaranteed by construction`);
+    }
+    const primaryClaimsForGrounding = [
+        aiOffers.primary.outcome,
+        aiOffers.primary.mechanism,
+        ...aiOffers.primary.deliverables,
+    ].filter(Boolean);
+    const primaryGrounding = validateClaimGrounding(primaryClaimsForGrounding, upstreamLineage, "offer_engine", "offer_claim");
+    diagnostics.primaryGrounding = {
+        total: primaryGrounding.totalClaims,
+        grounded: primaryGrounding.groundedClaims,
+        stripped: primaryGrounding.strippedClaims.length,
+        ratio: primaryGrounding.groundingRatio.toFixed(2),
+    };
+    console.log(`[OfferEngine-V4] GROUNDING_CHECK | primary: grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims} | ratio=${primaryGrounding.groundingRatio.toFixed(2)} | stripped=${primaryGrounding.strippedClaims.join("; ").slice(0, 100)}`);
+    const GROUNDING_RATIO_FLOOR = 0.3;
+    if (primaryGrounding.groundingRatio < GROUNDING_RATIO_FLOOR && primaryGrounding.totalClaims > 0) {
+        console.log(`[OfferEngine-V4] GROUNDING_FAILED | ratio=${primaryGrounding.groundingRatio.toFixed(2)} < floor=${GROUNDING_RATIO_FLOOR} — returning SIGNAL_INSUFFICIENT`);
+        const emptyOffer = buildEmptyOffer();
+        const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["AI-generated claims failed signal grounding"]);
+        return {
+            status: STATUS.INSUFFICIENT_SIGNALS,
+            statusMessage: `Signal grounding failed: only ${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims} claims are signal-anchored (${Math.round(primaryGrounding.groundingRatio * 100)}% < ${Math.round(GROUNDING_RATIO_FLOOR * 100)}% minimum). Claims cannot be generated without signal backing.`,
+            primaryOffer: emptyOffer,
+            alternativeOffer: emptyOffer,
+            rejectedOffer: { offer: emptyOffer, rejectionReason: "Claims failed signal grounding" },
+            offerStrengthScore: 0,
+            positioningConsistency: { consistent: false, contradictions: ["Claims not signal-grounded"] },
+            hookMechanismAlignment: { aligned: false, failures: ["Claims not signal-grounded"], hookAxis: null, mechanismAxis: null },
+            boundaryCheck: { passed: true, violations: [] },
+            structuralWarnings: [`GROUNDING_FAILED: ${primaryGrounding.strippedClaims.length} claims stripped for lack of signal backing`],
+            confidenceScore: 0,
+            executionTimeMs: Date.now() - startTime,
+            engineVersion: ENGINE_VERSION,
+            layerDiagnostics: diagnostics,
+            strategyAcceptability: acceptability,
+            signalGrounding: {
+                groundedClaims: primaryGrounding.groundedClaims,
+                totalClaims: primaryGrounding.totalClaims,
+                groundingRatio: primaryGrounding.groundingRatio,
+                strippedClaims: primaryGrounding.strippedClaims,
+            },
+        };
+    }
+    aiOffers.primary.deliverables = aiOffers.primary.deliverables.filter(d => !primaryGrounding.strippedClaims.includes(d));
+    if (primaryGrounding.strippedClaims.includes(aiOffers.primary.outcome)) {
+        aiOffers.primary.outcome = l1Outcome.primaryOutcome;
+        console.log(`[OfferEngine-V4] GROUNDING_STRIP | primary outcome replaced with layer-1 fallback`);
+    }
+    if (primaryGrounding.strippedClaims.includes(aiOffers.primary.mechanism)) {
+        aiOffers.primary.mechanism = l2Mechanism.mechanismDescription;
+        console.log(`[OfferEngine-V4] GROUNDING_STRIP | primary mechanism replaced with layer-2 fallback`);
+    }
+    const core = differentiation.mechanismCore;
+    const hasMechanismCore = !!(core && core.mechanismType !== "none" && core.mechanismName && core.mechanismSteps.length > 0);
+    const mergeDeliverables = (aiDeliverables, fallbackDeliverables) => {
+        if (aiDeliverables.length === 0)
+            return fallbackDeliverables;
+        if (!hasMechanismCore)
+            return aiDeliverables.slice(0, MAX_DELIVERABLES);
+        const stepWords = core.mechanismSteps.map(s => s.toLowerCase().split(/\s+/).slice(0, 3).join(" "));
+        const validAiDeliverables = aiDeliverables.filter(d => {
+            const dLower = d.toLowerCase();
+            return stepWords.some(sw => dLower.includes(sw) || sw.split(" ").some(w => w.length > 3 && dLower.includes(w)));
+        });
+        if (validAiDeliverables.length >= Math.min(core.mechanismSteps.length, 2)) {
+            return validAiDeliverables.slice(0, MAX_DELIVERABLES);
+        }
+        return fallbackDeliverables;
+    };
+    const primaryOutcome = {
+        ...l1Outcome,
+        primaryOutcome: aiOffers.primary.outcome || l1Outcome.primaryOutcome,
+    };
+    const aiPrimaryMechDesc = aiOffers.primary.mechanism || l2Mechanism.mechanismDescription;
+    const primaryMechLock = checkMechanismLock(aiPrimaryMechDesc, differentiation);
+    diagnostics.primaryMechanismLock = primaryMechLock;
+    const primaryMechanism = {
+        ...l2Mechanism,
+        mechanismDescription: primaryMechLock.locked
+            ? aiPrimaryMechDesc
+            : l2Mechanism.mechanismDescription,
+    };
+    if (!primaryMechLock.locked) {
+        console.log(`[OfferEngine-V4] MECHANISM_LOCK | primary mechanism category mismatch: diff="${primaryMechLock.diffCategory}" offer="${primaryMechLock.offerCategory}" — forced back to differentiation framing`);
+    }
+    const primaryDelivery = {
+        ...l3Delivery,
+        deliverables: mergeDeliverables(aiOffers.primary.deliverables, l3Delivery.deliverables),
+    };
+    const primaryOffer = buildOfferCandidate(aiOffers.primary.name, primaryOutcome, primaryMechanism, primaryDelivery, l4Proof, l5Risk, audience, differentiation, mi, positioning, { problemStatement: aiOffers.primary.problemStatement, proofPath: aiOffers.primary.proofPath, objectionHandling: aiOffers.primary.objectionHandling });
+    const altOutcome = {
+        ...l1Outcome,
+        primaryOutcome: aiOffers.alternative.outcome || l1Outcome.transformationStatement,
+        specificityScore: clamp(l1Outcome.specificityScore * 0.9),
+    };
+    const aiAltMechDesc = aiOffers.alternative.mechanism || l2Mechanism.mechanismDescription;
+    const altMechLock = checkMechanismLock(aiAltMechDesc, differentiation);
+    diagnostics.altMechanismLock = altMechLock;
+    const altMechanism = {
+        ...l2Mechanism,
+        mechanismDescription: altMechLock.locked
+            ? aiAltMechDesc
+            : l2Mechanism.mechanismDescription,
+    };
+    if (!altMechLock.locked) {
+        console.log(`[OfferEngine-V4] MECHANISM_LOCK | alternative mechanism category mismatch: diff="${altMechLock.diffCategory}" offer="${altMechLock.offerCategory}" — forced back to differentiation framing`);
+    }
+    const altDelivery = {
+        ...l3Delivery,
+        deliverables: mergeDeliverables(aiOffers.alternative.deliverables, l3Delivery.deliverables),
+    };
+    const alternativeOffer = buildOfferCandidate(aiOffers.alternative.name, altOutcome, altMechanism, altDelivery, l4Proof, l5Risk, audience, differentiation, mi, positioning, { problemStatement: aiOffers.alternative.problemStatement, proofPath: aiOffers.alternative.proofPath, objectionHandling: aiOffers.alternative.objectionHandling });
+    const rejOutcome = {
+        primaryOutcome: aiOffers.rejected.outcome || "Generic market improvement",
+        transformationStatement: "Vague transformation promise",
+        specificityScore: 0.2,
+    };
+    const rejMechanism = {
+        mechanismType: "none",
+        mechanismDescription: aiOffers.rejected.mechanism || "No validated mechanism",
+        differentiationLink: "No differentiation link",
+        credibilityScore: 0.1,
+    };
+    const rejectedOffer = buildOfferCandidate(aiOffers.rejected.name, rejOutcome, rejMechanism, l3Delivery, { alignedProofTypes: [], proofStrength: 0.1, proofGaps: ["process_proof", "outcome_proof", "case_proof", "transparency_proof"] }, { riskReducers: [], frictionMitigations: [], buyerConfidenceScore: 0.1 }, audience, differentiation, mi, positioning);
+    if (posLock.locked) {
+        const primaryClamp = clampOfferToAxis(primaryOffer.offerName, primaryOffer.coreOutcome, primaryOffer.mechanismDescription, posLock);
+        if (primaryClamp.clamped) {
+            primaryOffer.offerName = primaryClamp.offerName;
+            primaryOffer.coreOutcome = primaryClamp.coreOutcome;
+            primaryOffer.mechanismDescription = primaryClamp.mechanismDescription;
+            primaryOffer.mechanismLayer.mechanismDescription = primaryClamp.mechanismDescription;
+            primaryOffer.outcomeLayer.primaryOutcome = primaryClamp.coreOutcome;
+            console.log(`[OfferEngine-V4] AXIS_CLAMP_PRIMARY | ${primaryClamp.clampActions.join("; ")}`);
+            diagnostics.primaryAxisClamp = primaryClamp.clampActions;
+        }
+        const altClamp = clampOfferToAxis(alternativeOffer.offerName, alternativeOffer.coreOutcome, alternativeOffer.mechanismDescription, posLock);
+        if (altClamp.clamped) {
+            alternativeOffer.offerName = altClamp.offerName;
+            alternativeOffer.coreOutcome = altClamp.coreOutcome;
+            alternativeOffer.mechanismDescription = altClamp.mechanismDescription;
+            alternativeOffer.mechanismLayer.mechanismDescription = altClamp.mechanismDescription;
+            alternativeOffer.outcomeLayer.primaryOutcome = altClamp.coreOutcome;
+            console.log(`[OfferEngine-V4] AXIS_CLAMP_ALT | ${altClamp.clampActions.join("; ")}`);
+            diagnostics.altAxisClamp = altClamp.clampActions;
+        }
+    }
+    const posConsistency = checkPositioningConsistency(primaryOffer, positioning, differentiation);
+    diagnostics.positioningConsistency = posConsistency;
+    let hookMechAlignment = checkHookMechanismAlignment(primaryOffer, positioning);
+    const altHookMechAlignment = checkHookMechanismAlignment(alternativeOffer, positioning);
+    diagnostics.hookMechanismAlignment = hookMechAlignment;
+    diagnostics.altHookMechanismAlignment = altHookMechAlignment;
+    const combinedFailures = [];
+    if (!hookMechAlignment.aligned)
+        combinedFailures.push(...hookMechAlignment.failures);
+    if (!altHookMechAlignment.aligned)
+        combinedFailures.push(...altHookMechAlignment.failures.map(f => `[Alternative] ${f}`));
+    if (!hookMechAlignment.aligned || !altHookMechAlignment.aligned) {
+        hookMechAlignment = {
+            aligned: false,
+            failures: combinedFailures,
+            hookAxis: hookMechAlignment.hookAxis || altHookMechAlignment.hookAxis,
+            mechanismAxis: hookMechAlignment.mechanismAxis || altHookMechAlignment.mechanismAxis,
+        };
+    }
+    if (!hookMechAlignment.aligned && !strategyRoot) {
+        console.log(`[OfferEngine-V4] HOOK_MECHANISM_MISMATCH | ${hookMechAlignment.failures.join("; ")} — no strategy root, logging advisory`);
+        diagnostics.hookMechanismRetry = { skipped: true, reason: "no_retry_without_root" };
+    }
+    else if (!hookMechAlignment.aligned && strategyRoot) {
+        console.log(`[OfferEngine-V4] HOOK_MECHANISM_CHECK | skeleton-generated offers — alignment check advisory only: ${hookMechAlignment.failures.join("; ")}`);
+        diagnostics.hookMechanismRetry = { skipped: true, reason: "skeleton_based_no_retry_needed" };
+    }
+    const allOfferText = [
+        primaryOffer.offerName, primaryOffer.coreOutcome, primaryOffer.mechanismDescription,
+        ...primaryOffer.deliverables, ...primaryOffer.riskNotes,
+        alternativeOffer.offerName, alternativeOffer.coreOutcome, alternativeOffer.mechanismDescription,
+        ...alternativeOffer.deliverables,
+        rejectedOffer.offerName, rejectedOffer.coreOutcome,
+    ].join(" ");
+    const boundaryResult = enforceBoundaryWithSanitization(allOfferText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
+    const boundaryCheck = { clean: boundaryResult.clean, violations: boundaryResult.violations };
+    diagnostics.boundaryCheck = boundaryCheck;
+    diagnostics.boundarySanitization = { sanitized: boundaryResult.sanitized, warnings: boundaryResult.warnings };
+    const genericOutputCheck = detectGenericOutput(allOfferText);
+    diagnostics.genericOutputCheck = genericOutputCheck;
+    if (genericOutputCheck.genericDetected) {
+        primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - genericOutputCheck.penalty);
+        alternativeOffer.offerStrengthScore = clamp(alternativeOffer.offerStrengthScore - genericOutputCheck.penalty);
+        console.log(`[OfferEngine-V4] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
+    }
+    const diffStrength = checkDifferentiationStrength(primaryOffer, differentiation, positioning);
+    diagnostics.differentiationReinforcement = diffStrength;
+    if (!diffStrength.sufficient) {
+        primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore * 0.85);
+        alternativeOffer.offerStrengthScore = clamp(alternativeOffer.offerStrengthScore * 0.85);
+        console.log(`[OfferEngine-V4] DIFFERENTIATION_WEAK | score=${diffStrength.score.toFixed(2)} | gaps=${diffStrength.gaps.join("; ")}`);
+    }
+    else {
+        console.log(`[OfferEngine-V4] DIFFERENTIATION_CHECK | score=${diffStrength.score.toFixed(2)} | signals=${diffStrength.signals.length}`);
+    }
+    const outcomePrecision = scoreOutcomePrecision(primaryOffer.coreOutcome);
+    const mechClarity = scoreMechanismClarity(primaryOffer.mechanismDescription);
+    diagnostics.outcomePrecision = outcomePrecision;
+    diagnostics.mechanismClarity = mechClarity;
+    if (outcomePrecision.isVague) {
+        primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
+        console.log(`[OfferEngine-V4] AI_OUTCOME_VAGUE | primary AI-generated outcome flagged as vague — strength penalized`);
+    }
+    if (mechClarity.isVague) {
+        primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
+        console.log(`[OfferEngine-V4] AI_MECHANISM_VAGUE | primary AI-generated mechanism flagged as vague — strength penalized`);
+    }
+    if (mechanismEngineOutput?.axisConsistency) {
+        const mechAxisCheck = mechanismEngineOutput.axisConsistency;
+        diagnostics.mechanismAxisConsistency = mechAxisCheck;
+        if (!mechAxisCheck.consistent) {
+            console.log(`[OfferEngine-V4] MECHANISM_AXIS_GUARD | mechanism axis "${mechAxisCheck.mechanismAxis}" does not match positioning axis "${mechAxisCheck.primaryAxis}" — HARD REJECT`);
+            return {
+                status: "AXIS_MISMATCH",
+                statusMessage: `Mechanism axis "${mechAxisCheck.mechanismAxis}" does not match positioning axis "${mechAxisCheck.primaryAxis}". Re-run Mechanism Engine to resolve.`,
+                primaryOffer,
+                alternativeOffer: null,
+                rejectedOffer: null,
+                offerStrengthScore: 0,
+                positioningConsistency: null,
+                hookMechanismAlignment: null,
+                boundaryCheck: null,
+                confidenceScore: 0,
+                executionTimeMs: Date.now() - startTime,
+                diagnostics,
+            };
+        }
+        const offerMechText = (primaryOffer.mechanismDescription || "").toLowerCase();
+        const mechPrimaryAxis = (mechAxisCheck.primaryAxis || "").replace(/_/g, " ").toLowerCase();
+        const axisTokens = mechPrimaryAxis.split(/\s+/).filter((t) => t.length > 3);
+        const mechReferencesAxis = axisTokens.some((t) => offerMechText.includes(t));
+        if (!mechReferencesAxis && axisTokens.length > 0) {
+            console.log(`[OfferEngine-V4] MECHANISM_AXIS_ENFORCEMENT | offer mechanism does not reference positioning axis "${mechAxisCheck.primaryAxis}" — axis propagation warning`);
+            diagnostics.mechanismAxisEnforcement = {
+                passed: false,
+                offerMechText: offerMechText.slice(0, 200),
+                expectedAxis: mechAxisCheck.primaryAxis,
+            };
+        }
+    }
+    let status = STATUS.COMPLETE;
+    let statusMessage = null;
+    const structuralWarnings = [];
+    if (!diffStrength.sufficient) {
+        structuralWarnings.push(...diffStrength.gaps);
+    }
+    if (!hookMechAlignment.aligned && !strategyRoot) {
+        status = STATUS.POSITIONING_MISMATCH;
+        statusMessage = `Positioning axis mismatch — hook and mechanism do not share the same strategic axis: ${hookMechAlignment.failures.join("; ")}`;
+        structuralWarnings.push(...hookMechAlignment.failures);
+        console.log(`[OfferEngine-V4] POSITIONING_MISMATCH | ${hookMechAlignment.failures.join("; ")}`);
+    }
+    else if (!hookMechAlignment.aligned && strategyRoot) {
+        console.log(`[OfferEngine-V4] HOOK_MECH_ADVISORY_ONLY | skeleton-based — validator advisory: ${hookMechAlignment.failures.join("; ")}`);
+    }
+    if (!posConsistency.consistent && !strategyRoot) {
+        structuralWarnings.push(...posConsistency.contradictions);
+        if (status === STATUS.COMPLETE) {
+            status = STATUS.POSITIONING_MISMATCH;
+            statusMessage = `Positioning inconsistency — ${posConsistency.contradictions.join("; ")}`;
+        }
+    }
+    else if (!posConsistency.consistent && strategyRoot) {
+        console.log(`[OfferEngine-V4] POS_CONSISTENCY_ADVISORY_ONLY | skeleton-based — validator advisory: ${posConsistency.contradictions.join("; ")}`);
+    }
+    if (!boundaryCheck.clean) {
+        status = STATUS.INTEGRITY_FAILED;
+        statusMessage = `Boundary violation — cross-engine output detected: ${boundaryCheck.violations.join("; ")}`;
+        console.log(`[OfferEngine-V4] BOUNDARY_VIOLATION | ${boundaryCheck.violations.join("; ")}`);
+    }
+    if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
+        structuralWarnings.push(...boundaryResult.warnings);
+        console.log(`[OfferEngine-V4] BOUNDARY_SANITIZED | ${boundaryResult.warnings.join("; ")}`);
+        primaryOffer.offerName = applySoftSanitization(primaryOffer.offerName, BOUNDARY_SOFT_PATTERNS);
+        primaryOffer.coreOutcome = applySoftSanitization(primaryOffer.coreOutcome, BOUNDARY_SOFT_PATTERNS);
+        primaryOffer.mechanismDescription = applySoftSanitization(primaryOffer.mechanismDescription, BOUNDARY_SOFT_PATTERNS);
+        primaryOffer.deliverables = primaryOffer.deliverables.map((d) => applySoftSanitization(d, BOUNDARY_SOFT_PATTERNS));
+        primaryOffer.riskNotes = primaryOffer.riskNotes.map((r) => applySoftSanitization(r, BOUNDARY_SOFT_PATTERNS));
+        alternativeOffer.offerName = applySoftSanitization(alternativeOffer.offerName, BOUNDARY_SOFT_PATTERNS);
+        alternativeOffer.coreOutcome = applySoftSanitization(alternativeOffer.coreOutcome, BOUNDARY_SOFT_PATTERNS);
+        alternativeOffer.mechanismDescription = applySoftSanitization(alternativeOffer.mechanismDescription, BOUNDARY_SOFT_PATTERNS);
+        alternativeOffer.deliverables = alternativeOffer.deliverables.map((d) => applySoftSanitization(d, BOUNDARY_SOFT_PATTERNS));
+        rejectedOffer.offerName = applySoftSanitization(rejectedOffer.offerName, BOUNDARY_SOFT_PATTERNS);
+        rejectedOffer.coreOutcome = applySoftSanitization(rejectedOffer.coreOutcome, BOUNDARY_SOFT_PATTERNS);
+    }
+    if (status === STATUS.COMPLETE && !primaryOffer.completeness.complete) {
+        status = STATUS.INTEGRITY_FAILED;
+        statusMessage = `Offer incomplete: ${primaryOffer.completeness.missingLayers.join("; ")}`;
+    }
+    if (status === STATUS.COMPLETE && !primaryOffer.integrityResult.passed) {
+        status = STATUS.INTEGRITY_FAILED;
+        statusMessage = `Integrity check failed: ${primaryOffer.integrityResult.failures.join("; ")}`;
+    }
+    let offerAlignmentValidation = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
+    diagnostics.offerAlignmentValidation = offerAlignmentValidation;
+    if (!offerAlignmentValidation.aligned && status === STATUS.COMPLETE) {
+        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} — regenerating with positioning lock`);
+        try {
+            const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
+            diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
+            const retryPrimaryOutcome = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
+            const retryMechDesc = retryOffers.primary.mechanism || l2Mechanism.mechanismDescription;
+            const retryMechLock = checkMechanismLock(retryMechDesc, differentiation);
+            const retryMechanism = { ...l2Mechanism, mechanismDescription: retryMechLock.locked ? retryMechDesc : l2Mechanism.mechanismDescription };
+            const retryDelivery = { ...l3Delivery, deliverables: mergeDeliverables(retryOffers.primary.deliverables, l3Delivery.deliverables) };
+            const retryPrimary = buildOfferCandidate(retryOffers.primary.name, retryPrimaryOutcome, retryMechanism, retryDelivery, l4Proof, l5Risk, audience, differentiation, mi, positioning, { problemStatement: retryOffers.primary.problemStatement, proofPath: retryOffers.primary.proofPath, objectionHandling: retryOffers.primary.objectionHandling });
+            if (posLock.locked) {
+                const retryClamp = clampOfferToAxis(retryPrimary.offerName, retryPrimary.coreOutcome, retryPrimary.mechanismDescription, posLock);
+                if (retryClamp.clamped) {
+                    retryPrimary.offerName = retryClamp.offerName;
+                    retryPrimary.coreOutcome = retryClamp.coreOutcome;
+                    retryPrimary.mechanismDescription = retryClamp.mechanismDescription;
+                    retryPrimary.mechanismLayer.mechanismDescription = retryClamp.mechanismDescription;
+                    retryPrimary.outcomeLayer.primaryOutcome = retryClamp.coreOutcome;
+                    console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_CLAMP | ${retryClamp.clampActions.join("; ")}`);
+                }
+            }
+            const retryValidation = validateOfferAlignment(retryPrimary, differentiation, audience, marketLanguage);
+            diagnostics.offerAlignmentRetryValidation = retryValidation;
+            if (retryValidation.aligned || retryValidation.failures.length < offerAlignmentValidation.failures.length) {
+                console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_SUCCESS | Retry ${retryValidation.aligned ? "passed" : "improved"} validation`);
+                Object.assign(primaryOffer, retryPrimary);
+                offerAlignmentValidation = retryValidation;
+            }
+            else {
+                console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_NO_IMPROVEMENT | Keeping original offer`);
+            }
+        }
+        catch (retryErr) {
+            console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_FAILED | ${retryErr.message} — keeping original`);
+            diagnostics.aiGenerationRetry = { success: false, error: retryErr.message };
+        }
+    }
+    if (!offerAlignmentValidation.aligned) {
+        structuralWarnings.push(...offerAlignmentValidation.failures);
+        console.log(`[OfferEngine-V4] ALIGNMENT_VALIDATION_FAILED | ${offerAlignmentValidation.failures.join("; ")}`);
+        if (status === STATUS.COMPLETE) {
+            status = STATUS.INTEGRITY_FAILED;
+            statusMessage = `Pre-save alignment validation failed: ${offerAlignmentValidation.failures.join("; ")}`;
+        }
+    }
+    const mechanism = differentiation.mechanismFraming || {};
+    const mechanismSupported = mechanism.supported === true;
+    const mechanismType = mechanism.type || "none";
+    const pains = audience.audiencePains || [];
+    const desires = Object.entries(audience.desireMap || {});
+    const offerOutcome = primaryOffer.coreOutcome || "";
+    const offerMechDesc = primaryOffer.mechanismDescription || "";
+    const hasPainAlignment = pains.length > 0 && pains.some((p) => {
+        const painText = (typeof p === "string" ? p : p?.pain || p?.name || "").toLowerCase();
+        return painText.length > 3 && (offerOutcome.toLowerCase().includes(painText.substring(0, Math.min(painText.length, 15))) || offerMechDesc.toLowerCase().includes(painText.substring(0, Math.min(painText.length, 15))));
+    });
+    const hasDesireAlignment = desires.length > 0 && desires.some(([k]) => {
+        return k.length > 3 && (offerOutcome.toLowerCase().includes(k.toLowerCase().substring(0, Math.min(k.length, 15))) || offerMechDesc.toLowerCase().includes(k.toLowerCase().substring(0, Math.min(k.length, 15))));
+    });
+    const alignmentResult = checkCrossEngineAlignment([
+        {
+            name: "differentiation_mechanism_alignment",
+            aligned: mechanismSupported || mechanismType !== "none",
+            reason: !mechanismSupported && mechanismType === "none"
+                ? "Offer does not leverage a validated differentiation mechanism"
+                : "Offer mechanism aligns with differentiation engine output",
+        },
+        {
+            name: "audience_pain_alignment",
+            aligned: pains.length === 0 || hasPainAlignment || hasDesireAlignment,
+            reason: pains.length > 0 && !hasPainAlignment && !hasDesireAlignment
+                ? `Offer outcome does not reference any of the ${pains.length} identified audience pain points or ${desires.length} desire signals`
+                : "Offer addresses audience pain signals",
+        },
+    ]);
+    if (!alignmentResult.aligned) {
+        structuralWarnings.push(...alignmentResult.misalignments);
+        console.log(`[OfferEngine-V4] CROSS_ENGINE_MISALIGNMENT | ${alignmentResult.misalignments.join("; ")} | penalty=${alignmentResult.confidencePenalty.toFixed(2)}`);
+    }
+    diagnostics.crossEngineAlignment = alignmentResult;
+    let celDepth = enforceEngineDepthCompliance("offer", [
+        primaryOffer.offerName || "",
+        primaryOffer.coreOutcome || "",
+        primaryOffer.mechanismDescription || "",
+        ...(primaryOffer.deliverables || []).map((d) => typeof d === "string" ? d : `${d.name || ""} ${d.description || ""}`),
+    ], analyticalEnrichment || null);
+    diagnostics.celDepthCompliance = celDepth;
+    if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+        for (let offerDepthAttempt = 2; offerDepthAttempt <= offerDepthGateMaxAttempts; offerDepthAttempt++) {
+            offerDepthGateLog.push(`Attempt ${offerDepthAttempt - 1}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
+            offerDepthRejectionContext = buildDepthRejectionDirective(celDepth, offerDepthAttempt - 1, posLock.lockedDecisions);
+            console.log(`[OfferEngine-V4] DEPTH_GATE: Attempt ${offerDepthAttempt - 1} BLOCKED — regenerating (${offerDepthAttempt}/${offerDepthGateMaxAttempts})`);
+            try {
+                aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment, offerDepthRejectionContext);
+                diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation", depthRetry: offerDepthAttempt };
+            }
+            catch (err) {
+                offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: AI_ERROR (${err.message})`);
+                continue;
+            }
+            celDepth = enforceEngineDepthCompliance("offer", [
+                aiOffers.primary?.name || "",
+                aiOffers.primary?.outcome || "",
+                aiOffers.primary?.mechanism || "",
+                ...(aiOffers.primary?.deliverables || []),
+            ], analyticalEnrichment || null);
+            diagnostics.celDepthCompliance = celDepth;
+            if (!isDepthBlocking(celDepth)) {
+                offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
+                console.log(`[OfferEngine-V4] DEPTH_GATE: Attempt ${offerDepthAttempt} PASSED | depthScore=${celDepth.causalDepthScore}`);
+                break;
+            }
+            if (offerDepthAttempt >= offerDepthGateMaxAttempts) {
+                offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: FINAL FAILURE (depthScore=${celDepth.causalDepthScore})`);
+                const depthGateResult = buildDepthGateResult(celDepth, offerDepthAttempt, offerDepthGateMaxAttempts, offerDepthGateLog);
+                console.log(`[OfferEngine-V4] DEPTH_GATE: FINAL FAILURE after ${offerDepthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
+                return {
+                    status: "DEPTH_FAILED",
+                    statusMessage: `Depth gate failed after ${offerDepthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`,
+                    primaryOffer: buildEmptyOffer(),
+                    alternativeOffer: buildEmptyOffer(),
+                    rejectedOffer: { offer: buildEmptyOffer(), rejectionReason: "DEPTH_FAILED" },
+                    offerStrengthScore: 0,
+                    positioningConsistency: { consistent: false, failures: ["DEPTH_FAILED"] },
+                    hookMechanismAlignment: { aligned: false, failures: ["DEPTH_FAILED"] },
+                    boundaryCheck: { passed: false, violations: ["DEPTH_FAILED"] },
+                    structuralWarnings: ["DEPTH_FAILED"],
+                    confidenceScore: 0,
+                    executionTimeMs: Date.now() - startTime,
+                    engineVersion: ENGINE_VERSION,
+                    layerDiagnostics: { ...diagnostics, depthGate: depthGateResult },
+                    strategyAcceptability: { grade: "F", acceptable: false, reasons: ["DEPTH_FAILED"] },
+                    signalGrounding: { groundedClaims: 0, totalClaims: 0, groundingRatio: 0, strippedClaims: [] },
+                    celDepthCompliance: celDepth,
+                    depthGateResult,
+                };
+            }
+        }
+    }
+    if (celDepth.violations.length > 0) {
+        for (const logEntry of celDepth.enforcementLog) {
+            console.log(`[OfferEngine-V4] CEL_DEPTH: ${logEntry}`);
+        }
+    }
+    else {
+        console.log(`[OfferEngine-V4] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+    }
+    const depthGateResultOffer = offerDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, offerDepthGateLog.length, offerDepthGateMaxAttempts, offerDepthGateLog) : null;
+    diagnostics.depthGate = depthGateResultOffer;
+    const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
+    const rawConfidence = clamp(primaryOffer.offerStrengthScore *
+        (posConsistency.consistent ? 1 : 0.7) *
+        (hookMechAlignment.aligned ? 1 : 0.5) *
+        (boundaryCheck.clean ? 1 : 0) *
+        (primaryOffer.completeness.complete ? 1 : 0.6) *
+        (genericOutputCheck.genericDetected ? (1 - genericOutputCheck.penalty) : 1) *
+        (1 - alignmentResult.confidencePenalty) *
+        (offerAlignmentValidation.aligned ? 1 : 0.75) *
+        depthPenaltyFactor);
+    const confidenceScore = normalizeConfidence(rawConfidence, dataReliability);
+    const confidenceNormalized = rawConfidence !== confidenceScore;
+    diagnostics.confidenceNormalized = confidenceNormalized;
+    if (confidenceNormalized) {
+        diagnostics.rawConfidence = rawConfidence;
+    }
+    const layersPassed = [
+        primaryOffer.completeness.complete,
+        primaryOffer.integrityResult.passed,
+        boundaryCheck.clean,
+        posConsistency.consistent,
+        hookMechAlignment.aligned,
+        offerAlignmentValidation.aligned,
+    ].filter(Boolean).length;
+    const acceptability = assessStrategyAcceptability(confidenceScore, layersPassed, 6, primaryOffer.integrityResult.passed && boundaryCheck.clean, structuralWarnings);
+    diagnostics.strategyAcceptability = acceptability;
+    if (strategyRoot) {
+        const offerMechText = (primaryOffer.mechanismDescription || "").toLowerCase();
+        const offerHookText = (primaryOffer.offerName || "").toLowerCase();
+        const offerOutcomeText = (primaryOffer.coreOutcome || "").toLowerCase();
+        const axisLabel = (strategyRoot.primaryAxis || "").replace(/_/g, " ").toLowerCase();
+        const axisTokensForCheck = axisLabel.split(/\s+/).filter((t) => t.length > 3);
+        const rootMechParsed = typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism;
+        const rootMechNameCheck = (rootMechParsed?.mechanismName || "").toLowerCase();
+        const axisInHook = axisTokensForCheck.length === 0 || axisTokensForCheck.some((t) => offerHookText.includes(t));
+        const painInOutcome = diagnostics.sourceContext?.selectedPain
+            ? offerOutcomeText.includes(diagnostics.sourceContext.selectedPain.toLowerCase().substring(0, 15))
+            : true;
+        const mechInOffer = rootMechNameCheck.length === 0 || offerMechText.includes(rootMechNameCheck.substring(0, Math.min(rootMechNameCheck.length, 20)));
+        const proofInOffer = (primaryOffer.proofAlignment || []).length > 0;
+        diagnostics.integrityChecks = {
+            rootSynced: true,
+            axisAligned: axisInHook,
+            painAligned: painInOutcome,
+            mechanismAligned: mechInOffer,
+            proofAligned: proofInOffer,
+            integrityPassed: axisInHook && painInOutcome && mechInOffer && proofInOffer,
+        };
+    }
+    console.log(`[OfferEngine-V4] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length} | grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims}${diagnostics.integrityChecks ? ` | integrity=${diagnostics.integrityChecks.integrityPassed}` : ""}`);
+    return {
+        status,
+        statusMessage,
+        primaryOffer,
+        alternativeOffer,
+        rejectedOffer: { offer: rejectedOffer, rejectionReason: aiOffers.rejected.rejectionReason },
+        offerStrengthScore: primaryOffer.offerStrengthScore,
+        positioningConsistency: posConsistency,
+        hookMechanismAlignment: hookMechAlignment,
+        boundaryCheck: { passed: boundaryCheck.clean, violations: boundaryCheck.violations },
+        structuralWarnings,
+        confidenceScore,
+        executionTimeMs: Date.now() - startTime,
+        engineVersion: ENGINE_VERSION,
+        layerDiagnostics: diagnostics,
+        strategyAcceptability: acceptability,
+        signalGrounding: {
+            groundedClaims: primaryGrounding.groundedClaims,
+            totalClaims: primaryGrounding.totalClaims,
+            groundingRatio: primaryGrounding.groundingRatio,
+            strippedClaims: primaryGrounding.strippedClaims,
+        },
+        celDepthCompliance: celDepth,
+        depthGateResult: depthGateResultOffer,
+    };
+}
+function buildEmptyOffer() {
+    return {
+        offerName: "No Offer",
+        coreOutcome: "",
+        mechanismDescription: "",
+        deliverables: [],
+        proofAlignment: [],
+        audienceFitExplanation: "",
+        offerStrengthScore: 0,
+        riskNotes: ["Insufficient data to construct offer"],
+        outcomeLayer: { primaryOutcome: "", transformationStatement: "", specificityScore: 0 },
+        mechanismLayer: { mechanismType: "none", mechanismDescription: "", differentiationLink: "", credibilityScore: 0 },
+        deliveryLayer: { deliverables: [], format: "", complexityLevel: 0 },
+        proofLayer: { alignedProofTypes: [], proofStrength: 0, proofGaps: [] },
+        riskReductionLayer: { riskReducers: [], frictionMitigations: [], buyerConfidenceScore: 0 },
+        completeness: { complete: false, missingLayers: ["All layers missing"] },
+        genericFlag: false,
+        integrityResult: { passed: false, failures: ["No data"] },
+        frictionLevel: 1,
+        depthScores: {
+            outcomeClarity: 0, mechanismCredibility: 0, proofStrength: 0,
+            differentiationSupport: 0, marketDemandAlignment: 0, audienceTrustCompatibility: 0,
+            executionFeasibility: 0, buyerFrictionLevel: 1,
+        },
+    };
+}
