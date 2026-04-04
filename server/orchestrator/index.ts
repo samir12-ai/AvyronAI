@@ -59,6 +59,7 @@ import {
 import { strategyMemory } from "@shared/schema";
 import { snapshotPreMetrics } from "../outcome-tracker";
 import { applyMemoryMutation } from "../memory-mutation/engine";
+import type { MemoryClass } from "../memory-system/types";
 
 import { MarketIntelligenceV3 } from "../market-intelligence-v3/engine";
 import { runAudienceEngine } from "../audience-engine/engine";
@@ -1300,7 +1301,7 @@ async function writeStrategyMemoryEntries(
   try {
     const entries: Array<{
       engineName: string;
-      memoryType: string;
+      memoryType: MemoryClass;
       label: string;
       details: string;
     }> = [];
@@ -1379,7 +1380,7 @@ async function writeStrategyMemoryEntries(
       }
     }
 
-    const mutationResult = await applyMemoryMutation(config.campaignId, config.accountId, entries as any, planId);
+    const mutationResult = await applyMemoryMutation(config.campaignId, config.accountId, entries, planId);
 
     console.log(
       `[Orchestrator] MEMORY_WRITTEN | planId=${planId} | entries=${entries.length} | written=${mutationResult.written} | updated=${mutationResult.updated} | decayed=${mutationResult.decayed}`,

@@ -48,7 +48,11 @@ function extractCompetitorVelocity(miData: any): Record<FormatKey, number> {
   const defaults: Record<FormatKey, number> = { reel: 0.40, carousel: 0.25, story: 0.25, post: 0.10 };
   if (!miData) return defaults;
   try {
-    const competitors = Array.isArray(miData.competitorData) ? miData.competitorData : [];
+    let rawCompetitorData = miData.competitorData;
+    if (typeof rawCompetitorData === "string") {
+      try { rawCompetitorData = JSON.parse(rawCompetitorData); } catch { rawCompetitorData = null; }
+    }
+    const competitors = Array.isArray(rawCompetitorData) ? rawCompetitorData : [];
     const formatCounts: Record<FormatKey, number> = { reel: 0, carousel: 0, story: 0, post: 0 };
     let totalSeen = 0;
 
