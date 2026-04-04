@@ -817,8 +817,9 @@ export async function synthesizePlan(
       const storiesWeekly = (dist.storiesPerDay ?? 0) * 7;
       const weeklyTotal = weeklyPoolTotal + storiesWeekly;
 
+      const effectiveExplorationCount = Math.min(totalExplorationCount, weeklyPoolTotal);
       const deducted: Record<string, number> = { ...weeklyPool };
-      let remaining = Math.min(totalExplorationCount, weeklyPoolTotal);
+      let remaining = effectiveExplorationCount;
 
       if (weeklyPoolTotal > 0 && remaining > 0) {
         const formatKeys = Object.keys(weeklyPool);
@@ -868,18 +869,18 @@ export async function synthesizePlan(
         videosPerWeek: deducted.videosPerWeek,
       };
 
-      const actualDeducted = totalExplorationCount - remaining;
+      const actualDeducted = effectiveExplorationCount - remaining;
       const newMainWeekly =
         deducted.reelsPerWeek +
         deducted.postsPerWeek +
         deducted.carouselsPerWeek +
         storiesWeekly +
         deducted.videosPerWeek;
-      const combinedTotal = newMainWeekly + totalExplorationCount;
+      const combinedTotal = newMainWeekly + effectiveExplorationCount;
       if (combinedTotal !== weeklyTotal) {
-        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${totalExplorationCount} combined=${combinedTotal} residual=${remaining}`);
+        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${effectiveExplorationCount} combined=${combinedTotal} residual=${remaining}`);
       } else {
-        console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly} volumeOk=true`);
+        console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${effectiveExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly} volumeOk=true`);
       }
     } catch (expErr: any) {
       console.warn(`[PlanSynthesis] Exploration budget computation failed (non-blocking):`, expErr.message);

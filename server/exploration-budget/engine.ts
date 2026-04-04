@@ -33,7 +33,7 @@ const MIN_EXPLORATION_PCT = 10;
 const MAX_EXPLORATION_PCT = 35;
 const BASE_EXPLORATION_PCT = 20;
 
-const CONTENT_FORMATS = ["reel", "carousel", "story", "post"] as const;
+const CONTENT_FORMATS = ["reel", "carousel", "story", "post", "video"] as const;
 type ContentFormat = typeof CONTENT_FORMATS[number];
 
 function formatFromDistribution(
@@ -44,6 +44,7 @@ function formatFromDistribution(
     carousel: plan.contentDistribution.carouselsPerWeek,
     story: plan.contentDistribution.storiesPerDay * 7,
     post: plan.contentDistribution.postsPerWeek,
+    video: plan.contentDistribution.videosPerWeek ?? 0,
   };
 }
 
@@ -209,6 +210,7 @@ function detectFormat(label: string): ContentFormat | null {
   if (l.includes("carousel") || l.includes("slide") || l.includes("swipe")) return "carousel";
   if (l.includes("story") || l.includes("stories")) return "story";
   if (l.includes("post") || l.includes("image post") || l.includes("static")) return "post";
+  if (l.includes("video") || l.includes("long-form") || l.includes("longform")) return "video";
   return null;
 }
 
