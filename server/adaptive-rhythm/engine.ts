@@ -7,7 +7,7 @@ import {
 } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { loadMemoryBlock } from "../memory-system/manager";
-import { computeExplorationBudget } from "../exploration-budget/engine";
+import { computeLegacyExplorationBudget } from "../exploration-budget/engine";
 
 export interface AdaptiveRhythm {
   reelsPerWeek: number;
@@ -153,7 +153,7 @@ export async function computeAdaptiveRhythm(
   const memBlock = await loadMemoryBlock(campaignId, accountId).catch(() => null);
   let explorationBudget = null;
   if (memBlock) {
-    explorationBudget = await computeExplorationBudget(campaignId, accountId, memBlock, totalWeeklySlots).catch(() => null);
+    explorationBudget = await computeLegacyExplorationBudget(campaignId, accountId, memBlock, totalWeeklySlots).catch(() => null);
   }
 
   const [prevRhythmMem] = await db

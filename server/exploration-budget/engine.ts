@@ -138,6 +138,7 @@ export async function computeExplorationBudget(
 
   for (const slot of memoryBlock.avoidSlots) {
     if ((slot.confidenceScore ?? 1) >= 0.75) continue;
+    if ((slot.confidenceScore ?? 1) >= 0.6) continue;
     const fmt = detectFormat(slot.label);
     if (!fmt) continue;
     avoidFormats.push({ format: fmt, confidence: slot.confidenceScore ?? 0.3 });
@@ -177,6 +178,8 @@ export async function computeExplorationBudget(
     }
   }
 
+  const actualTotalExplorationCount = candidateSlots.reduce((s, slot) => s + slot.count, 0);
+
   const baselineValue = baseline?.confidenceScore ?? null;
 
   const rationale = buildRationale(
@@ -184,23 +187,23 @@ export async function computeExplorationBudget(
     BASE_EXPLORATION_PCT,
     highConfidenceEntries,
     challengedEntries,
-    explorationCount,
+    actualTotalExplorationCount,
     weeklyTotal,
     candidateSlots,
     baselineValue,
   );
 
-  await persistExplorationBudget(campaignId, accountId, explorationPercent, explorationCount, weeklyTotal, rationale, candidateSlots);
+  await persistExplorationBudget(campaignId, accountId, explorationPercent, actualTotalExplorationCount, weeklyTotal, rationale, candidateSlots);
 
   console.log(
-    `[ExplorationBudget] campaign=${campaignId} pct=${explorationPercent}% slots=${explorationCount}/${weeklyTotal} retest=${candidateSlots.filter((s) => s.intent === "retest").length} discovery=${candidateSlots.filter((s) => s.intent === "discovery").length}`,
+    `[ExplorationBudget] campaign=${campaignId} pct=${explorationPercent}% slots=${actualTotalExplorationCount}/${weeklyTotal} retest=${candidateSlots.filter((s) => s.intent === "retest").length} discovery=${candidateSlots.filter((s) => s.intent === "discovery").length}`,
   );
 
   return {
     explorationPercent,
     explorationSlots: candidateSlots,
     rationale,
-    totalExplorationCount: explorationCount,
+    totalExplorationCount: actualTotalExplorationCount,
   };
 }
 
