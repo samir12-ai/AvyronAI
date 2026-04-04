@@ -781,6 +781,37 @@ export async function runIterationEngine(
   const targets = generateOptimizationTargets(performance, funnel);
   const failedFlags = detectFailedStrategies(performance, creative);
 
+  if (memoryContext) {
+    const lines = memoryContext.split("\n");
+    const reinforceTerms: string[] = [];
+    const avoidTerms: string[] = [];
+    let mode: "none" | "reinforce" | "avoid" = "none";
+    for (const line of lines) {
+      if (line.includes("REINFORCE") || line.includes("Reinforce") || line.includes("reinforce")) mode = "reinforce";
+      else if (line.includes("AVOID") || line.includes("Avoid") || line.includes("avoid")) mode = "avoid";
+      else if (mode === "reinforce") reinforceTerms.push(line.toLowerCase());
+      else if (mode === "avoid") avoidTerms.push(line.toLowerCase());
+    }
+    const memoryAdjLog: string[] = [];
+    for (const target of targets) {
+      const targetText = `${target.metric || ""} ${target.improvementStrategy || ""}`.toLowerCase();
+      const matchesReinforce = reinforceTerms.some(t => t.length > 3 && targetText.includes(t.trim().split(/\s+/)[0]));
+      const matchesAvoid = avoidTerms.some(t => t.length > 3 && targetText.includes(t.trim().split(/\s+/)[0]));
+      if (matchesReinforce) {
+        target.priority = Math.min((target.priority || 0.5) + 0.15, 1.0);
+        memoryAdjLog.push(`REINFORCE priority boost → ${target.metric}`);
+      } else if (matchesAvoid) {
+        target.priority = Math.max((target.priority || 0.5) - 0.2, 0.05);
+        memoryAdjLog.push(`AVOID priority cut → ${target.metric}`);
+      }
+    }
+    if (memoryAdjLog.length > 0) {
+      console.log(`[IterationEngine] Memory context applied ${memoryAdjLog.length} optimization target adjustment(s): ${memoryAdjLog.join(", ")}`);
+    } else {
+      console.log(`[IterationEngine] Memory context active (${memoryContext.length} chars) — no direct target matches, patterns available for future runs`);
+    }
+  }
+
   const guardLayer = layer4_guardLayer(hypotheses, failedFlags, reliability);
   layerResults.push(guardLayer);
 

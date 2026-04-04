@@ -1098,8 +1098,37 @@ export function runChannelSelectionEngine(
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
 
-  if (memoryContext) {
-    console.log(`[ChannelSelectionEngine] Memory context active (${memoryContext.length} chars) — avoid/reinforce patterns available for channel scoring`);
+  const memoryAdjustments: string[] = [];
+  function applyMemoryAdjustments(candidateList: typeof candidates) {
+    if (!memoryContext) return;
+    const lines = memoryContext.split("\n");
+    const reinforceLines: string[] = [];
+    const avoidLines: string[] = [];
+    let mode: "none" | "reinforce" | "avoid" = "none";
+    for (const line of lines) {
+      if (line.includes("REINFORCE") || line.includes("Reinforce") || line.includes("reinforce")) mode = "reinforce";
+      else if (line.includes("AVOID") || line.includes("Avoid") || line.includes("avoid")) mode = "avoid";
+      else if (mode === "reinforce") reinforceLines.push(line.toLowerCase());
+      else if (mode === "avoid") avoidLines.push(line.toLowerCase());
+    }
+    for (const c of candidateList) {
+      if (c.candidate.rejectionReason) continue;
+      const channelLabel = (c.candidate.channelName || c.key).toLowerCase();
+      const matchedReinforce = reinforceLines.some(l => l.includes(channelLabel) || channelLabel.split(/[\s_\-]+/).some(part => part.length > 3 && l.includes(part)));
+      const matchedAvoid = avoidLines.some(l => l.includes(channelLabel) || channelLabel.split(/[\s_\-]+/).some(part => part.length > 3 && l.includes(part)));
+      if (matchedReinforce) {
+        const adj = Math.min(c.candidate.fitScore * 0.15, 0.1);
+        c.candidate.fitScore = clamp(c.candidate.fitScore + adj, 0, 1);
+        memoryAdjustments.push(`REINFORCE +${(adj * 100).toFixed(1)}% → ${c.candidate.channelName}`);
+      } else if (matchedAvoid) {
+        const adj = Math.min(c.candidate.fitScore * 0.2, 0.15);
+        c.candidate.fitScore = clamp(c.candidate.fitScore - adj, 0, 1);
+        memoryAdjustments.push(`AVOID -${(adj * 100).toFixed(1)}% → ${c.candidate.channelName}`);
+      }
+    }
+    if (memoryAdjustments.length > 0) {
+      console.log(`[ChannelSelectionEngine] Memory context applied ${memoryAdjustments.length} score adjustment(s): ${memoryAdjustments.join(", ")}`);
+    }
   }
 
   const reliability = assessDataReliability(audience, awareness, persuasion, offer, budget, validation);
@@ -1248,6 +1277,8 @@ export function runChannelSelectionEngine(
     structuralWarnings.push(`Funnel reconstruction rescued ${rescuedChannels.size} channel(s) from rejection — multi-stage funnel recommended`);
     structuralWarnings.push(...funnelLayer.warnings);
   }
+
+  applyMemoryAdjustments(candidates);
 
   const viable = candidates.filter(c => !c.candidate.rejectionReason);
   const rejected = candidates.filter(c => !!c.candidate.rejectionReason);

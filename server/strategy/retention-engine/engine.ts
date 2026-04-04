@@ -154,7 +154,7 @@ DERIVED METRICS:
 - Churn Risk Estimate: ${((derivedMetrics?.churnRiskEstimate || 0) * 100).toFixed(1)}%
 - Estimated Lifespan: ${derivedMetrics?.estimatedLifespanMonths || "N/A"} months` : "";
 
-  return `You are a Retention Strategy Engine. Analyze the following customer retention data and produce actionable retention outputs.
+  let prompt = `You are a Retention Strategy Engine. Analyze the following customer retention data and produce actionable retention outputs.
 
 OFFER STRUCTURE:
 - Offer: ${offer.offerName || "Unknown"}
