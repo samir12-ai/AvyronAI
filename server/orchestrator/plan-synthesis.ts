@@ -805,25 +805,47 @@ export async function synthesizePlan(
 
       const totalExplorationCount = expBudget.totalExplorationCount;
       const dist = { ...synthesized.contentDistribution };
-      let slotsStillToDeduct = totalExplorationCount;
-      const formatOrder: Array<keyof typeof dist> = [
-        "reelsPerWeek",
-        "postsPerWeek",
-        "carouselsPerWeek",
-        "storiesPerDay",
-        "videosPerWeek",
-      ];
 
-      for (const key of formatOrder) {
-        if (slotsStillToDeduct <= 0) break;
-        const current = (dist[key] as number) ?? 0;
-        const deduct = Math.min(current, slotsStillToDeduct);
-        (dist[key] as number) = Math.max(0, current - deduct);
-        slotsStillToDeduct -= deduct;
+      const weeklyUnits = {
+        reelsPerWeek: dist.reelsPerWeek ?? 0,
+        postsPerWeek: dist.postsPerWeek ?? 0,
+        carouselsPerWeek: dist.carouselsPerWeek ?? 0,
+        storiesPerWeek: (dist.storiesPerDay ?? 0) * 7,
+        videosPerWeek: dist.videosPerWeek ?? 0,
+      };
+      const weeklyTotal = Object.values(weeklyUnits).reduce((s, v) => s + v, 0);
+
+      let remaining = totalExplorationCount;
+      const deductedWeekly: typeof weeklyUnits = { ...weeklyUnits };
+
+      if (weeklyTotal > 0) {
+        for (const key of Object.keys(weeklyUnits) as Array<keyof typeof weeklyUnits>) {
+          if (remaining <= 0) break;
+          const share = weeklyUnits[key] / weeklyTotal;
+          const proportional = Math.round(totalExplorationCount * share);
+          const deduct = Math.min(deductedWeekly[key], proportional, remaining);
+          deductedWeekly[key] = Math.max(0, deductedWeekly[key] - deduct);
+          remaining -= deduct;
+        }
+        if (remaining > 0) {
+          for (const key of Object.keys(deductedWeekly) as Array<keyof typeof deductedWeekly>) {
+            if (remaining <= 0) break;
+            const deduct = Math.min(deductedWeekly[key], remaining);
+            deductedWeekly[key] = Math.max(0, deductedWeekly[key] - deduct);
+            remaining -= deduct;
+          }
+        }
       }
 
-      synthesized.contentDistribution = dist;
-      console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} slots=${expBudget.explorationSlots.length} deducted=${totalExplorationCount - slotsStillToDeduct}`);
+      synthesized.contentDistribution = {
+        ...dist,
+        reelsPerWeek: deductedWeekly.reelsPerWeek,
+        postsPerWeek: deductedWeekly.postsPerWeek,
+        carouselsPerWeek: deductedWeekly.carouselsPerWeek,
+        storiesPerDay: Math.round(deductedWeekly.storiesPerWeek / 7),
+        videosPerWeek: deductedWeekly.videosPerWeek,
+      };
+      console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} slots=${expBudget.explorationSlots.length} deducted=${totalExplorationCount - remaining}`);
     } catch (expErr: any) {
       console.warn(`[PlanSynthesis] Exploration budget computation failed (non-blocking):`, expErr.message);
     }

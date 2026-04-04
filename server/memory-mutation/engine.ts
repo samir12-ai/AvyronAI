@@ -259,6 +259,7 @@ async function processExplorationResults(
       .select({
         contentType: calendarEntries.contentType,
         explorationHypothesis: calendarEntries.explorationHypothesis,
+        scheduledDate: calendarEntries.scheduledDate,
         createdAt: calendarEntries.createdAt,
       })
       .from(calendarEntries)
@@ -273,17 +274,22 @@ async function processExplorationResults(
 
     if (explorationEntries.length === 0) return;
 
-    const formatGroups = new Map<string, { explorationStart: Date; hypothesis: string | null }>();
+    const formatGroups = new Map<string, { explorationWindowStart: Date; explorationWindowEnd: Date; hypothesis: string | null }>();
     for (const entry of explorationEntries) {
       const fmt = entry.contentType.toLowerCase();
-      const ts = entry.createdAt ?? new Date(0);
+      const scheduledTs = entry.scheduledDate ? new Date(entry.scheduledDate) : (entry.createdAt ?? new Date(0));
+      if (isNaN(scheduledTs.getTime())) continue;
       const existing = formatGroups.get(fmt);
-      if (!existing || ts < existing.explorationStart) {
-        formatGroups.set(fmt, { explorationStart: ts, hypothesis: entry.explorationHypothesis });
+      if (!existing) {
+        formatGroups.set(fmt, { explorationWindowStart: scheduledTs, explorationWindowEnd: scheduledTs, hypothesis: entry.explorationHypothesis });
+      } else {
+        if (scheduledTs < existing.explorationWindowStart) existing.explorationWindowStart = scheduledTs;
+        if (scheduledTs > existing.explorationWindowEnd) existing.explorationWindowEnd = scheduledTs;
       }
     }
 
-    for (const [fmt, { explorationStart, hypothesis }] of formatGroups) {
+    for (const [fmt, { explorationWindowStart, explorationWindowEnd, hypothesis }] of formatGroups) {
+      const windowEnd = new Date(explorationWindowEnd.getTime() + 7 * 24 * 60 * 60 * 1000);
       const snaps = await db
         .select({
           smoothedPerformanceScore: contentPerformanceSnapshots.smoothedPerformanceScore,
@@ -295,15 +301,17 @@ async function processExplorationResults(
             eq(contentPerformanceSnapshots.accountId, accountId),
             eq(contentPerformanceSnapshots.campaignId, campaignId),
             eq(contentPerformanceSnapshots.contentType, fmt),
-            gt(contentPerformanceSnapshots.createdAt, explorationStart),
+            gt(contentPerformanceSnapshots.createdAt, explorationWindowStart),
           ),
         )
         .orderBy(desc(contentPerformanceSnapshots.createdAt))
         .limit(3);
 
-      if (snaps.length === 0) continue;
+      const inWindowSnaps = snaps.filter((s) => !s.createdAt || s.createdAt <= windowEnd);
 
-      const strongPeriods = snaps.filter((s) => (s.smoothedPerformanceScore ?? 0) >= industryBaseline);
+      if (inWindowSnaps.length === 0) continue;
+
+      const strongPeriods = inWindowSnaps.filter((s) => (s.smoothedPerformanceScore ?? 0) >= industryBaseline);
 
       if (strongPeriods.length >= 1) {
         const existingProvisional = await db
@@ -339,7 +347,7 @@ async function processExplorationResults(
             direction: "reinforce",
             lastValidatedAt: new Date(),
           });
-          console.log(`[MemoryMutation] EXPLORATION_RESULT | format=${fmt} baseline=${industryBaseline.toFixed(3)} strongPeriods=${strongPeriods.length} explorationStart=${explorationStart.toISOString()} → provisional reinforce created`);
+          console.log(`[MemoryMutation] EXPLORATION_RESULT | format=${fmt} baseline=${industryBaseline.toFixed(3)} strongPeriods=${strongPeriods.length} windowStart=${explorationWindowStart.toISOString()} windowEnd=${windowEnd.toISOString()} → provisional reinforce created`);
         }
       }
     }
