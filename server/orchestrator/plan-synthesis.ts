@@ -270,6 +270,7 @@ async function generatePlanWithAI(
   accountId: string = "default",
   memoryContextBlock?: string,
   campaignId: string = "",
+  precomputedRhythm?: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; reasoning: string; performanceBasis: string } | null,
 ): Promise<SynthesizedPlan> {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
@@ -305,15 +306,6 @@ BUSINESS ARCHETYPE: ${archetype?.name || businessType}
 
 IMPORTANT: Content volumes and distribution MUST be derived from the funnel math above.
 The plan must explain WHY each content type volume was chosen based on the goal decomposition.
-
-CONTENT DISTRIBUTION RULES (platform algorithm-aware):
-On Instagram and similar platforms, reach and discovery are primarily driven by short-form video (Reels).
-Adjust content distribution based on the funnel objective:
-- AWARENESS / REACH objectives: Reels 70%, Carousels 20%, Posts 10%
-- LEAD GENERATION objectives: Reels 50%, Carousels 35%, Posts 15%
-- SALES / CONVERSION objectives: Reels 40%, Carousels 40%, Posts 20%
-- DEFAULT distribution: Reels 60%, Carousels 30%, Posts 10%
-The reelsPerWeek should always be the highest count. Never generate plans where posts exceed reels.
 `;
   }
 
@@ -330,13 +322,26 @@ ${lockedDecisions}
 `
     : "";
 
+  const rhythmConstraintBlock = precomputedRhythm
+    ? `LOCKED CONTENT RHYTHM (adaptive engine output — do NOT override these values):
+Reels/week: ${precomputedRhythm.reelsPerWeek}
+Carousels/week: ${precomputedRhythm.carouselsPerWeek}
+Stories/day: ${precomputedRhythm.storiesPerDay}
+Posts/week: ${precomputedRhythm.postsPerWeek}
+Basis: ${precomputedRhythm.performanceBasis}
+Reasoning: ${precomputedRhythm.reasoning}
+INSTRUCTION: Use these exact counts in contentDistribution. Do not derive rhythm from objective, business type, or platform templates. These values are pre-computed and locked.
+
+`
+    : "";
+
   const prompt = `You are a marketing strategist assembling an execution plan from engine outputs. Your job is to ASSEMBLE, not to re-derive strategy.
 
 Business Type: ${businessType}
 Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
-${memoryBlock}${lockedBlock}${goalMathSection}
+${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}
 Engine Analysis Results (use for volume, timing, and structural decisions):
 ${engineInsights}
 
@@ -703,7 +708,15 @@ export async function synthesizePlan(
 
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId);
+
+  let precomputedRhythm = null;
+  try {
+    precomputedRhythm = await computeAdaptiveRhythm(config.campaignId, config.accountId);
+  } catch (rhythmErr: any) {
+    console.warn(`[PlanSynthesis] Precomputed rhythm failed (non-blocking):`, rhythmErr.message);
+  }
+
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm);
 
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);

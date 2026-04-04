@@ -9,8 +9,8 @@ import { resolveAccountId } from "../auth";
 export function registerExplorationBudgetRoutes(app: Express): void {
   app.get("/api/exploration-budget/:campaignId", async (req: Request, res: Response) => {
     try {
-      const accountId = resolveAccountId(req);
-      const { campaignId } = req.params;
+      const accountId = resolveAccountId(req) as string;
+      const campaignId = req.params.campaignId as string;
 
       const [bizSnap] = await db
         .select()

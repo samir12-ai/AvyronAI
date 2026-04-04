@@ -175,6 +175,31 @@ export async function computeAdaptiveRhythm(
     }
   }
 
+  const allMemory = memBlock
+    ? [...memBlock.reinforceSlots, ...memBlock.avoidSlots]
+    : [];
+
+  const FORMAT_NAME_MAP: Record<string, FormatKey | "story"> = {
+    reel: "reel", reels: "reel", "short-form video": "reel", "short form video": "reel",
+    carousel: "carousel", carousels: "carousel", "carousel post": "carousel",
+    post: "post", posts: "post", "static post": "post", "feed post": "post",
+    story: "story", stories: "story", "instagram story": "story",
+  };
+
+  const memoryFormatBias: Record<string, number> = { reel: 0, carousel: 0, post: 0, story: 0 };
+  for (const slot of allMemory) {
+    if (slot.confidenceScore < 0.4) continue;
+    const labelLower = slot.label.toLowerCase();
+    for (const [keyword, fmt] of Object.entries(FORMAT_NAME_MAP)) {
+      if (labelLower.includes(keyword)) {
+        const weight = slot.isWinner ? slot.confidenceScore : -slot.confidenceScore * 0.5;
+        memoryFormatBias[fmt] = (memoryFormatBias[fmt] ?? 0) + weight;
+        break;
+      }
+    }
+  }
+  const hasMemorySignal = Object.values(memoryFormatBias).some((v) => Math.abs(v) > 0.01);
+
   let formatWeights: Record<string, number>;
   let performanceBasis: "performance_data" | "competitor_benchmark" | "default_balanced";
   let confidenceScore: number;
@@ -234,6 +259,36 @@ export async function computeAdaptiveRhythm(
     formatWeights = { reel: 0.55, carousel: 0.30, story: 0.25, post: 0.15 };
     confidenceScore = 0.25;
     reasoningParts.push("Balanced default — no performance data or competitor signals available");
+  }
+
+  if (hasMemorySignal) {
+    const blendFactor = 0.25;
+    for (const fmt of ["reel", "carousel", "post"] as const) {
+      const bias = memoryFormatBias[fmt] ?? 0;
+      if (Math.abs(bias) > 0.01) {
+        const biasClamped = Math.max(-0.3, Math.min(0.3, bias * blendFactor));
+        formatWeights[fmt] = Math.max(0.05, (formatWeights[fmt] ?? 0) + biasClamped);
+      }
+    }
+    const nonStoryWeightTotal = formatWeights.reel + formatWeights.carousel + formatWeights.post;
+    if (nonStoryWeightTotal > 0) {
+      formatWeights.reel /= nonStoryWeightTotal;
+      formatWeights.carousel /= nonStoryWeightTotal;
+      formatWeights.post /= nonStoryWeightTotal;
+    }
+    const memoryWinners = allMemory.filter(s => s.isWinner && Object.keys(FORMAT_NAME_MAP).some(k => s.label.toLowerCase().includes(k)));
+    if (memoryWinners.length > 0) {
+      reasoningParts.push(`Memory: ${memoryWinners.length} format winner(s) applied as bias`);
+    }
+  }
+
+  const bizTimelineConstraint = bizSnap?.goalTimeline
+    ? `${bizSnap.goalTimeline} timeline`
+    : null;
+  const bizBandwidthNote = bizSnap?.goalTarget ? `target: ${bizSnap.goalTarget}` : null;
+  if (bizTimelineConstraint || bizBandwidthNote) {
+    const constraints = [bizTimelineConstraint, bizBandwidthNote].filter(Boolean);
+    reasoningParts.push(`Business constraints: ${constraints.join(", ")}`);
   }
 
   const nonStorySlots = Math.round(totalWeeklySlots * 0.75);
