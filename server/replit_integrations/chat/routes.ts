@@ -421,7 +421,7 @@ export function registerChatRoutes(app: Express): void {
 
           toolCallsExecuted.push({ name: pendingToolName, result: toolResult });
 
-          if (campaignId) {
+          if (campaignId && toolResult.success) {
             const justification = toolArgs.justification || `User-initiated ${pendingToolName}`;
             writeAgentActionMemory(accountId, String(campaignId), pendingToolName, justification, toolResult).catch(() => {});
           }
