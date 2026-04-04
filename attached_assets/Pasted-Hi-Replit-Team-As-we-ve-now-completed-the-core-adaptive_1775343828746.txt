@@ -1,0 +1,142 @@
+Hi Replit Team,
+
+As we’ve now completed the core adaptive system layers (#11–#17), I’d like to request a **comprehensive backend architecture overview** to ensure full visibility, alignment, and long-term scalability.
+
+Specifically, I’m looking for a complete, structured breakdown of how the system is wired end-to-end — not just at a high level, but with clear mapping of all components and their relationships.
+
+---
+
+### 🔍 Requested Scope
+
+Please include a detailed overview covering:
+
+#### 1. System Architecture (End-to-End Flow)
+
+* Full pipeline from:
+
+  * data ingestion (scraping + manual input)
+  * → performance processing
+  * → memory mutation
+  * → adaptive rhythm
+  * → plan synthesis
+  * → agent execution
+* Clear flow diagram or step-by-step sequence
+
+---
+
+#### 2. Backend Structure (Files & Responsibilities)
+
+* Breakdown of key directories and files, including:
+
+  * `server/orchestrator/*`
+  * `server/adaptive-rhythm/*`
+  * `server/performance-feedback/*`
+  * `server/build-plan-layer/*`
+  * `server/replit_integrations/chat/*`
+* What each file/module is responsible for
+* Entry points and execution order
+
+---
+
+#### 3. Data Layer & Schema Mapping
+
+* All relevant tables and how they connect:
+
+  * `content_performance_snapshots`
+  * `strategy_memory`
+  * any related campaign/account tables
+* Field-level explanation (especially performanceScore, confidenceScore, direction, etc.)
+* How data flows between tables
+
+---
+
+#### 4. Engine Interconnections
+
+* How the following systems interact:
+
+  * Performance Feedback Layer (#11)
+  * Memory System (#15)
+  * Memory Mutation Engine (#16)
+  * Adaptive Rhythm Engine (#13)
+  * Memory Enforcement (#12)
+  * Exploration Engine (#17)
+* Order of execution and dependencies
+
+---
+
+#### 5. Agent Controller & Tooling
+
+* Full breakdown of:
+
+  * tool definitions
+  * tool routing (handleToolCall)
+  * how tool results feed back into the agent loop
+* How the agent interacts with backend engines
+
+---
+
+#### 6. Memory Lifecycle
+
+* End-to-end lifecycle of a memory entry:
+
+  * creation → mutation → decay → enforcement
+* Where each stage is implemented in code
+
+---
+
+#### 7. Performance Data Flow (Important)
+
+* Clarify how:
+
+  * scraped page data
+  * and manual campaign metrics
+    are ingested, processed, and used differently
+
+---
+
+#### 8. Constraints & Enforcement Layer
+
+* Where and how:
+
+  * applyMemoryConstraints runs
+  * baseline is defined
+  * overrides are applied and persisted
+
+---
+
+#### 9. Exploration Logic
+
+* Where exploration is computed
+* How slots are injected into plans
+* How exploration results feed back into memory
+
+---
+
+#### 10. Any Implicit Logic or Hidden Coupling
+
+* Any non-obvious dependencies between modules
+* Any assumptions or “silent” logic that isn’t explicitly documented
+
+---
+
+### 🎯 Goal
+
+The goal is to achieve **full system clarity**, including:
+
+* where every piece of logic lives
+* how everything connects
+* and how data flows across the entire adaptive loop
+
+This will help ensure:
+
+* maintainability
+* scalability
+* and safe iteration moving forward
+
+---
+
+Let me know if this can be delivered as a structured document or diagram (preferred), or broken down into sections.
+
+Thanks,
+Samir
+Avyron AI

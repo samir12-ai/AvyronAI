@@ -59,3 +59,9 @@ id = "isGnzzCgF4b_63ai5ByKu"
 uri = "file://README.md"
 type = "text"
 title = "Avyron AI — Full System Documentation"
+
+[[outputs]]
+id = "Jv6rOMMTxO53k5I1QEySz"
+uri = "file://.local/avyron-architecture.md"
+type = "text"
+title = "Avyron AI — Backend Architecture Overview"
