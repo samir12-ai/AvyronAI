@@ -1,0 +1,240 @@
+g"}
+Hi,
+
+I want to clarify the architecture we already have in place, and then ask for technical guidance on how to extend it correctly without rebuilding logic that already exists or breaking the current system.
+
+## What is already built
+
+We already have a multi-engine marketing system in production logic. This is not a new engine concept that needs to be invented from scratch.
+
+Our engine stack already exists and includes the strategic and execution pipeline, including engines such as:
+
+- Intelligence
+- Audience
+- Positioning
+- Differentiation
+- Mechanism Engine
+- Offer Engine
+- Awareness Engine
+- Funnel Engine
+- Integrity Engine
+- Persuasion Engine
+- Statistical Validation
+- Budget Governor
+- Channel Selection
+- Iteration Engine
+- Retention Engine
+
+These engines are already part of the system and already produce structured outputs across the pipeline.
+
+We also already have competitor-side public data scraping in place:
+- competitor Instagram / website scraping
+- competitor content / posts / comments / signals
+- competitor analysis feeding the existing engines
+
+So the competitor public-data side is already handled.
+
+---
+
+## What we want to add now
+
+The new layer we want to implement is:
+
+### 1) Agent as the operator / orchestrator
+We want the Agent to sit above the existing engine system and act as the controller, not just as a chat interface.
+
+The Agent should:
+- have access to all current engine outputs
+- read both competitor-side data and user-side data
+- detect change over time
+- decide whether to:
+  - keep the current strategy
+  - rerun only adaptive / execution-oriented engines
+  - rerun broader strategic engines if needed
+
+Important: we do not want to rebuild the engines.  
+We want to orchestrate the engines that already exist.
+
+---
+
+### 2) Add public scraping for the user’s own channels
+Right now, we already have:
+- manual campaign metrics input
+- manual retention metrics input
+- business profile / goal / product context input
+
+What we want to add now is a new public scraping layer for the user’s own assets, for example:
+
+- Instagram link
+- TikTok link
+- Website link
+
+From these user-owned public links, we want to scrape visible/public signals such as:
+- posts / reels / content frequency
+- likes
+- comments count
+- views where publicly available
+- post types / content format mix
+- visible website content / updates / changes
+
+This is not meant to replace the existing manual inputs.
+
+It is meant to enrich the Agent with user-side public performance/context data, so the Agent can better understand the user’s actual execution behavior and public-facing content performance.
+
+---
+
+## The key distinction the Agent must understand
+
+The Agent must analyze two different sides in parallel:
+
+### A) Competitor side
+This already exists and includes:
+- competitor public scraping
+- competitor content shifts
+- competitor messaging changes
+- competitor strategy signals
+- competitor content mix / proof / education / offer movement
+
+This side is used to determine:
+- whether the market has shifted
+- whether competitors changed positioning, execution, or content patterns
+- whether broader strategic reruns are needed
+
+---
+
+### B) User side
+This is the part we want to strengthen now.
+
+The Agent should look at:
+- existing manual campaign metrics
+- existing manual retention metrics
+- existing business / goal context
+- new public scraping from the user’s own Instagram / TikTok / website
+
+This side is used to determine:
+- whether the user’s current execution is working
+- whether the content mix is aligned with strategy
+- whether execution changes are needed
+- whether the issue is in content, funnel, offer, conversion path, or retention
+
+---
+
+## Desired operating model
+
+We want the Agent to evaluate both sides continuously:
+
+### Side 1: Competitor / market side
+Question:
+- Has anything changed in the market or competitor behavior that requires strategic adaptation?
+
+### Side 2: User / execution side
+Question:
+- Is the user’s current strategy being executed properly?
+- Is public-facing content performance indicating that execution changes are needed?
+- Are manual metrics showing a problem in conversion, lead quality, or retention?
+
+Then the Agent should decide:
+
+- no change needed
+- execution-level changes only
+- partial engine refresh
+- broader strategic rerun
+
+---
+
+## Important clarification
+
+We are not asking to create:
+- new core engines
+- new competitor scraping architecture from scratch
+- a new full system
+
+Those parts already exist.
+
+We are asking for guidance on how to correctly implement:
+
+1. an Agent orchestration layer on top of the current engine stack  
+2. a user-side public scraping layer for the user’s own pages/assets  
+3. the logic that combines:
+   - competitor-side intelligence
+   - user-side public signals
+   - user-side private/manual business metrics
+
+without duplicating existing logic or breaking the current architecture
+
+---
+
+## What we need technical guidance on
+
+Given the current codebase, we want your recommendation on the best implementation path for:
+
+### 1. Agent orchestration over existing engines
+- Where should the Agent layer live?
+- How should it access current engine outputs?
+- How should it decide when to rerun specific engines vs leave current strategy unchanged?
+
+### 2. User-side public scraping
+- Best way to add scraping for the user’s own Instagram / TikTok / website links
+- How to store that data separately from competitor scrape data
+- How to compare weekly deltas on the user side
+
+### 3. Dual-analysis logic
+How should we model the Agent’s decision process between:
+- competitor-side strategic change
+- user-side execution/performance change
+
+So that the Agent can distinguish:
+- “market changed”
+from
+- “user execution is weak”
+from
+- “both changed”
+
+### 4. Data model / storage
+How should we structure:
+- user public scrape history
+- competitor public scrape history
+- current engine state / last approved strategy state
+- rerun triggers / change logs / agent decisions
+
+### 5. Weekly automation
+We want weekly background scraping and comparison, ideally without the user needing to manually trigger it.
+What is the cleanest way to implement this in the current codebase:
+- scheduled jobs
+- workers
+- queues
+- background tasks
+
+### 6. Non-breaking integration
+Most importantly:
+we want to avoid building something that is already present in the codebase,
+and we want to avoid adding a layer that conflicts with or breaks the current logic.
+
+So we need your guidance based on the current implementation:
+- what already exists that can be reused
+- where the correct extension points are
+- and how to wire this in safely
+
+---
+
+## Goal
+
+The final behavior we want is:
+
+- competitor-side scraping continues as it already does
+- user-side public scraping is added
+- manual user business metrics remain in place
+- the Agent reads both the competitor side and the user side
+- the Agent acts as the operator of the existing engines
+- the Agent decides whether execution needs adjustment, or whether strategy itself needs to be rerun
+
+In short:
+we want the Agent to manage the system from both directions:
+- market / competitor direction
+- user / execution direction
+
+using the engines that already exist.
+
+Please review this direction based on the current codebase and advise us on the best way to implement it without duplicating existing functionality or breaking current system logic.
+
+Than

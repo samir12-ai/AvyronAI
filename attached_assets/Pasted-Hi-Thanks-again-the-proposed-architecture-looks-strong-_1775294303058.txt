@@ -1,0 +1,142 @@
+Hi,
+
+Thanks again — the proposed architecture looks strong and aligned with our direction.
+
+Before moving forward, we want to add a set of important clarifications and constraints to ensure correct implementation and avoid issues we’ve previously encountered.
+
+---
+
+### 1) Agent depth — avoid generic outputs
+
+We previously faced an issue where engines produced overly generic outputs unless they were explicitly constrained to operate through deeper structured layers.
+
+We want to avoid the same issue with the Agent.
+
+The Agent should not act as a high-level summarizer. It must operate through structured context only, including:
+- competitor delta context
+- user-side delta context
+- strategy memory
+- current plan state
+- engine outputs
+
+Its output should remain decision-oriented and structured (classification, reasoning, recommended engines), not broad generic analysis.
+
+---
+
+### 2) Scraping implementation must reuse existing proxy pool approach
+
+We already solved scraping reliability issues using a proxy pool setup for competitor scraping.
+
+We want all new scraping (user-side included) to follow the same discipline:
+- proxy pool usage
+- retry / cooldown logic
+- anti-block safeguards
+
+Even if this increases scraping time, reliability is more important than speed.
+
+---
+
+### 3) Clear separation between initial scrape and weekly refresh
+
+We want strict separation between:
+
+Initial scrape (first time only):
+- up to last 30 days maximum
+- capped sample (e.g. up to 12 posts)
+- used to establish baseline (content mix, cadence, patterns)
+
+Weekly refresh (ongoing):
+- last 7 days only
+- new content only (delta)
+- no historical re-fetching
+
+This applies to both:
+- competitor scraping
+- user-side public scraping
+
+---
+
+### 4) Scraping results must go to the Agent first (not directly to engines)
+
+Weekly scrape results (both competitor and user side) should not directly trigger engine execution.
+
+Instead:
+- all new scrape data is routed to the Agent first
+- the Agent decides:
+  - no action
+  - partial rerun
+  - full rerun
+
+This keeps the Agent as the orchestration controller.
+
+---
+
+### 5) Dual analysis must clearly separate two directions
+
+The Agent must always distinguish between:
+
+Competitor / market side
+- market shifts
+- competitor behavior changes
+
+User / execution side
+- user content performance
+- execution consistency
+- alignment with strategy
+
+The goal is to correctly classify:
+- market shift
+- execution gap
+- both
+- no change
+
+---
+
+### 6) Strategy memory must be used as a constraint (not just storage)
+
+We strongly want the system to:
+- track which strategies worked vs failed
+- reuse that context in future runs
+- avoid repeating ineffective patterns
+
+This memory should actively influence the Agent’s decisions, not just be stored passively.
+
+---
+
+### 7) Strict data structure and ID discipline (critical)
+
+We previously encountered serious issues with data mixing due to weak structure and ID handling.
+
+To avoid this entirely, we want strict enforcement of:
+
+- every entity must have a clear, unique ID
+- all data must be stored only in its designated table
+- no cross-table mixing or implicit linking
+- Agent memory entries must also carry explicit identifiers
+- no default/fallback IDs that could cause collisions
+
+In short:
+we want a strict data contract across:
+- database tables
+- strategy memory
+- scraping outputs
+- agent context
+
+This is critical to prevent noise, duplication, and corrupted analysis.
+
+---
+
+### 8) Weekly scraping should be delta-driven only
+
+For both user and competitor:
+- each week should analyze only that week’s changes
+- no reprocessing of older data
+- no mixing old and new data in the same analysis cycle
+
+---
+
+Please take these clarifications into account when aligning the implementation with the current codebase.
+
+The goal is to extend the existing system safely, without duplicating logic or introducing instability.
+
+Thanks.

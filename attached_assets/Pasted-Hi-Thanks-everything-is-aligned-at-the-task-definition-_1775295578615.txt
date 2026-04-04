@@ -1,0 +1,156 @@
+Hi,
+
+Thanks — everything is aligned at the task-definition level.
+
+Before implementation is considered complete, we want to define strict runtime acceptance criteria that must be validated under real execution conditions (not just code structure or happy paths).
+
+The system will only be accepted if all conditions below are met in actual runtime behavior:
+
+---
+
+### 1) Agent output validation under real scenarios
+
+The Agent must consistently produce structured, non-generic outputs across different real data cases.
+
+Acceptance conditions:
+- Run dual-analysis on at least 3 different scenarios:
+  - clear market shift
+  - clear execution gap
+  - mixed signals
+- In all cases, the Agent must:
+  - return correct classification
+  - provide reasoning tied explicitly to BOTH:
+    - competitor data
+    - user data
+  - return a non-empty, specific recommendedEngines array
+  - include a confidence score that reflects signal strength
+- Any generic, vague, or non-contextual response is considered failure
+
+---
+
+### 2) Scraping reliability under load (proxy pool enforcement)
+
+Acceptance conditions:
+- Run scraping across:
+  - multiple campaigns
+  - multiple user channels
+  - multiple competitors
+- Validate that:
+  - all requests go through proxy pool functions (no direct calls)
+  - blocked sessions are rotated correctly
+  - retries respect cooldown logic
+- Simulate at least one block scenario:
+  - system must recover without crashing or skipping data
+- Scraping may be slow, but must complete without instability
+
+---
+
+### 3) Initial vs incremental scraping correctness (multi-cycle test)
+
+Acceptance conditions:
+- For a fresh campaign:
+  - first scrape must:
+    - use up to 30-day window
+    - respect post cap
+- After 1+ cycles:
+  - all subsequent scrapes must:
+    - only use last 7 days
+    - not re-fetch older data
+- Validate across at least 3 consecutive runs:
+  - no duplication
+  - no historical bleed
+  - correct delta computation
+
+---
+
+### 4) Strict scrape → Agent → decision flow
+
+Acceptance conditions:
+- Trigger scraping manually and via worker
+- Verify:
+  - scraping only writes to DB
+  - no engine is triggered directly from scraping
+- Verify that:
+  - only the dual-analysis route produces rerun decisions
+  - engines only run after explicit user-triggered action
+
+Any implicit or hidden trigger path is considered failure.
+
+---
+
+### 5) Data integrity and ID isolation (critical stress test)
+
+Acceptance conditions:
+- Run multiple campaigns in parallel
+- Run multiple orchestrator executions
+- Run multiple scraping cycles
+
+Verify:
+- no data from one campaign appears in another
+- no cross-linking between:
+  - competitor data
+  - user data
+- all records must contain valid:
+  - accountId
+  - campaignId
+  - planId
+  - engineName (where applicable)
+- no default/fallback IDs appear in any inserted row
+- no orphaned records (rows without valid references)
+
+Any mixing, duplication, or ambiguous linking is considered failure.
+
+---
+
+### 6) Strategy memory correctness over time
+
+Acceptance conditions:
+- Run at least 3 orchestrator cycles
+- Verify:
+  - each run creates memory entries linked to the correct planId and engineName
+  - decisionOutcomes entries are created and updated after evaluation
+- Run a new orchestrator cycle:
+  - verify memory is injected into prompts
+  - verify Agent/engines reference past outcomes (not ignore them)
+- System must demonstrate:
+  - reinforcement of successful patterns
+  - avoidance of previously failed ones
+
+---
+
+### 7) Dual-analysis correctness across edge cases
+
+Acceptance conditions:
+- Test edge cases:
+  - no competitor change + strong user drop
+  - strong competitor shift + stable user performance
+  - both sides noisy
+- Verify classification remains stable and logical
+- No random or inconsistent classification across repeated runs
+
+---
+
+### 8) System stability under repeated execution
+
+Acceptance conditions:
+- Run:
+  - scraping
+  - dual-analysis
+  - orchestrator
+  in repeated cycles
+
+Verify:
+- no memory bloat causing degraded performance
+- no duplicated snapshots
+- no infinite loops or unintended re-triggers
+- consistent system behavior over time
+
+---
+
+### Final condition
+
+The implementation is only considered complete if all above conditions pass under real runtime testing.
+
+Passing at the code level or task-definition level is not sufficient — behavior must be validated end-to-end.
+
+Thanks.

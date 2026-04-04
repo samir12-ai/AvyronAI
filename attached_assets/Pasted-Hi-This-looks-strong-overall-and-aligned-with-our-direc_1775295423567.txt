@@ -1,0 +1,75 @@
+Hi,
+
+This looks strong overall and aligned with our direction. Before moving forward, we want to lock a few critical implementation details to avoid issues we’ve previously encountered:
+
+---
+
+### 1) Agent output must remain non-generic and structured
+
+We want to explicitly ensure that the Agent does not produce high-level or generic summaries.
+
+Agent outputs must be structured and decision-oriented, including:
+- classification
+- reasoning tied to specific data (user vs competitor)
+- recommended engine scope
+- confidence
+
+The Agent should always operate on deep structured context (memory + deltas), not generate broad responses.
+
+---
+
+### 2) Scraping must follow existing proxy-pool discipline
+
+User-side scraping must reuse the same stability model as competitor scraping:
+- proxy pool
+- retry / cooldown handling
+- anti-block safeguards
+
+We prefer slower but reliable scraping over faster unstable execution.
+
+---
+
+### 3) Strict scrape window rules
+
+We want this explicitly enforced:
+
+- Initial scrape: up to last 30 days (capped sample)
+- Weekly refresh: last 7 days only (delta only)
+
+No historical re-fetching during refresh cycles, and no mixing old data into new weekly analysis.
+
+---
+
+### 4) Scrape → Agent → Decision (no direct engine triggers)
+
+All new scraped data (competitor and user-side) must be routed to the Agent first.
+
+Scraping must not directly trigger engine execution.  
+The Agent must always decide:
+- no action
+- partial rerun
+- full rerun
+
+---
+
+### 5) Strict data contracts and ID integrity (critical)
+
+We need strict enforcement to prevent data mixing:
+
+- every entity must have explicit unique IDs
+- no fallback/default IDs
+- no cross-table ambiguity
+- user data and competitor data must remain fully separated
+- all memory, snapshots, and decisions must be explicitly tied to:
+  - campaignId
+  - accountId
+  - planId
+  - engineName
+
+This is critical to avoid noise and corrupted analysis.
+
+---
+
+If these constraints are aligned with the implementation plan, we’re good to proceed.
+
+Thanks.
