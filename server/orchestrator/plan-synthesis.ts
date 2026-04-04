@@ -796,15 +796,6 @@ export async function synthesizePlan(
         config.accountId,
         campaign?.explorationBudgetPercent ?? null,
       );
-      explorationSlotList = expBudget.explorationSlots;
-      synthesized.explorationPlan = {
-        explorationPercent: expBudget.explorationPercent,
-        totalExplorationCount: expBudget.totalExplorationCount,
-        rationale: expBudget.rationale,
-        slots: expBudget.explorationSlots,
-      };
-
-      const totalExplorationCount = expBudget.totalExplorationCount;
       const dist = { ...synthesized.contentDistribution };
 
       const weeklyPool: Record<string, number> = {
@@ -817,9 +808,32 @@ export async function synthesizePlan(
       const storiesWeekly = (dist.storiesPerDay ?? 0) * 7;
       const weeklyTotal = weeklyPoolTotal + storiesWeekly;
 
-      const effectiveExplorationCount = Math.min(totalExplorationCount, weeklyPoolTotal);
+      const rawExplorationCount = expBudget.totalExplorationCount;
+      const effectiveExplorationCount = Math.min(rawExplorationCount, weeklyPoolTotal);
+
+      let scheduledSlots = expBudget.explorationSlots;
+      if (effectiveExplorationCount < rawExplorationCount) {
+        let cap = effectiveExplorationCount;
+        scheduledSlots = [];
+        for (const slot of expBudget.explorationSlots) {
+          if (cap <= 0) break;
+          const slotCount = Math.min(slot.count, cap);
+          scheduledSlots.push({ ...slot, count: slotCount });
+          cap -= slotCount;
+        }
+      }
+      const scheduledExplorationCount = scheduledSlots.reduce((s, slot) => s + slot.count, 0);
+
+      explorationSlotList = scheduledSlots;
+      synthesized.explorationPlan = {
+        explorationPercent: expBudget.explorationPercent,
+        totalExplorationCount: scheduledExplorationCount,
+        rationale: expBudget.rationale,
+        slots: scheduledSlots,
+      };
+
       const deducted: Record<string, number> = { ...weeklyPool };
-      let remaining = effectiveExplorationCount;
+      let remaining = scheduledExplorationCount;
 
       if (weeklyPoolTotal > 0 && remaining > 0) {
         const formatKeys = Object.keys(weeklyPool);
@@ -827,7 +841,7 @@ export async function synthesizePlan(
         let idealSum = 0;
         for (const key of formatKeys) {
           const share = weeklyPool[key] / weeklyPoolTotal;
-          const ideal = Math.floor(totalExplorationCount * share);
+          const ideal = Math.floor(scheduledExplorationCount * share);
           idealDeductions[key] = ideal;
           idealSum += ideal;
         }
@@ -835,8 +849,8 @@ export async function synthesizePlan(
         const sortedByRemainder = formatKeys
           .slice()
           .sort((a, b) => {
-            const remA = (totalExplorationCount * weeklyPool[a] / weeklyPoolTotal) - idealDeductions[a];
-            const remB = (totalExplorationCount * weeklyPool[b] / weeklyPoolTotal) - idealDeductions[b];
+            const remA = (scheduledExplorationCount * weeklyPool[a] / weeklyPoolTotal) - idealDeductions[a];
+            const remB = (scheduledExplorationCount * weeklyPool[b] / weeklyPoolTotal) - idealDeductions[b];
             return remB - remA;
           });
         for (const key of sortedByRemainder) {
@@ -869,18 +883,18 @@ export async function synthesizePlan(
         videosPerWeek: deducted.videosPerWeek,
       };
 
-      const actualDeducted = effectiveExplorationCount - remaining;
+      const actualDeducted = scheduledExplorationCount - remaining;
       const newMainWeekly =
         deducted.reelsPerWeek +
         deducted.postsPerWeek +
         deducted.carouselsPerWeek +
         storiesWeekly +
         deducted.videosPerWeek;
-      const combinedTotal = newMainWeekly + effectiveExplorationCount;
+      const combinedTotal = newMainWeekly + scheduledExplorationCount;
       if (combinedTotal !== weeklyTotal) {
-        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${effectiveExplorationCount} combined=${combinedTotal} residual=${remaining}`);
+        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${scheduledExplorationCount} combined=${combinedTotal} residual=${remaining}`);
       } else {
-        console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${effectiveExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly} volumeOk=true`);
+        console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${scheduledExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly} volumeOk=true`);
       }
     } catch (expErr: any) {
       console.warn(`[PlanSynthesis] Exploration budget computation failed (non-blocking):`, expErr.message);
