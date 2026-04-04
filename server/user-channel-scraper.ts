@@ -60,6 +60,8 @@ export interface UserChannelSnapshotData {
   followers: number | null;
   recentPostTypes: Record<string, number>;
   avgEngagement: number | null;
+  /** Per-format breakdown: maps Instagram mediaType → {count, avgEngagement}. */
+  engagementByType?: Record<string, { count: number; avgEngagement: number }>;
   scrapedAt: string;
   websiteHeadlines?: string[];
   websiteCtaLabels?: string[];
@@ -273,6 +275,7 @@ async function scrapeInstagramChannel(
   }
 
   const typeMix: Record<string, number> = {};
+  const typeEngagement: Record<string, { total: number; count: number }> = {};
   let totalEngagement = 0;
   let engagementCount = 0;
 
@@ -283,12 +286,23 @@ async function scrapeInstagramChannel(
     if (engagement > 0) {
       totalEngagement += engagement;
       engagementCount++;
+      if (!typeEngagement[t]) typeEngagement[t] = { total: 0, count: 0 };
+      typeEngagement[t].total += engagement;
+      typeEngagement[t].count++;
     }
   }
 
   const avgEngagement = engagementCount > 0
     ? parseFloat((totalEngagement / engagementCount).toFixed(2))
     : null;
+
+  const engagementByType: Record<string, { count: number; avgEngagement: number }> = {};
+  for (const [t, { total, count }] of Object.entries(typeEngagement)) {
+    engagementByType[t] = {
+      count,
+      avgEngagement: parseFloat((total / count).toFixed(2)),
+    };
+  }
 
   return {
     platform: "instagram",
@@ -298,6 +312,7 @@ async function scrapeInstagramChannel(
     followers: result.followers,
     recentPostTypes: typeMix,
     avgEngagement,
+    engagementByType,
     scrapedAt: new Date().toISOString(),
     scrapeStatus: result.success ? "SUCCESS" : "PARTIAL",
     scrapeMode,

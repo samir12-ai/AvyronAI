@@ -420,15 +420,38 @@ export async function runMemoryMutation(
       ...(sinceDate ? [gt(contentPerformanceSnapshots.createdAt, sinceDate)] : []),
     );
 
-    const newSnaps = await db
+    // ── Source priority: channel-scrape (primary) → all sources (fallback) ───
+    // Channel-scraped signals are the primary truth: they are collected automatically
+    // from the user's own Instagram channel and reflect real audience behaviour.
+    // Manual / Meta-API snapshots serve as secondary validation only when channel
+    // data is insufficient (< MIN_PERIODS_FOR_CONFIDENCE_MOVE).
+    const channelSnaps = await db
       .select({
         smoothedPerformanceScore: contentPerformanceSnapshots.smoothedPerformanceScore,
         createdAt: contentPerformanceSnapshots.createdAt,
       })
       .from(contentPerformanceSnapshots)
-      .where(baseConditions)
+      .where(and(baseConditions, eq(contentPerformanceSnapshots.source, "channel-scrape")))
       .orderBy(desc(contentPerformanceSnapshots.createdAt))
       .limit(MAX_SNAPSHOTS);
+
+    const usingChannelAsPrimary = channelSnaps.length >= MIN_PERIODS_FOR_CONFIDENCE_MOVE;
+
+    const newSnaps = usingChannelAsPrimary
+      ? channelSnaps
+      : await db
+          .select({
+            smoothedPerformanceScore: contentPerformanceSnapshots.smoothedPerformanceScore,
+            createdAt: contentPerformanceSnapshots.createdAt,
+          })
+          .from(contentPerformanceSnapshots)
+          .where(baseConditions)
+          .orderBy(desc(contentPerformanceSnapshots.createdAt))
+          .limit(MAX_SNAPSHOTS);
+
+    console.log(
+      `[MemoryMutation] format=${fmt} signalSource=${usingChannelAsPrimary ? "channel-scrape (primary)" : "all-sources (fallback)"} snaps=${newSnaps.length}`,
+    );
 
     if (newSnaps.length < MIN_PERIODS_FOR_CONFIDENCE_MOVE) continue;
 

@@ -638,6 +638,57 @@ async function processAccount(accountId: string) {
         if (shouldScrape) {
           console.log(`[Worker] Awaiting user channel scrape for account=${accountId} campaign=${activeCampaignId}`);
           await scrapeUserChannels(accountId, activeCampaignId);
+
+          // ── Ingest fresh channel snapshots as primary performance signals ──
+          // After scraping completes, convert per-format engagement into
+          // content_performance_snapshots (source="channel-scrape") so the
+          // memory mutation engine uses them as its PRIMARY truth signal.
+          try {
+            const { ingestChannelSnapshotAsPerformanceSignals } = await import("./performance-signal/normalizer");
+            const { runMemoryMutation } = await import("./memory-mutation/engine");
+
+            // Fetch the snapshots just written (Instagram only — website has no format data)
+            const freshSnaps = await db
+              .select()
+              .from(userChannelSnapshots)
+              .where(
+                and(
+                  eq(userChannelSnapshots.accountId, accountId),
+                  eq(userChannelSnapshots.campaignId, activeCampaignId),
+                  eq(userChannelSnapshots.platform, "instagram"),
+                ),
+              )
+              .orderBy(desc(userChannelSnapshots.scrapedAt))
+              .limit(5);
+
+            let totalSignalsWritten = 0;
+            for (const snap of freshSnaps) {
+              if (!snap.snapshotData) continue;
+              try {
+                const parsed = JSON.parse(snap.snapshotData);
+                const written = await ingestChannelSnapshotAsPerformanceSignals(
+                  activeCampaignId,
+                  accountId,
+                  parsed,
+                );
+                totalSignalsWritten += written;
+              } catch (parseErr: any) {
+                console.warn(`[Worker] Failed to parse channel snapshot for signal ingest: ${parseErr.message}`);
+              }
+            }
+
+            if (totalSignalsWritten > 0) {
+              console.log(`[Worker] Channel signal ingest complete: ${totalSignalsWritten} format signal(s) written. Triggering memory mutation.`);
+              // Fire-and-forget: channel data is now the primary mutation input
+              runMemoryMutation(accountId, activeCampaignId).catch((err: any) =>
+                console.warn(`[Worker] Channel-triggered memory mutation error: ${err.message}`),
+              );
+            } else {
+              console.log(`[Worker] No channel format signals written (insufficient per-type data) — skipping channel mutation trigger.`);
+            }
+          } catch (signalErr: any) {
+            console.warn(`[Worker] Channel signal ingest/mutation error (non-blocking): ${signalErr.message}`);
+          }
         }
         // Build delta context from the latest snapshot per channel (uses deltaFromPrevious JSON)
         // campaignId filter is required to prevent cross-campaign data contamination

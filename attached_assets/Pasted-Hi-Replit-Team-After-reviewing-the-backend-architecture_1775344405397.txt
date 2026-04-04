@@ -1,0 +1,108 @@
+Hi Replit Team,
+
+After reviewing the backend architecture overview, I’d like to clarify and request an adjustment regarding the **performance data source and its role in the adaptive loop**.
+
+---
+
+### 🔍 Current Observation
+
+From the document:
+
+* `content_performance_snapshots` (manual / Meta API metrics) are treated as the **primary performance signal** and directly feed the **Memory Mutation Engine**
+* `user_channel_snapshots` (scraped user page data) are used mainly for **dual-analysis and competitor comparison**, not as a core mutation signal
+
+---
+
+### ⚠️ Required Correction
+
+For Avyron’s architecture, this needs to be inverted.
+
+The intended design is:
+
+> **Primary performance truth = scraped data from user pages (user_channel_snapshots or equivalent)**
+> **Manual / campaign metrics = supplementary signal only (calibration / additional context)**
+
+---
+
+### 🧠 Why This Matters
+
+The system is designed to:
+
+* Observe real-world behavior automatically (without relying on user input)
+* Learn from actual content performance on the user’s channels
+* Continuously adapt based on observed outcomes
+
+If manual input is treated as the primary signal:
+
+* The system becomes partially dependent on user-reported data
+* The adaptive loop weakens
+* Memory mutation may not reflect actual behavior
+
+---
+
+### 🔧 Requested Changes
+
+Please update the architecture and flow to reflect:
+
+#### 1. Performance Source Priority
+
+* Scraped user page data → **primary input for evaluation and memory mutation**
+* Manual / Meta API metrics → **secondary / supporting signal**
+
+---
+
+#### 2. Data Flow Adjustment
+
+* `user_channel_snapshots` (or equivalent scraped data) should:
+
+  * Feed into performance scoring
+  * Generate performance signals (similar to `content_performance_snapshots`)
+  * Trigger memory mutation
+
+* `content_performance_snapshots` should:
+
+  * Remain as structured campaign metrics
+  * Be used for validation, enrichment, or cross-checking
+
+---
+
+#### 3. Memory Mutation Input
+
+* Ensure that:
+
+  * Memory updates are driven primarily by **observed channel performance (scraped data)**
+  * Not exclusively by manually ingested metrics
+
+---
+
+#### 4. Documentation Update
+
+* Update Section 7 (Performance Data Flow) to clearly reflect:
+
+  * Separation of:
+
+    * Market intelligence (competitor scraping)
+    * User channel performance (primary signal)
+    * Manual campaign metrics (secondary signal)
+* Clarify how each feeds into:
+
+  * scoring
+  * mutation
+  * planning
+
+---
+
+### 🎯 Goal
+
+Ensure the system behaves as a **true self-observing adaptive system**, where:
+
+* Reality (observed performance) drives learning
+* Not user-reported inputs alone
+
+---
+
+Let me know once this adjustment is aligned, or if we should define a unified performance signal layer that merges both sources with weighted priority.
+
+Best regards,
+Samir
+Avyron AI
