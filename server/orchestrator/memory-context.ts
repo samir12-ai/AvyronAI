@@ -38,7 +38,7 @@ export function extractFormatConstraints(block: MemoryBlock): FormatConstraints 
   }
 
   for (const slot of block.avoidSlots) {
-    if (slot.isWinner || slot.score === 0) continue;
+    if (slot.isWinner || slot.score >= 0) continue;
     const lbl = (slot.label + " " + (slot.details ?? "")).toLowerCase();
     for (const [fmt, keywords] of Object.entries(FORMAT_KEYWORDS)) {
       if (keywords.some(k => lbl.includes(k)) && !reducedFormats.includes(fmt)) {
