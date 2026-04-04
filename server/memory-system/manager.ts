@@ -40,10 +40,10 @@ function computeEffectiveConfidence(slot: MemorySlot): number {
 }
 
 function contextMatches(slot: MemorySlot, ctx: MemoryContext): boolean {
-  if (slot.industry && ctx.industry && slot.industry !== ctx.industry) return false;
-  if (slot.platform && ctx.platform && slot.platform !== ctx.platform) return false;
-  if (slot.campaignType && ctx.campaignType && slot.campaignType !== ctx.campaignType) return false;
-  if (slot.funnelObjective && ctx.funnelObjective && slot.funnelObjective !== ctx.funnelObjective) return false;
+  if (slot.industry && slot.industry !== ctx.industry) return false;
+  if (slot.platform && slot.platform !== ctx.platform) return false;
+  if (slot.campaignType && slot.campaignType !== ctx.campaignType) return false;
+  if (slot.funnelObjective && slot.funnelObjective !== ctx.funnelObjective) return false;
   return true;
 }
 
@@ -66,7 +66,7 @@ function resolveConflicts(slots: MemorySlot[], ctx: MemoryContext): MemorySlot[]
     const sorted = group.slice().sort((a, b) => {
       const effA = computeEffectiveConfidence(a);
       const effB = computeEffectiveConfidence(b);
-      if (Math.abs(effA - effB) > 0.05) return effB - effA;
+      if (effA !== effB) return effB - effA;
 
       const timeA = (a.lastValidatedAt ?? a.updatedAt ?? a.createdAt ?? new Date(0)).getTime();
       const timeB = (b.lastValidatedAt ?? b.updatedAt ?? b.createdAt ?? new Date(0)).getTime();
@@ -98,7 +98,7 @@ function rowToSlot(row: typeof strategyMemory.$inferSelect): MemorySlot {
     score: row.score ?? 0,
     confidenceScore: row.confidenceScore ?? (row.isWinner ? 0.85 : row.score && row.score < 0 ? 0.15 : 0.5),
     direction,
-    isWinner: row.isWinner ?? false,
+    isWinner: direction === "reinforce",
     usageCount: row.usageCount ?? 0,
     planId: row.planId ?? null,
     strategyFingerprint: row.strategyFingerprint ?? null,
@@ -253,7 +253,7 @@ export function serializeMemoryBlockForPrompt(block: MemoryBlock): string {
   }
 
   if (avoid.length > 0) {
-    parts.push("AVOID (weighted exclusions — do not repeat these directions):");
+    parts.push("AVOID (confidence-weighted — apply proportionally, not as hard blocks):");
     for (const c of avoid) {
       const pct = Math.round(c.effectiveConfidence * 100);
       const band = c.effectiveConfidence >= 0.7 ? "STRONG guidance" : c.effectiveConfidence >= 0.4 ? "MODERATE guidance" : "WEAK signal";
@@ -270,7 +270,7 @@ export function serializeMemoryBlockForPrompt(block: MemoryBlock): string {
     parts.push(`INDUSTRY_BASELINE (${b.objective}/${b.businessType}): Reels ${b.reelsPerWeek}/wk · Carousels ${b.carouselsPerWeek}/wk · Stories ${b.storiesPerDay}/day · Posts ${b.postsPerWeek}/wk`);
   }
 
-  parts.push("INSTRUCTION: Apply REINFORCE entries with weight proportional to their effective confidence. AVOID entries with STRONG guidance should be treated as firm exclusions. MODERATE/WEAK guidance is advisory. Do not override content rhythm unless confidence for override exceeds 0.7.");
+  parts.push("INSTRUCTION: Apply all REINFORCE and AVOID entries with weight proportional to their effective confidence band. STRONG guidance (≥70% confidence) carries significant weight. MODERATE guidance (40–70%) is meaningful but not overriding. WEAK signals (<40%) are informational only. Results always take precedence over stored memory — do not override content rhythm unless confidence for override exceeds 0.7.");
 
   return parts.join("\n");
 }
