@@ -806,7 +806,7 @@ export async function synthesizePlan(
       const totalExplorationCount = expBudget.totalExplorationCount;
       const dist = { ...synthesized.contentDistribution };
 
-      const weeklyUnits = {
+      const weeklyUnits: Record<string, number> = {
         reelsPerWeek: dist.reelsPerWeek ?? 0,
         postsPerWeek: dist.postsPerWeek ?? 0,
         carouselsPerWeek: dist.carouselsPerWeek ?? 0,
@@ -814,52 +814,71 @@ export async function synthesizePlan(
         videosPerWeek: dist.videosPerWeek ?? 0,
       };
       const weeklyTotal = Object.values(weeklyUnits).reduce((s, v) => s + v, 0);
+      const deducted: Record<string, number> = { ...weeklyUnits };
+      let remaining = Math.min(totalExplorationCount, weeklyTotal);
 
-      let remaining = totalExplorationCount;
-      const deductedWeekly: typeof weeklyUnits = { ...weeklyUnits };
-
-      if (weeklyTotal > 0) {
-        for (const key of Object.keys(weeklyUnits) as Array<keyof typeof weeklyUnits>) {
-          if (remaining <= 0) break;
+      if (weeklyTotal > 0 && remaining > 0) {
+        const formatKeys = Object.keys(weeklyUnits);
+        const idealDeductions: Record<string, number> = {};
+        let idealSum = 0;
+        for (const key of formatKeys) {
           const share = weeklyUnits[key] / weeklyTotal;
-          const proportional = Math.round(totalExplorationCount * share);
-          const deduct = Math.min(deductedWeekly[key], proportional, remaining);
-          deductedWeekly[key] = Math.max(0, deductedWeekly[key] - deduct);
-          remaining -= deduct;
+          const ideal = Math.floor(totalExplorationCount * share);
+          idealDeductions[key] = ideal;
+          idealSum += ideal;
+        }
+        let residual = remaining - idealSum;
+        const sortedByRemainder = formatKeys
+          .slice()
+          .sort((a, b) => {
+            const remA = (totalExplorationCount * weeklyUnits[a] / weeklyTotal) - idealDeductions[a];
+            const remB = (totalExplorationCount * weeklyUnits[b] / weeklyTotal) - idealDeductions[b];
+            return remB - remA;
+          });
+        for (const key of sortedByRemainder) {
+          if (residual <= 0) break;
+          if (idealDeductions[key] < weeklyUnits[key]) {
+            idealDeductions[key]++;
+            residual--;
+          }
+        }
+        for (const key of formatKeys) {
+          const d = Math.min(idealDeductions[key], deducted[key]);
+          deducted[key] = Math.max(0, deducted[key] - d);
+          remaining -= d;
         }
         if (remaining > 0) {
-          for (const key of Object.keys(deductedWeekly) as Array<keyof typeof deductedWeekly>) {
+          for (const key of formatKeys) {
             if (remaining <= 0) break;
-            const deduct = Math.min(deductedWeekly[key], remaining);
-            deductedWeekly[key] = Math.max(0, deductedWeekly[key] - deduct);
-            remaining -= deduct;
+            const d = Math.min(deducted[key], remaining);
+            deducted[key] = Math.max(0, deducted[key] - d);
+            remaining -= d;
           }
         }
       }
 
-      const newStoriesPerDay = Math.round(deductedWeekly.storiesPerWeek / 7);
       synthesized.contentDistribution = {
         ...dist,
-        reelsPerWeek: deductedWeekly.reelsPerWeek,
-        postsPerWeek: deductedWeekly.postsPerWeek,
-        carouselsPerWeek: deductedWeekly.carouselsPerWeek,
-        storiesPerDay: newStoriesPerDay,
-        videosPerWeek: deductedWeekly.videosPerWeek,
+        reelsPerWeek: deducted.reelsPerWeek,
+        postsPerWeek: deducted.postsPerWeek,
+        carouselsPerWeek: deducted.carouselsPerWeek,
+        storiesPerDay: Math.floor(deducted.storiesPerWeek / 7),
+        videosPerWeek: deducted.videosPerWeek,
       };
 
       const actualDeducted = totalExplorationCount - remaining;
       const newMainWeekly =
-        deductedWeekly.reelsPerWeek +
-        deductedWeekly.postsPerWeek +
-        deductedWeekly.carouselsPerWeek +
-        (newStoriesPerDay * 7) +
-        deductedWeekly.videosPerWeek;
-      const expectedTotal = weeklyTotal;
-      const actualTotal = newMainWeekly + totalExplorationCount;
-      if (Math.abs(actualTotal - expectedTotal) > 2) {
-        console.warn(`[PlanSynthesis] VOLUME_DRIFT_DETECTED | originalWeekly=${expectedTotal} main=${newMainWeekly} exploration=${totalExplorationCount} combined=${actualTotal}`);
+        deducted.reelsPerWeek +
+        deducted.postsPerWeek +
+        deducted.carouselsPerWeek +
+        deducted.storiesPerWeek +
+        deducted.videosPerWeek;
+      const combinedTotal = newMainWeekly + totalExplorationCount;
+      if (Math.abs(combinedTotal - weeklyTotal) > 1) {
+        console.warn(`[PlanSynthesis] VOLUME_INVARIANT_FAIL | original=${weeklyTotal} main=${newMainWeekly} exp=${totalExplorationCount} combined=${combinedTotal} residual=${remaining}`);
+      } else {
+        console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly} volumeOk=true`);
       }
-      console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly}`);
     } catch (expErr: any) {
       console.warn(`[PlanSynthesis] Exploration budget computation failed (non-blocking):`, expErr.message);
     }
