@@ -78,6 +78,179 @@ const EMPTY_DATA: BusinessData = {
   goalDescription: '',
 };
 
+const PERF_FORMATS = [
+  { key: 'reel', label: 'Reel', icon: 'film-outline' as const },
+  { key: 'carousel', label: 'Carousel', icon: 'albums-outline' as const },
+  { key: 'story', label: 'Story', icon: 'aperture-outline' as const },
+  { key: 'post', label: 'Post', icon: 'image-outline' as const },
+] as const;
+
+interface PerfEntry {
+  avgReach: string;
+  savesRate: string;
+  avgEngagementRate: string;
+}
+
+const EMPTY_PERF: PerfEntry = { avgReach: '', savesRate: '', avgEngagementRate: '' };
+
+function ContentPerformanceSection({ campaignId, colors, isDark }: { campaignId: string; colors: any; isDark: boolean }) {
+  const [entries, setEntries] = useState<Record<string, PerfEntry>>({
+    reel: { ...EMPTY_PERF },
+    carousel: { ...EMPTY_PERF },
+    story: { ...EMPTY_PERF },
+    post: { ...EMPTY_PERF },
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+  const [lastLogged, setLastLogged] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch(getApiUrl(`/api/performance/summary/${campaignId}`));
+        const json = await safeApiJson(res);
+        if (json.totalFormatsTracked > 0) {
+          const latest = Object.values(json.summaryByFormat as Record<string, any>)
+            .filter(Boolean)
+            .sort((a: any, b: any) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime())[0];
+          if (latest?.lastUpdated) {
+            setLastLogged(new Date(latest.lastUpdated).toLocaleDateString());
+          }
+        }
+      } catch {}
+    })();
+  }, [campaignId]);
+
+  const updateEntry = (fmt: string, field: keyof PerfEntry, value: string) => {
+    setEntries(prev => ({ ...prev, [fmt]: { ...prev[fmt], [field]: value } }));
+    setSaved(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const today = new Date();
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - 6);
+      const periodLabel = `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+
+      const promises = PERF_FORMATS.map(({ key }) => {
+        const e = entries[key];
+        if (!e.avgReach && !e.savesRate && !e.avgEngagementRate) return null;
+        return authFetch(getApiUrl('/api/performance/ingest'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campaignId,
+            contentType: key,
+            periodLabel,
+            periodStart: weekStart.toISOString(),
+            periodEnd: today.toISOString(),
+            avgReach: parseFloat(e.avgReach) || 0,
+            savesRate: parseFloat(e.savesRate) / 100 || 0,
+            avgEngagementRate: parseFloat(e.avgEngagementRate) / 100 || 0,
+            totalPublished: 0,
+            source: 'manual',
+          }),
+        });
+      }).filter(Boolean);
+
+      if (promises.length === 0) { setError('Enter at least one format'); setSaving(false); return; }
+      await Promise.all(promises);
+      setSaved(true);
+      setLastLogged(new Date().toLocaleDateString());
+      Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={[s.channelsSection, { borderColor: '#F59E0B30', backgroundColor: isDark ? '#1A1300' : '#FFFBEB', marginTop: 16, marginBottom: 4 }]}>
+      <View style={s.goalSectionHeader}>
+        <Ionicons name="bar-chart-outline" size={16} color="#F59E0B" />
+        <Text style={[s.goalSectionTitle, { color: colors.text }]}>Content Performance</Text>
+        {saved && <Ionicons name="checkmark-circle" size={14} color={colors.success} />}
+      </View>
+      <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
+        Log your actual content performance weekly. The adaptive system uses this data to adjust your content rhythm and memory constraints.
+        {lastLogged ? ` Last logged: ${lastLogged}.` : ' No data logged yet.'}
+      </Text>
+
+      {PERF_FORMATS.map(({ key, label, icon }) => (
+        <View key={key} style={{ marginBottom: 12 }}>
+          <View style={[s.fieldLabelRow, { marginBottom: 6 }]}>
+            <Ionicons name={icon} size={14} color="#F59E0B" />
+            <Text style={[s.fieldLabel, { color: colors.text, fontSize: 12 }]}>{label}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TextInput
+              style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 9 : 7, fontSize: 13 }]}
+              placeholder="Avg Reach"
+              placeholderTextColor={colors.textMuted}
+              value={entries[key].avgReach}
+              onChangeText={v => updateEntry(key, 'avgReach', v)}
+              keyboardType="numeric"
+            />
+            <TextInput
+              style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 9 : 7, fontSize: 13 }]}
+              placeholder="Saves %"
+              placeholderTextColor={colors.textMuted}
+              value={entries[key].savesRate}
+              onChangeText={v => updateEntry(key, 'savesRate', v)}
+              keyboardType="numeric"
+            />
+            <TextInput
+              style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 9 : 7, fontSize: 13 }]}
+              placeholder="Eng. %"
+              placeholderTextColor={colors.textMuted}
+              value={entries[key].avgEngagementRate}
+              onChangeText={v => updateEntry(key, 'avgEngagementRate', v)}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
+      ))}
+
+      {error ? (
+        <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30', marginBottom: 8 }]}>
+          <Ionicons name="warning-outline" size={14} color={colors.error} />
+          <Text style={[s.errorText, { color: colors.error }]}>{error}</Text>
+        </View>
+      ) : null}
+
+      <Pressable
+        onPress={handleSave}
+        disabled={saving}
+        style={[s.channelsSaveBtn, { opacity: saving ? 0.5 : 1 }]}
+      >
+        <LinearGradient
+          colors={saved ? ['#10B981', '#059669'] : ['#F59E0B', '#D97706']}
+          style={s.channelsSaveBtnGrad}
+        >
+          {saving ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : saved ? (
+            <>
+              <Ionicons name="checkmark-circle" size={16} color="#fff" />
+              <Text style={s.channelsSaveBtnText}>Performance Logged</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="bar-chart-outline" size={16} color="#fff" />
+              <Text style={s.channelsSaveBtnText}>Log Performance</Text>
+            </>
+          )}
+        </LinearGradient>
+      </Pressable>
+    </View>
+  );
+}
+
 interface Props {
   onComplete?: (data: BusinessData) => void;
   onDataChange?: (isComplete: boolean) => void;
@@ -492,6 +665,8 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
           </LinearGradient>
         </Pressable>
       </View>
+
+      <ContentPerformanceSection campaignId={campaignId} colors={colors} isDark={isDark} />
 
       {error ? (
         <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30' }]}>

@@ -202,6 +202,35 @@ export const strategyMemory = pgTable("strategy_memory", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const contentPerformanceSnapshots = pgTable("content_performance_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  contentType: text("content_type").notNull(),
+  periodLabel: text("period_label").notNull(),
+  periodStart: timestamp("period_start"),
+  periodEnd: timestamp("period_end"),
+  avgReach: doublePrecision("avg_reach").default(0),
+  avgSaves: doublePrecision("avg_saves").default(0),
+  savesRate: doublePrecision("saves_rate").default(0),
+  avgEngagementRate: doublePrecision("avg_engagement_rate").default(0),
+  avgLikes: doublePrecision("avg_likes").default(0),
+  avgComments: doublePrecision("avg_comments").default(0),
+  reachDecayFactor: doublePrecision("reach_decay_factor").default(1.0),
+  totalPublished: integer("total_published").default(0),
+  rawPerformanceScore: doublePrecision("raw_performance_score").default(0),
+  smoothedPerformanceScore: doublePrecision("smoothed_performance_score").default(0),
+  volumePenaltyApplied: boolean("volume_penalty_applied").default(false),
+  source: text("source").default("manual"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ContentPerformanceSnapshot = typeof contentPerformanceSnapshots.$inferSelect;
+export type InsertContentPerformanceSnapshot = typeof contentPerformanceSnapshots.$inferInsert;
+
 export const growthCampaigns = pgTable("growth_campaigns", {
   id: varchar("id")
     .primaryKey()

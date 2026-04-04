@@ -29,6 +29,7 @@ import {
   growthSimulations,
   executionTasks,
   planAssumptions,
+  contentPerformanceSnapshots,
 } from "@shared/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { getActiveRootBundle, detectStaleness } from "../root-bundle";
@@ -63,6 +64,12 @@ export interface SystemContext {
   simulation: any;
   executionTasksSummary: { total: number; pending: number; completed: number; blocked: number } | null;
   assumptionsSummary: { total: number; highImpact: number; lowConfidence: number } | null;
+  contentPerformanceSummary: {
+    dominantFormat: string | null;
+    underperformingFormats: string[];
+    totalFormatsTracked: number;
+    byFormat: Record<string, { smoothedScore: number; stabilitySignal: number; lastPeriod: string; lastUpdated: any } | null>;
+  } | null;
   warnings: string[];
 }
 
@@ -329,13 +336,44 @@ export async function loadSystemContext(
     } catch {}
   }
 
+  let contentPerformanceSummary: SystemContext["contentPerformanceSummary"] = null;
+  try {
+    const CONTENT_TYPES = ["reel", "carousel", "story", "post"] as const;
+    const byFormat: Record<string, { smoothedScore: number; stabilitySignal: number; lastPeriod: string; lastUpdated: any } | null> = {};
+    let totalFormatsTracked = 0;
+    for (const ct of CONTENT_TYPES) {
+      const snaps = await db
+        .select({
+          smoothedPerformanceScore: contentPerformanceSnapshots.smoothedPerformanceScore,
+          periodLabel: contentPerformanceSnapshots.periodLabel,
+          createdAt: contentPerformanceSnapshots.createdAt,
+        })
+        .from(contentPerformanceSnapshots)
+        .where(and(eq(contentPerformanceSnapshots.accountId, accountId), eq(contentPerformanceSnapshots.campaignId, campaignId), eq(contentPerformanceSnapshots.contentType, ct)))
+        .orderBy(desc(contentPerformanceSnapshots.createdAt))
+        .limit(3);
+      if (snaps.length === 0) { byFormat[ct] = null; continue; }
+      totalFormatsTracked++;
+      const scores = snaps.map((s) => s.smoothedPerformanceScore ?? 0);
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+      const variance = scores.reduce((acc, s) => acc + Math.pow(s - mean, 2), 0) / scores.length;
+      const stdDev = Math.sqrt(variance);
+      const cv = mean > 0 ? stdDev / mean : 1;
+      const stabilitySignal = Math.max(0, Math.min(1, 1 - cv));
+      byFormat[ct] = { smoothedScore: snaps[0].smoothedPerformanceScore ?? 0, stabilitySignal, lastPeriod: snaps[0].periodLabel, lastUpdated: snaps[0].createdAt };
+    }
+    const tracked = Object.entries(byFormat).filter(([, v]) => v !== null).sort(([, a], [, b]) => (b!.smoothedScore) - (a!.smoothedScore));
+    const avgScore = tracked.length > 0 ? tracked.reduce((acc, [, v]) => acc + v!.smoothedScore, 0) / tracked.length : 0;
+    const underperformingFormats = tracked.filter(([, v]) => v!.smoothedScore < avgScore * 0.8).map(([k]) => k);
+    contentPerformanceSummary = { dominantFormat: tracked[0]?.[0] || null, underperformingFormats, totalFormatsTracked, byFormat };
+  } catch {}
+
   return {
     businessProfile: bizData ? {
       businessType: bizData.businessType,
       monthlyBudget: bizData.monthlyBudget,
       funnelObjective: bizData.funnelObjective,
       conversionChannel: bizData.primaryConversionChannel,
-      geoScope: bizData.geoScope,
     } : null,
     campaign: campaign ? {
       id: campaign.id,
@@ -403,6 +441,7 @@ export async function loadSystemContext(
     simulation,
     executionTasksSummary,
     assumptionsSummary,
+    contentPerformanceSummary,
     warnings,
   };
 }
@@ -575,6 +614,23 @@ export function buildSystemPrompt(context: SystemContext): string {
   } else {
     lines.push("");
     lines.push("ROOT BUNDLE: Not yet created — will be auto-generated on next plan synthesis");
+  }
+
+  if (context.contentPerformanceSummary) {
+    const cp = context.contentPerformanceSummary;
+    lines.push("");
+    lines.push(`CONTENT PERFORMANCE (${cp.totalFormatsTracked} formats tracked):`);
+    if (cp.dominantFormat) lines.push(`  Best performing: ${cp.dominantFormat.toUpperCase()}`);
+    if (cp.underperformingFormats.length > 0) lines.push(`  Underperforming: ${cp.underperformingFormats.map(f => f.toUpperCase()).join(", ")}`);
+    for (const [fmt, data] of Object.entries(cp.byFormat)) {
+      if (!data) { lines.push(`  ${fmt.toUpperCase()}: No data yet`); continue; }
+      const stability = data.stabilitySignal >= 0.7 ? "stable" : data.stabilitySignal >= 0.4 ? "moderate" : "unstable";
+      lines.push(`  ${fmt.toUpperCase()}: score=${data.smoothedScore.toFixed(3)} | signal=${stability} (${data.stabilitySignal.toFixed(2)}) | period="${data.lastPeriod}"`);
+    }
+    lines.push(`  Note: scores are smoothed (3-period rolling avg). Volume-penalized when <3 pieces published.`);
+  } else {
+    lines.push("");
+    lines.push("CONTENT PERFORMANCE: No data logged yet. Ask user to log performance via Business Profile > Content Performance.");
   }
 
   if (context.warnings.length > 0) {
