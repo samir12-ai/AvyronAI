@@ -166,6 +166,8 @@ export async function computeExplorationBudget(
     candidateSlots.push({ format: fallbackFormat, count: explorationCount, intent: "discovery", hypothesis });
   }
 
+  const baselineValue = baseline?.confidenceScore ?? null;
+
   const rationale = buildRationale(
     explorationPercent,
     BASE_EXPLORATION_PCT,
@@ -174,6 +176,7 @@ export async function computeExplorationBudget(
     explorationCount,
     weeklyTotal,
     candidateSlots,
+    baselineValue,
   );
 
   await persistExplorationBudget(campaignId, accountId, explorationPercent, explorationCount, weeklyTotal, rationale, candidateSlots);
@@ -207,12 +210,16 @@ function buildRationale(
   explorationCount: number,
   weeklyTotal: number,
   slots: ExplorationSlot[],
+  baselineValue: number | null,
 ): string {
   const parts: string[] = [];
   parts.push(
     `Exploration budget: ${explorationPercent}% (base ${basePct}%${highConf > 0 ? ` −${highConf}% from ${highConf} high-confidence entries` : ""}${challenged > 0 ? ` +${challenged * 2}% from ${challenged} low-confidence avoids` : ""}).`,
   );
   parts.push(`${explorationCount} of ${weeklyTotal} weekly slots allocated to exploration.`);
+  if (baselineValue != null) {
+    parts.push(`Industry baseline: ${(baselineValue * 100).toFixed(1)}% — exploration results evaluated against this threshold.`);
+  }
   const retests = slots.filter((s) => s.intent === "retest");
   const discoveries = slots.filter((s) => s.intent === "discovery");
   if (retests.length > 0) parts.push(`Retesting: ${retests.map((s) => s.format).join(", ")}.`);

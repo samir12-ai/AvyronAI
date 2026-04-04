@@ -837,15 +837,29 @@ export async function synthesizePlan(
         }
       }
 
+      const newStoriesPerDay = Math.round(deductedWeekly.storiesPerWeek / 7);
       synthesized.contentDistribution = {
         ...dist,
         reelsPerWeek: deductedWeekly.reelsPerWeek,
         postsPerWeek: deductedWeekly.postsPerWeek,
         carouselsPerWeek: deductedWeekly.carouselsPerWeek,
-        storiesPerDay: Math.round(deductedWeekly.storiesPerWeek / 7),
+        storiesPerDay: newStoriesPerDay,
         videosPerWeek: deductedWeekly.videosPerWeek,
       };
-      console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} slots=${expBudget.explorationSlots.length} deducted=${totalExplorationCount - remaining}`);
+
+      const actualDeducted = totalExplorationCount - remaining;
+      const newMainWeekly =
+        deductedWeekly.reelsPerWeek +
+        deductedWeekly.postsPerWeek +
+        deductedWeekly.carouselsPerWeek +
+        (newStoriesPerDay * 7) +
+        deductedWeekly.videosPerWeek;
+      const expectedTotal = weeklyTotal;
+      const actualTotal = newMainWeekly + totalExplorationCount;
+      if (Math.abs(actualTotal - expectedTotal) > 2) {
+        console.warn(`[PlanSynthesis] VOLUME_DRIFT_DETECTED | originalWeekly=${expectedTotal} main=${newMainWeekly} exploration=${totalExplorationCount} combined=${actualTotal}`);
+      }
+      console.log(`[PlanSynthesis] EXPLORATION_BUDGET_APPLIED | pct=${expBudget.explorationPercent}% totalExp=${totalExplorationCount} deducted=${actualDeducted} originalWeekly=${weeklyTotal} mainAfter=${newMainWeekly}`);
     } catch (expErr: any) {
       console.warn(`[PlanSynthesis] Exploration budget computation failed (non-blocking):`, expErr.message);
     }
@@ -871,6 +885,10 @@ export async function synthesizePlan(
     rootBundleVersion: rootBundle?.version || null,
   }).returning();
 
+  const explorationSlotsPerWeek = synthesized.explorationPlan?.totalExplorationCount ?? 0;
+  const weeks = Math.ceil(periodDays / 7);
+  const totalExplorationPieces = explorationSlotsPerWeek * weeks;
+
   await db.insert(requiredWork).values({
     planId: plan.id,
     campaignId: config.campaignId,
@@ -886,7 +904,8 @@ export async function synthesizePlan(
     totalStories: volume.totalStories,
     totalCarousels: volume.totalCarousels,
     totalVideos: volume.totalVideos,
-    totalContentPieces: volume.totalContentPieces,
+    totalContentPieces: volume.totalContentPieces + totalExplorationPieces,
+    explorationSlotsPerWeek,
     generatedCount: 0,
     readyCount: 0,
     scheduledCount: 0,

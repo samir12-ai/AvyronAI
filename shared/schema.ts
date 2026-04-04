@@ -1272,6 +1272,7 @@ export const requiredWork = pgTable("required_work", {
   storyItems: integer("story_items").default(0),
   postItems: integer("post_items").default(0),
   reelItems: integer("reel_items").default(0),
+  explorationSlotsPerWeek: integer("exploration_slots_per_week").default(0),
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),
   createdAt: timestamp("created_at").defaultNow(),
