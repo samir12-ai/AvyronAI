@@ -75,7 +75,7 @@ export default function DashboardChat() {
 
     if (!convId) {
       try {
-        const res = await globalThis.fetch(new URL('/api/conversations', baseUrl).toString(), {
+        const res = await authFetch(new URL('/api/conversations', baseUrl).toString(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: text.slice(0, 40) }),

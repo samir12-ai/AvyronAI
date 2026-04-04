@@ -69,7 +69,7 @@ export default function AgentScreen() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const res = await globalThis.fetch(new URL('/api/conversations', baseUrl).toString());
+      const res = await authFetch(new URL('/api/conversations', baseUrl).toString());
       const data = await res.json();
       setConversations(data || []);
     } catch (err) {
@@ -79,7 +79,7 @@ export default function AgentScreen() {
 
   const createConversation = useCallback(async () => {
     try {
-      const res = await globalThis.fetch(new URL('/api/conversations', baseUrl).toString(), {
+      const res = await authFetch(new URL('/api/conversations', baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: 'New Chat' }),
@@ -96,7 +96,7 @@ export default function AgentScreen() {
 
   const loadConversation = useCallback(async (id: number) => {
     try {
-      const res = await globalThis.fetch(new URL(`/api/conversations/${id}`, baseUrl).toString());
+      const res = await authFetch(new URL(`/api/conversations/${id}`, baseUrl).toString());
       const data = await res.json();
       setActiveConvId(id);
       setMessages(
@@ -114,7 +114,7 @@ export default function AgentScreen() {
 
   const deleteConversation = useCallback(async (id: number) => {
     try {
-      await globalThis.fetch(new URL(`/api/conversations/${id}`, baseUrl).toString(), {
+      await authFetch(new URL(`/api/conversations/${id}`, baseUrl).toString(), {
         method: 'DELETE',
       });
       setConversations(prev => prev.filter(c => c.id !== id));
@@ -134,7 +134,7 @@ export default function AgentScreen() {
 
     if (!convId) {
       try {
-        const res = await globalThis.fetch(new URL('/api/conversations', baseUrl).toString(), {
+        const res = await authFetch(new URL('/api/conversations', baseUrl).toString(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: input.trim().slice(0, 40) }),
