@@ -57,13 +57,18 @@ export async function applyMemoryMutation(
         ? 0.6 * (prev.score ?? 0) + 0.4 * confidence
         : confidence;
 
+      const updatedIsWinner = entry.isWinner ?? prev.isWinner ?? false;
+      const updatedDirection = updatedIsWinner ? "reinforce" : (blendedScore < 0 ? "avoid" : "neutral");
       await db
         .update(strategyMemory)
         .set({
           label: entry.label,
           details: entry.details ?? prev.details,
           score: blendedScore,
-          isWinner: entry.isWinner ?? prev.isWinner ?? false,
+          isWinner: updatedIsWinner,
+          confidenceScore: updatedIsWinner ? 0.85 : (blendedScore < 0 ? 0.15 : 0.5),
+          direction: updatedDirection,
+          lastValidatedAt: new Date(),
           planId: planId,
           usageCount: (prev.usageCount ?? 0) + 1,
           updatedAt: new Date(),
@@ -121,12 +126,13 @@ async function applyConfidenceDecay(campaignId: string, accountId: string): Prom
     if (newScore < DECAY_THRESHOLD) {
       await db
         .update(strategyMemory)
-        .set({ score: 0, isWinner: false, updatedAt: new Date() })
+        .set({ score: 0, isWinner: false, confidenceScore: 0.1, direction: "neutral", updatedAt: new Date() })
         .where(eq(strategyMemory.id, row.id));
     } else {
+      const decayedConfidence = Math.max(0, Math.min(1, newScore));
       await db
         .update(strategyMemory)
-        .set({ score: newScore, updatedAt: new Date() })
+        .set({ score: newScore, confidenceScore: decayedConfidence, updatedAt: new Date() })
         .where(eq(strategyMemory.id, row.id));
     }
     decayed++;

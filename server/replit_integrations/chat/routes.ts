@@ -276,7 +276,7 @@ async function writeAgentActionMemory(
       score: result.success ? 0.7 : 0.3,
       isWinner: result.success,
       confidenceScore: result.success ? 0.7 : 0.3,
-      direction: "neutral",
+      direction: result.success ? "reinforce" : "avoid",
       lastValidatedAt: new Date(),
     });
   } catch (err: any) {

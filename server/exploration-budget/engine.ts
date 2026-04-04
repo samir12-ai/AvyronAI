@@ -127,7 +127,16 @@ async function persistExplorationBudget(
   if (existing.length > 0) {
     await db
       .update(strategyMemory)
-      .set({ label, details, score: budget.confidenceScore, performance: budget.rationale, updatedAt: new Date() })
+      .set({
+        label,
+        details,
+        score: budget.confidenceScore,
+        confidenceScore: budget.confidenceScore,
+        direction: "neutral",
+        lastValidatedAt: new Date(),
+        performance: budget.rationale,
+        updatedAt: new Date(),
+      })
       .where(eq(strategyMemory.id, existing[0].id));
   } else {
     const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);

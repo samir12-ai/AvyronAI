@@ -357,6 +357,9 @@ export async function computeAdaptiveRhythm(
           performance: reasoning,
           score: confidenceScore,
           isWinner: true,
+          confidenceScore,
+          direction: "reinforce",
+          lastValidatedAt: new Date(),
           updatedAt: new Date(),
         })
         .where(eq(strategyMemory.id, prevRhythmMem.id));
