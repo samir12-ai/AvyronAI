@@ -267,6 +267,7 @@ async function generatePlanWithAI(
   goalMathContext?: { goal: any; funnel: any; feasibility: any; archetype: any } | null,
   lockedDecisions?: string,
   accountId: string = "default",
+  memoryContextBlock?: string,
 ): Promise<SynthesizedPlan> {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
@@ -321,13 +322,19 @@ ${lockedDecisions}
 `
     : "";
 
+  const memoryBlock = memoryContextBlock
+    ? `${memoryContextBlock}
+
+`
+    : "";
+
   const prompt = `You are a marketing strategist assembling an execution plan from engine outputs. Your job is to ASSEMBLE, not to re-derive strategy.
 
 Business Type: ${businessType}
 Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
-${lockedBlock}${goalMathSection}
+${memoryBlock}${lockedBlock}${goalMathSection}
 Engine Analysis Results (use for volume, timing, and structural decisions):
 ${engineInsights}
 
@@ -629,7 +636,8 @@ function generateCalendarSlots(
 export async function synthesizePlan(
   config: OrchestratorConfig,
   ctx: any,
-  results: Map<EngineId, EngineStepResult>
+  results: Map<EngineId, EngineStepResult>,
+  memoryContextBlock?: string,
 ): Promise<{ planId: string; plan: SynthesizedPlan }> {
   const [bizData] = await db
     .select()
@@ -684,7 +692,7 @@ export async function synthesizePlan(
 
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId);
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock);
 
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);

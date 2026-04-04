@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs } from "@shared/schema";
+import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs, strategyMemory } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode, getManualMetrics } from "./campaign-data-layer";
 
@@ -850,6 +850,28 @@ export function registerCampaignRoutes(app: Express) {
     } catch (error: any) {
       console.error("[Campaigns] Retention gate PUT error:", error);
       res.status(500).json({ code: "GATE_SAVE_FAILED", message: "Failed to save retention gate inputs" });
+    }
+  });
+
+  app.get("/api/campaigns/:campaignId/strategy-memory", async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = req.params;
+      const accountId = resolveAccountId(req);
+      const entries = await db
+        .select()
+        .from(strategyMemory)
+        .where(
+          and(
+            eq(strategyMemory.campaignId, campaignId),
+            eq(strategyMemory.accountId, accountId),
+          )
+        )
+        .orderBy(desc(strategyMemory.updatedAt))
+        .limit(10);
+      res.json({ success: true, entries });
+    } catch (error: any) {
+      console.error("[Campaigns] Strategy memory GET error:", error);
+      res.status(500).json({ code: "STRATEGY_MEMORY_FAILED", message: "Failed to fetch strategy memory" });
     }
   });
 

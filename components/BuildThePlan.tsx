@@ -161,6 +161,10 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [gateResult, setGateResult] = useState<any>(null);
   const [gateChecking, setGateChecking] = useState(false);
 
+  const [memoryEntries, setMemoryEntries] = useState<any[]>([]);
+  const [memoryExpanded, setMemoryExpanded] = useState(false);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+
   const isMetaReal = metaConnection?.isConnected === true;
   const profileCampaignId = selectedCampaign?.selectedCampaignId;
 
@@ -2383,6 +2387,131 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         )}
 
         {renderPerformanceIntelligence()}
+        {renderStrategyMemoryPanel()}
+      </View>
+    );
+  };
+
+  const loadStrategyMemory = async () => {
+    if (!profileCampaignId) return;
+    setMemoryLoading(true);
+    try {
+      const baseUrl = getApiUrl();
+      const res = await authFetch(new URL(`/api/campaigns/${profileCampaignId}/strategy-memory`, baseUrl).toString());
+      if (res.ok) {
+        const data = await safeApiJson(res);
+        setMemoryEntries(data?.entries || []);
+      }
+    } catch (err) {
+      console.log('[StrategyMemory] Load failed:', err);
+    } finally {
+      setMemoryLoading(false);
+    }
+  };
+
+  const renderStrategyMemoryPanel = () => {
+    const hasEntries = memoryEntries.length > 0;
+    return (
+      <View style={{ marginTop: 16 }}>
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            const next = !memoryExpanded;
+            setMemoryExpanded(next);
+            if (next && memoryEntries.length === 0) loadStrategyMemory();
+          }}
+          style={[s.execCard, { backgroundColor: colors.card, borderColor: '#10B98140' }]}
+        >
+          <View style={s.execHeader}>
+            <View style={[s.phaseIconWrap, { backgroundColor: '#10B98120' }]}>
+              <Ionicons name="layers-outline" size={18} color="#10B981" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.execTitle, { color: colors.text }]}>Strategy Memory</Text>
+              <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                Prior decisions from past orchestrator runs
+              </Text>
+            </View>
+            {hasEntries && (
+              <View style={{
+                backgroundColor: '#10B981',
+                borderRadius: 10,
+                paddingHorizontal: 7,
+                paddingVertical: 2,
+                marginRight: 6,
+              }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' as const }}>{memoryEntries.length}</Text>
+              </View>
+            )}
+            <Ionicons
+              name={memoryExpanded ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={colors.textSecondary}
+            />
+          </View>
+        </Pressable>
+
+        {memoryExpanded && (
+          <View style={{ gap: 10 }}>
+            {memoryLoading ? (
+              <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 24 }]}>
+                <ActivityIndicator size="small" color="#10B981" />
+                <Text style={[s.execItemDesc, { color: colors.textSecondary, marginTop: 8 }]}>Loading memory...</Text>
+              </View>
+            ) : !hasEntries ? (
+              <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 20 }]}>
+                <Text style={[s.execItemDesc, { color: colors.textSecondary }]}>
+                  No strategy memory yet. Memory entries are written after each orchestrator run.
+                </Text>
+              </View>
+            ) : (
+              <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={[s.execTitle, { color: colors.text, marginBottom: 10 }]}>
+                  Prior Decisions ({memoryEntries.length})
+                </Text>
+                {memoryEntries.map((entry: any, i: number) => {
+                  const isWinner = entry.isWinner === true;
+                  const hasOutcome = entry.score !== 0 || entry.isWinner === true;
+                  const badgeColor = isWinner ? '#10B981' : hasOutcome ? '#EF4444' : '#F59E0B';
+                  const badgeLabel = isWinner ? 'Winner' : hasOutcome ? 'Failed' : 'Pending';
+                  return (
+                    <View
+                      key={entry.id || i}
+                      style={{
+                        borderLeftWidth: 3,
+                        borderLeftColor: badgeColor,
+                        paddingLeft: 10,
+                        paddingVertical: 6,
+                        marginBottom: 8,
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                        borderRadius: 6,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' as const, flex: 1 }} numberOfLines={2}>
+                          {entry.label}
+                        </Text>
+                        <View style={{ backgroundColor: badgeColor, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 }}>
+                          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' as const }}>{badgeLabel}</Text>
+                        </View>
+                      </View>
+                      {entry.engineName && (
+                        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                          {entry.engineName.replace(/_/g, ' ')}
+                        </Text>
+                      )}
+                      {entry.details ? (
+                        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 3 }} numberOfLines={2}>
+                          {entry.details}
+                        </Text>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        )}
       </View>
     );
   };

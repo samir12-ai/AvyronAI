@@ -195,6 +195,9 @@ export const strategyMemory = pgTable("strategy_memory", {
   usageCount: integer("usage_count").default(0),
   lastUsed: timestamp("last_used"),
   isWinner: boolean("is_winner").default(false),
+  engineName: text("engine_name"),
+  planId: varchar("plan_id"),
+  strategyFingerprint: text("strategy_fingerprint"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

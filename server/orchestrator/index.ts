@@ -51,6 +51,13 @@ import {
   type NeedsInputPayload,
 } from "./priority-matrix";
 import { synthesizePlan } from "./plan-synthesis";
+import {
+  buildMemoryContext,
+  serializeMemoryContextForPrompt,
+  makeStrategyFingerprint,
+} from "./memory-context";
+import { strategyMemory } from "@shared/schema";
+import { snapshotPreMetrics } from "../outcome-tracker";
 
 import { MarketIntelligenceV3 } from "../market-intelligence-v3/engine";
 import { runAudienceEngine } from "../audience-engine/engine";
@@ -1277,6 +1284,135 @@ async function executeEngine(
   }
 }
 
+async function writeStrategyMemoryEntries(
+  config: OrchestratorConfig,
+  results: Map<EngineId, EngineStepResult>,
+  planId: string,
+): Promise<void> {
+  try {
+    const entries: Array<{
+      engineName: string;
+      memoryType: string;
+      label: string;
+      details: string;
+    }> = [];
+
+    const channel = results.get("channel_selection");
+    if (channel?.status === "SUCCESS" && channel.output) {
+      const out = channel.output.output || channel.output;
+      const primaryName =
+        out.primaryChannel?.channelName || out.primaryChannel?.name || null;
+      if (primaryName) {
+        entries.push({
+          engineName: "channel_selection",
+          memoryType: "channel_decision",
+          label: `Primary channel: ${primaryName}`,
+          details: `role=${out.primaryChannel?.channelRole || out.primaryChannel?.role || "primary"}, secondary=${out.secondaryChannel?.channelName || out.secondaryChannel?.name || "none"}`,
+        });
+      }
+    }
+
+    const budget = results.get("budget_governor");
+    if (budget?.status === "SUCCESS" && budget.output) {
+      const decision = budget.output.decision || "APPROVED";
+      entries.push({
+        engineName: "budget_governor",
+        memoryType: "budget_decision",
+        label: `Budget decision: ${decision}`,
+        details: budget.output.reasoning
+          ? String(budget.output.reasoning).slice(0, 200)
+          : `Governor decision: ${decision}`,
+      });
+    }
+
+    const iteration = results.get("iteration");
+    if (iteration?.status === "SUCCESS" && iteration.output) {
+      const out = iteration.output.output || iteration.output;
+      const targets = (out.optimizationTargets || []) as any[];
+      const topTarget =
+        targets[0]?.targetName || targets[0]?.target || null;
+      if (topTarget) {
+        entries.push({
+          engineName: "iteration",
+          memoryType: "iteration_direction",
+          label: `Optimization target: ${topTarget}`,
+          details: `hypotheses=${out.nextTestHypotheses?.length || 0}, targets=${targets.length}, planSteps=${out.iterationPlan?.length || 0}`,
+        });
+      }
+    }
+
+    const retention = results.get("retention");
+    if (retention?.status === "SUCCESS" && retention.output) {
+      const out = retention.output.output || retention.output;
+      const loops = (out.retentionLoops || []) as any[];
+      const topLoop = loops[0]?.loopName || loops[0]?.name || null;
+      if (topLoop) {
+        entries.push({
+          engineName: "retention",
+          memoryType: "retention_approach",
+          label: `Retention loop: ${topLoop}`,
+          details: `churnRisks=${out.churnRiskFlags?.length || 0}, ltvPaths=${out.ltvExpansionPaths?.length || 0}, confidence=${out.confidenceScore ?? "N/A"}`,
+        });
+      }
+    }
+
+    const positioning = results.get("positioning");
+    if (positioning?.status === "SUCCESS" && positioning.output) {
+      const out = positioning.output.output || positioning.output;
+      const territories = out.territories || [];
+      const primary = territories[0];
+      if (primary?.name) {
+        entries.push({
+          engineName: "positioning",
+          memoryType: "positioning_territory",
+          label: `Territory: ${primary.name}`,
+          details: `narrativeDirection=${primary.narrativeDirection || "N/A"}, contrastAxis=${primary.contrastAxis || "N/A"}`,
+        });
+      }
+    }
+
+    for (const entry of entries) {
+      const fingerprint = makeStrategyFingerprint(
+        entry.engineName,
+        entry.label,
+        entry.details,
+      );
+
+      const [memRow] = await db
+        .insert(strategyMemory)
+        .values({
+          accountId: config.accountId,
+          campaignId: config.campaignId,
+          memoryType: entry.memoryType,
+          label: entry.label,
+          details: entry.details,
+          score: 0,
+          isWinner: false,
+          engineName: entry.engineName,
+          planId: planId,
+          strategyFingerprint: fingerprint,
+        })
+        .returning();
+
+      try {
+        await snapshotPreMetrics(memRow.id, config.accountId, entry.memoryType);
+      } catch (snapErr: any) {
+        console.warn(
+          `[Orchestrator] MEMORY_SNAPSHOT_FAILED | id=${memRow.id} | error=${snapErr.message}`,
+        );
+      }
+    }
+
+    console.log(
+      `[Orchestrator] MEMORY_WRITTEN | planId=${planId} | entries=${entries.length}`,
+    );
+  } catch (memErr: any) {
+    console.warn(
+      `[Orchestrator] MEMORY_WRITE_FAILED | error=${memErr.message}`,
+    );
+  }
+}
+
 export async function runOrchestrator(config: OrchestratorConfig): Promise<OrchestratorRunResult> {
   const startTime = Date.now();
 
@@ -1328,6 +1464,17 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   let blockReason: string | undefined;
   let overallStatus: "COMPLETED" | "PARTIAL" | "BLOCKED" | "ERROR" | "NEEDS_INPUT" = "COMPLETED";
   let needsInputPayload: NeedsInputPayload | undefined;
+
+  let memoryContextBlock = "";
+  try {
+    const memBlock = await buildMemoryContext(config.campaignId, config.accountId);
+    memoryContextBlock = serializeMemoryContextForPrompt(memBlock);
+    if (memoryContextBlock) {
+      console.log(`[Orchestrator] MEMORY_CONTEXT_LOADED | reinforce=${memBlock.reinforcePatterns.length} | avoid=${memBlock.avoidPatterns.length}`);
+    }
+  } catch (memLoadErr: any) {
+    console.warn(`[Orchestrator] MEMORY_CONTEXT_LOAD_FAILED | error=${memLoadErr.message}`);
+  }
 
   const startIndex = config.resumeFromEngine
     ? ENGINE_PRIORITY_ORDER.findIndex(e => e.id === config.resumeFromEngine)
@@ -1455,8 +1602,11 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   if (overallStatus !== "BLOCKED") {
     try {
-      const planResult = await synthesizePlan(config, ctx, results);
+      const planResult = await synthesizePlan(config, ctx, results, memoryContextBlock || undefined);
       planId = planResult.planId;
+      if (planId) {
+        await writeStrategyMemoryEntries(config, results, planId);
+      }
     } catch (err: any) {
       console.error(`[Orchestrator] Plan synthesis failed:`, err.message);
       if (overallStatus === "COMPLETED") overallStatus = "PARTIAL";
