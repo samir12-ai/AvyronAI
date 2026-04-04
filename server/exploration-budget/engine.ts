@@ -142,6 +142,9 @@ async function persistExplorationBudget(
       performance: budget.rationale,
       score: budget.confidenceScore,
       isWinner: false,
+      confidenceScore: budget.confidenceScore,
+      direction: "neutral",
+      lastValidatedAt: new Date(),
     });
   }
 }

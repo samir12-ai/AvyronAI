@@ -82,6 +82,9 @@ export async function applyMemoryMutation(
         details: entry.details ?? null,
         score: confidence,
         isWinner: entry.isWinner ?? false,
+        confidenceScore: entry.isWinner ? 0.85 : (confidence < 0 ? 0.15 : 0.5),
+        direction: entry.isWinner ? "reinforce" : (confidence < 0 ? "avoid" : "neutral"),
+        lastValidatedAt: new Date(),
         planId,
         strategyFingerprint: fingerprint,
       });

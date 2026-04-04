@@ -5,6 +5,8 @@ import type {
   MemoryBlock,
   MemorySlot,
   MemoryClass,
+  MemoryDirection,
+  MemoryContext,
   IndustryBaseline,
   ConfidenceWeightedConstraint,
   EnforcementStrength,
@@ -28,7 +30,62 @@ function resolveEnforcement(confidenceScore: number): { strength: EnforcementStr
   return { strength: "none", multiplier: 0 };
 }
 
+function computeEffectiveConfidence(slot: MemorySlot): number {
+  const now = new Date();
+  const validatedAt = slot.lastValidatedAt ?? slot.updatedAt ?? slot.createdAt ?? now;
+  const periodMs = 7 * 24 * 60 * 60 * 1000;
+  const periodsElapsed = Math.max(0, (now.getTime() - validatedAt.getTime()) / periodMs);
+  const decayRate = slot.decayRate ?? 0.95;
+  return slot.confidenceScore * Math.pow(decayRate, periodsElapsed);
+}
+
+function contextMatches(slot: MemorySlot, ctx: MemoryContext): boolean {
+  if (slot.industry && ctx.industry && slot.industry !== ctx.industry) return false;
+  if (slot.platform && ctx.platform && slot.platform !== ctx.platform) return false;
+  if (slot.campaignType && ctx.campaignType && slot.campaignType !== ctx.campaignType) return false;
+  if (slot.funnelObjective && ctx.funnelObjective && slot.funnelObjective !== ctx.funnelObjective) return false;
+  return true;
+}
+
+function resolveConflicts(slots: MemorySlot[], ctx: MemoryContext): MemorySlot[] {
+  const grouped = new Map<string, MemorySlot[]>();
+  for (const slot of slots) {
+    const key = slot.strategyFingerprint ?? slot.label.toLowerCase().trim();
+    const group = grouped.get(key) ?? [];
+    group.push(slot);
+    grouped.set(key, group);
+  }
+
+  const resolved: MemorySlot[] = [];
+  for (const [, group] of grouped) {
+    if (group.length === 1) {
+      resolved.push(group[0]);
+      continue;
+    }
+
+    const sorted = group.slice().sort((a, b) => {
+      const effA = computeEffectiveConfidence(a);
+      const effB = computeEffectiveConfidence(b);
+      if (Math.abs(effA - effB) > 0.05) return effB - effA;
+
+      const timeA = (a.lastValidatedAt ?? a.updatedAt ?? a.createdAt ?? new Date(0)).getTime();
+      const timeB = (b.lastValidatedAt ?? b.updatedAt ?? b.createdAt ?? new Date(0)).getTime();
+      if (timeA !== timeB) return timeB - timeA;
+
+      const directionOrder: Record<MemoryDirection, number> = { avoid: 0, neutral: 1, reinforce: 2 };
+      return directionOrder[a.direction] - directionOrder[b.direction];
+    });
+
+    resolved.push(sorted[0]);
+  }
+  return resolved;
+}
+
 function rowToSlot(row: typeof strategyMemory.$inferSelect): MemorySlot {
+  const rawDirection = row.direction ?? "neutral";
+  const direction: MemoryDirection =
+    rawDirection === "reinforce" || rawDirection === "avoid" ? rawDirection : "neutral";
+
   return {
     id: row.id,
     accountId: row.accountId,
@@ -39,11 +96,19 @@ function rowToSlot(row: typeof strategyMemory.$inferSelect): MemorySlot {
     details: row.details ?? null,
     performance: row.performance ?? null,
     score: row.score ?? 0,
-    confidenceScore: row.score ?? 0,
+    confidenceScore: row.confidenceScore ?? (row.isWinner ? 0.85 : row.score && row.score < 0 ? 0.15 : 0.5),
+    direction,
     isWinner: row.isWinner ?? false,
     usageCount: row.usageCount ?? 0,
     planId: row.planId ?? null,
     strategyFingerprint: row.strategyFingerprint ?? null,
+    lastValidatedAt: row.lastValidatedAt ?? null,
+    decayRate: row.decayRate ?? 0.95,
+    validationCount: row.validationCount ?? 0,
+    industry: row.industry ?? null,
+    platform: row.platform ?? null,
+    campaignType: row.campaignType ?? null,
+    funnelObjective: row.funnelObjective ?? null,
     updatedAt: row.updatedAt ?? null,
     createdAt: row.createdAt ?? null,
   };
@@ -53,6 +118,7 @@ export async function loadMemoryBlock(
   campaignId: string,
   accountId: string,
   bizData?: { funnelObjective?: string; businessType?: string; monthlyBudget?: string } | null,
+  memoryContext?: MemoryContext | null,
 ): Promise<MemoryBlock> {
   const rows = await db
     .select()
@@ -64,8 +130,16 @@ export async function loadMemoryBlock(
       )
     )
     .orderBy(desc(strategyMemory.updatedAt))
-    .limit(50);
+    .limit(100);
 
+  const ctx: MemoryContext = memoryContext ?? {
+    funnelObjective: bizData?.funnelObjective ?? null,
+    industry: bizData?.businessType ?? null,
+    platform: null,
+    campaignType: null,
+  };
+
+  const rawSlots: MemorySlot[] = [];
   const reinforceSlots: MemorySlot[] = [];
   const avoidSlots: MemorySlot[] = [];
   const pendingSlots: MemorySlot[] = [];
@@ -81,9 +155,23 @@ export async function loadMemoryBlock(
       continue;
     }
 
-    if (slot.isWinner) {
+    if (!contextMatches(slot, ctx)) continue;
+
+    const effectiveConfidence = computeEffectiveConfidence(slot);
+    if (effectiveConfidence < 0.1) continue;
+
+    rawSlots.push(slot);
+  }
+
+  const deduped = resolveConflicts(rawSlots, ctx);
+
+  for (const slot of deduped) {
+    const effectiveConfidence = computeEffectiveConfidence(slot);
+    const direction = slot.direction;
+
+    if (direction === "reinforce" || (direction === "neutral" && effectiveConfidence >= 0.6)) {
       reinforceSlots.push(slot);
-    } else if (slot.score !== 0) {
+    } else if (direction === "avoid" || (direction === "neutral" && effectiveConfidence < 0.4)) {
       avoidSlots.push(slot);
     } else {
       pendingSlots.push(slot);
@@ -110,28 +198,34 @@ export function buildConfidenceWeightedConstraints(block: MemoryBlock): Confiden
   const constraints: ConfidenceWeightedConstraint[] = [];
 
   for (const slot of block.reinforceSlots) {
-    const { strength, multiplier } = resolveEnforcement(slot.confidenceScore);
+    const effectiveConfidence = computeEffectiveConfidence(slot);
+    const { strength, multiplier } = resolveEnforcement(effectiveConfidence);
     if (strength === "none") continue;
     constraints.push({
       label: slot.label,
       details: slot.details,
+      direction: slot.direction,
       enforcementStrength: strength,
       enforcementMultiplier: multiplier,
       confidenceScore: slot.confidenceScore,
+      effectiveConfidence,
       memoryType: slot.memoryType,
       engineName: slot.engineName,
     });
   }
 
   for (const slot of block.avoidSlots) {
-    const { strength, multiplier } = resolveEnforcement(Math.abs(slot.confidenceScore));
+    const effectiveConfidence = computeEffectiveConfidence(slot);
+    const { strength, multiplier } = resolveEnforcement(effectiveConfidence);
     if (strength === "none") continue;
     constraints.push({
-      label: `[AVOID] ${slot.label}`,
+      label: slot.label,
       details: slot.details,
+      direction: slot.direction,
       enforcementStrength: strength,
       enforcementMultiplier: -multiplier,
       confidenceScore: slot.confidenceScore,
+      effectiveConfidence,
       memoryType: slot.memoryType,
       engineName: slot.engineName,
     });
@@ -150,18 +244,20 @@ export function serializeMemoryBlockForPrompt(block: MemoryBlock): string {
   const avoid = constraints.filter(c => c.enforcementMultiplier < 0);
 
   if (reinforce.length > 0) {
-    parts.push("REINFORCE (confidence-weighted, prefer these directions):");
+    parts.push("REINFORCE (prefer these directions — weight by confidence band):");
     for (const c of reinforce) {
-      const pct = Math.round(c.enforcementMultiplier * 100);
-      parts.push(`  [${c.enforcementStrength.toUpperCase()} ${pct}%] [${c.engineName ?? c.memoryType}] "${c.label}"${c.details ? `: ${c.details}` : ""}`);
+      const pct = Math.round(c.effectiveConfidence * 100);
+      const band = c.effectiveConfidence >= 0.7 ? "STRONG guidance" : c.effectiveConfidence >= 0.4 ? "MODERATE guidance" : "WEAK signal";
+      parts.push(`  [${band} ${pct}% effective confidence] [${c.engineName ?? c.memoryType}] "${c.label}"${c.details ? `: ${c.details}` : ""}`);
     }
   }
 
   if (avoid.length > 0) {
-    parts.push("AVOID (confidence-weighted, do not repeat these):");
+    parts.push("AVOID (weighted exclusions — do not repeat these directions):");
     for (const c of avoid) {
-      const pct = Math.round(Math.abs(c.enforcementMultiplier) * 100);
-      parts.push(`  [${c.enforcementStrength.toUpperCase()} ${pct}%] [${c.engineName ?? c.memoryType}] "${c.label}"${c.details ? `: ${c.details}` : ""}`);
+      const pct = Math.round(c.effectiveConfidence * 100);
+      const band = c.effectiveConfidence >= 0.7 ? "STRONG guidance" : c.effectiveConfidence >= 0.4 ? "MODERATE guidance" : "WEAK signal";
+      parts.push(`  [${band} ${pct}% effective confidence] [${c.engineName ?? c.memoryType}] "${c.label}"${c.details ? `: ${c.details}` : ""}`);
     }
   }
 
@@ -174,7 +270,7 @@ export function serializeMemoryBlockForPrompt(block: MemoryBlock): string {
     parts.push(`INDUSTRY_BASELINE (${b.objective}/${b.businessType}): Reels ${b.reelsPerWeek}/wk · Carousels ${b.carouselsPerWeek}/wk · Stories ${b.storiesPerDay}/day · Posts ${b.postsPerWeek}/wk`);
   }
 
-  parts.push("INSTRUCTION: Apply REINFORCE directions with weight proportional to their enforcement %. Treat AVOID entries as weighted exclusions. Do not override content rhythm unless confidence for override exceeds 0.7.");
+  parts.push("INSTRUCTION: Apply REINFORCE entries with weight proportional to their effective confidence. AVOID entries with STRONG guidance should be treated as firm exclusions. MODERATE/WEAK guidance is advisory. Do not override content rhythm unless confidence for override exceeds 0.7.");
 
   return parts.join("\n");
 }

@@ -275,6 +275,9 @@ async function writeAgentActionMemory(
       performance: result.success ? "success" : "failure",
       score: result.success ? 0.7 : 0.3,
       isWinner: result.success,
+      confidenceScore: result.success ? 0.7 : 0.3,
+      direction: "neutral",
+      lastValidatedAt: new Date(),
     });
   } catch (err: any) {
     console.warn(`[AgentTool] Memory write failed (non-blocking):`, err.message);

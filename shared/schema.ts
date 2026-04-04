@@ -200,6 +200,15 @@ export const strategyMemory = pgTable("strategy_memory", {
   strategyFingerprint: text("strategy_fingerprint"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  confidenceScore: doublePrecision("confidence_score").default(0.5),
+  direction: text("direction").default("neutral"),
+  lastValidatedAt: timestamp("last_validated_at"),
+  decayRate: doublePrecision("decay_rate").default(0.95),
+  validationCount: integer("validation_count").default(0),
+  industry: text("industry"),
+  platform: text("platform"),
+  campaignType: text("campaign_type"),
+  funnelObjective: text("funnel_objective"),
 });
 
 export const contentPerformanceSnapshots = pgTable("content_performance_snapshots", {

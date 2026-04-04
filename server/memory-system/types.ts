@@ -10,6 +10,7 @@ export type MemoryClass =
   | "exploration_budget"
   | "agent_action";
 
+export type MemoryDirection = "reinforce" | "avoid" | "neutral";
 export type EnforcementStrength = "none" | "soft" | "moderate" | "strong";
 
 export interface MemorySlot {
@@ -23,12 +24,27 @@ export interface MemorySlot {
   performance: string | null;
   score: number;
   confidenceScore: number;
+  direction: MemoryDirection;
   isWinner: boolean;
   usageCount: number;
   planId: string | null;
   strategyFingerprint: string | null;
+  lastValidatedAt: Date | null;
+  decayRate: number;
+  validationCount: number;
+  industry: string | null;
+  platform: string | null;
+  campaignType: string | null;
+  funnelObjective: string | null;
   updatedAt: Date | null;
   createdAt: Date | null;
+}
+
+export interface MemoryContext {
+  industry?: string | null;
+  platform?: string | null;
+  campaignType?: string | null;
+  funnelObjective?: string | null;
 }
 
 export interface MemoryBlock {
@@ -57,9 +73,24 @@ export interface IndustryBaseline {
 export interface ConfidenceWeightedConstraint {
   label: string;
   details: string | null;
+  direction: MemoryDirection;
   enforcementStrength: EnforcementStrength;
   enforcementMultiplier: number;
   confidenceScore: number;
+  effectiveConfidence: number;
   memoryType: MemoryClass;
   engineName: string | null;
+}
+
+export interface PerformanceSnapshot {
+  contentFormat: string;
+  performanceScore: number;
+  industryBaselineScore?: number;
+  recordedAt: Date;
+}
+
+export interface ResultsOverrideResult {
+  override: boolean;
+  reason: string;
+  newConfidenceDirection: MemoryDirection;
 }

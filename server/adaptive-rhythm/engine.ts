@@ -373,6 +373,9 @@ export async function computeAdaptiveRhythm(
         score: confidenceScore,
         engineName: "adaptive-rhythm",
         isWinner: true,
+        confidenceScore,
+        direction: "reinforce",
+        lastValidatedAt: new Date(),
       });
     }
   } catch (memErr: any) {
