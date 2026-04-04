@@ -125,10 +125,14 @@ function computeDelta(
     followersDelta = current.followers - previous!.followers;
   }
 
-  // New posts: for first scrape = all posts; for incremental = posts beyond previous count
+  // New posts since last snapshot:
+  // - INITIAL scrape: no meaningful delta (historical baseline), set to 0
+  // - INCREMENTAL scrape: fetched posts are all within the recent window (≈7 days),
+  //   so all of them are "new" since the last scrape. postCount IS the weekly post delta.
+  //   Subtracting previous.postCount would be wrong — it mixes different sampling windows.
   const newPostsSinceLastSnapshot = isFirstScrape
-    ? current.postCount
-    : Math.max(0, current.postCount - (previous!.postCount));
+    ? 0
+    : current.postCount; // INCREMENTAL window posts = posts published since last scrape
 
   let websiteChangeSummary: string | null = null;
   if (current.platform === "website") {
@@ -382,10 +386,32 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
 
   console.log(`[UserChannelScraper] Scraping ${profiles.length} user channel(s) for account=${accountId}`);
 
+  const scrapeIntervalCutoff = Date.now() - SCRAPE_INTERVAL_MS;
+
   for (const profile of profiles) {
     try {
       // Determine first-scrape vs incremental for this platform
       const previousSnapshot = await getPreviousSnapshot(accountId, campaignId, profile.platform);
+
+      // Per-profile freshness check: skip if this profile's last snapshot is still fresh
+      if (previousSnapshot) {
+        const latestForProfile = await db
+          .select()
+          .from(userChannelSnapshots)
+          .where(and(
+            eq(userChannelSnapshots.accountId, accountId),
+            eq(userChannelSnapshots.campaignId, campaignId),
+            eq(userChannelSnapshots.platform, profile.platform),
+          ))
+          .orderBy(desc(userChannelSnapshots.scrapedAt))
+          .limit(1);
+        if (latestForProfile.length > 0 && latestForProfile[0].scrapedAt) {
+          if (latestForProfile[0].scrapedAt.getTime() >= scrapeIntervalCutoff) {
+            console.log(`[UserChannelScraper] Skipping fresh profile: ${profile.platform}:${profile.handle ?? profile.url}`);
+            continue;
+          }
+        }
+      }
       const isFirstScrape = previousSnapshot === null;
 
       let snapshot: UserChannelSnapshotData;
@@ -424,8 +450,10 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
 }
 
 /**
- * Returns true if this account+campaign has at least one configured channel
- * and the last scrape was more than SCRAPE_INTERVAL_MS ago (or never).
+ * Checks per-profile freshness: returns true if ANY configured profile either has
+ * no snapshot at all or its most recent snapshot is older than SCRAPE_INTERVAL_MS.
+ * This ensures newly added channels and stale channels are never skipped by a
+ * campaign-level timestamp check.
  */
 export async function needsUserChannelScrape(accountId: string, campaignId: string): Promise<boolean> {
   const profiles = await db
@@ -440,22 +468,26 @@ export async function needsUserChannelScrape(accountId: string, campaignId: stri
 
   if (profiles.length === 0) return false;
 
-  const latestSnap = await db
-    .select()
-    .from(userChannelSnapshots)
-    .where(
-      and(
-        eq(userChannelSnapshots.accountId, accountId),
-        eq(userChannelSnapshots.campaignId, campaignId),
+  const cutoff = Date.now() - SCRAPE_INTERVAL_MS;
+
+  for (const profile of profiles) {
+    const latestSnap = await db
+      .select()
+      .from(userChannelSnapshots)
+      .where(
+        and(
+          eq(userChannelSnapshots.accountId, accountId),
+          eq(userChannelSnapshots.campaignId, campaignId),
+          eq(userChannelSnapshots.platform, profile.platform),
+        )
       )
-    )
-    .orderBy(desc(userChannelSnapshots.scrapedAt))
-    .limit(1);
+      .orderBy(desc(userChannelSnapshots.scrapedAt))
+      .limit(1);
 
-  if (latestSnap.length === 0) return true;
+    if (latestSnap.length === 0) return true; // No snapshot for this profile → scrape needed
+    const lastScrape = latestSnap[0].scrapedAt;
+    if (!lastScrape || lastScrape.getTime() < cutoff) return true; // Stale → scrape needed
+  }
 
-  const lastScrape = latestSnap[0].scrapedAt;
-  if (!lastScrape) return true;
-
-  return lastScrape.getTime() < Date.now() - SCRAPE_INTERVAL_MS;
+  return false; // All profiles are fresh
 }

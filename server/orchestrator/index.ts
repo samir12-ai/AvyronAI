@@ -1490,9 +1490,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   const ENGINE_TIMEOUT_MS = 120_000; // 2-minute hard ceiling per engine
 
-  // When scopedEngines is provided, jump directly to the earliest requested engine.
-  // Dependency engines are skipped intentionally — fortress engines read DB-stored context from
-  // the most recent full run, so a scoped rerun only re-executes the specific engines requested.
+  // When scopedEngines is provided, execute ONLY those engines (selective rerun).
+  // Loop starts at the earliest requested engine; per-loop check skips any engine NOT in the set.
+  // Scoped reruns rely on DB-stored snapshots from the previous full run for non-scoped context.
   const scopedStartIndex = config.scopedEngines?.length
     ? Math.min(
         ...config.scopedEngines

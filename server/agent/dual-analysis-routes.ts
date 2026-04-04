@@ -36,13 +36,16 @@ export interface DualAnalysisResult {
 // ── Deterministic engine mapping (server-enforced, not AI-chosen) ─────────────
 
 /**
- * Maps a classification to a deterministic list of recommended engines.
- * This is the authoritative mapping — AI output for engines is ignored.
+ * Deterministic mapping: classification → engine IDs to re-run.
+ * market_shift_only: market refresh path (intelligence → awareness → channel selection)
+ * execution_gap_only: execution repair path (iterate content + retain audience)
+ * both_changed: full refresh — all market + all execution repair engines
+ * Engine IDs must exist in ENGINE_PRIORITY_ORDER (priority-matrix.ts).
  */
 const CLASSIFICATION_ENGINE_MAP: Record<DualAnalysisClassification, string[]> = {
-  market_shift_only:  ["channel_selection"],
+  market_shift_only:  ["market_intelligence", "awareness", "channel_selection"],
   execution_gap_only: ["iteration", "retention"],
-  both_changed:       ["channel_selection", "iteration", "retention"],
+  both_changed:       ["market_intelligence", "awareness", "channel_selection", "iteration", "retention"],
   no_change:          [],
   no_data:            [],
 };
