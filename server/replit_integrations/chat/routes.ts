@@ -102,18 +102,20 @@ async function handleToolCall(
           return {
             success: false,
             summary: "Orchestrator is already running. Wait for the current run to complete before triggering another.",
+            data: { jobId: latestJob.id, status: "RUNNING" },
           };
         }
 
+        const jobId = `orch_agent_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
         const { runOrchestrator } = await import("../../orchestrator/index");
-        runOrchestrator({ accountId, campaignId, forceRefresh: true }).catch((err: any) => {
+        runOrchestrator({ accountId, campaignId, forceRefresh: true, preassignedJobId: jobId }).catch((err: any) => {
           console.error(`[AgentTool] trigger_plan_rerun background error:`, err.message);
         });
 
         return {
           success: true,
-          summary: `Plan re-run triggered. All strategy engines will reprocess the campaign. Check the Strategy Hub for progress.`,
-          data: { campaignId, jobStarted: true },
+          summary: `Plan re-run triggered (job: ${jobId}). All 8 strategy engines will reprocess the campaign sequentially. Check the Strategy Hub for live progress.`,
+          data: { campaignId, jobId, status: "PENDING" },
         };
       }
 
