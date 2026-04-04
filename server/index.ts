@@ -5,6 +5,7 @@ import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
+import { migrateStrategyMemoryColumns } from "./migrations/002-strategy-memory-columns";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import { authMiddleware, optionalAuth } from "./auth";
 import * as fs from "fs";
@@ -341,6 +342,8 @@ function setupErrorHandler(app: express.Application) {
       startSnapshotCleanupWorker();
 
       invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
+
+      migrateStrategyMemoryColumns().catch(err => console.error("[Migration-002] strategy_memory column migration error:", err));
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));

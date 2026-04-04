@@ -2471,9 +2471,12 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
                 </Text>
                 {memoryEntries.map((entry: any, i: number) => {
                   const isWinner = entry.isWinner === true;
-                  const hasOutcome = entry.score !== 0 || entry.isWinner === true;
-                  const badgeColor = isWinner ? '#10B981' : hasOutcome ? '#EF4444' : '#F59E0B';
-                  const badgeLabel = isWinner ? 'Winner' : hasOutcome ? 'Failed' : 'Pending';
+                  const isEvaluated = entry.score !== 0 || entry.isWinner === true;
+                  const badgeColor = isWinner ? '#10B981' : isEvaluated ? '#EF4444' : '#F59E0B';
+                  const badgeLabel = isWinner ? 'Won' : isEvaluated ? 'Failed' : 'Neutral';
+                  const entryDate = entry.updatedAt || entry.createdAt
+                    ? new Date(entry.updatedAt || entry.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                    : null;
                   return (
                     <View
                       key={entry.id || i}
@@ -2495,11 +2498,16 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
                           <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' as const }}>{badgeLabel}</Text>
                         </View>
                       </View>
-                      {entry.engineName && (
-                        <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-                          {entry.engineName.replace(/_/g, ' ')}
-                        </Text>
-                      )}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                        {entry.engineName && (
+                          <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                            {entry.engineName.replace(/_/g, ' ')}
+                          </Text>
+                        )}
+                        {entryDate && (
+                          <Text style={{ color: colors.textSecondary, fontSize: 11 }}>· {entryDate}</Text>
+                        )}
+                      </View>
                       {entry.details ? (
                         <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 3 }} numberOfLines={2}>
                           {entry.details}

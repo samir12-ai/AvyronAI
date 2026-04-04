@@ -1288,6 +1288,7 @@ async function writeStrategyMemoryEntries(
   config: OrchestratorConfig,
   results: Map<EngineId, EngineStepResult>,
   planId: string,
+  planOutput?: any,
 ): Promise<void> {
   try {
     const entries: Array<{
@@ -1303,11 +1304,13 @@ async function writeStrategyMemoryEntries(
       const primaryName =
         out.primaryChannel?.channelName || out.primaryChannel?.name || null;
       if (primaryName) {
+        const confidence = out.primaryChannel?.confidence ?? out.primaryChannel?.allocationPercentage ?? null;
+        const secondary = out.secondaryChannel?.channelName || out.secondaryChannel?.name || "none";
         entries.push({
           engineName: "channel_selection",
           memoryType: "channel_decision",
           label: `Primary channel: ${primaryName}`,
-          details: `role=${out.primaryChannel?.channelRole || out.primaryChannel?.role || "primary"}, secondary=${out.secondaryChannel?.channelName || out.secondaryChannel?.name || "none"}`,
+          details: `confidence=${confidence !== null ? `${confidence}` : "N/A"}, role=${out.primaryChannel?.channelRole || out.primaryChannel?.role || "primary"}, secondary=${secondary}`,
         });
       }
     }
@@ -1356,17 +1359,15 @@ async function writeStrategyMemoryEntries(
       }
     }
 
-    const positioning = results.get("positioning");
-    if (positioning?.status === "SUCCESS" && positioning.output) {
-      const out = positioning.output.output || positioning.output;
-      const territories = out.territories || [];
-      const primary = territories[0];
-      if (primary?.name) {
+    if (planOutput) {
+      const dist = planOutput.contentDistribution;
+      const method = dist?.primaryMethod || dist?.distributionMethod || dist?.strategy || null;
+      if (method) {
         entries.push({
-          engineName: "positioning",
-          memoryType: "positioning_territory",
-          label: `Territory: ${primary.name}`,
-          details: `narrativeDirection=${primary.narrativeDirection || "N/A"}, contrastAxis=${primary.contrastAxis || "N/A"}`,
+          engineName: "plan_synthesis",
+          memoryType: "content_distribution",
+          label: `Content distribution: ${method}`,
+          details: `channelMix=${JSON.stringify(dist?.channelMix || dist?.allocation || {}).slice(0, 150)}`,
         });
       }
     }
@@ -1605,7 +1606,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       const planResult = await synthesizePlan(config, ctx, results, memoryContextBlock || undefined);
       planId = planResult.planId;
       if (planId) {
-        await writeStrategyMemoryEntries(config, results, planId);
+        await writeStrategyMemoryEntries(config, results, planId, planResult.plan);
       }
     } catch (err: any) {
       console.error(`[Orchestrator] Plan synthesis failed:`, err.message);

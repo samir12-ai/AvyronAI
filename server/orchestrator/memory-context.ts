@@ -18,6 +18,7 @@ export interface MemoryEntry {
 export interface MemoryConstraintBlock {
   reinforcePatterns: MemoryEntry[];
   avoidPatterns: MemoryEntry[];
+  pendingPatterns: MemoryEntry[];
 }
 
 export async function buildMemoryContext(
@@ -38,6 +39,7 @@ export async function buildMemoryContext(
 
   const reinforcePatterns: MemoryEntry[] = [];
   const avoidPatterns: MemoryEntry[] = [];
+  const pendingPatterns: MemoryEntry[] = [];
 
   for (const row of rows) {
     const entry: MemoryEntry = {
@@ -55,12 +57,14 @@ export async function buildMemoryContext(
 
     if (entry.isWinner) {
       reinforcePatterns.push(entry);
-    } else {
+    } else if (entry.score !== 0) {
       avoidPatterns.push(entry);
+    } else {
+      pendingPatterns.push(entry);
     }
   }
 
-  return { reinforcePatterns, avoidPatterns };
+  return { reinforcePatterns, avoidPatterns, pendingPatterns };
 }
 
 export function serializeMemoryContextForPrompt(block: MemoryConstraintBlock): string {
@@ -79,7 +83,7 @@ export function serializeMemoryContextForPrompt(block: MemoryConstraintBlock): s
   );
 
   const parts: string[] = [
-    "MEMORY_CONSTRAINTS (from prior orchestrator runs for this campaign):",
+    "MEMORY_CONSTRAINTS (from prior evaluated orchestrator runs for this campaign):",
   ];
 
   if (reinforceLines.length > 0) {
@@ -91,14 +95,13 @@ export function serializeMemoryContextForPrompt(block: MemoryConstraintBlock): s
 
   if (avoidLines.length > 0) {
     parts.push(
-      "AVOID — strategies that previously failed or underperformed (do not repeat these):",
+      "AVOID — strategies that were evaluated and underperformed (do not repeat these):",
       ...avoidLines,
     );
+    parts.push(
+      "INSTRUCTION: treat AVOID entries as hard exclusions — do not recommend any strategy labeled in the AVOID list above. Prefer directions listed under REINFORCE when applicable.",
+    );
   }
-
-  parts.push(
-    "INSTRUCTION: treat AVOID entries as hard exclusions — do not recommend any strategy labeled in the AVOID list above. Prefer directions listed under REINFORCE when applicable.",
-  );
 
   return parts.join("\n");
 }
