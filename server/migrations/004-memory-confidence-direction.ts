@@ -23,15 +23,15 @@ export async function migrateMemoryConfidenceDirection() {
       confidence_score = CASE
         WHEN is_winner = true THEN 0.85
         WHEN is_winner = false AND score < 0 THEN 0.15
-        WHEN is_winner = false AND score = 0 THEN 0.5
-        ELSE GREATEST(0.0, LEAST(1.0, COALESCE(score, 0.5)))
+        ELSE 0.5
       END,
       direction = CASE
         WHEN is_winner = true THEN 'reinforce'
         WHEN is_winner = false AND score < 0 THEN 'avoid'
         ELSE 'neutral'
-      END
-    WHERE direction IS NULL
+      END,
+      last_validated_at = NOW()
+    WHERE last_validated_at IS NULL
   `);
 
   console.log("[Migration-004] strategy_memory confidence_score and direction columns ready.");
