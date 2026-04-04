@@ -372,13 +372,38 @@ export async function runMemoryMutation(
         challengedEntryIds.add(row.id);
       }
     } else if (currentDirection === "avoid") {
+      const asSlot: MemorySlot = {
+        id: row.id,
+        accountId: row.accountId,
+        campaignId: row.campaignId,
+        memoryType: (row.memoryType ?? "content_format") as import("../memory-system/types").MemoryClass,
+        engineName: row.engineName ?? null,
+        label: row.label,
+        details: row.details ?? null,
+        performance: null,
+        score: row.score ?? 0,
+        confidenceScore: currentConfidence,
+        direction: currentDirection,
+        isWinner: row.isWinner ?? false,
+        usageCount: row.usageCount ?? 0,
+        planId: row.planId ?? null,
+        strategyFingerprint: row.strategyFingerprint ?? null,
+        lastValidatedAt: row.lastValidatedAt ?? null,
+        decayRate: row.decayRate ?? 0.95,
+        validationCount: currentValidationCount,
+        industry: null,
+        platform: null,
+        campaignType: null,
+        funnelObjective: null,
+        updatedAt: row.updatedAt ?? null,
+        createdAt: row.createdAt ?? null,
+      };
+
       const perfSnaps = toPerformanceSnapshots(newSnaps, industryBaseline);
-      const overrideResult = checkResultsOverrideMemory(
-        row as unknown as MemorySlot,
-        perfSnaps,
-      );
+      const overrideResult = checkResultsOverrideMemory(asSlot, perfSnaps);
 
       const consistentBelow = countConsecutiveConfirmed(scores, industryBaseline, "below");
+      const consistentAboveForAvoid = countConsecutiveConfirmed(scores, industryBaseline, "above");
 
       if (overrideResult.override) {
         await db
@@ -405,6 +430,9 @@ export async function runMemoryMutation(
           })
           .where(eq(strategyMemory.id, row.id));
         summary.confirmed++;
+      } else if (consistentAboveForAvoid >= MIN_PERIODS_FOR_CONFIDENCE_MOVE && !overrideResult.override) {
+        summary.challenged++;
+        challengedEntryIds.add(row.id);
       }
     }
   }
