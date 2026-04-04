@@ -8,6 +8,7 @@ import {
   computeSmoothedScore,
   computeStabilitySignal,
 } from "./scoring";
+import { runMemoryMutation } from "../memory-mutation/engine";
 
 const CONTENT_TYPES = ["reel", "carousel", "story", "post"] as const;
 const VALID_SOURCES = ["manual", "meta-api"] as const;
@@ -112,6 +113,10 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
       notes: notes || null,
     });
 
+    runMemoryMutation(accountId, campaignId).catch((err: Error) => {
+      console.warn(`[PerformanceFeedback] Memory mutation fire-and-forget failed:`, err.message);
+    });
+
     return res.json({
       success: true,
       id,
@@ -119,6 +124,21 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
       smoothedPerformanceScore: smoothedScore,
       volumePenaltyApplied: penaltyApplied,
     });
+  });
+
+  app.post("/api/memory/mutate", async (req: any, res) => {
+    const accountId = req.user?.accountId || req.accountId || "default";
+    const { campaignId } = req.body;
+    if (!campaignId) {
+      return res.status(400).json({ error: "campaignId is required" });
+    }
+    try {
+      const result = await runMemoryMutation(accountId, campaignId);
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      console.error(`[MemoryMutate] Manual trigger failed:`, err.message);
+      return res.status(500).json({ error: err.message });
+    }
   });
 
   app.get("/api/performance/summary/:campaignId", async (req: any, res) => {

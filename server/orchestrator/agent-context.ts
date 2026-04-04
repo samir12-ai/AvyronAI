@@ -33,6 +33,7 @@ import {
 } from "@shared/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { getActiveRootBundle, detectStaleness } from "../root-bundle";
+import { getMemoryHealth, type MemoryHealthSummary } from "../memory-mutation/engine";
 
 export interface SystemContext {
   businessProfile: any;
@@ -70,6 +71,7 @@ export interface SystemContext {
     totalFormatsTracked: number;
     byFormat: Record<string, { smoothedScore: number; stabilitySignal: number; lastPeriod: string; lastUpdated: any } | null>;
   } | null;
+  memoryHealth: MemoryHealthSummary | null;
   warnings: string[];
 }
 
@@ -336,6 +338,11 @@ export async function loadSystemContext(
     } catch {}
   }
 
+  let memoryHealth: MemoryHealthSummary | null = null;
+  try {
+    memoryHealth = await getMemoryHealth(accountId, campaignId);
+  } catch {}
+
   let contentPerformanceSummary: SystemContext["contentPerformanceSummary"] = null;
   try {
     const CONTENT_TYPES = ["reel", "carousel", "story", "post"] as const;
@@ -442,6 +449,7 @@ export async function loadSystemContext(
     executionTasksSummary,
     assumptionsSummary,
     contentPerformanceSummary,
+    memoryHealth,
     warnings,
   };
 }
@@ -631,6 +639,18 @@ export function buildSystemPrompt(context: SystemContext): string {
   } else {
     lines.push("");
     lines.push("CONTENT PERFORMANCE: No data logged yet. Ask user to log performance via Business Profile > Content Performance.");
+  }
+
+  if (context.memoryHealth) {
+    const mh = context.memoryHealth;
+    lines.push("");
+    lines.push(`MEMORY HEALTH: ${mh.totalActive} active entries | ${mh.highConfidenceCount} high-confidence (>0.7) | ${mh.challengedCount} stale/challenged | ${mh.recentlyDecayed} recently decayed to neutral`);
+    if (mh.recentFlips.length > 0) {
+      lines.push(`  Recent direction flips: ${mh.recentFlips.map((f) => `${f.label} (${f.from}→${f.to})`).join("; ")}`);
+    }
+    if (mh.lastMutationRunAt) {
+      lines.push(`  Last mutation run: ${new Date(mh.lastMutationRunAt).toLocaleDateString()}`);
+    }
   }
 
   if (context.warnings.length > 0) {
