@@ -1,0 +1,76 @@
+Hi Replit Team,
+
+Before we continue building further on top of the current scraping setup, I’d like to align on how things are behaving today at the code level — especially since this is becoming a core signal in the system.
+
+We’ve discussed scraping patterns before, but given that we now have:
+- autonomous cycles (~6h)
+- growing number of users
+- and scraping feeding directly into performance + memory
+
+…it feels important to double-check that what we have is safe and consistent before scaling it further.
+
+---
+
+### 🧠 What I’d like to understand (based on current code)
+
+1. Scheduling behavior
+   - How are scraping jobs currently scheduled?
+   - Are all accounts triggered in fixed intervals (e.g. every 6h at the same time)?
+   - Or is there any distribution / staggering already implemented?
+
+---
+
+2. Request distribution
+   - When multiple accounts are scraped:
+     - Is it done in batches or sequentially?
+     - Do we have any queueing or spacing between requests?
+   - Is there any rate limiting logic in place?
+
+---
+
+3. Pattern randomness
+   - Is there any jitter/randomization in:
+     - scrape timing
+     - request intervals
+   - Or is the pattern currently deterministic?
+
+---
+
+4. Failure / degradation detection
+   - Do we currently detect:
+     - empty or partial responses?
+     - sudden drops in engagement data?
+   - Is there any logic that flags potential scraping issues vs real performance changes?
+
+---
+
+5. Scaling behavior
+   - As user count increases:
+     - how does the scraping workload scale?
+     - do we have any prioritization, batching, or throttling mechanisms?
+
+---
+
+6. IP / network layer
+   - Are all requests currently coming from a single IP/source?
+   - Or is there already any form of distribution (proxies, rotation, etc.)?
+
+---
+
+### 🎯 Goal
+
+The goal here isn’t to change things immediately, but to understand clearly:
+
+- what’s already implemented in code  
+- what assumptions we’re currently making  
+- and whether anything might become a bottleneck or risk as we scale  
+
+I’d prefer to align based on the actual implementation, so we don’t build new logic that conflicts with what already exists.
+
+---
+
+Once we have this mapped out, we can decide together if any adjustments are needed — or if the current setup is already sufficient for the next phase.
+
+Thanks,  
+Samir  
+Avyron AI
