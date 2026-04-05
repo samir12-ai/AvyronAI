@@ -931,6 +931,9 @@ function categorizeDecisionType(action: string): string {
   return "general";
 }
 
+/** Number of accounts processed in parallel per worker tick. */
+const WORKER_CONCURRENCY = 3;
+
 async function workerTick() {
   try {
     const accountIds = await getAccountsDueForProcessing();
@@ -939,10 +942,11 @@ async function workerTick() {
       return;
     }
 
-    console.log(`[Worker] Processing ${accountIds.length} account(s): ${accountIds.join(", ")}`);
+    console.log(`[Worker] Processing ${accountIds.length} account(s) across ${WORKER_CONCURRENCY} parallel lane(s): ${accountIds.join(", ")}`);
 
-    for (const accountId of accountIds) {
-      await processAccount(accountId);
+    for (let i = 0; i < accountIds.length; i += WORKER_CONCURRENCY) {
+      const batch = accountIds.slice(i, i + WORKER_CONCURRENCY);
+      await Promise.all(batch.map((accountId) => processAccount(accountId)));
     }
   } catch (error) {
     console.error("[Worker] Tick error:", error);
@@ -971,11 +975,17 @@ async function ensureDefaultConfig() {
   }
 }
 
-const CI_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const SHARED_POOL_STALE_HOURS = 12;
+const CI_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CI_MAX_INTERVAL_MS = 48 * 60 * 60 * 1000; // 48 hours
+const SHARED_POOL_STALE_HOURS = 24;
 const SHARED_POOL_MAX_SCRAPES_PER_RUN = 3;
 const FOUNDER_ACCOUNT_ID = "a2d87878-a1e9-41ea-a8a5-90beff569673";
-let ciTimer: ReturnType<typeof setInterval> | null = null;
+let ciTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Returns a random interval between CI_MIN and CI_MAX to avoid fixed-pattern scheduling. */
+function getNextCIIntervalMs(): number {
+  return CI_MIN_INTERVAL_MS + Math.random() * (CI_MAX_INTERVAL_MS - CI_MIN_INTERVAL_MS);
+}
 let sharedPoolRunning = false;
 
 async function runSharedPoolRefresh() {
@@ -1074,15 +1084,32 @@ async function runSharedPoolRefresh() {
   }
 }
 
+/**
+ * Schedules the next CI refresh with a randomized 24–48h interval.
+ * Using recursive setTimeout (rather than setInterval) ensures each cycle
+ * picks a fresh random delay, breaking fixed-pattern scheduling.
+ */
+function scheduleCIRefresh() {
+  const nextMs = getNextCIIntervalMs();
+  const nextHours = (nextMs / 3600000).toFixed(1);
+  console.log(`[CI Worker] Next shared pool refresh in ${nextHours}h`);
+  ciTimer = setTimeout(async () => {
+    await runSharedPoolRefresh();
+    scheduleCIRefresh();
+  }, nextMs);
+}
+
 export function startAutonomousWorker() {
-  console.log("[Worker] Starting autonomous worker (5-min interval, 6h cycle threshold)");
+  console.log(`[Worker] Starting autonomous worker (5-min tick, 6h cycle threshold, ${WORKER_CONCURRENCY} parallel lanes)`);
   ensureDefaultConfig().catch(err => console.error("[Worker] Failed to seed defaults:", err));
   workerTick();
   workerTimer = setInterval(workerTick, WORKER_INTERVAL_MS);
 
-  setTimeout(() => runSharedPoolRefresh(), 60000);
-  ciTimer = setInterval(runSharedPoolRefresh, CI_CHECK_INTERVAL_MS);
-  console.log("[CI Worker] Shared pool refresh worker started (6h interval, initial run in 60s)");
+  setTimeout(async () => {
+    await runSharedPoolRefresh();
+    scheduleCIRefresh();
+  }, 60000);
+  console.log("[CI Worker] Shared pool refresh worker started (24–48h randomized interval, initial run in 60s)");
 }
 
 export function stopAutonomousWorker() {
@@ -1092,7 +1119,7 @@ export function stopAutonomousWorker() {
     console.log("[Worker] Autonomous worker stopped");
   }
   if (ciTimer) {
-    clearInterval(ciTimer);
+    clearTimeout(ciTimer);
     ciTimer = null;
     console.log("[CI Worker] Competitive intelligence checker stopped");
   }

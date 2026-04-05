@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { strategyMemory, contentPerformanceSnapshots, calendarEntries } from "@shared/schema";
+import { strategyMemory, contentPerformanceSnapshots, calendarEntries, userChannelSnapshots } from "@shared/schema";
 import { eq, and, lt, gt, desc, isNotNull } from "drizzle-orm";
 import { makeStrategyFingerprint } from "../memory-system/manager";
 import { checkResultsOverrideMemory } from "../orchestrator/memory-context";
@@ -370,10 +370,66 @@ async function resolveIndustryBaseline(accountId: string, campaignId: string): P
   return INDUSTRY_BASELINE_DEFAULT;
 }
 
+// ── Scrape Health Guard ────────────────────────────────────────────────────────
+
+const CONSECUTIVE_FAILED_THRESHOLD = 3;
+
+/**
+ * Returns true if the most recent N snapshots for this account are all FAILED.
+ * When an account is degraded the signal cannot be trusted, so memory mutation
+ * is skipped entirely to protect memory integrity.
+ */
+async function checkScrapeHealthForAccount(
+  accountId: string,
+): Promise<{ isDegraded: boolean; consecutiveFailed: number }> {
+  const recentSnaps = await db
+    .select({ snapshotData: userChannelSnapshots.snapshotData })
+    .from(userChannelSnapshots)
+    .where(eq(userChannelSnapshots.accountId, accountId))
+    .orderBy(desc(userChannelSnapshots.scrapedAt))
+    .limit(CONSECUTIVE_FAILED_THRESHOLD);
+
+  let consecutiveFailed = 0;
+  for (const snap of recentSnaps) {
+    try {
+      const data = snap.snapshotData ? JSON.parse(snap.snapshotData) : null;
+      if (data?.scrapeStatus === "FAILED") {
+        consecutiveFailed++;
+      } else {
+        break;
+      }
+    } catch {
+      break;
+    }
+  }
+
+  return {
+    isDegraded: consecutiveFailed >= CONSECUTIVE_FAILED_THRESHOLD,
+    consecutiveFailed,
+  };
+}
+
 export async function runMemoryMutation(
   accountId: string,
   campaignId: string,
 ): Promise<MemoryMutationResult> {
+  // ── Degradation guard ────────────────────────────────────────────────────────
+  // If the account's last 3 channel scrapes all failed, the performance signal
+  // is unreliable. Skip mutation entirely rather than risk corrupting memory
+  // with bad data (e.g. false "zero engagement" from a blocked scrape).
+  const scrapeHealth = await checkScrapeHealthForAccount(accountId);
+  if (scrapeHealth.isDegraded) {
+    console.warn(
+      `[MemoryMutation] Skipping mutation for account=${accountId} — ` +
+      `${scrapeHealth.consecutiveFailed} consecutive FAILED scrapes detected. ` +
+      `Signal integrity compromised. Memory unchanged.`
+    );
+    return {
+      summary: { confirmed: 0, challenged: 0, flipped: [], decayed: 0, totalProcessed: 0 },
+      logEntryId: "degraded-skip",
+    };
+  }
+
   const memoryRows = await db
     .select()
     .from(strategyMemory)

@@ -30,8 +30,61 @@ const INITIAL_SCRAPE_MAX_POSTS = 30;
 /** Max posts fetched on subsequent (incremental) scrapes — approx. 1 week of posts. */
 const INCREMENTAL_SCRAPE_MAX_POSTS = 12;
 
-/** Do not re-scrape if last snapshot is younger than this. */
-const SCRAPE_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // 6 days
+/** Minimum scrape interval — no profile is re-scraped more often than this. */
+const MIN_SCRAPE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Maximum scrape interval — and the interval used for degraded profiles. */
+const MAX_SCRAPE_INTERVAL_MS = 48 * 60 * 60 * 1000; // 48 hours
+
+/**
+ * Returns a deterministic but distributed scrape interval for a profile.
+ * Hashing the channelKey spreads scrape times across the 24–48h window
+ * so all accounts don't fire at the same wall-clock time.
+ */
+function getProfileScrapeInterval(channelKey: string): number {
+  let h = 0;
+  for (let i = 0; i < channelKey.length; i++) {
+    h = (Math.imul(31, h) + channelKey.charCodeAt(i)) | 0;
+  }
+  const range = MAX_SCRAPE_INTERVAL_MS - MIN_SCRAPE_INTERVAL_MS;
+  return MIN_SCRAPE_INTERVAL_MS + (Math.abs(h) % range);
+}
+
+/**
+ * Returns true if the last 3 snapshots for this profile are all FAILED.
+ * Degraded profiles use the maximum 48h interval to reduce pressure.
+ */
+async function isProfileDegraded(
+  accountId: string,
+  campaignId: string,
+  platform: string,
+  channelKey: string | null
+): Promise<boolean> {
+  const conditions: Parameters<typeof and>[0][] = [
+    eq(userChannelSnapshots.accountId, accountId),
+    eq(userChannelSnapshots.campaignId, campaignId),
+    eq(userChannelSnapshots.platform, platform),
+  ];
+  if (channelKey) conditions.push(eq(userChannelSnapshots.handle, channelKey));
+
+  const recentSnaps = await db
+    .select({ snapshotData: userChannelSnapshots.snapshotData })
+    .from(userChannelSnapshots)
+    .where(and(...conditions))
+    .orderBy(desc(userChannelSnapshots.scrapedAt))
+    .limit(3);
+
+  if (recentSnaps.length < 3) return false;
+
+  return recentSnaps.every((snap) => {
+    try {
+      const data = snap.snapshotData ? JSON.parse(snap.snapshotData) : null;
+      return data?.scrapeStatus === "FAILED";
+    } catch {
+      return false;
+    }
+  });
+}
 
 /** Block-indicator patterns in scrape warnings. */
 const BLOCK_WARNING_PATTERNS = [
@@ -408,8 +461,6 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
 
   console.log(`[UserChannelScraper] Scraping ${profiles.length} user channel(s) for account=${accountId}`);
 
-  const scrapeIntervalCutoff = Date.now() - SCRAPE_INTERVAL_MS;
-
   for (const profile of profiles) {
     try {
       // Channel identity key: handle for Instagram, URL for website
@@ -420,8 +471,20 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
       // Determine first-scrape vs incremental for this exact channel identity
       const previousSnapshot = await getPreviousSnapshot(accountId, campaignId, profile.platform, channelKey);
 
-      // Per-profile freshness check: skip if this exact channel's last snapshot is still fresh
+      // Per-profile freshness check: skip if this exact channel's last snapshot is still fresh.
+      // Degraded profiles (≥3 consecutive FAILEDs) always use the maximum 48h interval to
+      // reduce scraping pressure. Normal profiles use a hash-derived 24–48h interval so
+      // scrapes are naturally spread across the window rather than all firing together.
       if (previousSnapshot) {
+        const degraded = await isProfileDegraded(accountId, campaignId, profile.platform, channelKey);
+        const intervalMs = degraded
+          ? MAX_SCRAPE_INTERVAL_MS
+          : getProfileScrapeInterval(channelKey ?? (accountId + profile.platform));
+
+        if (degraded) {
+          console.warn(`[UserChannelScraper] Profile ${profile.platform}:${channelKey ?? "unknown"} is DEGRADED (3+ consecutive failures) — using ${MAX_SCRAPE_INTERVAL_MS / 3600000}h interval`);
+        }
+
         const conditions = [
           eq(userChannelSnapshots.accountId, accountId),
           eq(userChannelSnapshots.campaignId, campaignId),
@@ -435,8 +498,9 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
           .orderBy(desc(userChannelSnapshots.scrapedAt))
           .limit(1);
         if (latestForProfile.length > 0 && latestForProfile[0].scrapedAt) {
+          const scrapeIntervalCutoff = Date.now() - intervalMs;
           if (latestForProfile[0].scrapedAt.getTime() >= scrapeIntervalCutoff) {
-            console.log(`[UserChannelScraper] Skipping fresh profile: ${profile.platform}:${channelKey ?? "unknown"}`);
+            console.log(`[UserChannelScraper] Skipping fresh profile: ${profile.platform}:${channelKey ?? "unknown"} (interval=${Math.round(intervalMs / 3600000)}h)`);
             continue;
           }
         }
