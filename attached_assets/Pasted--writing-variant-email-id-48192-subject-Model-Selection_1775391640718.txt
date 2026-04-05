@@ -1,0 +1,82 @@
+:::writing{variant=“email” id=“48192” subject=“Model Selection Strategy for Avyron (Selective Upgrade Approach)”}
+Hi Replit Team,
+
+I’d like to align on the model upgrade direction, but based specifically on how our system is actually structured in code — not just a blanket upgrade.
+
+After reviewing the current architecture (#11–#17), I strongly believe we should not upgrade all calls uniformly, but instead adopt a selective (hybrid) model strategy aligned with how different parts of the system operate.
+
+⸻
+
+🧠 Proposed Approach (Architecture-Aligned)
+
+We split model usage into two tiers:
+
+1. Heavy Reasoning / Decision Layers (Upgrade)
+These are the parts of the system where correctness and multi-factor reasoning matter most:
+	•	Plan synthesis (plan-synthesis.ts)
+	•	Agent orchestration decisions (controller loop)
+	•	Adaptive rhythm reasoning
+	•	Memory mutation decisions
+	•	Exploration allocation logic
+
+👉 These should use the strongest reasoning-capable model available
+
+⸻
+
+2. High-Volume / Utility Layers (Keep Lightweight)
+These are frequent, structured, or deterministic tasks:
+	•	Data extraction / normalization
+	•	Formatting / summarization
+	•	Tool routing / simple responses
+	•	Signal processing (non-decision logic)
+
+👉 These should remain on mini / lightweight models for cost and speed efficiency
+
+⸻
+
+❗ What We Want to Avoid
+	•	Upgrading all calls to a heavy model (high cost, low marginal gain)
+	•	Keeping everything on mini models (hurts reasoning quality where it matters)
+	•	Mixing models without clear responsibility boundaries
+
+⸻
+
+🔍 Questions (Based on Current Code)
+
+To finalize this properly, I’d like clarity based on actual implementation:
+	1.	Which files/functions currently use:
+	•	gpt-4.1
+	•	gpt-4.1-mini / gpt-4o-mini
+	•	or any reasoning models?
+	2.	Specifically:
+	•	What model is used inside plan-synthesis.ts?
+	•	What model powers the orchestrator engine loop (runOrchestrator)?
+	•	What model is used in memory mutation (if any LLM is involved)?
+	•	What model is used in agent tool-calling?
+	3.	Are model assignments centralized (e.g. ai-client.ts) or scattered across files?
+	4.	If we upgrade only specific layers:
+	•	What is the easiest way in the current codebase to route different tasks to different models?
+
+⸻
+
+🎯 Goal
+
+We want a model strategy that matches system architecture, not a one-size-fits-all upgrade:
+	•	Strong models → where decisions are made
+	•	Lightweight models → where volume and speed matter
+
+⸻
+
+Once we understand current model usage in code, we can define:
+	•	Exact upgrade targets
+	•	Cost impact
+	•	And rollout safely
+
+⸻
+
+Looking forward to your breakdown — especially with references to the relevant files/functions.
+
+Best regards,
+Samir
+Avyron AI
+:::
