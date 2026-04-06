@@ -1135,7 +1135,7 @@ Return JSON:
   const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
   try {
     const completion = await aiChat({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
       messages: [{ role: "user", content: fullPrompt }],
       max_tokens: 800,
       temperature: 0.7,

@@ -384,8 +384,8 @@ export function registerChatRoutes(app: Express): void {
         tools: campaignId ? AGENT_TOOLS : undefined,
         tool_choice: campaignId ? "auto" : undefined,
         stream: true,
-        max_completion_tokens: 2048,
-      });
+        max_tokens: 2048,
+      } as any);
 
       let pendingToolCallId = "";
       let pendingToolName = "";
@@ -451,8 +451,8 @@ export function registerChatRoutes(app: Express): void {
             model: PRIMARY_CHAT_MODEL,
             messages: messageHistory,
             stream: true,
-            max_completion_tokens: 1024,
-          });
+            max_tokens: 1024,
+          } as any);
 
           for await (const continuationChunk of continuationStream) {
             const contDelta = continuationChunk.choices[0]?.delta;

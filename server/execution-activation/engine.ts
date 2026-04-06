@@ -211,7 +211,7 @@ async function generateCreativeForEntry(
   planContext: string,
 ): Promise<{ caption: string; creativeBrief: string; ctaCopy: string }> {
   const response = await aiChat({
-    model: "gpt-4o-mini",
+    model: "gpt-4.1-mini",
     messages: [
       {
         role: "system",

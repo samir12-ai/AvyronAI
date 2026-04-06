@@ -216,7 +216,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
 
   try {
     const response = await aiChat({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
