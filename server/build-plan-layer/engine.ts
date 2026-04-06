@@ -512,7 +512,7 @@ export async function runBuildPlanLayer(
       const prompt = buildBuildPlanPrompt(engineContext, adaptiveRhythm, attempt > 1 ? lastFailedBlocks : undefined);
 
       const response = await aiChat({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 1500,
         temperature: 0.3,
