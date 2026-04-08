@@ -7,12 +7,16 @@ const HARD_TIMEOUT_MS = 45000;
 export const PRIMARY_CHAT_MODEL = "gpt-4.1";
 
 let openaiInstance: OpenAI | null = null;
+let openaiApiKey: string | undefined;
 let geminiInstance: GoogleGenAI | null = null;
+let geminiApiKey: string | undefined;
 
 export function getOpenAI(): OpenAI {
-  if (!openaiInstance) {
+  const currentKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  if (!openaiInstance || currentKey !== openaiApiKey) {
+    openaiApiKey = currentKey;
     openaiInstance = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey: currentKey,
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
       timeout: HARD_TIMEOUT_MS,
       maxRetries: 0,
@@ -22,9 +26,11 @@ export function getOpenAI(): OpenAI {
 }
 
 export function getGemini(): GoogleGenAI {
-  if (!geminiInstance) {
+  const currentKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  if (!geminiInstance || currentKey !== geminiApiKey) {
+    geminiApiKey = currentKey;
     geminiInstance = new GoogleGenAI({
-      apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
+      apiKey: currentKey,
       httpOptions: {
         apiVersion: "",
         baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
@@ -89,13 +95,14 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
     const tokenParam = isGpt5
       ? { max_completion_tokens: rest.max_tokens }
       : { max_tokens: rest.max_tokens };
-    const result = await openai.chat.completions.create({
+    const payload = {
       model: rest.model,
       messages: rest.messages as any,
       ...tokenParam,
       temperature: rest.temperature,
       response_format: rest.response_format,
-    } as any);
+    };
+    const result = await openai.chat.completions.create(payload as any);
 
     success = true;
     actualTokens = result.usage?.total_tokens || rest.max_tokens;
