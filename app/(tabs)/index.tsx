@@ -11,6 +11,7 @@ import {
   Animated as RNAnimated,
   Dimensions,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -25,6 +26,7 @@ import { useCampaign } from '@/context/CampaignContext';
 import { MetricCard } from '@/components/MetricCard';
 import { CampaignBar } from '@/components/CampaignSelector';
 import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
+import { useQueryClient } from '@tanstack/react-query';
 import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfile';
 import { PlanStatus } from '@/components/PlanStatus';
 import ExecutionPlan from '@/components/ExecutionPlan';
@@ -161,6 +163,7 @@ export default function DashboardScreen() {
   const [showProfile, setShowProfile] = useState(false);
   const [orchestratorRunning, setOrchestratorRunning] = useState(false);
   const [narrativeRefreshKey, setNarrativeRefreshKey] = useState(0);
+  const [isApproving, setIsApproving] = useState(false);
   const prevCampaignRef = useRef<string | null | undefined>(undefined);
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
@@ -173,6 +176,7 @@ export default function DashboardScreen() {
   }, []);
 
   const baseUrl = getApiUrl();
+  const queryClient = useQueryClient();
 
   const activeCampaignRef = useRef<string | null>(selectedCampaignId);
   useEffect(() => { activeCampaignRef.current = selectedCampaignId; }, [selectedCampaignId]);
@@ -298,18 +302,49 @@ export default function DashboardScreen() {
     setTimeout(() => setOrchestratorRunning(false), 5000);
   }, [selectedCampaignId, baseUrl, orchestratorRunning]);
 
-  const handleApprovePlan = useCallback(async (planId: string) => {
+  const doApprove = useCallback(async (planId: string, force: boolean) => {
+    setIsApproving(true);
     try {
-      await authFetch(new URL(`/api/plans/${planId}/approve`, baseUrl).toString(), {
+      const res = await authFetch(new URL(`/api/plans/${planId}/approve`, baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(force ? { force: true } : {}),
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (err) {
-      console.error('Failed to approve plan:', err);
+      if (res.ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        queryClient.invalidateQueries({ queryKey: ['/api/plans/active', selectedCampaignId] });
+      } else {
+        const body = await res.json().catch(() => ({}));
+        if (body.blocked) {
+          const warningText = Array.isArray(body.warnings) && body.warnings.length > 0
+            ? body.warnings.join('\n')
+            : 'Integrity or deviation checks failed.';
+          Alert.alert(
+            'Approval Blocked',
+            warningText,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Force Approve',
+                style: 'destructive',
+                onPress: () => doApprove(planId, true),
+              },
+            ]
+          );
+        } else {
+          Alert.alert('Approval Failed', body.error || body.message || 'Unknown error. Please try again.');
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Approval Failed', err.message || 'Network error. Please try again.');
+    } finally {
+      setIsApproving(false);
     }
-  }, [baseUrl]);
+  }, [baseUrl, queryClient, selectedCampaignId]);
+
+  const handleApprovePlan = useCallback((planId: string) => {
+    doApprove(planId, false);
+  }, [doApprove]);
 
   const confColor = confidenceStatus === 'Stable' ? P.mint : confidenceStatus === 'Caution' ? P.orange : P.coral;
 
@@ -567,6 +602,7 @@ export default function DashboardScreen() {
               isDark={isDark}
               onBuildPlan={handleBuildPlan}
               onApprovePlan={handleApprovePlan}
+              isApproving={isApproving}
             />
 
             <NarrativeCard campaignId={selectedCampaignId} isDark={isDark} refreshKey={narrativeRefreshKey} />

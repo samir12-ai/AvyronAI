@@ -383,16 +383,65 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   };
 
   const renderWeeklyRhythm = () => {
-    if (!work) return null;
-    const items = [
-      { label: 'Reels', count: work.reels?.perWeek, icon: 'videocam-outline', color: C.coral },
-      { label: 'Posts', count: work.posts?.perWeek, icon: 'image-outline', color: C.blue },
-      { label: 'Stories', count: work.stories?.perDay ? `${work.stories.perDay}/day` : 0, icon: 'layers-outline', color: C.teal },
-      { label: 'Carousels', count: work.carousels?.perWeek, icon: 'albums-outline', color: C.orange },
-      { label: 'Videos', count: work.videos?.perWeek, icon: 'film-outline', color: C.mint },
-    ].filter(i => i.count && i.count !== 0);
+    const liveRhythm = planData.liveRhythm;
+    const approvedRhythm = planData.approvedRhythm;
+    const rhythmDelta = planData.rhythmDelta;
+    const showApproved = !!approvedRhythm;
+    const showDelta = !!(rhythmDelta && showApproved);
 
-    if (items.length === 0) return null;
+    const formatRows = [
+      {
+        label: 'Reels',
+        icon: 'videocam-outline' as const,
+        color: C.coral,
+        current: liveRhythm?.reelsPerWeek ?? work?.reels?.perWeek,
+        approved: approvedRhythm?.reelsPerWeek,
+        delta: rhythmDelta?.reels,
+        unit: '/wk',
+      },
+      {
+        label: 'Posts',
+        icon: 'image-outline' as const,
+        color: C.blue,
+        current: liveRhythm?.postsPerWeek ?? work?.posts?.perWeek,
+        approved: approvedRhythm?.postsPerWeek,
+        delta: null as number | null,
+        unit: '/wk',
+      },
+      {
+        label: 'Stories',
+        icon: 'layers-outline' as const,
+        color: C.teal,
+        current: liveRhythm?.storiesPerDay ?? work?.stories?.perDay,
+        approved: approvedRhythm?.storiesPerDay,
+        delta: rhythmDelta?.stories,
+        unit: '/day',
+      },
+      {
+        label: 'Carousels',
+        icon: 'albums-outline' as const,
+        color: C.orange,
+        current: liveRhythm?.carouselsPerWeek ?? work?.carousels?.perWeek,
+        approved: approvedRhythm?.carouselsPerWeek,
+        delta: rhythmDelta?.carousels,
+        unit: '/wk',
+      },
+    ].filter(r => r.current != null && r.current !== 0);
+
+    if (formatRows.length === 0 && !work) return null;
+
+    const deltaColor = (d: number | null | undefined) => {
+      if (d == null) return textSecondary;
+      if (d > 0) return '#10B981';
+      if (d < 0) return C.coral;
+      return textSecondary;
+    };
+    const deltaStr = (d: number | null | undefined) => {
+      if (d == null) return '—';
+      if (d > 0) return `+${d}`;
+      if (d < 0) return `${d}`;
+      return '0';
+    };
 
     return (
       <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
@@ -400,15 +449,51 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
           <Ionicons name="calendar-outline" size={18} color={C.orange} />
           <Text style={[st.sectionTitle, { color: textPrimary }]}>Weekly Rhythm</Text>
         </View>
-        <View style={st.rhythmGrid}>
-          {items.map((item, i) => (
-            <View key={i} style={[st.rhythmCard, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
-              <Ionicons name={item.icon as any} size={16} color={item.color} />
-              <Text style={[st.rhythmCount, { color: textPrimary }]}>{item.count}</Text>
-              <Text style={[st.rhythmLabel, { color: textSecondary }]}>{item.label}</Text>
+
+        <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+          <View style={[st.rhythmTableHeader, { borderBottomColor: cardBorder }]}>
+            <Text style={[st.rhythmTableHeaderCell, { flex: 2, color: textSecondary }]}>Format</Text>
+            <Text style={[st.rhythmTableHeaderCell, { color: textSecondary }]}>Current</Text>
+            {showApproved && <Text style={[st.rhythmTableHeaderCell, { color: textSecondary }]}>Approved</Text>}
+            {showDelta && <Text style={[st.rhythmTableHeaderCell, { color: textSecondary }]}>Δ</Text>}
+          </View>
+          {formatRows.map((row, i) => (
+            <View
+              key={i}
+              style={[
+                st.rhythmTableRow,
+                { borderBottomColor: cardBorder, borderBottomWidth: i < formatRows.length - 1 ? 1 : 0 },
+              ]}
+            >
+              <View style={[st.rhythmFormatCell, { flex: 2 }]}>
+                <Ionicons name={row.icon} size={13} color={row.color} />
+                <Text style={[st.rhythmFormatLabel, { color: textPrimary }]}>{row.label}</Text>
+              </View>
+              <Text style={[st.rhythmValueCell, { color: textPrimary }]}>
+                {row.current}{row.unit}
+              </Text>
+              {showApproved && (
+                <Text style={[st.rhythmValueCell, { color: textSecondary }]}>
+                  {row.approved != null ? `${row.approved}${row.unit}` : '—'}
+                </Text>
+              )}
+              {showDelta && (
+                <Text style={[st.rhythmValueCell, { color: deltaColor(row.delta), fontWeight: '700' as const }]}>
+                  {deltaStr(row.delta)}
+                </Text>
+              )}
             </View>
           ))}
         </View>
+
+        {showApproved && approvedRhythm?.approvedAt && (
+          <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+            <Text style={{ fontSize: 10, color: textSecondary }}>
+              Approved on {new Date(approvedRhythm.approvedAt).toLocaleDateString()}
+            </Text>
+          </View>
+        )}
+
         {work && (
           <View style={st.progressSection}>
             <View style={st.progressHeader}>
@@ -866,6 +951,12 @@ const st = StyleSheet.create({
   rhythmCard: { flex: 1, minWidth: 70, borderWidth: 1, borderRadius: 10, padding: 10, alignItems: 'center' as const, gap: 4 },
   rhythmCount: { fontSize: 18, fontWeight: '800' as const },
   rhythmLabel: { fontSize: 10 },
+  rhythmTableHeader: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1 },
+  rhythmTableHeaderCell: { flex: 1, fontSize: 10, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  rhythmTableRow: { flexDirection: 'row', paddingVertical: 10, alignItems: 'center' as const },
+  rhythmFormatCell: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rhythmFormatLabel: { fontSize: 13, fontWeight: '600' as const },
+  rhythmValueCell: { flex: 1, fontSize: 13, fontWeight: '600' as const },
   progressSection: { paddingHorizontal: 14, paddingBottom: 14 },
   progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   progressLabel: { fontSize: 12 },

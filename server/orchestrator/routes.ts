@@ -20,6 +20,7 @@ import { eq, and, or, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
 import { computeFulfillment } from "../fulfillment-engine";
 import { buildCausalNarrative } from "../narrative-layer";
+import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
 
 import { resolveAccountId } from "../auth";
 export function registerOrchestratorV2Routes(app: Express) {
@@ -211,8 +212,31 @@ export function registerOrchestratorV2Routes(app: Express) {
       const assumptions = await db.select().from(planAssumptions)
         .where(eq(planAssumptions.planId, plan.id));
 
+      let liveRhythm: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number } | null = null;
+      try {
+        const rhythm = await computeAdaptiveRhythm(req.params.campaignId, accountId);
+        liveRhythm = {
+          reelsPerWeek: rhythm.reelsPerWeek,
+          carouselsPerWeek: rhythm.carouselsPerWeek,
+          storiesPerDay: rhythm.storiesPerDay,
+          postsPerWeek: rhythm.postsPerWeek,
+        };
+      } catch {}
+
+      const approvedRhythm: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek?: number; approvedAt?: string } | null =
+        plan.approvedRhythmJson ? safeJson(plan.approvedRhythmJson) : null;
+
+      const rhythmDelta = (liveRhythm && approvedRhythm) ? {
+        reels: liveRhythm.reelsPerWeek - (approvedRhythm.reelsPerWeek || 0),
+        carousels: liveRhythm.carouselsPerWeek - (approvedRhythm.carouselsPerWeek || 0),
+        stories: liveRhythm.storiesPerDay - (approvedRhythm.storiesPerDay || 0),
+      } : null;
+
       res.json({
         hasPlan: true,
+        liveRhythm,
+        approvedRhythm,
+        rhythmDelta,
         plan: {
           id: plan.id,
           status: plan.status,
@@ -380,15 +404,33 @@ export function registerOrchestratorV2Routes(app: Express) {
         return res.status(409).json({ error: "Plan was already approved or changed by another request" });
       }
 
+      let rhythmSnapshot: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; approvedAt: string } | null = null;
+      try {
+        const rhythm = await computeAdaptiveRhythm(plan.campaignId, plan.accountId);
+        rhythmSnapshot = {
+          reelsPerWeek: rhythm.reelsPerWeek,
+          carouselsPerWeek: rhythm.carouselsPerWeek,
+          storiesPerDay: rhythm.storiesPerDay,
+          postsPerWeek: rhythm.postsPerWeek,
+          approvedAt: new Date().toISOString(),
+        };
+        await db.update(strategicPlans)
+          .set({ approvedRhythmJson: JSON.stringify(rhythmSnapshot) })
+          .where(eq(strategicPlans.id, planId));
+      } catch (snapshotErr: any) {
+        console.warn("[ApproveRoute] Failed to capture rhythm snapshot (non-blocking):", snapshotErr.message);
+      }
+
       await db.insert(planApprovals).values({
         planId,
         accountId: plan.accountId,
         decision: "APPROVED",
         reason: req.body.reason || (warnings.length > 0 ? `Force-approved with warnings: ${warnings.join("; ")}` : "Approved by user"),
         decidedBy: "client",
+        rhythmSnapshotJson: rhythmSnapshot ? JSON.stringify(rhythmSnapshot) : null,
       });
 
-      res.json({ success: true, status: "APPROVED", warnings });
+      res.json({ success: true, status: "APPROVED", warnings, approvedRhythm: rhythmSnapshot });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

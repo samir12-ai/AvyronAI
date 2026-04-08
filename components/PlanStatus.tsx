@@ -18,9 +18,10 @@ interface PlanStatusProps {
   onBuildPlan: () => void;
   onApprovePlan?: (planId: string) => void;
   onViewPlan?: (planId: string) => void;
+  isApproving?: boolean;
 }
 
-export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onViewPlan }: PlanStatusProps) {
+export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onViewPlan, isApproving }: PlanStatusProps) {
   const baseUrl = getApiUrl();
   const textPrimary = isDark ? '#E8EDF2' : '#1A2332';
   const textSecondary = isDark ? '#8892A4' : '#546478';
@@ -135,15 +136,22 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
       )}
 
       <View style={s.btnRow}>
-        {plan.status === 'DRAFT' && onApprovePlan && (
-          <Pressable style={[s.actionBtn, { backgroundColor: P.neon, flex: 1 }]} onPress={() => onApprovePlan(plan.id)}>
-            <Ionicons name="checkmark" size={16} color="#000" />
-            <Text style={[s.actionBtnText, { color: '#000' }]}>Approve</Text>
+        {(plan.status === 'DRAFT' || plan.status === 'READY_FOR_REVIEW') && onApprovePlan && (
+          <Pressable
+            style={[s.actionBtn, { backgroundColor: P.neon, flex: 1, opacity: isApproving ? 0.7 : 1 }]}
+            onPress={() => !isApproving && onApprovePlan(plan.id)}
+            disabled={isApproving}
+          >
+            {isApproving
+              ? <ActivityIndicator size="small" color="#000" />
+              : <Ionicons name="checkmark" size={16} color="#000" />
+            }
+            <Text style={[s.actionBtnText, { color: '#000' }]}>{isApproving ? 'Approving...' : 'Approve'}</Text>
           </Pressable>
         )}
         {onViewPlan && (
           <Pressable
-            style={[s.outlineBtn, { borderColor: P.mint + '40', flex: plan.status === 'DRAFT' ? 1 : undefined }]}
+            style={[s.outlineBtn, { borderColor: P.mint + '40', flex: (plan.status === 'DRAFT' || plan.status === 'READY_FOR_REVIEW') ? 1 : undefined }]}
             onPress={() => onViewPlan(plan.id)}
           >
             <Text style={[s.outlineBtnText, { color: P.mint }]}>View Plan</Text>

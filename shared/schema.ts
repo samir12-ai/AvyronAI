@@ -1228,6 +1228,7 @@ export const strategicPlans = pgTable("strategic_plans", {
   totalCanceled: integer("total_canceled").default(0),
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),
+  approvedRhythmJson: text("approved_rhythm_json"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1241,6 +1242,7 @@ export const planApprovals = pgTable("plan_approvals", {
   decision: text("decision").notNull(),
   reason: text("reason"),
   decidedBy: text("decided_by").default("client"),
+  rhythmSnapshotJson: text("rhythm_snapshot_json"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
