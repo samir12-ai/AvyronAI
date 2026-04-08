@@ -1,0 +1,95 @@
+Hi Replit Team,
+
+Following the recent fixes around plan approval and rhythm discrepancies, I’d like to align on a clean direction for how we handle **rhythm as a system-level concept** going forward.
+
+---
+
+### 🧠 1. Single Source of Truth (Required Change)
+
+We will **fully deprecate the old requiredWork rhythm fields** (`work.reelsPerWeek`, etc.) as a display source.
+
+From now on:
+
+* **Source of truth = `contentDna.weeklyStructure`**
+* All UI (Strategic Plan + Content DNA) should read directly from this
+
+This ensures:
+
+* No discrepancies across screens
+* Full alignment with the adaptive system (live output)
+
+---
+
+### 🧩 2. Preserve History via Approval Snapshot
+
+To maintain historical tracking without reverting to static plans:
+
+On **plan approval**, store a snapshot of the current rhythm:
+
+```ts
+approvedRhythm = {
+  reelsPerWeek,
+  carouselsPerWeek,
+  storiesPerDay,
+  approvedAt
+}
+```
+
+This should be saved in the plan record (or related table).
+
+---
+
+### 🔄 3. Delta Tracking (Lightweight)
+
+We want to track how the system evolves after approval.
+
+At runtime:
+
+* Compare current `contentDna.weeklyStructure` vs `approvedRhythm`
+* Compute a simple delta (per format)
+
+Example:
+
+* Approved: 2 Reels / 1 Carousel
+* Current: 4 Reels / 2 Carousels
+* Δ: +2 / +1
+
+This does not need to be persisted initially — can be computed on the fly.
+
+---
+
+### 🖥️ 4. UI Alignment
+
+In PlanDocumentView (and related views):
+
+* Display:
+
+  * **Current Rhythm (live)**
+  * **Approved Rhythm (snapshot)**
+  * **Delta (if exists)**
+
+This keeps:
+
+* The system adaptive
+* While still giving users a clear reference point
+
+---
+
+### 🎯 Goal
+
+* Keep the system **fully adaptive (live-driven)**
+* Remove conflicting data sources
+* Preserve **historical context** without reintroducing static plans
+
+---
+
+Let me know:
+
+* Where you’d store `approvedRhythm` in the current schema
+* And if any part of this conflicts with the existing plan JSON structure
+
+Once aligned, we can implement this cleanly across both backend and UI.
+
+Thanks,
+Samir
+Avyron AI
