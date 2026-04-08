@@ -389,12 +389,14 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
     const showApproved = !!approvedRhythm;
     const showDelta = !!(rhythmDelta && showApproved);
 
+    const planJsonDna = planData.plan?.sections?.contentDna?.weeklyStructure;
+
     const formatRows = [
       {
         label: 'Reels',
         icon: 'videocam-outline' as const,
         color: C.coral,
-        current: liveRhythm?.reelsPerWeek ?? work?.reels?.perWeek,
+        current: liveRhythm?.reelsPerWeek ?? planJsonDna?.reels ?? work?.reels?.perWeek,
         approved: approvedRhythm?.reelsPerWeek,
         delta: rhythmDelta?.reels,
         unit: '/wk',
@@ -412,7 +414,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
         label: 'Stories',
         icon: 'layers-outline' as const,
         color: C.teal,
-        current: liveRhythm?.storiesPerDay ?? work?.stories?.perDay,
+        current: liveRhythm?.storiesPerDay ?? planJsonDna?.stories ?? work?.stories?.perDay,
         approved: approvedRhythm?.storiesPerDay,
         delta: rhythmDelta?.stories,
         unit: '/day',
@@ -421,7 +423,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
         label: 'Carousels',
         icon: 'albums-outline' as const,
         color: C.orange,
-        current: liveRhythm?.carouselsPerWeek ?? work?.carousels?.perWeek,
+        current: liveRhythm?.carouselsPerWeek ?? planJsonDna?.carousels ?? work?.carousels?.perWeek,
         approved: approvedRhythm?.carouselsPerWeek,
         delta: rhythmDelta?.carousels,
         unit: '/wk',

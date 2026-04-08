@@ -9,6 +9,7 @@ import { migrateStrategyMemoryColumns } from "./migrations/002-strategy-memory-c
 import { migrateUserChannelTables } from "./migrations/003-user-channel-tables";
 import { migrateMemoryConfidenceDirection } from "./migrations/004-memory-confidence-direction";
 import { migrateCalendarExplorationFields } from "./migrations/005-calendar-exploration-fields";
+import { migrateRhythmSnapshotColumns } from "./migrations/006-rhythm-snapshot-columns";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import { authMiddleware, optionalAuth } from "./auth";
 import * as fs from "fs";
@@ -350,6 +351,7 @@ function setupErrorHandler(app: express.Application) {
       migrateUserChannelTables().catch(err => console.error("[Migration-003] user channel tables migration error:", err));
       migrateMemoryConfidenceDirection().catch(err => console.error("[Migration-004] memory confidence direction migration error:", err));
       migrateCalendarExplorationFields().catch(err => console.error("[Migration-005] calendar exploration fields migration error:", err));
+      migrateRhythmSnapshotColumns().catch(err => console.error("[Migration-006] rhythm snapshot columns migration error:", err));
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));
