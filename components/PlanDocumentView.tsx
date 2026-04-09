@@ -6,6 +6,7 @@ import {
   Pressable,
   ActivityIndicator,
   useColorScheme,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -447,9 +448,23 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
 
     return (
       <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-        <View style={st.sectionHead}>
-          <Ionicons name="calendar-outline" size={18} color={C.orange} />
-          <Text style={[st.sectionTitle, { color: textPrimary }]}>Weekly Rhythm</Text>
+        <View style={{ padding: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="calendar-outline" size={18} color={C.orange} />
+            <Text style={[st.sectionTitle, { color: textPrimary, flex: 1 }]}>Weekly Rhythm</Text>
+            <Pressable
+              onPress={() => Alert.alert(
+                'Adaptive System',
+                'These values are continuously updated by the system based on performance data and market signals. They reflect live output from the adaptive rhythm engine — not a fixed plan snapshot.'
+              )}
+              style={st.livePill}
+              hitSlop={8}
+            >
+              <View style={st.liveDot} />
+              <Text style={st.livePillText}>Adaptive · Live</Text>
+              <Ionicons name="information-circle-outline" size={11} color="#3B82F6" />
+            </Pressable>
+          </View>
         </View>
 
         <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
@@ -959,6 +974,9 @@ const st = StyleSheet.create({
   rhythmFormatCell: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   rhythmFormatLabel: { fontSize: 13, fontWeight: '600' as const },
   rhythmValueCell: { flex: 1, fontSize: 13, fontWeight: '600' as const },
+  livePill: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, backgroundColor: '#3B82F615', borderWidth: 1, borderColor: '#3B82F650' },
+  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#10B981' },
+  livePillText: { fontSize: 10, fontWeight: '600' as const, color: '#3B82F6', letterSpacing: 0.3 },
   progressSection: { paddingHorizontal: 14, paddingBottom: 14 },
   progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   progressLabel: { fontSize: 12 },
