@@ -10,22 +10,26 @@ import {
   Platform,
   ActivityIndicator,
   KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getApiUrl , authFetch } from '@/lib/query-client';
+import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
-import { fetch } from 'expo/fetch';
 
 const P = {
   mint: '#8B5CF6',
   neon: '#39FF14',
+  amber: '#F59E0B',
+  red: '#EF4444',
   bg: { dark: '#080C10', light: '#F4F7F5' },
   card: { dark: '#0F1419', light: '#FFFFFF' },
   border: { dark: '#1A2030', light: '#E2E8E4' },
   text: { dark: '#E8EDF2', light: '#1A2332' },
   muted: { dark: '#8892A4', light: '#546478' },
+  insightBg: { dark: '#0D1B12', light: '#F0FDF4' },
+  insightBorder: { dark: '#1A3A24', light: '#BBF7D0' },
 };
 
 interface Message {
@@ -37,6 +41,24 @@ interface Message {
 interface Conversation {
   id: number;
   title: string;
+}
+
+interface ProactiveInsight {
+  id: string;
+  messageText: string;
+  priority: string;
+  status: string;
+  riskLevel: string;
+  createdAt: string;
+}
+
+function formatTimeAgo(dateStr: string): string {
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const h = Math.floor(ms / 3600000);
+  if (h < 1) return 'just now';
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
 }
 
 export default function AgentScreen() {
@@ -55,6 +77,8 @@ export default function AgentScreen() {
   const [sending, setSending] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [showSidebar, setShowSidebar] = useState(false);
+  const [proactiveInsights, setProactiveInsights] = useState<ProactiveInsight[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
   const textPrimary = isDark ? P.text.dark : P.text.light;
@@ -65,7 +89,23 @@ export default function AgentScreen() {
 
   useEffect(() => {
     loadConversations();
+    loadProactiveInsights();
   }, []);
+
+  const loadProactiveInsights = useCallback(async () => {
+    try {
+      setInsightsLoading(true);
+      const res = await authFetch(new URL('/api/decisions/proactive-insights', baseUrl).toString());
+      const data = await res.json();
+      if (data.insights && Array.isArray(data.insights)) {
+        setProactiveInsights(data.insights);
+      }
+    } catch (err) {
+      console.error('Failed to load proactive insights:', err);
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, [baseUrl]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -231,6 +271,12 @@ export default function AgentScreen() {
     ? [...messages, { id: 'streaming', role: 'assistant' as const, content: streamingContent }]
     : messages;
 
+  const priorityColor = (p: string) => {
+    if (p === 'high') return P.red;
+    if (p === 'medium') return P.amber;
+    return P.mint;
+  };
+
   const renderMessage = useCallback(({ item }: { item: Message }) => {
     const isUser = item.role === 'user';
     return (
@@ -261,35 +307,116 @@ export default function AgentScreen() {
     );
   }, [isDark, textPrimary, cardBg, borderColor]);
 
-  const renderEmpty = useCallback(() => (
-    <View style={s.emptyContainer}>
-      <View style={[s.emptyIcon, { backgroundColor: P.mint + '15' }]}>
-        <Ionicons name="sparkles" size={32} color={P.mint} />
+  const renderInsightCard = useCallback((insight: ProactiveInsight, index: number) => {
+    const pColor = priorityColor(insight.priority);
+    const insightBg = isDark ? P.insightBg.dark : P.insightBg.light;
+    const insightBorderC = isDark ? P.insightBorder.dark : P.insightBorder.light;
+    return (
+      <View key={insight.id} style={[s.insightCard, { backgroundColor: insightBg, borderColor: insightBorderC }]}>
+        <View style={s.insightHeader}>
+          <View style={[s.avatar, { backgroundColor: pColor + '20' }]}>
+            <Ionicons name="sparkles" size={14} color={pColor} />
+          </View>
+          <View style={s.insightMeta}>
+            <View style={[s.priorityBadge, { backgroundColor: pColor + '20' }]}>
+              <Text style={[s.priorityText, { color: pColor }]}>
+                {insight.priority.toUpperCase()} PRIORITY
+              </Text>
+            </View>
+            <Text style={[s.insightTime, { color: textMuted }]}>
+              {formatTimeAgo(insight.createdAt)}
+            </Text>
+          </View>
+        </View>
+        <View style={s.insightBody}>
+          {insight.messageText.split('\n\n').map((section, si) => {
+            const lines = section.split('\n');
+            const label = lines[0];
+            const body = lines.slice(1).join('\n');
+            const isAction = label.startsWith('Suggested');
+            return (
+              <View key={si} style={si > 0 ? { marginTop: 10 } : undefined}>
+                <Text style={[s.insightLabel, { color: isAction ? pColor : textMuted }]}>
+                  {label}
+                </Text>
+                <Text style={[s.insightText, { color: textPrimary }]}>
+                  {body}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
       </View>
-      <Text style={[s.emptyTitle, { color: textPrimary }]}>Avyron Agent</Text>
-      <Text style={[s.emptySubtitle, { color: textMuted }]}>
-        Your strategic operations manager. Ask about your plan, execution status, what to create next, or get marketing guidance.
-      </Text>
-      <View style={s.suggestionsGrid}>
-        {[
-          "What has the agent decided recently?",
-          "What should I create today?",
-          "Explain my current plan",
-          "What's my execution progress?",
-        ].map((suggestion, i) => (
-          <Pressable
-            key={i}
-            style={[s.suggestion, { backgroundColor: cardBg, borderColor }]}
-            onPress={() => {
-              setInput(suggestion);
-            }}
-          >
-            <Text style={[s.suggestionText, { color: textPrimary }]}>{suggestion}</Text>
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  ), [textPrimary, textMuted, cardBg, borderColor]);
+    );
+  }, [isDark, textPrimary, textMuted, cardBg]);
+
+  const renderNoConvContent = useCallback(() => {
+    if (insightsLoading) {
+      return (
+        <View style={s.insightsLoadingWrap}>
+          <ActivityIndicator size="small" color={P.mint} />
+          <Text style={[s.insightsLoadingText, { color: textMuted }]}>Scanning your campaign...</Text>
+        </View>
+      );
+    }
+
+    return (
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={s.noConvScrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {proactiveInsights.length > 0 ? (
+          <>
+            <View style={s.insightsFeedHeader}>
+              <View style={[s.avatar, { backgroundColor: P.mint + '20' }]}>
+                <Ionicons name="sparkles" size={14} color={P.mint} />
+              </View>
+              <Text style={[s.insightsFeedTitle, { color: textPrimary }]}>
+                {proactiveInsights.length} insight{proactiveInsights.length > 1 ? 's' : ''} from the monitoring agent
+              </Text>
+            </View>
+            {proactiveInsights.map((insight, i) => renderInsightCard(insight, i))}
+            <View style={s.insightsFooterNote}>
+              <Text style={[s.insightsFooterText, { color: textMuted }]}>
+                The agent monitors your campaign 24/7 and surfaces insights automatically.
+              </Text>
+            </View>
+          </>
+        ) : (
+          <View style={s.emptyContainer}>
+            <View style={[s.emptyIcon, { backgroundColor: P.mint + '15' }]}>
+              <Ionicons name="sparkles" size={32} color={P.mint} />
+            </View>
+            <Text style={[s.emptyTitle, { color: textPrimary }]}>Avyron Agent</Text>
+            <Text style={[s.emptySubtitle, { color: textMuted }]}>
+              Your strategic operations manager. Ask about your plan, execution status, or what to create next.
+            </Text>
+          </View>
+        )}
+
+        <View style={s.suggestionsGrid}>
+          {[
+            "What has the agent decided recently?",
+            "What should I create today?",
+            "Explain my current plan",
+            "What's my execution progress?",
+          ].map((suggestion, i) => (
+            <Pressable
+              key={i}
+              style={[s.suggestion, { backgroundColor: cardBg, borderColor }]}
+              onPress={() => setInput(suggestion)}
+            >
+              <Text style={[s.suggestionText, { color: textPrimary }]}>{suggestion}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </ScrollView>
+    );
+  }, [insightsLoading, proactiveInsights, isDark, textPrimary, textMuted, cardBg, borderColor, renderInsightCard]);
+
+  const hasConversation = allMessages.length > 0;
 
   return (
     <View style={[s.container, { backgroundColor: bgColor }]}>
@@ -306,7 +433,7 @@ export default function AgentScreen() {
           {selectedCampaignId && (
             <View style={[s.connectedBadge, { backgroundColor: P.neon + '20' }]}>
               <View style={[s.connectedDot, { backgroundColor: P.neon }]} />
-              <Text style={[s.connectedText, { color: P.neon }]}>System Connected</Text>
+              <Text style={[s.connectedText, { color: P.neon }]}>Monitoring Active</Text>
             </View>
           )}
         </View>
@@ -366,25 +493,23 @@ export default function AgentScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        <FlatList
-          ref={flatListRef}
-          data={allMessages}
-          keyExtractor={item => item.id}
-          renderItem={renderMessage}
-          ListEmptyComponent={renderEmpty}
-          contentContainerStyle={[
-            s.messagesList,
-            allMessages.length === 0 && { flex: 1, justifyContent: 'center' },
-          ]}
-          onContentSizeChange={() => {
-            if (allMessages.length > 0) {
+        {hasConversation ? (
+          <FlatList
+            ref={flatListRef}
+            data={allMessages}
+            keyExtractor={item => item.id}
+            renderItem={renderMessage}
+            contentContainerStyle={s.messagesList}
+            onContentSizeChange={() => {
               flatListRef.current?.scrollToEnd({ animated: true });
-            }
-          }}
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
-          testID="agent-messages"
-        />
+            }}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            testID="agent-messages"
+          />
+        ) : (
+          renderNoConvContent()
+        )}
 
         <View style={[s.inputBar, {
           backgroundColor: cardBg,
@@ -482,11 +607,48 @@ const s = StyleSheet.create({
   avatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   bubble: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
   messageText: { fontSize: 14, lineHeight: 20 },
-  emptyContainer: { alignItems: 'center', paddingHorizontal: 32 },
+  noConvScrollContent: { padding: 16, paddingBottom: 16 },
+  insightsLoadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingTop: 80,
+  },
+  insightsLoadingText: { fontSize: 13 },
+  insightsFeedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  insightsFeedTitle: { fontSize: 14, fontWeight: '600' as const },
+  insightCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+  },
+  insightHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  insightMeta: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  priorityBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  priorityText: { fontSize: 10, fontWeight: '700' as const, letterSpacing: 0.5 },
+  insightTime: { fontSize: 11 },
+  insightBody: {},
+  insightLabel: { fontSize: 11, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 3 },
+  insightText: { fontSize: 13, lineHeight: 19 },
+  insightsFooterNote: { marginTop: 4, marginBottom: 20 },
+  insightsFooterText: { fontSize: 12, textAlign: 'center' as const, lineHeight: 17 },
+  emptyContainer: { alignItems: 'center', paddingHorizontal: 32, paddingVertical: 40 },
   emptyIcon: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   emptyTitle: { fontSize: 22, fontWeight: '700' as const, marginBottom: 8 },
-  emptySubtitle: { fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
-  suggestionsGrid: { gap: 8, width: '100%' },
+  emptySubtitle: { fontSize: 14, textAlign: 'center' as const, lineHeight: 20, marginBottom: 24 },
+  suggestionsGrid: { gap: 8, marginTop: 8 },
   suggestion: { borderWidth: 1, borderRadius: 12, padding: 12 },
   suggestionText: { fontSize: 13 },
   inputBar: {

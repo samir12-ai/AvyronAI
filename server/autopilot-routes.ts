@@ -464,6 +464,85 @@ router.get("/api/autopilot/guardrails", requireCampaign, async (req, res) => {
   }
 });
 
+router.get("/api/decisions/proactive-insights", async (req, res) => {
+  try {
+    const accountId = resolveAccountId(req);
+
+    const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000);
+
+    let decisions = await db
+      .select({
+        id: strategyDecisions.id,
+        trigger: strategyDecisions.trigger,
+        action: strategyDecisions.action,
+        reason: strategyDecisions.reason,
+        priority: strategyDecisions.priority,
+        status: strategyDecisions.status,
+        riskLevel: strategyDecisions.riskLevel,
+        createdAt: strategyDecisions.createdAt,
+      })
+      .from(strategyDecisions)
+      .where(
+        and(
+          eq(strategyDecisions.accountId, accountId),
+          gte(strategyDecisions.createdAt, cutoff)
+        )
+      )
+      .orderBy(desc(strategyDecisions.createdAt))
+      .limit(4);
+
+    if (decisions.length === 0) {
+      decisions = await db
+        .select({
+          id: strategyDecisions.id,
+          trigger: strategyDecisions.trigger,
+          action: strategyDecisions.action,
+          reason: strategyDecisions.reason,
+          priority: strategyDecisions.priority,
+          status: strategyDecisions.status,
+          riskLevel: strategyDecisions.riskLevel,
+          createdAt: strategyDecisions.createdAt,
+        })
+        .from(strategyDecisions)
+        .where(eq(strategyDecisions.accountId, accountId))
+        .orderBy(desc(strategyDecisions.createdAt))
+        .limit(3);
+    }
+
+    const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    const sorted = [...decisions].sort((a, b) => {
+      const pa = priorityOrder[a.priority || "medium"] ?? 1;
+      const pb = priorityOrder[b.priority || "medium"] ?? 1;
+      return pa - pb;
+    });
+
+    const insights = sorted.slice(0, 3).map(d => {
+      const trigger = (d.trigger || "").trim();
+      const reason = (d.reason || "").trim();
+      const action = (d.action || "").trim();
+
+      const messageText =
+        `Observation:\n${trigger}\n\n` +
+        `Why this matters:\n${reason}\n\n` +
+        `Suggested action:\n${action}`;
+
+      return {
+        id: d.id,
+        messageText,
+        priority: d.priority || "medium",
+        status: d.status || "pending",
+        riskLevel: d.riskLevel || "low",
+        createdAt: d.createdAt,
+      };
+    });
+
+    res.json({ insights, total: decisions.length });
+  } catch (error) {
+    console.error("[Autopilot] Error fetching proactive insights:", error);
+    res.status(500).json({ error: "Failed to fetch insights" });
+  }
+});
+
 export function registerAutopilotRoutes(app: any) {
   app.use(router);
 }
