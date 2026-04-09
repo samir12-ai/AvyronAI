@@ -87,16 +87,16 @@ export default function AgentScreen() {
   const cardBg = isDark ? P.card.dark : P.card.light;
   const borderColor = isDark ? P.border.dark : P.border.light;
 
-  useEffect(() => {
-    loadConversations();
-    loadProactiveInsights();
-  }, []);
-
   const loadProactiveInsights = useCallback(async () => {
     try {
       setInsightsLoading(true);
-      const res = await authFetch(new URL('/api/decisions/proactive-insights', baseUrl).toString());
-      const data = await res.json();
+      const res = await authFetch(getApiUrl('/api/decisions/proactive-insights'));
+      const text = await res.text();
+      if (!text || text.trimStart().startsWith('<')) {
+        setInsightsLoading(false);
+        return;
+      }
+      const data = JSON.parse(text);
       if (data.insights && Array.isArray(data.insights)) {
         setProactiveInsights(data.insights);
       }
@@ -105,7 +105,7 @@ export default function AgentScreen() {
     } finally {
       setInsightsLoading(false);
     }
-  }, [baseUrl]);
+  }, []);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -116,6 +116,11 @@ export default function AgentScreen() {
       console.error('Failed to load conversations:', err);
     }
   }, [baseUrl]);
+
+  useEffect(() => {
+    loadConversations();
+    loadProactiveInsights();
+  }, []);
 
   const createConversation = useCallback(async () => {
     try {

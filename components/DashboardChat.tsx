@@ -14,17 +14,24 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
+import { useAuth } from '@/context/AuthContext';
 
 const P = {
   mint: '#8B5CF6',
   neon: '#39FF14',
+  red: '#EF4444',
+  amber: '#F59E0B',
   darkBg: '#080C10',
   darkCard: '#0F1419',
   darkCardBorder: '#1A2030',
   darkSurface: '#151B24',
+  darkInsightBg: '#0D1B12',
+  darkInsightBorder: '#1A3A24',
   lightCard: '#FFFFFF',
   lightCardBorder: '#E2E8E4',
   lightSurface: '#F0F3F1',
+  lightInsightBg: '#F0FDF4',
+  lightInsightBorder: '#BBF7D0',
   textDark: '#E8EDF2',
   textLight: '#1A2332',
   mutedDark: '#8892A4',
@@ -65,17 +72,34 @@ interface AgentActionEvent {
   summary: string;
 }
 
+interface ProactiveInsight {
+  id: string;
+  messageText: string;
+  priority: string;
+  status: string;
+  riskLevel: string;
+  createdAt: string;
+}
+
 type MessageItem = ChatMessage | AgentActionEvent;
 
 function isAgentAction(item: MessageItem): item is AgentActionEvent {
   return (item as AgentActionEvent).type === 'tool_call';
 }
 
+function timeAgo(dateStr: string): string {
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const h = Math.floor(ms / 3600000);
+  if (h < 1) return 'just now';
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 export default function DashboardChat() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const baseUrl = getApiUrl();
   const { selectedCampaignId } = useCampaign();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
 
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [input, setInput] = useState('');
@@ -83,6 +107,8 @@ export default function DashboardChat() {
   const [streamingContent, setStreamingContent] = useState('');
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [proactiveInsights, setProactiveInsights] = useState<ProactiveInsight[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
@@ -93,6 +119,35 @@ export default function DashboardChat() {
     setExpanded(false);
   }, [selectedCampaignId]);
 
+  const loadProactiveInsights = useCallback(async () => {
+    try {
+      setInsightsLoading(true);
+      const url = getApiUrl('/api/decisions/proactive-insights');
+      const res = await authFetch(url);
+      const text = await res.text();
+      if (!text || text.trimStart().startsWith('<')) {
+        setInsightsLoading(false);
+        return;
+      }
+      const data = JSON.parse(text);
+      if (data.insights && Array.isArray(data.insights)) {
+        setProactiveInsights(data.insights);
+      }
+    } catch (err) {
+      console.error('Failed to load proactive insights:', err);
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      loadProactiveInsights();
+    } else if (!authLoading && !isAuthenticated) {
+      setInsightsLoading(false);
+    }
+  }, [authLoading, isAuthenticated, loadProactiveInsights]);
+
   const textPrimary = isDark ? P.textDark : P.textLight;
   const textMuted = isDark ? P.mutedDark : P.mutedLight;
   const cardBg = isDark ? P.darkCard : P.lightCard;
@@ -100,6 +155,14 @@ export default function DashboardChat() {
   const surfaceBg = isDark ? P.darkSurface : P.lightSurface;
   const actionBg = isDark ? P.actionBg : P.actionBgLight;
   const actionBorder = isDark ? P.actionBorder : P.actionBorderLight;
+  const insightBg = isDark ? P.darkInsightBg : P.lightInsightBg;
+  const insightBorderC = isDark ? P.darkInsightBorder : P.lightInsightBorder;
+
+  const priorityColor = (p: string) => {
+    if (p === 'high') return P.red;
+    if (p === 'medium') return P.amber;
+    return P.mint;
+  };
 
   const sendMessage = useCallback(async (overrideInput?: string) => {
     const text = (overrideInput || input).trim();
@@ -107,6 +170,7 @@ export default function DashboardChat() {
 
     Keyboard.dismiss();
     let convId = activeConvId;
+    const baseUrl = getApiUrl();
 
     if (!convId) {
       try {
@@ -231,7 +295,7 @@ export default function DashboardChat() {
     } finally {
       setSending(false);
     }
-  }, [input, sending, activeConvId, baseUrl, selectedCampaignId]);
+  }, [input, sending, activeConvId, selectedCampaignId]);
 
   const streamingItem: ChatMessage | null = streamingContent
     ? { id: 'streaming', role: 'assistant', content: streamingContent }
@@ -256,10 +320,10 @@ export default function DashboardChat() {
   }, [sendMessage]);
 
   const suggestions = [
+    "What has the agent decided?",
     "What should I create today?",
-    "Update my content rhythm",
     "What's my execution progress?",
-    "Explain my forecast model",
+    "Explain my current plan",
   ];
 
   const hasMessages = allMessages.length > 0;
@@ -309,6 +373,66 @@ export default function DashboardChat() {
     );
   }, [actionBg, actionBorder, textMuted, textPrimary, surfaceBg, cardBorder]);
 
+  const renderInsightsSection = () => {
+    if (insightsLoading) {
+      return (
+        <View style={st.insightsLoading}>
+          <ActivityIndicator size="small" color={P.mint} />
+          <Text style={[st.insightsLoadingText, { color: textMuted }]}>Scanning your campaign...</Text>
+        </View>
+      );
+    }
+
+    if (proactiveInsights.length === 0) return null;
+
+    return (
+      <View style={st.insightsSection}>
+        <View style={st.insightsFeedLabel}>
+          <Ionicons name="sparkles" size={11} color={P.mint} />
+          <Text style={[st.insightsFeedLabelText, { color: textMuted }]}>
+            {proactiveInsights.length} active insight{proactiveInsights.length > 1 ? 's' : ''} from monitoring
+          </Text>
+        </View>
+        {proactiveInsights.map((insight) => {
+          const pColor = priorityColor(insight.priority);
+          const sections = insight.messageText.split('\n\n');
+          const observationSection = sections[0] || '';
+          const actionSection = sections[2] || '';
+          const observationText = observationSection.split('\n').slice(1).join(' ');
+          const actionLines = actionSection.split('\n');
+          const actionText = actionLines.slice(1).join(' ');
+
+          return (
+            <View key={insight.id} style={[st.insightCard, { backgroundColor: insightBg, borderColor: insightBorderC }]}>
+              <View style={st.insightCardTop}>
+                <View style={[st.priorityBadge, { backgroundColor: pColor + '20' }]}>
+                  <Text style={[st.priorityText, { color: pColor }]}>
+                    {insight.priority.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={[st.insightTime, { color: textMuted }]}>
+                  {timeAgo(insight.createdAt)}
+                </Text>
+              </View>
+              {!!observationText && (
+                <Text style={[st.insightObservation, { color: textPrimary }]} numberOfLines={2}>
+                  {observationText}
+                </Text>
+              )}
+              {!!actionText && (
+                <View style={[st.insightAction, { borderLeftColor: pColor }]}>
+                  <Text style={[st.insightActionText, { color: pColor }]} numberOfLines={2}>
+                    {actionText}
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
   return (
     <View style={[st.container, { backgroundColor: cardBg, borderColor: cardBorder }]} testID="dashboard-chat">
       <View style={st.header}>
@@ -339,10 +463,8 @@ export default function DashboardChat() {
       </View>
 
       {!hasMessages ? (
-        <View style={st.suggestionsWrap}>
-          <Text style={[st.suggestionsLabel, { color: textMuted }]}>
-            Ask about your strategy, trigger actions, or get marketing guidance
-          </Text>
+        <View style={st.emptyState}>
+          {renderInsightsSection()}
           <View style={st.suggestionsGrid}>
             {suggestions.map((s, i) => (
               <Pressable
@@ -473,14 +595,72 @@ const st = StyleSheet.create({
   headerBtn: {
     padding: 4,
   },
-  suggestionsWrap: {
-    paddingHorizontal: 16,
+  emptyState: {
+    paddingHorizontal: 12,
     paddingBottom: 8,
   },
-  suggestionsLabel: {
+  insightsLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  insightsLoadingText: {
     fontSize: 12,
-    lineHeight: 18,
+  },
+  insightsSection: {
     marginBottom: 10,
+  },
+  insightsFeedLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  insightsFeedLabelText: {
+    fontSize: 11,
+    fontWeight: '500' as const,
+  },
+  insightCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+  },
+  insightCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  priorityBadge: {
+    borderRadius: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  priorityText: {
+    fontSize: 9,
+    fontWeight: '700' as const,
+    letterSpacing: 0.5,
+  },
+  insightTime: {
+    fontSize: 10,
+  },
+  insightObservation: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 6,
+  },
+  insightAction: {
+    borderLeftWidth: 2,
+    paddingLeft: 8,
+  },
+  insightActionText: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '500' as const,
   },
   suggestionsGrid: {
     gap: 6,
