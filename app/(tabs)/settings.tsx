@@ -27,7 +27,7 @@ import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
 import { PlatformConnection } from '@/components/PlatformConnection';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
 import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { fetch } from 'expo/fetch';
 
 interface MetaStatus {
@@ -104,6 +104,7 @@ export default function SettingsScreen() {
   const { user, logout, openAccountSwitcher, savedAccounts } = useAuth();
   const { selectedCampaignId } = useCampaign();
   const { t, locale, setLocale, languages } = useLanguage();
+  const params = useLocalSearchParams<{ openBrandProfile?: string }>();
 
   const [name, setName] = useState(brandProfile.name);
   const [industry, setIndustry] = useState(brandProfile.industry);
@@ -113,6 +114,12 @@ export default function SettingsScreen() {
   const [hasChanges, setHasChanges] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+
+  useEffect(() => {
+    if (params.openBrandProfile === '1') {
+      setShowProfileModal(true);
+    }
+  }, [params.openBrandProfile]);
 
   const [metaStatus, setMetaStatus] = useState<MetaStatus | null>(null);
   const [metaLoading, setMetaLoading] = useState(true);

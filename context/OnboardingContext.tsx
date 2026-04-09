@@ -18,8 +18,8 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
     id: 'setup',
     title: 'Step 1 — Setup',
     message: 'Start by completing your business profile: add your brand details, product DNA, content style, and link your social channels for scraping.',
-    deepLink: '/(tabs)/settings',
-    deepLinkLabel: 'Open Settings',
+    deepLink: '/(tabs)/settings?openBrandProfile=1',
+    deepLinkLabel: 'Open Brand Profile',
   },
   {
     id: 'market',
@@ -179,8 +179,14 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   }, [state, saveState, trackEvent]);
 
   const dismiss = useCallback(() => {
+    const dismissedState: OnboardingState = {
+      ...state,
+      skipped: true,
+      completedAt: new Date().toISOString(),
+    };
+    saveState(dismissedState);
     setIsVisible(false);
-  }, []);
+  }, [state, saveState]);
 
   const show = useCallback(() => {
     if (!state.completed && !state.skipped) {
