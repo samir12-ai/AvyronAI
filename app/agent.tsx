@@ -272,10 +272,10 @@ export default function AgentScreen() {
       </Text>
       <View style={s.suggestionsGrid}>
         {[
+          "What has the agent decided recently?",
           "What should I create today?",
           "Explain my current plan",
           "What's my execution progress?",
-          "Suggest content ideas",
         ].map((suggestion, i) => (
           <Pressable
             key={i}

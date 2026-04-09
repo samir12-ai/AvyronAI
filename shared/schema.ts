@@ -2360,3 +2360,19 @@ export const userChannelSnapshots = pgTable("user_channel_snapshots", {
 
 export type UserPublicProfile = typeof userPublicProfiles.$inferSelect;
 export type UserChannelSnapshot = typeof userChannelSnapshots.$inferSelect;
+
+export const buildPlanSnapshots = pgTable("build_plan_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  status: text("status").notNull().default("SUCCESS"),
+  plan: text("plan"),
+  actionabilityScore: doublePrecision("actionability_score").default(0),
+  failedBlocks: text("failed_blocks"),
+  attempts: integer("attempts").default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type BuildPlanSnapshot = typeof buildPlanSnapshots.$inferSelect;

@@ -2,6 +2,9 @@ import type { Express } from "express";
 import { runBuildPlanLayer } from "./engine";
 import { resolveAccountId } from "../auth";
 import { buildCausalNarrative } from "../narrative-layer";
+import { db } from "../db";
+import { buildPlanSnapshots } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
 
 export function registerBuildPlanLayerRoutes(app: Express) {
   app.post("/api/build-plan-layer/generate", async (req, res) => {
@@ -14,6 +17,25 @@ export function registerBuildPlanLayerRoutes(app: Express) {
 
       const depthGateStatus = req.body.depthGateStatus || undefined;
       const result = await runBuildPlanLayer(accountId, campaignId, depthGateStatus);
+
+      if (result.status === "SUCCESS" || result.status === "ACTIONABILITY_FAILED") {
+        try {
+          const snapId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+          await db.insert(buildPlanSnapshots).values({
+            id: snapId,
+            accountId,
+            campaignId,
+            status: result.status,
+            plan: result.plan ? JSON.stringify(result.plan) : null,
+            actionabilityScore: result.actionabilityScore,
+            failedBlocks: JSON.stringify(result.failedBlocks),
+            attempts: result.attempts,
+          });
+          console.log(`[BuildPlanLayer] Snapshot saved | id=${snapId} | status=${result.status}`);
+        } catch (snapErr: any) {
+          console.warn("[BuildPlanLayer] Snapshot save failed (non-blocking):", snapErr.message);
+        }
+      }
 
       let narrative = null;
       try {
@@ -37,6 +59,27 @@ export function registerBuildPlanLayerRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId query parameter required" });
       }
 
+      const [stored] = await db
+        .select()
+        .from(buildPlanSnapshots)
+        .where(and(eq(buildPlanSnapshots.accountId, accountId), eq(buildPlanSnapshots.campaignId, campaignId)))
+        .orderBy(desc(buildPlanSnapshots.createdAt))
+        .limit(1);
+
+      if (stored) {
+        console.log(`[BuildPlanLayer] Serving stored snapshot | id=${stored.id} | status=${stored.status}`);
+        return res.json({
+          status: stored.status,
+          plan: stored.plan ? JSON.parse(stored.plan) : null,
+          actionabilityScore: stored.actionabilityScore ?? 0,
+          failedBlocks: stored.failedBlocks ? JSON.parse(stored.failedBlocks) : [],
+          attempts: stored.attempts ?? 1,
+          fromCache: true,
+          cachedAt: stored.createdAt,
+        });
+      }
+
+      console.log("[BuildPlanLayer] No stored snapshot found, generating fresh...");
       const result = await runBuildPlanLayer(accountId, campaignId);
       res.json(result);
     } catch (err: any) {
