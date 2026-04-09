@@ -66,7 +66,7 @@ async function computeRebuildEligibility(
 
   const hasMarketShift = volatilityIndex > 0.35 || driftFlag;
 
-  if (publishedCount7d === 0) {
+  if (publishedCount7d === 0 && !hasMarketShift) {
     return {
       eligible: false,
       mustExecuteFirst: true,
