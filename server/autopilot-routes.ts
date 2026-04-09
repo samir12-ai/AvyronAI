@@ -516,7 +516,22 @@ router.get("/api/decisions/proactive-insights", async (req, res) => {
       return pa - pb;
     });
 
-    const insights = sorted.slice(0, 3).map(d => {
+    const MIN_FIELD_LENGTH = 20;
+
+    function isStructuredInsight(d: typeof decisions[0]): boolean {
+      const trigger = (d.trigger || "").trim();
+      const reason = (d.reason || "").trim();
+      const action = (d.action || "").trim();
+      return (
+        trigger.length >= MIN_FIELD_LENGTH &&
+        reason.length >= MIN_FIELD_LENGTH &&
+        action.length >= MIN_FIELD_LENGTH
+      );
+    }
+
+    const validDecisions = sorted.filter(isStructuredInsight);
+
+    const insights = validDecisions.slice(0, 3).map(d => {
       const trigger = (d.trigger || "").trim();
       const reason = (d.reason || "").trim();
       const action = (d.action || "").trim();
@@ -533,10 +548,11 @@ router.get("/api/decisions/proactive-insights", async (req, res) => {
         status: d.status || "pending",
         riskLevel: d.riskLevel || "low",
         createdAt: d.createdAt,
+        validated: true,
       };
     });
 
-    res.json({ insights, total: decisions.length });
+    res.json({ insights, total: decisions.length, validCount: validDecisions.length });
   } catch (error) {
     console.error("[Autopilot] Error fetching proactive insights:", error);
     res.status(500).json({ error: "Failed to fetch insights" });

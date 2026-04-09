@@ -1,0 +1,195 @@
+:::writing{variant=“email” id=“48219” subject=“System Improvements: Agent Persistence, Intelligence Enforcement, Performance Source, and Onboarding Simplification”}
+Hi Replit Team,
+
+I’d like to consolidate the next set of system-level improvements into one aligned implementation pass. These changes focus on three areas: agent behavior, intelligence quality enforcement, and product UX simplification.
+
+Please review and respond based on the current code.
+
+⸻
+
+🔴 1. Agent Box — Preserve Insights (Critical)
+
+Current Issue
+	•	When the user interacts with the agent (chat), the proactive insights disappear.
+	•	This makes the system feel inconsistent and “stateless”.
+
+Required Change
+
+We need to separate system insights from chat messages:
+
+Structure:
+	•	System Insights (persistent, top section)
+	•	Chat (interactive, below)
+
+Behavior:
+	•	Insights are loaded from strategy_decisions
+	•	They persist across:
+	•	user messages
+	•	navigation
+	•	refresh
+	•	They are only updated by the worker (not overwritten by chat)
+
+Goal:
+
+Insights = system state
+Chat = interaction layer
+
+⸻
+
+🔴 2. Intelligence Enforcement Layer (Critical)
+
+Current Issue
+	•	The agent does not consistently follow reasoning standards
+	•	It produces weak / generic insights in some cases
+
+Required Change
+
+We need to enforce insight quality at the system level (not rely on prompts)
+
+⸻
+
+Insight Schema (mandatory)
+
+All insights must follow:
+	•	observation (what happened)
+	•	reason (why it happened)
+	•	evidence (data / comparison)
+	•	action (specific system action)
+	•	confidence (0–1)
+
+⸻
+
+Enforcement Logic
+
+Before displaying any insight:
+	•	If any field is missing → reject or regenerate
+	•	No free-form responses allowed
+
+⸻
+
+Optional (if simple)
+	•	Add post-processing validation or retry generation if schema is incomplete
+
+⸻
+
+Goal
+
+Ensure every insight is:
+	•	actionable
+	•	data-backed
+	•	consistent in structure
+
+⸻
+
+🔴 3. Content Performance — Remove Manual Input
+
+Current Issue
+	•	Users are asked to manually input content performance metrics
+	•	This is unreliable and breaks system integrity
+
+⸻
+
+Required Change
+	•	Remove manual content performance input entirely
+	•	Performance must come only from scraping pipeline
+
+⸻
+
+UI Behavior
+
+If no data exists:
+	•	Show:
+“No performance data yet — system will begin learning after first content is detected.”
+
+⸻
+
+Goal
+
+All intelligence must be based on real observed data, not user input
+
+⸻
+
+🟡 4. Onboarding (Guide) — Simplify to 3 Steps
+
+Current Issue
+	•	Existing onboarding is 10-step and repeats every session
+	•	Not aligned with product flow
+
+⸻
+
+Required Change
+
+Replace with 3-step onboarding:
+
+⸻
+
+Step 1 — Setup
+	•	Business profile
+	•	Product DNA
+	•	Content DNA
+	•	Channel links (for scraping)
+
+⸻
+
+Step 2 — Market
+	•	Add competitors
+	•	Validate inputs
+
+⸻
+
+Step 3 — Run
+	•	Single action:
+→ trigger full orchestrator pipeline (/api/orchestrator/run)
+
+⸻
+
+Visibility Logic
+	•	Show onboarding only if:
+	•	first-time user
+	•	or required data missing
+	•	Do NOT show on every app entry
+
+⸻
+
+Goal
+
+Move from:
+manual engine-by-engine setup
+
+To:
+simple system initialization flow
+
+⸻
+
+🟡 5. System Visibility (Minor Alignment)
+	•	Agent should initiate insights automatically on entry
+	•	Maintain “Monitoring Active” behavior
+	•	Ensure dashboard reflects latest state (no stale UI)
+
+⸻
+
+🎯 Summary
+
+Immediate implementation goals:
+	1.	Persist agent insights in UI (separate from chat)
+	2.	Enforce structured, high-quality insights (schema + validation)
+	3.	Remove manual performance input (scraping only)
+	4.	Replace onboarding with 3-step flow + proper visibility logic
+
+⸻
+
+These changes align the system with its core principle:
+
+adaptive, data-driven, and system-controlled — not user-dependent
+
+⸻
+
+Let me know:
+	•	what is already aligned with current code
+	•	what needs implementation
+	•	and any blockers
+
+Thanks,
+Samir
+Avyron AI
+:::

@@ -462,9 +462,48 @@ export default function DashboardChat() {
         </View>
       </View>
 
-      {!hasMessages ? (
-        <View style={st.emptyState}>
-          {renderInsightsSection()}
+      {renderInsightsSection()}
+
+      {hasMessages ? (
+        expanded ? (
+          <View style={{ height: 260 }}>
+            <FlatList
+              ref={flatListRef}
+              data={allMessages}
+              keyExtractor={item => item.id}
+              renderItem={renderItem}
+              contentContainerStyle={st.messagesList}
+              onContentSizeChange={() => {
+                if (allMessages.length > 0) {
+                  flatListRef.current?.scrollToEnd({ animated: true });
+                }
+              }}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              testID="dashboard-chat-messages"
+            />
+          </View>
+        ) : (
+          <Pressable
+            style={st.collapsedPreview}
+            onPress={() => { setExpanded(true); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+          >
+            <View style={[st.avatar, { backgroundColor: P.mint + '20' }]}>
+              <Ionicons name="sparkles" size={12} color={P.mint} />
+            </View>
+            <Text style={[st.previewText, { color: textPrimary }]} numberOfLines={2}>
+              {(() => {
+                const lastMsg = allMessages[allMessages.length - 1];
+                if (!lastMsg) return '';
+                if (isAgentAction(lastMsg)) return `Agent action: ${TOOL_LABELS[lastMsg.name] || lastMsg.name}`;
+                return lastMsg.content;
+              })()}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={textMuted} />
+          </Pressable>
+        )
+      ) : (
+        <View style={[st.suggestionsWrap, proactiveInsights.length > 0 ? { paddingTop: 0 } : undefined]}>
           <View style={st.suggestionsGrid}>
             {suggestions.map((s, i) => (
               <Pressable
@@ -478,42 +517,6 @@ export default function DashboardChat() {
             ))}
           </View>
         </View>
-      ) : expanded ? (
-        <View style={{ height: 320 }}>
-          <FlatList
-            ref={flatListRef}
-            data={allMessages}
-            keyExtractor={item => item.id}
-            renderItem={renderItem}
-            contentContainerStyle={st.messagesList}
-            onContentSizeChange={() => {
-              if (allMessages.length > 0) {
-                flatListRef.current?.scrollToEnd({ animated: true });
-              }
-            }}
-            keyboardDismissMode="interactive"
-            keyboardShouldPersistTaps="handled"
-            testID="dashboard-chat-messages"
-          />
-        </View>
-      ) : (
-        <Pressable
-          style={st.collapsedPreview}
-          onPress={() => { setExpanded(true); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-        >
-          <View style={[st.avatar, { backgroundColor: P.mint + '20' }]}>
-            <Ionicons name="sparkles" size={12} color={P.mint} />
-          </View>
-          <Text style={[st.previewText, { color: textPrimary }]} numberOfLines={2}>
-            {(() => {
-              const lastMsg = allMessages[allMessages.length - 1];
-              if (!lastMsg) return '';
-              if (isAgentAction(lastMsg)) return `Agent action: ${TOOL_LABELS[lastMsg.name] || lastMsg.name}`;
-              return lastMsg.content;
-            })()}
-          </Text>
-          <Ionicons name="chevron-down" size={16} color={textMuted} />
-        </Pressable>
       )}
 
       <View style={[st.inputBar, { borderTopColor: cardBorder }]}>
@@ -597,6 +600,11 @@ const st = StyleSheet.create({
   },
   emptyState: {
     paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  suggestionsWrap: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
     paddingBottom: 8,
   },
   insightsLoading: {

@@ -355,7 +355,7 @@ export default function AgentScreen() {
     );
   }, [isDark, textPrimary, textMuted, cardBg]);
 
-  const renderNoConvContent = useCallback(() => {
+  const renderInsightsBlock = useCallback(() => {
     if (insightsLoading) {
       return (
         <View style={s.insightsLoadingWrap}>
@@ -364,7 +364,28 @@ export default function AgentScreen() {
         </View>
       );
     }
+    if (proactiveInsights.length === 0) return null;
+    return (
+      <View style={s.insightsBlockWrap}>
+        <View style={s.insightsFeedHeader}>
+          <View style={[s.avatar, { backgroundColor: P.mint + '20' }]}>
+            <Ionicons name="sparkles" size={14} color={P.mint} />
+          </View>
+          <Text style={[s.insightsFeedTitle, { color: textPrimary }]}>
+            {proactiveInsights.length} insight{proactiveInsights.length > 1 ? 's' : ''} from the monitoring agent
+          </Text>
+        </View>
+        {proactiveInsights.map((insight, i) => renderInsightCard(insight, i))}
+        <View style={s.insightsFooterNote}>
+          <Text style={[s.insightsFooterText, { color: textMuted }]}>
+            The agent monitors your campaign 24/7 and surfaces insights automatically.
+          </Text>
+        </View>
+      </View>
+    );
+  }, [insightsLoading, proactiveInsights, textPrimary, textMuted, renderInsightCard]);
 
+  const renderNoConvContent = useCallback(() => {
     return (
       <ScrollView
         style={{ flex: 1 }}
@@ -372,24 +393,9 @@ export default function AgentScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {proactiveInsights.length > 0 ? (
-          <>
-            <View style={s.insightsFeedHeader}>
-              <View style={[s.avatar, { backgroundColor: P.mint + '20' }]}>
-                <Ionicons name="sparkles" size={14} color={P.mint} />
-              </View>
-              <Text style={[s.insightsFeedTitle, { color: textPrimary }]}>
-                {proactiveInsights.length} insight{proactiveInsights.length > 1 ? 's' : ''} from the monitoring agent
-              </Text>
-            </View>
-            {proactiveInsights.map((insight, i) => renderInsightCard(insight, i))}
-            <View style={s.insightsFooterNote}>
-              <Text style={[s.insightsFooterText, { color: textMuted }]}>
-                The agent monitors your campaign 24/7 and surfaces insights automatically.
-              </Text>
-            </View>
-          </>
-        ) : (
+        {renderInsightsBlock()}
+
+        {proactiveInsights.length === 0 && !insightsLoading && (
           <View style={s.emptyContainer}>
             <View style={[s.emptyIcon, { backgroundColor: P.mint + '15' }]}>
               <Ionicons name="sparkles" size={32} color={P.mint} />
@@ -419,7 +425,7 @@ export default function AgentScreen() {
         </View>
       </ScrollView>
     );
-  }, [insightsLoading, proactiveInsights, isDark, textPrimary, textMuted, cardBg, borderColor, renderInsightCard]);
+  }, [insightsLoading, proactiveInsights, isDark, textPrimary, textMuted, cardBg, borderColor, renderInsightCard, renderInsightsBlock]);
 
   const hasConversation = allMessages.length > 0;
 
@@ -505,6 +511,7 @@ export default function AgentScreen() {
             keyExtractor={item => item.id}
             renderItem={renderMessage}
             contentContainerStyle={s.messagesList}
+            ListHeaderComponent={renderInsightsBlock}
             onContentSizeChange={() => {
               flatListRef.current?.scrollToEnd({ animated: true });
             }}
@@ -619,6 +626,11 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
     paddingTop: 80,
+  },
+  insightsBlockWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 4,
   },
   insightsLoadingText: { fontSize: 13 },
   insightsFeedHeader: {

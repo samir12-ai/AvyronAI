@@ -15,70 +15,25 @@ export interface OnboardingStep {
 
 const ONBOARDING_STEPS: OnboardingStep[] = [
   {
-    id: 'welcome',
-    title: 'Welcome to Avyron',
-    message: 'I\'m your Avyron agent. I\'ll walk you through your marketing system in a few quick steps.',
-  },
-  {
-    id: 'profile',
-    title: 'Set up your brand',
-    message: 'First, tell us about your business — name, industry, and target audience. This shapes everything.',
+    id: 'setup',
+    title: 'Step 1 — Setup',
+    message: 'Start by completing your business profile: add your brand details, product DNA, content style, and link your social channels for scraping.',
     deepLink: '/(tabs)/settings',
-    deepLinkLabel: 'Go to Settings',
+    deepLinkLabel: 'Open Settings',
   },
   {
-    id: 'dashboard_overview',
-    title: 'Your command center',
-    message: 'This is your Dashboard. Campaign metrics, progress, and system status — all in one view.',
-    deepLink: '/(tabs)',
-    deepLinkLabel: 'View Dashboard',
-  },
-  {
-    id: 'competitors',
-    title: 'Add your competitors',
-    message: 'Head to AI Management and add competitors. Our intelligence engine will analyze their strategy.',
+    id: 'market',
+    title: 'Step 2 — Market Intelligence',
+    message: 'Add your top competitors. The intelligence engine will analyze their strategy, content, and positioning to calibrate your market data.',
     deepLink: '/(tabs)/ai-management',
-    deepLinkLabel: 'Open AI Management',
+    deepLinkLabel: 'Add Competitors',
   },
   {
-    id: 'run_engines',
-    title: 'Run your engines',
-    message: 'Now run the strategic engines — Positioning, Differentiation, Funnel, Offer. They build your entire strategy.',
+    id: 'run',
+    title: 'Step 3 — Launch System',
+    message: 'Run the full orchestrator pipeline. This initializes your strategy engines, builds your plan, and activates autonomous monitoring.',
     deepLink: '/(tabs)/ai-management',
-    deepLinkLabel: 'Run Engines',
-  },
-  {
-    id: 'narrative',
-    title: 'Check your narrative',
-    message: 'Once engines complete, your strategic narrative connects everything: problem, cause, intervention, result.',
-    deepLink: '/(tabs)/ai-management',
-    deepLinkLabel: 'View Narrative',
-  },
-  {
-    id: 'create_content',
-    title: 'Create your first content',
-    message: 'Use the Create tab to generate strategy-aligned posts, reels, and ad copy powered by your engines.',
-    deepLink: '/(tabs)/create',
-    deepLinkLabel: 'Start Creating',
-  },
-  {
-    id: 'studio',
-    title: 'Explore the Studio',
-    message: 'Studio manages your media — videos, scripts, and visual assets. Everything organized in one place.',
-    deepLink: '/(tabs)/studio',
-    deepLinkLabel: 'Open Studio',
-  },
-  {
-    id: 'calendar',
-    title: 'Plan your schedule',
-    message: 'Use the Calendar to schedule content and plan your publishing cadence across channels.',
-    deepLink: '/(tabs)/calendar',
-    deepLinkLabel: 'View Calendar',
-  },
-  {
-    id: 'ready',
-    title: 'You\'re all set!',
-    message: 'Your marketing system is ready. Run engines, create content, and let Avyron handle the strategy.',
+    deepLinkLabel: 'Run Pipeline',
   },
 ];
 
@@ -132,7 +87,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     try {
       const stored = await AsyncStorage.getItem(`${ONBOARDING_KEY}_${userId}`);
       if (stored) {
-        const parsed: OnboardingState = JSON.parse(stored);
+        let parsed: OnboardingState = JSON.parse(stored);
+        if (!parsed.completed && !parsed.skipped && parsed.currentStep >= ONBOARDING_STEPS.length) {
+          parsed = { ...defaultState, startedAt: new Date().toISOString() };
+          await AsyncStorage.setItem(`${ONBOARDING_KEY}_${userId}`, JSON.stringify(parsed));
+        }
         setState(parsed);
         if (!parsed.completed && !parsed.skipped) {
           setIsVisible(true);

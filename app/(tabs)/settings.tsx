@@ -885,138 +885,25 @@ export default function SettingsScreen() {
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleRow}>
               <Ionicons name="stats-chart" size={20} color={colors.primary} />
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Campaign Metrics</Text>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Campaign Performance</Text>
             </View>
-            <View style={[styles.badge, { backgroundColor: isMetaConnected ? (colors.success + '20') : (colors.accent + '20') }]}>
-              <Text style={[styles.badgeText, { color: isMetaConnected ? colors.success : colors.accent }]}>
-                {isMetaConnected ? 'Meta Active' : 'Manual Entry'}
+            <View style={[styles.badge, { backgroundColor: isMetaConnected ? (colors.success + '20') : ('#6B7280' + '20') }]}>
+              <Text style={[styles.badgeText, { color: isMetaConnected ? colors.success : '#6B7280' }]}>
+                {isMetaConnected ? 'Meta Live' : 'System Tracked'}
               </Text>
             </View>
           </View>
-          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            {isMetaConnected
-              ? 'Meta is connected — live metrics are used. Manual data is archived.'
-              : 'Enter your campaign stats manually. These drive your dashboard, AI actions, and autopilot analysis.'}
-          </Text>
-
-          {!selectedCampaignId ? (
-            <View style={{ padding: 16, alignItems: 'center' }}>
-              <Text style={{ color: colors.textMuted, fontSize: 14 }}>Select a campaign first to enter metrics</Text>
-            </View>
-          ) : (
-            <View style={{ marginTop: 12, gap: 10 }}>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Spend ($)</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualSpend}
-                    onChangeText={setManualSpend}
-                    placeholder="0.00"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
-                    editable={!isMetaConnected}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Revenue ($)</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualRevenue}
-                    onChangeText={setManualRevenue}
-                    placeholder="0.00"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
-                    editable={!isMetaConnected}
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Leads</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualLeads}
-                    onChangeText={setManualLeads}
-                    placeholder="0"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                    editable={!isMetaConnected}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Conversions</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualConversions}
-                    onChangeText={setManualConversions}
-                    placeholder="0"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                    editable={!isMetaConnected}
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Impressions</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualImpressions}
-                    onChangeText={setManualImpressions}
-                    placeholder="0"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                    editable={!isMetaConnected}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Clicks</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualClicks}
-                    onChangeText={setManualClicks}
-                    placeholder="0"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                    editable={!isMetaConnected}
-                  />
-                </View>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-                <View style={[styles.derivedMetric, { backgroundColor: colors.primary + '10', borderColor: colors.primary + '30' }]}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>CPA (derived)</Text>
-                  <Text style={{ color: colors.primary, fontSize: 18, fontWeight: '700' }}>${manualDerived.cpa.toFixed(2)}</Text>
-                </View>
-                <View style={[styles.derivedMetric, { backgroundColor: colors.success + '10', borderColor: colors.success + '30' }]}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>ROAS (derived)</Text>
-                  <Text style={{ color: colors.success, fontSize: 18, fontWeight: '700' }}>{manualDerived.roas.toFixed(2)}x</Text>
-                </View>
-              </View>
-
-              {!isMetaConnected && (
-                <Pressable
-                  onPress={handleSaveManualMetrics}
-                  disabled={manualSaving}
-                  style={({ pressed }) => [{
-                    backgroundColor: colors.primary,
-                    padding: 14,
-                    borderRadius: 10,
-                    alignItems: 'center' as const,
-                    marginTop: 6,
-                    opacity: (pressed || manualSaving) ? 0.7 : 1,
-                  }]}
-                >
-                  {manualSaving ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Save Campaign Metrics</Text>
-                  )}
-                </Pressable>
-              )}
-            </View>
-          )}
+          <View style={{ padding: 16, alignItems: 'center', gap: 8 }}>
+            <Ionicons name="analytics-outline" size={32} color={colors.textMuted} />
+            <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
+              {isMetaConnected ? 'Live data from Meta' : 'No performance data yet'}
+            </Text>
+            <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 18 }}>
+              {isMetaConnected
+                ? 'Performance metrics are pulled automatically from your connected Meta account.'
+                : 'Performance data is collected automatically from your connected channels. The system will begin learning after your first content is detected.'}
+            </Text>
+          </View>
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
