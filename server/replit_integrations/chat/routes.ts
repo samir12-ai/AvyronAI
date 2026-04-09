@@ -120,9 +120,60 @@ async function handleToolCall(
 
       case "update_content_rhythm": {
         const rhythm = await computeAdaptiveRhythm(campaignId, accountId);
+
+        const rhythmLabel = `${rhythm.reelsPerWeek}R · ${rhythm.carouselsPerWeek}C · ${rhythm.storiesPerDay}S · ${rhythm.postsPerWeek}P /wk`;
+        const rhythmDetails = JSON.stringify({
+          reelsPerWeek: rhythm.reelsPerWeek,
+          carouselsPerWeek: rhythm.carouselsPerWeek,
+          storiesPerDay: rhythm.storiesPerDay,
+          postsPerWeek: rhythm.postsPerWeek,
+          performanceBasis: rhythm.performanceBasis,
+          confidenceScore: rhythm.confidenceScore,
+          reasoning: rhythm.reasoning,
+          deltaFromPrevious: rhythm.deltaFromPrevious,
+          updatedByAgent: true,
+          updatedAt: new Date().toISOString(),
+        });
+
+        const existing = await db
+          .select({ id: strategyMemory.id })
+          .from(strategyMemory)
+          .where(
+            and(
+              eq(strategyMemory.accountId, accountId),
+              eq(strategyMemory.campaignId, campaignId),
+              eq(strategyMemory.memoryType, "content_rhythm"),
+            ),
+          )
+          .limit(1);
+
+        if (existing[0]) {
+          await db
+            .update(strategyMemory)
+            .set({
+              label: rhythmLabel,
+              details: rhythmDetails,
+              score: rhythm.confidenceScore,
+              confidenceScore: rhythm.confidenceScore,
+              updatedAt: new Date(),
+            })
+            .where(eq(strategyMemory.id, existing[0].id));
+        } else {
+          await db.insert(strategyMemory).values({
+            accountId,
+            campaignId,
+            memoryType: "content_rhythm",
+            label: rhythmLabel,
+            details: rhythmDetails,
+            score: rhythm.confidenceScore,
+            confidenceScore: rhythm.confidenceScore,
+            direction: "neutral",
+          });
+        }
+
         return {
           success: true,
-          summary: `Content rhythm updated: ${rhythm.reelsPerWeek} Reels/wk · ${rhythm.carouselsPerWeek} Carousels/wk · ${rhythm.storiesPerDay} Stories/day · ${rhythm.postsPerWeek} Posts/wk. Basis: ${rhythm.performanceBasis}. Confidence: ${Math.round(rhythm.confidenceScore * 100)}%.`,
+          summary: `Content rhythm updated and saved: ${rhythm.reelsPerWeek} Reels/wk · ${rhythm.carouselsPerWeek} Carousels/wk · ${rhythm.storiesPerDay} Stories/day · ${rhythm.postsPerWeek} Posts/wk. Basis: ${rhythm.performanceBasis}. Confidence: ${Math.round(rhythm.confidenceScore * 100)}%.`,
           data: {
             reelsPerWeek: rhythm.reelsPerWeek,
             carouselsPerWeek: rhythm.carouselsPerWeek,

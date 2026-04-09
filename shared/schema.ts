@@ -179,6 +179,7 @@ export const strategyDecisions = pgTable("strategy_decisions", {
   outcomeStatus: text("outcome_status"),
   createdAt: timestamp("created_at").defaultNow(),
   executedAt: timestamp("executed_at"),
+  insightType: text("insight_type").default("user_execution"),
 });
 
 export const strategyMemory = pgTable("strategy_memory", {

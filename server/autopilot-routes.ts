@@ -480,6 +480,7 @@ router.get("/api/decisions/proactive-insights", async (req, res) => {
         status: strategyDecisions.status,
         riskLevel: strategyDecisions.riskLevel,
         createdAt: strategyDecisions.createdAt,
+        insightType: strategyDecisions.insightType,
       })
       .from(strategyDecisions)
       .where(
@@ -502,6 +503,7 @@ router.get("/api/decisions/proactive-insights", async (req, res) => {
           status: strategyDecisions.status,
           riskLevel: strategyDecisions.riskLevel,
           createdAt: strategyDecisions.createdAt,
+          insightType: strategyDecisions.insightType,
         })
         .from(strategyDecisions)
         .where(eq(strategyDecisions.accountId, accountId))
@@ -548,6 +550,7 @@ router.get("/api/decisions/proactive-insights", async (req, res) => {
         status: d.status || "pending",
         riskLevel: d.riskLevel || "low",
         createdAt: d.createdAt,
+        insightType: d.insightType || "user_execution",
         validated: true,
       };
     });
