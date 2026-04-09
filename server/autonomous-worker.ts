@@ -314,7 +314,23 @@ async function checkIdleAccount(accountId: string, days: number): Promise<boolea
       sql`${performanceSnapshots.accountId} = ${accountId} AND ${performanceSnapshots.fetchedAt} >= ${threshold}`
     )
     .limit(1);
-  return recentPosts.length === 0 && recentSnapshots.length === 0;
+
+  // Not idle if there's recent publishing or performance activity
+  if (recentPosts.length > 0 || recentSnapshots.length > 0) return false;
+
+  // Not idle if the account has an active strategic plan (pre-publish phase).
+  // Accounts in strategy/approval phase have no published posts yet but are
+  // actively being worked on and must receive autonomous analysis.
+  const activePlan = await db.select({ id: strategicPlans.id })
+    .from(strategicPlans)
+    .where(
+      sql`${strategicPlans.accountId} = ${accountId} AND ${strategicPlans.status} IN ('DRAFT', 'READY_FOR_REVIEW', 'APPROVED')`
+    )
+    .limit(1);
+
+  if (activePlan.length > 0) return false;
+
+  return true;
 }
 
 async function processAccount(accountId: string) {
