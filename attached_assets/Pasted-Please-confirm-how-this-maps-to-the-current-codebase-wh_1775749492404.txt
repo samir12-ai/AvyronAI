@@ -1,0 +1,188 @@
+Please confirm how this maps to the current codebase:
+	•	what actions already have callable backend endpoints/tools
+	•	what still needs orchestration wiring
+
+⸻
+
+4. Execution Mapping by Insight Type
+
+We want each insight type to trigger a specific action chain, not a generic rerun.
+
+Proposed mapping
+
+user_execution
+Typical triggers:
+	•	no posting
+	•	insufficient cadence
+	•	no learnable signal
+
+Typical actions:
+	•	recompute rhythm
+	•	generate bounded content sprint
+	•	initialize tracking / measurement
+
+market_shift
+Typical triggers:
+	•	competitor cadence changed
+	•	format share changed
+	•	positioning / offer market pressure increased
+
+Typical actions:
+	•	refresh MI
+	•	re-run positioning
+	•	re-run funnel
+	•	re-run offer
+	•	then recompute rhythm
+
+strategy_gap
+Typical triggers:
+	•	plan no longer aligned with current data
+	•	memory / strategy contradiction
+	•	execution vs plan mismatch
+
+Typical actions:
+	•	rebuild strategy layer
+	•	update execution plan
+
+measurement_gap
+Typical triggers:
+	•	no signal quality
+	•	incomplete tracked outcomes
+	•	insufficient baseline
+
+Typical actions:
+	•	initialize measurement flow
+	•	defer heavy strategy mutation until signal quality improves
+
+Please confirm:
+	•	which of these chains are already possible
+	•	and which require new orchestration logic
+
+⸻
+
+5. Approval / Trust Model
+
+This is important.
+
+We do not want the system to auto-change everything from day one.
+
+The intended flow is:
+
+Phase 1
+	•	user sees insight
+	•	user clicks action
+	•	system executes
+	•	updated plan/dashboard is shown
+
+Phase 2
+
+After the user has already given initial plan approval / system trust:
+	•	allow bounded auto-execution for lower-risk changes
+
+Examples of low-risk auto-actions:
+	•	rhythm update
+	•	cadence update
+	•	content allocation shift
+
+Examples that should likely remain explicit approval:
+	•	full strategy rebuild
+	•	funnel change
+	•	offer change
+	•	positioning change
+
+Please confirm:
+	•	how the current approval system could support this
+	•	and whether we can introduce a “trusted auto-adjust mode” cleanly
+
+⸻
+
+6. Dashboard State Update After Action
+
+After an action is executed from an insight, the dashboard must visibly change.
+
+Expected behavior:
+	•	plan updates
+	•	rhythm updates
+	•	insight state updates
+	•	agent explains what changed
+	•	refresh shows the new current system state
+
+This is critical because the dashboard should feel alive, not static.
+
+Please confirm:
+	•	whether current plan persistence + live rhythm architecture is enough for this
+	•	and what still needs to be wired for state propagation
+
+⸻
+
+7. Agent Behavior
+
+The agent should not only describe insights. It should become the execution surface for them.
+
+Desired behavior:
+	•	insight appears in dashboard
+	•	user clicks action
+	•	agent executes the correct chain
+	•	agent responds with:
+	•	what it changed
+	•	why it changed it
+	•	what to expect next
+
+Example:
+
+Competitors increased carousel velocity by 28%.
+I refreshed the market-facing strategy layer and recomputed your rhythm.
+Carousels increased from 2 → 3/week.
+
+Please confirm:
+	•	whether the current agent tool-calling architecture can support this directly
+	•	or whether we need a dedicated “dashboard insight action router”
+
+⸻
+
+8. Flow Validation We Need
+
+Please validate both flows against current code:
+
+A. Computer / System Flow
+	•	signal detected
+	•	classified into correct insight type
+	•	surfaced in dashboard
+	•	mapped to correct action chain
+	•	action executes
+	•	state persists
+	•	UI reflects change
+
+B. User / Product Flow
+	•	user opens dashboard
+	•	sees personalized execution + market insights
+	•	clicks one action
+	•	system handles the rest
+	•	user sees updated state after refresh
+
+We want to ensure we are not building isolated pieces, but one coherent adaptive operating loop.
+
+⸻
+
+9. Key Product Goal
+
+The goal is to evolve from:
+
+dashboard that reports insights
+
+to:
+
+dashboard that classifies insights, lets the user execute the right response, and then updates itself as a living system
+
+⸻
+
+Please respond with:
+	•	what is already supported in current code
+	•	what is partially supported
+	•	what needs new implementation
+	•	and what build order you recommend
+
+Thanks,
+Samir
+Avyron AI
+:::
