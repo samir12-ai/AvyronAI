@@ -382,6 +382,8 @@ async function processAccount(accountId: string) {
 
     const activeCampaign = await getActiveCampaignId(accountId);
     let activePlanContext: { planId: string; planSummary: string; calendarProgress: string } | null = null;
+    let capturedPlanEntries: Array<{ status: string }> = [];
+    let capturedPlanWork: { totalContentPieces?: number | null } | undefined = undefined;
 
     if (activeCampaign) {
       let planQuery = await db
@@ -436,6 +438,8 @@ async function processAccount(accountId: string) {
         planSummary: plan.planSummary || "Active execution plan",
         calendarProgress: `Total required: ${totalReq}, Calendar entries: ${planEntries.length}, Draft: ${draftCount}, Generated: ${generatedCount}, Failed: ${failedCount}`,
       };
+      capturedPlanEntries = planEntries;
+      capturedPlanWork = planWork[0];
     } else {
       console.log(`[Worker] Account ${accountId}: No active campaign — autopilot BLOCKED`);
       await releaseLock(jobId, "completed");
@@ -447,6 +451,9 @@ async function processAccount(accountId: string) {
 
     const baselines = await computeRollingBaselines(accountId);
     const guardrailResult = await runAllGuardrails(accountId);
+    const compliance = activeCampaign
+      ? await computeExecutionCompliance(accountId, activeCampaign, capturedPlanEntries, capturedPlanWork, baselines)
+      : null;
     await evaluatePendingOutcomes(accountId);
 
     const volThreshold = await getVolatilityThreshold(accountId);
@@ -807,7 +814,9 @@ async function processAccount(accountId: string) {
         }
       }
 
-      const insightType = classifyInsightType(decision.trigger, decision.action);
+      const insightType = compliance
+        ? classifyInsightTypeFromState(compliance, finalState.volatilityIndex || 0, finalState.driftFlag || false, decision.trigger, decision.action)
+        : classifyInsightType(decision.trigger, decision.action);
 
       const inserted = await db.insert(strategyDecisions).values({
         accountId,
@@ -994,6 +1003,146 @@ function classifyInsightType(trigger: string, action: string): InsightType {
   if (isMeasurementGap) return "measurement_gap";
 
   return "user_execution";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXECUTION COMPLIANCE — deterministic, data-driven. No AI involved.
+// Uses data already collected by processAccount (plan entries + baselines).
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ExecutionCompliance {
+  state: "COMPLIANT" | "LOW_CADENCE" | "NO_EXECUTION";
+  publishedCount7d: number;
+  cadenceFloor: number;
+  calendarTotal: number;
+  calendarGenerated: number;
+  hasPerformanceData: boolean;
+  explanation: string;
+}
+
+async function computeExecutionCompliance(
+  accountId: string,
+  campaignId: string,
+  planEntries: Array<{ status: string }>,
+  planWork: { totalContentPieces?: number | null } | undefined,
+  baselines: { rollingRoas: number; rollingCtr: number; rollingSpend: number },
+): Promise<ExecutionCompliance> {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  const [recentPublished, rhythmMem] = await Promise.all([
+    db
+      .select({ id: publishedPosts.id })
+      .from(publishedPosts)
+      .where(
+        sql`${publishedPosts.accountId} = ${accountId} AND ${publishedPosts.status} = 'published' AND ${publishedPosts.publishedAt} >= ${sevenDaysAgo}`,
+      )
+      .limit(50),
+    db
+      .select({ details: strategyMemory.details })
+      .from(strategyMemory)
+      .where(
+        and(
+          eq(strategyMemory.accountId, accountId),
+          eq(strategyMemory.campaignId, campaignId),
+          eq(strategyMemory.memoryType, "content_rhythm"),
+        ),
+      )
+      .orderBy(desc(strategyMemory.updatedAt))
+      .limit(1),
+  ]);
+
+  const publishedCount7d = recentPublished.length;
+
+  let cadenceFloor = 3;
+  if (rhythmMem[0]?.details) {
+    try {
+      const rhythm =
+        typeof rhythmMem[0].details === "string"
+          ? JSON.parse(rhythmMem[0].details)
+          : rhythmMem[0].details;
+      const weeklyTarget =
+        (rhythm.reelsPerWeek || 0) +
+        (rhythm.carouselsPerWeek || 0) +
+        (rhythm.postsPerWeek || 0);
+      if (weeklyTarget > 0) {
+        cadenceFloor = Math.max(1, Math.floor(weeklyTarget * 0.4));
+      }
+    } catch {}
+  }
+
+  const calendarTotal = planEntries.length;
+  const calendarGenerated = planEntries.filter(
+    (e) =>
+      e.status === "AI_GENERATED" ||
+      e.status === "GENERATED" ||
+      e.status === "PUBLISHED",
+  ).length;
+  const hasPerformanceData = baselines.rollingSpend > 0 || baselines.rollingRoas > 0;
+
+  let state: ExecutionCompliance["state"];
+  let explanation: string;
+
+  if (publishedCount7d === 0) {
+    state = "NO_EXECUTION";
+    explanation = `No published posts in the last 7 days. Execution has not started or has stopped completely.`;
+  } else if (publishedCount7d < cadenceFloor) {
+    state = "LOW_CADENCE";
+    explanation = `${publishedCount7d} post(s) published in 7 days vs. cadence floor of ${cadenceFloor}. Execution is below minimum threshold.`;
+  } else {
+    state = "COMPLIANT";
+    explanation = `${publishedCount7d} post(s) published in 7 days (cadence floor: ${cadenceFloor}). Execution is on track.`;
+  }
+
+  return {
+    state,
+    publishedCount7d,
+    cadenceFloor,
+    calendarTotal,
+    calendarGenerated,
+    hasPerformanceData,
+    explanation,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE-DRIVEN INSIGHT CLASSIFIER
+// Uses real system state as the primary signal.
+// Text matching (classifyInsightType) is kept only as a final-step refinement.
+// Decision tree:
+//   1. No execution → user_execution (always)
+//   2. Low cadence → user_execution (execution, not strategy)
+//   3. Executed but no performance data → measurement_gap
+//   4. Market signals active (volatility / drift) → market_shift
+//   5. Compliant + data + stable market → text refinement between
+//      measurement_gap and strategy_gap, defaulting to strategy_gap
+// ─────────────────────────────────────────────────────────────────────────────
+
+function classifyInsightTypeFromState(
+  compliance: ExecutionCompliance,
+  volatilityIndex: number,
+  driftFlag: boolean,
+  triggerText: string,
+  actionText: string,
+): InsightType {
+  if (compliance.state === "NO_EXECUTION") return "user_execution";
+  if (compliance.state === "LOW_CADENCE") return "user_execution";
+
+  if (!compliance.hasPerformanceData) return "measurement_gap";
+
+  if (volatilityIndex > 0.35 || driftFlag) return "market_shift";
+
+  const t = (triggerText + " " + actionText).toLowerCase();
+  const hasMeasurementSignal =
+    t.includes("no data") ||
+    t.includes("no signal") ||
+    t.includes("measurement") ||
+    t.includes("tracking") ||
+    t.includes("baseline") ||
+    t.includes("insufficient signal");
+
+  if (hasMeasurementSignal) return "measurement_gap";
+
+  return "strategy_gap";
 }
 
 /** Number of accounts processed in parallel per worker tick. */
