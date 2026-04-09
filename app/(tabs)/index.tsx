@@ -312,6 +312,10 @@ export default function DashboardScreen() {
       });
       if (res.ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        queryClient.setQueryData(['/api/plans/active', selectedCampaignId], (old: any) => {
+          if (!old?.plan) return old;
+          return { ...old, plan: { ...old.plan, status: 'APPROVED' } };
+        });
         queryClient.invalidateQueries({ queryKey: ['/api/plans/active', selectedCampaignId] });
       } else {
         const body = await res.json().catch(() => ({}));
