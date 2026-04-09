@@ -79,7 +79,35 @@ interface ProactiveInsight {
   status: string;
   riskLevel: string;
   createdAt: string;
+  insightType?: string;
 }
+
+const INSIGHT_ACTIONS: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string; message: string }> = {
+  user_execution: {
+    label: 'Update Rhythm',
+    icon: 'pulse',
+    color: P.mint,
+    message: 'I have a content execution gap. Analyze my posting cadence and update my content rhythm with the latest data.',
+  },
+  market_shift: {
+    label: 'Refresh Strategy',
+    icon: 'trending-up',
+    color: P.amber,
+    message: 'Market signals have shifted. Refresh my market intelligence context and recompute my content rhythm based on the latest competitor movements.',
+  },
+  strategy_gap: {
+    label: 'Rebuild Plan',
+    icon: 'git-network',
+    color: P.red,
+    message: 'There is a strategy gap in my plan. Trigger a full plan rebuild that aligns with my current memory and market data.',
+  },
+  measurement_gap: {
+    label: 'Assess Signals',
+    icon: 'analytics',
+    color: '#60A5FA',
+    message: 'I have measurement gaps. Assess my signal quality and explain what tracking issues must be resolved before strategy changes.',
+  },
+};
 
 type MessageItem = ChatMessage | AgentActionEvent;
 
@@ -319,6 +347,13 @@ export default function DashboardChat() {
     setTimeout(() => sendMessage(text), 50);
   }, [sendMessage]);
 
+  const handleInsightAction = useCallback((insightType: string) => {
+    const action = INSIGHT_ACTIONS[insightType] || INSIGHT_ACTIONS.user_execution;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setInput(action.message);
+    setTimeout(() => sendMessage(action.message), 50);
+  }, [sendMessage]);
+
   const suggestions = [
     "What has the agent decided?",
     "What should I create today?",
@@ -402,6 +437,9 @@ export default function DashboardChat() {
           const actionLines = actionSection.split('\n');
           const actionText = actionLines.slice(1).join(' ');
 
+          const iType = insight.insightType || 'user_execution';
+          const insightAction = INSIGHT_ACTIONS[iType] || INSIGHT_ACTIONS.user_execution;
+
           return (
             <View key={insight.id} style={[st.insightCard, { backgroundColor: insightBg, borderColor: insightBorderC }]}>
               <View style={st.insightCardTop}>
@@ -426,6 +464,15 @@ export default function DashboardChat() {
                   </Text>
                 </View>
               )}
+              <Pressable
+                style={[st.insightActionBtn, { backgroundColor: insightAction.color + '18', borderColor: insightAction.color + '45' }]}
+                onPress={() => handleInsightAction(iType)}
+              >
+                <Ionicons name={insightAction.icon} size={12} color={insightAction.color} />
+                <Text style={[st.insightActionBtnText, { color: insightAction.color }]}>
+                  {insightAction.label}
+                </Text>
+              </Pressable>
             </View>
           );
         })}
@@ -669,6 +716,22 @@ const st = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
     fontWeight: '500' as const,
+  },
+  insightActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 10,
+    alignSelf: 'flex-start',
+  },
+  insightActionBtnText: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    letterSpacing: 0.2,
   },
   suggestionsGrid: {
     gap: 6,

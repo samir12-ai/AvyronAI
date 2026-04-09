@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
+import * as Haptics from 'expo-haptics';
 
 const P = {
   mint: '#8B5CF6',
@@ -50,7 +51,35 @@ interface ProactiveInsight {
   status: string;
   riskLevel: string;
   createdAt: string;
+  insightType?: string;
 }
+
+const INSIGHT_ACTIONS: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string; message: string }> = {
+  user_execution: {
+    label: 'Update Rhythm',
+    icon: 'pulse',
+    color: P.mint,
+    message: 'I have a content execution gap. Analyze my posting cadence and update my content rhythm with the latest data.',
+  },
+  market_shift: {
+    label: 'Refresh Strategy',
+    icon: 'trending-up',
+    color: P.amber,
+    message: 'Market signals have shifted. Refresh my market intelligence context and recompute my content rhythm based on the latest competitor movements.',
+  },
+  strategy_gap: {
+    label: 'Rebuild Plan',
+    icon: 'git-network',
+    color: P.red,
+    message: 'There is a strategy gap in my plan. Trigger a full plan rebuild that aligns with my current memory and market data.',
+  },
+  measurement_gap: {
+    label: 'Assess Signals',
+    icon: 'analytics',
+    color: '#60A5FA',
+    message: 'I have measurement gaps. Assess my signal quality and explain what tracking issues must be resolved before strategy changes.',
+  },
+};
 
 function formatTimeAgo(dateStr: string): string {
   const ms = Date.now() - new Date(dateStr).getTime();
@@ -172,8 +201,9 @@ export default function AgentScreen() {
     }
   }, [baseUrl, activeConvId]);
 
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || sending) return;
+  const sendMessage = useCallback(async (overrideInput?: string) => {
+    const currentInput = (overrideInput !== undefined ? overrideInput : input).trim();
+    if (!currentInput || sending) return;
 
     let convId = activeConvId;
 
@@ -182,7 +212,7 @@ export default function AgentScreen() {
         const res = await authFetch(new URL('/api/conversations', baseUrl).toString(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: input.trim().slice(0, 40) }),
+          body: JSON.stringify({ title: currentInput.slice(0, 40) }),
         });
         const conv = await res.json();
         convId = conv.id;
@@ -197,10 +227,8 @@ export default function AgentScreen() {
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: input.trim(),
+      content: currentInput,
     };
-
-    const currentInput = input.trim();
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setSending(true);
@@ -282,6 +310,12 @@ export default function AgentScreen() {
     return P.mint;
   };
 
+  const handleInsightAction = useCallback((insightType: string) => {
+    const action = INSIGHT_ACTIONS[insightType] || INSIGHT_ACTIONS.user_execution;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    sendMessage(action.message);
+  }, [sendMessage]);
+
   const renderMessage = useCallback(({ item }: { item: Message }) => {
     const isUser = item.role === 'user';
     return (
@@ -316,6 +350,8 @@ export default function AgentScreen() {
     const pColor = priorityColor(insight.priority);
     const insightBg = isDark ? P.insightBg.dark : P.insightBg.light;
     const insightBorderC = isDark ? P.insightBorder.dark : P.insightBorder.light;
+    const iType = insight.insightType || 'user_execution';
+    const insightAction = INSIGHT_ACTIONS[iType] || INSIGHT_ACTIONS.user_execution;
     return (
       <View key={insight.id} style={[s.insightCard, { backgroundColor: insightBg, borderColor: insightBorderC }]}>
         <View style={s.insightHeader}>
@@ -351,9 +387,18 @@ export default function AgentScreen() {
             );
           })}
         </View>
+        <Pressable
+          style={[s.insightActionBtn, { backgroundColor: insightAction.color + '18', borderColor: insightAction.color + '45' }]}
+          onPress={() => handleInsightAction(iType)}
+        >
+          <Ionicons name={insightAction.icon} size={13} color={insightAction.color} />
+          <Text style={[s.insightActionBtnText, { color: insightAction.color }]}>
+            {insightAction.label}
+          </Text>
+        </Pressable>
       </View>
     );
-  }, [isDark, textPrimary, textMuted, cardBg]);
+  }, [isDark, textPrimary, textMuted, cardBg, handleInsightAction]);
 
   const renderInsightsBlock = useCallback(() => {
     if (insightsLoading) {
@@ -659,6 +704,22 @@ const s = StyleSheet.create({
   insightBody: {},
   insightLabel: { fontSize: 11, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 3 },
   insightText: { fontSize: 13, lineHeight: 19 },
+  insightActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 14,
+    alignSelf: 'flex-start' as const,
+  },
+  insightActionBtnText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    letterSpacing: 0.2,
+  },
   insightsFooterNote: { marginTop: 4, marginBottom: 20 },
   insightsFooterText: { fontSize: 12, textAlign: 'center' as const, lineHeight: 17 },
   emptyContainer: { alignItems: 'center', paddingHorizontal: 32, paddingVertical: 40 },
