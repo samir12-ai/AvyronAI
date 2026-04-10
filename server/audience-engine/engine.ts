@@ -286,17 +286,14 @@ interface MarketScopeMetadata {
   scopeAmbiguityFlag: boolean;
 }
 
-let _lastMarketScopeMetadata: MarketScopeMetadata = {
-  scopeConfidence: 0,
-  matchedKeywordDensity: 0,
-  scopeAmbiguityFlag: false,
-};
-
 function getMarketScopeMetadata(): MarketScopeMetadata {
-  return { ..._lastMarketScopeMetadata };
+  return { scopeConfidence: 0, matchedKeywordDensity: 0, scopeAmbiguityFlag: false };
 }
 
-function detectMarketScope(texts: string[], businessContext: { industry: string; coreOffer: string }): MarketScope[] {
+function detectMarketScope(
+  texts: string[],
+  businessContext: { industry: string; coreOffer: string },
+): { markets: MarketScope[]; metadata: MarketScopeMetadata } {
   const allText = [...texts.slice(0, 200), businessContext.industry, businessContext.coreOffer].join(" ").toLowerCase();
   const totalWords = allText.split(/\s+/).length || 1;
   const scores: Record<MarketScope, number> = {} as any;
@@ -318,8 +315,10 @@ function detectMarketScope(texts: string[], businessContext: { industry: string;
 
   const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]).filter(([, v]) => v > 0);
   if (sorted.length === 0) {
-    _lastMarketScopeMetadata = { scopeConfidence: 0, matchedKeywordDensity: 0, scopeAmbiguityFlag: false };
-    return ["universal"];
+    return {
+      markets: ["universal"],
+      metadata: { scopeConfidence: 0, matchedKeywordDensity: 0, scopeAmbiguityFlag: false },
+    };
   }
 
   const topScore = sorted[0][1];
@@ -331,10 +330,11 @@ function detectMarketScope(texts: string[], businessContext: { industry: string;
   const densityFactor = Math.min(1, totalKeywordMatches / 10);
   const scopeConfidence = Math.round(Math.min(1, Math.max(0, separationFactor * 0.5 + densityFactor * 0.5)) * 1000) / 1000;
 
-  _lastMarketScopeMetadata = { scopeConfidence, matchedKeywordDensity, scopeAmbiguityFlag };
-
   const detected = sorted.filter(([, v]) => v >= topScore * 0.3).map(([k]) => k as MarketScope);
-  return detected.length > 0 ? detected : ["universal"];
+  return {
+    markets: detected.length > 0 ? detected : ["universal"],
+    metadata: { scopeConfidence, matchedKeywordDensity, scopeAmbiguityFlag },
+  };
 }
 
 function filterClustersByMarket(clusters: PatternCluster[], detectedMarkets: MarketScope[]): PatternCluster[] {
@@ -1505,9 +1505,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   const allText = [...commentTexts, ...captions];
 
-  const detectedMarkets = detectMarketScope(allText, businessContext);
+  const { markets: detectedMarkets, metadata: scopeMetadata } = detectMarketScope(allText, businessContext);
   baseInputSummary.detectedMarkets = detectedMarkets;
-  const scopeMetadata = getMarketScopeMetadata();
   console.log(`[AudienceEngine-V3] Market scope detected: ${detectedMarkets.join(", ")} | scopeConfidence=${scopeMetadata.scopeConfidence} | ambiguity=${scopeMetadata.scopeAmbiguityFlag}`);
 
   const scopedPainClusters = filterClustersByMarket(PAIN_CLUSTERS, detectedMarkets);
