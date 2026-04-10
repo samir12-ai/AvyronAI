@@ -18,6 +18,9 @@ import {
   CONFIDENCE_WEIGHTS,
   OBJECTION_CONTEXT_RULES,
   MIN_EVIDENCE_PER_SIGNAL,
+  BRIDGE_SUPPRESS_THRESHOLD,
+  COMMENT_QUALITY_WEIGHTS,
+  LOW_SIGNAL_COMMENT_PHRASES,
   type PatternCluster,
   type MarketScope,
 } from "./constants";
@@ -165,6 +168,103 @@ function sanitizeTexts(texts: string[]): { clean: string[]; removed: number } {
     }
   }
   return { clean, removed };
+}
+
+type CommentQuality = "HIGH" | "MEDIUM" | "LOW" | "NOISE";
+
+interface LabeledText {
+  text: string;
+  source: string;
+  qualityWeight: number;
+}
+
+const EMOJI_ONLY_REGEX = /^[\p{Emoji}\p{Z}\s!?.,"']+$/u;
+const SUBSTANTIVE_MARKER_REGEX = /\?|how|why|what|when|where|help|problem|issue|struggle|tried|can't|doesn't|not working|advice|question|difficult|challenge|frustrat|confus|overwhelm/i;
+
+function classifyCommentQuality(text: string): CommentQuality {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (trimmed.length < 8) return "NOISE";
+  if (EMOJI_ONLY_REGEX.test(trimmed)) return "NOISE";
+
+  const isLowPhrase = (LOW_SIGNAL_COMMENT_PHRASES as readonly string[]).some(p =>
+    lower.includes(p) && trimmed.length < 40
+  );
+  if (isLowPhrase) return "LOW";
+
+  if (SUBSTANTIVE_MARKER_REGEX.test(lower)) return "HIGH";
+  if (trimmed.length > 80) return "HIGH";
+  if (trimmed.length > 30) return "MEDIUM";
+
+  return "LOW";
+}
+
+function buildLabeledComments(comments: string[]): {
+  labeled: LabeledText[];
+  noiseCount: number;
+  lowCount: number;
+  highCount: number;
+  mediumCount: number;
+} {
+  const labeled: LabeledText[] = [];
+  let noiseCount = 0;
+  let lowCount = 0;
+  let highCount = 0;
+  let mediumCount = 0;
+
+  for (const text of comments) {
+    const quality = classifyCommentQuality(text);
+    if (quality === "NOISE") {
+      noiseCount++;
+      continue;
+    }
+    const qualityWeight =
+      quality === "HIGH"
+        ? COMMENT_QUALITY_WEIGHTS.HIGH
+        : quality === "MEDIUM"
+        ? COMMENT_QUALITY_WEIGHTS.MEDIUM
+        : COMMENT_QUALITY_WEIGHTS.LOW;
+
+    if (quality === "HIGH") highCount++;
+    else if (quality === "MEDIUM") mediumCount++;
+    else lowCount++;
+
+    labeled.push({ text, source: "comment", qualityWeight });
+  }
+
+  return { labeled, noiseCount, lowCount, highCount, mediumCount };
+}
+
+function buildLabeledCaptions(captions: string[]): LabeledText[] {
+  return captions.map(text => ({ text, source: "caption", qualityWeight: 1.0 }));
+}
+
+function computePrimaryDataStrength(
+  labeledComments: LabeledText[],
+  labeledCaptions: LabeledText[],
+): number {
+  const totalLabeled = labeledComments.length + labeledCaptions.length;
+  if (totalLabeled === 0) return 0;
+
+  const highQualityComments = labeledComments.filter(t => t.qualityWeight >= COMMENT_QUALITY_WEIGHTS.HIGH).length;
+  const uniqueSources = new Set<string>();
+  if (labeledComments.length > 0) uniqueSources.add("comment");
+  if (labeledCaptions.length > 0) uniqueSources.add("caption");
+
+  const volumeScore = Math.min(1, totalLabeled / 80);
+  const qualityScore = labeledComments.length > 0
+    ? Math.min(1, highQualityComments / Math.max(labeledComments.length, 1))
+    : 0.4;
+  const sourceScore = Math.min(1, uniqueSources.size / 2);
+  const captionScore = Math.min(1, labeledCaptions.length / 20);
+
+  return (
+    volumeScore * 0.35 +
+    qualityScore * 0.25 +
+    sourceScore * 0.20 +
+    captionScore * 0.20
+  );
 }
 
 const MARKET_DETECTION_KEYWORDS: Record<MarketScope, string[]> = {
@@ -416,26 +516,41 @@ function computeCalibratedConfidence(
 }
 
 function matchPatternClusters(
-  texts: string[],
+  labeledTexts: LabeledText[],
   clusters: PatternCluster[],
   inputSnapshotId: string | null,
-  sourceTypes: string[],
   competitorCount: number,
 ): SignalItem[] {
-  const results: Map<string, { count: number; evidence: string[]; matchedPatterns: Set<string> }> = new Map();
+  const results: Map<string, {
+    weightedCount: number;
+    rawCount: number;
+    evidence: string[];
+    matchedPatterns: Set<string>;
+    hitSources: Set<string>;
+  }> = new Map();
 
   for (const cluster of clusters) {
-    results.set(cluster.canonical, { count: 0, evidence: [], matchedPatterns: new Set() });
+    results.set(cluster.canonical, {
+      weightedCount: 0,
+      rawCount: 0,
+      evidence: [],
+      matchedPatterns: new Set(),
+      hitSources: new Set(),
+    });
   }
 
-  for (const text of texts) {
+  const totalWeightedTexts = labeledTexts.reduce((sum, t) => sum + t.qualityWeight, 0);
+
+  for (const { text, source, qualityWeight } of labeledTexts) {
     const lower = text.toLowerCase();
     for (const cluster of clusters) {
       for (const pattern of cluster.patterns) {
         if (lower.includes(pattern)) {
           const entry = results.get(cluster.canonical)!;
-          entry.count++;
+          entry.weightedCount += qualityWeight;
+          entry.rawCount++;
           entry.matchedPatterns.add(pattern);
+          entry.hitSources.add(source);
           if (entry.evidence.length < 3) {
             entry.evidence.push(text.slice(0, 150));
           }
@@ -446,14 +561,19 @@ function matchPatternClusters(
   }
 
   return Array.from(results.entries())
-    .filter(([, v]) => v.count > 0)
-    .sort((a, b) => b[1].count - a[1].count)
+    .filter(([, v]) => v.rawCount > 0)
+    .sort((a, b) => b[1].weightedCount - a[1].weightedCount)
     .map(([canonical, data]) => ({
       canonical,
-      frequency: data.count,
+      frequency: Math.round(data.weightedCount),
       evidence: data.evidence,
-      evidenceCount: data.count,
-      confidenceScore: computeCalibratedConfidence(data.count, texts.length, sourceTypes, competitorCount),
+      evidenceCount: data.rawCount,
+      confidenceScore: computeCalibratedConfidence(
+        data.weightedCount,
+        totalWeightedTexts,
+        Array.from(data.hitSources),
+        competitorCount,
+      ),
       sourceSignals: Array.from(data.matchedPatterns),
       inputSnapshotId,
     }));
@@ -1287,36 +1407,61 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const commentTexts = commentSanitized.clean;
   const totalSanitized = captionSanitized.removed + commentSanitized.removed;
 
-  console.log(`[AudienceEngine-V3] Data: ${competitorCount} competitors, ${captions.length} captions, ${commentTexts.length} comments (sanitized ${totalSanitized} synthetic signals)`);
+  const commentClassification = buildLabeledComments(commentTexts);
+  const labeledComments = commentClassification.labeled;
+  const labeledCaptions = buildLabeledCaptions(captions);
+  const labeledAllTexts: LabeledText[] = [...labeledComments, ...labeledCaptions];
+  const primaryDataStrength = computePrimaryDataStrength(labeledComments, labeledCaptions);
+
+  console.log(
+    `[AudienceEngine-V3] Data: ${competitorCount} competitors, ${captions.length} captions, ${commentTexts.length} comments` +
+    ` (sanitized ${totalSanitized} synthetic | noise-filtered ${commentClassification.noiseCount}` +
+    ` | HIGH=${commentClassification.highCount} MED=${commentClassification.mediumCount} LOW=${commentClassification.lowCount})` +
+    ` | primaryStrength=${primaryDataStrength.toFixed(3)}`
+  );
 
   const baseInputSummary = {
     postsAnalyzed: captions.length,
     commentsAnalyzed: commentTexts.length,
     competitorsAnalyzed: competitorCount,
     sanitizedCount: totalSanitized,
+    commentQuality: {
+      noise: commentClassification.noiseCount,
+      low: commentClassification.lowCount,
+      medium: commentClassification.mediumCount,
+      high: commentClassification.highCount,
+    },
+    primaryDataStrength,
     miSnapshotId,
     miSnapshotAge,
     detectedMarkets: [] as string[],
   };
 
+  const datasetTooSmall =
+    competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
+    captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS;
+
   let bridgeResult: SemanticBridgeResult | null = null;
   if (latestSnapshot) {
-    bridgeResult = executeSemanticBridge(latestSnapshot);
-    const bridgeValidation = validateBridgeIntegrity(bridgeResult);
-    if (!bridgeValidation.valid) {
-      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_VALIDATION_FAIL | issues=${bridgeValidation.issues.join("; ")}`);
-      bridgeResult = null;
+    if (!datasetTooSmall && primaryDataStrength >= BRIDGE_SUPPRESS_THRESHOLD) {
+      console.log(
+        `[AudienceEngine-V3] BRIDGE_SUPPRESSED | primaryStrength=${primaryDataStrength.toFixed(3)} >= threshold=${BRIDGE_SUPPRESS_THRESHOLD} | primary data is sufficient`
+      );
     } else {
-      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_ACTIVE | pains=${bridgeResult.painSignals.length} | desires=${bridgeResult.desireSignals.length} | objections=${bridgeResult.objectionSignals.length} | integrity=${bridgeResult.bridgeIntegrity}`);
+      bridgeResult = executeSemanticBridge(latestSnapshot);
+      const bridgeValidation = validateBridgeIntegrity(bridgeResult);
+      if (!bridgeValidation.valid) {
+        console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_VALIDATION_FAIL | issues=${bridgeValidation.issues.join("; ")}`);
+        bridgeResult = null;
+      } else {
+        console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_ACTIVE | pains=${bridgeResult.painSignals.length} | desires=${bridgeResult.desireSignals.length} | objections=${bridgeResult.objectionSignals.length} | integrity=${bridgeResult.bridgeIntegrity} | reason=${datasetTooSmall ? "dataset_too_small" : "primary_weak"}`);
+      }
     }
   }
 
   const bridgeCanRescue = bridgeResult && bridgeResult.bridgeIntegrity && bridgeResult.totalPassed >= AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI;
 
-  if (
-    competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
-    captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS
-  ) {
+  if (datasetTooSmall) {
     if (bridgeCanRescue) {
       console.log(`[AudienceEngine-V3] DATASET_TOO_SMALL bypassed — Semantic Bridge provides ${bridgeResult!.totalPassed} quality-gated signals from MIv3 contentDnaData (bridge-only mode)`);
     } else {
@@ -1359,9 +1504,6 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   }
 
   const allText = [...commentTexts, ...captions];
-  const sourceTypes = [];
-  if (commentTexts.length > 0) sourceTypes.push("comments");
-  if (captions.length > 0) sourceTypes.push("captions");
 
   const detectedMarkets = detectMarketScope(allText, businessContext);
   baseInputSummary.detectedMarkets = detectedMarkets;
@@ -1373,11 +1515,11 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const scopedObjectionClusters = filterClustersByMarket(OBJECTION_CLUSTERS, detectedMarkets);
 
   const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId, competitorCount);
-  const rawPainMap = matchPatternClusters(allText, scopedPainClusters, miSnapshotId, sourceTypes, competitorCount);
-  const rawDesireMap = matchPatternClusters(allText, scopedDesireClusters, miSnapshotId, sourceTypes, competitorCount);
-  let rawObjectionMap = matchPatternClusters(allText, scopedObjectionClusters, miSnapshotId, sourceTypes, competitorCount);
-  const rawTransformationMap = matchPatternClusters(allText, TRANSFORMATION_PATTERNS, miSnapshotId, sourceTypes, competitorCount);
-  const rawEmotionalDrivers = matchPatternClusters(allText, EMOTIONAL_DRIVER_PATTERNS, miSnapshotId, sourceTypes, competitorCount);
+  const rawPainMap = matchPatternClusters(labeledAllTexts, scopedPainClusters, miSnapshotId, competitorCount);
+  const rawDesireMap = matchPatternClusters(labeledAllTexts, scopedDesireClusters, miSnapshotId, competitorCount);
+  let rawObjectionMap = matchPatternClusters(labeledAllTexts, scopedObjectionClusters, miSnapshotId, competitorCount);
+  const rawTransformationMap = matchPatternClusters(labeledAllTexts, TRANSFORMATION_PATTERNS, miSnapshotId, competitorCount);
+  const rawEmotionalDrivers = matchPatternClusters(labeledAllTexts, EMOTIONAL_DRIVER_PATTERNS, miSnapshotId, competitorCount);
 
   rawObjectionMap = applyObjectionContextRules(rawObjectionMap, allText);
 

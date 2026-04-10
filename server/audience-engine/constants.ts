@@ -10,6 +10,21 @@ export const AUDIENCE_THRESHOLDS = {
   DEFENSIVE_MODE_SIGNAL_THRESHOLD: 10,
 } as const;
 
+export const BRIDGE_SUPPRESS_THRESHOLD = 0.55;
+
+export const COMMENT_QUALITY_WEIGHTS = {
+  HIGH: 1.0,
+  MEDIUM: 0.6,
+  LOW: 0.25,
+} as const;
+
+export const LOW_SIGNAL_COMMENT_PHRASES = [
+  "thank you", "thanks!", "great", "amazing", "awesome", "love this",
+  "love it", "so good", "nice", "wow", "🔥", "👏", "🙏", "💯",
+  "❤️", "woot", "yes!", "cool", "haha", "lol", "go ", "!!", "so excited",
+  "congratulations", "congrats", "well done", "good job", "keep going",
+] as const;
+
 export const SYNTHETIC_FILTERS = [
   "synthetic",
   "engagement signal",
