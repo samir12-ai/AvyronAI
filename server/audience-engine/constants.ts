@@ -581,6 +581,14 @@ export const LANGUAGE_PATTERNS = {
   ],
 } as const;
 
+export const MAX_EXPECTED_SOURCE_TYPES = 5;
+
+export const SOURCE_QUALITY_WEIGHTS = {
+  REVIEW: 1.4,
+  TIKTOK: 0.9,
+  CAPTION: 1.0,
+} as const;
+
 export const CONFIDENCE_WEIGHTS = {
   SIGNAL_FREQUENCY: 0.5,
   SOURCE_DIVERSITY: 0.3,

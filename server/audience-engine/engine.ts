@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, growthCampaigns } from "@shared/schema";
+import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorReviews, growthCampaigns } from "@shared/schema";
 import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
 import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import {
@@ -21,6 +21,8 @@ import {
   BRIDGE_SUPPRESS_THRESHOLD,
   COMMENT_QUALITY_WEIGHTS,
   LOW_SIGNAL_COMMENT_PHRASES,
+  MAX_EXPECTED_SOURCE_TYPES,
+  SOURCE_QUALITY_WEIGHTS,
   type PatternCluster,
   type MarketScope,
 } from "./constants";
@@ -237,7 +239,29 @@ function buildLabeledComments(comments: string[]): {
 }
 
 function buildLabeledCaptions(captions: string[]): LabeledText[] {
-  return captions.map(text => ({ text, source: "caption", qualityWeight: 1.0 }));
+  return captions.map(text => ({ text, source: "caption", qualityWeight: SOURCE_QUALITY_WEIGHTS.CAPTION }));
+}
+
+function buildLabeledReviews(reviews: string[]): LabeledText[] {
+  const labeled: LabeledText[] = [];
+  for (const text of reviews) {
+    const quality = classifyCommentQuality(text);
+    if (quality === "NOISE") continue;
+    const baseWeight =
+      quality === "HIGH"
+        ? COMMENT_QUALITY_WEIGHTS.HIGH
+        : quality === "MEDIUM"
+        ? COMMENT_QUALITY_WEIGHTS.MEDIUM
+        : COMMENT_QUALITY_WEIGHTS.LOW;
+    labeled.push({ text, source: "review", qualityWeight: baseWeight * SOURCE_QUALITY_WEIGHTS.REVIEW });
+  }
+  return labeled;
+}
+
+function buildLabeledTiktok(tiktokTexts: string[]): LabeledText[] {
+  return tiktokTexts
+    .filter(t => t.trim().length >= 5)
+    .map(text => ({ text, source: "tiktok", qualityWeight: SOURCE_QUALITY_WEIGHTS.TIKTOK }));
 }
 
 function computePrimaryDataStrength(
@@ -504,7 +528,7 @@ function computeCalibratedConfidence(
   competitorCount: number,
 ): number {
   const freqScore = totalTexts > 0 ? Math.min(1, frequency / Math.max(totalTexts * 0.1, 1)) : 0;
-  const diversityScore = Math.min(1, sourceTypes.length / 3);
+  const diversityScore = Math.min(1, sourceTypes.length / MAX_EXPECTED_SOURCE_TYPES);
   const competitorScore = Math.min(1, competitorCount / MI_COST_LIMITS.MAX_COMPETITORS);
 
   const raw =
@@ -584,8 +608,10 @@ function analyzeLanguage(
   captions: string[],
   inputSnapshotId: string | null,
   competitorCount: number,
+  reviews: string[] = [],
+  tiktokTexts: string[] = [],
 ): LanguageSignals {
-  const allText = [...comments, ...captions];
+  const allText = [...comments, ...captions, ...reviews, ...tiktokTexts];
   const result: LanguageSignals = {
     problemExpressions: { count: 0, samples: [] },
     questionPatterns: { count: 0, samples: [] },
@@ -636,6 +662,8 @@ function analyzeLanguage(
   const sourceTypes = [];
   if (comments.length > 0) sourceTypes.push("comments");
   if (captions.length > 0) sourceTypes.push("captions");
+  if (reviews.length > 0) sourceTypes.push("reviews");
+  if (tiktokTexts.length > 0) sourceTypes.push("tiktok");
   result.confidenceScore = computeCalibratedConfidence(total, allText.length, sourceTypes, competitorCount);
   result.sourceSignals = sourceTypes;
 
@@ -1379,27 +1407,41 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const competitorIds = competitors.map(c => c.id);
   const competitorCount = competitorIds.length;
 
-  let posts: { caption: string | null }[] = [];
+  let posts: { caption: string | null; platform: string }[] = [];
   let rawComments: { commentText: string | null }[] = [];
+  let rawReviews: { reviewText: string }[] = [];
 
   if (competitorIds.length > 0) {
     const idList = sql.join(competitorIds.map(id => sql`${id}`), sql`, `);
 
-    posts = await db.select({ caption: ciCompetitorPosts.caption })
-      .from(ciCompetitorPosts)
-      .where(sql`${ciCompetitorPosts.competitorId} IN (${idList})`)
-      .orderBy(desc(ciCompetitorPosts.createdAt))
-      .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE);
+    [posts, rawComments, rawReviews] = await Promise.all([
+      db.select({ caption: ciCompetitorPosts.caption, platform: ciCompetitorPosts.platform })
+        .from(ciCompetitorPosts)
+        .where(sql`${ciCompetitorPosts.competitorId} IN (${idList})`)
+        .orderBy(desc(ciCompetitorPosts.createdAt))
+        .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE),
 
-    rawComments = await db.select({ commentText: ciCompetitorComments.commentText })
-      .from(ciCompetitorComments)
-      .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL)`)
-      .orderBy(desc(ciCompetitorComments.createdAt))
-      .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE);
+      db.select({ commentText: ciCompetitorComments.commentText })
+        .from(ciCompetitorComments)
+        .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL)`)
+        .orderBy(desc(ciCompetitorComments.createdAt))
+        .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE),
+
+      db.select({ reviewText: ciCompetitorReviews.reviewText })
+        .from(ciCompetitorReviews)
+        .where(sql`${ciCompetitorReviews.competitorId} IN (${idList}) AND ${ciCompetitorReviews.isSynthetic} = false`)
+        .orderBy(desc(ciCompetitorReviews.createdAt))
+        .limit(300),
+    ]);
   }
 
-  const rawCaptions = posts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
+  const instagramPosts = posts.filter(p => !p.platform || p.platform === "instagram");
+  const tiktokPosts = posts.filter(p => p.platform === "tiktok");
+
+  const rawCaptions = instagramPosts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
+  const rawTiktokTexts = tiktokPosts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
   const rawCommentTexts = rawComments.map(c => c.commentText).filter((c): c is string => !!c && c.length > 3);
+  const rawReviewTexts = rawReviews.map(r => r.reviewText).filter(t => t.length > 5);
 
   const captionSanitized = sanitizeTexts(rawCaptions);
   const commentSanitized = sanitizeTexts(rawCommentTexts);
@@ -1410,11 +1452,14 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const commentClassification = buildLabeledComments(commentTexts);
   const labeledComments = commentClassification.labeled;
   const labeledCaptions = buildLabeledCaptions(captions);
-  const labeledAllTexts: LabeledText[] = [...labeledComments, ...labeledCaptions];
+  const labeledReviews = buildLabeledReviews(rawReviewTexts);
+  const labeledTiktok = buildLabeledTiktok(rawTiktokTexts);
+  const labeledAllTexts: LabeledText[] = [...labeledComments, ...labeledCaptions, ...labeledReviews, ...labeledTiktok];
   const primaryDataStrength = computePrimaryDataStrength(labeledComments, labeledCaptions);
 
   console.log(
     `[AudienceEngine-V3] Data: ${competitorCount} competitors, ${captions.length} captions, ${commentTexts.length} comments` +
+    ` | reviews=${labeledReviews.length} tiktok=${labeledTiktok.length}` +
     ` (sanitized ${totalSanitized} synthetic | noise-filtered ${commentClassification.noiseCount}` +
     ` | HIGH=${commentClassification.highCount} MED=${commentClassification.mediumCount} LOW=${commentClassification.lowCount})` +
     ` | primaryStrength=${primaryDataStrength.toFixed(3)}`
@@ -1425,6 +1470,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     commentsAnalyzed: commentTexts.length,
     competitorsAnalyzed: competitorCount,
     sanitizedCount: totalSanitized,
+    reviewsAnalyzed: labeledReviews.length,
+    tiktokAnalyzed: labeledTiktok.length,
     commentQuality: {
       noise: commentClassification.noiseCount,
       low: commentClassification.lowCount,
@@ -1513,7 +1560,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const scopedDesireClusters = filterClustersByMarket(DESIRE_CLUSTERS, detectedMarkets);
   const scopedObjectionClusters = filterClustersByMarket(OBJECTION_CLUSTERS, detectedMarkets);
 
-  const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId, competitorCount);
+  const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId, competitorCount, rawReviewTexts, rawTiktokTexts);
   const rawPainMap = matchPatternClusters(labeledAllTexts, scopedPainClusters, miSnapshotId, competitorCount);
   const rawDesireMap = matchPatternClusters(labeledAllTexts, scopedDesireClusters, miSnapshotId, competitorCount);
   let rawObjectionMap = matchPatternClusters(labeledAllTexts, scopedObjectionClusters, miSnapshotId, competitorCount);

@@ -1658,6 +1658,8 @@ export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
   hasOffer: boolean("has_offer").default(false),
   shortcode: text("shortcode"),
   batchId: varchar("batch_id"),
+  platform: text("platform").notNull().default("instagram"),
+  hookText: text("hook_text"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   competitorPostUnique: uniqueIndex("idx_ci_posts_competitor_postid").on(table.competitorId, table.postId),
@@ -1685,6 +1687,25 @@ export const ciCompetitorComments = pgTable("ci_competitor_comments", {
 });
 
 export type CiCompetitorComment = typeof ciCompetitorComments.$inferSelect;
+
+export const ciCompetitorReviews = pgTable("ci_competitor_reviews", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  competitorId: varchar("competitor_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  reviewId: varchar("review_id", { length: 256 }),
+  reviewText: text("review_text").notNull(),
+  rating: integer("rating"),
+  platform: text("platform").notNull().default("google"),
+  reviewDate: timestamp("review_date"),
+  isSynthetic: boolean("is_synthetic").notNull().default(false),
+  scrapedAt: timestamp("scraped_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CiCompetitorReview = typeof ciCompetitorReviews.$inferSelect;
 
 export const ciCompetitorMetricsSnapshot = pgTable("ci_competitor_metrics_snapshot", {
   id: varchar("id")

@@ -1,0 +1,203 @@
+Hi Replit Team,
+
+Great work on the Audience Engine stabilization and the root cause fix — this was a critical milestone. With the system now stable under concurrent load, we’re ready to move into the next phase.
+
+However, before starting any new work, we need to follow a **strict execution order** to avoid introducing instability.
+
+---
+
+# 🔴 1. CRITICAL — Must Be Done First (Before Any New Work)
+
+## Fix Confidence Calculation Denominator
+
+Currently:
+
+* `computeCalibratedConfidence()` is calibrated for **3 source types**
+
+With the upcoming additions (comments, captions, website, TikTok, reviews), this will break confidence scoring.
+
+### Required:
+
+* Replace hardcoded `/3` with:
+
+  * either `/5`, or
+  * a constant (preferred): `MAX_EXPECTED_SOURCE_TYPES = 5`
+
+### Why this is critical:
+
+If not fixed:
+
+* confidence will be inflated
+* signals will appear stronger than they are
+* decision quality will degrade silently
+
+👉 This must be implemented and verified **before proceeding to any ingestion or schema changes**
+
+---
+
+# 🟢 2. Phase 1 — Source Weighting Foundation
+
+We want to introduce **source-aware weighting** aligned with signal quality.
+
+### Add:
+
+`SOURCE_QUALITY_WEIGHTS` (in constants.ts)
+
+Example direction:
+
+* reviews → highest (direct pain / truth)
+* comments (high quality) → strong
+* captions → baseline
+* TikTok → slightly lower (pattern signal, not direct pain)
+
+### Questions:
+
+* Where is the cleanest insertion point in the current pipeline?
+* Should weighting be applied during:
+
+  * LabeledText construction?
+  * or inside matchPatternClusters?
+
+---
+
+# 🟢 3. Phase 2 — Schema Changes
+
+We want to extend sources **without breaking the current structure**.
+
+### Reviews:
+
+Create new table:
+
+* `ciCompetitorReviews`
+
+Fields:
+
+* reviewText
+* rating (1–5)
+* platform (google, etc.)
+* reviewDate
+* isSynthetic
+* competitorId / accountId / campaignId / scrapedAt
+
+### TikTok:
+
+Do NOT create a new table.
+
+Instead:
+
+* extend `ciCompetitorPosts`
+* add:
+
+  * `platform` (default = "instagram")
+  * optional: `hookText`
+
+👉 This allows reuse of the entire posts pipeline.
+
+---
+
+# 🟢 4. Phase 3 — Audience Engine Integration
+
+We will extend the current pipeline — not rebuild it.
+
+### Add builders:
+
+* `buildLabeledReviews()`
+* `buildLabeledTiktok()`
+
+### Important rules:
+
+#### Reviews:
+
+* pass through `classifyCommentQuality()`
+* apply higher source weight
+
+#### TikTok:
+
+* DO NOT pass through comment quality classifier
+* treat short hook text as valid signal
+* apply flat weight
+
+---
+
+### Integration:
+
+* Add both sources into `labeledAllTexts`
+* Extend `sourceTypes` arrays to include:
+
+  * `"reviews"`
+  * `"tiktok"`
+
+---
+
+# 🟢 5. Phase 4 — Ingestion
+
+### Reviews:
+
+* Use Google Maps API (not scraping)
+* Integrate into `data-acquisition.ts`
+* No proxy pool required
+
+### TikTok:
+
+* Start with:
+
+  * captions
+  * hook text
+* Avoid comment scraping in v1
+* Integrate via new scraper module
+
+---
+
+# 🟢 6. Phase 5 — Validation (Mandatory)
+
+After implementation:
+
+### Verify:
+
+* consistency across multiple runs
+* correct weighting behavior
+* no crashes when sources are missing
+* no impact on existing Instagram pipeline
+* stability under concurrent calls
+
+---
+
+# ⚠️ Important Rules
+
+* Do NOT rebuild the pipeline
+* Do NOT introduce parallel logic
+* Everything must extend:
+
+  * `LabeledText`
+  * `matchPatternClusters()`
+  * `computeCalibratedConfidence()`
+
+---
+
+# 🎯 Goal
+
+We are not adding features.
+
+We are building:
+
+> **a stable multi-source intelligence system that remains consistent under real-world conditions**
+
+---
+
+# 📌 What We Need From You
+
+Please:
+
+1. Confirm Phase 1 (denominator fix) is implemented first
+2. Confirm schema approach (reviews table + platform column)
+3. Confirm integration points inside the engine
+4. Highlight any risks before implementation
+5. Then proceed step-by-step (not all at once)
+
+---
+
+This order is critical to avoid breaking the system we just stabilized.
+
+Thanks,
+Samir
+Avyron AI
