@@ -529,9 +529,10 @@ export function registerOrchestratorV2Routes(app: Express) {
         remaining: fulfillment.total.remaining,
         progressPercent: fulfillment.progressPercent,
         branches: {
-          STORIES: fulfillment.byBranch.STORIES,
-          POSTS: fulfillment.byBranch.POSTS,
           REELS: fulfillment.byBranch.REELS,
+          POSTS: fulfillment.byBranch.POSTS,
+          STORIES: fulfillment.byBranch.STORIES,
+          CAROUSELS: fulfillment.byBranch.CAROUSELS,
         },
         byStatus: fulfillment.byStatus,
         todayWork: pendingToday.map(e => ({
@@ -553,7 +554,7 @@ export function registerOrchestratorV2Routes(app: Express) {
           reels: { required: fulfillment.byBranch.REELS.required, fulfilled: fulfillment.byBranch.REELS.fulfilled, remaining: fulfillment.byBranch.REELS.remaining, perWeek: work.reelsPerWeek },
           posts: { required: fulfillment.byBranch.POSTS.required, fulfilled: fulfillment.byBranch.POSTS.fulfilled, remaining: fulfillment.byBranch.POSTS.remaining, perWeek: work.postsPerWeek },
           stories: { required: fulfillment.byBranch.STORIES.required, fulfilled: fulfillment.byBranch.STORIES.fulfilled, remaining: fulfillment.byBranch.STORIES.remaining, perDay: work.storiesPerDay },
-          carousels: { required: work.totalCarousels, perWeek: work.carouselsPerWeek },
+          carousels: { required: fulfillment.byBranch.CAROUSELS.required, fulfilled: fulfillment.byBranch.CAROUSELS.fulfilled, remaining: fulfillment.byBranch.CAROUSELS.remaining, perWeek: work.carouselsPerWeek },
           videos: { required: work.totalVideos, perWeek: work.videosPerWeek },
         },
       });

@@ -22,6 +22,7 @@ const BRANCH_CONFIG = {
   REELS: { icon: 'videocam' as const, color: P.coral, label: 'Reels' },
   POSTS: { icon: 'image' as const, color: P.blue, label: 'Posts' },
   STORIES: { icon: 'flash' as const, color: P.gold, label: 'Stories' },
+  CAROUSELS: { icon: 'albums' as const, color: P.orange, label: 'Carousels' },
 };
 
 export function RequiredWorkCard({ campaignId, isDark }: RequiredWorkCardProps) {
@@ -103,7 +104,7 @@ export function RequiredWorkCard({ campaignId, isDark }: RequiredWorkCardProps) 
       )}
 
       <View style={s.breakdownGrid}>
-        {(['REELS', 'POSTS', 'STORIES'] as const).map((key) => {
+        {(['REELS', 'POSTS', 'STORIES', 'CAROUSELS'] as const).map((key) => {
           const config = BRANCH_CONFIG[key];
           const branch = branches[key];
           if (!branch) return null;
