@@ -101,7 +101,7 @@ export function registerCiCompetitorRoutes(app: Express) {
       const { name, platform, profileLink, businessType, primaryObjective,
         postingFrequency, contentTypeRatio, engagementRatio, ctaPatterns,
         discountFrequency, hookStyles, messagingTone, socialProofPresence,
-        screenshotUrls, notes, websiteUrl, blogUrl } = req.body;
+        screenshotUrls, notes, websiteUrl, blogUrl, tiktokUrl, googleMapsUrl } = req.body;
 
       if (!name || !profileLink || !businessType || !primaryObjective) {
         return res.status(400).json({ error: "name, profileLink, businessType, primaryObjective are required" });
@@ -127,6 +127,8 @@ export function registerCiCompetitorRoutes(app: Express) {
         notes: notes || null,
         websiteUrl: websiteUrl || null,
         blogUrl: blogUrl || null,
+        tiktokUrl: tiktokUrl || null,
+        googleMapsUrl: googleMapsUrl || null,
         isDemo: false,
         enrichmentStatus: "PENDING",
         fetchMethod: null,
@@ -155,7 +157,7 @@ export function registerCiCompetitorRoutes(app: Express) {
       const fields = ["name", "platform", "profileLink", "businessType", "primaryObjective",
         "postingFrequency", "contentTypeRatio", "engagementRatio", "ctaPatterns",
         "discountFrequency", "hookStyles", "messagingTone", "socialProofPresence",
-        "screenshotUrls", "notes", "websiteUrl", "blogUrl"];
+        "screenshotUrls", "notes", "websiteUrl", "blogUrl", "tiktokUrl", "googleMapsUrl"];
 
       for (const f of fields) {
         if (req.body[f] !== undefined) {

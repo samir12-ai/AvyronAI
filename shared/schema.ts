@@ -870,6 +870,8 @@ export const ciCompetitors = pgTable("ci_competitors", {
   syntheticChurnFlag: text("synthetic_churn_flag"),
   lastPostWatermark: timestamp("last_post_watermark"),
   sharedProfileId: varchar("shared_profile_id"),
+  tiktokUrl: text("tiktok_url"),
+  googleMapsUrl: text("google_maps_url"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

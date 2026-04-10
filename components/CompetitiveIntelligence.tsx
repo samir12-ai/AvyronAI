@@ -53,6 +53,8 @@ interface Competitor {
   primaryObjective: string;
   websiteUrl: string | null;
   blogUrl: string | null;
+  tiktokUrl: string | null;
+  googleMapsUrl: string | null;
   websiteEnrichmentStatus: string | null;
   postingFrequency: number | null;
   contentTypeRatio: string | null;
@@ -98,7 +100,7 @@ export default function CompetitiveIntelligence() {
     platform: 'instagram', postingFrequency: '', contentTypeRatio: '',
     engagementRatio: '', ctaPatterns: '', discountFrequency: '',
     hookStyles: '', messagingTone: '', socialProofPresence: '',
-    websiteUrl: '', blogUrl: '',
+    websiteUrl: '', blogUrl: '', tiktokUrl: '', googleMapsUrl: '',
   };
 
   const [newComp, setNewComp] = useState(emptyComp);
@@ -216,6 +218,8 @@ export default function CompetitiveIntelligence() {
       socialProofPresence: comp.socialProofPresence || '',
       websiteUrl: comp.websiteUrl || '',
       blogUrl: comp.blogUrl || '',
+      tiktokUrl: comp.tiktokUrl || '',
+      googleMapsUrl: comp.googleMapsUrl || '',
     });
     setShowAddCompetitor(true);
   }, []);
@@ -580,6 +584,14 @@ export default function CompetitiveIntelligence() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                       <Ionicons name="document-text-outline" size={12} color={comp.blogUrl ? '#10B981' : colors.textMuted} />
                       <Text style={{ fontSize: 11, color: comp.blogUrl ? '#10B981' : colors.textMuted }}>Blog</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="logo-tiktok" size={12} color={comp.tiktokUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.tiktokUrl ? '#10B981' : colors.textMuted }}>TikTok</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="map-outline" size={12} color={comp.googleMapsUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.googleMapsUrl ? '#10B981' : colors.textMuted }}>GMaps</Text>
                     </View>
                     {comp.websiteEnrichmentStatus === 'COMPLETE' && (
                       <View style={{ backgroundColor: '#10B98120', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
@@ -1779,6 +1791,28 @@ export default function CompetitiveIntelligence() {
                 value={newComp.blogUrl}
                 onChangeText={v => setNewComp(p => ({ ...p, blogUrl: v }))}
                 placeholder="https://competitor.com/blog"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>TikTok URL</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.tiktokUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, tiktokUrl: v }))}
+                placeholder="https://tiktok.com/@competitor"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Google Maps URL</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.googleMapsUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, googleMapsUrl: v }))}
+                placeholder="https://maps.google.com/?cid=..."
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
                 keyboardType="url"
