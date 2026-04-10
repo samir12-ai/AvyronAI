@@ -42,9 +42,19 @@ export function registerCiCompetitorRoutes(app: Express) {
         .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)))
         .orderBy(sql`${ciCompetitors.createdAt} DESC`);
 
+      const ids = competitors.map(c => c.id);
+      const extraUrlsMap: Record<string, { tiktokUrl: string | null; googleMapsUrl: string | null }> = {};
+      if (ids.length > 0) {
+        const extraRes = await db.execute(sql`SELECT id, tiktok_url, google_maps_url FROM ci_competitors WHERE id = ANY(${ids})`);
+        for (const row of extraRes.rows as any[]) {
+          extraUrlsMap[row.id] = { tiktokUrl: row.tiktok_url ?? null, googleMapsUrl: row.google_maps_url ?? null };
+        }
+      }
+
       const enriched = await Promise.all(competitors.map(async c => {
         const validation = validateEvidence(c);
         const coverage = await getCompetitorDataCoverage(c.id, accountId);
+        const extra = extraUrlsMap[c.id] ?? { tiktokUrl: null, googleMapsUrl: null };
         return {
           id: c.id,
           accountId: c.accountId,
@@ -66,6 +76,8 @@ export function registerCiCompetitorRoutes(app: Express) {
           notes: c.notes,
           websiteUrl: c.websiteUrl,
           blogUrl: c.blogUrl,
+          tiktokUrl: extra.tiktokUrl,
+          googleMapsUrl: extra.googleMapsUrl,
           isActive: c.isActive,
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
@@ -137,8 +149,12 @@ export function registerCiCompetitorRoutes(app: Express) {
         dataFreshnessDays: null,
       }).returning();
 
+      if (tiktokUrl || googleMapsUrl) {
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${tiktokUrl || null}, google_maps_url = ${googleMapsUrl || null} WHERE id = ${competitor.id}`);
+      }
+
       const validation = validateEvidence(competitor);
-      res.json({ competitor: { ...competitor, evidenceComplete: validation.complete, missingFields: validation.missing } });
+      res.json({ competitor: { ...competitor, tiktokUrl: tiktokUrl || null, googleMapsUrl: googleMapsUrl || null, evidenceComplete: validation.complete, missingFields: validation.missing } });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -179,8 +195,20 @@ export function registerCiCompetitorRoutes(app: Express) {
 
       if (!updated) return res.status(404).json({ error: "Competitor not found" });
 
+      const hasTiktok = req.body.tiktokUrl !== undefined;
+      const hasGmaps = req.body.googleMapsUrl !== undefined;
+      if (hasTiktok && hasGmaps) {
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${req.body.tiktokUrl || null}, google_maps_url = ${req.body.googleMapsUrl || null} WHERE id = ${id}`);
+      } else if (hasTiktok) {
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${req.body.tiktokUrl || null} WHERE id = ${id}`);
+      } else if (hasGmaps) {
+        await db.execute(sql`UPDATE ci_competitors SET google_maps_url = ${req.body.googleMapsUrl || null} WHERE id = ${id}`);
+      }
+      const extraRes = await db.execute(sql`SELECT tiktok_url, google_maps_url FROM ci_competitors WHERE id = ${id}`);
+      const extra = (extraRes.rows as any[])[0] ?? {};
+
       const validation = validateEvidence(updated);
-      res.json({ competitor: { ...updated, evidenceComplete: validation.complete, missingFields: validation.missing } });
+      res.json({ competitor: { ...updated, tiktokUrl: extra.tiktok_url ?? null, googleMapsUrl: extra.google_maps_url ?? null, evidenceComplete: validation.complete, missingFields: validation.missing } });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
