@@ -1,0 +1,59 @@
+Hi Replit Team,
+
+I want to clarify one architectural point before we build anything new.
+
+In our recent discussion, a question came up around whether the system already has a real **Decision Layer** on top of the collected signals, or whether we currently have mainly:
+
+* data collection
+* signal extraction
+* partial weighting
+* and downstream usage
+
+What I mean by **Decision Layer** is not just storing or analyzing signals, but a clear logic layer that does something like this:
+
+1. receives signals from multiple sources
+   (Instagram, website, comments, TikTok, reviews, etc.)
+
+2. evaluates their roles differently
+   for example:
+
+   * reviews = pain truth
+   * TikTok = validation / attention
+   * Instagram = positioning
+   * website = intent
+   * comments = feedback / objections
+
+3. checks agreement / conflict between sources
+
+4. applies weighting and confidence rules
+
+5. outputs a structured decision such as:
+
+   * high-confidence pain signal
+   * validated hook
+   * weak/noisy market claim
+   * objection confirmed across sources
+   * market shift signal worth acting on
+
+In other words, I’m asking whether the current codebase already contains a layer that turns multi-source inputs into a **final structured intelligence decision**, rather than just processing each source separately and passing signals downstream.
+
+### Could you please clarify based on the actual code:
+
+1. Do we already have a true decision layer in this sense?
+2. If yes:
+
+   * which files/functions implement it?
+   * what are the exact inputs and outputs?
+3. If partially:
+
+   * what parts of this logic already exist?
+   * what is still missing?
+4. Is the current system able to produce a final confidence-based decision across multiple source types, or does it still mainly rely on per-source processing plus downstream interpretation?
+
+The goal here is to avoid rebuilding something that may already exist in code under a different name or spread across multiple modules.
+
+Please answer based on the actual implementation and point to the relevant files/functions if possible.
+
+Thanks,
+Samir
+Avyron AI
