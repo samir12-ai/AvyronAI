@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot } from "@shared/schema";
+import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews } from "@shared/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { scrapeInstagramProfile, scrapeCommentsForPosts, extractHandleFromUrl, type ScrapedPost, type ScrapedComment } from "./profile-scraper";
 import { lookupSharedProfile, upsertSharedProfile, linkCompetitorToSharedProfile, reuseFromSharedPool } from "./shared-profile-store";
@@ -1397,6 +1397,50 @@ export async function getStoredCommentsForMIv3(competitorId: string, accountId: 
     timestamp: c.timestamp?.toISOString() || new Date().toISOString(),
     isSynthetic: c.isSynthetic ?? false,
     source: c.source ?? "scraped",
+  }));
+}
+
+export async function getStoredTikTokPostsForMIv3(competitorId: string, accountId: string = "default") {
+  const posts = await db.select().from(ciCompetitorPosts)
+    .where(and(
+      eq(ciCompetitorPosts.competitorId, competitorId),
+      eq(ciCompetitorPosts.accountId, accountId),
+      eq(ciCompetitorPosts.platform, "tiktok"),
+    ))
+    .orderBy(desc(ciCompetitorPosts.createdAt))
+    .limit(50);
+
+  return posts.map(p => ({
+    id: p.id,
+    postId: p.postId,
+    caption: p.caption || "",
+    hookText: p.hookText || null,
+    likes: p.likes || 0,
+    comments: p.comments || 0,
+    views: p.views || 0,
+    shares: 0,
+    hashtags: p.hashtags || "",
+    timestamp: p.timestamp?.toISOString() || new Date().toISOString(),
+  }));
+}
+
+export async function getStoredReviewsForMIv3(competitorId: string, accountId: string = "default") {
+  const reviews = await db.select().from(ciCompetitorReviews)
+    .where(and(
+      eq(ciCompetitorReviews.competitorId, competitorId),
+      eq(ciCompetitorReviews.accountId, accountId),
+    ))
+    .orderBy(desc(ciCompetitorReviews.createdAt))
+    .limit(100);
+
+  return reviews.map(r => ({
+    id: r.id,
+    reviewId: r.reviewId || r.id,
+    text: r.reviewText || "",
+    rating: r.rating ?? 0,
+    platform: r.platform || "google",
+    reviewDate: r.reviewDate?.toISOString() || null,
+    isSynthetic: r.isSynthetic ?? false,
   }));
 }
 

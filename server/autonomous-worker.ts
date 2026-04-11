@@ -1291,6 +1291,70 @@ async function runSharedPoolRefresh() {
     }
 
     console.log(`[CI Worker] Shared pool refresh complete — ${scraped} handle(s) re-scraped this cycle`);
+
+    try {
+      const { scrapeTiktokForCompetitor } = await import("./competitive-intelligence/tiktok-scraper");
+      const { db: workerDb } = await import("./db");
+      const { ciCompetitors: ciComp } = await import("@shared/schema");
+      const { eq: eqOp, and: andOp, sql: sqlOp } = await import("drizzle-orm");
+
+      const tiktokCompetitors = await workerDb.execute(
+        sqlOp`SELECT id, account_id, name FROM ci_competitors WHERE tiktok_url IS NOT NULL AND tiktok_url != '' AND is_active = true LIMIT 20`
+      );
+
+      let tiktokScraped = 0;
+      for (const comp of (tiktokCompetitors as any).rows || tiktokCompetitors || []) {
+        if (tiktokScraped >= 5) break;
+        try {
+          const result = await scrapeTiktokForCompetitor(comp.id, comp.account_id);
+          console.log(`[CI Worker] TikTok scrape: competitor=${comp.name} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | source=${result.source}`);
+          tiktokScraped++;
+        } catch (tktErr: any) {
+          console.error(`[CI Worker] TikTok scrape error for ${comp.name}: ${tktErr.message}`);
+        }
+        await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      }
+
+      if (tiktokScraped > 0) {
+        console.log(`[CI Worker] TikTok auto-scrape complete: ${tiktokScraped} competitor(s) processed`);
+      }
+    } catch (tiktokErr: any) {
+      console.error(`[CI Worker] TikTok auto-scraping module error (non-blocking): ${tiktokErr.message}`);
+    }
+
+    try {
+      const { db: workerDb } = await import("./db");
+      const { sql: sqlOp } = await import("drizzle-orm");
+
+      const reviewCompetitors = await workerDb.execute(
+        sqlOp`SELECT id, account_id, campaign_id, name FROM ci_competitors WHERE google_maps_url IS NOT NULL AND google_maps_url != '' AND is_active = true LIMIT 20`
+      );
+
+      let reviewsScraped = 0;
+      for (const comp of (reviewCompetitors as any).rows || reviewCompetitors || []) {
+        if (reviewsScraped >= 5) break;
+        try {
+          const reviewsRoute = await import("./competitive-intelligence/reviews-tiktok-routes");
+          if (typeof (reviewsRoute as any).scrapeReviewsForCompetitor === "function") {
+            const result = await (reviewsRoute as any).scrapeReviewsForCompetitor(comp.id, comp.account_id, comp.campaign_id);
+            console.log(`[CI Worker] Reviews scrape: competitor=${comp.name} | result=${JSON.stringify(result).slice(0, 200)}`);
+            reviewsScraped++;
+          } else {
+            console.log(`[CI Worker] Reviews scrape: scrapeReviewsForCompetitor not exported — skipping`);
+            break;
+          }
+        } catch (revErr: any) {
+          console.error(`[CI Worker] Reviews scrape error for ${comp.name}: ${revErr.message}`);
+        }
+        await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      }
+
+      if (reviewsScraped > 0) {
+        console.log(`[CI Worker] Reviews auto-scrape complete: ${reviewsScraped} competitor(s) processed`);
+      }
+    } catch (reviewErr: any) {
+      console.error(`[CI Worker] Reviews auto-scraping module error (non-blocking): ${reviewErr.message}`);
+    }
   } catch (error) {
     console.error("[CI Worker] Shared pool refresh error:", error);
   } finally {

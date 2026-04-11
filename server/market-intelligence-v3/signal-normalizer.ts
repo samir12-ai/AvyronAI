@@ -6,19 +6,23 @@ import type {
   InstagramSignals,
   WebsiteSignals,
   BlogSignals,
+  TikTokSignals,
+  ReviewsSignals,
   WebsiteExtraction,
   BlogExtraction,
   SourceAvailability,
 } from "./source-types";
 import type { CompetitorContentDNA } from "./types";
+import type { TikTokQualificationResult } from "./tiktok-qualification";
+import type { ReviewsIntelligenceResult } from "./reviews-intelligence";
 
 const SIGNAL_WEIGHTS: Record<SignalClass, Record<SourceType, number>> = {
-  positioning: { website: 0.6, instagram: 0.25, blog: 0.15 },
-  offer: { website: 0.65, instagram: 0.2, blog: 0.15 },
-  content: { instagram: 0.6, website: 0.2, blog: 0.2 },
-  educational: { blog: 0.6, website: 0.25, instagram: 0.15 },
-  proof: { website: 0.5, instagram: 0.3, blog: 0.2 },
-  cta: { website: 0.5, instagram: 0.35, blog: 0.15 },
+  positioning: { website: 0.5, instagram: 0.2, blog: 0.1, tiktok: 0.1, reviews: 0.1 },
+  offer: { website: 0.5, instagram: 0.15, blog: 0.1, tiktok: 0.1, reviews: 0.15 },
+  content: { instagram: 0.4, website: 0.15, blog: 0.15, tiktok: 0.25, reviews: 0.05 },
+  educational: { blog: 0.45, website: 0.2, instagram: 0.1, tiktok: 0.15, reviews: 0.1 },
+  proof: { website: 0.35, instagram: 0.2, blog: 0.15, tiktok: 0.1, reviews: 0.2 },
+  cta: { website: 0.35, instagram: 0.25, blog: 0.1, tiktok: 0.2, reviews: 0.1 },
 };
 
 export function classifyWebsiteSignals(extraction: WebsiteExtraction): ClassifiedSignal[] {
@@ -229,12 +233,158 @@ export function buildBlogSignals(extraction: BlogExtraction | null): BlogSignals
   };
 }
 
+export function buildTikTokSignals(
+  qualificationResult: TikTokQualificationResult | null,
+  posts: Array<{ caption?: string; hookText?: string | null; hashtags?: string | null }>,
+): TikTokSignals {
+  if (!qualificationResult || qualificationResult.qualifications.length === 0) {
+    return {
+      validatedHooks: [],
+      highPerformingCaptions: [],
+      trendingHashtags: [],
+      contentPatterns: [],
+      painInferences: [],
+      ctaPatterns: [],
+      performanceTierDistribution: { high: 0, mid: 0, low: 0 },
+    };
+  }
+
+  const validatedHooks: string[] = [];
+  const highPerformingCaptions: string[] = [];
+  const trendingHashtags: string[] = [];
+  const painInferences: string[] = [];
+  const ctaPatterns: string[] = [];
+  const contentPatterns: string[] = [];
+
+  const qualMap = new Map(qualificationResult.qualifications.map(q => [q.postId, q]));
+
+  for (const post of posts) {
+    const caption = (post.caption || "").trim();
+    const hook = (post.hookText || caption.split("\n")[0] || "").trim();
+    const hashtags = (post.hashtags || "").split(" ").filter(Boolean);
+
+    const qual = qualMap.get((post as any).postId || (post as any).id || "");
+    if (!qual || qual.tier === "LOW_PERFORMING") continue;
+
+    if (hook.length > 5 && hook.length < 200) {
+      validatedHooks.push(hook);
+      if (/pain|struggle|frustrated|tired|sick of|can'?t|won'?t/i.test(hook)) painInferences.push(hook);
+    }
+
+    if (qual.tier === "HIGH_PERFORMING" && caption.length > 10) {
+      highPerformingCaptions.push(caption.slice(0, 300));
+    }
+
+    if (/link in bio|DM me|comment|book a call|tap the link|click below|swipe up/i.test(caption)) {
+      const ctaMatch = caption.match(/(link in bio|DM me[^.]*|comment [^.]*|book a call[^.]*|tap the link[^.]*|click below[^.]*|swipe up[^.]*)/i);
+      if (ctaMatch) ctaPatterns.push(ctaMatch[1].trim());
+    }
+
+    trendingHashtags.push(...hashtags);
+
+    if (/how to|tutorial|step by step|guide|hack|tip/i.test(caption)) contentPatterns.push("educational");
+    if (/before.{0,10}after|transformation|result/i.test(caption)) contentPatterns.push("proof");
+    if (/story|journey|experience|behind the scenes/i.test(caption)) contentPatterns.push("storytelling");
+  }
+
+  const hashtagCounts = new Map<string, number>();
+  for (const h of trendingHashtags) {
+    hashtagCounts.set(h, (hashtagCounts.get(h) || 0) + 1);
+  }
+  const sortedHashtags = [...hashtagCounts.entries()].sort((a, b) => b[1] - a[1]).map(([h]) => h);
+
+  return {
+    validatedHooks: [...new Set(validatedHooks)].slice(0, 15),
+    highPerformingCaptions: [...new Set(highPerformingCaptions)].slice(0, 10),
+    trendingHashtags: sortedHashtags.slice(0, 15),
+    contentPatterns: [...new Set(contentPatterns)].slice(0, 10),
+    painInferences: [...new Set(painInferences)].slice(0, 10),
+    ctaPatterns: [...new Set(ctaPatterns)].slice(0, 10),
+    performanceTierDistribution: {
+      high: qualificationResult.highPerformingCount,
+      mid: qualificationResult.midPerformingCount,
+      low: qualificationResult.lowPerformingCount,
+    },
+  };
+}
+
+export function buildReviewsSignals(reviewsIntel: ReviewsIntelligenceResult | null): ReviewsSignals {
+  if (!reviewsIntel || reviewsIntel.totalReviewsProcessed === 0) {
+    return {
+      painPoints: [],
+      objections: [],
+      trustBarriers: [],
+      positiveDifferentiators: [],
+      serviceGaps: [],
+      avgRating: 0,
+      reviewVolume: 0,
+    };
+  }
+
+  const painPoints = reviewsIntel.painSignals.map(p => p.painText);
+  const objections = reviewsIntel.objections
+    .filter(o => o.signalType === "objection")
+    .map(o => o.objection);
+  const trustBarriers = reviewsIntel.objections
+    .filter(o => o.signalType === "trust_barrier")
+    .map(o => o.objection);
+
+  return {
+    painPoints: painPoints.slice(0, 15),
+    objections: objections.slice(0, 15),
+    trustBarriers: trustBarriers.slice(0, 10),
+    positiveDifferentiators: [],
+    serviceGaps: [],
+    avgRating: reviewsIntel.avgRating,
+    reviewVolume: reviewsIntel.totalReviewsProcessed,
+  };
+}
+
+export function classifyTikTokSignals(tikTokSignals: TikTokSignals): ClassifiedSignal[] {
+  const signals: ClassifiedSignal[] = [];
+  const src: SourceType = "tiktok";
+
+  for (const hook of tikTokSignals.validatedHooks) {
+    signals.push({ signalClass: "content", sourceType: src, text: hook, confidence: 0.8 });
+  }
+  for (const pain of tikTokSignals.painInferences) {
+    signals.push({ signalClass: "positioning", sourceType: src, text: pain, confidence: 0.7 });
+  }
+  for (const cta of tikTokSignals.ctaPatterns) {
+    signals.push({ signalClass: "cta", sourceType: src, text: cta, confidence: 0.75 });
+  }
+  for (const cap of tikTokSignals.highPerformingCaptions.slice(0, 5)) {
+    signals.push({ signalClass: "content", sourceType: src, text: cap, confidence: 0.85 });
+  }
+
+  return signals;
+}
+
+export function classifyReviewsSignals(reviewsSignals: ReviewsSignals): ClassifiedSignal[] {
+  const signals: ClassifiedSignal[] = [];
+  const src: SourceType = "reviews";
+
+  for (const pain of reviewsSignals.painPoints) {
+    signals.push({ signalClass: "positioning", sourceType: src, text: pain, confidence: 0.8 });
+  }
+  for (const obj of reviewsSignals.objections) {
+    signals.push({ signalClass: "offer", sourceType: src, text: obj, confidence: 0.75 });
+  }
+  for (const tb of reviewsSignals.trustBarriers) {
+    signals.push({ signalClass: "proof", sourceType: src, text: tb, confidence: 0.8 });
+  }
+
+  return signals;
+}
+
 export function reconcileMultiSourceSignals(
   instagramSignals: InstagramSignals | null,
   websiteSignals: WebsiteSignals | null,
   blogSignals: BlogSignals | null,
   classifiedSignals: ClassifiedSignal[],
   sourceAvailability: SourceAvailability,
+  tiktokSignals?: TikTokSignals | null,
+  reviewsSignals?: ReviewsSignals | null,
 ): MultiSourceSignals {
   const reconciliationNotes: string[] = [];
 
@@ -250,6 +400,14 @@ export function reconcileMultiSourceSignals(
     reconciliationNotes.push("Blog source not available — educational themes will be inferred from other sources");
   }
 
+  if (!sourceAvailability.tiktok) {
+    reconciliationNotes.push("TikTok source not available — content validation signals reduced, relying on Instagram for content behavior");
+  }
+
+  if (!sourceAvailability.reviews) {
+    reconciliationNotes.push("Google Reviews source not available — pain/trust signals limited to comment-derived objections");
+  }
+
   const positioningCount = classifiedSignals.filter(s => s.signalClass === "positioning").length;
   const offerCount = classifiedSignals.filter(s => s.signalClass === "offer").length;
   const contentCount = classifiedSignals.filter(s => s.signalClass === "content").length;
@@ -261,8 +419,10 @@ export function reconcileMultiSourceSignals(
   if (totalSignals > 5) signalConfidence = 0.5;
   if (totalSignals > 15) signalConfidence = 0.65;
   if (totalSignals > 30) signalConfidence = 0.75;
-  if (sourceAvailability.availableSources.length >= 2) signalConfidence += 0.1;
-  if (sourceAvailability.availableSources.length >= 3) signalConfidence += 0.1;
+  if (sourceAvailability.availableSources.length >= 2) signalConfidence += 0.05;
+  if (sourceAvailability.availableSources.length >= 3) signalConfidence += 0.05;
+  if (sourceAvailability.availableSources.length >= 4) signalConfidence += 0.05;
+  if (sourceAvailability.availableSources.length >= 5) signalConfidence += 0.05;
 
   if (positioningCount < 3) reconciliationNotes.push("Low positioning signal density — may default to generic positioning");
   if (offerCount < 2) reconciliationNotes.push("Low offer signal density — offer structure may be inferred from profile card");
@@ -274,6 +434,8 @@ export function reconcileMultiSourceSignals(
     instagram: instagramSignals,
     website: websiteSignals,
     blog: blogSignals,
+    tiktok: tiktokSignals || null,
+    reviews: reviewsSignals || null,
     sourceAvailability,
     classifiedSignals,
     reconciliationNotes,

@@ -1,4 +1,4 @@
-export type SourceType = "instagram" | "website" | "blog";
+export type SourceType = "instagram" | "website" | "blog" | "tiktok" | "reviews";
 
 export type SignalClass =
   | "positioning"
@@ -12,6 +12,8 @@ export interface SourceAvailability {
   instagram: boolean;
   website: boolean;
   blog: boolean;
+  tiktok: boolean;
+  reviews: boolean;
   availableSources: SourceType[];
   missingSourcesCount: number;
   primarySource: SourceType;
@@ -95,10 +97,36 @@ export interface BlogSignals {
   educationPatterns: string[];
 }
 
+export interface TikTokSignals {
+  validatedHooks: string[];
+  highPerformingCaptions: string[];
+  trendingHashtags: string[];
+  contentPatterns: string[];
+  painInferences: string[];
+  ctaPatterns: string[];
+  performanceTierDistribution: {
+    high: number;
+    mid: number;
+    low: number;
+  };
+}
+
+export interface ReviewsSignals {
+  painPoints: string[];
+  objections: string[];
+  trustBarriers: string[];
+  positiveDifferentiators: string[];
+  serviceGaps: string[];
+  avgRating: number;
+  reviewVolume: number;
+}
+
 export interface MultiSourceSignals {
   instagram: InstagramSignals | null;
   website: WebsiteSignals | null;
   blog: BlogSignals | null;
+  tiktok: TikTokSignals | null;
+  reviews: ReviewsSignals | null;
   sourceAvailability: SourceAvailability;
   classifiedSignals: ClassifiedSignal[];
   reconciliationNotes: string[];
@@ -120,24 +148,32 @@ export function computeSourceAvailability(competitor: {
   postsCollected?: number | null;
   websiteEnrichmentStatus?: string | null;
   blogEnrichmentStatus?: string | null;
+  tiktokPostCount?: number;
+  reviewCount?: number;
 }): SourceAvailability {
   const instagram = !!(competitor.profileLink && (competitor.postsCollected ?? 0) > 0);
   const website = !!(competitor.websiteUrl && competitor.websiteEnrichmentStatus !== "NONE" && competitor.websiteEnrichmentStatus !== "FAILED");
   const blog = !!(competitor.blogUrl && competitor.blogEnrichmentStatus !== "NONE" && competitor.blogEnrichmentStatus !== "FAILED");
+  const tiktok = (competitor.tiktokPostCount ?? 0) > 0;
+  const reviews = (competitor.reviewCount ?? 0) > 0;
 
   const availableSources: SourceType[] = [];
   if (instagram) availableSources.push("instagram");
   if (website) availableSources.push("website");
   if (blog) availableSources.push("blog");
+  if (tiktok) availableSources.push("tiktok");
+  if (reviews) availableSources.push("reviews");
 
-  const primarySource: SourceType = website ? "website" : instagram ? "instagram" : "blog";
+  const primarySource: SourceType = website ? "website" : instagram ? "instagram" : tiktok ? "tiktok" : "blog";
 
   return {
     instagram,
     website,
     blog,
+    tiktok,
+    reviews,
     availableSources,
-    missingSourcesCount: 3 - availableSources.length,
+    missingSourcesCount: 5 - availableSources.length,
     primarySource,
   };
 }

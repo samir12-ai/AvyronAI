@@ -266,6 +266,9 @@ export interface MIv3DiagnosticResult {
   signalDiagnostics: import("../../server/engine-hardening/types").SignalDiagnostics | null;
   narrativeOverlap: import("../../server/engine-hardening/types").NarrativeOverlapResult | null;
   narrativeObjectionMap: import("./narrative-objection-extractor").NarrativeObjectionMap | null;
+  crossSignalDecisions: import("./cross-signal-decision").CrossSignalDecisionResult | null;
+  tiktokQualification: import("./tiktok-qualification").TikTokQualificationResult | null;
+  reviewsIntelligence: import("./reviews-intelligence").ReviewsIntelligenceResult | null;
   cached: boolean;
   cacheInvalidationReason: CacheInvalidationReason;
   snapshotSource: "FRESH_DATA" | "CACHED_DATA";

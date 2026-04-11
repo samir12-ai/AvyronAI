@@ -39,9 +39,14 @@ import { MI_CONFIDENCE, ENGINE_VERSION, INSTAGRAM_API_CEILING } from "./constant
 import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard";
 import { logAudit } from "../audit";
 import { computeCompetitorHash, parseJsonSafe } from "./utils";
-import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
+import { getStoredPostsForMIv3, getStoredCommentsForMIv3, getStoredTikTokPostsForMIv3, getStoredReviewsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { logSignalDiagnostics, detectNarrativeOverlap } from "../engine-hardening";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
+import { qualifyTikTokPosts, type TikTokQualificationResult } from "./tiktok-qualification";
+import { extractReviewsIntelligence, type ReviewsIntelligenceResult } from "./reviews-intelligence";
+import { buildTikTokSignals, buildReviewsSignals, classifyTikTokSignals, classifyReviewsSignals } from "./signal-normalizer";
+import { runCrossSignalDecisionLayer, type CrossSignalDecisionResult } from "./cross-signal-decision";
+import { computeSourceAvailability } from "./source-types";
 
 export { computeCompetitorHash } from "./utils";
 export { ENGINE_VERSION } from "./constants";
@@ -928,6 +933,92 @@ export class MarketIntelligenceV3 {
     }
     console.log(`[MIv3] NARRATIVE_OBJECTIONS | total=${narrativeObjectionMap.totalObjectionsDetected} | multiCompetitor=${narrativeObjectionMap.objectionsFromMultipleCompetitors} | density=${narrativeObjectionMap.objectionDensity} | captions=${narrativeObjectionMap.captionsScanned} | problemStatements=${narrativeObjectionMap.problemStatementsExtracted} | clusters=${narrativeObjectionMap.clusteredObjections.length} | contentDnaBridge=${contentDnaProblemObjections}`);
 
+    let tiktokQualification: TikTokQualificationResult | null = null;
+    let reviewsIntelligence: ReviewsIntelligenceResult | null = null;
+    let crossSignalDecisions: CrossSignalDecisionResult | null = null;
+
+    try {
+      const allTikTokPosts: Array<{ competitorId: string; posts: Awaited<ReturnType<typeof getStoredTikTokPostsForMIv3>> }> = [];
+      const allReviews: Array<{ competitorId: string; reviews: Awaited<ReturnType<typeof getStoredReviewsForMIv3>> }> = [];
+
+      for (const comp of competitors) {
+        const [tiktokPosts, reviews] = await Promise.all([
+          getStoredTikTokPostsForMIv3(comp.id, accountId),
+          getStoredReviewsForMIv3(comp.id, accountId),
+        ]);
+        if (tiktokPosts.length > 0) allTikTokPosts.push({ competitorId: comp.id, posts: tiktokPosts });
+        if (reviews.length > 0) allReviews.push({ competitorId: comp.id, reviews });
+      }
+
+      const totalTikTokPosts = allTikTokPosts.reduce((s, t) => s + t.posts.length, 0);
+      const totalReviews = allReviews.reduce((s, r) => s + r.reviews.length, 0);
+      console.log(`[MIv3] EXTENDED_SOURCES | tiktokCompetitors=${allTikTokPosts.length} | tiktokPosts=${totalTikTokPosts} | reviewCompetitors=${allReviews.length} | reviews=${totalReviews}`);
+
+      if (totalTikTokPosts > 0) {
+        const allTikTokFlat = allTikTokPosts.flatMap(t => t.posts);
+        tiktokQualification = qualifyTikTokPosts(allTikTokFlat);
+        console.log(`[MIv3] TIKTOK_QUALIFICATION | total=${tiktokQualification.totalPosts} | HIGH=${tiktokQualification.highPerformingCount} | MID=${tiktokQualification.midPerformingCount} | LOW=${tiktokQualification.lowPerformingCount} | filtered=${tiktokQualification.filteredPostIds.length}`);
+      }
+
+      if (totalReviews > 0) {
+        const allReviewsFlat = allReviews.flatMap(r => r.reviews);
+        reviewsIntelligence = extractReviewsIntelligence(allReviewsFlat);
+        console.log(`[MIv3] REVIEWS_INTELLIGENCE | processed=${reviewsIntelligence.totalReviewsProcessed} | painSignals=${reviewsIntelligence.painSignals.length} | objections=${reviewsIntelligence.objections.length} | clusters=${reviewsIntelligence.clusters.length} | avgRating=${reviewsIntelligence.avgRating.toFixed(2)}`);
+      }
+
+      const sourceAvail = computeSourceAvailability({
+        profileLink: competitors[0]?.profileLink || null,
+        websiteUrl: competitors[0]?.websiteUrl || null,
+        blogUrl: competitors[0]?.blogUrl || null,
+        postsCollected: allPosts.length,
+        tiktokPostCount: totalTikTokPosts,
+        reviewCount: totalReviews,
+      });
+
+      const tiktokSignals = totalTikTokPosts > 0
+        ? buildTikTokSignals(tiktokQualification, allTikTokPosts.flatMap(t => t.posts))
+        : null;
+      const reviewsSignals = totalReviews > 0
+        ? buildReviewsSignals(reviewsIntelligence)
+        : null;
+
+      const tiktokClassified = tiktokSignals ? classifyTikTokSignals(tiktokSignals) : [];
+      const reviewsClassified = reviewsSignals ? classifyReviewsSignals(reviewsSignals) : [];
+
+      if (tiktokClassified.length > 0 || reviewsClassified.length > 0) {
+        console.log(`[MIv3] EXTENDED_SIGNALS | tiktokSignals=${tiktokClassified.length} | reviewsSignals=${reviewsClassified.length}`);
+      }
+
+      const multiSourceForDecision = {
+        instagram: {
+          hooks: allPosts.slice(0, 15).map(p => (p.caption || "").split("\n")[0] || "").filter(h => h.length > 5),
+          painInferences: narrativeObjectionMap.objections.filter(o => o.signalType === "pain").map(o => o.objection),
+          ctaPatterns: competitors.flatMap(c => (c.ctaPatterns || "").split(",").filter(Boolean)).slice(0, 10),
+          contentThemes: [],
+          engagementPatterns: [],
+        },
+        website: null,
+        blog: null,
+        tiktok: tiktokSignals,
+        reviews: reviewsSignals,
+        sourceAvailability: sourceAvail,
+        classifiedSignals: [...tiktokClassified, ...reviewsClassified],
+        reconciliationNotes: [],
+        signalConfidence: 0,
+      };
+
+      crossSignalDecisions = runCrossSignalDecisionLayer(
+        multiSourceForDecision,
+        narrativeObjectionMap,
+        reviewsIntelligence,
+        tiktokQualification,
+      );
+
+      console.log(`[MIv3] CROSS_SIGNAL_DECISIONS | total=${crossSignalDecisions.decisions.length} | VALIDATED_PAIN=${crossSignalDecisions.validatedPains.length} | VALIDATED_HOOK=${crossSignalDecisions.validatedHooks.length} | CONFIRMED_OBJECTION=${crossSignalDecisions.confirmedObjections.length} | WEAK=${crossSignalDecisions.weakSignals.length} | coverage=${(crossSignalDecisions.sourceCoverage.coverageRatio * 100).toFixed(0)}% | aggregateConfidence=${crossSignalDecisions.aggregateConfidence}`);
+    } catch (extErr: any) {
+      console.error(`[MIv3] Extended source processing failed (non-blocking): ${extErr.message}`);
+    }
+
     const gatedClusters = qualityGate.gatePass ? clusterQuality.filteredClusters : signalClusters;
     if (!qualityGate.gatePass) {
       console.log(`[MIv3] QUALITY_GATE_DEGRADED | Gate failed — using unfiltered clusters for threat/opportunity computation but marking snapshot as PARTIAL`);
@@ -1130,6 +1221,31 @@ export class MarketIntelligenceV3 {
             mergedDuplicates: clusterQuality.mergedDuplicates,
           },
         },
+        crossSignalDecisions: crossSignalDecisions ? {
+          totalDecisions: crossSignalDecisions.decisions.length,
+          validatedPains: crossSignalDecisions.validatedPains.length,
+          validatedHooks: crossSignalDecisions.validatedHooks.length,
+          confirmedObjections: crossSignalDecisions.confirmedObjections.length,
+          weakSignals: crossSignalDecisions.weakSignals.length,
+          sourceCoverage: crossSignalDecisions.sourceCoverage,
+          aggregateConfidence: crossSignalDecisions.aggregateConfidence,
+          decisions: crossSignalDecisions.decisions,
+          fallbackNotes: crossSignalDecisions.fallbackNotes,
+        } : null,
+        tiktokQualification: tiktokQualification ? {
+          totalPosts: tiktokQualification.totalPosts,
+          highPerformingCount: tiktokQualification.highPerformingCount,
+          midPerformingCount: tiktokQualification.midPerformingCount,
+          lowPerformingCount: tiktokQualification.lowPerformingCount,
+          filteredPostIds: tiktokQualification.filteredPostIds,
+        } : null,
+        reviewsIntelligence: reviewsIntelligence ? {
+          totalReviewsProcessed: reviewsIntelligence.totalReviewsProcessed,
+          painSignals: reviewsIntelligence.painSignals.length,
+          objections: reviewsIntelligence.objections.length,
+          clusters: reviewsIntelligence.clusters.length,
+          avgRating: reviewsIntelligence.avgRating,
+        } : null,
       }),
       objectionMapData: JSON.stringify(narrativeObjectionMap),
       signalLineage: JSON.stringify(miLineage),
@@ -1220,6 +1336,9 @@ export class MarketIntelligenceV3 {
       signalDiagnostics,
       narrativeOverlap,
       narrativeObjectionMap,
+      crossSignalDecisions,
+      tiktokQualification,
+      reviewsIntelligence,
       cached: false,
       cacheInvalidationReason,
       snapshotSource: "FRESH_DATA" as const,
@@ -1332,6 +1451,18 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     signalDiagnostics: null,
     narrativeOverlap: null,
     narrativeObjectionMap: parseJsonSafe(snapshot.objectionMapData, null),
+    crossSignalDecisions: (() => {
+      const diag = parseJsonSafe(snapshot.diagnosticsData, null);
+      return diag?.crossSignalDecisions || null;
+    })(),
+    tiktokQualification: (() => {
+      const diag = parseJsonSafe(snapshot.diagnosticsData, null);
+      return diag?.tiktokQualification || null;
+    })(),
+    reviewsIntelligence: (() => {
+      const diag = parseJsonSafe(snapshot.diagnosticsData, null);
+      return diag?.reviewsIntelligence || null;
+    })(),
     cached: true,
     cacheInvalidationReason: null,
     snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",
