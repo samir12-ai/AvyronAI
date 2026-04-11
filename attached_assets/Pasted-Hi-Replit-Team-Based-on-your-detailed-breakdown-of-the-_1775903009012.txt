@@ -1,0 +1,432 @@
+Hi Replit Team,
+
+Based on your detailed breakdown of the current system (especially around MI v3, signal processing, and the existing decision-related components), I want to move forward with a **clear, code-aligned execution plan**.
+
+This plan is strictly built on what already exists in the codebase, without re-architecting working components.
+
+---
+
+# 🧠 Current State (Aligned with Your Findings)
+
+From your analysis:
+
+* We already have:
+
+  * Quality Gate (signal filtering + rejection)
+  * Confidence Engine (global confidence scoring)
+  * Two-Run Guard (stability over time)
+  * Signal weighting (Instagram / Website / Blog only)
+  * Strong Comments processing (objections, sentiment, filtering)
+  * Website structured extraction
+  * Narrative synthesis output
+
+* However:
+
+1. TikTok posts are ingested but:
+
+   * ❌ No per-post performance qualification
+   * ❌ No relative scoring vs creator baseline
+
+2. Google Reviews:
+
+   * ❌ No pain clustering
+   * ❌ No objection mapping
+   * ❌ No structured usage beyond raw ingestion
+
+3. Cross-source logic:
+
+   * ❌ No semantic agreement checking across sources
+   * ❌ No per-signal confidence
+   * ❌ No structured decision outputs
+
+4. Decision logic exists but is:
+
+   * distributed
+   * not producing typed verdicts
+   * not evaluating signals at a cross-source level
+
+This confirms that we currently have a **signal processing pipeline**, not a full decision layer.
+
+---
+
+# 🚀 Phase 1 — Promote TikTok & Reviews into First-Class Signal Sources
+
+This phase should extend the existing system — not replace it.
+
+## 1. TikTok Success Qualification Layer (Competitor Posts)
+
+Build a per-post scoring layer BEFORE signals enter MI analysis.
+
+Requirements:
+
+* For each TikTok post:
+
+  * Compute **relative performance vs creator baseline**
+  * Use:
+
+    * views vs average
+    * engagement ratios
+    * shares/comments if available
+
+* Output classification:
+
+  * HIGH_PERFORMING
+  * MID_PERFORMING
+  * LOW_PERFORMING
+
+* Store:
+
+  * classification
+  * relativeScore (0–1)
+
+* Integration:
+
+  * Only HIGH + MID posts should meaningfully influence MI signals
+  * LOW posts should not act as validation signals
+
+Important:
+This must be implemented for **competitor posts**, not just user performance (which already exists).
+
+---
+
+## 2. Google Reviews → Pain & Objection Layer
+
+Extend existing signal extraction logic (similar to comments):
+
+* Build:
+
+  * pain signal extraction
+  * objection extraction
+  * clustering (similar to NarrativeObjectionExtractor)
+
+* Output:
+
+  * pain clusters
+  * objection clusters
+  * frequency / dominance indicators
+
+* Reviews must remain:
+
+  * raw in `ci_competitor_reviews`
+  * processed outputs stored in MI snapshots (like existing objectionMapData)
+
+---
+
+## 3. Promote TikTok & Reviews into Source Types
+
+Extend existing `signal-normalizer.ts`:
+
+* Add:
+
+  * TikTok as SourceType
+  * Google Reviews as SourceType
+
+* Integrate into:
+
+  * SIGNAL_WEIGHTS matrix
+  * MultiSourceSignals interface
+
+Important:
+Do NOT replace existing weighting — extend it.
+
+---
+
+## 4. Automatic Scraping + Analysis Flow for TikTok and Google Reviews
+
+Right now, Instagram has an automated lifecycle and TikTok / Reviews are more manual. We want TikTok and Google Reviews to behave like Instagram operationally.
+
+Required behavior:
+
+* TikTok scraping should run automatically, not only via manual trigger
+* Google Reviews scraping should run automatically, not only via manual trigger
+* After scraping:
+
+  * data should be normalized / processed
+  * then included in MI analysis
+  * then flow into the new decision layer
+
+In other words, TikTok and Reviews should become part of the same automatic market-intelligence loop as Instagram.
+
+Please implement this in a way that fits the existing worker / queue architecture rather than adding a completely separate execution path.
+
+---
+
+## 5. Fallback Logic — New System Must Still Work When Sources Are Missing
+
+The new system must not depend on all sources being present at all times.
+
+Required fallback behavior:
+
+* If TikTok and Google Reviews are both present:
+
+  * run the full new system using Instagram + TikTok + Reviews + existing sources
+
+* If TikTok exists but Google Reviews does not:
+
+  * system should still run correctly on the new logic
+
+* If Google Reviews exists but TikTok does not:
+
+  * system should still run correctly on the new logic
+
+* If neither TikTok nor Google Reviews exists:
+
+  * system should still run on Instagram + existing sources **using the new decision layer**, not by silently falling back to the old pre-decision behavior
+
+This is very important:
+Even when TikTok / Reviews are missing, the system should still execute the **new architecture**, only with fewer sources and reduced confidence where appropriate.
+
+We do not want:
+
+* new behavior when sources exist
+* old behavior when they do not
+
+We want:
+
+* one consistent system
+* graceful degradation based on available sources
+
+---
+
+# 🧠 Phase 2 — Cross-Signal Decision Layer (On Top of Existing System)
+
+This phase must sit ABOVE existing components:
+
+* Quality Gate
+* Confidence Engine
+* Signal Normalizer
+* Narrative Synthesis
+
+Do NOT modify or break these systems.
+
+---
+
+## 1. Cross-Source Agreement Logic
+
+For each extracted signal (pain / hook / objection / theme):
+
+* Detect presence across sources:
+
+  * Instagram
+  * Website
+  * Comments
+  * TikTok
+  * Reviews
+
+* Compare semantic similarity (existing similarity logic can be reused)
+
+* Compute:
+
+  * agreementSources[]
+  * agreementScore
+  * weightedConfidence
+
+---
+
+## 2. Typed Decision Output (New Layer)
+
+Introduce structured decision objects (in addition to existing outputs):
+
+Each signal should produce:
+
+* type:
+
+  * VALIDATED_PAIN
+  * VALIDATED_HOOK
+  * CONFIRMED_OBJECTION
+  * WEAK_SIGNAL
+  * CONFLICTED_SIGNAL
+
+* fields:
+
+  * sources[]
+  * confidenceScore (0–1)
+  * supportingEvidenceCount
+  * sourceWeightsApplied
+
+This must NOT replace narrative output — it must exist alongside it.
+
+---
+
+## 3. Decision Layer Placement
+
+This layer should execute:
+
+AFTER:
+
+* signal extraction
+* normalization
+* quality gate
+
+BEFORE:
+
+* plan synthesis
+* downstream consumption
+
+---
+
+## 4. Integration with Existing System
+
+* Use:
+
+  * existing confidence engine as base signal
+  * existing signal pool (do not duplicate extraction)
+
+* Do NOT:
+
+  * rebuild MI engine
+  * duplicate logic from signal-normalizer
+  * override Quality Gate
+
+---
+
+# ✅ Acceptance Criteria (Strict)
+
+This phase is only considered complete if ALL conditions are met:
+
+---
+
+## TikTok Validation
+
+* System must:
+
+  * classify each competitor TikTok post (HIGH/MID/LOW)
+  * store classification
+  * demonstrate that LOW posts do not influence final signals
+
+---
+
+## Reviews Intelligence
+
+* System must:
+
+  * output structured pain clusters from reviews
+  * output objection clusters
+  * show frequency/dominance
+
+---
+
+## Automatic Execution
+
+* TikTok scraping must run automatically within the MI workflow
+* Google Reviews scraping must run automatically within the MI workflow
+* Both must be processed and analyzed automatically after scraping
+* Verification must show this working end-to-end in backend flow
+
+---
+
+## Fallback Behavior
+
+The same new system must work in all cases:
+
+* Instagram + TikTok + Reviews
+* Instagram + TikTok only
+* Instagram + Reviews only
+* Instagram only
+
+For each case:
+
+* the system must still produce decision objects
+* the system must not revert to the old architecture
+* confidence should degrade appropriately based on missing sources
+* reconciliation notes should explain missing source conditions where relevant
+
+---
+
+## Cross-Signal Decision Layer
+
+For a given signal, system must:
+
+* show:
+
+  * which sources contributed
+  * computed confidence
+  * classification (validated / weak / conflicted)
+
+Example expected output:
+
+Signal: “high cost”
+Sources: reviews + comments + TikTok
+Confidence: HIGH
+Type: VALIDATED_PAIN
+
+---
+
+## Agreement Logic
+
+* Must demonstrate:
+
+  * signal appearing in 1 source → LOW confidence
+  * same signal across 3+ sources → HIGH confidence
+
+---
+
+## Non-Regression
+
+* Existing components must remain intact:
+
+  * Quality Gate
+  * Confidence Engine
+  * Narrative synthesis
+  * Adaptive Rhythm inputs
+
+No degradation in current MI outputs.
+
+---
+
+## Backend Verification
+
+* Logs or debug output must show:
+
+  * TikTok classification applied
+  * Review clustering executed
+  * decision objects generated
+  * automatic scrape-to-analysis flow executed
+  * fallback path executed correctly when TikTok and/or Reviews are absent
+
+---
+
+## Frontend Verification
+
+* UI must display:
+
+  * signal confidence
+  * contributing sources
+  * classification type
+
+* UI/debug view must also make it visible when:
+
+  * a source is missing
+  * fallback behavior was applied
+  * confidence was reduced due to missing source coverage
+
+(Not necessarily final UI — but visible/debuggable)
+
+---
+
+# 🎯 Final Goal
+
+We are not adding more data.
+
+We are enabling the system to:
+
+* validate signals
+* understand agreement
+* produce decisions — not just analysis
+* operate consistently whether TikTok / Reviews exist or not
+
+---
+
+Please confirm:
+
+1. Feasibility based on current code
+2. Suggested implementation order (if different)
+3. Any constraints or conflicts with existing architecture
+4. Which existing worker / queue files should own the new automatic TikTok and Reviews lifecycle
+5. Which files will implement fallback behavior so we can verify this cleanly
+
+And if possible, reference the exact files where each part should be implemented.
+
+Thanks,
+Samir
+Avyron AI
