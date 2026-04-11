@@ -1380,6 +1380,20 @@ async function writeStrategyMemoryEntries(
       }
     }
 
+    const mi = results.get("market_intelligence");
+    if (mi?.status === "SUCCESS" && mi.output?.crossSignalDecisions) {
+      const decisions = mi.output.crossSignalDecisions.decisions || [];
+      const highConfDecisions = decisions.filter((d: any) => d.confidenceLevel === "HIGH");
+      for (const d of highConfDecisions.slice(0, 5)) {
+        entries.push({
+          engineName: "market_intelligence",
+          memoryType: "market_signal" as MemoryClass,
+          label: `[${d.type}] ${d.signalText}`,
+          details: `confidence=${d.confidenceScore}, agreement=${d.agreementType}, sources=${d.sources?.join(",")}, evidence=${d.supportingEvidenceCount}`,
+        });
+      }
+    }
+
     const mutationResult = await applyMemoryMutation(config.campaignId, config.accountId, entries, planId);
 
     console.log(

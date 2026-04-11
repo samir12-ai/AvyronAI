@@ -85,6 +85,17 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const competitors = out.competitors?.length || 0;
     const marketState = out.marketState || "unknown";
     sections.push(`Market Intelligence: ${competitors} competitors analyzed, market state: ${marketState}`);
+
+    const decisions = mi.output.crossSignalDecisions;
+    if (decisions?.decisions?.length > 0) {
+      const validated = decisions.decisions.filter((d: any) => d.confidenceLevel === "HIGH" || d.confidenceLevel === "MEDIUM");
+      const pains = validated.filter((d: any) => d.type === "VALIDATED_PAIN").map((d: any) => d.signalText);
+      const hooks = validated.filter((d: any) => d.type === "VALIDATED_HOOK").map((d: any) => d.signalText);
+      const objections = validated.filter((d: any) => d.type === "CONFIRMED_OBJECTION").map((d: any) => d.signalText);
+      if (pains.length > 0) sections.push(`  Validated Pain Signals: ${pains.slice(0, 5).join("; ")}`);
+      if (hooks.length > 0) sections.push(`  Validated Hook Signals: ${hooks.slice(0, 5).join("; ")}`);
+      if (objections.length > 0) sections.push(`  Confirmed Objections: ${objections.slice(0, 5).join("; ")}`);
+    }
   }
 
   const audience = results.get("audience");

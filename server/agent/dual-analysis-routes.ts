@@ -92,6 +92,18 @@ function buildCompetitorContext(mi: any): string {
   if (mi.marketDiagnosis) parts.push(`• Market Diagnosis: ${mi.marketDiagnosis}`);
   if (mi.threatSignals) parts.push(`• Threat Signals: ${mi.threatSignals}`);
   if (mi.opportunitySignals) parts.push(`• Opportunity Signals: ${mi.opportunitySignals}`);
+
+  const decisions = mi.crossSignalDecisions;
+  if (decisions && decisions.decisions?.length > 0) {
+    const highConf = decisions.decisions.filter((d: any) => d.confidenceLevel === "HIGH" || d.confidenceLevel === "MEDIUM");
+    if (highConf.length > 0) {
+      parts.push(`\nVALIDATED CROSS-SIGNAL DECISIONS (${highConf.length} high/medium confidence):`);
+      for (const d of highConf.slice(0, 8)) {
+        parts.push(`  [${d.type}] ${d.signalText} — confidence=${(d.confidenceScore * 100).toFixed(0)}% (${d.agreementType}, sources: ${d.sources?.join(", ")})`);
+      }
+    }
+  }
+
   return parts.join("\n");
 }
 

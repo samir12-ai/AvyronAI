@@ -29,6 +29,18 @@ export interface ReviewPainCluster {
   avgRating: number;
   signalType: NarrativeSignalType;
   competitorSources: string[];
+  dominanceScore: number;
+  frequencyBand: "HIGH" | "MEDIUM" | "LOW";
+  lowVolumePenalty: number;
+  recencyWeight: number;
+}
+
+export interface ReviewsReliabilityGuard {
+  totalVolume: number;
+  volumeBand: "HIGH" | "MEDIUM" | "LOW" | "INSUFFICIENT";
+  lowVolumePenalty: number;
+  recencyWeightApplied: boolean;
+  reliabilityNotes: string[];
 }
 
 export interface ReviewsIntelligenceResult {
@@ -36,21 +48,25 @@ export interface ReviewsIntelligenceResult {
   objections: ReviewObjectionItem[];
   painClusters: ReviewPainCluster[];
   objectionClusters: ReviewPainCluster[];
+  clusters: ReviewPainCluster[];
   totalReviewsProcessed: number;
   avgRating: number;
   ratingDistribution: Record<number, number>;
   extractionTimestamp: string;
   painDominance: number;
   objectionDominance: number;
+  reliabilityGuard: ReviewsReliabilityGuard;
 }
 
 interface RawReview {
   id: string;
-  competitorId: string;
-  reviewText: string;
+  reviewId?: string;
+  text?: string;
+  reviewText?: string;
   rating: number | null;
-  platform: string;
-  reviewDate?: Date | null;
+  platform?: string;
+  reviewDate?: string | Date | null;
+  isSynthetic?: boolean;
 }
 
 interface CompetitorReviews {
@@ -58,6 +74,11 @@ interface CompetitorReviews {
   competitorName: string;
   reviews: RawReview[];
 }
+
+const MIN_REVIEWS_FOR_HIGH_VOLUME = 30;
+const MIN_REVIEWS_FOR_MEDIUM_VOLUME = 10;
+const MIN_REVIEWS_FOR_ANY_SIGNAL = 3;
+const RECENCY_DECAY_DAYS = 180;
 
 const REVIEW_PAIN_PATTERNS: Array<{ category: string; patterns: RegExp[]; label: string; signalType: NarrativeSignalType }> = [
   {
@@ -172,7 +193,67 @@ const REVIEW_CLUSTER_KEYWORDS: Record<string, string[]> = {
   expertise: ["expertise", "experience", "knowledge", "professional", "competent", "skilled"],
 };
 
-export function extractReviewsIntelligence(competitorReviews: CompetitorReviews[]): ReviewsIntelligenceResult {
+function normalizeReview(r: RawReview): { text: string; rating: number; competitorName: string; reviewDate: Date | null } {
+  return {
+    text: (r.text || r.reviewText || "").trim(),
+    rating: r.rating || 0,
+    competitorName: "",
+    reviewDate: r.reviewDate ? new Date(r.reviewDate) : null,
+  };
+}
+
+function computeReviewRecencyWeight(reviewDate: Date | null): number {
+  if (!reviewDate) return 0.5;
+  const ageDays = (Date.now() - reviewDate.getTime()) / (1000 * 60 * 60 * 24);
+  if (ageDays <= 30) return 1.0;
+  if (ageDays <= 90) return 0.85;
+  if (ageDays <= RECENCY_DECAY_DAYS) return 0.6;
+  return 0.3;
+}
+
+function computeVolumeReliability(totalReviews: number): ReviewsReliabilityGuard {
+  const notes: string[] = [];
+  let volumeBand: ReviewsReliabilityGuard["volumeBand"];
+  let lowVolumePenalty = 0;
+
+  if (totalReviews >= MIN_REVIEWS_FOR_HIGH_VOLUME) {
+    volumeBand = "HIGH";
+  } else if (totalReviews >= MIN_REVIEWS_FOR_MEDIUM_VOLUME) {
+    volumeBand = "MEDIUM";
+    lowVolumePenalty = 0.15;
+    notes.push(`Moderate review volume (${totalReviews}) — cluster dominance scores adjusted downward`);
+  } else if (totalReviews >= MIN_REVIEWS_FOR_ANY_SIGNAL) {
+    volumeBand = "LOW";
+    lowVolumePenalty = 0.35;
+    notes.push(`Low review volume (${totalReviews}) — pain/objection clusters may not be representative of actual market sentiment`);
+  } else {
+    volumeBand = "INSUFFICIENT";
+    lowVolumePenalty = 0.6;
+    notes.push(`Insufficient review volume (${totalReviews}) — signals heavily downgraded, do not use for validated decisions`);
+  }
+
+  return {
+    totalVolume: totalReviews,
+    volumeBand,
+    lowVolumePenalty,
+    recencyWeightApplied: true,
+    reliabilityNotes: notes,
+  };
+}
+
+export function extractReviewsIntelligence(reviews: RawReview[] | CompetitorReviews[]): ReviewsIntelligenceResult {
+  let competitorReviews: CompetitorReviews[];
+
+  if (reviews.length > 0 && "reviews" in reviews[0]) {
+    competitorReviews = reviews as CompetitorReviews[];
+  } else {
+    competitorReviews = [{
+      competitorId: "aggregated",
+      competitorName: "aggregated",
+      reviews: reviews as RawReview[],
+    }];
+  }
+
   let totalProcessed = 0;
   let totalRatingSum = 0;
   let ratedCount = 0;
@@ -186,19 +267,25 @@ export function extractReviewsIntelligence(competitorReviews: CompetitorReviews[
     totalRating: number;
     ratedReviews: number;
     signalType: NarrativeSignalType;
+    recencyWeights: number[];
   }>();
 
   for (const cr of competitorReviews) {
     for (const review of cr.reviews) {
+      if ((review as any).isSynthetic) continue;
       totalProcessed++;
-      const rating = review.rating || 0;
+      const normalized = normalizeReview(review);
+      const text = normalized.text;
+      const rating = normalized.rating;
+      const recencyW = computeReviewRecencyWeight(normalized.reviewDate);
+      const compName = cr.competitorName || "unknown";
+
       if (rating > 0 && rating <= 5) {
         totalRatingSum += rating;
         ratedCount++;
         ratingDistribution[Math.round(rating)] = (ratingDistribution[Math.round(rating)] || 0) + 1;
       }
 
-      const text = (review.reviewText || "").trim();
       if (text.length < 10) continue;
 
       const seenLabels = new Set<string>();
@@ -216,18 +303,16 @@ export function extractReviewsIntelligence(competitorReviews: CompetitorReviews[
                 totalRating: 0,
                 ratedReviews: 0,
                 signalType: pattern.signalType,
+                recencyWeights: [],
               });
             }
             const entry = painAgg.get(pattern.label)!;
             entry.hitCount++;
-            entry.competitorNames.add(cr.competitorName);
+            entry.competitorNames.add(compName);
+            entry.recencyWeights.push(recencyW);
             if (rating > 0) { entry.totalRating += rating; entry.ratedReviews++; }
             if (entry.reviews.length < 5) {
-              entry.reviews.push({
-                text: text.slice(0, 200),
-                rating,
-                competitorName: cr.competitorName,
-              });
+              entry.reviews.push({ text: text.slice(0, 200), rating, competitorName: compName });
             }
             break;
           }
@@ -236,16 +321,26 @@ export function extractReviewsIntelligence(competitorReviews: CompetitorReviews[
     }
   }
 
+  const reliabilityGuard = computeVolumeReliability(totalProcessed);
+
   const painSignals: ReviewPainSignal[] = [];
   const objections: ReviewObjectionItem[] = [];
 
   for (const [label, data] of painAgg.entries()) {
-    const frequencyScore = Math.min(data.hitCount / Math.max(totalProcessed, 1), 1.0);
+    const rawFrequency = Math.min(data.hitCount / Math.max(totalProcessed, 1), 1.0);
+    const avgRecency = data.recencyWeights.length > 0
+      ? data.recencyWeights.reduce((a, b) => a + b, 0) / data.recencyWeights.length
+      : 0.5;
+    const frequencyScore = rawFrequency * (0.7 + avgRecency * 0.3);
+
     const multiCompetitorBonus = data.competitorNames.size >= 2 ? 0.2 : 0;
-    const confidence = Math.min(
+    let confidence = Math.min(
       0.35 + (frequencyScore * 0.4) + multiCompetitorBonus + (Math.min(data.hitCount, 5) * 0.05),
       1.0,
     );
+
+    confidence = Math.max(0, confidence - reliabilityGuard.lowVolumePenalty);
+
     const avgRating = data.ratedReviews > 0 ? Math.round((data.totalRating / data.ratedReviews) * 10) / 10 : 0;
 
     if (data.signalType === "pain") {
@@ -281,7 +376,8 @@ export function extractReviewsIntelligence(competitorReviews: CompetitorReviews[
     avgRating: p.avgRating,
     signalType: p.signalType,
     sources: p.reviewSources,
-  })));
+    evidenceCount: p.evidenceCount,
+  })), totalProcessed, reliabilityGuard.lowVolumePenalty);
 
   const objectionClusters = clusterReviewSignals(objections.map(o => ({
     text: o.objection,
@@ -289,14 +385,17 @@ export function extractReviewsIntelligence(competitorReviews: CompetitorReviews[
     avgRating: o.avgRating,
     signalType: o.signalType,
     sources: o.reviewSources,
-  })));
+    evidenceCount: o.supportingReviews.length,
+  })), totalProcessed, reliabilityGuard.lowVolumePenalty);
+
+  const allClusters = [...painClusters, ...objectionClusters].sort((a, b) => b.dominanceScore - a.dominanceScore);
 
   const avgRating = ratedCount > 0 ? Math.round((totalRatingSum / ratedCount) * 10) / 10 : 0;
   const painDominance = totalProcessed > 0 ? painSignals.reduce((s, p) => s + p.evidenceCount, 0) / totalProcessed : 0;
   const objectionDominance = totalProcessed > 0 ? objections.reduce((s, o) => s + o.frequencyScore, 0) / Math.max(objections.length, 1) : 0;
 
   console.log(
-    `[ReviewsIntelligence] processed=${totalProcessed} | avgRating=${avgRating} | painSignals=${painSignals.length} | objections=${objections.length} | painClusters=${painClusters.length} | objectionClusters=${objectionClusters.length}`
+    `[ReviewsIntelligence] processed=${totalProcessed} | avgRating=${avgRating} | painSignals=${painSignals.length} | objections=${objections.length} | painClusters=${painClusters.length} | objectionClusters=${objectionClusters.length} | volumeBand=${reliabilityGuard.volumeBand} | lowVolumePenalty=${reliabilityGuard.lowVolumePenalty}`
   );
 
   return {
@@ -304,12 +403,14 @@ export function extractReviewsIntelligence(competitorReviews: CompetitorReviews[
     objections,
     painClusters,
     objectionClusters,
+    clusters: allClusters,
     totalReviewsProcessed: totalProcessed,
     avgRating,
     ratingDistribution,
     extractionTimestamp: new Date().toISOString(),
     painDominance: Math.round(painDominance * 1000) / 1000,
     objectionDominance: Math.round(objectionDominance * 1000) / 1000,
+    reliabilityGuard,
   };
 }
 
@@ -319,13 +420,15 @@ function clusterReviewSignals(items: Array<{
   avgRating: number;
   signalType: NarrativeSignalType;
   sources: string[];
-}>): ReviewPainCluster[] {
+  evidenceCount: number;
+}>, totalReviews: number, volumePenalty: number): ReviewPainCluster[] {
   const clusterMap = new Map<string, {
     members: typeof items;
     totalFreq: number;
     totalRating: number;
     ratedCount: number;
     sources: Set<string>;
+    totalEvidence: number;
   }>();
 
   for (const item of items) {
@@ -345,19 +448,37 @@ function clusterReviewSignals(items: Array<{
     }
 
     if (!clusterMap.has(bestCluster)) {
-      clusterMap.set(bestCluster, { members: [], totalFreq: 0, totalRating: 0, ratedCount: 0, sources: new Set() });
+      clusterMap.set(bestCluster, { members: [], totalFreq: 0, totalRating: 0, ratedCount: 0, sources: new Set(), totalEvidence: 0 });
     }
     const cluster = clusterMap.get(bestCluster)!;
     cluster.members.push(item);
     cluster.totalFreq += item.frequency;
+    cluster.totalEvidence += item.evidenceCount;
     if (item.avgRating > 0) { cluster.totalRating += item.avgRating; cluster.ratedCount++; }
     for (const src of item.sources) cluster.sources.add(src);
   }
+
+  const totalClusterFreq = [...clusterMap.values()].reduce((s, c) => s + c.totalFreq, 0);
 
   const clusters: ReviewPainCluster[] = [];
   for (const [clusterId, data] of clusterMap.entries()) {
     if (data.members.length === 0) continue;
     const sorted = [...data.members].sort((a, b) => b.frequency - a.frequency);
+
+    let rawDominance = totalClusterFreq > 0 ? data.totalFreq / totalClusterFreq : 0;
+    rawDominance = Math.max(0, rawDominance - volumePenalty * 0.3);
+
+    let frequencyBand: "HIGH" | "MEDIUM" | "LOW";
+    if (data.totalEvidence >= 5 && rawDominance >= 0.3) frequencyBand = "HIGH";
+    else if (data.totalEvidence >= 2 && rawDominance >= 0.1) frequencyBand = "MEDIUM";
+    else frequencyBand = "LOW";
+
+    const lowVolPenalty = totalReviews < MIN_REVIEWS_FOR_MEDIUM_VOLUME
+      ? Math.min(0.4, (MIN_REVIEWS_FOR_MEDIUM_VOLUME - totalReviews) * 0.04)
+      : 0;
+
+    const recencyWeight = 1.0;
+
     clusters.push({
       clusterId,
       canonicalPain: sorted[0].text,
@@ -366,9 +487,22 @@ function clusterReviewSignals(items: Array<{
       avgRating: data.ratedCount > 0 ? Math.round((data.totalRating / data.ratedCount) * 10) / 10 : 0,
       signalType: sorted[0].signalType,
       competitorSources: Array.from(data.sources),
+      dominanceScore: Math.round(rawDominance * 1000) / 1000,
+      frequencyBand,
+      lowVolumePenalty: Math.round(lowVolPenalty * 1000) / 1000,
+      recencyWeight,
     });
   }
 
-  clusters.sort((a, b) => b.totalFrequency - a.totalFrequency);
+  clusters.sort((a, b) => b.dominanceScore - a.dominanceScore);
   return clusters;
+}
+
+export function getReviewsContributionMultiplier(guard: ReviewsReliabilityGuard): number {
+  switch (guard.volumeBand) {
+    case "HIGH": return 1.0;
+    case "MEDIUM": return 0.75;
+    case "LOW": return 0.4;
+    case "INSUFFICIENT": return 0.15;
+  }
 }

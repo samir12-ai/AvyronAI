@@ -1221,23 +1221,14 @@ export class MarketIntelligenceV3 {
             mergedDuplicates: clusterQuality.mergedDuplicates,
           },
         },
-        crossSignalDecisions: crossSignalDecisions ? {
-          totalDecisions: crossSignalDecisions.decisions.length,
-          validatedPains: crossSignalDecisions.validatedPains.length,
-          validatedHooks: crossSignalDecisions.validatedHooks.length,
-          confirmedObjections: crossSignalDecisions.confirmedObjections.length,
-          weakSignals: crossSignalDecisions.weakSignals.length,
-          sourceCoverage: crossSignalDecisions.sourceCoverage,
-          aggregateConfidence: crossSignalDecisions.aggregateConfidence,
-          decisions: crossSignalDecisions.decisions,
-          fallbackNotes: crossSignalDecisions.fallbackNotes,
-        } : null,
+        crossSignalDecisions: crossSignalDecisions || null,
         tiktokQualification: tiktokQualification ? {
           totalPosts: tiktokQualification.totalPosts,
           highPerformingCount: tiktokQualification.highPerformingCount,
           midPerformingCount: tiktokQualification.midPerformingCount,
           lowPerformingCount: tiktokQualification.lowPerformingCount,
           filteredPostIds: tiktokQualification.filteredPostIds,
+          baselineReliability: tiktokQualification.baselineReliability,
         } : null,
         reviewsIntelligence: reviewsIntelligence ? {
           totalReviewsProcessed: reviewsIntelligence.totalReviewsProcessed,
@@ -1245,6 +1236,7 @@ export class MarketIntelligenceV3 {
           objections: reviewsIntelligence.objections.length,
           clusters: reviewsIntelligence.clusters.length,
           avgRating: reviewsIntelligence.avgRating,
+          reliabilityGuard: reviewsIntelligence.reliabilityGuard,
         } : null,
       }),
       objectionMapData: JSON.stringify(narrativeObjectionMap),
@@ -1453,7 +1445,17 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     narrativeObjectionMap: parseJsonSafe(snapshot.objectionMapData, null),
     crossSignalDecisions: (() => {
       const diag = parseJsonSafe(snapshot.diagnosticsData, null);
-      return diag?.crossSignalDecisions || null;
+      const stored = diag?.crossSignalDecisions;
+      if (!stored || !stored.decisions) return null;
+      if (stored.validatedPains && Array.isArray(stored.validatedPains)) return stored;
+      return {
+        ...stored,
+        validatedPains: stored.decisions.filter((d: any) => d.type === "VALIDATED_PAIN"),
+        validatedHooks: stored.decisions.filter((d: any) => d.type === "VALIDATED_HOOK"),
+        confirmedObjections: stored.decisions.filter((d: any) => d.type === "CONFIRMED_OBJECTION"),
+        weakSignals: stored.decisions.filter((d: any) => d.type === "WEAK_SIGNAL"),
+        conflictedSignals: stored.decisions.filter((d: any) => d.type === "CONFLICTED_SIGNAL"),
+      };
     })(),
     tiktokQualification: (() => {
       const diag = parseJsonSafe(snapshot.diagnosticsData, null);
