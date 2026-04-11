@@ -15,6 +15,12 @@ import type { MemoryBlock } from "../memory-system/types";
 import type { ExplorationSlot } from "../exploration-budget/engine";
 import type { OrchestratorConfig } from "./index";
 import type { EngineId, EngineStepResult } from "./priority-matrix";
+import {
+  filterDecisionsForPlan,
+  buildDecisionEnforcementReport,
+  serializeDecisionReportForLog,
+  type DecisionEnforcementReport,
+} from "../decision-policy";
 
 export interface SynthesizedPlan {
   strategicSummary: {
@@ -98,33 +104,36 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     }
   }
 
+  const nonMiSections: string[] = [];
+  nonMiSections.push(`[ENGINE_OUTPUTS — These are engine-concluded structural decisions. They are NOT cross-signal validated market decisions. Use them for structural plan assembly only, not as market truth signals.]`);
+
   const audience = results.get("audience");
   if (audience?.status === "SUCCESS" && audience.output) {
     const pains = audience.output.painProfiles?.length || 0;
     const segments = audience.output.audienceSegments?.length || 0;
-    sections.push(`Audience: ${pains} pain profiles, ${segments} segments identified`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Audience: ${pains} pain profiles, ${segments} segments identified`);
   }
 
   const positioning = results.get("positioning");
   if (positioning?.status === "SUCCESS" && positioning.output) {
     const territories = positioning.output.territories?.length || 0;
-    sections.push(`Positioning: ${territories} territories mapped`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Positioning: ${territories} territories mapped`);
   }
 
   const offer = results.get("offer");
   if (offer?.status === "SUCCESS" && offer.output) {
-    sections.push(`Offer Engine: structured offer constructed`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Offer Engine: structured offer constructed`);
   }
 
   const funnel = results.get("funnel");
   if (funnel?.status === "SUCCESS" && funnel.output) {
-    sections.push(`Funnel: trust path and conversion flow defined`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Funnel: trust path and conversion flow defined`);
   }
 
   const budget = results.get("budget_governor");
   if (budget?.status === "SUCCESS" && budget.output) {
     const decision = budget.output.decision || "APPROVED";
-    sections.push(`Budget Governor: ${decision}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Budget Governor: ${decision}`);
   }
 
   const channel = results.get("channel_selection");
@@ -133,7 +142,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const primary = out.primaryChannel?.channelName || out.primaryChannel?.name || "unknown";
     const secondary = out.secondaryChannel?.channelName || out.secondaryChannel?.name || "none";
     const rejected = out.rejectedChannels?.length || 0;
-    sections.push(`Channel Selection: primary "${primary}", secondary "${secondary}", ${rejected} rejected`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Channel Selection: primary "${primary}", secondary "${secondary}", ${rejected} rejected`);
   }
 
   const diff = results.get("differentiation");
@@ -143,7 +152,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const claims = out.claimStructures?.length || 0;
     const proofAssets = out.proofArchitecture?.length || 0;
     const authorityMode = out.authorityMode?.mode || out.authorityMode || "unknown";
-    sections.push(`Differentiation: ${pillars} pillars, ${claims} claim structures, ${proofAssets} proof assets, authority mode: ${authorityMode}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Differentiation: ${pillars} pillars, ${claims} claim structures, ${proofAssets} proof assets, authority mode: ${authorityMode}`);
   }
 
   const integrity = results.get("integrity");
@@ -152,7 +161,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const score = out.confidenceScore ?? "N/A";
     const warnings = out.structuralWarnings?.length || 0;
     const stable = out.stabilityResult?.stable ?? "unknown";
-    sections.push(`Integrity: confidence ${score}, ${warnings} structural warnings, stable: ${stable}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Integrity: confidence ${score}, ${warnings} structural warnings, stable: ${stable}`);
   }
 
   const awareness = results.get("awareness");
@@ -161,7 +170,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const primaryRoute = out.primaryRoute?.routeName || out.primaryRoute?.name || "unknown";
     const layers = out.layerResults?.length || 0;
     const confidence = out.confidenceScore ?? "N/A";
-    sections.push(`Awareness: primary route "${primaryRoute}", ${layers} layer results, confidence ${confidence}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Awareness: primary route "${primaryRoute}", ${layers} layer results, confidence ${confidence}`);
   }
 
   const persuasion = results.get("persuasion");
@@ -170,7 +179,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const primaryRoute = out.primaryRoute?.routeName || out.primaryRoute?.name || "unknown";
     const altRoute = out.alternativeRoute?.routeName || "none";
     const layers = out.layerResults?.length || 0;
-    sections.push(`Persuasion: primary route "${primaryRoute}", alternative "${altRoute}", ${layers} layer results`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Persuasion: primary route "${primaryRoute}", alternative "${altRoute}", ${layers} layer results`);
   }
 
   const statVal = results.get("statistical_validation");
@@ -180,7 +189,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const claimConfidence = out.claimConfidenceScore ?? "N/A";
     const warnings = out.structuralWarnings?.length || 0;
     const claimValidations = out.claimValidations?.length || 0;
-    sections.push(`Statistical Validation: state ${state}, claim confidence ${claimConfidence}, ${claimValidations} claims validated, ${warnings} warnings`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Statistical Validation: state ${state}, claim confidence ${claimConfidence}, ${claimValidations} claims validated, ${warnings} warnings`);
   }
 
   const iteration = results.get("iteration");
@@ -190,7 +199,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const targets = out.optimizationTargets?.length || 0;
     const failedFlags = out.failedStrategyFlags?.length || 0;
     const planSteps = out.iterationPlan?.length || 0;
-    sections.push(`Iteration: ${hypotheses} test hypotheses, ${targets} optimization targets, ${planSteps} plan steps, ${failedFlags} failed strategy flags`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Iteration: ${hypotheses} test hypotheses, ${targets} optimization targets, ${planSteps} plan steps, ${failedFlags} failed strategy flags`);
   }
 
   const retention = results.get("retention");
@@ -201,9 +210,10 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const ltvPaths = out.ltvExpansionPaths?.length || 0;
     const upsells = out.upsellTriggers?.length || 0;
     const confidence = out.confidenceScore ?? "N/A";
-    sections.push(`Retention: ${loops} retention loops, ${churnRisks} churn risk flags, ${ltvPaths} LTV paths, ${upsells} upsell triggers, confidence ${confidence}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Retention: ${loops} retention loops, ${churnRisks} churn risk flags, ${ltvPaths} LTV paths, ${upsells} upsell triggers, confidence ${confidence}`);
   }
 
+  sections.push(...nonMiSections);
   return sections.join("\n");
 }
 
@@ -435,7 +445,11 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
     if (!content) throw new Error("Empty AI response");
     return JSON.parse(content) as SynthesizedPlan;
   } catch (err: any) {
-    console.warn(`[PlanSynthesis] AI synthesis failed, using deterministic fallback: ${err.message}`);
+    console.error(
+      `[PlanSynthesis] SYNTHESIS_DEGRADED_AI_FAILED | AI synthesis failed: ${err.message}. ` +
+      `Falling back to degraded plan — plan will be EXPLICITLY MARKED as degraded. ` +
+      `No raw signals or hardcoded generic defaults will silently substitute for decisions.`,
+    );
     return buildDeterministicPlan(businessData, campaign, objective, campaignId, accountId);
   }
 }
@@ -449,18 +463,25 @@ async function buildDeterministicPlan(businessData: any, campaign: any, objectiv
     reelsPerWeek: 4, carouselsPerWeek: 2, storiesPerDay: 2, postsPerWeek: 1,
     reasoning: "default balanced distribution", performanceBasis: "default_balanced",
   };
+  let rhythmSource = "hardcoded_defaults_no_decisions";
   try {
     rhythm = await computeAdaptiveRhythm(campaignId, accountId);
+    rhythmSource = rhythm.performanceBasis;
   } catch (err: any) {
-    console.warn(`[PlanSynthesis] AdaptiveRhythm fallback failed, using default:`, err.message);
+    console.error(
+      `[PlanSynthesis] SYNTHESIS_DEGRADED_NO_RHYTHM | AdaptiveRhythm failed: ${err.message}. ` +
+      `Using hardcoded defaults — content distribution NOT driven by decisions or performance data.`,
+    );
   }
+
+  const degradedMarker = "[DEGRADED — AI synthesis failed. This plan uses adaptive rhythm where available but contains no cross-signal validated market decisions. Do not treat this as a decision-driven plan.]";
 
   return {
     strategicSummary: {
-      strategy: `${objective.toLowerCase()}-focused growth strategy for ${businessType}`,
+      strategy: `${degradedMarker} ${objective.toLowerCase()}-focused growth strategy for ${businessType}`,
       targetAudience: `Primary audience in ${location} seeking ${businessType} solutions`,
       growthObjective: `Increase ${objective.toLowerCase()} through structured content and engagement`,
-      rationale: "Based on market analysis, audience insights, and competitive positioning",
+      rationale: `Degraded plan — AI synthesis unavailable. Rhythm source: ${rhythmSource}. No validated decisions applied.`,
     },
     monthlyObjective: {
       objective: `Drive ${objective.toLowerCase()} growth`,
@@ -773,6 +794,38 @@ export async function synthesizePlan(
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
 
+  const miResult = results.get("market_intelligence");
+  const crossSignalDecisions: any[] = miResult?.output?.crossSignalDecisions?.decisions ?? [];
+  const filterResult = filterDecisionsForPlan(crossSignalDecisions);
+  const synthesisNotes: string[] = [];
+
+  let synthesisPath: DecisionEnforcementReport["synthesisPath"] = "DECISION_DRIVEN";
+  if (crossSignalDecisions.length === 0) {
+    synthesisPath = "DEGRADED_NO_DECISIONS";
+    synthesisNotes.push("No cross-signal decisions available from market intelligence — plan will rely on engine outputs only");
+    console.warn(`[PlanSynthesis] DEGRADED_NO_DECISIONS | No cross-signal decisions available. Plan will not be fully decision-driven.`);
+  } else if (filterResult.eligible.length === 0) {
+    synthesisPath = "DEGRADED_NO_DECISIONS";
+    synthesisNotes.push(`All ${crossSignalDecisions.length} decision(s) rejected by policy — ${filterResult.violations.map(v => v.reason).join("; ")}`);
+    console.warn(`[PlanSynthesis] DEGRADED_NO_DECISIONS | All decisions rejected by policy: ${filterResult.violations.map(v => v.reason).join("; ")}`);
+  } else {
+    synthesisNotes.push(`${filterResult.eligible.length} eligible decision(s) entering synthesis`);
+    if (filterResult.rejected.length > 0) {
+      synthesisNotes.push(`${filterResult.rejected.length} decision(s) rejected by policy`);
+    }
+    if (filterResult.blocked.length > 0) {
+      synthesisNotes.push(`${filterResult.blocked.length} decision(s) blocked (CONFLICTED or WEAK)`);
+    }
+  }
+
+  const enforcementReport = buildDecisionEnforcementReport(
+    crossSignalDecisions,
+    filterResult,
+    synthesisPath,
+    synthesisNotes,
+  );
+  console.log(serializeDecisionReportForLog(enforcementReport));
+
   let precomputedRhythm = null;
   try {
     precomputedRhythm = await computeAdaptiveRhythm(config.campaignId, config.accountId);
@@ -781,6 +834,14 @@ export async function synthesizePlan(
   }
 
   const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm);
+
+  if (synthesisPath !== "DECISION_DRIVEN") {
+    console.warn(
+      `[PlanSynthesis] PLAN_INTEGRITY_WARNING | planId=pending path=${synthesisPath} ` +
+      `eligible=${enforcementReport.eligible} total=${enforcementReport.totalDecisions} — ` +
+      `this plan was NOT fully driven by validated decisions.`,
+    );
+  }
 
   if (memoryBlock && (memoryBlock.reinforceSlots.length > 0 || memoryBlock.avoidSlots.length > 0)) {
     try {
@@ -792,7 +853,11 @@ export async function synthesizePlan(
         console.log(`[PlanSynthesis] MEMORY_CONSTRAINTS_APPLIED | overrides=${overrides.length} | fields=${overrides.map(o => o.field).join(",")}`);
       }
     } catch (memErr: any) {
-      console.warn(`[PlanSynthesis] Memory constraint enforcement failed (non-blocking):`, memErr.message);
+      console.error(
+        `[PlanSynthesis] ENFORCEMENT_FAILURE_MEMORY_CONSTRAINTS | Memory enforcement FAILED: ${memErr.message}. ` +
+        `The synthesized plan is being used WITHOUT memory constraint correction. ` +
+        `This is an enforcement failure — plan may violate high-confidence memory constraints.`,
+      );
     }
   }
 

@@ -26,6 +26,7 @@ import { classifyDecisionRisk } from "./risk-classifier";
 import { snapshotPreMetrics, evaluatePendingOutcomes, getRecentOutcomesForPrompt, computeSuccessRates } from "./outcome-tracker";
 import { calculateConfidence, computeDecisionSuccessRate, getLast2Outcomes, checkSafeModeExitConditions } from "./confidence";
 import { aiChat } from "./ai-client";
+import { validateAgentDecisionBinding } from "./decision-policy";
 
 const WORKER_INTERVAL_MS = 5 * 60 * 1000;
 const CYCLE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
@@ -759,6 +760,24 @@ async function processAccount(accountId: string) {
     const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext, activePlanContext, userChannelDeltaContext);
 
     for (const decision of aiDecisions) {
+      const planIdBinding = activePlanContext?.planId ?? null;
+      const bindingCheck = validateAgentDecisionBinding(decision, planIdBinding);
+      if (!bindingCheck.bound) {
+        console.error(
+          `[Worker] DECISION_REJECTED_UNBOUND | account=${accountId} action="${decision.action.slice(0, 80)}" — ${bindingCheck.reason}. ` +
+          `Decision will NOT be persisted. This enforces the requirement that all agent actions reference a validated plan.`,
+        );
+        await logAudit(accountId, "BLOCKED_DECISION", {
+          details: {
+            action: decision.action,
+            reason: bindingCheck.reason,
+            enforcementLayer: "decision-policy-binding",
+            mode: activeMode,
+          },
+        });
+        continue;
+      }
+
       const riskResult = classifyDecisionRisk(
         {
           action: decision.action,

@@ -4,6 +4,7 @@ import { eq, and, lt, gt, desc, isNotNull } from "drizzle-orm";
 import { makeStrategyFingerprint } from "../memory-system/manager";
 import { checkResultsOverrideMemory } from "../orchestrator/memory-context";
 import type { MemoryClass, MemoryDirection, MemorySlot, PerformanceSnapshot } from "../memory-system/types";
+import { validateDecisionForMemoryWrite, applyFallbackSourcePenalty, DECISION_CONFIDENCE_THRESHOLDS } from "../decision-policy";
 
 const DECAY_HALF_LIFE_DAYS = 30;
 const DECAY_THRESHOLD = 0.05;
@@ -313,7 +314,15 @@ async function processExplorationResults(
 
       const strongPeriods = inWindowSnaps.filter((s) => (s.smoothedPerformanceScore ?? 0) >= industryBaseline);
 
-      if (strongPeriods.length >= 1) {
+      const PROVISIONAL_PERIODS_REQUIRED = DECISION_CONFIDENCE_THRESHOLDS.PROVISIONAL_WRITE_PERIODS_REQUIRED;
+      const PROVISIONAL_CONFIDENCE = DECISION_CONFIDENCE_THRESHOLDS.MEMORY_WRITE_MIN;
+
+      if (strongPeriods.length < PROVISIONAL_PERIODS_REQUIRED) {
+        console.log(
+          `[MemoryMutation] MEMORY_WRITE_BLOCKED | format=${fmt} strongPeriods=${strongPeriods.length} required=${PROVISIONAL_PERIODS_REQUIRED} ` +
+          `reason="Insufficient qualifying periods for provisional reinforce — policy requires ${PROVISIONAL_PERIODS_REQUIRED} periods above baseline"`,
+        );
+      } else {
         const existingProvisional = await db
           .select({ id: strategyMemory.id, label: strategyMemory.label })
           .from(strategyMemory)
@@ -331,7 +340,13 @@ async function processExplorationResults(
         );
 
         if (!alreadyExists) {
-          const details = hypothesis || `${fmt} showed above-baseline performance during exploration (${strongPeriods.length} qualifying period(s)).`;
+          const validation = validateDecisionForMemoryWrite(PROVISIONAL_CONFIDENCE, "reinforce", "exploration-result");
+          if (!validation.allowed) {
+            console.log(
+              `[MemoryMutation] MEMORY_WRITE_BLOCKED | format=${fmt} reason="${validation.reason}"`,
+            );
+          } else {
+          const details = hypothesis || `${fmt} showed above-baseline performance during exploration (${strongPeriods.length} qualifying period(s) — policy minimum: ${PROVISIONAL_PERIODS_REQUIRED}).`;
           const provId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
           await db.insert(strategyMemory).values({
             id: provId,
@@ -341,13 +356,14 @@ async function processExplorationResults(
             engineName: "exploration-result",
             label: `${fmt} exploration result — provisional reinforce`,
             details,
-            score: 0.5,
+            score: PROVISIONAL_CONFIDENCE,
             isWinner: true,
-            confidenceScore: 0.5,
+            confidenceScore: PROVISIONAL_CONFIDENCE,
             direction: "reinforce",
             lastValidatedAt: new Date(),
           });
           console.log(`[MemoryMutation] EXPLORATION_RESULT | format=${fmt} baseline=${industryBaseline.toFixed(3)} strongPeriods=${strongPeriods.length} windowStart=${explorationWindowStart.toISOString()} windowEnd=${windowEnd.toISOString()} → provisional reinforce created`);
+          }
         }
       }
     }
@@ -505,6 +521,14 @@ export async function runMemoryMutation(
           .orderBy(desc(contentPerformanceSnapshots.createdAt))
           .limit(MAX_SNAPSHOTS);
 
+    if (!usingChannelAsPrimary && newSnaps.length > 0) {
+      console.warn(
+        `[MemoryMutation] MEMORY_FALLBACK_SOURCE_ACTIVE | format=${fmt} snaps=${newSnaps.length} ` +
+        `reason="channel-scrape insufficient (${channelSnaps.length}/${MIN_PERIODS_FOR_CONFIDENCE_MOVE}) — using all-sources fallback. ` +
+        `Confidence penalty of ${DECISION_CONFIDENCE_THRESHOLDS.FALLBACK_SOURCE_PENALTY} will be applied to any memory writes from this signal."`,
+      );
+    }
+
     console.log(
       `[MemoryMutation] format=${fmt} signalSource=${usingChannelAsPrimary ? "channel-scrape (primary)" : "all-sources (fallback)"} snaps=${newSnaps.length}`,
     );
@@ -515,8 +539,14 @@ export async function runMemoryMutation(
 
     const scores = newSnaps.map((s) => s.smoothedPerformanceScore ?? 0);
     const currentDirection = (row.direction ?? "neutral") as MemoryDirection;
-    const currentConfidence = row.confidenceScore ?? 0.5;
+    const rawConfidence = row.confidenceScore ?? 0.5;
     const currentValidationCount = row.validationCount ?? 0;
+
+    let currentConfidence = rawConfidence;
+    if (!usingChannelAsPrimary) {
+      const penaltyResult = applyFallbackSourcePenalty(rawConfidence, row.label);
+      currentConfidence = penaltyResult.penalizedScore;
+    }
 
     if (currentDirection === "reinforce") {
       const consistentAbove = countConsecutiveConfirmed(scores, industryBaseline, "above");
