@@ -109,6 +109,8 @@ export default function CompetitiveIntelligence() {
     queryKey: ['ci-competitors', activeCampaignId],
     enabled: !!activeCampaignId,
     gcTime: 30 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: 'always' as const,
     queryFn: async () => {
       const res = await authFetch(new URL(`/api/ci/competitors?campaignId=${activeCampaignId}`, baseUrl).toString());
       return safeApiJson(res);
