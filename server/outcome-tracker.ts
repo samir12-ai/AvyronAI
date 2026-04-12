@@ -2,9 +2,18 @@ import { db } from "./db";
 import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory } from "@shared/schema";
 import { eq, sql, gte, isNull, lte, desc, and } from "drizzle-orm";
 import { logAudit } from "./audit";
+import { validateDecisionForMemoryWrite } from "./decision-policy";
 
-export async function snapshotPreMetrics(decisionId: string, accountId: string, decisionType?: string) {
+export async function snapshotPreMetrics(decisionId: string, accountId: string, decisionType?: string, campaignId?: string) {
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const conditions = [
+    eq(performanceSnapshots.accountId, accountId),
+    gte(performanceSnapshots.fetchedAt, oneDayAgo),
+  ];
+  if (campaignId) {
+    conditions.push(eq(performanceSnapshots.campaignId, campaignId));
+  }
 
   const metricsResult = await db.select({
     avgCpa: sql<number>`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
@@ -12,19 +21,26 @@ export async function snapshotPreMetrics(decisionId: string, accountId: string, 
     avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
     totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
   }).from(performanceSnapshots)
-    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, oneDayAgo)));
+    .where(and(...conditions));
 
   const m = metricsResult[0];
 
   await db.insert(decisionOutcomes).values({
     decisionId,
     accountId,
+    campaignId: campaignId || null,
     decisionType: decisionType || "unknown",
     preMetricsCpa: Number(m?.avgCpa) || 0,
     preMetricsRoas: Number(m?.avgRoas) || 0,
     preMetricsCtr: Number(m?.avgCtr) || 0,
     preMetricsSpend: Number(m?.totalSpend) || 0,
   });
+
+  console.log(
+    `[OutcomeTracker] SNAPSHOT_PRE_METRICS | decision=${decisionId} account=${accountId} ` +
+    `campaign=${campaignId || "NONE"} scope=${campaignId ? "campaign" : "account"} ` +
+    `cpa=${Number(m?.avgCpa || 0).toFixed(2)} roas=${Number(m?.avgRoas || 0).toFixed(2)} ctr=${Number(m?.avgCtr || 0).toFixed(4)}`,
+  );
 }
 
 export async function evaluatePendingOutcomes(accountId: string) {
@@ -42,21 +58,50 @@ export async function evaluatePendingOutcomes(accountId: string) {
   if (pending.length === 0) return;
 
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const currentMetrics = await db.select({
-    avgCpa: sql<number>`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
-    avgRoas: sql<number>`coalesce(avg(${performanceSnapshots.roas}), 0)`,
-    avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
-    totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
-  }).from(performanceSnapshots)
-    .where(and(eq(performanceSnapshots.accountId, accountId), gte(performanceSnapshots.fetchedAt, oneDayAgo)));
 
-  const current = currentMetrics[0];
-  const postCpa = Number(current?.avgCpa) || 0;
-  const postRoas = Number(current?.avgRoas) || 0;
-  const postCtr = Number(current?.avgCtr) || 0;
-  const postSpend = Number(current?.totalSpend) || 0;
+  const campaignMetricsCache = new Map<string, { avgCpa: number; avgRoas: number; avgCtr: number; totalSpend: number }>();
+
+  async function getMetricsForScope(campaignId: string | null): Promise<{ avgCpa: number; avgRoas: number; avgCtr: number; totalSpend: number }> {
+    const cacheKey = campaignId || "__account__";
+    if (campaignMetricsCache.has(cacheKey)) return campaignMetricsCache.get(cacheKey)!;
+
+    const conditions = [
+      eq(performanceSnapshots.accountId, accountId),
+      gte(performanceSnapshots.fetchedAt, oneDayAgo),
+    ];
+    if (campaignId) {
+      conditions.push(eq(performanceSnapshots.campaignId, campaignId));
+    }
+
+    const result = await db.select({
+      avgCpa: sql<number>`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
+      avgRoas: sql<number>`coalesce(avg(${performanceSnapshots.roas}), 0)`,
+      avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
+      totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
+    }).from(performanceSnapshots)
+      .where(and(...conditions));
+
+    const m = result[0];
+    const metrics = {
+      avgCpa: Number(m?.avgCpa) || 0,
+      avgRoas: Number(m?.avgRoas) || 0,
+      avgCtr: Number(m?.avgCtr) || 0,
+      totalSpend: Number(m?.totalSpend) || 0,
+    };
+    campaignMetricsCache.set(cacheKey, metrics);
+    return metrics;
+  }
 
   for (const p of pending) {
+    const scopeCampaignId = p.campaignId || null;
+    const measurementScope = scopeCampaignId ? "campaign" : "account";
+    const current = await getMetricsForScope(scopeCampaignId);
+
+    const postCpa = current.avgCpa;
+    const postRoas = current.avgRoas;
+    const postCtr = current.avgCtr;
+    const postSpend = current.totalSpend;
+
     const preCpa = p.preMetricsCpa || 0;
     const preRoas = p.preMetricsRoas || 0;
     const preCtr = p.preMetricsCtr || 0;
@@ -94,21 +139,33 @@ export async function evaluatePendingOutcomes(accountId: string) {
       .where(eq(strategyDecisions.id, p.decisionId));
 
     try {
-      const score = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
-      const isWinner = outcome === "success";
-      const direction = isWinner ? "reinforce" : (outcome === "failure" ? "avoid" : "neutral");
-      const confidenceScore = isWinner ? 0.85 : (outcome === "failure" ? 0.15 : 0.5);
-      await db.update(strategyMemory)
-        .set({ score, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date() })
-        .where(eq(strategyMemory.id, p.decisionId));
+      const direction = outcome === "success" ? "reinforce" as const
+        : (outcome === "failure" ? "avoid" as const : "neutral" as const);
+      const confidenceScore = outcome === "success" ? 0.85
+        : (outcome === "failure" ? 0.15 : 0.5);
+
+      const validation = validateDecisionForMemoryWrite(confidenceScore, direction, "outcome-tracker");
+      if (!validation.allowed) {
+        console.log(
+          `[OutcomeTracker] MEMORY_UPDATE_BLOCKED | decision=${p.decisionId} outcome=${outcome} ` +
+          `confidence=${confidenceScore} reason="${validation.reason}"`,
+        );
+      } else {
+        const score = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
+        const isWinner = outcome === "success";
+        await db.update(strategyMemory)
+          .set({ score, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date() })
+          .where(eq(strategyMemory.id, p.decisionId));
+      }
     } catch {
-      // strategy_memory row may not exist for this decisionId — not an error
     }
 
     await logAudit(accountId, "OUTCOME_EVALUATED", {
       decisionId: p.decisionId,
       details: {
         outcome,
+        measurementScope,
+        campaignId: scopeCampaignId || "account-wide",
         cpaChange: cpaChange.toFixed(1) + "%",
         roasChange: roasChange.toFixed(1) + "%",
         ctrChange: ctrChange.toFixed(1) + "%",
@@ -116,6 +173,12 @@ export async function evaluatePendingOutcomes(accountId: string) {
       preMetrics: { cpa: preCpa, roas: preRoas, ctr: preCtr },
       postMetrics: { cpa: postCpa, roas: postRoas, ctr: postCtr },
     });
+
+    console.log(
+      `[OutcomeTracker] OUTCOME_EVALUATED | decision=${p.decisionId} type=${p.decisionType} ` +
+      `scope=${measurementScope} campaign=${scopeCampaignId || "N/A"} outcome=${outcome} ` +
+      `cpa=${cpaChange.toFixed(1)}% roas=${roasChange.toFixed(1)}% ctr=${ctrChange.toFixed(1)}%`,
+    );
   }
 }
 
@@ -152,6 +215,7 @@ export async function getRecentOutcomesForPrompt(accountId: string): Promise<str
   const outcomes = await db.select({
     decisionType: decisionOutcomes.decisionType,
     outcome: decisionOutcomes.outcome,
+    campaignId: decisionOutcomes.campaignId,
     preCpa: decisionOutcomes.preMetricsCpa,
     postCpa: decisionOutcomes.postMetricsCpa,
     preRoas: decisionOutcomes.preMetricsRoas,
@@ -172,8 +236,9 @@ export async function getRecentOutcomesForPrompt(accountId: string): Promise<str
     .join(", ");
 
   const outcomesSummary = outcomes
-    .map(o => `${o.decisionType}: ${o.outcome} (CPA: ${o.preCpa?.toFixed(2)}→${o.postCpa?.toFixed(2)}, ROAS: ${o.preRoas?.toFixed(2)}→${o.postRoas?.toFixed(2)})`)
+    .map(o => `${o.decisionType}: ${o.outcome} [campaign=${o.campaignId || "unknown"}] (CPA: ${o.preCpa?.toFixed(2)}→${o.postCpa?.toFixed(2)}, ROAS: ${o.preRoas?.toFixed(2)}→${o.postRoas?.toFixed(2)})`)
     .join("\n");
 
   return `DECISION OUTCOME HISTORY (last 20):\n${outcomesSummary}\n\nSUCCESS RATES BY TYPE: ${ratesStr}\n\nIMPORTANT: If any decision type has success rate below 40%, avoid auto-executing that type. Reduce aggressiveness for types with declining success rates.`;
 }
+

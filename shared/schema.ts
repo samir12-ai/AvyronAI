@@ -165,6 +165,7 @@ export const strategyDecisions = pgTable("strategy_decisions", {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").default("default"),
+  campaignId: varchar("campaign_id"),
   trigger: text("trigger").notNull(),
   action: text("action").notNull(),
   reason: text("reason").notNull(),
@@ -368,6 +369,7 @@ export const decisionOutcomes = pgTable("decision_outcomes", {
     .default(sql`gen_random_uuid()`),
   decisionId: varchar("decision_id").notNull(),
   accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
   decisionType: text("decision_type"),
   preMetricsCpa: doublePrecision("pre_metrics_cpa").default(0),
   preMetricsRoas: doublePrecision("pre_metrics_roas").default(0),
@@ -1305,6 +1307,7 @@ export const calendarEntries = pgTable("calendar_entries", {
   sourceLabel: text("source_label"),
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),
+  sourceDecisionId: varchar("source_decision_id"),
   isExploration: boolean("is_exploration").default(false),
   explorationIntent: text("exploration_intent"),
   explorationHypothesis: text("exploration_hypothesis"),

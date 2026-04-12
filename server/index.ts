@@ -14,6 +14,7 @@ import { migrateMemoryConfidenceDirection } from "./migrations/004-memory-confid
 import { migrateCalendarExplorationFields } from "./migrations/005-calendar-exploration-fields";
 import { migrateRhythmSnapshotColumns } from "./migrations/006-rhythm-snapshot-columns";
 import { migrateBuildPlanSnapshots } from "./migrations/007-build-plan-snapshots";
+import { migrateDecisionAttribution } from "./migrations/008-decision-attribution";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import { authMiddleware, optionalAuth } from "./auth";
 import * as fs from "fs";
@@ -357,6 +358,7 @@ function setupErrorHandler(app: express.Application) {
       migrateCalendarExplorationFields().catch(err => console.error("[Migration-005] calendar exploration fields migration error:", err));
       migrateRhythmSnapshotColumns().catch(err => console.error("[Migration-006] rhythm snapshot columns migration error:", err));
       migrateBuildPlanSnapshots().catch(err => console.error("[Migration-007] build_plan_snapshots migration error:", err));
+      migrateDecisionAttribution().catch(err => console.error("[Migration-008] decision attribution migration error:", err));
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));

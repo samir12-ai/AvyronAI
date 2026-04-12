@@ -52,6 +52,8 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Scalability & Thundering Herd Protection**: Features a global job queue, per-account job budgets, shared market data cache, request deduplication, and a rate gate. Database has 90 indexes across all critical tables for query performance under load.
 - **Production Readiness**: Load tested at 200 concurrent users with 0% failure rate (p50=490ms, p95=858ms, p99=888ms). All 9 strategy engines validated for snapshot consistency. Failure recovery tested: invalid IDs return proper 404s, duplicate runs blocked with 409, all endpoints wrapped in try/catch.
 - **Audit & Control System**: A 5-panel dashboard for auditing feeds, AI usage, gate status, decisions, publish history, and job management.
+- **Decision Policy Layer (Phase 3)**: Central enforcement policy (`server/decision-policy/index.ts`) with confidence thresholds (MEMORY_WRITE_MIN=0.65, PROVISIONAL_PERIODS=2, FALLBACK_PENALTY=0.15), applied across plan synthesis, memory mutation, outcome tracking, and autonomous worker. All 6 bypass paths closed with explicit failure logging.
+- **Decision Attribution Layer (Phase A)**: Campaign-scoped decision tracking — `strategy_decisions` and `decision_outcomes` carry `campaignId` for per-campaign outcome measurement (not account-level averaging). `calendar_entries` has `sourceDecisionId` for future action-to-decision linkage. Outcome tracker routes through `validateDecisionForMemoryWrite()` for policy-consistent memory updates. Migration: `server/migrations/008-decision-attribution.ts`.
 
 ## External Dependencies
 

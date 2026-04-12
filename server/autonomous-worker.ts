@@ -839,6 +839,7 @@ async function processAccount(accountId: string) {
 
       const inserted = await db.insert(strategyDecisions).values({
         accountId,
+        campaignId: activeCampaign || undefined,
         trigger: decision.trigger,
         action: decision.action,
         reason: decision.reason,
@@ -862,7 +863,7 @@ async function processAccount(accountId: string) {
           .set({ status: "executed", executedAt: new Date() })
           .where(eq(strategyDecisions.id, decisionId));
 
-        await snapshotPreMetrics(decisionId, accountId, decisionType);
+        await snapshotPreMetrics(decisionId, accountId, decisionType, activeCampaign || undefined);
 
         await logAudit(accountId, "AUTO_EXECUTION", {
           decisionId,
