@@ -65,3 +65,9 @@ id = "Jv6rOMMTxO53k5I1QEySz"
 uri = "file://.local/avyron-architecture.md"
 type = "text"
 title = "Avyron AI — Backend Architecture Overview"
+
+[[outputs]]
+id = "WXT-OXZbWXB196pzclTVq"
+uri = "file://.local/architecture-audit-cleaning-enforcement.md"
+type = "text"
+title = "Architecture Audit: Cleaning, Enforcement, Structure & Traceability"
