@@ -1,0 +1,164 @@
+Hi Replit Team,
+
+Phase B implementation looks strong — the transition to action-level attribution and the full decision → action → outcome chain is a major step forward.
+
+Before moving ahead, we need to refine attribution precision to reduce bias and improve learning quality.
+
+This is not a new system — it is a refinement layer on top of what you already built.
+
+---
+
+# 🧠 Objective
+
+Move from:
+
+“this decision is linked to these actions”
+
+to:
+
+“this decision influenced this action with a measurable role and weight”
+
+---
+
+# 🚀 Phase B.5 Scope
+
+## 1. Replace “Most Recent Decision” Heuristic
+
+Currently, actions are tagged using the most recent executed decision.
+
+This creates bias and can misattribute results.
+
+### Required:
+
+- Replace this with a relevance-based selection:
+  - match decision type to action type (e.g. hook → reel, messaging → caption)
+  - match campaign context
+  - prefer decisions that logically produced the action
+
+If multiple decisions are relevant:
+- do not force a single decision assignment
+
+---
+
+## 2. Support Multi-Decision Attribution
+
+Some actions are influenced by more than one decision.
+
+### Required:
+
+- Allow actions to reference multiple decisionIds
+- Introduce a lightweight structure for:
+  - decisionId[]
+  - or decision attribution entries per action
+
+This should not break existing structure — extend it.
+
+---
+
+## 3. Introduce Decision Weighting per Action
+
+Not all decisions contribute equally.
+
+### Required:
+
+- Assign a weight per decision per action (e.g. 0.7 / 0.3)
+- Default:
+  - single decision → weight = 1.0
+  - multiple → split or assign based on relevance
+
+Weights do not need to be perfect initially — but must exist.
+
+---
+
+## 4. Improve Action-Level Attribution Logic
+
+Current flow:
+
+decision → calendar entry → content → performance
+
+### Improvement:
+
+- ensure attribution is applied at the individual content level, not just batch-level
+- avoid grouping all content under a single decision unless explicitly correct
+
+---
+
+## 5. Outcome Attribution Uses Weights
+
+When computing outcomes:
+
+- distribute KPI impact across decisions based on weights
+- avoid assigning full outcome to all linked decisions equally
+
+Example:
+
+- if action improved CTR by 20%
+- and attribution is 70% / 30%
+
+→ decision A gets stronger reinforcement than decision B
+
+---
+
+## 6. Logging & Traceability
+
+Extend current logging to include:
+
+- number of decisions per action
+- assigned weights
+- attribution method used (single / multi / fallback)
+
+This is critical for debugging and validation.
+
+---
+
+# ⚠️ Constraints
+
+- Do NOT redesign the system  
+- Extend existing tables and flows only  
+- Maintain backward compatibility  
+- Keep fallback behavior (action → campaign → account)  
+
+---
+
+# 🧪 Acceptance Criteria
+
+- Actions can be linked to more than one decision  
+- Attribution is not based solely on “most recent decision”  
+- Outcome updates are not applied equally across all decisions  
+- Logs clearly show attribution structure per action  
+- System still operates correctly when only one decision is present  
+
+---
+
+# 🎯 Final Goal
+
+By the end of Phase B.5:
+
+The system should be able to say:
+
+“This action was influenced by these decisions, with these weights, and this is how each one contributed to the outcome.”
+
+---
+
+# 🧠 Key Principle
+
+We are moving from:
+
+simple attribution  
+
+to:
+
+structured, weighted attribution
+
+---
+
+Please confirm:
+
+1. feasibility within current schema  
+2. where multi-decision linkage will be stored  
+3. how weights will be computed initially  
+4. any edge cases you foresee  
+
+Thanks,  
+Samir  
+Avyron A

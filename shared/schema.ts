@@ -1315,6 +1315,21 @@ export const calendarEntries = pgTable("calendar_entries", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const decisionAttributions = pgTable("decision_attributions", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  calendarEntryId: varchar("calendar_entry_id").notNull(),
+  decisionId: varchar("decision_id").notNull(),
+  weight: doublePrecision("weight").notNull().default(1.0),
+  relevanceScore: doublePrecision("relevance_score").default(0),
+  attributionMethod: text("attribution_method").notNull().default("single"),
+  matchReason: text("match_reason"),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const studioItems = pgTable("studio_items", {
   id: varchar("id")
     .primaryKey()

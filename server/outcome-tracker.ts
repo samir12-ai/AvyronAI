@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory, calendarEntries, studioItems, publishedPosts } from "@shared/schema";
+import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory, calendarEntries, studioItems, publishedPosts, decisionAttributions } from "@shared/schema";
 import { eq, sql, gte, isNull, isNotNull, lte, desc, and, inArray } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { validateDecisionForMemoryWrite } from "./decision-policy";
@@ -14,18 +14,13 @@ export interface ActionMetrics {
   snapshotCount: number;
 }
 
-export async function getActionPerformance(decisionId: string, accountId: string): Promise<ActionMetrics | null> {
-  const linkedEntries = await db.select({ id: calendarEntries.id })
-    .from(calendarEntries)
-    .where(and(
-      eq(calendarEntries.sourceDecisionId, decisionId),
-      eq(calendarEntries.accountId, accountId),
-    ));
+export interface WeightedActionMetrics extends ActionMetrics {
+  weight: number;
+  attributionMethod: string;
+  linkedDecisionCount: number;
+}
 
-  if (linkedEntries.length === 0) return null;
-
-  const entryIds = linkedEntries.map(e => e.id);
-
+async function resolvePerformanceForEntries(entryIds: string[], accountId: string): Promise<ActionMetrics | null> {
   const linkedStudio = await db.select({ id: studioItems.id })
     .from(studioItems)
     .where(and(
@@ -36,7 +31,7 @@ export async function getActionPerformance(decisionId: string, accountId: string
   if (linkedStudio.length === 0) {
     return {
       avgCpa: 0, avgRoas: 0, avgCtr: 0, totalSpend: 0,
-      actionCount: linkedEntries.length, publishedCount: 0, snapshotCount: 0,
+      actionCount: entryIds.length, publishedCount: 0, snapshotCount: 0,
     };
   }
 
@@ -55,7 +50,7 @@ export async function getActionPerformance(decisionId: string, accountId: string
   if (metaPostIds.length === 0) {
     return {
       avgCpa: 0, avgRoas: 0, avgCtr: 0, totalSpend: 0,
-      actionCount: linkedEntries.length, publishedCount: linkedPublished.length, snapshotCount: 0,
+      actionCount: entryIds.length, publishedCount: 0, snapshotCount: 0,
     };
   }
 
@@ -80,7 +75,7 @@ export async function getActionPerformance(decisionId: string, accountId: string
   if (snapshotCount === 0) {
     return {
       avgCpa: 0, avgRoas: 0, avgCtr: 0, totalSpend: 0,
-      actionCount: linkedEntries.length, publishedCount: metaPostIds.length, snapshotCount: 0,
+      actionCount: entryIds.length, publishedCount: metaPostIds.length, snapshotCount: 0,
     };
   }
 
@@ -89,10 +84,79 @@ export async function getActionPerformance(decisionId: string, accountId: string
     avgRoas: Number(s?.avgRoas) || 0,
     avgCtr: Number(s?.avgCtr) || 0,
     totalSpend: Number(s?.totalSpend) || 0,
-    actionCount: linkedEntries.length,
+    actionCount: entryIds.length,
     publishedCount: metaPostIds.length,
     snapshotCount,
   };
+}
+
+export async function getWeightedActionPerformance(decisionId: string, accountId: string): Promise<WeightedActionMetrics | null> {
+  const attributions = await db.select({
+    calendarEntryId: decisionAttributions.calendarEntryId,
+    weight: decisionAttributions.weight,
+    attributionMethod: decisionAttributions.attributionMethod,
+  })
+    .from(decisionAttributions)
+    .where(and(
+      eq(decisionAttributions.decisionId, decisionId),
+      eq(decisionAttributions.accountId, accountId),
+    ));
+
+  const attrEntryIds = new Set(attributions.map(a => a.calendarEntryId));
+
+  const legacyEntries = await db.select({ id: calendarEntries.id })
+    .from(calendarEntries)
+    .where(and(
+      eq(calendarEntries.sourceDecisionId, decisionId),
+      eq(calendarEntries.accountId, accountId),
+    ));
+
+  const legacyOnlyIds = legacyEntries.map(e => e.id).filter(id => !attrEntryIds.has(id));
+
+  const allEntryIds = [...attrEntryIds, ...legacyOnlyIds];
+
+  if (allEntryIds.length === 0) return null;
+
+  let avgWeight = 1.0;
+  let method = "single";
+
+  if (attributions.length > 0) {
+    avgWeight = attributions.reduce((sum, a) => sum + a.weight, 0) / attributions.length;
+    method = attributions[0].attributionMethod;
+    if (legacyOnlyIds.length > 0) {
+      const totalEntries = attrEntryIds.size + legacyOnlyIds.length;
+      avgWeight = (avgWeight * attrEntryIds.size + 1.0 * legacyOnlyIds.length) / totalEntries;
+      method = "mixed";
+    }
+  }
+
+  let linkedDecisionCount = 1;
+  if (attrEntryIds.size > 0) {
+    const peerDecisionCount = await db.select({
+      cnt: sql<number>`count(distinct ${decisionAttributions.decisionId})`,
+    })
+      .from(decisionAttributions)
+      .where(and(
+        inArray(decisionAttributions.calendarEntryId, [...attrEntryIds]),
+        eq(decisionAttributions.accountId, accountId),
+      ));
+    linkedDecisionCount = Number(peerDecisionCount[0]?.cnt) || 1;
+  }
+
+  const perf = await resolvePerformanceForEntries(allEntryIds, accountId);
+  if (!perf) return null;
+
+  return {
+    ...perf,
+    weight: avgWeight,
+    attributionMethod: method,
+    linkedDecisionCount,
+  };
+}
+
+export async function getActionPerformance(decisionId: string, accountId: string): Promise<ActionMetrics | null> {
+  const result = await getWeightedActionPerformance(decisionId, accountId);
+  return result;
 }
 
 export async function snapshotPreMetrics(decisionId: string, accountId: string, decisionType?: string, campaignId?: string) {
@@ -191,14 +255,20 @@ export async function evaluatePendingOutcomes(accountId: string) {
     let postCtr: number;
     let postSpend: number;
     let measurementScope: "action" | "campaign" | "account";
+    let attributionWeight = 1.0;
+    let attributionMethod = "single";
+    let linkedDecisionCount = 1;
 
-    const actionMetrics = await getActionPerformance(p.decisionId, accountId);
-    if (actionMetrics && actionMetrics.snapshotCount > 0) {
-      postCpa = actionMetrics.avgCpa;
-      postRoas = actionMetrics.avgRoas;
-      postCtr = actionMetrics.avgCtr;
-      postSpend = actionMetrics.totalSpend;
+    const weightedMetrics = await getWeightedActionPerformance(p.decisionId, accountId);
+    if (weightedMetrics && weightedMetrics.snapshotCount > 0) {
+      postCpa = weightedMetrics.avgCpa;
+      postRoas = weightedMetrics.avgRoas;
+      postCtr = weightedMetrics.avgCtr;
+      postSpend = weightedMetrics.totalSpend;
       measurementScope = "action";
+      attributionWeight = weightedMetrics.weight;
+      attributionMethod = weightedMetrics.attributionMethod;
+      linkedDecisionCount = weightedMetrics.linkedDecisionCount;
     } else {
       const current = await getMetricsForScope(scopeCampaignId);
       postCpa = current.avgCpa;
@@ -247,20 +317,26 @@ export async function evaluatePendingOutcomes(accountId: string) {
     try {
       const direction = outcome === "success" ? "reinforce" as const
         : (outcome === "failure" ? "avoid" as const : "neutral" as const);
-      const confidenceScore = outcome === "success" ? 0.85
+
+      const baseConfidence = outcome === "success" ? 0.85
         : (outcome === "failure" ? 0.15 : 0.5);
+      const weightedConfidence = measurementScope === "action"
+        ? baseConfidence * attributionWeight + (1 - attributionWeight) * 0.5
+        : baseConfidence;
+      const confidenceScore = Math.max(0, Math.min(1, weightedConfidence));
 
       const validation = validateDecisionForMemoryWrite(confidenceScore, direction, "outcome-tracker");
       if (!validation.allowed) {
         console.log(
           `[OutcomeTracker] MEMORY_UPDATE_BLOCKED | decision=${p.decisionId} outcome=${outcome} ` +
-          `confidence=${confidenceScore} reason="${validation.reason}"`,
+          `confidence=${confidenceScore.toFixed(3)} weight=${attributionWeight.toFixed(3)} reason="${validation.reason}"`,
         );
       } else {
-        const score = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
-        const isWinner = outcome === "success";
+        const baseScore = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
+        const weightedScore = measurementScope === "action" ? baseScore * attributionWeight : baseScore;
+        const isWinner = outcome === "success" && attributionWeight >= 0.5;
         await db.update(strategyMemory)
-          .set({ score, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date() })
+          .set({ score: weightedScore, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date() })
           .where(eq(strategyMemory.id, p.decisionId));
       }
     } catch {
@@ -271,14 +347,17 @@ export async function evaluatePendingOutcomes(accountId: string) {
       details: {
         outcome,
         measurementScope,
+        attributionWeight,
+        attributionMethod,
+        linkedDecisionCount,
         campaignId: scopeCampaignId || "account-wide",
         cpaChange: cpaChange.toFixed(1) + "%",
         roasChange: roasChange.toFixed(1) + "%",
         ctrChange: ctrChange.toFixed(1) + "%",
-        actionMetrics: actionMetrics ? {
-          actionCount: actionMetrics.actionCount,
-          publishedCount: actionMetrics.publishedCount,
-          snapshotCount: actionMetrics.snapshotCount,
+        actionMetrics: weightedMetrics ? {
+          actionCount: weightedMetrics.actionCount,
+          publishedCount: weightedMetrics.publishedCount,
+          snapshotCount: weightedMetrics.snapshotCount,
         } : null,
       },
       preMetrics: { cpa: preCpa, roas: preRoas, ctr: preCtr },
@@ -286,10 +365,11 @@ export async function evaluatePendingOutcomes(accountId: string) {
     });
 
     console.log(
-      `[OutcomeTracker] OUTCOME_SCOPE=${measurementScope} | decision=${p.decisionId} type=${p.decisionType} ` +
-      `campaign=${scopeCampaignId || "N/A"} outcome=${outcome} ` +
+      `[OutcomeTracker] OUTCOME_WEIGHTED | decision=${p.decisionId} type=${p.decisionType} ` +
+      `scope=${measurementScope} method=${attributionMethod} weight=${attributionWeight.toFixed(3)} ` +
+      `linkedDecisions=${linkedDecisionCount} campaign=${scopeCampaignId || "N/A"} outcome=${outcome} ` +
       `cpa=${cpaChange.toFixed(1)}% roas=${roasChange.toFixed(1)}% ctr=${ctrChange.toFixed(1)}%` +
-      (actionMetrics ? ` actions=${actionMetrics.actionCount} published=${actionMetrics.publishedCount} snapshots=${actionMetrics.snapshotCount}` : ""),
+      (weightedMetrics ? ` actions=${weightedMetrics.actionCount} published=${weightedMetrics.publishedCount} snapshots=${weightedMetrics.snapshotCount}` : ""),
     );
   }
 }

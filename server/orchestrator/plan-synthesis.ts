@@ -1,7 +1,8 @@
 import { db } from "../db";
-import { strategicPlans, requiredWork, calendarEntries, businessDataLayer, strategyDecisions } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { strategicPlans, requiredWork, calendarEntries, businessDataLayer } from "@shared/schema";
+import { eq, and, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
+import { createAttributionEntries } from "../decision-attribution";
 import { aiChat } from "../ai-client";
 import { lockRootBundle } from "../root-bundle";
 import { decomposeGoal, generateSimulation, normalizeGoal, computeFunnelMath, checkFeasibility } from "../goal-math";
@@ -595,7 +596,6 @@ function generateCalendarSlots(
   rootBundleId: string | null = null,
   rootBundleVersion: number | null = null,
   explorationSlots: ExplorationSlot[] = [],
-  sourceDecisionIds: string[] = [],
 ): Array<{
   planId: string;
   campaignId: string;
@@ -610,9 +610,7 @@ function generateCalendarSlots(
   isExploration?: boolean;
   explorationIntent?: string | null;
   explorationHypothesis?: string | null;
-  sourceDecisionId?: string | null;
 }> {
-  const primaryDecisionId = sourceDecisionIds.length > 0 ? sourceDecisionIds[0] : null;
   const slots: any[] = [];
   const startDate = new Date();
   startDate.setHours(0, 0, 0, 0);
@@ -647,7 +645,6 @@ function generateCalendarSlots(
           rootBundleId,
           rootBundleVersion,
           isExploration: false,
-          sourceDecisionId: primaryDecisionId,
         });
       }
 
@@ -664,7 +661,7 @@ function generateCalendarSlots(
           rootBundleId,
           rootBundleVersion,
           isExploration: false,
-          sourceDecisionId: primaryDecisionId,
+
         });
       }
 
@@ -681,7 +678,7 @@ function generateCalendarSlots(
           rootBundleId,
           rootBundleVersion,
           isExploration: false,
-          sourceDecisionId: primaryDecisionId,
+
         });
       }
     }
@@ -732,7 +729,7 @@ function generateCalendarSlots(
           isExploration: true,
           explorationIntent: expSlot.intent,
           explorationHypothesis: expSlot.hypothesis,
-          sourceDecisionId: primaryDecisionId,
+
         });
       }
     }
@@ -1035,17 +1032,6 @@ export async function synthesizePlan(
     rootBundleVersion: rootBundle?.version || null,
   });
 
-  const recentDecisions = await db.select({ id: strategyDecisions.id })
-    .from(strategyDecisions)
-    .where(and(
-      eq(strategyDecisions.accountId, config.accountId),
-      eq(strategyDecisions.campaignId, config.campaignId),
-      eq(strategyDecisions.status, "executed"),
-    ))
-    .orderBy(desc(strategyDecisions.executedAt))
-    .limit(5);
-  const sourceDecisionIds = recentDecisions.map(d => d.id);
-
   const calendarSlots = generateCalendarSlots(
     synthesized,
     periodDays,
@@ -1055,15 +1041,29 @@ export async function synthesizePlan(
     rootBundle?.id || null,
     rootBundle?.version || null,
     explorationSlotList,
-    sourceDecisionIds,
   );
 
   if (calendarSlots.length > 0) {
-    await db.insert(calendarEntries).values(calendarSlots);
+    const inserted = await db.insert(calendarEntries).values(calendarSlots).returning({ id: calendarEntries.id, contentType: calendarEntries.contentType });
     await db.update(strategicPlans)
       .set({ totalCalendarEntries: calendarSlots.length })
       .where(eq(strategicPlans.id, plan.id));
-    console.log(`[PlanSynthesis] ACTION_ATTRIBUTION | entries=${calendarSlots.length} sourceDecisions=${sourceDecisionIds.length} primaryDecisionId=${sourceDecisionIds[0] || "NONE"}`);
+
+    const byType = new Map<string, string[]>();
+    for (const entry of inserted) {
+      const t = entry.contentType.toUpperCase();
+      if (!byType.has(t)) byType.set(t, []);
+      byType.get(t)!.push(entry.id);
+    }
+
+    for (const [contentType, entryIds] of byType) {
+      const attrResult = await createAttributionEntries(entryIds, contentType, config.campaignId, config.accountId);
+      if (attrResult.primaryDecisionId) {
+        await db.update(calendarEntries)
+          .set({ sourceDecisionId: attrResult.primaryDecisionId })
+          .where(inArray(calendarEntries.id, entryIds));
+      }
+    }
   }
 
   console.log(`[PlanSynthesis] Created plan ${plan.id} with ${calendarSlots.length} calendar entries, ${volume.totalContentPieces} required content pieces, root v${rootBundle?.version || "none"}`);
