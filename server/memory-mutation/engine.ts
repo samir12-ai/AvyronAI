@@ -4,7 +4,7 @@ import { eq, and, lt, gt, desc, isNotNull } from "drizzle-orm";
 import { makeStrategyFingerprint } from "../memory-system/manager";
 import { checkResultsOverrideMemory } from "../orchestrator/memory-context";
 import type { MemoryClass, MemoryDirection, MemorySlot, PerformanceSnapshot } from "../memory-system/types";
-import { validateDecisionForMemoryWrite, applyFallbackSourcePenalty, DECISION_CONFIDENCE_THRESHOLDS } from "../decision-policy";
+import { validateDecisionForMemoryWrite, policyEnforcedMemoryCheck, applyFallbackSourcePenalty, DECISION_CONFIDENCE_THRESHOLDS } from "../decision-policy";
 
 const DECAY_HALF_LIFE_DAYS = 30;
 const DECAY_THRESHOLD = 0.05;
@@ -67,6 +67,11 @@ export async function applyMemoryMutation(
       const updatedIsWinner = updatedDirection === "reinforce";
       const updatedConfidence = entry.confidenceScore
         ?? (updatedDirection === "reinforce" ? 0.85 : updatedDirection === "avoid" ? 0.15 : 0.5);
+      const updateCheck = policyEnforcedMemoryCheck(updatedConfidence, updatedDirection, entry.engineName, entry.memoryType);
+      if (!updateCheck.allowed) {
+        console.log(`[MemoryMutation] UPDATE_BLOCKED | label="${entry.label.slice(0, 60)}" confidence=${updatedConfidence} engine=${entry.engineName}`);
+        continue;
+      }
       await db
         .update(strategyMemory)
         .set({
@@ -91,6 +96,11 @@ export async function applyMemoryMutation(
       const insertIsWinner = insertDirection === "reinforce";
       const insertConfidence = entry.confidenceScore
         ?? (insertDirection === "reinforce" ? 0.85 : insertDirection === "avoid" ? 0.15 : 0.5);
+      const insertCheck = policyEnforcedMemoryCheck(insertConfidence, insertDirection, entry.engineName, entry.memoryType);
+      if (!insertCheck.allowed) {
+        console.log(`[MemoryMutation] INSERT_BLOCKED | label="${entry.label.slice(0, 60)}" confidence=${insertConfidence} engine=${entry.engineName}`);
+        continue;
+      }
       await db.insert(strategyMemory).values({
         id: memId,
         accountId,

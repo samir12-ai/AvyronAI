@@ -17,6 +17,7 @@ import {
   accountState,
 } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
+import { policyEnforcedMemoryCheck } from "../../decision-policy";
 import { ACTIVE_PLAN_STATUSES_SQL } from "../../plan-constants";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,28 +309,31 @@ async function handleToolCall(
           )
           .limit(1);
 
-        if (existing[0]) {
-          await db
-            .update(strategyMemory)
-            .set({
+        const rhythmCheck = policyEnforcedMemoryCheck(rhythm.confidenceScore, "neutral", "agent-rhythm", "content_rhythm");
+        if (rhythmCheck.allowed) {
+          if (existing[0]) {
+            await db
+              .update(strategyMemory)
+              .set({
+                label: rhythmLabel,
+                details: rhythmDetails,
+                score: rhythm.confidenceScore,
+                confidenceScore: rhythm.confidenceScore,
+                updatedAt: new Date(),
+              })
+              .where(eq(strategyMemory.id, existing[0].id));
+          } else {
+            await db.insert(strategyMemory).values({
+              accountId,
+              campaignId,
+              memoryType: "content_rhythm",
               label: rhythmLabel,
               details: rhythmDetails,
               score: rhythm.confidenceScore,
               confidenceScore: rhythm.confidenceScore,
-              updatedAt: new Date(),
-            })
-            .where(eq(strategyMemory.id, existing[0].id));
-        } else {
-          await db.insert(strategyMemory).values({
-            accountId,
-            campaignId,
-            memoryType: "content_rhythm",
-            label: rhythmLabel,
-            details: rhythmDetails,
-            score: rhythm.confidenceScore,
-            confidenceScore: rhythm.confidenceScore,
-            direction: "neutral",
-          });
+              direction: "neutral",
+            });
+          }
         }
 
         return {
@@ -607,6 +611,13 @@ async function writeAgentActionMemory(
   result: ToolCallResult,
 ): Promise<void> {
   try {
+    const direction = result.success ? "reinforce" as const : "avoid" as const;
+    const confidenceScore = result.success ? 0.85 : 0.15;
+    const check = policyEnforcedMemoryCheck(confidenceScore, direction, "agent", "agent_action");
+    if (!check.allowed) {
+      console.log(`[AgentTool] MEMORY_WRITE_BLOCKED | tool="${toolName}" success=${result.success} confidence=${confidenceScore}`);
+      return;
+    }
     const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
     await db.insert(strategyMemory).values({
       id: memId,
@@ -617,10 +628,10 @@ async function writeAgentActionMemory(
       label: toolName,
       details: `${justification} | Result: ${result.summary}`,
       performance: result.success ? "success" : "failure",
-      score: result.success ? 0.85 : 0.15,
+      score: confidenceScore,
       isWinner: result.success,
-      confidenceScore: result.success ? 0.85 : 0.15,
-      direction: result.success ? "reinforce" : "avoid",
+      confidenceScore,
+      direction,
       lastValidatedAt: new Date(),
     });
   } catch (err: any) {

@@ -2,6 +2,7 @@ import { db } from "../db";
 import { strategyMemory } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import { aiChat } from "../ai-client";
+import { policyEnforcedMemoryCheck } from "../decision-policy";
 import type { MemoryBlock, IndustryBaseline } from "../memory-system/types";
 import type { SynthesizedPlan } from "../orchestrator/plan-synthesis";
 
@@ -267,28 +268,31 @@ async function persistExplorationBudget(
     )
     .limit(1);
 
-  if (existing.length > 0) {
-    await db
-      .update(strategyMemory)
-      .set({ label, details, performance: rationale, lastValidatedAt: new Date(), updatedAt: new Date() })
-      .where(eq(strategyMemory.id, existing[0].id));
-  } else {
-    const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    await db.insert(strategyMemory).values({
-      id: memId,
-      accountId,
-      campaignId,
-      memoryType: "exploration_budget",
-      engineName: "exploration-budget",
-      label,
-      details,
-      performance: rationale,
-      score: 0.5,
-      isWinner: false,
-      confidenceScore: 0.5,
-      direction: "neutral",
-      lastValidatedAt: new Date(),
-    });
+  const explorationCheck = policyEnforcedMemoryCheck(0.5, "neutral", "exploration-budget", "exploration_budget");
+  if (explorationCheck.allowed) {
+    if (existing.length > 0) {
+      await db
+        .update(strategyMemory)
+        .set({ label, details, performance: rationale, lastValidatedAt: new Date(), updatedAt: new Date() })
+        .where(eq(strategyMemory.id, existing[0].id));
+    } else {
+      const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      await db.insert(strategyMemory).values({
+        id: memId,
+        accountId,
+        campaignId,
+        memoryType: "exploration_budget",
+        engineName: "exploration-budget",
+        label,
+        details,
+        performance: rationale,
+        score: 0.5,
+        isWinner: false,
+        confidenceScore: 0.5,
+        direction: "neutral",
+        lastValidatedAt: new Date(),
+      });
+    }
   }
 }
 

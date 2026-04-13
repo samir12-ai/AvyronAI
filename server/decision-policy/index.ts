@@ -245,6 +245,34 @@ export function validateAgentDecisionBinding(
   return { bound: true, reason: `Bound to plan ${planId}` };
 }
 
+const OPERATIONAL_MEMORY_TYPES = new Set([
+  "content_rhythm",
+  "exploration_budget",
+]);
+
+export function policyEnforcedMemoryCheck(
+  confidenceScore: number,
+  direction: "reinforce" | "avoid" | "neutral",
+  engineName: string,
+  memoryType: string,
+): { allowed: boolean; reason: string; policyBypassed: boolean } {
+  const isOperational = OPERATIONAL_MEMORY_TYPES.has(memoryType);
+
+  if (confidenceScore < DECISION_CONFIDENCE_THRESHOLDS.MEMORY_WRITE_MIN) {
+    if (isOperational) {
+      const reason = `POLICY_BYPASS_OPERATIONAL | engine="${engineName}" memoryType="${memoryType}" confidence=${confidenceScore.toFixed(3)} — operational state, write allowed below threshold`;
+      console.log(`[DecisionPolicy] ${reason}`);
+      return { allowed: true, reason, policyBypassed: true };
+    }
+
+    const reason = `Memory write BLOCKED for engine="${engineName}" memoryType="${memoryType}" direction="${direction}": confidence ${confidenceScore.toFixed(3)} below minimum ${DECISION_CONFIDENCE_THRESHOLDS.MEMORY_WRITE_MIN}`;
+    console.log(`[DecisionPolicy] MEMORY_WRITE_BLOCKED | ${reason}`);
+    return { allowed: false, reason, policyBypassed: false };
+  }
+
+  return { allowed: true, reason: "Confidence meets memory write threshold", policyBypassed: false };
+}
+
 export function serializeDecisionReportForLog(report: DecisionEnforcementReport): string {
   return [
     `[DecisionEnforcement] path=${report.synthesisPath} total=${report.totalDecisions} eligible=${report.eligible} rejected=${report.rejected} blocked=${report.blocked}`,

@@ -8,6 +8,7 @@ import {
 import { eq, and, desc } from "drizzle-orm";
 import { loadMemoryBlock } from "../memory-system/manager";
 import { computeLegacyExplorationBudget } from "../exploration-budget/engine";
+import { policyEnforcedMemoryCheck } from "../decision-policy";
 
 export interface AdaptiveRhythm {
   reelsPerWeek: number;
@@ -348,38 +349,41 @@ export async function computeAdaptiveRhythm(
   const rhythmLabel = `Reels ${reelsPerWeek}/wk · Carousels ${carouselsPerWeek}/wk · Stories ${storiesPerDay}/day · Posts ${postsPerWeek}/wk`;
 
   try {
-    if (prevRhythmMem) {
-      await db
-        .update(strategyMemory)
-        .set({
+    const rhythmCheck = policyEnforcedMemoryCheck(confidenceScore, "reinforce", "adaptive-rhythm", "content_rhythm");
+    if (rhythmCheck.allowed) {
+      if (prevRhythmMem) {
+        await db
+          .update(strategyMemory)
+          .set({
+            label: rhythmLabel,
+            details: newDetails,
+            performance: reasoning,
+            score: confidenceScore,
+            isWinner: true,
+            confidenceScore,
+            direction: "reinforce",
+            lastValidatedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(strategyMemory.id, prevRhythmMem.id));
+      } else {
+        const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+        await db.insert(strategyMemory).values({
+          id: memId,
+          accountId,
+          campaignId,
+          memoryType: "content_rhythm",
           label: rhythmLabel,
           details: newDetails,
           performance: reasoning,
           score: confidenceScore,
+          engineName: "adaptive-rhythm",
           isWinner: true,
           confidenceScore,
           direction: "reinforce",
           lastValidatedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(strategyMemory.id, prevRhythmMem.id));
-    } else {
-      const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-      await db.insert(strategyMemory).values({
-        id: memId,
-        accountId,
-        campaignId,
-        memoryType: "content_rhythm",
-        label: rhythmLabel,
-        details: newDetails,
-        performance: reasoning,
-        score: confidenceScore,
-        engineName: "adaptive-rhythm",
-        isWinner: true,
-        confidenceScore,
-        direction: "reinforce",
-        lastValidatedAt: new Date(),
-      });
+        });
+      }
     }
   } catch (memErr: any) {
     console.warn(`[AdaptiveRhythm] Memory write failed (non-blocking):`, memErr.message);

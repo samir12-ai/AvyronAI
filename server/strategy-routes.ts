@@ -13,6 +13,7 @@ import {
 import { eq, desc, sql, and, gte, lte, ne } from "drizzle-orm";
 import { aiChat } from "./ai-client";
 import { requireCampaign } from "./campaign-routes";
+import { policyEnforcedMemoryCheck } from "./decision-policy";
 import { getRevenueSummary, getCampaignMetrics } from "./campaign-data-layer";
 import { logAuditEvent } from "./strategic-core/audit-logger";
 
@@ -362,6 +363,10 @@ Return ONLY valid JSON with this structure:
 
       if (analysis.memoryUpdates?.length) {
         for (const mem of analysis.memoryUpdates) {
+          const direction = mem.isWinner ? "reinforce" as const : "neutral" as const;
+          const confidenceScore = mem.isWinner ? 0.85 : 0.5;
+          const check = policyEnforcedMemoryCheck(confidenceScore, direction, "performance-analysis", mem.memoryType || "analysis");
+          if (!check.allowed) continue;
           await db.insert(strategyMemory).values({
             accountId,
             campaignId,
@@ -369,9 +374,9 @@ Return ONLY valid JSON with this structure:
             label: mem.label,
             details: mem.details,
             score: mem.score || 0,
-            direction: mem.isWinner ? "reinforce" : "neutral",
+            direction,
             isWinner: mem.isWinner ? true : false,
-            confidenceScore: mem.isWinner ? 0.85 : 0.5,
+            confidenceScore,
             lastValidatedAt: new Date(),
           });
         }
@@ -574,6 +579,11 @@ Return JSON:
 
       if (report.selfImprovements?.length) {
         for (const improvement of report.selfImprovements) {
+          const check = policyEnforcedMemoryCheck(0.5, "neutral", "weekly-report", "self_improvement");
+          if (!check.allowed) {
+            console.log(`[Strategy] SELF_IMPROVEMENT_BLOCKED | label="${improvement.slice(0, 80)}" — below memory write threshold`);
+            continue;
+          }
           await db.insert(strategyMemory).values({
             accountId,
             campaignId,
