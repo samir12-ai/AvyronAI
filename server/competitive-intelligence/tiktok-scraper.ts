@@ -509,7 +509,7 @@ export async function scrapeTiktokForCompetitor(
     source: "unavailable",
   };
 
-  const [competitor] = await db.select({ name: ciCompetitors.name, profileLink: ciCompetitors.profileLink })
+  const [competitor] = await db.select({ name: ciCompetitors.name, profileLink: ciCompetitors.profileLink, tiktokUrl: ciCompetitors.tiktokUrl })
     .from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
 
@@ -526,7 +526,7 @@ export async function scrapeTiktokForCompetitor(
     return result;
   }
 
-  const handle = extractHandleFromProfileUrl(competitor.profileLink || "") || competitor.name || "";
+  const handle = extractHandleFromProfileUrl(competitor.tiktokUrl || "") || extractHandleFromProfileUrl(competitor.profileLink || "") || competitor.name || "";
   if (!handle) {
     result.error = "Could not determine TikTok handle for competitor";
     return result;
