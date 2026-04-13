@@ -44,7 +44,12 @@ async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; statu
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
       const { ProxyAgent } = await import("undici");
-      const proxyUrl = `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`;
+      const country = process.env.BRIGHT_DATA_PROXY_COUNTRY || "us";
+      const isWebUnlocker = proxy.port === "33335";
+      const proxyUsername = isWebUnlocker
+        ? proxy.username
+        : `${proxy.username}-country-${country}`;
+      const proxyUrl = `http://${proxyUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
       const res = await fetch(opts.url, {
         headers: baseHeaders,
         signal: controller.signal,
@@ -58,7 +63,8 @@ async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; statu
         proxyErr.message + (proxyErr.cause?.message || "")
       );
       if (!isConnectError) throw proxyErr;
-      console.log(`[WebScraper] Proxy connection failed for ${opts.url}: ${proxyErr.message} — falling back to direct fetch`);
+      const safeMsg = (proxyErr.message || "").replace(/\/\/[^@]+@/g, "//***@");
+      console.log(`[WebScraper] Proxy connection failed for ${opts.url}: ${safeMsg} — falling back to direct fetch`);
     } finally {
       clearTimeout(timer);
     }
