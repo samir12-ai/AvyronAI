@@ -88,7 +88,11 @@ function createSession(accountId: string): ProxySession | null {
   const rand = Math.random().toString(36).substr(2, 4);
   const sessionId = `s${shortAccount}${ts}${rand}`;
   const isWebUnlocker = proxy.port === "33335";
-  const sessionUsername = isWebUnlocker ? proxy.username : `${proxy.username}-session-${sessionId}`;
+  const country = process.env.BRIGHT_DATA_PROXY_COUNTRY || "us";
+  const countrySegment = `-country-${country}`;
+  const sessionUsername = isWebUnlocker
+    ? proxy.username
+    : `${proxy.username}${countrySegment}-session-${sessionId}`;
   const sessionUrl = `http://${sessionUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
 
   const session: ProxySession = {
