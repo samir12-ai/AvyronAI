@@ -67,6 +67,14 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - OpenAI API
 - Google Gemini
 
+### Data Acquisition & Proxy Infrastructure
+- Bright Data residential proxy pool (Web Unlocker on port 33335) for all scraping
+- Instagram: Direct scraping via `proxy-pool-manager.ts` with sticky sessions, rotation, quarantine, US country targeting
+- TikTok: Direct scraping via Bright Data proxy (replaced Apify), extracts rehydration data from profile pages
+- Website/Blog: Proxied via `website-scraper.ts` with US country targeting and direct-fetch fallback
+- Google Reviews: Google Places API (official API, no proxy needed)
+- Credentials: BRIGHT_DATA_PROXY_HOST, PORT, USERNAME, PASSWORD env vars; BRIGHT_DATA_PROXY_COUNTRY defaults to "us"
+
 ### Database
 - PostgreSQL
 
