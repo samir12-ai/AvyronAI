@@ -70,7 +70,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 ### Data Acquisition & Proxy Infrastructure
 - Bright Data residential proxy pool (Web Unlocker on port 33335) for all scraping
 - Instagram: Direct scraping via `proxy-pool-manager.ts` with sticky sessions, rotation, quarantine, US country targeting
-- TikTok: Direct scraping via Bright Data proxy (replaced Apify), extracts rehydration data from profile pages
+- TikTok: Full validation engine via Bright Data proxy — extracts posts, comments, and transcripts from rehydration data; transcript-first hook detection with caption-proxy fallback; audience reaction extraction (objections, confusion, validation, language) from comments; hookReliability and transcriptCoverage metadata; all gated behind qualification filter (HIGH+MID posts only)
 - Website/Blog: Proxied via `website-scraper.ts` with US country targeting and direct-fetch fallback
 - Google Reviews: Direct scraping via Bright Data proxy from Google Maps (replaced Google Places API)
 - Credentials: BRIGHT_DATA_PROXY_HOST, PORT, USERNAME, PASSWORD env vars; BRIGHT_DATA_PROXY_COUNTRY defaults to "us"

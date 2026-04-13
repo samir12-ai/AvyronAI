@@ -1415,12 +1415,33 @@ export async function getStoredTikTokPostsForMIv3(competitorId: string, accountI
     postId: p.postId,
     caption: p.caption || "",
     hookText: p.hookText || null,
+    hookSource: (p as any).hookSource || null,
+    transcript: (p as any).transcript || null,
     likes: p.likes || 0,
     comments: p.comments || 0,
     views: p.views || 0,
     shares: 0,
     hashtags: p.hashtags || "",
     timestamp: p.timestamp?.toISOString() || new Date().toISOString(),
+  }));
+}
+
+export async function getStoredTikTokCommentsForMIv3(competitorId: string, accountId: string = "default") {
+  const comments = await db.select().from(ciCompetitorComments)
+    .where(and(
+      eq(ciCompetitorComments.competitorId, competitorId),
+      eq(ciCompetitorComments.accountId, accountId),
+      eq(ciCompetitorComments.source, "tiktok_scraped"),
+    ))
+    .orderBy(desc(ciCompetitorComments.createdAt))
+    .limit(200);
+
+  return comments.map(c => ({
+    postId: c.postId,
+    commentId: c.commentId || c.id,
+    username: c.username || "anonymous",
+    text: c.commentText || "",
+    sentiment: c.sentiment ?? null,
   }));
 }
 

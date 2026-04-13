@@ -1681,6 +1681,8 @@ export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
   batchId: varchar("batch_id"),
   platform: text("platform").notNull().default("instagram"),
   hookText: text("hook_text"),
+  transcript: text("transcript"),
+  hookSource: text("hook_source"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   competitorPostUnique: uniqueIndex("idx_ci_posts_competitor_postid").on(table.competitorId, table.postId),

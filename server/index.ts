@@ -16,6 +16,7 @@ import { migrateRhythmSnapshotColumns } from "./migrations/006-rhythm-snapshot-c
 import { migrateBuildPlanSnapshots } from "./migrations/007-build-plan-snapshots";
 import { migrateDecisionAttribution } from "./migrations/008-decision-attribution";
 import { migrateMemoryOutcomeProvenance } from "./migrations/009-memory-outcome-provenance";
+import { runMigration010 } from "./migrations/010-tiktok-validation-columns";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import { authMiddleware, optionalAuth } from "./auth";
 import * as fs from "fs";
@@ -361,6 +362,7 @@ function setupErrorHandler(app: express.Application) {
       migrateBuildPlanSnapshots().catch(err => console.error("[Migration-007] build_plan_snapshots migration error:", err));
       migrateDecisionAttribution().catch(err => console.error("[Migration-008] decision attribution migration error:", err));
       migrateMemoryOutcomeProvenance().catch(err => console.error("[Migration-009] memory outcome provenance migration error:", err));
+      runMigration010().catch(err => console.error("[Migration-010] tiktok validation columns migration error:", err));
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));

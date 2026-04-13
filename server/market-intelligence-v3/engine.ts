@@ -39,7 +39,7 @@ import { MI_CONFIDENCE, ENGINE_VERSION, INSTAGRAM_API_CEILING } from "./constant
 import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard";
 import { logAudit } from "../audit";
 import { computeCompetitorHash, parseJsonSafe } from "./utils";
-import { getStoredPostsForMIv3, getStoredCommentsForMIv3, getStoredTikTokPostsForMIv3, getStoredReviewsForMIv3 } from "../competitive-intelligence/data-acquisition";
+import { getStoredPostsForMIv3, getStoredCommentsForMIv3, getStoredTikTokPostsForMIv3, getStoredTikTokCommentsForMIv3, getStoredReviewsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { logSignalDiagnostics, detectNarrativeOverlap } from "../engine-hardening";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { qualifyTikTokPosts, type TikTokQualificationResult } from "./tiktok-qualification";
@@ -939,14 +939,17 @@ export class MarketIntelligenceV3 {
 
     try {
       const allTikTokPosts: Array<{ competitorId: string; posts: Awaited<ReturnType<typeof getStoredTikTokPostsForMIv3>> }> = [];
+      const allTikTokComments: Array<{ postId: string; text: string; sentiment: number | null }> = [];
       const allReviews: Array<{ competitorId: string; reviews: Awaited<ReturnType<typeof getStoredReviewsForMIv3>> }> = [];
 
       for (const comp of competitors) {
-        const [tiktokPosts, reviews] = await Promise.all([
+        const [tiktokPosts, tiktokComments, reviews] = await Promise.all([
           getStoredTikTokPostsForMIv3(comp.id, accountId),
+          getStoredTikTokCommentsForMIv3(comp.id, accountId),
           getStoredReviewsForMIv3(comp.id, accountId),
         ]);
         if (tiktokPosts.length > 0) allTikTokPosts.push({ competitorId: comp.id, posts: tiktokPosts });
+        if (tiktokComments.length > 0) allTikTokComments.push(...tiktokComments);
         if (reviews.length > 0) allReviews.push({ competitorId: comp.id, reviews });
       }
 
@@ -976,7 +979,7 @@ export class MarketIntelligenceV3 {
       });
 
       const tiktokSignals = totalTikTokPosts > 0
-        ? buildTikTokSignals(tiktokQualification, allTikTokPosts.flatMap(t => t.posts))
+        ? buildTikTokSignals(tiktokQualification, allTikTokPosts.flatMap(t => t.posts), allTikTokComments)
         : null;
       const reviewsSignals = totalReviews > 0
         ? buildReviewsSignals(reviewsIntelligence)

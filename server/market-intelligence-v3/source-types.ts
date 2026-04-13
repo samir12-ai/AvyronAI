@@ -109,6 +109,14 @@ export interface TikTokSignals {
     mid: number;
     low: number;
   };
+  audienceObjections: string[];
+  audienceConfusion: string[];
+  audienceValidation: string[];
+  audienceLanguage: string[];
+  transcriptHooks: string[];
+  hookReliability: "transcript_validated" | "caption_proxy" | "mixed" | "unavailable";
+  commentVolume: number;
+  transcriptCoverage: number;
 }
 
 export interface ReviewsSignals {

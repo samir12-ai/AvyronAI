@@ -1,15 +1,27 @@
 import { db } from "../db";
-import { ciCompetitorPosts, ciCompetitors } from "@shared/schema";
+import { ciCompetitorPosts, ciCompetitorComments, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { getProxyConfig } from "./proxy-pool-manager";
 
 const TIKTOK_SCRAPE_TIMEOUT_MS = 45000;
 const MAX_RETRIES = 2;
+const MAX_COMMENTS_PER_POST = 20;
+
+export interface TiktokComment {
+  commentId: string;
+  username: string;
+  text: string;
+  likes?: number;
+  replyCount?: number;
+  timestamp?: Date;
+}
 
 export interface TiktokPost {
   postId: string;
   caption: string;
   hookText?: string;
+  hookSource?: "transcript" | "caption_proxy";
+  transcript?: string;
   likes?: number;
   comments?: number;
   shares?: number;
@@ -17,12 +29,14 @@ export interface TiktokPost {
   hashtags?: string[];
   permalink?: string;
   timestamp?: Date;
+  topComments?: TiktokComment[];
 }
 
 export interface TiktokScrapedResult {
   competitorId: string;
   postsFetched: number;
   postsInserted: number;
+  commentsInserted: number;
   source: "proxy" | "manual" | "unavailable";
   error?: string;
 }
@@ -74,23 +88,17 @@ async function fetchViaProxy(url: string, headers: Record<string, string>): Prom
 function extractRehydrationData(html: string): any | null {
   const rehydrationMatch = html.match(/<script\s+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
   if (rehydrationMatch) {
-    try {
-      return JSON.parse(rehydrationMatch[1]);
-    } catch {}
+    try { return JSON.parse(rehydrationMatch[1]); } catch {}
   }
 
   const sigaMatch = html.match(/<script\s+id="SIGI_STATE"[^>]*>([\s\S]*?)<\/script>/);
   if (sigaMatch) {
-    try {
-      return JSON.parse(sigaMatch[1]);
-    } catch {}
+    try { return JSON.parse(sigaMatch[1]); } catch {}
   }
 
   const nextDataMatch = html.match(/<script\s+id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
   if (nextDataMatch) {
-    try {
-      return JSON.parse(nextDataMatch[1]);
-    } catch {}
+    try { return JSON.parse(nextDataMatch[1]); } catch {}
   }
 
   return null;
@@ -101,18 +109,17 @@ function extractPostsFromRehydration(data: any, handle: string): TiktokPost[] {
 
   const defaultScope = data?.["__DEFAULT_SCOPE__"];
   if (defaultScope) {
-    const userDetail = defaultScope["webapp.user-detail"];
     const userModule = defaultScope["webapp.user-video"];
     const itemModule = defaultScope["webapp.video-detail"];
 
     const videoList = userModule?.videoList || [];
     for (const video of videoList) {
-      const post = parseVideoItem(video, handle);
+      const post = parseVideoItem(video, handle, data);
       if (post) posts.push(post);
     }
 
     if (posts.length === 0 && itemModule?.itemInfo?.itemStruct) {
-      const post = parseVideoItem(itemModule.itemInfo.itemStruct, handle);
+      const post = parseVideoItem(itemModule.itemInfo.itemStruct, handle, data);
       if (post) posts.push(post);
     }
   }
@@ -120,7 +127,7 @@ function extractPostsFromRehydration(data: any, handle: string): TiktokPost[] {
   if (posts.length === 0 && data?.ItemModule) {
     for (const key of Object.keys(data.ItemModule)) {
       const item = data.ItemModule[key];
-      const post = parseVideoItem(item, handle);
+      const post = parseVideoItem(item, handle, data);
       if (post) posts.push(post);
     }
   }
@@ -128,7 +135,7 @@ function extractPostsFromRehydration(data: any, handle: string): TiktokPost[] {
   if (posts.length === 0) {
     const items = findVideoItems(data);
     for (const item of items) {
-      const post = parseVideoItem(item, handle);
+      const post = parseVideoItem(item, handle, data);
       if (post) posts.push(post);
     }
   }
@@ -170,18 +177,139 @@ function findVideoItems(obj: any, depth = 0): any[] {
   return results;
 }
 
-function parseVideoItem(item: any, handle: string): TiktokPost | null {
+function extractTranscript(item: any): string | null {
+  if (item.video?.subtitles) {
+    const subs = item.video.subtitles;
+    if (typeof subs === "string" && subs.length > 10 && !subs.startsWith("http")) return subs;
+    if (Array.isArray(subs) && subs.length > 0) {
+      const textParts: string[] = [];
+      for (const sub of subs) {
+        if (typeof sub === "string" && !sub.startsWith("http")) textParts.push(sub);
+        else if (sub?.text && typeof sub.text === "string") textParts.push(sub.text);
+      }
+      if (textParts.length > 0) return textParts.join(" ");
+    }
+  }
+
+  const stickersOnItem = item.stickersOnItem || [];
+  for (const sticker of stickersOnItem) {
+    if (sticker.stickerType === 13 || sticker.stickerType === "speech_text") {
+      const texts = sticker.stickerText || [];
+      if (Array.isArray(texts) && texts.length > 0) {
+        return texts.map((t: any) => typeof t === "string" ? t : t?.text || "").filter(Boolean).join(" ");
+      }
+    }
+  }
+
+  const textExtra = item.textExtra || [];
+  const speechTexts: string[] = [];
+  for (const t of textExtra) {
+    if (t.type === 2 && t.text) {
+      speechTexts.push(t.text);
+    }
+  }
+  if (speechTexts.length > 0) return speechTexts.join(" ");
+
+  if (item.aigc?.caption_text) return item.aigc.caption_text;
+  if (item.suggestedCaption) return item.suggestedCaption;
+
+  return null;
+}
+
+function extractComments(item: any, fullData: any): TiktokComment[] {
+  const comments: TiktokComment[] = [];
+
+  const commentList = item.comments || item.commentList || [];
+  if (Array.isArray(commentList)) {
+    for (const c of commentList.slice(0, MAX_COMMENTS_PER_POST)) {
+      const parsed = parseComment(c);
+      if (parsed) comments.push(parsed);
+    }
+  }
+
+  if (comments.length === 0 && fullData?.CommentModule) {
+    const postId = item.id;
+    const commentModule = fullData.CommentModule?.[postId];
+    if (commentModule?.comments) {
+      for (const c of commentModule.comments.slice(0, MAX_COMMENTS_PER_POST)) {
+        const parsed = parseComment(c);
+        if (parsed) comments.push(parsed);
+      }
+    }
+  }
+
+  if (comments.length === 0) {
+    const postId = item.id;
+    const defaultScope = fullData?.["__DEFAULT_SCOPE__"];
+    if (defaultScope && postId) {
+      const commentModule = defaultScope["webapp.comment"];
+      const scopedComments = commentModule?.commentListByVideoId?.[postId] || commentModule?.comments;
+      if (scopedComments && Array.isArray(scopedComments)) {
+        const isScoped = commentModule?.commentListByVideoId?.[postId] !== undefined;
+        if (isScoped) {
+          for (const c of scopedComments.slice(0, MAX_COMMENTS_PER_POST)) {
+            const parsed = parseComment(c);
+            if (parsed) comments.push(parsed);
+          }
+        }
+      }
+    }
+  }
+
+  return comments;
+}
+
+function parseComment(c: any): TiktokComment | null {
+  if (!c || typeof c !== "object") return null;
+
+  const rawText = c.text || c.comment || c.commentText || c.content || "";
+  const text = (typeof rawText === "string" ? rawText : String(rawText)).trim();
+  if (text.length < 2) return null;
+
+  const username = c.user?.uniqueId || c.user?.nickname || c.uniqueId || c.username || "anonymous";
+  const commentId = c.cid || c.id || c.commentId || `tt_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+  return {
+    commentId: String(commentId),
+    username: String(username),
+    text,
+    likes: toNum(c.digg_count ?? c.diggCount ?? c.likes),
+    replyCount: toNum(c.reply_comment_total ?? c.replyCommentTotal ?? c.replyCount),
+    timestamp: c.create_time || c.createTime
+      ? new Date((c.create_time || c.createTime) * 1000)
+      : undefined,
+  };
+}
+
+function deriveHook(caption: string, transcript: string | null): { hookText: string; hookSource: "transcript" | "caption_proxy" } {
+  if (transcript && transcript.length > 10) {
+    const words = transcript.split(/\s+/);
+    const hookWords = words.slice(0, 25);
+    const hookText = hookWords.join(" ").trim();
+    if (hookText.length > 5) {
+      return { hookText: hookText.slice(0, 200), hookSource: "transcript" };
+    }
+  }
+
+  const firstLine = caption.split(/\n/)[0].trim();
+  if (firstLine.length > 5 && firstLine.length < 200) {
+    return { hookText: firstLine, hookSource: "caption_proxy" };
+  }
+
+  return { hookText: caption.slice(0, 150), hookSource: "caption_proxy" };
+}
+
+function parseVideoItem(item: any, handle: string, fullData: any): TiktokPost | null {
   if (!item || typeof item !== "object") return null;
 
   const caption = (item.desc || item.description || item.text || "").trim();
   if (!caption) return null;
 
   const postId = item.id || item.video?.id || String(item.createTime || Date.now());
-  const firstLine = caption.split(/\n/)[0].slice(0, 150);
 
   const stats = item.stats || item.statsV2 || {};
   const likes = toNum(stats.diggCount ?? stats.likeCount ?? item.diggCount);
-  const comments = toNum(stats.commentCount ?? item.commentCount);
+  const commentsCount = toNum(stats.commentCount ?? item.commentCount);
   const shares = toNum(stats.shareCount ?? item.shareCount);
   const views = toNum(stats.playCount ?? item.playCount);
 
@@ -198,17 +326,24 @@ function parseVideoItem(item: any, handle: string): TiktokPost | null {
     ? new Date(typeof createTime === "number" && createTime < 1e12 ? createTime * 1000 : createTime)
     : undefined;
 
+  const transcript = extractTranscript(item);
+  const { hookText, hookSource } = deriveHook(caption, transcript);
+  const topComments = extractComments(item, fullData);
+
   return {
     postId,
     caption,
-    hookText: firstLine !== caption ? firstLine : undefined,
+    hookText,
+    hookSource,
+    transcript,
     likes,
-    comments,
+    comments: commentsCount,
     shares,
     views,
     hashtags: hashtags.length > 0 ? hashtags : undefined,
     permalink,
     timestamp,
+    topComments,
   };
 }
 
@@ -278,7 +413,9 @@ async function scrapeTiktokViaProxy(handle: string): Promise<TiktokPost[]> {
       }
 
       const posts = extractPostsFromRehydration(data, handle);
-      console.log(`[TiktokScraper] Extracted ${posts.length} posts for @${handle} from rehydration data`);
+      const totalComments = posts.reduce((s, p) => s + (p.topComments?.length || 0), 0);
+      const withTranscript = posts.filter(p => p.transcript).length;
+      console.log(`[TiktokScraper] Extracted ${posts.length} posts for @${handle} | comments=${totalComments} | withTranscript=${withTranscript}`);
       return posts;
     } catch (err: any) {
       const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
@@ -298,8 +435,10 @@ export async function ingestTiktokPosts(
   competitorId: string,
   accountId: string,
   posts: TiktokPost[],
-): Promise<{ inserted: number }> {
+): Promise<{ inserted: number; commentsInserted: number }> {
   let inserted = 0;
+  let commentsInserted = 0;
+
   for (const post of posts) {
     const existing = await db.select({ id: ciCompetitorPosts.id })
       .from(ciCompetitorPosts)
@@ -315,6 +454,8 @@ export async function ingestTiktokPosts(
       postId: post.postId,
       caption: post.caption,
       hookText: post.hookText || null,
+      hookSource: post.hookSource || null,
+      transcript: post.transcript || null,
       likes: post.likes || null,
       comments: post.comments || null,
       views: post.views || null,
@@ -326,8 +467,34 @@ export async function ingestTiktokPosts(
       hasOffer: false,
     });
     inserted++;
+
+    if (post.topComments && post.topComments.length > 0) {
+      for (const comment of post.topComments) {
+        try {
+          await db.insert(ciCompetitorComments).values({
+            id: `ttc_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            competitorId,
+            accountId,
+            postId: post.postId,
+            commentId: comment.commentId,
+            username: comment.username,
+            commentText: comment.text,
+            sentiment: null,
+            timestamp: comment.timestamp || null,
+            isSynthetic: false,
+            source: "tiktok_scraped",
+          });
+          commentsInserted++;
+        } catch (commentErr: any) {
+          if (!commentErr.message?.includes("duplicate")) {
+            console.warn(`[TiktokScraper] Comment insert error: ${commentErr.message}`);
+          }
+        }
+      }
+    }
   }
-  return { inserted };
+
+  return { inserted, commentsInserted };
 }
 
 export async function scrapeTiktokForCompetitor(
@@ -338,6 +505,7 @@ export async function scrapeTiktokForCompetitor(
     competitorId,
     postsFetched: 0,
     postsInserted: 0,
+    commentsInserted: 0,
     source: "unavailable",
   };
 
@@ -353,7 +521,7 @@ export async function scrapeTiktokForCompetitor(
   const proxy = getProxyConfig();
   if (!proxy) {
     result.source = "unavailable";
-    result.error = "Bright Data proxy not configured — TikTok scraping unavailable. Set BRIGHT_DATA_PROXY_HOST/PORT/USERNAME/PASSWORD or use POST /api/ci/tiktok/:competitorId/ingest to provide data manually.";
+    result.error = "Bright Data proxy not configured — TikTok scraping unavailable.";
     console.log(`[TiktokScraper] ${result.error}`);
     return result;
   }
@@ -374,10 +542,11 @@ export async function scrapeTiktokForCompetitor(
       return result;
     }
 
-    const { inserted } = await ingestTiktokPosts(competitorId, accountId, posts);
+    const { inserted, commentsInserted } = await ingestTiktokPosts(competitorId, accountId, posts);
     result.postsInserted = inserted;
+    result.commentsInserted = commentsInserted;
 
-    console.log(`[TiktokScraper] competitorId=${competitorId} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | source=proxy`);
+    console.log(`[TiktokScraper] competitorId=${competitorId} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=proxy`);
     return result;
   } catch (err: any) {
     const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");

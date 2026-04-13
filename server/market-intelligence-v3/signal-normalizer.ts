@@ -235,18 +235,29 @@ export function buildBlogSignals(extraction: BlogExtraction | null): BlogSignals
 
 export function buildTikTokSignals(
   qualificationResult: TikTokQualificationResult | null,
-  posts: Array<{ caption?: string; hookText?: string | null; hashtags?: string | null }>,
+  posts: Array<{ caption?: string; hookText?: string | null; hookSource?: string | null; transcript?: string | null; hashtags?: string | null; postId?: string }>,
+  comments: Array<{ postId: string; text: string; sentiment: number | null }> = [],
 ): TikTokSignals {
+  const emptyResult: TikTokSignals = {
+    validatedHooks: [],
+    highPerformingCaptions: [],
+    trendingHashtags: [],
+    contentPatterns: [],
+    painInferences: [],
+    ctaPatterns: [],
+    performanceTierDistribution: { high: 0, mid: 0, low: 0 },
+    audienceObjections: [],
+    audienceConfusion: [],
+    audienceValidation: [],
+    audienceLanguage: [],
+    transcriptHooks: [],
+    hookReliability: "unavailable",
+    commentVolume: 0,
+    transcriptCoverage: 0,
+  };
+
   if (!qualificationResult || qualificationResult.qualifications.length === 0) {
-    return {
-      validatedHooks: [],
-      highPerformingCaptions: [],
-      trendingHashtags: [],
-      contentPatterns: [],
-      painInferences: [],
-      ctaPatterns: [],
-      performanceTierDistribution: { high: 0, mid: 0, low: 0 },
-    };
+    return emptyResult;
   }
 
   const validatedHooks: string[] = [];
@@ -255,20 +266,44 @@ export function buildTikTokSignals(
   const painInferences: string[] = [];
   const ctaPatterns: string[] = [];
   const contentPatterns: string[] = [];
+  const transcriptHooks: string[] = [];
+  const audienceObjections: string[] = [];
+  const audienceConfusion: string[] = [];
+  const audienceValidation: string[] = [];
+  const audienceLanguage: string[] = [];
+
+  let transcriptCount = 0;
+  let captionProxyCount = 0;
 
   const qualMap = new Map(qualificationResult.qualifications.map(q => [q.postId, q]));
+  const filteredOutIds = new Set(qualificationResult.filteredPostIds);
+  const qualifiedPostIds = new Set(
+    qualificationResult.qualifications
+      .filter(q => q.tier !== "LOW_PERFORMING")
+      .map(q => q.postId)
+  );
 
   for (const post of posts) {
+    const postId = (post as any).postId || (post as any).id || "";
     const caption = (post.caption || "").trim();
     const hook = (post.hookText || caption.split("\n")[0] || "").trim();
+    const hookSource = post.hookSource || null;
+    const transcript = post.transcript || null;
     const hashtags = (post.hashtags || "").split(" ").filter(Boolean);
 
-    const qual = qualMap.get((post as any).postId || (post as any).id || "");
+    const qual = qualMap.get(postId);
     if (!qual || qual.tier === "LOW_PERFORMING") continue;
+
+    if (transcript) transcriptCount++;
+    if (hookSource === "caption_proxy") captionProxyCount++;
 
     if (hook.length > 5 && hook.length < 200) {
       validatedHooks.push(hook);
       if (/pain|struggle|frustrated|tired|sick of|can'?t|won'?t/i.test(hook)) painInferences.push(hook);
+    }
+
+    if (hookSource === "transcript" && hook.length > 5) {
+      transcriptHooks.push(hook);
     }
 
     if (qual.tier === "HIGH_PERFORMING" && caption.length > 10) {
@@ -287,11 +322,36 @@ export function buildTikTokSignals(
     if (/story|journey|experience|behind the scenes/i.test(caption)) contentPatterns.push("storytelling");
   }
 
+  const qualifiedComments = comments.filter(c => qualifiedPostIds.has(c.postId));
+  for (const comment of qualifiedComments) {
+    const text = comment.text.trim();
+    if (text.length < 3) continue;
+
+    if (/but |however |doesn'?t work|not worth|too expensive|scam|waste|disappointed|problem/i.test(text)) {
+      audienceObjections.push(text.slice(0, 200));
+    }
+    if (/how do|how does|what is|can you explain|confused|don'?t understand|where do i|help me/i.test(text)) {
+      audienceConfusion.push(text.slice(0, 200));
+    }
+    if (/love this|amazing|game changer|so helpful|this works|need this|saving this|exactly what/i.test(text)) {
+      audienceValidation.push(text.slice(0, 200));
+    }
+    if (text.length > 10 && text.length < 150 && !/^(nice|great|wow|lol|😂|🔥|❤️|💯|omg)$/i.test(text)) {
+      audienceLanguage.push(text.slice(0, 150));
+    }
+  }
+
   const hashtagCounts = new Map<string, number>();
   for (const h of trendingHashtags) {
     hashtagCounts.set(h, (hashtagCounts.get(h) || 0) + 1);
   }
   const sortedHashtags = [...hashtagCounts.entries()].sort((a, b) => b[1] - a[1]).map(([h]) => h);
+
+  const totalQualified = validatedHooks.length || 1;
+  let hookReliability: TikTokSignals["hookReliability"] = "unavailable";
+  if (transcriptCount > 0 && captionProxyCount === 0) hookReliability = "transcript_validated";
+  else if (transcriptCount > 0 && captionProxyCount > 0) hookReliability = "mixed";
+  else if (captionProxyCount > 0) hookReliability = "caption_proxy";
 
   return {
     validatedHooks: [...new Set(validatedHooks)].slice(0, 15),
@@ -305,6 +365,14 @@ export function buildTikTokSignals(
       mid: qualificationResult.midPerformingCount,
       low: qualificationResult.lowPerformingCount,
     },
+    audienceObjections: [...new Set(audienceObjections)].slice(0, 15),
+    audienceConfusion: [...new Set(audienceConfusion)].slice(0, 10),
+    audienceValidation: [...new Set(audienceValidation)].slice(0, 10),
+    audienceLanguage: [...new Set(audienceLanguage)].slice(0, 20),
+    transcriptHooks: [...new Set(transcriptHooks)].slice(0, 15),
+    hookReliability,
+    commentVolume: qualifiedComments.length,
+    transcriptCoverage: Math.round((transcriptCount / totalQualified) * 100),
   };
 }
 
@@ -344,8 +412,15 @@ export function classifyTikTokSignals(tikTokSignals: TikTokSignals): ClassifiedS
   const signals: ClassifiedSignal[] = [];
   const src: SourceType = "tiktok";
 
+  const hookConfidence = tikTokSignals.hookReliability === "transcript_validated" ? 0.92
+    : tikTokSignals.hookReliability === "mixed" ? 0.85
+    : 0.75;
+
   for (const hook of tikTokSignals.validatedHooks) {
-    signals.push({ signalClass: "content", sourceType: src, text: hook, confidence: 0.8 });
+    signals.push({ signalClass: "content", sourceType: src, text: hook, confidence: hookConfidence });
+  }
+  for (const tHook of tikTokSignals.transcriptHooks) {
+    signals.push({ signalClass: "content", sourceType: src, text: `[transcript] ${tHook}`, confidence: 0.92 });
   }
   for (const pain of tikTokSignals.painInferences) {
     signals.push({ signalClass: "positioning", sourceType: src, text: pain, confidence: 0.7 });
@@ -355,6 +430,18 @@ export function classifyTikTokSignals(tikTokSignals: TikTokSignals): ClassifiedS
   }
   for (const cap of tikTokSignals.highPerformingCaptions.slice(0, 5)) {
     signals.push({ signalClass: "content", sourceType: src, text: cap, confidence: 0.85 });
+  }
+  for (const obj of tikTokSignals.audienceObjections) {
+    signals.push({ signalClass: "offer", sourceType: src, text: `[objection] ${obj}`, confidence: 0.8 });
+  }
+  for (const conf of tikTokSignals.audienceConfusion) {
+    signals.push({ signalClass: "positioning", sourceType: src, text: `[confusion] ${conf}`, confidence: 0.75 });
+  }
+  for (const val of tikTokSignals.audienceValidation.slice(0, 5)) {
+    signals.push({ signalClass: "proof", sourceType: src, text: `[validation] ${val}`, confidence: 0.7 });
+  }
+  for (const lang of tikTokSignals.audienceLanguage.slice(0, 10)) {
+    signals.push({ signalClass: "positioning", sourceType: src, text: `[audience_voice] ${lang}`, confidence: 0.65 });
   }
 
   return signals;
