@@ -1,8 +1,99 @@
 import { db } from "./db";
-import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory } from "@shared/schema";
-import { eq, sql, gte, isNull, lte, desc, and } from "drizzle-orm";
+import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory, calendarEntries, studioItems, publishedPosts } from "@shared/schema";
+import { eq, sql, gte, isNull, isNotNull, lte, desc, and, inArray } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { validateDecisionForMemoryWrite } from "./decision-policy";
+
+export interface ActionMetrics {
+  avgCpa: number;
+  avgRoas: number;
+  avgCtr: number;
+  totalSpend: number;
+  actionCount: number;
+  publishedCount: number;
+  snapshotCount: number;
+}
+
+export async function getActionPerformance(decisionId: string, accountId: string): Promise<ActionMetrics | null> {
+  const linkedEntries = await db.select({ id: calendarEntries.id })
+    .from(calendarEntries)
+    .where(and(
+      eq(calendarEntries.sourceDecisionId, decisionId),
+      eq(calendarEntries.accountId, accountId),
+    ));
+
+  if (linkedEntries.length === 0) return null;
+
+  const entryIds = linkedEntries.map(e => e.id);
+
+  const linkedStudio = await db.select({ id: studioItems.id })
+    .from(studioItems)
+    .where(and(
+      inArray(studioItems.calendarEntryId, entryIds),
+      eq(studioItems.accountId, accountId),
+    ));
+
+  if (linkedStudio.length === 0) {
+    return {
+      avgCpa: 0, avgRoas: 0, avgCtr: 0, totalSpend: 0,
+      actionCount: linkedEntries.length, publishedCount: 0, snapshotCount: 0,
+    };
+  }
+
+  const studioIds = linkedStudio.map(s => s.id);
+
+  const linkedPublished = await db.select({ metaPostId: publishedPosts.metaPostId })
+    .from(publishedPosts)
+    .where(and(
+      inArray(publishedPosts.mediaItemId, studioIds),
+      eq(publishedPosts.accountId, accountId),
+      isNotNull(publishedPosts.metaPostId),
+    ));
+
+  const metaPostIds = linkedPublished.map(p => p.metaPostId).filter((id): id is string => !!id);
+
+  if (metaPostIds.length === 0) {
+    return {
+      avgCpa: 0, avgRoas: 0, avgCtr: 0, totalSpend: 0,
+      actionCount: linkedEntries.length, publishedCount: linkedPublished.length, snapshotCount: 0,
+    };
+  }
+
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const snapshots = await db.select({
+    avgCpa: sql<number>`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
+    avgRoas: sql<number>`coalesce(avg(${performanceSnapshots.roas}), 0)`,
+    avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
+    totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
+    cnt: sql<number>`count(*)`,
+  }).from(performanceSnapshots)
+    .where(and(
+      eq(performanceSnapshots.accountId, accountId),
+      inArray(performanceSnapshots.postId, metaPostIds),
+      gte(performanceSnapshots.fetchedAt, oneDayAgo),
+    ));
+
+  const s = snapshots[0];
+  const snapshotCount = Number(s?.cnt) || 0;
+
+  if (snapshotCount === 0) {
+    return {
+      avgCpa: 0, avgRoas: 0, avgCtr: 0, totalSpend: 0,
+      actionCount: linkedEntries.length, publishedCount: metaPostIds.length, snapshotCount: 0,
+    };
+  }
+
+  return {
+    avgCpa: Number(s?.avgCpa) || 0,
+    avgRoas: Number(s?.avgRoas) || 0,
+    avgCtr: Number(s?.avgCtr) || 0,
+    totalSpend: Number(s?.totalSpend) || 0,
+    actionCount: linkedEntries.length,
+    publishedCount: metaPostIds.length,
+    snapshotCount,
+  };
+}
 
 export async function snapshotPreMetrics(decisionId: string, accountId: string, decisionType?: string, campaignId?: string) {
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -94,13 +185,28 @@ export async function evaluatePendingOutcomes(accountId: string) {
 
   for (const p of pending) {
     const scopeCampaignId = p.campaignId || null;
-    const measurementScope = scopeCampaignId ? "campaign" : "account";
-    const current = await getMetricsForScope(scopeCampaignId);
 
-    const postCpa = current.avgCpa;
-    const postRoas = current.avgRoas;
-    const postCtr = current.avgCtr;
-    const postSpend = current.totalSpend;
+    let postCpa: number;
+    let postRoas: number;
+    let postCtr: number;
+    let postSpend: number;
+    let measurementScope: "action" | "campaign" | "account";
+
+    const actionMetrics = await getActionPerformance(p.decisionId, accountId);
+    if (actionMetrics && actionMetrics.snapshotCount > 0) {
+      postCpa = actionMetrics.avgCpa;
+      postRoas = actionMetrics.avgRoas;
+      postCtr = actionMetrics.avgCtr;
+      postSpend = actionMetrics.totalSpend;
+      measurementScope = "action";
+    } else {
+      const current = await getMetricsForScope(scopeCampaignId);
+      postCpa = current.avgCpa;
+      postRoas = current.avgRoas;
+      postCtr = current.avgCtr;
+      postSpend = current.totalSpend;
+      measurementScope = scopeCampaignId ? "campaign" : "account";
+    }
 
     const preCpa = p.preMetricsCpa || 0;
     const preRoas = p.preMetricsRoas || 0;
@@ -169,15 +275,21 @@ export async function evaluatePendingOutcomes(accountId: string) {
         cpaChange: cpaChange.toFixed(1) + "%",
         roasChange: roasChange.toFixed(1) + "%",
         ctrChange: ctrChange.toFixed(1) + "%",
+        actionMetrics: actionMetrics ? {
+          actionCount: actionMetrics.actionCount,
+          publishedCount: actionMetrics.publishedCount,
+          snapshotCount: actionMetrics.snapshotCount,
+        } : null,
       },
       preMetrics: { cpa: preCpa, roas: preRoas, ctr: preCtr },
       postMetrics: { cpa: postCpa, roas: postRoas, ctr: postCtr },
     });
 
     console.log(
-      `[OutcomeTracker] OUTCOME_EVALUATED | decision=${p.decisionId} type=${p.decisionType} ` +
-      `scope=${measurementScope} campaign=${scopeCampaignId || "N/A"} outcome=${outcome} ` +
-      `cpa=${cpaChange.toFixed(1)}% roas=${roasChange.toFixed(1)}% ctr=${ctrChange.toFixed(1)}%`,
+      `[OutcomeTracker] OUTCOME_SCOPE=${measurementScope} | decision=${p.decisionId} type=${p.decisionType} ` +
+      `campaign=${scopeCampaignId || "N/A"} outcome=${outcome} ` +
+      `cpa=${cpaChange.toFixed(1)}% roas=${roasChange.toFixed(1)}% ctr=${ctrChange.toFixed(1)}%` +
+      (actionMetrics ? ` actions=${actionMetrics.actionCount} published=${actionMetrics.publishedCount} snapshots=${actionMetrics.snapshotCount}` : ""),
     );
   }
 }

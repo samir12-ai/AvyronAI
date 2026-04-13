@@ -52,6 +52,7 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - **Audit & Control System**: A 5-panel dashboard for auditing feeds, AI usage, gate status, decisions, publish history, and job management.
 - **Decision Policy Layer (Phase 3)**: Central enforcement policy with confidence thresholds applied across plan synthesis, memory mutation, outcome tracking, and autonomous worker.
 - **Decision Attribution Layer (Phase A)**: Campaign-scoped decision tracking for `strategy_decisions` and `decision_outcomes` for per-campaign outcome measurement.
+- **Per-Action Attribution Layer (Phase B)**: `sourceDecisionId` populated on all calendar entries from 3 creation paths (plan-synthesis, execution-activation, execution-routes). Action-level performance lookup via `getActionPerformance()` traces decision → calendar entries → studio items → performance snapshots. Outcome evaluation uses action-level metrics when available (fallback: campaign → account). Measurement scope logged as `OUTCOME_SCOPE=action|campaign|account` for auditability.
 
 ## External Dependencies
 

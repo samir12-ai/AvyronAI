@@ -9,8 +9,9 @@ import {
   contentDna,
   audienceSnapshots,
   positioningSnapshots,
+  strategyDecisions,
 } from "@shared/schema";
-import { eq, and, sql, ne } from "drizzle-orm";
+import { eq, and, sql, ne, desc } from "drizzle-orm";
 import { logAudit } from "../audit";
 import { aiChat } from "../ai-client";
 import {
@@ -160,7 +161,8 @@ function generateCalendarSlots(
   accountId: string,
   work: any,
   startDate: Date,
-  periodDays: number
+  periodDays: number,
+  sourceDecisionId: string | null = null,
 ): any[] {
   const slots: any[] = [];
   const contentQueue: { type: string; count: number }[] = [];
@@ -200,6 +202,7 @@ function generateCalendarSlots(
       title: `${allItems[i].type.charAt(0).toUpperCase() + allItems[i].type.slice(1)} #${allItems[i].index + 1}`,
       status: "DRAFT",
       sourceLabel: "auto-activation",
+      sourceDecisionId,
     });
   }
 
@@ -452,12 +455,23 @@ export async function activateExecution(planId: string): Promise<ActivationResul
         });
       }
 
-      const slots = generateCalendarSlots(planId, plan.campaignId, plan.accountId, totals, new Date(), periodDays);
+      const recentDecisions = await db.select({ id: strategyDecisions.id })
+        .from(strategyDecisions)
+        .where(and(
+          eq(strategyDecisions.accountId, plan.accountId),
+          eq(strategyDecisions.campaignId, plan.campaignId),
+          eq(strategyDecisions.status, "executed"),
+        ))
+        .orderBy(desc(strategyDecisions.executedAt))
+        .limit(1);
+      const activationDecisionId = recentDecisions.length > 0 ? recentDecisions[0].id : null;
+
+      const slots = generateCalendarSlots(planId, plan.campaignId, plan.accountId, totals, new Date(), periodDays, activationDecisionId);
 
       if (slots.length > 0) {
         await db.insert(calendarEntries).values(slots);
         calendarEntriesGenerated = slots.length;
-        activationLog.push(`CALENDAR: Generated ${slots.length} calendar slots`);
+        activationLog.push(`CALENDAR: Generated ${slots.length} calendar slots | sourceDecisionId=${activationDecisionId || "NONE"}`);
       } else {
         activationLog.push("CALENDAR_WARNING: Zero slots generated — distribution may be empty");
       }
