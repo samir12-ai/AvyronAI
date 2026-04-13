@@ -212,6 +212,7 @@ export const strategyMemory = pgTable("strategy_memory", {
   platform: text("platform"),
   campaignType: text("campaign_type"),
   funnelObjective: text("funnel_objective"),
+  sourceOutcomeId: varchar("source_outcome_id"),
 });
 
 export const contentPerformanceSnapshots = pgTable("content_performance_snapshots", {

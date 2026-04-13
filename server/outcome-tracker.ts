@@ -314,9 +314,9 @@ export async function evaluatePendingOutcomes(accountId: string) {
       .set({ outcomeStatus: outcome })
       .where(eq(strategyDecisions.id, p.decisionId));
 
+    let planIsDegraded = true;
+    let planLookupReason = "no_linked_plan_found";
     try {
-      let planIsDegraded = true;
-      let planLookupReason = "no_linked_plan_found";
       try {
         const planRows = await db.select({ planJson: strategicPlans.planJson })
           .from(strategicPlans)
@@ -364,8 +364,12 @@ export async function evaluatePendingOutcomes(accountId: string) {
           const weightedScore = measurementScope === "action" ? baseScore * attributionWeight : baseScore;
           const isWinner = outcome === "success" && attributionWeight >= 0.5;
           await db.update(strategyMemory)
-            .set({ score: weightedScore, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date() })
+            .set({ score: weightedScore, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date(), sourceOutcomeId: p.id })
             .where(eq(strategyMemory.id, p.decisionId));
+          console.log(
+            `[OutcomeTracker] MEMORY_UPDATED | decision=${p.decisionId} outcomeId=${p.id} direction=${direction} ` +
+            `confidence=${confidenceScore.toFixed(3)} score=${weightedScore.toFixed(3)} sourceOutcomeId=${p.id}`,
+          );
         }
       }
     } catch {
@@ -373,12 +377,15 @@ export async function evaluatePendingOutcomes(accountId: string) {
 
     await logAudit(accountId, "OUTCOME_EVALUATED", {
       decisionId: p.decisionId,
+      outcomeId: p.id,
       details: {
         outcome,
         measurementScope,
         attributionWeight,
         attributionMethod,
         linkedDecisionCount,
+        planIsDegraded,
+        planLookupReason,
         campaignId: scopeCampaignId || "account-wide",
         cpaChange: cpaChange.toFixed(1) + "%",
         roasChange: roasChange.toFixed(1) + "%",

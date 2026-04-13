@@ -1,0 +1,97 @@
+Hi Replit Team,
+
+Great work on the recent updates — the system is now structurally clean, with proper cleaning, enforcement, fallback isolation, and synthesis verification in place.
+
+At this point, there is only one remaining item from the audit:
+
+---
+
+# 🧠 P3 — Memory-to-Outcome Provenance Link
+
+We now need to complete the final linkage in the learning chain by introducing a direct connection between memory updates and the outcomes that triggered them.
+
+### Objective
+
+Ensure that every memory update can be traced back to the specific outcome that caused it.
+
+This is not a correctness fix, but it is important for:
+
+* auditability
+* traceability
+* debugging learning behavior
+* future analysis and explainability
+
+---
+
+# 🔗 Required Implementation
+
+## 1. Add `sourceOutcomeId` to memory
+
+* Add a `sourceOutcomeId` field to the `strategy_memory` (or equivalent) table
+* This should reference the corresponding `decision_outcomes` entry
+
+---
+
+## 2. Populate during memory updates
+
+* When a memory entry is created or updated as a result of outcome evaluation:
+
+  * attach the `sourceOutcomeId`
+* This should apply to:
+
+  * reinforcement
+  * challenge
+  * flip
+  * any outcome-driven mutation
+
+---
+
+## 3. Ensure compatibility with existing flow
+
+* Do not break existing memory entries
+* Allow null for historical data
+* Apply only to new updates going forward
+
+---
+
+## 4. Logging / visibility
+
+* Include `sourceOutcomeId` in:
+
+  * memory update logs
+  * debug traces
+* This will allow full tracing:
+
+decision → action → outcome → memory
+
+---
+
+# 🧪 Verification
+
+Please confirm that after implementation:
+
+* a memory entry can be traced back to:
+
+  * the decision
+  * the action
+  * the outcome that triggered it
+
+* no outcome-driven update occurs without a linked `sourceOutcomeId` (unless explicitly skipped with logging)
+
+---
+
+# 🎯 Final Goal
+
+Complete the full traceable loop:
+
+data → signals → decisions → actions → outcomes → memory
+
+with explicit linkage at every step.
+
+---
+
+Once this is done, we can consider the current system fully aligned and ready from an architectural standpoint.
+
+Thanks,
+Samir
+Avyron AI
