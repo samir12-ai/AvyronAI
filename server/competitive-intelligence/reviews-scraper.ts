@@ -1,10 +1,10 @@
 import { db } from "../db";
 import { ciCompetitorReviews, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import * as https from "https";
+import { getProxyConfig } from "./proxy-pool-manager";
 
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || "";
-const GOOGLE_PLACES_BASE = "https://maps.googleapis.com/maps/api/place";
+const SCRAPE_TIMEOUT_MS = 40000;
+const MAX_RETRIES = 2;
 
 export interface ReviewScrapedResult {
   competitorId: string;
@@ -14,38 +14,307 @@ export interface ReviewScrapedResult {
   error?: string;
 }
 
-function httpsGet(url: string): Promise<any> {
-  return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error("Failed to parse JSON: " + data.slice(0, 200))); }
-      });
-    }).on("error", reject);
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+];
+
+function pickUA(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+async function fetchViaProxy(url: string): Promise<{ html: string; status: number }> {
+  const proxy = getProxyConfig();
+  if (!proxy) throw new Error("Bright Data proxy not configured");
+
+  const { ProxyAgent } = await import("undici");
+  const country = process.env.BRIGHT_DATA_PROXY_COUNTRY || "us";
+  const isWebUnlocker = proxy.port === "33335";
+  const proxyUsername = isWebUnlocker
+    ? proxy.username
+    : `${proxy.username}-country-${country}`;
+  const proxyUrl = `http://${proxyUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": pickUA(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+      },
+      signal: controller.signal,
+      redirect: "follow",
+      dispatcher: new ProxyAgent({ uri: proxyUrl, requestTls: { rejectUnauthorized: false } }),
+    } as any);
+    const html = await res.text();
+    return { html, status: res.status };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface ExtractedReview {
+  text: string;
+  rating: number;
+  time: number;
+  authorName?: string;
+}
+
+function extractReviewsFromHTML(html: string): ExtractedReview[] {
+  const reviews: ExtractedReview[] = [];
+
+  const windowDataMatch = html.match(/window\.APP_INITIALIZATION_STATE\s*=\s*(\[[\s\S]*?\]);\s*(?:window\.|;|<\/script>)/);
+  if (windowDataMatch) {
+    try {
+      const parsed = JSON.parse(windowDataMatch[1]);
+      const extracted = extractFromAppInitState(parsed);
+      if (extracted.length > 0) return extracted;
+    } catch {}
+  }
+
+  const pbMatch = html.match(/\["https:\/\/www\.google\.[^"]*\/maps\/preview\/review[\s\S]*?\]\s*\]/g);
+  if (pbMatch) {
+    for (const block of pbMatch) {
+      try {
+        const parsed = JSON.parse(`[${block}]`);
+        const revs = extractFromPbBlocks(parsed);
+        reviews.push(...revs);
+      } catch {}
+    }
+    if (reviews.length > 0) return reviews;
+  }
+
+  const jsonBlocks = html.match(/\[\[[\s\S]{50,}?\]\]/g) || [];
+  for (const block of jsonBlocks) {
+    try {
+      const parsed = JSON.parse(block);
+      const revs = deepExtractReviews(parsed);
+      reviews.push(...revs);
+    } catch {}
+  }
+
+  if (reviews.length === 0) {
+    const reviewPatterns = [
+      /<span[^>]*class="[^"]*review[^"]*"[^>]*>([\s\S]*?)<\/span>/gi,
+      /data-review-id="[^"]*"[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/gi,
+    ];
+
+    for (const pattern of reviewPatterns) {
+      let match;
+      while ((match = pattern.exec(html)) !== null) {
+        const text = cleanHtml(match[1]);
+        if (text.length > 10 && text.length < 5000) {
+          const ratingMatch = html.slice(Math.max(0, match.index - 500), match.index + match[0].length + 200)
+            .match(/aria-label="(\d)\s*star/i);
+          reviews.push({
+            text,
+            rating: ratingMatch ? parseInt(ratingMatch[1]) : 0,
+            time: Math.floor(Date.now() / 1000),
+          });
+        }
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  return reviews.filter(r => {
+    if (r.text.length < 5) return false;
+    const key = r.text.slice(0, 100).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 
-async function findPlaceId(query: string): Promise<string | null> {
-  if (!GOOGLE_MAPS_API_KEY) return null;
-  const encoded = encodeURIComponent(query);
-  const url = `${GOOGLE_PLACES_BASE}/findplacefromtext/json?input=${encoded}&inputtype=textquery&fields=place_id&key=${GOOGLE_MAPS_API_KEY}`;
-  const result = await httpsGet(url);
-  if (result.status !== "OK" || !result.candidates?.length) return null;
-  return result.candidates[0].place_id || null;
+function extractFromAppInitState(data: any[]): ExtractedReview[] {
+  const reviews: ExtractedReview[] = [];
+  const str = JSON.stringify(data);
+
+  const reviewArrays = findReviewArrays(data, 0);
+  for (const arr of reviewArrays) {
+    const text = findReviewText(arr);
+    const rating = findRating(arr);
+    const time = findTimestamp(arr);
+    const author = findAuthorName(arr);
+    if (text && text.length > 5) {
+      reviews.push({ text, rating: rating || 0, time: time || Math.floor(Date.now() / 1000), authorName: author });
+    }
+  }
+
+  return reviews;
 }
 
-async function fetchPlaceReviews(placeId: string): Promise<{ text: string; rating: number; time: number }[]> {
-  if (!GOOGLE_MAPS_API_KEY) return [];
-  const url = `${GOOGLE_PLACES_BASE}/details/json?place_id=${placeId}&fields=reviews&language=en&key=${GOOGLE_MAPS_API_KEY}`;
-  const result = await httpsGet(url);
-  if (result.status !== "OK" || !result.result?.reviews) return [];
-  return result.result.reviews.map((r: any) => ({
-    text: (r.text || "").trim(),
-    rating: r.rating || 0,
-    time: r.time || 0,
-  })).filter((r: { text: string }) => r.text.length > 5);
+function findReviewArrays(data: any, depth: number): any[] {
+  if (depth > 12 || !data) return [];
+  const results: any[] = [];
+
+  if (Array.isArray(data)) {
+    const hasTextLikeField = data.some((item, i) =>
+      typeof item === "string" && item.length > 20 && item.length < 5000 && i > 0
+    );
+    const hasRatingLikeField = data.some(item =>
+      typeof item === "number" && item >= 1 && item <= 5
+    );
+
+    if (hasTextLikeField && hasRatingLikeField && data.length >= 3) {
+      results.push(data);
+    }
+
+    for (const item of data) {
+      results.push(...findReviewArrays(item, depth + 1));
+    }
+  }
+
+  return results;
+}
+
+function findReviewText(arr: any[]): string | null {
+  if (!Array.isArray(arr)) return null;
+
+  for (const item of arr) {
+    if (typeof item === "string" && item.length > 20 && item.length < 5000) {
+      if (!/^https?:\/\//.test(item) && !/^[A-Z]{2,}$/.test(item) && !/^\d+$/.test(item)) {
+        return item.trim();
+      }
+    }
+  }
+
+  for (const item of arr) {
+    if (Array.isArray(item)) {
+      const found = findReviewText(item);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+function findRating(arr: any[]): number | null {
+  if (!Array.isArray(arr)) return null;
+  for (const item of arr) {
+    if (typeof item === "number" && item >= 1 && item <= 5 && Number.isInteger(item)) {
+      return item;
+    }
+  }
+  for (const item of arr) {
+    if (Array.isArray(item)) {
+      const found = findRating(item);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findTimestamp(arr: any[]): number | null {
+  if (!Array.isArray(arr)) return null;
+  for (const item of arr) {
+    if (typeof item === "number" && item > 1_000_000_000 && item < 2_000_000_000) {
+      return item;
+    }
+  }
+  for (const item of arr) {
+    if (Array.isArray(item)) {
+      const found = findTimestamp(item);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findAuthorName(arr: any[]): string | undefined {
+  if (!Array.isArray(arr)) return undefined;
+  for (const item of arr) {
+    if (typeof item === "string" && item.length > 1 && item.length < 60) {
+      if (!/^https?:\/\//.test(item) && !/^\d+$/.test(item) && item.length < 40) {
+        return item;
+      }
+    }
+  }
+  return undefined;
+}
+
+function extractFromPbBlocks(data: any): ExtractedReview[] {
+  return deepExtractReviews(data);
+}
+
+function deepExtractReviews(data: any, depth = 0): ExtractedReview[] {
+  if (depth > 15 || !data) return [];
+  const reviews: ExtractedReview[] = [];
+
+  if (Array.isArray(data)) {
+    if (data.length >= 3) {
+      let textCandidate: string | null = null;
+      let ratingCandidate: number | null = null;
+      let timeCandidate: number | null = null;
+
+      for (const item of data) {
+        if (typeof item === "string" && item.length > 20 && item.length < 5000 && !textCandidate) {
+          if (!/^https?:\/\//.test(item)) textCandidate = item;
+        }
+        if (typeof item === "number" && item >= 1 && item <= 5 && Number.isInteger(item)) {
+          ratingCandidate = item;
+        }
+        if (typeof item === "number" && item > 1_000_000_000 && item < 2_000_000_000) {
+          timeCandidate = item;
+        }
+      }
+
+      if (textCandidate && ratingCandidate) {
+        reviews.push({
+          text: textCandidate.trim(),
+          rating: ratingCandidate,
+          time: timeCandidate || Math.floor(Date.now() / 1000),
+        });
+      }
+    }
+
+    for (const item of data) {
+      reviews.push(...deepExtractReviews(item, depth + 1));
+    }
+  }
+
+  return reviews;
+}
+
+function cleanHtml(text: string): string {
+  return text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildGoogleMapsSearchUrl(query: string): string {
+  const encoded = encodeURIComponent(query + " reviews");
+  return `https://www.google.com/maps/search/${encoded}`;
+}
+
+function buildGoogleMapsPlaceUrl(placeIdentifier: string): string {
+  const encoded = encodeURIComponent(placeIdentifier);
+  return `https://www.google.com/maps/place/${encoded}`;
+}
+
+function extractPlaceIdFromHtml(html: string): string | null {
+  const ftidMatch = html.match(/0x[0-9a-f]+:0x[0-9a-f]+/i);
+  if (ftidMatch) return ftidMatch[0];
+
+  const ludocrIdMatch = html.match(/ludocid[=:](\d+)/);
+  if (ludocrIdMatch) return `ludocid:${ludocrIdMatch[1]}`;
+
+  const cidMatch = html.match(/cid[=:](\d+)/);
+  if (cidMatch) return `cid:${cidMatch[1]}`;
+
+  return `search_${Date.now()}`;
 }
 
 export async function scrapeReviewsForCompetitor(
@@ -60,8 +329,9 @@ export async function scrapeReviewsForCompetitor(
     placeId: null,
   };
 
-  if (!GOOGLE_MAPS_API_KEY) {
-    result.error = "GOOGLE_MAPS_API_KEY not configured — reviews scraping skipped";
+  const proxy = getProxyConfig();
+  if (!proxy) {
+    result.error = "Bright Data proxy not configured — reviews scraping unavailable. Set BRIGHT_DATA_PROXY_HOST/PORT/USERNAME/PASSWORD.";
     console.log(`[ReviewsScraper] ${result.error}`);
     return result;
   }
@@ -77,24 +347,67 @@ export async function scrapeReviewsForCompetitor(
     }
 
     const searchQuery = competitor.name || competitor.url || competitorId;
-    const placeId = await findPlaceId(searchQuery);
-    if (!placeId) {
-      result.error = `No Google Place found for: ${searchQuery}`;
-      console.log(`[ReviewsScraper] ${result.error}`);
-      return result;
+    let reviews: ExtractedReview[] = [];
+    let placeId: string | null = null;
+    let lastError = "";
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const searchUrl = attempt === 0
+          ? buildGoogleMapsSearchUrl(searchQuery)
+          : buildGoogleMapsPlaceUrl(searchQuery);
+
+        console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via proxy`);
+        const { html, status } = await fetchViaProxy(searchUrl);
+
+        if (status === 403 || status === 429) {
+          lastError = `HTTP ${status} — blocked or rate limited`;
+          console.warn(`[ReviewsScraper] ${lastError}, attempt ${attempt + 1}`);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+          }
+          continue;
+        }
+
+        if (status !== 200) {
+          lastError = `HTTP ${status}`;
+          console.warn(`[ReviewsScraper] Unexpected status ${status} for "${searchQuery}"`);
+          continue;
+        }
+
+        placeId = extractPlaceIdFromHtml(html);
+        reviews = extractReviewsFromHTML(html);
+
+        if (reviews.length > 0) {
+          console.log(`[ReviewsScraper] Extracted ${reviews.length} reviews for "${searchQuery}" from Google Maps`);
+          break;
+        }
+
+        lastError = "No reviews found in HTML response";
+        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}" (html length: ${html.length})`);
+        if (attempt < MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+        }
+      } catch (err: any) {
+        const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
+        lastError = safeMsg;
+        console.error(`[ReviewsScraper] Proxy fetch error: ${safeMsg}`);
+        if (attempt < MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+        }
+      }
     }
 
     result.placeId = placeId;
-    const reviews = await fetchPlaceReviews(placeId);
     result.reviewsFetched = reviews.length;
 
     if (reviews.length === 0) {
-      result.error = "No reviews found on Google Maps for this competitor";
+      result.error = `No reviews extracted after ${MAX_RETRIES + 1} attempts: ${lastError}`;
       return result;
     }
 
     for (const review of reviews) {
-      const reviewId = `google_${placeId}_${review.time}`;
+      const reviewId = `google_${placeId || "unknown"}_${review.time}_${review.text.slice(0, 20).replace(/\W/g, "")}`;
       const existing = await db.select({ id: ciCompetitorReviews.id })
         .from(ciCompetitorReviews)
         .where(sql`${ciCompetitorReviews.competitorId} = ${competitorId} AND ${ciCompetitorReviews.reviewId} = ${reviewId}`)
@@ -117,11 +430,12 @@ export async function scrapeReviewsForCompetitor(
       result.reviewsInserted++;
     }
 
-    console.log(`[ReviewsScraper] competitorId=${competitorId} | fetched=${result.reviewsFetched} | inserted=${result.reviewsInserted}`);
+    console.log(`[ReviewsScraper] competitorId=${competitorId} | fetched=${result.reviewsFetched} | inserted=${result.reviewsInserted} | source=proxy`);
     return result;
   } catch (err: any) {
-    result.error = err.message;
-    console.error(`[ReviewsScraper] ERROR competitorId=${competitorId}: ${err.message}`);
+    const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
+    result.error = safeMsg;
+    console.error(`[ReviewsScraper] ERROR competitorId=${competitorId}: ${safeMsg}`);
     return result;
   }
 }
@@ -138,7 +452,7 @@ export async function scrapeReviewsForCampaign(
   for (const comp of competitors) {
     const result = await scrapeReviewsForCompetitor(comp.id, accountId, campaignId);
     results.push(result);
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
   }
   return results;
 }
