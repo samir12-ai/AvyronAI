@@ -194,8 +194,11 @@ const REVIEW_CLUSTER_KEYWORDS: Record<string, string[]> = {
 };
 
 function normalizeReview(r: RawReview): { text: string; rating: number; competitorName: string; reviewDate: Date | null } {
+  const { sanitizeReviewText } = require("../shared/text-sanitizer");
+  const raw = (r.text || r.reviewText || "").trim();
+  const sanitized = sanitizeReviewText(raw);
   return {
-    text: (r.text || r.reviewText || "").trim(),
+    text: sanitized.text,
     rating: r.rating || 0,
     competitorName: "",
     reviewDate: r.reviewDate ? new Date(r.reviewDate) : null,

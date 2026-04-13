@@ -237,7 +237,10 @@ function sanitizeExtractedText(raw: string): string {
 }
 
 function isCleanText(text: string): boolean {
-  return text.length > 5 && text.length < 200 && !/href=|class=|onclick=|data-|style=|utm_|\.js|\.css/i.test(text);
+  const { sanitizeWebsiteBlock } = require("../shared/text-sanitizer");
+  if (text.length <= 5 || text.length >= 200) return false;
+  const result = sanitizeWebsiteBlock(text, "general");
+  return result.text.length > 0;
 }
 
 function extractOfferPhrases(html: string): string[] {

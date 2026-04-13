@@ -371,12 +371,21 @@ const SEMANTIC_PATTERNS: Record<SemanticSignalCategory, RegExp[]> = {
 };
 
 export function extractSemanticSignals(posts: PostData[]): SemanticSignal[] {
+  const { sanitizeCaption } = require("../shared/text-sanitizer");
   const signals: SemanticSignal[] = [];
   const seenSnippets = new Set<string>();
+  let sanitizedCount = 0;
+  let rejectedCount = 0;
 
   for (const post of posts) {
-    const caption = (post.caption || "").trim();
-    if (caption.length < 10) continue;
+    const raw = (post.caption || "").trim();
+    if (raw.length < 10) continue;
+
+    const platform = (post as any).platform === "tiktok" ? "tiktok" : "instagram";
+    const sanitized = sanitizeCaption(raw, platform);
+    if (sanitized.wasModified) sanitizedCount++;
+    const caption = sanitized.text;
+    if (!caption || caption.length < 10) { rejectedCount++; continue; }
 
     for (const [category, patterns] of Object.entries(SEMANTIC_PATTERNS) as [SemanticSignalCategory, RegExp[]][]) {
       for (const pattern of patterns) {
@@ -401,6 +410,10 @@ export function extractSemanticSignals(posts: PostData[]): SemanticSignal[] {
         }
       }
     }
+  }
+
+  if (sanitizedCount > 0 || rejectedCount > 0) {
+    console.log(`[TextSanitizer] SemanticExtraction | total=${posts.length} sanitized=${sanitizedCount} rejected=${rejectedCount} signals=${signals.length}`);
   }
 
   return signals;

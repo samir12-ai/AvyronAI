@@ -49,6 +49,10 @@ function generateFallbackPlan(params: {
 
   return {
     fallback: true,
+    planSource: "deterministic_fallback",
+    degraded: true,
+    lockedDecisionLabels: [],
+    synthesisVerification: { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() },
     fallbackReason: "AI generation timed out or failed. This is a deterministic skeleton plan. You can approve it and refine later, or retry generation.",
     contentDistributionPlan: {
       platforms: [

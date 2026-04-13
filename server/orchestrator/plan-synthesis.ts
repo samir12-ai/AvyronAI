@@ -23,7 +23,19 @@ import {
   type DecisionEnforcementReport,
 } from "../decision-policy";
 
+export type PlanSource = "decision_driven" | "degraded_no_decisions" | "degraded_ai_failed" | "deterministic_fallback";
+
 export interface SynthesizedPlan {
+  planSource: PlanSource;
+  degraded: boolean;
+  lockedDecisionLabels?: string[];
+  synthesisVerification?: {
+    passed: boolean;
+    totalLocked: number;
+    preserved: number;
+    missing: string[];
+    verifiedAt: string;
+  };
   strategicSummary: {
     strategy: string;
     targetAudience: string;
@@ -216,6 +228,76 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
 
   sections.push(...nonMiSections);
   return sections.join("\n");
+}
+
+function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): string[] {
+  const labels: string[] = [];
+
+  const positioning = results.get("positioning");
+  if (positioning?.status === "SUCCESS" && positioning.output) {
+    const out = positioning.output;
+    const primary = (out.territories || [])[0];
+    if (primary?.name) labels.push(primary.name);
+  }
+
+  const mechanism = results.get("mechanism");
+  if (mechanism?.status === "SUCCESS") {
+    const out = mechanism.output?.output || mechanism.output;
+    if (out?.mechanismName) labels.push(out.mechanismName);
+  }
+
+  const offer = results.get("offer");
+  if (offer?.status === "SUCCESS") {
+    const out = offer.output?.output || offer.output;
+    if (out?.offerName) labels.push(out.offerName);
+  }
+
+  const diff = results.get("differentiation");
+  if (diff?.status === "SUCCESS") {
+    const out = diff.output?.output || diff.output;
+    if (out?.pillars?.length > 0) {
+      for (const p of out.pillars) {
+        const name = p.name || p.pillarName;
+        if (name) labels.push(name);
+      }
+    }
+  }
+
+  return labels;
+}
+
+function verifySynthesisPreservation(plan: SynthesizedPlan, lockedLabels: string[]): SynthesizedPlan["synthesisVerification"] {
+  if (lockedLabels.length === 0) {
+    return { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
+  }
+
+  const { lockedDecisionLabels: _labels, synthesisVerification: _verif, planSource: _src, degraded: _deg, ...contentOnly } = plan;
+  const planText = JSON.stringify(contentOnly).toLowerCase();
+  const missing: string[] = [];
+  let preserved = 0;
+
+  for (const label of lockedLabels) {
+    const normalized = label.toLowerCase().trim();
+    if (normalized.length < 3) continue;
+
+    const words = normalized.split(/\s+/).filter(w => w.length >= 3);
+    const keywordPresent = words.length > 0 && words.filter(w => planText.includes(w)).length >= Math.ceil(words.length * 0.5);
+    const exactPresent = planText.includes(normalized);
+
+    if (exactPresent || keywordPresent) {
+      preserved++;
+    } else {
+      missing.push(label);
+    }
+  }
+
+  return {
+    passed: missing.length === 0,
+    totalLocked: lockedLabels.length,
+    preserved,
+    missing,
+    verifiedAt: new Date().toISOString(),
+  };
 }
 
 function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): string {
@@ -478,6 +560,10 @@ async function buildDeterministicPlan(businessData: any, campaign: any, objectiv
   const degradedMarker = "[DEGRADED — AI synthesis failed. This plan uses adaptive rhythm where available but contains no cross-signal validated market decisions. Do not treat this as a decision-driven plan.]";
 
   return {
+    planSource: "degraded_ai_failed" as PlanSource,
+    degraded: true,
+    lockedDecisionLabels: [],
+    synthesisVerification: { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() },
     strategicSummary: {
       strategy: `${degradedMarker} ${objective.toLowerCase()}-focused growth strategy for ${businessType}`,
       targetAudience: `Primary audience in ${location} seeking ${businessType} solutions`,
@@ -798,6 +884,7 @@ export async function synthesizePlan(
 
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
+  const lockedLabels = extractLockedDecisionLabels(results);
 
   const miResult = results.get("market_intelligence");
   const crossSignalDecisions: any[] = miResult?.output?.crossSignalDecisions?.decisions ?? [];
@@ -839,6 +926,42 @@ export async function synthesizePlan(
   }
 
   const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm);
+
+  const alreadyDegraded = synthesized.degraded === true || synthesized.planSource === "degraded_ai_failed";
+
+  const verification = verifySynthesisPreservation(synthesized, lockedLabels);
+
+  if (alreadyDegraded) {
+    synthesized.planSource = synthesized.planSource ?? "degraded_ai_failed";
+    synthesized.degraded = true;
+    synthesized.lockedDecisionLabels = [];
+    synthesized.synthesisVerification = { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
+    console.warn(
+      `[PlanSynthesis] PLAN_ALREADY_DEGRADED | planSource=${synthesized.planSource} — AI fallback was used, preserving degraded provenance.`,
+    );
+  } else {
+    const planSource: PlanSource = synthesisPath === "DECISION_DRIVEN" ? "decision_driven" : "degraded_no_decisions";
+    synthesized.planSource = planSource;
+    synthesized.degraded = planSource !== "decision_driven";
+
+    synthesized.synthesisVerification = verification;
+    synthesized.lockedDecisionLabels = lockedLabels;
+
+    if (!verification.passed) {
+      console.warn(
+        `[PlanSynthesis] SYNTHESIS_VERIFICATION_FAILED | locked=${verification.totalLocked} preserved=${verification.preserved} ` +
+        `missing=[${verification.missing.join(", ")}] — locked decisions were NOT fully preserved in AI output.`,
+      );
+      synthesized.degraded = true;
+      if (synthesized.planSource === "decision_driven") {
+        synthesized.planSource = "degraded_no_decisions";
+      }
+    } else if (verification.totalLocked > 0) {
+      console.log(
+        `[PlanSynthesis] SYNTHESIS_VERIFICATION_PASSED | locked=${verification.totalLocked} preserved=${verification.preserved} — all locked decisions preserved in output.`,
+      );
+    }
+  }
 
   if (synthesisPath !== "DECISION_DRIVEN") {
     console.warn(

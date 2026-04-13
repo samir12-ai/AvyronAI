@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory, calendarEntries, studioItems, publishedPosts, decisionAttributions } from "@shared/schema";
+import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory, calendarEntries, studioItems, publishedPosts, decisionAttributions, strategicPlans } from "@shared/schema";
 import { eq, sql, gte, isNull, isNotNull, lte, desc, and, inArray } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { validateDecisionForMemoryWrite } from "./decision-policy";
@@ -315,29 +315,58 @@ export async function evaluatePendingOutcomes(accountId: string) {
       .where(eq(strategyDecisions.id, p.decisionId));
 
     try {
-      const direction = outcome === "success" ? "reinforce" as const
-        : (outcome === "failure" ? "avoid" as const : "neutral" as const);
+      let planIsDegraded = true;
+      let planLookupReason = "no_linked_plan_found";
+      try {
+        const planRows = await db.select({ planJson: strategicPlans.planJson })
+          .from(strategicPlans)
+          .innerJoin(calendarEntries, eq(calendarEntries.planId, strategicPlans.id))
+          .where(eq(calendarEntries.sourceDecisionId, p.decisionId))
+          .limit(1);
+        if (planRows.length > 0 && planRows[0].planJson) {
+          const planData = typeof planRows[0].planJson === "string" ? JSON.parse(planRows[0].planJson) : planRows[0].planJson;
+          if (planData.degraded === true || planData.planSource === "deterministic_fallback" || planData.planSource === "degraded_ai_failed" || planData.planSource === "degraded_no_decisions") {
+            planIsDegraded = true;
+            planLookupReason = `degraded_plan_source=${planData.planSource || "unknown"}`;
+          } else {
+            planIsDegraded = false;
+            planLookupReason = "decision_driven_plan_verified";
+          }
+        }
+      } catch (planLookupErr: any) {
+        planLookupReason = `plan_lookup_failed: ${planLookupErr.message}`;
+      }
 
-      const baseConfidence = outcome === "success" ? 0.85
-        : (outcome === "failure" ? 0.15 : 0.5);
-      const weightedConfidence = measurementScope === "action"
-        ? baseConfidence * attributionWeight + (1 - attributionWeight) * 0.5
-        : baseConfidence;
-      const confidenceScore = Math.max(0, Math.min(1, weightedConfidence));
-
-      const validation = validateDecisionForMemoryWrite(confidenceScore, direction, "outcome-tracker");
-      if (!validation.allowed) {
+      if (planIsDegraded) {
         console.log(
-          `[OutcomeTracker] MEMORY_UPDATE_BLOCKED | decision=${p.decisionId} outcome=${outcome} ` +
-          `confidence=${confidenceScore.toFixed(3)} weight=${attributionWeight.toFixed(3)} reason="${validation.reason}"`,
+          `[OutcomeTracker] FALLBACK_ISOLATION | decision=${p.decisionId} outcome=${outcome} reason="${planLookupReason}" ` +
+          `— skipping memory reinforcement because plan is degraded/fallback/unlinked. Outcome recorded but NOT used for learning.`,
         );
       } else {
-        const baseScore = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
-        const weightedScore = measurementScope === "action" ? baseScore * attributionWeight : baseScore;
-        const isWinner = outcome === "success" && attributionWeight >= 0.5;
-        await db.update(strategyMemory)
-          .set({ score: weightedScore, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date() })
-          .where(eq(strategyMemory.id, p.decisionId));
+        const direction = outcome === "success" ? "reinforce" as const
+          : (outcome === "failure" ? "avoid" as const : "neutral" as const);
+
+        const baseConfidence = outcome === "success" ? 0.85
+          : (outcome === "failure" ? 0.15 : 0.5);
+        const weightedConfidence = measurementScope === "action"
+          ? baseConfidence * attributionWeight + (1 - attributionWeight) * 0.5
+          : baseConfidence;
+        const confidenceScore = Math.max(0, Math.min(1, weightedConfidence));
+
+        const validation = validateDecisionForMemoryWrite(confidenceScore, direction, "outcome-tracker");
+        if (!validation.allowed) {
+          console.log(
+            `[OutcomeTracker] MEMORY_UPDATE_BLOCKED | decision=${p.decisionId} outcome=${outcome} ` +
+            `confidence=${confidenceScore.toFixed(3)} weight=${attributionWeight.toFixed(3)} reason="${validation.reason}"`,
+          );
+        } else {
+          const baseScore = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
+          const weightedScore = measurementScope === "action" ? baseScore * attributionWeight : baseScore;
+          const isWinner = outcome === "success" && attributionWeight >= 0.5;
+          await db.update(strategyMemory)
+            .set({ score: weightedScore, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date() })
+            .where(eq(strategyMemory.id, p.decisionId));
+        }
       }
     } catch {
     }
