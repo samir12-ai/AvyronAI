@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { ciCompetitors } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { getCompetitorDataCoverage } from "./data-acquisition";
 
@@ -45,7 +45,7 @@ export function registerCiCompetitorRoutes(app: Express) {
       const ids = competitors.map(c => c.id);
       const extraUrlsMap: Record<string, { tiktokUrl: string | null; googleMapsUrl: string | null }> = {};
       if (ids.length > 0) {
-        const extraRes = await db.execute(sql`SELECT id, tiktok_url, google_maps_url FROM ci_competitors WHERE id = ANY(${ids})`);
+        const extraRes = await db.execute(sql`SELECT id, tiktok_url, google_maps_url FROM ci_competitors WHERE id IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`);
         for (const row of extraRes.rows as any[]) {
           extraUrlsMap[row.id] = { tiktokUrl: row.tiktok_url ?? null, googleMapsUrl: row.google_maps_url ?? null };
         }
