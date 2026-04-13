@@ -322,6 +322,7 @@ function setupErrorHandler(app: express.Application) {
     "/auth/",
     "/stripe/webhook",
     "/onboarding/track",
+    "/proxy/health",
   ];
 
   app.use("/api", (req, res, next) => {

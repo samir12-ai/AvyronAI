@@ -64,6 +64,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
   registerStagingAdminRoutes(app);
 
+  app.get("/api/proxy/health", async (req, res) => {
+    try {
+      const { getProxyConfig } = await import("./competitive-intelligence/proxy-pool-manager");
+      const proxy = getProxyConfig();
+      if (!proxy) {
+        return res.json({
+          status: "NOT_CONFIGURED",
+          message: "Bright Data proxy environment variables not set",
+          configured: false,
+          tests: [],
+        });
+      }
+
+      const isWebUnlocker = proxy.port === "33335";
+      const zoneMatch = proxy.username.match(/zone-(\w+)/);
+      const zoneName = zoneMatch ? zoneMatch[1] : "unknown";
+
+      const results: Array<{ test: string; status: string; detail: string; durationMs: number }> = [];
+
+      const net = await import("net");
+      const tcpResult = await new Promise<{ ok: boolean; detail: string; ms: number }>((resolve) => {
+        const start = Date.now();
+        const socket = net.createConnection({ host: proxy.host, port: parseInt(proxy.port), timeout: 10000 }, () => {
+          socket.end();
+          resolve({ ok: true, detail: "TCP connection established", ms: Date.now() - start });
+        });
+        socket.on("timeout", () => { socket.destroy(); resolve({ ok: false, detail: "TCP timeout", ms: Date.now() - start }); });
+        socket.on("error", (err: any) => { resolve({ ok: false, detail: err.message, ms: Date.now() - start }); });
+      });
+      results.push({ test: "tcp_connectivity", status: tcpResult.ok ? "PASS" : "FAIL", detail: tcpResult.detail, durationMs: tcpResult.ms });
+
+      if (tcpResult.ok) {
+        const http = await import("http");
+        const authResult = await new Promise<{ ok: boolean; status: number | null; detail: string; ms: number }>((resolve) => {
+          const start = Date.now();
+          const auth = Buffer.from(proxy.username + ":" + proxy.password).toString("base64");
+          const req = http.request({
+            host: proxy.host,
+            port: parseInt(proxy.port),
+            method: "CONNECT",
+            path: "lumtest.com:443",
+            headers: { "Proxy-Authorization": "Basic " + auth, "Host": "lumtest.com:443" },
+            timeout: 20000,
+          });
+          req.on("connect", (connectRes, socket) => {
+            const s = connectRes.statusCode ?? 0;
+            socket.end();
+            if (s === 200) resolve({ ok: true, status: s, detail: "Tunnel established", ms: Date.now() - start });
+            else {
+              const errCode = connectRes.headers["x-brd-err-code"] || "";
+              const errMsg = connectRes.headers["x-brd-err-msg"] || connectRes.headers["x-luminati-error"] || "";
+              resolve({ ok: false, status: s, detail: `${s}: ${errCode} — ${errMsg}`, ms: Date.now() - start });
+            }
+          });
+          req.on("timeout", () => { req.destroy(); resolve({ ok: false, status: null, detail: "CONNECT timeout", ms: Date.now() - start }); });
+          req.on("error", (err: any) => { resolve({ ok: false, status: null, detail: err.message, ms: Date.now() - start }); });
+          req.end();
+        });
+        results.push({ test: "proxy_auth", status: authResult.ok ? "PASS" : "FAIL", detail: authResult.detail, durationMs: authResult.ms });
+      }
+
+      const allPass = results.every((r) => r.status === "PASS");
+
+      res.json({
+        status: allPass ? "HEALTHY" : "UNHEALTHY",
+        configured: true,
+        proxyProduct: isWebUnlocker ? "Web Unlocker" : "Residential/Datacenter",
+        zone: zoneName,
+        host: proxy.host,
+        port: proxy.port,
+        usernamePrefix: proxy.username.substring(0, 20) + "...",
+        passwordLength: proxy.password.length,
+        tests: results,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ status: "ERROR", error: err.message });
+    }
+  });
+
   app.get("/api/engines/health", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);

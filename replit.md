@@ -74,6 +74,8 @@ Client-side data is stored using AsyncStorage. Server-side data, including user 
 - Website/Blog: Proxied via `website-scraper.ts` with US country targeting and direct-fetch fallback
 - Google Reviews: Direct scraping via Bright Data proxy from Google Maps (replaced Google Places API)
 - Credentials: BRIGHT_DATA_PROXY_HOST, PORT, USERNAME, PASSWORD env vars; BRIGHT_DATA_PROXY_COUNTRY defaults to "us"
+- Proxy Health Check: GET /api/proxy/health (public, no auth) — tests TCP connectivity + auth against Bright Data; returns zone, product type, and per-test pass/fail
+- Current zone: marketmindai (Web Unlocker product, port 33335)
 
 ### Database
 - PostgreSQL
