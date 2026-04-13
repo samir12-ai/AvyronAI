@@ -88,3 +88,10 @@ outputType = "console"
 task = "shell.exec"
 args = "npm run expo:dev"
 waitForPort = 8081
+
+[userenv]
+
+[userenv.shared]
+BRIGHT_DATA_PROXY_HOST = "brd.superproxy.io"
+BRIGHT_DATA_PROXY_PORT = "33335"
+BRIGHT_DATA_PROXY_COUNTRY = "us"
