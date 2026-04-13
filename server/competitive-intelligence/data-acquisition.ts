@@ -1431,7 +1431,7 @@ export async function getStoredTikTokCommentsForMIv3(competitorId: string, accou
     .where(and(
       eq(ciCompetitorComments.competitorId, competitorId),
       eq(ciCompetitorComments.accountId, accountId),
-      eq(ciCompetitorComments.source, "tiktok_scraped"),
+      sql`${ciCompetitorComments.source} IN ('tiktok_scraped', 'tiktok_apify')`,
     ))
     .orderBy(desc(ciCompetitorComments.createdAt))
     .limit(200);

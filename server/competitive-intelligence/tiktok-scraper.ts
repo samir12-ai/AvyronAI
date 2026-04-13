@@ -37,7 +37,7 @@ export interface TiktokScrapedResult {
   postsFetched: number;
   postsInserted: number;
   commentsInserted: number;
-  source: "proxy" | "manual" | "unavailable";
+  source: "brightdata" | "apify" | "manual" | "unavailable";
   error?: string;
 }
 
@@ -435,6 +435,7 @@ export async function ingestTiktokPosts(
   competitorId: string,
   accountId: string,
   posts: TiktokPost[],
+  dataSource: "brightdata" | "apify" = "brightdata",
 ): Promise<{ inserted: number; commentsInserted: number }> {
   let inserted = 0;
   let commentsInserted = 0;
@@ -482,7 +483,7 @@ export async function ingestTiktokPosts(
             sentiment: null,
             timestamp: comment.timestamp || null,
             isSynthetic: false,
-            source: "tiktok_scraped",
+            source: dataSource === "apify" ? "tiktok_apify" : "tiktok_scraped",
           });
           commentsInserted++;
         } catch (commentErr: any) {
@@ -518,40 +519,71 @@ export async function scrapeTiktokForCompetitor(
     return result;
   }
 
-  const proxy = getProxyConfig();
-  if (!proxy) {
-    result.source = "unavailable";
-    result.error = "Bright Data proxy not configured — TikTok scraping unavailable.";
-    console.log(`[TiktokScraper] ${result.error}`);
-    return result;
-  }
-
   const handle = extractHandleFromProfileUrl(competitor.tiktokUrl || "") || extractHandleFromProfileUrl(competitor.profileLink || "") || competitor.name || "";
   if (!handle) {
     result.error = "Could not determine TikTok handle for competitor";
     return result;
   }
 
+  const proxy = getProxyConfig();
+  let brightDataFailed = false;
+
+  if (proxy) {
+    try {
+      const posts = await scrapeTiktokViaProxy(handle);
+      if (posts.length > 0) {
+        result.postsFetched = posts.length;
+        result.source = "brightdata";
+
+        const { inserted, commentsInserted } = await ingestTiktokPosts(competitorId, accountId, posts, "brightdata");
+        result.postsInserted = inserted;
+        result.commentsInserted = commentsInserted;
+
+        console.log(`[TiktokScraper] competitorId=${competitorId} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=brightdata`);
+        return result;
+      }
+      brightDataFailed = true;
+      console.log(`[TiktokScraper] Bright Data returned 0 posts for @${handle} — falling back to Apify`);
+    } catch (err: any) {
+      brightDataFailed = true;
+      const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
+      console.log(`[TiktokScraper] Bright Data failed for @${handle}: ${safeMsg} — falling back to Apify`);
+    }
+  } else {
+    brightDataFailed = true;
+    console.log(`[TiktokScraper] Bright Data proxy not configured — trying Apify`);
+  }
+
+  const { isApifyConfigured, scrapeTiktokViaApify } = await import("./tiktok-apify-scraper");
+
+  if (!isApifyConfigured()) {
+    result.source = "unavailable";
+    result.error = brightDataFailed
+      ? "Both Bright Data and Apify unavailable — Bright Data failed and APIFY_API_KEY not set"
+      : "No TikTok scraping source configured";
+    console.log(`[TiktokScraper] ${result.error}`);
+    return result;
+  }
+
   try {
-    const posts = await scrapeTiktokViaProxy(handle);
+    const posts = await scrapeTiktokViaApify(handle);
     result.postsFetched = posts.length;
-    result.source = "proxy";
+    result.source = "apify";
 
     if (posts.length === 0) {
-      result.error = "No TikTok posts extracted — profile may be private, empty, or blocked";
+      result.error = "Apify returned no TikTok posts — profile may be private, empty, or not found";
       return result;
     }
 
-    const { inserted, commentsInserted } = await ingestTiktokPosts(competitorId, accountId, posts);
+    const { inserted, commentsInserted } = await ingestTiktokPosts(competitorId, accountId, posts, "apify");
     result.postsInserted = inserted;
     result.commentsInserted = commentsInserted;
 
-    console.log(`[TiktokScraper] competitorId=${competitorId} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=proxy`);
+    console.log(`[TiktokScraper] competitorId=${competitorId} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=apify`);
     return result;
   } catch (err: any) {
-    const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
-    result.error = safeMsg;
-    console.error(`[TiktokScraper] ERROR competitorId=${competitorId}: ${safeMsg}`);
+    result.error = `Apify scrape failed: ${err.message}`;
+    console.error(`[TiktokScraper] Apify ERROR competitorId=${competitorId}: ${err.message}`);
     return result;
   }
 }
