@@ -250,6 +250,14 @@ const OPERATIONAL_MEMORY_TYPES = new Set([
   "exploration_budget",
 ]);
 
+export const NON_STRATEGIC_MEMORY_TYPES = [
+  "content_rhythm",
+  "exploration_budget",
+  "mutation_log",
+  "agent_action",
+  "self_improvement",
+] as const;
+
 export function policyEnforcedMemoryCheck(
   confidenceScore: number,
   direction: "reinforce" | "avoid" | "neutral",

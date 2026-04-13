@@ -2,7 +2,8 @@ import type { Express, Request, Response } from "express";
 import { aiChat, AICallError } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints, strategicPlans, planApprovals, strategyMemory, strategyInsights, moatCandidates, businessDataLayer, planDocuments, requiredWork, calendarEntries, orchestratorJobs } from "@shared/schema";
-import { eq, desc, gte, and, sql, ne } from "drizzle-orm";
+import { eq, desc, gte, and, sql, ne, notInArray } from "drizzle-orm";
+import { NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
 import { logAuditEvent } from "./audit-logger";
 import { logAudit } from "../audit";
 import * as crypto from "crypto";
@@ -533,7 +534,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       const sCampaignId = campaignContext?.campaignId;
       if (sCampaignId) {
         const [memories, insights, moats] = await Promise.all([
-          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, sAccountId), eq(strategyMemory.campaignId, sCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyMemory.updatedAt)).limit(5),
+          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, sAccountId), eq(strategyMemory.campaignId, sCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`, notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(5),
           db.select().from(strategyInsights).where(and(gte(strategyInsights.confidence, 0.7), eq(strategyInsights.accountId, sAccountId), eq(strategyInsights.campaignId, sCampaignId), sql`${strategyInsights.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyInsights.createdAt)).limit(5),
           db.select().from(moatCandidates).where(and(eq(moatCandidates.status, "candidate"), eq(moatCandidates.accountId, sAccountId), eq(moatCandidates.campaignId, sCampaignId), sql`${moatCandidates.campaignId} != 'unscoped_legacy'`)).orderBy(desc(moatCandidates.moatScore)).limit(3),
         ]);

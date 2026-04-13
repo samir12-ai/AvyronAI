@@ -4,7 +4,7 @@ import { eq, and, lt, gt, desc, isNotNull } from "drizzle-orm";
 import { makeStrategyFingerprint } from "../memory-system/manager";
 import { checkResultsOverrideMemory } from "../orchestrator/memory-context";
 import type { MemoryClass, MemoryDirection, MemorySlot, PerformanceSnapshot } from "../memory-system/types";
-import { validateDecisionForMemoryWrite, policyEnforcedMemoryCheck, applyFallbackSourcePenalty, DECISION_CONFIDENCE_THRESHOLDS } from "../decision-policy";
+import { validateDecisionForMemoryWrite, policyEnforcedMemoryCheck, applyFallbackSourcePenalty, DECISION_CONFIDENCE_THRESHOLDS, NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
 
 const DECAY_HALF_LIFE_DAYS = 30;
 const DECAY_THRESHOLD = 0.05;
@@ -469,11 +469,12 @@ export async function runMemoryMutation(
     )
     .orderBy(desc(strategyMemory.createdAt));
 
+  const NON_STRATEGIC_SET = new Set(NON_STRATEGIC_MEMORY_TYPES);
   const eligible = memoryRows.filter(
     (r) =>
       r.direction !== null &&
       r.direction !== "neutral" &&
-      r.memoryType !== "mutation_log",
+      !NON_STRATEGIC_SET.has(r.memoryType ?? ""),
   );
 
   const summary: MutationSummary = {
@@ -578,6 +579,7 @@ export async function runMemoryMutation(
             updatedAt: new Date(),
           })
           .where(eq(strategyMemory.id, row.id));
+        console.log(`[MemoryMutation] CONFIRMED | label="${row.label.slice(0, 60)}" periods=${consistentAbove} confidence=${currentConfidence.toFixed(3)}→${newConfidence.toFixed(3)} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.confirmed++;
       } else if (challengedPeriods >= MIN_PERIODS_FOR_FLIP) {
         await db
@@ -590,10 +592,12 @@ export async function runMemoryMutation(
             updatedAt: new Date(),
           })
           .where(eq(strategyMemory.id, row.id));
+        console.log(`[MemoryMutation] FLIPPED | label="${row.label.slice(0, 60)}" from=reinforce to=avoid periods=${challengedPeriods} confidence=${currentConfidence.toFixed(3)}→${FLIP_RESET_CONFIDENCE} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.flipped.push({ label: row.label, from: "reinforce", to: "avoid" });
         summary.challenged++;
         challengedEntryIds.add(row.id);
       } else if (challengedPeriods >= MIN_PERIODS_FOR_CONFIDENCE_MOVE) {
+        console.log(`[MemoryMutation] CHALLENGED | label="${row.label.slice(0, 60)}" periods=${challengedPeriods} confidence=${currentConfidence.toFixed(3)} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.challenged++;
         challengedEntryIds.add(row.id);
       }
@@ -642,6 +646,7 @@ export async function runMemoryMutation(
             updatedAt: new Date(),
           })
           .where(eq(strategyMemory.id, row.id));
+        console.log(`[MemoryMutation] FLIPPED | label="${row.label.slice(0, 60)}" from=avoid to=reinforce reason=results_override confidence=${currentConfidence.toFixed(3)}→${FLIP_RESET_CONFIDENCE} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.flipped.push({ label: row.label, from: "avoid", to: "reinforce" });
         summary.confirmed++;
       } else if (consistentBelow >= MIN_PERIODS_FOR_CONFIDENCE_MOVE) {
@@ -655,8 +660,10 @@ export async function runMemoryMutation(
             updatedAt: new Date(),
           })
           .where(eq(strategyMemory.id, row.id));
+        console.log(`[MemoryMutation] AVOID_CONFIRMED | label="${row.label.slice(0, 60)}" periods=${consistentBelow} confidence=${currentConfidence.toFixed(3)}→${newConfidence.toFixed(3)} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.confirmed++;
       } else if (consistentAboveForAvoid >= MIN_PERIODS_FOR_CONFIDENCE_MOVE && !overrideResult.override) {
+        console.log(`[MemoryMutation] AVOID_CHALLENGED | label="${row.label.slice(0, 60)}" periods=${consistentAboveForAvoid} confidence=${currentConfidence.toFixed(3)} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.challenged++;
         challengedEntryIds.add(row.id);
       }

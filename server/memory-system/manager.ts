@@ -1,6 +1,8 @@
 import { db } from "../db";
 import { strategyMemory } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
+const NON_STRATEGIC_MEMORY_TYPES_SET = new Set<string>(NON_STRATEGIC_MEMORY_TYPES);
 import type {
   MemoryBlock,
   MemorySlot,
@@ -154,6 +156,8 @@ export async function loadMemoryBlock(
       }
       continue;
     }
+
+    if (NON_STRATEGIC_MEMORY_TYPES_SET.has(slot.memoryType as any)) continue;
 
     if (!contextMatches(slot, ctx)) continue;
 
