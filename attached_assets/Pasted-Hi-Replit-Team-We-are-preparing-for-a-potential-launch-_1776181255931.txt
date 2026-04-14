@@ -1,0 +1,204 @@
+Hi Replit Team,
+
+We are preparing for a potential launch, and before moving forward, I need a complete end-to-end system audit across all layers.
+
+This is not a partial check — I want a full validation of system integrity under real conditions, including edge cases, data contamination risks, scaling behavior, and user isolation.
+
+Please treat this as a pre-launch readiness audit.
+
+---
+
+# 🎯 Objective
+
+Confirm that the system is:
+
+- clean (no noise / garbage data issues)
+- isolated (no cross-user or cross-campaign leakage)
+- stable under real usage
+- logically consistent across all pipelines
+- safe to onboard real users without corruption
+
+---
+
+# 🔍 1. Data Integrity & Noise Control
+
+I want verification of:
+
+- how raw scraped data is cleaned (text sanitizer, normalization, filtering)
+- whether garbage/noisy inputs can pass into signals
+- whether invalid or low-quality data is being filtered before:
+  - signal generation
+  - decision layer
+  - memory writes
+
+Please confirm:
+
+- no raw/unfiltered data is reaching memory
+- no duplicated or malformed data is polluting signals
+- cleaning layer is consistently applied across all sources (TikTok, Instagram, Website)
+
+---
+
+# 🔐 2. User & Account Isolation (CRITICAL)
+
+This is extremely important.
+
+Please verify:
+
+- no user can ever see another user’s data
+- no cross-account contamination exists anywhere in:
+  - scraping
+  - storage
+  - signal processing
+  - memory
+  - plan generation
+
+Specifically:
+
+- confirm strict isolation by accountId and campaignId at ALL layers
+- confirm no shared cache (e.g. Instagram shared profiles) can leak data across users
+- confirm all queries enforce account + campaign boundaries
+
+I want explicit confirmation that:
+
+👉 opening a new account will NEVER expose another user’s data
+
+---
+
+# 🧠 3. Memory System Audit
+
+Please audit the full memory system:
+
+- what types of memory are written
+- what conditions allow memory writes
+- whether low-confidence or noisy signals can enter memory
+- whether memory is scoped correctly per user/account
+
+Confirm:
+
+- only validated decisions enter memory
+- fallback / degraded / untrusted data is NOT written
+- memory cannot mix between campaigns or users
+- memory updates follow the decision-policy rules (confidence thresholds, validation gates)
+
+---
+
+# 🤖 4. Agent System Behavior
+
+We need a full audit of agent logic:
+
+- how agents trigger actions
+- how they select decisions
+- whether they rely ONLY on validated decision objects
+- whether any raw or unvalidated signals can influence actions
+
+Also verify:
+
+- agent actions are always tied to decisionId
+- no “free-form” or hallucinated actions exist
+- agent cannot bypass the decision layer
+
+---
+
+# 🧩 5. Data Flow Integrity (End-to-End)
+
+Please trace and verify the full pipeline:
+
+data → cleaning → signals → decisions → plans → actions → outcomes → memory
+
+Confirm:
+
+- no step is bypassed
+- no legacy paths exist
+- no raw signals skip validation
+- no decisions are created without cross-signal validation
+
+---
+
+# ⚙️ 6. Scraping System Stability
+
+For all sources (especially TikTok):
+
+- confirm scraping works per campaign (no global behavior)
+- confirm retry logic exists and works
+- confirm failures are logged and handled correctly
+- confirm coverage (multiple competitors, not just one)
+
+---
+
+# 📈 7. Scale & Stress Readiness
+
+I want an honest assessment of:
+
+- what happens with:
+  - 10 campaigns
+  - 50 campaigns
+  - 100+ campaigns
+- any bottlenecks in:
+  - scraping
+  - processing
+  - memory
+  - agent execution
+
+Identify:
+
+- limits
+- risks
+- what will break first
+
+---
+
+# 🧪 8. Edge Cases & Hidden Risks
+
+Please actively search for:
+
+- silent failures
+- missing data paths
+- unhandled null/empty cases
+- fallback misuse
+- incorrect defaults
+- anything that “works” but produces wrong outputs
+
+---
+
+# 📊 9. Frontend / User Experience Safety
+
+- confirm UI never shows incorrect or mixed data
+- confirm loading states / empty states behave correctly
+- confirm no stale or cached cross-user data appears
+
+---
+
+# 📌 Deliverables
+
+Please return with:
+
+1. Full audit report across all sections above  
+2. Any issues found (even minor)  
+3. What was fixed (if applicable)  
+4. What remains risky  
+5. Clear statement:
+
+👉 “Is the system safe for real users or not?”
+
+---
+
+# ⚠️ Important
+
+Do not assume anything is correct.
+
+Even if something is “expected to work,” verify it.
+
+We are specifically looking for:
+
+- hidden bugs  
+- unseen edge cases  
+- structural weaknesses  
+
+---
+
+If this audit passes cleanly, we will proceed with initial user onboarding.
+
+Thanks,  
+Samir  
+Avyron A
