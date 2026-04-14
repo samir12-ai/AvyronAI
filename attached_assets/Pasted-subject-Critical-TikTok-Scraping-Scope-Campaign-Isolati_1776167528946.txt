@@ -1,0 +1,134 @@
+subject=“Critical: TikTok Scraping Scope & Campaign Isolation Audit (Code-Level Verification Required)”}
+Hi Replit Team,
+
+I need a precise, code-level audit of the current TikTok scraping behavior.
+
+This is not a general explanation request — I want verification based on the actual implementation and runtime behavior.
+
+⸻
+
+🎯 Context
+
+I explicitly requested TikTok scraping for a single campaign (MarketMind).
+
+However, based on observed behavior, it appears that competitors from other campaigns (e.g. Fitness, SWA) are also being processed.
+
+This should not happen.
+
+⸻
+
+🚨 Core Issue
+
+TikTok scraping is not properly isolated at the campaign level.
+
+This suggests that somewhere in the flow, the system is not enforcing campaignId correctly.
+
+This is a critical data isolation issue.
+
+⸻
+
+🔍 What I need you to verify (based on code)
+
+Please answer each of the following based on actual code paths and queries:
+
+⸻
+
+1. Competitor Selection Logic
+
+Where exactly are competitors selected for TikTok scraping?
+	•	Which file/function is responsible?
+	•	What is the exact query being used?
+
+Specifically:
+	•	Is campaignId included in the query?
+	•	Or is it selecting all competitors with tiktok_url globally?
+
+Please include the exact query or logic used.
+
+⸻
+
+2. Autonomous Worker Flow
+
+In autonomous-worker.ts:
+	•	How does the worker decide which competitors to process?
+	•	Is it scoped to a campaign?
+	•	Or does it run globally across all campaigns?
+
+If it is global, explain why.
+
+⸻
+
+3. Apify Fallback Path
+
+When Bright Data fails and the system falls back to Apify:
+	•	Does the fallback still respect the original campaignId?
+	•	Or does it trigger a broader/global scrape?
+
+I want confirmation that the same campaign scope is preserved in fallback.
+
+⸻
+
+4. End-to-End Scope Propagation
+
+Trace the full flow:
+
+trigger → worker → scraper → fallback → storage
+
+At each step, confirm:
+	•	Is campaignId passed forward?
+	•	Is it used in filtering?
+	•	Or is it dropped at any stage?
+
+⸻
+
+5. Runtime Evidence
+
+Based on logs or actual runs:
+	•	Which campaign(s) were processed?
+	•	Which competitors were included?
+	•	Why were competitors outside the target campaign processed?
+
+I want concrete evidence, not assumptions.
+
+⸻
+
+⚠️ Why this matters
+
+If campaign isolation is not enforced:
+	•	data from different niches will mix
+	•	signals will become invalid
+	•	decisions will be based on incorrect market context
+	•	memory will learn from the wrong data
+
+This is a system-level integrity issue.
+
+⸻
+
+✅ Expected Behavior
+
+If a campaign is targeted:
+	•	ONLY competitors within that campaign are processed
+	•	NO cross-campaign scraping should occur
+	•	This must hold true for both:
+	•	primary scraping
+	•	fallback (Apify)
+
+⸻
+
+📌 Deliverables
+
+Please return with:
+	1.	Exact code references for competitor selection
+	2.	Confirmation of whether campaignId is enforced or not
+	3.	Identification of where scope is breaking (if it is)
+	4.	Fix applied (if needed)
+	5.	Verified runtime behavior after fix
+
+⸻
+
+Please treat this as a priority issue before further scaling.
+
+Thanks,
+Samir
+Avyron AI
+:::
