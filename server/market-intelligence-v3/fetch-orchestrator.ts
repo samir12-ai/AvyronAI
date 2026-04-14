@@ -200,11 +200,11 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   }));
   const hash = computeCompetitorHash(competitorInputs);
 
-  const STALE_QUEUED_THRESHOLD_MS = 10 * 60 * 1000;
+  const STALE_QUEUED_THRESHOLD_MS = 25 * 60 * 1000;
   const staleQueuedCutoff = new Date(Date.now() - STALE_QUEUED_THRESHOLD_MS);
 
   const staleQueued = await db.update(miFetchJobs)
-    .set({ status: "FAILED", error: "Auto-expired: stuck in QUEUED for >10 minutes", completedAt: new Date() })
+    .set({ status: "FAILED", error: "Auto-expired: stuck in QUEUED for >25 minutes", completedAt: new Date() })
     .where(and(
       eq(miFetchJobs.accountId, accountId),
       eq(miFetchJobs.campaignId, campaignId),
@@ -1683,11 +1683,11 @@ async function validateInventoryConsistency(accountId: string, campaignId: strin
   }
 }
 
-const GLOBAL_MAX_CONCURRENT_JOBS = 3;
-const QUEUE_PROCESSOR_INTERVAL_MS = 30000;
-const PER_ACCOUNT_JOB_BUDGET_PER_HOUR = 4;
-const BACKPRESSURE_QUEUE_THRESHOLD = 20;
-const MAX_PROMOTIONS_PER_MINUTE = 6;
+const GLOBAL_MAX_CONCURRENT_JOBS = 8;
+const QUEUE_PROCESSOR_INTERVAL_MS = 15000;
+const PER_ACCOUNT_JOB_BUDGET_PER_HOUR = 6;
+const BACKPRESSURE_QUEUE_THRESHOLD = 40;
+const MAX_PROMOTIONS_PER_MINUTE = 12;
 
 const PRIORITY_FAST_PASS = 0;
 const PRIORITY_DEEP_PASS = 5;
@@ -1732,7 +1732,7 @@ function recordPromotion(): void {
 
 const STALE_JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
-const STALE_QUEUED_GLOBAL_THRESHOLD_MS = 15 * 60 * 1000;
+const STALE_QUEUED_GLOBAL_THRESHOLD_MS = 30 * 60 * 1000;
 
 async function recoverStaleRunningJobs(): Promise<number> {
   const now = new Date();

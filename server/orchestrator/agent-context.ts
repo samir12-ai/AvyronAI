@@ -370,7 +370,7 @@ export async function loadSystemContext(
         createdAt: strategyDecisions.createdAt,
       })
       .from(strategyDecisions)
-      .where(eq(strategyDecisions.accountId, accountId))
+      .where(and(eq(strategyDecisions.accountId, accountId), eq(strategyDecisions.campaignId, campaignId)))
       .orderBy(desc(strategyDecisions.createdAt))
       .limit(5);
     recentDecisions = decisions;

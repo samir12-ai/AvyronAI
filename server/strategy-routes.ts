@@ -351,6 +351,7 @@ Return ONLY valid JSON with this structure:
         for (const dec of decisions) {
           await db.insert(strategyDecisions).values({
             accountId,
+            campaignId,
             trigger: dec.trigger,
             action: dec.action,
             reason: dec.reason,
@@ -432,7 +433,9 @@ Return ONLY valid JSON with this structure:
 
   app.get("/api/strategy/decisions", requireCampaign, async (req, res) => {
     try {
+      const { accountId, campaignId } = (req as any).campaignContext;
       const decisions = await db.select().from(strategyDecisions)
+        .where(and(eq(strategyDecisions.accountId, accountId), eq(strategyDecisions.campaignId, campaignId)))
         .orderBy(desc(strategyDecisions.createdAt))
         .limit(30);
       res.json(decisions);
@@ -482,7 +485,7 @@ Return ONLY valid JSON with this structure:
         .orderBy(desc(strategyInsights.createdAt));
 
       const decisions = await db.select().from(strategyDecisions)
-        .where(gte(strategyDecisions.createdAt, weekAgo));
+        .where(and(gte(strategyDecisions.createdAt, weekAgo), eq(strategyDecisions.accountId, accountId), eq(strategyDecisions.campaignId, campaignId)));
 
       const memories = await db.select().from(strategyMemory)
         .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES])))
@@ -1001,7 +1004,7 @@ Return ONLY valid JSON:
       const [averages, recentInsights, recentDecisions, memoryItems, latestReport] = await Promise.all([
         getAccountAverages(),
         db.select().from(strategyInsights).where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyInsights.createdAt)).limit(5),
-        db.select().from(strategyDecisions).orderBy(desc(strategyDecisions.createdAt)).limit(5),
+        db.select().from(strategyDecisions).where(and(eq(strategyDecisions.accountId, accountId), eq(strategyDecisions.campaignId, campaignId))).orderBy(desc(strategyDecisions.createdAt)).limit(5),
         db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(10),
         db.select().from(weeklyReports).orderBy(desc(weeklyReports.createdAt)).limit(1),
       ]);

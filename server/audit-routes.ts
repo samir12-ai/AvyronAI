@@ -643,11 +643,7 @@ export function registerAuditRoutes(app: Express) {
 
       const conditions: any[] = [eq(strategyDecisions.accountId, accountId)];
       if (campaignId) {
-        conditions.push(
-          sql`${strategyDecisions.id} IN (
-            SELECT id FROM strategy_decisions WHERE account_id = ${accountId}
-          )`
-        );
+        conditions.push(eq(strategyDecisions.campaignId, campaignId));
       }
 
       const decisions = await db

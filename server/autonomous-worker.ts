@@ -451,7 +451,7 @@ async function processAccount(accountId: string) {
     }
 
     const baselines = await computeRollingBaselines(accountId);
-    const guardrailResult = await runAllGuardrails(accountId);
+    const guardrailResult = await runAllGuardrails(accountId, activeCampaign || undefined);
     const compliance = activeCampaign
       ? await computeExecutionCompliance(accountId, activeCampaign, capturedPlanEntries, capturedPlanWork, baselines)
       : null;

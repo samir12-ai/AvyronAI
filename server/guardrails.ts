@@ -267,7 +267,7 @@ export async function checkSafeModeConditions(accountId: string): Promise<{
   };
 }
 
-export async function runAllGuardrails(accountId: string): Promise<GuardrailCheckResult> {
+export async function runAllGuardrails(accountId: string, campaignId?: string): Promise<GuardrailCheckResult> {
   const config = await getConfig(accountId);
 
   const [budgetCap, monthlyBudgetCap, cpaGuard, roasFloor, volatility, fatigue] = await Promise.all([
@@ -323,6 +323,7 @@ export async function runAllGuardrails(accountId: string): Promise<GuardrailChec
 
     await db.insert(strategyDecisions).values({
       accountId,
+      campaignId: campaignId || undefined,
       trigger: "Creative fatigue detected by algorithmic analysis",
       action: "Refresh creative assets — new hooks, visuals, and angles needed",
       reason: fatigue.reason || "CTR declining with rising frequency and impressions",

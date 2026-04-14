@@ -1,0 +1,127 @@
+:::writing{variant=“email” id=“77264” subject=“Pre-Scale Hardening Tasks — Required Before Expanding User Base”}
+Hi Replit Team,
+
+Thanks for the full audit — this gives us strong confidence in the system overall.
+
+We are now preparing for initial user onboarding, but before we move toward any scale beyond a small number of accounts, I want to address a few critical structural hardening tasks identified in the audit.
+
+These are not optional — they are required to ensure the system remains stable and logically correct as usage grows.
+
+⸻
+
+🎯 Objective
+
+Close the remaining structural gaps so the system is:
+	•	fully campaign-isolated at all levels
+	•	safe under multi-campaign and multi-account usage
+	•	stable under increased load
+	•	clean from legacy or inconsistent state
+
+⸻
+
+🔧 Required Tasks
+
+1. Add campaign_id to strategy_decisions (CRITICAL)
+
+Current issue:
+	•	strategy_decisions is only scoped by account_id
+	•	this creates a risk of cross-campaign influence within the same account
+
+Required:
+	•	add campaign_id column to strategy_decisions
+	•	backfill existing records where possible
+	•	enforce campaign scoping in:
+	•	decision creation
+	•	plan synthesis
+	•	outcome tracking
+	•	any read paths using decisions
+
+Goal:
+👉 decisions must be fully isolated per campaign, not just per account
+
+⸻
+
+2. Filter Synthetic Comments in Shared Pool Reuse
+
+Current issue:
+	•	shared profile reuse may copy isSynthetic = true comments across accounts
+
+Required:
+	•	update reuse query to include:
+	•	isSynthetic = false
+	•	ensure only real scraped comments are reused
+
+Goal:
+👉 prevent future cross-account contamination from generated data
+
+⸻
+
+3. Concurrency & Queue Hardening
+
+Current issue:
+	•	global concurrency is limited (3 jobs)
+	•	queue expiry is 10 minutes
+	•	system will break under moderate scale
+
+Required:
+	•	review and increase:
+	•	global concurrent job limit
+	•	per-account concurrency (if safe)
+	•	revisit queue expiry logic (10-minute wall)
+	•	ensure jobs do not silently fail due to queue timeout
+
+Goal:
+👉 system must handle >30 campaigns without dropping jobs
+
+⸻
+
+4. Cleanup Legacy “Unscoped” Memory Entries
+
+Current issue:
+	•	11 memory entries exist without proper campaign scoping
+
+Required:
+	•	identify all unscoped memory entries
+	•	either:
+	•	assign them to the correct campaign
+	•	or remove them if invalid
+
+Goal:
+👉 eliminate inconsistent or legacy state before scaling
+
+⸻
+
+📌 Deliverables
+
+Please provide:
+	1.	Confirmation of all 4 tasks completed
+	2.	Files / migrations changed
+	3.	Any data migrations performed
+	4.	Verification that:
+	•	decisions are now campaign-scoped
+	•	shared pool is safe
+	•	queue system is stable under increased load
+	•	memory is fully clean and consistent
+
+⸻
+
+🚀 Next Step
+
+Once these are complete, we will proceed from:
+
+👉 controlled onboarding → to broader rollout
+
+⸻
+
+⚠️ Important
+
+Do not defer these tasks.
+
+These are pre-scale structural fixes, not optimizations.
+
+⸻
+
+Thanks,
+Samir
+Avyron AI
+:::

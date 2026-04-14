@@ -467,8 +467,15 @@ router.get("/api/autopilot/guardrails", requireCampaign, async (req, res) => {
 router.get("/api/decisions/proactive-insights", async (req, res) => {
   try {
     const accountId = resolveAccountId(req);
+    const campaignId = req.query.campaign_id as string | undefined;
 
     const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000);
+
+    const baseConditions = [
+      eq(strategyDecisions.accountId, accountId),
+      gte(strategyDecisions.createdAt, cutoff),
+    ];
+    if (campaignId) baseConditions.push(eq(strategyDecisions.campaignId, campaignId));
 
     let decisions = await db
       .select({
@@ -483,16 +490,14 @@ router.get("/api/decisions/proactive-insights", async (req, res) => {
         insightType: strategyDecisions.insightType,
       })
       .from(strategyDecisions)
-      .where(
-        and(
-          eq(strategyDecisions.accountId, accountId),
-          gte(strategyDecisions.createdAt, cutoff)
-        )
-      )
+      .where(and(...baseConditions))
       .orderBy(desc(strategyDecisions.createdAt))
       .limit(4);
 
     if (decisions.length === 0) {
+      const fallbackConditions: any[] = [eq(strategyDecisions.accountId, accountId)];
+      if (campaignId) fallbackConditions.push(eq(strategyDecisions.campaignId, campaignId));
+
       decisions = await db
         .select({
           id: strategyDecisions.id,
@@ -506,7 +511,7 @@ router.get("/api/decisions/proactive-insights", async (req, res) => {
           insightType: strategyDecisions.insightType,
         })
         .from(strategyDecisions)
-        .where(eq(strategyDecisions.accountId, accountId))
+        .where(and(...fallbackConditions))
         .orderBy(desc(strategyDecisions.createdAt))
         .limit(3);
     }
