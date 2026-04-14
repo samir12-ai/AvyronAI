@@ -339,10 +339,10 @@ export async function scrapeReviewsForCompetitor(
   try {
     const [competitor] = await db.select({ name: ciCompetitors.name, url: ciCompetitors.profileLink })
       .from(ciCompetitors)
-      .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
+      .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)));
 
     if (!competitor) {
-      result.error = `Competitor not found: ${competitorId}`;
+      result.error = `Competitor not found: ${competitorId} (campaignId=${campaignId})`;
       return result;
     }
 
