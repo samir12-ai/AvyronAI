@@ -782,7 +782,6 @@ function generateCalendarSlots(
         rootBundleId,
         rootBundleVersion,
         isExploration: false,
-        sourceDecisionId: primaryDecisionId,
       });
     }
   }

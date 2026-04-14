@@ -18,6 +18,14 @@ import { computeFulfillment } from "../fulfillment-engine";
 import { activateExecution } from "../execution-activation/engine";
 
 import { resolveAccountId } from "../auth";
+
+async function verifyPlanOwnership(planId: string | string[], req: Request): Promise<{ plan: any } | null> {
+  const id = Array.isArray(planId) ? planId[0] : planId;
+  const accountId = resolveAccountId(req);
+  const [plan] = await db.select().from(strategicPlans).where(and(eq(strategicPlans.id, id), eq(strategicPlans.accountId, accountId))).limit(1);
+  return plan ? { plan } : null;
+}
+
 function deriveDistributionFromBusinessData(bizData: any): {
   reelsPerWeek: number;
   postsPerWeek: number;
@@ -121,10 +129,11 @@ function requirePlanStatus(...allowedStatuses: string[]) {
     const planId = req.params.planId || req.params.id;
     if (!planId) return res.status(400).json({ error: "MISSING_PLAN_ID" });
 
+    const accountId = resolveAccountId(req);
     const [plan] = await db
       .select()
       .from(strategicPlans)
-      .where(eq(strategicPlans.id, planId))
+      .where(and(eq(strategicPlans.id, planId), eq(strategicPlans.accountId, accountId)))
       .limit(1);
 
     if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
@@ -367,8 +376,9 @@ export function registerExecutionRoutes(app: Express) {
   app.get("/api/execution/plans/:planId", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const plan = ownership.plan;
 
       const work = await db.select().from(requiredWork).where(eq(requiredWork.planId, planId));
       const entries = await db.select().from(calendarEntries).where(eq(calendarEntries.planId, planId));
@@ -499,8 +509,9 @@ export function registerExecutionRoutes(app: Express) {
       const { planId } = req.params;
       const { reason } = req.body;
 
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const plan = ownership.plan;
 
       if (plan.emergencyStopped) {
         return res.status(409).json({ error: "ALREADY_STOPPED", message: "Emergency stop already active." });
@@ -531,8 +542,9 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const { planId } = req.params;
 
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const plan = ownership.plan;
 
       if (!plan.emergencyStopped) {
         return res.status(409).json({ error: "NOT_STOPPED", message: "Plan is not in emergency stop state." });
@@ -989,8 +1001,9 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const { planId } = req.params;
 
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const plan = ownership.plan;
 
       const entries = await db.select().from(calendarEntries).where(eq(calendarEntries.planId, planId));
       const calendarFailed = entries.filter((e) => e.status === "FAILED").length;
@@ -1154,6 +1167,8 @@ export function registerExecutionRoutes(app: Express) {
   app.get("/api/execution/plans/:planId/calendar", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
       const entries = await db
         .select()
         .from(calendarEntries)
@@ -1169,6 +1184,8 @@ export function registerExecutionRoutes(app: Express) {
   app.get("/api/execution/plans/:planId/studio", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
       const items = await db
         .select()
         .from(studioItems)

@@ -20,7 +20,10 @@ import { logAuditEvent } from "./strategic-core/audit-logger";
 import { resolveAccountId } from "./auth";
 const LEGACY_CAMPAIGN = "unscoped_legacy";
 
-async function getAccountAverages() {
+async function getAccountAverages(accountId?: string, campaignId?: string) {
+  const conditions = [];
+  if (accountId) conditions.push(eq(performanceSnapshots.accountId, accountId));
+  if (campaignId) conditions.push(eq(performanceSnapshots.campaignId, campaignId));
   const result = await db.select({
     avgReach: sql<number>`coalesce(avg(${performanceSnapshots.reach}), 0)`,
     avgImpressions: sql<number>`coalesce(avg(${performanceSnapshots.impressions}), 0)`,
@@ -37,7 +40,7 @@ async function getAccountAverages() {
     avgRetention: sql<number>`coalesce(avg(${performanceSnapshots.retentionRate}), 0)`,
     avgWatchTime: sql<number>`coalesce(avg(${performanceSnapshots.watchTime}), 0)`,
     totalPosts: sql<number>`count(*)`,
-  }).from(performanceSnapshots);
+  }).from(performanceSnapshots).where(conditions.length > 0 ? and(...conditions) : undefined);
   return result[0];
 }
 
@@ -137,8 +140,11 @@ export function registerStrategyRoutes(app: Express) {
 
   app.get("/api/strategy/performance", requireCampaign, async (req, res) => {
     try {
-      const data = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(100);
-      const averages = await getAccountAverages();
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const data = await db.select().from(performanceSnapshots)
+        .where(and(eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId)))
+        .orderBy(desc(performanceSnapshots.fetchedAt)).limit(100);
+      const averages = await getAccountAverages(accountId, campaignId);
       res.json({ data, averages });
     } catch (error) {
       console.error("[Strategy] Performance fetch error:", error);
@@ -150,8 +156,8 @@ export function registerStrategyRoutes(app: Express) {
     try {
       const campaignContext = (req as any).campaignContext;
       const { accountId, campaignId } = campaignContext;
-      const allData = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
-      const averages = await getAccountAverages();
+      const allData = await db.select().from(performanceSnapshots).where(and(eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId))).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
+      const averages = await getAccountAverages(accountId, campaignId);
       const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(20);
 
       if (allData.length === 0) {
@@ -446,10 +452,19 @@ Return ONLY valid JSON with this structure:
 
   app.patch("/api/strategy/decisions/:id", requireCampaign, async (req, res) => {
     try {
+      const { accountId, campaignId } = (req as any).campaignContext;
       const { status, outcome } = req.body;
-      await db.update(strategyDecisions)
+      const result = await db.update(strategyDecisions)
         .set({ status, outcome, executedAt: status === 'executed' ? new Date() : undefined })
-        .where(eq(strategyDecisions.id, req.params.id as string));
+        .where(and(
+          eq(strategyDecisions.id, req.params.id as string),
+          eq(strategyDecisions.accountId, accountId),
+          eq(strategyDecisions.campaignId, campaignId),
+        ))
+        .returning({ id: strategyDecisions.id });
+      if (result.length === 0) {
+        return res.status(404).json({ error: "Decision not found or does not belong to this campaign" });
+      }
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to update decision" });
@@ -474,11 +489,11 @@ Return ONLY valid JSON with this structure:
       const now = new Date();
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-      const weekData = await db.select().from(performanceSnapshots)
-        .where(gte(performanceSnapshots.fetchedAt, weekAgo))
-        .orderBy(desc(performanceSnapshots.fetchedAt));
-
       const { accountId, campaignId } = (req as any).campaignContext;
+
+      const weekData = await db.select().from(performanceSnapshots)
+        .where(and(gte(performanceSnapshots.fetchedAt, weekAgo), eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId)))
+        .orderBy(desc(performanceSnapshots.fetchedAt));
       const campaignContext = (req as any).campaignContext;
       const insights = await db.select().from(strategyInsights)
         .where(and(gte(strategyInsights.createdAt, weekAgo), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN)))
@@ -491,7 +506,7 @@ Return ONLY valid JSON with this structure:
         .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES])))
         .orderBy(desc(strategyMemory.updatedAt)).limit(20);
 
-      const averages = await getAccountAverages();
+      const averages = await getAccountAverages(accountId, campaignId);
       const revenueSummary = await getRevenueSummary(campaignContext.campaignId, accountId);
       const activePlanId = await getActiveBlueprintId();
 
@@ -642,7 +657,7 @@ Return JSON:
       const insights = await db.select().from(strategyInsights)
         .where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN)))
         .orderBy(desc(strategyInsights.createdAt)).limit(15);
-      const averages = await getAccountAverages();
+      const averages = await getAccountAverages(accountId, campaignId);
 
       const aiResponse = await aiChat({
         model: "gpt-5.2",
@@ -716,8 +731,8 @@ Return JSON:
       const { accountId, campaignId } = (req as any).campaignContext;
       const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(30);
       const insights = await db.select().from(strategyInsights).where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyInsights.createdAt)).limit(20);
-      const allPerf = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
-      const averages = await getAccountAverages();
+      const allPerf = await db.select().from(performanceSnapshots).where(and(eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId))).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
+      const averages = await getAccountAverages(accountId, campaignId);
 
       if (memories.length === 0 && insights.length === 0) {
         return res.status(400).json({ error: "Run AI Analysis first to populate memory and patterns before scanning for moat candidates." });
@@ -855,7 +870,7 @@ Return ONLY valid JSON:
       if (!candidate) return res.status(404).json({ error: "Moat candidate not found" });
 
       const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(15);
-      const averages = await getAccountAverages();
+      const averages = await getAccountAverages(accountId, campaignId);
 
       const aiResponse = await aiChat({
         model: "gpt-5.2",
@@ -961,7 +976,7 @@ Return ONLY valid JSON:
         db.select().from(moatCandidates).where(and(eq(moatCandidates.accountId, accountId), eq(moatCandidates.campaignId, campaignId), ne(moatCandidates.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(moatCandidates.moatScore)).limit(10),
         db.select().from(signatureSeries).where(eq(signatureSeries.isActive, true)).orderBy(desc(signatureSeries.createdAt)),
         db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(20),
-        getAccountAverages(),
+        getAccountAverages(accountId, campaignId),
       ]);
 
       const activeSeries = series.length;
@@ -1002,7 +1017,7 @@ Return ONLY valid JSON:
       const { accountId, campaignId } = (req as any).campaignContext;
 
       const [averages, recentInsights, recentDecisions, memoryItems, latestReport] = await Promise.all([
-        getAccountAverages(),
+        getAccountAverages(accountId, campaignId),
         db.select().from(strategyInsights).where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyInsights.createdAt)).limit(5),
         db.select().from(strategyDecisions).where(and(eq(strategyDecisions.accountId, accountId), eq(strategyDecisions.campaignId, campaignId))).orderBy(desc(strategyDecisions.createdAt)).limit(5),
         db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(10),
