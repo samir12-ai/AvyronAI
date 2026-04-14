@@ -501,6 +501,7 @@ export async function ingestTiktokPosts(
 export async function scrapeTiktokForCompetitor(
   competitorId: string,
   accountId: string,
+  campaignId?: string,
 ): Promise<TiktokScrapedResult> {
   const result: TiktokScrapedResult = {
     competitorId,
@@ -510,9 +511,14 @@ export async function scrapeTiktokForCompetitor(
     source: "unavailable",
   };
 
+  const whereConditions = [eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)];
+  if (campaignId) {
+    whereConditions.push(eq(ciCompetitors.campaignId, campaignId));
+  }
+
   const [competitor] = await db.select({ name: ciCompetitors.name, profileLink: ciCompetitors.profileLink, tiktokUrl: ciCompetitors.tiktokUrl })
     .from(ciCompetitors)
-    .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
+    .where(and(...whereConditions));
 
   if (!competitor) {
     result.error = `Competitor not found: ${competitorId}`;
@@ -539,7 +545,7 @@ export async function scrapeTiktokForCompetitor(
         result.postsInserted = inserted;
         result.commentsInserted = commentsInserted;
 
-        console.log(`[TiktokScraper] competitorId=${competitorId} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=brightdata`);
+        console.log(`[TiktokScraper] competitorId=${competitorId} | campaignId=${campaignId || "unscoped"} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=brightdata`);
         return result;
       }
       brightDataFailed = true;
@@ -579,11 +585,11 @@ export async function scrapeTiktokForCompetitor(
     result.postsInserted = inserted;
     result.commentsInserted = commentsInserted;
 
-    console.log(`[TiktokScraper] competitorId=${competitorId} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=apify`);
+    console.log(`[TiktokScraper] competitorId=${competitorId} | campaignId=${campaignId || "unscoped"} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=apify`);
     return result;
   } catch (err: any) {
     result.error = `Apify scrape failed: ${err.message}`;
-    console.error(`[TiktokScraper] Apify ERROR competitorId=${competitorId}: ${err.message}`);
+    console.error(`[TiktokScraper] Apify ERROR competitorId=${competitorId} | campaignId=${campaignId || "unscoped"}: ${err.message}`);
     return result;
   }
 }

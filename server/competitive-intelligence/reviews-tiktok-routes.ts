@@ -58,7 +58,7 @@ export function registerReviewsTiktokRoutes(app: Express) {
       const owned = await validateCompetitorOwnership(competitorId, accountId, campaignId);
       if (!owned) return res.status(403).json({ error: "Competitor not found or access denied" });
 
-      const result = await scrapeTiktokForCompetitor(competitorId, accountId);
+      const result = await scrapeTiktokForCompetitor(competitorId, accountId, campaignId);
       res.json({ success: !result.error, ...result });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -1319,18 +1319,18 @@ async function runSharedPoolRefresh() {
       const { eq: eqOp, and: andOp, sql: sqlOp } = await import("drizzle-orm");
 
       const tiktokCompetitors = await workerDb.execute(
-        sqlOp`SELECT id, account_id, name FROM ci_competitors WHERE tiktok_url IS NOT NULL AND tiktok_url != '' AND is_active = true LIMIT 20`
+        sqlOp`SELECT id, account_id, campaign_id, name FROM ci_competitors WHERE tiktok_url IS NOT NULL AND tiktok_url != '' AND is_active = true LIMIT 20`
       );
 
       let tiktokScraped = 0;
       for (const comp of (tiktokCompetitors as any).rows || tiktokCompetitors || []) {
         if (tiktokScraped >= 5) break;
         try {
-          const result = await scrapeTiktokForCompetitor(comp.id, comp.account_id);
-          console.log(`[CI Worker] TikTok scrape: competitor=${comp.name} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | source=${result.source}`);
+          const result = await scrapeTiktokForCompetitor(comp.id, comp.account_id, comp.campaign_id);
+          console.log(`[CI Worker] TikTok scrape: competitor=${comp.name} | campaign=${comp.campaign_id} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | source=${result.source}`);
           tiktokScraped++;
         } catch (tktErr: any) {
-          console.error(`[CI Worker] TikTok scrape error for ${comp.name}: ${tktErr.message}`);
+          console.error(`[CI Worker] TikTok scrape error for ${comp.name} (campaign=${comp.campaign_id}): ${tktErr.message}`);
         }
         await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
       }
