@@ -1,3 +1,47 @@
+export type SignalOriginType = "real" | "competitor" | "inferred" | "fallback" | "unknown";
+
+export interface SignalComposition {
+  real: number;
+  competitor: number;
+  inferred: number;
+  fallback: number;
+  unknown: number;
+  total: number;
+  dominantType: SignalOriginType;
+  competitorRatio: number;
+  realRatio: number;
+  inferredRatio: number;
+}
+
+export function computeSignalComposition(entries: SignalLineageEntry[]): SignalComposition {
+  const counts: Record<SignalOriginType, number> = { real: 0, competitor: 0, inferred: 0, fallback: 0, unknown: 0 };
+  for (const e of entries) {
+    const t = e.originType || "unknown";
+    counts[t] = (counts[t] || 0) + 1;
+  }
+  const total = entries.length || 1;
+  let dominantType: SignalOriginType = "unknown";
+  let maxCount = 0;
+  for (const [type, count] of Object.entries(counts)) {
+    if (count > maxCount) {
+      maxCount = count;
+      dominantType = type as SignalOriginType;
+    }
+  }
+  return {
+    ...counts,
+    total: entries.length,
+    dominantType,
+    competitorRatio: counts.competitor / total,
+    realRatio: counts.real / total,
+    inferredRatio: counts.inferred / total,
+  };
+}
+
+export function formatCompositionLog(comp: SignalComposition): string {
+  return `real=${comp.real} competitor=${comp.competitor} inferred=${comp.inferred} fallback=${comp.fallback} unknown=${comp.unknown} | dominant=${comp.dominantType} | realRatio=${(comp.realRatio * 100).toFixed(0)}% competitorRatio=${(comp.competitorRatio * 100).toFixed(0)}%`;
+}
+
 export interface SignalLineageEntry {
   signalId: string;
   originEngine: string;
@@ -7,6 +51,7 @@ export interface SignalLineageEntry {
   hopDepth: number;
   signalPath: string[];
   createdAt: string;
+  originType: SignalOriginType;
 }
 
 export function generateLineageId(engine: string, category: string, index: number): string {
@@ -20,6 +65,7 @@ export function createSourceLineageEntry(
   category: string,
   signalText: string,
   index: number,
+  originType: SignalOriginType = "unknown",
 ): SignalLineageEntry {
   const signalId = generateLineageId(engine, category, index);
   return {
@@ -31,6 +77,7 @@ export function createSourceLineageEntry(
     hopDepth: 0,
     signalPath: [engine],
     createdAt: new Date().toISOString(),
+    originType,
   };
 }
 
@@ -51,6 +98,7 @@ export function createDerivedLineageEntry(
     hopDepth: parentEntry.hopDepth + 1,
     signalPath: [...parentEntry.signalPath, engine],
     createdAt: new Date().toISOString(),
+    originType: parentEntry.originType || "unknown",
   };
 }
 
@@ -94,11 +142,26 @@ export function mergeLineageArrays(...arrays: SignalLineageEntry[][]): SignalLin
   return result;
 }
 
+function normalizeLineageEntry(raw: any): SignalLineageEntry {
+  return {
+    signalId: raw.signalId || "",
+    originEngine: raw.originEngine || "",
+    signalCategory: raw.signalCategory || "",
+    signalText: raw.signalText || "",
+    parentSignalId: raw.parentSignalId || null,
+    hopDepth: raw.hopDepth || 0,
+    signalPath: raw.signalPath || [],
+    createdAt: raw.createdAt || "",
+    originType: raw.originType || "unknown",
+  };
+}
+
 export function parseLineageFromSnapshot(raw: string | null): SignalLineageEntry[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeLineageEntry);
   } catch {
     return [];
   }
@@ -110,6 +173,7 @@ export interface QualifyingSignal {
   category: string;
   text: string;
   hopDepth: number;
+  originType: SignalOriginType;
 }
 
 export function extractQualifyingSignals(lineage: SignalLineageEntry[]): QualifyingSignal[] {
@@ -121,6 +185,7 @@ export function extractQualifyingSignals(lineage: SignalLineageEntry[]): Qualify
       category: e.signalCategory,
       text: e.signalText,
       hopDepth: e.hopDepth,
+      originType: e.originType,
     }));
 }
 
@@ -134,6 +199,7 @@ export interface SignalGroundingResult {
   signalSufficient: boolean;
   groundedEntries: SignalLineageEntry[];
   strippedClaims: string[];
+  composition: SignalComposition;
 }
 
 export function validateClaimGrounding(
@@ -166,5 +232,6 @@ export function validateClaimGrounding(
     signalSufficient: upstreamLineage.filter(e => e.hopDepth === 0).length >= MIN_QUALIFYING_SIGNALS,
     groundedEntries,
     strippedClaims,
+    composition: computeSignalComposition(groundedEntries),
   };
 }

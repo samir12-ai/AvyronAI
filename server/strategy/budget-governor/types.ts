@@ -27,6 +27,7 @@ export interface BudgetGovernorInput {
   historicalCPA: number | null;
   historicalROAS: number | null;
   campaignPerformance?: CampaignPerformanceMetrics;
+  signalComposition?: import("../../shared/signal-lineage").SignalComposition;
 }
 
 export interface BudgetDecision {

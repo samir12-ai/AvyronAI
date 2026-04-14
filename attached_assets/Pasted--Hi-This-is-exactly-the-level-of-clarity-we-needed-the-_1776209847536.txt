@@ -1,0 +1,157 @@
+}
+Hi,
+
+This is exactly the level of clarity we needed — the breakdown of the propagation paths and the T1–T8 mapping makes the problem fully explicit.
+
+I agree with your assessment and the proposed model:
+
+> tag-at-source → inherit-on-derive → validate-at-boundary
+
+This aligns with the direction we want.
+
+---
+
+## Confirmation on Direction
+
+We are moving forward with:
+
+- Adding originType to SignalLineageEntry
+- Tagging at source (Signal Engine + data resolver + inferred/fallback paths)
+- Strict inheritance via createDerivedLineageEntry()
+- Orchestrator-level boundary enforcement
+- Composition visibility into plan + fortress engines
+
+---
+
+## Critical Emphasis (Before You Start)
+
+There are three constraints I want you to strictly enforce during implementation:
+
+---
+
+### 1. No Identity Loss — Zero Tolerance
+
+From your mapping:
+
+- T1 and T3 are critical
+
+These must be treated as:
+
+> Non-negotiable — identity must never be dropped or reset
+
+Specifically:
+
+- buildUpstreamLineage() must NOT recreate lineage entries without originType
+- No transformation should generate a “fresh” signal without inheriting originType
+- No fallback path should produce untagged signals
+
+---
+
+### 2. No Leakage or Type Collapse
+
+This is critical across:
+
+- T2 (MI → orchestrator)
+- T5 (semantic matching)
+- T6 (plan synthesis)
+
+We must ensure:
+
+- No implicit merging of signal types
+- No reinterpretation of:
+  - inferred → real
+  - competitor → native
+- Any aggregation must preserve composition, not collapse it
+
+---
+
+### 3. System-Wide Enforcement (Not Local)
+
+This must apply to:
+
+- all engines
+- all pipelines
+- all users (current and future)
+- all signal flows
+
+Not acceptable:
+
+- fixing only lineage arrays
+- fixing only one engine
+- or partial propagation coverage
+
+---
+
+## Specific Clarifications Before Implementation
+
+Before you start coding, I want confirmation on these points:
+
+---
+
+### A. T2 (Aggregated MI Context)
+
+For:
+
+- threatSignals
+- opportunitySignals
+- clusters
+
+How exactly will originType be carried?
+
+Since these are currently plain arrays/objects:
+
+- Will you wrap them?
+- Or attach a parallel structure?
+
+---
+
+### B. T6 (Plan Synthesis)
+
+How will you ensure:
+
+- Plan elements (pain, claims, hooks, etc.)
+retain origin composition?
+
+Will this be:
+
+- per-element tagging?
+- or plan-level composition only?
+
+---
+
+### C. T7 (Budget / Channel)
+
+How will composition be passed?
+
+- As a separate object?
+- Or embedded into confidence diagnostics?
+
+---
+
+### D. Handling Legacy Data
+
+Confirm:
+
+- All existing lineage entries default to "unknown"
+- No enforcement rule treats "unknown" as "real"
+- Unknown is handled safely (not promoted implicitly)
+
+---
+
+## Final Note
+
+Do NOT:
+
+- introduce engine-specific logic divergence
+- duplicate enforcement across multiple places
+- or rely on assumptions of upstream correctness
+
+We want:
+
+> one consistent model, enforced at the right layers, with no bypass paths
+
+---
+
+Once you confirm the above, proceed with implementation.
+
+Thank

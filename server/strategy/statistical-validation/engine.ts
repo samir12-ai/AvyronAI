@@ -20,7 +20,7 @@ import {
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
-import type { SignalLineageEntry } from "../../shared/signal-lineage";
+import { computeSignalComposition, formatCompositionLog, type SignalLineageEntry } from "../../shared/signal-lineage";
 import type {
   ValidationMIInput,
   ValidationAudienceInput,
@@ -1299,7 +1299,9 @@ export async function runStatisticalValidationEngine(
   }
 
   const lineageAnchoredCount = claimValidations.filter(c => c.parentSignalId !== null || c.originEngine !== null).length;
+  const originTypeDistribution = computeSignalComposition(upstreamLineage);
   console.log(`[StatisticalValidation] GROUNDING_METRICS | total=${claimValidations.length} | signalBacked=${signalBackedClaimCount} | lineageAnchored=${lineageAnchoredCount} | hypotheses=${hypotheses.length} | ratio=${signalBackedClaimRatio.toFixed(2)} | state=${validationState}`);
+  console.log(`[StatisticalValidation] ORIGIN_TYPE_DISTRIBUTION | ${formatCompositionLog(originTypeDistribution)}`);
 
   const confidenceExplanation = buildConfidenceExplanation(
     claimConfidenceScore,
@@ -1355,5 +1357,6 @@ export async function runStatisticalValidationEngine(
     signalBackedClaimRatio,
     unmappedSignals,
     lowConfidenceSignals,
+    originTypeDistribution,
   };
 }

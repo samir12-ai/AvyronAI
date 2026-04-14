@@ -22,6 +22,7 @@ import {
   serializeDecisionReportForLog,
   type DecisionEnforcementReport,
 } from "../decision-policy";
+import { computeSignalComposition, formatCompositionLog, type SignalComposition } from "../shared/signal-lineage";
 
 export type PlanSource = "decision_driven" | "degraded_no_decisions" | "degraded_ai_failed" | "deterministic_fallback";
 
@@ -386,6 +387,7 @@ async function generatePlanWithAI(
   memoryContextBlock?: string,
   campaignId: string = "",
   precomputedRhythm?: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; reasoning: string; performanceBasis: string } | null,
+  signalComposition?: SignalComposition | null,
 ): Promise<SynthesizedPlan> {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
@@ -450,13 +452,26 @@ INSTRUCTION: Use these exact counts in contentDistribution. Do not derive rhythm
 `
     : "";
 
+  const compositionBlock = signalComposition && signalComposition.total > 0
+    ? `SIGNAL COMPOSITION (epistemic origin of strategy inputs):
+  Total signals: ${signalComposition.total}
+  Real (performance data): ${(signalComposition.realRatio * 100).toFixed(0)}%
+  Competitor-derived: ${(signalComposition.competitorRatio * 100).toFixed(0)}%
+  AI-inferred: ${(signalComposition.inferredRatio * 100).toFixed(0)}%
+  Fallback: ${(signalComposition.fallbackRatio * 100).toFixed(0)}%
+  Unknown: ${(signalComposition.unknownRatio * 100).toFixed(0)}%
+NOTE: If strategy is heavily competitor-derived or inferred, flag this in riskTriggers and recommend gathering own performance data early.
+
+`
+    : "";
+
   const prompt = `You are a marketing strategist assembling an execution plan from engine outputs. Your job is to ASSEMBLE, not to re-derive strategy.
 
 Business Type: ${businessType}
 Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
-${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}
+${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}${compositionBlock}
 Engine Analysis Results (use for volume, timing, and structural decisions):
 ${engineInsights}
 
@@ -924,7 +939,13 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] Precomputed rhythm failed (non-blocking):`, rhythmErr.message);
   }
 
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm);
+  const validationResult = results.get("statistical_validation");
+  const signalComp: SignalComposition | null = validationResult?.output?.originTypeDistribution || null;
+  if (signalComp) {
+    console.log(`[PlanSynthesis] SIGNAL_COMPOSITION_INJECTED | ${formatCompositionLog(signalComp)}`);
+  }
+
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm, signalComp);
 
   const alreadyDegraded = synthesized.degraded === true || synthesized.planSource === "degraded_ai_failed";
 

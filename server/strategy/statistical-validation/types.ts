@@ -153,4 +153,5 @@ export interface StatisticalValidationResult {
   signalBackedClaimRatio: number;
   unmappedSignals: string[];
   lowConfidenceSignals: string[];
+  originTypeDistribution?: import("../../shared/signal-lineage").SignalComposition;
 }

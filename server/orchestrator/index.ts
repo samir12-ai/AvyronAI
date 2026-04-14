@@ -42,6 +42,7 @@ import {
 } from "@shared/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
+import { computeSignalComposition, formatCompositionLog } from "../shared/signal-lineage";
 import {
   ENGINE_PRIORITY_ORDER,
   checkPriorityViolation,
@@ -74,6 +75,8 @@ import { runPersuasionEngine } from "../persuasion-engine/engine";
 import {
   createSourceLineageEntry,
   type SignalLineageEntry,
+  type SignalOriginType,
+  parseLineageFromSnapshot,
 } from "../shared/signal-lineage";
 import { runStatisticalValidationEngine } from "../strategy/statistical-validation/engine";
 import { runBudgetGovernorEngine } from "../strategy/budget-governor/engine";
@@ -288,9 +291,17 @@ async function getRetentionGateData(accountId: string, campaignId: string): Prom
 function extractMiInput(miResult: any): any {
   if (!miResult?.output) return {};
   const out = miResult.output;
+
+  const rawSignals: any[] = out.signals || [];
+  const taggedSignals = rawSignals.map((s: any) => {
+    if (typeof s === "string") return { text: s, originType: "competitor" as const };
+    return { text: s.text || s.signal || s.name || JSON.stringify(s), originType: s.originType || "competitor" as const };
+  });
+
   return {
     competitors: out.competitors || [],
-    signals: out.signals || [],
+    signals: rawSignals,
+    taggedSignals,
     dominance: miResult.dominanceData || [],
     trajectory: miResult.trajectoryData || null,
     marketState: out.marketState || null,
@@ -346,74 +357,85 @@ function extractDifferentiationInput(diffResult: any): any {
   };
 }
 
+function resolveUpstreamOriginType(ctx: EngineContext, engine: string): SignalOriginType {
+  if (engine === "audience") return "competitor";
+  if (engine === "positioning" || engine === "differentiation" || engine === "mechanism") return "inferred";
+  return "unknown";
+}
+
 function buildUpstreamLineage(ctx: EngineContext): SignalLineageEntry[] {
   const entries: SignalLineageEntry[] = [];
   let idx = 0;
 
   const audienceResult = ctx.audience;
   if (audienceResult) {
+    const audOrigin = resolveUpstreamOriginType(ctx, "audience");
     const pains = audienceResult.painProfiles || [];
     for (const p of pains.slice(0, 5)) {
       const text = typeof p === "string" ? p : p.pain || p.name || p.label || JSON.stringify(p);
-      entries.push(createSourceLineageEntry("audience", "pain", text, idx++));
+      entries.push(createSourceLineageEntry("audience", "pain", text, idx++, audOrigin));
     }
     const desires = audienceResult.desireMap || [];
     for (const d of desires.slice(0, 5)) {
       const text = typeof d === "string" ? d : d.desire || d.name || d.label || JSON.stringify(d);
-      entries.push(createSourceLineageEntry("audience", "desire", text, idx++));
+      entries.push(createSourceLineageEntry("audience", "desire", text, idx++, audOrigin));
     }
     const objections = audienceResult.objectionMap || [];
     for (const o of objections.slice(0, 3)) {
       const text = typeof o === "string" ? o : o.objection || o.name || o.label || JSON.stringify(o);
-      entries.push(createSourceLineageEntry("audience", "objection", text, idx++));
+      entries.push(createSourceLineageEntry("audience", "objection", text, idx++, audOrigin));
     }
   }
 
   const positioningResult = ctx.positioning;
   if (positioningResult) {
+    const posOrigin = resolveUpstreamOriginType(ctx, "positioning");
     const out = positioningResult.output || positioningResult;
     const territories: any[] = out.territories || positioningResult.territories || [];
     for (const t of territories.slice(0, 3)) {
       const text = typeof t === "string" ? t : t.name || t.territory || JSON.stringify(t);
-      entries.push(createSourceLineageEntry("positioning", "territory", text, idx++));
+      entries.push(createSourceLineageEntry("positioning", "territory", text, idx++, posOrigin));
     }
     const cards = out.strategyCards || positioningResult.strategyCards || [];
     for (const c of cards.slice(0, 3)) {
       const text = typeof c === "string" ? c : c.claim || c.description || c.name || JSON.stringify(c);
-      entries.push(createSourceLineageEntry("positioning", "strategy_card", text, idx++));
+      entries.push(createSourceLineageEntry("positioning", "strategy_card", text, idx++, posOrigin));
     }
   }
 
   const diffResult = ctx.differentiation;
   if (diffResult) {
+    const diffOrigin = resolveUpstreamOriginType(ctx, "differentiation");
     const claims = diffResult.validatedClaims || [];
     for (const c of claims.slice(0, 5)) {
       const text = typeof c === "string" ? c : c.claim || c.description || c.name || JSON.stringify(c);
-      entries.push(createSourceLineageEntry("differentiation", "claim", text, idx++));
+      entries.push(createSourceLineageEntry("differentiation", "claim", text, idx++, diffOrigin));
     }
     const pillars = diffResult.pillars || [];
     for (const p of pillars.slice(0, 3)) {
       const text = typeof p === "string" ? p : p.description || p.name || p.territory || JSON.stringify(p);
-      entries.push(createSourceLineageEntry("differentiation", "pillar", text, idx++));
+      entries.push(createSourceLineageEntry("differentiation", "pillar", text, idx++, diffOrigin));
     }
   }
 
   const mechResult = ctx.mechanism;
   if (mechResult?.primaryMechanism) {
+    const mechOrigin = resolveUpstreamOriginType(ctx, "mechanism");
     const m = mechResult.primaryMechanism;
     if (m.mechanismDescription) {
-      entries.push(createSourceLineageEntry("mechanism", "mechanism_description", m.mechanismDescription, idx++));
+      entries.push(createSourceLineageEntry("mechanism", "mechanism_description", m.mechanismDescription, idx++, mechOrigin));
     }
     if (m.mechanismLogic) {
-      entries.push(createSourceLineageEntry("mechanism", "mechanism_logic", m.mechanismLogic, idx++));
+      entries.push(createSourceLineageEntry("mechanism", "mechanism_logic", m.mechanismLogic, idx++, mechOrigin));
     }
     const steps = m.mechanismSteps || [];
     for (const s of steps.slice(0, 5)) {
-      entries.push(createSourceLineageEntry("mechanism", "mechanism_step", s, idx++));
+      entries.push(createSourceLineageEntry("mechanism", "mechanism_step", s, idx++, mechOrigin));
     }
   }
 
-  console.log(`[Orchestrator] LINEAGE_BUILT | entries=${entries.length} | sources=[${[...new Set(entries.map(e => e.originEngine))].join(",")}]`);
+  const comp = computeSignalComposition(entries);
+  console.log(`[Orchestrator] LINEAGE_BUILT | entries=${entries.length} | sources=[${[...new Set(entries.map(e => e.originEngine))].join(",")}] | composition: ${formatCompositionLog(comp)}`);
   return entries;
 }
 

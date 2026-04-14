@@ -1170,17 +1170,17 @@ export class MarketIntelligenceV3 {
     const miLineage: SignalLineageEntry[] = [];
     opportunitySignals.forEach((sig: any, i: number) => {
       const text = typeof sig === "string" ? sig : (sig?.signal || sig?.description || sig?.message || "");
-      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_opportunity", text, i));
+      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_opportunity", text, i, "competitor"));
     });
     threatSignals.forEach((sig: any, i: number) => {
       const text = typeof sig === "string" ? sig : (sig?.signal || sig?.description || sig?.message || "");
-      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_threat", text, i));
+      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_threat", text, i, "competitor"));
     });
     const narObjections = narrativeObjectionMap?.objections || [];
     narObjections.forEach((obj: any, i: number) => {
-      if (obj?.objection) miLineage.push(createSourceLineageEntry("market_intelligence", "narrative_objection", obj.objection, i));
+      if (obj?.objection) miLineage.push(createSourceLineageEntry("market_intelligence", "narrative_objection", obj.objection, i, "competitor"));
     });
-    console.log(`[MIv3] LINEAGE_GENERATED | entries=${miLineage.length} | opportunities=${opportunitySignals.length} | threats=${threatSignals.length} | narrativeObj=${narObjections.length}`);
+    console.log(`[MIv3] LINEAGE_GENERATED | entries=${miLineage.length} | originType=competitor | opportunities=${opportunitySignals.length} | threats=${threatSignals.length} | narrativeObj=${narObjections.length}`);
 
     const snapshotPayload = {
       accountId,

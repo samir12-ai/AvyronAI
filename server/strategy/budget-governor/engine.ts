@@ -144,6 +144,16 @@ function runGuard(input: BudgetGovernorInput, riskScore: number): BudgetGuardRes
     warnings.push("High market intensity — competitive pressure may inflate costs");
   }
 
+  if (input.signalComposition) {
+    const comp = input.signalComposition;
+    if (comp.realRatio === 0 && comp.total > 0) {
+      warnings.push(`SIGNAL_COMPOSITION: No real signals detected — strategy is ${(comp.competitorRatio * 100).toFixed(0)}% competitor-derived, ${(comp.inferredRatio * 100).toFixed(0)}% inferred. Scaling risk elevated.`);
+    }
+    if (comp.competitorRatio > 0.8) {
+      warnings.push(`SIGNAL_COMPOSITION: Strategy is >80% competitor-derived (${(comp.competitorRatio * 100).toFixed(0)}%). Recommend acquiring own performance data before scaling.`);
+    }
+  }
+
   return {
     passed: violations.length === 0,
     violations,
