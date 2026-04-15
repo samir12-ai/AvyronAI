@@ -1174,6 +1174,46 @@ function layer6_messageOrderLogic(
     }
   }
 
+  const funnelStages = funnel.stageMap || [];
+  const funnelDepth = funnelStages.length;
+  if (funnelDepth >= 5) {
+    if (sequence.includes("invite_commitment")) {
+      const commitIdx = sequence.indexOf("invite_commitment");
+      if (!sequence.includes("build_anticipation")) {
+        sequence.splice(commitIdx, 0, "build_anticipation");
+        findings.push(`Deep funnel (${funnelDepth} stages) → anticipation step injected before commitment — audience has more touchpoints for gradual escalation`);
+      }
+    }
+    if (!sequence.includes("demonstrate_understanding") && sequence.length > 3) {
+      sequence.splice(1, 0, "demonstrate_understanding");
+      findings.push(`Deep funnel → demonstrate_understanding added early — multi-stage funnels need empathy anchoring`);
+    }
+    score += 0.05;
+  } else if (funnelDepth > 0 && funnelDepth <= 2) {
+    const educationSteps = ["educate_on_problem", "demonstrate_understanding", "disrupt_assumption"];
+    const compressed = sequence.filter(s => !educationSteps.includes(s) || s === sequence[0]);
+    if (compressed.length < sequence.length) {
+      sequence.length = 0;
+      sequence.push(...compressed);
+      findings.push(`Shallow funnel (${funnelDepth} stages) → compressed sequence: removed redundant education steps for fast conversion path`);
+    }
+  }
+
+  const funnelTrustPath = funnel.trustPath || [];
+  if (Array.isArray(funnelTrustPath) && funnelTrustPath.length > 0) {
+    const trustStages = funnelTrustPath.map((tp: any) => typeof tp === "string" ? tp : tp?.stage || tp?.name || "");
+    const hasSocialProofStage = trustStages.some((s: string) => s.toLowerCase().includes("social") || s.toLowerCase().includes("testimonial"));
+    if (hasSocialProofStage && !sequence.includes("present_proof")) {
+      const authIdx = sequence.indexOf("establish_authority");
+      if (authIdx >= 0) {
+        sequence.splice(authIdx + 1, 0, "present_proof");
+      } else {
+        sequence.push("present_proof");
+      }
+      findings.push(`Funnel trust path includes social proof stage → proof step added to persuasion sequence`);
+    }
+  }
+
   const architectureViolations = validateMessageArchitecture(sequence);
   if (architectureViolations.length === 0) {
     findings.push(`Message architecture validated: follows problem → mechanism → proof → outcome → offer`);

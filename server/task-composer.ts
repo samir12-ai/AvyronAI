@@ -97,20 +97,73 @@ function generateTasksFromPlan(planData: any, periodDays: number): TaskTemplate[
   return tasks;
 }
 
+export interface TaskComposerContext {
+  budgetDecision?: string;
+  budgetKillFlag?: boolean;
+  integrityScore?: number;
+  safeToExecute?: boolean;
+  signalTrustedRatio?: number;
+}
+
+function applyStrategicGuards(templates: TaskTemplate[], context: TaskComposerContext): TaskTemplate[] {
+  if (context.budgetKillFlag || context.budgetDecision === "halt") {
+    console.log(`[TaskComposer] HALT_ENFORCED | No tasks generated — budget decision: ${context.budgetDecision}, killFlag: ${context.budgetKillFlag}`);
+    return [];
+  }
+
+  let filtered = [...templates];
+
+  if (context.budgetDecision === "hold") {
+    filtered = filtered.filter(t => t.taskType !== "launch" && t.category !== "ads");
+    const contentTasks = filtered.filter(t => t.taskType === "content_production");
+    const nonContentTasks = filtered.filter(t => t.taskType !== "content_production");
+    const reducedContent = contentTasks.filter((_, i) => i % 2 === 0);
+    filtered = [...reducedContent, ...nonContentTasks];
+    console.log(`[TaskComposer] HOLD_RESTRICTION | Removed launch/ad tasks, reduced content by 50% | ${templates.length}→${filtered.length} tasks`);
+  }
+
+  if (context.safeToExecute === false) {
+    filtered = filtered.filter(t => t.taskType !== "launch" && t.category !== "ads");
+    filtered = filtered.map(t => ({
+      ...t,
+      title: `[REVIEW] ${t.title}`,
+      description: `${t.description} — INTEGRITY WARNING: Strategy has structural concerns, review before executing`,
+      priority: t.priority === "high" ? "normal" : t.priority,
+    }));
+    console.log(`[TaskComposer] INTEGRITY_DEGRADED | Marked tasks for review, blocked launches | safeToExecute=false score=${context.integrityScore}`);
+  } else if ((context.integrityScore ?? 1) < 0.6) {
+    filtered = filtered.map(t => t.taskType === "launch" ? { ...t, priority: "normal", description: `${t.description} — Note: Strategy integrity score is low (${((context.integrityScore ?? 0) * 100).toFixed(0)}%), proceed with caution` } : t);
+    console.log(`[TaskComposer] INTEGRITY_CAUTION | Launch tasks deprioritized | score=${context.integrityScore}`);
+  }
+
+  if ((context.signalTrustedRatio ?? 1) < 0.3) {
+    filtered = filtered.filter(t => t.taskType !== "launch");
+    console.log(`[TaskComposer] LOW_TRUST_SIGNALS | Launch tasks removed — trusted signal ratio: ${((context.signalTrustedRatio ?? 0) * 100).toFixed(0)}%`);
+  }
+
+  return filtered;
+}
+
 export async function composeTasks(
   planId: string,
   campaignId: string,
   accountId: string,
   planData: any,
   periodDays: number,
-  rootBundleId: string | null = null
+  rootBundleId: string | null = null,
+  strategicContext?: TaskComposerContext,
 ) {
   await db.delete(executionTasks).where(and(
     eq(executionTasks.planId, planId),
     eq(executionTasks.campaignId, campaignId)
   ));
 
-  const templates = generateTasksFromPlan(planData, periodDays);
+  let templates = generateTasksFromPlan(planData, periodDays);
+
+  if (strategicContext) {
+    templates = applyStrategicGuards(templates, strategicContext);
+  }
+
   if (templates.length === 0) return [];
 
   const weeks = Math.ceil(periodDays / 7);

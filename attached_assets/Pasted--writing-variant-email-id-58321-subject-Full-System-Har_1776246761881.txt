@@ -1,0 +1,232 @@
+:::writing{variant=“email” id=“58321” subject=“Full System Hardening Plan — 3 Phases + Mandatory End-to-End Verification”}
+Hi,
+
+This is a full system-level directive based on a deep code-level audit across all engines, orchestration, and execution layers. We’ve identified 20+ issues across data flow, enforcement, and execution consistency.
+
+This is NOT a partial fix request. This is a complete system hardening plan from A to Z.
+
+Your role:
+	•	Implement ~70% strictly as specified
+	•	Use your judgment for ~30% improvements / connections
+	•	If anything is unclear or you see a better structural approach → flag it before changing
+
+Every phase MUST end with strict end-to-end validation (frontend + backend). No phase is considered complete without that.
+
+⸻
+
+PHASE ONE — SYSTEM CONTROL & ENFORCEMENT (CRITICAL)
+
+Objective:
+
+Ensure the system does not produce misleading or unsafe outputs.
+
+Tasks:
+	1.	Fix Budget Governor Inputs (CRITICAL)
+
+	•	Ensure all required inputs are passed from orchestrator (same as working API route logic)
+	•	Include: offer strength, funnel strength, validation confidence, market context, etc.
+	•	No undefined fields allowed
+
+	2.	Fix Channel Selection Budget Mapping
+
+	•	Align field names with actual Budget Governor output
+	•	Ensure channels are filtered based on real budget constraints
+
+	3.	Enforce Budget Decision BEFORE Plan Creation
+
+	•	If decision = HALT → do not generate full plan
+	•	If HOLD → restrict plan scale
+	•	Plan must respect budget decision structurally, not via prompt only
+
+	4.	Enforce Integrity Engine
+
+	•	If safeToExecute = false:
+	•	Either block execution OR switch to degraded-safe mode
+	•	This must affect downstream behavior, not just logs
+
+	5.	Connect Execution Layer to Reality
+
+	•	Task Composer must respect:
+	•	Budget decision
+	•	Integrity result
+	•	No tasks generated if system is halted
+	•	Reduced tasks if system is unstable
+
+⸻
+
+Phase 1 — Acceptance Criteria (MANDATORY)
+
+You MUST:
+	•	Test full flow from:
+	•	Data → Engines → Plan → Tasks → Dashboard
+	•	Validate:
+	•	No plan generated when HALT
+	•	Tasks match budget decision
+	•	Integrity failure actually affects execution
+	•	No fake confidence shown in dashboard
+	•	Run multiple scenarios:
+	•	Strong system
+	•	Weak signals
+	•	Missing data
+	•	Degraded mode
+	•	Confirm:
+	•	Backend logs clean
+	•	Frontend reflects real state
+	•	No silent failures
+
+⸻
+
+PHASE TWO — DATA CONTRACTS & ENGINE ALIGNMENT
+
+Objective:
+
+Make all engines speak a consistent, reliable data language
+
+Tasks:
+	1.	Create Formal Data Contracts (Minimum Required)
+
+Define strict output structure for:
+	•	Offer
+	•	Funnel
+
+These must include all required fields consistently (no optional guessing)
+	2.	Implement Extractors
+
+	•	Create:
+	•	extractOfferInput()
+	•	extractFunnelInput()
+	•	ALL downstream engines must use these (no raw object access)
+
+	3.	Remove Raw Data Access
+
+	•	No engine should read ctx.offer || {} or similar directly
+	•	Everything must pass through normalized inputs
+
+	4.	Fix Statistical Validation Input
+
+	•	Pass real lineage (not empty array)
+	•	Ensure validation operates on actual signal data
+
+	5.	Stabilize Data Flow
+
+	•	Ensure no engine depends on AI output shape variability
+	•	Standardize access paths across system
+
+⸻
+
+Phase 2 — Acceptance Criteria (MANDATORY)
+
+You MUST:
+	•	Run full system end-to-end again
+	•	Validate:
+	•	All engines receive structured inputs
+	•	No undefined field access anywhere
+	•	No fallback chains triggered due to missing fields
+	•	Statistical validation works with real lineage
+	•	Test variations:
+	•	Different AI output shapes
+	•	Missing optional fields
+	•	Edge-case responses
+	•	Confirm:
+	•	System behavior remains stable
+	•	Outputs are consistent across runs
+	•	No silent structural breaks
+
+⸻
+
+PHASE THREE — INTELLIGENCE ENFORCEMENT & SYSTEM ADAPTIVITY
+
+Objective:
+
+Make the system think AND act based on its intelligence
+
+Tasks:
+	1.	Activate Signal-Based Behavior
+
+	•	Use signal composition (real / competitor / inferred / fallback)
+	•	Modify behavior accordingly:
+	•	High competitor → reduce confidence / restrict scaling
+	•	High inferred → more conservative decisions
+	•	No real data → no aggressive execution
+
+	2.	Strengthen Funnel → Persuasion Link
+
+	•	Persuasion must adapt to:
+	•	Funnel depth
+	•	Stage progression
+	•	Friction points
+	•	Not just compatibility check — actual behavioral adjustment
+
+	3.	Fix Retention Inputs
+
+	•	Generate touchpoints from funnel stages (if no external data)
+	•	Provide meaningful journey structure
+	•	Remove empty arrays
+
+	4.	Introduce Feedback Awareness
+
+	•	Ensure:
+	•	Iteration insights influence decisions
+	•	Retention insights are not isolated
+	•	At minimum: flag inconsistencies for future adjustment
+
+⸻
+
+Phase 3 — Acceptance Criteria (MANDATORY)
+
+You MUST:
+	•	Run complete end-to-end system again
+	•	Validate:
+	•	Signal composition affects decisions
+	•	Persuasion changes based on funnel
+	•	Retention produces meaningful outputs
+	•	No engine behaves blindly to inputs
+	•	Test:
+	•	High competitor scenarios
+	•	Low data scenarios
+	•	Mixed signal environments
+	•	Confirm:
+	•	System is adaptive (not static)
+	•	Outputs change based on data reality
+
+⸻
+
+FINAL REQUIREMENTS
+	•	Do NOT skip phases
+	•	Do NOT partially implement
+	•	Do NOT rely on assumptions
+
+You are expected to:
+	•	Close all known gaps
+	•	Connect missing flows where obvious
+	•	Improve structure where needed (within ~30%)
+
+If you:
+	•	See missing logic
+	•	Need clarification
+	•	Want to change structure
+
+→ STOP and ask before proceeding
+
+⸻
+
+FINAL DELIVERY EXPECTATION
+
+Before confirming completion, you must state:
+	•	All 3 phases completed
+	•	All acceptance criteria passed
+	•	Full end-to-end system tested (frontend + backend)
+	•	No silent failures observed
+	•	System behavior matches data reality
+
+⸻
+
+This is the step that determines whether the system is:
+	•	A working prototype
+or
+	•	A real, reliable company brain
+
+Execute carefully.
+
+— Samir
+:::

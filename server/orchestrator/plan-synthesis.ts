@@ -97,6 +97,137 @@ export interface SynthesizedPlan {
   };
 }
 
+function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any): SynthesizedPlan {
+  const reasoning = budgetOutput?.decision?.reasoning || "Budget governor halted execution";
+  const killReasons = budgetOutput?.killReasons || [];
+  return {
+    planSource: "degraded_ai_failed",
+    degraded: true,
+    strategicSummary: {
+      strategy: "HALTED — Budget governor blocked execution",
+      targetAudience: campaign?.targetAudience || "N/A",
+      growthObjective: campaign?.objective || "N/A",
+      rationale: `Execution halted: ${reasoning}. ${killReasons.length > 0 ? "Kill reasons: " + killReasons.join("; ") : ""}`,
+    },
+    monthlyObjective: {
+      objective: "Strategy under review — no execution permitted",
+      type: "hold",
+      targetMetric: "N/A",
+      targetValue: "0",
+    },
+    kpiStructure: {
+      primaryKPI: { name: "N/A", target: "0", cadence: "N/A" },
+      secondaryKPI: { name: "N/A", target: "0", cadence: "N/A" },
+      performanceExpectations: "Execution halted by budget governor. Review strategy before resuming.",
+    },
+    contentDistribution: {
+      reelsPerWeek: 0,
+      postsPerWeek: 0,
+      storiesPerDay: 0,
+      carouselsPerWeek: 0,
+      videosPerWeek: 0,
+      rationale: "No content production — strategy halted",
+      contentPillars: [],
+    },
+    creativeTesting: { tests: [] },
+    budgetAllocation: {
+      totalBudget: "0",
+      breakdown: [],
+    },
+    kpiMonitoring: {
+      metrics: [],
+      reportingCadence: "paused",
+    },
+    competitiveWatch: { targets: [] },
+    riskTriggers: {
+      triggers: [{ trigger: "Budget halt active", condition: "Automatic", action: "Review strategy fundamentals before resuming", severity: "critical" }],
+      escalationPath: ["Review offer strength", "Review funnel conversion", "Re-run budget governor"],
+    },
+  };
+}
+
+async function persistPlan(plan: SynthesizedPlan, config: OrchestratorConfig, rootBundle: any, explorationSlots: any[]): Promise<string> {
+  const [dbPlan] = await db.insert(strategicPlans).values({
+    accountId: config.accountId,
+    blueprintId: "orchestrator-v2",
+    campaignId: config.campaignId,
+    planJson: JSON.stringify(plan),
+    planSummary: plan.strategicSummary.strategy,
+    status: "DRAFT",
+    executionStatus: plan.degraded ? "HALTED" : "IDLE",
+    totalCalendarEntries: 0,
+    totalStudioItems: 0,
+    totalPublished: 0,
+    totalFailed: 0,
+    totalCanceled: 0,
+    rootBundleId: rootBundle?.id || null,
+    rootBundleVersion: rootBundle?.version || null,
+  }).returning();
+
+  await db.insert(requiredWork).values({
+    planId: dbPlan.id,
+    campaignId: config.campaignId,
+    accountId: config.accountId,
+    periodDays: 30,
+    reelsPerWeek: plan.contentDistribution.reelsPerWeek,
+    postsPerWeek: plan.contentDistribution.postsPerWeek,
+    storiesPerDay: plan.contentDistribution.storiesPerDay,
+    carouselsPerWeek: plan.contentDistribution.carouselsPerWeek,
+    videosPerWeek: plan.contentDistribution.videosPerWeek,
+    totalReels: 0,
+    totalPosts: 0,
+    totalStories: 0,
+    totalCarousels: 0,
+    totalVideos: 0,
+    totalContentPieces: 0,
+    explorationSlotsPerWeek: 0,
+    generatedCount: 0,
+    readyCount: 0,
+    scheduledCount: 0,
+    publishedCount: 0,
+    failedCount: 0,
+    rootBundleId: rootBundle?.id || null,
+    rootBundleVersion: rootBundle?.version || null,
+  });
+
+  console.log(`[PlanSynthesis] Persisted ${plan.degraded ? "HALT" : ""} plan ${dbPlan.id}`);
+  return dbPlan.id;
+}
+
+function applyBudgetHoldRestriction(plan: SynthesizedPlan): SynthesizedPlan {
+  const dist = plan.contentDistribution;
+  const restricted = {
+    ...dist,
+    reelsPerWeek: Math.max(1, Math.floor(dist.reelsPerWeek * 0.5)),
+    postsPerWeek: Math.max(1, Math.floor(dist.postsPerWeek * 0.5)),
+    storiesPerDay: Math.max(0, Math.floor(dist.storiesPerDay * 0.5)),
+    carouselsPerWeek: Math.max(0, Math.floor(dist.carouselsPerWeek * 0.5)),
+    videosPerWeek: Math.max(0, Math.floor(dist.videosPerWeek * 0.5)),
+    rationale: `[HOLD-RESTRICTED] ${dist.rationale || ""} — Content volume reduced by 50% due to budget hold decision`,
+  };
+  return { ...plan, contentDistribution: restricted };
+}
+
+function applyIntegrityDegradation(plan: SynthesizedPlan, mode: "restricted" | "degraded"): SynthesizedPlan {
+  const multiplier = mode === "degraded" ? 0.3 : 0.6;
+  const label = mode === "degraded" ? "DEGRADED-SAFE" : "INTEGRITY-RESTRICTED";
+  const dist = plan.contentDistribution;
+  const restricted = {
+    ...dist,
+    reelsPerWeek: Math.max(1, Math.floor(dist.reelsPerWeek * multiplier)),
+    postsPerWeek: Math.max(1, Math.floor(dist.postsPerWeek * multiplier)),
+    storiesPerDay: Math.max(0, Math.floor(dist.storiesPerDay * multiplier)),
+    carouselsPerWeek: Math.max(0, Math.floor(dist.carouselsPerWeek * multiplier)),
+    videosPerWeek: Math.max(0, Math.floor(dist.videosPerWeek * multiplier)),
+    rationale: `[${label}] ${dist.rationale || ""} — Content volume reduced due to integrity concerns`,
+  };
+  return {
+    ...plan,
+    contentDistribution: restricted,
+    degraded: mode === "degraded" ? true : plan.degraded,
+  };
+}
+
 function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string {
   const sections: string[] = [];
 
@@ -898,6 +1029,30 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] Plan gate check failed (non-blocking):`, gateErr.message);
   }
 
+  const budgetGovResult = results.get("budget_governor");
+  const budgetDecision = budgetGovResult?.output?.decision?.action || null;
+  const budgetKillFlag = budgetGovResult?.output?.killFlag === true;
+
+  if (budgetDecision === "halt" || budgetKillFlag) {
+    console.warn(`[PlanSynthesis] BUDGET_HALT_ENFORCED | decision=${budgetDecision} killFlag=${budgetKillFlag} — skipping full plan synthesis, producing halt plan`);
+    const haltPlan = buildHaltPlan(budgetGovResult?.output, bizData, campaign);
+    const planId = await persistPlan(haltPlan, config, rootBundle, []);
+    return { planId, plan: haltPlan };
+  }
+
+  const integrityResult = results.get("integrity");
+  const safeToExecute = integrityResult?.output?.safeToExecute !== false;
+  const integrityScore = integrityResult?.output?.overallIntegrityScore ?? 1.0;
+  let integrityDegradation: "none" | "restricted" | "degraded" = "none";
+
+  if (!safeToExecute) {
+    integrityDegradation = "degraded";
+    console.warn(`[PlanSynthesis] INTEGRITY_DEGRADED_MODE | safeToExecute=false score=${integrityScore.toFixed(2)} — plan will be generated in degraded-safe mode`);
+  } else if (integrityScore < 0.6) {
+    integrityDegradation = "restricted";
+    console.warn(`[PlanSynthesis] INTEGRITY_RESTRICTED_MODE | score=${integrityScore.toFixed(2)} — plan content volume will be reduced`);
+  }
+
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
   const lockedLabels = extractLockedDecisionLabels(results);
@@ -997,6 +1152,99 @@ export async function synthesizePlan(
       `eligible=${enforcementReport.eligible} total=${enforcementReport.totalDecisions} — ` +
       `this plan was NOT fully driven by validated decisions.`,
     );
+  }
+
+  if (budgetDecision === "hold") {
+    const preDist = { ...synthesized.contentDistribution };
+    const holdPlan = applyBudgetHoldRestriction(synthesized);
+    Object.assign(synthesized, holdPlan);
+    console.log(`[PlanSynthesis] BUDGET_HOLD_ENFORCED | reels: ${preDist.reelsPerWeek}→${synthesized.contentDistribution.reelsPerWeek} posts: ${preDist.postsPerWeek}→${synthesized.contentDistribution.postsPerWeek}`);
+  }
+
+  if (integrityDegradation !== "none") {
+    const preDist = { ...synthesized.contentDistribution };
+    const degradedPlan = applyIntegrityDegradation(synthesized, integrityDegradation);
+    Object.assign(synthesized, degradedPlan);
+    console.log(`[PlanSynthesis] INTEGRITY_ENFORCEMENT_APPLIED | mode=${integrityDegradation} reels: ${preDist.reelsPerWeek}→${synthesized.contentDistribution.reelsPerWeek}`);
+  }
+
+  if (signalComp) {
+    const trustedRatio = signalComp.trustedRatio ?? 0;
+    if (trustedRatio < 0.3) {
+      synthesized.signalTrustWarning = {
+        level: "low",
+        trustedRatio,
+        dominantType: signalComp.dominantType,
+        advisory: "Less than 30% of strategy signals come from trusted sources (real performance data or verified competitor intelligence). Plan reliability is significantly reduced.",
+      };
+      synthesized.degraded = true;
+      if (synthesized.planSource === "decision_driven") {
+        synthesized.planSource = "degraded_no_decisions";
+      }
+      console.log(`[PlanSynthesis] LOW_TRUST_SIGNAL_ENFORCEMENT | trustedRatio=${(trustedRatio * 100).toFixed(0)}% — plan flagged as degraded, dominant signal type: ${signalComp.dominantType}`);
+    } else if (trustedRatio < 0.5) {
+      synthesized.signalTrustWarning = {
+        level: "moderate",
+        trustedRatio,
+        dominantType: signalComp.dominantType,
+        advisory: "Trusted signal coverage is below 50%. Plan decisions may be influenced by inferred or fallback assumptions.",
+      };
+      console.log(`[PlanSynthesis] MODERATE_TRUST_SIGNAL_WARNING | trustedRatio=${(trustedRatio * 100).toFixed(0)}% — advisory attached to plan`);
+    }
+  }
+
+  const iterationResult = results.get("iteration");
+  if (iterationResult?.status === "SUCCESS" && iterationResult.output) {
+    const iterOut = iterationResult.output.output || iterationResult.output;
+    const failedFlags: any[] = iterOut.failedStrategyFlags || [];
+    const optimizationTargets: any[] = iterOut.optimizationTargets || [];
+
+    if (failedFlags.length > 0) {
+      const failedStrategies = failedFlags.map((f: any) => f.strategy || f.name || f.flag || "unknown").join(", ");
+      const planChannels = (synthesized.channels || []).map((c: any) => typeof c === "string" ? c.toLowerCase() : (c.name || "").toLowerCase());
+      const conflicting = failedFlags.filter((f: any) => {
+        const name = (f.strategy || f.name || "").toLowerCase();
+        return planChannels.some((ch: string) => ch.includes(name) || name.includes(ch));
+      });
+
+      if (conflicting.length > 0) {
+        synthesized.iterationConflicts = {
+          count: conflicting.length,
+          conflicts: conflicting.map((f: any) => ({
+            strategy: f.strategy || f.name || "unknown",
+            reason: f.reason || f.description || "Previously failed",
+          })),
+          advisory: `Plan includes ${conflicting.length} strategy/channel(s) that were flagged as failed in iteration analysis: ${failedStrategies}`,
+        };
+        console.log(`[PlanSynthesis] ITERATION_CONFLICT_DETECTED | ${conflicting.length} plan elements conflict with iteration failure flags: ${failedStrategies}`);
+      }
+    }
+
+    if (optimizationTargets.length > 0) {
+      synthesized.iterationOptimizationHints = optimizationTargets.slice(0, 5).map((t: any) => ({
+        target: t.target || t.metric || t.name || "unknown",
+        direction: t.direction || t.recommendation || "improve",
+        priority: t.priority || "medium",
+      }));
+      console.log(`[PlanSynthesis] ITERATION_OPTIMIZATION_HINTS | ${optimizationTargets.length} optimization targets attached to plan`);
+    }
+  }
+
+  const retentionResult = results.get("retention");
+  if (retentionResult?.status === "SUCCESS" && retentionResult.output) {
+    const retOut = retentionResult.output.output || retentionResult.output;
+    const churnRisks: any[] = retOut.churnRiskFlags || [];
+    if (churnRisks.length > 0) {
+      synthesized.retentionInsights = {
+        churnRiskCount: churnRisks.length,
+        topRisks: churnRisks.slice(0, 3).map((r: any) => ({
+          risk: r.risk || r.description || r.flag || "unknown",
+          severity: r.severity || r.level || "medium",
+        })),
+        advisory: `Retention analysis identified ${churnRisks.length} churn risk(s) that should be addressed in post-conversion strategy.`,
+      };
+      console.log(`[PlanSynthesis] RETENTION_INSIGHTS_INJECTED | ${churnRisks.length} churn risks attached to plan`);
+    }
   }
 
   if (memoryBlock && (memoryBlock.reinforceSlots.length > 0 || memoryBlock.avoidSlots.length > 0)) {
@@ -1228,8 +1476,15 @@ export async function synthesizePlan(
   }
 
   try {
-    await composeTasks(plan.id, config.campaignId, config.accountId, synthesized, periodDays, rootBundle?.id || null);
-    console.log(`[PlanSynthesis] Execution tasks generated for plan ${plan.id}`);
+    const taskContext: import("../task-composer").TaskComposerContext = {
+      budgetDecision: budgetDecision || undefined,
+      budgetKillFlag: budgetKillFlag,
+      integrityScore: integrityScore,
+      safeToExecute: safeToExecute,
+      signalTrustedRatio: signalComp?.trustedRatio ?? undefined,
+    };
+    await composeTasks(plan.id, config.campaignId, config.accountId, synthesized, periodDays, rootBundle?.id || null, taskContext);
+    console.log(`[PlanSynthesis] Execution tasks generated for plan ${plan.id} | budgetDecision=${budgetDecision} integrity=${integrityDegradation}`);
   } catch (taskErr: any) {
     console.warn(`[PlanSynthesis] Task composition failed (non-blocking):`, taskErr.message);
   }

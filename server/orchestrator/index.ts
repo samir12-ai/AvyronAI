@@ -362,6 +362,56 @@ function extractDifferentiationInput(diffResult: any): any {
   };
 }
 
+function extractOfferInput(offerResult: any): any {
+  if (!offerResult) return {};
+  const primary = offerResult.primaryOffer || offerResult.selectedOffer || offerResult;
+  return {
+    offerName: primary.offerName || primary.name || offerResult.offerName || null,
+    coreOutcome: primary.coreOutcome || primary.outcome || offerResult.coreOutcome || null,
+    mechanismDescription: primary.mechanismDescription || offerResult.mechanismDescription || null,
+    headline: primary.headline || offerResult.headline || null,
+    deliverables: Array.isArray(primary.deliverables) ? primary.deliverables : (Array.isArray(offerResult.deliverables) ? offerResult.deliverables : []),
+    riskReducers: Array.isArray(primary.riskReducers) ? primary.riskReducers : (Array.isArray(offerResult.riskReducers) ? offerResult.riskReducers : []),
+    riskNotes: Array.isArray(primary.riskNotes) ? primary.riskNotes : (Array.isArray(offerResult.riskNotes) ? offerResult.riskNotes : []),
+    proofAlignment: Array.isArray(primary.proofAlignment) ? primary.proofAlignment : (Array.isArray(offerResult.proofAlignment) ? offerResult.proofAlignment : []),
+    frictionLevel: primary.frictionLevel || offerResult.frictionLevel || null,
+    proofStrength: primary.proofLayer?.proofStrength ?? offerResult.proofLayer?.proofStrength ?? null,
+    offerStrengthScore: offerResult.offerStrengthScore ?? null,
+    positioningConsistency: offerResult.positioningConsistency || null,
+    hookMechanismAlignment: offerResult.hookMechanismAlignment || null,
+    boundaryCheck: offerResult.boundaryCheck || null,
+    signalGrounding: offerResult.signalGrounding || null,
+    lockedDecisions: offerResult.layerDiagnostics?.positioningLock?.lockedDecisions || [],
+    nonGenericAnchors: offerResult.layerDiagnostics?.positioningLock?.nonGenericAnchors || [],
+    snapshotId: offerResult.snapshotId || null,
+  };
+}
+
+function extractFunnelInput(funnelResult: any): any {
+  if (!funnelResult) return {};
+  const primary = funnelResult.primaryFunnel || funnelResult;
+  const rawStages = Array.isArray(primary.stageMap) ? primary.stageMap
+    : Array.isArray(primary.stages) ? primary.stages
+    : Array.isArray(funnelResult.stageMap) ? funnelResult.stageMap
+    : Array.isArray(funnelResult.stages) ? funnelResult.stages : [];
+  const trustPathRaw = primary.trustPath || funnelResult.trustPathAnalysis || funnelResult.trustPath || [];
+  return {
+    funnelType: primary.funnelType || primary.type || funnelResult.funnelType || null,
+    funnelName: primary.funnelName || primary.name || funnelResult.funnelName || null,
+    stages: rawStages,
+    stageMap: rawStages,
+    trustPath: Array.isArray(trustPathRaw) ? trustPathRaw : (trustPathRaw?.path || trustPathRaw?.stages || []),
+    trustPathScore: funnelResult.trustPathAnalysis?.score ?? null,
+    proofPlacements: funnelResult.proofPlacementLogic?.placements || primary.proofPlacements || [],
+    frictionMap: primary.frictionMap || funnelResult.frictionMap || [],
+    commitmentLevel: primary.commitmentLevel || funnelResult.commitmentLevel || "medium",
+    entryTrigger: primary.entryTrigger || funnelResult.entryTrigger || { mechanismType: "unknown", purpose: "unknown" },
+    funnelStrengthScore: funnelResult.funnelStrengthScore ?? primary.funnelStrengthScore ?? 0,
+    boundaryCheck: funnelResult.boundaryCheck || null,
+    snapshotId: funnelResult.snapshotId || null,
+  };
+}
+
 function resolveUpstreamOriginType(ctx: EngineContext, engine: string): SignalOriginType {
   if (engine === "audience") return "competitor";
   if (engine === "positioning" || engine === "differentiation" || engine === "mechanism") return "inferred";
@@ -846,7 +896,7 @@ async function executeEngine(
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
-        const offerInput = ctx.offer || {};
+        const offerInput = extractOfferInput(ctx.offer);
         const upstreamLineage = buildUpstreamLineage(ctx);
         const result = await runAwarenessEngine(
           miInput, audInput, posInput, diffInput, offerInput,
@@ -884,7 +934,7 @@ async function executeEngine(
         }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
-        const offerInput = ctx.offer || {};
+        const offerInput = extractOfferInput(ctx.offer);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const awarenessInput = ctx.awareness ? {
@@ -935,8 +985,8 @@ async function executeEngine(
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
-        const offerInput = ctx.offer || {};
-        const funnelInput = ctx.funnel || {};
+        const offerInput = extractOfferInput(ctx.offer);
+        const funnelInput = extractFunnelInput(ctx.funnel);
         const result = runIntegrityEngine(
           miInput, audInput, posInput, diffInput, offerInput, funnelInput
         );
@@ -979,16 +1029,8 @@ async function executeEngine(
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
-        const offerRaw = ctx.offer || {};
-        const posLockForPersuasion = offerRaw?.layerDiagnostics?.positioningLock || null;
-        const offerInput = posLockForPersuasion
-          ? {
-              ...offerRaw,
-              lockedDecisions: posLockForPersuasion.lockedDecisions || [],
-              nonGenericAnchors: posLockForPersuasion.nonGenericAnchors || [],
-            }
-          : offerRaw;
-        const funnelInput = ctx.funnel || {};
+        const offerInput = extractOfferInput(ctx.offer);
+        const funnelInput = extractFunnelInput(ctx.funnel);
         const integrityInput = ctx.integrity || {};
         const awarenessInput = ctx.awareness || {};
         const persuasionLineage = buildUpstreamLineage(ctx);
@@ -1030,13 +1072,14 @@ async function executeEngine(
       case "statistical_validation": {
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
-        const offerInput = ctx.offer || {};
-        const funnelInput = ctx.funnel || {};
+        const offerInput = extractOfferInput(ctx.offer);
+        const funnelInput = extractFunnelInput(ctx.funnel);
         const awarenessInput = ctx.awareness || {};
         const persuasionInput = ctx.persuasion || {};
+        const statLineage = buildUpstreamLineage(ctx);
         const result = await runStatisticalValidationEngine(
           miInput, audInput, offerInput, funnelInput, awarenessInput, persuasionInput,
-          config.accountId, []
+          config.accountId, statLineage
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -1047,21 +1090,71 @@ async function executeEngine(
       case "budget_governor": {
         const bizData = await getBusinessData(config.accountId, config.campaignId);
         const campaignData = await getCampaignData(config.campaignId);
-        const result = runBudgetGovernorEngine({
-          budget: {
-            monthlyBudget: parseFloat(bizData?.monthlyBudget?.replace(/[^0-9.]/g, "") || "0"),
-            currency: "USD",
-            currentSpend: 0,
-          },
-          campaign: {
-            objective: campaignData?.objective || "AWARENESS",
-            durationDays: 30,
-            channels: [],
-          },
-          performance: null,
-          validation: ctx.statisticalValidation || null,
+
+        const offerCtxBG = ctx.offer || {};
+        const primaryOfferBG = offerCtxBG.primaryOffer || offerCtxBG.selectedOffer || offerCtxBG;
+        const offerStrength = typeof offerCtxBG.offerStrengthScore === "number" ? offerCtxBG.offerStrengthScore : 0.5;
+        const offerProofScore = typeof primaryOfferBG?.proofLayer?.proofStrength === "number" ? primaryOfferBG.proofLayer.proofStrength : 0.5;
+        const offerCompleteness = primaryOfferBG?.completeness?.complete === true;
+
+        const funnelCtxBG = ctx.funnel || {};
+        const funnelStrengthScore = typeof funnelCtxBG.funnelStrengthScore === "number" ? funnelCtxBG.funnelStrengthScore : 0.5;
+        const funnelFrictionScore = typeof funnelCtxBG.frictionMap?.totalFriction === "number" ? funnelCtxBG.frictionMap.totalFriction : 0.5;
+        const primaryFunnelBG = funnelCtxBG.primaryFunnel || {};
+        const funnelProjections = {
+          expectedConversionRate: typeof primaryFunnelBG.eligibilityScore === "number" ? primaryFunnelBG.eligibilityScore : 0.02,
+          expectedCPA: 50,
+          expectedROAS: 2.0,
+        };
+
+        const miCtxBG = ctx.mi?.output || ctx.mi || {};
+        const competitors = miCtxBG.competitors || [];
+        const marketIntensity = competitors.length > 0 ? Math.min(competitors.length / 10, 1.0) : 0.5;
+        const competitorSpendEstimate = competitors.length * 500;
+
+        const audCtxBG = ctx.audience || {};
+        const segments = audCtxBG.audienceSegments || audCtxBG.segments || [];
+        const audienceSize = segments.length >= 5 ? "large" : segments.length >= 2 ? "medium" : "small";
+
+        const svCtx = ctx.statisticalValidation || {};
+        const validationConfidence = typeof svCtx.claimConfidenceScore === "number" ? svCtx.claimConfidenceScore
+          : typeof svCtx.confidenceScore === "number" ? svCtx.confidenceScore : 0.5;
+        const validationState = svCtx.validationState || "unknown";
+
+        const monthlyBudget = parseFloat(bizData?.monthlyBudget?.replace(/[^0-9.]/g, "") || "0");
+
+        const manualMetrics = ctx.manualCampaignMetrics || null;
+        const campaignPerformance = manualMetrics ? {
+          conversions: manualMetrics.conversions || 0,
+          spend: manualMetrics.spend || 0,
+          revenue: manualMetrics.revenue || 0,
+          isStatisticallyValid: (manualMetrics.conversions || 0) >= 30,
+          statisticalConfidence: Math.min((manualMetrics.conversions || 0) / 100, 1),
+        } : undefined;
+
+        const budgetGovernorInput: import("../strategy/budget-governor/types").BudgetGovernorInput = {
+          offerStrength,
+          offerProofScore,
+          offerCompleteness,
+          funnelStrengthScore,
+          funnelFrictionScore,
+          funnelProjections,
+          channelRisk: 0.5,
+          validationConfidence,
+          validationState,
+          marketIntensity,
+          competitorSpendEstimate,
+          audienceSize,
+          currentBudget: monthlyBudget,
+          historicalCPA: manualMetrics?.cpa || null,
+          historicalROAS: manualMetrics?.roas || null,
+          campaignPerformance,
           signalComposition: ctx.signalComposition || undefined,
-        } as any);
+        };
+
+        console.log(`[Orchestrator] BUDGET_GOVERNOR_INPUT | offerStrength=${offerStrength.toFixed(2)} funnelStrength=${funnelStrengthScore.toFixed(2)} validationConf=${validationConfidence.toFixed(2)} marketIntensity=${marketIntensity.toFixed(2)} audienceSize=${audienceSize} budget=${monthlyBudget}`);
+
+        const result = runBudgetGovernorEngine(budgetGovernorInput);
         output = result;
         ctx.budgetGovernor = result;
 
@@ -1089,9 +1182,18 @@ async function executeEngine(
         const audInput = extractAudienceInput(ctx.audience);
         const awarenessInput = ctx.awareness || {};
         const persuasionInput = ctx.persuasion || {};
-        const offerInput = ctx.offer || {};
-        const budgetInput = ctx.budgetGovernor || {};
+        const offerInput = extractOfferInput(ctx.offer);
+        const bgResult = ctx.budgetGovernor || {};
+        const budgetInput = {
+          testBudgetMin: bgResult.testBudgetRange?.min ?? 0,
+          testBudgetMax: bgResult.testBudgetRange?.max ?? 0,
+          scaleBudgetMin: bgResult.scaleBudgetRange?.min ?? 0,
+          scaleBudgetMax: bgResult.scaleBudgetRange?.max ?? 0,
+          expansionPermission: bgResult.expansionPermission?.allowed ?? false,
+          killFlag: bgResult.killFlag ?? false,
+        };
         const validationInput = ctx.statisticalValidation || {};
+        console.log(`[Orchestrator] CHANNEL_BUDGET_MAPPED | testMax=${budgetInput.testBudgetMax} scaleMax=${budgetInput.scaleBudgetMax} killFlag=${budgetInput.killFlag} expansion=${budgetInput.expansionPermission}`);
         const result = runChannelSelectionEngine(
           audInput, awarenessInput, persuasionInput, offerInput,
           budgetInput, validationInput, "INTELLIGENT",
@@ -1204,8 +1306,9 @@ async function executeEngine(
           };
         }
 
-        const offerCtx = ctx.offer || {};
-        const audCtx = ctx.audience || {};
+        const offerCtx = extractOfferInput(ctx.offer);
+        const audInput = extractAudienceInput(ctx.audience);
+        const funnelCtx = extractFunnelInput(ctx.funnel);
         const mechCtx = ctx.mechanism || {};
         const rm = retGate.retentionMetrics;
         const rg = retGate.gateInputs;
@@ -1216,19 +1319,29 @@ async function executeEngine(
           return [];
         };
 
-        const audiencePains = safeParseArr(audCtx.audiencePains);
+        const audiencePains = safeParseArr(audInput.painProfiles);
         const purchaseMotivations = audiencePains.slice(0, 4).map((p: any) => ({
           motivation: p.canonical || p.pain || p.description || "Unknown motivation",
           strength: typeof p.intensity === "number" ? p.intensity : (typeof p.severity === "number" ? p.severity : 0.5),
           category: "pain_alleviation" as const,
         })).filter((m: any) => m.motivation !== "Unknown motivation");
 
-        const primaryOffer = offerCtx.primaryOffer || offerCtx.selectedOffer || offerCtx;
-        const offerName = primaryOffer?.name || primaryOffer?.offerName || offerCtx.name || null;
-        const coreOutcome = primaryOffer?.coreOutcome || primaryOffer?.outcome || offerCtx.coreOutcome || null;
-        const deliverables = safeParseArr(primaryOffer?.deliverables || offerCtx.deliverables);
+        const audienceObjections = safeParseArr(audInput.objectionMap);
+        const postPurchaseObjections = audienceObjections.slice(0, 5).map((obj: any) => ({
+          objection: obj.objection || obj.text || obj.description || "Unknown objection",
+          category: obj.category || obj.type || "general",
+          severity: typeof obj.severity === "number" ? obj.severity : (typeof obj.intensity === "number" ? obj.intensity : 0.5),
+        })).filter((o: any) => o.objection !== "Unknown objection");
+
+        const funnelStages = safeParseArr(funnelCtx.stages);
+        const touchpoints = funnelStages.map((stage: any, idx: number) => ({
+          type: stage.type || stage.stageName || stage.name || `stage_${idx + 1}`,
+          channel: stage.channel || stage.medium || "funnel",
+          sequencePosition: idx + 1,
+          purpose: stage.purpose || stage.objective || stage.description || null,
+        }));
+
         const mechanismDesc = mechCtx.primaryMechanism?.name || mechCtx.name || null;
-        const riskReducers = safeParseArr(primaryOffer?.riskReducers || offerCtx.riskReducers);
 
         const repeatPurchaseRate = rm?.repeatPurchaseRate ||
           (rm?.totalCustomers && rm?.returningCustomers
@@ -1240,9 +1353,11 @@ async function executeEngine(
           ? avgOrderValue * rm.purchaseFrequency * (rm.customerLifespan || 1)
           : null;
 
+        console.log(`[Orchestrator] RETENTION_INPUT_SYNTHESIS | touchpoints=${touchpoints.length} from funnel stages | postPurchaseObjections=${postPurchaseObjections.length} from audience | motivations=${purchaseMotivations.length}`);
+
         const result = await runRetentionEngine({
           customerJourneyData: {
-            touchpoints: [],
+            touchpoints,
             avgTimeToConversion: null,
             repeatPurchaseRate,
             churnRate,
@@ -1251,15 +1366,15 @@ async function executeEngine(
             engagementDecayRate: rm?.refundRate || null,
           },
           offerStructure: {
-            offerName,
-            coreOutcome,
-            deliverables,
-            proofStrength: null,
+            offerName: offerCtx.offerName,
+            coreOutcome: offerCtx.coreOutcome,
+            deliverables: safeParseArr(offerCtx.deliverables),
+            proofStrength: offerCtx.proofStrength,
             mechanismDescription: mechanismDesc,
-            riskReducers,
+            riskReducers: safeParseArr(offerCtx.riskReducers),
           },
           purchaseMotivations,
-          postPurchaseObjections: [],
+          postPurchaseObjections,
           campaignId: config.campaignId,
           accountId: config.accountId,
           memoryContext: ctx.memoryContext || undefined,
