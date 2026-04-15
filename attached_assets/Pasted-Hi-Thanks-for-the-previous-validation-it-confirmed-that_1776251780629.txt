@@ -1,0 +1,92 @@
+Hi,
+
+Thanks for the previous validation — it confirmed that enforcement and low-signal handling are working correctly.
+
+Now we need to validate the full system under real conditions, not partial runs.
+
+This phase must be done using the existing “Market Mine” campaign, since it already contains competitors and full signal coverage.
+
+---
+
+### Core Requirement
+
+You must run a full orchestrator cycle with all 15 engines executing (no PARTIAL runs) and validate the complete cross-engine flow.
+
+---
+
+### Mandatory Evidence (Required — do not skip)
+
+For this phase to be accepted, you must include clear, verifiable evidence, not only summaries.
+
+For each scenario you run, provide:
+
+- Campaign ID (Market Mine)
+- Orchestrator run ID
+- Snapshot IDs (before and after changes)
+- Key decision objects:
+  - Budget Governor (action, confidence, killFlag)
+  - Integrity (score, safeToExecute)
+  - Statistical Validation (state, confidence, composition)
+- Relevant backend logs (short excerpts are enough)
+- Before / After comparison (what changed vs what the system produced)
+
+Additionally:
+
+- Frontend proof is required
+  - Screenshots or short recording showing:
+    - Dashboard state
+    - Generated plan
+    - Task list behavior
+  - This is necessary to confirm end-to-end behavior, not just backend correctness
+
+If evidence is missing, the validation will not be accepted.
+
+---
+
+### What Must Be Tested
+
+1. Full 15-engine execution
+   - No SGL blocking
+   - Confirm all engines ran successfully
+
+2. Cross-engine integrity
+   Show that:
+   - Offer feeds Funnel correctly (structured, not fallback)
+   - Funnel shapes Persuasion (sequence adapts, not just validation)
+   - Budget Governor reacts to real inputs (offer + funnel + validation)
+   - Plan synthesis reflects real engine outputs (not degraded)
+   - Integrity results affect downstream behavior
+
+3. Scenario-based testing (on the same campaign)
+   You must actively modify and test:
+   - Improve performance → observe system behavior
+   - Degrade performance → observe recalculation
+   - Introduce contradictions → verify integrity reaction
+   - Re-run → confirm new snapshot IDs and updated decisions
+
+---
+
+### Cleanup Requirement (Critical)
+
+Any changes you make:
+- Must be fully reverted
+- The “Market Mine” campaign must be restored exactly as it was before testing
+- No residual test data should remain
+
+---
+
+### Goal of This Phase
+
+Phase 1 proved that the system stops itself correctly when weak.
+
+Phase 2 must prove that:
+- The system works correctly when fully active
+- All 15 engines integrate properly
+- No hidden gaps exist in cross-engine flow
+- The frontend reflects the real system state
+
+---
+
+Let me know once complete with full evidence.
+
+Thanks
