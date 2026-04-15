@@ -71,3 +71,9 @@ id = "WXT-OXZbWXB196pzclTVq"
 uri = "file://.local/architecture-audit-cleaning-enforcement.md"
 type = "text"
 title = "Architecture Audit: Cleaning, Enforcement, Structure & Traceability"
+
+[[outputs]]
+id = "d9qjx4m9IT8UNInS_qhFw"
+uri = "file://.local/cross-engine-alignment-audit.md"
+type = "text"
+title = "Cross-Engine Alignment Audit — Full System Report"
