@@ -1235,6 +1235,33 @@ function buildOfferCandidate(
   }
 
   const pains = audience.audiencePains || [];
+  const objections = Object.keys(audience.objectionMap || {});
+
+  if (pains.length > 0) {
+    const nameText = (name || "").toLowerCase();
+    const outcomeText = (outcome.primaryOutcome || "").toLowerCase();
+    const mechText = (mechanism.mechanismDescription || "").toLowerCase();
+    const delivText = (delivery.deliverables || []).join(" ").toLowerCase();
+    const combinedText = `${nameText} ${outcomeText} ${mechText} ${delivText}`;
+
+    const hasPainRef = pains.some((p: any) => {
+      const painStr = typeof p === "string" ? p : (p?.pain || p?.name || p?.canonical || "");
+      return painStr.length > 3 && combinedText.includes(painStr.toLowerCase().substring(0, Math.min(painStr.length, 15)));
+    });
+
+    if (!hasPainRef) {
+      offerStrengthScore = clamp(offerStrengthScore - 0.25);
+    }
+  }
+
+  if (objections.length > 0) {
+    const hasObjectionCoverage = (extraFields?.objectionHandling || []).length > 0 ||
+      proof.alignedProofTypes.length > 0;
+    if (!hasObjectionCoverage) {
+      offerStrengthScore = clamp(offerStrengthScore - 0.20);
+    }
+  }
+
   const desires = Object.entries(audience.desireMap || {});
   const topPain = pains.length > 0 ? (typeof pains[0] === "string" ? pains[0] : pains[0]?.pain || pains[0]?.name || "core challenge") : "core challenge";
   const topDesire = desires.length > 0 ? desires[0][0] : "primary goal";

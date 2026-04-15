@@ -662,7 +662,33 @@ export function runIntegrityEngine(
   }
 
   const failedCount = allLayers.filter(l => !l.passed).length;
-  const safeToExecute = boundaryCheck.passed && failedCount <= 2 && overallIntegrityScore >= 0.4;
+
+  const audienceOfferLayer = l2;
+  const painAlignmentFailed = audienceOfferLayer.score < 0.3 ||
+    !audienceOfferLayer.passed ||
+    audienceOfferLayer.warnings.some(w => {
+      const wl = w.toLowerCase();
+      return wl.includes("audience pain") || wl.includes("readiness gap") || wl.includes("pain signal") || wl.includes("pain alignment");
+    });
+
+  const objectionCoverageZero = l6.score < 0.3 ||
+    !l6.passed ||
+    l6.warnings.some(w => {
+      const wl = w.toLowerCase();
+      return wl.includes("no proof") || wl.includes("proof missing") || wl.includes("zero proof") || wl.includes("missing proof") || wl.includes("proof gap");
+    });
+
+  const hasEnforcementFailure = painAlignmentFailed || objectionCoverageZero;
+
+  if (hasEnforcementFailure) {
+    const reasons: string[] = [];
+    if (painAlignmentFailed) reasons.push("offer↔audience pain alignment failed");
+    if (objectionCoverageZero) reasons.push("objection/proof coverage is critically low");
+    structuralWarnings.push(`ENFORCEMENT_BLOCK: safeToExecute overridden — ${reasons.join(", ")}`);
+    console.log(`[IntegrityEngine-V3] ENFORCEMENT_OVERRIDE | safeToExecute=false | reasons=${reasons.join(", ")}`);
+  }
+
+  const safeToExecute = boundaryCheck.passed && failedCount <= 2 && overallIntegrityScore >= 0.4 && !hasEnforcementFailure;
 
   console.log(`[IntegrityEngine-V3] Complete | status=${status} | score=${overallIntegrityScore.toFixed(2)} | safeToExecute=${safeToExecute} | failed=${failedCount}/8 | warnings=${structuralWarnings.length} | boundary=${boundaryCheck.passed}`);
 

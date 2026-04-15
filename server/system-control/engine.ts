@@ -18,6 +18,11 @@ import {
   checkFunnelStructuralCompleteness,
   checkBudgetFunnelAlignment,
   checkBudgetCACVerification,
+  checkValidationResult,
+  checkSignalGroundingMassFailure,
+  checkOfferAudienceMisalignment,
+  checkZeroObjectionCoverage,
+  checkChannelConfidenceMinimum,
   collectBlockReasons,
 } from "./structural-checks";
 import { detectContradictions } from "./contradiction-detector";
@@ -39,6 +44,11 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkCELCompliance(input.celResults));
   structuralChecks.push(checkUpstreamEngineHealth(input.results));
   structuralChecks.push(checkFunnelStructuralCompleteness(input.results));
+  structuralChecks.push(checkValidationResult(input.results));
+  structuralChecks.push(checkSignalGroundingMassFailure(input.results));
+  structuralChecks.push(checkOfferAudienceMisalignment(input.results));
+  structuralChecks.push(checkZeroObjectionCoverage(input.results));
+  structuralChecks.push(checkChannelConfidenceMinimum(input.results));
 
   const contradictions = detectContradictions(input.results, input.integrityReport);
 

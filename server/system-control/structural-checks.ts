@@ -6,6 +6,8 @@ import type { StructuralCheck, BlockReason, Downgrade, BlockCode, DowngradeCode 
 import {
   FUNNEL_STRENGTH_MINIMUM_FOR_SCALE,
   SIGNAL_TRUST_MINIMUM_FOR_LAUNCH,
+  SIGNAL_GROUNDING_FAILURE_THRESHOLD,
+  CHANNEL_CONFIDENCE_MINIMUM,
 } from "./constants";
 
 export function checkConversionPath(results: Map<EngineId, EngineStepResult>): StructuralCheck {
@@ -217,6 +219,143 @@ export function checkBudgetCACVerification(results: Map<EngineId, EngineStepResu
   return { unverified: false, details: `Budget action=${action} CPA data=${hasNoCACData ? "missing" : "present"}`, downgrade: null };
 }
 
+export function checkValidationResult(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const validationResult = results.get("statistical_validation");
+  if (!validationResult || validationResult.status === "SKIPPED") {
+    return { check: "validation_result", passed: true, details: "No statistical validation result — check skipped" };
+  }
+
+  const output = validationResult.output;
+  const result = output?.result || output?.validationResult || output?.status;
+
+  if (result === "rejected" || result === "REJECTED" || result === "fail" || result === "FAIL") {
+    return {
+      check: "validation_result",
+      passed: false,
+      details: `Statistical validation result="${result}" — strategy rejected by validation engine`,
+    };
+  }
+
+  return { check: "validation_result", passed: true, details: `Statistical validation result="${result || "n/a"}"` };
+}
+
+export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const failedEngines: string[] = [];
+  const allEngines = Array.from(results.entries());
+
+  for (const [engineId, result] of allEngines) {
+    if (result.status === "SIGNAL_BLOCKED" || result.status === "ERROR") {
+      failedEngines.push(engineId);
+    }
+  }
+
+  if (failedEngines.length >= SIGNAL_GROUNDING_FAILURE_THRESHOLD) {
+    return {
+      check: "signal_grounding_mass_failure",
+      passed: false,
+      details: `${failedEngines.length} engines in SIGNAL_BLOCKED/ERROR state (threshold=${SIGNAL_GROUNDING_FAILURE_THRESHOLD}): ${failedEngines.join(", ")}`,
+    };
+  }
+
+  return {
+    check: "signal_grounding_mass_failure",
+    passed: true,
+    details: `${failedEngines.length} engine(s) in failure state — below threshold of ${SIGNAL_GROUNDING_FAILURE_THRESHOLD}`,
+  };
+}
+
+export function checkOfferAudienceMisalignment(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const offerResult = results.get("offer");
+  if (!offerResult?.output) {
+    return { check: "offer_audience_misalignment", passed: true, details: "No offer output — check skipped" };
+  }
+
+  const output = offerResult.output;
+  const warnings: string[] = Array.isArray(output.structuralWarnings) ? output.structuralWarnings : [];
+  const alignmentValidation = output.layerDiagnostics?.offerAlignmentValidation || output.offerAlignmentValidation;
+
+  const hasPainMisalignment = warnings.some((w: string) =>
+    w.includes("does not reflect any identified audience pain") ||
+    w.includes("Market language preservation failed") ||
+    w.includes("completely disconnected from market language")
+  );
+
+  const alignmentFailed = alignmentValidation && alignmentValidation.aligned === false;
+
+  const integrityChecks = output.layerDiagnostics?.integrityChecks;
+  const painNotAligned = integrityChecks && integrityChecks.painAligned === false;
+
+  if (hasPainMisalignment || (alignmentFailed && painNotAligned)) {
+    return {
+      check: "offer_audience_misalignment",
+      passed: false,
+      details: `Offer does not address audience pains — ${hasPainMisalignment ? "pain signal mismatch detected" : "alignment validation failed with pain misalignment"}`,
+    };
+  }
+
+  return { check: "offer_audience_misalignment", passed: true, details: "Offer addresses audience pains" };
+}
+
+export function checkZeroObjectionCoverage(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const offerResult = results.get("offer");
+  const audienceResult = results.get("audience");
+  if (!offerResult?.output || !audienceResult?.output) {
+    return { check: "zero_objection_coverage", passed: true, details: "No offer/audience output — check skipped" };
+  }
+
+  const objectionMap = audienceResult.output.objectionMap || {};
+  const objections = Object.keys(objectionMap);
+
+  if (objections.length === 0) {
+    return { check: "zero_objection_coverage", passed: true, details: "No audience objections declared — check not applicable" };
+  }
+
+  const offerOutput = offerResult.output;
+  const primaryOffer = offerOutput.primaryOffer || offerOutput;
+  const objectionHandling = Array.isArray(primaryOffer.objectionHandling) ? primaryOffer.objectionHandling : [];
+  const riskNotes = Array.isArray(primaryOffer.riskNotes) ? primaryOffer.riskNotes : [];
+  const proofAlignment = Array.isArray(primaryOffer.proofAlignment) ? primaryOffer.proofAlignment :
+    (Array.isArray(primaryOffer.proofLayer?.alignedProofTypes) ? primaryOffer.proofLayer.alignedProofTypes : []);
+
+  const hasAnyCoverage = objectionHandling.length > 0 || proofAlignment.length > 0 ||
+    riskNotes.some((n: string) => n.toLowerCase().includes("objection") || n.toLowerCase().includes("risk"));
+
+  if (!hasAnyCoverage) {
+    return {
+      check: "zero_objection_coverage",
+      passed: false,
+      details: `${objections.length} audience objection(s) exist but offer has zero objection coverage — no objection handling, proof alignment, or risk mitigation`,
+    };
+  }
+
+  return { check: "zero_objection_coverage", passed: true, details: `Objection coverage present for ${objections.length} audience objection(s)` };
+}
+
+export function checkChannelConfidenceMinimum(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const channelResult = results.get("channel_selection");
+  if (!channelResult?.output) {
+    return { check: "channel_confidence_minimum", passed: true, details: "No channel selection output — check skipped" };
+  }
+
+  const output = channelResult.output;
+  const confidence = typeof output.confidenceScore === "number" ? output.confidenceScore :
+    typeof output.confidence === "number" ? output.confidence : null;
+
+  if (confidence === null) {
+    return { check: "channel_confidence_minimum", passed: true, details: "No channel confidence score available — check skipped" };
+  }
+
+  if (confidence < CHANNEL_CONFIDENCE_MINIMUM) {
+    return {
+      check: "channel_confidence_minimum",
+      passed: false,
+      details: `Channel selection confidence=${confidence.toFixed(2)} is below minimum threshold ${CHANNEL_CONFIDENCE_MINIMUM}`,
+    };
+  }
+
+  return { check: "channel_confidence_minimum", passed: true, details: `Channel confidence=${confidence.toFixed(2)} meets minimum ${CHANNEL_CONFIDENCE_MINIMUM}` };
+}
+
 export function collectBlockReasons(checks: StructuralCheck[], results: Map<EngineId, EngineStepResult>): BlockReason[] {
   const blocks: BlockReason[] = [];
 
@@ -275,6 +414,46 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
           code: "COMPLIANCE_FAILURE",
           description: check.details,
           source: "cel_enforcement",
+          severity: "high",
+        });
+        break;
+      case "validation_result":
+        blocks.push({
+          code: "VALIDATION_REJECTED",
+          description: check.details,
+          source: "statistical_validation",
+          severity: "critical",
+        });
+        break;
+      case "signal_grounding_mass_failure":
+        blocks.push({
+          code: "SIGNAL_GROUNDING_MASS_FAILURE",
+          description: check.details,
+          source: "structural_check",
+          severity: "critical",
+        });
+        break;
+      case "offer_audience_misalignment":
+        blocks.push({
+          code: "OFFER_AUDIENCE_MISALIGNMENT",
+          description: check.details,
+          source: "offer_engine",
+          severity: "high",
+        });
+        break;
+      case "zero_objection_coverage":
+        blocks.push({
+          code: "ZERO_OBJECTION_COVERAGE",
+          description: check.details,
+          source: "offer_engine",
+          severity: "high",
+        });
+        break;
+      case "channel_confidence_minimum":
+        blocks.push({
+          code: "CHANNEL_CONFIDENCE_BELOW_MINIMUM",
+          description: check.details,
+          source: "channel_selection",
           severity: "high",
         });
         break;

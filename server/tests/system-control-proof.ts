@@ -915,6 +915,186 @@ async function runPhase4Tests() {
     assert("storeControlVerdict is exported", typeof storeControlVerdict === "function");
   }
 
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 38: Enforcement — VALIDATION_REJECTED Block");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    input.results.set("statistical_validation", makeMockResult("statistical_validation", "SUCCESS", {
+      result: "rejected",
+      reason: "Statistical model rejected strategy",
+    }));
+    const verdict = evaluateSystemControl(input);
+    assert("Validation rejected → BLOCK", verdict.verdict === "BLOCK");
+    assert("Block code is VALIDATION_REJECTED",
+      verdict.blockReasons.some(b => b.code === "VALIDATION_REJECTED"));
+    assert("Execution mode HALTED when rejected", verdict.executionMode === "HALTED");
+  }
+
+  {
+    const input = makeBaseInput();
+    input.results.set("statistical_validation", makeMockResult("statistical_validation", "SUCCESS", {
+      result: "accepted",
+    }));
+    const verdict = evaluateSystemControl(input);
+    assert("Validation accepted → no VALIDATION_REJECTED block",
+      !verdict.blockReasons.some(b => b.code === "VALIDATION_REJECTED"));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 39: Enforcement — SIGNAL_GROUNDING_MASS_FAILURE Block");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    const engines = ["market_intelligence", "audience", "positioning", "differentiation", "mechanism"];
+    for (const e of engines) {
+      input.results.set(e, makeMockResult(e, "SIGNAL_BLOCKED" as any));
+    }
+    const verdict = evaluateSystemControl(input);
+    assert("5+ signal failures → BLOCK", verdict.verdict === "BLOCK");
+    assert("Block code is SIGNAL_GROUNDING_MASS_FAILURE",
+      verdict.blockReasons.some(b => b.code === "SIGNAL_GROUNDING_MASS_FAILURE"));
+  }
+
+  {
+    const input = makeBaseInput();
+    input.results.set("market_intelligence", makeMockResult("market_intelligence", "ERROR" as any));
+    input.results.set("audience", makeMockResult("audience", "ERROR" as any));
+    const verdict = evaluateSystemControl(input);
+    assert("2 engine failures → no mass failure block",
+      !verdict.blockReasons.some(b => b.code === "SIGNAL_GROUNDING_MASS_FAILURE"));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 40: Enforcement — OFFER_AUDIENCE_MISALIGNMENT Block");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    input.results.set("offer", makeMockResult("offer", "SUCCESS", {
+      offerName: "Test",
+      coreOutcome: "Growth",
+      structuralWarnings: ["Outcome statement does not reflect any identified audience pain signals or desires"],
+    }));
+    const verdict = evaluateSystemControl(input);
+    assert("Offer pain misalignment → BLOCK", verdict.verdict === "BLOCK");
+    assert("Block code is OFFER_AUDIENCE_MISALIGNMENT",
+      verdict.blockReasons.some(b => b.code === "OFFER_AUDIENCE_MISALIGNMENT"));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 41: Enforcement — ZERO_OBJECTION_COVERAGE Block");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    input.results.set("audience", makeMockResult("audience", "SUCCESS", {
+      objectionMap: { "too expensive": { severity: "high" }, "not sure it works": { severity: "medium" } },
+    }));
+    input.results.set("offer", makeMockResult("offer", "SUCCESS", {
+      offerName: "Test",
+      primaryOffer: {
+        objectionHandling: [],
+        proofAlignment: [],
+        riskNotes: [],
+      },
+    }));
+    const verdict = evaluateSystemControl(input);
+    assert("Zero objection coverage → BLOCK", verdict.verdict === "BLOCK");
+    assert("Block code is ZERO_OBJECTION_COVERAGE",
+      verdict.blockReasons.some(b => b.code === "ZERO_OBJECTION_COVERAGE"));
+  }
+
+  {
+    const input = makeBaseInput();
+    input.results.set("audience", makeMockResult("audience", "SUCCESS", {
+      objectionMap: { "too expensive": { severity: "high" } },
+    }));
+    input.results.set("offer", makeMockResult("offer", "SUCCESS", {
+      offerName: "Test",
+      primaryOffer: {
+        objectionHandling: ["We offer a money-back guarantee"],
+        proofAlignment: ["outcome_proof"],
+        riskNotes: [],
+      },
+    }));
+    const verdict = evaluateSystemControl(input);
+    assert("Objection coverage present → no ZERO_OBJECTION_COVERAGE block",
+      !verdict.blockReasons.some(b => b.code === "ZERO_OBJECTION_COVERAGE"));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 42: Enforcement — CHANNEL_CONFIDENCE_BELOW_MINIMUM Block");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    input.results.set("channel_selection", makeMockResult("channel_selection", "SUCCESS", {
+      funnelStages: {
+        awareness: [{ label: "Instagram" }],
+        nurture: [{ label: "Email" }],
+        conversion: [{ label: "Landing Page" }],
+      },
+      confidenceScore: 0.35,
+    }));
+    const verdict = evaluateSystemControl(input);
+    assert("Channel confidence 0.35 → BLOCK", verdict.verdict === "BLOCK");
+    assert("Block code is CHANNEL_CONFIDENCE_BELOW_MINIMUM",
+      verdict.blockReasons.some(b => b.code === "CHANNEL_CONFIDENCE_BELOW_MINIMUM"));
+  }
+
+  {
+    const input = makeBaseInput();
+    input.results.set("channel_selection", makeMockResult("channel_selection", "SUCCESS", {
+      funnelStages: {
+        awareness: [{ label: "Instagram" }],
+        nurture: [{ label: "Email" }],
+        conversion: [{ label: "Landing Page" }],
+      },
+      confidenceScore: 0.65,
+    }));
+    const verdict = evaluateSystemControl(input);
+    assert("Channel confidence 0.65 → no channel block",
+      !verdict.blockReasons.some(b => b.code === "CHANNEL_CONFIDENCE_BELOW_MINIMUM"));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 43: Enforcement — Combined Block Scenarios");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    input.results.set("statistical_validation", makeMockResult("statistical_validation", "SUCCESS", {
+      result: "rejected",
+    }));
+    input.results.set("offer", makeMockResult("offer", "SUCCESS", {
+      offerName: "Test",
+      structuralWarnings: ["Market language preservation failed — zero audience tokens found in offer text (completely disconnected from market language)"],
+    }));
+    const verdict = evaluateSystemControl(input);
+    assert("Multiple enforcement violations → BLOCK", verdict.verdict === "BLOCK");
+    assert("Contains VALIDATION_REJECTED", verdict.blockReasons.some(b => b.code === "VALIDATION_REJECTED"));
+    assert("Contains OFFER_AUDIENCE_MISALIGNMENT", verdict.blockReasons.some(b => b.code === "OFFER_AUDIENCE_MISALIGNMENT"));
+    assert("Multiple block reasons", verdict.blockReasons.length >= 2);
+  }
+
+  {
+    const input = makeBaseInput();
+    const verdict = evaluateSystemControl(input);
+    assert("Clean input with no violations → PASS or DOWNGRADE",
+      verdict.verdict === "PASS" || verdict.verdict === "DOWNGRADE");
+    assert("No enforcement blocks on clean input",
+      !verdict.blockReasons.some(b =>
+        b.code === "VALIDATION_REJECTED" ||
+        b.code === "SIGNAL_GROUNDING_MASS_FAILURE" ||
+        b.code === "OFFER_AUDIENCE_MISALIGNMENT" ||
+        b.code === "ZERO_OBJECTION_COVERAGE" ||
+        b.code === "CHANNEL_CONFIDENCE_BELOW_MINIMUM"
+      ));
+  }
+
   console.log("\n" + "=".repeat(80));
   console.log(`SYSTEM CONTROL LAYER VALIDATION COMPLETE: ${passed} passed, ${failed} failed`);
   console.log("=".repeat(80));

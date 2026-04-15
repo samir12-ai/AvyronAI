@@ -1,0 +1,168 @@
+Hi,
+
+After reviewing a real system run (MarketMindAI campaign), I need to address a **critical gap in decision authority and scoring alignment**.
+
+This is not a minor adjustment — this is a **blocking issue for system correctness**.
+
+---
+
+## 🚨 Core Problem
+
+The system is currently able to:
+
+* Mark **Statistical Validation = REJECTED**
+* While still:
+
+  * `Integrity.safeToExecute = true`
+  * Budget proceeding
+  * Channels selected
+  * Full pipeline completing
+
+This creates a **false-positive “ready” state**.
+
+> The system knows the strategy is invalid — but still allows it to proceed.
+
+This must not be possible.
+
+---
+
+## ✅ Required Fixes
+
+### 1. Validation Must Be a Hard Authority
+
+If:
+
+* `Statistical Validation.result === "rejected"`
+
+Then:
+
+* Control Layer MUST return:
+
+  * `verdict = "BLOCK"`
+  * `executionMode = "HALTED"`
+  * block code: `VALIDATION_REJECTED`
+
+This must override:
+
+* Integrity
+* Budget Governor
+* Any downstream execution
+
+No exceptions.
+
+---
+
+### 2. Integrity Definition Must Be Corrected
+
+Current behavior:
+
+* Integrity score reflects internal consistency only
+
+Required change:
+
+* Integrity must incorporate:
+
+  * Validation result
+  * Offer ↔ Audience alignment
+  * Objection coverage
+
+If any of the following:
+
+* Validation = rejected
+* Offer does not map to audience pains
+* Objection coverage = 0
+
+Then:
+
+* Integrity must NOT return `safeToExecute = true`
+
+---
+
+### 3. Offer Scoring Must Be Grounded in Audience
+
+Observed issue:
+
+* Offer strength high (0.90) despite:
+
+  * “Outcome misses audience pain signals”
+  * Objection coverage = 0/3
+
+Required logic:
+
+If:
+
+* pain alignment missing OR
+* objection coverage == 0
+
+Then:
+
+* Offer strength must be downgraded significantly
+* OR Offer engine should return PARTIAL / FAIL
+
+---
+
+### 4. Persuasion Must Be Structurally Validated
+
+Observed:
+
+* High persuasion strength despite:
+
+  * unmapped proofs
+  * positioning drift
+
+Required:
+If:
+
+* proofs are unmapped OR
+* positioning drift detected
+
+Then:
+
+* persuasion strength must be downgraded
+* OR flagged as PARTIAL
+
+---
+
+### 5. Control Layer Must Enforce These Conditions
+
+The following must trigger BLOCK:
+
+* VALIDATION_REJECTED
+* Multiple signal grounding failures (≥5 unmapped signals)
+* Offer ↔ Audience misalignment
+* Objection coverage = 0
+* Channel confidence below minimum threshold (e.g. < 0.5)
+
+These conditions should not remain warnings — they are **system-breaking conditions**.
+
+---
+
+## 🎯 Goal
+
+We are not trying to:
+→ make the system “look correct”
+
+We are trying to:
+→ ensure the system **cannot approve incorrect strategies**
+
+---
+
+## 🔥 Key Principle
+
+> If the system detects invalid strategy, it must prevent execution — not just report it.
+
+---
+
+## Expected Outcome
+
+After these fixes:
+
+* A rejected validation MUST halt execution
+* Scores must reflect real alignment, not isolated strength
+* No more “all green but actually wrong” scenarios
+
+---
+
+Please implement these changes and confirm once ready for re-testing.
+
+Thanks.

@@ -1423,6 +1423,16 @@ function layer8_persuasionStrengthScoring(
     warnings.push(`${unresolvedObjections.length} unresolved objection(s) weaken persuasion completeness`);
   }
 
+  const totalLinks = objectionProofLinks.length;
+  const unmappedCount = unresolvedObjections.length;
+  if (totalLinks > 0 && unmappedCount === totalLinks) {
+    readinessMultiplier *= 0.70;
+    warnings.push(`ALL ${totalLinks} objection-proof links are unmapped — persuasion has zero proof grounding`);
+  } else if (totalLinks > 0 && unmappedCount / totalLinks > 0.5) {
+    readinessMultiplier *= 0.85;
+    warnings.push(`${unmappedCount}/${totalLinks} objection-proof links unmapped (>${Math.round(50)}%) — proof coverage is weak`);
+  }
+
   const compatibleModes = FUNNEL_PERSUASION_COMPATIBILITY[funnelType] || [];
   if (compatibleModes.length > 0 && !compatibleModes.includes(selectedMode)) {
     readinessMultiplier *= 0.8;
@@ -2102,6 +2112,17 @@ export function analyzePersuasion(
   if ((pReadiness === "unaware" || pReadiness === "problem_aware") &&
       (funnelType === "direct" || funnelType === "tripwire" || funnelType === "application")) {
     crossEngineValidation.push(`CROSS-ENGINE VIOLATION: Funnel type "${funnelType}" contradicts awareness stage "${pReadiness}" — funnel should not have passed awareness gate`);
+  }
+
+  const positioningDriftDetected = crossEngineValidation.some(v =>
+    v.includes("POSITIONING LOCK DRIFT") || v.includes("GENERIC DRIFT WARNING")
+  );
+
+  if (positioningDriftDetected) {
+    const driftPenalty = 0.20;
+    routes.primary.persuasionStrengthScore = clamp(routes.primary.persuasionStrengthScore - driftPenalty);
+    routes.alternative.persuasionStrengthScore = clamp(routes.alternative.persuasionStrengthScore - driftPenalty);
+    console.log(`[PersuasionEngine-V3] POSITIONING_DRIFT_PENALTY | score reduced by ${driftPenalty} | drift detected in cross-engine validation`);
   }
 
   if (crossEngineValidation.length > 0) {
