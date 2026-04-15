@@ -1,0 +1,157 @@
+Hi Replit Team,
+
+Thanks for the detailed technical assessment and proposed Control Layer architecture — this is aligned with what we need.
+
+Before moving forward, I want to lock a few critical adjustments and a clear execution approach to ensure we build this correctly without introducing noise or conflicts with the existing adaptive/agent systems.
+
+---
+
+## 🔴 Key Clarifications (Important)
+
+1. Control Layer = Final Authority
+   - This is not just another validation layer.
+   - It must act as the single decision point before the system proceeds to plan generation.
+
+2. Agent & Adaptive System MUST remain untouched
+   - Iteration engine
+   - Memory system
+   - Adaptive rhythm
+   - Exploration logic  
+
+   👉 These systems are already working as the adaptive brain — do not modify, duplicate, or override them.
+
+3. Self-Correcting = Controlled Repair (Not a Separate System)
+   - No parallel correction loop
+   - No interference with memory or prompts
+   - No independent logic outside the Control Layer  
+
+   👉 Self-correcting should only exist as controlled repair actions inside the Control Layer
+
+---
+
+## ⚠️ Critical Adjustments Before Implementation
+
+### 1. Autonomous Worker Alignment
+Currently treated as separate.
+
+👉 This creates risk of having two decision authorities.
+
+Required:
+- Any decisions coming from the autonomous worker must follow the same decision logic as the Control Layer
+- The system should not allow the worker to bypass final system judgment
+
+---
+
+### 2. Funnel Re-run Constraint
+Re-running funnel logic can introduce instability.
+
+👉 Required limits:
+- Maximum one retry only
+- Only when structure is incomplete (not fully broken)
+- If still invalid → escalate to manual review, not repeated retries
+
+---
+
+### 3. Start Without Full Repair System
+Do not introduce complex self-correction immediately.
+
+👉 Start with only safe, controlled actions:
+- Downgrade decisions
+- Add missing structural elements (when safe)
+- Re-check system integrity
+- Flag for review when needed
+
+---
+
+## 🧠 Implementation Phases (Mandatory Order)
+
+### ✅ Phase 1 — Observation Mode (Shadow Mode)
+
+Goal: Understand system behavior without changing it
+
+- Run the Control Layer after all engines complete
+- Analyze:
+  - system structure
+  - contradictions
+  - readiness
+- Produce a verdict internally
+- Log results for comparison
+
+👉 Important:  
+No impact on execution yet — only observation
+
+---
+
+### ✅ Phase 2 — Enforcement (Core Fix)
+
+Goal: Fix the real issue — inconsistent and misleading decisions
+
+- The system should now:
+  - Rely on the Control Layer as the only final decision gate
+  - Stop execution if critical issues exist
+  - Adjust decisions when needed (e.g. downgrade from scale to test)
+
+- Introduce clear execution states:
+  - Full execution
+  - Restricted execution
+  - Test-only mode
+  - Review required
+  - Halted
+
+👉 At this stage:
+- No more contradictions
+- No more false “ready” states
+
+---
+
+### ✅ Phase 3 — Controlled Repair Actions (Self-Correcting Layer)
+
+Goal: Add safe correction capability without destabilizing the system
+
+Allowed actions:
+- Add missing structural elements (e.g. conversion path if safe)
+- Reduce risk (downgrade decisions)
+- Retry limited components (once only)
+- Re-check system consistency after adjustment
+- Flag uncertain cases for human review
+
+Not allowed:
+- Changing core strategy generation
+- Modifying memory or learning system
+- Overriding safety or risk controls
+- Creating multiple retries or loops
+
+👉 Repair must remain:
+- limited
+- predictable
+- controlled
+
+---
+
+## 🧩 Final Expected Outcome
+
+After full implementation:
+
+- One unified system decision (no contradictions)
+- No execution when structure is incomplete
+- No false readiness signals
+- Stable adaptive system (unchanged and clean)
+- Controlled correction when necessary — not chaos
+
+---
+
+## ❓ Validation Request
+
+Before starting implementation, please confirm:
+
+1. Can the Control Layer safely become the single final decision point without breaking current flow?
+2. Can the autonomous worker follow the same decision logic without creating conflicts?
+3. Are the limited repair actions (retry, downgrade, structural fix) safe within the current system behavior?
+
+---
+
+This step is critical — it defines the system’s decision brain.
+
+Once confirmed, proceed with Phase 1 (Observation Mode) first.
+
+Thanks.

@@ -16,6 +16,8 @@ import { runSystemIntegrityValidation } from "../system-integrity/engine";
 import { summarizeEngine } from "../agent/summarizers";
 import type { IntegrityReport } from "../system-integrity/types";
 import { storeIntegrityReport } from "../system-integrity/routes";
+import { evaluateSystemControl } from "../system-control/engine";
+import type { SystemControlVerdict } from "../system-control/types";
 import {
   orchestratorJobs,
   strategicPlans,
@@ -1825,6 +1827,21 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   if (ctx.sglState) {
     const sglSummary = getGovernanceSummary(ctx.sglState);
     console.log(`[Orchestrator] SGL_SUMMARY | signals=${sglSummary.totalSignals} | enginesServed=${sglSummary.enginesServed.length} | coverage=${sglSummary.coverage.coverageSufficient}`);
+  }
+
+  let controlVerdict: SystemControlVerdict | null = null;
+  try {
+    const sglSummaryData = ctx.sglState ? getGovernanceSummary(ctx.sglState) : null;
+    controlVerdict = evaluateSystemControl({
+      results,
+      integrityReport: ctx.integrityReport || null,
+      celResults: ctx.celResults || [],
+      signalComposition: ctx.signalComposition || null,
+      sglCoverageSufficient: sglSummaryData?.coverage?.coverageSufficient ?? null,
+      config: { campaignId: config.campaignId, accountId: config.accountId },
+    });
+  } catch (ctrlErr: any) {
+    console.warn(`[Orchestrator] SYSTEM_CONTROL_FAILED | error=${ctrlErr.message}`);
   }
 
   let planId: string | undefined;
