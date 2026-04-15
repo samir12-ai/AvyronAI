@@ -5,11 +5,27 @@ import {
   strategicPlans,
   strategyMemory,
   systemControlVerdicts,
+  miSnapshots,
+  audienceSnapshots,
+  positioningSnapshots,
+  differentiationSnapshots,
+  mechanismSnapshots,
+  offerSnapshots,
+  funnelSnapshots,
+  integritySnapshots,
+  awarenessSnapshots,
+  persuasionSnapshots,
+  strategyValidationSnapshots,
+  budgetGovernorSnapshots,
+  channelSelectionSnapshots,
+  iterationSnapshots,
+  retentionSnapshots,
 } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { authMiddleware, resolveAccountId, type AuthRequest } from "../auth";
 import { getStoredIntegrityReport } from "../system-integrity/routes";
 import { getCachedCELReport } from "../causal-enforcement-layer/engine";
+
 function computeEffectiveConfidenceFromRow(row: any): number {
   const now = new Date();
   const validatedAt = row.updatedAt ?? row.createdAt ?? now;
@@ -25,6 +41,33 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   try { return JSON.parse(raw); } catch { return fallback; }
 }
 
+function collectWarnings(snapshot: any, ...fields: string[]): string[] {
+  const warnings: string[] = [];
+  for (const field of fields) {
+    const val = snapshot[field];
+    if (!val) continue;
+    const parsed = parseJson(val, null);
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        if (typeof item === "string") warnings.push(item);
+        else if (item?.message) warnings.push(item.message);
+        else if (item?.warning) warnings.push(item.warning);
+        else if (item?.description) warnings.push(item.description);
+      }
+    } else if (typeof parsed === "object" && parsed !== null) {
+      if (parsed.warnings && Array.isArray(parsed.warnings)) {
+        for (const w of parsed.warnings) warnings.push(typeof w === "string" ? w : w.message || JSON.stringify(w));
+      }
+      if (parsed.issues && Array.isArray(parsed.issues)) {
+        for (const i of parsed.issues) warnings.push(typeof i === "string" ? i : i.message || JSON.stringify(i));
+      }
+    } else if (typeof val === "string" && val.length > 0 && val !== "null" && val !== "[]") {
+      warnings.push(val);
+    }
+  }
+  return warnings.slice(0, 10);
+}
+
 interface EngineSummary {
   id: string;
   name: string;
@@ -32,20 +75,266 @@ interface EngineSummary {
   summary: string | null;
 }
 
-function buildEngineOutputs(sectionStatuses: string | null): any[] {
+interface EngineOutput {
+  engine: string;
+  engineId: string;
+  status: string;
+  summary: string | null;
+  confidenceScore: number | null;
+  warnings: string[];
+  keyOutputs: Record<string, any>;
+  executionTimeMs: number | null;
+  snapshotAvailable: boolean;
+}
+
+async function fetchLatestSnapshot(table: any, campaignId: string, accountId: string) {
+  const [row] = await db
+    .select()
+    .from(table)
+    .where(and(eq(table.campaignId, campaignId), eq(table.accountId, accountId)))
+    .orderBy(desc(table.createdAt))
+    .limit(1);
+  return row || null;
+}
+
+function extractMiKeyOutputs(snap: any): Record<string, any> {
+  const competitors = parseJson(snap.competitorData, []);
+  const signals = parseJson(snap.signalData, null);
+  const marketState = snap.marketState || null;
+  return {
+    competitorCount: Array.isArray(competitors) ? competitors.length : 0,
+    marketState,
+    confidenceLevel: snap.confidenceLevel || null,
+    dataFreshnessDays: snap.dataFreshnessDays ?? null,
+    volatilityIndex: snap.volatilityIndex ?? null,
+    executionMode: snap.executionMode || null,
+    signalCount: signals?.totalSignals ?? (Array.isArray(signals) ? signals.length : null),
+  };
+}
+
+function extractAudienceKeyOutputs(snap: any): Record<string, any> {
+  const pains = parseJson(snap.audiencePains, []);
+  const segments = parseJson(snap.audienceSegments, []);
+  const desires = parseJson(snap.desireMap, []);
+  const objections = parseJson(snap.objectionMap, []);
+  return {
+    painCount: Array.isArray(pains) ? pains.length : 0,
+    segmentCount: Array.isArray(segments) ? segments.length : 0,
+    desireCount: Array.isArray(desires) ? desires.length : 0,
+    objectionCount: Array.isArray(objections) ? objections.length : 0,
+    awarenessLevel: snap.awarenessLevel || null,
+    topPains: Array.isArray(pains) ? pains.slice(0, 3).map((p: any) => typeof p === "string" ? p : p.pain || p.label || p.name || JSON.stringify(p).slice(0, 80)) : [],
+  };
+}
+
+function extractPositioningKeyOutputs(snap: any): Record<string, any> {
+  const territories = parseJson(snap.territories, []);
+  const territory = snap.territory || null;
+  return {
+    primaryTerritory: territory ? (typeof territory === "string" ? territory : null) : null,
+    territoryCount: Array.isArray(territories) ? territories.length : 0,
+    enemyDefinition: snap.enemyDefinition ? (parseJson(snap.enemyDefinition, snap.enemyDefinition) as any)?.summary || (typeof snap.enemyDefinition === "string" ? snap.enemyDefinition.slice(0, 150) : null) : null,
+    contrastAxis: snap.contrastAxis ? (typeof snap.contrastAxis === "string" ? snap.contrastAxis.slice(0, 120) : null) : null,
+    narrativeDirection: snap.narrativeDirection ? (typeof snap.narrativeDirection === "string" ? snap.narrativeDirection.slice(0, 120) : null) : null,
+  };
+}
+
+function extractDifferentiationKeyOutputs(snap: any): Record<string, any> {
+  const pillars = parseJson(snap.differentiationPillars, []);
+  return {
+    pillarCount: Array.isArray(pillars) ? pillars.length : 0,
+    topPillars: Array.isArray(pillars) ? pillars.slice(0, 3).map((p: any) => typeof p === "string" ? p : p.name || p.pillar || p.label || JSON.stringify(p).slice(0, 60)) : [],
+    authorityMode: snap.authorityMode || null,
+  };
+}
+
+function extractMechanismKeyOutputs(snap: any): Record<string, any> {
+  const primary = parseJson(snap.primaryMechanism, null);
+  return {
+    mechanismName: primary?.name || primary?.mechanismName || (typeof primary === "string" ? primary.slice(0, 100) : null),
+    mechanismType: primary?.type || primary?.mechanismType || null,
+    hasAlternative: !!snap.alternativeMechanism,
+  };
+}
+
+function extractOfferKeyOutputs(snap: any): Record<string, any> {
+  const primary = parseJson(snap.primaryOffer, null);
+  return {
+    offerName: primary?.name || primary?.offerName || primary?.title || (typeof primary === "string" ? primary.slice(0, 100) : null),
+    coreOutcome: primary?.coreOutcome || primary?.outcome || null,
+    offerStrengthScore: snap.offerStrengthScore ?? null,
+    hasAlternative: !!snap.alternativeOffer,
+    selectedOption: snap.selectedOption || null,
+  };
+}
+
+function extractFunnelKeyOutputs(snap: any): Record<string, any> {
+  const primary = parseJson(snap.primaryFunnel, null);
+  const trustPath = parseJson(snap.trustPathAnalysis, null);
+  return {
+    funnelType: primary?.type || primary?.funnelType || (typeof primary === "string" ? primary.slice(0, 80) : null),
+    stageCount: primary?.stages ? (Array.isArray(primary.stages) ? primary.stages.length : null) : null,
+    funnelStrengthScore: snap.funnelStrengthScore ?? null,
+    trustPathScore: trustPath?.score || trustPath?.trustScore || null,
+    hasAlternative: !!snap.alternativeFunnel,
+    selectedOption: snap.selectedOption || null,
+  };
+}
+
+function extractIntegrityKeyOutputs(snap: any): Record<string, any> {
+  const flagged = parseJson(snap.flaggedInconsistencies, []);
+  return {
+    overallIntegrityScore: snap.overallIntegrityScore ?? null,
+    safeToExecute: snap.safeToExecute ?? null,
+    inconsistencyCount: Array.isArray(flagged) ? flagged.length : 0,
+    topInconsistencies: Array.isArray(flagged) ? flagged.slice(0, 3).map((f: any) => typeof f === "string" ? f : f.description || f.message || JSON.stringify(f).slice(0, 80)) : [],
+  };
+}
+
+function extractAwarenessKeyOutputs(snap: any): Record<string, any> {
+  const primary = parseJson(snap.primaryRoute, null);
+  return {
+    primaryRoute: primary?.name || primary?.route || (typeof primary === "string" ? primary.slice(0, 100) : null),
+    awarenessStrengthScore: snap.awarenessStrengthScore ?? null,
+    hasAlternative: !!snap.alternativeRoute,
+  };
+}
+
+function extractPersuasionKeyOutputs(snap: any): Record<string, any> {
+  const primary = parseJson(snap.primaryRoute, null);
+  return {
+    primaryRoute: primary?.name || primary?.route || primary?.mode || (typeof primary === "string" ? primary.slice(0, 100) : null),
+    persuasionStrengthScore: snap.persuasionStrengthScore ?? null,
+    hasAlternative: !!snap.alternativeRoute,
+  };
+}
+
+function extractValidationKeyOutputs(snap: any): Record<string, any> {
+  const result = parseJson(snap.result, null);
+  return {
+    validationResult: result?.verdict || result?.status || result?.outcome || (typeof result === "string" ? result.slice(0, 100) : null),
+    dataReliability: snap.dataReliability || null,
+  };
+}
+
+function extractBudgetKeyOutputs(snap: any): Record<string, any> {
+  const result = parseJson(snap.result, null);
+  return {
+    budgetAction: result?.budgetAction || result?.action || null,
+    recommendedRange: result?.recommendedRange || result?.range || null,
+    monthlyBudget: result?.monthlyBudget || null,
+    dataReliability: snap.dataReliability || null,
+  };
+}
+
+function extractChannelKeyOutputs(snap: any): Record<string, any> {
+  const result = parseJson(snap.result, null);
+  return {
+    primaryChannel: result?.primaryChannel || result?.channels?.[0]?.name || null,
+    secondaryChannel: result?.secondaryChannel || result?.channels?.[1]?.name || null,
+    channelCount: result?.channels ? (Array.isArray(result.channels) ? result.channels.length : null) : null,
+    rejectedCount: result?.rejectedChannels ? (Array.isArray(result.rejectedChannels) ? result.rejectedChannels.length : null) : null,
+    dataReliability: snap.dataReliability || null,
+  };
+}
+
+function extractIterationKeyOutputs(snap: any): Record<string, any> {
+  const result = parseJson(snap.result, null);
+  return {
+    hypothesisCount: result?.hypotheses ? (Array.isArray(result.hypotheses) ? result.hypotheses.length : null) : null,
+    optimizationTargets: result?.optimizationTargets ? (Array.isArray(result.optimizationTargets) ? result.optimizationTargets.length : null) : null,
+    dataReliability: snap.dataReliability || null,
+  };
+}
+
+function extractRetentionKeyOutputs(snap: any): Record<string, any> {
+  const result = parseJson(snap.result, null);
+  return {
+    loopCount: result?.retentionLoops ? (Array.isArray(result.retentionLoops) ? result.retentionLoops.length : null) : null,
+    churnRiskCount: result?.churnRiskFlags ? (Array.isArray(result.churnRiskFlags) ? result.churnRiskFlags.length : null) : null,
+    dataReliability: snap.dataReliability || null,
+  };
+}
+
+interface EngineSnapshotConfig {
+  engineId: string;
+  table: any;
+  confidenceField: string;
+  warningFields: string[];
+  extractKeyOutputs: (snap: any) => Record<string, any>;
+}
+
+const ENGINE_SNAPSHOT_MAP: EngineSnapshotConfig[] = [
+  { engineId: "market_intelligence", table: miSnapshots, confidenceField: "overallConfidence", warningFields: ["missingSignalFlags", "diagnosticsData"], extractKeyOutputs: extractMiKeyOutputs },
+  { engineId: "audience", table: audienceSnapshots, confidenceField: "", warningFields: [], extractKeyOutputs: extractAudienceKeyOutputs },
+  { engineId: "positioning", table: positioningSnapshots, confidenceField: "confidenceScore", warningFields: [], extractKeyOutputs: extractPositioningKeyOutputs },
+  { engineId: "differentiation", table: differentiationSnapshots, confidenceField: "confidenceScore", warningFields: ["collisionDiagnostics"], extractKeyOutputs: extractDifferentiationKeyOutputs },
+  { engineId: "mechanism", table: mechanismSnapshots, confidenceField: "confidenceScore", warningFields: [], extractKeyOutputs: extractMechanismKeyOutputs },
+  { engineId: "offer", table: offerSnapshots, confidenceField: "confidenceScore", warningFields: ["structuralWarnings", "boundaryCheck", "layerDiagnostics"], extractKeyOutputs: extractOfferKeyOutputs },
+  { engineId: "funnel", table: funnelSnapshots, confidenceField: "confidenceScore", warningFields: ["boundaryCheck", "layerDiagnostics"], extractKeyOutputs: extractFunnelKeyOutputs },
+  { engineId: "integrity", table: integritySnapshots, confidenceField: "overallIntegrityScore", warningFields: ["structuralWarnings", "boundaryCheck", "flaggedInconsistencies"], extractKeyOutputs: extractIntegrityKeyOutputs },
+  { engineId: "awareness", table: awarenessSnapshots, confidenceField: "awarenessStrengthScore", warningFields: ["structuralWarnings", "boundaryCheck"], extractKeyOutputs: extractAwarenessKeyOutputs },
+  { engineId: "persuasion", table: persuasionSnapshots, confidenceField: "persuasionStrengthScore", warningFields: ["structuralWarnings", "boundaryCheck"], extractKeyOutputs: extractPersuasionKeyOutputs },
+  { engineId: "statistical_validation", table: strategyValidationSnapshots, confidenceField: "confidenceScore", warningFields: ["structuralWarnings", "boundaryCheck"], extractKeyOutputs: extractValidationKeyOutputs },
+  { engineId: "budget_governor", table: budgetGovernorSnapshots, confidenceField: "confidenceScore", warningFields: ["structuralWarnings", "boundaryCheck"], extractKeyOutputs: extractBudgetKeyOutputs },
+  { engineId: "channel_selection", table: channelSelectionSnapshots, confidenceField: "confidenceScore", warningFields: ["structuralWarnings", "boundaryCheck"], extractKeyOutputs: extractChannelKeyOutputs },
+  { engineId: "iteration", table: iterationSnapshots, confidenceField: "confidenceScore", warningFields: ["structuralWarnings", "boundaryCheck"], extractKeyOutputs: extractIterationKeyOutputs },
+  { engineId: "retention", table: retentionSnapshots, confidenceField: "confidenceScore", warningFields: ["structuralWarnings", "boundaryCheck"], extractKeyOutputs: extractRetentionKeyOutputs },
+];
+
+async function buildEngineOutputs(sectionStatuses: string | null, campaignId: string, accountId: string): Promise<EngineOutput[]> {
   const engines: EngineSummary[] = parseJson(sectionStatuses, []);
-  return engines.map(e => ({
-    engine: e.name || e.id,
-    engineId: e.id,
-    status: e.status,
-    summary: e.summary || null,
-  }));
+
+  const snapshotPromises = ENGINE_SNAPSHOT_MAP.map(cfg => fetchLatestSnapshot(cfg.table, campaignId, accountId));
+  const snapshots = await Promise.all(snapshotPromises);
+
+  const snapshotMap = new Map<string, any>();
+  ENGINE_SNAPSHOT_MAP.forEach((cfg, i) => {
+    if (snapshots[i]) snapshotMap.set(cfg.engineId, snapshots[i]);
+  });
+
+  return engines.map(e => {
+    const snap = snapshotMap.get(e.id);
+    const cfg = ENGINE_SNAPSHOT_MAP.find(c => c.engineId === e.id);
+
+    let confidenceScore: number | null = null;
+    let warnings: string[] = [];
+    let keyOutputs: Record<string, any> = {};
+    let executionTimeMs: number | null = null;
+
+    if (snap && cfg) {
+      if (cfg.confidenceField) {
+        const rawConf = snap[cfg.confidenceField];
+        if (rawConf != null) {
+          const numConf = typeof rawConf === "string" ? parseFloat(rawConf) : Number(rawConf);
+          confidenceScore = isNaN(numConf) ? null : +(numConf).toFixed(4);
+        }
+      }
+      warnings = collectWarnings(snap, ...cfg.warningFields);
+      keyOutputs = cfg.extractKeyOutputs(snap);
+      executionTimeMs = snap.executionTimeMs ?? snap.execution_time_ms ?? null;
+    }
+
+    const snapshotAvailable = !!snap;
+
+    return {
+      engine: e.name || e.id,
+      engineId: e.id,
+      status: e.status,
+      summary: e.summary || null,
+      confidenceScore,
+      warnings: !snapshotAvailable && e.status === "SUCCESS" ? ["Snapshot data unavailable — engine ran but snapshot not found"] : warnings,
+      keyOutputs,
+      executionTimeMs,
+      snapshotAvailable,
+    };
+  });
 }
 
 function buildSystemSummary(
   job: any,
   controlVerdict: any | null,
-  engines: any[],
+  engines: EngineOutput[],
 ) {
   const completedCount = engines.filter(e => e.status === "SUCCESS").length;
   const failedCount = engines.filter(e => ["ERROR", "BLOCKED", "SIGNAL_BLOCKED"].includes(e.status)).length;
@@ -70,6 +359,8 @@ function buildSystemSummary(
     blockers.push(job.error);
   }
 
+  const enginesWithWarnings = engines.filter(e => e.warnings.length > 0);
+
   return {
     overallStatus: job.status,
     finalVerdict: controlVerdict?.verdict || "N/A",
@@ -79,6 +370,7 @@ function buildSystemSummary(
       completed: completedCount,
       failed: failedCount,
       skipped: skippedCount,
+      withWarnings: enginesWithWarnings.length,
     },
     durationMs: job.durationMs || 0,
     risksDetected: risks,
@@ -162,10 +454,8 @@ function buildConfidenceSection(
   };
 }
 
-function buildStrategicOutputs(sectionStatuses: string | null) {
-  const engines: EngineSummary[] = parseJson(sectionStatuses, []);
-
-  const find = (id: string) => engines.find(e => e.id === id)?.summary || null;
+function buildStrategicOutputs(engines: EngineOutput[]) {
+  const find = (id: string) => engines.find(e => e.engineId === id)?.summary || null;
 
   return {
     iterationEngine: find("iteration") || find("iteration_engine"),
@@ -264,6 +554,11 @@ async function buildMemorySection(campaignId: string, accountId: string) {
   };
 }
 
+function formatConfidence(val: number | null): string {
+  if (val === null || val === undefined) return "N/A";
+  return `${(val * 100).toFixed(1)}%`;
+}
+
 function generateReadableSummary(report: any): string {
   const lines: string[] = [];
   lines.push("AVYRON AI — SYSTEM FULL REPORT");
@@ -274,6 +569,9 @@ function generateReadableSummary(report: any): string {
   lines.push(`STATUS: ${sys.overallStatus}`);
   lines.push(`VERDICT: ${sys.finalVerdict} | MODE: ${sys.executionMode}`);
   lines.push(`ENGINES: ${sys.engineCounts.completed}/${sys.engineCounts.total} completed, ${sys.engineCounts.failed} failed, ${sys.engineCounts.skipped} skipped`);
+  if (sys.engineCounts.withWarnings > 0) {
+    lines.push(`WARNINGS: ${sys.engineCounts.withWarnings} engine(s) reported warnings`);
+  }
   lines.push(`DURATION: ${sys.durationMs}ms`);
   lines.push("");
 
@@ -286,6 +584,32 @@ function generateReadableSummary(report: any): string {
   if (sys.risksDetected.length > 0) {
     lines.push("RISKS:");
     for (const r of sys.risksDetected) lines.push(`  - ${r}`);
+    lines.push("");
+  }
+
+  lines.push("ENGINE OUTPUTS:");
+  lines.push("-".repeat(50));
+  for (const eng of report.engineOutputs) {
+    const confStr = formatConfidence(eng.confidenceScore);
+    const statusIcon = eng.status === "SUCCESS" ? "PASS" : eng.status;
+    lines.push(`  ${eng.engine}`);
+    lines.push(`    Status: ${statusIcon} | Confidence: ${confStr}${eng.executionTimeMs ? ` | ${eng.executionTimeMs}ms` : ""}`);
+    if (eng.summary) lines.push(`    Summary: ${eng.summary}`);
+    if (eng.warnings.length > 0) {
+      lines.push(`    Warnings (${eng.warnings.length}):`);
+      for (const w of eng.warnings.slice(0, 3)) lines.push(`      - ${w.slice(0, 120)}`);
+    }
+    const keyEntries = Object.entries(eng.keyOutputs).filter(([, v]) => v !== null && v !== undefined);
+    if (keyEntries.length > 0) {
+      const keyParts = keyEntries.slice(0, 5).map(([k, v]) => {
+        if (typeof v === "boolean") return `${k}=${v}`;
+        if (typeof v === "number") return `${k}=${v}`;
+        if (Array.isArray(v)) return `${k}=[${v.length}]`;
+        if (typeof v === "string") return `${k}="${v.slice(0, 50)}"`;
+        return `${k}=${JSON.stringify(v).slice(0, 50)}`;
+      });
+      lines.push(`    Key: ${keyParts.join(" | ")}`);
+    }
     lines.push("");
   }
 
@@ -320,6 +644,9 @@ function generateReadableSummary(report: any): string {
   if (strat.budgetGovernor) lines.push(`  Budget: ${strat.budgetGovernor}`);
   if (strat.channelSelection) lines.push(`  Channels: ${strat.channelSelection}`);
   if (strat.iterationEngine) lines.push(`  Iteration: ${strat.iterationEngine}`);
+  if (strat.funnelEngine) lines.push(`  Funnel: ${strat.funnelEngine}`);
+  if (strat.retentionEngine) lines.push(`  Retention: ${strat.retentionEngine}`);
+  if (strat.offerEngine) lines.push(`  Offer: ${strat.offerEngine}`);
   lines.push("");
 
   const mem = report.memoryInfluence;
@@ -413,11 +740,11 @@ export function registerFullReportRoutes(app: Express) {
         .orderBy(desc(strategicPlans.createdAt))
         .limit(1);
 
-      const engineOutputs = buildEngineOutputs(job.sectionStatuses);
+      const engineOutputs = await buildEngineOutputs(job.sectionStatuses, campaignId, accountId);
       const systemSummary = buildSystemSummary(job, controlVerdict, engineOutputs);
       const controlLayer = buildControlLayerSection(controlVerdict);
       const confidenceAndIntegrity = buildConfidenceSection(integrityReport, job.sectionStatuses);
-      const strategicOutputs = buildStrategicOutputs(job.sectionStatuses);
+      const strategicOutputs = buildStrategicOutputs(engineOutputs);
       const memoryInfluence = await buildMemorySection(campaignId, accountId);
 
       const report = {
