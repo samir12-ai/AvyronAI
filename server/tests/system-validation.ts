@@ -606,7 +606,7 @@ async function cleanup() {
   ];
   for (const t of tables) {
     try {
-      await db.execute(sql`DELETE FROM ${sql.raw(t)} WHERE account_id = ${TEST_ACCOUNT_ID} AND campaign_id = ${TEST_CAMPAIGN_ID}`);
+      await db.execute(sql`DELETE FROM ${sql.raw(t)} WHERE account_id = ${TEST_ACCOUNT_ID}`);
     } catch { /* table may not exist or no matching rows */ }
   }
   console.log(`[Cleanup] Removed test data from ${tables.length} tables`);

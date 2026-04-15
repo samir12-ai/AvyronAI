@@ -77,3 +77,9 @@ id = "d9qjx4m9IT8UNInS_qhFw"
 uri = "file://.local/cross-engine-alignment-audit.md"
 type = "text"
 title = "Cross-Engine Alignment Audit — Full System Report"
+
+[[outputs]]
+id = "UghQebr_fWlYlkYzyyal8"
+uri = "file://.local/validation-evidence-report.md"
+type = "text"
+title = "System Validation Evidence Report"
