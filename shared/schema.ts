@@ -2421,3 +2421,28 @@ export const buildPlanSnapshots = pgTable("build_plan_snapshots", {
 });
 
 export type BuildPlanSnapshot = typeof buildPlanSnapshots.$inferSelect;
+
+export const systemControlVerdicts = pgTable("system_control_verdicts", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id"),
+  verdict: text("verdict").notNull(),
+  executionMode: text("execution_mode").notNull(),
+  blockReasons: text("block_reasons"),
+  downgrades: text("downgrades"),
+  structuralChecks: text("structural_checks"),
+  contradictions: text("contradictions"),
+  repairActions: text("repair_actions"),
+  repairAttempted: boolean("repair_attempted").default(false),
+  checksTotal: integer("checks_total").default(0),
+  checksPassed: integer("checks_passed").default(0),
+  durationMs: integer("duration_ms").default(0),
+  controlVersion: text("control_version"),
+  shadowMode: boolean("shadow_mode").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type SystemControlVerdictRecord = typeof systemControlVerdicts.$inferSelect;

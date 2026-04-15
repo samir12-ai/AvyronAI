@@ -18,6 +18,7 @@ import type { IntegrityReport } from "../system-integrity/types";
 import { storeIntegrityReport } from "../system-integrity/routes";
 import { evaluateSystemControl } from "../system-control/engine";
 import type { SystemControlVerdict } from "../system-control/types";
+import { storeControlVerdict } from "../system-control/routes";
 import {
   orchestratorJobs,
   strategicPlans,
@@ -1841,6 +1842,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       sglCoverageSufficient: sglSummaryData?.coverage?.coverageSufficient ?? null,
       config: { campaignId: config.campaignId, accountId: config.accountId },
     });
+    storeControlVerdict(config.accountId, config.campaignId, jobId, controlVerdict)
+      .then(id => console.log(`[Orchestrator] CONTROL_VERDICT_STORED | id=${id} | verdict=${controlVerdict!.verdict}`))
+      .catch(err => console.warn(`[Orchestrator] CONTROL_VERDICT_STORE_FAILED | error=${err.message}`));
   } catch (ctrlErr: any) {
     console.warn(`[Orchestrator] SYSTEM_CONTROL_FAILED | error=${ctrlErr.message}`);
   }

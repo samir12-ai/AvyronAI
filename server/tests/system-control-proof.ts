@@ -787,10 +787,146 @@ console.log("─".repeat(80));
     verdict.repairActions.every(a => a.executed === false));
 }
 
-console.log("\n" + "=".repeat(80));
-console.log(`SYSTEM CONTROL LAYER VALIDATION COMPLETE: ${passed} passed, ${failed} failed`);
-console.log("=".repeat(80));
+import { systemControlVerdicts } from "../../shared/schema";
+import { storeControlVerdict, registerSystemControlRoutes } from "../system-control/routes";
+import { db } from "../db";
+import { eq, and } from "drizzle-orm";
 
-if (failed > 0) {
-  process.exit(1);
+async function runPhase4Tests() {
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 33: Phase 4 — Verdict Storage Schema Verification");
+  console.log("─".repeat(80));
+
+  {
+    assert("Schema table exists", systemControlVerdicts !== undefined);
+
+    const columns = Object.keys(systemControlVerdicts);
+    const requiredColumns = [
+      "id", "accountId", "campaignId", "jobId", "verdict", "executionMode",
+      "blockReasons", "downgrades", "structuralChecks", "contradictions",
+      "repairActions", "repairAttempted", "checksTotal", "checksPassed",
+      "durationMs", "controlVersion", "shadowMode", "createdAt",
+    ];
+    for (const col of requiredColumns) {
+      assert(`Schema has column: ${col}`, columns.includes(col));
+    }
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 34: Phase 4 — Store & Retrieve Verdict (DB Integration)");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    const testCampaignId = `test_phase4_${Date.now()}`;
+    const testAccountId = `test_account_${Date.now()}`;
+    input.config = { campaignId: testCampaignId, accountId: testAccountId };
+
+    const verdict = evaluateSystemControl(input);
+
+    const id = await storeControlVerdict(testAccountId, testCampaignId, "test_job_1", verdict);
+    assert("Verdict stored and ID returned", typeof id === "string" && id.length > 0);
+
+    const [row] = await db.select()
+      .from(systemControlVerdicts)
+      .where(eq(systemControlVerdicts.id, id));
+
+    assert("Row found in DB", row !== undefined);
+    assert("Stored verdict matches", row.verdict === "PASS");
+    assert("Stored execution mode matches", row.executionMode === "FULL_EXECUTION");
+    assert("Stored campaign ID matches", row.campaignId === testCampaignId);
+    assert("Stored account ID matches", row.accountId === testAccountId);
+    assert("Stored job ID matches", row.jobId === "test_job_1");
+    assert("Checks total stored correctly", row.checksTotal === verdict.structuralChecks.length);
+    assert("Checks passed stored correctly", row.checksPassed === verdict.structuralChecks.filter(c => c.passed).length);
+    assert("Duration stored", (row.durationMs || 0) >= 0);
+    assert("Control version stored", row.controlVersion === verdict.controlVersion);
+    assert("Shadow mode stored as false", row.shadowMode === false);
+    assert("Repair attempted stored as false", row.repairAttempted === false);
+    assert("Block reasons stored as JSON", JSON.parse(row.blockReasons || "[]").length === 0);
+    assert("Structural checks stored as JSON", JSON.parse(row.structuralChecks || "[]").length > 0);
+
+    await db.delete(systemControlVerdicts).where(eq(systemControlVerdicts.id, id));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 35: Phase 4 — Store BLOCK Verdict with Full Metadata");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    const testCampaignId = `test_block_${Date.now()}`;
+    input.config = { campaignId: testCampaignId, accountId: "test_block_acc" };
+    const budgetResult = input.results.get("budget_governor" as any)!;
+    budgetResult.output.killFlag = true;
+
+    const verdict = evaluateSystemControl(input);
+    const id = await storeControlVerdict("test_block_acc", testCampaignId, "test_job_block", verdict);
+
+    const [row] = await db.select()
+      .from(systemControlVerdicts)
+      .where(eq(systemControlVerdicts.id, id));
+
+    assert("BLOCK verdict stored", row.verdict === "BLOCK");
+    assert("Execution mode HALTED stored", row.executionMode === "HALTED");
+
+    const blockReasons = JSON.parse(row.blockReasons || "[]");
+    assert("Block reasons contain BUDGET_KILL",
+      blockReasons.some((b: any) => b.code === "BUDGET_KILL"));
+
+    await db.delete(systemControlVerdicts).where(eq(systemControlVerdicts.id, id));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 36: Phase 4 — Store REPAIR Verdict with Repair Actions");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    const testCampaignId = `test_repair_${Date.now()}`;
+    input.config = { campaignId: testCampaignId, accountId: "test_repair_acc" };
+    const channelResult = input.results.get("channel_selection" as any)!;
+    channelResult.output.funnelStages.conversion = [];
+    channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+
+    const verdict = evaluateSystemControl(input);
+    const id = await storeControlVerdict("test_repair_acc", testCampaignId, "test_job_repair", verdict);
+
+    const [row] = await db.select()
+      .from(systemControlVerdicts)
+      .where(eq(systemControlVerdicts.id, id));
+
+    assert("REPAIR verdict stored", row.verdict === "REPAIR");
+    assert("Repair attempted flag stored", row.repairAttempted === true);
+
+    const repairActions = JSON.parse(row.repairActions || "[]");
+    assert("Repair actions stored",
+      repairActions.some((a: any) => a.code === "INJECT_FALLBACK_CONVERSION" && a.succeeded));
+
+    await db.delete(systemControlVerdicts).where(eq(systemControlVerdicts.id, id));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 37: Phase 4 — API Route Existence Verification");
+  console.log("─".repeat(80));
+
+  {
+    assert("registerSystemControlRoutes is a function", typeof registerSystemControlRoutes === "function");
+    assert("storeControlVerdict is exported", typeof storeControlVerdict === "function");
+  }
+
+  console.log("\n" + "=".repeat(80));
+  console.log(`SYSTEM CONTROL LAYER VALIDATION COMPLETE: ${passed} passed, ${failed} failed`);
+  console.log("=".repeat(80));
+
+  if (failed > 0) {
+    process.exit(1);
+  }
+
+  process.exit(0);
 }
+
+runPhase4Tests().catch(err => {
+  console.error("Phase 4 test error:", err);
+  process.exit(1);
+});
