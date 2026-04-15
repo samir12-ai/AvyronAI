@@ -127,11 +127,11 @@ console.log("─".repeat(80));
   assert("No contradictions", verdict.contradictions.length === 0);
   assert("All structural checks pass", verdict.structuralChecks.every(c => c.passed));
   assert("Active mode flag (default)", verdict.shadowMode === false);
-  assert("Control version is 2.0.0", verdict.controlVersion === "2.0.0");
+  assert("Control version is 3.0.0", verdict.controlVersion === "3.0.0");
 }
 
 console.log("\n" + "─".repeat(80));
-console.log("SECTION 2: No Conversion Path → BLOCK");
+console.log("SECTION 2: No Conversion Path → REPAIR (fallback injection)");
 console.log("─".repeat(80));
 
 {
@@ -142,18 +142,18 @@ console.log("─".repeat(80));
 
   const verdict = evaluateSystemControl(input);
 
-  assert("Missing conversion path produces BLOCK verdict", verdict.verdict === "BLOCK");
-  assert("Execution mode is HALTED", verdict.executionMode === "HALTED");
-  assert("Block reason code is NO_CONVERSION_PATH",
-    verdict.blockReasons.some(b => b.code === "NO_CONVERSION_PATH"));
-  assert("Block reason severity is critical",
-    verdict.blockReasons.find(b => b.code === "NO_CONVERSION_PATH")?.severity === "critical");
-  assert("Structural check conversion_path_exists failed",
-    verdict.structuralChecks.find(c => c.check === "conversion_path_exists")?.passed === false);
+  assert("Missing conversion path triggers REPAIR verdict", verdict.verdict === "REPAIR");
+  assert("Execution mode is REVIEW_REQUIRED (repaired)", verdict.executionMode === "REVIEW_REQUIRED");
+  assert("Repair was attempted", verdict.repairAttempted === true);
+  assert("Repair action INJECT_FALLBACK_CONVERSION succeeded",
+    verdict.repairActions.some(a => a.code === "INJECT_FALLBACK_CONVERSION" && a.succeeded));
+  assert("Block reasons cleared after repair", verdict.blockReasons.length === 0);
+  assert("Conversion path check passes after repair",
+    verdict.structuralChecks.find(c => c.check === "conversion_path_exists")?.passed === true);
 }
 
 console.log("\n" + "─".repeat(80));
-console.log("SECTION 3: Scale + Zero Real Data → BLOCK");
+console.log("SECTION 3: Scale + Zero Real Data → REPAIR (downgrade to test)");
 console.log("─".repeat(80));
 
 {
@@ -169,9 +169,14 @@ console.log("─".repeat(80));
 
   const verdict = evaluateSystemControl(input);
 
-  assert("Scale + zero real data produces BLOCK verdict", verdict.verdict === "BLOCK");
-  assert("Block reason code is SCALE_WITHOUT_REAL_DATA",
-    verdict.blockReasons.some(b => b.code === "SCALE_WITHOUT_REAL_DATA"));
+  assert("Scale + zero real data triggers REPAIR verdict", verdict.verdict === "REPAIR");
+  assert("Repair action DOWNGRADE_SCALE_TO_TEST succeeded",
+    verdict.repairActions.some(a => a.code === "DOWNGRADE_SCALE_TO_TEST" && a.succeeded));
+  assert("Block reasons cleared after repair", verdict.blockReasons.length === 0);
+  assert("Budget action mutated to test by repair",
+    budgetResult.output.decision.action === "test");
+  assert("Original action preserved as scale",
+    budgetResult.output.decision.originalAction === "scale");
 }
 
 console.log("\n" + "─".repeat(80));
@@ -431,32 +436,33 @@ console.log("─".repeat(80));
   assert("Explicit shadow mode sets shadowMode=true", shadowVerdict.shadowMode === true);
   assert("Both modes produce same verdict", activeVerdict.verdict === shadowVerdict.verdict);
   assert("Both modes produce same execution mode", activeVerdict.executionMode === shadowVerdict.executionMode);
-  assert("Control version is 2.0.0", activeVerdict.controlVersion === "2.0.0");
+  assert("Control version is 3.0.0", activeVerdict.controlVersion === "3.0.0");
   assert("Timestamp is set", activeVerdict.timestamp instanceof Date);
   assert("Duration is measured", activeVerdict.durationMs >= 0);
 }
 
 console.log("\n" + "─".repeat(80));
-console.log("SECTION 18: Phase 2 — BLOCK Enforcement Overrides overallStatus");
+console.log("SECTION 18: Phase 2 — BLOCK Enforcement (non-repairable)");
 console.log("─".repeat(80));
 
 {
   const input = makeBaseInput();
-  const channelResult = input.results.get("channel_selection" as any)!;
-  channelResult.output.funnelStages.conversion = [];
-  channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+  input.integrityReport = {
+    ...makeHealthyIntegrity(),
+    overallStatus: "FAIL",
+    failureReasons: ["Leakage detected"],
+    zeroLeakage: false,
+  };
 
   const verdict = evaluateSystemControl(input);
 
-  assert("BLOCK verdict in active mode", verdict.verdict === "BLOCK" && verdict.shadowMode === false);
-  assert("Block codes include NO_CONVERSION_PATH",
-    verdict.blockReasons.some(b => b.code === "NO_CONVERSION_PATH"));
-
-  const blockCodes = verdict.blockReasons.map(b => b.code).join(", ");
-  const expectedBlockReason = `System Control Layer blocked execution: ${blockCodes}`;
-
-  assert("Block reason message is well-formed", expectedBlockReason.includes("NO_CONVERSION_PATH"));
-  assert("failedEngine would be set to system_control", true);
+  assert("INTEGRITY_FAILURE produces BLOCK even with repair attempt", verdict.verdict === "BLOCK");
+  assert("Execution mode is HALTED", verdict.executionMode === "HALTED");
+  assert("Block reason still present after failed repair",
+    verdict.blockReasons.some(b => b.code === "INTEGRITY_FAILURE"));
+  assert("Repair was attempted", verdict.repairAttempted === true);
+  assert("REVALIDATE_INTEGRITY repair failed",
+    verdict.repairActions.some(a => a.code === "REVALIDATE_INTEGRITY" && !a.succeeded));
 }
 
 console.log("\n" + "─".repeat(80));
@@ -486,7 +492,7 @@ console.log("─".repeat(80));
 }
 
 console.log("\n" + "─".repeat(80));
-console.log("SECTION 20: Phase 2 — Multiple Block Reasons Aggregate");
+console.log("SECTION 20: Phase 2 — Mixed Repairable + Non-Repairable → BLOCK");
 console.log("─".repeat(80));
 
 {
@@ -499,12 +505,14 @@ console.log("─".repeat(80));
 
   const verdict = evaluateSystemControl(input);
 
-  assert("Multiple block reasons produce single BLOCK verdict", verdict.verdict === "BLOCK");
-  assert("Block reasons count >= 2", verdict.blockReasons.length >= 2);
-  assert("NO_CONVERSION_PATH in block reasons",
-    verdict.blockReasons.some(b => b.code === "NO_CONVERSION_PATH"));
-  assert("BUDGET_KILL in block reasons",
+  assert("Mixed repairable + non-repairable produces BLOCK verdict", verdict.verdict === "BLOCK");
+  assert("Block reasons count >= 1 (non-repairable remains)", verdict.blockReasons.length >= 1);
+  assert("BUDGET_KILL in block reasons (non-repairable)",
     verdict.blockReasons.some(b => b.code === "BUDGET_KILL"));
+  assert("Repair was NOT attempted (non-repairable blocks present)",
+    verdict.repairAttempted === false);
+  assert("Repair actions show skipped status",
+    verdict.repairActions.length > 0 && verdict.repairActions.every(a => !a.executed));
 }
 
 console.log("\n" + "─".repeat(80));
@@ -559,6 +567,8 @@ console.log("─".repeat(80));
     verdict.downgrades !== undefined &&
     verdict.structuralChecks !== undefined &&
     verdict.contradictions !== undefined &&
+    verdict.repairActions !== undefined &&
+    verdict.repairAttempted !== undefined &&
     verdict.timestamp !== undefined &&
     verdict.durationMs !== undefined &&
     verdict.controlVersion !== undefined &&
@@ -589,6 +599,192 @@ console.log("─".repeat(80));
 
   assert("Hold action not downgraded further", verdict.verdict === "PASS");
   assert("No downgrades on hold action", verdict.downgrades.length === 0);
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 25: Phase 3 — Shadow Mode Skips Repairs");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const channelResult = input.results.get("channel_selection" as any)!;
+  channelResult.output.funnelStages.conversion = [];
+  channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+
+  const verdict = evaluateSystemControl(input, { shadowMode: true });
+
+  assert("Shadow mode still reports BLOCK for NO_CONVERSION_PATH", verdict.verdict === "BLOCK");
+  assert("Shadow mode does NOT attempt repairs", verdict.repairAttempted === false);
+  assert("Shadow mode has no repair actions", verdict.repairActions.length === 0);
+  assert("Shadow mode does not mutate results",
+    channelResult.output.funnelStages.conversion.length === 0);
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 26: Phase 3 — Conversion Injection Marks Repair Source");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const channelResult = input.results.get("channel_selection" as any)!;
+  channelResult.output.funnelStages.conversion = [];
+  channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("Repair succeeded", verdict.verdict === "REPAIR");
+
+  const injected = channelResult.output.funnelStages.conversion[0];
+  assert("Injected channel has systemControlRepair flag", injected?.systemControlRepair === true);
+  assert("Injected channel has wasReconstructed flag", injected?.wasReconstructed === true);
+  assert("Injected channel has autoInjectedConversion flag", injected?.autoInjectedConversion === true);
+  assert("Injected channel has channelName", typeof injected?.channelName === "string" && injected.channelName.length > 0);
+  assert("Reconstruction log updated",
+    channelResult.output.reconstructionLog.some((l: string) => l.includes("SYSTEM_CONTROL")));
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 27: Phase 3 — Scale→Test Repair Preserves Attribution");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const budgetResult = input.results.get("budget_governor" as any)!;
+  budgetResult.output.decision.action = "scale";
+  input.signalComposition = {
+    ...makeHealthySignals(),
+    real: 0,
+    realRatio: 0,
+    trustedRatio: 0.25,
+  };
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("Repair verdict for scale→test", verdict.verdict === "REPAIR");
+  assert("Budget action changed to test", budgetResult.output.decision.action === "test");
+  assert("Downgraded by system_control_repair",
+    budgetResult.output.decision.downgradedBy === "system_control_repair");
+  assert("Downgrade reasons include SCALE_WITHOUT_REAL_DATA",
+    budgetResult.output.decision.downgradeReasons.includes("SCALE_WITHOUT_REAL_DATA"));
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 28: Phase 3 — Repair Does Not Touch Agent System");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const channelResult = input.results.get("channel_selection" as any)!;
+  channelResult.output.funnelStages.conversion = [];
+  channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("Repair does not produce memory writes",
+    !("memoryEntries" in verdict) && !("memoryWrites" in verdict));
+  assert("Repair does not modify adaptive rhythm",
+    !("rhythmAdjustment" in verdict) && !("adaptiveRhythm" in verdict));
+  assert("Repair does not produce prompt injections",
+    !("promptInjection" in verdict) && !("memoryContext" in verdict));
+  assert("Repair does not touch exploration budget",
+    !("explorationBudget" in verdict));
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 29: Phase 3 — Compliance/Kill/Halt Never Repairable");
+console.log("─".repeat(80));
+
+{
+  const input1 = makeBaseInput();
+  input1.celResults = [{ passed: false, overallPassed: false } as any];
+  const v1 = evaluateSystemControl(input1);
+  assert("COMPLIANCE_FAILURE stays BLOCK", v1.verdict === "BLOCK");
+  assert("COMPLIANCE repair attempted but failed or skipped",
+    v1.repairActions.length === 0 || v1.repairActions.every(a => !a.succeeded));
+
+  const input2 = makeBaseInput();
+  const br2 = input2.results.get("budget_governor" as any)!;
+  br2.output.killFlag = true;
+  const v2 = evaluateSystemControl(input2);
+  assert("BUDGET_KILL stays BLOCK", v2.verdict === "BLOCK");
+
+  const input3 = makeBaseInput();
+  const br3 = input3.results.get("budget_governor" as any)!;
+  br3.output.decision.action = "halt";
+  const v3 = evaluateSystemControl(input3);
+  assert("BUDGET_HALT stays BLOCK", v3.verdict === "BLOCK");
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 30: Phase 3 — Repair + Downgrade Coexistence");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const channelResult = input.results.get("channel_selection" as any)!;
+  channelResult.output.funnelStages.conversion = [];
+  channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+
+  const budgetResult = input.results.get("budget_governor" as any)!;
+  budgetResult.output.decision.action = "scale";
+  budgetResult.output.decision.funnelStrengthScore = 0.3;
+  budgetResult.output.funnelStrengthScore = 0.3;
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("Repair + downgrade coexist: verdict is REPAIR", verdict.verdict === "REPAIR");
+  assert("Repair succeeded (conversion injected)",
+    verdict.repairActions.some(a => a.code === "INJECT_FALLBACK_CONVERSION" && a.succeeded));
+  assert("Downgrade present (weak funnel for scale)",
+    verdict.downgrades.some(d => d.code === "WEAK_FUNNEL_FOR_SCALE"));
+  assert("Execution mode is TEST_ONLY (downgrade applied)",
+    verdict.executionMode === "TEST_ONLY");
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 31: Phase 3 — Post-Repair Downgrade Recomputation");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const budgetResult = input.results.get("budget_governor" as any)!;
+  budgetResult.output.decision.action = "scale";
+  input.signalComposition = {
+    ...makeHealthySignals(),
+    real: 0,
+    realRatio: 0,
+    trustedRatio: 0.25,
+  };
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("Repair resolves SCALE_WITHOUT_REAL_DATA block", verdict.verdict === "REPAIR");
+  assert("Post-repair action is test", budgetResult.output.decision.action === "test");
+  assert("Post-repair LOW_SIGNAL_TRUST downgrade applied",
+    verdict.downgrades.some(d => d.code === "LOW_SIGNAL_TRUST"));
+  assert("Execution mode reflects post-repair downgrade",
+    verdict.executionMode === "RESTRICTED_EXECUTION");
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 32: Phase 3 — Mixed Block: No Mutation on Repairable Targets");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const channelResult = input.results.get("channel_selection" as any)!;
+  channelResult.output.funnelStages.conversion = [];
+  channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+  const budgetResult = input.results.get("budget_governor" as any)!;
+  budgetResult.output.killFlag = true;
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("Mixed block stays BLOCK", verdict.verdict === "BLOCK");
+  assert("Conversion array was NOT mutated (still empty)",
+    channelResult.output.funnelStages.conversion.length === 0);
+  assert("Repair not executed",
+    verdict.repairActions.every(a => a.executed === false));
 }
 
 console.log("\n" + "=".repeat(80));

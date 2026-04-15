@@ -1853,20 +1853,29 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     console.warn(`[Orchestrator] SYSTEM_CONTROL_BLOCK | overallStatus overridden to BLOCKED | reasons=${blockCodes}`);
   }
 
-  if (controlVerdict && controlVerdict.verdict === "DOWNGRADE" && controlVerdict.downgrades.length > 0) {
+  if (controlVerdict && controlVerdict.verdict === "REPAIR") {
+    const successfulRepairs = controlVerdict.repairActions.filter(a => a.succeeded);
+    const failedRepairs = controlVerdict.repairActions.filter(a => a.executed && !a.succeeded);
+    console.log(`[Orchestrator] SYSTEM_CONTROL_REPAIR | succeeded=${successfulRepairs.length} failed=${failedRepairs.length} | actions=${successfulRepairs.map(a => a.code).join(", ")}`);
+    if (overallStatus === "COMPLETED") overallStatus = "PARTIAL";
+  }
+
+  if (controlVerdict && (controlVerdict.verdict === "DOWNGRADE" || controlVerdict.verdict === "REPAIR") && controlVerdict.downgrades.length > 0) {
     const budgetResult = results.get("budget_governor");
     if (budgetResult?.output?.decision) {
-      const originalAction = budgetResult.output.decision.action;
+      const originalAction = budgetResult.output.decision.originalAction || budgetResult.output.decision.action;
       const DOWNGRADE_SEVERITY: Record<string, number> = { hold: 0, test: 1, scale: 2 };
       const targetAction = controlVerdict.downgrades.reduce((most, d) =>
         (DOWNGRADE_SEVERITY[d.to] ?? 99) < (DOWNGRADE_SEVERITY[most] ?? 99) ? d.to : most,
         controlVerdict.downgrades[0].to
       );
-      budgetResult.output.decision.action = targetAction;
-      budgetResult.output.decision.originalAction = originalAction;
-      budgetResult.output.decision.downgradedBy = "system_control";
-      budgetResult.output.decision.downgradeReasons = controlVerdict.downgrades.map(d => d.code);
-      console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE | budget action ${originalAction}→${targetAction} | reasons=${controlVerdict.downgrades.map(d => d.code).join(", ")}`);
+      if (budgetResult.output.decision.downgradedBy !== "system_control_repair") {
+        budgetResult.output.decision.action = targetAction;
+        budgetResult.output.decision.originalAction = originalAction;
+        budgetResult.output.decision.downgradedBy = "system_control";
+        budgetResult.output.decision.downgradeReasons = controlVerdict.downgrades.map(d => d.code);
+        console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE | budget action ${originalAction}→${targetAction} | reasons=${controlVerdict.downgrades.map(d => d.code).join(", ")}`);
+      }
     }
   }
 

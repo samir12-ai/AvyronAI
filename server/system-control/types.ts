@@ -60,6 +60,22 @@ export interface Contradiction {
   resolution: string;
 }
 
+export type RepairActionCode =
+  | "INJECT_FALLBACK_CONVERSION"
+  | "DOWNGRADE_SCALE_TO_TEST"
+  | "REVALIDATE_INTEGRITY"
+  | "FLAG_FOR_REVIEW";
+
+export interface RepairAction {
+  code: RepairActionCode;
+  targetBlock: BlockCode;
+  description: string;
+  safe: boolean;
+  executed: boolean;
+  succeeded: boolean;
+  detail: string;
+}
+
 export interface SystemControlVerdict {
   verdict: SystemVerdict;
   executionMode: ExecutionMode;
@@ -67,6 +83,8 @@ export interface SystemControlVerdict {
   downgrades: Downgrade[];
   structuralChecks: StructuralCheck[];
   contradictions: Contradiction[];
+  repairActions: RepairAction[];
+  repairAttempted: boolean;
   timestamp: Date;
   durationMs: number;
   controlVersion: string;
