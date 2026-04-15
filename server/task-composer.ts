@@ -268,7 +268,30 @@ export function registerTaskComposerRoutes(app: Express) {
       const [work] = await db.select().from(requiredWork).where(eq(requiredWork.planId, planId)).limit(1);
       const periodDays = work?.periodDays || 30;
 
-      const tasks = await composeTasks(planId, campaignId, accountId, planData, periodDays, plan.rootBundleId);
+      const strategicContext: TaskComposerContext = {};
+
+      if (plan.executionStatus === "HALTED") {
+        strategicContext.budgetDecision = "halt";
+        strategicContext.budgetKillFlag = true;
+        console.log(`[TaskComposer] GENERATE_ENDPOINT | Plan executionStatus=HALTED — blocking task generation`);
+      }
+
+      if (planData) {
+        if (planData.degraded === true && !strategicContext.budgetKillFlag) {
+          const summary = planData.strategicSummary?.strategy || "";
+          if (summary.includes("HALTED")) {
+            strategicContext.budgetDecision = "halt";
+            strategicContext.budgetKillFlag = true;
+            console.log(`[TaskComposer] GENERATE_ENDPOINT | HALT detected from plan strategy summary — blocking task generation`);
+          } else {
+            strategicContext.safeToExecute = false;
+            strategicContext.integrityScore = 0.3;
+            console.log(`[TaskComposer] GENERATE_ENDPOINT | Degraded plan detected — marking tasks for review`);
+          }
+        }
+      }
+
+      const tasks = await composeTasks(planId, campaignId, accountId, planData, periodDays, plan.rootBundleId, strategicContext);
       res.json({ success: true, count: tasks.length });
     } catch (err: any) {
       console.error("[TaskComposer] Generate error:", err.message);

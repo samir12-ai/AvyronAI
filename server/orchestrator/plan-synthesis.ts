@@ -1041,13 +1041,42 @@ export async function synthesizePlan(
   }
 
   const integrityResult = results.get("integrity");
-  const safeToExecute = integrityResult?.output?.safeToExecute !== false;
+  let safeToExecute = integrityResult?.output?.safeToExecute !== false;
   const integrityScore = integrityResult?.output?.overallIntegrityScore ?? 1.0;
   let integrityDegradation: "none" | "restricted" | "degraded" = "none";
 
+  const crossEngineFailures: string[] = [];
+  const offerResult = results.get("offer");
+  if (offerResult && (offerResult.status === "ERROR" || offerResult.status === "BLOCKED" || offerResult.status === "SIGNAL_BLOCKED")) {
+    crossEngineFailures.push(`Offer engine ${offerResult.status}`);
+  }
+  const celResults = ctx.celResults;
+  if (celResults && Array.isArray(celResults)) {
+    const celFailed = celResults.some((c: any) => c.passed === false || c.overallPassed === false);
+    if (celFailed) {
+      crossEngineFailures.push("CEL enforcement failed");
+    }
+  }
+  const funnelResult = results.get("funnel");
+  if (funnelResult && (funnelResult.status === "ERROR" || funnelResult.status === "BLOCKED" || funnelResult.status === "SIGNAL_BLOCKED")) {
+    crossEngineFailures.push(`Funnel engine ${funnelResult.status}`);
+  }
+  const positioningResult = results.get("positioning");
+  if (positioningResult && (positioningResult.status === "ERROR" || positioningResult.status === "BLOCKED" || positioningResult.status === "SIGNAL_BLOCKED")) {
+    crossEngineFailures.push(`Positioning engine ${positioningResult.status}`);
+  }
+
+  if (crossEngineFailures.length > 0 && safeToExecute) {
+    safeToExecute = false;
+    console.warn(`[PlanSynthesis] CROSS_ENGINE_INTEGRITY_OVERRIDE | safeToExecute forced to false | failures: ${crossEngineFailures.join(", ")}`);
+  }
+
   if (!safeToExecute) {
     integrityDegradation = "degraded";
-    console.warn(`[PlanSynthesis] INTEGRITY_DEGRADED_MODE | safeToExecute=false score=${integrityScore.toFixed(2)} — plan will be generated in degraded-safe mode`);
+    const reason = crossEngineFailures.length > 0
+      ? `Cross-engine failures: ${crossEngineFailures.join(", ")}`
+      : `Integrity engine: safeToExecute=false`;
+    console.warn(`[PlanSynthesis] INTEGRITY_DEGRADED_MODE | ${reason} | score=${integrityScore.toFixed(2)} — plan will be generated in degraded-safe mode`);
   } else if (integrityScore < 0.6) {
     integrityDegradation = "restricted";
     console.warn(`[PlanSynthesis] INTEGRITY_RESTRICTED_MODE | score=${integrityScore.toFixed(2)} — plan content volume will be reduced`);
