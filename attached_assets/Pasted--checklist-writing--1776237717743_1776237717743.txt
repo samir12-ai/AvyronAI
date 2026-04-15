@@ -1,0 +1,204 @@
+تمام 👌 هذا إيميل احترافي + فيه checklist واضح + فيه توجيه تنفيذ بدون كسر السيستم 👇
+
+⸻
+
+:::writing{variant=“email” id=“58214” subject=“Final Verification: Signal Identity Enforcement Checklist (Must Pass 100% Before Next Phase)”}
+Hi,
+
+Before we move to the next phase (engine-level fixes), I want to fully lock and verify the signal identity enforcement layer.
+
+This is a hard checkpoint — we need to confirm that everything we implemented is complete, consistent, and cannot break under any path.
+
+⸻
+
+Goal
+
+Ensure that:
+
+Signal identity (originType) is correctly assigned, preserved, and enforced end-to-end
+with zero loss, zero leakage, and zero implicit conversion
+
+⸻
+
+Full Verification Checklist
+
+Please go through each item and confirm:
+	•	✅ if already implemented and verified
+	•	❌ if missing (implement directly)
+	•	⚠️ if partially implemented (clarify gap)
+
+⸻
+
+1. Signal Origin Assignment (T1)
+	•	Every signal created in signal-engine is tagged:
+	•	competitor (for all scraped competitor data)
+	•	Every signal from campaign metrics / user data is tagged:
+	•	real
+	•	Every AI-derived transformation (non-direct extraction) is tagged:
+	•	inferred
+	•	Every fallback / degraded output is tagged:
+	•	fallback
+
+👉 If any of the above is missing:
+	•	Add tagging at the exact creation point only
+	•	Do NOT infer later downstream
+
+⸻
+
+2. Lineage Persistence (T3)
+	•	SignalLineageEntry includes:
+	•	originType
+	•	createDerivedLineageEntry():
+	•	strictly inherits originType from parent
+	•	does NOT override or reset it
+	•	buildUpstreamLineage():
+	•	does NOT create fresh entries without originType
+	•	must copy originType from source
+
+👉 If missing:
+	•	Fix at lineage factory level ONLY
+	•	Do NOT patch per engine
+
+⸻
+
+3. No Identity Loss in Aggregation (T2)
+
+For:
+	•	threatSignals
+	•	opportunitySignals
+	•	clusters
+	•	Each signal has:
+	•	{ text, originType }
+	•	No place where signals are reduced to plain strings without originType
+
+👉 If still using raw arrays:
+	•	Keep raw for compatibility
+	•	BUT enforce tagged version as primary
+
+⸻
+
+4. No Propagation Leakage (Critical)
+
+Verify that:
+	•	No transformation converts:
+	•	inferred → real
+	•	competitor → real
+	•	fallback → inferred
+	•	No function drops originType during:
+	•	mapping
+	•	filtering
+	•	summarization
+	•	semantic matching
+
+👉 Specifically check:
+	•	findBestParentSignal()
+	•	mapping functions (positioning/differentiation)
+	•	any .map() or .reduce() on signals
+
+If found:
+	•	Fix at function level
+	•	Always carry originType forward
+
+⸻
+
+5. Orchestrator Boundary Enforcement
+	•	Every engine input includes:
+	•	signal composition (counts per originType)
+	•	No engine receives signals without originType
+	•	No bypass path exists that skips orchestrator
+
+👉 If missing:
+	•	Add enforcement ONLY at orchestrator level
+	•	Do NOT duplicate logic inside engines
+
+⸻
+
+6. Plan-Level Integrity (T6)
+	•	Plan synthesis receives:
+	•	signal composition context
+	•	Plan output includes:
+	•	originTypeDistribution (or equivalent metadata)
+	•	No plan element is treated as origin-agnostic
+
+👉 If missing:
+	•	Add metadata layer ONLY
+	•	Do NOT change plan structure drastically
+
+⸻
+
+7. Budget / Channel Awareness (T7)
+	•	Budget governor receives:
+	•	signal composition
+	•	Guard logic exists for:
+	•	0 real signals
+	•	high competitor dominance
+
+👉 Important:
+	•	Keep logic additive (warnings / modifiers)
+	•	Do NOT break existing decision flow
+
+⸻
+
+8. Validation Layer Audit
+	•	Statistical validation reports:
+	•	originTypeDistribution
+	•	Unmapped signals are:
+	•	not counted as real
+	•	not implicitly trusted
+
+👉 If missing:
+	•	Extend validation output ONLY
+	•	Do NOT change validation thresholds yet
+
+⸻
+
+9. Legacy Data Handling
+	•	All old signals default to:
+	•	“unknown”
+	•	“unknown” is:
+	•	NEVER treated as “real”
+	•	No promotion of unknown → real
+
+👉 If needed:
+	•	Normalize in parsing layer (not per engine)
+
+⸻
+
+10. System-Wide Coverage
+
+Final confirmation:
+	•	Applies to ALL engines (not partial)
+	•	Applies to ALL pipelines (not specific flows)
+	•	Applies to ALL users and future data
+
+⸻
+
+Implementation Constraints (Must Respect)
+	•	Do NOT break existing pipelines
+	•	Do NOT duplicate enforcement across engines
+	•	Do NOT introduce conflicting logic paths
+	•	Do NOT rewrite system architecture
+
+Preferred approach:
+
+Single-source enforcement
+(lineage + orchestrator + validation)
+
+⸻
+
+What I Need Back
+
+For each checklist item:
+	•	Status (✅ / ❌ / ⚠️)
+	•	If ❌:
+	•	implement directly
+	•	mention where it was added
+	•	If ⚠️:
+	•	explain the gap clearly
+
+⸻
+
+Once all items are fully confirmed, we’ll move to the next phase.
+
+Thanks
+:::

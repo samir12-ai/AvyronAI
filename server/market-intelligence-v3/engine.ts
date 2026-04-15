@@ -1028,6 +1028,8 @@ export class MarketIntelligenceV3 {
     }
     const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, gatedClusters);
     const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, gatedClusters);
+    const taggedThreatSignals = threatSignals.map(t => ({ text: t, originType: "competitor" as const }));
+    const taggedOpportunitySignals = opportunitySignals.map(o => ({ text: o, originType: "competitor" as const }));
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
 
     const numericalSignals = signalResults.reduce((s, r) => s + Object.values(r.signals).filter(v => Math.abs(v) > 0.01).length, 0);
@@ -1297,6 +1299,8 @@ export class MarketIntelligenceV3 {
       marketDiagnosis,
       threatSignals,
       opportunitySignals,
+      taggedThreatSignals,
+      taggedOpportunitySignals,
       confidence,
       missingSignalFlags: missingFlags,
       dataFreshnessDays,

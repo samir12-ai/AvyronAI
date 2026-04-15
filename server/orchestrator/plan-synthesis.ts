@@ -87,6 +87,7 @@ export interface SynthesizedPlan {
     contentPillarToDna?: Array<{ pillar: string; dnaElements: string[]; hookApproach: string; ctaStyle: string }>;
     weeklyDnaApplication?: string;
   };
+  signalComposition?: import("../shared/signal-lineage").SignalComposition;
   memoryOverrides?: Array<{ field: string; originalValue: number; correctedValue: number; memoryLabel: string }>;
   explorationPlan?: {
     explorationPercent: number;
@@ -951,11 +952,18 @@ export async function synthesizePlan(
 
   const verification = verifySynthesisPreservation(synthesized, lockedLabels);
 
+  if (signalComp) {
+    synthesized.signalComposition = signalComp;
+  }
+
   if (alreadyDegraded) {
     synthesized.planSource = synthesized.planSource ?? "degraded_ai_failed";
     synthesized.degraded = true;
     synthesized.lockedDecisionLabels = [];
     synthesized.synthesisVerification = { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
+    if (!synthesized.signalComposition) {
+      synthesized.signalComposition = { total: 0, real: 0, competitor: 0, inferred: 0, fallback: 0, unknown: 0, realRatio: 0, competitorRatio: 0, inferredRatio: 0, fallbackRatio: 1, unknownRatio: 0 };
+    }
     console.warn(
       `[PlanSynthesis] PLAN_ALREADY_DEGRADED | planSource=${synthesized.planSource} — AI fallback was used, preserving degraded provenance.`,
     );

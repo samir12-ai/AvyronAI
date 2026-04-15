@@ -202,6 +202,11 @@ export interface EngagementQuality {
   engagementQualityRatio: number;
 }
 
+export interface TaggedSignal {
+  text: string;
+  originType: import("../shared/signal-lineage").SignalOriginType;
+}
+
 export interface MIv3Output {
   marketState: string;
   dominantIntentType: IntentCategory;
@@ -212,6 +217,8 @@ export interface MIv3Output {
   marketDiagnosis: string | null;
   threatSignals: string[];
   opportunitySignals: string[];
+  taggedThreatSignals?: TaggedSignal[];
+  taggedOpportunitySignals?: TaggedSignal[];
   confidence: ConfidenceResult;
   missingSignalFlags: string[];
   dataFreshnessDays: number;

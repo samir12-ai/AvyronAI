@@ -1694,17 +1694,17 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   const audienceLineage: SignalLineageEntry[] = [];
   painMap.forEach((p: any, i: number) => {
-    if (p.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_pain", p.canonical, i));
+    if (p.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_pain", p.canonical, i, "competitor"));
   });
   desireMap.forEach((d: any, i: number) => {
-    if (d.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_desire", d.canonical, i));
+    if (d.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_desire", d.canonical, i, "competitor"));
   });
   objectionMap.forEach((o: any, i: number) => {
-    if (o.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_objection", o.canonical, i));
+    if (o.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_objection", o.canonical, i, "competitor"));
   });
   (emotionalDrivers || []).forEach((d: any, i: number) => {
     const text = typeof d === "string" ? d : (d?.driver || d?.description || d?.canonical || "");
-    if (text) audienceLineage.push(createSourceLineageEntry("audience", "emotional_driver", text, i));
+    if (text) audienceLineage.push(createSourceLineageEntry("audience", "emotional_driver", text, i, "competitor"));
   });
   if (bridgeResult && bridgeResult.bridgeIntegrity) {
     const allBridgedSignals = [...bridgeResult.painSignals, ...bridgeResult.desireSignals, ...bridgeResult.objectionSignals];
@@ -1714,6 +1714,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
         `bridge_${bs.category}_${bs.bridgeSource}`,
         `${bs.canonical} [parent:${bs.parentSignalId}]`,
         i,
+        "competitor",
       ));
     });
   }
