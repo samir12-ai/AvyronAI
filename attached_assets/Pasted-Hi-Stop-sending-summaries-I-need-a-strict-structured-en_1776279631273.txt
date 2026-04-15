@@ -1,0 +1,75 @@
+Hi,
+
+Stop sending summaries.
+
+I need a strict, structured, engine-level report in table format — not paragraphs, not explanations.
+
+---
+
+# 🔴 REQUIRED OUTPUT FORMAT (MANDATORY)
+
+You must provide ONE TABLE with the following columns:
+
+| Engine | Status | Outcome | Confidence | Key Scores | Warnings | Errors | Decision | Notes |
+
+---
+
+# 📌 COLUMN DEFINITIONS (DO NOT SKIP)
+
+- Engine → engine name (MI, Audience, Positioning, etc.)
+- Status → SUCCESS / FAILED / PARTIAL / BLOCKED
+- Outcome → exact main output (e.g. marketState, funnelType, offerName, etc.)
+- Confidence → numeric value (0–1)
+- Key Scores → important metrics (strength scores, trust score, etc.)
+- Warnings → number + short description (NOT summary)
+- Errors → if any
+- Decision → only if applicable (e.g. HALT / HOLD / SCALE)
+- Notes → only critical flags (e.g. INTEGRITY_FAILED, CEL_FAIL)
+
+---
+
+# 📊 EXAMPLE (FORMAT ONLY — NOT REAL DATA)
+
+| Engine | Status | Outcome | Confidence | Key Scores | Warnings | Errors | Decision | Notes |
+|--------|--------|--------|------------|------------|----------|--------|----------|-------|
+| Offer | SUCCESS | "Generate leads in 60 days" | 0.64 | strength=0.89 | 2 (weak proof) | - | - | INTEGRITY_FAILED |
+| Funnel | SUCCESS | Webinar Funnel (6 stages) | 0.75 | strength=0.79 | 1 (friction high) | - | - | - |
+| Budget | SUCCESS | - | 0.15 | risk=high | 1 (low real signals) | - | HALT | killFlag=true |
+
+---
+
+# ❗ STRICT RULES
+
+- No summaries
+- No paragraphs
+- No explanations unless inside table cells
+- No missing engines (must include ALL 15 engines)
+- All values must come from actual run outputs (not assumptions)
+
+---
+
+# 🎯 SCOPE
+
+Run this on:
+→ MarketMindAI campaign (real data)
+
+Include:
+- ALL 15 engines
+- REAL values only (no placeholders)
+
+---
+
+# 🔁 AFTER COMPLETION
+
+After sending the table:
+1. Confirm data was NOT modified
+2. Confirm no test artifacts remain
+3. Confirm system restored to original state
+
+---
+
+This is a data report request, not a narrative.
+
+Send only the table.
+
+Thanks.
