@@ -1377,7 +1377,7 @@ export async function getStoredPostsForMIv3(competitorId: string, accountId: str
     comments: p.comments || 0,
     views: p.views || undefined,
     mediaType: p.mediaType || "IMAGE",
-    hashtags: p.hashtags ? JSON.parse(p.hashtags) : [],
+    hashtags: p.hashtags ? (() => { try { return JSON.parse(p.hashtags!); } catch { return p.hashtags!.split(/[\s,]+/).filter(Boolean); } })() : [],
     timestamp: p.timestamp?.toISOString() || new Date().toISOString(),
     hasCTA: p.hasCTA || false,
     hasOffer: p.hasOffer || false,
