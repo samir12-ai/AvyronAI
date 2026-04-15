@@ -1,0 +1,211 @@
+Hi,
+
+I need a complete, code-level audit of the Agent system — not a summary, not a high-level explanation, and not selective answers.
+
+This request is critical before we introduce any new control layers, because the Agent already owns iteration, adaptation, and memory, and I need to fully understand its current behavior to avoid introducing noise, conflicts, or duplicated logic.
+
+---
+
+## 🔴 Scope of Request
+
+I want a full deep-dive into the Agent system, including:
+
+- Iteration Engine
+- Adaptive Logic / Adaptive Rhythm
+- Strategic Memory (read/write, mutation, injection)
+- Feedback loops
+- Any decision influence the Agent has across the system
+
+---
+
+## ⚠️ Strict Requirements
+
+- ❌ Do NOT summarize  
+- ❌ Do NOT simplify  
+- ❌ Do NOT explain conceptually only  
+
+- ✔ Provide actual code references
+- ✔ Show exact files and functions
+- ✔ Include logic flows and conditions
+- ✔ Show how data moves through the system
+- ✔ Show real execution paths
+
+I want this as a technical document, not a narrative.
+
+---
+
+## 🧠 What I Need Exactly
+
+### 1. Full Agent Architecture
+
+- All files related to the Agent system
+- Entry points (where it starts in orchestrator)
+- Execution order (when it runs relative to other engines)
+- Dependencies (what it reads from upstream)
+
+---
+
+### 2. Iteration Engine — Full Breakdown
+
+- Exact file(s)
+- Full logic flow:
+  - Inputs
+  - Processing
+  - Outputs
+- How it detects:
+  - failures
+  - bottlenecks
+  - performance drops
+- All conditions used for decisions
+
+---
+
+### 3. Adaptive System (Adaptive Rhythm / Strategy Adaptation)
+
+- Where adaptation logic lives
+- How decisions are modified over time
+- What triggers adaptation
+- What variables are tracked
+
+---
+
+### 4. Strategic Memory System (Critical)
+
+I need FULL visibility here:
+
+#### A. Memory Write
+- File(s)
+- Conditions for writing:
+  - thresholds
+  - confidence levels
+- What gets stored:
+  - structure of memory objects
+- How “winner / avoid / reinforce” is decided
+
+#### B. Memory Read / Injection
+- Where memory is injected into engines
+- How it's formatted for prompts
+- Which engines receive it
+
+#### C. Memory Mutation
+- How memory evolves over time
+- If/where old memory is overwritten or decayed
+
+---
+
+### 5. Agent → System Influence
+
+- EXACTLY how the Agent affects:
+  - plan synthesis
+  - budget decisions
+  - funnel decisions
+  - channel selection
+- Does it directly modify decisions or only influence prompts?
+
+---
+
+### 6. Feedback Loop Mechanics
+
+- How feedback flows:
+  iteration → memory → next run → engine outputs
+- Is feedback:
+  - real-time?
+  - next-run only?
+- Where is this implemented in code?
+
+---
+
+### 7. Limitations (Code-Level, Not Theoretical)
+
+Show explicitly:
+
+- What the Agent CANNOT do
+- Where it stops
+- Where it has no authority
+
+Example:
+- Can it block execution?
+- Can it override budget?
+- Can it force re-run of engines?
+
+Back this with code.
+
+---
+
+### 8. Conflict Potential (Important)
+
+From code analysis:
+
+- Where could the Agent:
+  - conflict with Control Layer logic?
+  - duplicate enforcement logic?
+  - introduce noise?
+
+---
+
+### 9. Data Contracts
+
+- What exact data the Agent expects
+- What structure it outputs
+- How it connects with:
+  - signal lineage
+  - validation
+  - plan synthesis
+
+---
+
+### 10. Full Flow Example (End-to-End)
+
+Provide ONE real flow:
+
+1. Campaign runs
+2. Engines execute
+3. Agent runs
+4. Memory updated
+5. Next run influenced
+
+With:
+- actual function calls
+- actual data passed
+
+---
+
+## 📁 Output Format Required
+
+Deliver this as:
+
+- A structured technical document
+- With:
+  - file paths
+  - code snippets
+  - flow diagrams (text-based is fine)
+- Organized by sections above
+
+---
+
+## 🚨 Important Context
+
+We are about to introduce a Control Layer + Self-Correcting system.
+
+Before doing that, I need to know:
+
+> ❗ Does the Agent already partially do this?
+> ❗ Where will conflicts happen?
+> ❗ What must NOT be duplicated?
+
+---
+
+## 🎯 Goal
+
+I want a complete mental model of the Agent system based on actual code, so we can:
+
+- avoid noise
+- avoid double logic
+- avoid conflicting authority
+- integrate cleanly with the upcoming architecture
+
+---
+
+Please treat this as a full system audit request, not a quick answer.
+
+Thanks.

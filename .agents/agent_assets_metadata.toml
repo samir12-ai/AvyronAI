@@ -95,3 +95,9 @@ id = "WTRQKNjD_Kp-tUQyfVCcw"
 uri = "file://.local/phase2-evidence-report.md"
 type = "text"
 title = "Phase 2: Full 15/15 Engine Run Evidence Report"
+
+[[outputs]]
+id = "OFOCFUL7AgqtV7pVJUD4K"
+uri = "file://server/docs/agent-system-audit.md"
+type = "text"
+title = "Agent System — Complete Code-Level Audit"
