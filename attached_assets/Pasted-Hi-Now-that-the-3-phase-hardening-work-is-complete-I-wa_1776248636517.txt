@@ -1,0 +1,261 @@
+Hi,
+
+Now that the 3-phase hardening work is complete, I want a full validation pass before we treat the system as launch-ready.
+
+This is not a simple smoke test.
+
+I need you to create a dedicated internal test campaign and use it to run a full set of controlled scenarios that measure whether the system now behaves correctly under weak, contradictory, and strong conditions.
+
+The goal is to verify that everything we implemented is actually working across the full system.
+
+---
+
+## Core Requirement
+
+Please create a separate test campaign dedicated only for validation.
+
+This campaign should be isolated from the active production-style campaign and used only to test system behavior under different controlled conditions.
+
+Use it to:
+- add data
+- remove data
+- weaken signals
+- strengthen signals
+- create contradictions
+- trigger updates
+- verify the full system end-to-end
+
+I want this done through the actual system, not through assumptions.
+
+---
+
+# Part 1 — Full System Regression Check
+
+Before running special scenarios, first verify that the full system still works after all recent changes.
+
+Please confirm end-to-end:
+
+- scraping still works
+- all engines still run
+- plan synthesis still works
+- task composer still works
+- dashboard still renders correctly
+- agent still behaves correctly
+- no old working path was broken by the new enforcement / contracts / adaptations
+
+This is a full-system regression check.
+
+---
+
+# Part 2 — Required Test Scenarios
+
+Use the dedicated test campaign to run the following scenarios.
+
+---
+
+## Scenario A — Weak / Low-Signal Campaign
+
+Create a test state where:
+
+- little or weak source data exists
+- low trusted signal ratio
+- mostly competitor-derived / inferred signals
+- minimal or incomplete campaign metrics
+
+Expected behavior:
+
+- system must NOT behave aggressively
+- no fake confidence
+- no scale recommendation
+- plan should be reduced / cautious / degraded if appropriate
+- tasks should reflect low-confidence state
+- dashboard should not present this as strong or execution-ready
+
+---
+
+## Scenario B — Contradictory Campaign
+
+Create a state where:
+
+- some engines suggest strength
+- but funnel / retention / integrity indicate weakness
+- or signal composition is mixed
+- or budget reality conflicts with strategic optimism
+
+Expected behavior:
+
+- contradictions must be surfaced
+- system must not silently collapse them into a “strong” output
+- budget / plan / tasks must reflect the contradiction appropriately
+- integrity and strategic guards must affect execution
+
+---
+
+## Scenario C — Competitor-Heavy Campaign
+
+Create a state where:
+
+- the strategy is mostly built from competitor-derived signals
+- real signals are absent or near-zero
+
+Expected behavior:
+
+- confidence must be reduced
+- budget behavior must be conservative
+- plan must reflect that this is not strongly validated
+- no aggressive execution path should appear
+
+---
+
+## Scenario D — Strong / Trusted Campaign
+
+Create a state where:
+
+- signal composition is stronger
+- more trusted data exists
+- metrics are sufficient
+- no major structural contradictions
+
+Expected behavior:
+
+- engines should run fully
+- plan should be stronger
+- budget decisions may become more confident
+- tasks should reflect healthy execution readiness
+- dashboard should match actual system strength
+
+---
+
+## Scenario E — HALT / HOLD Enforcement
+
+Explicitly trigger cases where:
+
+- Budget Governor should return HALT
+- Budget Governor should return HOLD
+- Integrity should be unsafe
+
+Expected behavior:
+
+### HALT
+- no full plan
+- no normal task generation
+- no misleading dashboard confidence
+
+### HOLD
+- restricted / reduced plan
+- reduced task volume
+- clear caution in downstream outputs
+
+### Integrity unsafe
+- execution must be affected
+- not only logged
+
+---
+
+## Scenario F — Update / Remove / Recompute
+
+In the same test campaign, actively change the system state:
+
+- add signals
+- remove signals
+- change campaign metrics
+- change confidence conditions
+- re-run orchestration
+
+Expected behavior:
+
+- system updates correctly
+- no stale values
+- no stuck states
+- no old assumptions remain after new inputs
+- outputs truly recompute instead of appearing cached or cosmetically refreshed
+
+---
+
+# Part 3 — End-to-End Validation for Each Scenario
+
+For every scenario above, verify end-to-end across:
+
+- backend engine execution
+- orchestrator behavior
+- plan synthesis
+- task composer
+- dashboard
+- agent
+- any strategic guard or enforcement layer
+
+I want confirmation that each change propagates all the way through the system.
+
+Not just:
+- engine output
+but:
+- final visible behavior
+
+---
+
+# Part 4 — Specific Checks
+
+Please explicitly test and confirm the following:
+
+### A. Budget / Integrity / Task Alignment
+- HALT really stops downstream execution
+- HOLD really reduces execution
+- Integrity unsafe actually changes behavior
+
+### B. Contracts / Extractors
+- no hidden raw access remains
+- normalized offer/funnel inputs are being used everywhere expected
+
+### C. Statistical Validation
+- real lineage is being consumed
+- validation results are materially different when signal quality changes
+
+### D. Signal Composition Enforcement
+- trusted ratio affects behavior
+- competitor-heavy strategies become more conservative
+- weak composition is not merely logged — it changes system output
+
+### E. Retention / Iteration Influence
+- retention output is meaningful with synthesized touchpoints
+- iteration conflicts produce actual downstream effect
+- these engines are not just generating side notes
+
+### F. Frontend Accuracy
+- dashboard reflects real backend state
+- no false “everything is fine” view
+- task list matches actual strategic status
+- agent responses do not overstate system confidence
+
+---
+
+# Part 5 — What I Need Back
+
+Please return with a structured report containing:
+
+1. the dedicated test campaign created
+2. all scenarios executed
+3. expected vs actual behavior for each scenario
+4. whether end-to-end propagation worked in each case
+5. any regressions found
+6. any hidden failures found
+7. any fixes you applied immediately
+8. anything still risky or incomplete
+
+---
+
+# Important
+
+Do not do a shallow pass.
+
+I want you to actively:
+- push the system
+- weaken it
+- strengthen it
+- contradict it
+- update it
+- rerun it
+- and confirm that the full system truly reacts the way it should now
+
+If anything fails or behaves partially, fix it and explain exactly what was wrong.
+
+Thanks

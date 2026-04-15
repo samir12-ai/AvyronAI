@@ -1082,8 +1082,31 @@ async function executeEngine(
           config.accountId, statLineage
         );
         output = result;
-        snapshotId = result.snapshotId;
         ctx.statisticalValidation = result;
+
+        try {
+          const [svSnap] = await db.insert(strategyValidationSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            persuasionSnapshotId: ctx.persuasion?.snapshotId || null,
+            engineVersion: result.engineVersion || 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            result: JSON.stringify(result),
+            layerResults: JSON.stringify(result.layerResults || []),
+            structuralWarnings: JSON.stringify(result.structuralWarnings || []),
+            boundaryCheck: JSON.stringify(result.boundaryCheck || {}),
+            dataReliability: JSON.stringify(result.dataReliability || {}),
+            confidenceScore: result.claimConfidenceScore || null,
+            executionTimeMs: result.executionTimeMs || null,
+          }).returning();
+          snapshotId = svSnap.id;
+          ctx.statisticalValidation.snapshotId = svSnap.id;
+          console.log(`[Orchestrator] SV_SNAPSHOT_PERSISTED | id=${svSnap.id} confidence=${result.claimConfidenceScore?.toFixed(2) || "N/A"} state=${result.validationState}`);
+        } catch (snapErr: any) {
+          console.warn(`[Orchestrator] SV snapshot persist failed: ${snapErr.message}`);
+          snapshotId = undefined;
+        }
         break;
       }
 
@@ -1091,18 +1114,16 @@ async function executeEngine(
         const bizData = await getBusinessData(config.accountId, config.campaignId);
         const campaignData = await getCampaignData(config.campaignId);
 
-        const offerCtxBG = ctx.offer || {};
-        const primaryOfferBG = offerCtxBG.primaryOffer || offerCtxBG.selectedOffer || offerCtxBG;
+        const offerCtxBG = extractOfferInput(ctx.offer);
         const offerStrength = typeof offerCtxBG.offerStrengthScore === "number" ? offerCtxBG.offerStrengthScore : 0.5;
-        const offerProofScore = typeof primaryOfferBG?.proofLayer?.proofStrength === "number" ? primaryOfferBG.proofLayer.proofStrength : 0.5;
-        const offerCompleteness = primaryOfferBG?.completeness?.complete === true;
+        const offerProofScore = typeof offerCtxBG.proofStrength === "number" ? offerCtxBG.proofStrength : 0.5;
+        const offerCompleteness = offerCtxBG.offerName != null && offerCtxBG.coreOutcome != null;
 
-        const funnelCtxBG = ctx.funnel || {};
+        const funnelCtxBG = extractFunnelInput(ctx.funnel);
         const funnelStrengthScore = typeof funnelCtxBG.funnelStrengthScore === "number" ? funnelCtxBG.funnelStrengthScore : 0.5;
         const funnelFrictionScore = typeof funnelCtxBG.frictionMap?.totalFriction === "number" ? funnelCtxBG.frictionMap.totalFriction : 0.5;
-        const primaryFunnelBG = funnelCtxBG.primaryFunnel || {};
         const funnelProjections = {
-          expectedConversionRate: typeof primaryFunnelBG.eligibilityScore === "number" ? primaryFunnelBG.eligibilityScore : 0.02,
+          expectedConversionRate: typeof funnelCtxBG.trustPathScore === "number" ? funnelCtxBG.trustPathScore : 0.02,
           expectedCPA: 50,
           expectedROAS: 2.0,
         };
