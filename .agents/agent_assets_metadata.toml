@@ -101,3 +101,9 @@ id = "OFOCFUL7AgqtV7pVJUD4K"
 uri = "file://server/docs/agent-system-audit.md"
 type = "text"
 title = "Agent System — Complete Code-Level Audit"
+
+[[outputs]]
+id = "ypjilYn6kBntcfXYz1rZA"
+uri = "file://server/docs/control-layer-architecture.md"
+type = "text"
+title = "Control Layer Architecture — Technical Validation & Design"
