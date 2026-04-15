@@ -83,3 +83,15 @@ id = "UghQebr_fWlYlkYzyyal8"
 uri = "file://.local/validation-evidence-report.md"
 type = "text"
 title = "System Validation Evidence Report"
+
+[[outputs]]
+id = "1E8qNMzglL4kATL_TgU69"
+uri = "file://.local/validation-report-final.md"
+type = "text"
+title = "Phase 1: Validation Suite Report (50/50 checks)"
+
+[[outputs]]
+id = "WTRQKNjD_Kp-tUQyfVCcw"
+uri = "file://.local/phase2-evidence-report.md"
+type = "text"
+title = "Phase 2: Full 15/15 Engine Run Evidence Report"
