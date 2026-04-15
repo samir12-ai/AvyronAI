@@ -460,8 +460,9 @@ INSTRUCTION: Use these exact counts in contentDistribution. Do not derive rhythm
   Competitor-derived: ${(signalComposition.competitorRatio * 100).toFixed(0)}%
   AI-inferred: ${(signalComposition.inferredRatio * 100).toFixed(0)}%
   Fallback: ${(signalComposition.fallbackRatio * 100).toFixed(0)}%
-  Unknown: ${(signalComposition.unknownRatio * 100).toFixed(0)}%
-NOTE: If strategy is heavily competitor-derived or inferred, flag this in riskTriggers and recommend gathering own performance data early.
+  Unknown (legacy/untagged): ${(signalComposition.unknownRatio * 100).toFixed(0)}%
+  Trusted (real + competitor): ${(signalComposition.trustedRatio * 100).toFixed(0)}%
+NOTE: "unknown" signals are NOT trusted — they represent legacy data with no verified origin. If strategy is heavily competitor-derived, inferred, or unknown, flag this in riskTriggers and recommend gathering own performance data early.
 
 `
     : "";
@@ -940,8 +941,7 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] Precomputed rhythm failed (non-blocking):`, rhythmErr.message);
   }
 
-  const validationResult = results.get("statistical_validation");
-  const signalComp: SignalComposition | null = validationResult?.output?.originTypeDistribution || null;
+  const signalComp: SignalComposition | null = ctx.signalComposition || (results.get("statistical_validation")?.output?.originTypeDistribution) || null;
   if (signalComp) {
     console.log(`[PlanSynthesis] SIGNAL_COMPOSITION_INJECTED | ${formatCompositionLog(signalComp)}`);
   }
@@ -962,7 +962,7 @@ export async function synthesizePlan(
     synthesized.lockedDecisionLabels = [];
     synthesized.synthesisVerification = { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
     if (!synthesized.signalComposition) {
-      synthesized.signalComposition = { total: 0, real: 0, competitor: 0, inferred: 0, fallback: 0, unknown: 0, realRatio: 0, competitorRatio: 0, inferredRatio: 0, fallbackRatio: 1, unknownRatio: 0 };
+      synthesized.signalComposition = { total: 0, real: 0, competitor: 0, inferred: 0, fallback: 0, unknown: 0, dominantType: "fallback", realRatio: 0, competitorRatio: 0, inferredRatio: 0, fallbackRatio: 1, unknownRatio: 0, trustedRatio: 0 };
     }
     console.warn(
       `[PlanSynthesis] PLAN_ALREADY_DEGRADED | planSource=${synthesized.planSource} — AI fallback was used, preserving degraded provenance.`,

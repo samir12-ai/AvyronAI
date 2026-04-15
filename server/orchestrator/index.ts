@@ -42,7 +42,6 @@ import {
 } from "@shared/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { computeSignalComposition, formatCompositionLog } from "../shared/signal-lineage";
 import {
   ENGINE_PRIORITY_ORDER,
   checkPriorityViolation,
@@ -74,9 +73,13 @@ import { runAwarenessEngine } from "../awareness-engine/engine";
 import { runPersuasionEngine } from "../persuasion-engine/engine";
 import {
   createSourceLineageEntry,
+  computeSignalComposition,
+  formatCompositionLog,
   type SignalLineageEntry,
   type SignalOriginType,
+  type SignalComposition,
   parseLineageFromSnapshot,
+  bridgePerformanceToLineage,
 } from "../shared/signal-lineage";
 import { runStatisticalValidationEngine } from "../strategy/statistical-validation/engine";
 import { runBudgetGovernorEngine } from "../strategy/budget-governor/engine";
@@ -152,6 +155,8 @@ interface EngineContext {
   sglState?: SignalGovernanceState;
   integrityReport?: IntegrityReport;
   memoryContext?: string;
+  signalComposition?: SignalComposition;
+  performanceLineage?: SignalLineageEntry[];
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -434,8 +439,21 @@ function buildUpstreamLineage(ctx: EngineContext): SignalLineageEntry[] {
     }
   }
 
+  if (ctx.performanceLineage && ctx.performanceLineage.length > 0) {
+    entries.push(...ctx.performanceLineage);
+  }
+
   const comp = computeSignalComposition(entries);
+  ctx.signalComposition = comp;
   console.log(`[Orchestrator] LINEAGE_BUILT | entries=${entries.length} | sources=[${[...new Set(entries.map(e => e.originEngine))].join(",")}] | composition: ${formatCompositionLog(comp)}`);
+
+  if (comp.unknownRatio > 0.3 && comp.total > 0) {
+    console.warn(`[Orchestrator] HIGH_UNKNOWN_RATIO | unknownRatio=${(comp.unknownRatio * 100).toFixed(0)}% (${comp.unknown}/${comp.total}) — legacy/untagged signals dominate. These are NOT trusted.`);
+  }
+  if (comp.trustedRatio < 0.5 && comp.total > 5) {
+    console.warn(`[Orchestrator] LOW_TRUSTED_RATIO | trustedRatio=${(comp.trustedRatio * 100).toFixed(0)}% — strategy lacks grounded (real + competitor) signals.`);
+  }
+
   return entries;
 }
 
@@ -1042,7 +1060,8 @@ async function executeEngine(
           },
           performance: null,
           validation: ctx.statisticalValidation || null,
-        });
+          signalComposition: ctx.signalComposition || undefined,
+        } as any);
         output = result;
         ctx.budgetGovernor = result;
 
@@ -1497,6 +1516,29 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     }
   } catch (memLoadErr: any) {
     console.warn(`[Orchestrator] MEMORY_CONTEXT_LOAD_FAILED | error=${memLoadErr.message}`);
+  }
+
+  try {
+    const [metricsRow] = await db
+      .select()
+      .from(manualCampaignMetrics)
+      .where(and(eq(manualCampaignMetrics.accountId, config.accountId), eq(manualCampaignMetrics.campaignId, config.campaignId)))
+      .limit(1);
+    if (metricsRow) {
+      const perfLineage = bridgePerformanceToLineage({
+        impressions: metricsRow.impressions || 0,
+        clicks: metricsRow.clicks || 0,
+        conversions: metricsRow.conversions || 0,
+        spend: metricsRow.spend || 0,
+        revenue: metricsRow.revenue || 0,
+      }, config.campaignId);
+      if (perfLineage.length > 0) {
+        ctx.performanceLineage = perfLineage;
+        console.log(`[Orchestrator] PERFORMANCE_BRIDGE_LOADED | campaign=${config.campaignId} | realSignals=${perfLineage.length}`);
+      }
+    }
+  } catch (perfErr: any) {
+    console.warn(`[Orchestrator] PERFORMANCE_BRIDGE_FAILED | error=${perfErr.message}`);
   }
 
   const startIndex = config.resumeFromEngine

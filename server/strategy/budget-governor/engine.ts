@@ -162,6 +162,54 @@ function runGuard(input: BudgetGovernorInput, riskScore: number): BudgetGuardRes
   };
 }
 
+function applyCompositionEnforcement(
+  input: BudgetGovernorInput,
+  decision: BudgetDecision,
+  confidenceScore: number,
+): { decision: BudgetDecision; confidenceScore: number; enforcements: string[] } {
+  const enforcements: string[] = [];
+  let adjustedConfidence = confidenceScore;
+  let adjustedDecision = { ...decision };
+
+  if (!input.signalComposition) {
+    return { decision: adjustedDecision, confidenceScore: adjustedConfidence, enforcements };
+  }
+
+  const comp = input.signalComposition;
+
+  if (comp.realRatio === 0 && comp.total > 0) {
+    if (adjustedDecision.action === "scale") {
+      adjustedDecision = {
+        action: "hold",
+        reasoning: `${adjustedDecision.reasoning} [COMPOSITION_HOLD: Zero real signals — cannot scale without performance data. Strategy is ${(comp.competitorRatio * 100).toFixed(0)}% competitor-derived.]`,
+      };
+      enforcements.push("COMPOSITION_HOLD: scale→hold (zero real signals)");
+    }
+  }
+
+  if (comp.competitorRatio > 0.8) {
+    const penalty = 0.1;
+    adjustedConfidence = Math.max(0, adjustedConfidence - penalty);
+    enforcements.push(`CONFIDENCE_PENALTY: -${(penalty * 100).toFixed(0)}% (competitor-dominant: ${(comp.competitorRatio * 100).toFixed(0)}%)`);
+  }
+
+  if (comp.inferredRatio > 0.6 && adjustedDecision.action === "scale") {
+    adjustedDecision = {
+      action: "hold",
+      reasoning: `${adjustedDecision.reasoning} [COMPOSITION_CAP: Inferred signals dominate (${(comp.inferredRatio * 100).toFixed(0)}%) — capping at hold until grounded data available.]`,
+    };
+    enforcements.push(`COMPOSITION_CAP: scale→hold (inferred-dominant: ${(comp.inferredRatio * 100).toFixed(0)}%)`);
+  }
+
+  if (comp.unknownRatio > 0.5 && comp.total > 0) {
+    const penalty = 0.05;
+    adjustedConfidence = Math.max(0, adjustedConfidence - penalty);
+    enforcements.push(`UNKNOWN_PENALTY: -${(penalty * 100).toFixed(0)}% (unknown signals: ${(comp.unknownRatio * 100).toFixed(0)}%)`);
+  }
+
+  return { decision: adjustedDecision, confidenceScore: adjustedConfidence, enforcements };
+}
+
 function determineBudgetDecision(input: BudgetGovernorInput, riskScore: number, guardResult: BudgetGuardResult): BudgetDecision {
   if (input.offerStrength < KILL_THRESHOLDS.minOfferStrength ||
       input.validationConfidence < KILL_THRESHOLDS.minValidationConfidence ||
@@ -383,7 +431,16 @@ export function runBudgetGovernorEngine(input: BudgetGovernorInput): BudgetGover
       reconciledInput.funnelStrengthScore * 0.2
     );
 
-    const confidenceScore = killFlag ? Math.min(rawConfidence, 0.15) : rawConfidence;
+    const preEnforcementConfidence = killFlag ? Math.min(rawConfidence, 0.15) : rawConfidence;
+
+    const compositionEnforcement = applyCompositionEnforcement(input, decision, preEnforcementConfidence);
+    const enforcedDecision = compositionEnforcement.decision;
+    const confidenceScore = compositionEnforcement.confidenceScore;
+
+    if (compositionEnforcement.enforcements.length > 0) {
+      structuralWarnings.push(...compositionEnforcement.enforcements);
+      console.log(`[BudgetGovernor] COMPOSITION_ENFORCEMENT | enforcements=${compositionEnforcement.enforcements.length} | ${compositionEnforcement.enforcements.join(" | ")}`);
+    }
 
     const strategyAcceptability = assessStrategyAcceptability(
       confidenceScore,
@@ -397,8 +454,8 @@ export function runBudgetGovernorEngine(input: BudgetGovernorInput): BudgetGover
 
     return {
       status: killFlag ? STATUS.HALTED : guardResult.passed ? STATUS.COMPLETE : STATUS.PARTIAL,
-      statusMessage: decision.reasoning,
-      decision,
+      statusMessage: enforcedDecision.reasoning,
+      decision: enforcedDecision,
       testBudgetRange,
       scaleBudgetRange,
       expansionPermission,

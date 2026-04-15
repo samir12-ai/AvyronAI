@@ -11,6 +11,9 @@ export interface SignalComposition {
   competitorRatio: number;
   realRatio: number;
   inferredRatio: number;
+  fallbackRatio: number;
+  unknownRatio: number;
+  trustedRatio: number;
 }
 
 export function computeSignalComposition(entries: SignalLineageEntry[]): SignalComposition {
@@ -28,6 +31,7 @@ export function computeSignalComposition(entries: SignalLineageEntry[]): SignalC
       dominantType = type as SignalOriginType;
     }
   }
+  const trustedCount = counts.real + counts.competitor;
   return {
     ...counts,
     total: entries.length,
@@ -35,6 +39,9 @@ export function computeSignalComposition(entries: SignalLineageEntry[]): SignalC
     competitorRatio: counts.competitor / total,
     realRatio: counts.real / total,
     inferredRatio: counts.inferred / total,
+    fallbackRatio: counts.fallback / total,
+    unknownRatio: counts.unknown / total,
+    trustedRatio: trustedCount / total,
   };
 }
 
@@ -187,6 +194,48 @@ export function extractQualifyingSignals(lineage: SignalLineageEntry[]): Qualify
       hopDepth: e.hopDepth,
       originType: e.originType,
     }));
+}
+
+export interface PerformanceMetrics {
+  impressions?: number;
+  clicks?: number;
+  conversions?: number;
+  spend?: number;
+  revenue?: number;
+  cpa?: number;
+  roas?: number;
+  ctr?: number;
+}
+
+export function bridgePerformanceToLineage(metrics: PerformanceMetrics, campaignId: string): SignalLineageEntry[] {
+  const entries: SignalLineageEntry[] = [];
+  let idx = 0;
+
+  if (metrics.conversions && metrics.conversions > 0) {
+    entries.push(createSourceLineageEntry("performance", "conversion_signal", `${metrics.conversions} conversions recorded`, idx++, "real"));
+  }
+  if (metrics.spend && metrics.spend > 0) {
+    const cpa = metrics.cpa || (metrics.conversions && metrics.conversions > 0 ? metrics.spend / metrics.conversions : null);
+    if (cpa !== null) {
+      entries.push(createSourceLineageEntry("performance", "cpa_signal", `CPA: $${cpa.toFixed(2)}`, idx++, "real"));
+    }
+  }
+  if (metrics.revenue && metrics.revenue > 0 && metrics.spend && metrics.spend > 0) {
+    const roas = metrics.roas || metrics.revenue / metrics.spend;
+    entries.push(createSourceLineageEntry("performance", "roas_signal", `ROAS: ${roas.toFixed(2)}x`, idx++, "real"));
+  }
+  if (metrics.clicks && metrics.clicks > 0 && metrics.impressions && metrics.impressions > 0) {
+    const ctr = metrics.ctr || metrics.clicks / metrics.impressions;
+    entries.push(createSourceLineageEntry("performance", "ctr_signal", `CTR: ${(ctr * 100).toFixed(2)}%`, idx++, "real"));
+  }
+  if (metrics.impressions && metrics.impressions > 0) {
+    entries.push(createSourceLineageEntry("performance", "reach_signal", `${metrics.impressions} impressions`, idx++, "real"));
+  }
+
+  if (entries.length > 0) {
+    console.log(`[SignalLineage] PERFORMANCE_BRIDGE | campaign=${campaignId} | realSignals=${entries.length} | metrics=${Object.entries(metrics).filter(([,v]) => v && v > 0).map(([k]) => k).join(",")}`);
+  }
+  return entries;
 }
 
 export const MIN_QUALIFYING_SIGNALS = 3;
