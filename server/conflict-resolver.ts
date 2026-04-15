@@ -5,6 +5,7 @@ import { planAssumptions, strategicPlans } from "../shared/schema";
 
 import { resolveAccountId } from "./auth";
 export const CONFLICT_PRIORITY = [
+  "system_control",
   "hard_constraints",
   "compliance",
   "goal_feasibility",

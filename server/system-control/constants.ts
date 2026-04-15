@@ -1,4 +1,4 @@
-export const CONTROL_VERSION = "1.0.0";
+export const CONTROL_VERSION = "2.0.0";
 
 export const STRUCTURAL_THRESHOLDS = {
   INTEGRITY_FAIL_BLOCK: true,

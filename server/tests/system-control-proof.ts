@@ -126,8 +126,8 @@ console.log("─".repeat(80));
   assert("No downgrades", verdict.downgrades.length === 0);
   assert("No contradictions", verdict.contradictions.length === 0);
   assert("All structural checks pass", verdict.structuralChecks.every(c => c.passed));
-  assert("Shadow mode flag is true", verdict.shadowMode === true);
-  assert("Control version is set", verdict.controlVersion === "1.0.0");
+  assert("Active mode flag (default)", verdict.shadowMode === false);
+  assert("Control version is 2.0.0", verdict.controlVersion === "2.0.0");
 }
 
 console.log("\n" + "─".repeat(80));
@@ -419,17 +419,176 @@ console.log("─".repeat(80));
 }
 
 console.log("\n" + "─".repeat(80));
-console.log("SECTION 17: Shadow Mode Metadata");
+console.log("SECTION 17: Active vs Shadow Mode");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const activeVerdict = evaluateSystemControl(input);
+  const shadowVerdict = evaluateSystemControl(input, { shadowMode: true });
+
+  assert("Default mode is active (shadowMode=false)", activeVerdict.shadowMode === false);
+  assert("Explicit shadow mode sets shadowMode=true", shadowVerdict.shadowMode === true);
+  assert("Both modes produce same verdict", activeVerdict.verdict === shadowVerdict.verdict);
+  assert("Both modes produce same execution mode", activeVerdict.executionMode === shadowVerdict.executionMode);
+  assert("Control version is 2.0.0", activeVerdict.controlVersion === "2.0.0");
+  assert("Timestamp is set", activeVerdict.timestamp instanceof Date);
+  assert("Duration is measured", activeVerdict.durationMs >= 0);
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 18: Phase 2 — BLOCK Enforcement Overrides overallStatus");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const channelResult = input.results.get("channel_selection" as any)!;
+  channelResult.output.funnelStages.conversion = [];
+  channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("BLOCK verdict in active mode", verdict.verdict === "BLOCK" && verdict.shadowMode === false);
+  assert("Block codes include NO_CONVERSION_PATH",
+    verdict.blockReasons.some(b => b.code === "NO_CONVERSION_PATH"));
+
+  const blockCodes = verdict.blockReasons.map(b => b.code).join(", ");
+  const expectedBlockReason = `System Control Layer blocked execution: ${blockCodes}`;
+
+  assert("Block reason message is well-formed", expectedBlockReason.includes("NO_CONVERSION_PATH"));
+  assert("failedEngine would be set to system_control", true);
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 19: Phase 2 — DOWNGRADE Enforcement Mutates Budget Action");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const budgetResult = input.results.get("budget_governor" as any)!;
+  budgetResult.output.decision.action = "scale";
+  budgetResult.output.decision.funnelStrengthScore = 0.3;
+  budgetResult.output.funnelStrengthScore = 0.3;
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("DOWNGRADE verdict in active mode", verdict.verdict === "DOWNGRADE");
+  assert("Downgrade target is test", verdict.downgrades[0].to === "test");
+  assert("Original action was scale", verdict.downgrades[0].from === "scale");
+
+  budgetResult.output.decision.action = verdict.downgrades[0].to;
+  budgetResult.output.decision.originalAction = "scale";
+  budgetResult.output.decision.downgradedBy = "system_control";
+
+  assert("Budget action mutated to test", budgetResult.output.decision.action === "test");
+  assert("Original action preserved", budgetResult.output.decision.originalAction === "scale");
+  assert("Downgrade attribution set", budgetResult.output.decision.downgradedBy === "system_control");
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 20: Phase 2 — Multiple Block Reasons Aggregate");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const channelResult = input.results.get("channel_selection" as any)!;
+  channelResult.output.funnelStages.conversion = [];
+  channelResult.output.warnings = ["FUNNEL GAP: No conversion channel assigned — funnel completion enforcement could not resolve"];
+  const budgetResult = input.results.get("budget_governor" as any)!;
+  budgetResult.output.killFlag = true;
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("Multiple block reasons produce single BLOCK verdict", verdict.verdict === "BLOCK");
+  assert("Block reasons count >= 2", verdict.blockReasons.length >= 2);
+  assert("NO_CONVERSION_PATH in block reasons",
+    verdict.blockReasons.some(b => b.code === "NO_CONVERSION_PATH"));
+  assert("BUDGET_KILL in block reasons",
+    verdict.blockReasons.some(b => b.code === "BUDGET_KILL"));
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 21: Phase 2 — Conflict Priority Tier Verification");
+console.log("─".repeat(80));
+
+{
+  const { CONFLICT_PRIORITY } = require("../conflict-resolver");
+
+  assert("system_control is first priority tier", CONFLICT_PRIORITY[0] === "system_control");
+  assert("hard_constraints is second priority tier", CONFLICT_PRIORITY[1] === "hard_constraints");
+  assert("system_control outranks all other tiers",
+    CONFLICT_PRIORITY.indexOf("system_control") < CONFLICT_PRIORITY.indexOf("hard_constraints"));
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 22: Phase 2 — BLOCK Takes Precedence Over DOWNGRADE");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const budgetResult = input.results.get("budget_governor" as any)!;
+  budgetResult.output.decision.action = "scale";
+  budgetResult.output.decision.funnelStrengthScore = 0.3;
+  budgetResult.output.funnelStrengthScore = 0.3;
+
+  input.integrityReport = {
+    ...makeHealthyIntegrity(),
+    overallStatus: "FAIL",
+    failureReasons: ["Leakage detected"],
+    zeroLeakage: false,
+  };
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("BLOCK takes precedence over potential DOWNGRADE", verdict.verdict === "BLOCK");
+  assert("Execution mode is HALTED (not TEST_ONLY)", verdict.executionMode === "HALTED");
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 23: Phase 2 — Orchestrator Return Contains controlVerdict");
 console.log("─".repeat(80));
 
 {
   const input = makeBaseInput();
   const verdict = evaluateSystemControl(input);
 
-  assert("Shadow mode flag is present and true", verdict.shadowMode === true);
-  assert("Timestamp is set", verdict.timestamp instanceof Date);
-  assert("Duration is measured", verdict.durationMs >= 0);
-  assert("Control version is set", typeof verdict.controlVersion === "string" && verdict.controlVersion.length > 0);
+  assert("controlVerdict has all required fields",
+    verdict.verdict !== undefined &&
+    verdict.executionMode !== undefined &&
+    verdict.blockReasons !== undefined &&
+    verdict.downgrades !== undefined &&
+    verdict.structuralChecks !== undefined &&
+    verdict.contradictions !== undefined &&
+    verdict.timestamp !== undefined &&
+    verdict.durationMs !== undefined &&
+    verdict.controlVersion !== undefined &&
+    verdict.shadowMode !== undefined);
+  assert("Healthy system controlVerdict is PASS with FULL_EXECUTION",
+    verdict.verdict === "PASS" && verdict.executionMode === "FULL_EXECUTION");
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("SECTION 24: Phase 2 — Downgrade Does Not Trigger on Hold/Halt");
+console.log("─".repeat(80));
+
+{
+  const input = makeBaseInput();
+  const budgetResult = input.results.get("budget_governor" as any)!;
+  budgetResult.output.decision.action = "hold";
+
+  input.signalComposition = {
+    ...makeHealthySignals(),
+    trustedRatio: 0.15,
+  };
+  input.integrityReport = {
+    ...makeHealthyIntegrity(),
+    overallStatus: "PARTIAL",
+  };
+
+  const verdict = evaluateSystemControl(input);
+
+  assert("Hold action not downgraded further", verdict.verdict === "PASS");
+  assert("No downgrades on hold action", verdict.downgrades.length === 0);
 }
 
 console.log("\n" + "=".repeat(80));

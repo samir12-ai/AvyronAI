@@ -22,7 +22,8 @@ import {
 import { detectContradictions } from "./contradiction-detector";
 import { CONTROL_VERSION, INTEGRITY_RESTRICT_THRESHOLD } from "./constants";
 
-export function evaluateSystemControl(input: SystemControlInput): SystemControlVerdict {
+export function evaluateSystemControl(input: SystemControlInput, options?: { shadowMode?: boolean }): SystemControlVerdict {
+  const shadowMode = options?.shadowMode ?? false;
   const startTime = Date.now();
 
   const budgetResult = input.results.get("budget_governor");
@@ -118,7 +119,7 @@ export function evaluateSystemControl(input: SystemControlInput): SystemControlV
     timestamp: new Date(),
     durationMs,
     controlVersion: CONTROL_VERSION,
-    shadowMode: true,
+    shadowMode,
   };
 
   logVerdict(result, input.config);

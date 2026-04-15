@@ -124,6 +124,7 @@ export interface OrchestratorRunResult {
   results: Map<EngineId, EngineStepResult>;
   durationMs: number;
   needsInput?: NeedsInputPayload;
+  controlVerdict?: SystemControlVerdict;
 }
 
 interface EngineContext {
@@ -1844,6 +1845,31 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     console.warn(`[Orchestrator] SYSTEM_CONTROL_FAILED | error=${ctrlErr.message}`);
   }
 
+  if (controlVerdict && controlVerdict.verdict === "BLOCK" && overallStatus !== "BLOCKED") {
+    overallStatus = "BLOCKED";
+    const blockCodes = controlVerdict.blockReasons.map(b => b.code).join(", ");
+    failedEngine = "system_control";
+    blockReason = `System Control Layer blocked execution: ${blockCodes}`;
+    console.warn(`[Orchestrator] SYSTEM_CONTROL_BLOCK | overallStatus overridden to BLOCKED | reasons=${blockCodes}`);
+  }
+
+  if (controlVerdict && controlVerdict.verdict === "DOWNGRADE" && controlVerdict.downgrades.length > 0) {
+    const budgetResult = results.get("budget_governor");
+    if (budgetResult?.output?.decision) {
+      const originalAction = budgetResult.output.decision.action;
+      const DOWNGRADE_SEVERITY: Record<string, number> = { hold: 0, test: 1, scale: 2 };
+      const targetAction = controlVerdict.downgrades.reduce((most, d) =>
+        (DOWNGRADE_SEVERITY[d.to] ?? 99) < (DOWNGRADE_SEVERITY[most] ?? 99) ? d.to : most,
+        controlVerdict.downgrades[0].to
+      );
+      budgetResult.output.decision.action = targetAction;
+      budgetResult.output.decision.originalAction = originalAction;
+      budgetResult.output.decision.downgradedBy = "system_control";
+      budgetResult.output.decision.downgradeReasons = controlVerdict.downgrades.map(d => d.code);
+      console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE | budget action ${originalAction}→${targetAction} | reasons=${controlVerdict.downgrades.map(d => d.code).join(", ")}`);
+    }
+  }
+
   let planId: string | undefined;
 
   if (overallStatus !== "BLOCKED") {
@@ -1907,6 +1933,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     planId,
     results,
     durationMs,
+    controlVerdict: controlVerdict || undefined,
   };
 }
 
