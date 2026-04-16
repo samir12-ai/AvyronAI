@@ -418,8 +418,17 @@ async function extractClaims(
 
   push(offer.coreOutcome, "offer_outcome");
   push(offer.mechanismDescription, "offer_mechanism");
-  for (const proof of (offer.proofAlignment || []).slice(0, 3)) {
-    if (proof) push(proof, classifyProofSubType(proof));
+  const proofGrounding = (offer as any).proofGrounding;
+  if (Array.isArray(proofGrounding) && proofGrounding.length > 0) {
+    for (const pg of proofGrounding.slice(0, 3)) {
+      const text = pg?.groundingText || pg?.proofType;
+      const sourceTag = classifyProofSubType(pg?.proofType || text || "");
+      if (text) push(text, sourceTag);
+    }
+  } else {
+    for (const proof of (offer.proofAlignment || []).slice(0, 3)) {
+      if (proof) push(proof, classifyProofSubType(proof));
+    }
   }
   for (const driver of (persuasion.primaryInfluenceDrivers || []).slice(0, 3)) {
     if (driver) push(`Influence driver: ${driver}`, classifyPersuasionDriverSubType(driver));

@@ -466,6 +466,7 @@ function extractOfferInput(offerResult: any): any {
     riskReducers: Array.isArray(primary.riskReducers) ? primary.riskReducers : (Array.isArray(offerResult.riskReducers) ? offerResult.riskReducers : []),
     riskNotes: Array.isArray(primary.riskNotes) ? primary.riskNotes : (Array.isArray(offerResult.riskNotes) ? offerResult.riskNotes : []),
     proofAlignment: Array.isArray(primary.proofAlignment) ? primary.proofAlignment : (Array.isArray(offerResult.proofAlignment) ? offerResult.proofAlignment : []),
+    proofGrounding: Array.isArray(primary.proofGrounding) ? primary.proofGrounding : (Array.isArray(primary.proofLayer?.proofGrounding) ? primary.proofLayer.proofGrounding : (Array.isArray(offerResult.proofGrounding) ? offerResult.proofGrounding : [])),
     frictionLevel: primary.frictionLevel || offerResult.frictionLevel || null,
     proofStrength: primary.proofLayer?.proofStrength ?? offerResult.proofLayer?.proofStrength ?? null,
     offerStrengthScore: offerResult.offerStrengthScore ?? null,

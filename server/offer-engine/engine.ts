@@ -660,7 +660,36 @@ export function layer4_proofAlignment(
     : ["case_proof"];
   const proofGaps = mandatoryProof.filter(p => !proofTypes.has(p));
 
-  return { alignedProofTypes, proofStrength, proofGaps };
+  const PROOF_TYPE_DESCRIPTIONS: Record<string, string> = {
+    transparency_proof: "transparent disclosure of process, pricing and outcomes to neutralize trust and credibility doubts",
+    outcome_proof: "documented outcome evidence, benchmark results and measurable performance guarantees",
+    process_proof: "structured process and methodology walkthrough demonstrating repeatable implementation",
+    case_proof: "client case studies, success stories and peer validation from comparable customers",
+    framework_proof: "proprietary framework, blueprint and architectural model proof points",
+    comparative_proof: "side-by-side comparison against alternatives, versus-competitor differentiation and unique capability contrast",
+  };
+
+  const proofGrounding = alignedProofTypes.map(proofType => {
+    const sourceObjections: string[] = objectionProofMapping[proofType] || [];
+    const sourcePillars: string[] = [];
+    for (const pillar of pillars) {
+      if ((pillar.supportingProof || []).includes(proofType)) {
+        const name = (pillar as any).name || (pillar as any).pillarName || "";
+        if (name) sourcePillars.push(String(name).slice(0, 80));
+      }
+    }
+    const pillarFragment = sourcePillars.length > 0
+      ? ` supporting differentiation pillar${sourcePillars.length > 1 ? "s" : ""}: ${sourcePillars.join("; ")}`
+      : "";
+    const objectionFragment = sourceObjections.length > 0
+      ? ` addressing audience objection${sourceObjections.length > 1 ? "s" : ""}: ${sourceObjections.slice(0, 3).join("; ")}`
+      : "";
+    const description = PROOF_TYPE_DESCRIPTIONS[proofType] || proofType.replace(/_/g, " ");
+    const groundingText = `${proofType.replace(/_/g, " ")} — ${description}${pillarFragment}${objectionFragment}`;
+    return { proofType, groundingText, sourceObjections, sourcePillars };
+  });
+
+  return { alignedProofTypes, proofStrength, proofGaps, proofGrounding };
 }
 
 export function layer5_riskReduction(
@@ -1272,6 +1301,7 @@ function buildOfferCandidate(
     mechanismDescription: mechanism.mechanismDescription,
     deliverables: delivery.deliverables,
     proofAlignment: proof.alignedProofTypes,
+    proofGrounding: proof.proofGrounding || [],
     audienceFitExplanation: `Addresses ${topPain} and targets ${topDesire} with ${proof.alignedProofTypes.length} proof types`,
     offerStrengthScore,
     riskNotes: [
@@ -2211,7 +2241,7 @@ export async function runOfferEngine(
 
   const rejectedOffer = buildOfferCandidate(
     aiOffers.rejected.name, rejOutcome, rejMechanism, l3Delivery,
-    { alignedProofTypes: [], proofStrength: 0.1, proofGaps: ["process_proof", "outcome_proof", "case_proof", "transparency_proof"] },
+    { alignedProofTypes: [], proofStrength: 0.1, proofGaps: ["process_proof", "outcome_proof", "case_proof", "transparency_proof"], proofGrounding: [] },
     { riskReducers: [], frictionMitigations: [], buyerConfidenceScore: 0.1 },
     audience, differentiation, mi, positioning,
   );
@@ -2697,7 +2727,7 @@ function buildEmptyOffer(): OfferCandidate {
     outcomeLayer: { primaryOutcome: "", transformationStatement: "", specificityScore: 0 },
     mechanismLayer: { mechanismType: "none", mechanismDescription: "", differentiationLink: "", credibilityScore: 0 },
     deliveryLayer: { deliverables: [], format: "", complexityLevel: 0 },
-    proofLayer: { alignedProofTypes: [], proofStrength: 0, proofGaps: [] },
+    proofLayer: { alignedProofTypes: [], proofStrength: 0, proofGaps: [], proofGrounding: [] },
     riskReductionLayer: { riskReducers: [], frictionMitigations: [], buyerConfidenceScore: 0 },
     completeness: { complete: false, missingLayers: ["All layers missing"] },
     genericFlag: false,

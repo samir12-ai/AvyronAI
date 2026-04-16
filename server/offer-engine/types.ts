@@ -70,10 +70,18 @@ export interface DeliveryLayer {
   complexityLevel: number;
 }
 
+export interface ProofGrounding {
+  proofType: string;
+  groundingText: string;
+  sourceObjections: string[];
+  sourcePillars: string[];
+}
+
 export interface ProofLayer {
   alignedProofTypes: string[];
   proofStrength: number;
   proofGaps: string[];
+  proofGrounding: ProofGrounding[];
 }
 
 export interface RiskReductionLayer {
@@ -88,6 +96,7 @@ export interface OfferCandidate {
   mechanismDescription: string;
   deliverables: string[];
   proofAlignment: string[];
+  proofGrounding: ProofGrounding[];
   audienceFitExplanation: string;
   offerStrengthScore: number;
   riskNotes: string[];
