@@ -1,0 +1,154 @@
+Hi,
+
+Before moving to the validation run, we need to close a few critical gaps to ensure Phase 2 is not only implemented, but actually **enforced correctly at runtime**.
+
+Do not proceed to any run until all points below are addressed and confirmed.
+
+---
+
+# 1. Problem Registry — MUST BE ENFORCED (NOT LOGGED)
+
+Current state shows:
+
+* Problems are logged (pre-engine + summary)
+* Lifecycle is visible
+
+This is NOT enough.
+
+Required behavior:
+
+For every engine:
+
+* It must receive relevant problems from SSC
+* It must explicitly return for each:
+
+  * resolved
+  * deferred
+  * cannot_resolve (with reason)
+
+What is NOT allowed:
+
+* Silent pass-through
+* Ignoring problems
+* Logging without action
+
+This must be enforced in execution, not just observed.
+
+---
+
+# 2. Confidence Floor Propagation (Validation Reject)
+
+You implemented:
+
+* Statistical validation rejection → confidence = 0
+
+We need confirmation of propagation:
+
+* No downstream engine can:
+
+  * increase confidence
+  * override the floor
+  * produce high-confidence outputs after rejection
+
+Confirm explicitly:
+
+* Confidence floor is respected across the full chain
+* Budget, channel, and synthesis respect this state
+
+---
+
+# 3. No Fake Compliance
+
+We must prevent engines from:
+
+* claiming “resolved” without actual structural change
+
+Required:
+
+* Resolution must be tied to actual output change
+* If not resolved → must return “cannot_resolve” with reason
+
+No soft resolution.
+
+---
+
+# 4. Awareness Enforcement Verification
+
+You implemented canonical awareness injection via SSC.
+
+Confirm:
+
+* All downstream engines (especially Channel Selection, Funnel, Persuasion)
+  strictly use SSC awareness
+* No engine falls back to its own derived awareness
+* No mismatch between SSC awareness and engine behavior
+
+---
+
+# 5. Mid-Pipeline Gates — Strict Behavior
+
+Confirm:
+
+* Retry happens only once (bounded)
+* If still failing → pipeline halts correctly
+* No continuation after failed gate
+
+Especially for:
+
+* Positioning < 0.40
+* Offer pain misalignment
+
+---
+
+# 6. Problem Flow Completeness
+
+At pipeline end:
+
+* All critical problems must be:
+
+  * resolved OR
+  * explicitly marked unresolved with reason
+
+No “open but ignored” problems.
+
+---
+
+# 7. Required Before Run
+
+Before executing the validation run, provide:
+
+1. Confirmation for all points above
+2. Short explanation of:
+
+   * how enforcement is implemented (not just where logging happens)
+3. Example of one engine handling a problem end-to-end
+
+---
+
+# DO NOT RUN YET
+
+Do not run the system until all above conditions are confirmed.
+
+We are validating behavior, not just structure.
+
+---
+
+# NEXT STEP
+
+After confirmation, proceed with:
+
+* Full orchestrator run on the same previous campaign
+* Provide BEFORE vs AFTER comparison on:
+
+  * awareness propagation
+  * positioning gate behavior
+  * offer alignment enforcement
+  * validation rejection impact
+  * problem resolution flow
+
+---
+
+This step is critical.
+We are verifying that the system **acts on problems**, not just detects them.
+
+Thanks.

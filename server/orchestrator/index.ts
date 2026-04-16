@@ -24,6 +24,7 @@ import {
   registerProblem,
   resolveProblem,
   deferProblem,
+  markCannotResolve,
   getRelevantProblems,
   updateConfidenceChain,
   addReasonTrace,
@@ -715,15 +716,114 @@ function updateSSCAfterEngine(ssc: SharedStrategicContext, engineId: string, ste
   if (!output) return;
 
   const conf = extractEngineConfidence(engineId, output);
-  updateConfidenceChain(ssc, engineId as EngineIdType, conf.dataConfidence, conf.engineConfidence, conf.combined);
+  const cappedCombined = Math.min(conf.combined, ssc.confidenceFloor === 0 ? 0 : conf.combined);
+  const cappedEngine = ssc.confidenceFloor === 0 ? 0 : conf.engineConfidence;
+  const cappedData = ssc.confidenceFloor === 0 ? 0 : conf.dataConfidence;
 
-  console.log(`[Orchestrator] SSC_CONFIDENCE | engine=${engineId} | data=${conf.dataConfidence.toFixed(2)} | engine=${conf.engineConfidence.toFixed(2)} | combined=${conf.combined.toFixed(2)} | floor=${ssc.confidenceFloor.toFixed(2)}`);
+  updateConfidenceChain(ssc, engineId as EngineIdType, cappedData, cappedEngine, cappedCombined);
+
+  if (ssc.confidenceFloor === 0 && conf.combined > 0) {
+    console.warn(`[Orchestrator] SSC_CONFIDENCE_CAPPED | engine=${engineId} | raw=${conf.combined.toFixed(2)} | capped=0.00 | reason=floor_is_zero_after_rejection`);
+  }
+  console.log(`[Orchestrator] SSC_CONFIDENCE | engine=${engineId} | data=${cappedData.toFixed(2)} | engine=${cappedEngine.toFixed(2)} | combined=${cappedCombined.toFixed(2)} | floor=${ssc.confidenceFloor.toFixed(2)}`);
+}
+
+function detectProblemResolutionInOutput(engineId: string, output: any, problem: ProblemEntry): "resolved" | "deferred" | "cannot_resolve" | "unaddressed" {
+  if (!output) return "unaddressed";
+
+  if (problem.type === "alignment" && (engineId === "offer" || engineId === "funnel")) {
+    const painAlignment = output.signalGrounding?.painAlignment ?? output.painAlignment ?? null;
+    const painScore = typeof painAlignment === "number" ? painAlignment : (painAlignment?.score ?? null);
+    if (painScore !== null && painScore > 0) return "resolved";
+    if (painScore === 0) return "cannot_resolve";
+  }
+
+  if (problem.type === "structural" && engineId === "positioning") {
+    const conf = output.confidenceScore ?? output.specificityScore ?? 0;
+    if (conf >= 0.40) return "resolved";
+    return "cannot_resolve";
+  }
+
+  if (problem.type === "trust" && (engineId === "differentiation" || engineId === "mechanism" || engineId === "offer")) {
+    const proofStrength = output.proofLayer?.proofStrength ?? output.proofStrength ?? null;
+    const trustPath = output.trustPathAnalysis?.score ?? output.trustPathScore ?? null;
+    if (proofStrength !== null && proofStrength >= 0.5) return "resolved";
+    if (trustPath !== null && trustPath >= 0.5) return "resolved";
+    const conf = output.confidenceScore ?? 0;
+    if (conf >= 0.6) return "deferred";
+  }
+
+  if (problem.type === "conversion" && engineId === "channel_selection") {
+    const channels = output.selectedChannels || output.channels || [];
+    const hasConversion = channels.some((c: any) =>
+      c.role === "conversion" || c.funnelStage === "Conversion" ||
+      c.purpose?.toLowerCase().includes("conversion")
+    );
+    if (hasConversion) return "resolved";
+    return "cannot_resolve";
+  }
+
+  if (problem.type === "market" && engineId === "positioning") {
+    const diff = output.differentiationAngle || output.positioningAngle;
+    if (diff && output.confidenceScore >= 0.50) return "resolved";
+  }
+
+  if (problem.severity === "critical" || problem.severity === "high") {
+    const engineConf = output.confidenceScore ?? output.overallIntegrityScore ?? 0;
+    if (engineConf >= 0.70) return "deferred";
+  }
+
+  return "unaddressed";
+}
+
+function enforceProblemsPostEngine(ssc: SharedStrategicContext, engineId: string, stepResult: EngineStepResult, preEngineProblems: ProblemEntry[], pipelineStep: number): void {
+  if (preEngineProblems.length === 0) return;
+  if (stepResult.status !== "SUCCESS" && stepResult.status !== "PARTIAL") return;
+  const output = stepResult.output;
+
+  for (const problem of preEngineProblems) {
+    if (problem.status !== "open") continue;
+
+    const resolution = detectProblemResolutionInOutput(engineId, output, problem);
+
+    switch (resolution) {
+      case "resolved": {
+        const action = `Engine ${engineId} produced output addressing ${problem.type} problem (step ${pipelineStep})`;
+        resolveProblem(ssc, problem.id, engineId as EngineIdType, action);
+        console.log(`[Orchestrator] SSC_PROBLEM_RESOLVED | id=${problem.id} | by=${engineId} | action=${action}`);
+        break;
+      }
+      case "deferred": {
+        const reason = `Engine ${engineId} acknowledged problem but could not fully resolve at step ${pipelineStep}`;
+        deferProblem(ssc, problem.id, engineId as EngineIdType, reason);
+        console.log(`[Orchestrator] SSC_PROBLEM_DEFERRED | id=${problem.id} | by=${engineId} | reason=${reason}`);
+        break;
+      }
+      case "cannot_resolve": {
+        const reason = `Engine ${engineId} output does not structurally address ${problem.type} problem — no change in relevant metrics`;
+        markCannotResolve(ssc, problem.id, engineId as EngineIdType, reason);
+        console.warn(`[Orchestrator] SSC_PROBLEM_CANNOT_RESOLVE | id=${problem.id} | by=${engineId} | reason=${reason}`);
+        break;
+      }
+      case "unaddressed": {
+        const isLastRelevant = problem.relevantEngines[problem.relevantEngines.length - 1] === engineId;
+        if (isLastRelevant) {
+          markCannotResolve(ssc, problem.id, engineId as EngineIdType,
+            `Problem passed through all relevant engines without resolution — last engine was ${engineId}`);
+          console.warn(`[Orchestrator] SSC_PROBLEM_EXHAUSTED | id=${problem.id} | lastEngine=${engineId} | severity=${problem.severity} | desc=${problem.description}`);
+        } else {
+          console.log(`[Orchestrator] SSC_PROBLEM_PASSED_THROUGH | id=${problem.id} | engine=${engineId} | status=unaddressed | remaining=${problem.relevantEngines.filter(e => e !== engineId).join(",")}`);
+        }
+        break;
+      }
+    }
+  }
 }
 
 function logRelevantProblems(ssc: SharedStrategicContext, engineId: string): ProblemEntry[] {
   const relevant = getRelevantProblems(ssc, engineId as EngineIdType);
   if (relevant.length > 0) {
-    console.log(`[Orchestrator] SSC_PROBLEMS_FOR_ENGINE | engine=${engineId} | openProblems=${relevant.length} | problems=${relevant.map(p => p.id).join(",")}`);
+    console.log(`[Orchestrator] SSC_PROBLEMS_FOR_ENGINE | engine=${engineId} | openProblems=${relevant.length} | problems=${relevant.map(p => `${p.id}(${p.severity}:${p.type})`).join(",")}`);
   }
   return relevant;
 }
@@ -1179,13 +1279,22 @@ async function executeEngine(
         const offerInput = extractOfferInput(ctx.offer);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
+        let funnelAwarenessStage = ctx.awareness.primaryRoute?.targetReadinessStage || "problem_aware";
+        if (ctx.ssc?.awarenessMeaning) {
+          const canonicalStage = ctx.ssc.awarenessMeaning.stage;
+          if (funnelAwarenessStage !== canonicalStage) {
+            console.log(`[Orchestrator] SSC_AWARENESS_OVERRIDE | funnel | was=${funnelAwarenessStage} | canonical=${canonicalStage}`);
+            funnelAwarenessStage = canonicalStage;
+          }
+        }
         const awarenessInput = ctx.awareness ? {
-          awarenessStage: ctx.awareness.primaryRoute?.targetReadinessStage || "problem_aware",
+          awarenessStage: funnelAwarenessStage,
           entryMechanism: ctx.awareness.primaryRoute?.entryMechanismType || "unknown",
           triggerClass: ctx.awareness.primaryRoute?.triggerClass || "unknown",
           trustState: ctx.awareness.primaryRoute?.trustRequirement || "moderate",
           awarenessRoute: ctx.awareness.primaryRoute?.routeName || "default",
           awarenessStrengthScore: ctx.awareness.primaryRoute?.awarenessStrengthScore || 0,
+          _canonicalAwareness: ctx.ssc?.awarenessMeaning || undefined,
         } : null;
         const result = await runFunnelEngine(
           miInput, audInput, offerInput, posInput, diffInput,
@@ -1275,6 +1384,15 @@ async function executeEngine(
         const funnelInput = extractFunnelInput(ctx.funnel);
         const integrityInput = ctx.integrity || {};
         const awarenessInput = ctx.awareness || {};
+        if (ctx.ssc?.awarenessMeaning && awarenessInput.primaryRoute) {
+          const canonicalStage = ctx.ssc.awarenessMeaning.stage;
+          const currentStage = awarenessInput.primaryRoute.targetReadinessStage;
+          if (currentStage !== canonicalStage) {
+            console.log(`[Orchestrator] SSC_AWARENESS_OVERRIDE | persuasion | was=${currentStage} | canonical=${canonicalStage}`);
+            awarenessInput.primaryRoute.targetReadinessStage = canonicalStage;
+          }
+          awarenessInput._canonicalAwareness = ctx.ssc.awarenessMeaning;
+        }
         const persuasionLineage = buildUpstreamLineage(ctx);
         const result = await runPersuasionEngine(
           miInput, audInput, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
@@ -1980,8 +2098,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
     console.log(`[Orchestrator] Running engine ${i + 1}/${ENGINE_PRIORITY_ORDER.length}: ${engineDef.name}`);
 
+    let preEngineProblems: ProblemEntry[] = [];
     if (ctx.ssc) {
-      logRelevantProblems(ctx.ssc, engineDef.id);
+      preEngineProblems = logRelevantProblems(ctx.ssc, engineDef.id);
     }
 
     let stepResult = await Promise.race([
@@ -2002,6 +2121,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
     if (ctx.ssc && (stepResult.status === "SUCCESS" || stepResult.status === "PARTIAL")) {
       updateSSCAfterEngine(ctx.ssc, engineDef.id, stepResult, i);
+      enforceProblemsPostEngine(ctx.ssc, engineDef.id, stepResult, preEngineProblems, i);
 
       const gateResult = checkMidPipelineGate(engineDef.id, stepResult, ctx);
       if (gateResult?.gateFailed) {
@@ -2026,9 +2146,16 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           if (retryGate?.gateFailed) {
             registerProblem(ctx.ssc, engineDef.id as EngineIdType, "structural", gateResult.reason, gateResult.severity, 1.0,
               ENGINE_PRIORITY_ORDER.slice(i + 1).map(e => e.id) as EngineIdType[], i);
-            console.warn(`[Orchestrator] MID_PIPELINE_GATE_FAILED | engine=${engineDef.id} | reason=${gateResult.reason} | retryAlsoFailed=true`);
+            console.warn(`[Orchestrator] MID_PIPELINE_GATE_HALT | engine=${engineDef.id} | reason=${gateResult.reason} | retryAlsoFailed=true | action=HALTING_PIPELINE`);
             if (retryGate.setConfidenceFloor !== undefined) {
               ctx.ssc.confidenceFloor = retryGate.setConfidenceFloor;
+            }
+            if (gateResult.severity === "critical") {
+              failedEngine = engineDef.name;
+              blockReason = `Critical gate failure after retry: ${gateResult.reason}`;
+              overallStatus = "BLOCKED";
+              results.set(engineDef.id, retryResult);
+              break;
             }
           } else {
             console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY_PASSED | engine=${engineDef.id} | retry succeeded`);
@@ -2042,6 +2169,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           registerProblem(ctx.ssc, engineDef.id as EngineIdType, "structural", gateResult.reason, gateResult.severity, 1.0,
             ENGINE_PRIORITY_ORDER.slice(i + 1).map(e => e.id) as EngineIdType[], i);
           console.warn(`[Orchestrator] MID_PIPELINE_GATE_FAILED | engine=${engineDef.id} | reason=${gateResult.reason} | noRetry=true`);
+          if (gateResult.severity === "critical") {
+            failedEngine = engineDef.name;
+            blockReason = `Critical gate failure (no retry): ${gateResult.reason}`;
+            overallStatus = "BLOCKED";
+            results.set(engineDef.id, stepResult);
+            break;
+          }
         }
       }
     }
@@ -2132,11 +2266,29 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     const openProblems = ctx.ssc.problemRegistry.filter(p => p.status === "open").length;
     const resolvedProblems = ctx.ssc.problemRegistry.filter(p => p.status === "resolved").length;
     const deferredProblems = ctx.ssc.problemRegistry.filter(p => p.status === "deferred").length;
-    console.log(`[Orchestrator] SSC_PIPELINE_SUMMARY | floor=${ctx.ssc.confidenceFloor.toFixed(2)} | chainLength=${ctx.ssc.confidenceChain.length} | problems=${totalProblems} (open=${openProblems} resolved=${resolvedProblems} deferred=${deferredProblems}) | criticalUnresolved=${unresolvedCritical.length} | contradictions=${ctx.ssc.contradictions.length} | traceEntries=${ctx.ssc.reasonTrace.length} | awareness=${ctx.ssc.awarenessMeaning?.stage || "none"}`);
+    const cannotResolveProblems = ctx.ssc.problemRegistry.filter(p => p.status === "cannot_resolve").length;
+    console.log(`[Orchestrator] SSC_PIPELINE_SUMMARY | floor=${ctx.ssc.confidenceFloor.toFixed(2)} | chainLength=${ctx.ssc.confidenceChain.length} | problems=${totalProblems} (open=${openProblems} resolved=${resolvedProblems} deferred=${deferredProblems} cannot_resolve=${cannotResolveProblems}) | criticalUnresolved=${unresolvedCritical.length} | contradictions=${ctx.ssc.contradictions.length} | traceEntries=${ctx.ssc.reasonTrace.length} | awareness=${ctx.ssc.awarenessMeaning?.stage || "none"}`);
+
     if (unresolvedCritical.length > 0) {
       for (const p of unresolvedCritical) {
-        console.warn(`[Orchestrator] SSC_UNRESOLVED_CRITICAL | id=${p.id} | source=${p.sourceEngine} | desc=${p.description}`);
+        console.error(`[Orchestrator] SSC_UNRESOLVED_CRITICAL | id=${p.id} | source=${p.sourceEngine} | severity=${p.severity} | desc=${p.description} | status=${p.status}`);
       }
+      if (overallStatus === "COMPLETED") {
+        overallStatus = "PARTIAL";
+        console.warn(`[Orchestrator] SSC_STATUS_DOWNGRADE | COMPLETED→PARTIAL | reason=${unresolvedCritical.length} critical problems remain unresolved`);
+      }
+    }
+
+    for (const p of ctx.ssc.problemRegistry) {
+      if (p.status === "cannot_resolve") {
+        console.warn(`[Orchestrator] SSC_PROBLEM_FINAL | id=${p.id} | status=cannot_resolve | by=${p.cannotResolveBy} | reason=${p.cannotResolveReason}`);
+      }
+    }
+
+    for (const p of ctx.ssc.problemRegistry.filter(pr => pr.status === "open" && pr.severity !== "low")) {
+      markCannotResolve(ctx.ssc, p.id, "pipeline_end" as any,
+        `Problem remained open through entire pipeline — no engine resolved or explicitly deferred`);
+      console.warn(`[Orchestrator] SSC_PROBLEM_FORCE_CLOSED | id=${p.id} | severity=${p.severity} | desc=${p.description} | status=cannot_resolve | reason=pipeline_exhausted`);
     }
   }
 

@@ -25,7 +25,7 @@ export type ProblemType =
 
 export type ProblemSeverity = "critical" | "high" | "medium" | "low";
 
-export type ProblemStatus = "open" | "resolved" | "deferred";
+export type ProblemStatus = "open" | "resolved" | "deferred" | "cannot_resolve";
 
 export interface ProblemEntry {
   id: string;
@@ -39,6 +39,8 @@ export interface ProblemEntry {
   resolvedAction?: string;
   deferredBy?: EngineId;
   deferredReason?: string;
+  cannotResolveBy?: EngineId;
+  cannotResolveReason?: string;
   discoveredAt: number;
   relevantEngines: EngineId[];
 }
@@ -221,6 +223,20 @@ export function deferProblem(
   problem.status = "deferred";
   problem.deferredBy = deferredBy;
   problem.deferredReason = deferredReason;
+  return true;
+}
+
+export function markCannotResolve(
+  ssc: SharedStrategicContext,
+  problemId: string,
+  cannotResolveBy: EngineId,
+  cannotResolveReason: string
+): boolean {
+  const problem = ssc.problemRegistry.find((p) => p.id === problemId);
+  if (!problem) return false;
+  problem.status = "cannot_resolve";
+  problem.cannotResolveBy = cannotResolveBy;
+  problem.cannotResolveReason = cannotResolveReason;
   return true;
 }
 

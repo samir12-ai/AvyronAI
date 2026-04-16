@@ -3,6 +3,7 @@ import {
   registerProblem,
   resolveProblem,
   deferProblem,
+  markCannotResolve,
   getRelevantProblems,
   addReasonTrace,
   updateConfidenceChain,
@@ -468,11 +469,115 @@ console.log("\n--- Full SSC lifecycle simulation ---");
   assert(restored.awarenessMeaning?.stage === "solution_aware", "roundtrip: awareness preserved");
 }
 
+console.log("\n=== Phase 2 Enforcement Tests ===\n");
+
+console.log("--- markCannotResolve function ---");
+{
+  const ssc = createEmptySSC("camp_cnr", "acc_cnr");
+  const p = registerProblem(ssc, "positioning", "structural", "Weak territory", "critical", 0.35, ["differentiation", "offer"], 3);
+  assert(p.status === "open", "problem starts open");
+
+  markCannotResolve(ssc, p.id, "differentiation", "Output does not structurally address positioning weakness");
+  assert(p.status === "cannot_resolve", "problem marked cannot_resolve");
+  assert(p.cannotResolveBy === "differentiation", "cannotResolveBy set correctly");
+  assert(p.cannotResolveReason?.includes("structurally"), "cannotResolveReason captures reason");
+
+  const stillOpen = getRelevantProblems(ssc, "offer");
+  assert(stillOpen.length === 0, "cannot_resolve problem no longer returned by getRelevantProblems");
+}
+
+console.log("\n--- Confidence floor zero propagation ---");
+{
+  const ssc = createEmptySSC("camp_floor0", "acc_floor0");
+  updateConfidenceChain(ssc, "audience", 0.8, 0.7, 0.75);
+  assert(ssc.confidenceFloor === 0.75, "floor at 0.75 before rejection");
+
+  ssc.confidenceFloor = 0;
+
+  updateConfidenceChain(ssc, "budget_governor", 0.9, 0.85, 0.875);
+  assert(ssc.confidenceFloor === 0, "floor stays at 0 even with high-confidence downstream engine");
+
+  const lastEntry = ssc.confidenceChain[ssc.confidenceChain.length - 1];
+  assert(lastEntry.inheritedFloor === 0, "inherited floor is 0 for downstream engine");
+}
+
+console.log("\n--- Problem status lifecycle: all four states ---");
+{
+  const ssc = createEmptySSC("camp_4st", "acc_4st");
+  const p1 = registerProblem(ssc, "audience", "trust", "Trust barrier", "high", 0.8, ["positioning", "offer"], 1);
+  const p2 = registerProblem(ssc, "positioning", "structural", "Weak pos", "critical", 0.4, ["differentiation"], 2);
+  const p3 = registerProblem(ssc, "offer", "alignment", "No pain alignment", "critical", 1.0, ["funnel"], 4);
+  const p4 = registerProblem(ssc, "market_intelligence", "market", "Low data", "medium", 0.5, ["audience"], 0);
+
+  resolveProblem(ssc, p1.id, "offer", "Added proof framework with 3 case studies");
+  deferProblem(ssc, p2.id, "differentiation", "Territory weak but niche angle found");
+  markCannotResolve(ssc, p3.id, "funnel", "Funnel output has zero pain alignment score");
+
+  assert(p1.status === "resolved", "p1 resolved");
+  assert(p2.status === "deferred", "p2 deferred");
+  assert(p3.status === "cannot_resolve", "p3 cannot_resolve");
+  assert(p4.status === "open", "p4 still open");
+
+  const critUnresolved = getUnresolvedCriticalProblems(ssc);
+  assert(critUnresolved.length === 0, "no critical problems still open (p2 deferred, p3 cannot_resolve)");
+
+  const openProbs = ssc.problemRegistry.filter(p => p.status === "open");
+  assert(openProbs.length === 1, "only 1 problem still open (low-severity p4)");
+  assert(openProbs[0].severity === "medium", "remaining open problem is medium severity");
+}
+
+console.log("\n--- Resolution requires substantive action ---");
+{
+  const ssc = createEmptySSC("camp_subst", "acc_subst");
+  const p = registerProblem(ssc, "audience", "trust", "High trust barrier", "high", 0.8, ["offer"], 1);
+
+  resolveProblem(ssc, p.id, "offer", "Added proof framework with 3 case studies");
+  assert(p.resolvedAction !== undefined, "resolved action is recorded");
+  assert(p.resolvedAction!.length > 10, "resolved action is substantive, not generic");
+  assert(p.resolvedBy === "offer", "resolvedBy engine recorded");
+}
+
+console.log("\n--- Awareness canonical enforcement for funnel/persuasion/channel ---");
+{
+  const ssc = createEmptySSC("camp_aware_enf", "acc_aware_enf");
+  ssc.awarenessMeaning = resolveAwarenessMeaning("problem_aware");
+
+  assert(ssc.awarenessMeaning.stage === "problem_aware", "canonical stage is problem_aware");
+  assert(ssc.awarenessMeaning.conversionReadiness === "needs_nurture", "problem_aware needs nurture");
+  assert(!ssc.awarenessMeaning.allowedChannelRoles.includes("conversion"), "problem_aware does NOT allow conversion channels");
+  assert(ssc.awarenessMeaning.blockedFunnelTypes.includes("direct"), "problem_aware blocks direct funnel");
+  assert(ssc.awarenessMeaning.allowedPersuasionModes.includes("empathy_led"), "problem_aware allows empathy_led persuasion");
+  assert(!ssc.awarenessMeaning.allowedPersuasionModes.includes("urgency"), "problem_aware does NOT allow urgency persuasion");
+
+  const mostAware = resolveAwarenessMeaning("most_aware");
+  assert(mostAware.conversionReadiness === "ready", "most_aware is ready for conversion");
+  assert(mostAware.allowedChannelRoles.includes("conversion"), "most_aware allows conversion");
+  assert(mostAware.blockedFunnelTypes.length === 0, "most_aware blocks no funnel types");
+}
+
+console.log("\n--- Pipeline end: force-close open non-low problems ---");
+{
+  const ssc = createEmptySSC("camp_force", "acc_force");
+  const p1 = registerProblem(ssc, "audience", "trust", "Moderate trust issue", "medium", 0.6, ["positioning"], 1);
+  const p2 = registerProblem(ssc, "market_intelligence", "market", "Low quality data", "low", 0.3, ["audience"], 0);
+
+  assert(p1.status === "open", "p1 open before pipeline end");
+  assert(p2.status === "open", "p2 open before pipeline end");
+
+  for (const p of ssc.problemRegistry.filter(pr => pr.status === "open" && pr.severity !== "low")) {
+    markCannotResolve(ssc, p.id, "pipeline_end" as any,
+      `Problem remained open through entire pipeline — no engine resolved or explicitly deferred`);
+  }
+
+  assert(p1.status === "cannot_resolve", "medium problem force-closed at pipeline end");
+  assert(p2.status === "open", "low-severity problem left open (not force-closed)");
+}
+
 console.log("\n================================");
 console.log(`RESULTS: ${passed} passed, ${failed} failed out of ${passed + failed} total`);
 if (failed > 0) {
   console.error("\n⚠️  SSC TESTS HAVE FAILURES");
   process.exit(1);
 } else {
-  console.log("\n✅ ALL SSC TESTS PASSED (Phase 1 + Phase 2)");
+  console.log("\n✅ ALL SSC TESTS PASSED (Phase 1 + Phase 2 + Enforcement)");
 }
