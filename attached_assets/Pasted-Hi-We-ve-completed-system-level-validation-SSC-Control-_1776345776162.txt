@@ -1,0 +1,221 @@
+Hi,
+
+We’ve completed system-level validation (SSC, Control Layer, confidence split, evaluability), and the system is now structurally sound.
+
+The remaining issue is not system orchestration — it is engine-internal logic.
+
+I need a full deep audit of each engine’s internal reasoning and generation logic, not how they interact in the system, but how they operate inside themselves.
+
+This is critical.
+
+---
+
+## Objective
+
+For each engine, I want to understand:
+
+> How it thinks, how it generates, how it transforms inputs into outputs — step by step
+
+Not summaries. Not outputs.  
+The actual internal logic flow.
+
+---
+
+## Scope
+
+All engines, including but not limited to:
+
+- Market Intelligence  
+- Audience  
+- Positioning  
+- Differentiation  
+- Mechanism  
+- Offer  
+- Awareness  
+- Funnel  
+- Persuasion  
+- Integrity  
+- Statistical Validation  
+- Budget Governor  
+- Channel Selection  
+- Iteration  
+- Retention  
+
+---
+
+## For EACH Engine — Required Breakdown
+
+### 1. Internal Pipeline (Step-by-Step)
+
+Describe the full internal flow:
+
+- How input is processed
+- What transformations happen
+- What intermediate representations are created
+- What sequence of logic is applied
+
+Example (structure, not content):
+- Step 1: parse input → extract signals
+- Step 2: cluster/group
+- Step 3: generate hypotheses
+- Step 4: filter/prune
+- Step 5: scoring
+- Step 6: output construction
+
+I want the real internal stages, not high-level descriptions.
+
+---
+
+### 2. Generation Logic (LLM / Heuristic Behavior)
+
+For any generation step:
+
+- What exactly is being generated?
+- Based on what?
+- What constraints are applied?
+- What is allowed vs not allowed?
+
+Specifically:
+- Does it generate freely then filter?
+- Or is generation constrained from the start?
+
+---
+
+### 3. Evidence Usage
+
+- How does the engine use signals/data?
+- At what step are signals injected?
+- Are outputs strictly derived from signals or partially inferred?
+
+Explicitly answer:
+> Can this engine produce outputs that are not directly traceable to input signals?
+
+If yes:
+- where and why?
+
+---
+
+### 4. Decision Points
+
+List all internal decisions:
+
+- branching logic
+- thresholds
+- selection criteria
+- prioritization rules
+
+Example:
+- why choose one segment over another?
+- why select one territory?
+- why reject alternatives?
+
+---
+
+### 5. Scoring & Confidence Logic
+
+- How is confidence calculated internally?
+- What affects it?
+- Is it based on:
+  - structure?
+  - data?
+  - heuristics?
+  - penalties?
+
+Clarify:
+- what lowers confidence
+- what increases it
+
+---
+
+### 6. Failure Modes
+
+For each engine:
+
+- When does it fail logically (not system block)?
+- What are typical weak outputs?
+- Where does it “hallucinate” or over-expand?
+
+---
+
+### 7. Constraint Enforcement
+
+- What constraints are enforced inside the engine itself?
+- Are they:
+  - hard constraints
+  - soft (post-processing penalties)
+
+---
+
+### 8. Output Construction
+
+- How final outputs are assembled
+- What parts are:
+  - directly derived
+  - synthesized
+  - inferred
+
+---
+
+## Critical Focus
+
+Especially deep-dive these engines:
+
+### Positioning
+- How territories are generated
+- How claims are formed
+- When signal → claim mapping happens
+- Why orphan claims exist
+
+### Offer
+- How pain alignment is actually computed
+- How objections are mapped
+
+### Funnel
+- How structure is constructed (not just selected)
+
+### Persuasion
+- How proofs are linked to claims
+
+---
+
+## Important Rules
+
+- Do NOT give summaries
+- Do NOT describe what the engine “should do”
+- Do NOT describe system-level behavior
+
+Only:
+> What the engine actually does internally today
+
+---
+
+## Output Format
+
+For each engine:
+
+- Internal pipeline (step-by-step)
+- Generation logic
+- Evidence usage
+- Decision logic
+- Confidence logic
+- Failure modes
+- Constraint enforcement
+- Output construction
+
+---
+
+## Goal
+
+We need to identify:
+
+> Where engines are still generating beyond logic  
+> vs  
+> where they are strictly reasoning from signals
+
+This is required before moving to any further development (agents, self-correcting, etc.)
+
+---
+
+Proceed with full audit.
+
+Thanks.
