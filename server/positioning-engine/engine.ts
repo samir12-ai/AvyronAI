@@ -2660,7 +2660,45 @@ CORRECTION REQUIRED:
   const overallConfidence = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== overallConfidence;
 
-  const positioningEngineConfidence = rawConfidence;
+  // engineConfidence reflects deterministic engine LOGIC quality (process integrity,
+  // structural completeness, internal-check passage), NOT LLM content self-rating
+  // and NOT data reliability. It is the input to the positioning hard gate (≥ 0.40).
+  let positioningEngineConfidence = 0;
+  const engineConfidenceFactors: string[] = [];
+  if (primaryTerritory) {
+    positioningEngineConfidence += 0.35;
+    engineConfidenceFactors.push("territory_produced(+0.35)");
+  }
+  if (finalTerritories.length >= 2) {
+    positioningEngineConfidence += 0.10;
+    engineConfidenceFactors.push("multiple_territories(+0.10)");
+  }
+  if (stabilityResult.isStable) {
+    positioningEngineConfidence += 0.15;
+    engineConfidenceFactors.push("stability_passed(+0.15)");
+  }
+  if (celCompliance.passed) {
+    positioningEngineConfidence += 0.10;
+    engineConfidenceFactors.push("cel_passed(+0.10)");
+  }
+  if (signalTraceability?.validationPassed) {
+    positioningEngineConfidence += 0.15;
+    engineConfidenceFactors.push("signal_trace_passed(+0.15)");
+  } else if (signalTraceability && signalTraceability.signalsUsed.length > 0) {
+    positioningEngineConfidence += 0.05;
+    engineConfidenceFactors.push("partial_signal_trace(+0.05)");
+  }
+  if (primaryTerritory && (primaryTerritory.evidenceSignals?.length || 0) > 0) {
+    positioningEngineConfidence += 0.10;
+    engineConfidenceFactors.push("evidence_signals(+0.10)");
+  }
+  if (primaryTerritory?.enemyDefinition && primaryTerritory?.contrastAxis && primaryTerritory?.narrativeDirection) {
+    positioningEngineConfidence += 0.05;
+    engineConfidenceFactors.push("complete_narrative_fields(+0.05)");
+  }
+  positioningEngineConfidence = Math.round(Math.min(1, Math.max(0, positioningEngineConfidence)) * 100) / 100;
+  console.log(`[PositioningEngine-V3] ENGINE_CONFIDENCE_BREAKDOWN | score=${positioningEngineConfidence.toFixed(2)} | factors=[${engineConfidenceFactors.join(",")}]`);
+
   const positioningDataConfidence = Math.round(dataReliability.overallReliability * 100) / 100;
 
   const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";

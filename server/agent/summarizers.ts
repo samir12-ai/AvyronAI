@@ -28,13 +28,13 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
       }
       case "audience": {
         const out = output.output || output;
-        const rawPains = out.painProfiles || out.audiencePains;
+        const rawPains = out.painMap || out.painProfiles || out.audiencePains;
         const painsArr = typeof rawPains === "string" ? safeParseArr(rawPains) : (Array.isArray(rawPains) ? rawPains : []);
         const pains = painsArr.length;
         const rawSegments = out.audienceSegments;
         const segArr = typeof rawSegments === "string" ? safeParseArr(rawSegments) : (Array.isArray(rawSegments) ? rawSegments : []);
         const segments = segArr.length;
-        const topPain = painsArr[0]?.canonicalPain || painsArr[0]?.pain;
+        const topPain = painsArr[0]?.canonical || painsArr[0]?.canonicalPain || painsArr[0]?.pain || painsArr[0]?.label || painsArr[0]?.name;
         return `${pains} pain profiles across ${segments} segments.${topPain ? ` Primary pain: ${topPain}.` : ""}`;
       }
       case "positioning": {

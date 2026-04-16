@@ -455,20 +455,31 @@ function buildUpstreamLineage(ctx: EngineContext): SignalLineageEntry[] {
   const audienceResult = ctx.audience;
   if (audienceResult) {
     const audOrigin = resolveUpstreamOriginType(ctx, "audience");
-    const pains = audienceResult.painProfiles || [];
-    for (const p of pains.slice(0, 5)) {
-      const text = typeof p === "string" ? p : p.pain || p.name || p.label || JSON.stringify(p);
-      entries.push(createSourceLineageEntry("audience", "pain", text, idx++, audOrigin));
+    const extractSignalText = (item: any): string => {
+      if (!item) return "";
+      if (typeof item === "string") return item;
+      return item.canonical || item.text || item.pain || item.desire || item.objection
+        || item.name || item.label || item.description || "";
+    };
+    const pains = audienceResult.painMap || audienceResult.painProfiles || audienceResult.audiencePains || [];
+    for (const p of pains.slice(0, 8)) {
+      const text = extractSignalText(p);
+      if (text) entries.push(createSourceLineageEntry("audience", "pain", text, idx++, audOrigin));
     }
     const desires = audienceResult.desireMap || [];
-    for (const d of desires.slice(0, 5)) {
-      const text = typeof d === "string" ? d : d.desire || d.name || d.label || JSON.stringify(d);
-      entries.push(createSourceLineageEntry("audience", "desire", text, idx++, audOrigin));
+    for (const d of desires.slice(0, 8)) {
+      const text = extractSignalText(d);
+      if (text) entries.push(createSourceLineageEntry("audience", "desire", text, idx++, audOrigin));
     }
     const objections = audienceResult.objectionMap || [];
-    for (const o of objections.slice(0, 3)) {
-      const text = typeof o === "string" ? o : o.objection || o.name || o.label || JSON.stringify(o);
-      entries.push(createSourceLineageEntry("audience", "objection", text, idx++, audOrigin));
+    for (const o of objections.slice(0, 5)) {
+      const text = extractSignalText(o);
+      if (text) entries.push(createSourceLineageEntry("audience", "objection", text, idx++, audOrigin));
+    }
+    const drivers = audienceResult.emotionalDrivers || [];
+    for (const d of drivers.slice(0, 5)) {
+      const text = typeof d === "string" ? d : (d?.driver || d?.canonical || d?.description || "");
+      if (text) entries.push(createSourceLineageEntry("audience", "emotional_driver", text, idx++, audOrigin));
     }
   }
 
