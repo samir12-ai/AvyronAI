@@ -416,6 +416,84 @@ function applyObjectionContextRules(
   return result;
 }
 
+function buildNarrativeObjectionSignals(
+  latestSnapshot: any,
+  miSnapshotId: string | null,
+): SignalItem[] {
+  if (!latestSnapshot?.objectionMapData) return [];
+  let miObjMap: any = null;
+  try {
+    miObjMap = typeof latestSnapshot.objectionMapData === "string"
+      ? JSON.parse(latestSnapshot.objectionMapData)
+      : latestSnapshot.objectionMapData;
+  } catch { return []; }
+  const narrativeObjections: any[] = Array.isArray(miObjMap?.objections) ? miObjMap.objections : [];
+  if (narrativeObjections.length === 0) return [];
+
+  const signals: SignalItem[] = [];
+  for (const obj of narrativeObjections) {
+    const canonical = typeof obj?.objection === "string" ? obj.objection.trim() : "";
+    if (!canonical) continue;
+    const supporting: any[] = Array.isArray(obj.supportingEvidence) ? obj.supportingEvidence : [];
+    const competitorSources: string[] = Array.isArray(obj.competitorSources) ? obj.competitorSources : [];
+    const evidenceTexts = supporting
+      .map((e: any) => (typeof e?.caption === "string" ? e.caption.slice(0, 200) : ""))
+      .filter((s: string) => s.length > 0)
+      .slice(0, 3);
+    const evidenceCount = Math.max(supporting.length, evidenceTexts.length);
+    const frequency = Math.max(supporting.length, competitorSources.length, 1);
+    const confidenceScore = typeof obj.narrativeConfidence === "number" ? obj.narrativeConfidence : 0.3;
+    const matchedPatterns = supporting
+      .map((e: any) => (typeof e?.matchedPattern === "string" ? `narrative:${e.matchedPattern}` : null))
+      .filter((s: string | null): s is string => !!s)
+      .slice(0, 5);
+    signals.push({
+      canonical,
+      frequency,
+      evidence: evidenceTexts,
+      evidenceCount,
+      confidenceScore,
+      sourceSignals: ["narrative_objection_extractor", obj.signalType || "objection", obj.patternCategory || "unclassified", ...matchedPatterns],
+      inputSnapshotId: miSnapshotId,
+    });
+  }
+  return signals;
+}
+
+function mergeNarrativeObjectionsIntoMap(
+  existing: SignalItem[],
+  narrative: SignalItem[],
+): { merged: SignalItem[]; added: number; reinforced: number } {
+  if (narrative.length === 0) return { merged: existing, added: 0, reinforced: 0 };
+  const byKey = new Map<string, SignalItem>();
+  for (const s of existing) {
+    byKey.set(s.canonical.toLowerCase(), { ...s });
+  }
+  let added = 0;
+  let reinforced = 0;
+  for (const narr of narrative) {
+    const key = narr.canonical.toLowerCase();
+    const prev = byKey.get(key);
+    if (prev) {
+      prev.frequency += narr.frequency;
+      prev.evidenceCount += narr.evidenceCount;
+      for (const ev of narr.evidence) {
+        if (prev.evidence.length < 3 && !prev.evidence.includes(ev)) prev.evidence.push(ev);
+      }
+      prev.confidenceScore = Math.max(prev.confidenceScore, narr.confidenceScore);
+      for (const src of narr.sourceSignals) {
+        if (!prev.sourceSignals.includes(src)) prev.sourceSignals.push(src);
+      }
+      reinforced++;
+    } else {
+      byKey.set(key, { ...narr });
+      added++;
+    }
+  }
+  const merged = Array.from(byKey.values()).sort((a, b) => b.confidenceScore - a.confidenceScore);
+  return { merged, added, reinforced };
+}
+
 function applyEvidenceIntegrityFilter(signals: SignalItem[]): SignalItem[] {
   return signals.map(s => {
     if (s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL) {
@@ -1697,6 +1775,13 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   let objectionMap = applyEvidenceIntegrityFilter(rawObjectionMap);
   const transformationMap = applyEvidenceIntegrityFilter(rawTransformationMap);
   const emotionalDrivers = applyEvidenceIntegrityFilter(rawEmotionalDrivers);
+
+  const narrativeObjectionSignals = buildNarrativeObjectionSignals(latestSnapshot, miSnapshotId);
+  if (narrativeObjectionSignals.length > 0) {
+    const narrMerge = mergeNarrativeObjectionsIntoMap(objectionMap, narrativeObjectionSignals);
+    objectionMap = narrMerge.merged;
+    console.log(`[AudienceEngine-V3] NARRATIVE_OBJECTIONS_MERGED | ingested=${narrativeObjectionSignals.length} | added=${narrMerge.added} | reinforced=${narrMerge.reinforced} | total=${objectionMap.length}`);
+  }
 
   let bridgePainSignals: SignalItem[] = [];
   let totalBridgeConflicts = 0;

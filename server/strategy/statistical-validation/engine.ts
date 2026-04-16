@@ -555,7 +555,7 @@ function validateClaim(
 
   for (const threat of (mi.threatSignals || [])) {
     const threatStr = extractSignalText(threat);
-    if (threatStr && hasOverlap(lower, threatStr.toLowerCase())) {
+    if (threatStr && isSemanticallyContradicting(lower, threatStr.toLowerCase())) {
       contradictingSignals.push(threatStr.slice(0, 100));
       evidenceStrength -= 0.1;
     }
@@ -563,7 +563,7 @@ function validateClaim(
 
   const objectionKeys = Object.keys(audience.objectionMap || {});
   for (const key of objectionKeys) {
-    if (hasOverlap(lower, key.toLowerCase())) {
+    if (isSemanticallyContradicting(lower, key.toLowerCase())) {
       contradictingSignals.push(`Objection: ${key}`);
       evidenceStrength -= 0.05;
     }
@@ -720,6 +720,60 @@ function hasOverlap(a: string, b: string): boolean {
     if (wordsB.has(w)) matches++;
   }
   return matches >= 2;
+}
+
+// Polarity dictionaries used to detect semantic opposition (not mere topic overlap).
+// A contradiction requires (a) substantial topical overlap AND (b) opposing polarity
+// between the claim and the counter-signal (threat / objection).
+const POSITIVE_POLARITY_TERMS = [
+  "grow", "growth", "increase", "improve", "rising", "rise", "expand", "expansion",
+  "strong", "strength", "emerging", "novel", "unique", "differenti", "advantage",
+  "opportunity", "proof", "validated", "proven", "effective", "high",
+];
+const NEGATIVE_POLARITY_TERMS = [
+  "declin", "decreas", "drop", "shrink", "erosion", "erod", "fail", "failing", "failure",
+  "weaken", "weak", "satur", "commoditi", "lose", "losing", "loss", "risk",
+  "threat", "impossible", "stuck", "stagnant", "fatigue", "breakdown", "break",
+  "no proof", "no evidence", "lack", "missing", "insufficient",
+];
+
+function containsAny(text: string, terms: string[]): boolean {
+  for (const t of terms) {
+    if (text.includes(t)) return true;
+  }
+  return false;
+}
+
+function countSharedContentWords(a: string, b: string): number {
+  const wordsA = a.split(/\s+/).filter(w => w.length > 3);
+  const wordsB = new Set(b.split(/\s+/).filter(w => w.length > 3));
+  let matches = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) matches++;
+  }
+  return matches;
+}
+
+// A semantic contradiction requires meaningful shared vocabulary (>=3 content words)
+// AND opposing polarity. Topical co-occurrence alone (the previous hasOverlap check)
+// produced false positives — e.g., a proof-based claim sharing the word "differentiation"
+// with a threat about angle saturation, or a claim that ADDRESSES an objection being
+// flagged merely because it shares vocabulary with the objection.
+function isSemanticallyContradicting(claim: string, counterSignal: string): boolean {
+  const shared = countSharedContentWords(claim, counterSignal);
+  if (shared < 3) return false;
+
+  const claimPositive = containsAny(claim, POSITIVE_POLARITY_TERMS);
+  const claimNegative = containsAny(claim, NEGATIVE_POLARITY_TERMS);
+  const signalPositive = containsAny(counterSignal, POSITIVE_POLARITY_TERMS);
+  const signalNegative = containsAny(counterSignal, NEGATIVE_POLARITY_TERMS);
+
+  // Opposite polarity: one side asserts positive, the other asserts negative
+  // about the same topic.
+  if (claimPositive && signalNegative && !claimNegative) return true;
+  if (claimNegative && signalPositive && !signalNegative) return true;
+
+  return false;
 }
 
 function layer_evidenceDensity(
