@@ -1,0 +1,176 @@
+We need to run a deeper audit. The previous audit correctly identified rule gaps, but it is still operating at the wrong level.
+
+The issue is NOT only missing hard rules.
+
+The real issue is that engines are not interpreting signals correctly, and decisions are being made without a shared logical understanding of the data.
+
+Right now:
+
+* Signals are extracted correctly
+* But they are not translated into meaning
+* And that meaning is not enforced across engines
+
+This is why we see:
+
+* Valid data → invalid strategy
+* Correct signals → contradictory decisions
+* High scores → logically broken outputs
+
+---
+
+### Objective
+
+Audit how signals are interpreted, transformed into meaning, and propagated across engines.
+
+We are NOT looking for:
+
+* More scoring fixes
+* More penalties
+* More surface-level rule additions
+
+We ARE looking for:
+
+* How decisions are actually formed from signals
+* Where logical understanding breaks
+* Why engines can contradict each other even when data is correct
+
+---
+
+### Required Audit Scope
+
+For EACH engine:
+
+#### 1. Signal Interpretation Layer
+
+* What raw signals does the engine receive?
+* How are these signals interpreted internally?
+* Are signals just passed through, or transformed into meaning?
+
+Example:
+If awareness = unaware:
+
+* Does the engine understand this means low trust, low urgency, low clarity?
+* Or does it just store "unaware" as a label?
+
+---
+
+#### 2. Meaning Construction
+
+* Does the engine derive internal constraints from signals?
+* Or does it operate independently using generic logic?
+
+We need to know:
+
+* How the engine translates data into decisions
+* Whether it builds reasoning or just applies scoring
+
+---
+
+#### 3. Constraint Propagation
+
+* Once a signal is interpreted, how does it affect downstream behavior?
+* Are constraints shared across engines?
+
+Example:
+If audience is unaware:
+
+* Does funnel automatically shift to education-first?
+* Does persuasion reduce direct conversion pressure?
+* Does offer adapt positioning?
+
+Or do engines ignore this and decide independently?
+
+---
+
+#### 4. Dependency Awareness
+
+* Does the engine validate upstream quality before using it?
+* Can it detect when upstream data is unreliable or weak?
+
+Example:
+
+* Positioning confidence = 0.20
+* Why do downstream engines still fully trust and use it?
+
+We need full tracing of:
+
+* Input confidence vs output confidence
+* Whether confidence inheritance exists or not
+
+---
+
+#### 5. Contradiction Origin Tracing
+
+For the current campaign, trace EXACTLY where these contradictions are created:
+
+* Audience = product_aware → Channel Selection behaves as unaware
+* Positioning = 0.20 → Mechanism = 0.95
+* Offer not aligned with pains → still accepted
+* Statistical validation = rejected → system proceeds
+* Funnel trust = 1.0 → Awareness says no trust path
+
+For EACH case:
+
+* Identify the engine where the logic breaks
+* Identify WHY it breaks (missing interpretation, missing propagation, or wrong assumption)
+
+---
+
+### Critical Requirement
+
+We need a clear answer to this:
+
+Does the system currently:
+A) Interpret signals into meaning and enforce them across engines
+B) Or simply pass signals and let each engine decide independently
+
+Be explicit. No assumptions.
+
+---
+
+### Expected Output
+
+Deliver a structured report including:
+
+* Engine-by-engine analysis of:
+
+  * Signal → Meaning → Decision flow
+* Clear identification of missing interpretation layers
+* Evidence of whether constraint propagation exists or not
+* Root cause mapping for all major contradictions
+* Identification of where “understanding” is missing
+
+---
+
+### Important Instructions
+
+Do NOT:
+
+* Suggest adding more scoring penalties
+* Suggest surface-level rules only
+* Hide issues behind confidence adjustments
+
+Focus on:
+
+* Logical reasoning
+* Signal interpretation
+* Cross-engine consistency
+
+---
+
+### Goal
+
+We need to determine if the system is:
+
+* A scoring system (current suspicion), or
+* A true reasoning system (target state)
+
+This audit will define the next architecture step.
+
+Do not deliver until:
+
+* Full traceability is achieved
+* Root causes are clearly identified
+* No contradictions remain unexplained
+
+---

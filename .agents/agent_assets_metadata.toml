@@ -113,3 +113,9 @@ id = "f7WgpNVkwmN_K0a4nmDHv"
 uri = "file://server/audits/engine-decision-audit.md"
 type = "text"
 title = "Full Engine Decision Logic Audit"
+
+[[outputs]]
+id = "8gYcvH3PSU6nW5EInWHDr"
+uri = "file://server/audits/signal-interpretation-audit.md"
+type = "text"
+title = "Signal Interpretation & Propagation Audit — Deep Root Cause Analysis"
