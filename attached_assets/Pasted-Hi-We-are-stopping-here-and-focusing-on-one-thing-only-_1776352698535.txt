@@ -1,0 +1,168 @@
+Hi,
+
+We are stopping here and focusing on one thing only:
+
+## **Positioning Engine must be fully fixed before anything else continues.**
+
+No new features.
+No sub-agents.
+No self-correcting expansion.
+No further architecture work.
+
+The remaining bottleneck is now clearly isolated to the Positioning Engine.
+
+---
+
+## Why this is now the top priority
+
+The latest validation proves:
+
+* Audience pain structure is no longer the main blocker
+* MI usable signals now pass the gate
+* AEL is returning full enrichment
+* The pipeline can now proceed far enough to expose the real bottleneck
+
+And the real bottleneck is:
+
+* **Positioning engine signal coverage = 0%**
+* **8 orphan claims**
+* **LLM-generated positioning claims are still not properly grounded in upstream signals**
+* `dataConfidence` is strong, but `engineConfidence` remains too weak
+
+This means the problem is now inside Positioning logic itself.
+
+---
+
+# Required Objective
+
+We are no longer trying to “make Positioning pass.”
+
+We are fixing it so that:
+
+> **Positioning can only produce claims that are actually grounded in upstream signals**
+
+---
+
+# What must be fixed inside Positioning
+
+## 1. Claim Construction Must Be Signal-First
+
+Do not let the engine generate free-form territory/narrative claims first and try to validate them later.
+
+Instead:
+
+* select the usable upstream signals first
+* group them into positioning-relevant clusters
+* derive territories, contrast axes, and narrative claims from those clusters only
+
+The generation flow must become:
+
+**signals → claim candidates → validated positioning**
+
+not:
+
+**LLM claims → post-hoc grounding**
+
+---
+
+## 2. Every Positioning Claim Must Be Traceable
+
+Each output claim must include valid signal grounding.
+
+At minimum, every claim must be traceable to:
+
+* audience pains / objections / drivers
+* MI narrative or market signals
+* root causes / structured signals where applicable
+
+If a claim cannot be grounded:
+
+* it must be dropped
+* not merely penalized later
+
+---
+
+## 3. Orphan Audit Must Become Preventive, Not Merely Punitive
+
+Right now orphan audit is detecting the failure after the claim already exists.
+
+We need to move that logic earlier.
+
+The engine should prevent orphan claims from being emitted in the first place.
+
+---
+
+## 4. Signal Coverage Must Be System-Built, Not LLM-Dependent
+
+Do not depend on the model to create valid grounding structure by itself.
+
+Coverage must be computed from actual matched upstream signals.
+
+If needed:
+
+* build claim-to-signal mapping deterministically after generation
+* but the final output must only retain claims that pass grounding
+
+---
+
+## 5. Positioning Output Must Be Smaller if Necessary, But Real
+
+I do not want richer narrative if it is invented.
+
+If the result needs to be:
+
+* narrower
+* simpler
+* less dramatic
+
+that is acceptable.
+
+What is not acceptable is:
+
+* elegant positioning with no evidence base
+
+---
+
+# Required Deliverable
+
+Work only on Positioning now.
+
+After implementation, rerun:
+
+* MarketMindAI
+* SWA Media (after MI refresh if needed)
+
+Return only:
+
+### A. Before vs After for Positioning
+
+* engineConfidence
+* dataConfidence
+* signal coverage
+* orphan claims count
+* number of final claims kept
+
+### B. Output Quality
+
+* example final territories / contrast axis
+* proof that each claim is grounded
+
+### C. Pipeline Outcome
+
+* whether pipeline now passes Positioning
+* first downstream blocking point if any remains
+
+---
+
+# Do Not Do
+
+* Do not weaken the gate
+* Do not lower standards to force a pass
+* Do not move to other engines yet
+* Do not treat this as a tuning exercise only
+
+This is a **Positioning Engine logic correction phase**.
+
+Proceed directly on Positioning and nothing else.
+
+Thanks.

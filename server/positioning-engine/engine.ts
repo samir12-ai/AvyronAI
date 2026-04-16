@@ -1523,6 +1523,110 @@ function deterministicSignalMapping(
   return { mappings, validSignalIds, coverage, totalMapped: globalMappedIds.size };
 }
 
+interface ClaimSeed {
+  enemySeed: string;
+  contrastSeed: string;
+  narrativeSeed: string;
+  sourceSignalIds: string[];
+  sourceLabels: string[];
+  painLabels: string[];
+  desireLabels: string[];
+  rootCauseLabels: string[];
+}
+
+function buildSignalClaimSeeds(
+  territory: Territory,
+  mapped: MappedSignalCluster[],
+  productDna?: any,
+): ClaimSeed | null {
+  if (mapped.length === 0) return null;
+
+  const pains = mapped.filter(m => m.category === "pain" || m.category === "root_cause");
+  const desires = mapped.filter(m => m.category === "desire" || m.category === "pattern");
+  const drivers = mapped.filter(m => m.category === "psychological_driver");
+
+  const enemySources = pains.length > 0 ? pains : (drivers.length > 0 ? drivers : mapped.slice(0, 2));
+  const contrastSources = desires.length > 0 ? desires : (drivers.length > 0 ? drivers : mapped.slice(0, 2));
+
+  const domainNoun = inferDomainNoun(productDna);
+
+  const enemyParts = enemySources.slice(0, 3).map(s => s.label);
+  const enemySeed = enemyParts.length > 0
+    ? `${domainNoun} failure: ${enemyParts.join(" + ")}`
+    : `${domainNoun} system breakdown`;
+
+  const contrastParts = contrastSources.slice(0, 3).map(s => s.label);
+  const contrastSeed = contrastParts.length > 0
+    ? `${contrastParts.join(", ")} vs current ${enemyParts[0] || "breakdown"}`
+    : "operational improvement vs current failure";
+
+  const allParts = [...new Set([...enemyParts, ...contrastParts])];
+  const narrativeSeed = allParts.length > 0
+    ? `Addressing ${allParts.slice(0, 3).join(", ")} through ${domainNoun} system correction`
+    : "System-level correction of operational failures";
+
+  return {
+    enemySeed,
+    contrastSeed,
+    narrativeSeed,
+    sourceSignalIds: mapped.map(m => m.id),
+    sourceLabels: mapped.map(m => m.label.toLowerCase()),
+    painLabels: pains.map(p => p.label.toLowerCase()),
+    desireLabels: desires.map(d => d.label.toLowerCase()),
+    rootCauseLabels: mapped.filter(m => m.category === "root_cause").map(r => r.label.toLowerCase()),
+  };
+}
+
+function validateClaimGrounding(
+  claimText: string,
+  seed: ClaimSeed,
+): { grounded: boolean; matchedSignals: string[]; score: number } {
+  if (!claimText || claimText.trim().length < 5) return { grounded: false, matchedSignals: [], score: 0 };
+
+  const claimLower = claimText.toLowerCase().replace(/[^a-z0-9\s]/g, "");
+  const claimWords = new Set(claimLower.split(/\s+/).filter(w => w.length > 2));
+  const matchedSignals: string[] = [];
+  let totalScore = 0;
+
+  for (let i = 0; i < seed.sourceLabels.length; i++) {
+    const label = seed.sourceLabels[i];
+    const labelWords = label.replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2);
+    if (labelWords.length === 0) continue;
+
+    if (claimLower.includes(label)) {
+      matchedSignals.push(seed.sourceSignalIds[i]);
+      totalScore += 3.0;
+      continue;
+    }
+
+    let wordOverlap = 0;
+    for (const lw of labelWords) {
+      if (claimWords.has(lw)) {
+        wordOverlap++;
+      } else {
+        for (const cw of claimWords) {
+          if (cw.length >= 4 && lw.length >= 4 && (cw.includes(lw) || lw.includes(cw))) {
+            wordOverlap += 0.5;
+            break;
+          }
+        }
+      }
+    }
+
+    const overlapRatio = wordOverlap / labelWords.length;
+    if (overlapRatio >= 0.3) {
+      matchedSignals.push(seed.sourceSignalIds[i]);
+      totalScore += overlapRatio * 2.0;
+    }
+  }
+
+  return {
+    grounded: matchedSignals.length > 0,
+    matchedSignals: [...new Set(matchedSignals)],
+    score: totalScore,
+  };
+}
+
 async function layer11_positioningStatementGeneration(
   territories: Territory[],
   category: string,
@@ -1572,7 +1676,7 @@ async function layer11_positioningStatementGeneration(
     const signalMapping = hasSignals ? mapSignalsToTerritories(territories, structuredSignals!) : null;
     if (signalMapping) {
       const totalMapped = Array.from(signalMapping.values()).reduce((s, arr) => s + arr.length, 0);
-      console.log(`[PositioningEngine-V3] SIGNAL_DIRECT_MODE | pre-mapped ${totalMapped} signals across ${territories.length} territories`);
+      console.log(`[PositioningEngine-V3] SIGNAL_FIRST_MODE | pre-mapped ${totalMapped} signals across ${territories.length} territories`);
     }
 
     const allSignalIds = hasSignals ? new Set([
@@ -1583,14 +1687,32 @@ async function layer11_positioningStatementGeneration(
       ...structuredSignals!.psychological_drivers,
     ].map(c => c.id)) : null;
 
+    const claimSeeds = new Map<number, ClaimSeed>();
+    if (signalMapping && hasSignals) {
+      for (let i = 0; i < territories.length; i++) {
+        const mapped = signalMapping.get(i) || [];
+        const seed = buildSignalClaimSeeds(territories[i], mapped, productDna);
+        if (seed) claimSeeds.set(i, seed);
+      }
+      console.log(`[PositioningEngine-V3] CLAIM_SEEDS | built=${claimSeeds.size}/${territories.length} territories have signal-derived seeds`);
+    }
+
     const territoriesBlock = territories.map((t, i) => {
       const mapped = signalMapping?.get(i) || [];
+      const seed = claimSeeds.get(i);
       const signalSection = mapped.length > 0
-        ? `\n   SOURCE SIGNALS (compose your output FROM these):\n${formatMappedSignalsForTerritory(mapped)}`
+        ? `\n   SOURCE SIGNALS (these are the ONLY inputs you may use):\n${formatMappedSignalsForTerritory(mapped)}`
+        : "";
+      const seedSection = seed
+        ? `\n   CLAIM SEEDS (refine these — do NOT replace with unrelated content):
+   - Enemy seed: "${seed.enemySeed}"
+   - Contrast seed: "${seed.contrastSeed}"
+   - Narrative seed: "${seed.narrativeSeed}"
+   - Source signal IDs: [${seed.sourceSignalIds.join(", ")}]`
         : "";
       return `${i + 1}. "${t.name}" (opportunity: ${t.opportunityScore}, distance: ${t.narrativeDistanceScore})
    Pain alignment: ${t.painAlignment.join(", ") || "general"}
-   Desire alignment: ${t.desireAlignment.join(", ") || "general"}${signalSection}`;
+   Desire alignment: ${t.desireAlignment.join(", ") || "general"}${signalSection}${seedSection}`;
     }).join("\n\n");
 
     const domainTranslationInstruction = productDna ? `
@@ -1608,25 +1730,35 @@ Also return three additional fields per territory:
     const rejectionBlock = specificityRejectionContext ? `\n${specificityRejectionContext}\n` : "";
 
     const prompt = hasSignals
-      ? `You are a strategic positioning COMPOSER. You build positioning statements by DIRECTLY COMPOSING from the provided audience signal clusters — not by generating freely.
+      ? `You are a strategic positioning REFINER. Your job is to SHARPEN the provided claim seeds into precise positioning statements. You must NOT generate new concepts — only refine what is given.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
 ${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
-TERRITORIES WITH THEIR SOURCE SIGNALS:
+TERRITORIES WITH CLAIM SEEDS AND SOURCE SIGNALS:
 ${territoriesBlock}
 ${websitePositioningContext}
 ${rejectionBlock}
-RULES:
-1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each signal label as the operational failure it represents for this specific business type and offer. Use that operational language — not the surface signal label — in every field you write.
-2. COMPRESSION: Focus on the FIRST territory as the PRIMARY positioning. Express it as a specific root-cause SYSTEM FAILURE — not an emotional category. The enemyDefinition must name what specific process, system, or operational component breaks for the buyer. If the territory is broad (e.g. "cost concerns" or "trust issues"), compress it into the ONE operational failure that causes it.
-3. enemyDefinition: Compose from the PAIN and ROOT_CAUSE signals mapped to this territory. Translate them into the domain-specific operational failure. Name what specifically fails in this market for this type of buyer. Must contain a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls).
-4. contrastAxis: Compose from the DESIRE and PATTERN signals. Name what the buyer wants operationally vs what currently breaks — in terms specific to this business type.
-5. narrativeDirection: Synthesize across all mapped signals into one positioning sentence that uses domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
-6. mappedSignalIds: List the exact signal IDs you used from the SOURCE SIGNALS. EVERY claim you make MUST reference at least one signal ID.
-7. HARD CONSTRAINT: Do NOT invent, extrapolate, or generate ANY concept, claim, or phrase that does not directly trace to a provided signal label. If you cannot ground a statement in the SOURCE SIGNALS, do not write it. Orphaned claims destroy positioning integrity.
-8. If a territory has no usable signals, set narrativeDirection to "UNMAPPED".
-9. VALIDATION: Before returning, verify every enemyDefinition, contrastAxis, and narrativeDirection contains language directly derived from SOURCE SIGNALS — not inferred or hallucinated.
+YOUR TASK:
+Each territory has CLAIM SEEDS derived from real audience signals. Your ONLY job is to:
+1. Take each claim seed and sharpen it into professional positioning language
+2. Translate signal labels into domain-specific operational language for this business type
+3. Keep the core meaning of each seed — do NOT replace it with unrelated concepts
+
+FIELD RULES:
+- enemyDefinition: Sharpen the Enemy seed. Must name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls). The content MUST derive from the pain/root_cause signal labels listed in the SOURCE SIGNALS.
+- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST derive from the desire/pattern signal labels.
+- narrativeDirection: Sharpen the Narrative seed into one sentence. MUST synthesize the actual signal labels — not invent new concepts.
+- domainFailure: The operational/system failure this signal cluster represents in this specific domain.
+- operationalProblem: What concretely breaks in the buyer's workflow.
+- proofRequirement: What evidence would resolve this (e.g., "live demo", "case study with metrics").
+- mappedSignalIds: Copy the Source signal IDs from the claim seeds. These are pre-assigned — do NOT change them.
+
+HARD CONSTRAINTS:
+- Your output MUST preserve the meaning of the claim seeds. If you cannot refine a seed, return it as-is.
+- Do NOT introduce concepts, problems, or solutions not present in the SOURCE SIGNALS.
+- Every word in your output must trace back to a SOURCE SIGNAL label. If unsure, use the signal label directly.
+- If a territory has no claim seeds, set narrativeDirection to "UNMAPPED".
 
 Return a JSON array:
 [{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }]
@@ -1669,21 +1801,58 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
     for (const item of parsed) {
       const idx = (item.index || 1) - 1;
       if (idx >= 0 && idx < territories.length) {
+        const seed = claimSeeds.get(idx);
+
         if (item.narrativeDirection && typeof item.narrativeDirection === "string" && item.narrativeDirection.includes("UNMAPPED")) {
           territories[idx].confidenceScore = Math.max(0, territories[idx].confidenceScore - 0.15);
           territories[idx].stabilityNotes.push("[SIGNAL_UNMAPPED] Territory could not be grounded in audience signals");
           console.log(`[PositioningEngine-V3] L11 UNMAPPED territory: "${territories[idx].name}"`);
           continue;
         }
-        if (item.enemyDefinition && validateNarrativeOutput(item.enemyDefinition).valid) {
-          territories[idx].enemyDefinition = item.enemyDefinition;
+
+        if (seed) {
+          const enemyText = (item.enemyDefinition && validateNarrativeOutput(item.enemyDefinition).valid) ? item.enemyDefinition : seed.enemySeed;
+          const contrastText = (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) ? item.contrastAxis : seed.contrastSeed;
+          const narrativeText = (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) ? item.narrativeDirection : seed.narrativeSeed;
+
+          const enemyGrounding = validateClaimGrounding(enemyText, seed);
+          const contrastGrounding = validateClaimGrounding(contrastText, seed);
+          const narrativeGrounding = validateClaimGrounding(narrativeText, seed);
+
+          territories[idx].enemyDefinition = enemyGrounding.grounded ? enemyText : seed.enemySeed;
+          territories[idx].contrastAxis = contrastGrounding.grounded ? contrastText : seed.contrastSeed;
+          territories[idx].narrativeDirection = narrativeGrounding.grounded ? narrativeText : seed.narrativeSeed;
+
+          const allGroundedIds = new Set([
+            ...enemyGrounding.matchedSignals,
+            ...contrastGrounding.matchedSignals,
+            ...seed.sourceSignalIds,
+          ]);
+          territories[idx].mappedSignalIds = Array.from(allGroundedIds);
+          (territories[idx] as any)._systemMapped = true;
+
+          const groundedFields = [enemyGrounding.grounded, contrastGrounding.grounded, narrativeGrounding.grounded].filter(Boolean).length;
+          const fallbackFields = 3 - groundedFields;
+
+          if (fallbackFields > 0) {
+            territories[idx].stabilityNotes.push(`[GROUNDING_GATE] ${fallbackFields}/3 claim fields fell back to signal seeds (LLM output not grounded)`);
+            console.log(`[PositioningEngine-V3] GROUNDING_FALLBACK | territory="${territories[idx].name}" | fallbacks=${fallbackFields}/3`);
+          }
+
+          territories[idx].stabilityNotes.push(`[SIGNAL_GROUNDED] ${allGroundedIds.size} signal(s) verified: ${Array.from(allGroundedIds).join(", ")}`);
+
+        } else {
+          if (item.enemyDefinition && validateNarrativeOutput(item.enemyDefinition).valid) {
+            territories[idx].enemyDefinition = item.enemyDefinition;
+          }
+          if (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) {
+            territories[idx].narrativeDirection = item.narrativeDirection;
+          }
+          if (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) {
+            territories[idx].contrastAxis = item.contrastAxis;
+          }
         }
-        if (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) {
-          territories[idx].narrativeDirection = item.narrativeDirection;
-        }
-        if (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) {
-          territories[idx].contrastAxis = item.contrastAxis;
-        }
+
         if (item.domainFailure && typeof item.domainFailure === "string" && item.domainFailure.trim()) {
           territories[idx].domainFailure = item.domainFailure.trim();
         }
@@ -1693,24 +1862,6 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
         if (item.proofRequirement && typeof item.proofRequirement === "string" && item.proofRequirement.trim()) {
           territories[idx].proofRequirement = item.proofRequirement.trim();
         }
-        if (hasSignals && Array.isArray(item.mappedSignalIds) && allSignalIds) {
-          const preMapped = signalMapping?.get(idx) || [];
-          const preMappedIds = new Set(preMapped.map(m => m.id));
-          const validIds = item.mappedSignalIds.filter((id: string) => allSignalIds.has(id));
-          const groundedIds = validIds.filter((id: string) => preMappedIds.has(id));
-          const extraIds = validIds.filter((id: string) => !preMappedIds.has(id));
-          territories[idx].mappedSignalIds = validIds;
-          if (groundedIds.length > 0) {
-            territories[idx].stabilityNotes.push(`[SIGNAL_COMPOSED] Built from ${groundedIds.length} source signal(s): ${groundedIds.join(", ")}`);
-          }
-          if (extraIds.length > 0) {
-            territories[idx].stabilityNotes.push(`[SIGNAL_EXTRA] ${extraIds.length} signal(s) outside pre-mapped set: ${extraIds.join(", ")}`);
-          }
-          if (validIds.length === 0) {
-            territories[idx].stabilityNotes.push("[SIGNAL_WEAK] No valid signal IDs returned — composition may not be grounded");
-            territories[idx].confidenceScore = Math.max(0, territories[idx].confidenceScore - 0.10);
-          }
-        }
       }
     }
   } catch (err: any) {
@@ -1719,16 +1870,17 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
 
   if (structuredSignals && getAllSignalLabels(structuredSignals).length > 0) {
     const detMapping = deterministicSignalMapping(territories, structuredSignals);
-    const validIds = detMapping.validSignalIds;
+    const validIdSet = detMapping.validSignalIds;
     for (let tIdx = 0; tIdx < territories.length; tIdx++) {
       const systemMappedIds = detMapping.mappings.get(tIdx) || [];
-      const existingIds = (territories[tIdx].mappedSignalIds || []).filter(id => validIds.has(id));
+      const existingIds = (territories[tIdx].mappedSignalIds || []).filter(id => validIdSet.has(id));
       const finalIds = Array.from(new Set([...existingIds, ...systemMappedIds]));
-      const llmPurged = (territories[tIdx].mappedSignalIds || []).length - existingIds.length;
       territories[tIdx].mappedSignalIds = finalIds;
-      (territories[tIdx] as any)._systemMapped = systemMappedIds.length > 0;
-      if (systemMappedIds.length > 0) {
-        territories[tIdx].stabilityNotes.push(`[SYSTEM_MAPPED] Deterministic signal mapping assigned ${systemMappedIds.length} signal(s)${llmPurged > 0 ? ` | purged ${llmPurged} unverified LLM ID(s)` : ""}`);
+      if (!(territories[tIdx] as any)._systemMapped) {
+        (territories[tIdx] as any)._systemMapped = systemMappedIds.length > 0;
+      }
+      if (systemMappedIds.length > 0 && existingIds.length === 0) {
+        territories[tIdx].stabilityNotes.push(`[SYSTEM_MAPPED] Deterministic signal mapping assigned ${systemMappedIds.length} signal(s)`);
       }
     }
     console.log(`[PositioningEngine-V3] DETERMINISTIC_MAPPING | totalMapped=${detMapping.totalMapped} | coverage=${(detMapping.coverage * 100).toFixed(1)}% | method=keyword_overlap`);
@@ -2382,23 +2534,39 @@ CORRECTION REQUIRED:
 
     let totalOrphanedClaims = 0;
     let totalTracedClaims = 0;
-    for (const territory of generatedTerritories) {
+    let droppedTerritories = 0;
+    const beforeCount = generatedTerritories.length;
+
+    generatedTerritories = generatedTerritories.filter(territory => {
       const claims = [territory.name, territory.enemyDefinition, territory.contrastAxis, territory.narrativeDirection].filter(Boolean);
 
       const hasSystemMapping = (territory as any)._systemMapped === true;
       if (hasSystemMapping) {
         totalTracedClaims += claims.length;
-        continue;
+        return true;
+      }
+
+      const hasAnyMappedSignals = territory.mappedSignalIds && territory.mappedSignalIds.length > 0;
+      if (hasAnyMappedSignals) {
+        totalTracedClaims += claims.length;
+        return true;
       }
 
       const orphanResult = checkForOrphanClaims(claims, strategicSignalGate);
+
+      if (orphanResult.orphanedClaims.length === claims.length) {
+        console.log(`[PositioningEngine-V3] ORPHAN_DROP | territory="${territory.name}" | all ${claims.length} claims orphaned — DROPPED (no signal grounding)`);
+        droppedTerritories++;
+        totalOrphanedClaims += orphanResult.orphanedClaims.length;
+        return false;
+      }
 
       totalOrphanedClaims += orphanResult.orphanedClaims.length;
       totalTracedClaims += orphanResult.tracedClaims;
 
       if (orphanResult.orphanedClaims.length > 0) {
+        if (!territory.stabilityNotes) territory.stabilityNotes = [];
         for (const orphan of orphanResult.orphanedClaims) {
-          if (!territory.stabilityNotes) territory.stabilityNotes = [];
           territory.stabilityNotes.push(`[HYPOTHESIS] Claim not directly traceable to MIv3 signal: "${orphan.slice(0, 80)}"`);
         }
         const orphanPenaltyPerClaim = 0.05;
@@ -2406,10 +2574,15 @@ CORRECTION REQUIRED:
         const totalPenalty = Math.min(orphanResult.orphanedClaims.length * orphanPenaltyPerClaim, maxOrphanPenalty);
         territory.confidenceScore = Math.max(0.15, territory.confidenceScore - totalPenalty);
       }
+      return true;
+    });
+
+    if (droppedTerritories > 0) {
+      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | PREVENTIVE | dropped=${droppedTerritories} territories | remaining=${generatedTerritories.length}/${beforeCount}`);
     }
-    if (totalOrphanedClaims > 0) {
-      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | orphaned=${totalOrphanedClaims} | traced=${totalTracedClaims} | territories=${generatedTerritories.length} — orphaned claims flagged as [HYPOTHESIS]`);
-    } else {
+    if (totalOrphanedClaims > 0 && droppedTerritories === 0) {
+      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | orphaned=${totalOrphanedClaims} | traced=${totalTracedClaims} | territories=${generatedTerritories.length}`);
+    } else if (totalOrphanedClaims === 0) {
       console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | ZERO_ORPHANS | all ${totalTracedClaims} claims grounded (system-mapped or MI-traced)`);
     }
 
