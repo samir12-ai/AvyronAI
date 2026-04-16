@@ -1,0 +1,149 @@
+Hi,
+
+We need to stop assuming “sparse market” as a root cause.
+
+We have a confirmed contradiction:
+
+- In some runs, MI reports 0 competitors
+- However, we know competitor data exists and is populated
+
+This means the issue is NOT market reality.
+
+> This is a data representation / propagation / resolution failure inside the system
+
+---
+
+# Objective
+
+Perform a full end-to-end truth trace of competitor data across the pipeline.
+
+No assumptions.  
+No summaries.  
+No high-level explanations.
+
+I want exact counts and transformations at each stage.
+
+---
+
+# Required Trace (STRICT)
+
+For the same campaign and same run, provide:
+
+## 1. Raw Data Layer
+- total competitors stored in DB
+- sample records (IDs only)
+- source of ingestion
+
+---
+
+## 2. Pre-MI Input
+- competitors retrieved before MI processing
+- query used (exact)
+- filters applied
+
+---
+
+## 3. Market Intelligence Output
+- competitors received by MI
+- competitors after enrichment
+- competitors after filtering
+- final competitors exposed in MI output
+
+---
+
+## 4. AEL Input
+- competitor count passed into AEL
+- full shape of the object received
+- any transformation applied
+
+---
+
+## 5. Positioning Input
+- competitor count available at positioning stage
+- confirm whether competitors are present or missing
+
+---
+
+## 6. Downstream Awareness (if relevant)
+- whether competitor-derived signals exist
+- or were lost
+
+---
+
+# Critical Requirement
+
+At EACH stage, log:
+
+- input count
+- output count
+- reason for any drop
+
+If count goes:
+> >0 → 0
+
+You MUST identify:
+- exact function
+- exact condition
+- exact code path responsible
+
+---
+
+# Additional Checks
+
+## A. Field Mapping
+- confirm field names are consistent across engines
+- identify any mismatch (e.g., dominanceData vs signalClusters type issues)
+
+## B. Filtering Logic
+- list all filters that can remove competitors
+- thresholds
+- confidence conditions
+
+## C. Freshness / Validity Logic
+- confirm competitors are not being dropped due to:
+  - freshness miscalculation
+  - incomplete enrichment
+  - missing fields
+
+---
+
+# What NOT to Do
+
+Do NOT:
+
+- assume market is empty
+- inject fake competitors
+- lower thresholds blindly
+- bypass MI logic
+- give conceptual explanations
+
+---
+
+# Required Output
+
+Provide:
+
+1. Full trace table (stage → count)
+2. Exact drop-off point (if any)
+3. Root cause (code-level)
+4. Confirmation whether:
+   - data exists but is lost
+   - or never correctly passed
+
+---
+
+# Final Note
+
+Right now the system is making decisions based on:
+
+> “0 competitors”
+
+If that is not true, then:
+
+> the system is operating on incorrect internal reality
+
+This must be corrected at the root.
+
+Proceed with the trace.
+
+Thanks.

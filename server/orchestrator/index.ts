@@ -318,20 +318,62 @@ function extractMiInput(miResult: any): any {
   if (!miResult?.output) return {};
   const out = miResult.output;
 
-  const rawSignals: any[] = out.signals || [];
-  const taggedSignals = rawSignals.map((s: any) => {
-    if (typeof s === "string") return { text: s, originType: "competitor" as const };
-    return { text: s.text || s.signal || s.name || JSON.stringify(s), originType: s.originType || "competitor" as const };
-  });
+  const intentMap: any[] = Array.isArray(out.competitorIntentMap) ? out.competitorIntentMap : [];
+  const competitors = (out.competitors && Array.isArray(out.competitors) && out.competitors.length > 0)
+    ? out.competitors
+    : intentMap.map((c: any) => ({
+        id: c.competitorId || c.id || null,
+        name: c.competitorName || c.name || null,
+        intentType: c.intentType || c.dominantIntentType || null,
+        intentConfidence: c.confidence ?? c.intentConfidence ?? null,
+        evidenceCount: c.evidenceCount ?? c.postsAnalyzed ?? null,
+      }));
+
+  const opportunitySignals = out.opportunitySignals || [];
+  const threatSignals = out.threatSignals || [];
+  const taggedOpp = Array.isArray(out.taggedOpportunitySignals) ? out.taggedOpportunitySignals : [];
+  const taggedThreat = Array.isArray(out.taggedThreatSignals) ? out.taggedThreatSignals : [];
+
+  const rawSignals: any[] = (out.signals && Array.isArray(out.signals) && out.signals.length > 0)
+    ? out.signals
+    : [...opportunitySignals, ...threatSignals];
+
+  const taggedSignals = (taggedOpp.length + taggedThreat.length > 0)
+    ? [...taggedOpp, ...taggedThreat]
+    : rawSignals.map((s: any) => {
+        if (typeof s === "string") return { text: s, originType: "competitor" as const };
+        return { text: s.text || s.signal || s.name || JSON.stringify(s), originType: s.originType || "competitor" as const };
+      });
+
+  const confidenceObj = out.confidence;
+  const confidenceNumber = (typeof confidenceObj === "number")
+    ? confidenceObj
+    : (confidenceObj && typeof confidenceObj === "object" ? (confidenceObj.overall ?? confidenceObj.score ?? null) : null);
+  const overallConfidence = out.overallConfidence
+    ?? miResult.overallConfidence
+    ?? confidenceNumber
+    ?? null;
 
   return {
-    competitors: out.competitors || [],
+    competitors,
+    competitorIntentMap: intentMap,
     signals: rawSignals,
     taggedSignals,
+    opportunitySignals,
+    threatSignals,
     dominance: miResult.dominanceData || [],
     trajectory: miResult.trajectoryData || null,
     marketState: out.marketState || null,
-    confidence: out.overallConfidence || null,
+    marketDiagnosis: out.marketDiagnosis || null,
+    dominantIntentType: out.dominantIntentType || null,
+    evidenceCoverage: out.evidenceCoverage || null,
+    audienceIntentSignals: out.audienceIntentSignals || [],
+    missingSignalFlags: out.missingSignalFlags || [],
+    dataFreshnessDays: out.dataFreshnessDays ?? null,
+    volatilityIndex: out.volatilityIndex ?? null,
+    signalNoiseRatio: out.signalNoiseRatio ?? null,
+    confidence: overallConfidence,
+    overallConfidence,
   };
 }
 

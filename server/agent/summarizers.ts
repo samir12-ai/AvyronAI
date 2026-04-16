@@ -19,7 +19,7 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
     switch (engineId) {
       case "market_intelligence": {
         const out = output.output || output;
-        const rawCompetitors = out.competitors || out.competitorData || out.competitor_data;
+        const rawCompetitors = out.competitors || out.competitorData || out.competitor_data || out.competitorIntentMap;
         const compArr = typeof rawCompetitors === "string" ? safeParseArr(rawCompetitors) : (Array.isArray(rawCompetitors) ? rawCompetitors : []);
         const competitors = compArr.length;
         const marketState = out.marketState || out.market_state || "analyzed";
