@@ -17,6 +17,7 @@ export interface QualityGateResult {
   totalInputSignals: number;
   passedSignals: SignalQualityScore[];
   rejectedSignals: SignalQualityScore[];
+  mediumQualitySignals: SignalQualityScore[];
   deduplicatedCount: number;
   crossValidatedCount: number;
   averageQuality: number;
@@ -31,7 +32,9 @@ export interface ClusterQualityResult {
   mergedDuplicates: number;
 }
 
-const QUALITY_THRESHOLD = 0.85;
+const QUALITY_THRESHOLD_HIGH = 0.75;
+const QUALITY_THRESHOLD_MEDIUM = 0.50;
+const QUALITY_THRESHOLD = QUALITY_THRESHOLD_HIGH;
 const SNIPPET_SIMILARITY_THRESHOLD = 0.65;
 const MIN_PASSING_SIGNALS = 3;
 
@@ -242,15 +245,20 @@ export function applyQualityGate(
   const crossValidated = crossValidateSignals(deduplicated, signalClusters);
 
   const passed: SignalQualityScore[] = [];
+  const medium: SignalQualityScore[] = [];
   const rejected: SignalQualityScore[] = [];
 
   for (const signal of crossValidated) {
-    if (signal.qualityScore >= QUALITY_THRESHOLD) {
+    if (signal.qualityScore >= QUALITY_THRESHOLD_HIGH) {
       passed.push(signal);
+    } else if (signal.qualityScore >= QUALITY_THRESHOLD_MEDIUM) {
+      medium.push(signal);
     } else {
-      rejected.push({ ...signal, rejectionReason: `Quality ${signal.qualityScore.toFixed(3)} < threshold ${QUALITY_THRESHOLD}` });
+      rejected.push({ ...signal, rejectionReason: `Quality ${signal.qualityScore.toFixed(3)} < medium threshold ${QUALITY_THRESHOLD_MEDIUM}` });
     }
   }
+
+  const usableSignals = passed.length + medium.length;
 
   const deduplicatedCount = rawScored.length - deduplicated.length;
   const crossValidatedCount = crossValidated.filter(s => s.crossValidated).length;
@@ -258,16 +266,17 @@ export function applyQualityGate(
     ? Math.round((crossValidated.reduce((s, sig) => s + sig.qualityScore, 0) / crossValidated.length) * 1000) / 1000
     : 0;
 
-  const gatePass = passed.length >= MIN_PASSING_SIGNALS;
+  const gatePass = usableSignals >= MIN_PASSING_SIGNALS;
 
   const gateSummary = gatePass
-    ? `GATE_PASS: ${passed.length}/${crossValidated.length} signals passed quality threshold (${QUALITY_THRESHOLD}). Deduplicated ${deduplicatedCount}, cross-validated ${crossValidatedCount}.`
-    : `GATE_FAIL: Only ${passed.length}/${crossValidated.length} signals passed quality threshold (${QUALITY_THRESHOLD}). Minimum ${MIN_PASSING_SIGNALS} required. Deduplicated ${deduplicatedCount}, cross-validated ${crossValidatedCount}.`;
+    ? `GATE_PASS: ${passed.length} high + ${medium.length} medium = ${usableSignals}/${crossValidated.length} usable signals (high≥${QUALITY_THRESHOLD_HIGH}, medium≥${QUALITY_THRESHOLD_MEDIUM}). Rejected ${rejected.length}. Deduplicated ${deduplicatedCount}, cross-validated ${crossValidatedCount}.`
+    : `GATE_FAIL: Only ${usableSignals}/${crossValidated.length} usable signals (high=${passed.length}, medium=${medium.length}). Minimum ${MIN_PASSING_SIGNALS} required. Deduplicated ${deduplicatedCount}, cross-validated ${crossValidatedCount}.`;
 
   return {
     totalInputSignals: rawScored.length,
-    passedSignals: passed.sort((a, b) => b.qualityScore - a.qualityScore),
+    passedSignals: [...passed, ...medium].sort((a, b) => b.qualityScore - a.qualityScore),
     rejectedSignals: rejected.sort((a, b) => b.qualityScore - a.qualityScore),
+    mediumQualitySignals: medium.sort((a, b) => b.qualityScore - a.qualityScore),
     deduplicatedCount,
     crossValidatedCount,
     averageQuality,

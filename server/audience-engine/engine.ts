@@ -417,7 +417,106 @@ function applyObjectionContextRules(
 }
 
 function applyEvidenceIntegrityFilter(signals: SignalItem[]): SignalItem[] {
-  return signals.filter(s => s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL);
+  return signals.map(s => {
+    if (s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL) {
+      return s;
+    }
+    if (s.evidenceCount >= 1 || s.frequency >= 1) {
+      const evidenceRatio = Math.min(s.evidenceCount, s.frequency) / MIN_EVIDENCE_PER_SIGNAL;
+      const downgradedConfidence = Math.max(0.05, s.confidenceScore * evidenceRatio * 0.6);
+      return {
+        ...s,
+        confidenceScore: downgradedConfidence,
+        sourceSignals: [...s.sourceSignals, "evidence_downgraded"],
+      };
+    }
+    return null;
+  }).filter((s): s is SignalItem => s !== null);
+}
+
+function inferPainsFromObjections(objectionMap: SignalItem[], inputSnapshotId: string | null): SignalItem[] {
+  const inferred: SignalItem[] = [];
+  for (const obj of objectionMap) {
+    const painCanonical = `Problem behind objection: ${obj.canonical}`;
+    inferred.push({
+      canonical: painCanonical,
+      frequency: Math.max(1, Math.round(obj.frequency * 0.7)),
+      evidence: obj.evidence.slice(0, 2),
+      evidenceCount: Math.max(1, Math.round(obj.evidenceCount * 0.7)),
+      confidenceScore: Math.max(0.1, obj.confidenceScore * 0.6),
+      sourceSignals: [...obj.sourceSignals, "inferred_from_objection"],
+      inputSnapshotId,
+    });
+  }
+  return inferred;
+}
+
+function inferPainsFromEmotionalDrivers(drivers: SignalItem[], inputSnapshotId: string | null): SignalItem[] {
+  const inferred: SignalItem[] = [];
+  for (const driver of drivers) {
+    const painCanonical = `Unresolved need: ${driver.canonical}`;
+    inferred.push({
+      canonical: painCanonical,
+      frequency: Math.max(1, Math.round(driver.frequency * 0.5)),
+      evidence: driver.evidence.slice(0, 2),
+      evidenceCount: Math.max(1, Math.round(driver.evidenceCount * 0.5)),
+      confidenceScore: Math.max(0.1, driver.confidenceScore * 0.5),
+      sourceSignals: [...driver.sourceSignals, "inferred_from_emotional_driver"],
+      inputSnapshotId,
+    });
+  }
+  return inferred;
+}
+
+function mergePainLayers(
+  directPains: SignalItem[],
+  objectionInferred: SignalItem[],
+  driverInferred: SignalItem[],
+  bridgePains: SignalItem[],
+): { finalPainMap: SignalItem[]; painSources: { direct: number; objectionInferred: number; driverInferred: number; bridge: number } } {
+  const seen = new Set<string>();
+  const final: SignalItem[] = [];
+
+  for (const p of directPains) {
+    seen.add(p.canonical.toLowerCase());
+    final.push(p);
+  }
+
+  for (const p of bridgePains) {
+    const key = p.canonical.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      final.push(p);
+    }
+  }
+
+  for (const p of objectionInferred) {
+    const key = p.canonical.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      final.push(p);
+    }
+  }
+
+  for (const p of driverInferred) {
+    const key = p.canonical.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      final.push(p);
+    }
+  }
+
+  final.sort((a, b) => b.confidenceScore - a.confidenceScore);
+
+  return {
+    finalPainMap: final,
+    painSources: {
+      direct: directPains.length,
+      objectionInferred: objectionInferred.filter(p => final.includes(p)).length,
+      driverInferred: driverInferred.filter(p => final.includes(p)).length,
+      bridge: bridgePains.filter(p => final.includes(p)).length,
+    },
+  };
 }
 
 function computeSegmentSimilarity(segA: AudienceSegment, segB: AudienceSegment): number {
@@ -1569,16 +1668,26 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   rawObjectionMap = applyObjectionContextRules(rawObjectionMap, allText);
 
-  let painMap = applyEvidenceIntegrityFilter(rawPainMap);
+  let directPainMap = applyEvidenceIntegrityFilter(rawPainMap);
   let desireMap = applyEvidenceIntegrityFilter(rawDesireMap);
   let objectionMap = applyEvidenceIntegrityFilter(rawObjectionMap);
   const transformationMap = applyEvidenceIntegrityFilter(rawTransformationMap);
   const emotionalDrivers = applyEvidenceIntegrityFilter(rawEmotionalDrivers);
 
+  let bridgePainSignals: SignalItem[] = [];
   let totalBridgeConflicts = 0;
   if (bridgeResult && bridgeResult.bridgeIntegrity) {
-    const painMerge = mergeBridgedIntoAudienceMap(painMap, bridgeResult.painSignals, miSnapshotId);
-    painMap = painMerge.merged;
+    const painMerge = mergeBridgedIntoAudienceMap(directPainMap, bridgeResult.painSignals, miSnapshotId);
+    directPainMap = painMerge.merged;
+    bridgePainSignals = bridgeResult.painSignals.map((bs: any) => ({
+      canonical: bs.canonical,
+      frequency: bs.frequency || 1,
+      evidence: bs.evidence || [],
+      evidenceCount: bs.evidenceCount || 1,
+      confidenceScore: Math.max(0.1, (bs.confidenceScore || 0.3) * 0.7),
+      sourceSignals: [...(bs.sourceSignals || []), "bridge_signal"],
+      inputSnapshotId: miSnapshotId,
+    }));
     totalBridgeConflicts += painMerge.conflictsResolved;
 
     const desireMerge = mergeBridgedIntoAudienceMap(desireMap, bridgeResult.desireSignals, miSnapshotId);
@@ -1592,8 +1701,16 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     if (totalBridgeConflicts > 0) {
       console.log(`[AudienceEngine-V3] CONFLICT_RESOLUTION | conflictsResolved=${totalBridgeConflicts} | anchor=MIv3_QUALITY_GATED`);
     }
-    console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_MERGED | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length}`);
+    console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_MERGED | pains=${directPainMap.length} | desires=${desireMap.length} | objections=${objectionMap.length}`);
   }
+
+  const qualifiedObjections = objectionMap.filter(o => o.confidenceScore >= 0.25 && o.evidenceCount >= 1);
+  const qualifiedDrivers = emotionalDrivers.filter(d => d.confidenceScore >= 0.25 && d.evidenceCount >= 1);
+  const objectionInferredPains = inferPainsFromObjections(qualifiedObjections, miSnapshotId).slice(0, 5);
+  const driverInferredPains = inferPainsFromEmotionalDrivers(qualifiedDrivers, miSnapshotId).slice(0, 3);
+  const { finalPainMap, painSources } = mergePainLayers(directPainMap, objectionInferredPains, driverInferredPains, bridgePainSignals);
+  let painMap = finalPainMap;
+  console.log(`[AudienceEngine-V3] PAIN_LAYERED_CONSTRUCTION | direct=${painSources.direct} | objectionInferred=${painSources.objectionInferred} | driverInferred=${painSources.driverInferred} | bridge=${painSources.bridge} | final=${painMap.length}`);
 
   let miObjectionDensity = 0;
   let miObjectionCount = 0;

@@ -1508,9 +1508,10 @@ RULES:
 3. enemyDefinition: Compose from the PAIN and ROOT_CAUSE signals mapped to this territory. Translate them into the domain-specific operational failure. Name what specifically fails in this market for this type of buyer. Must contain a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls).
 4. contrastAxis: Compose from the DESIRE and PATTERN signals. Name what the buyer wants operationally vs what currently breaks — in terms specific to this business type.
 5. narrativeDirection: Synthesize across all mapped signals into one positioning sentence that uses domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
-6. mappedSignalIds: List the exact signal IDs you used from the SOURCE SIGNALS.
-7. Do NOT invent concepts outside the provided signals. Every word of substance must trace to a signal label.
+6. mappedSignalIds: List the exact signal IDs you used from the SOURCE SIGNALS. EVERY claim you make MUST reference at least one signal ID.
+7. HARD CONSTRAINT: Do NOT invent, extrapolate, or generate ANY concept, claim, or phrase that does not directly trace to a provided signal label. If you cannot ground a statement in the SOURCE SIGNALS, do not write it. Orphaned claims destroy positioning integrity.
 8. If a territory has no usable signals, set narrativeDirection to "UNMAPPED".
+9. VALIDATION: Before returning, verify every enemyDefinition, contrastAxis, and narrativeDirection contains language directly derived from SOURCE SIGNALS — not inferred or hallucinated.
 
 Return a JSON array:
 [{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }]
@@ -2239,6 +2240,7 @@ CORRECTION REQUIRED:
       })),
       totalInputSignals: allStrategicSignals.length,
       rejectedSignals: [] as any[],
+      mediumQualitySignals: [] as any[],
       deduplicatedCount: 0,
       crossValidatedCount: allStrategicSignals.length,
       averageQuality: 1,
@@ -2260,7 +2262,10 @@ CORRECTION REQUIRED:
           if (!territory.stabilityNotes) territory.stabilityNotes = [];
           territory.stabilityNotes.push(`[HYPOTHESIS] Claim not directly traceable to MIv3 signal: "${orphan.slice(0, 80)}"`);
         }
-        territory.confidenceScore = Math.max(0, territory.confidenceScore - (orphanResult.orphanedClaims.length * 0.05));
+        const orphanPenaltyPerClaim = 0.05;
+        const maxOrphanPenalty = 0.10;
+        const totalPenalty = Math.min(orphanResult.orphanedClaims.length * orphanPenaltyPerClaim, maxOrphanPenalty);
+        territory.confidenceScore = Math.max(0.15, territory.confidenceScore - totalPenalty);
       }
     }
     if (totalOrphanedClaims > 0) {

@@ -229,7 +229,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.warn(`${LOG_PREFIX} PARSE_FAIL | No JSON found in response`);
-      return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary };
+      return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: "AEL response contained no parseable JSON" };
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
@@ -257,8 +257,8 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
     return pkg;
   } catch (err: any) {
     const elapsed = Date.now() - startTime;
-    console.warn(`${LOG_PREFIX} BUILD_ERROR | campaign=${input.campaignId} | elapsed=${elapsed}ms | error=${err.message}`);
-    return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary };
+    console.error(`${LOG_PREFIX} BUILD_ERROR | campaign=${input.campaignId} | elapsed=${elapsed}ms | error=${err.message}`);
+    return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: `AEL build failed: ${err.message}` };
   }
 }
 

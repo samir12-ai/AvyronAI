@@ -82,6 +82,8 @@ export interface AnalyticalPackage {
   confidence_notes: ConfidenceNote[];
   generatedAt: string;
   version: number;
+  isPartial?: boolean;
+  partialReason?: string;
   inputSummary: {
     hasMI: boolean;
     hasAudience: boolean;

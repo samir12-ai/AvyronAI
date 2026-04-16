@@ -961,7 +961,10 @@ async function executeEngine(
               campaignId: config.campaignId,
             });
             ctx.analyticalEnrichment = aelPkg;
-            console.log(`[Orchestrator] AEL_BUILT | duration=${Date.now() - aelStart}ms | dimensions=${aelPkg ? Object.keys(aelPkg).length : 0} | campaignId=${config.campaignId}`);
+            if (aelPkg?.isPartial) {
+              console.warn(`[Orchestrator] AEL_PARTIAL | reason=${aelPkg.partialReason} — downstream engines will receive degraded enrichment`);
+            }
+            console.log(`[Orchestrator] AEL_BUILT | duration=${Date.now() - aelStart}ms | dimensions=${aelPkg ? Object.keys(aelPkg).length : 0} | partial=${aelPkg?.isPartial || false} | campaignId=${config.campaignId}`);
           } catch (aelErr: any) {
             console.warn(`[Orchestrator] AEL_BUILD_FAILED | error=${aelErr.message} — proceeding without enrichment`);
             ctx.analyticalEnrichment = null;

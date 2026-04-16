@@ -1,0 +1,257 @@
+Hi,
+
+We’ve completed the full engine audit and validation runs. The system is now stable at a control level, but we’ve identified the **actual root cause layer** that is still breaking logic.
+
+This is not a protection issue.
+This is not a control issue.
+
+This is a **core logic breakdown in upstream engines**, specifically:
+
+> Audience → Positioning → (supported by MI signal quality)
+
+You need to fix these at the source — not patch, not block, not bypass.
+
+---
+
+# 1. Audience Engine — CRITICAL ROOT ISSUE
+
+## Problem
+
+The engine performs deep internal analysis (desires, objections, drivers, segments), but the **exported painMap is structurally broken**.
+
+We are seeing:
+
+* painMap = 0
+* while other maps (desires, objections, drivers) are populated
+
+This means:
+
+> The engine understands the market, but fails to export usable pain structure.
+
+This is the primary cause of downstream collapse.
+
+---
+
+## Required Fix (MANDATORY)
+
+### A. Decouple internal reasoning from final painMap
+
+Do NOT rely only on:
+
+* pattern cluster matching output
+
+Instead, construct painMap from:
+
+* direct pain clusters
+* objection-derived pains
+* root-cause-derived pains
+* semantic bridge signals
+
+---
+
+### B. Fix the export contract
+
+The final output must include:
+
+* directPainMap
+* inferredPainMap
+* bridgePainMap
+* finalUsablePainMap
+
+Downstream engines must NOT receive an empty pain structure if meaningful signals exist elsewhere.
+
+---
+
+### C. Evidence filter behavior
+
+`applyEvidenceIntegrityFilter()` must NOT collapse the entire painMap to zero.
+
+Instead:
+
+* downgrade confidence
+* mark as inferred
+* but NEVER erase the problem space entirely
+
+---
+
+### D. Market scope + pattern matching
+
+Investigate:
+
+* detectMarketScope()
+* matchPatternClusters()
+
+Ensure they are not over-filtering valid signals.
+
+---
+
+# 2. Positioning Engine — LOGIC CONSTRAINT FAILURE
+
+## Problem
+
+The engine generates narrative beyond available signals:
+
+* low signal coverage (~9%)
+* high orphan claims
+* heavy orphan penalty (-0.40)
+
+Result:
+
+* engineConfidence collapses to ~0.20
+
+---
+
+## Required Fix (MANDATORY)
+
+### A. Reverse generation logic
+
+Do NOT:
+
+* generate positioning → then try to validate
+
+Instead:
+
+* select validated signals first
+* build positioning ONLY from those signals
+
+---
+
+### B. Hard constraint
+
+Every positioning claim MUST:
+
+* map to at least one upstream signal (via lineage)
+
+If not:
+
+* the claim must not be generated
+
+---
+
+### C. Reduce LLM freedom
+
+Constrain generation:
+
+* no abstract narrative expansion
+* no speculative territory creation
+* only signal-backed constructs
+
+---
+
+# 3. Market Intelligence — SIGNAL QUALITY DISTORTION
+
+## Problem
+
+We are seeing:
+
+* high signal volume
+* but near-zero signals passing quality threshold (0.85)
+
+This indicates:
+
+* scoring distortion OR threshold miscalibration
+
+---
+
+## Required Fix
+
+### A. Introduce signal tiers
+
+Replace binary threshold:
+
+* high quality
+* medium quality
+* low quality
+
+Positioning and Audience must use:
+
+* high + medium
+
+---
+
+### B. Recalibrate scoring
+
+Audit how signal quality is computed:
+
+* frequency
+* source diversity
+* competitor overlap
+
+Ensure valid signals are not being suppressed.
+
+---
+
+# 4. AEL / Analytical Enrichment (IMPORTANT)
+
+We observed:
+
+* repeated timeouts (~45s)
+
+This may be silently degrading:
+
+* causal depth
+* signal richness
+
+---
+
+## Required Action
+
+* Audit timeout behavior
+* Confirm whether fallback reduces output quality
+* Ensure downstream engines are not receiving degraded enrichment silently
+
+---
+
+# 5. Execution Rules
+
+* Do NOT add new gates
+* Do NOT add new blocks
+* Do NOT patch outputs
+
+You MUST:
+
+* fix logic at source
+* ensure engines produce structurally valid outputs
+
+---
+
+# 6. Required Deliverable
+
+After implementation, run full pipeline on:
+
+* MarketMindAI
+* SWA Media
+
+And provide:
+
+### Per Engine (Audience + Positioning + MI only)
+
+* before vs after behavior
+* sample outputs
+* signal coverage
+* orphan claim count
+* confidence breakdown:
+
+  * engineConfidence
+  * dataConfidence
+
+---
+
+### Final Validation
+
+Confirm:
+
+* painMap is no longer empty when signals exist
+* positioning is fully grounded
+* no artificial narrative expansion
+* pipeline progresses beyond positioning stage
+
+---
+
+This is not optional tuning.
+
+This is a **core logic correction phase**.
+
+Proceed and implement directly.
+
+Thanks.
