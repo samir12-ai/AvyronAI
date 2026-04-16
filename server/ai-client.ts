@@ -51,6 +51,7 @@ export interface AIChatOptions {
   seed?: number;
   accountId: string;
   endpoint?: string;
+  timeoutMs?: number;
 }
 
 export interface AIGeminiOptions {
@@ -104,7 +105,12 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
       response_format: rest.response_format,
       ...(rest.seed !== undefined ? { seed: rest.seed } : {}),
     };
-    const result = await openai.chat.completions.create(payload as any);
+    const callOptions = options.timeoutMs && options.timeoutMs > HARD_TIMEOUT_MS
+      ? { timeout: options.timeoutMs }
+      : undefined;
+    const result = callOptions
+      ? await openai.chat.completions.create(payload as any, callOptions)
+      : await openai.chat.completions.create(payload as any);
 
     success = true;
     actualTokens = result.usage?.total_tokens || rest.max_tokens;

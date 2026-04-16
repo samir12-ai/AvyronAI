@@ -9,14 +9,36 @@ const LOG_PREFIX = "[AEL-v2]";
 const AEL_VERSION = 2;
 
 function buildInputSummary(input: AELInput) {
-  const hasMI = !!(input.mi && (input.mi.signalClusters || input.mi.marketState || input.mi.signals));
-  const hasAudience = !!(input.audience && (input.audience.painMap || input.audience.pains || input.audience.segments));
-  const hasProductDNA = !!(input.productDNA && input.productDNA.coreOffer);
-  const hasCompetitiveData = !!(input.competitiveData && (input.competitiveData.competitors?.length > 0 || input.competitiveData.posts?.length > 0));
+  // MI runtime shape (MIv3DiagnosticResult): top-level dominanceData/trajectoryData/threatSignals/opportunitySignals/narrativeObjectionMap,
+  // and `output` containing marketState/marketDiagnosis/competitorIntentMap, plus signal_data via output.audienceIntentSignals.
+  const mi = input.mi;
+  const miMarketState = mi?.marketState ?? mi?.output?.marketState;
+  const miSignals =
+    mi?.signalClusters ??
+    mi?.signals ??
+    mi?.output?.audienceIntentSignals ??
+    mi?.threatSignals ??
+    mi?.opportunitySignals;
+  const miHasNarrative = !!(mi?.output?.marketDiagnosis || mi?.output?.narrativeSynthesis || mi?.narrativeObjectionMap);
+  const miHasCompetitive = !!(mi?.dominanceData?.length > 0 || mi?.output?.competitorIntentMap?.length > 0);
+  const hasMI = !!(mi && (miMarketState || (Array.isArray(miSignals) && miSignals.length > 0) || miHasNarrative || miHasCompetitive));
+
+  const hasAudience = !!(input.audience && (input.audience.painMap || input.audience.pains || input.audience.segments || input.audience.audienceSegments));
+  const hasProductDNA = !!(input.productDNA && (input.productDNA.coreOffer || input.productDNA.businessType));
+  const hasCompetitiveData = !!(
+    input.competitiveData && (
+      (Array.isArray(input.competitiveData.competitors) && input.competitiveData.competitors.length > 0) ||
+      (Array.isArray(input.competitiveData.posts) && input.competitiveData.posts.length > 0)
+    )
+  );
 
   let signalCount = 0;
-  if (input.mi?.signalClusters) signalCount += input.mi.signalClusters.length;
-  if (input.mi?.signals) signalCount += input.mi.signals.length;
+  if (Array.isArray(mi?.signalClusters)) signalCount += mi.signalClusters.length;
+  if (Array.isArray(mi?.signals)) signalCount += mi.signals.length;
+  if (Array.isArray(mi?.threatSignals)) signalCount += mi.threatSignals.length;
+  if (Array.isArray(mi?.opportunitySignals)) signalCount += mi.opportunitySignals.length;
+  if (Array.isArray(mi?.output?.audienceIntentSignals)) signalCount += mi.output.audienceIntentSignals.length;
+  if (Array.isArray(mi?.output?.competitorIntentMap)) signalCount += mi.output.competitorIntentMap.length;
 
   return { hasMI, hasAudience, hasProductDNA, hasCompetitiveData, signalCount };
 }
@@ -26,15 +48,33 @@ function buildContextBlock(input: AELInput): string {
 
   if (input.mi) {
     const mi = input.mi;
+    const out = mi.output || {};
     sections.push("=== MARKET INTELLIGENCE RAW DATA ===");
-    if (mi.marketState) sections.push(`Market State: ${JSON.stringify(mi.marketState).slice(0, 1200)}`);
-    if (mi.signalClusters) sections.push(`Signal Clusters (${mi.signalClusters.length}): ${JSON.stringify(mi.signalClusters.slice(0, 8)).slice(0, 2000)}`);
+    const marketState = mi.marketState ?? out.marketState;
+    if (marketState) sections.push(`Market State: ${JSON.stringify(marketState).slice(0, 1200)}`);
+    if (out.marketDiagnosis) sections.push(`Market Diagnosis: ${JSON.stringify(out.marketDiagnosis).slice(0, 1200)}`);
+    const signalClusters = mi.signalClusters ?? mi.signals ?? out.audienceIntentSignals;
+    if (Array.isArray(signalClusters) && signalClusters.length > 0) {
+      sections.push(`Signal Clusters (${signalClusters.length}): ${JSON.stringify(signalClusters.slice(0, 8)).slice(0, 2000)}`);
+    }
+    if (Array.isArray(mi.threatSignals) && mi.threatSignals.length > 0) {
+      sections.push(`Threat Signals (${mi.threatSignals.length}): ${JSON.stringify(mi.threatSignals.slice(0, 10)).slice(0, 1200)}`);
+    }
+    if (Array.isArray(mi.opportunitySignals) && mi.opportunitySignals.length > 0) {
+      sections.push(`Opportunity Signals (${mi.opportunitySignals.length}): ${JSON.stringify(mi.opportunitySignals.slice(0, 10)).slice(0, 1200)}`);
+    }
     if (mi.trajectoryData) sections.push(`Market Trajectory: ${JSON.stringify(mi.trajectoryData).slice(0, 800)}`);
-    if (mi.intentData) sections.push(`Buyer Intent Signals: ${JSON.stringify(mi.intentData).slice(0, 800)}`);
-    if (mi.narrativeObjections) sections.push(`Market Objections & Resistance: ${JSON.stringify(mi.narrativeObjections).slice(0, 800)}`);
+    const intentData = mi.intentData ?? out.competitorIntentMap;
+    if (intentData) sections.push(`Buyer/Competitor Intent Signals: ${JSON.stringify(intentData).slice(0, 800)}`);
+    const narrativeObjections = mi.narrativeObjections ?? mi.narrativeObjectionMap;
+    if (narrativeObjections) sections.push(`Market Objections & Resistance: ${JSON.stringify(narrativeObjections).slice(0, 800)}`);
     if (mi.dominanceData) sections.push(`Competitive Dominance Patterns: ${JSON.stringify(mi.dominanceData).slice(0, 800)}`);
     if (mi.competitorPosts || mi.posts) sections.push(`Competitor Content Sample: ${JSON.stringify((mi.competitorPosts || mi.posts || []).slice(0, 5)).slice(0, 1000)}`);
     if (mi.comments || mi.audienceComments) sections.push(`Audience Comments: ${JSON.stringify((mi.comments || mi.audienceComments || []).slice(0, 10)).slice(0, 1200)}`);
+    if (mi.telemetry) {
+      const t = mi.telemetry;
+      sections.push(`Pipeline Trace: competitorsCount=${t.competitorsCount ?? 0} | postSampleSize=${t.postSampleSize ?? 0} | commentSampleSize=${t.commentSampleSize ?? 0} | postsProcessed=${t.postsProcessed ?? 0} | commentsProcessed=${t.commentsProcessed ?? 0} | executionMode=${t.executionMode}`);
+    }
   }
 
   if (input.audience) {
@@ -223,6 +263,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
       ],
       max_tokens: 4000,
       temperature: 0.4,
+      timeoutMs: 90000,
     });
 
     const content = response.choices?.[0]?.message?.content || "";

@@ -1,0 +1,259 @@
+Hi,
+
+We are not treating this as a single issue.
+We are addressing this as a **full system behavior correction pass**.
+
+The SWA Media case exposed a critical failure:
+
+> The system reports 0 competitors in a market where competitors clearly exist.
+
+This is not acceptable and indicates a breakdown in the Market Intelligence pipeline and overall system behavior.
+
+---
+
+# 1. CRITICAL — MI Competitor Pipeline Failure
+
+The system must NEVER conclude “0 competitors” unless it is explicitly proven.
+
+You are required to trace the full pipeline for SWA Media:
+
+## Step-by-step investigation:
+
+### A. Raw Extraction
+
+* number of raw competitors detected before enrichment
+
+### B. Enrichment
+
+* number entering enrichment
+* number successfully enriched
+
+### C. Filtering
+
+* number before filtering
+* number after filtering
+* exact rules causing removals
+
+### D. Market Scope
+
+* detected market category
+* justification
+* why valid competitors may have been excluded
+
+### E. Campaign Binding
+
+* confirm correct campaignId / accountId linkage
+
+---
+
+## Required Output (for MI):
+
+* raw competitor count
+* enriched competitor count
+* final usable competitor count
+* exact drop-off stage
+* root cause explanation
+
+---
+
+# 2. SYSTEM BEHAVIOR RULES (MANDATORY ENFORCEMENT)
+
+We are not fixing isolated bugs.
+We are enforcing how the system must behave.
+
+---
+
+## A. No False Zero States
+
+The system must NOT output:
+
+* 0 competitors
+* 0 pains
+* 0 signals
+
+if any upstream evidence exists.
+
+If confidence is low:
+
+* mark as low confidence
+* mark as partial
+* but DO NOT collapse to zero
+
+---
+
+## B. No Silent Data Loss
+
+At every stage:
+
+* log input count
+* log output count
+* log drop reason
+
+No data should disappear without trace.
+
+---
+
+## C. No Hard Decisions on Broken Inputs
+
+If MI is incomplete or degraded:
+
+* downstream engines must NOT produce:
+
+  * hard BLOCK decisions
+  * strong conclusions
+
+Instead:
+
+* mark as PARTIAL / INSUFFICIENT_DATA
+
+---
+
+## D. Signal Preservation
+
+Signals must not be over-filtered.
+
+If filtering removes >70% of signals:
+
+* trigger warning
+* downgrade confidence
+* DO NOT proceed as normal
+
+---
+
+## E. Grounded Output Only
+
+All downstream outputs must remain:
+
+* signal-backed
+* pain-linked
+* traceable
+
+No engine is allowed to generate beyond available data.
+
+---
+
+## F. Deterministic Behavior
+
+Same input → same output.
+
+No stochastic variation that changes:
+
+* pass / block decisions
+* confidence thresholds
+
+---
+
+## G. Enforcement Must Be Real
+
+If system detects:
+
+* positioning drift
+* invalid offer alignment
+* missing grounding
+
+→ must trigger:
+
+* PARTIAL or BLOCK
+
+No silent COMPLETE allowed.
+
+---
+
+## H. Run-Scoped Truth (Already Implemented — MUST HOLD)
+
+* all engines must use same run_id
+* no fallback to old snapshots
+* no mixing states
+
+Validate that this is still true in SWA case.
+
+---
+
+## I. Single Source of Truth
+
+* awareness: single canonical source
+* pains: from audience only
+* positioning: from current run only
+
+No parallel interpretations.
+
+---
+
+# 3. VALIDATION REQUIREMENT (MANDATORY — NO EXCEPTIONS)
+
+After fixing MI and enforcing behavior, run:
+
+* SWA Media (fixed)
+* MarketMindAI
+* one additional clean campaign
+
+---
+
+## Provide FULL evidence:
+
+### Pipeline
+
+* engines executed
+* statuses
+* first degradation point
+
+### MI
+
+* full competitor pipeline trace
+
+### Consistency
+
+* awareness
+* pains
+* positioning lineage
+
+### Enforcement
+
+* all PARTIAL / BLOCK triggers
+* justification
+
+### Final Verdict
+
+* COMPLETE / PARTIAL / BLOCKED
+* based on actual system state
+
+---
+
+# 4. NON-NEGOTIABLE RULES
+
+Do NOT:
+
+* inject fake competitors
+* lower thresholds blindly
+* bypass MI logic
+* patch outputs
+* hide failures behind COMPLETE status
+
+If you must change behavior:
+
+* explain exactly what and why
+
+---
+
+# 5. ACCEPTANCE CRITERIA
+
+This is NOT complete until:
+
+* competitors are correctly detected in SWA
+* no false zero states exist
+* data flow is fully traceable
+* system behaves consistently under degraded data
+* validation runs prove correctness with evidence
+
+---
+
+We are closing system behavior at the root level.
+
+Do not return partial results.
+Do not stop at “should be fixed.”
+
+Return full investigation + fixes + validated evidence.
+
+Proceed.
+
+Thanks.

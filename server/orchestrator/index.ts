@@ -952,11 +952,24 @@ async function executeEngine(
         if (ctx.mi && ctx.audience) {
           try {
             const aelStart = Date.now();
+            // Derive competitive data from MI's runtime shape so AEL sees what's actually present.
+            const miAny: any = ctx.mi;
+            const competitorIntent = miAny?.output?.competitorIntentMap || [];
+            const dominance = Array.isArray(miAny?.dominanceData) ? miAny.dominanceData : [];
+            const competitorList = dominance.length > 0
+              ? dominance.map((d: any) => ({ id: d.competitorId, name: d.competitorName, weight: d.authorityWeight, lifecycle: d.lifecycle }))
+              : competitorIntent.map((c: any) => ({ id: c.competitorId, name: c.competitorName, intent: c.intentCategory }));
+            const competitiveData = competitorList.length > 0
+              ? { competitors: competitorList, posts: miAny?.competitorPosts || miAny?.posts || [] }
+              : null;
+            // ProductDNA is loaded by the audience engine and exposed on its result.
+            const productDnaFromAudience = (ctx.audience as any)?.productDna || null;
+            console.log(`[Orchestrator] AEL_INPUT_PROBE | hasMI=${!!ctx.mi} | hasAudience=${!!ctx.audience} | hasProductDNA=${!!productDnaFromAudience} | competitorListSize=${competitorList.length} | miMarketState=${miAny?.output?.marketState ?? miAny?.marketState ?? "n/a"}`);
             const aelPkg = await buildAnalyticalPackage({
               mi: ctx.mi,
               audience: ctx.audience,
-              productDNA: null,
-              competitiveData: null,
+              productDNA: productDnaFromAudience,
+              competitiveData,
               accountId: config.accountId,
               campaignId: config.campaignId,
             });
