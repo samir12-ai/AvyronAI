@@ -529,6 +529,13 @@ function validateClaim(
     }
   }
 
+  if (signalProvenance && signalProvenance.signalStrength >= 0.5) {
+    isNarrativeBased = false;
+    isAssumptionBased = false;
+  } else if (hasLineageAnchor && signalProvenance && signalProvenance.signalStrength >= 0.3) {
+    isAssumptionBased = false;
+  }
+
   for (const opp of (mi.opportunitySignals || [])) {
     const oppStr = extractSignalText(opp);
     if (oppStr && hasOverlap(lower, oppStr.toLowerCase())) {

@@ -2192,6 +2192,11 @@ export function analyzePersuasion(
       ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
       ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
       ...routes.primary.messageOrderLogic.map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
+      ...(routes.primary.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
+      ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
+      ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
+      ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
+      ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""}`),
     ],
     analyticalEnrichment || null,
   );

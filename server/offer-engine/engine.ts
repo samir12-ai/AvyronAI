@@ -2471,12 +2471,15 @@ export async function runOfferEngine(
     const offerOutcome = primaryOffer.coreOutcome || "";
     const offerMechDesc = primaryOffer.mechanismDescription || "";
 
+    const offerCombinedText = `${(primaryOffer.offerName || "").toLowerCase()} ${offerOutcome.toLowerCase()} ${offerMechDesc.toLowerCase()} ${(primaryOffer.deliverables || []).join(" ").toLowerCase()}`;
     const hasPainAlignment = pains.length > 0 && pains.some((p: any) => {
-      const painText = (typeof p === "string" ? p : p?.pain || p?.name || "").toLowerCase();
-      return painText.length > 3 && (offerOutcome.toLowerCase().includes(painText.substring(0, Math.min(painText.length, 15))) || offerMechDesc.toLowerCase().includes(painText.substring(0, Math.min(painText.length, 15))));
+      const painText = (typeof p === "string" ? p : p?.pain || p?.name || p?.canonical || "");
+      const tokens = extractRobustTokens(painText);
+      return tokens.length > 0 && fuzzyTokenMatch(tokens, offerCombinedText);
     });
     const hasDesireAlignment = desires.length > 0 && desires.some(([k]) => {
-      return k.length > 3 && (offerOutcome.toLowerCase().includes(k.toLowerCase().substring(0, Math.min(k.length, 15))) || offerMechDesc.toLowerCase().includes(k.toLowerCase().substring(0, Math.min(k.length, 15))));
+      const tokens = extractRobustTokens(k);
+      return tokens.length > 0 && fuzzyTokenMatch(tokens, offerCombinedText);
     });
 
     const alignmentResult = checkCrossEngineAlignment([

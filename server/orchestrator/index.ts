@@ -344,13 +344,33 @@ function extractAudienceInput(audienceResult: any): any {
   } else if (rawAwareness != null && typeof rawAwareness === "object" && typeof rawAwareness.level === "string") {
     awarenessLevel = rawAwareness.level;
   }
+  const painProfiles = audienceResult.painProfiles || audienceResult.painMap || audienceResult.audiencePains || [];
+  const rawObjections = audienceResult.objectionMap ?? {};
+  const objectionMapObject: Record<string, any> = Array.isArray(rawObjections)
+    ? rawObjections.reduce((acc: Record<string, any>, item: any, idx: number) => {
+        const key = typeof item === "string" ? item : (item?.objection || item?.name || item?.key || `objection_${idx}`);
+        acc[key] = item;
+        return acc;
+      }, {})
+    : (rawObjections && typeof rawObjections === "object" ? rawObjections : {});
+  const rawDesire = audienceResult.desireMap ?? {};
+  const desireMapObject: Record<string, any> = Array.isArray(rawDesire)
+    ? rawDesire.reduce((acc: Record<string, any>, item: any, idx: number) => {
+        const key = typeof item === "string" ? item : (item?.desire || item?.name || item?.key || `desire_${idx}`);
+        acc[key] = item;
+        return acc;
+      }, {})
+    : (rawDesire && typeof rawDesire === "object" ? rawDesire : {});
+  const segments = audienceResult.audienceSegments || audienceResult.segments || [];
   return {
-    painProfiles: audienceResult.painProfiles || [],
-    desireMap: audienceResult.desireMap || [],
-    objectionMap: audienceResult.objectionMap || [],
+    painProfiles,
+    audiencePains: painProfiles,
+    desireMap: desireMapObject,
+    objectionMap: objectionMapObject,
     transformationMap: audienceResult.transformationMap || [],
     emotionalDrivers: audienceResult.emotionalDrivers || [],
-    segments: audienceResult.audienceSegments || [],
+    segments,
+    audienceSegments: segments,
     awarenessLevel,
     maturityIndex: audienceResult.maturityIndex || null,
   };
