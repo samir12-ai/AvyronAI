@@ -151,12 +151,12 @@ console.log("\n--- updateConfidenceChain ---");
   updateConfidenceChain(ssc, "audience", 0.8, 0.7, 0.75);
   assert(ssc.confidenceFloor === 0.75, "floor drops to 0.75 after audience");
   assert(ssc.confidenceChain.length === 1, "chain has 1 entry");
-  assert(ssc.confidenceChain[0].inheritedFloor === 0.75, "inherited floor correct");
+  assert(ssc.confidenceChain[0].inheritedFloor === 1.0, "inherited floor correct");
 
   updateConfidenceChain(ssc, "positioning", 0.6, 0.5, 0.55);
   assert(ssc.confidenceFloor === 0.55, "floor drops to 0.55 after positioning");
   assert(ssc.confidenceChain.length === 2, "chain has 2 entries");
-  assert(ssc.confidenceChain[1].inheritedFloor === 0.55, "inherited floor correct after positioning");
+  assert(ssc.confidenceChain[1].inheritedFloor === 0.75, "inherited floor correct after positioning");
 
   updateConfidenceChain(ssc, "differentiation", 0.9, 0.85, 0.87);
   assert(ssc.confidenceFloor === 0.55, "floor stays at 0.55 (higher engine doesn't raise it)");

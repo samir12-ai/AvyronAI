@@ -278,13 +278,14 @@ export function updateConfidenceChain(
   engineConfidence: number,
   combinedConfidence: number
 ): void {
+  const floorBeforeThisEngine = ssc.confidenceFloor;
   ssc.confidenceFloor = Math.min(ssc.confidenceFloor, combinedConfidence);
   ssc.confidenceChain.push({
     engineId,
     dataConfidence,
     engineConfidence,
     combinedConfidence,
-    inheritedFloor: ssc.confidenceFloor,
+    inheritedFloor: floorBeforeThisEngine,
   });
 }
 

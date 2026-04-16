@@ -384,12 +384,12 @@ export function checkConfidenceChainIntegrity(ssc: SharedStrategicContext | null
   }
 
   const violations: string[] = [];
-  const floor = ssc.confidenceFloor;
-  const maxAllowed = floor + 0.20;
 
   for (const entry of ssc.confidenceChain) {
-    if (entry.combinedConfidence > maxAllowed && floor < 1.0) {
-      violations.push(`${entry.engineId}: combined=${entry.combinedConfidence.toFixed(2)} > floor(${floor.toFixed(2)})+0.20=${maxAllowed.toFixed(2)}`);
+    const entryFloor = entry.inheritedFloor;
+    const maxAllowed = entryFloor + 0.20;
+    if (entry.combinedConfidence > maxAllowed && entryFloor < 1.0) {
+      violations.push(`${entry.engineId}: combined=${entry.combinedConfidence.toFixed(2)} > floor(${entryFloor.toFixed(2)})+0.20=${maxAllowed.toFixed(2)}`);
     }
   }
 
@@ -404,7 +404,7 @@ export function checkConfidenceChainIntegrity(ssc: SharedStrategicContext | null
   return {
     check: "confidence_chain_integrity",
     passed: true,
-    details: `All ${ssc.confidenceChain.length} engines within floor(${floor.toFixed(2)})+0.20 bound`,
+    details: `All ${ssc.confidenceChain.length} engines within their inherited floor+0.20 bound`,
   };
 }
 
