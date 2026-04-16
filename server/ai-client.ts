@@ -48,6 +48,7 @@ export interface AIChatOptions {
   max_tokens: number;
   temperature?: number;
   response_format?: any;
+  seed?: number;
   accountId: string;
   endpoint?: string;
 }
@@ -101,6 +102,7 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
       ...tokenParam,
       temperature: rest.temperature,
       response_format: rest.response_format,
+      ...(rest.seed !== undefined ? { seed: rest.seed } : {}),
     };
     const result = await openai.chat.completions.create(payload as any);
 

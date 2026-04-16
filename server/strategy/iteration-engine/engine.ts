@@ -774,9 +774,11 @@ export async function runIterationEngine(
   }
 
   let hypotheses = generateHypotheses(performance, funnel, creative, persuasion);
+  let syntheticFallbackUsed = false;
   if (hypotheses.length === 0) {
     hypotheses = generateBenchmarkExplorationHypotheses().slice(0, 2);
-    structuralWarnings.push("No data-driven hypotheses generated — baseline exploration hypotheses injected");
+    syntheticFallbackUsed = true;
+    structuralWarnings.push("SYNTHETIC FALLBACK: No data-driven hypotheses generated — baseline exploration hypotheses injected");
   }
   const targets = generateOptimizationTargets(performance, funnel);
   const failedFlags = detectFailedStrategies(performance, creative);
@@ -874,10 +876,15 @@ export async function runIterationEngine(
 
   const confidenceScore = clamp(rawConfidence);
 
-  const status = guardLayer.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
-  const statusMessage = status === STATUS.PROVISIONAL
+  let status: string = guardLayer.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
+  let statusMessage: string = status === STATUS.PROVISIONAL
     ? "Iteration plan generated with guard warnings — operating in conservative mode"
     : `Iteration analysis complete: ${filteredHypotheses.length} test hypotheses, ${targets.length} optimization targets`;
+  if (syntheticFallbackUsed && status === STATUS.COMPLETE) {
+    status = STATUS.PROVISIONAL;
+    statusMessage = `Iteration in synthetic fallback mode — no data-driven hypotheses available, ${filteredHypotheses.length} baseline exploration hypotheses injected`;
+    console.log(`[IterationEngine] SYNTHETIC_FALLBACK_STATUS | demoting COMPLETE → PROVISIONAL | hypotheses=${filteredHypotheses.length} (synthetic)`);
+  }
 
   const acceptability = assessStrategyAcceptability(
     confidenceScore,

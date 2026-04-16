@@ -81,6 +81,8 @@ export interface BudgetGovernorResult {
   boundaryCheck: { passed: boolean; violations: string[] };
   structuralWarnings: string[];
   confidenceScore: number;
+  budgetDecisionConfidence: number;
+  baseValidationConfidence: number;
   executionTimeMs: number;
   engineVersion: number;
   layerDiagnostics: Record<string, any>;

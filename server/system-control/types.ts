@@ -35,7 +35,8 @@ export type DowngradeCode =
   | "UNVERIFIED_CAC"
   | "WEAK_FUNNEL_FOR_SCALE"
   | "LOW_SIGNAL_TRUST"
-  | "INTEGRITY_PARTIAL";
+  | "INTEGRITY_PARTIAL"
+  | "CROSS_ENGINE_CONTRADICTIONS";
 
 export type ReviewCode =
   | "SYNTHESIS_DRIFT"

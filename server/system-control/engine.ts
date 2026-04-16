@@ -225,8 +225,15 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
       executionMode = "RESTRICTED_EXECUTION";
     }
   } else if (contradictions.length > 0) {
-    verdict = "PASS";
+    verdict = "DOWNGRADE";
     executionMode = "REVIEW_REQUIRED";
+    downgrades.push({
+      from: budgetAction || "test",
+      to: "review_required",
+      reason: `${contradictions.length} cross-engine contradiction(s) detected — verdict cannot be PASS until resolved`,
+      code: "CROSS_ENGINE_CONTRADICTIONS",
+      affectedEngine: "system_control",
+    });
   } else {
     verdict = "PASS";
     executionMode = "FULL_EXECUTION";

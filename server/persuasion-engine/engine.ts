@@ -2062,6 +2062,8 @@ export function analyzePersuasion(
   const pMode = routes.primary.persuasionMode;
   const pMsgOrder = routes.primary.messageOrderLogic;
 
+  let positioningDriftMinSimilarity = 1;
+  let positioningDriftWorstDecision = "";
   if (lockedDecisions.length > 0) {
     const persuasionOutputText = [
       routes.primary.routeName || "",
@@ -2074,6 +2076,10 @@ export function analyzePersuasion(
       const decisionCore = decision.replace(/^(contrast_axis|enemy|mechanism|narrative_direction):\s*/i, "").trim();
       if (!decisionCore) continue;
       const similarity = cosineSimilarity(decisionCore, persuasionOutputText);
+      if (similarity < positioningDriftMinSimilarity) {
+        positioningDriftMinSimilarity = similarity;
+        positioningDriftWorstDecision = decisionCore;
+      }
       if (similarity < 0.20) {
         crossEngineValidation.push(
           `POSITIONING LOCK DRIFT: Persuasion output has low semantic alignment (score=${similarity.toFixed(2)}, threshold=0.20) with locked decision "${decisionCore}" — output may have drifted from offer engine contracts`,
@@ -2245,9 +2251,23 @@ export function analyzePersuasion(
     structuralWarnings,
   );
 
+  let driftStatus: string = STATUS.COMPLETE;
+  let driftStatusMessage: string | null = null;
+  if (lockedDecisions.length > 0 && positioningDriftMinSimilarity < 0.20) {
+    if (positioningDriftMinSimilarity < 0.10) {
+      driftStatus = STATUS.POSITIONING_DRIFT;
+      driftStatusMessage = `BLOCKED: Severe positioning drift detected (similarity=${positioningDriftMinSimilarity.toFixed(2)} < 0.10) against locked decision "${positioningDriftWorstDecision}" — persuasion output is semantically disconnected from positioning lock`;
+      console.log(`[PersuasionEngine-V3] POSITIONING_DRIFT_ENFORCEMENT | severity=SEVERE | minSim=${positioningDriftMinSimilarity.toFixed(2)} | status=POSITIONING_DRIFT (BLOCK)`);
+    } else {
+      driftStatus = STATUS.PARTIAL;
+      driftStatusMessage = `PARTIAL: Positioning drift detected (similarity=${positioningDriftMinSimilarity.toFixed(2)} < 0.20 threshold) against locked decision "${positioningDriftWorstDecision}" — persuasion output drifted from positioning lock`;
+      console.log(`[PersuasionEngine-V3] POSITIONING_DRIFT_ENFORCEMENT | severity=MILD | minSim=${positioningDriftMinSimilarity.toFixed(2)} | status=PARTIAL`);
+    }
+  }
+
   return {
-    status: STATUS.COMPLETE,
-    statusMessage: null,
+    status: driftStatus,
+    statusMessage: driftStatusMessage,
     primaryRoute: routes.primary,
     alternativeRoute: routes.alternative,
     rejectedRoute: routes.rejected,

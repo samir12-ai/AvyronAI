@@ -467,6 +467,8 @@ export function runBudgetGovernorEngine(input: BudgetGovernorInput): BudgetGover
       boundaryCheck: { passed: guardResult.passed, violations: guardResult.violations },
       structuralWarnings,
       confidenceScore,
+      budgetDecisionConfidence: confidenceScore,
+      baseValidationConfidence: input.validationConfidence,
       executionTimeMs,
       engineVersion: ENGINE_VERSION,
       layerDiagnostics: {
@@ -502,6 +504,8 @@ export function runBudgetGovernorEngine(input: BudgetGovernorInput): BudgetGover
       boundaryCheck: { passed: false, violations: ["Engine failure"] },
       structuralWarnings: [`Engine error: ${error.message}`],
       confidenceScore: 0,
+      budgetDecisionConfidence: 0,
+      baseValidationConfidence: input.validationConfidence,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
       layerDiagnostics: { error: error.message },

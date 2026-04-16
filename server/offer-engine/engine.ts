@@ -2502,6 +2502,14 @@ export async function runOfferEngine(
     }
     diagnostics.crossEngineAlignment = alignmentResult;
 
+    const painsExist = pains.length > 0;
+    const noPainAlignment = painsExist && !hasPainAlignment && !hasDesireAlignment;
+    if (noPainAlignment && status === STATUS.COMPLETE) {
+      status = STATUS.AUDIENCE_MISALIGNMENT;
+      statusMessage = `Offer outcome does not reference any of the ${pains.length} identified audience pain points or ${desires.length} desire signals — offer is signal-detached from audience`;
+      console.log(`[OfferEngine-V4] AUDIENCE_PAIN_GATE_FAILED | pains=${pains.length} desires=${desires.length} | demoting status COMPLETE → AUDIENCE_MISALIGNMENT`);
+    }
+
     let celDepth = enforceEngineDepthCompliance(
     "offer",
     [

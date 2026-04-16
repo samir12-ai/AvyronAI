@@ -1788,8 +1788,9 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
     const response = await aiChat({
       model: "gpt-4.1-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
+      temperature: 0.0,
       max_tokens: 1500,
+      seed: 42,
       endpoint: "positioning-engine-v3-statements",
       accountId,
     });
@@ -2185,11 +2186,17 @@ export async function runPositioningEngine(
     );
   }
 
-  const miFreshness = activeMiSnapshot.dataFreshnessDays;
-  if (miFreshness !== null && miFreshness !== undefined && miFreshness > 14) {
-    console.log(`[PositioningEngine-V3] MI data stale: ${miFreshness}d exceeds 14d threshold — requires MI refresh first`);
+  const miSnapshotAgeDays = activeMiSnapshot.createdAt
+    ? Math.max(0, Math.round((Date.now() - new Date(activeMiSnapshot.createdAt).getTime()) / (1000 * 60 * 60 * 24)))
+    : null;
+  if (miSnapshotAgeDays !== null && miSnapshotAgeDays > 14) {
+    console.log(`[PositioningEngine-V3] MI snapshot stale: created ${miSnapshotAgeDays}d ago (threshold=14d) — refresh MI`);
     const executionTimeMs = Date.now() - startTime;
-    return buildEmptyResult("MISSING_DEPENDENCY", `MI data is stale (${miFreshness}d) — refresh Market Intelligence before running Positioning`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot is ${miSnapshotAgeDays}d old (>14d) — re-run Market Intelligence before Positioning`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+  const miSourceDataDays = activeMiSnapshot.dataFreshnessDays;
+  if (miSourceDataDays !== null && miSourceDataDays !== undefined && miSourceDataDays > 14) {
+    console.log(`[PositioningEngine-V3] MI source data is ${miSourceDataDays}d old (snapshot itself is fresh: ${miSnapshotAgeDays}d) — proceeding with staleness annotation`);
   }
 
   const [audienceSnapshot] = await db.select().from(audienceSnapshots)

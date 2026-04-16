@@ -1,0 +1,392 @@
+Hi,
+
+We need to close this properly and cleanly from the root.
+
+At this stage, the remaining issues are no longer random. We now have a clear split between:
+
+1. Run / snapshot consistency problems
+2. Real engine-logic problems that still remain even after the recent fixes
+
+I do not want another partial fix, another local patch, or another “works for now” outcome.
+
+I want this solved once, correctly, and end-to-end.
+
+This means:
+
+- fix the run-scoped truth problem
+- fix the real downstream logic issues that are independent of run inconsistency
+- enforce the flow properly
+- validate everything with evidence
+- do not stop until the validation proves the system is coherent
+
+---
+
+# 1. Core Diagnosis
+
+We now know that two categories of problems are mixed together:
+
+## A. Problems caused by run inconsistency
+These happen because downstream engines are reading different snapshot generations instead of one run-scoped truth.
+
+This creates false contradictions such as:
+- Awareness and Funnel disagreeing on trust path
+- Integrity reporting missing data that actually exists
+- Persuasion drift / channel state / awareness stage contradictions across engines
+- stale snapshot behavior appearing as if engine logic is broken
+
+These are not pure engine-logic failures.
+These are system-level data flow failures.
+
+---
+
+## B. Problems that remain even when run consistency is fixed
+These are real logic problems inside engines and must still be fixed.
+
+Current confirmed examples include:
+- Offer output not sufficiently grounded in audience pains/desires
+- Budget Governor rewriting upstream confidence logic
+- Positioning stochastic variation between runs
+- silent fallback behavior in Iteration
+- weak confidence normalization / consistency in some downstream engines
+
+These must not be hidden behind the run fix.
+
+---
+
+# 2. Required Solution Direction
+
+We need to solve both categories in one clean implementation pass.
+
+Not as patches.
+Not as UI-only fixes.
+Not as post-hoc filters.
+
+This must be implemented as a system-level correction.
+
+---
+
+# 3. Fix the Run-Scoped Truth Problem First
+
+## Mandatory architecture rule:
+Every engine in a pipeline run must consume the same run-scoped upstream snapshot chain.
+
+No engine is allowed to independently select:
+- latest snapshot
+- latest complete snapshot
+- latest by account
+- latest by timestamp
+
+That behavior is now forbidden.
+
+## Required implementation:
+The orchestrator must construct a single run-scoped snapshot map, and every engine must consume from that map only.
+
+Example conceptually:
+
+- orchestrator creates current run context
+- for each engine result, the exact produced snapshot ID is registered in the run context
+- every downstream engine receives upstream snapshot IDs directly from that context
+- Integrity, Offer, Funnel, Awareness, Persuasion, Channel Selection, and all downstream consumers must use only those IDs
+
+## Hard requirement:
+No downstream engine may resolve upstream state from the database on its own if that state already exists inside the active run context.
+
+## Goal:
+One pipeline run = one truth set.
+
+---
+
+# 4. Enforce Full-Flow Consistency
+
+This is critical.
+
+I do not want engines to be individually correct but collectively disconnected.
+
+The system must enforce full-flow consistency across:
+
+- MI
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Awareness
+- Funnel
+- Persuasion
+- Integrity
+- Statistical Validation
+- Channel Selection
+- Budget Governor
+- Iteration
+- Retention
+
+## This means:
+Each engine must work on:
+- the same run truth
+- the same awareness state
+- the same pain/desire/problem structure
+- the same validated positioning lineage
+
+---
+
+# 5. Single-Source Rules That Must Be Enforced
+
+## A. Awareness must become single-source
+No more multiple awareness interpretations.
+
+Required:
+- one canonical awareness state
+- all downstream engines consume that one state only
+
+No independent awareness derivation is allowed in downstream logic once canonical awareness is set.
+
+---
+
+## B. Pain/problem structure must remain single-source
+Audience output must define the usable pain/problem structure.
+Offer, Funnel, Persuasion, and Channel Selection must consume it directly.
+No downstream engine should silently replace it with its own incompatible interpretation.
+
+---
+
+## C. Positioning lineage must remain single-source
+Once positioning is generated for the run, downstream engines must consume that exact positioning generation.
+No re-resolution to older positioning snapshots.
+
+---
+
+# 6. Fix the Real Engine Logic Problems That Are NOT Caused by Run Issues
+
+These must be corrected in the same workstream, not postponed.
+
+## 6.1 Offer Engine
+The Offer engine must not be allowed to remain logically detached from audience pains/desires.
+
+Required:
+- audience pain alignment must become a generation constraint, not just a post-hoc warning
+- if offer outcome does not map to audience pain/desire structure, that output must be corrected before acceptance
+- no “COMPLETE” status for signal-detached offer logic
+
+---
+
+## 6.2 Persuasion Engine
+Positioning-lock drift must not remain a warning only.
+
+Required:
+- if persuasion semantic drift is below the required threshold, it must trigger enforcement
+- this should produce at least PARTIAL or BLOCK behavior depending on severity
+- no more COMPLETE status with severe positioning drift
+
+---
+
+## 6.3 Integrity Engine
+Integrity must consume the correct run-scoped upstream chain only.
+
+Required:
+- eliminate any selector logic that allows it to read stale parallel branches
+- if the inputs exist in the active run, Integrity must reflect those exact inputs
+- no false “missing data” reports when data exists
+
+---
+
+## 6.4 Budget Governor
+Budget Governor must not rewrite upstream confidence truth.
+
+Required:
+- it may use upstream confidence
+- it may use performance data for budget decisions
+- but it must not mutate or reinterpret upstream validation confidence as if it were the new source of truth
+
+Budget logic must remain downstream, not retroactively authoritative.
+
+---
+
+## 6.5 Iteration Engine
+Synthetic fallback behavior must be explicit.
+
+Required:
+- if data-driven iteration is unavailable and baseline hypotheses are injected, status must reflect that
+- no silent COMPLETE on synthetic fallback
+
+---
+
+## 6.6 Positioning Determinism
+Even though Positioning is now materially improved, non-deterministic gate outcomes across similar runs must still be reduced.
+
+Required:
+- reduce stochastic variance
+- keep signal-first generation
+- preserve deterministic grounding
+- make repeated runs on comparable input materially stable
+
+Do not weaken standards.
+Do not weaken grounding.
+
+---
+
+# 7. Statistical Validation / Persistence Integrity
+
+The audit raised a major concern around statistical validation persistence / lineage visibility.
+
+This must be verified and corrected.
+
+Required:
+- confirm where the engine persists its result
+- confirm the persistence layer is real and connected
+- confirm downstream consumers reference the actual current validation output
+- if persistence is missing or fragmented, fix it properly
+
+No ghost engine behavior.
+No invisible lineage gaps.
+
+---
+
+# 8. Enforcement Requirements
+
+I do not want “warnings only” for critical logic contradictions.
+
+Where the system detects a true contradiction or broken logic, enforcement must be real.
+
+Examples:
+- severe positioning drift
+- stale/forked upstream lineage
+- invalid offer pain alignment
+- broken run-scoped truth
+- non-evaluable checks being treated as failures
+- or actual failures being allowed to pass
+
+The rule is simple:
+
+> If the system detects a real logic break, it must enforce the correct consequence.
+
+---
+
+# 9. No Patching, No Silent Invention, No Workaround Architecture
+
+You must work strictly within the plan and the actual code.
+
+Do NOT:
+- invent parallel architectures
+- add workaround layers that hide the issue
+- patch output strings instead of fixing logic
+- relabel incorrect states as complete
+- bypass run consistency with UI logic
+- weaken the system just to get a PASS
+
+If anything needs to change beyond the agreed direction:
+- state it explicitly
+- explain why
+- identify the exact code reason
+- do not silently improvise
+
+---
+
+# 10. Acceptance Criteria (Strict)
+
+This work is NOT complete until all of the following are true:
+
+## Run / System Truth
+- every engine in the pipeline consumes the same run-scoped upstream truth
+- no downstream engine resolves stale or independent snapshot branches
+- no cross-engine contradictions caused by snapshot mismatch remain
+
+## Logic
+- Offer is pain/desire-grounded
+- Persuasion drift is enforced
+- Integrity reflects actual run data
+- Budget does not rewrite upstream confidence truth
+- Iteration fallback is explicitly surfaced
+- Positioning remains signal-first and materially stable
+
+## Consistency
+- awareness is single-source
+- pain/problem structure is single-source
+- positioning lineage is single-source
+
+## Validation
+- no false contradictions
+- no false blocks
+- no hidden stale branches
+- no silent synthetic fallbacks
+- no invisible persistence gaps
+
+---
+
+# 11. Required Delivery Structure
+
+Do not return a vague summary.
+
+Return exactly this:
+
+## A. Code-Level Change Report
+For each fix:
+- file
+- exact functions changed
+- what was wrong
+- what was changed
+- why this is a root fix and not a patch
+
+## B. Remaining Risk List
+Anything still not fully solved:
+- describe it clearly
+- classify severity
+- explain why it remains
+
+## C. Validation Evidence
+Run validation with evidence after implementation.
+No hand-waving.
+
+---
+
+# 12. Required Validation Runs (MANDATORY)
+
+After implementation, run full validation with evidence on:
+
+- MarketMindAI
+- SWA Media (after valid MI refresh)
+- one additional campaign that is expected to pass cleanly
+
+## For each run, provide:
+- pipeline status
+- completed engines
+- exact snapshot chain per engine
+- canonical awareness state
+- pain/problem chain
+- positioning lineage used by downstream engines
+- problem registry lifecycle
+- gate triggers
+- enforcement outcomes
+- final verdict
+- whether any output is stale or synthetic
+
+---
+
+# 13. Validation Standard
+
+Do not stop work until:
+
+- validation is running
+- evidence is collected
+- contradictions are checked
+- output is proven coherent
+- system truth and engine logic both pass
+
+I do not want:
+- “code is complete”
+- “tests pass”
+- “should be correct”
+
+I want:
+> validated behavior with evidence
+
+---
+
+# 14. Final Rule
+
+Do not hand this back until the system is clean enough that we do not have to revisit the same class of logic failure again after a few days.
+
+This must be done properly, end-to-end, and at the root.
+
+Proceed directly.
+
+Thanks.
