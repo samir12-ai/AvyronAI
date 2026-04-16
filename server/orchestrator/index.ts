@@ -505,6 +505,58 @@ function extractFunnelInput(funnelResult: any): any {
   };
 }
 
+function extractAwarenessValidationInput(awarenessResult: any): any {
+  if (!awarenessResult) {
+    return {
+      entryMechanismType: "unknown",
+      targetReadinessStage: "unknown",
+      triggerClass: "unknown",
+      trustRequirement: "unknown",
+      funnelCompatibility: "unknown",
+      awarenessStrengthScore: 0,
+      frictionNotes: [],
+    };
+  }
+  const pr = awarenessResult.primaryRoute || awarenessResult;
+  return {
+    entryMechanismType: pr.entryMechanismType || "unknown",
+    targetReadinessStage: pr.targetReadinessStage || "unknown",
+    triggerClass: pr.triggerClass || "unknown",
+    trustRequirement: pr.trustRequirement || "unknown",
+    funnelCompatibility: pr.funnelCompatibility || "unknown",
+    awarenessStrengthScore: typeof pr.awarenessStrengthScore === "number" ? pr.awarenessStrengthScore : 0,
+    frictionNotes: Array.isArray(pr.frictionNotes) ? pr.frictionNotes : [],
+  };
+}
+
+function extractPersuasionValidationInput(persuasionResult: any): any {
+  if (!persuasionResult) {
+    return {
+      persuasionMode: "none",
+      primaryInfluenceDrivers: [],
+      objectionPriorities: [],
+      trustSequence: [],
+      persuasionStrengthScore: 0,
+      frictionNotes: [],
+      trustBarriers: [],
+      objectionProofLinks: [],
+      structuredObjections: [],
+    };
+  }
+  const pr = persuasionResult.primaryRoute || persuasionResult;
+  return {
+    persuasionMode: pr.persuasionMode || "none",
+    primaryInfluenceDrivers: Array.isArray(pr.primaryInfluenceDrivers) ? pr.primaryInfluenceDrivers : [],
+    objectionPriorities: Array.isArray(pr.objectionPriorities) ? pr.objectionPriorities : [],
+    trustSequence: Array.isArray(pr.trustSequence) ? pr.trustSequence : [],
+    persuasionStrengthScore: typeof pr.persuasionStrengthScore === "number" ? pr.persuasionStrengthScore : 0,
+    frictionNotes: Array.isArray(pr.frictionNotes) ? pr.frictionNotes : [],
+    trustBarriers: Array.isArray(persuasionResult.trustBarriers) ? persuasionResult.trustBarriers : [],
+    objectionProofLinks: Array.isArray(persuasionResult.objectionProofLinks) ? persuasionResult.objectionProofLinks : [],
+    structuredObjections: Array.isArray(persuasionResult.structuredObjections) ? persuasionResult.structuredObjections : [],
+  };
+}
+
 function resolveUpstreamOriginType(ctx: EngineContext, engine: string): SignalOriginType {
   if (engine === "audience") return "competitor";
   if (engine === "positioning" || engine === "differentiation" || engine === "mechanism") return "inferred";
@@ -1524,8 +1576,8 @@ async function executeEngine(
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
         const funnelInput = extractFunnelInput(ctx.funnel);
-        const awarenessInput = ctx.awareness || {};
-        const persuasionInput = ctx.persuasion || {};
+        const awarenessInput = extractAwarenessValidationInput(ctx.awareness);
+        const persuasionInput = extractPersuasionValidationInput(ctx.persuasion);
         const statLineage = buildUpstreamLineage(ctx);
         const result = await runStatisticalValidationEngine(
           miInput, audInput, offerInput, funnelInput, awarenessInput, persuasionInput,
