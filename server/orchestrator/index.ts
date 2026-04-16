@@ -574,8 +574,8 @@ function extractEngineConfidence(engineId: string, output: any): { dataConfidenc
       dataConf = output.dataReliability?.score ?? engineConf;
       break;
     case "positioning":
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = output.specificityScore ?? engineConf;
+      engineConf = output.engineConfidence ?? output.confidenceScore ?? 0.5;
+      dataConf = output.dataConfidence ?? output.specificityScore ?? engineConf;
       break;
     case "differentiation":
       engineConf = output.confidenceScore ?? output.confidence ?? 0.5;
@@ -651,11 +651,11 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
 
   switch (engineId) {
     case "positioning": {
-      const conf = output.confidenceScore ?? output.specificityScore ?? 1.0;
-      if (conf < 0.40) {
+      const engineConf = output.engineConfidence ?? output.confidenceScore ?? 1.0;
+      if (engineConf < 0.40) {
         return {
           gateFailed: true,
-          reason: `Positioning confidence ${conf.toFixed(2)} below 0.40 minimum`,
+          reason: `Positioning engineConfidence ${engineConf.toFixed(2)} below 0.40 minimum (gates on engine logic quality, not data reliability)`,
           severity: "critical",
           shouldRetry: true,
         };

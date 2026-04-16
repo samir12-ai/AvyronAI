@@ -2343,6 +2343,9 @@ CORRECTION REQUIRED:
   const overallConfidence = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== overallConfidence;
 
+  const positioningEngineConfidence = rawConfidence;
+  const positioningDataConfidence = Math.round(dataReliability.overallReliability * 100) / 100;
+
   const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";
   const hasAdvisories = stabilityResult.advisories.length > 0;
   const statusMessage = !stabilityResult.isStable
@@ -2412,7 +2415,7 @@ CORRECTION REQUIRED:
     console.error(`[PositioningEngine-V3] Root invalidation failed (non-blocking): ${invErr.message}`);
   }
 
-  console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence}`);
+  console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence} | engineConfidence=${positioningEngineConfidence} | dataConfidence=${positioningDataConfidence}`);
 
   return {
     status,
@@ -2431,6 +2434,8 @@ CORRECTION REQUIRED:
     differentiationVector: differentiationAxes,
     proofSignals: primaryTerritory?.evidenceSignals || [],
     confidenceScore: overallConfidence,
+    engineConfidence: positioningEngineConfidence,
+    dataConfidence: positioningDataConfidence,
     inputSummary,
     snapshotId: inserted.id,
     executionTimeMs,

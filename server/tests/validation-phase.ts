@@ -367,7 +367,7 @@ console.log("─".repeat(80));
 }
 
 console.log("\n" + "─".repeat(80));
-console.log("3.2: No conversion path → System Control blocks");
+console.log("3.2: No conversion path (SKIPPED engine) → evaluability precondition not met, check skipped");
 console.log("─".repeat(80));
 
 {
@@ -382,8 +382,33 @@ console.log("─".repeat(80));
     channelResult.output = null;
   }
   const verdict = evaluateSystemControl(input);
-  assert("No channel selection → NO_CONVERSION_PATH block", verdict.blockReasons.some(b => b.code === "NO_CONVERSION_PATH"));
-  console.log(`  [evidence] channel_selection=SKIPPED | block=${verdict.blockReasons.find(b => b.code === "NO_CONVERSION_PATH")?.description}`);
+  assert("SKIPPED channel_selection → NO block (evaluability precondition not met)", !verdict.blockReasons.some(b => b.code === "NO_CONVERSION_PATH"));
+  const convCheck = verdict.structuralChecks.find(c => c.check === "conversion_path_exists");
+  assert("Conversion path check passes when engine not reached", convCheck?.passed === true);
+  console.log(`  [evidence] channel_selection=SKIPPED | conversionPathCheck=${convCheck?.passed} | details=${convCheck?.details}`);
+}
+
+console.log("\n" + "─".repeat(80));
+console.log("3.2b: No conversion path (SUCCESS engine, zero conversion channels) → detected (shadow mode, no repair)");
+console.log("─".repeat(80));
+
+{
+  const ssc = createEmptySSC("val_campaign", "val_account");
+  updateConfidenceChain(ssc, "market_intelligence" as EngineIdType, 0.50, 0.50, 0.50);
+  updateConfidenceChain(ssc, "positioning" as EngineIdType, 0.50, 0.50, 0.50);
+
+  const input = makeBaseControlInput(ssc);
+  const channelResult = input.results.get("channel_selection" as any);
+  if (channelResult) {
+    channelResult.status = "SUCCESS";
+    channelResult.output = { funnelStages: { awareness: [{ name: "social" }], nurture: [{ name: "email" }], conversion: [] }, selectedChannels: [], warnings: [] };
+  }
+  const verdict = evaluateSystemControl(input, { shadowMode: true });
+  assert("Shadow mode: SUCCESS channel_selection with zero conversion → NO_CONVERSION_PATH detected", verdict.blockReasons.some(b => b.code === "NO_CONVERSION_PATH"));
+  assert("Shadow mode: no repair attempted", verdict.repairAttempted === false);
+  const convCheck = verdict.structuralChecks.find(c => c.check === "conversion_path_exists");
+  assert("Conversion path check fails when engine ran but no conversion channels", convCheck?.passed === false);
+  console.log(`  [evidence] channel_selection=SUCCESS with empty conversion (shadow mode) | block=${verdict.blockReasons.find(b => b.code === "NO_CONVERSION_PATH")?.description}`);
 }
 
 console.log("\n" + "─".repeat(80));

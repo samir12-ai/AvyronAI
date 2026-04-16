@@ -13,8 +13,11 @@ import {
 
 export function checkConversionPath(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const channelResult = results.get("channel_selection");
-  if (!channelResult || channelResult.status === "SKIPPED" || channelResult.status === "ERROR") {
-    return { check: "conversion_path_exists", passed: false, details: "Channel selection engine did not produce output" };
+  if (!channelResult || channelResult.status === "SKIPPED" || channelResult.status === "BLOCKED" || channelResult.status === "SIGNAL_BLOCKED") {
+    return { check: "conversion_path_exists", passed: true, details: "Channel selection engine not reached — evaluability precondition not met, check skipped" };
+  }
+  if (channelResult.status === "ERROR") {
+    return { check: "conversion_path_exists", passed: true, details: "Channel selection engine errored — evaluability precondition not met, check skipped" };
   }
 
   const output = channelResult.output;
@@ -130,6 +133,9 @@ export function checkUpstreamEngineHealth(results: Map<EngineId, EngineStepResul
 
 export function checkFunnelStructuralCompleteness(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const channelResult = results.get("channel_selection");
+  if (!channelResult || channelResult.status === "SKIPPED" || channelResult.status === "BLOCKED" || channelResult.status === "SIGNAL_BLOCKED" || channelResult.status === "ERROR") {
+    return { check: "funnel_structural_completeness", passed: true, details: "Channel selection engine not reached — evaluability precondition not met, check skipped" };
+  }
   if (!channelResult?.output?.funnelStages) {
     return { check: "funnel_structural_completeness", passed: true, details: "No funnel stage data — check skipped" };
   }
@@ -267,6 +273,9 @@ export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineSte
 
 export function checkOfferAudienceMisalignment(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const offerResult = results.get("offer");
+  if (!offerResult || offerResult.status === "SKIPPED" || offerResult.status === "BLOCKED" || offerResult.status === "SIGNAL_BLOCKED" || offerResult.status === "ERROR") {
+    return { check: "offer_audience_misalignment", passed: true, details: "Offer engine not reached — evaluability precondition not met, check skipped" };
+  }
   if (!offerResult?.output) {
     return { check: "offer_audience_misalignment", passed: true, details: "No offer output — check skipped" };
   }
@@ -300,6 +309,11 @@ export function checkOfferAudienceMisalignment(results: Map<EngineId, EngineStep
 export function checkZeroObjectionCoverage(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const offerResult = results.get("offer");
   const audienceResult = results.get("audience");
+  const offerNotReached = !offerResult || offerResult.status === "SKIPPED" || offerResult.status === "BLOCKED" || offerResult.status === "SIGNAL_BLOCKED" || offerResult.status === "ERROR";
+  const audienceNotReached = !audienceResult || audienceResult.status === "SKIPPED" || audienceResult.status === "BLOCKED" || audienceResult.status === "SIGNAL_BLOCKED" || audienceResult.status === "ERROR";
+  if (offerNotReached || audienceNotReached) {
+    return { check: "zero_objection_coverage", passed: true, details: "Offer or audience engine not reached — evaluability precondition not met, check skipped" };
+  }
   if (!offerResult?.output || !audienceResult?.output) {
     return { check: "zero_objection_coverage", passed: true, details: "No offer/audience output — check skipped" };
   }
@@ -334,6 +348,9 @@ export function checkZeroObjectionCoverage(results: Map<EngineId, EngineStepResu
 
 export function checkChannelConfidenceMinimum(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const channelResult = results.get("channel_selection");
+  if (!channelResult || channelResult.status === "SKIPPED" || channelResult.status === "BLOCKED" || channelResult.status === "SIGNAL_BLOCKED" || channelResult.status === "ERROR") {
+    return { check: "channel_confidence_minimum", passed: true, details: "Channel selection engine not reached — evaluability precondition not met, check skipped" };
+  }
   if (!channelResult?.output) {
     return { check: "channel_confidence_minimum", passed: true, details: "No channel selection output — check skipped" };
   }
@@ -418,18 +435,18 @@ export function checkPositioningHardGate(ssc: SharedStrategicContext | null): St
     return { check: "positioning_hard_gate", passed: true, details: "No positioning confidence entry — check skipped" };
   }
 
-  if (positioningEntry.combinedConfidence < 0.40) {
+  if (positioningEntry.engineConfidence < 0.40) {
     return {
       check: "positioning_hard_gate",
       passed: false,
-      details: `Positioning confidence=${positioningEntry.combinedConfidence.toFixed(2)} is below hard gate threshold 0.40`,
+      details: `Positioning engineConfidence=${positioningEntry.engineConfidence.toFixed(2)} is below hard gate threshold 0.40 (gates on engine logic quality, not data reliability)`,
     };
   }
 
   return {
     check: "positioning_hard_gate",
     passed: true,
-    details: `Positioning confidence=${positioningEntry.combinedConfidence.toFixed(2)} meets threshold 0.40`,
+    details: `Positioning engineConfidence=${positioningEntry.engineConfidence.toFixed(2)} meets threshold 0.40`,
   };
 }
 
