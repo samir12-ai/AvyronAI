@@ -2445,6 +2445,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     results,
     durationMs,
     controlVerdict: controlVerdict || undefined,
+    ssc: ctx.ssc || null,
   };
 }
 

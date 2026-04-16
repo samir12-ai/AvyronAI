@@ -125,3 +125,9 @@ id = "8plIvBf9oZ7-vj13xB8B3"
 uri = "file://server/audits/implementation-plan-validation.md"
 type = "text"
 title = "Technical Validation & Implementation Plan — Validated Against Codebase"
+
+[[outputs]]
+id = "h3XibbJloNLIaokvvAmS8"
+uri = "file://server/tests/DIAGNOSTIC-REPORT.md"
+type = "text"
+title = "Avyron AI — Full Engine Diagnostic Report"
