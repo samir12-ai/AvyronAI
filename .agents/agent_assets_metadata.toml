@@ -107,3 +107,9 @@ id = "ypjilYn6kBntcfXYz1rZA"
 uri = "file://server/docs/control-layer-architecture.md"
 type = "text"
 title = "Control Layer Architecture — Technical Validation & Design"
+
+[[outputs]]
+id = "f7WgpNVkwmN_K0a4nmDHv"
+uri = "file://server/audits/engine-decision-audit.md"
+type = "text"
+title = "Full Engine Decision Logic Audit"

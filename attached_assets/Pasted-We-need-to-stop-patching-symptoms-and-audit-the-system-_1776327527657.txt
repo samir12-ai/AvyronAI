@@ -1,0 +1,126 @@
+We need to stop patching symptoms and audit the system at its core.
+
+The current behavior shows a critical issue: engines are producing logically inconsistent decisions that later require blocking or correction at the Control Layer. This is not acceptable.
+
+The Control Layer is NOT meant to fix bad decisions. It is meant to enforce final system safety. Right now, it is compensating for flaws upstream.
+
+I want a **full audit of decision logic across ALL engines**, focused specifically on how decisions are being made — not just outputs.
+
+---
+
+### Objective
+
+Identify why engines are generating invalid or contradictory strategic decisions, and map the exact gaps in decision logic.
+
+---
+
+### Scope (ALL engines, no exceptions)
+
+* Awareness Engine
+* Audience Engine
+* Positioning Engine
+* Differentiation Engine
+* Mechanism Engine
+* Offer Engine
+* Funnel Engine
+* Persuasion Engine
+* Channel Selection
+* Budget Governor
+* Iteration Engine
+* Retention Engine
+* Integrity & Validation layers
+
+---
+
+### What to Audit (MANDATORY)
+
+For EACH engine, provide:
+
+1. **Decision Logic Breakdown**
+
+   * What inputs are used?
+   * What rules/conditions determine outputs?
+   * Are there ANY hard constraints or only scoring/heuristics?
+
+2. **Constraint Validation**
+
+   * What combinations are explicitly prevented?
+   * What combinations are currently allowed but should NOT be?
+
+3. **Cross-Engine Awareness**
+
+   * Does this engine validate upstream/downstream dependencies?
+   * Or does it operate in isolation?
+
+4. **Failure Cases (CRITICAL)**
+
+   * Provide REAL examples where the engine produced invalid decisions
+   * Example:
+
+     * Unaware audience + Proof-led entry
+     * Offer not aligned with audience pains
+     * Funnel structurally valid but strategically invalid
+
+5. **Rule Gaps**
+
+   * What rules are missing that would have prevented these outputs?
+   * Be explicit (e.g., "IF stage = Unaware THEN proof-led entry must be blocked")
+
+---
+
+### Required Output Format
+
+Deliver a structured report (not summary) including:
+
+* Engine-by-engine breakdown
+* Explicit rule tables (if/then logic)
+* Identified invalid combinations currently allowed
+* Missing constraints
+* Suggested hard rules (NOT scoring adjustments)
+
+---
+
+### Additional Requirement (IMPORTANT)
+
+Run a **full system execution across all engines** using the current campaign data and:
+
+* Trace every decision path
+* Show where invalid logic originated
+* Do NOT stop at warnings — trace the root cause
+* Do NOT hide or downgrade issues — expose them clearly
+
+---
+
+### Critical Instruction
+
+Do NOT:
+
+* Patch with score penalties
+* Add more warnings
+* Hide inconsistencies behind confidence adjustments
+
+We are not optimizing output quality —
+We are fixing **decision correctness at the source**.
+
+---
+
+### Goal
+
+By the end of this audit, we should be able to:
+
+* Define a complete **Rules Matrix** across:
+  Awareness × Funnel × Offer × Channel × Audience
+
+* Ensure the system CANNOT generate invalid strategic combinations
+
+---
+
+No delivery until:
+
+* All engines are audited
+* All logical gaps are identified
+* Root causes are clearly explained
+
+This is a foundational correction, not an iteration.
+
+---
