@@ -131,3 +131,9 @@ id = "h3XibbJloNLIaokvvAmS8"
 uri = "file://server/tests/DIAGNOSTIC-REPORT.md"
 type = "text"
 title = "Avyron AI — Full Engine Diagnostic Report"
+
+[[outputs]]
+id = "AiVYFWambpO8_sl7itL9T"
+uri = "file://.local/engine-audit.md"
+type = "text"
+title = "Avyron AI — 15-Engine Deep Audit"
