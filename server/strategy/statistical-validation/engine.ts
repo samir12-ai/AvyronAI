@@ -21,6 +21,7 @@ import {
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
 import { computeSignalComposition, formatCompositionLog, type SignalLineageEntry } from "../../shared/signal-lineage";
+import { computeSemanticLineageMatches, type SemanticLineageMatch, type GroundingType } from "./semantic-lineage";
 import type {
   ValidationMIInput,
   ValidationAudienceInput,
@@ -397,26 +398,67 @@ interface ExtractedClaim {
   hopDepth: number;
   mappingConfidence: number;
   belowConfidenceThreshold: boolean;
+  groundingScore: number;
+  groundingType: GroundingType;
+  matchedSignalText: string | null;
 }
 
-function extractClaims(
+async function extractClaims(
   offer: ValidationOfferInput,
   persuasion: ValidationPersuasionInput,
   awareness: ValidationAwarenessInput,
   signalClusters: SignalCluster[],
   upstreamLineage: SignalLineageEntry[] = [],
-): { claims: ExtractedClaim[]; unmappedSignals: string[]; lowConfidenceSignals: string[] } {
+): Promise<{ claims: ExtractedClaim[]; unmappedSignals: string[]; lowConfidenceSignals: string[] }> {
+  const pending: { text: string; source: string }[] = [];
+  const push = (text: string | undefined | null, source: string) => {
+    if (!text) return;
+    pending.push({ text, source });
+  };
+
+  push(offer.coreOutcome, "offer_outcome");
+  push(offer.mechanismDescription, "offer_mechanism");
+  for (const proof of (offer.proofAlignment || []).slice(0, 3)) {
+    if (proof) push(proof, classifyProofSubType(proof));
+  }
+  for (const driver of (persuasion.primaryInfluenceDrivers || []).slice(0, 3)) {
+    if (driver) push(`Influence driver: ${driver}`, classifyPersuasionDriverSubType(driver));
+  }
+  if (awareness.triggerClass) {
+    push(`Trigger: ${awareness.triggerClass}`, classifyAwarenessTriggerSubType(awareness.triggerClass));
+  }
+  if (awareness.entryMechanismType) {
+    push(`Entry: ${awareness.entryMechanismType}`, classifyAwarenessEntrySubType(awareness.entryMechanismType));
+  }
+
+  const semanticMatches: SemanticLineageMatch[] = upstreamLineage.length > 0
+    ? await computeSemanticLineageMatches(pending.map(p => p.text), upstreamLineage)
+    : pending.map(() => ({ entry: null, score: 0, type: "none" as GroundingType, matchedSignalText: null }));
+
   const claims: ExtractedClaim[] = [];
   const unmappedSignals: string[] = [];
   const lowConfidenceSignals: string[] = [];
-  let claimIndex = 0;
-  const hasLineage = upstreamLineage.length > 0;
 
-  const addClaim = (claimText: string, source: string) => {
-    if (!claimText) return;
-    const { supporting, mappedViaEquivalence, mappingConfidence } = matchClaimToSignalCluster(claimText, signalClusters, source);
-    const lineageMatch = hasLineage ? findLineageMatch(claimText, upstreamLineage) : null;
-    const traceId = generateSignalTraceId(source, claimIndex);
+  for (let i = 0; i < pending.length; i++) {
+    const { text: claimText, source } = pending[i];
+    const { supporting: lexicalSupporting, mappedViaEquivalence, mappingConfidence: lexicalMappingConfidence } = matchClaimToSignalCluster(claimText, signalClusters, source);
+    const sm = semanticMatches[i];
+    const lineageMatch = sm.entry;
+    const traceId = generateSignalTraceId(source, i);
+
+    let supporting: SignalProvenance | null = lexicalSupporting;
+    let mappingConfidence = lexicalMappingConfidence;
+    if (!supporting && lineageMatch && (sm.type === "direct" || sm.type === "inferred")) {
+      supporting = {
+        signalId: lineageMatch.parentSignalId || `${lineageMatch.originEngine}_lineage_${i}`,
+        signalSource: lineageMatch.signalCategory || lineageMatch.originEngine,
+        signalOriginEngine: lineageMatch.originEngine,
+        signalStrength: sm.type === "direct" ? clamp(sm.score, 0.5, 1) : clamp(sm.score, 0.3, 0.7),
+        evidenceReference: (sm.matchedSignalText || lineageMatch.signalText || "").slice(0, 120),
+      };
+      mappingConfidence = Math.max(mappingConfidence, sm.score);
+    }
+
     const signalPath = buildSignalPath(source, supporting, lineageMatch);
     const isHypothesis = supporting === null && lineageMatch === null;
     const belowConfidenceThreshold = mappingConfidence > 0 && mappingConfidence < SIGNAL_MAPPING_CONFIDENCE_THRESHOLD;
@@ -440,31 +482,10 @@ function extractClaims(
       hopDepth: lineageMatch?.hopDepth ?? 0,
       mappingConfidence,
       belowConfidenceThreshold,
+      groundingScore: sm.score,
+      groundingType: sm.type,
+      matchedSignalText: sm.matchedSignalText,
     });
-    claimIndex++;
-  };
-
-  addClaim(offer.coreOutcome, "offer_outcome");
-  addClaim(offer.mechanismDescription, "offer_mechanism");
-  for (const proof of (offer.proofAlignment || []).slice(0, 3)) {
-    if (proof) {
-      const proofSubType = classifyProofSubType(proof);
-      addClaim(proof, proofSubType);
-    }
-  }
-  for (const driver of (persuasion.primaryInfluenceDrivers || []).slice(0, 3)) {
-    if (driver) {
-      const driverSubType = classifyPersuasionDriverSubType(driver);
-      addClaim(`Influence driver: ${driver}`, driverSubType);
-    }
-  }
-  if (awareness.triggerClass) {
-    const triggerSubType = classifyAwarenessTriggerSubType(awareness.triggerClass);
-    addClaim(`Trigger: ${awareness.triggerClass}`, triggerSubType);
-  }
-  if (awareness.entryMechanismType) {
-    const entrySubType = classifyAwarenessEntrySubType(awareness.entryMechanismType);
-    addClaim(`Entry: ${awareness.entryMechanismType}`, entrySubType);
   }
 
   return { claims, unmappedSignals, lowConfidenceSignals };
@@ -1139,17 +1160,19 @@ export async function runStatisticalValidationEngine(
 
   const signalClusters = buildSignalClusters(mi, audience);
 
-  let { claims: extractedClaims, unmappedSignals, lowConfidenceSignals } = extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
+  let { claims: extractedClaims, unmappedSignals, lowConfidenceSignals } = await extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
   if (upstreamLineage.length > 0) {
-    const orphanedClaims = extractedClaims.filter(c => c.parentSignalId === null && c.signalProvenance === null);
+    const directCount = extractedClaims.filter(c => c.groundingType === "direct").length;
+    const inferredCount = extractedClaims.filter(c => c.groundingType === "inferred").length;
+    const orphanedClaims = extractedClaims.filter(c => c.groundingType === "none" && c.signalProvenance === null);
     const lineageLinked = extractedClaims.length - orphanedClaims.length;
-    console.log(`[StatisticalValidation] LINEAGE_RESOLUTION | claims=${extractedClaims.length} | lineageLinked=${lineageLinked} | orphaned=${orphanedClaims.length} | upstreamEntries=${upstreamLineage.length}`);
+    console.log(`[StatisticalValidation] LINEAGE_RESOLUTION | claims=${extractedClaims.length} | lineageLinked=${lineageLinked} | orphaned=${orphanedClaims.length} | direct=${directCount} | inferred=${inferredCount} | upstreamEntries=${upstreamLineage.length}`);
 
     if (orphanedClaims.length > 0) {
       for (const oc of orphanedClaims) {
-        console.log(`[StatisticalValidation] LINEAGE_REJECTED | traceId=${oc.signalTraceId} | source=${oc.source} | claim="${oc.claim.slice(0, 60)}" — no valid signal lineage`);
+        console.log(`[StatisticalValidation] LINEAGE_REJECTED | traceId=${oc.signalTraceId} | source=${oc.source} | groundingScore=${oc.groundingScore.toFixed(3)} | claim="${oc.claim.slice(0, 60)}" — no semantic match above threshold`);
       }
-      extractedClaims = extractedClaims.filter(c => c.parentSignalId !== null || c.signalProvenance !== null);
+      extractedClaims = extractedClaims.filter(c => c.groundingType !== "none" || c.signalProvenance !== null);
       console.log(`[StatisticalValidation] LINEAGE_GATE | rejected=${orphanedClaims.length} orphaned claims | remaining=${extractedClaims.length} signal-backed claims`);
     }
   }
