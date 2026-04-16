@@ -1,0 +1,292 @@
+Hi,
+
+I want you to perform a **full technical validation and implementation plan review** based strictly on the current codebase (not assumptions).
+
+This is not a patch request. This is a **system-level logic alignment plan** to fix how engines think, interact, and pass meaning.
+
+---
+
+# OBJECTIVE
+
+Unify all engines under a **single reasoning flow**, not independent local reasoning.
+
+The system must:
+
+* Process signals → build shared meaning → accumulate problems → solve them progressively
+* NOT operate as disconnected scoring engines
+
+---
+
+# CORE ISSUES (FROM REAL SYSTEM BEHAVIOR)
+
+1. Engines operate with **local reasoning only**
+2. Meaning is lost between engines (signals reduced to labels)
+3. No accumulation of **derived problems**
+4. Confidence is incorrectly tied to outcomes instead of engine logic
+5. Warnings exist but are not structurally enforced
+6. No shared understanding of what signals actually mean
+
+---
+
+# REQUIRED SYSTEM CHANGES
+
+## 1. Shared Strategic Context (SSC)
+
+All engines must read and write to a **single evolving context object**
+
+This context must include:
+
+* problem_map
+* pain_map
+* desire_map
+* objection_map
+* trust_map
+* awareness_meaning
+* narrative_constraints
+* contradictions
+* downstream_requirements
+
+### Engine behavior:
+
+Each engine must:
+
+1. Read full context
+2. Interpret signals within that context
+3. Add structured insights (not overwrite)
+4. Pass enriched context forward
+
+No engine is allowed to reinterpret reality from scratch.
+
+---
+
+## 2. Problem Registry (CRITICAL)
+
+We need a **central evolving list of problems**
+
+Not just initial problems — ALL problems discovered during execution.
+
+### Structure:
+
+Each problem must include:
+
+* id
+* source_engine
+* type (market / audience / structural / conversion)
+* description
+* severity
+* confidence
+* status (open / resolved / deferred)
+
+### Engine responsibility:
+
+Each engine must:
+
+* Read existing problems
+* Solve relevant ones
+* Add new problems if discovered
+
+### Control Layer responsibility:
+
+* Detect unresolved critical problems
+* Detect ignored problems
+* Block or downgrade if necessary
+
+---
+
+## 3. Canonical Meaning Contract
+
+We must standardize the meaning of all strategic labels.
+
+Example:
+
+“product_aware” must NOT be interpreted differently across engines.
+
+Instead, it must be expanded into structured meaning like:
+
+* trust level
+* comparison behavior
+* conversion readiness
+* proof requirements
+* education level
+
+All engines must consume the same definition.
+
+No engine is allowed to redefine core meanings.
+
+---
+
+## 4. Reason Trace (MANDATORY)
+
+Every engine must output:
+
+signal → interpretation → constraint → decision
+
+This is required to:
+
+* trace contradictions
+* debug logic
+* enable correction
+
+### CRITICAL ADDITION:
+
+Reason Trace must NOT be treated as debug output.
+
+It must be part of the **structured data contract passed between engines**.
+
+This means:
+
+* Each engine must expose its reasoning in a machine-readable format
+* Downstream engines MUST read and validate upstream reasoning before proceeding
+* Any contradiction between reasoning layers must be detectable and actionable
+
+Without this, engines will continue operating with isolated logic.
+
+---
+
+## 5. Confidence System Refactor
+
+We must separate:
+
+### A. Data Confidence
+
+* reflects data quality only
+* DOES NOT block execution
+* only informs visibility
+
+### B. Engine Confidence
+
+* reflects correctness of engine logic
+* determines whether correction is needed
+
+### Rules:
+
+* Low data confidence → continue execution
+* Low engine confidence → trigger correction
+* NEVER block due to weak data alone
+
+---
+
+## 6. Self-Correcting System Role
+
+Self-correcting must:
+
+* Fix engine logic
+* NOT compensate for weak data
+* NOT modify memory directly
+* NOT override final system authority
+
+Triggers:
+
+* Low engine confidence
+* Contradictions
+* Logical inconsistencies
+
+---
+
+## 7. Control Layer (Final Authority)
+
+The Control Layer must:
+
+1. Consume all engine outputs
+2. Evaluate:
+
+   * structural completeness
+   * problem resolution status
+   * contradictions
+   * engine confidence
+3. Produce a final verdict:
+
+   * PASS
+   * DOWNGRADE
+   * REPAIR
+   * BLOCK
+
+---
+
+## 8. Repair Actions (NOT reactions)
+
+The system must include **bounded repair actions**, not passive reactions.
+
+Allowed actions:
+
+* Re-run specific engines (max 1 time)
+* Inject missing structural components (e.g. conversion path)
+* Downgrade decisions (scale → test)
+
+Not allowed:
+
+* Re-run offer generation freely
+* Override integrity score
+* Modify memory directly
+
+---
+
+# PHASED IMPLEMENTATION PLAN
+
+## Phase 1 — Structural Foundation
+
+* Implement Shared Strategic Context
+* Implement Problem Registry
+* Implement Canonical Meaning Contract
+* Add Reason Trace as a REQUIRED data contract across all engines
+
+## Phase 2 — Intelligence Layer
+
+* Refactor confidence system (data vs engine)
+* Integrate self-correcting logic (engine-level only)
+* Ensure engines operate on shared context, not raw signals
+
+## Phase 3 — Control & Enforcement
+
+* Implement Control Layer
+* Integrate problem validation into final decision
+* Add Repair Actions
+* Replace fragmented gates with unified verdict
+
+---
+
+# REQUIRED VALIDATION (CRITICAL)
+
+Before confirming this plan, I need you to:
+
+1. Validate compatibility with:
+
+   * orchestrator flow (server/orchestrator/index.ts)
+   * memory system (NO conflict allowed)
+   * adaptive system (must remain untouched)
+   * iteration engine behavior
+
+2. Identify:
+
+   * conflicts with current data contracts
+   * required changes per engine
+   * performance risks
+   * potential loops or instability
+
+3. Confirm:
+
+   * whether Shared Context + Problem Registry can be introduced without breaking existing engine isolation
+   * whether Reason Trace can be enforced as a strict contract
+   * whether Control Layer integration point is correct
+
+---
+
+# FINAL REQUIREMENT
+
+Do NOT give a theoretical answer.
+
+Base everything on:
+
+* actual code paths
+* actual engine structure
+* actual data flow
+
+If anything in this plan is flawed, state it clearly and explain why.
+
+If it works, confirm how to implement it cleanly.
+
+No masking. No shortcuts.
+
+We fix this at the logic level — not by patching outputs.
+
+---
