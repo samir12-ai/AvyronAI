@@ -22,9 +22,15 @@ import { storeControlVerdict } from "../system-control/routes";
 import {
   createEmptySSC,
   registerProblem,
+  resolveProblem,
+  deferProblem,
+  getRelevantProblems,
   updateConfidenceChain,
   addReasonTrace,
+  addContradiction,
+  getUnresolvedCriticalProblems,
   type SharedStrategicContext,
+  type ProblemEntry,
 } from "./shared-strategic-context";
 import { resolveAwarenessMeaning } from "./canonical-meanings";
 import {
@@ -330,6 +336,13 @@ function extractMiInput(miResult: any): any {
 
 function extractAudienceInput(audienceResult: any): any {
   if (!audienceResult) return {};
+  const rawAwareness = audienceResult.awarenessLevel;
+  let awarenessLevel: string | null = null;
+  if (typeof rawAwareness === "string") {
+    awarenessLevel = rawAwareness;
+  } else if (rawAwareness != null && typeof rawAwareness === "object" && typeof rawAwareness.level === "string") {
+    awarenessLevel = rawAwareness.level;
+  }
   return {
     painProfiles: audienceResult.painProfiles || [],
     desireMap: audienceResult.desireMap || [],
@@ -337,6 +350,8 @@ function extractAudienceInput(audienceResult: any): any {
     transformationMap: audienceResult.transformationMap || [],
     emotionalDrivers: audienceResult.emotionalDrivers || [],
     segments: audienceResult.audienceSegments || [],
+    awarenessLevel,
+    maturityIndex: audienceResult.maturityIndex || null,
   };
 }
 
@@ -538,6 +553,179 @@ function resolveSglOrBlock(
     };
   }
   return null;
+}
+
+type EngineIdType = "market_intelligence" | "audience" | "positioning" | "differentiation" | "mechanism" | "offer" | "awareness" | "funnel" | "integrity" | "persuasion" | "statistical_validation" | "budget_governor" | "channel_selection" | "iteration" | "retention";
+
+function extractEngineConfidence(engineId: string, output: any): { dataConfidence: number; engineConfidence: number; combined: number } {
+  if (!output) return { dataConfidence: 0, engineConfidence: 0, combined: 0 };
+
+  let dataConf = 0.5;
+  let engineConf = 0.5;
+
+  switch (engineId) {
+    case "market_intelligence":
+      engineConf = output.confidenceScore ?? output.overallConfidence ?? 0.5;
+      dataConf = output.dataReliability?.overallScore ?? engineConf;
+      break;
+    case "audience":
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = output.dataReliability?.score ?? engineConf;
+      break;
+    case "positioning":
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = output.specificityScore ?? engineConf;
+      break;
+    case "differentiation":
+      engineConf = output.confidenceScore ?? output.confidence ?? 0.5;
+      dataConf = output.celDepthCompliance?.causalDepthScore ?? engineConf;
+      break;
+    case "mechanism":
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = output.celDepthCompliance?.causalDepthScore ?? engineConf;
+      break;
+    case "offer":
+      engineConf = output.offerStrengthScore ?? output.confidenceScore ?? 0.5;
+      dataConf = output.proofLayer?.proofStrength ?? output.proofStrength ?? engineConf;
+      break;
+    case "awareness":
+      engineConf = output.primaryRoute?.awarenessStrengthScore ?? output.confidenceScore ?? 0.5;
+      dataConf = engineConf;
+      break;
+    case "funnel":
+      engineConf = output.funnelStrengthScore ?? output.confidenceScore ?? 0.5;
+      dataConf = output.trustPathAnalysis?.score ?? output.trustPathScore ?? engineConf;
+      break;
+    case "integrity":
+      engineConf = output.overallIntegrityScore ?? 0.5;
+      dataConf = engineConf;
+      break;
+    case "persuasion":
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = output.celDepthCompliance?.causalDepthScore ?? engineConf;
+      break;
+    case "statistical_validation":
+      engineConf = output.claimConfidenceScore ?? output.confidenceScore ?? 0.5;
+      dataConf = output.dataReliability?.overallScore ?? engineConf;
+      break;
+    case "budget_governor":
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = engineConf;
+      break;
+    case "channel_selection":
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = engineConf;
+      break;
+    case "iteration":
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = engineConf;
+      break;
+    case "retention":
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = engineConf;
+      break;
+    default:
+      engineConf = output.confidenceScore ?? 0.5;
+      dataConf = engineConf;
+  }
+
+  dataConf = Math.max(0, Math.min(1, dataConf));
+  engineConf = Math.max(0, Math.min(1, engineConf));
+  const combined = (dataConf + engineConf) / 2;
+  return { dataConfidence: dataConf, engineConfidence: engineConf, combined };
+}
+
+interface MidPipelineGateResult {
+  gateFailed: boolean;
+  reason: string;
+  severity: "critical" | "high" | "medium";
+  shouldRetry: boolean;
+  setConfidenceFloor?: number;
+}
+
+function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ctx: EngineContext): MidPipelineGateResult | null {
+  if (stepResult.status !== "SUCCESS" && stepResult.status !== "PARTIAL") return null;
+  const output = stepResult.output;
+  if (!output) return null;
+
+  switch (engineId) {
+    case "positioning": {
+      const conf = output.confidenceScore ?? output.specificityScore ?? 1.0;
+      if (conf < 0.40) {
+        return {
+          gateFailed: true,
+          reason: `Positioning confidence ${conf.toFixed(2)} below 0.40 minimum`,
+          severity: "critical",
+          shouldRetry: true,
+        };
+      }
+      break;
+    }
+    case "offer": {
+      const painAlignment = output.signalGrounding?.painAlignment ?? output.painAlignment ?? null;
+      const painScore = typeof painAlignment === "number" ? painAlignment : (painAlignment?.score ?? null);
+      const hasPainCoverage = painScore === null ? true : painScore > 0;
+
+      if (!hasPainCoverage) {
+        return {
+          gateFailed: true,
+          reason: "Offer has zero pain alignment — does not address any audience pains",
+          severity: "critical",
+          shouldRetry: true,
+        };
+      }
+      break;
+    }
+    case "statistical_validation": {
+      const validationState = output.validationState || output.status;
+      if (validationState === "rejected") {
+        return {
+          gateFailed: true,
+          reason: "Statistical validation rejected — strategy failed validation",
+          severity: "critical",
+          shouldRetry: false,
+          setConfidenceFloor: 0,
+        };
+      }
+      break;
+    }
+    case "channel_selection": {
+      const channels = output.selectedChannels || output.channels || [];
+      const hasConversion = channels.some((c: any) =>
+        c.role === "conversion" || c.funnelStage === "Conversion" ||
+        c.purpose?.toLowerCase().includes("conversion")
+      );
+      if (channels.length > 0 && !hasConversion) {
+        return {
+          gateFailed: true,
+          reason: "Channel Selection produced zero conversion-capable channels",
+          severity: "high",
+          shouldRetry: false,
+        };
+      }
+      break;
+    }
+  }
+  return null;
+}
+
+function updateSSCAfterEngine(ssc: SharedStrategicContext, engineId: string, stepResult: EngineStepResult, pipelineStep: number): void {
+  if (stepResult.status !== "SUCCESS" && stepResult.status !== "PARTIAL") return;
+  const output = stepResult.output;
+  if (!output) return;
+
+  const conf = extractEngineConfidence(engineId, output);
+  updateConfidenceChain(ssc, engineId as EngineIdType, conf.dataConfidence, conf.engineConfidence, conf.combined);
+
+  console.log(`[Orchestrator] SSC_CONFIDENCE | engine=${engineId} | data=${conf.dataConfidence.toFixed(2)} | engine=${conf.engineConfidence.toFixed(2)} | combined=${conf.combined.toFixed(2)} | floor=${ssc.confidenceFloor.toFixed(2)}`);
+}
+
+function logRelevantProblems(ssc: SharedStrategicContext, engineId: string): ProblemEntry[] {
+  const relevant = getRelevantProblems(ssc, engineId as EngineIdType);
+  if (relevant.length > 0) {
+    console.log(`[Orchestrator] SSC_PROBLEMS_FOR_ENGINE | engine=${engineId} | openProblems=${relevant.length} | problems=${relevant.map(p => p.id).join(",")}`);
+  }
+  return relevant;
 }
 
 async function executeEngine(
@@ -1256,6 +1444,21 @@ async function executeEngine(
       case "channel_selection": {
         const audInput = extractAudienceInput(ctx.audience);
         const awarenessInput = ctx.awareness || {};
+        if (ctx.ssc?.awarenessMeaning && awarenessInput.primaryRoute) {
+          const canonicalStage = ctx.ssc.awarenessMeaning.stage;
+          const currentStage = awarenessInput.primaryRoute.targetReadinessStage;
+          if (currentStage !== canonicalStage) {
+            console.log(`[Orchestrator] SSC_AWARENESS_OVERRIDE | channel_selection | was=${currentStage} | canonical=${canonicalStage}`);
+            awarenessInput.primaryRoute.targetReadinessStage = canonicalStage;
+          }
+          awarenessInput._canonicalAwareness = ctx.ssc.awarenessMeaning;
+        } else if (ctx.ssc?.awarenessMeaning && !awarenessInput.primaryRoute) {
+          awarenessInput.primaryRoute = {
+            targetReadinessStage: ctx.ssc.awarenessMeaning.stage,
+          };
+          awarenessInput._canonicalAwareness = ctx.ssc.awarenessMeaning;
+          console.log(`[Orchestrator] SSC_AWARENESS_INJECTED | channel_selection | stage=${ctx.ssc.awarenessMeaning.stage} | reason=no_awareness_engine_output`);
+        }
         const persuasionInput = ctx.persuasion || {};
         const offerInput = extractOfferInput(ctx.offer);
         const bgResult = ctx.budgetGovernor || {};
@@ -1268,7 +1471,7 @@ async function executeEngine(
           killFlag: bgResult.killFlag ?? false,
         };
         const validationInput = ctx.statisticalValidation || {};
-        console.log(`[Orchestrator] CHANNEL_BUDGET_MAPPED | testMax=${budgetInput.testBudgetMax} scaleMax=${budgetInput.scaleBudgetMax} killFlag=${budgetInput.killFlag} expansion=${budgetInput.expansionPermission}`);
+        console.log(`[Orchestrator] CHANNEL_BUDGET_MAPPED | testMax=${budgetInput.testBudgetMax} scaleMax=${budgetInput.scaleBudgetMax} killFlag=${budgetInput.killFlag} expansion=${budgetInput.expansionPermission} | awarenessStage=${awarenessInput.primaryRoute?.targetReadinessStage || "unknown"}`);
         const result = runChannelSelectionEngine(
           audInput, awarenessInput, persuasionInput, offerInput,
           budgetInput, validationInput, "INTELLIGENT",
@@ -1777,7 +1980,11 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
     console.log(`[Orchestrator] Running engine ${i + 1}/${ENGINE_PRIORITY_ORDER.length}: ${engineDef.name}`);
 
-    const stepResult = await Promise.race([
+    if (ctx.ssc) {
+      logRelevantProblems(ctx.ssc, engineDef.id);
+    }
+
+    let stepResult = await Promise.race([
       executeEngine(engineDef.id, ctx, config, results),
       new Promise<EngineStepResult>((resolve) =>
         setTimeout(() => {
@@ -1792,6 +1999,53 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         }, ENGINE_TIMEOUT_MS)
       ),
     ]);
+
+    if (ctx.ssc && (stepResult.status === "SUCCESS" || stepResult.status === "PARTIAL")) {
+      updateSSCAfterEngine(ctx.ssc, engineDef.id, stepResult, i);
+
+      const gateResult = checkMidPipelineGate(engineDef.id, stepResult, ctx);
+      if (gateResult?.gateFailed) {
+        if (gateResult.setConfidenceFloor !== undefined) {
+          ctx.ssc.confidenceFloor = gateResult.setConfidenceFloor;
+          console.log(`[Orchestrator] SSC_FLOOR_OVERRIDE | engine=${engineDef.id} | newFloor=${gateResult.setConfidenceFloor} | reason=${gateResult.reason}`);
+        }
+
+        if (gateResult.shouldRetry) {
+          console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason}`);
+          const retryResult = await Promise.race([
+            executeEngine(engineDef.id, ctx, config, results),
+            new Promise<EngineStepResult>((resolve) =>
+              setTimeout(() => resolve({
+                engineId: engineDef.id, status: "ERROR", output: null, durationMs: ENGINE_TIMEOUT_MS,
+                error: `Retry timed out after ${ENGINE_TIMEOUT_MS / 1000}s`,
+              }), ENGINE_TIMEOUT_MS)
+            ),
+          ]);
+
+          const retryGate = checkMidPipelineGate(engineDef.id, retryResult, ctx);
+          if (retryGate?.gateFailed) {
+            registerProblem(ctx.ssc, engineDef.id as EngineIdType, "structural", gateResult.reason, gateResult.severity, 1.0,
+              ENGINE_PRIORITY_ORDER.slice(i + 1).map(e => e.id) as EngineIdType[], i);
+            console.warn(`[Orchestrator] MID_PIPELINE_GATE_FAILED | engine=${engineDef.id} | reason=${gateResult.reason} | retryAlsoFailed=true`);
+            if (retryGate.setConfidenceFloor !== undefined) {
+              ctx.ssc.confidenceFloor = retryGate.setConfidenceFloor;
+            }
+          } else {
+            console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY_PASSED | engine=${engineDef.id} | retry succeeded`);
+          }
+
+          stepResult = retryResult;
+          if (retryResult.status === "SUCCESS" || retryResult.status === "PARTIAL") {
+            updateSSCAfterEngine(ctx.ssc, engineDef.id, retryResult, i);
+          }
+        } else {
+          registerProblem(ctx.ssc, engineDef.id as EngineIdType, "structural", gateResult.reason, gateResult.severity, 1.0,
+            ENGINE_PRIORITY_ORDER.slice(i + 1).map(e => e.id) as EngineIdType[], i);
+          console.warn(`[Orchestrator] MID_PIPELINE_GATE_FAILED | engine=${engineDef.id} | reason=${gateResult.reason} | noRetry=true`);
+        }
+      }
+    }
+
     results.set(engineDef.id, stepResult);
 
     const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
@@ -1870,6 +2124,20 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   if (overallStatus === "NEEDS_INPUT") {
     const durationMs = Date.now() - startTime;
     return { jobId, status: "NEEDS_INPUT", completedEngines, durationMs, results, needsInput: needsInputPayload };
+  }
+
+  if (ctx.ssc) {
+    const unresolvedCritical = getUnresolvedCriticalProblems(ctx.ssc);
+    const totalProblems = ctx.ssc.problemRegistry.length;
+    const openProblems = ctx.ssc.problemRegistry.filter(p => p.status === "open").length;
+    const resolvedProblems = ctx.ssc.problemRegistry.filter(p => p.status === "resolved").length;
+    const deferredProblems = ctx.ssc.problemRegistry.filter(p => p.status === "deferred").length;
+    console.log(`[Orchestrator] SSC_PIPELINE_SUMMARY | floor=${ctx.ssc.confidenceFloor.toFixed(2)} | chainLength=${ctx.ssc.confidenceChain.length} | problems=${totalProblems} (open=${openProblems} resolved=${resolvedProblems} deferred=${deferredProblems}) | criticalUnresolved=${unresolvedCritical.length} | contradictions=${ctx.ssc.contradictions.length} | traceEntries=${ctx.ssc.reasonTrace.length} | awareness=${ctx.ssc.awarenessMeaning?.stage || "none"}`);
+    if (unresolvedCritical.length > 0) {
+      for (const p of unresolvedCritical) {
+        console.warn(`[Orchestrator] SSC_UNRESOLVED_CRITICAL | id=${p.id} | source=${p.sourceEngine} | desc=${p.description}`);
+      }
+    }
   }
 
   try {

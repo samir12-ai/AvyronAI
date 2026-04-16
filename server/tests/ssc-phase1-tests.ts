@@ -308,11 +308,171 @@ console.log("\n--- SSC serialization roundtrip (pausedContext simulation) ---");
   assert(deserialized.awarenessMeaning!.stage === "product_aware", "serialized awareness stage preserved");
 }
 
+console.log("\n=== Phase 2 Tests ===\n");
+
+console.log("--- extractAudienceInput awarenessLevel fix ---");
+{
+  const extractAudienceInput = (audienceResult: any): any => {
+    if (!audienceResult) return {};
+    const rawAwareness = audienceResult.awarenessLevel;
+    let awarenessLevel: string | null = null;
+    if (typeof rawAwareness === "string") {
+      awarenessLevel = rawAwareness;
+    } else if (rawAwareness != null && typeof rawAwareness === "object" && typeof rawAwareness.level === "string") {
+      awarenessLevel = rawAwareness.level;
+    }
+    return {
+      painProfiles: audienceResult.painProfiles || [],
+      desireMap: audienceResult.desireMap || [],
+      objectionMap: audienceResult.objectionMap || [],
+      transformationMap: audienceResult.transformationMap || [],
+      emotionalDrivers: audienceResult.emotionalDrivers || [],
+      segments: audienceResult.audienceSegments || [],
+      awarenessLevel,
+      maturityIndex: audienceResult.maturityIndex || null,
+    };
+  };
+
+  const stringResult = extractAudienceInput({ awarenessLevel: "product_aware", painProfiles: [{ pain: "test" }] });
+  assert(stringResult.awarenessLevel === "product_aware", "extractAudienceInput: string awarenessLevel preserved");
+  assert(stringResult.painProfiles.length === 1, "extractAudienceInput: painProfiles preserved");
+
+  const objectResult = extractAudienceInput({ awarenessLevel: { level: "solution_aware", distribution: {}, confidenceScore: 0.7 } });
+  assert(objectResult.awarenessLevel === "solution_aware", "extractAudienceInput: object awarenessLevel.level extracted");
+
+  const nullResult = extractAudienceInput({ painProfiles: [] });
+  assert(nullResult.awarenessLevel === null, "extractAudienceInput: missing awarenessLevel returns null");
+
+  const emptyResult = extractAudienceInput(null);
+  assert(Object.keys(emptyResult).length === 0, "extractAudienceInput: null input returns empty object");
+}
+
+console.log("\n--- Mid-pipeline gate: positioning confidence ---");
+{
+  const ssc = createEmptySSC("camp_gate", "acc_gate");
+
+  const lowConfResult = {
+    engineId: "positioning" as const,
+    status: "SUCCESS" as const,
+    output: { confidenceScore: 0.35, specificityScore: 0.30 },
+    durationMs: 100,
+  };
+
+  updateConfidenceChain(ssc, "positioning", 0.30, 0.35, 0.325);
+  assert(ssc.confidenceFloor < 1.0, "confidence floor drops after low-conf positioning");
+  assert(ssc.confidenceChain.length === 1, "confidence chain has entry for positioning");
+  assert(ssc.confidenceChain[0].dataConfidence === 0.30, "data confidence captured correctly");
+  assert(ssc.confidenceChain[0].engineConfidence === 0.35, "engine confidence captured correctly");
+}
+
+console.log("\n--- Mid-pipeline gate: statistical validation rejection ---");
+{
+  const ssc = createEmptySSC("camp_sv", "acc_sv");
+  updateConfidenceChain(ssc, "audience", 0.8, 0.7, 0.75);
+  assert(ssc.confidenceFloor === 0.75, "floor at 0.75 before stat val");
+
+  ssc.confidenceFloor = 0;
+  assert(ssc.confidenceFloor === 0, "stat val rejection sets floor to 0");
+
+  registerProblem(ssc, "statistical_validation", "structural", "Statistical validation rejected", "critical", 1.0, ["budget_governor", "channel_selection"], 10);
+  const bgProblems = getRelevantProblems(ssc, "budget_governor");
+  assert(bgProblems.length === 1, "budget_governor sees stat val rejection problem");
+  assert(bgProblems[0].severity === "critical", "stat val problem is critical severity");
+}
+
+console.log("\n--- Confidence chain ordering and floor behavior ---");
+{
+  const ssc = createEmptySSC("camp_chain", "acc_chain");
+
+  updateConfidenceChain(ssc, "market_intelligence", 0.9, 0.85, 0.875);
+  updateConfidenceChain(ssc, "audience", 0.7, 0.65, 0.675);
+  updateConfidenceChain(ssc, "positioning", 0.3, 0.35, 0.325);
+  updateConfidenceChain(ssc, "differentiation", 0.8, 0.75, 0.775);
+
+  assert(ssc.confidenceChain.length === 4, "chain has 4 entries");
+  assert(ssc.confidenceFloor === 0.325, "floor is minimum across chain");
+  assert(ssc.confidenceChain[0].engineId === "market_intelligence", "chain order preserved: MI first");
+  assert(ssc.confidenceChain[3].engineId === "differentiation", "chain order preserved: diff last");
+  assert(ssc.confidenceChain[3].inheritedFloor === 0.325, "last entry has correct inherited floor");
+}
+
+console.log("\n--- Problem propagation through pipeline ---");
+{
+  const ssc = createEmptySSC("camp_prop", "acc_prop");
+
+  const p1 = registerProblem(ssc, "audience", "trust", "Low trust barriers detected", "high", 0.8, ["positioning", "differentiation", "offer"], 1);
+  const p2 = registerProblem(ssc, "positioning", "structural", "Weak territory", "critical", 0.35, ["differentiation", "mechanism", "offer", "funnel"], 2);
+
+  assert(getRelevantProblems(ssc, "differentiation").length === 2, "diff sees both problems");
+  assert(getRelevantProblems(ssc, "offer").length === 2, "offer sees both problems");
+  assert(getRelevantProblems(ssc, "channel_selection").length === 0, "channel_selection not targeted");
+
+  resolveProblem(ssc, p1.id, "differentiation", "Added proof framework");
+  assert(getRelevantProblems(ssc, "offer").length === 1, "offer now sees only 1 problem after trust resolved");
+
+  deferProblem(ssc, p2.id, "mechanism", "Territory too weak but proceeding with constraints");
+  assert(getRelevantProblems(ssc, "offer").length === 0, "offer sees 0 problems after defer");
+  assert(ssc.problemRegistry.filter(p => p.status === "resolved").length === 1, "1 resolved");
+  assert(ssc.problemRegistry.filter(p => p.status === "deferred").length === 1, "1 deferred");
+}
+
+console.log("\n--- Canonical awareness meaning for channel selection ---");
+{
+  const ssc = createEmptySSC("camp_cs", "acc_cs");
+  ssc.awarenessMeaning = resolveAwarenessMeaning("product_aware");
+
+  assert(ssc.awarenessMeaning !== null, "awareness meaning set");
+  assert(ssc.awarenessMeaning!.stage === "product_aware", "stage is product_aware");
+  assert(ssc.awarenessMeaning!.blockedFunnelTypes.length === 0, "product_aware has no blocked funnel types");
+  assert(ssc.awarenessMeaning!.allowedChannelRoles.includes("conversion"), "product_aware allows conversion channels");
+  assert(ssc.awarenessMeaning!.conversionReadiness === "evaluating", "product_aware conversion readiness is evaluating");
+
+  const unawareSsc = createEmptySSC("camp_un", "acc_un");
+  unawareSsc.awarenessMeaning = resolveAwarenessMeaning("unaware");
+  assert(unawareSsc.awarenessMeaning!.blockedFunnelTypes.includes("direct"), "unaware blocks direct funnels");
+  assert(unawareSsc.awarenessMeaning!.blockedFunnelTypes.includes("tripwire"), "unaware blocks tripwire funnels");
+  assert(!unawareSsc.awarenessMeaning!.allowedChannelRoles.includes("conversion"), "unaware does NOT allow conversion channels");
+}
+
+console.log("\n--- Full SSC lifecycle simulation ---");
+{
+  const ssc = createEmptySSC("camp_life", "acc_life");
+
+  updateConfidenceChain(ssc, "market_intelligence", 0.9, 0.85, 0.875);
+  updateConfidenceChain(ssc, "audience", 0.7, 0.65, 0.675);
+  ssc.awarenessMeaning = resolveAwarenessMeaning("solution_aware");
+  ssc.painMap = [{ canonical: "time_waste", sourceSignal: "pain1", frequency: 3, severity: 0.8 }];
+  ssc.desireMap = [{ canonical: "automation", sourceSignal: "desire1", intensity: 0.9 }];
+
+  registerProblem(ssc, "audience", "trust", "High trust barriers", "high", 0.75, ["positioning", "offer"], 2);
+  updateConfidenceChain(ssc, "positioning", 0.4, 0.42, 0.41);
+  addReasonTrace(ssc, "positioning", "saturation=0.85", "High saturation", "Must differentiate", "Niche positioning", 0.42);
+
+  updateConfidenceChain(ssc, "differentiation", 0.7, 0.68, 0.69);
+  updateConfidenceChain(ssc, "mechanism", 0.6, 0.55, 0.575);
+  updateConfidenceChain(ssc, "offer", 0.65, 0.6, 0.625);
+  resolveProblem(ssc, ssc.problemRegistry[0].id, "offer", "Pain alignment added");
+
+  assert(ssc.confidenceFloor === 0.41, "floor is at positioning level (lowest)");
+  assert(ssc.confidenceChain.length === 6, "6 engines in chain");
+  assert(ssc.problemRegistry.length === 1, "1 problem registered");
+  assert(ssc.problemRegistry[0].status === "resolved", "problem resolved");
+  assert(ssc.reasonTrace.length === 1, "1 reason trace entry");
+  assert(ssc.awarenessMeaning?.stage === "solution_aware", "awareness is solution_aware");
+
+  const serialized = JSON.stringify(ssc);
+  const restored: SharedStrategicContext = JSON.parse(serialized);
+  assert(restored.confidenceFloor === 0.41, "roundtrip: floor preserved");
+  assert(restored.confidenceChain.length === 6, "roundtrip: chain preserved");
+  assert(restored.problemRegistry[0].status === "resolved", "roundtrip: problem status preserved");
+  assert(restored.awarenessMeaning?.stage === "solution_aware", "roundtrip: awareness preserved");
+}
+
 console.log("\n================================");
 console.log(`RESULTS: ${passed} passed, ${failed} failed out of ${passed + failed} total`);
 if (failed > 0) {
-  console.error("\n⚠️  PHASE 1 TESTS HAVE FAILURES");
+  console.error("\n⚠️  SSC TESTS HAVE FAILURES");
   process.exit(1);
 } else {
-  console.log("\n✅ ALL PHASE 1 TESTS PASSED");
+  console.log("\n✅ ALL SSC TESTS PASSED (Phase 1 + Phase 2)");
 }
