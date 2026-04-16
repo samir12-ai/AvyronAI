@@ -20,6 +20,14 @@ import { evaluateSystemControl } from "../system-control/engine";
 import type { SystemControlVerdict } from "../system-control/types";
 import { storeControlVerdict } from "../system-control/routes";
 import {
+  createEmptySSC,
+  registerProblem,
+  updateConfidenceChain,
+  addReasonTrace,
+  type SharedStrategicContext,
+} from "./shared-strategic-context";
+import { resolveAwarenessMeaning } from "./canonical-meanings";
+import {
   orchestratorJobs,
   strategicPlans,
   growthCampaigns,
@@ -129,6 +137,7 @@ export interface OrchestratorRunResult {
 }
 
 interface EngineContext {
+  ssc?: SharedStrategicContext;
   mi?: any;
   audience?: any;
   positioning?: any;
@@ -689,6 +698,46 @@ async function executeEngine(
             console.warn(`[Orchestrator] SGL_INIT_FAILED | error=${sglErr.message} — proceeding without signal governance`);
             ctx.sglState = undefined;
           }
+        }
+
+        if (ctx.ssc && ctx.audience) {
+          const pains = ctx.audience.painProfiles || [];
+          ctx.ssc.painMap = pains.slice(0, 10).map((p: any) => ({
+            canonical: typeof p === "string" ? p : p.pain || p.name || p.label || "",
+            sourceSignal: typeof p === "string" ? p : p.evidence || p.signal || "",
+            frequency: typeof p === "object" ? (p.frequency ?? p.count ?? 1) : 1,
+            severity: typeof p === "object" ? (p.severity ?? p.intensity ?? 0.5) : 0.5,
+          }));
+
+          const desires = ctx.audience.desireMap || [];
+          ctx.ssc.desireMap = desires.slice(0, 10).map((d: any) => ({
+            canonical: typeof d === "string" ? d : d.desire || d.name || d.label || "",
+            sourceSignal: typeof d === "string" ? d : d.evidence || d.signal || "",
+            intensity: typeof d === "object" ? (d.intensity ?? d.strength ?? 0.5) : 0.5,
+          }));
+
+          const objections = ctx.audience.objectionMap || [];
+          ctx.ssc.objectionMap = objections.slice(0, 10).map((o: any) => ({
+            canonical: typeof o === "string" ? o : o.objection || o.name || o.label || "",
+            sourceSignal: typeof o === "string" ? o : o.evidence || o.signal || "",
+            severity: typeof o === "object" ? (o.severity ?? o.weight ?? 0.5) : 0.5,
+            addressed: false,
+          }));
+
+          const awarenessLevel =
+            ctx.audience.awarenessLevel ||
+            ctx.audience.audienceAwarenessLevel ||
+            ctx.audience.awareness?.level ||
+            ctx.audience.awarenessStage ||
+            null;
+          if (awarenessLevel) {
+            ctx.ssc.awarenessMeaning = resolveAwarenessMeaning(awarenessLevel);
+            console.log(`[Orchestrator] SSC_AWARENESS_SET | stage=${awarenessLevel} | resolved=${ctx.ssc.awarenessMeaning ? "yes" : "no"}`);
+          } else {
+            console.warn(`[Orchestrator] SSC_AWARENESS_MISSING | audience output did not contain awarenessLevel`);
+          }
+
+          console.log(`[Orchestrator] SSC_POPULATED | pains=${ctx.ssc.painMap.length} | desires=${ctx.ssc.desireMap.length} | objections=${ctx.ssc.objectionMap.length}`);
         }
         break;
       }
@@ -1595,6 +1644,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   let ctx: EngineContext = {};
   let previousSectionStatuses: any[] = [];
 
+  ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
+  console.log(`[Orchestrator] SSC_INITIALIZED | campaignId=${config.campaignId} | accountId=${config.accountId}`);
+
   if (config.pausedJobId) {
     jobId = config.pausedJobId;
     const [pausedJob] = await db
@@ -1606,6 +1658,12 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     if (pausedJob?.pausedContext) {
       try {
         ctx = JSON.parse(pausedJob.pausedContext);
+        if (!ctx.ssc) {
+          ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
+          console.log(`[Orchestrator] SSC_RESTORED_EMPTY | job=${jobId} | reason=paused_context_missing_ssc`);
+        } else {
+          console.log(`[Orchestrator] SSC_RESTORED | job=${jobId} | problems=${ctx.ssc.problemRegistry?.length || 0} | traceEntries=${ctx.ssc.reasonTrace?.length || 0}`);
+        }
         console.log(`[Orchestrator] CONTEXT_RESTORED | job=${jobId} | keys=${Object.keys(ctx).join(",")}`);
       } catch {
         console.warn(`[Orchestrator] CONTEXT_RESTORE_FAILED | job=${jobId}`);

@@ -1,0 +1,246 @@
+Hi,
+
+The proposed system logic alignment plan is directionally correct, but before moving forward I want to lock several **non-negotiable requirements**.
+
+This work is foundational. It must be implemented carefully, at the **system level**, with strict acceptance criteria, no improvisation, and no partial delivery.
+
+---
+
+# 1. SYSTEM-LEVEL SCOPE ONLY
+
+This work must be implemented at the **system level**, not at the account level and not as account-specific behavior.
+
+Meaning:
+
+* The logic must apply to the architecture of the system itself
+* It must not depend on specific campaign/account edge cases
+* It must not introduce account-specific workaround behavior
+
+The target is:
+
+> a consistent reasoning architecture for the full system
+
+Not:
+
+> a patch for one campaign
+
+---
+
+# 2. NO REASONING / SIGNAL LEAKAGE
+
+We need to explicitly protect against leakage.
+
+If Shared Strategic Context, Problem Registry, Canonical Meaning Contract, and Reason Trace are introduced, they must remain:
+
+* scoped to the current run
+* scoped to the current system execution
+* isolated from unrelated accounts/campaigns
+* non-persistent unless explicitly intended
+
+This means:
+
+* No cross-account leakage
+* No contamination between runs
+* No accidental reuse of problems / traces / constraints from previous executions
+* No silent carry-over outside approved memory paths
+
+Anything introduced here must respect strict isolation boundaries.
+
+Please validate explicitly:
+
+* where leakage could happen
+* how it will be prevented
+* which objects are ephemeral
+* which objects are persistent
+* and what guarantees isolation
+
+---
+
+# 3. FOLLOW THE PLAN ONLY — NO INVENTION
+
+Do not improvise.
+
+Do not introduce parallel ideas, extra frameworks, or side architectures that are outside this plan.
+
+Do not “creatively” solve the problem with a different direction.
+
+The implementation must follow the agreed plan only:
+
+* Shared Strategic Context
+* Problem Registry
+* Canonical Meaning Contract
+* Reason Trace as structured contract
+* Confidence split (data confidence vs engine confidence)
+* Self-correcting limited to logic correction
+* Control Layer consuming all of the above
+
+If you believe something in the plan is flawed, state it clearly first.
+Do not silently replace it with your own approach.
+
+---
+
+# 4. PROBLEM REGISTRY MUST BE ENFORCED
+
+If Problem Registry is added, then every engine must be required to deal with the problems relevant to it.
+
+This is critical.
+
+I do NOT want a registry that simply logs problems while engines continue normally.
+
+Required behavior:
+
+Each engine must:
+
+* read active problems relevant to its scope
+* attempt to resolve them
+* explicitly mark them as:
+
+  * resolved
+  * deferred
+  * unresolved with reason
+
+What is forbidden:
+
+* ignoring a problem
+* skipping a problem silently
+* passing it through without explanation
+
+In other words:
+
+> If a problem reaches an engine that should handle it, that engine is REQUIRED to act on it.
+
+No passive problem passing.
+
+---
+
+# 5. ADD THIS RULE TO ALL POINTS
+
+This requirement applies across the entire plan:
+
+> The system is NOT allowed to observe a problem without either resolving it, deferring it explicitly, or escalating it.
+
+Nothing should remain vague.
+
+No hidden problem flow.
+No silent drops.
+No “warning only” behavior for critical logic problems.
+
+---
+
+# 6. STRICT ACCEPTANCE CRITERIA
+
+I want strict acceptance criteria before anything is considered complete.
+
+Do not deliver partial work unless the checklist for that phase is fully satisfied.
+
+Each phase must have:
+
+* explicit implementation checklist
+* explicit validation checklist
+* explicit completion criteria
+* explicit failure criteria
+
+And the work is NOT considered done until all of them pass.
+
+---
+
+# 7. CHECKLIST-BASED DELIVERY ONLY
+
+For each phase, provide a checklist like this:
+
+### Implemented
+
+* [ ]
+* [ ]
+* [ ]
+
+### Validated
+
+* [ ]
+* [ ]
+* [ ]
+
+### Risks Checked
+
+* [ ]
+* [ ]
+* [ ]
+
+### Acceptance Criteria Passed
+
+* [ ]
+* [ ]
+* [ ]
+
+No phase should be marked complete until every box is complete.
+
+---
+
+# 8. HARD ACCEPTANCE STANDARD
+
+Do not mark this work complete until ALL of the following are true:
+
+* Shared Strategic Context is working across engines
+* Canonical Meaning is consumed consistently
+* Reason Trace is structured and usable downstream
+* Problem Registry is active and enforced
+* No engine can silently ignore relevant problems
+* Confidence system is correctly split
+* Self-correcting only fixes logic (not data weakness)
+* Control Layer consumes the full reasoning context
+* No leakage exists across runs/accounts
+* No part of the plan was replaced by an invented alternative
+
+---
+
+# 9. NO PARTIAL HANDOFF
+
+Do not hand this back as:
+
+* “mostly complete”
+* “working with a few gaps”
+* “ready for next iteration”
+
+This should only be handed back when:
+
+* the phase checklist is complete
+* the validation is complete
+* the acceptance criteria are complete
+
+If something is incomplete, say exactly what is incomplete and stop there.
+
+---
+
+# 10. REQUIRED RESPONSE
+
+Before implementation, I want a revised execution plan that includes:
+
+1. Updated phased plan
+2. Leakage prevention strategy
+3. Strict system-level scope confirmation
+4. Problem Registry enforcement logic
+5. Per-phase checklist
+6. Acceptance criteria per phase
+7. Confirmation that no invention / no deviation will occur
+
+This must be based on the actual codebase.
+
+No theory.
+No abstraction without code grounding.
+
+---
+
+# FINAL PRINCIPLE
+
+We are not building a system that merely tracks problems.
+
+We are building a system that:
+
+* understands them
+* routes them correctly
+* forces engines to act on them
+* and does not allow them to disappear silently
+
+Please revise the implementation plan accordingly and return it in that exact structure before starting execution.
+
+Thanks.
