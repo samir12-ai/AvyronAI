@@ -793,6 +793,26 @@ export function enforceEngineDepthCompliance(
     }
   }
 
+  // Reconcile individual component violations with the overall depth-gate decision.
+  // When overall causalDepthScore is at/above the gate threshold, the engine has
+  // demonstrated sufficient causal depth via OTHER components even if one specific
+  // component (e.g., causal_chain or root_cause) did not semantically match.
+  // Treat those component-level "missing X" violations as MAJOR rather than
+  // BLOCKING, so they still penalize confidence but do not veto an output that
+  // passes the gate. This aligns passed/blocked decisions across the two layers
+  // that previously disagreed (isDepthBlocking used depthScore, result.passed
+  // used blocking-count).
+  if (result.causalDepthScore >= DEPTH_GATE_THRESHOLD) {
+    for (const v of result.violations) {
+      if (
+        v.severity === "blocking" &&
+        (v.violationType === "missing_root_cause" || v.violationType === "missing_causal_chain")
+      ) {
+        v.severity = "major";
+      }
+    }
+  }
+
   const blockingViolations = result.violations.filter(v => v.severity === "blocking");
   const majorViolations = result.violations.filter(v => v.severity === "major");
   const minorViolations = result.violations.filter(v => v.severity === "minor");

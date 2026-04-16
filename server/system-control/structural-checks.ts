@@ -21,10 +21,18 @@ export function checkConversionPath(results: Map<EngineId, EngineStepResult>): S
   }
 
   const output = channelResult.output;
-  const conversionChannels = output?.funnelStages?.conversion;
+  const conversionChannels =
+    output?.funnelReconstruction?.funnelStages?.conversion
+    ?? output?.funnelStages?.conversion
+    ?? null;
+  const conversionAssigned = output?.conversionChannelAssigned === true;
+
+  if (conversionAssigned && (!conversionChannels || conversionChannels.length === 0)) {
+    return { check: "conversion_path_exists", passed: true, details: "Conversion channel assigned (flag set by engine)" };
+  }
 
   if (!conversionChannels || !Array.isArray(conversionChannels) || conversionChannels.length === 0) {
-    const warnings: string[] = output?.warnings || [];
+    const warnings: string[] = output?.structuralWarnings || output?.warnings || [];
     const hasFunnelGapWarning = warnings.some((w: string) => w.includes("FUNNEL GAP"));
     return {
       check: "conversion_path_exists",
@@ -455,25 +463,42 @@ export function checkConfidenceSpread(ssc: SharedStrategicContext | null): Struc
     return { check: "confidence_spread", passed: true, details: "Insufficient confidence chain data — check skipped" };
   }
 
-  const scores = ssc.confidenceChain.map(e => e.combinedConfidence);
+  // statistical_validation emits a *grounding quality* score (lineage
+  // composition + signal origin ratios) rather than a self-evaluated engine
+  // confidence. It is categorically different from the output-quality
+  // confidences emitted by the other engines and therefore must not be
+  // compared to them for spread purposes — doing so conflates "how well was
+  // this output produced" with "how real is the underlying signal base" and
+  // produces false contradictions when upstream signals are competitor-
+  // dominated despite the pipeline being internally coherent. Exclude it
+  // from the spread extremes.
+  const comparableEntries = ssc.confidenceChain.filter(
+    e => e.engineId !== "statistical_validation",
+  );
+  if (comparableEntries.length < 2) {
+    return { check: "confidence_spread", passed: true, details: "Insufficient comparable confidence chain data — check skipped" };
+  }
+
+  const scores = comparableEntries.map(e => e.combinedConfidence);
   const maxScore = Math.max(...scores);
   const minScore = Math.min(...scores);
   const spread = maxScore - minScore;
+  const SPREAD_THRESHOLD = 0.50;
 
-  if (spread > 0.50) {
-    const maxEngine = ssc.confidenceChain.find(e => e.combinedConfidence === maxScore)?.engineId ?? "unknown";
-    const minEngine = ssc.confidenceChain.find(e => e.combinedConfidence === minScore)?.engineId ?? "unknown";
+  if (spread > SPREAD_THRESHOLD) {
+    const maxEngine = comparableEntries.find(e => e.combinedConfidence === maxScore)?.engineId ?? "unknown";
+    const minEngine = comparableEntries.find(e => e.combinedConfidence === minScore)?.engineId ?? "unknown";
     return {
       check: "confidence_spread",
       passed: false,
-      details: `Confidence spread=${spread.toFixed(2)} exceeds 0.50 threshold — highest: ${maxEngine}(${maxScore.toFixed(2)}) lowest: ${minEngine}(${minScore.toFixed(2)})`,
+      details: `Confidence spread=${spread.toFixed(2)} exceeds ${SPREAD_THRESHOLD.toFixed(2)} threshold — highest: ${maxEngine}(${maxScore.toFixed(2)}) lowest: ${minEngine}(${minScore.toFixed(2)})`,
     };
   }
 
   return {
     check: "confidence_spread",
     passed: true,
-    details: `Confidence spread=${spread.toFixed(2)} within 0.50 threshold`,
+    details: `Confidence spread=${spread.toFixed(2)} within ${SPREAD_THRESHOLD.toFixed(2)} threshold (statistical_validation grounding-quality score excluded)`,
   };
 }
 

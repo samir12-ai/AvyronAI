@@ -34,7 +34,7 @@ import {
 } from "../causal-enforcement-layer/engine";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
 import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
-import { cosineSimilarity } from "../shared/embedding";
+import { cosineSimilarity, tokenize } from "../shared/embedding";
 import {
   type SignalLineageEntry,
   extractQualifyingSignals,
@@ -2065,24 +2065,52 @@ export function analyzePersuasion(
   let positioningDriftMinSimilarity = 1;
   let positioningDriftWorstDecision = "";
   if (lockedDecisions.length > 0) {
-    const persuasionOutputText = [
-      routes.primary.routeName || "",
+    // Drift detection measures whether persuasion's SUBSTANTIVE content
+    // (drivers, objections, trust, messaging, proof links, stage properties)
+    // references the content vocabulary of each locked positioning decision.
+    //
+    // Why token-coverage instead of bigram cosineSimilarity:
+    //   Locked decisions are long prose sentences (~40 content tokens).
+    //   Persuasion output is structured keyword data. They share concepts
+    //   but rarely share exact bigrams, so bigram-weighted cosine collapses
+    //   to ~0.02-0.07 even when semantic alignment is strong — producing
+    //   false-positive SEVERE drift.
+    //
+    // Why exclude frictionNotes and routeName lock suffix from the compared
+    // surface: those fields inject the decision text verbatim via
+    // applyPositioningLockConstraints. Including them would be circular
+    // self-matching and mask genuine drift.
+    const persuasionSubstantiveText = [
       routes.primary.persuasionMode || "",
       ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
       ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
+      ...(routes.primary.messageOrderLogic || []).map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
+      ...(routes.primary.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
+      ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
+      ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
+      ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objectionCategory || o.objection || ""} ${o.objectionDetail || ""} ${o.requiredProofType || o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
+      ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.objectionType || ""} ${o.requiredProofType || ""} ${o.persuasionResponse || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""}`),
     ].join(" ");
+    const persuasionTokenSet = new Set(tokenize(persuasionSubstantiveText));
 
     for (const decision of lockedDecisions) {
       const decisionCore = decision.replace(/^(contrast_axis|enemy|mechanism|narrative_direction):\s*/i, "").trim();
       if (!decisionCore) continue;
-      const similarity = cosineSimilarity(decisionCore, persuasionOutputText);
-      if (similarity < positioningDriftMinSimilarity) {
-        positioningDriftMinSimilarity = similarity;
+      const decisionTokens = tokenize(decisionCore);
+      if (decisionTokens.length === 0) continue;
+      const uniqueDecisionTokens = new Set(decisionTokens);
+      let covered = 0;
+      for (const t of uniqueDecisionTokens) {
+        if (persuasionTokenSet.has(t)) covered++;
+      }
+      const coverage = covered / uniqueDecisionTokens.size;
+      if (coverage < positioningDriftMinSimilarity) {
+        positioningDriftMinSimilarity = coverage;
         positioningDriftWorstDecision = decisionCore;
       }
-      if (similarity < 0.20) {
+      if (coverage < 0.20) {
         crossEngineValidation.push(
-          `POSITIONING LOCK DRIFT: Persuasion output has low semantic alignment (score=${similarity.toFixed(2)}, threshold=0.20) with locked decision "${decisionCore}" — output may have drifted from offer engine contracts`,
+          `POSITIONING LOCK DRIFT: Persuasion substantive output covers only ${(coverage * 100).toFixed(0)}% of content tokens from locked decision "${decisionCore}" (threshold=20%) — output may have drifted from offer engine contracts`,
         );
       }
     }

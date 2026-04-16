@@ -691,13 +691,15 @@ function extractEngineConfidence(engineId: string, output: any): { dataConfidenc
   let engineConf = 0.5;
 
   switch (engineId) {
-    case "market_intelligence":
-      engineConf = output.confidenceScore ?? output.overallConfidence ?? 0.5;
-      dataConf = output.dataReliability?.overallScore ?? engineConf;
+    case "market_intelligence": {
+      const miOutput = output.output ?? output;
+      engineConf = miOutput.confidence?.overall ?? output.overallConfidence ?? output.confidenceScore ?? 0.5;
+      dataConf = miOutput.dataReliability?.overallScore ?? miOutput.confidence?.factors?.dataCompleteness ?? engineConf;
       break;
+    }
     case "audience":
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = output.dataReliability?.score ?? engineConf;
+      engineConf = output.confidenceScore ?? output.dataReliability?.overallReliability ?? 0.5;
+      dataConf = output.dataReliability?.overallReliability ?? output.dataReliability?.score ?? engineConf;
       break;
     case "positioning":
       engineConf = output.engineConfidence ?? output.confidenceScore ?? 0.5;

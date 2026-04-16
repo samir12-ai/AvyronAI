@@ -1925,6 +1925,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     snapshotId: inserted.id,
     freshnessMetadata: miFreshnessMetadata,
     productDna: productDna || null,
+    dataReliability,
+    confidenceScore: dataReliability.overallReliability,
   };
 }
 

@@ -60,6 +60,7 @@ export interface ConfidenceChainEntry {
   dataConfidence: number;
   engineConfidence: number;
   combinedConfidence: number;
+  localCombined: number;
   inheritedFloor: number;
 }
 
@@ -271,6 +272,8 @@ export function addReasonTrace(
   });
 }
 
+export const MAX_CONFIDENCE_AMPLIFICATION = 0.20;
+
 export function updateConfidenceChain(
   ssc: SharedStrategicContext,
   engineId: EngineId,
@@ -279,12 +282,17 @@ export function updateConfidenceChain(
   combinedConfidence: number
 ): void {
   const floorBeforeThisEngine = ssc.confidenceFloor;
-  ssc.confidenceFloor = Math.min(ssc.confidenceFloor, combinedConfidence);
+  const localCombined = combinedConfidence;
+  const rolledUp = floorBeforeThisEngine >= 1.0
+    ? localCombined
+    : Math.min(localCombined, floorBeforeThisEngine + MAX_CONFIDENCE_AMPLIFICATION);
+  ssc.confidenceFloor = Math.min(ssc.confidenceFloor, rolledUp);
   ssc.confidenceChain.push({
     engineId,
     dataConfidence,
     engineConfidence,
-    combinedConfidence,
+    combinedConfidence: rolledUp,
+    localCombined,
     inheritedFloor: floorBeforeThisEngine,
   });
 }
