@@ -943,7 +943,7 @@ async function executeEngine(
       }
 
       case "audience": {
-        const result = await runAudienceEngine(config.accountId, config.campaignId);
+        const result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId);
         output = result;
         snapshotId = result.snapshotId;
         ctx.audience = result;

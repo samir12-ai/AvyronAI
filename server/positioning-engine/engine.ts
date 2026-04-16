@@ -2150,26 +2150,16 @@ export async function runPositioningEngine(
     return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot ${miSnapshotId} belongs to campaign ${miSnapshot.campaignId}, not ${campaignId}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
   }
 
-  let activeMiSnapshot = miSnapshot;
+  const activeMiSnapshot = miSnapshot;
   const miIntegrity = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
   if (!miIntegrity.valid) {
-    console.log(`[PositioningEngine-V3] MI snapshot integrity failed: ${miIntegrity.failures.join(", ")} — attempting self-healing`);
-    const [healed] = await db.select().from(miSnapshots)
-      .where(and(
-        eq(miSnapshots.campaignId, campaignId),
-        eq(miSnapshots.accountId, accountId),
-        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-        eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
-      ))
-      .orderBy(desc(miSnapshots.createdAt))
-      .limit(1);
-    if (!healed) {
-      console.log(`[PositioningEngine-V3] Self-healing failed: no valid MI snapshot found for campaign ${campaignId}`);
-      const executionTimeMs = Date.now() - startTime;
-      return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot integrity verification failed and no valid fallback found: ${miIntegrity.failures.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
-    }
-    console.log(`[PositioningEngine-V3] Self-healed: resolved stale MI ${miSnapshotId} → ${healed.id}`);
-    activeMiSnapshot = healed;
+    console.log(`[PositioningEngine-V3] RUN_SCOPED_INTEGRITY_FAIL | id=${miSnapshotId} | failures=${miIntegrity.failures.join(", ")} — failing fast (no cross-run fallback)`);
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult(
+      "MISSING_DEPENDENCY",
+      `Run-scoped MI snapshot ${miSnapshotId} failed integrity verification: ${miIntegrity.failures.join("; ")} — re-run Market Intelligence to produce a fresh snapshot`,
+      executionTimeMs, miSnapshotId, audienceSnapshotId,
+    );
   }
 
   const miFreshnessMetadata = buildFreshnessMetadata(activeMiSnapshot);

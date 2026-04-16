@@ -1448,18 +1448,42 @@ function buildEmptyResult(
   };
 }
 
-export async function runAudienceEngine(accountId: string, campaignId: string): Promise<AudienceEngineV3Result> {
+export async function runAudienceEngine(accountId: string, campaignId: string, miSnapshotIdParam?: string): Promise<AudienceEngineV3Result> {
   const startTime = Date.now();
-  console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}`);
+  console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}${miSnapshotIdParam ? ` | run-scoped MI=${miSnapshotIdParam}` : " | unscoped (will resolve latest)"}`);
 
-  const [latestSnapshot] = await db.select().from(miSnapshots)
-    .where(and(
-      eq(miSnapshots.accountId, accountId),
-      eq(miSnapshots.campaignId, campaignId),
-      inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-    ))
-    .orderBy(desc(miSnapshots.createdAt))
-    .limit(1);
+  let latestSnapshot: any = null;
+  if (miSnapshotIdParam) {
+    const [byId] = await db.select().from(miSnapshots)
+      .where(and(
+        eq(miSnapshots.id, miSnapshotIdParam),
+        eq(miSnapshots.accountId, accountId),
+        eq(miSnapshots.campaignId, campaignId),
+      ))
+      .limit(1);
+    latestSnapshot = byId || null;
+    if (!latestSnapshot) {
+      console.log(`[AudienceEngine-V3] RUN_SCOPED_MI_NOT_FOUND | id=${miSnapshotIdParam} — failing fast (no latest fallback in scoped mode)`);
+      const executionTimeMs = Date.now() - startTime;
+      return buildEmptyResult(
+        "MISSING_DEPENDENCY",
+        `Run-scoped MI snapshot ${miSnapshotIdParam} not found for campaign ${campaignId}`,
+        { postsAnalyzed: 0, commentsAnalyzed: 0, competitorsAnalyzed: 0, sanitizedCount: 0, miSnapshotId: miSnapshotIdParam, miSnapshotAge: null },
+        executionTimeMs,
+        "",
+      );
+    }
+  } else {
+    const [byLatest] = await db.select().from(miSnapshots)
+      .where(and(
+        eq(miSnapshots.accountId, accountId),
+        eq(miSnapshots.campaignId, campaignId),
+        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
+      ))
+      .orderBy(desc(miSnapshots.createdAt))
+      .limit(1);
+    latestSnapshot = byLatest || null;
+  }
 
   const miSnapshotId = latestSnapshot?.id || null;
   const miSnapshotAge = latestSnapshot?.createdAt

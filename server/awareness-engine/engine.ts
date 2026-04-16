@@ -663,7 +663,17 @@ function selectEntryRoute(layer1: LayerResult): string {
   return extractSelected(layer1, "");
 }
 
-function selectReadinessStage(layer2: LayerResult): string {
+function selectReadinessStage(layer2: LayerResult, audience: AwarenessAudienceInput): string {
+  const canonical = safeString(audience.awarenessLevel, "").toLowerCase().trim();
+  const VALID = new Set(["unaware", "problem_aware", "solution_aware", "product_aware", "most_aware"]);
+  if (canonical && VALID.has(canonical)) {
+    return canonical;
+  }
+  if (canonical.includes("unaware") || canonical === "none") return "unaware";
+  if (canonical.includes("most") || canonical.includes("ready")) return "most_aware";
+  if (canonical.includes("product")) return "product_aware";
+  if (canonical.includes("solution")) return "solution_aware";
+  if (canonical.includes("problem")) return "problem_aware";
   return extractSelected(layer2, "problem_aware");
 }
 
@@ -671,7 +681,7 @@ function selectTriggerClass(layer3: LayerResult): string {
   return extractSelected(layer3, "");
 }
 
-function buildAlternativeRoute(primaryEntry: string, audience: AwarenessAudienceInput, mi: AwarenessMIInput): { entry: string; trigger: string; readiness: string } {
+function buildAlternativeRoute(primaryEntry: string, audience: AwarenessAudienceInput, mi: AwarenessMIInput, canonicalReadiness: string): { entry: string; trigger: string; readiness: string } {
   const alternatives: Record<string, string> = {
     pain_entry: "diagnostic_entry",
     opportunity_entry: "authority_entry",
@@ -681,9 +691,8 @@ function buildAlternativeRoute(primaryEntry: string, audience: AwarenessAudience
     diagnostic_entry: "opportunity_entry",
   };
   const altEntry = alternatives[primaryEntry] || primaryEntry;
-  const readiness = detectBuyerReadiness(audience);
   const altTrigger = (mi.threatSignals || []).length > 2 ? "competitor_weakness" : "missed_opportunity";
-  return { entry: altEntry, trigger: altTrigger, readiness };
+  return { entry: altEntry, trigger: altTrigger, readiness: canonicalReadiness };
 }
 
 function buildRejectedRoute(primaryEntry: string, audience: AwarenessAudienceInput, mi: AwarenessMIInput): { entry: string; trigger: string; readiness: string; reason: string } {
@@ -771,7 +780,8 @@ export async function runAwarenessEngine(
   const primaryEntry = selectEntryRoute(l1);
 
   const l2 = layer2_awarenessReadinessMapping(audience, mi);
-  const readinessStage = selectReadinessStage(l2);
+  const readinessStage = selectReadinessStage(l2, audience);
+  console.log(`[AwarenessEngine-V3] CANONICAL_AWARENESS | source=audience.awarenessLevel | value=${readinessStage} | (no parallel inference)`);
 
   const l3 = layer3_attentionTriggerMapping(audience, mi, differentiation);
   const triggerClass = selectTriggerClass(l3);
@@ -808,12 +818,12 @@ export async function runAwarenessEngine(
     rejectionReason: null,
   };
 
-  const alt = buildAlternativeRoute(primaryEntry, audience, mi);
+  const alt = buildAlternativeRoute(primaryEntry, audience, mi, readinessStage);
   const altL7 = layer7_genericAwarenessDetector("", alt.entry, alt.trigger);
   const alternativeRoute: AwarenessRoute = {
     routeName: `${alt.entry.replace(/_/g, " ")} awareness route`,
     entryMechanismType: alt.entry,
-    targetReadinessStage: alt.readiness,
+    targetReadinessStage: readinessStage,
     triggerClass: alt.trigger,
     trustRequirement: buildTrustRequirement(alt.entry, trustLevel),
     funnelCompatibility: buildFunnelCompatibility(alt.entry, funnel),
@@ -826,7 +836,7 @@ export async function runAwarenessEngine(
   const rejectedRoute: AwarenessRoute = {
     routeName: `${rej.entry.replace(/_/g, " ")} awareness route`,
     entryMechanismType: rej.entry,
-    targetReadinessStage: rej.readiness,
+    targetReadinessStage: readinessStage,
     triggerClass: rej.trigger,
     trustRequirement: buildTrustRequirement(rej.entry, trustLevel),
     funnelCompatibility: "incompatible — route rejected",

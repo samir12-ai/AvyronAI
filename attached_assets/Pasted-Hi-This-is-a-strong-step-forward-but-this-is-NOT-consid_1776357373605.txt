@@ -1,0 +1,132 @@
+Hi,
+
+This is a strong step forward, but this is **NOT considered complete yet**.
+
+You have correctly fixed multiple root-level engine logic issues, and those changes are valid.
+
+However, there are still **critical system-level requirements not completed**, and we will not accept this as done until they are fully implemented and validated.
+
+---
+
+# 1. CRITICAL — Run-Scoped Snapshot Consistency (Missing)
+
+There is no confirmation that snapshot/run consistency has been enforced.
+
+This is the most critical system-level requirement.
+
+If engines are still allowed to read:
+
+* latest
+* latestComplete
+* account-level snapshots
+
+then all fixes above can still produce false contradictions.
+
+---
+
+## Required
+
+* enforce run_id-scoped snapshot chain across ALL engines
+* no downstream engine is allowed to independently resolve upstream data from the database if it exists in the active run context
+* confirm explicitly how each engine retrieves upstream state
+
+Provide:
+
+* exact implementation (files/functions)
+* confirmation that no fallback to non-run snapshots exists
+
+---
+
+# 2. REQUIRED — Single-Source Awareness (T004)
+
+This is still not implemented.
+
+We cannot allow:
+
+* Audience awareness
+* Positioning intent
+* Channel-derived awareness
+
+to coexist independently.
+
+---
+
+## Required
+
+* one canonical awareness state only
+* all downstream engines must consume that state exclusively
+* no secondary awareness inference allowed after canonical state is set
+
+Provide:
+
+* where canonical awareness is defined
+* how downstream engines consume it
+* confirmation that no parallel awareness logic remains
+
+---
+
+# 3. MANDATORY — Full End-to-End Validation (T013)
+
+This is not optional.
+
+Do not ask to proceed — proceed directly.
+
+---
+
+## Required Runs
+
+* MarketMindAI
+* SWA Media (after MI refresh)
+* one clean campaign expected to pass
+
+---
+
+## For each run, provide:
+
+### A. Pipeline Flow
+
+* engines executed
+* status per engine
+* first degradation point (if any)
+
+### B. Snapshot Chain (CRITICAL)
+
+* run_id
+* snapshot ID per engine
+* proof that all engines used the same run-scoped chain
+
+### C. Consistency
+
+* awareness state (single source)
+* pain/problem chain
+* positioning lineage across engines
+
+### D. Enforcement
+
+* any BLOCK / PARTIAL / DOWNGRADE
+* proof that enforcement triggers correctly
+
+### E. Final Verdict
+
+* COMPLETE / PARTIAL / BLOCKED
+* justification based on system state
+
+---
+
+# 4. Acceptance Rule
+
+This work is NOT complete until:
+
+* run-scoped snapshot consistency is enforced
+* awareness is single-source
+* validation runs prove system coherence with evidence
+
+---
+
+Do not return a partial confirmation.
+
+Return full implementation + validation evidence.
+
+Proceed.
+
+Thanks.
