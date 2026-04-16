@@ -215,6 +215,83 @@ This work is NOT complete until ALL of the following are true:
 
 ---
 
+## PROBLEM REGISTRY ENFORCEMENT (MANDATORY — NO EXCEPTIONS)
+
+Every engine MUST:
+- Call `getRelevantProblems(engineId)` before making any decision
+- Act on every returned problem without exception
+
+For each problem, the engine MUST explicitly:
+- resolve it → `status = resolved`
+- OR defer it → `status = deferred` (with reason)
+- OR fail → `status = cannot_resolve`
+
+### Forbidden Behaviors
+
+It is strictly forbidden for any engine to:
+- Ignore a problem
+- Proceed without updating its status
+- Produce output without referencing relevant problems
+
+Any engine that does not act on all relevant problems is considered **invalid execution**.
+
+### Validation Requirements
+
+Validation must prove:
+- No problem enters an engine and exits unchanged
+- Every problem has a state transition at each relevant engine
+
+### Implementation Reference
+
+- `getRelevantProblems(ssc, engineId)` — returns open problems relevant to the engine
+- `resolveProblem(ssc, problemId, resolvedBy, resolvedAction)` — marks resolved
+- `deferProblem(ssc, problemId, deferredBy, deferredReason)` — marks deferred
+- `markCannotResolve(ssc, problemId, cannotResolveBy, cannotResolveReason)` — marks cannot_resolve
+- `enforceProblemsPostEngine(ssc, engineId, stepResult, preEngineProblems, pipelineStep)` — post-engine inspection that checks actual engine output metrics to determine resolve/defer/cannot_resolve/unaddressed
+- `checkUnresolvedCriticalProblems(ssc)` — System Control blocks on any critical open/cannot_resolve problems
+
+### Enforcement Points
+
+1. **Pre-engine**: `getRelevantProblems()` called, logged as `SSC_PROBLEMS_PRE_ENGINE`
+2. **Post-engine**: `enforceProblemsPostEngine()` inspects actual engine output (not self-reported claims), sets status based on metrics
+3. **Pipeline end**: Force-close any remaining open non-low problems as `cannot_resolve`
+4. **System Control**: `checkUnresolvedCriticalProblems()` blocks on unresolved critical problems
+5. **Critical cannot_resolve**: Escalates pipeline status to BLOCKED
+
+---
+
+## VALIDATION PHASE SCOPE
+
+Development is frozen. No new features, no architectural additions. The goal is to prove the current system logic is correct and stable with evidence.
+
+### Validation Areas
+
+1. **Cross-Engine Logical Consistency** — Problems detected upstream are correctly interpreted, passed downstream via SSC, and acted upon by each engine in its domain
+2. **Confidence System Behavior** — dataConfidence vs engineConfidence separation works correctly under weak data, weak logic, and validation rejection scenarios
+3. **Mid-Pipeline Gates & Enforcement** — System stops when logic is broken (positioning <0.40, zero pain alignment, no conversion path)
+4. **Problem Lifecycle Enforcement** — Every problem goes through open → resolved/deferred/cannot_resolve, no silent drops, critical cannot_resolve → BLOCKED
+5. **Awareness & Canonical Meaning Consistency** — Channel Selection, Funnel, Persuasion all respect canonical constraints
+6. **System Behavior Scenarios** — Weak data, strong consistent, contradictory signals, structurally broken (should BLOCK)
+
+### Strict Rules
+
+- No patching during validation
+- No "fixing" outputs manually
+- No hiding or downgrading issues
+- No summaries without logs
+- Follow existing system behavior only
+
+### Acceptance Criteria
+
+- All engines operate on shared logic (via SSC)
+- Confidence behaves correctly (data ≠ engine)
+- System halts on weak logic, not weak data
+- No problem is silently ignored
+- BLOCKED states occur where expected
+- No contradictions across engines
+
+---
+
 ## DEVIATION POLICY
 
 If during implementation a flaw is discovered in the plan:

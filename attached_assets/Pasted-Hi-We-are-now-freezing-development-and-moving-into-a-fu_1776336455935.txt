@@ -1,0 +1,220 @@
+Hi,
+
+We are now **freezing development** and moving into a **full validation phase**. No new features, no architectural additions, no sub-agents — the goal is to **prove that the current system logic is correct and stable with evidence**.
+
+This validation must confirm that the system is no longer detecting problems only, but **correctly reasoning, propagating, and enforcing them across all engines**.
+
+---
+
+## 🔴 Scope of This Validation
+
+This is a **system-level validation**, not account-specific.
+Run multiple orchestrator executions across different scenarios and provide **evidence-backed outputs** — not summaries.
+
+We are validating 4 core areas:
+
+---
+
+## 1. Cross-Engine Logical Consistency
+
+We need proof that **all engines operate on the same problem space**.
+
+### Validate:
+
+* A problem detected upstream (Market Intelligence / Audience) is:
+
+  * correctly interpreted
+  * passed downstream via SSC
+  * acted upon by each engine in its domain
+
+### Evidence required:
+
+* Full SSC trace per run:
+
+  * `problemRegistry` (creation → propagation → resolution/defer/cannot_resolve)
+  * `reasonTrace` entries per engine
+* Show at least:
+
+  * 1 case where a problem is fully resolved across engines
+  * 1 case where a problem propagates and fails (ends in cannot_resolve)
+
+---
+
+## 2. Confidence System Behavior (CRITICAL)
+
+We must confirm the system behaves correctly under different data conditions.
+
+### Validate:
+
+#### Case A — Weak Data, Strong Logic
+
+* Low **dataConfidence**
+* Engines still operate normally
+* System continues without unnecessary blocking
+
+#### Case B — Strong Data, Weak Engine Logic
+
+* Low **engineConfidence**
+* Mid-pipeline gates trigger (retry → halt if needed)
+
+#### Case C — Validation Rejection
+
+* Statistical Validation = rejected
+* `confidenceFloor = 0`
+* Downstream engines cannot inflate confidence
+
+### Evidence required:
+
+* Confidence chain logs (`confidenceChain`)
+* Show:
+
+  * dataConfidence vs engineConfidence separation
+  * inherited `confidenceFloor`
+  * proof that no engine exceeds `floor + 0.20`
+
+---
+
+## 3. Mid-Pipeline Gates & Enforcement
+
+We need to verify that **the system stops when logic is broken**.
+
+### Validate:
+
+* Positioning < 0.40:
+
+  * retry once
+  * halt if still failing
+
+* Offer:
+
+  * zero pain alignment → retry → halt
+
+* Channel:
+
+  * no conversion path → registered as critical problem
+
+### Evidence required:
+
+* Full execution logs showing:
+
+  * retry trigger
+  * retry result
+  * halt behavior
+* Confirm:
+
+  * no downstream engines run after halt
+  * SSC logs correct lifecycle
+
+---
+
+## 4. Problem Lifecycle Enforcement
+
+We must confirm:
+
+> No problem is ignored. Every problem must be resolved, deferred, or escalated.
+
+### Validate:
+
+* Every problem goes through:
+
+  * `open → resolved / deferred / cannot_resolve`
+* No silent drops
+* Critical `cannot_resolve` → **BLOCKED**
+
+### Evidence required:
+
+* Full `problemRegistry` dump at:
+
+  * creation
+  * mid-pipeline
+  * final summary
+* Show:
+
+  * at least 1 BLOCKED run due to critical failure
+  * full reason chain for that block
+
+---
+
+## 5. Awareness & Canonical Meaning Consistency
+
+### Validate:
+
+* Audience awareness → correctly mapped to canonical meaning
+* Channel Selection, Funnel, Persuasion:
+
+  * all respect canonical constraints
+  * no contradictions
+
+### Evidence required:
+
+* SSC `awarenessMeaning`
+* Channel + Funnel + Persuasion outputs aligned with it
+
+---
+
+## 6. System Behavior Scenarios (MANDATORY)
+
+Run at least these 4 scenarios:
+
+1. Weak data scenario
+2. Strong consistent scenario
+3. Contradictory signals scenario
+4. Structurally broken scenario (should BLOCK)
+
+For each:
+
+* Provide full engine outputs
+* SSC trace
+* Final verdict
+* Explanation grounded in system logs (not interpretation)
+
+---
+
+## 🔒 Strict Requirements
+
+* No patching during validation
+* No “fixing” outputs manually
+* No hiding or downgrading issues
+* No summaries without logs
+* Follow the existing system behavior only
+
+---
+
+## ✅ Acceptance Criteria
+
+We will consider this phase successful only if:
+
+* All engines operate on shared logic (via SSC)
+* Confidence behaves correctly (data ≠ engine)
+* System halts on weak logic, not weak data
+* No problem is silently ignored
+* BLOCKED states occur where expected
+* No contradictions across engines
+
+---
+
+## 🚫 Do NOT Proceed To
+
+* Sub-agent architecture
+* Self-correcting expansion
+* Control layer changes
+
+Until this validation is fully complete and proven.
+
+---
+
+## Deliverable Format
+
+Provide:
+
+* Structured report per run
+* Raw logs (or extracted key logs)
+* SSC snapshots
+* Clear mapping of behavior → expected outcome
+
+---
+
+This is the final checkpoint before moving to the next phase.
+We are validating **system integrity, not features**.
+
+Proceed.
