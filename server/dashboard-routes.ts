@@ -28,6 +28,7 @@ import {
   growthSimulations,
   executionTasks,
   planAssumptions,
+  orchestratorJobs,
 } from "@shared/schema";
 import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
@@ -37,6 +38,66 @@ import { getActiveRootBundle, detectStaleness, validateRootIntegrity, computeCal
 
 import { resolveAccountId } from "./auth";
 const LOG_PREFIX = "[Dashboard]";
+
+async function getLatestPipelineState(campaignId: string, accountId: string) {
+  try {
+    const [latestJob] = await db
+      .select({
+        id: orchestratorJobs.id,
+        status: orchestratorJobs.status,
+        error: orchestratorJobs.error,
+        sectionStatuses: orchestratorJobs.sectionStatuses,
+        planId: orchestratorJobs.planId,
+        durationMs: orchestratorJobs.durationMs,
+        createdAt: orchestratorJobs.createdAt,
+        completedAt: orchestratorJobs.completedAt,
+      })
+      .from(orchestratorJobs)
+      .where(
+        and(
+          eq(orchestratorJobs.campaignId, campaignId),
+          eq(orchestratorJobs.accountId, accountId)
+        )
+      )
+      .orderBy(desc(orchestratorJobs.createdAt))
+      .limit(1);
+
+    if (!latestJob) return null;
+
+    let sections: Array<{ id: string; name: string; status: string }> = [];
+    try {
+      sections = latestJob.sectionStatuses ? JSON.parse(latestJob.sectionStatuses) : [];
+    } catch {}
+
+    const completedEngines = sections.filter(s => s.status === "SUCCESS").map(s => s.id);
+    const blockedEngines = sections.filter(s => s.status === "BLOCKED" || s.status === "DEPTH_CASCADE_BLOCKED").map(s => s.id);
+    const failedEngines = sections.filter(s => s.status === "FAILED" || s.status === "DEPTH_FAILED" || s.status === "ERROR").map(s => s.id);
+    const isTerminal = ["COMPLETED", "FAILED", "PARTIAL", "BLOCKED", "ERROR"].includes(latestJob.status);
+
+    return {
+      jobId: latestJob.id,
+      pipelineStatus: latestJob.status,
+      isBlocked: latestJob.status === "BLOCKED",
+      isFailed: latestJob.status === "FAILED" || latestJob.status === "ERROR",
+      isRunning: latestJob.status === "RUNNING",
+      isTerminal,
+      blockReason: latestJob.status === "BLOCKED" ? (latestJob.error || "Pipeline blocked — check engine results") : null,
+      errorMessage: (latestJob.status === "FAILED" || latestJob.status === "ERROR") ? latestJob.error : null,
+      completedEngines,
+      blockedEngines,
+      failedEngines,
+      totalEngines: 15,
+      completedCount: completedEngines.length,
+      planId: latestJob.planId,
+      durationMs: latestJob.durationMs,
+      lastRunAt: latestJob.createdAt,
+      completedAt: latestJob.completedAt,
+    };
+  } catch (err: any) {
+    console.warn(`${LOG_PREFIX} Pipeline state fetch failed:`, err.message);
+    return null;
+  }
+}
 
 type SourceTag = "MANUAL_METRICS" | "PLAN_PROGRESS" | "HYBRID" | "PERFORMANCE";
 
@@ -462,6 +523,8 @@ export function registerDashboardRoutes(app: Express) {
 
       const safeJson = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
 
+      const pipelineState = await getLatestPipelineState(campaignId, accountId);
+
       const [plans, manual, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, statValData, budgetData, channelData, iterData, retentionData, blueprint, goalDecompData, simulationData] = await Promise.all([
         db.select().from(strategicPlans)
           .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
@@ -820,6 +883,7 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
         } : null,
         executionTasksSummary: taskSummary,
         assumptionsSummary,
+        pipelineState,
       });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Agent brief error:`, error);

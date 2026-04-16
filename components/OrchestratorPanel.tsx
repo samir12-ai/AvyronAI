@@ -393,7 +393,13 @@ export default function OrchestratorPanel() {
               <Text style={[s.statusBadgeText, { color: P.green }]}>Complete</Text>
             </View>
           )}
-          {!running && job?.status === 'FAILED' && (
+          {!running && job?.status === 'BLOCKED' && (
+            <View style={[s.statusBadge, { backgroundColor: P.amber + '20', borderColor: P.amber + '40' }]}>
+              <Ionicons name="alert-circle" size={12} color={P.amber} />
+              <Text style={[s.statusBadgeText, { color: P.amber }]}>Blocked</Text>
+            </View>
+          )}
+          {!running && (job?.status === 'FAILED' || job?.status === 'ERROR') && (
             <View style={[s.statusBadge, { backgroundColor: P.coral + '20', borderColor: P.coral + '40' }]}>
               <Ionicons name="close-circle" size={12} color={P.coral} />
               <Text style={[s.statusBadgeText, { color: P.coral }]}>Failed</Text>
@@ -458,15 +464,84 @@ export default function OrchestratorPanel() {
         </Pressable>
       </LinearGradient>
 
+      {!running && job?.status === 'BLOCKED' && (
+        <View style={[s.planCard, { backgroundColor: isDark ? '#1A1400' : '#FFFBEB', borderColor: P.amber + '40' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+            <View style={[s.planIconWrap, { backgroundColor: P.amber + '20' }]}>
+              <Ionicons name="warning-outline" size={18} color={P.amber} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.planCardTitle, { color: P.amber }]}>Pipeline Blocked</Text>
+              <Text style={[{ fontSize: 12, lineHeight: 18, marginTop: 4, color: textSec }]} numberOfLines={4}>
+                {job.error || 'Pipeline was blocked — check engine results for details'}
+              </Text>
+              {sections.length > 0 && (
+                <Text style={[{ fontSize: 11, marginTop: 6, color: textMuted }]}>
+                  {completedCount} of 15 engines completed before block
+                </Text>
+              )}
+            </View>
+          </View>
+        </View>
+      )}
+
+      {!running && (job?.status === 'FAILED' || job?.status === 'ERROR') && job?.error && (
+        <View style={[s.planCard, { backgroundColor: isDark ? '#1A0A0A' : '#FEF2F2', borderColor: P.coral + '40' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+            <View style={[s.planIconWrap, { backgroundColor: P.coral + '20' }]}>
+              <Ionicons name="close-circle-outline" size={18} color={P.coral} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.planCardTitle, { color: P.coral }]}>Pipeline Failed</Text>
+              <Text style={[{ fontSize: 12, lineHeight: 18, marginTop: 4, color: textSec }]} numberOfLines={4}>
+                {job.error}
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
       {activePlan?.hasPlan && (
-        <View style={[s.planCard, { backgroundColor: isDark ? '#0A1F12' : '#ECFDF5', borderColor: P.green + '30' }]}>
+        <View style={[s.planCard, {
+          backgroundColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+            ? (isDark ? '#1A1400' : '#FFFBEB')
+            : (isDark ? '#0A1F12' : '#ECFDF5'),
+          borderColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+            ? P.amber + '30'
+            : P.green + '30',
+        }]}>
+          {(job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR') && (
+            <View style={{
+              backgroundColor: isDark ? P.amber + '15' : P.amber + '10',
+              borderRadius: 6,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              marginBottom: 10,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+            }}>
+              <Ionicons name="time-outline" size={13} color={P.amber} />
+              <Text style={{ fontSize: 11, color: P.amber, fontWeight: '600' }}>
+                Showing last successful plan — current pipeline is {job?.status === 'BLOCKED' ? 'blocked' : 'failed'}
+              </Text>
+            </View>
+          )}
           <View style={s.planCardRow}>
             <View style={s.planCardLeft}>
-              <View style={[s.planIconWrap, { backgroundColor: P.green + '20' }]}>
-                <Ionicons name="document-text-outline" size={18} color={P.green} />
+              <View style={[s.planIconWrap, {
+                backgroundColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+                  ? P.amber + '20' : P.green + '20'
+              }]}>
+                <Ionicons name="document-text-outline" size={18}
+                  color={(job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR') ? P.amber : P.green}
+                />
               </View>
               <View>
-                <Text style={[s.planCardTitle, { color: textPrimary }]}>Strategic Plan Ready</Text>
+                <Text style={[s.planCardTitle, { color: textPrimary }]}>
+                  {(job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+                    ? 'Previous Plan' : 'Strategic Plan Ready'}
+                </Text>
                 <Text style={[s.planCardSub, { color: textSec }]}>
                   {activePlan.calendar?.total || 0} calendar entries
                   {activePlan.studio?.total ? ` · ${activePlan.studio.total} content pieces` : ''}
@@ -475,10 +550,19 @@ export default function OrchestratorPanel() {
             </View>
             <Pressable
               onPress={() => setShowPlan(true)}
-              style={[s.viewPlanBtn, { backgroundColor: P.green + '20', borderColor: P.green + '40' }]}
+              style={[s.viewPlanBtn, {
+                backgroundColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+                  ? P.amber + '20' : P.green + '20',
+                borderColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+                  ? P.amber + '40' : P.green + '40',
+              }]}
             >
-              <Text style={[s.viewPlanText, { color: P.green }]}>View</Text>
-              <Ionicons name="chevron-forward" size={14} color={P.green} />
+              <Text style={[s.viewPlanText, {
+                color: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR') ? P.amber : P.green
+              }]}>View</Text>
+              <Ionicons name="chevron-forward" size={14}
+                color={(job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR') ? P.amber : P.green}
+              />
             </Pressable>
           </View>
           {activePlan.goalDecomposition?.goalLabel && (

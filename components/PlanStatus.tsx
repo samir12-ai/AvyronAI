@@ -38,6 +38,11 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
     refetchInterval: 10000,
   });
 
+  const pipelineState = data?.pipelineState;
+  const isPipelineBlocked = pipelineState?.isBlocked === true;
+  const isPipelineFailed = pipelineState?.isFailed === true;
+  const isPlanStale = pipelineState?.isPlanStale === true;
+
   if (isLoading) {
     return (
       <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
@@ -47,20 +52,62 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
   }
 
   if (!data?.hasPlan) {
+    const noPlanBlocked = data?.pipelineState?.isBlocked === true;
+    const noPlanFailed = data?.pipelineState?.isFailed === true;
+    const noPlanBlockReason = data?.pipelineState?.blockReason;
+
     return (
-      <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+      <View style={[s.card, {
+        backgroundColor: cardBg,
+        borderColor: (noPlanBlocked || noPlanFailed) ? (P.gold + '40') : cardBorder,
+      }]}>
+        {(noPlanBlocked || noPlanFailed) && (
+          <View style={{
+            backgroundColor: isDark ? '#1A1400' : '#FFFBEB',
+            borderRadius: 8,
+            padding: 10,
+            marginBottom: 12,
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: 8,
+          }}>
+            <Ionicons name="warning-outline" size={16} color={P.gold} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 12, fontWeight: '600' as const, color: P.gold }}>
+                Pipeline {noPlanBlocked ? 'Blocked' : 'Failed'}
+              </Text>
+              {noPlanBlockReason && (
+                <Text style={{ fontSize: 11, color: isDark ? '#8892A4' : '#546478', marginTop: 2 }} numberOfLines={2}>
+                  {noPlanBlockReason}
+                </Text>
+              )}
+            </View>
+          </View>
+        )}
         <View style={s.row}>
-          <View style={[s.iconCircle, { backgroundColor: P.mint + '15' }]}>
-            <Ionicons name="document-text-outline" size={20} color={P.mint} />
+          <View style={[s.iconCircle, {
+            backgroundColor: (noPlanBlocked || noPlanFailed) ? (P.gold + '15') : (P.mint + '15'),
+          }]}>
+            <Ionicons
+              name={(noPlanBlocked || noPlanFailed) ? 'alert-circle-outline' : 'document-text-outline'}
+              size={20}
+              color={(noPlanBlocked || noPlanFailed) ? P.gold : P.mint}
+            />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[s.title, { color: textPrimary }]}>No Active Plan</Text>
-            <Text style={[s.subtitle, { color: textSecondary }]}>Run the orchestrator to generate your strategic plan</Text>
+            <Text style={[s.subtitle, { color: textSecondary }]}>
+              {(noPlanBlocked || noPlanFailed)
+                ? 'The pipeline could not generate a plan. Resolve the issues and re-run.'
+                : 'Run the orchestrator to generate your strategic plan'}
+            </Text>
           </View>
         </View>
         <Pressable style={[s.actionBtn, { backgroundColor: P.mint }]} onPress={onBuildPlan}>
           <Ionicons name="flash" size={16} color="#fff" />
-          <Text style={s.actionBtnText}>Build The Plan</Text>
+          <Text style={s.actionBtnText}>
+            {(noPlanBlocked || noPlanFailed) ? 'Re-run Pipeline' : 'Build The Plan'}
+          </Text>
         </Pressable>
       </View>
     );
@@ -73,28 +120,56 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
     : 0;
 
   const statusColor =
+    isPlanStale ? P.gold :
     plan.status === 'APPROVED' ? P.neon :
     plan.status === 'REJECTED' ? P.coral :
     P.gold;
 
   const statusLabel =
+    isPlanStale ? 'Previous Run' :
     plan.status === 'APPROVED' ? 'Approved' :
     plan.status === 'REJECTED' ? 'Rejected' :
     'Awaiting Approval';
 
   return (
-    <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+    <View style={[s.card, { backgroundColor: cardBg, borderColor: isPlanStale ? (P.gold + '40') : cardBorder }]}>
+      {isPlanStale && (
+        <View style={{
+          backgroundColor: isDark ? '#1A1400' : '#FFFBEB',
+          borderRadius: 8,
+          padding: 10,
+          marginBottom: 12,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <Ionicons name="warning-outline" size={16} color={P.gold} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 12, fontWeight: '600' as const, color: P.gold }}>
+              Current pipeline is {isPipelineBlocked ? 'blocked' : 'failed'}
+            </Text>
+            {pipelineState?.blockReason && (
+              <Text style={{ fontSize: 11, color: isDark ? '#8892A4' : '#546478', marginTop: 2 }} numberOfLines={2}>
+                {pipelineState.blockReason}
+              </Text>
+            )}
+            <Text style={{ fontSize: 11, color: isDark ? '#4A5568' : '#8A96A8', marginTop: 2 }}>
+              This plan is from a previous successful run
+            </Text>
+          </View>
+        </View>
+      )}
       <View style={s.row}>
         <View style={[s.iconCircle, { backgroundColor: statusColor + '15' }]}>
           <Ionicons
-            name={plan.status === 'APPROVED' ? 'checkmark-circle' : plan.status === 'REJECTED' ? 'close-circle' : 'time'}
+            name={isPlanStale ? 'time-outline' : plan.status === 'APPROVED' ? 'checkmark-circle' : plan.status === 'REJECTED' ? 'close-circle' : 'time'}
             size={20}
             color={statusColor}
           />
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={[s.title, { color: textPrimary }]}>The Plan</Text>
+            <Text style={[s.title, { color: textPrimary }]}>{isPlanStale ? 'Previous Plan' : 'The Plan'}</Text>
             <View style={[s.badge, { backgroundColor: statusColor + '20' }]}>
               <Text style={[s.badgeText, { color: statusColor }]}>{statusLabel}</Text>
             </View>

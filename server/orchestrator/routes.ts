@@ -164,8 +164,53 @@ export function registerOrchestratorV2Routes(app: Express) {
         .orderBy(desc(strategicPlans.createdAt))
         .limit(1);
 
+      const [latestJob] = await db
+        .select({
+          id: orchestratorJobs.id,
+          status: orchestratorJobs.status,
+          error: orchestratorJobs.error,
+          planId: orchestratorJobs.planId,
+          sectionStatuses: orchestratorJobs.sectionStatuses,
+          createdAt: orchestratorJobs.createdAt,
+        })
+        .from(orchestratorJobs)
+        .where(
+          and(
+            eq(orchestratorJobs.campaignId, req.params.campaignId),
+            eq(orchestratorJobs.accountId, accountId)
+          )
+        )
+        .orderBy(desc(orchestratorJobs.createdAt))
+        .limit(1);
+
+      const pipelineStatus = latestJob?.status || null;
+      const pipelineBlocked = pipelineStatus === "BLOCKED";
+      const pipelineFailed = pipelineStatus === "FAILED" || pipelineStatus === "ERROR";
+      const pipelineBlockReason = pipelineBlocked ? (latestJob?.error || null) : null;
+      const isPlanFromLatestRun = plan && latestJob?.planId ? (plan.id === latestJob.planId) : false;
+      const isPlanStale = plan && (pipelineBlocked || pipelineFailed) && !isPlanFromLatestRun;
+
+      let completedEngines: string[] = [];
+      let blockedEngines: string[] = [];
+      try {
+        const sections = latestJob?.sectionStatuses ? JSON.parse(latestJob.sectionStatuses) : [];
+        completedEngines = sections.filter((s: any) => s.status === "SUCCESS").map((s: any) => s.id);
+        blockedEngines = sections.filter((s: any) => s.status === "BLOCKED" || s.status === "DEPTH_CASCADE_BLOCKED").map((s: any) => s.id);
+      } catch {}
+
       if (!plan) {
-        return res.json({ hasPlan: false });
+        return res.json({
+          hasPlan: false,
+          pipelineState: latestJob ? {
+            status: pipelineStatus,
+            isBlocked: pipelineBlocked,
+            isFailed: pipelineFailed,
+            blockReason: pipelineBlockReason,
+            completedEngines,
+            blockedEngines,
+            lastRunAt: latestJob.createdAt,
+          } : null,
+        });
       }
 
       const planData = plan.planJson ? JSON.parse(plan.planJson) : null;
@@ -316,6 +361,17 @@ export function registerOrchestratorV2Routes(app: Express) {
           impactSeverity: a.impactSeverity,
           source: a.source,
         })),
+        pipelineState: {
+          status: pipelineStatus,
+          isBlocked: pipelineBlocked,
+          isFailed: pipelineFailed,
+          blockReason: pipelineBlockReason,
+          isPlanFromLatestRun,
+          isPlanStale,
+          completedEngines,
+          blockedEngines,
+          lastRunAt: latestJob?.createdAt || null,
+        },
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

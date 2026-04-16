@@ -1,0 +1,131 @@
+Hi,
+
+There is a critical mismatch between the actual system state and what is shown in the preview.
+
+This is not a minor UI issue — it breaks trust in the system output.
+
+---
+
+## Problem
+
+From the latest runs:
+
+* System Control Verdict = **BLOCKED**
+* Pipeline halts early (Positioning / data freshness)
+* Only partial engines execute
+
+However:
+
+* The **preview shows a complete, valid output**
+* No indication that the system is currently blocked
+* It looks like everything is functioning normally
+
+This is logically incorrect.
+
+---
+
+## Root Cause (likely)
+
+The preview is not using the **current orchestrator run as source of truth**.
+
+Instead, it is likely showing:
+
+* last successful plan
+* cached output
+* or partial snapshot not tied to final verdict
+
+---
+
+## Required Fix
+
+### 1. Define a single source of truth
+
+You must explicitly define and use:
+
+> **System Control Verdict / Orchestrator Job Status = source of truth**
+
+Not:
+
+* cached plan
+* previous output
+* preview snapshot
+
+---
+
+### 2. Enforce preview-state alignment
+
+If:
+
+* `verdict = BLOCK`
+  or
+* `pipelineStatus = BLOCKED`
+
+Then the preview must:
+
+* NOT display a full valid plan
+* NOT look like execution is complete
+
+Instead, it must:
+
+* clearly show BLOCKED state
+* display block reasons
+* indicate where the pipeline stopped
+* optionally show partial outputs with clear labeling
+
+---
+
+### 3. Handle fallback explicitly
+
+If you still want to show last successful output:
+
+You MUST label it clearly:
+
+* “Showing last successful plan”
+* “Current run is BLOCKED”
+* “This preview is not from the latest execution”
+
+No silent fallback is allowed.
+
+---
+
+### 4. Prevent mixed-state rendering
+
+Do NOT combine:
+
+* partial current run data
+* with previous successful outputs
+
+This creates invalid system representation.
+
+---
+
+## Expected Outcome
+
+After fix:
+
+* Preview always reflects the **actual run state**
+* BLOCKED runs are visibly blocked
+* No false impression of success
+* Full traceability between:
+
+  * run → verdict → preview
+
+---
+
+## Important
+
+Do not treat this as a UI polish task.
+
+This is a **core system integrity issue**:
+
+> The system must never display outputs that contradict its own execution state.
+
+---
+
+Implement this directly and confirm with:
+
+* before vs after behavior
+* example from MarketMindAI and SWA Media
+* proof that preview now reflects BLOCKED state correctly
+
+Thanks.

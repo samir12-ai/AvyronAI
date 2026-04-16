@@ -45,6 +45,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [planData, setPlanData] = useState<any>(null);
+  const [pipelineState, setPipelineState] = useState<any>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [expandedRiskIdx, setExpandedRiskIdx] = useState<number | null>(null);
 
@@ -88,6 +89,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
       }
 
       setPlanData({ ...activeData, documentData: docData });
+      setPipelineState(activeData.pipelineState || null);
     } catch (err: any) {
       setError(err.message || 'Network error.');
     } finally {
@@ -144,6 +146,10 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   const work = planData.requiredWork;
   const calendar = planData.calendar;
   const docContent = planData.documentData?.document?.contentJson || {};
+
+  const isPipelineBlocked = pipelineState?.isBlocked === true;
+  const isPipelineFailed = pipelineState?.isFailed === true;
+  const isPlanStale = pipelineState?.isPlanStale === true;
 
   const statusLabel = plan?.status?.replace(/_/g, ' ') || 'DRAFT';
   const isActive = ['APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'SCHEDULED', 'PUBLISHED'].includes(plan?.status);
@@ -874,6 +880,35 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
           <Ionicons name="arrow-back" size={18} color={textPrimary} />
           <Text style={[st.backBtnText, { color: textPrimary }]}>Back</Text>
         </Pressable>
+      )}
+
+      {isPlanStale && (
+        <View style={{
+          backgroundColor: isDark ? '#1A1400' : '#FFFBEB',
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: '#F59E0B40',
+          padding: 14,
+          marginHorizontal: 16,
+          marginBottom: 12,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 10,
+        }}>
+          <Ionicons name="warning-outline" size={20} color="#F59E0B" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700' as const, color: '#F59E0B' }}>
+              This plan is from a previous run
+            </Text>
+            <Text style={{ fontSize: 12, color: isDark ? '#8892A4' : '#546478', marginTop: 4, lineHeight: 18 }}>
+              The latest pipeline run is {isPipelineBlocked ? 'blocked' : 'in error state'}.
+              {pipelineState?.blockReason ? ` Reason: ${pipelineState.blockReason}` : ''}
+            </Text>
+            <Text style={{ fontSize: 11, color: isDark ? '#4A5568' : '#8A96A8', marginTop: 4 }}>
+              Re-run the pipeline to generate a current plan.
+            </Text>
+          </View>
+        </View>
       )}
 
       <View style={[st.headerStrip, { backgroundColor: cardBg, borderColor: cardBorder }]}>
