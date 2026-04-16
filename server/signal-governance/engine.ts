@@ -46,7 +46,7 @@ export function purifyEvidence(rawEvidence: string[]): string[] {
   }
 
   if (discarded > 0 && purified.length === 0) {
-    purified.push(`[${discarded} raw source(s) purified — structured signal only]`);
+    purified.push(`[${discarded} source input(s) purified — structured signal only]`);
   }
 
   return purified;

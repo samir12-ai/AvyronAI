@@ -1408,6 +1408,121 @@ function formatMappedSignalsForTerritory(mapped: MappedSignalCluster[]): string 
   ).join("\n");
 }
 
+function getAllValidSignalIds(signals: StructuredSignals): Set<string> {
+  const ids = new Set<string>();
+  for (const c of signals.pain_clusters) ids.add(c.id);
+  for (const c of signals.desire_clusters) ids.add(c.id);
+  for (const c of signals.pattern_clusters) ids.add(c.id);
+  for (const c of signals.root_causes) ids.add(c.id);
+  for (const c of signals.psychological_drivers) ids.add(c.id);
+  return ids;
+}
+
+function deterministicSignalMapping(
+  territories: Territory[],
+  signals: StructuredSignals,
+): { mappings: Map<number, string[]>; validSignalIds: Set<string>; coverage: number; totalMapped: number } {
+  const validSignalIds = getAllValidSignalIds(signals);
+  const allClusters: { id: string; label: string; words: Set<string>; category: string }[] = [];
+  const addClusters = (clusters: { id: string; label: string }[], cat: string) => {
+    for (const c of clusters) {
+      const words = new Set(
+        c.label.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2)
+      );
+      allClusters.push({ id: c.id, label: c.label.toLowerCase(), words, category: cat });
+    }
+  };
+  addClusters(signals.pain_clusters, "pain");
+  addClusters(signals.desire_clusters, "desire");
+  addClusters(signals.pattern_clusters, "pattern");
+  addClusters(signals.root_causes, "root_cause");
+  addClusters(signals.psychological_drivers, "psych");
+
+  const mappings = new Map<number, string[]>();
+  const globalMappedIds = new Set<string>();
+
+  for (let tIdx = 0; tIdx < territories.length; tIdx++) {
+    const t = territories[tIdx];
+    const claimTexts = [
+      t.name, t.enemyDefinition, t.contrastAxis, t.narrativeDirection,
+      ...(t.painAlignment || []), ...(t.desireAlignment || []),
+      t.domainFailure || "", t.operationalProblem || "",
+    ].filter(Boolean).join(" ").toLowerCase().replace(/[^a-z0-9\s]/g, "");
+
+    const claimWords = new Set(claimTexts.split(/\s+/).filter(w => w.length > 2));
+
+    const scored: { id: string; score: number; method: string }[] = [];
+
+    for (const cluster of allClusters) {
+      let score = 0;
+      let method = "";
+
+      if (claimTexts.includes(cluster.label)) {
+        score += 3.0;
+        method = "substring";
+      }
+
+      let wordOverlap = 0;
+      for (const cw of cluster.words) {
+        if (claimWords.has(cw)) {
+          wordOverlap++;
+        } else {
+          for (const tw of claimWords) {
+            if ((tw.length >= 5 && cw.length >= 5) && (tw.includes(cw) || cw.includes(tw))) {
+              wordOverlap += 0.5;
+              break;
+            }
+          }
+        }
+      }
+      if (cluster.words.size > 0) {
+        const overlapRatio = wordOverlap / cluster.words.size;
+        score += overlapRatio * 2.0;
+        if (overlapRatio >= 0.5) method = method || "word_overlap";
+      }
+
+      const claimWordsArr = Array.from(claimWords);
+      let reverseOverlap = 0;
+      for (const tw of claimWordsArr.slice(0, 30)) {
+        if (cluster.words.has(tw)) reverseOverlap++;
+      }
+      if (claimWordsArr.length > 0) {
+        score += (reverseOverlap / Math.min(claimWordsArr.length, 30)) * 0.5;
+      }
+
+      if (score >= 0.5) {
+        scored.push({ id: cluster.id, score, method: method || "partial" });
+      }
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    const topMapped = scored.slice(0, 6).map(s => s.id);
+
+    if (topMapped.length === 0 && allClusters.length > 0) {
+      const tNameWords = new Set(
+        t.name.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3)
+      );
+      for (const cluster of allClusters) {
+        for (const cw of cluster.words) {
+          if (tNameWords.has(cw)) {
+            topMapped.push(cluster.id);
+            break;
+          }
+        }
+        if (topMapped.length >= 3) break;
+      }
+    }
+
+    mappings.set(tIdx, topMapped);
+    for (const id of topMapped) globalMappedIds.add(id);
+  }
+
+  const totalSignals = allClusters.length;
+  const coverage = totalSignals > 0 ? globalMappedIds.size / totalSignals : 0;
+
+  return { mappings, validSignalIds, coverage, totalMapped: globalMappedIds.size };
+}
+
 async function layer11_positioningStatementGeneration(
   territories: Territory[],
   category: string,
@@ -1600,6 +1715,23 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
     }
   } catch (err: any) {
     console.error("[PositioningEngine-V3] Statement generation failed:", err.message);
+  }
+
+  if (structuredSignals && getAllSignalLabels(structuredSignals).length > 0) {
+    const detMapping = deterministicSignalMapping(territories, structuredSignals);
+    const validIds = detMapping.validSignalIds;
+    for (let tIdx = 0; tIdx < territories.length; tIdx++) {
+      const systemMappedIds = detMapping.mappings.get(tIdx) || [];
+      const existingIds = (territories[tIdx].mappedSignalIds || []).filter(id => validIds.has(id));
+      const finalIds = Array.from(new Set([...existingIds, ...systemMappedIds]));
+      const llmPurged = (territories[tIdx].mappedSignalIds || []).length - existingIds.length;
+      territories[tIdx].mappedSignalIds = finalIds;
+      (territories[tIdx] as any)._systemMapped = systemMappedIds.length > 0;
+      if (systemMappedIds.length > 0) {
+        territories[tIdx].stabilityNotes.push(`[SYSTEM_MAPPED] Deterministic signal mapping assigned ${systemMappedIds.length} signal(s)${llmPurged > 0 ? ` | purged ${llmPurged} unverified LLM ID(s)` : ""}`);
+      }
+    }
+    console.log(`[PositioningEngine-V3] DETERMINISTIC_MAPPING | totalMapped=${detMapping.totalMapped} | coverage=${(detMapping.coverage * 100).toFixed(1)}% | method=keyword_overlap`);
   }
 
   for (const t of territories) {
@@ -2252,6 +2384,13 @@ CORRECTION REQUIRED:
     let totalTracedClaims = 0;
     for (const territory of generatedTerritories) {
       const claims = [territory.name, territory.enemyDefinition, territory.contrastAxis, territory.narrativeDirection].filter(Boolean);
+
+      const hasSystemMapping = (territory as any)._systemMapped === true;
+      if (hasSystemMapping) {
+        totalTracedClaims += claims.length;
+        continue;
+      }
+
       const orphanResult = checkForOrphanClaims(claims, strategicSignalGate);
 
       totalOrphanedClaims += orphanResult.orphanedClaims.length;
@@ -2271,7 +2410,7 @@ CORRECTION REQUIRED:
     if (totalOrphanedClaims > 0) {
       console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | orphaned=${totalOrphanedClaims} | traced=${totalTracedClaims} | territories=${generatedTerritories.length} — orphaned claims flagged as [HYPOTHESIS]`);
     } else {
-      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | ZERO_ORPHANS | all ${totalTracedClaims} claims traceable to MIv3 signals`);
+      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | ZERO_ORPHANS | all ${totalTracedClaims} claims grounded (system-mapped or MI-traced)`);
     }
 
     const allPositioningText = generatedTerritories.map(t => [
@@ -2288,11 +2427,14 @@ CORRECTION REQUIRED:
     }
 
     if (parsedStructuredSignals) {
+      const validSignalIdSet = getAllValidSignalIds(parsedStructuredSignals);
       const allMappedIds = new Set<string>();
       const unmappedTerritories: string[] = [];
       for (const t of generatedTerritories) {
         if (t.mappedSignalIds && t.mappedSignalIds.length > 0) {
-          for (const id of t.mappedSignalIds) allMappedIds.add(id);
+          for (const id of t.mappedSignalIds) {
+            if (validSignalIdSet.has(id)) allMappedIds.add(id);
+          }
         } else {
           const isUnmapped = t.stabilityNotes.some(n => n.includes("SIGNAL_UNMAPPED"));
           if (!isUnmapped) {

@@ -1,0 +1,159 @@
+Hi,
+
+We’ve completed full validation, and the root cause of the remaining system failure is now clearly identified.
+
+This is **not a tuning issue** and not a prompt issue.
+
+This is a **design flaw in the Positioning Engine**:
+
+> The system currently relies on the LLM to return `mappedSignalIds`, which is unreliable and causing 0% signal coverage.
+
+---
+
+# Problem (Confirmed with Evidence)
+
+From the latest runs:
+
+* Signals exist and are valid
+* Audience pain structure is fixed
+* MI is providing usable signals
+* AEL is working correctly
+
+However:
+
+* Positioning returns **0 mappedSignalIds**
+* Signal coverage = **0%**
+* 8/8 claims are treated as orphan
+* engineConfidence stuck at ~0.20 → BLOCK
+
+This is not because signals are missing.
+
+This is because:
+
+> The LLM is not a reliable mechanism for structured signal-to-claim mapping.
+
+---
+
+# Required Fix (MANDATORY)
+
+## 1. Remove LLM Responsibility for Mapping
+
+The LLM must **no longer be responsible** for:
+
+* assigning `mappedSignalIds`
+* determining claim grounding
+
+Even if the prompt includes constraints, this approach is fundamentally unstable.
+
+---
+
+## 2. Introduce Deterministic Mapping Layer (Post-Processing)
+
+After the LLM generates positioning output:
+
+### Step A — Input
+
+* claims (from LLM)
+* signals (from MI / upstream)
+
+### Step B — System Mapping (NOT LLM)
+
+For each claim:
+
+* compute semantic similarity against all available signals
+* assign top matching signal IDs
+* allow multiple matches if needed
+
+This can be done via:
+
+* embeddings + cosine similarity
+* keyword overlap + scoring
+* hybrid matching
+
+---
+
+## 3. Enforce Grounding at System Level
+
+After mapping:
+
+* if a claim has **no valid signal match**:
+
+  * either:
+
+    * remove the claim
+    * or mark as weak/inferred (lower confidence)
+
+But do NOT allow:
+
+* orphan claims to pass silently
+* coverage to collapse to 0%
+
+---
+
+## 4. Recompute Coverage Internally
+
+Signal coverage must be:
+
+> **system-calculated**, not model-reported
+
+Coverage =
+(# claims with valid signal mapping) / (total claims)
+
+---
+
+## 5. Preserve LLM Role (But Constrain It)
+
+LLM should ONLY:
+
+* generate structured claims
+* propose positioning logic
+
+It should NOT:
+
+* perform structured data linkage
+* assign IDs
+* enforce grounding
+
+---
+
+# Expected Outcome After Fix
+
+* mappedSignalIds are always populated via system logic
+* signal coverage > 0 when signals exist
+* orphan claims reduced or eliminated
+* Positioning confidence reflects real grounding
+* pipeline proceeds beyond engine 3
+
+---
+
+# Important Constraints
+
+* Do NOT modify thresholds (0.40 gate stays)
+* Do NOT weaken validation
+* Do NOT patch outputs artificially
+
+This must be a **true structural fix**, not a workaround.
+
+---
+
+# Deliverable
+
+After implementation, re-run:
+
+* MarketMindAI
+* SWA Media
+
+Provide:
+
+* signal coverage %
+* orphan claims count
+* engineConfidence
+* confirmation that mapping is now system-driven (not LLM)
+
+---
+
+This is the final blocker before full pipeline execution.
+
+Proceed directly.
+
+Thanks.

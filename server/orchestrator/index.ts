@@ -81,7 +81,7 @@ import { applyMemoryMutation } from "../memory-mutation/engine";
 import type { MemoryClass } from "../memory-system/types";
 
 import { MarketIntelligenceV3 } from "../market-intelligence-v3/engine";
-import { runAudienceEngine } from "../audience-engine/engine";
+import { runAudienceEngine, getLatestAudienceSnapshot } from "../audience-engine/engine";
 import { runPositioningEngine } from "../positioning-engine/engine";
 import { runDifferentiationEngine } from "../differentiation-engine/engine";
 import { runMechanismEngine } from "../mechanism-engine/engine";
@@ -2088,6 +2088,81 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   const scopedEngineSet = config.scopedEngines?.length
     ? new Set(config.scopedEngines)
     : null;
+
+  if (scopedEngineSet && !ctx.audience) {
+    try {
+      const audRows = await db.select().from(audienceSnapshots)
+        .where(and(
+          eq(audienceSnapshots.accountId, config.accountId),
+          eq(audienceSnapshots.campaignId, config.campaignId),
+        ))
+        .orderBy(desc(audienceSnapshots.createdAt))
+        .limit(10);
+      for (const row of audRows) {
+        const ss = JSON.parse(row.structuredSignals || '{"pain_clusters":[],"desire_clusters":[],"pattern_clusters":[],"root_causes":[],"psychological_drivers":[]}');
+        const signalCount = (ss.pain_clusters?.length || 0) + (ss.desire_clusters?.length || 0) +
+          (ss.pattern_clusters?.length || 0) + (ss.root_causes?.length || 0) + (ss.psychological_drivers?.length || 0);
+        if (signalCount > 0) {
+          const cachedAudience = {
+            ...row,
+            painMap: JSON.parse(row.audiencePains || "[]"),
+            desireMap: JSON.parse(row.desireMap || "[]"),
+            objectionMap: JSON.parse(row.objectionMap || "[]"),
+            transformationMap: JSON.parse(row.transformationMap || "[]"),
+            emotionalDrivers: JSON.parse(row.emotionalDrivers || "[]"),
+            audienceSegments: JSON.parse(row.audienceSegments || "[]"),
+            segmentDensity: JSON.parse(row.segmentDensity || "[]"),
+            awarenessLevel: JSON.parse(row.awarenessLevel || "{}"),
+            maturityIndex: JSON.parse(row.maturityIndex || "{}"),
+            intentDistribution: JSON.parse(row.audienceIntentDistribution || "{}"),
+            structuredSignals: ss,
+            inputSummary: JSON.parse(row.inputSummary || "{}"),
+            snapshotId: row.id,
+          };
+          ctx.audience = cachedAudience;
+          ctx.audienceSnapshotId = row.id;
+          console.log(`[Orchestrator] SCOPED_HYDRATE | Loaded cached audience snapshot=${row.id} | structuredSignals=${signalCount}`);
+
+          const rawObjections = cachedAudience.objectionMap || [];
+          const mappedObjections = rawObjections.map((o: any) => ({
+            label: o.label ?? o.canonical ?? o.pain ?? o.signal ?? "",
+            confidence: o.confidence ?? o.confidenceScore ?? 0.5,
+            evidence: Array.isArray(o.evidence) ? o.evidence : [],
+          }));
+          ctx.sglState = initializeSignalGovernance(ss, mappedObjections);
+          console.log(`[Orchestrator] SCOPED_SGL | signals=${ctx.sglState.governedSignals.length} | trace=${ctx.sglState.traceToken}`);
+          break;
+        }
+      }
+    } catch (hydErr: any) {
+      console.warn(`[Orchestrator] SCOPED_HYDRATE_FAILED | ${hydErr.message}`);
+    }
+  }
+
+  if (scopedEngineSet && !ctx.mi) {
+    try {
+      const [latestMi] = await db.select().from(miSnapshots)
+        .where(and(
+          eq(miSnapshots.accountId, config.accountId),
+          eq(miSnapshots.campaignId, config.campaignId),
+          eq(miSnapshots.status, "COMPLETE"),
+        ))
+        .orderBy(desc(miSnapshots.createdAt))
+        .limit(1);
+      if (latestMi) {
+        ctx.mi = {
+          ...latestMi,
+          signals: JSON.parse(latestMi.signalData?.toString() || "[]"),
+          multiSourceSignals: latestMi.multiSourceSignals || "{}",
+          snapshotId: latestMi.id,
+        };
+        ctx.miSnapshotId = latestMi.id;
+        console.log(`[Orchestrator] SCOPED_HYDRATE | Loaded cached MI snapshot=${latestMi.id} | confidence=${latestMi.overallConfidence}`);
+      }
+    } catch (miHydErr: any) {
+      console.warn(`[Orchestrator] SCOPED_MI_HYDRATE_FAILED | ${miHydErr.message}`);
+    }
+  }
 
   for (let i = effectiveStartIndex; i < ENGINE_PRIORITY_ORDER.length; i++) {
     const engineDef = ENGINE_PRIORITY_ORDER[i];
