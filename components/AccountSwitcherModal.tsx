@@ -47,7 +47,7 @@ export function AccountSwitcherModal() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
-  const { user, savedAccounts, showAccountSwitcher, closeAccountSwitcher, switchToAccount, removeSavedAccount } = useAuth();
+  const { user, savedAccounts, showAccountSwitcher, closeAccountSwitcher, switchToAccount, removeSavedAccount, setIsAddingAccount } = useAuth();
 
   const colors = {
     bg: isDark ? '#0F1421' : '#FFFFFF',
@@ -96,6 +96,7 @@ export function AccountSwitcherModal() {
   const handleAddAccount = () => {
     Haptics.selectionAsync();
     closeAccountSwitcher();
+    setIsAddingAccount(true);
     router.push({ pathname: '/login', params: { addAccount: '1' } });
   };
 

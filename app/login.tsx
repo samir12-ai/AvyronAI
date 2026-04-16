@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -23,9 +23,15 @@ export default function LoginScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
-  const { login, register } = useAuth();
+  const { login, register, setIsAddingAccount } = useAuth();
   const { addAccount } = useLocalSearchParams<{ addAccount?: string }>();
   const isAddingAccount = addAccount === '1';
+
+  useEffect(() => {
+    return () => {
+      setIsAddingAccount(false);
+    };
+  }, []);
 
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -53,6 +59,7 @@ export default function LoginScreen() {
     if (result.success) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (isAddingAccount) {
+        setIsAddingAccount(false);
         router.replace('/(tabs)');
       }
     } else {
@@ -63,6 +70,7 @@ export default function LoginScreen() {
 
   const handleCancel = () => {
     Haptics.selectionAsync();
+    setIsAddingAccount(false);
     router.back();
   };
 

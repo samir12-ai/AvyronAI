@@ -33,6 +33,7 @@ interface AuthContextValue {
   isAccessActive: boolean;
   savedAccounts: SavedAccount[];
   showAccountSwitcher: boolean;
+  isAddingAccount: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -42,6 +43,7 @@ interface AuthContextValue {
   removeSavedAccount: (userId: string) => Promise<void>;
   openAccountSwitcher: () => void;
   closeAccountSwitcher: () => void;
+  setIsAddingAccount: (value: boolean) => void;
 }
 
 const AUTH_TOKEN_KEY = 'avyron_auth_token';
@@ -67,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [isAddingAccount, setIsAddingAccount] = useState(false);
 
   useEffect(() => {
     loadStoredAuth();
@@ -313,6 +316,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAccessActive,
     savedAccounts,
     showAccountSwitcher,
+    isAddingAccount,
     login,
     register,
     logout,
@@ -322,7 +326,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     removeSavedAccount,
     openAccountSwitcher,
     closeAccountSwitcher,
-  }), [user, token, isLoading, trialDaysRemaining, isAccessActive, savedAccounts, showAccountSwitcher, login, register, logout, markIntroSeen, refreshUser, switchToAccount, removeSavedAccount, openAccountSwitcher, closeAccountSwitcher]);
+    setIsAddingAccount,
+  }), [user, token, isLoading, trialDaysRemaining, isAccessActive, savedAccounts, showAccountSwitcher, isAddingAccount, login, register, logout, markIntroSeen, refreshUser, switchToAccount, removeSavedAccount, openAccountSwitcher, closeAccountSwitcher]);
 
   return (
     <AuthContext.Provider value={value}>

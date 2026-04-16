@@ -70,7 +70,7 @@ const loadingStyles = StyleSheet.create({
 });
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, user, isAccessActive } = useAuth();
+  const { isAuthenticated, isLoading, user, isAccessActive, isAddingAccount } = useAuth();
   const segments = useSegments();
 
   useEffect(() => {
@@ -93,11 +93,14 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         router.replace('/upgrade');
       }
     } else {
+      if (inAuthGroup && isAddingAccount) {
+        return;
+      }
       if (inAuthGroup || inIntro || inUpgrade) {
         router.replace('/(tabs)');
       }
     }
-  }, [isAuthenticated, isLoading, user, isAccessActive, segments]);
+  }, [isAuthenticated, isLoading, user, isAccessActive, isAddingAccount, segments]);
 
   if (isLoading) {
     return <LoadingScreen />;
