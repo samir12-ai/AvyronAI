@@ -2,6 +2,7 @@ import type { EngineId, EngineStepResult } from "../orchestrator/priority-matrix
 import type { IntegrityReport } from "../system-integrity/types";
 import type { ComplianceResult } from "../causal-enforcement-layer/engine";
 import type { SignalComposition } from "../shared/signal-lineage";
+import type { SharedStrategicContext } from "../orchestrator/shared-strategic-context";
 
 export type SystemVerdict = "PASS" | "DOWNGRADE" | "REPAIR" | "BLOCK";
 
@@ -23,7 +24,12 @@ export type BlockCode =
   | "SIGNAL_GROUNDING_MASS_FAILURE"
   | "OFFER_AUDIENCE_MISALIGNMENT"
   | "ZERO_OBJECTION_COVERAGE"
-  | "CHANNEL_CONFIDENCE_BELOW_MINIMUM";
+  | "CHANNEL_CONFIDENCE_BELOW_MINIMUM"
+  | "UNRESOLVED_CRITICAL_PROBLEMS"
+  | "CONFIDENCE_CHAIN_VIOLATION"
+  | "POSITIONING_HARD_GATE"
+  | "CONFIDENCE_SPREAD_EXCESSIVE"
+  | "BUDGET_OVERRIDE_ZERO_CONFIDENCE";
 
 export type DowngradeCode =
   | "UNVERIFIED_CAC"
@@ -102,6 +108,7 @@ export interface SystemControlInput {
   celResults: ComplianceResult[];
   signalComposition: SignalComposition | null;
   sglCoverageSufficient: boolean | null;
+  ssc: SharedStrategicContext | null;
   config: {
     campaignId: string;
     accountId: string;

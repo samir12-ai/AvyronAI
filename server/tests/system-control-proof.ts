@@ -3,6 +3,7 @@ import { evaluateSystemControl } from "../system-control/engine";
 import type { SystemControlInput } from "../system-control/types";
 import type { IntegrityReport } from "../system-integrity/types";
 import type { SignalComposition } from "../shared/signal-lineage";
+import { createEmptySSC, registerProblem, markCannotResolve, updateConfidenceChain } from "../orchestrator/shared-strategic-context";
 
 const PASS = "✅ PASS";
 const FAIL = "❌ FAIL";
@@ -103,6 +104,7 @@ function makeBaseInput(): SystemControlInput {
     celResults: [],
     signalComposition: makeHealthySignals(),
     sglCoverageSufficient: true,
+    ssc: null,
     config: { campaignId: "test_campaign", accountId: "test_account" },
   };
 }
@@ -1093,6 +1095,233 @@ async function runPhase4Tests() {
         b.code === "ZERO_OBJECTION_COVERAGE" ||
         b.code === "CHANNEL_CONFIDENCE_BELOW_MINIMUM"
       ));
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 44: Phase 3 — SSC Integration in System Control");
+  console.log("─".repeat(80));
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    registerProblem(ssc, "positioning" as any, "structural", "Weak positioning foundation", "critical", 0.20, ["offer", "funnel", "channel_selection"] as any[], 3);
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    assert("Unresolved critical problem → BLOCK", verdict.verdict === "BLOCK");
+    assert("Block code is UNRESOLVED_CRITICAL_PROBLEMS",
+      verdict.blockReasons.some(b => b.code === "UNRESOLVED_CRITICAL_PROBLEMS"));
+  }
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    const p = registerProblem(ssc, "positioning" as any, "structural", "Weak positioning", "critical", 0.20, ["offer"] as any[], 3);
+    markCannotResolve(ssc, p.id, "offer" as any, "No viable positioning found");
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    assert("cannot_resolve critical → BLOCK", verdict.verdict === "BLOCK");
+    assert("Block mentions unresolved critical",
+      verdict.blockReasons.some(b => b.code === "UNRESOLVED_CRITICAL_PROBLEMS"));
+  }
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    registerProblem(ssc, "audience" as any, "audience", "Minor audience gap", "medium", 0.50, ["offer"] as any[], 2);
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    const hasUnresolvedBlock = verdict.blockReasons.some(b => b.code === "UNRESOLVED_CRITICAL_PROBLEMS");
+    assert("Medium-severity open problem does NOT trigger UNRESOLVED_CRITICAL_PROBLEMS block", !hasUnresolvedBlock);
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 45: Phase 3 — Confidence Chain Integrity");
+  console.log("─".repeat(80));
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    updateConfidenceChain(ssc, "market_intelligence" as any, 0.50, 0.50, 0.50);
+    updateConfidenceChain(ssc, "audience" as any, 0.50, 0.50, 0.50);
+    updateConfidenceChain(ssc, "positioning" as any, 0.45, 0.45, 0.45);
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    const hasChainViolation = verdict.blockReasons.some(b => b.code === "CONFIDENCE_CHAIN_VIOLATION");
+    assert("Engines within floor+0.20 → no chain violation", !hasChainViolation);
+  }
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    updateConfidenceChain(ssc, "market_intelligence" as any, 0.50, 0.50, 0.50);
+    updateConfidenceChain(ssc, "audience" as any, 0.20, 0.20, 0.20);
+    updateConfidenceChain(ssc, "positioning" as any, 0.50, 0.50, 0.50);
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    const hasChainViolation = verdict.blockReasons.some(b => b.code === "CONFIDENCE_CHAIN_VIOLATION");
+    assert("Engine exceeds floor+0.20 → CONFIDENCE_CHAIN_VIOLATION", hasChainViolation);
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 46: Phase 3 — Positioning Hard Gate");
+  console.log("─".repeat(80));
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    updateConfidenceChain(ssc, "market_intelligence" as any, 0.50, 0.50, 0.50);
+    updateConfidenceChain(ssc, "positioning" as any, 0.20, 0.20, 0.20);
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    assert("Positioning confidence 0.20 → BLOCK", verdict.verdict === "BLOCK");
+    assert("Block code is POSITIONING_HARD_GATE",
+      verdict.blockReasons.some(b => b.code === "POSITIONING_HARD_GATE"));
+  }
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    updateConfidenceChain(ssc, "market_intelligence" as any, 0.50, 0.50, 0.50);
+    updateConfidenceChain(ssc, "positioning" as any, 0.45, 0.45, 0.45);
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    const hasPosGate = verdict.blockReasons.some(b => b.code === "POSITIONING_HARD_GATE");
+    assert("Positioning confidence 0.45 → no hard gate block", !hasPosGate);
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 47: Phase 3 — Confidence Spread");
+  console.log("─".repeat(80));
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    updateConfidenceChain(ssc, "market_intelligence" as any, 0.90, 0.90, 0.90);
+    updateConfidenceChain(ssc, "audience" as any, 0.30, 0.30, 0.30);
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    assert("Spread 0.60 → CONFIDENCE_SPREAD_EXCESSIVE",
+      verdict.blockReasons.some(b => b.code === "CONFIDENCE_SPREAD_EXCESSIVE"));
+  }
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    updateConfidenceChain(ssc, "market_intelligence" as any, 0.60, 0.60, 0.60);
+    updateConfidenceChain(ssc, "audience" as any, 0.50, 0.50, 0.50);
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const verdict = evaluateSystemControl(input);
+    const hasSpread = verdict.blockReasons.some(b => b.code === "CONFIDENCE_SPREAD_EXCESSIVE");
+    assert("Spread 0.10 → no spread block", !hasSpread);
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 48: Phase 3 — Budget Governor Zero-Confidence Guard");
+  console.log("─".repeat(80));
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    ssc.confidenceFloor = 0;
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const budgetResult = input.results.get("budget_governor" as any);
+    if (budgetResult) {
+      budgetResult.output = { ...budgetResult.output, decision: { action: "scale" } };
+    }
+    const verdict = evaluateSystemControl(input);
+    assert("Floor=0 + scale → BUDGET_OVERRIDE_ZERO_CONFIDENCE",
+      verdict.blockReasons.some(b => b.code === "BUDGET_OVERRIDE_ZERO_CONFIDENCE"));
+  }
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    ssc.confidenceFloor = 0;
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const budgetResult = input.results.get("budget_governor" as any);
+    if (budgetResult) {
+      budgetResult.output = { ...budgetResult.output, decision: { action: "test" } };
+    }
+    const verdict = evaluateSystemControl(input);
+    assert("Floor=0 + test → BUDGET_OVERRIDE_ZERO_CONFIDENCE",
+      verdict.blockReasons.some(b => b.code === "BUDGET_OVERRIDE_ZERO_CONFIDENCE"));
+  }
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    ssc.confidenceFloor = 0;
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const budgetResult = input.results.get("budget_governor" as any);
+    if (budgetResult) {
+      budgetResult.output = { ...budgetResult.output, decision: { action: "hold" } };
+    }
+    const verdict = evaluateSystemControl(input);
+    const hasBudgetBlock = verdict.blockReasons.some(b => b.code === "BUDGET_OVERRIDE_ZERO_CONFIDENCE");
+    assert("Floor=0 + hold → no budget override block", !hasBudgetBlock);
+  }
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    ssc.confidenceFloor = 0.50;
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const budgetResult = input.results.get("budget_governor" as any);
+    if (budgetResult) {
+      budgetResult.output = { ...budgetResult.output, decision: { action: "scale" } };
+    }
+    const verdict = evaluateSystemControl(input);
+    const hasBudgetBlock = verdict.blockReasons.some(b => b.code === "BUDGET_OVERRIDE_ZERO_CONFIDENCE");
+    assert("Floor=0.50 + scale → no zero-confidence block", !hasBudgetBlock);
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 49: Phase 3 — SSC null (backwards compatibility)");
+  console.log("─".repeat(80));
+
+  {
+    const input = makeBaseInput();
+    input.ssc = null;
+    const verdict = evaluateSystemControl(input);
+    assert("ssc=null → all SSC checks skipped (passed)",
+      verdict.structuralChecks.filter(c =>
+        c.check.startsWith("unresolved_critical") ||
+        c.check.startsWith("confidence_chain") ||
+        c.check.startsWith("positioning_hard") ||
+        c.check.startsWith("confidence_spread") ||
+        c.check.startsWith("budget_override_zero")
+      ).every(c => c.passed));
+    assert("ssc=null → verdict still PASS", verdict.verdict === "PASS");
+  }
+
+  console.log("\n" + "─".repeat(80));
+  console.log("SECTION 50: Phase 3 — Combined SSC Blocks");
+  console.log("─".repeat(80));
+
+  {
+    const ssc = createEmptySSC("test_campaign", "test_account");
+    registerProblem(ssc, "positioning" as any, "structural", "Critical positioning failure", "critical", 0.15, ["offer"] as any[], 3);
+    updateConfidenceChain(ssc, "market_intelligence" as any, 0.50, 0.50, 0.50);
+    updateConfidenceChain(ssc, "positioning" as any, 0.15, 0.15, 0.15);
+    ssc.confidenceFloor = 0;
+    const input = makeBaseInput();
+    input.ssc = ssc;
+    const budgetResult = input.results.get("budget_governor" as any);
+    if (budgetResult) {
+      budgetResult.output = { ...budgetResult.output, decision: { action: "scale" } };
+    }
+    const verdict = evaluateSystemControl(input);
+    assert("Combined SSC violations → BLOCK", verdict.verdict === "BLOCK");
+    assert("Has UNRESOLVED_CRITICAL_PROBLEMS", verdict.blockReasons.some(b => b.code === "UNRESOLVED_CRITICAL_PROBLEMS"));
+    assert("Has POSITIONING_HARD_GATE", verdict.blockReasons.some(b => b.code === "POSITIONING_HARD_GATE"));
+    assert("Has BUDGET_OVERRIDE_ZERO_CONFIDENCE", verdict.blockReasons.some(b => b.code === "BUDGET_OVERRIDE_ZERO_CONFIDENCE"));
+    assert("Multiple SSC block reasons", verdict.blockReasons.filter(b =>
+      b.code === "UNRESOLVED_CRITICAL_PROBLEMS" ||
+      b.code === "POSITIONING_HARD_GATE" ||
+      b.code === "BUDGET_OVERRIDE_ZERO_CONFIDENCE" ||
+      b.code === "CONFIDENCE_CHAIN_VIOLATION" ||
+      b.code === "CONFIDENCE_SPREAD_EXCESSIVE"
+    ).length >= 3);
   }
 
   console.log("\n" + "=".repeat(80));

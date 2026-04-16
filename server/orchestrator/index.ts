@@ -2337,6 +2337,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       celResults: ctx.celResults || [],
       signalComposition: ctx.signalComposition || null,
       sglCoverageSufficient: sglSummaryData?.coverage?.coverageSufficient ?? null,
+      ssc: ctx.ssc || null,
       config: { campaignId: config.campaignId, accountId: config.accountId },
     });
     storeControlVerdict(config.accountId, config.campaignId, jobId, controlVerdict)

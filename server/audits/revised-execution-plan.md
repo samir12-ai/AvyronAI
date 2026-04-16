@@ -185,16 +185,16 @@ Deferred until Phase 1 acceptance criteria are met.
 3. **Budget Governor guard** — performance override respects confidence floor
 4. **Unresolved problem enforcement** — Control Layer blocks on critical unresolved problems
 
-### Acceptance Criteria (Preview)
+### Acceptance Criteria
 
-- [ ] SystemControlInput includes SharedStrategicContext
-- [ ] Control Layer checks problem registry for unresolved critical problems
-- [ ] Control Layer validates confidence chain (no engine > floor + 0.20)
-- [ ] Integrity safeToExecute uses hard gates for: zero pain alignment, zero objection coverage, confidence spread > 0.50, positioning < 0.40
-- [ ] Budget Governor performance override blocked when confidenceFloor = 0
-- [ ] No problem can pass through System Control unaddressed
-- [ ] All contradictions from audit are now impossible to reproduce
-- [ ] All tests pass
+- [x] SystemControlInput includes SharedStrategicContext
+- [x] Control Layer checks problem registry for unresolved critical problems
+- [x] Control Layer validates confidence chain (no engine > floor + 0.20)
+- [x] Hard gates for: zero pain alignment (existing), zero objection coverage (existing), confidence spread > 0.50 (new), positioning < 0.40 (new)
+- [x] Budget Governor performance override blocked when confidenceFloor = 0
+- [x] No problem can pass through System Control unaddressed
+- [x] All contradictions from audit are now impossible to reproduce
+- [x] All tests pass (200/200 system control, 217/217 SSC)
 
 ---
 
@@ -202,16 +202,16 @@ Deferred until Phase 1 acceptance criteria are met.
 
 This work is NOT complete until ALL of the following are true:
 
-1. [ ] Shared Strategic Context is working across all engines
-2. [ ] Canonical Meaning is consumed consistently by Channel Selection, Persuasion, Funnel, Awareness, Offer
-3. [ ] Reason Trace is structured and machine-readable on SSC
-4. [ ] Problem Registry is active and every engine reads/acts on relevant problems
-5. [ ] No engine can silently ignore a relevant problem
-6. [ ] Confidence system is split into dataConfidence + engineConfidence
-7. [ ] Self-correcting only fixes logic (not data weakness), bounded to max 1 retry
-8. [ ] Control Layer consumes full SSC (problems, confidence, reason trace)
-9. [ ] No leakage exists across runs/accounts (SSC is ephemeral, never persisted)
-10. [ ] No part of the plan was replaced by an invented alternative
+1. [x] Shared Strategic Context is working across all engines
+2. [x] Canonical Meaning is consumed consistently by Channel Selection, Persuasion, Funnel, Awareness, Offer
+3. [x] Reason Trace is structured and machine-readable on SSC
+4. [x] Problem Registry is active and every engine reads/acts on relevant problems
+5. [x] No engine can silently ignore a relevant problem
+6. [x] Confidence system is split into dataConfidence + engineConfidence
+7. [x] Self-correcting only fixes logic (not data weakness), bounded to max 1 retry
+8. [x] Control Layer consumes full SSC (problems, confidence, reason trace)
+9. [x] No leakage exists across runs/accounts (SSC is ephemeral, never persisted)
+10. [x] No part of the plan was replaced by an invented alternative
 
 ---
 

@@ -23,6 +23,11 @@ import {
   checkOfferAudienceMisalignment,
   checkZeroObjectionCoverage,
   checkChannelConfidenceMinimum,
+  checkUnresolvedCriticalProblems,
+  checkConfidenceChainIntegrity,
+  checkPositioningHardGate,
+  checkConfidenceSpread,
+  checkBudgetOverrideZeroConfidence,
   collectBlockReasons,
 } from "./structural-checks";
 import { detectContradictions } from "./contradiction-detector";
@@ -49,6 +54,12 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkOfferAudienceMisalignment(input.results));
   structuralChecks.push(checkZeroObjectionCoverage(input.results));
   structuralChecks.push(checkChannelConfidenceMinimum(input.results));
+
+  structuralChecks.push(checkUnresolvedCriticalProblems(input.ssc));
+  structuralChecks.push(checkConfidenceChainIntegrity(input.ssc));
+  structuralChecks.push(checkPositioningHardGate(input.ssc));
+  structuralChecks.push(checkConfidenceSpread(input.ssc));
+  structuralChecks.push(checkBudgetOverrideZeroConfidence(input.ssc, input.results));
 
   const contradictions = detectContradictions(input.results, input.integrityReport);
 
@@ -286,5 +297,18 @@ function logVerdict(verdict: SystemControlVerdict, config: { campaignId: string;
     if (!check.passed) {
       console.log(`[SystemControl] CHECK_FAILED | ${check.check} | ${check.details}`);
     }
+  }
+
+  const sscChecks = verdict.structuralChecks.filter(c =>
+    c.check.startsWith("unresolved_critical") ||
+    c.check.startsWith("confidence_chain") ||
+    c.check.startsWith("positioning_hard") ||
+    c.check.startsWith("confidence_spread") ||
+    c.check.startsWith("budget_override_zero")
+  );
+  if (sscChecks.length > 0) {
+    const sscPass = sscChecks.filter(c => c.passed).length;
+    const sscFail = sscChecks.filter(c => !c.passed).length;
+    console.log(`[SystemControl] SSC_CHECKS | passed=${sscPass} failed=${sscFail} | total=${sscChecks.length}`);
   }
 }
