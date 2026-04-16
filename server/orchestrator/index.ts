@@ -2275,13 +2275,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       }
       if (overallStatus === "COMPLETED") {
         overallStatus = "PARTIAL";
-        console.warn(`[Orchestrator] SSC_STATUS_DOWNGRADE | COMPLETED→PARTIAL | reason=${unresolvedCritical.length} critical problems remain unresolved`);
-      }
-    }
-
-    for (const p of ctx.ssc.problemRegistry) {
-      if (p.status === "cannot_resolve") {
-        console.warn(`[Orchestrator] SSC_PROBLEM_FINAL | id=${p.id} | status=cannot_resolve | by=${p.cannotResolveBy} | reason=${p.cannotResolveReason}`);
+        console.warn(`[Orchestrator] SSC_STATUS_DOWNGRADE | COMPLETED→PARTIAL | reason=${unresolvedCritical.length} critical problems remain open`);
       }
     }
 
@@ -2289,6 +2283,31 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       markCannotResolve(ctx.ssc, p.id, "pipeline_end" as any,
         `Problem remained open through entire pipeline — no engine resolved or explicitly deferred`);
       console.warn(`[Orchestrator] SSC_PROBLEM_FORCE_CLOSED | id=${p.id} | severity=${p.severity} | desc=${p.description} | status=cannot_resolve | reason=pipeline_exhausted`);
+    }
+
+    const criticalCannotResolve = ctx.ssc.problemRegistry.filter(
+      p => p.status === "cannot_resolve" && p.severity === "critical"
+    );
+    if (criticalCannotResolve.length > 0) {
+      for (const p of criticalCannotResolve) {
+        console.error(`[Orchestrator] SSC_CRITICAL_CANNOT_RESOLVE | id=${p.id} | source=${p.sourceEngine} | by=${p.cannotResolveBy} | desc=${p.description} | reason=${p.cannotResolveReason}`);
+      }
+      if (overallStatus !== "BLOCKED") {
+        failedEngine = failedEngine || criticalCannotResolve[0].sourceEngine;
+        blockReason = `${criticalCannotResolve.length} critical problem(s) structurally unresolvable: ${criticalCannotResolve.map(p => p.description).join("; ")}`;
+        overallStatus = "BLOCKED";
+        console.error(`[Orchestrator] SSC_STATUS_ESCALATION | →BLOCKED | reason=${blockReason}`);
+      }
+    }
+
+    for (const p of ctx.ssc.problemRegistry) {
+      if (p.status === "cannot_resolve") {
+        console.warn(`[Orchestrator] SSC_PROBLEM_FINAL | id=${p.id} | severity=${p.severity} | status=cannot_resolve | by=${p.cannotResolveBy} | reason=${p.cannotResolveReason}`);
+      } else if (p.status === "deferred") {
+        console.log(`[Orchestrator] SSC_PROBLEM_FINAL | id=${p.id} | severity=${p.severity} | status=deferred | by=${p.deferredBy} | reason=${p.deferredReason}`);
+      } else if (p.status === "resolved") {
+        console.log(`[Orchestrator] SSC_PROBLEM_FINAL | id=${p.id} | severity=${p.severity} | status=resolved | by=${p.resolvedBy} | action=${p.resolvedAction}`);
+      }
     }
   }
 
