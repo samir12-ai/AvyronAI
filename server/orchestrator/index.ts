@@ -1396,7 +1396,11 @@ async function executeEngine(
               narrativeDirection: ctx.positioning?.narrativeDirection || null,
             };
             const primaryMech = result.primaryMechanism;
-            const mechClaim = primaryMech?.mechanismPromise || null;
+            const rawClaims = (ctx.differentiation?.claimStructures || []) as any[];
+            const sortedClaims = [...rawClaims].sort((a: any, b: any) => (b?.overallScore || 0) - (a?.overallScore || 0));
+            const topClaim = sortedClaims[0]?.claim || null;
+            const mechClaim = topClaim || primaryMech?.mechanismPromise || null;
+            console.log(`[Orchestrator] STRATEGY_ROOT_CLAIMS | claimsCount=${sortedClaims.length} | topClaim="${(topClaim || "").substring(0, 80)}" | mechPromise="${(primaryMech?.mechanismPromise || "").substring(0, 80)}"`);
 
             const rootResult = await buildStrategyRoot({
               campaignId: config.campaignId,
@@ -1413,6 +1417,7 @@ async function executeEngine(
               approvedDesires: ctx.audience?.desireMap || {},
               approvedTransformation: audienceTransformation,
               approvedClaim: mechClaim,
+              approvedClaims: sortedClaims,
               approvedPromise: primaryMech?.mechanismPromise || null,
               approvedObjections: ctx.audience?.objectionMap || {},
               approvedProofTypes: proofTypes,

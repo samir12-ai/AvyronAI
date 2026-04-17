@@ -2377,6 +2377,7 @@ export const strategyRoots = pgTable("strategy_roots", {
   approvedDesires: text("approved_desires"),
   approvedTransformation: text("approved_transformation"),
   approvedClaim: text("approved_claim"),
+  approvedClaims: text("approved_claims"),
   approvedPromise: text("approved_promise"),
   approvedObjections: text("approved_objections"),
   approvedProofTypes: text("approved_proof_types"),

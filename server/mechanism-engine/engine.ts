@@ -133,6 +133,21 @@ export async function runMechanismEngine(
   }
 
   const pillarSummary = pillars.slice(0, 5).map((p: any) => `"${p.name || p.territory}": ${p.description || ""}`.slice(0, 120)).join("\n");
+
+  const validatedClaims = (differentiation.claimStructures || []) as any[];
+  const sortedClaims = [...validatedClaims].sort((a: any, b: any) => (b?.overallScore || 0) - (a?.overallScore || 0)).slice(0, 5);
+  const claimsBlock = sortedClaims.length > 0
+    ? sortedClaims.map((c: any, i: number) => `[CLAIM ${i + 1}] (score=${(c.overallScore || 0).toFixed(2)}, territory="${c.territory || "n/a"}"): ${c.claim}`).join("\n")
+    : "";
+  const claimsSection = claimsBlock ? `
+═══ VALIDATED CLAIMS FROM DIFFERENTIATION (CANONICAL — anchor your promise to one of these) ═══
+The Differentiation Engine produced and validated these claims via three layers (scoring, refinement, stability guard). Your mechanism's "promise" field MUST be a refined version of ONE of these claims — same core meaning, sharpened for axis alignment. Do NOT invent a new promise unrelated to these claims.
+
+${claimsBlock}
+
+In your output, set "anchorClaimIndex" to the [CLAIM N] you anchored on (1-based). The promise text must preserve the semantic core of that claim.
+` : "";
+
   const existingMechanismSection = diffCore && diffCore.mechanismType !== "none" ? `
 EXISTING MECHANISM FROM DIFFERENTIATION ENGINE (use as foundation):
 Name: "${diffCore.mechanismName}"
@@ -178,7 +193,7 @@ The mechanism MUST embody the "${primaryAxis}" axis in every component:
 
 ═══ DIFFERENTIATION PILLARS ═══
 ${pillarSummary || "No pillars available"}
-
+${claimsSection}
 ${existingMechanismSection}
 
 ═══ MECHANISM NAMING RULES (MUST SATISFY ALL) ═══
@@ -220,7 +235,8 @@ Respond with ONLY valid JSON, no markdown:
     "structuralFrame": "The [Name] Framework|System|Protocol",
     "axisEmphasis": ["keyword1", "keyword2", "keyword3"],
     "rootCauseUsed": "[RC#] identifier and exact deep cause text used",
-    "barrierResolved": "[BB#] identifier and exact barrier text resolved"
+    "barrierResolved": "[BB#] identifier and exact barrier text resolved",
+    "anchorClaimIndex": 1
   },
   "alternative": {
     "name": "alternative mechanism name",

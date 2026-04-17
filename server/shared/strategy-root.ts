@@ -18,6 +18,7 @@ interface StrategyRootInput {
   approvedDesires: any;
   approvedTransformation: string | null;
   approvedClaim: string | null;
+  approvedClaims: any;
   approvedPromise: string | null;
   approvedObjections: any;
   approvedProofTypes: any;
@@ -25,6 +26,9 @@ interface StrategyRootInput {
 }
 
 export function computeRootHash(input: StrategyRootInput): string {
+  const claimsKey = Array.isArray(input.approvedClaims)
+    ? input.approvedClaims.slice(0, 3).map((c: any) => (typeof c === "string" ? c : c?.claim || "")).join("|")
+    : null;
   const hashPayload = {
     mi: input.miSnapshotId,
     aud: input.audienceSnapshotId,
@@ -36,6 +40,7 @@ export function computeRootHash(input: StrategyRootInput): string {
     objections: input.approvedObjections ? JSON.stringify(input.approvedObjections) : null,
     proofTypes: input.approvedProofTypes ? JSON.stringify(input.approvedProofTypes) : null,
     posContext: input.approvedPositioningContext ? JSON.stringify(input.approvedPositioningContext) : null,
+    claims: claimsKey,
   };
   return crypto.createHash("sha256").update(JSON.stringify(hashPayload)).digest("hex").substring(0, 16);
 }
@@ -87,6 +92,7 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
     approvedDesires: JSON.stringify(input.approvedDesires),
     approvedTransformation: input.approvedTransformation,
     approvedClaim: input.approvedClaim,
+    approvedClaims: JSON.stringify(input.approvedClaims || []),
     approvedPromise: input.approvedPromise,
     approvedObjections: JSON.stringify(input.approvedObjections),
     approvedProofTypes: JSON.stringify(input.approvedProofTypes),

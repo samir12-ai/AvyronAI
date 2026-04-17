@@ -168,7 +168,11 @@ export function registerMechanismEngineRoutes(app: Express) {
           };
 
           const primaryMech = result.primaryMechanism;
-          const mechClaim = primaryMech?.mechanismPromise || null;
+          const rawClaims = (differentiationInput.claimStructures || []) as any[];
+          const sortedClaims = [...rawClaims].sort((a: any, b: any) => (b?.overallScore || 0) - (a?.overallScore || 0));
+          const topClaim = sortedClaims[0]?.claim || null;
+          const mechClaim = topClaim || primaryMech?.mechanismPromise || null;
+          console.log(`[MechanismEngine] STRATEGY_ROOT_CLAIMS | claimsCount=${sortedClaims.length} | topClaim="${(topClaim || "").substring(0, 80)}" | mechPromise="${(primaryMech?.mechanismPromise || "").substring(0, 80)}"`);
 
           strategyRootResult = await buildStrategyRoot({
             campaignId,
@@ -185,6 +189,7 @@ export function registerMechanismEngineRoutes(app: Express) {
             approvedDesires: audienceDesires,
             approvedTransformation: audienceTransformation,
             approvedClaim: mechClaim,
+            approvedClaims: sortedClaims,
             approvedPromise: primaryMech?.mechanismPromise || null,
             approvedObjections: audienceObjections,
             approvedProofTypes: proofTypes,

@@ -1374,7 +1374,11 @@ function buildDeterministicOfferSkeletons(
   const rootContrastText = strategyRoot?.contrastAxisText || "";
   const rawTransformation = strategyRoot?.approvedTransformation || "";
   const rootTransformation = typeof rawTransformation === "object" ? (rawTransformation?.text || rawTransformation?.label || rawTransformation?.name || JSON.stringify(rawTransformation)) : rawTransformation;
-  const rootClaim = strategyRoot?.approvedClaim || "";
+  const rootClaimsRaw = strategyRoot?.approvedClaims ? (typeof strategyRoot.approvedClaims === "string" ? safeJsonParse(strategyRoot.approvedClaims) : strategyRoot.approvedClaims) : null;
+  const rootClaimsList: any[] = Array.isArray(rootClaimsRaw) ? rootClaimsRaw : [];
+  const topClaimText = rootClaimsList[0]?.claim || "";
+  const altClaimText = rootClaimsList[1]?.claim || "";
+  const rootClaim = topClaimText || strategyRoot?.approvedClaim || "";
   const rootPromise = strategyRoot?.approvedPromise || "";
   const rootMechName = rootMech?.mechanismName || "";
   const rootMechSteps: string[] = rootMech?.mechanismSteps || [];
@@ -1456,8 +1460,9 @@ function buildDeterministicOfferSkeletons(
     ? `${axisPhrase}: ${rootClaim.substring(0, 80)}`
     : `${axisPhrase} — Eliminate ${primaryPain}`;
 
-  const altHook = rootPromise && rootPromise !== rootClaim
-    ? `${axisPhrase}: ${rootPromise.substring(0, 80)}`
+  const altHookSource = altClaimText || (rootPromise && rootPromise !== rootClaim ? rootPromise : "");
+  const altHook = altHookSource
+    ? `${axisPhrase}: ${altHookSource.substring(0, 80)}`
     : `${axisPhrase} — Achieve ${primaryDesire}`;
 
   const primaryProblem = `${primaryPain} — preventing ${primaryDesire} and blocking ${rootTransformation || "meaningful progress"}`;
@@ -1906,7 +1911,10 @@ export async function runOfferEngine(
 
   if (strategyRoot) {
     const srMech = strategyRoot.approvedMechanism ? (typeof strategyRoot.approvedMechanism === "string" ? safeJsonParse(strategyRoot.approvedMechanism) : strategyRoot.approvedMechanism) : null;
-    console.log(`[OfferEngine-V4] STRATEGY_ROOT_CONSUMED | rootId=${strategyRoot.id} | hash=${strategyRoot.rootHash} | runId=${strategyRoot.runId} | axis="${strategyRoot.primaryAxis}" | mechanism="${srMech?.mechanismName || "n/a"}" | claim="${(strategyRoot.approvedClaim || "").substring(0, 60)}" | promise="${(strategyRoot.approvedPromise || "").substring(0, 60)}"`);
+    const srClaimsRaw = strategyRoot?.approvedClaims ? (typeof strategyRoot.approvedClaims === "string" ? safeJsonParse(strategyRoot.approvedClaims) : strategyRoot.approvedClaims) : null;
+    const srClaimsCount = Array.isArray(srClaimsRaw) ? srClaimsRaw.length : 0;
+    const srTopClaim = Array.isArray(srClaimsRaw) && srClaimsRaw[0] ? (srClaimsRaw[0].claim || "") : "";
+    console.log(`[OfferEngine-V4] STRATEGY_ROOT_CONSUMED | rootId=${strategyRoot.id} | hash=${strategyRoot.rootHash} | runId=${strategyRoot.runId} | axis="${strategyRoot.primaryAxis}" | mechanism="${srMech?.mechanismName || "n/a"}" | claimsCount=${srClaimsCount} | topClaim="${srTopClaim.substring(0, 60)}" | claim="${(strategyRoot.approvedClaim || "").substring(0, 60)}" | promise="${(strategyRoot.approvedPromise || "").substring(0, 60)}"`);
     diagnostics.strategyRootConsumed = {
       rootId: strategyRoot.id,
       rootHash: strategyRoot.rootHash,
