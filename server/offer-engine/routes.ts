@@ -240,6 +240,22 @@ export function registerOfferEngineRoutes(app: Express) {
         }
       }
 
+      // CONTRACT CONSISTENCY: an offer that fails root binding or post-gen
+      // validation must NOT be persisted as COMPLETE. Downgrade status to
+      // INVALID_ROOT_BINDING so dashboards/approval treat it as needing
+      // attention. We still persist the snapshot so manual debugging is
+      // possible (the offer payload remains intact and inspectable).
+      const bindingFailed = !rootValidation.valid;
+      const postGenFailed = !!(postGenValidation && !postGenValidation.valid);
+      if ((bindingFailed || postGenFailed) && result.status === "COMPLETE") {
+        const reasons: string[] = [];
+        if (bindingFailed) reasons.push(`Root binding invalid: ${rootValidation.issues.join("; ")}`);
+        if (postGenFailed) reasons.push(`Post-gen validation failed: ${postGenValidation.issues.join("; ")}`);
+        result.status = "INVALID_ROOT_BINDING";
+        result.statusMessage = reasons.join(" | ");
+        console.log(`[OfferEngine] STATUS_DOWNGRADED | COMPLETE → INVALID_ROOT_BINDING | ${reasons.join(" | ")}`);
+      }
+
       const diagnostics = result.layerDiagnostics || {};
       diagnostics.strategyRoot = {
         rootId: activeRoot.id,

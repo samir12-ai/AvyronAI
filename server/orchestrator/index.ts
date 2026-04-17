@@ -93,6 +93,7 @@ import { runPositioningEngine } from "../positioning-engine/engine";
 import { runDifferentiationEngine } from "../differentiation-engine/engine";
 import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
+import { getActiveRoot, buildStrategyRoot } from "../shared/strategy-root";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
 import { runAwarenessEngine } from "../awareness-engine/engine";
@@ -158,6 +159,7 @@ interface EngineContext {
   differentiation?: any;
   mechanism?: any;
   mechanismSnapshotId?: string;
+  strategyRootId?: string;
   offer?: any;
   funnel?: any;
   integrity?: any;
@@ -1374,6 +1376,54 @@ async function executeEngine(
         if (result.depthGateResult) {
           console.log(`[Orchestrator] DEPTH_GATE_MECH | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
         }
+
+        // CONTRACT CONSISTENCY: orchestrator MUST build the Strategy Root after
+        // mechanism completes — same contract as /api/mechanism-engine/analyze.
+        // Without this, getActiveRoot() returns null at the offer step and the
+        // pipeline blocks with NO_ACTIVE_STRATEGY_ROOT.
+        if (result.status !== "DEPTH_FAILED" && ctx.mechanismSnapshotId) {
+          try {
+            const audSegments = (ctx.audience?.audienceSegments || ctx.audience?.segments || []) as any[];
+            const audienceTransformation = audSegments[0]?.transformation || null;
+            const diffProofArchitecture = (ctx.differentiation?.proofArchitecture || []) as any[];
+            const proofTypes = diffProofArchitecture.map((p: any) =>
+              typeof p === "string" ? p : p?.type || p?.name || String(p)
+            );
+            const positioningContext = {
+              territories: ctx.positioning?.territories || [],
+              enemyDefinition: ctx.positioning?.enemyDefinition || null,
+              contrastAxis: ctx.positioning?.contrastAxis || null,
+              narrativeDirection: ctx.positioning?.narrativeDirection || null,
+            };
+            const primaryMech = result.primaryMechanism;
+            const mechClaim = primaryMech?.mechanismPromise || null;
+
+            const rootResult = await buildStrategyRoot({
+              campaignId: config.campaignId,
+              accountId: config.accountId,
+              miSnapshotId: ctx.miSnapshotId || "",
+              audienceSnapshotId: ctx.audienceSnapshotId || "",
+              positioningSnapshotId: ctx.positioningSnapshotId || "",
+              differentiationSnapshotId: ctx.differentiationSnapshotId || "",
+              mechanismSnapshotId: ctx.mechanismSnapshotId,
+              primaryAxis: primaryMech?.axisAlignment?.primaryAxis || ctx.positioning?.contrastAxis || null,
+              contrastAxisText: ctx.positioning?.contrastAxis || null,
+              approvedMechanism: primaryMech || null,
+              approvedAudiencePains: ctx.audience?.painProfiles || [],
+              approvedDesires: ctx.audience?.desireMap || {},
+              approvedTransformation: audienceTransformation,
+              approvedClaim: mechClaim,
+              approvedPromise: primaryMech?.mechanismPromise || null,
+              approvedObjections: ctx.audience?.objectionMap || {},
+              approvedProofTypes: proofTypes,
+              approvedPositioningContext: positioningContext,
+            });
+            ctx.strategyRootId = rootResult.id;
+            console.log(`[Orchestrator] STRATEGY_ROOT_BUILT | id=${rootResult.id} | hash=${rootResult.rootHash} | runId=${rootResult.runId} | isNew=${rootResult.isNew}`);
+          } catch (rootErr: any) {
+            console.error(`[Orchestrator] STRATEGY_ROOT_BUILD_FAILED | ${rootErr.message}`);
+          }
+        }
         break;
       }
 
@@ -1384,11 +1434,30 @@ async function executeEngine(
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const upstreamLineage = buildUpstreamLineage(ctx);
+
+        // CONTRACT CONSISTENCY: orchestrator MUST pass strategyRoot so the
+        // engine takes the deterministic-skeleton path with advisory validators
+        // (same contract as /api/offer-engine/analyze). Passing undefined
+        // forces free_generation + strict lexical validators which produces
+        // false POSITIONING_MISMATCH on otherwise-strong upstream layers.
+        const activeRoot = await getActiveRoot(config.campaignId, config.accountId);
+        if (!activeRoot) {
+          console.log(`[Orchestrator] OFFER_ROOT_MISSING | campaign=${config.campaignId} | no active strategy root — offer cannot run`);
+          return {
+            engineId,
+            status: "BLOCKED",
+            output: null,
+            durationMs: Date.now() - startTime,
+            blockReason: "NO_ACTIVE_STRATEGY_ROOT — pipeline must produce a complete Strategy Root (Mechanism Engine output) before Offer can run.",
+          };
+        }
+        console.log(`[Orchestrator] OFFER_ROOT_BOUND | rootId=${activeRoot.id} | hash=${activeRoot.rootHash} | runId=${activeRoot.runId}`);
+
         const result = await runOfferEngine(
           miInput, audInput, posInput, diffInput,
           config.accountId, upstreamLineage,
           ctx.mechanism || undefined,
-          undefined,
+          activeRoot,
           ctx.analyticalEnrichment
         );
         output = result;
@@ -1404,6 +1473,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             mechanismSnapshotId: (ctx.mechanism as any)?.snapshotId || null,
+            strategyRootId: activeRoot.id,
             engineVersion: OFFER_ENGINE_VERSION,
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
