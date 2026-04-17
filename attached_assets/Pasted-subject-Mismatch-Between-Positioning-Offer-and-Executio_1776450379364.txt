@@ -1,0 +1,84 @@
+subject=“Mismatch Between Positioning, Offer, and Execution — Code-Level Audit Required”}
+Hi,
+
+We’re seeing a consistent mismatch across multiple parts of the system, and I need you to investigate this from the code level.
+
+⸻
+
+Observed Behavior
+
+From the latest runs:
+	•	Positioning / Differentiation outputs:
+	•	High strength (very strong positioning, high distinctiveness)
+	•	Strategy appears structurally solid
+	•	Mechanism:
+	•	Consistent with positioning
+	•	Proper propagation into downstream layers
+	•	Awareness:
+	•	Indicates clear trust issues in the market (low trust, high skepticism)
+
+⸻
+
+Issue
+	•	Offer engine is failing / unstable:
+	•	Returns states like:
+	•	POSITIONING_MISMATCH
+	•	low confidence despite high structural strength
+	•	In some cases:
+	•	reports missing or invalid root
+	•	while still producing a full offer output
+	•	Execution / approval layer:
+	•	Previously blocked due to inconsistencies (e.g. calendar deviation)
+	•	Now passes in some cases after fixes
+	•	But underlying inconsistency between layers still appears
+
+⸻
+
+Core Symptom
+
+We are seeing this pattern:
+	•	Upstream layers (positioning, mechanism) → strong, valid outputs
+	•	Awareness → indicates constraint (trust-related)
+	•	Offer / execution → either:
+	•	fails
+	•	or produces output that doesn’t align with upstream logic
+
+⸻
+
+What I Need From You
+
+Please investigate from the code, not assumptions:
+	•	Why does the system produce:
+	•	strong positioning
+	•	but unstable / failing offer
+	•	Where exactly does the divergence start:
+	•	between positioning → mechanism?
+	•	mechanism → offer?
+	•	or awareness → offer?
+	•	Why is the offer:
+	•	sometimes generated despite reporting invalid conditions?
+	•	or marked as mismatch while upstream layers appear consistent?
+
+⸻
+
+Important
+
+Do not start with a fix.
+
+Do not assume the cause.
+
+Trace the actual flow and identify:
+	•	where the mismatch originates
+	•	which component introduces it
+	•	how it propagates downstream
+
+⸻
+
+Send back:
+	•	root cause (from code)
+	•	exact file(s) / function(s)
+	•	failure chain
+
+Thanks.
+:::
+
