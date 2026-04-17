@@ -103,7 +103,8 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   let resolved;
   try {
     resolved = await resolveRunId(campaignId, accountId, requestedRunId);
-  } catch {
+  } catch (e: any) {
+    if (typeof e?.message === "string" && e.message.startsWith("RUN_NOT_FOUND")) throw e;
     return { ...empty, runId: null, isLatest: false, isStale: false };
   }
   const runId = resolved.runId;
@@ -179,9 +180,10 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
 
   let aelData: any = null;
   try {
+    if (!resolved.runId) throw new Error("no_run");
     const aelRows = await db.execute(
       sql`SELECT root_causes, causal_chains, buying_barriers
-          FROM ael_snapshots WHERE campaign_id = ${campaignId} AND account_id = ${accountId} ORDER BY created_at DESC LIMIT 1`
+          FROM ael_snapshots WHERE campaign_id = ${campaignId} AND account_id = ${accountId} AND job_id = ${resolved.runId} LIMIT 1`
     );
     if (aelRows.rows?.[0]) {
       aelData = {

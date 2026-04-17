@@ -261,12 +261,12 @@ export function registerOrchestratorV2Routes(app: Express) {
       const safeJson = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
 
       const [goalDecomp] = await db.select().from(goalDecompositions)
-        .where(and(eq(goalDecompositions.campaignId, req.params.campaignId), eq(goalDecompositions.accountId, accountId)))
-        .orderBy(desc(goalDecompositions.createdAt)).limit(1);
+        .where(and(eq(goalDecompositions.campaignId, req.params.campaignId), eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.jobId, resolved.runId!)))
+        .limit(1);
 
       const [simulation] = await db.select().from(growthSimulations)
-        .where(and(eq(growthSimulations.campaignId, req.params.campaignId), eq(growthSimulations.accountId, accountId)))
-        .orderBy(desc(growthSimulations.createdAt)).limit(1);
+        .where(and(eq(growthSimulations.campaignId, req.params.campaignId), eq(growthSimulations.accountId, accountId), eq(growthSimulations.jobId, resolved.runId!)))
+        .limit(1);
 
       const tasks = await db.select().from(executionTasks)
         .where(eq(executionTasks.planId, plan.id));
@@ -542,9 +542,13 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/system-context/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const context = await loadSystemContext(accountId, req.params.campaignId);
+      const requestedRunId = (req.query.runId as string) || null;
+      const context = await loadSystemContext(accountId, req.params.campaignId, requestedRunId);
       res.json(context);
     } catch (error: any) {
+      if (typeof error?.message === "string" && error.message.startsWith("RUN_NOT_FOUND")) {
+        return res.status(404).json({ error: error.message });
+      }
       res.status(500).json({ error: error.message });
     }
   });
@@ -1162,6 +1166,9 @@ export function registerOrchestratorV2Routes(app: Express) {
       const narrative = await buildCausalNarrative(req.params.campaignId, accountId, (req.query.runId as string) || null);
       res.json(narrative);
     } catch (error: any) {
+      if (typeof error?.message === "string" && error.message.startsWith("RUN_NOT_FOUND")) {
+        return res.status(404).json({ error: error.message });
+      }
       res.status(500).json({ error: error.message });
     }
   });

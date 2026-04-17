@@ -2296,6 +2296,7 @@ export const goalDecompositions = pgTable("goal_decompositions", {
   assumptions: text("assumptions"),
   confidenceScore: integer("confidence_score"),
   status: text("status").notNull().default("active"),
+  jobId: varchar("job_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2318,6 +2319,7 @@ export const growthSimulations = pgTable("growth_simulations", {
   bottleneckAlerts: text("bottleneck_alerts"),
   constraintSimulation: text("constraint_simulation"),
   status: text("status").notNull().default("active"),
+  jobId: varchar("job_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

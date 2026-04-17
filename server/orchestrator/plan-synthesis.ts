@@ -1008,7 +1008,7 @@ export async function synthesizePlan(
   let goalDecomp: any = null;
 
   try {
-    goalDecomp = await decomposeGoal(config.campaignId, config.accountId, rootBundle?.id || null, rootBundle?.version || null);
+    goalDecomp = await decomposeGoal(config.campaignId, config.accountId, rootBundle?.id || null, rootBundle?.version || null, config.jobId);
     const archetype = resolveArchetype(bizData?.businessType || "");
     goalMathContext = {
       goal: goalDecomp.goal,
@@ -1528,7 +1528,8 @@ export async function synthesizePlan(
         goalMathContext.funnel,
         goalMathContext.feasibility,
         bizData,
-        rootBundle?.id || null
+        rootBundle?.id || null,
+        config.jobId
       );
       console.log(`[PlanSynthesis] Growth simulation generated for plan ${plan.id}`);
     } catch (simErr: any) {

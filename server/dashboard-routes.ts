@@ -550,9 +550,9 @@ export function registerDashboardRoutes(app: Express) {
       const pipelineState = await getLatestPipelineState(campaignId, accountId);
 
       const [plans, manual, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, statValData, budgetData, channelData, iterData, retentionData, blueprint, goalDecompData, simulationData] = await Promise.all([
-        db.select().from(strategicPlans)
-          .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
-          .orderBy(desc(strategicPlans.createdAt)).limit(1),
+        resolved.planId
+          ? db.select().from(strategicPlans).where(and(eq(strategicPlans.id, resolved.planId), eq(strategicPlans.accountId, accountId))).limit(1)
+          : Promise.resolve([] as any[]),
         getManualMetrics(campaignId, accountId),
         db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, competitorData: miSnapshots.competitorData, status: miSnapshots.status })
           .from(miSnapshots).where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.jobId, runId)))
@@ -602,15 +602,15 @@ export function registerDashboardRoutes(app: Express) {
           feasibility: goalDecompositions.feasibility, feasibilityScore: goalDecompositions.feasibilityScore,
           confidenceScore: goalDecompositions.confidenceScore, funnelMath: goalDecompositions.funnelMath,
         }).from(goalDecompositions)
-          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.status, "active")))
-          .orderBy(desc(goalDecompositions.createdAt)).limit(1),
+          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.jobId, runId)))
+          .limit(1),
         db.select({
           conservativeCase: growthSimulations.conservativeCase, baseCase: growthSimulations.baseCase,
           upsideCase: growthSimulations.upsideCase, confidenceScore: growthSimulations.confidenceScore,
           bottleneckAlerts: growthSimulations.bottleneckAlerts,
         }).from(growthSimulations)
-          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.status, "active")))
-          .orderBy(desc(growthSimulations.createdAt)).limit(1),
+          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.jobId, runId)))
+          .limit(1),
       ]);
 
       const plan = plans[0] || null;
@@ -941,9 +941,9 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
       }
 
       const [plans, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, blueprint, goalDecompExplain, simulationExplain] = await Promise.all([
-        db.select().from(strategicPlans)
-          .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
-          .orderBy(desc(strategicPlans.createdAt)).limit(1),
+        resolved.planId
+          ? db.select().from(strategicPlans).where(and(eq(strategicPlans.id, resolved.planId), eq(strategicPlans.accountId, accountId))).limit(1)
+          : Promise.resolve([] as any[]),
         db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, narrativeSynthesis: miSnapshots.narrativeSynthesis, threatSignals: miSnapshots.threatSignals, opportunitySignals: miSnapshots.opportunitySignals })
           .from(miSnapshots).where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.jobId, runId)))
           .limit(1),
@@ -979,15 +979,15 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
           feasibilityExplanation: goalDecompositions.feasibilityExplanation,
           assumptions: goalDecompositions.assumptions,
         }).from(goalDecompositions)
-          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.status, "active")))
-          .orderBy(desc(goalDecompositions.createdAt)).limit(1),
+          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.jobId, runId)))
+          .limit(1),
         db.select({
           conservativeCase: growthSimulations.conservativeCase, baseCase: growthSimulations.baseCase,
           upsideCase: growthSimulations.upsideCase, confidenceScore: growthSimulations.confidenceScore,
           keyAssumptions: growthSimulations.keyAssumptions, bottleneckAlerts: growthSimulations.bottleneckAlerts,
         }).from(growthSimulations)
-          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.status, "active")))
-          .orderBy(desc(growthSimulations.createdAt)).limit(1),
+          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.jobId, runId)))
+          .limit(1),
       ]);
 
       const plan = plans[0] || null;
@@ -1111,7 +1111,7 @@ Be specific, reference actual data, and explain the strategic reasoning. Keep yo
 
       const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
 
-      res.json({ success: true, answer: rawText.trim() });
+      res.json({ success: true, runId, isLatest: resolved.isLatest, isStale: resolved.isStale, answer: rawText.trim() });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Agent explain error:`, error);
       res.status(500).json({ success: false, error: "Failed to generate explanation" });

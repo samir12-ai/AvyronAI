@@ -261,7 +261,8 @@ export async function generateSimulation(
   funnel: ReturnType<typeof computeFunnelMath>,
   feasibility: ReturnType<typeof checkFeasibility>,
   bizData: any,
-  rootBundleId: string | null = null
+  rootBundleId: string | null = null,
+  jobId: string | null = null
 ) {
   const monthlyBudget = parseFloat(bizData?.monthlyBudget?.replace(/[^0-9.]/g, "") || "0");
   const budgetInfo = monthlyBudget > 0
@@ -358,6 +359,7 @@ Make numbers realistic for this specific business type and budget level.`;
       campaignId,
       accountId,
       planId,
+      jobId,
       goalDecompositionId: null,
       rootBundleId,
       planHash: null,
@@ -379,6 +381,7 @@ Make numbers realistic for this specific business type and budget level.`;
         campaignId,
         accountId,
         planId,
+        jobId,
         goalDecompositionId: null,
         rootBundleId,
         planHash: null,
@@ -454,7 +457,7 @@ function buildDeterministicSimulation(
   };
 }
 
-export async function decomposeGoal(campaignId: string, accountId: string, rootBundleId: string | null = null, rootBundleVersion: number | null = null) {
+export async function decomposeGoal(campaignId: string, accountId: string, rootBundleId: string | null = null, rootBundleVersion: number | null = null, jobId: string | null = null) {
   const [bizData] = await db.select().from(businessDataLayer)
     .where(and(eq(businessDataLayer.campaignId, campaignId), eq(businessDataLayer.accountId, accountId)))
     .orderBy(desc(businessDataLayer.createdAt)).limit(1);
@@ -471,6 +474,7 @@ export async function decomposeGoal(campaignId: string, accountId: string, rootB
     accountId,
     rootBundleId,
     rootBundleVersion,
+    jobId,
     goalType: goal.goalType,
     goalTarget: goal.target,
     goalLabel: goal.label,
@@ -493,17 +497,19 @@ export async function decomposeGoal(campaignId: string, accountId: string, rootB
   };
 }
 
-export async function getLatestGoalDecomposition(campaignId: string, accountId: string) {
+export async function getLatestGoalDecomposition(campaignId: string, accountId: string, jobId?: string | null) {
+  if (!jobId) return null;
   const [row] = await db.select().from(goalDecompositions)
-    .where(and(eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.status, "active")))
-    .orderBy(desc(goalDecompositions.createdAt)).limit(1);
+    .where(and(eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.jobId, jobId)))
+    .limit(1);
   return row || null;
 }
 
-export async function getLatestSimulation(campaignId: string, accountId: string) {
+export async function getLatestSimulation(campaignId: string, accountId: string, jobId?: string | null) {
+  if (!jobId) return null;
   const [row] = await db.select().from(growthSimulations)
-    .where(and(eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.accountId, accountId), eq(growthSimulations.status, "active")))
-    .orderBy(desc(growthSimulations.createdAt)).limit(1);
+    .where(and(eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.accountId, accountId), eq(growthSimulations.jobId, jobId)))
+    .limit(1);
   return row || null;
 }
 
@@ -561,12 +567,23 @@ export function registerGoalMathRoutes(app: Express) {
     try {
       const campaignId = req.params.campaignId;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
-      const decomp = await getLatestGoalDecomposition(campaignId, accountId);
-      const sim = await getLatestSimulation(campaignId, accountId);
+      const { resolveRunId } = await import("./orchestrator/run-resolver");
+      let resolved;
+      try { resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) {
+        if (typeof e?.message === "string" && e.message.startsWith("RUN_NOT_FOUND")) return res.status(404).json({ success: false, error: e.message });
+        throw e;
+      }
+      const runId = resolved.runId;
+
+      const decomp = runId ? await getLatestGoalDecomposition(campaignId, accountId, runId) : null;
+      const sim = runId ? await getLatestSimulation(campaignId, accountId, runId) : null;
 
       res.json({
         success: true,
+        runId, isLatest: resolved.isLatest, isStale: resolved.isStale,
         goalDecomposition: decomp ? {
           ...decomp,
           funnelMath: safeJson(decomp.funnelMath),

@@ -410,8 +410,15 @@ async function handleToolCall(
       }
 
       case "explain_forecast_model": {
-        const decomp = await getLatestGoalDecomposition(campaignId, accountId);
-        const sim = await getLatestSimulation(campaignId, accountId);
+        const { resolveRunId } = await import("../../orchestrator/run-resolver");
+        let resolvedRun;
+        try {
+          resolvedRun = await resolveRunId(campaignId, accountId, null);
+        } catch {
+          resolvedRun = null;
+        }
+        const decomp = resolvedRun?.runId ? await getLatestGoalDecomposition(campaignId, accountId, resolvedRun.runId) : null;
+        const sim = resolvedRun?.runId ? await getLatestSimulation(campaignId, accountId, resolvedRun.runId) : null;
 
         if (!decomp) {
           return {

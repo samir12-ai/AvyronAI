@@ -89,9 +89,18 @@ export interface SystemContext {
 
 export async function loadSystemContext(
   accountId: string,
-  campaignId: string
+  campaignId: string,
+  requestedRunId: string | null = null,
 ): Promise<SystemContext> {
   const warnings: string[] = [];
+
+  const { resolveRunId: _resolveRunId } = await import("./run-resolver");
+  let _resolved: any = null;
+  try { _resolved = await _resolveRunId(campaignId, accountId, requestedRunId); } catch (e: any) {
+    if (typeof e?.message === "string" && e.message.startsWith("RUN_NOT_FOUND")) throw e;
+    _resolved = null;
+  }
+  const _runId: string | null = _resolved?.runId || null;
 
   const [campaign] = await db
     .select()
@@ -234,31 +243,31 @@ export async function loadSystemContext(
     { name: "retention", table: retentionSnapshots },
   ] as const;
 
-  for (const { name, table } of snapshotTablesWithStatus) {
+  if (_runId) {
+    for (const { name, table } of snapshotTablesWithStatus) {
+      try {
+        const [snap] = await db
+          .select({ id: table.id, status: table.status, createdAt: table.createdAt })
+          .from(table)
+          .where(and(eq(table.campaignId, campaignId), eq(table.accountId, accountId), eq((table as any).jobId, _runId)))
+          .limit(1);
+        if (snap) {
+          engineSnapshots[name] = { id: snap.id, status: snap.status || "COMPLETE", createdAt: snap.createdAt };
+        }
+      } catch {}
+    }
+
     try {
-      const [snap] = await db
-        .select({ id: table.id, status: table.status, createdAt: table.createdAt })
-        .from(table)
-        .where(and(eq(table.campaignId, campaignId), eq(table.accountId, accountId)))
-        .orderBy(desc(table.createdAt))
+      const [audSnap] = await db
+        .select({ id: audienceSnapshots.id, createdAt: audienceSnapshots.createdAt })
+        .from(audienceSnapshots)
+        .where(and(eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.jobId, _runId)))
         .limit(1);
-      if (snap) {
-        engineSnapshots[name] = { id: snap.id, status: snap.status || "COMPLETE", createdAt: snap.createdAt };
+      if (audSnap) {
+        engineSnapshots["audience"] = { id: audSnap.id, status: "COMPLETE", createdAt: audSnap.createdAt };
       }
     } catch {}
   }
-
-  try {
-    const [audSnap] = await db
-      .select({ id: audienceSnapshots.id, createdAt: audienceSnapshots.createdAt })
-      .from(audienceSnapshots)
-      .where(and(eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.accountId, accountId)))
-      .orderBy(desc(audienceSnapshots.createdAt))
-      .limit(1);
-    if (audSnap) {
-      engineSnapshots["audience"] = { id: audSnap.id, status: "COMPLETE", createdAt: audSnap.createdAt };
-    }
-  } catch {}
 
   let dnaData: any = null;
   try {
@@ -294,9 +303,13 @@ export async function loadSystemContext(
   let assumptionsSummary: any = null;
 
   try {
-    const [gd] = await db.select().from(goalDecompositions)
-      .where(and(eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.status, "active")))
-      .orderBy(desc(goalDecompositions.createdAt)).limit(1);
+    const { resolveRunId } = await import("./run-resolver");
+    let _resolvedForCtx;
+    try { _resolvedForCtx = await resolveRunId(campaignId, accountId, null); } catch { _resolvedForCtx = null; }
+    const _runId = _resolvedForCtx?.runId || null;
+    const [gd] = _runId ? await db.select().from(goalDecompositions)
+      .where(and(eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.jobId, _runId)))
+      .limit(1) : [undefined as any];
     if (gd) {
       goalDecomposition = {
         goalType: gd.goalType, goalTarget: gd.goalTarget, goalLabel: gd.goalLabel,
@@ -308,9 +321,13 @@ export async function loadSystemContext(
   } catch {}
 
   try {
-    const [sim] = await db.select().from(growthSimulations)
-      .where(and(eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.accountId, accountId), eq(growthSimulations.status, "active")))
-      .orderBy(desc(growthSimulations.createdAt)).limit(1);
+    const { resolveRunId: _rR } = await import("./run-resolver");
+    let _rs;
+    try { _rs = await _rR(campaignId, accountId, null); } catch { _rs = null; }
+    const _rid = _rs?.runId || null;
+    const [sim] = _rid ? await db.select().from(growthSimulations)
+      .where(and(eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.accountId, accountId), eq(growthSimulations.jobId, _rid)))
+      .limit(1) : [undefined as any];
     if (sim) {
       simulation = {
         conservativeCase: safeP(sim.conservativeCase),
