@@ -13,6 +13,7 @@ import {
   Inter_600SemiBold, 
   Inter_700Bold 
 } from "@expo-google-fonts/inter";
+import { Ionicons } from "@expo/vector-icons";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { AppProvider } from "@/context/AppContext";
@@ -128,11 +129,17 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  // Preload Ionicons alongside Inter so the icon font is registered exactly
+  // once during splash. Without this, @expo/vector-icons calls Font.loadAsync
+  // lazily on first icon render, which on iOS triggers
+  // CTFontManagerError code 104 ("Font registration was unsuccessful")
+  // during Fast Refresh / re-mount because the font is already registered.
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
+    ...Ionicons.font,
   });
 
   useEffect(() => {
