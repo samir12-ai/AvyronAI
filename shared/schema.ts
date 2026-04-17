@@ -1217,6 +1217,7 @@ export const strategicPlans = pgTable("strategic_plans", {
   accountId: varchar("account_id").notNull().default("default"),
   blueprintId: varchar("blueprint_id").notNull(),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id"),
   planJson: text("plan_json").notNull(),
   planSummary: text("plan_summary"),
   status: text("status").notNull().default("DRAFT"),

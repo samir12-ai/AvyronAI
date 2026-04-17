@@ -416,22 +416,66 @@ export function registerOrchestratorV2Routes(app: Express) {
       }
 
       const warnings: string[] = [];
+      const blockReasons: Array<{ code: string; message: string; detail?: any }> = [];
+
+      // ===== PLAN-RUN BINDING CHECK =====
+      // A plan is run-bound iff it carries a jobId AND that jobId matches the
+      // most recent COMPLETED orchestrator run for the campaign. If a newer
+      // run has completed since the plan was generated, the plan is OUTDATED
+      // — its requiredWork/calendar reflect old engine outputs and approving
+      // it would lock in a strategy that disagrees with the latest analysis.
+      // Hard-block (even with forceApprove=false) is the correct behavior here
+      // because the system already supports re-running the orchestrator to
+      // produce a fresh plan; force-approving a stale plan defeats the purpose.
+      const [latestCompletedJob] = await db
+        .select({ id: orchestratorJobs.id, planId: orchestratorJobs.planId, completedAt: orchestratorJobs.completedAt })
+        .from(orchestratorJobs)
+        .where(and(
+          eq(orchestratorJobs.campaignId, plan.campaignId),
+          eq(orchestratorJobs.accountId, plan.accountId),
+          eq(orchestratorJobs.status, "COMPLETED"),
+        ))
+        .orderBy(desc(orchestratorJobs.completedAt))
+        .limit(1);
+
+      if (plan.jobId && latestCompletedJob && latestCompletedJob.id !== plan.jobId) {
+        blockReasons.push({
+          code: "PLAN_OUTDATED",
+          message: `Plan is from a previous pipeline run (${plan.jobId}). A newer run has completed (${latestCompletedJob.id}). Regenerate the plan from the latest run before approving.`,
+          detail: {
+            planJobId: plan.jobId,
+            latestJobId: latestCompletedJob.id,
+            latestCompletedAt: latestCompletedJob.completedAt,
+          },
+        });
+      }
 
       if (plan.rootBundleId) {
         const integrity = await validateRootIntegrity(planId);
         if (!integrity.valid) {
           warnings.push(...integrity.issues);
+          blockReasons.push({
+            code: "ROOT_INTEGRITY_FAILED",
+            message: `Root bundle integrity check failed: ${integrity.issues.join("; ")}`,
+            detail: { issues: integrity.issues },
+          });
         }
 
         const staleness = await detectStaleness(plan.campaignId, plan.accountId);
         if (staleness.isStale) {
           warnings.push(`Root staleness detected: ${staleness.reason}`);
+          blockReasons.push({
+            code: "ROOT_STALE",
+            message: `Root bundle is stale: ${staleness.reason}`,
+            detail: { reason: staleness.reason },
+          });
         }
       }
 
       const [work] = await db.select().from(requiredWork)
         .where(eq(requiredWork.planId, planId)).limit(1);
 
+      let deviationDetail: any = null;
       if (work) {
         const calCounts = await db.select({
           reels: sql<number>`count(case when content_type = 'REEL' then 1 end)`,
@@ -459,16 +503,31 @@ export function registerOrchestratorV2Routes(app: Express) {
         );
 
         if (!deviation.passesThreshold) {
+          deviationDetail = deviation;
           warnings.push(`Calendar deviation exceeds threshold: max ${deviation.maxDeviation}% (limit 5%)`);
+          blockReasons.push({
+            code: "EXECUTION_DEVIATION",
+            message: `Calendar contents drifted from required work plan (max ${deviation.maxDeviation}% deviation, limit 5%). This indicates real execution drift — content was added/removed outside the plan.`,
+            detail: deviation,
+          });
         }
       }
 
-      if (warnings.length > 0 && !forceApprove) {
+      // PLAN_OUTDATED is a structural lifecycle problem and must NOT be
+      // bypassed by forceApprove. Other blockers (root integrity, calendar
+      // deviation) can still be force-approved by an explicit operator.
+      const hasPlanOutdated = blockReasons.some(b => b.code === "PLAN_OUTDATED");
+      const shouldBlock = (hasPlanOutdated || blockReasons.length > 0) && (!forceApprove || hasPlanOutdated);
+
+      if (shouldBlock) {
         return res.status(409).json({
           success: false,
           blocked: true,
           warnings,
-          message: "Plan approval blocked due to integrity issues. Set force=true to override.",
+          blockReasons,
+          message: hasPlanOutdated
+            ? "Plan approval blocked: plan is outdated relative to the latest pipeline run. Regenerate the plan and try again. Force-approve is not permitted for outdated plans."
+            : "Plan approval blocked due to integrity issues. Set force=true to override (not recommended for execution drift without investigating root cause).",
         });
       }
 

@@ -1,0 +1,186 @@
+:::writing{variant=“email” id=“77432” subject=“Audit & Fix Required — Pipeline vs Plan/Approval Synchronization (Calendar Deviation Issue)”}
+Hi,
+
+We’ve reached a point where the core system (engines, orchestration, run-binding, dashboard truth) is working correctly.
+
+However, we’ve identified a critical inconsistency between the Pipeline (analysis layer) and the Plan/Approval (execution layer) that needs a full audit and fix.
+
+⸻
+
+Problem Summary
+
+We are seeing cases where:
+	•	Pipeline completes successfully (15/15 engines, SystemControl PASS)
+	•	But Plan approval is blocked with:
+
+“Calendar deviation exceeds threshold: 100% (limit 5%)”
+
+Additionally:
+	•	Plan may show [DEGRADED — AI synthesis failed...]
+	•	Approval is blocked even though analysis is valid
+
+⸻
+
+Key Insight
+
+This is NOT a pipeline issue.
+
+This is a synchronization problem between:
+	•	Pipeline (analysis truth)
+	•	Plan / Calendar (execution layer)
+
+⸻
+
+Likely Root Causes (Audit Required)
+
+Please verify all of the following from code and behavior:
+
+1. Run Mismatch (Most Likely)
+	•	Plan / calendar may be tied to an older run
+	•	Pipeline is using a newer run
+	•	→ results in artificial 100% deviation
+
+2. Plan Not Regenerated After Re-run
+	•	Pipeline re-run produces new outputs
+	•	But plan/calendar is not rebuilt
+	•	→ execution layer becomes stale
+
+3. Degraded Plan State
+	•	[DEGRADED — AI synthesis failed...]
+	•	Plan may be partially generated or fallback-based
+	•	→ calendar mismatch is expected
+
+4. Calendar Generation Not Run-Bound
+	•	Verify:
+	•	is calendar tied to runId?
+	•	or still using latest / previous plan logic?
+
+5. Deviation Logic Too Blind
+	•	Current behavior:
+	•	deviation % > threshold → hard block
+	•	Missing:
+	•	context of why deviation happened
+	•	whether it’s due to a legitimate new run
+
+⸻
+
+Required Audit
+
+Trace full flow:
+	1.	Build Plan → Re-run Pipeline
+	2.	Engine outputs (runId A → runId B)
+	3.	Plan generation
+	4.	Calendar generation
+	5.	Approval check logic
+
+⸻
+
+Required Fix (Root-Level)
+
+Based on findings, implement the correct lifecycle behavior:
+
+A. Plan–Run Binding (Mandatory)
+	•	Plan and calendar must be tied to a specific runId
+	•	Approval must compare:
+	•	plan.runId vs current pipeline runId
+
+⸻
+
+B. Plan Invalidation Logic
+
+If pipeline changes:
+
+One of the following must happen:
+
+Option 1 (Preferred)
+	•	Auto-regenerate plan & calendar
+
+Option 2
+	•	Mark plan as:
+“Outdated — requires regeneration”
+
+Option 3
+	•	Allow comparison:
+	•	old plan vs new analysis
+
+⸻
+
+C. Approval Logic Fix
+
+Approval should NOT blindly block.
+
+Instead:
+	•	If mismatch is due to new run:
+→ show: “Plan outdated”
+	•	If mismatch is due to real execution drift:
+→ show: “Execution deviation”
+
+⸻
+
+D. Calendar Deviation Context
+
+Enhance logic to include:
+	•	What changed?
+	•	Why deviation occurred?
+	•	Whether deviation is expected due to new analysis
+
+⸻
+
+Important Rules
+
+Do NOT:
+	•	lower thresholds blindly
+	•	bypass approval checks
+	•	patch UI only
+
+We need:
+
+correct lifecycle + correct data binding
+
+⸻
+
+Output Required
+
+Please return:
+
+1. Audit Findings
+	•	exact root cause(s)
+	•	affected files/functions
+
+2. Fixes Applied
+	•	what was changed
+	•	why it solves the issue
+
+3. Validation
+	•	run pipeline → generate plan → approve
+	•	confirm no false blocks
+	•	confirm correct behavior when plan is outdated vs valid
+
+⸻
+
+Note
+
+If during implementation you find:
+	•	missing logic
+	•	better structural solution
+	•	additional improvements
+
+You are allowed to implement them, but:
+
+clearly document what you added and why
+
+⸻
+
+Goal
+
+We want:
+
+Pipeline → Plan → Approval
+to behave as a single coherent lifecycle
+
+⸻
+
+Proceed with the audit and fix.
+
+Thanks.
+:::

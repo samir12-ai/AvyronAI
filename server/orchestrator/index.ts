@@ -2344,6 +2344,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     }
   }
 
+  // Mirror the local jobId onto config so downstream callers (synthesizePlan,
+  // engine adapters that read config.jobId) see the same run identifier as
+  // the local executeEngine path. Without this assignment, plan persistence
+  // inserts NULL into strategic_plans.job_id even though engine snapshots
+  // get the right jobId via the local variable — leaving plans non-run-bound.
+  config.jobId = jobId;
+
   const results = new Map<EngineId, EngineStepResult>();
   const completedEngines: string[] = [];
   let failedEngine: string | undefined;

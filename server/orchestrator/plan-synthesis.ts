@@ -151,6 +151,7 @@ async function persistPlan(plan: SynthesizedPlan, config: OrchestratorConfig, ro
     accountId: config.accountId,
     blueprintId: "orchestrator-v2",
     campaignId: config.campaignId,
+    jobId: config.jobId,
     planJson: JSON.stringify(plan),
     planSummary: plan.strategicSummary.strategy,
     status: "DRAFT",
@@ -1417,6 +1418,7 @@ export async function synthesizePlan(
     accountId: config.accountId,
     blueprintId: "orchestrator-v2",
     campaignId: config.campaignId,
+    jobId: config.jobId,
     planJson: JSON.stringify(synthesized),
     planSummary: synthesized.strategicSummary.strategy,
     status: "DRAFT",
@@ -1431,8 +1433,30 @@ export async function synthesizePlan(
   }).returning();
 
   const explorationSlotsPerWeek = synthesized.explorationPlan?.totalExplorationCount ?? 0;
-  const weeks = Math.ceil(periodDays / 7);
-  const totalExplorationPieces = explorationSlotsPerWeek * weeks;
+
+  // Generate calendar slots FIRST so requiredWork.total* can be derived from the
+  // exact slots that will be persisted (single source of truth). This eliminates
+  // formula-drift between deriveContentVolume() (weekly × ceil(days/7)) and
+  // generateCalendarSlots() (per-day, per-weekday gating with Sunday skip and
+  // partial last-week edges) AND ensures exploration slots — which inject
+  // per-type content — are counted in the same per-type buckets used by the
+  // calendar deviation check at approval time.
+  const calendarSlots = generateCalendarSlots(
+    synthesized,
+    periodDays,
+    config.campaignId,
+    config.accountId,
+    plan.id,
+    rootBundle?.id || null,
+    rootBundle?.version || null,
+    explorationSlotList,
+  );
+
+  const slotCounts = { REEL: 0, POST: 0, STORY: 0, CAROUSEL: 0, VIDEO: 0 } as Record<string, number>;
+  for (const s of calendarSlots) {
+    const t = (s.contentType || "").toUpperCase();
+    if (t in slotCounts) slotCounts[t]++;
+  }
 
   await db.insert(requiredWork).values({
     planId: plan.id,
@@ -1444,12 +1468,12 @@ export async function synthesizePlan(
     storiesPerDay: volume.storiesPerDay,
     carouselsPerWeek: volume.carouselsPerWeek,
     videosPerWeek: volume.videosPerWeek,
-    totalReels: volume.totalReels,
-    totalPosts: volume.totalPosts,
-    totalStories: volume.totalStories,
-    totalCarousels: volume.totalCarousels,
-    totalVideos: volume.totalVideos,
-    totalContentPieces: volume.totalContentPieces + totalExplorationPieces,
+    totalReels: slotCounts.REEL,
+    totalPosts: slotCounts.POST,
+    totalStories: slotCounts.STORY,
+    totalCarousels: slotCounts.CAROUSEL,
+    totalVideos: slotCounts.VIDEO,
+    totalContentPieces: calendarSlots.length,
     explorationSlotsPerWeek,
     generatedCount: 0,
     readyCount: 0,
@@ -1459,17 +1483,6 @@ export async function synthesizePlan(
     rootBundleId: rootBundle?.id || null,
     rootBundleVersion: rootBundle?.version || null,
   });
-
-  const calendarSlots = generateCalendarSlots(
-    synthesized,
-    periodDays,
-    config.campaignId,
-    config.accountId,
-    plan.id,
-    rootBundle?.id || null,
-    rootBundle?.version || null,
-    explorationSlotList,
-  );
 
   if (calendarSlots.length > 0) {
     const inserted = await db.insert(calendarEntries).values(calendarSlots).returning({ id: calendarEntries.id, contentType: calendarEntries.contentType });
