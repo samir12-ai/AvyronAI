@@ -960,8 +960,12 @@ async function executeEngine(
   engineId: EngineId,
   ctx: EngineContext,
   config: OrchestratorConfig,
-  results: Map<EngineId, EngineStepResult>
+  results: Map<EngineId, EngineStepResult>,
+  jobId: string,
 ): Promise<EngineStepResult> {
+  if (!jobId) {
+    throw new Error(`executeEngine called without jobId for ${engineId} — pipeline misconfiguration`);
+  }
   const startTime = Date.now();
 
   const violation = checkPriorityViolation(engineId, results);
@@ -2500,7 +2504,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     }
 
     let stepResult = await Promise.race([
-      executeEngine(engineDef.id, ctx, config, results),
+      executeEngine(engineDef.id, ctx, config, results, jobId),
       new Promise<EngineStepResult>((resolve) =>
         setTimeout(() => {
           console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${ENGINE_TIMEOUT_MS / 1000}s — forcing ERROR`);
@@ -2529,7 +2533,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         if (gateResult.shouldRetry) {
           console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason}`);
           const retryResult = await Promise.race([
-            executeEngine(engineDef.id, ctx, config, results),
+            executeEngine(engineDef.id, ctx, config, results, jobId),
             new Promise<EngineStepResult>((resolve) =>
               setTimeout(() => resolve({
                 engineId: engineDef.id, status: "ERROR", output: null, durationMs: ENGINE_TIMEOUT_MS,
