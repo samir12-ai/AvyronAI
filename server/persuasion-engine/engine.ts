@@ -144,9 +144,58 @@ function buildPersuasionResponse(objType: StructuredObjection["objectionType"], 
   }
 }
 
+function aelTokenize(s: string): string[] {
+  return (s || "").toLowerCase().match(/[a-z0-9]{4,}/g) || [];
+}
+const AEL_GROUNDING_MIN_OVERLAP = 0.05;
+function aelOverlapScore(a: string, b: string): number {
+  const ta = new Set(aelTokenize(a));
+  const tb = aelTokenize(b);
+  if (ta.size === 0 || tb.length === 0) return 0;
+  let hits = 0;
+  for (const t of tb) if (ta.has(t)) hits++;
+  return hits / Math.max(ta.size, tb.length);
+}
+
+function attachAELGrounding(
+  obj: StructuredObjection,
+  ael: any,
+): void {
+  if (!ael || !ael.root_causes || ael.root_causes.length === 0) return;
+  const objText = `${obj.objectionStatement} ${obj.objectionTrigger} ${obj.persuasionResponse}`;
+
+  let bestRc: any = null;
+  let bestRcScore = 0;
+  for (const rc of ael.root_causes) {
+    const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
+    const s = aelOverlapScore(rcText, objText);
+    if (s > bestRcScore) { bestRcScore = s; bestRc = rc; }
+  }
+  if (bestRc && bestRcScore >= AEL_GROUNDING_MIN_OVERLAP) {
+    obj.rootCause = `${bestRc.deepCause || ""}: ${bestRc.causalReasoning || ""}`.trim().slice(0, 400);
+    obj.userThinking = `Surface signal observed: ${bestRc.surfaceSignal || bestRc.deepCause || ""}`.slice(0, 300);
+    obj.resolution = `Resolve by addressing ${bestRc.deepCause || "underlying cause"} via ${obj.requiredProofType} — ${obj.persuasionResponse}`.slice(0, 400);
+  }
+
+  const chains = ael.causal_chains || [];
+  if (chains.length > 0) {
+    let bestCh: any = null;
+    let bestChScore = 0;
+    for (const ch of chains) {
+      const chText = `${ch.cause || ""} ${ch.impact || ""} ${ch.behavior || ""} ${ch.pain || ""}`;
+      const s = aelOverlapScore(chText, objText);
+      if (s > bestChScore) { bestChScore = s; bestCh = ch; }
+    }
+    if (bestCh && bestChScore >= AEL_GROUNDING_MIN_OVERLAP) {
+      obj.causalChainAlignment = `Causal chain — cause: ${bestCh.cause || ""}; impact: ${bestCh.impact || ""}; behavior: ${bestCh.behavior || ""}; pain: ${bestCh.pain || ""}`.slice(0, 500);
+    }
+  }
+}
+
 function buildStructuredObjectionMap(
   audience: PersuasionAudienceInput,
   mi: PersuasionMIInput,
+  analyticalEnrichment?: any,
 ): StructuredObjection[] {
   const structuredObjections: StructuredObjection[] = [];
   const seen = new Set<string>();
@@ -1995,7 +2044,12 @@ export function analyzePersuasion(
     };
   }
 
-  const structuredObjections = buildStructuredObjectionMap(audience, mi);
+  const structuredObjections = buildStructuredObjectionMap(audience, mi, analyticalEnrichment);
+  if (analyticalEnrichment && analyticalEnrichment.root_causes && analyticalEnrichment.root_causes.length > 0) {
+    for (const obj of structuredObjections) attachAELGrounding(obj, analyticalEnrichment);
+    const grounded = structuredObjections.filter(o => !!o.rootCause).length;
+    console.log(`[PersuasionEngine-V3] AEL_GROUNDING_ATTACHED | objections=${structuredObjections.length} | grounded=${grounded} | root_causes=${analyticalEnrichment.root_causes.length} | chains=${(analyticalEnrichment.causal_chains || []).length}`);
+  }
 
   const multiSource = safeJsonParse(mi.multiSourceSignals);
   let websiteProofCount = 0;
@@ -2224,7 +2278,7 @@ export function analyzePersuasion(
       ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
       ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
       ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
-      ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""}`),
+      ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""} ${o.causalChainAlignment || ""}`),
     ],
     analyticalEnrichment || null,
   );

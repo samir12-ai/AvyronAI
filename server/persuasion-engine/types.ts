@@ -7,6 +7,10 @@ export interface StructuredObjection {
   persuasionResponse: string;
   source: "audience_objection" | "narrative_extraction" | "pain_inference";
   confidence: number;
+  rootCause?: string;
+  userThinking?: string;
+  resolution?: string;
+  causalChainAlignment?: string;
 }
 
 export interface PersuasionMIInput {

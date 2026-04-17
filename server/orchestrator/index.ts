@@ -1548,7 +1548,18 @@ async function executeEngine(
         ctx.persuasion = result;
 
         if (ctx.analyticalEnrichment) {
-          const persTexts = (result.sequences || result.persuasionSequence || []).map((s: any) => typeof s === "string" ? s : s.technique || s.name || JSON.stringify(s));
+          const pr: any = result.primaryRoute || {};
+          const persTexts: string[] = [
+            pr.routeName || "",
+            pr.persuasionMode || "",
+            ...(pr.primaryInfluenceDrivers || []).map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
+            ...(pr.objectionPriorities || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
+            ...(pr.messageOrderLogic || []).map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
+            ...(pr.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
+            ...(pr.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
+            ...(pr.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
+            ...(pr.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""} ${o.causalChainAlignment || ""}`),
+          ].filter(t => t && t.trim().length > 0);
           const celResult = enforceGenericEngineCompliance("persuasion", persTexts, ctx.analyticalEnrichment);
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(celResult);
