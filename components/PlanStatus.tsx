@@ -19,9 +19,10 @@ interface PlanStatusProps {
   onApprovePlan?: (planId: string) => void;
   onViewPlan?: (planId: string) => void;
   isApproving?: boolean;
+  runId?: string | null;
 }
 
-export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onViewPlan, isApproving }: PlanStatusProps) {
+export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onViewPlan, isApproving, runId }: PlanStatusProps) {
   const baseUrl = getApiUrl();
   const textPrimary = isDark ? '#E8EDF2' : '#1A2332';
   const textSecondary = isDark ? '#8892A4' : '#546478';
@@ -29,9 +30,11 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
   const cardBorder = isDark ? '#1A2030' : '#E2E8E4';
 
   const { data, isLoading } = useQuery({
-    queryKey: ['/api/plans/active', campaignId],
+    queryKey: ['/api/plans/active', campaignId, runId || null],
     queryFn: async () => {
-      const res = await authFetch(new URL(`/api/plans/active/${campaignId}`, baseUrl).toString());
+      const url = new URL(`/api/plans/active/${campaignId}`, baseUrl);
+      if (runId) url.searchParams.set('runId', runId);
+      const res = await authFetch(url.toString());
       return res.json();
     },
     enabled: !!campaignId,

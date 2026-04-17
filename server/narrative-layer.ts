@@ -96,32 +96,39 @@ function humanize(text: string): string {
   return out;
 }
 
-export async function buildCausalNarrative(campaignId: string, accountId: string = "default"): Promise<CausalNarrative> {
+export async function buildCausalNarrative(campaignId: string, accountId: string = "default", requestedRunId: string | null = null): Promise<CausalNarrative & { runId?: string | null; isLatest?: boolean; isStale?: boolean }> {
   const empty: CausalNarrative = { hasNarrative: false, steps: [], oneLiner: "", engineCount: 0, completedAt: null };
+
+  const { resolveRunId } = await import("./orchestrator/run-resolver");
+  let resolved;
+  try {
+    resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+  } catch {
+    return { ...empty, runId: null, isLatest: false, isStale: false };
+  }
+  const runId = resolved.runId;
+  if (!runId) return { ...empty, runId: null, isLatest: true, isStale: false };
 
   const jobRows = await db.execute(
     sql`SELECT section_statuses, status, completed_at FROM orchestrator_jobs
-        WHERE campaign_id = ${campaignId} AND account_id = ${accountId} ORDER BY created_at DESC LIMIT 1`
+        WHERE id = ${runId} LIMIT 1`
   );
   const job = jobRows.rows?.[0];
-  if (!job || !job.section_statuses) return empty;
+  if (!job || !job.section_statuses) return { ...empty, runId, isLatest: resolved.isLatest, isStale: resolved.isStale };
 
   const sections: Array<{ id: string; status: string }> = safeP(job.section_statuses) || [];
   const completed = sections.filter(s => s.status === "SUCCESS" || s.status === "COMPLETE");
-  if (completed.length < 3) return empty;
+  if (completed.length < 3) return { ...empty, runId, isLatest: resolved.isLatest, isStale: resolved.isStale };
 
   const completedIds = new Set(completed.map(s => s.id));
-
-  const COMPLETE_STATUS = ["COMPLETE", "SUCCESS"];
 
   const [posRows, diffRows, mechRows, offerRows, funnelRows] = await Promise.all([
     db.select().from(positioningSnapshots)
       .where(and(
         eq(positioningSnapshots.campaignId, campaignId),
         eq(positioningSnapshots.accountId, accountId),
-        or(...COMPLETE_STATUS.map(s => eq(positioningSnapshots.status, s)))
+        eq(positioningSnapshots.jobId, runId),
       ))
-      .orderBy(desc(positioningSnapshots.createdAt))
       .limit(1)
       .catch(() => []),
 
@@ -130,9 +137,8 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
           .where(and(
             eq(differentiationSnapshots.campaignId, campaignId),
             eq(differentiationSnapshots.accountId, accountId),
-            or(...COMPLETE_STATUS.map(s => eq(differentiationSnapshots.status, s)))
+            eq(differentiationSnapshots.jobId, runId),
           ))
-          .orderBy(desc(differentiationSnapshots.createdAt))
           .limit(1)
           .catch(() => [])
       : Promise.resolve([]),
@@ -142,9 +148,8 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
           .where(and(
             eq(mechanismSnapshots.campaignId, campaignId),
             eq(mechanismSnapshots.accountId, accountId),
-            or(...COMPLETE_STATUS.map(s => eq(mechanismSnapshots.status, s)))
+            eq(mechanismSnapshots.jobId, runId),
           ))
-          .orderBy(desc(mechanismSnapshots.createdAt))
           .limit(1)
           .catch(() => [])
       : Promise.resolve([]),
@@ -154,9 +159,8 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
           .where(and(
             eq(offerSnapshots.campaignId, campaignId),
             eq(offerSnapshots.accountId, accountId),
-            or(...COMPLETE_STATUS.map(s => eq(offerSnapshots.status, s)))
+            eq(offerSnapshots.jobId, runId),
           ))
-          .orderBy(desc(offerSnapshots.createdAt))
           .limit(1)
           .catch(() => [])
       : Promise.resolve([]),
@@ -166,9 +170,8 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
           .where(and(
             eq(funnelSnapshots.campaignId, campaignId),
             eq(funnelSnapshots.accountId, accountId),
-            or(...COMPLETE_STATUS.map(s => eq(funnelSnapshots.status, s)))
+            eq(funnelSnapshots.jobId, runId),
           ))
-          .orderBy(desc(funnelSnapshots.createdAt))
           .limit(1)
           .catch(() => [])
       : Promise.resolve([]),
@@ -339,5 +342,8 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
     oneLiner,
     engineCount: completed.length,
     completedAt: job.completed_at ? String(job.completed_at) : null,
+    runId,
+    isLatest: resolved.isLatest,
+    isStale: resolved.isStale,
   };
 }

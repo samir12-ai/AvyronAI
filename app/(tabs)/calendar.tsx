@@ -121,8 +121,17 @@ export default function CalendarScreen() {
     setDbEntriesLoading(true);
     try {
       const baseUrl = getApiUrl();
+      let runId: string | null = null;
+      try {
+        const anchorRes = await authFetch(new URL(`/api/plans/active/${selectedCampaign.selectedCampaignId}`, baseUrl).toString());
+        if (anchorRes.ok) {
+          const anchor = await anchorRes.json();
+          runId = anchor?.runId || null;
+        }
+      } catch {}
       const url = new URL('/api/execution/calendar-entries', baseUrl);
       url.searchParams.set('campaignId', selectedCampaign.selectedCampaignId);
+      if (runId) url.searchParams.set('runId', runId);
       const response = await authFetch(url.toString());
       if (response.ok) {
         const data = await response.json();

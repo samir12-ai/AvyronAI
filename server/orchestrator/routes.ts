@@ -23,6 +23,7 @@ import { buildCausalNarrative } from "../narrative-layer";
 import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
 
 import { resolveAccountId } from "../auth";
+import { resolveRunId } from "./run-resolver";
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
     try {
@@ -152,17 +153,13 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/plans/active/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const [plan] = await db
-        .select()
-        .from(strategicPlans)
-        .where(
-          and(
-            eq(strategicPlans.accountId, accountId),
-            eq(strategicPlans.campaignId, req.params.campaignId),
-          )
-        )
-        .orderBy(desc(strategicPlans.createdAt))
-        .limit(1);
+
+      let resolved;
+      try {
+        resolved = await resolveRunId(req.params.campaignId, accountId, (req.query.runId as string) || null);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
+      }
 
       const [latestJob] = await db
         .select({
@@ -183,6 +180,22 @@ export function registerOrchestratorV2Routes(app: Express) {
         .orderBy(desc(orchestratorJobs.createdAt))
         .limit(1);
 
+      let plan: any = null;
+      if (resolved.runId && resolved.planId) {
+        const [p] = await db
+          .select()
+          .from(strategicPlans)
+          .where(
+            and(
+              eq(strategicPlans.accountId, accountId),
+              eq(strategicPlans.campaignId, req.params.campaignId),
+              eq(strategicPlans.id, resolved.planId),
+            )
+          )
+          .limit(1);
+        plan = p || null;
+      }
+
       const pipelineStatus = latestJob?.status || null;
       const pipelineBlocked = pipelineStatus === "BLOCKED";
       const pipelineFailed = pipelineStatus === "FAILED" || pipelineStatus === "ERROR";
@@ -200,6 +213,10 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       if (!plan) {
         return res.json({
+          runId: resolved.runId,
+          isLatest: resolved.isLatest,
+          isStale: resolved.isStale,
+          completedAt: resolved.completedAt,
           hasPlan: false,
           pipelineState: latestJob ? {
             status: pipelineStatus,
@@ -278,6 +295,10 @@ export function registerOrchestratorV2Routes(app: Express) {
       } : null;
 
       res.json({
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
         hasPlan: true,
         liveRhythm,
         approvedRhythm,
@@ -1138,7 +1159,7 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/narrative/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const narrative = await buildCausalNarrative(req.params.campaignId, accountId);
+      const narrative = await buildCausalNarrative(req.params.campaignId, accountId, (req.query.runId as string) || null);
       res.json(narrative);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

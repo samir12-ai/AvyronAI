@@ -1526,7 +1526,7 @@ function buildEmptyResult(
   };
 }
 
-export async function runAudienceEngine(accountId: string, campaignId: string, miSnapshotIdParam?: string): Promise<AudienceEngineV3Result> {
+export async function runAudienceEngine(accountId: string, campaignId: string, miSnapshotIdParam?: string, jobId?: string): Promise<AudienceEngineV3Result> {
   const startTime = Date.now();
   console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}${miSnapshotIdParam ? ` | run-scoped MI=${miSnapshotIdParam}` : " | unscoped (will resolve latest)"}`);
 
@@ -1718,7 +1718,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
 
       const executionTimeMs = Date.now() - startTime;
       const [inserted] = await db.insert(audienceSnapshots).values({
-        accountId, campaignId, miSnapshotId,
+        accountId, campaignId, jobId, miSnapshotId,
         engineVersion: AUDIENCE_ENGINE_VERSION,
         inputSummary: JSON.stringify({ ...baseInputSummary, status: "DATASET_TOO_SMALL", statusMessage: msg }),
         executionTimeMs,
@@ -1953,7 +1953,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   console.log(`[AudienceEngine-V3] STRUCTURED_SIGNALS | pains=${structuredSignals.pain_clusters.length} | desires=${structuredSignals.desire_clusters.length} | patterns=${structuredSignals.pattern_clusters.length} | rootCauses=${structuredSignals.root_causes.length} | psychDrivers=${structuredSignals.psychological_drivers.length}`);
 
   const [inserted] = await db.insert(audienceSnapshots).values({
-    accountId, campaignId, miSnapshotId,
+    accountId, campaignId, jobId, miSnapshotId,
     engineVersion: AUDIENCE_ENGINE_VERSION,
     languageSignals: JSON.stringify(languageSignals),
     audiencePains: JSON.stringify(painMap),

@@ -18,6 +18,7 @@ import { computeFulfillment } from "../fulfillment-engine";
 import { activateExecution } from "../execution-activation/engine";
 
 import { resolveAccountId } from "../auth";
+import { resolveRunId } from "../orchestrator/run-resolver";
 
 async function verifyPlanOwnership(planId: string | string[], req: Request): Promise<{ plan: any } | null> {
   const id = Array.isArray(planId) ? planId[0] : planId;
@@ -1045,21 +1046,33 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string | undefined;
+      const requestedRunId = (req.query.runId as string) || null;
 
-      const planConditions = [eq(strategicPlans.accountId, accountId)];
-      if (campaignId) planConditions.push(eq(strategicPlans.campaignId, campaignId));
+      let resolved: { runId: string | null; isLatest: boolean; isStale: boolean; completedAt: any; planId: string | null } = { runId: null, isLatest: true, isStale: false, completedAt: null, planId: null };
+      if (campaignId) {
+        try {
+          resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+        } catch (e: any) {
+          return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
+        }
+      }
 
-      const plans = await db
-        .select()
-        .from(strategicPlans)
-        .where(and(...planConditions));
+      let plans: any[] = [];
+      if (campaignId) {
+        if (resolved.planId) {
+          plans = await db.select().from(strategicPlans)
+            .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.id, resolved.planId)));
+        }
+      } else {
+        plans = await db.select().from(strategicPlans).where(eq(strategicPlans.accountId, accountId));
+      }
 
       const totalPlans = plans.length;
       const activePlans = plans.filter((p) => !["REJECTED", "DRAFT"].includes(p.status)).length;
       const emergencyStoppedPlans = plans.filter((p) => p.emergencyStopped).length;
 
       let fulfillment = null;
-      if (campaignId) {
+      if (campaignId && resolved.planId) {
         fulfillment = await computeFulfillment(campaignId, accountId);
       }
 
@@ -1095,6 +1108,10 @@ export function registerExecutionRoutes(app: Express) {
           createdAt: p.createdAt,
         })),
         fulfillment,
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1105,9 +1122,21 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
+      }
+
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
+      }
+
+      if (!resolved.planId) {
+        return res.json({ success: true, entries: [], planId: null, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, message: "No plan from current run." });
       }
 
       let matchingPlans = await db
@@ -1117,13 +1146,12 @@ export function registerExecutionRoutes(app: Express) {
           and(
             eq(strategicPlans.accountId, accountId),
             eq(strategicPlans.campaignId, campaignId),
-            sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
+            eq(strategicPlans.id, resolved.planId),
           )
-        )
-        .orderBy(sql`${strategicPlans.createdAt} DESC`);
+        );
 
       if (matchingPlans.length === 0) {
-        return res.json({ success: true, entries: [], planId: null, message: "No approved plan found for this campaign." });
+        return res.json({ success: true, entries: [], planId: null, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, message: "No plan found for resolved run." });
       }
 
       let bestPlan = matchingPlans[0];
@@ -1157,6 +1185,10 @@ export function registerExecutionRoutes(app: Express) {
         executionStatus: bestPlan.executionStatus,
         entries,
         fulfillment,
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
       });
     } catch (err: any) {
       console.error("Calendar entries fetch error:", err);

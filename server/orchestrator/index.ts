@@ -1061,7 +1061,8 @@ async function executeEngine(
           config.accountId,
           config.campaignId,
           config.forceRefresh || false,
-          "STRATEGY_MODE"
+          "STRATEGY_MODE",
+          jobId,
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -1071,7 +1072,7 @@ async function executeEngine(
       }
 
       case "audience": {
-        const result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId);
+        const result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId, jobId);
         output = result;
         snapshotId = result.snapshotId;
         ctx.audience = result;
@@ -1190,7 +1191,8 @@ async function executeEngine(
           config.campaignId,
           ctx.miSnapshotId,
           ctx.audienceSnapshotId,
-          ctx.analyticalEnrichment
+          ctx.analyticalEnrichment,
+          jobId,
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -1230,9 +1232,40 @@ async function executeEngine(
           ctx.analyticalEnrichment
         );
         output = result;
-        snapshotId = result.snapshotId;
         ctx.differentiation = result;
-        ctx.differentiationSnapshotId = result.snapshotId;
+
+        try {
+          const [diffSnap] = await db.insert(differentiationSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            jobId,
+            miSnapshotId: ctx.miSnapshotId || "N/A",
+            audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
+            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+            engineVersion: 3,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            differentiationPillars: JSON.stringify((result as any).pillars || (result as any).differentiationPillars || []),
+            proofArchitecture: JSON.stringify((result as any).proofArchitecture || null),
+            claimStructures: JSON.stringify((result as any).claimStructures || (result as any).claims || []),
+            authorityMode: JSON.stringify({ mode: (result as any).authorityMode, rationale: (result as any).authorityRationale }),
+            mechanismFraming: JSON.stringify((result as any).mechanismFraming || null),
+            mechanismCore: JSON.stringify((result as any).mechanismCore || null),
+            trustPriorityMap: JSON.stringify((result as any).trustPriorityMap || null),
+            claimScores: JSON.stringify((result as any).claimScores || null),
+            collisionDiagnostics: JSON.stringify((result as any).collisionDiagnostics || null),
+            stabilityResult: JSON.stringify((result as any).stabilityResult || null),
+            confidenceScore: (result as any).confidenceScore ?? null,
+            executionTimeMs: (result as any).executionTimeMs ?? null,
+          }).returning({ id: differentiationSnapshots.id });
+          (result as any).snapshotId = diffSnap.id;
+          ctx.differentiationSnapshotId = diffSnap.id;
+          snapshotId = diffSnap.id;
+        } catch (e: any) {
+          console.error(`[Orchestrator] DIFF_PERSIST_FAILED | job=${jobId} | ${e.message}`);
+          ctx.differentiationSnapshotId = result.snapshotId;
+          snapshotId = result.snapshotId;
+        }
 
         if (ctx.analyticalEnrichment) {
           const diffTexts = (result.claims || result.claimStructures || []).map((c: any) => typeof c === "string" ? c : c.claim || c.title || JSON.stringify(c));
@@ -1295,6 +1328,7 @@ async function executeEngine(
           const [mechSnapshot] = await db.insert(mechanismSnapshots).values({
             accountId: config.accountId,
             campaignId: config.campaignId,
+            jobId,
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: result.engineVersion || 1,
@@ -1347,8 +1381,38 @@ async function executeEngine(
           ctx.analyticalEnrichment
         );
         output = result;
-        snapshotId = result.snapshotId;
         ctx.offer = result;
+
+        try {
+          const [offerSnap] = await db.insert(offerSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            jobId,
+            miSnapshotId: ctx.miSnapshotId || "N/A",
+            audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
+            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+            differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
+            mechanismSnapshotId: (ctx.mechanism as any)?.snapshotId || null,
+            engineVersion: 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            primaryOffer: JSON.stringify((result as any).primaryOffer || result),
+            alternativeOffer: JSON.stringify((result as any).alternativeOffer || null),
+            rejectedOffer: JSON.stringify((result as any).rejectedOffer || null),
+            offerStrengthScore: (result as any).offerStrengthScore ?? null,
+            positioningConsistency: JSON.stringify((result as any).positioningConsistency || null),
+            hookMechanismAlignment: JSON.stringify((result as any).hookMechanismAlignment || null),
+            boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
+            confidenceScore: (result as any).confidenceScore ?? null,
+            structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
+            executionTimeMs: (result as any).executionTimeMs ?? null,
+          }).returning({ id: offerSnapshots.id });
+          (result as any).snapshotId = offerSnap.id;
+          snapshotId = offerSnap.id;
+        } catch (e: any) {
+          console.error(`[Orchestrator] OFFER_PERSIST_FAILED | job=${jobId} | ${e.message}`);
+          snapshotId = result.snapshotId;
+        }
 
         if (ctx.analyticalEnrichment) {
           const offerTexts = [result.offerName, result.coreOutcome, result.mechanismDescription, result.headline].filter(Boolean);
@@ -1391,8 +1455,38 @@ async function executeEngine(
           ctx.analyticalEnrichment
         );
         output = result;
-        snapshotId = result.snapshotId;
         ctx.awareness = result;
+
+        try {
+          const [awSnap] = await db.insert(awarenessSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            jobId,
+            offerSnapshotId: (ctx.offer as any)?.snapshotId || "N/A",
+            miSnapshotId: ctx.miSnapshotId || "N/A",
+            audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
+            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+            differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
+            engineVersion: 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            primaryRoute: JSON.stringify((result as any).primaryRoute || null),
+            alternativeRoute: JSON.stringify((result as any).alternativeRoute || null),
+            rejectedRoute: JSON.stringify((result as any).rejectedRoute || null),
+            layerResults: JSON.stringify((result as any).layerResults || null),
+            structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
+            boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
+            dataReliability: JSON.stringify((result as any).dataReliability || null),
+            confidenceNormalized: !!(result as any).confidenceNormalized,
+            awarenessStrengthScore: (result as any).primaryRoute?.awarenessStrengthScore ?? null,
+            executionTimeMs: (result as any).executionTimeMs ?? null,
+          }).returning({ id: awarenessSnapshots.id });
+          (result as any).snapshotId = awSnap.id;
+          snapshotId = awSnap.id;
+        } catch (e: any) {
+          console.error(`[Orchestrator] AWARENESS_PERSIST_FAILED | job=${jobId} | ${e.message}`);
+          snapshotId = result.snapshotId;
+        }
 
         if (result.celDepthCompliance) {
           if (!ctx.celResults) ctx.celResults = [];
@@ -1440,14 +1534,46 @@ async function executeEngine(
           awarenessStrengthScore: ctx.awareness.primaryRoute?.awarenessStrengthScore || 0,
           _canonicalAwareness: ctx.ssc?.awarenessMeaning || undefined,
         } : null;
+        const __funnelStart = Date.now();
         const result = await runFunnelEngine(
           miInput, audInput, offerInput, posInput, diffInput,
           config.accountId, awarenessInput,
           ctx.analyticalEnrichment
         );
         output = result;
-        snapshotId = result.snapshotId;
         ctx.funnel = result;
+
+        try {
+          const [fnSnap] = await db.insert(funnelSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            jobId,
+            offerSnapshotId: (ctx.offer as any)?.snapshotId || "N/A",
+            awarenessSnapshotId: (ctx.awareness as any)?.snapshotId || null,
+            miSnapshotId: ctx.miSnapshotId || "N/A",
+            audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
+            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+            differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
+            engineVersion: 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            primaryFunnel: JSON.stringify((result as any).primaryFunnel || result),
+            alternativeFunnel: JSON.stringify((result as any).alternativeFunnel || null),
+            rejectedFunnel: JSON.stringify((result as any).rejectedFunnel || null),
+            funnelStrengthScore: (result as any).funnelStrengthScore ?? null,
+            trustPathAnalysis: JSON.stringify((result as any).trustPathAnalysis || null),
+            proofPlacementLogic: JSON.stringify((result as any).proofPlacementLogic || null),
+            frictionMap: JSON.stringify((result as any).frictionMap || null),
+            boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
+            confidenceScore: (result as any).confidenceScore ?? null,
+            executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __funnelStart),
+          }).returning({ id: funnelSnapshots.id });
+          (result as any).snapshotId = fnSnap.id;
+          snapshotId = fnSnap.id;
+        } catch (e: any) {
+          console.error(`[Orchestrator] FUNNEL_PERSIST_FAILED | job=${jobId} | ${e.message}`);
+          snapshotId = result.snapshotId;
+        }
 
         if (ctx.analyticalEnrichment) {
           const funnelTexts = (result.stages || []).map((s: any) => `${s.name || ""} ${s.objective || ""} ${s.contentStrategy || ""}`);
@@ -1492,6 +1618,7 @@ async function executeEngine(
           const [intSnap] = await db.insert(integritySnapshots).values({
             accountId: config.accountId,
             campaignId: config.campaignId,
+            jobId,
             funnelSnapshotId: ctx.funnel?.snapshotId || "N/A",
             offerSnapshotId: ctx.offer?.snapshotId || "N/A",
             miSnapshotId: ctx.miSnapshotId || "N/A",
@@ -1538,14 +1665,48 @@ async function executeEngine(
           awarenessInput._canonicalAwareness = ctx.ssc.awarenessMeaning;
         }
         const persuasionLineage = buildUpstreamLineage(ctx);
+        const __persStart = Date.now();
         const result = await runPersuasionEngine(
           miInput, audInput, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
           config.accountId, persuasionLineage,
           ctx.analyticalEnrichment
         );
         output = result;
-        snapshotId = result.snapshotId;
         ctx.persuasion = result;
+
+        try {
+          const [persSnap] = await db.insert(persuasionSnapshots).values({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            jobId,
+            awarenessSnapshotId: (ctx.awareness as any)?.snapshotId || "N/A",
+            integritySnapshotId: ctx.integritySnapshotId || "N/A",
+            funnelSnapshotId: (ctx.funnel as any)?.snapshotId || "N/A",
+            offerSnapshotId: (ctx.offer as any)?.snapshotId || "N/A",
+            miSnapshotId: ctx.miSnapshotId || "N/A",
+            audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
+            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+            differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
+            engineVersion: 1,
+            status: result.status || "COMPLETE",
+            statusMessage: result.statusMessage || null,
+            primaryRoute: JSON.stringify((result as any).primaryRoute || null),
+            alternativeRoute: JSON.stringify((result as any).alternativeRoute || null),
+            rejectedRoute: JSON.stringify((result as any).rejectedRoute || null),
+            layerResults: JSON.stringify((result as any).layerResults || null),
+            structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
+            boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
+            dataReliability: JSON.stringify((result as any).dataReliability || null),
+            confidenceNormalized: !!(result as any).confidenceNormalized,
+            persuasionStrengthScore: (result as any).primaryRoute?.persuasionStrengthScore ?? null,
+            executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __persStart),
+          }).returning({ id: persuasionSnapshots.id });
+          (result as any).snapshotId = persSnap.id;
+          snapshotId = persSnap.id;
+        } catch (e: any) {
+          console.error(`[Orchestrator] PERSUASION_PERSIST_FAILED | job=${jobId} | ${e.message}`);
+          snapshotId = result.snapshotId;
+        }
 
         if (ctx.analyticalEnrichment) {
           const pr: any = result.primaryRoute || {};
@@ -1603,6 +1764,7 @@ async function executeEngine(
           const [svSnap] = await db.insert(strategyValidationSnapshots).values({
             accountId: config.accountId,
             campaignId: config.campaignId,
+            jobId,
             persuasionSnapshotId: ctx.persuasion?.snapshotId || null,
             engineVersion: result.engineVersion || 1,
             status: result.status || "COMPLETE",
@@ -1698,6 +1860,7 @@ async function executeEngine(
           const [bgSnap] = await db.insert(budgetGovernorSnapshots).values({
             accountId: config.accountId,
             campaignId: config.campaignId,
+            jobId,
             validationSnapshotId: ctx.statisticalValidation?.snapshotId || null,
             engineVersion: 1,
             status: "COMPLETE",
@@ -1757,6 +1920,7 @@ async function executeEngine(
           const [csSnap] = await db.insert(channelSelectionSnapshots).values({
             accountId: config.accountId,
             campaignId: config.campaignId,
+            jobId,
             validationSnapshotId: ctx.statisticalValidation?.snapshotId || null,
             budgetSnapshotId: ctx.budgetGovernorSnapshotId || null,
             engineVersion: 1,
@@ -1820,6 +1984,7 @@ async function executeEngine(
           const [iterSnap] = await db.insert(iterationSnapshots).values({
             accountId: config.accountId,
             campaignId: config.campaignId,
+            jobId,
             engineVersion: result.engineVersion || 1,
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
@@ -1937,6 +2102,7 @@ async function executeEngine(
           const [retSnap] = await db.insert(retentionSnapshots).values({
             accountId: config.accountId,
             campaignId: config.campaignId,
+            jobId,
             engineVersion: result.engineVersion || 1,
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,

@@ -726,6 +726,7 @@ export class MarketIntelligenceV3 {
     campaignId: string,
     forceRefresh: boolean = false,
     goalMode: GoalMode = "STRATEGY_MODE",
+    jobId?: string,
   ): Promise<MIv3DiagnosticResult> {
     const lockKey = `${accountId}:${campaignId}`;
     const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
@@ -744,7 +745,7 @@ export class MarketIntelligenceV3 {
       }
     }
 
-    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode);
+    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode, jobId);
     activeLocks.set(lockKey, runPromise);
 
     try {
@@ -761,6 +762,7 @@ export class MarketIntelligenceV3 {
     campaignId: string,
     forceRefresh: boolean,
     goalMode: GoalMode = "STRATEGY_MODE",
+    jobId?: string,
   ): Promise<MIv3DiagnosticResult> {
     if (!goalMode || goalMode === "STRATEGY_MODE") {
       const campaignRows = await db.select().from(growthCampaigns).where(eq(growthCampaigns.id, campaignId)).limit(1);
@@ -1187,6 +1189,7 @@ export class MarketIntelligenceV3 {
     const snapshotPayload = {
       accountId,
       campaignId,
+      jobId,
       competitorHash,
       version: (previousSnapshot?.version || 0) + 1,
       competitorData: JSON.stringify(competitors.map(c => ({ id: c.id, name: c.name }))),

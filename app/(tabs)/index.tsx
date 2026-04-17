@@ -33,6 +33,7 @@ import ExecutionPlan from '@/components/ExecutionPlan';
 import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 import DashboardChat from '@/components/DashboardChat';
 import NarrativeCard from '@/components/NarrativeCard';
+import { useRunAnchor } from '@/hooks/useRunAnchor';
 import { useAuth } from '@/context/AuthContext';
 import OnboardingAgent from '@/components/OnboardingAgent';
 
@@ -132,6 +133,28 @@ type DashboardMetrics = {
 };
 
 type PanelState = 'loading' | 'empty' | 'error' | 'success' | 'no_data';
+
+function DashboardRunBound({ campaignId, isDark, onBuildPlan, onApprovePlan, isApproving, narrativeRefreshKey, setNarrativeRefreshKey }: {
+  campaignId: string; isDark: boolean; onBuildPlan: () => void; onApprovePlan: (planId: string) => void; isApproving: boolean; narrativeRefreshKey: number; setNarrativeRefreshKey: (fn: (k: number) => number) => void;
+}) {
+  const { data: anchor } = useRunAnchor(campaignId);
+  const runId = anchor?.runId || null;
+  return (
+    <>
+      <PlanStatus
+        campaignId={campaignId}
+        isDark={isDark}
+        onBuildPlan={onBuildPlan}
+        onApprovePlan={onApprovePlan}
+        isApproving={isApproving}
+        runId={runId}
+      />
+      <NarrativeCard campaignId={campaignId} isDark={isDark} refreshKey={narrativeRefreshKey} runId={runId} />
+      <ExecutionPlan onPlanGenerated={() => setNarrativeRefreshKey(k => k + 1)} />
+      <RequiredWorkCard campaignId={campaignId} isDark={isDark} />
+    </>
+  );
+}
 
 export default function DashboardScreen() {
   const colorScheme = useColorScheme();
@@ -600,21 +623,15 @@ export default function DashboardScreen() {
         <DashboardChat />
 
         {selectedCampaignId ? (
-          <>
-            <PlanStatus
-              campaignId={selectedCampaignId}
-              isDark={isDark}
-              onBuildPlan={handleBuildPlan}
-              onApprovePlan={handleApprovePlan}
-              isApproving={isApproving}
-            />
-
-            <NarrativeCard campaignId={selectedCampaignId} isDark={isDark} refreshKey={narrativeRefreshKey} />
-
-            <ExecutionPlan onPlanGenerated={() => setNarrativeRefreshKey(k => k + 1)} />
-
-            <RequiredWorkCard campaignId={selectedCampaignId} isDark={isDark} />
-          </>
+          <DashboardRunBound
+            campaignId={selectedCampaignId}
+            isDark={isDark}
+            onBuildPlan={handleBuildPlan}
+            onApprovePlan={handleApprovePlan}
+            isApproving={isApproving}
+            narrativeRefreshKey={narrativeRefreshKey}
+            setNarrativeRefreshKey={setNarrativeRefreshKey}
+          />
         ) : null}
 
         <View style={[s.metaStrip, { 

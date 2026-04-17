@@ -2118,6 +2118,7 @@ export async function runPositioningEngine(
   miSnapshotId: string,
   audienceSnapshotId: string,
   analyticalEnrichment?: any,
+  jobId?: string,
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
 
@@ -2734,6 +2735,7 @@ CORRECTION REQUIRED:
   const [inserted] = await db.insert(positioningSnapshots).values({
     accountId,
     campaignId,
+    jobId,
     miSnapshotId: resolvedMiSnapshotId,
     audienceSnapshotId,
     engineVersion: POSITIONING_ENGINE_VERSION,
@@ -2815,6 +2817,7 @@ async function buildAndPersistEmptyResult(
     const [inserted] = await db.insert(positioningSnapshots).values({
       accountId,
       campaignId,
+      jobId,
       miSnapshotId,
       audienceSnapshotId,
       engineVersion: POSITIONING_ENGINE_VERSION,
