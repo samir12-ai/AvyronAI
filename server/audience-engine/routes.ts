@@ -34,16 +34,28 @@ export function registerAudienceEngineRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
+      const requestedRunId = (req.query.runId as string) || null;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
-      const snapshot = await getLatestAudienceSnapshot(accountId, campaignId);
-      if (!snapshot) {
-        return res.status(404).json({ error: "No audience analysis found for this campaign" });
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
+      }
+      if (!resolved.runId) {
+        return res.status(404).json({ error: "No completed orchestrator run for this campaign yet.", runId: null, isLatest: true, isStale: false });
       }
 
-      return res.json(snapshot);
+      const snapshot = await getLatestAudienceSnapshot(accountId, campaignId, resolved.runId);
+      if (!snapshot) {
+        return res.status(404).json({ error: "No audience snapshot for this run", runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale });
+      }
+
+      return res.json({ ...snapshot, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt });
     } catch (err: any) {
       console.error("[AudienceEngine-Route] Latest error:", err.message);
       return res.status(500).json({ error: err.message });

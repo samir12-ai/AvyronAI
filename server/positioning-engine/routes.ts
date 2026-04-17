@@ -40,16 +40,28 @@ export function registerPositioningEngineRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
       }
 
-      const snapshot = await getLatestPositioningSnapshot(accountId, campaignId);
-      if (!snapshot) {
-        return res.json(null);
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
       }
-      res.json(snapshot);
+      if (!resolved.runId) {
+        return res.json({ runId: null, isLatest: true, isStale: false, snapshot: null });
+      }
+
+      const snapshot = await getLatestPositioningSnapshot(accountId, campaignId, resolved.runId);
+      if (!snapshot) {
+        return res.json({ runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, snapshot: null });
+      }
+      res.json({ ...snapshot, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt });
     } catch (err: any) {
       console.error("[PositioningEngine-V3] Latest route error:", err.message);
       res.status(500).json({ error: err.message });

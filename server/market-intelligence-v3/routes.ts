@@ -96,18 +96,31 @@ export function registerMIv3Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
+      const requestedRunId = (req.query.runId as string) || null;
+
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
+      }
+
+      if (!resolved.runId) {
+        return res.json({ snapshot: null, engineState: "REFRESH_REQUIRED", runId: null, isLatest: true, isStale: false, message: "No completed orchestrator run for this campaign yet." });
+      }
 
       const snapshots = await db.select().from(miSnapshots)
         .where(and(
           eq(miSnapshots.accountId, accountId),
           eq(miSnapshots.campaignId, campaignId),
+          eq(miSnapshots.jobId, resolved.runId),
           inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
         ))
-        .orderBy(desc(miSnapshots.createdAt))
         .limit(1);
 
       if (snapshots.length === 0) {
-        return res.json({ snapshot: null, engineState: "REFRESH_REQUIRED", message: "No snapshot available. Run analysis first." });
+        return res.json({ snapshot: null, engineState: "REFRESH_REQUIRED", runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt, message: "No MI snapshot for this run." });
       }
 
       const snapshot = snapshots[0];
@@ -119,6 +132,10 @@ export function registerMIv3Routes(app: Express) {
         engineState: readiness.state,
         engineDiagnostics: readiness.diagnostics,
         freshnessMetadata: readiness.freshnessMetadata || null,
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });

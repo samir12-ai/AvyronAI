@@ -191,25 +191,36 @@ export function registerRetentionEngineRoutes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const { resolveRunId } = await import("../../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.json({ found: false, snapshot: null, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(retentionSnapshots)
         .where(and(
           eq(retentionSnapshots.campaignId, campaignId),
           eq(retentionSnapshots.accountId, accountId),
+          eq(retentionSnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(retentionSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ found: false, snapshot: null });
+        return res.json({ found: false, snapshot: null, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
       return res.json({
         found: true,
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
         snapshot: {
           ...latest,
           result: safeJsonParse(latest.result),

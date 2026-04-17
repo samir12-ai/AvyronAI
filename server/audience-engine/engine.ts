@@ -2015,14 +2015,16 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   };
 }
 
-export async function getLatestAudienceSnapshot(accountId: string, campaignId: string) {
-  const [snapshot] = await db.select().from(audienceSnapshots)
-    .where(and(
-      eq(audienceSnapshots.accountId, accountId),
-      eq(audienceSnapshots.campaignId, campaignId),
-    ))
-    .orderBy(desc(audienceSnapshots.createdAt))
-    .limit(1);
+export async function getLatestAudienceSnapshot(accountId: string, campaignId: string, runId?: string | null) {
+  const baseFilters = [
+    eq(audienceSnapshots.accountId, accountId),
+    eq(audienceSnapshots.campaignId, campaignId),
+  ];
+  if (runId) baseFilters.push(eq(audienceSnapshots.jobId, runId));
+  const query = db.select().from(audienceSnapshots).where(and(...baseFilters));
+  const [snapshot] = runId
+    ? await query.limit(1)
+    : await query.orderBy(desc(audienceSnapshots.createdAt)).limit(1);
 
   if (!snapshot) return null;
 

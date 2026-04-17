@@ -225,24 +225,35 @@ export function registerChannelSelectionRoutes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
       }
 
+      const { resolveRunId } = await import("../../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.status(404).json({ error: "No completed orchestrator run for this campaign yet.", runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(channelSelectionSnapshots)
         .where(and(
           eq(channelSelectionSnapshots.campaignId, campaignId),
           eq(channelSelectionSnapshots.accountId, accountId),
+          eq(channelSelectionSnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(channelSelectionSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.status(404).json({ error: "No channel selection snapshot found for this campaign" });
+        return res.status(404).json({ error: "No channel selection snapshot for this run", runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
       return res.json({
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
         snapshotId: latest.id,
         status: latest.status,
         statusMessage: latest.statusMessage,

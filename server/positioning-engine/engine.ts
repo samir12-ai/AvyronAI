@@ -2892,15 +2892,17 @@ function buildEmptyResult(
   };
 }
 
-export async function getLatestPositioningSnapshot(accountId: string, campaignId: string) {
-  const [snapshot] = await db.select().from(positioningSnapshots)
-    .where(and(
-      eq(positioningSnapshots.accountId, accountId),
-      eq(positioningSnapshots.campaignId, campaignId),
-      eq(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION),
-    ))
-    .orderBy(desc(positioningSnapshots.createdAt))
-    .limit(1);
+export async function getLatestPositioningSnapshot(accountId: string, campaignId: string, runId?: string | null) {
+  const baseFilters = [
+    eq(positioningSnapshots.accountId, accountId),
+    eq(positioningSnapshots.campaignId, campaignId),
+    eq(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION),
+  ];
+  if (runId) baseFilters.push(eq(positioningSnapshots.jobId, runId));
+  const query = db.select().from(positioningSnapshots).where(and(...baseFilters));
+  const [snapshot] = runId
+    ? await query.limit(1)
+    : await query.orderBy(desc(positioningSnapshots.createdAt)).limit(1);
 
   if (!snapshot) return null;
 

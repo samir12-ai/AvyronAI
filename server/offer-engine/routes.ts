@@ -306,17 +306,23 @@ export function registerOfferEngineRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const requestedRunId = (req.query.runId as string) || null;
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.json({ exists: false, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(offerSnapshots)
         .where(and(
           eq(offerSnapshots.campaignId, campaignId),
           eq(offerSnapshots.accountId, accountId),
-          eq(offerSnapshots.engineVersion, ENGINE_VERSION),
+          eq(offerSnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(offerSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ exists: false });
+        return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
       const activeRoot = await getActiveRoot(campaignId, accountId);
@@ -327,6 +333,10 @@ export function registerOfferEngineRoutes(app: Express) {
 
       res.json({
         exists: true,
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
         id: latest.id,
         campaignId: latest.campaignId,
         status: latest.status,

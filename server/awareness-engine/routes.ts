@@ -385,26 +385,36 @@ export function registerAwarenessEngineRoutes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.json({ exists: false, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(awarenessSnapshots)
         .where(and(
           eq(awarenessSnapshots.campaignId, campaignId),
           eq(awarenessSnapshots.accountId, accountId),
-          eq(awarenessSnapshots.engineVersion, ENGINE_VERSION),
+          eq(awarenessSnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(awarenessSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ exists: false });
+        return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
       res.json({
         exists: true,
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
         id: latest.id,
         campaignId: latest.campaignId,
         status: latest.status,

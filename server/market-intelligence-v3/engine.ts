@@ -799,8 +799,18 @@ export class MarketIntelligenceV3 {
     if (!forceRefresh) {
       const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash);
       if (cacheResult.snapshot) {
-        console.log(`[MIv3] Returning cached snapshot ${cacheResult.snapshot.id}`);
-        return buildResultFromSnapshot(cacheResult.snapshot);
+        const cached = cacheResult.snapshot;
+        if (jobId && cached.jobId !== jobId) {
+          const { id: _omitId, createdAt: _omitCreatedAt, ...cloneable } = cached as any;
+          const [stamped] = await db.insert(miSnapshots).values({
+            ...cloneable,
+            jobId,
+          }).returning();
+          console.log(`[MIv3] Cache hit reused snapshot ${cached.id} → cloned as ${stamped.id} stamped with jobId=${jobId}`);
+          return buildResultFromSnapshot(stamped);
+        }
+        console.log(`[MIv3] Returning cached snapshot ${cached.id}`);
+        return buildResultFromSnapshot(cached);
       }
       cacheInvalidationReason = cacheResult.invalidationReason;
     }
