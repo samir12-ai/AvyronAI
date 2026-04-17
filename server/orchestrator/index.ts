@@ -19,6 +19,13 @@ import { storeIntegrityReport } from "../system-integrity/routes";
 import { evaluateSystemControl } from "../system-control/engine";
 import type { SystemControlVerdict } from "../system-control/types";
 import { storeControlVerdict } from "../system-control/routes";
+import { ENGINE_VERSION as DIFFERENTIATION_ENGINE_VERSION } from "../differentiation-engine/constants";
+import { ENGINE_VERSION as OFFER_ENGINE_VERSION } from "../offer-engine/constants";
+import { ENGINE_VERSION as AWARENESS_ENGINE_VERSION } from "../awareness-engine/constants";
+import { ENGINE_VERSION as FUNNEL_ENGINE_VERSION } from "../funnel-engine/constants";
+import { ENGINE_VERSION as PERSUASION_ENGINE_VERSION } from "../persuasion-engine/constants";
+import { ENGINE_VERSION as BUDGET_GOVERNOR_ENGINE_VERSION } from "../strategy/budget-governor/constants";
+import { ENGINE_VERSION as CHANNEL_SELECTION_ENGINE_VERSION } from "../strategy/channel-selection/constants";
 import {
   createEmptySSC,
   registerProblem,
@@ -1246,7 +1253,7 @@ async function executeEngine(
             miSnapshotId: ctx.miSnapshotId || "N/A",
             audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
-            engineVersion: 3,
+            engineVersion: DIFFERENTIATION_ENGINE_VERSION,
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             differentiationPillars: JSON.stringify((result as any).pillars || (result as any).differentiationPillars || []),
@@ -1397,7 +1404,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             mechanismSnapshotId: (ctx.mechanism as any)?.snapshotId || null,
-            engineVersion: 1,
+            engineVersion: OFFER_ENGINE_VERSION,
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryOffer: JSON.stringify((result as any).primaryOffer || result),
@@ -1471,7 +1478,7 @@ async function executeEngine(
             audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
-            engineVersion: 1,
+            engineVersion: AWARENESS_ENGINE_VERSION,
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryRoute: JSON.stringify((result as any).primaryRoute || null),
@@ -1558,7 +1565,7 @@ async function executeEngine(
             audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
-            engineVersion: 1,
+            engineVersion: FUNNEL_ENGINE_VERSION,
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryFunnel: JSON.stringify((result as any).primaryFunnel || result),
@@ -1691,7 +1698,7 @@ async function executeEngine(
             audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
-            engineVersion: 1,
+            engineVersion: PERSUASION_ENGINE_VERSION,
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryRoute: JSON.stringify((result as any).primaryRoute || null),
@@ -1866,7 +1873,7 @@ async function executeEngine(
             campaignId: config.campaignId,
             jobId,
             validationSnapshotId: ctx.statisticalValidation?.snapshotId || null,
-            engineVersion: 1,
+            engineVersion: BUDGET_GOVERNOR_ENGINE_VERSION,
             status: "COMPLETE",
             result: JSON.stringify(result),
             confidenceScore: result.confidenceScore || null,
@@ -1927,7 +1934,7 @@ async function executeEngine(
             jobId,
             validationSnapshotId: ctx.statisticalValidation?.snapshotId || null,
             budgetSnapshotId: ctx.budgetGovernorSnapshotId || null,
-            engineVersion: 1,
+            engineVersion: CHANNEL_SELECTION_ENGINE_VERSION,
             status: "COMPLETE",
             result: JSON.stringify(result),
             confidenceScore: result.confidenceScore || null,

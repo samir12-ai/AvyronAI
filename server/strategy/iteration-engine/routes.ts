@@ -8,6 +8,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardenin
 import { validateEngineDependencies, logDependencyCheck } from "../dependency-validation";
 
 import { resolveAccountId } from "../../auth";
+import { resolveOrManualJobId } from "../../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -25,6 +26,7 @@ export function registerIterationEngineRoutes(app: Express) {
         creative = null,
         persuasion = null,
       } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -106,6 +108,7 @@ export function registerIterationEngineRoutes(app: Express) {
       const result = await runIterationEngine(effectivePerformance, funnel, creative, persuasion);
 
       const [saved] = await db.insert(iterationSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         engineVersion: ENGINE_VERSION,

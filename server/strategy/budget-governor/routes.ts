@@ -8,6 +8,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardenin
 import { resolveDataSource } from "../../data-source/resolver";
 
 import { resolveAccountId } from "../../auth";
+import { resolveOrManualJobId } from "../../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -18,6 +19,7 @@ export function registerBudgetGovernorRoutes(app: Express) {
   app.post("/api/strategy/budget-governor/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, validationSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -174,6 +176,7 @@ export function registerBudgetGovernorRoutes(app: Express) {
 
       const snapshotId = crypto.randomUUID();
       await db.insert(budgetGovernorSnapshots).values({
+        jobId: __jobId,
         id: snapshotId,
         accountId,
         campaignId,

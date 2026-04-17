@@ -23,6 +23,7 @@ import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, cre
 import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -39,6 +40,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
   app.post("/api/awareness-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, offerSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -342,6 +344,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
       console.log(`[AwarenessEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${awarenessLineage.length} | claims=${awarenessClaims.length}`);
 
       const [saved] = await db.insert(awarenessSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         integritySnapshotId: null,

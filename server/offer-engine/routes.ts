@@ -13,6 +13,7 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 import { getActiveRoot, validateRootBinding, validatePreGeneration, validatePostGeneration } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -23,6 +24,7 @@ export function registerOfferEngineRoutes(app: Express) {
   app.post("/api/offer-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, differentiationSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -258,6 +260,7 @@ export function registerOfferEngineRoutes(app: Express) {
       };
 
       const [saved] = await db.insert(offerSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         miSnapshotId: miSnapshot.id,

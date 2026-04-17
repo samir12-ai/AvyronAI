@@ -53,7 +53,9 @@ export function registerMIv3Routes(app: Express) {
       console.log(`[MIv3-Route] POST /api/ci/mi-v3/analyze | mode=${mode} | accountId=${accountId} | campaignId=${campaignId}`);
 
       const goalMode = (req.body.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE") as import("./types").GoalMode;
-      const result = await MarketIntelligenceV3.run(mode, accountId, campaignId, forceRefresh, goalMode);
+      const { resolveOrManualJobId } = await import("../orchestrator/job-id");
+      const __jobId = resolveOrManualJobId(req.body.jobId);
+      const result = await MarketIntelligenceV3.run(mode, accountId, campaignId, forceRefresh, goalMode, __jobId);
 
       if (result.signalDiagnostics) {
         console.log(`[MIv3-Route] SignalDiagnostics | posts=${result.signalDiagnostics.postsProcessed} detected=${result.signalDiagnostics.signalsDetected} filtered=${result.signalDiagnostics.signalsFiltered} used=${result.signalDiagnostics.signalsUsed}`);
@@ -157,7 +159,9 @@ export function registerMIv3Routes(app: Express) {
       console.log(`[MIv3-Route] POST /api/ci/mi-v3/refresh | manual refresh | campaignId=${campaignId}`);
 
       const goalMode = (req.body.goalMode === "REACH_MODE" ? "REACH_MODE" : "STRATEGY_MODE") as import("./types").GoalMode;
-      const result = await MarketIntelligenceV3.run("overview", accountId, campaignId, true, goalMode);
+      const { resolveOrManualJobId } = await import("../orchestrator/job-id");
+      const __jobId = resolveOrManualJobId(req.body.jobId);
+      const result = await MarketIntelligenceV3.run("overview", accountId, campaignId, true, goalMode, __jobId);
 
       return res.json({
         success: true,

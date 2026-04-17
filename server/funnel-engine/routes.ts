@@ -16,6 +16,7 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -26,6 +27,7 @@ export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/funnel-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, offerSnapshotId, awarenessSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -343,6 +345,7 @@ export function registerFunnelEngineRoutes(app: Express) {
       }
 
       const [saved] = await db.insert(funnelSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         offerSnapshotId: activeOfferSnapshot.id,

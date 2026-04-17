@@ -11,6 +11,7 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 import type { ProfileInput } from "./types";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -21,6 +22,7 @@ export function registerDifferentiationRoutes(app: Express) {
   app.post("/api/differentiation-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, positioningSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -196,6 +198,7 @@ export function registerDifferentiationRoutes(app: Express) {
       }
 
       const [saved] = await db.insert(differentiationSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         miSnapshotId,

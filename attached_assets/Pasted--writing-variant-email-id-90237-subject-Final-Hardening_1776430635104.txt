@@ -1,0 +1,184 @@
+:::writing{variant=“email” id=“90237” subject=“Final Hardening Pass — Close All Remaining Gaps End-to-End (A→Z)”}
+Hi,
+
+We are at the final stage. The system is now logically correct and run-bound, but we still have a few remaining gaps that must be fully closed to ensure long-term integrity and prevent any future leakage or inconsistency.
+
+This is a complete A→Z hardening pass. Nothing partial.
+
+⸻
+
+Objective
+
+Ensure that:
+
+Every write path, every read path, and every data surface is fully consistent, run-bound (where applicable), and free from legacy or undefined behavior.
+
+No exceptions.
+
+⸻
+
+1. Direct /analyze Routes (Critical)
+
+Current issue:
+	•	Some direct analyze routes may write snapshots with jobId = null
+
+This is unacceptable under the current system.
+
+Required:
+	•	Every analyze route must:
+	•	either:
+	•	require a jobId and behave like orchestrator runs
+	•	or:
+	•	be explicitly marked as non-run-bound and never used by dashboard surfaces
+	•	No snapshot row should ever be created without:
+	•	valid jobId
+	•	valid campaignId
+	•	valid accountId
+
+Action:
+	•	Audit all /analyze routes
+	•	Fix all insert paths
+	•	Remove or block any path that writes without jobId
+
+⸻
+
+2. Write-Side Consistency (Engine Versions & Metadata)
+
+Current issue:
+	•	Hardcoded engineVersion values diverge from constants
+	•	Read side no longer depends on version, but write-side inconsistency remains
+
+Required:
+	•	Remove all hardcoded engineVersion values
+	•	Use a single source of truth (constants or config)
+	•	Ensure all snapshot rows are internally consistent
+
+⸻
+
+3. Full Write Path Audit
+
+For ALL engines:
+	•	Verify:
+	•	every insert is stamped with:
+	•	jobId
+	•	campaignId
+	•	accountId
+	•	createdAt
+	•	No upserts unless explicitly justified
+	•	No silent overwrites
+	•	No conditional “skip write” logic that breaks run-bound expectations
+
+⸻
+
+4. StrategicBlueprints (Design Decision)
+
+Currently:
+	•	latest-per-campaign (not run-bound)
+
+You must decide and implement one of:
+
+A) Keep as-is (explicitly non-run-bound)
+	•	document it clearly
+	•	ensure it never contaminates run-bound surfaces
+
+OR
+
+B) Convert to run-bound
+	•	add jobId
+	•	backfill
+	•	bind reads to runId
+
+No ambiguous state.
+
+⸻
+
+5. Admin / Build Endpoints
+
+Includes:
+	•	content-dna-routes
+	•	root-bundle
+	•	any internal build helpers
+
+Required:
+	•	Either:
+	•	mark clearly as admin-only (never used by frontend)
+	•	Or:
+	•	fully convert to run-bound pattern
+
+No hidden endpoints that can leak inconsistent data.
+
+⸻
+
+6. Dead / Inactive Code Paths
+
+Example:
+	•	narrative AEL path (wrapped in try/catch, currently inactive)
+
+Required:
+	•	Either:
+	•	remove dead paths completely
+	•	Or:
+	•	make them fully compliant (jobId-bound)
+
+No silent dead logic that may break later.
+
+⸻
+
+7. Final End-to-End Validation
+
+After all fixes:
+
+Run this scenario:
+	1.	Run A completes
+	2.	Run B starts
+	3.	Inject fake newer rows
+	4.	Trigger direct analyze routes
+	5.	Refresh dashboard
+
+Must prove:
+	•	No mixed-run data anywhere
+	•	No snapshot without jobId
+	•	No endpoint returns inconsistent data
+	•	All dashboard surfaces remain stable and correct
+
+⸻
+
+8. Non-Negotiable Rules
+
+Do NOT:
+	•	reintroduce fallback-to-latest logic
+	•	allow jobId to be optional anywhere
+	•	patch UI to hide backend inconsistencies
+	•	leave “temporary” inconsistencies for later
+
+Everything must be:
+
+strict, explicit, and permanent
+
+⸻
+
+9. Acceptance Criteria
+
+This task is complete only when:
+	•	no snapshot exists without jobId
+	•	all write paths are consistent
+	•	all endpoints are correct and safe
+	•	no legacy behavior can surface
+	•	system remains stable under failure simulation
+
+⸻
+
+Final Note
+
+We are not improving features.
+
+We are:
+
+locking the system completely
+
+After this, the system should behave as a fully deterministic, consistent source of truth across all layers.
+
+Proceed and close everything.
+
+Thanks.
+:::

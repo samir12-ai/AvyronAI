@@ -10,6 +10,7 @@ import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, cre
 import { buildStrategyRoot } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -20,6 +21,7 @@ export function registerMechanismEngineRoutes(app: Express) {
   app.post("/api/mechanism-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, differentiationSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -113,6 +115,7 @@ export function registerMechanismEngineRoutes(app: Express) {
       const result = await runMechanismEngine(positioningInput, differentiationInput, accountId);
 
       const [saved] = await db.insert(mechanismSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         positioningSnapshotId,

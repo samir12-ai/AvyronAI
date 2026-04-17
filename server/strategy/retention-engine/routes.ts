@@ -9,6 +9,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardenin
 import { validateEngineDependencies, logDependencyCheck } from "../dependency-validation";
 
 import { resolveAccountId } from "../../auth";
+import { resolveOrManualJobId } from "../../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -19,6 +20,7 @@ export function registerRetentionEngineRoutes(app: Express) {
   app.post("/api/strategy/retention-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -154,6 +156,7 @@ export function registerRetentionEngineRoutes(app: Express) {
       const result = await runRetentionEngine(input);
 
       const [snapshot] = await db.insert(retentionSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         engineVersion: ENGINE_VERSION,

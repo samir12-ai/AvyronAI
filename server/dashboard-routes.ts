@@ -593,6 +593,9 @@ export function registerDashboardRoutes(app: Express) {
         db.select({ result: retentionSnapshots.result, status: retentionSnapshots.status })
           .from(retentionSnapshots).where(and(eq(retentionSnapshots.accountId, accountId), eq(retentionSnapshots.campaignId, campaignId), eq(retentionSnapshots.jobId, runId)))
           .limit(1),
+        // strategic_blueprints is INTENTIONALLY non-run-bound: it is a campaign-config artifact
+        // (DRAFT → CONFIRMED → ORCHESTRATED lifecycle), one per campaign. The orchestrator
+        // consumes it as input; it is not a per-run output. Latest-by-createdAt is correct here.
         db.select().from(strategicBlueprints)
           .where(and(eq(strategicBlueprints.accountId, accountId), eq(strategicBlueprints.campaignId, campaignId)))
           .orderBy(desc(strategicBlueprints.createdAt)).limit(1),
@@ -968,6 +971,7 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
         db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore })
           .from(persuasionSnapshots).where(and(eq(persuasionSnapshots.accountId, accountId), eq(persuasionSnapshots.campaignId, campaignId), eq(persuasionSnapshots.jobId, runId)))
           .limit(1),
+        // strategic_blueprints is INTENTIONALLY non-run-bound (config-layer artifact). See note above.
         db.select().from(strategicBlueprints)
           .where(and(eq(strategicBlueprints.accountId, accountId), eq(strategicBlueprints.campaignId, campaignId)))
           .orderBy(desc(strategicBlueprints.createdAt)).limit(1),

@@ -3,6 +3,7 @@ import { runAudienceEngine, getLatestAudienceSnapshot } from "./engine";
 import { checkValidationSession } from "../engine-hardening";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 export function registerAudienceEngineRoutes(app: Express) {
   app.post("/api/audience-engine/analyze", async (req, res) => {
     try {
@@ -21,8 +22,9 @@ export function registerAudienceEngineRoutes(app: Express) {
         });
       }
 
-      console.log(`[AudienceEngine-Route] Analyze request: account=${accountId} campaign=${campaignId}`);
-      const result = await runAudienceEngine(accountId, campaignId);
+      const __jobId = resolveOrManualJobId(req.body.jobId);
+      console.log(`[AudienceEngine-Route] Analyze request: account=${accountId} campaign=${campaignId} jobId=${__jobId}`);
+      const result = await runAudienceEngine(accountId, campaignId, undefined, __jobId);
       return res.json(result);
     } catch (err: any) {
       console.error("[AudienceEngine-Route] Analyze error:", err.message);

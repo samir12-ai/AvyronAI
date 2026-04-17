@@ -16,6 +16,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardenin
 import { validateEngineDependencies, logDependencyCheck } from "../dependency-validation";
 
 import { resolveAccountId } from "../../auth";
+import { resolveOrManualJobId } from "../../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -32,6 +33,7 @@ export function registerChannelSelectionRoutes(app: Express) {
   app.post("/api/strategy/channel-selection/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, validationSessionId, channelMode = "automatic" } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -190,6 +192,7 @@ export function registerChannelSelectionRoutes(app: Express) {
 
       const snapshotId = `cs-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       await db.insert(channelSelectionSnapshots).values({
+        jobId: __jobId,
         id: snapshotId,
         accountId,
         campaignId,

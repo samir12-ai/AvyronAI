@@ -24,6 +24,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../../engine-hardenin
 import { parseLineageFromSnapshot, mergeLineageArrays } from "../../shared/signal-lineage";
 
 import { resolveAccountId } from "../../auth";
+import { resolveOrManualJobId } from "../../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -40,6 +41,7 @@ export function registerStatisticalValidationRoutes(app: Express) {
   app.post("/api/strategy/statistical-validation/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, persuasionSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -287,6 +289,7 @@ export function registerStatisticalValidationRoutes(app: Express) {
       }
 
       const [saved] = await db.insert(strategyValidationSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         persuasionSnapshotId: persuasionSnapshot.id,

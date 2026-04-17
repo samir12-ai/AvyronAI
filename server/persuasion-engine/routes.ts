@@ -29,6 +29,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -87,6 +88,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
   app.post("/api/persuasion-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, awarenessSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -413,6 +415,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
       console.log(`[PersuasionEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${persuasionLineage.length} | claims=${persuasionClaims.length}`);
 
       const [saved] = await db.insert(persuasionSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         awarenessSnapshotId: awarenessSnapshot.id,

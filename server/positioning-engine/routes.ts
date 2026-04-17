@@ -3,6 +3,7 @@ import { runPositioningEngine, getLatestPositioningSnapshot } from "./engine";
 import { checkValidationSession } from "../engine-hardening";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 export function registerPositioningEngineRoutes(app: Express) {
   app.post("/api/positioning-engine/analyze", async (req, res) => {
     try {
@@ -28,7 +29,8 @@ export function registerPositioningEngineRoutes(app: Express) {
         return res.status(400).json({ error: "audienceSnapshotId is required — run Audience Engine first" });
       }
 
-      const result = await runPositioningEngine(accountId, campaignId, miSnapshotId, audienceSnapshotId);
+      const __jobId = resolveOrManualJobId(req.body.jobId);
+      const result = await runPositioningEngine(accountId, campaignId, miSnapshotId, audienceSnapshotId, undefined, __jobId);
       res.json(result);
     } catch (err: any) {
       console.error("[PositioningEngine-V3] Route error:", err.message);
