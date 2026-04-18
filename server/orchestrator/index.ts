@@ -1208,8 +1208,24 @@ async function executeEngine(
             }
             console.log(`[Orchestrator] AEL_BUILT | duration=${Date.now() - aelStart}ms | dimensions=${aelPkg ? Object.keys(aelPkg).length : 0} | partial=${aelPkg?.isPartial || false} | campaignId=${config.campaignId}`);
           } catch (aelErr: any) {
-            console.warn(`[Orchestrator] AEL_BUILD_FAILED | error=${aelErr.message} — proceeding without enrichment`);
-            ctx.analyticalEnrichment = null;
+            // PRE-LAUNCH HARDENING (G.1): AEL is a hard dependency for every
+            // downstream engine (Positioning, Mechanism, Differentiation,
+            // Offer, Funnel). Previously we logged + nulled, letting downstream
+            // generate without enrichment context. We now fail the audience
+            // step with a BLOCKED result so the orchestrator halts. The
+            // messaging-tier-blocking change in priority-matrix ensures no
+            // downstream engine runs.
+            console.error(`[Orchestrator] AEL_BUILD_FAILED | error=${aelErr.message} — halting pipeline (no silent degradation)`);
+            return {
+              step: "audience",
+              status: "BLOCKED",
+              error: {
+                code: "AEL_BUILD_FAILED",
+                message: `Analytical Enrichment Layer failed to build — pipeline halted to prevent ungrounded downstream generation. Underlying error: ${aelErr.message}`,
+              },
+              snapshotId,
+              durationMs: Date.now() - startTime,
+            } as any;
           }
         }
 

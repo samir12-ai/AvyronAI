@@ -80,14 +80,26 @@ export interface EngineStepResult {
   needsInput?: NeedsInputPayload;
 }
 
+/**
+ * Returns true if a failed engine result must halt downstream execution.
+ *
+ * PRE-LAUNCH HARDENING (G.3): The previous threshold (`<= OFFER`) let
+ * MESSAGING-tier failures (Awareness, Funnel, Persuasion, Integrity) pass
+ * through to FINANCIAL/CHANNEL, so spend and distribution decisions could
+ * be made on top of a failed messaging strategy. We now block downstream on
+ * ANY of these statuses regardless of tier — every engine produces input
+ * for the next, so no failure can be "silently skipped".
+ *
+ * DEPTH_BLOCKED is also a blocking status: it indicates the CEL Depth Gate
+ * rejected the output as ungrounded.
+ */
 export function shouldBlockDownstream(result: EngineStepResult): boolean {
-  if (result.status === "BLOCKED" || result.status === "ERROR" || result.status === "SIGNAL_BLOCKED") {
-    const engine = ENGINE_PRIORITY_ORDER.find(e => e.id === result.engineId);
-    if (engine && TIER_RANK[engine.tier] <= TIER_RANK["OFFER"]) {
-      return true;
-    }
-  }
-  return false;
+  return (
+    result.status === "BLOCKED" ||
+    result.status === "ERROR" ||
+    result.status === "SIGNAL_BLOCKED" ||
+    result.status === "DEPTH_BLOCKED"
+  );
 }
 
 export function getEngineTier(engineId: EngineId): PriorityTier {
