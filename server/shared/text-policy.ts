@@ -14,6 +14,9 @@
 
 const TOKEN_PATTERN = /\[([A-Z]{2,3})(\d+)\]/g;
 const SYNTHETIC_KEY_PATTERN = /\b(objection|desire|pain|claim|barrier)_(\d+)\b/g;
+// Literal text produced by `String({})` or template-string coercion of an
+// object. Not an internal token, but the most common contract leak symptom.
+const OBJECT_OBJECT_PATTERN = /\[object Object\]/g;
 
 export interface ExtractedRefs {
   groundingRefs: string[];   // e.g. ["RC1","BB2","CC3"]
@@ -60,6 +63,9 @@ export function stripInternalTokens(input: unknown): string | null {
   out = out.replace(TOKEN_PATTERN, "");
   // Remove synthetic indexed keys
   out = out.replace(SYNTHETIC_KEY_PATTERN, "");
+  // Remove the "[object Object]" literal that template-string coercion of
+  // a non-string upstream payload leaves behind.
+  out = out.replace(OBJECT_OBJECT_PATTERN, "");
   // Tidy stray whitespace and orphan punctuation
   out = out
     .replace(/\s{2,}/g, " ")

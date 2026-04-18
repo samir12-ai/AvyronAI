@@ -76,25 +76,89 @@ function normStringArray(value: unknown, ctx: NormalizeContext, field: string): 
   return out;
 }
 
+/**
+ * Deep-walk an arbitrary value, normalizing every string in place. Visits
+ * nested arrays and plain objects but never crosses into the lineage block
+ * (the audit channel intentionally retains internal tokens). Used to scrub
+ * the nested layer subtrees (`outcomeLayer`, `mechanismLayer`,
+ * `deliveryLayer`, `riskReductionLayer`, …) which the explicit field map
+ * would otherwise miss.
+ *
+ * `MAX_DEPTH` is a safety guard against pathological cyclic structures —
+ * the offer payloads have a known max depth of ~6 in practice.
+ */
+const MAX_DEPTH = 12;
+
+/** True only for plain objects. Class instances (Date, Map, Set, RegExp, etc.)
+ *  are returned as-is by the walker so they aren't corrupted into `{}`. Offer
+ *  payloads are JSON-derived in practice but this guard makes the helper safe
+ *  to call anywhere. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (v == null || typeof v !== "object") return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+function deepNormalize(value: any, ctx: NormalizeContext, path: string, depth: number, seen: WeakSet<object>): any {
+  if (depth > MAX_DEPTH) return value;
+  if (value == null) return value;
+  if (typeof value === "string") {
+    const refs = extractGroundingRefs(value);
+    refs.groundingRefs.forEach((r) => ctx.groundingRefs.add(r));
+    refs.syntheticKeys.forEach((k) => ctx.syntheticKeys.add(k));
+    const stripped = stripInternalTokens(value);
+    if (stripped === null) return null;
+    if (stripped.length === 0 && value.trim().length > 0) {
+      ctx.violations.push({ field: path, reason: "string_emptied_after_strip" });
+      return "";
+    }
+    return stripped;
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return value;
+    seen.add(value);
+    return value.map((v, i) => deepNormalize(v, ctx, `${path}[${i}]`, depth + 1, seen));
+  }
+  if (isPlainObject(value)) {
+    // Stop at lineage / contractViolations subtrees (audit channels).
+    const leaf = path.split(".").pop() || path;
+    if (leaf === "lineage" || leaf === "contractViolations") return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = deepNormalize(v, ctx, path ? `${path}.${k}` : k, depth + 1, seen);
+    }
+    return out;
+  }
+  // Non-plain object (Date/Map/Set/class instance), number, boolean, function — pass through unchanged.
+  return value;
+}
+
 function normalizeCandidate(candidate: any, ctx: NormalizeContext, prefix: string): any {
   if (!candidate || typeof candidate !== "object") return candidate;
+  // Deep-walk first so nested layer subtrees (outcomeLayer, mechanismLayer,
+  // deliveryLayer, riskReductionLayer, …) get scrubbed too. Then re-apply
+  // the explicit field contract to drop uncoercible non-strings (which the
+  // deep walker preserves as-is at non-string positions).
+  const deep = deepNormalize(candidate, ctx, prefix, 0, new WeakSet<object>());
   return {
-    ...candidate,
-    offerName: normString(candidate.offerName, ctx, `${prefix}.offerName`) || candidate.offerName || null,
-    coreOutcome: normString(candidate.coreOutcome, ctx, `${prefix}.coreOutcome`) || "",
-    mechanismDescription: normString(candidate.mechanismDescription, ctx, `${prefix}.mechanismDescription`) || "",
-    deliverables: normStringArray(candidate.deliverables, ctx, `${prefix}.deliverables`),
-    proofAlignment: normStringArray(candidate.proofAlignment, ctx, `${prefix}.proofAlignment`),
-    audienceFitExplanation: normString(candidate.audienceFitExplanation, ctx, `${prefix}.audienceFitExplanation`) || "",
-    riskNotes: normStringArray(candidate.riskNotes, ctx, `${prefix}.riskNotes`),
-    problemStatement: candidate.problemStatement != null
-      ? (normString(candidate.problemStatement, ctx, `${prefix}.problemStatement`) || "")
+    ...deep,
+    offerName: normString(deep.offerName, ctx, `${prefix}.offerName`) || deep.offerName || null,
+    coreOutcome: normString(deep.coreOutcome, ctx, `${prefix}.coreOutcome`) || "",
+    mechanismDescription: normString(deep.mechanismDescription, ctx, `${prefix}.mechanismDescription`) || "",
+    deliverables: normStringArray(deep.deliverables, ctx, `${prefix}.deliverables`),
+    proofAlignment: normStringArray(deep.proofAlignment, ctx, `${prefix}.proofAlignment`),
+    audienceFitExplanation: normString(deep.audienceFitExplanation, ctx, `${prefix}.audienceFitExplanation`) || "",
+    riskNotes: normStringArray(deep.riskNotes, ctx, `${prefix}.riskNotes`),
+    problemStatement: deep.problemStatement != null
+      ? (normString(deep.problemStatement, ctx, `${prefix}.problemStatement`) || "")
       : undefined,
-    proofPath: Array.isArray(candidate.proofPath)
-      ? normStringArray(candidate.proofPath, ctx, `${prefix}.proofPath`)
+    proofPath: Array.isArray(deep.proofPath)
+      ? normStringArray(deep.proofPath, ctx, `${prefix}.proofPath`)
       : undefined,
-    objectionHandling: Array.isArray(candidate.objectionHandling)
-      ? normStringArray(candidate.objectionHandling, ctx, `${prefix}.objectionHandling`)
+    objectionHandling: Array.isArray(deep.objectionHandling)
+      ? normStringArray(deep.objectionHandling, ctx, `${prefix}.objectionHandling`)
       : undefined,
   };
 }
