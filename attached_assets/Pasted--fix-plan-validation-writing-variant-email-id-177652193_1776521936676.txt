@@ -1,0 +1,117 @@
+تمام — هذا إيميل قوي ومباشر يطلب fix plan حقيقي + validation بدون لف:
+
+:::writing{variant=“email” id=“72941” subject=“Action Required — Offer Pipeline Contract & Output Integrity (Fix Plan + Validation)”}
+Hi,
+
+We completed a full code-level audit of the Offer pipeline.
+We are not asking for patches — we need a structured fix plan and end-to-end validation.
+
+The current system is internally coherent, but the Offer output layer is broken at the contract level, causing user-facing corruption.
+
+Below are the issues to address:
+
+⸻
+
+Issues (must be treated as one system problem, not isolated bugs)
+	1.	Object Rendering Leak
+[object Object] appears in:
+
+	•	problemStatement
+	•	coreOutcome / promise
+	•	proofPath
+	•	objectionHandling
+Root cause traced to:
+	•	String(obj) coercion in offer skeleton
+	•	lack of per-item validation after AI refinement
+	•	no normalization at API boundary
+
+	2.	Internal Token Leakage
+Tokens like:
+
+	•	[RC#], [BB#], [CC#]
+	•	objection_0 / desire_0
+are leaking to UI. These are internal audit identifiers and must never reach user-facing output.
+
+	3.	Weak / Non-human Hook Construction
+Hook is currently:
+axis + “:” + claim.slice(0, 80)
+This surfaces internal taxonomy instead of a usable marketing hook.
+	4.	Fallback Template Overuse
+Templates like:
+
+	•	“Eliminate X and achieve Y”
+	•	default proof / objection placeholders
+are triggered despite the presence of valid upstream data (claims, mechanism, proof architecture).
+
+	5.	Claim → Offer Translation Gap
+Validated claims (with structure and evidence) are reduced to plain text and only used in the hook.
+They are not used to build:
+
+	•	problem framing
+	•	promise / outcome
+	•	proof path
+	•	objection handling
+
+	6.	Backend ↔ Frontend Contract Mismatch
+Types declare string/string[], but runtime values violate this:
+
+	•	no runtime schema validation
+	•	no normalization in routes
+	•	frontend renders raw values without guards
+
+⸻
+
+What we need from you
+
+1. Root-Cause Mapping (per issue)
+
+For each of the 6 issues:
+	•	exact failure point (file + function)
+	•	propagation path
+	•	classification: data / contract / logic / rendering
+
+2. Fix Plan (not code yet)
+
+Define a clean, minimal plan that includes:
+	•	A runtime normalization layer at the Offer API boundary
+	•	A strict separation between:
+	•	internal tokens / audit markers
+	•	user-facing text
+	•	A defined mapping from:
+claimStructures → StrategyRoot → Offer fields
+	•	Removal of String(obj) fallback behavior
+	•	Clear conditions for fallback templates (only when upstream data is truly absent)
+
+3. Validation Plan
+
+How you will prove the fix works:
+	•	No [object Object] in any field
+	•	No internal tokens in UI output
+	•	Hooks are human-readable
+	•	Claims are reflected in:
+problem / promise / proof / objections
+	•	Consistent output across multiple runs
+
+4. End-to-End Re-run
+
+After implementing:
+	•	run full pipeline (15/15)
+	•	provide before/after comparison
+	•	confirm no regression in Statistical Validation or root integrity
+
+⸻
+
+Important constraints
+	•	Do not bypass or weaken validation layers
+	•	Do not remove grounding or lineage logic
+	•	Fix must be at the contract level, not UI-only masking
+	•	No partial fixes — this must be resolved end-to-end
+
+⸻
+
+We will review your plan first before approving implementation.
+
+Thanks.
+:::
+
+إذا بدك بعد ما يرد، نفكك الـ fix plan تبعه ونشوف إذا فعلاً عم يحل الجذر أو بس عم يرقّع 👍
