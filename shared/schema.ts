@@ -1811,6 +1811,7 @@ export const audienceSnapshots = pgTable("audience_snapshots", {
   signalLineage: text("signal_lineage"),
   structuredSignals: text("structured_signals"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1845,6 +1846,7 @@ export const positioningSnapshots = pgTable("positioning_snapshots", {
   confidenceScore: doublePrecision("confidence_score"),
   signalTraceability: text("signal_traceability"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1875,6 +1877,7 @@ export const differentiationSnapshots = pgTable("differentiation_snapshots", {
   stabilityResult: text("stability_result"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1897,6 +1900,7 @@ export const mechanismSnapshots = pgTable("mechanism_snapshots", {
   axisConsistency: text("axis_consistency"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1931,6 +1935,7 @@ export const offerSnapshots = pgTable("offer_snapshots", {
   layerDiagnostics: text("layer_diagnostics"),
   strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1965,6 +1970,7 @@ export const funnelSnapshots = pgTable("funnel_snapshots", {
   strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
   layerDiagnostics: text("layer_diagnostics"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1994,6 +2000,7 @@ export const integritySnapshots = pgTable("integrity_snapshots", {
   boundaryCheck: text("boundary_check"),
   strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2027,6 +2034,7 @@ export const awarenessSnapshots = pgTable("awareness_snapshots", {
   awarenessStrengthScore: doublePrecision("awareness_strength_score"),
   signalLineage: text("signal_lineage"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2061,6 +2069,7 @@ export const persuasionSnapshots = pgTable("persuasion_snapshots", {
   persuasionStrengthScore: doublePrecision("persuasion_strength_score"),
   signalLineage: text("signal_lineage"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2084,6 +2093,7 @@ export const strategyValidationSnapshots = pgTable("strategy_validation_snapshot
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2107,6 +2117,7 @@ export const budgetGovernorSnapshots = pgTable("budget_governor_snapshots", {
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2131,6 +2142,7 @@ export const channelSelectionSnapshots = pgTable("channel_selection_snapshots", 
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2153,6 +2165,7 @@ export const iterationSnapshots = pgTable("iteration_snapshots", {
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2175,6 +2188,7 @@ export const retentionSnapshots = pgTable("retention_snapshots", {
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

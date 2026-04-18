@@ -89,6 +89,29 @@ import type { MemoryClass } from "../memory-system/types";
 
 import { MarketIntelligenceV3 } from "../market-intelligence-v3/engine";
 import { runAudienceEngine, getLatestAudienceSnapshot } from "../audience-engine/engine";
+import {
+  computeInputHash,
+  logReuseHit,
+  logReuseMiss,
+  tryReuseAudience,
+  tryReusePositioning,
+  tryReuseDifferentiation,
+  tryReuseMechanism,
+  tryReuseOffer,
+  tryReuseAwareness,
+  tryReuseFunnel,
+  tryReuseIntegrity,
+  tryReusePersuasion,
+  tryReuseStatVal,
+  tryReuseBudgetGovernor,
+  tryReuseChannelSelection,
+  tryReuseIteration,
+  tryReuseRetention,
+} from "./snapshot-reuse";
+import {
+  audienceSnapshots as audienceSnapshotsTbl,
+  positioningSnapshots as positioningSnapshotsTbl,
+} from "@shared/schema";
 import { runPositioningEngine } from "../positioning-engine/engine";
 import { runDifferentiationEngine } from "../differentiation-engine/engine";
 import { runMechanismEngine } from "../mechanism-engine/engine";
@@ -187,6 +210,7 @@ interface EngineContext {
   memoryContext?: string;
   signalComposition?: SignalComposition;
   performanceLineage?: SignalLineageEntry[];
+  inputHashes?: Record<string, string>;
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -1081,11 +1105,44 @@ async function executeEngine(
         snapshotId = result.snapshotId;
         ctx.mi = result;
         ctx.miSnapshotId = result.snapshotId;
+        try {
+          const [miRow] = await db
+            .select({ competitorHash: miSnapshots.competitorHash })
+            .from(miSnapshots)
+            .where(eq(miSnapshots.id, result.snapshotId))
+            .limit(1);
+          if (miRow?.competitorHash) {
+            ctx.inputHashes!.mi = miRow.competitorHash;
+          }
+        } catch (miHashErr: any) {
+          console.warn(`[Orchestrator] MI_COMPETITOR_HASH_LOAD_FAILED | error=${miHashErr.message}`);
+        }
         break;
       }
 
       case "audience": {
-        const result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId, jobId);
+        const audInputHash = computeInputHash("audience-v1", ctx.inputHashes!.mi || "");
+        ctx.inputHashes!.audience = audInputHash;
+        let result: any = null;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseAudience(config.accountId, config.campaignId, audInputHash);
+          if (reused) {
+            logReuseHit("audience", reused.snap.id, audInputHash);
+            result = reused.hydrated;
+          } else {
+            logReuseMiss("audience", audInputHash);
+          }
+        }
+        if (!result) {
+          result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId, jobId);
+          if (result?.snapshotId) {
+            try {
+              await db.update(audienceSnapshotsTbl).set({ inputHash: audInputHash }).where(eq(audienceSnapshotsTbl.id, result.snapshotId));
+            } catch (e: any) {
+              console.warn(`[Orchestrator] AUDIENCE_INPUT_HASH_PERSIST_FAILED | ${e.message}`);
+            }
+          }
+        }
         output = result;
         snapshotId = result.snapshotId;
         ctx.audience = result;
@@ -1199,14 +1256,40 @@ async function executeEngine(
           };
         }
         { const sglBlock = resolveSglOrBlock("positioning", ctx, startTime); if (sglBlock) return sglBlock; }
-        const result = await runPositioningEngine(
-          config.accountId,
-          config.campaignId,
-          ctx.miSnapshotId,
-          ctx.audienceSnapshotId,
-          ctx.analyticalEnrichment,
-          jobId,
+        const posInputHash = computeInputHash(
+          "positioning-v1",
+          ctx.inputHashes!.mi || "",
+          ctx.inputHashes!.audience || "",
+          ctx.analyticalEnrichment?.isPartial ? "ael-partial" : "ael-full",
         );
+        ctx.inputHashes!.positioning = posInputHash;
+        let result: any = null;
+        if (!config.forceRefresh) {
+          const reused = await tryReusePositioning(config.accountId, config.campaignId, posInputHash);
+          if (reused) {
+            logReuseHit("positioning", reused.snap.id, posInputHash);
+            result = reused.hydrated;
+          } else {
+            logReuseMiss("positioning", posInputHash);
+          }
+        }
+        if (!result) {
+          result = await runPositioningEngine(
+            config.accountId,
+            config.campaignId,
+            ctx.miSnapshotId,
+            ctx.audienceSnapshotId,
+            ctx.analyticalEnrichment,
+            jobId,
+          );
+          if (result?.snapshotId) {
+            try {
+              await db.update(positioningSnapshotsTbl).set({ inputHash: posInputHash }).where(eq(positioningSnapshotsTbl.id, result.snapshotId));
+            } catch (e: any) {
+              console.warn(`[Orchestrator] POSITIONING_INPUT_HASH_PERSIST_FAILED | ${e.message}`);
+            }
+          }
+        }
         output = result;
         snapshotId = result.snapshotId;
         ctx.positioning = result;
@@ -1233,10 +1316,35 @@ async function executeEngine(
 
       case "differentiation": {
         { const sglBlock = resolveSglOrBlock("differentiation", ctx, startTime); if (sglBlock) return sglBlock; }
+        const diffInputHash = computeInputHash(
+          "differentiation-v1",
+          ctx.inputHashes!.mi || "",
+          ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.positioning || "",
+          ctx.analyticalEnrichment?.isPartial ? "ael-partial" : "ael-full",
+        );
+        ctx.inputHashes!.differentiation = diffInputHash;
+        let result: any = null;
+        let diffReused = false;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseDifferentiation(config.accountId, config.campaignId, diffInputHash);
+          if (reused) {
+            logReuseHit("differentiation", reused.snap.id, diffInputHash);
+            result = reused.hydrated;
+            diffReused = true;
+            ctx.differentiation = result;
+            ctx.differentiationSnapshotId = reused.snap.id;
+            snapshotId = reused.snap.id;
+            output = result;
+          } else {
+            logReuseMiss("differentiation", diffInputHash);
+          }
+        }
+        if (!diffReused) {
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
-        const result = await runDifferentiationEngine(
+        result = await runDifferentiationEngine(
           miInput,
           audInput,
           posInput,
@@ -1270,6 +1378,7 @@ async function executeEngine(
             stabilityResult: JSON.stringify((result as any).stabilityResult || null),
             confidenceScore: (result as any).confidenceScore ?? null,
             executionTimeMs: (result as any).executionTimeMs ?? null,
+            inputHash: diffInputHash,
           }).returning({ id: differentiationSnapshots.id });
           (result as any).snapshotId = diffSnap.id;
           ctx.differentiationSnapshotId = diffSnap.id;
@@ -1279,8 +1388,9 @@ async function executeEngine(
           ctx.differentiationSnapshotId = result.snapshotId;
           snapshotId = result.snapshotId;
         }
+        }  // end if(!diffReused)
 
-        if (ctx.analyticalEnrichment) {
+        if (!diffReused && ctx.analyticalEnrichment) {
           const diffTexts = (result.claims || result.claimStructures || []).map((c: any) => typeof c === "string" ? c : c.claim || c.title || JSON.stringify(c));
           const celResult = enforceGenericEngineCompliance("differentiation", diffTexts, ctx.analyticalEnrichment);
           if (!ctx.celResults) ctx.celResults = [];
@@ -1311,6 +1421,29 @@ async function executeEngine(
 
       case "mechanism": {
         { const sglBlock = resolveSglOrBlock("mechanism", ctx, startTime); if (sglBlock) return sglBlock; }
+        const mechInputHash = computeInputHash(
+          "mechanism-v1",
+          ctx.inputHashes!.positioning || "",
+          ctx.inputHashes!.differentiation || "",
+          ctx.analyticalEnrichment?.isPartial ? "ael-partial" : "ael-full",
+        );
+        ctx.inputHashes!.mechanism = mechInputHash;
+        let mechReused = false;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseMechanism(config.accountId, config.campaignId, mechInputHash);
+          if (reused) {
+            logReuseHit("mechanism", reused.snap.id, mechInputHash);
+            output = reused.hydrated;
+            ctx.mechanism = reused.hydrated;
+            ctx.mechanismSnapshotId = reused.snap.id;
+            snapshotId = reused.snap.id;
+            ctx.depthGateStatus!.mechanism = "DEPTH_PASSED";
+            mechReused = true;
+          } else {
+            logReuseMiss("mechanism", mechInputHash);
+          }
+        }
+        if (!mechReused) {
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const domainVocabParts = [
@@ -1352,6 +1485,7 @@ async function executeEngine(
             axisConsistency: result.axisConsistency ? JSON.stringify(result.axisConsistency) : null,
             confidenceScore: result.confidenceScore || null,
             executionTimeMs: result.executionTimeMs || null,
+            inputHash: mechInputHash,
           }).returning();
           snapshotId = mechSnapshot.id;
           ctx.mechanismSnapshotId = mechSnapshot.id;
@@ -1359,8 +1493,10 @@ async function executeEngine(
         } catch (mechDbErr: any) {
           console.warn(`[Orchestrator] MECH_SNAPSHOT_SAVE_FAILED | error=${mechDbErr.message}`);
         }
+        }  // end if(!mechReused)
 
-        if (result.celDepthCompliance) {
+        const result: any = ctx.mechanism;
+        if (!mechReused && result?.celDepthCompliance) {
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(result.celDepthCompliance);
           if (result.celDepthCompliance.violations.length > 0) {
@@ -1434,6 +1570,27 @@ async function executeEngine(
 
       case "offer": {
         { const sglBlock = resolveSglOrBlock("offer", ctx, startTime); if (sglBlock) return sglBlock; }
+        const offerInputHash = computeInputHash(
+          "offer-v1",
+          ctx.inputHashes!.mi || "",
+          ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.positioning || "",
+          ctx.inputHashes!.differentiation || "",
+          ctx.inputHashes!.mechanism || "",
+        );
+        ctx.inputHashes!.offer = offerInputHash;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseOffer(config.accountId, config.campaignId, offerInputHash);
+          if (reused) {
+            logReuseHit("offer", reused.snap.id, offerInputHash);
+            output = reused.hydrated;
+            ctx.offer = reused.hydrated;
+            snapshotId = reused.snap.id;
+            ctx.depthGateStatus!.offer = "DEPTH_PASSED";
+            break;
+          }
+          logReuseMiss("offer", offerInputHash);
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -1492,6 +1649,7 @@ async function executeEngine(
             confidenceScore: (result as any).confidenceScore ?? null,
             structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
             executionTimeMs: (result as any).executionTimeMs ?? null,
+            inputHash: offerInputHash,
           }).returning({ id: offerSnapshots.id });
           (result as any).snapshotId = offerSnap.id;
           snapshotId = offerSnap.id;
@@ -1528,6 +1686,27 @@ async function executeEngine(
 
       case "awareness": {
         { const sglBlock = resolveSglOrBlock("awareness", ctx, startTime); if (sglBlock) return sglBlock; }
+        const awarenessInputHash = computeInputHash(
+          "awareness-v1",
+          ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.positioning || "",
+          ctx.inputHashes!.differentiation || "",
+          ctx.inputHashes!.mechanism || "",
+          ctx.inputHashes!.offer || "",
+        );
+        ctx.inputHashes!.awareness = awarenessInputHash;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseAwareness(config.accountId, config.campaignId, awarenessInputHash);
+          if (reused) {
+            logReuseHit("awareness", reused.snap.id, awarenessInputHash);
+            output = reused.hydrated;
+            ctx.awareness = reused.hydrated;
+            snapshotId = reused.snap.id;
+            ctx.depthGateStatus!.awareness = "DEPTH_PASSED";
+            break;
+          }
+          logReuseMiss("awareness", awarenessInputHash);
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -1566,6 +1745,7 @@ async function executeEngine(
             confidenceNormalized: !!(result as any).confidenceNormalized,
             awarenessStrengthScore: (result as any).primaryRoute?.awarenessStrengthScore ?? null,
             executionTimeMs: (result as any).executionTimeMs ?? null,
+            inputHash: awarenessInputHash,
           }).returning({ id: awarenessSnapshots.id });
           (result as any).snapshotId = awSnap.id;
           snapshotId = awSnap.id;
@@ -1597,6 +1777,28 @@ async function executeEngine(
           console.log(`[Orchestrator] AWARENESS_GATE_BLOCKED | Funnel cannot execute without completed Awareness — awareness output missing or incomplete`);
           output = { status: "MISSING_DEPENDENCY", statusMessage: "Funnel requires completed Awareness output — awareness gate active" };
           break;
+        }
+        const funnelInputHash = computeInputHash(
+          "funnel-v1",
+          ctx.inputHashes!.offer || "",
+          ctx.inputHashes!.awareness || "",
+          ctx.inputHashes!.mi || "",
+          ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.positioning || "",
+          ctx.inputHashes!.differentiation || "",
+        );
+        ctx.inputHashes!.funnel = funnelInputHash;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseFunnel(config.accountId, config.campaignId, funnelInputHash);
+          if (reused) {
+            logReuseHit("funnel", reused.snap.id, funnelInputHash);
+            output = reused.hydrated;
+            ctx.funnel = reused.hydrated;
+            snapshotId = reused.snap.id;
+            ctx.depthGateStatus!.funnel = "DEPTH_PASSED";
+            break;
+          }
+          logReuseMiss("funnel", funnelInputHash);
         }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
@@ -1653,6 +1855,7 @@ async function executeEngine(
             boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
             confidenceScore: (result as any).confidenceScore ?? null,
             executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __funnelStart),
+            inputHash: funnelInputHash,
           }).returning({ id: funnelSnapshots.id });
           (result as any).snapshotId = fnSnap.id;
           snapshotId = fnSnap.id;
@@ -1688,6 +1891,28 @@ async function executeEngine(
       }
 
       case "integrity": {
+        const integrityInputHash = computeInputHash(
+          "integrity-v1",
+          ctx.inputHashes!.mi || "",
+          ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.positioning || "",
+          ctx.inputHashes!.differentiation || "",
+          ctx.inputHashes!.offer || "",
+          ctx.inputHashes!.funnel || "",
+        );
+        ctx.inputHashes!.integrity = integrityInputHash;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseIntegrity(config.accountId, config.campaignId, integrityInputHash);
+          if (reused) {
+            logReuseHit("integrity", reused.snap.id, integrityInputHash);
+            output = reused.hydrated;
+            ctx.integrity = reused.hydrated;
+            ctx.integritySnapshotId = reused.snap.id;
+            snapshotId = reused.snap.id;
+            break;
+          }
+          logReuseMiss("integrity", integrityInputHash);
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -1721,6 +1946,7 @@ async function executeEngine(
             flaggedInconsistencies: result.flaggedInconsistencies ? JSON.stringify(result.flaggedInconsistencies) : null,
             boundaryCheck: result.boundaryCheck ? JSON.stringify(result.boundaryCheck) : null,
             executionTimeMs: result.executionTimeMs || null,
+            inputHash: integrityInputHash,
           }).returning();
           snapshotId = intSnap.id;
           ctx.integritySnapshotId = intSnap.id;
@@ -1733,6 +1959,29 @@ async function executeEngine(
 
       case "persuasion": {
         { const sglBlock = resolveSglOrBlock("persuasion", ctx, startTime); if (sglBlock) return sglBlock; }
+        const persuasionInputHash = computeInputHash(
+          "persuasion-v1",
+          ctx.inputHashes!.awareness || "",
+          ctx.inputHashes!.integrity || "",
+          ctx.inputHashes!.funnel || "",
+          ctx.inputHashes!.offer || "",
+          ctx.inputHashes!.mi || "",
+          ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.positioning || "",
+          ctx.inputHashes!.differentiation || "",
+        );
+        ctx.inputHashes!.persuasion = persuasionInputHash;
+        if (!config.forceRefresh) {
+          const reused = await tryReusePersuasion(config.accountId, config.campaignId, persuasionInputHash);
+          if (reused) {
+            logReuseHit("persuasion", reused.snap.id, persuasionInputHash);
+            output = reused.hydrated;
+            ctx.persuasion = reused.hydrated;
+            snapshotId = reused.snap.id;
+            break;
+          }
+          logReuseMiss("persuasion", persuasionInputHash);
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -1786,6 +2035,7 @@ async function executeEngine(
             confidenceNormalized: !!(result as any).confidenceNormalized,
             persuasionStrengthScore: (result as any).primaryRoute?.persuasionStrengthScore ?? null,
             executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __persStart),
+            inputHash: persuasionInputHash,
           }).returning({ id: persuasionSnapshots.id });
           (result as any).snapshotId = persSnap.id;
           snapshotId = persSnap.id;
@@ -1832,6 +2082,27 @@ async function executeEngine(
       }
 
       case "statistical_validation": {
+        const svInputHash = computeInputHash(
+          "statval-v1",
+          ctx.inputHashes!.persuasion || "",
+          ctx.inputHashes!.awareness || "",
+          ctx.inputHashes!.funnel || "",
+          ctx.inputHashes!.offer || "",
+          ctx.inputHashes!.mi || "",
+          ctx.inputHashes!.audience || "",
+        );
+        ctx.inputHashes!.statistical_validation = svInputHash;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseStatVal(config.accountId, config.campaignId, svInputHash);
+          if (reused) {
+            logReuseHit("statistical_validation", reused.snap.id, svInputHash);
+            output = reused.hydrated;
+            ctx.statisticalValidation = reused.hydrated;
+            snapshotId = reused.snap.id;
+            break;
+          }
+          logReuseMiss("statistical_validation", svInputHash);
+        }
         const miInput = extractMiInput(ctx.mi);
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
@@ -1862,6 +2133,7 @@ async function executeEngine(
             dataReliability: JSON.stringify(result.dataReliability || {}),
             confidenceScore: result.claimConfidenceScore || null,
             executionTimeMs: result.executionTimeMs || null,
+            inputHash: svInputHash,
           }).returning();
           snapshotId = svSnap.id;
           ctx.statisticalValidation.snapshotId = svSnap.id;
@@ -1876,6 +2148,28 @@ async function executeEngine(
       case "budget_governor": {
         const bizData = await getBusinessData(config.accountId, config.campaignId);
         const campaignData = await getCampaignData(config.campaignId);
+        const bgInputHash = computeInputHash(
+          "budget-governor-v1",
+          ctx.inputHashes!.offer || "",
+          ctx.inputHashes!.funnel || "",
+          ctx.inputHashes!.statistical_validation || "",
+          ctx.inputHashes!.mi || "",
+          ctx.inputHashes!.audience || "",
+          { monthlyBudget: bizData?.monthlyBudget || null, manualMetrics: ctx.manualCampaignMetrics || null },
+        );
+        ctx.inputHashes!.budget_governor = bgInputHash;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseBudgetGovernor(config.accountId, config.campaignId, bgInputHash);
+          if (reused) {
+            logReuseHit("budget_governor", reused.snap.id, bgInputHash);
+            output = reused.hydrated;
+            ctx.budgetGovernor = reused.hydrated;
+            ctx.budgetGovernorSnapshotId = reused.snap.id;
+            snapshotId = reused.snap.id;
+            break;
+          }
+          logReuseMiss("budget_governor", bgInputHash);
+        }
 
         const offerCtxBG = extractOfferInput(ctx.offer);
         const offerStrength = typeof offerCtxBG.offerStrengthScore === "number" ? offerCtxBG.offerStrengthScore : 0.5;
@@ -1953,6 +2247,7 @@ async function executeEngine(
             result: JSON.stringify(result),
             confidenceScore: result.confidenceScore || null,
             executionTimeMs: result.executionTimeMs || null,
+            inputHash: bgInputHash,
           }).returning();
           snapshotId = bgSnap.id;
           ctx.budgetGovernorSnapshotId = bgSnap.id;
@@ -1964,6 +2259,28 @@ async function executeEngine(
       }
 
       case "channel_selection": {
+        const csInputHash = computeInputHash(
+          "channel-selection-v1",
+          ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.awareness || "",
+          ctx.inputHashes!.persuasion || "",
+          ctx.inputHashes!.offer || "",
+          ctx.inputHashes!.budget_governor || "",
+          ctx.inputHashes!.statistical_validation || "",
+        );
+        ctx.inputHashes!.channel_selection = csInputHash;
+        if (!config.forceRefresh) {
+          const reused = await tryReuseChannelSelection(config.accountId, config.campaignId, csInputHash);
+          if (reused) {
+            logReuseHit("channel_selection", reused.snap.id, csInputHash);
+            output = reused.hydrated;
+            ctx.channelSelection = reused.hydrated;
+            ctx.channelSelectionSnapshotId = reused.snap.id;
+            snapshotId = reused.snap.id;
+            break;
+          }
+          logReuseMiss("channel_selection", csInputHash);
+        }
         const audInput = extractAudienceInput(ctx.audience);
         const awarenessInput = ctx.awareness || {};
         if (ctx.ssc?.awarenessMeaning && awarenessInput.primaryRoute) {
@@ -2014,6 +2331,7 @@ async function executeEngine(
             result: JSON.stringify(result),
             confidenceScore: result.confidenceScore || null,
             executionTimeMs: result.executionTimeMs || null,
+            inputHash: csInputHash,
           }).returning();
           snapshotId = csSnap.id;
           ctx.channelSelectionSnapshotId = csSnap.id;
@@ -2026,6 +2344,25 @@ async function executeEngine(
 
       case "iteration": {
         const iterGate = await getIterationGateData(config.accountId, config.campaignId);
+        const iterInputHash = computeInputHash(
+          "iteration-v1",
+          ctx.inputHashes!.funnel || "",
+          ctx.inputHashes!.persuasion || "",
+          { metrics: iterGate.campaignMetrics || null, gateInputs: iterGate.gateInputs || null },
+        );
+        ctx.inputHashes!.iteration = iterInputHash;
+        if (!config.forceRefresh && iterGate.isReady) {
+          const reused = await tryReuseIteration(config.accountId, config.campaignId, iterInputHash);
+          if (reused) {
+            logReuseHit("iteration", reused.snap.id, iterInputHash);
+            output = reused.hydrated;
+            ctx.iteration = reused.hydrated;
+            ctx.iterationSnapshotId = reused.snap.id;
+            snapshotId = reused.snap.id;
+            break;
+          }
+          logReuseMiss("iteration", iterInputHash);
+        }
         if (!iterGate.isReady) {
           console.log(`[Orchestrator] ITERATION_NEEDS_INPUT | missing=${iterGate.missingFields.join(",")}`);
           return {
@@ -2081,6 +2418,7 @@ async function executeEngine(
             dataReliability: result.dataReliability ? JSON.stringify(result.dataReliability) : null,
             confidenceScore: result.confidenceScore || null,
             executionTimeMs: result.executionTimeMs || null,
+            inputHash: iterInputHash,
           }).returning();
           snapshotId = iterSnap.id;
           ctx.iterationSnapshotId = iterSnap.id;
@@ -2093,6 +2431,27 @@ async function executeEngine(
 
       case "retention": {
         const retGate = await getRetentionGateData(config.accountId, config.campaignId);
+        const retInputHash = computeInputHash(
+          "retention-v1",
+          ctx.inputHashes!.funnel || "",
+          ctx.inputHashes!.offer || "",
+          ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.mechanism || "",
+          { metrics: retGate.retentionMetrics || null, gateInputs: retGate.gateInputs || null },
+        );
+        ctx.inputHashes!.retention = retInputHash;
+        if (!config.forceRefresh && retGate.isReady) {
+          const reused = await tryReuseRetention(config.accountId, config.campaignId, retInputHash);
+          if (reused) {
+            logReuseHit("retention", reused.snap.id, retInputHash);
+            output = reused.hydrated;
+            ctx.retention = reused.hydrated;
+            ctx.retentionSnapshotId = reused.snap.id;
+            snapshotId = reused.snap.id;
+            break;
+          }
+          logReuseMiss("retention", retInputHash);
+        }
         if (!retGate.isReady) {
           console.log(`[Orchestrator] RETENTION_NEEDS_INPUT | missing=${retGate.missingFields.join(",")}`);
           return {
@@ -2199,6 +2558,7 @@ async function executeEngine(
             dataReliability: result.dataReliability ? JSON.stringify(result.dataReliability) : null,
             confidenceScore: result.confidenceScore || null,
             executionTimeMs: result.executionTimeMs || null,
+            inputHash: retInputHash,
           }).returning();
           snapshotId = retSnap.id;
           ctx.retentionSnapshotId = retSnap.id;
@@ -2369,7 +2729,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   const startTime = Date.now();
 
   let jobId: string;
-  let ctx: EngineContext = {};
+  let ctx: EngineContext = { inputHashes: {} };
   let previousSectionStatuses: any[] = [];
 
   ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
@@ -2386,6 +2746,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     if (pausedJob?.pausedContext) {
       try {
         ctx = JSON.parse(pausedJob.pausedContext);
+        if (!ctx.inputHashes) {
+          ctx.inputHashes = {};
+          console.log(`[Orchestrator] INPUT_HASHES_RESTORED_EMPTY | job=${jobId} | reason=paused_context_missing_inputHashes`);
+        }
         if (!ctx.ssc) {
           ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
           console.log(`[Orchestrator] SSC_RESTORED_EMPTY | job=${jobId} | reason=paused_context_missing_ssc`);
