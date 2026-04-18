@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { db } from "../db";
 import { strategyRoots, offerSnapshots, funnelSnapshots, integritySnapshots } from "@shared/schema";
-import { eq, and, desc, ne } from "drizzle-orm";
+import { eq, and, desc, ne, sql } from "drizzle-orm";
 
 export interface StrategyRootInput {
   campaignId: string;
@@ -116,55 +116,91 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
   const rootHash = computeRootHash(input);
   const runId = generateRunId();
 
-  const [existing] = await db.select().from(strategyRoots)
-    .where(and(
-      eq(strategyRoots.campaignId, input.campaignId),
-      eq(strategyRoots.accountId, input.accountId),
-      eq(strategyRoots.rootHash, rootHash),
-      eq(strategyRoots.status, "ACTIVE"),
-    ))
-    .limit(1);
+  // ---------------------------------------------------------------
+  // ATOMIC SUPERSEDE + INSERT
+  // The previous implementation ran SELECT → UPDATE → INSERT in three
+  // separate statements. Concurrent calls (parallel orchestrator runs
+  // for the same campaign, mechanism-engine + orchestrator racing, or
+  // dual-analysis re-runs) could leave 0 or 2+ ACTIVE rows. We now
+  // serialize through a transaction with row-level locks (FOR UPDATE)
+  // and a uniqueness invariant verified before commit.
+  // ---------------------------------------------------------------
+  return await db.transaction(async (tx: any) => {
+    // Lock all rows for this (campaign, account) so concurrent transactions
+    // serialize on this campaign — postgres holds the locks until commit.
+    await tx.execute(sql`
+      SELECT id FROM strategy_roots
+       WHERE campaign_id = ${input.campaignId}
+         AND account_id  = ${input.accountId}
+       FOR UPDATE
+    `);
 
-  if (existing) {
-    console.log(`[StrategyRoot] REUSE | existing root ${existing.id} | hash=${rootHash} | campaign=${input.campaignId}`);
-    return { id: existing.id, runId: existing.runId, rootHash, isNew: false };
-  }
+    // Idempotent reuse: same hash already ACTIVE → return it, do nothing else.
+    const [existing] = await tx.select().from(strategyRoots)
+      .where(and(
+        eq(strategyRoots.campaignId, input.campaignId),
+        eq(strategyRoots.accountId, input.accountId),
+        eq(strategyRoots.rootHash, rootHash),
+        eq(strategyRoots.status, "ACTIVE"),
+      ))
+      .limit(1);
 
-  await db.update(strategyRoots)
-    .set({ status: "SUPERSEDED" })
-    .where(and(
-      eq(strategyRoots.campaignId, input.campaignId),
-      eq(strategyRoots.accountId, input.accountId),
-      eq(strategyRoots.status, "ACTIVE"),
-    ));
+    if (existing) {
+      console.log(`[StrategyRoot] REUSE | existing root ${existing.id} | hash=${rootHash} | campaign=${input.campaignId}`);
+      return { id: existing.id, runId: existing.runId, rootHash, isNew: false };
+    }
 
-  const [created] = await db.insert(strategyRoots).values({
-    accountId: input.accountId,
-    campaignId: input.campaignId,
-    runId,
-    rootHash,
-    primaryAxis: input.primaryAxis,
-    contrastAxisText: input.contrastAxisText,
-    approvedMechanism: JSON.stringify(input.approvedMechanism),
-    approvedAudiencePains: JSON.stringify(input.approvedAudiencePains),
-    approvedDesires: JSON.stringify(input.approvedDesires),
-    approvedTransformation: input.approvedTransformation,
-    approvedClaim: input.approvedClaim,
-    approvedClaims: JSON.stringify(input.approvedClaims || []),
-    approvedPromise: input.approvedPromise,
-    approvedObjections: JSON.stringify(input.approvedObjections),
-    approvedProofTypes: JSON.stringify(input.approvedProofTypes),
-    approvedPositioningContext: JSON.stringify(input.approvedPositioningContext),
-    miSnapshotId: input.miSnapshotId,
-    audienceSnapshotId: input.audienceSnapshotId,
-    positioningSnapshotId: input.positioningSnapshotId,
-    differentiationSnapshotId: input.differentiationSnapshotId,
-    mechanismSnapshotId: input.mechanismSnapshotId,
-    status: "ACTIVE",
-  }).returning();
+    // Supersede any existing ACTIVE roots for this (campaign, account).
+    await tx.update(strategyRoots)
+      .set({ status: "SUPERSEDED" })
+      .where(and(
+        eq(strategyRoots.campaignId, input.campaignId),
+        eq(strategyRoots.accountId, input.accountId),
+        eq(strategyRoots.status, "ACTIVE"),
+      ));
 
-  console.log(`[StrategyRoot] CREATED | id=${created.id} | hash=${rootHash} | runId=${runId} | campaign=${input.campaignId}`);
-  return { id: created.id, runId, rootHash, isNew: true };
+    const [created] = await tx.insert(strategyRoots).values({
+      accountId: input.accountId,
+      campaignId: input.campaignId,
+      runId,
+      rootHash,
+      primaryAxis: input.primaryAxis,
+      contrastAxisText: input.contrastAxisText,
+      approvedMechanism: JSON.stringify(input.approvedMechanism),
+      approvedAudiencePains: JSON.stringify(input.approvedAudiencePains),
+      approvedDesires: JSON.stringify(input.approvedDesires),
+      approvedTransformation: input.approvedTransformation,
+      approvedClaim: input.approvedClaim,
+      approvedClaims: JSON.stringify(input.approvedClaims || []),
+      approvedPromise: input.approvedPromise,
+      approvedObjections: JSON.stringify(input.approvedObjections),
+      approvedProofTypes: JSON.stringify(input.approvedProofTypes),
+      approvedPositioningContext: JSON.stringify(input.approvedPositioningContext),
+      miSnapshotId: input.miSnapshotId,
+      audienceSnapshotId: input.audienceSnapshotId,
+      positioningSnapshotId: input.positioningSnapshotId,
+      differentiationSnapshotId: input.differentiationSnapshotId,
+      mechanismSnapshotId: input.mechanismSnapshotId,
+      status: "ACTIVE",
+    }).returning();
+
+    // Invariant guard: exactly one ACTIVE row for (campaign, account) post-commit.
+    const activeRows = await tx.select({ id: strategyRoots.id }).from(strategyRoots)
+      .where(and(
+        eq(strategyRoots.campaignId, input.campaignId),
+        eq(strategyRoots.accountId, input.accountId),
+        eq(strategyRoots.status, "ACTIVE"),
+      ));
+    if (activeRows.length !== 1) {
+      // Throwing inside the transaction triggers a rollback — no degraded state persists.
+      throw new Error(
+        `[StrategyRoot] INVARIANT_VIOLATION | expected exactly 1 ACTIVE row, found ${activeRows.length} | campaign=${input.campaignId}`
+      );
+    }
+
+    console.log(`[StrategyRoot] CREATED | id=${created.id} | hash=${rootHash} | runId=${runId} | campaign=${input.campaignId}`);
+    return { id: created.id, runId, rootHash, isNew: true };
+  });
 }
 
 export async function getActiveRoot(campaignId: string, accountId: string = "default"): Promise<any | null> {

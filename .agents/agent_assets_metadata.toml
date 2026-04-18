@@ -143,3 +143,9 @@ id = "fkeWW7-XomPSaw-JTdXzA"
 uri = "file://.local/validation/STRATEGY_ROOT_INCOMPLETE_DIAGNOSIS.md"
 type = "text"
 title = "STRATEGY_ROOT_INCOMPLETE — Root-Cause Diagnosis"
+
+[[outputs]]
+id = "bRETsr0S4-1WQyPlGSo9I"
+uri = "file://.local/validation/PRE_LAUNCH_AUDIT.md"
+type = "text"
+title = "Pre-Launch System Audit Report"
