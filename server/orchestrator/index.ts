@@ -420,19 +420,42 @@ function extractAudienceInput(audienceResult: any): any {
     awarenessLevel = rawAwareness.level;
   }
   const painProfiles = audienceResult.painProfiles || audienceResult.painMap || audienceResult.audiencePains || [];
+
+  // CONTRACT NOTE (text-policy):
+  // Synthetic indexed keys (objection_N / desire_N) are RESERVED for internal
+  // map indexing and audit lineage only. They MUST NOT leak into display
+  // fields. Each value object now carries an explicit `label` (human text)
+  // and `id` (synthetic key). Downstream display code must read `.label`,
+  // never the map key.
   const rawObjections = audienceResult.objectionMap ?? {};
   const objectionMapObject: Record<string, any> = Array.isArray(rawObjections)
     ? rawObjections.reduce((acc: Record<string, any>, item: any, idx: number) => {
-        const key = typeof item === "string" ? item : (item?.objection || item?.name || item?.key || `objection_${idx}`);
-        acc[key] = item;
+        const labelCandidate = typeof item === "string"
+          ? item
+          : (item?.label || item?.objection || item?.text || item?.name || null);
+        const id = typeof item === "string"
+          ? item
+          : (item?.key || `objection_${idx}`);
+        const value = typeof item === "object" && item !== null
+          ? { ...item, id, label: labelCandidate }
+          : { id, label: labelCandidate, raw: item };
+        acc[id] = value;
         return acc;
       }, {})
     : (rawObjections && typeof rawObjections === "object" ? rawObjections : {});
   const rawDesire = audienceResult.desireMap ?? {};
   const desireMapObject: Record<string, any> = Array.isArray(rawDesire)
     ? rawDesire.reduce((acc: Record<string, any>, item: any, idx: number) => {
-        const key = typeof item === "string" ? item : (item?.desire || item?.name || item?.key || `desire_${idx}`);
-        acc[key] = item;
+        const labelCandidate = typeof item === "string"
+          ? item
+          : (item?.label || item?.desire || item?.text || item?.name || null);
+        const id = typeof item === "string"
+          ? item
+          : (item?.key || `desire_${idx}`);
+        const value = typeof item === "object" && item !== null
+          ? { ...item, id, label: labelCandidate }
+          : { id, label: labelCandidate, raw: item };
+        acc[id] = value;
         return acc;
       }, {})
     : (rawDesire && typeof rawDesire === "object" ? rawDesire : {});

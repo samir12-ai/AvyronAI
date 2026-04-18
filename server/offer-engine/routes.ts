@@ -3,6 +3,7 @@ import { db } from "../db";
 import { offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots, mechanismSnapshots } from "@shared/schema";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { runOfferEngine } from "./engine";
+import { normalizeOfferResult } from "./normalize";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
@@ -304,10 +305,14 @@ export function registerOfferEngineRoutes(app: Express) {
 
       await pruneOldSnapshots(db, offerSnapshots, campaignId, 20, accountId);
 
+      const normalized = normalizeOfferResult(result);
+      if (normalized.lineage.contractViolations.length > 0) {
+        console.log(`[OfferEngine] BOUNDARY_NORMALIZE | violations=${normalized.lineage.contractViolations.length} | grounding=${normalized.lineage.groundingRefs.length}`);
+      }
       res.json({
         success: true,
         snapshotId: saved.id,
-        ...result,
+        ...normalized,
         freshnessMetadata: miFreshnessMetadata,
       });
     } catch (error: any) {
@@ -350,6 +355,16 @@ export function registerOfferEngineRoutes(app: Express) {
         rootSyncStatus = latest.strategyRootId === activeRoot.id ? "synced" : "stale";
       }
 
+      // Normalize stored offer payload at the boundary so any historical
+      // tokens/synthetic keys are stripped before they reach the frontend.
+      const storedNormalized = normalizeOfferResult({
+        primaryOffer: safeJsonParse(latest.primaryOffer),
+        alternativeOffer: safeJsonParse(latest.alternativeOffer),
+        rejectedOffer: safeJsonParse(latest.rejectedOffer),
+        statusMessage: latest.statusMessage,
+        layerDiagnostics: safeJsonParse(latest.layerDiagnostics),
+      });
+
       res.json({
         exists: true,
         runId: __resolved.runId,
@@ -359,11 +374,11 @@ export function registerOfferEngineRoutes(app: Express) {
         id: latest.id,
         campaignId: latest.campaignId,
         status: latest.status,
-        statusMessage: latest.statusMessage,
+        statusMessage: storedNormalized.statusMessage ?? latest.statusMessage,
         engineVersion: latest.engineVersion,
-        primaryOffer: safeJsonParse(latest.primaryOffer),
-        alternativeOffer: safeJsonParse(latest.alternativeOffer),
-        rejectedOffer: safeJsonParse(latest.rejectedOffer),
+        primaryOffer: storedNormalized.primaryOffer,
+        alternativeOffer: storedNormalized.alternativeOffer,
+        rejectedOffer: storedNormalized.rejectedOffer,
         offerStrengthScore: latest.offerStrengthScore,
         positioningConsistency: safeJsonParse(latest.positioningConsistency),
         hookMechanismAlignment: safeJsonParse(latest.hookMechanismAlignment),
@@ -371,7 +386,8 @@ export function registerOfferEngineRoutes(app: Express) {
         confidenceScore: latest.confidenceScore,
         selectedOption: latest.selectedOption,
         structuralWarnings: safeJsonParse(latest.structuralWarnings),
-        layerDiagnostics: safeJsonParse(latest.layerDiagnostics),
+        layerDiagnostics: storedNormalized.layerDiagnostics,
+        lineage: storedNormalized.lineage,
         mechanismSnapshotId: latest.mechanismSnapshotId,
         strategyRootId: latest.strategyRootId,
         executionTimeMs: latest.executionTimeMs,

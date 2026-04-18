@@ -1,4 +1,172 @@
 import { aiChat } from "../ai-client";
+import {
+  coerceToLabel,
+  coerceLabelArray,
+  stripInternalTokens,
+  isHumanReadable,
+} from "../shared/text-policy";
+
+// Contract violations recorded during a single offer build. Surfaced via
+// layerDiagnostics.contractViolations so the normalizer/CI can fail fast.
+type OfferContractViolation = { field: string; reason: string; raw?: unknown };
+const __offerContractViolations: OfferContractViolation[] = [];
+function recordContractViolation(field: string, reason: string, raw?: unknown) {
+  __offerContractViolations.push({ field, reason, raw });
+}
+function drainContractViolations(): OfferContractViolation[] {
+  const out = __offerContractViolations.slice();
+  __offerContractViolations.length = 0;
+  return out;
+}
+
+/**
+ * Strict claim → human label.
+ * Replaces the legacy `String(x)` fallback pattern. Returns null on miss
+ * and records a contract violation; callers must decide what to do.
+ */
+function safeLabel(value: unknown, fieldPath: string): string | null {
+  const label = coerceToLabel(value);
+  if (label) return label;
+  recordContractViolation(fieldPath, "uncoercible_value", value);
+  return null;
+}
+
+function safeLabelArray(arr: unknown, fieldPath: string): string[] {
+  return coerceLabelArray(arr, (reason, raw) =>
+    recordContractViolation(`${fieldPath}.${reason}`, "array_item_uncoercible", raw),
+  );
+}
+
+/**
+ * Build a structured digest of approved claims, used by the offer builders to
+ * derive problem / outcome / proof / objection text from the claim itself
+ * (closing the Claim → Offer translation gap).
+ */
+interface ClaimDigest {
+  benefit: string | null;
+  contrast: string | null;
+  rootCause: string | null;
+  barrierResolved: string | null;
+  proofRefs: string[];
+  objectionRefs: string[];
+  raw: string | null;
+}
+function buildClaimDigest(claim: any): ClaimDigest {
+  if (!claim || typeof claim !== "object") {
+    const asText = safeLabel(claim, "claim.raw");
+    return {
+      benefit: asText,
+      contrast: null,
+      rootCause: null,
+      barrierResolved: null,
+      proofRefs: [],
+      objectionRefs: [],
+      raw: asText,
+    };
+  }
+  const benefit =
+    safeLabel(claim.benefit, "claim.benefit") ||
+    safeLabel(claim.outcome, "claim.outcome") ||
+    safeLabel(claim.promise, "claim.promise") ||
+    safeLabel(claim.claim, "claim.claim");
+  const contrast =
+    safeLabel(claim.contrast, "claim.contrast") ||
+    safeLabel(claim.contrastFraming, "claim.contrastFraming") ||
+    safeLabel(claim.vsStatusQuo, "claim.vsStatusQuo");
+  const rootCause = safeLabel(claim.rootCauseUsed, "claim.rootCauseUsed") ||
+    safeLabel(claim.rootCause, "claim.rootCause");
+  const barrierResolved = safeLabel(claim.barrierResolved, "claim.barrierResolved") ||
+    safeLabel(claim.barrier, "claim.barrier");
+  const proofRefs = safeLabelArray(
+    claim.proofRefs || claim.proof || claim.evidence || [],
+    "claim.proofRefs",
+  );
+  const objectionRefs = safeLabelArray(
+    claim.objectionRefs || claim.objectionsAddressed || [],
+    "claim.objectionRefs",
+  );
+  return {
+    benefit,
+    contrast,
+    rootCause,
+    barrierResolved,
+    proofRefs,
+    objectionRefs,
+    raw: safeLabel(claim.claim, "claim.claim") || benefit,
+  };
+}
+
+/**
+ * Validator-constrained hook builder. NOT a free-generation step.
+ *  - Source MUST be a claim digest (no claim → fallback).
+ *  - Output MUST contain a benefit verb + a benefit noun.
+ *  - Output MUST NOT contain internal tokens, axis underscores, or be
+ *    the bare "axis: …" prefix shape.
+ *  - Output MUST be ≤ 90 chars.
+ * Returns null when the claim cannot satisfy the validator — the caller
+ * uses an explicit fallback marker instead of synthesizing freely.
+ */
+const HOOK_BENEFIT_VERBS = [
+  "eliminate", "remove", "cut", "stop", "end", "prevent",
+  "deliver", "achieve", "unlock", "build", "grow", "scale",
+  "reach", "close", "convert", "win", "drive", "reduce",
+  "shorten", "compress", "double", "triple", "replace", "automate",
+];
+function hookValidator(candidate: string): { ok: boolean; reason?: string } {
+  if (!candidate) return { ok: false, reason: "empty" };
+  if (candidate.length > 90) return { ok: false, reason: "too_long" };
+  if (/\[(RC|BB|CC|[A-Z]{2,3})\d+\]/.test(candidate)) return { ok: false, reason: "internal_token" };
+  if (/\b(objection|desire|pain|claim|barrier)_\d+\b/i.test(candidate)) return { ok: false, reason: "synthetic_key" };
+  if (/_/.test(candidate)) return { ok: false, reason: "axis_underscore" };
+  if (/^[a-z][a-z\s]+:\s*$/i.test(candidate)) return { ok: false, reason: "axis_prefix_only" };
+  const lower = candidate.toLowerCase();
+  const hasVerb = HOOK_BENEFIT_VERBS.some((v) => new RegExp(`\\b${v}`, "i").test(lower));
+  if (!hasVerb) return { ok: false, reason: "no_benefit_verb" };
+  return { ok: true };
+}
+function buildClaimHook(
+  digest: ClaimDigest,
+  pain: string | null,
+  desire: string | null,
+): string | null {
+  // Deterministic candidates derived strictly from the claim digest.
+  const verbForPain = "Eliminate";
+  const verbForDesire = "Deliver";
+  const candidates: string[] = [];
+  if (digest.benefit && pain) {
+    candidates.push(`${verbForPain} ${pain} — ${digest.benefit}`);
+  }
+  if (digest.benefit && desire) {
+    candidates.push(`${verbForDesire} ${desire} — ${digest.benefit}`);
+  }
+  if (digest.benefit) {
+    candidates.push(digest.benefit);
+  }
+  if (digest.raw) {
+    candidates.push(digest.raw);
+  }
+  for (const raw of candidates) {
+    const cleaned = stripInternalTokens(raw) || "";
+    const trimmed = cleaned.length > 90 ? cleaned.slice(0, 87).replace(/[\s,;:.\-—]+$/, "") + "…" : cleaned;
+    const v = hookValidator(trimmed);
+    if (v.ok) return trimmed;
+    recordContractViolation("hook.candidate_rejected", v.reason || "invalid", raw);
+  }
+  return null;
+}
+
+/**
+ * Cascade fallback: walk a list of candidates, return the first that
+ * survives stripping + isHumanReadable. Returns null if all empty (caller
+ * decides whether to use a degraded marker).
+ */
+function cascade(...candidates: unknown[]): string | null {
+  for (const c of candidates) {
+    const label = coerceToLabel(c);
+    if (label) return label;
+  }
+  return null;
+}
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import {
   buildCausalDirectiveForPrompt,
@@ -1373,7 +1541,13 @@ function buildDeterministicOfferSkeletons(
   const rootAxis = (strategyRoot?.primaryAxis || "").replace(/_/g, " ");
   const rootContrastText = strategyRoot?.contrastAxisText || "";
   const rawTransformation = strategyRoot?.approvedTransformation || "";
-  const rootTransformation = typeof rawTransformation === "object" ? (rawTransformation?.text || rawTransformation?.label || rawTransformation?.name || JSON.stringify(rawTransformation)) : rawTransformation;
+  // Strict coercion: never JSON.stringify an object into a user-facing field.
+  // If the transformation cannot be coerced to a label, treat as missing and
+  // record a contract violation; downstream cascades supply a degraded marker.
+  const rootTransformation: string =
+    typeof rawTransformation === "string"
+      ? rawTransformation
+      : (safeLabel(rawTransformation, "skeleton.rootTransformation") || "");
   const rootClaimsRaw = strategyRoot?.approvedClaims ? (typeof strategyRoot.approvedClaims === "string" ? safeJsonParse(strategyRoot.approvedClaims) : strategyRoot.approvedClaims) : null;
   const rootClaimsList: any[] = Array.isArray(rootClaimsRaw) ? rootClaimsRaw : [];
   const topClaimText = rootClaimsList[0]?.claim || "";
@@ -1383,122 +1557,171 @@ function buildDeterministicOfferSkeletons(
   const rootMechName = rootMech?.mechanismName || "";
   const rootMechSteps: string[] = rootMech?.mechanismSteps || [];
 
-  const painsList: string[] = [];
-  if (rootPains && Array.isArray(rootPains)) {
-    for (const p of rootPains.slice(0, 5)) {
-      painsList.push(typeof p === "string" ? p : p?.pain || p?.name || String(p));
+  // STRICT label coercion (no String(obj) fallback). Items that cannot be
+  // coerced to a human-readable string are dropped and recorded as contract
+  // violations in layerDiagnostics.
+  const painsList: string[] = (() => {
+    if (rootPains && Array.isArray(rootPains)) {
+      const arr = safeLabelArray(rootPains.slice(0, 5), "skeleton.painsList.root");
+      if (arr.length > 0) return arr;
     }
-  }
-  if (painsList.length === 0) {
-    for (const p of (audience.audiencePains || []).slice(0, 5)) {
-      painsList.push(typeof p === "string" ? p : (p as any)?.pain || (p as any)?.name || String(p));
-    }
-  }
+    return safeLabelArray((audience.audiencePains || []).slice(0, 5), "skeleton.painsList.audience");
+  })();
 
-  const desiresList: string[] = [];
-  if (rootDesires) {
-    if (Array.isArray(rootDesires)) {
-      for (const d of rootDesires.slice(0, 5)) {
-        desiresList.push(typeof d === "string" ? d : d?.desire || d?.label || d?.name || String(d));
+  const desiresList: string[] = (() => {
+    if (rootDesires) {
+      if (Array.isArray(rootDesires)) {
+        const arr = safeLabelArray(rootDesires.slice(0, 5), "skeleton.desiresList.root");
+        if (arr.length > 0) return arr;
+      } else if (typeof rootDesires === "object") {
+        const arr = safeLabelArray(Object.values(rootDesires).slice(0, 5), "skeleton.desiresList.rootMap");
+        if (arr.length > 0) return arr;
       }
-    } else if (typeof rootDesires === "object") {
-      desiresList.push(...Object.keys(rootDesires).slice(0, 5));
     }
-  }
-  if (desiresList.length === 0) {
     const dm = audience.desireMap || {};
     if (Array.isArray(dm)) {
-      for (const d of dm.slice(0, 5)) {
-        desiresList.push(typeof d === "string" ? d : d?.desire || d?.label || d?.name || String(d));
-      }
-    } else {
-      desiresList.push(...Object.keys(dm).slice(0, 5));
+      return safeLabelArray(dm.slice(0, 5), "skeleton.desiresList.audience");
     }
-  }
+    // Each value carries an explicit `.label` — take values, never keys.
+    return safeLabelArray(Object.values(dm).slice(0, 5), "skeleton.desiresList.audienceMap");
+  })();
 
-  const objectionsList: string[] = [];
-  if (rootObjections) {
-    if (Array.isArray(rootObjections)) {
-      for (const o of rootObjections.slice(0, 5)) {
-        objectionsList.push(typeof o === "string" ? o : o?.objection || o?.label || o?.name || String(o));
+  const objectionsList: string[] = (() => {
+    if (rootObjections) {
+      if (Array.isArray(rootObjections)) {
+        const arr = safeLabelArray(rootObjections.slice(0, 5), "skeleton.objectionsList.root");
+        if (arr.length > 0) return arr;
+      } else if (typeof rootObjections === "object") {
+        const arr = safeLabelArray(Object.values(rootObjections).slice(0, 5), "skeleton.objectionsList.rootMap");
+        if (arr.length > 0) return arr;
       }
-    } else if (typeof rootObjections === "object") {
-      objectionsList.push(...Object.keys(rootObjections).slice(0, 5));
     }
-  }
-  if (objectionsList.length === 0) {
     const om = audience.objectionMap || {};
     if (Array.isArray(om)) {
-      for (const o of om.slice(0, 5)) {
-        objectionsList.push(typeof o === "string" ? o : o?.objection || o?.label || o?.name || String(o));
-      }
-    } else {
-      objectionsList.push(...Object.keys(om).slice(0, 5));
+      return safeLabelArray(om.slice(0, 5), "skeleton.objectionsList.audience");
     }
-  }
+    return safeLabelArray(Object.values(om).slice(0, 5), "skeleton.objectionsList.audienceMap");
+  })();
 
-  const proofTypesList: string[] = [];
-  if (rootProofTypes && Array.isArray(rootProofTypes)) {
-    for (const p of rootProofTypes.slice(0, 6)) {
-      proofTypesList.push(typeof p === "string" ? p : p?.type || p?.name || String(p));
+  const proofTypesList: string[] = (() => {
+    if (rootProofTypes && Array.isArray(rootProofTypes)) {
+      const arr = safeLabelArray(rootProofTypes.slice(0, 6), "skeleton.proofTypesList.root");
+      if (arr.length > 0) return arr;
     }
-  }
-  if (proofTypesList.length === 0) {
-    for (const p of (differentiation.proofArchitecture || []).slice(0, 6)) {
-      proofTypesList.push(typeof p === "string" ? p : p?.type || p?.name || String(p));
-    }
-  }
+    return safeLabelArray((differentiation.proofArchitecture || []).slice(0, 6), "skeleton.proofTypesList.diff");
+  })();
 
-  const primaryPain = painsList[0] || "unresolved challenge";
-  const altPain = painsList[1] || painsList[0] || "persistent friction";
-  const primaryDesire = desiresList[0] || "measurable improvement";
-  const altDesire = desiresList[1] || desiresList[0] || "tangible results";
+  const primaryPain = painsList[0] || null;
+  const altPain = painsList[1] || painsList[0] || null;
+  const primaryDesire = desiresList[0] || null;
+  const altDesire = desiresList[1] || desiresList[0] || null;
 
   const axisPhrase = rootAxis || "strategic alignment";
 
-  const primaryHook = rootClaim
-    ? `${axisPhrase}: ${rootClaim.substring(0, 80)}`
-    : `${axisPhrase} — Eliminate ${primaryPain}`;
+  // Claim digests — primary builders consume the structured claim, not just
+  // the .claim text. This closes the Claim → Offer translation gap.
+  const primaryClaimDigest = buildClaimDigest(rootClaimsList[0] ?? rootClaim);
+  const altClaimDigest = buildClaimDigest(rootClaimsList[1] ?? altClaimText ?? rootPromise);
 
-  const altHookSource = altClaimText || (rootPromise && rootPromise !== rootClaim ? rootPromise : "");
-  const altHook = altHookSource
-    ? `${axisPhrase}: ${altHookSource.substring(0, 80)}`
-    : `${axisPhrase} — Achieve ${primaryDesire}`;
+  // Hook construction — claim-derived, validator-constrained. Returns null
+  // when the claim cannot satisfy the validator; we use an explicit cascade
+  // fallback rather than a free-form template.
+  const primaryHook = buildClaimHook(primaryClaimDigest, primaryPain, primaryDesire)
+    || cascade(rootPromise, primaryPain ? `Eliminate ${primaryPain}` : null, primaryDesire ? `Achieve ${primaryDesire}` : null)
+    || `${axisPhrase} offer`;
+  const altHook = buildClaimHook(altClaimDigest, altPain, altDesire)
+    || cascade(altClaimText, primaryDesire ? `Deliver ${primaryDesire}` : null, altPain ? `Resolve ${altPain}` : null)
+    || `${axisPhrase} alternative`;
 
-  const primaryProblem = `${primaryPain} — preventing ${primaryDesire} and blocking ${rootTransformation || "meaningful progress"}`;
-  const altProblem = `${altPain} — creating friction toward ${altDesire}`;
+  // Problem statement — claim digest first, then pain context. No template
+  // when neither is available (use degraded marker).
+  const primaryProblem = (() => {
+    const claimSide = primaryClaimDigest.rootCause || primaryClaimDigest.contrast;
+    if (claimSide && primaryPain) return `${primaryPain} — root cause: ${claimSide}`;
+    if (claimSide) return claimSide;
+    if (primaryPain && primaryDesire) return `${primaryPain} — preventing ${primaryDesire}`;
+    if (primaryPain) return primaryPain;
+    return null;
+  })();
+  const altProblem = (() => {
+    const claimSide = altClaimDigest.rootCause || altClaimDigest.contrast;
+    if (claimSide && altPain) return `${altPain} — root cause: ${claimSide}`;
+    if (claimSide) return claimSide;
+    if (altPain && altDesire) return `${altPain} — friction toward ${altDesire}`;
+    if (altPain) return altPain;
+    return null;
+  })();
 
-  const primaryOutcome = rootTransformation
-    ? `${rootTransformation.substring(0, 100)} — addressing ${primaryPain} and delivering ${primaryDesire}`
-    : `Eliminate ${primaryPain} and achieve ${primaryDesire} through ${axisPhrase}`;
+  // Outcome cascade: claim.benefit → mechanism.promise → root transformation
+  // → pain+desire composition. NEVER the legacy "Eliminate X and achieve Y"
+  // template when richer data is present.
+  const mechPromise = safeLabel(rootMech?.mechanismPromise, "skeleton.mechanism.promise");
+  const mechLogic = safeLabel(rootMech?.mechanismLogic, "skeleton.mechanism.logic");
+  const primaryOutcome = cascade(
+    primaryClaimDigest.benefit,
+    rootTransformation,
+    mechPromise,
+    primaryDesire && primaryPain ? `Move from ${primaryPain} to ${primaryDesire}` : null,
+    primaryDesire,
+  ) || `${axisPhrase} outcome (degraded — upstream data missing)`;
+  const altOutcome = cascade(
+    altClaimDigest.benefit,
+    mechPromise,
+    altDesire && altPain ? `Move from ${altPain} to ${altDesire}` : null,
+    altDesire,
+  ) || `${axisPhrase} alternative outcome (degraded — upstream data missing)`;
 
-  const altOutcome = `Resolve ${altPain} and deliver ${altDesire} through ${axisPhrase}`;
+  // Mechanism description — prefer named mechanism + steps; fall back to
+  // mechanismLogic; never to bare axisPhrase concatenation.
+  const mechDesc = (() => {
+    const cleanSteps = safeLabelArray(rootMechSteps.slice(0, 4), "skeleton.mechSteps");
+    if (rootMechName && cleanSteps.length > 0) {
+      return `The ${rootMechName} delivers this through: ${cleanSteps.join(", ")}`;
+    }
+    if (rootMechName) return `The ${rootMechName} mechanism`;
+    if (mechLogic) return mechLogic;
+    return `Structured delivery system using ${axisPhrase} (degraded — mechanism missing)`;
+  })();
 
-  const mechDesc = rootMechName
-    ? `The ${rootMechName} delivers this through: ${rootMechSteps.slice(0, 4).join(", ") || "structured implementation"}`
-    : `Structured delivery system using ${axisPhrase}`;
+  const deliverables = (() => {
+    const fromRoot = safeLabelArray(rootMechSteps, "skeleton.deliverables.root");
+    if (fromRoot.length > 0) return fromRoot.slice(0, 6);
+    const fromCore = safeLabelArray(differentiation.mechanismCore?.mechanismSteps || [], "skeleton.deliverables.core");
+    return fromCore.slice(0, 6);
+  })();
 
-  const deliverables = rootMechSteps.length > 0
-    ? rootMechSteps.slice(0, 6)
-    : (differentiation.mechanismCore?.mechanismSteps || []).slice(0, 6);
+  // Proof path cascade — claim.proofRefs → approved proof types →
+  // proofArchitecture → degraded marker (NOT "process_proof").
+  const proofPath = (() => {
+    if (primaryClaimDigest.proofRefs.length > 0) return primaryClaimDigest.proofRefs;
+    if (proofTypesList.length > 0) return proofTypesList;
+    return [];
+  })();
 
-  const proofPath = proofTypesList.length > 0
-    ? proofTypesList
-    : ["process_proof"];
-
-  const objectionHandling = objectionsList.length > 0
-    ? objectionsList.map(obj => `Addresses: ${obj}`)
-    : ["Friction handling through mechanism demonstration"];
+  // Objection handling cascade — claim.objectionRefs → audience objection
+  // labels → degraded marker. Each label rendered as a clean handling line.
+  const objectionHandling = (() => {
+    const claimSide = primaryClaimDigest.objectionRefs;
+    const audienceSide = objectionsList;
+    const merged = Array.from(new Set([...claimSide, ...audienceSide]));
+    if (merged.length > 0) return merged.map((obj) => `Addresses: ${obj}`);
+    return [];
+  })();
 
   const sourceContext: OfferSourceContext = {
     selectedAxis: axisPhrase,
-    selectedPain: primaryPain,
-    selectedDesire: primaryDesire,
+    selectedPain: primaryPain ?? "unresolved challenge",
+    selectedDesire: primaryDesire ?? "measurable improvement",
     selectedMechanism: rootMechName || "direct mechanism",
     selectedTransformation: rootTransformation || primaryOutcome,
     selectedProofTypes: proofPath,
     selectedObjections: objectionsList,
   };
+
+  // Degraded markers if claim digest produced nothing — never silently
+  // emit an empty string and never hide the degradation in a polished line.
+  const PRIMARY_PROBLEM_DEGRADED = "Problem statement unavailable (degraded — upstream claim/pain missing)";
+  const ALT_PROBLEM_DEGRADED = "Problem statement unavailable (degraded — upstream claim/pain missing)";
 
   return {
     primary: {
@@ -1506,7 +1729,7 @@ function buildDeterministicOfferSkeletons(
       outcome: primaryOutcome,
       mechanism: mechDesc,
       deliverables: deliverables.length > 0 ? deliverables : ["Core implementation module"],
-      problemStatement: primaryProblem,
+      problemStatement: primaryProblem ?? PRIMARY_PROBLEM_DEGRADED,
       proofPath,
       objectionHandling,
     },
@@ -1515,7 +1738,7 @@ function buildDeterministicOfferSkeletons(
       outcome: altOutcome,
       mechanism: mechDesc,
       deliverables: deliverables.length > 0 ? deliverables : ["Alternative implementation module"],
-      problemStatement: altProblem,
+      problemStatement: altProblem ?? ALT_PROBLEM_DEGRADED,
       proofPath,
       objectionHandling,
     },
@@ -1642,31 +1865,50 @@ Return JSON:
       const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
       const parsed = JSON.parse(cleanedResponse);
 
+      // Per-field strict coercion. The model can emit anything (objects,
+      // null, arrays of objects); we validate each value rather than trusting
+      // shape and falling back wholesale.
+      const pickStr = (v: unknown, fallback: string, path: string): string => {
+        const label = coerceToLabel(v);
+        if (label) return label;
+        if (v != null) recordContractViolation(path, "ai_refinement_uncoercible", v);
+        return fallback;
+      };
+      const pickArr = (v: unknown, fallback: string[], path: string): string[] => {
+        if (!Array.isArray(v)) {
+          if (v != null) recordContractViolation(path, "ai_refinement_not_array", v);
+          return fallback;
+        }
+        const arr = coerceLabelArray(v, (reason, raw) =>
+          recordContractViolation(`${path}.${reason}`, "ai_refinement_item_uncoercible", raw),
+        );
+        return arr.length > 0 ? arr : fallback;
+      };
       const result = {
         primary: {
-          name: parsed.primary?.name || skeletons.primary.name,
-          outcome: parsed.primary?.outcome || skeletons.primary.outcome,
-          mechanism: parsed.primary?.mechanism || skeletons.primary.mechanism,
-          deliverables: Array.isArray(parsed.primary?.deliverables) ? parsed.primary.deliverables : skeletons.primary.deliverables,
-          problemStatement: parsed.primary?.problemStatement || skeletons.primary.problemStatement,
-          proofPath: Array.isArray(parsed.primary?.proofPath) ? parsed.primary.proofPath : skeletons.primary.proofPath,
-          objectionHandling: Array.isArray(parsed.primary?.objectionHandling) ? parsed.primary.objectionHandling : skeletons.primary.objectionHandling,
+          name: pickStr(parsed.primary?.name, skeletons.primary.name, "ai.primary.name"),
+          outcome: pickStr(parsed.primary?.outcome, skeletons.primary.outcome, "ai.primary.outcome"),
+          mechanism: pickStr(parsed.primary?.mechanism, skeletons.primary.mechanism, "ai.primary.mechanism"),
+          deliverables: pickArr(parsed.primary?.deliverables, skeletons.primary.deliverables, "ai.primary.deliverables"),
+          problemStatement: pickStr(parsed.primary?.problemStatement, skeletons.primary.problemStatement, "ai.primary.problemStatement"),
+          proofPath: pickArr(parsed.primary?.proofPath, skeletons.primary.proofPath, "ai.primary.proofPath"),
+          objectionHandling: pickArr(parsed.primary?.objectionHandling, skeletons.primary.objectionHandling, "ai.primary.objectionHandling"),
         },
         alternative: {
-          name: parsed.alternative?.name || skeletons.alternative.name,
-          outcome: parsed.alternative?.outcome || skeletons.alternative.outcome,
-          mechanism: parsed.alternative?.mechanism || skeletons.alternative.mechanism,
-          deliverables: Array.isArray(parsed.alternative?.deliverables) ? parsed.alternative.deliverables : skeletons.alternative.deliverables,
-          problemStatement: parsed.alternative?.problemStatement || skeletons.alternative.problemStatement,
-          proofPath: Array.isArray(parsed.alternative?.proofPath) ? parsed.alternative.proofPath : skeletons.alternative.proofPath,
-          objectionHandling: Array.isArray(parsed.alternative?.objectionHandling) ? parsed.alternative.objectionHandling : skeletons.alternative.objectionHandling,
+          name: pickStr(parsed.alternative?.name, skeletons.alternative.name, "ai.alternative.name"),
+          outcome: pickStr(parsed.alternative?.outcome, skeletons.alternative.outcome, "ai.alternative.outcome"),
+          mechanism: pickStr(parsed.alternative?.mechanism, skeletons.alternative.mechanism, "ai.alternative.mechanism"),
+          deliverables: pickArr(parsed.alternative?.deliverables, skeletons.alternative.deliverables, "ai.alternative.deliverables"),
+          problemStatement: pickStr(parsed.alternative?.problemStatement, skeletons.alternative.problemStatement, "ai.alternative.problemStatement"),
+          proofPath: pickArr(parsed.alternative?.proofPath, skeletons.alternative.proofPath, "ai.alternative.proofPath"),
+          objectionHandling: pickArr(parsed.alternative?.objectionHandling, skeletons.alternative.objectionHandling, "ai.alternative.objectionHandling"),
         },
         rejected: {
-          name: parsed.rejected?.name || skeletons.rejected.name,
-          outcome: parsed.rejected?.outcome || skeletons.rejected.outcome,
-          mechanism: parsed.rejected?.mechanism || skeletons.rejected.mechanism,
+          name: pickStr(parsed.rejected?.name, skeletons.rejected.name, "ai.rejected.name"),
+          outcome: pickStr(parsed.rejected?.outcome, skeletons.rejected.outcome, "ai.rejected.outcome"),
+          mechanism: pickStr(parsed.rejected?.mechanism, skeletons.rejected.mechanism, "ai.rejected.mechanism"),
           deliverables: [],
-          rejectionReason: parsed.rejected?.rejectionReason || skeletons.rejected.rejectionReason,
+          rejectionReason: pickStr(parsed.rejected?.rejectionReason, skeletons.rejected.rejectionReason, "ai.rejected.rejectionReason"),
         },
         sourceContext: skeletonResult.sourceContext,
       };
@@ -2695,6 +2937,11 @@ export async function runOfferEngine(
 
   console.log(`[OfferEngine-V4] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length} | grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims}${diagnostics.integrityChecks ? ` | integrity=${diagnostics.integrityChecks.integrityPassed}` : ""}`);
 
+  const contractViolations = drainContractViolations();
+  if (contractViolations.length > 0) {
+    console.log(`[OfferEngine-V4] CONTRACT_VIOLATIONS=${contractViolations.length} | sample=${contractViolations.slice(0, 3).map(v => `${v.field}:${v.reason}`).join(",")}`);
+  }
+
   return {
     status,
     statusMessage,
@@ -2709,7 +2956,7 @@ export async function runOfferEngine(
     confidenceScore,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
-    layerDiagnostics: diagnostics,
+    layerDiagnostics: { ...diagnostics, contractViolations },
     strategyAcceptability: acceptability,
     signalGrounding: {
       groundedClaims: primaryGrounding.groundedClaims,
