@@ -137,3 +137,9 @@ id = "AiVYFWambpO8_sl7itL9T"
 uri = "file://.local/engine-audit.md"
 type = "text"
 title = "Avyron AI — 15-Engine Deep Audit"
+
+[[outputs]]
+id = "fkeWW7-XomPSaw-JTdXzA"
+uri = "file://.local/validation/STRATEGY_ROOT_INCOMPLETE_DIAGNOSIS.md"
+type = "text"
+title = "STRATEGY_ROOT_INCOMPLETE — Root-Cause Diagnosis"
