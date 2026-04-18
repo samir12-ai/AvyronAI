@@ -76,7 +76,7 @@ export async function tryReuseAudience(accountId: string, campaignId: string, in
       snapshotId: snap.id,
       status: snap.status || "COMPLETE",
       languageSignals: safeParse(snap.languageSignals, {}),
-      painProfiles: safeParse(snap.audiencePains, []),
+      audiencePains: safeParse(snap.audiencePains, []),
       desireMap: safeParse(snap.desireMap, {}),
       objectionMap: safeParse(snap.objectionMap, []),
       transformationMap: safeParse(snap.transformationMap, {}),

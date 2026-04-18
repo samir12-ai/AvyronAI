@@ -23,7 +23,7 @@ function buildInputSummary(input: AELInput) {
   const miHasCompetitive = !!(mi?.dominanceData?.length > 0 || mi?.output?.competitorIntentMap?.length > 0);
   const hasMI = !!(mi && (miMarketState || (Array.isArray(miSignals) && miSignals.length > 0) || miHasNarrative || miHasCompetitive));
 
-  const hasAudience = !!(input.audience && (input.audience.painMap || input.audience.pains || input.audience.segments || input.audience.audienceSegments));
+  const hasAudience = !!(input.audience && (input.audience.audiencePains || input.audience.painMap || input.audience.pains || input.audience.segments || input.audience.audienceSegments));
   const hasProductDNA = !!(input.productDNA && (input.productDNA.coreOffer || input.productDNA.businessType));
   const hasCompetitiveData = !!(
     input.competitiveData && (
@@ -80,7 +80,8 @@ function buildContextBlock(input: AELInput): string {
   if (input.audience) {
     const aud = input.audience;
     sections.push("\n=== AUDIENCE DATA ===");
-    if (aud.painMap || aud.pains) sections.push(`Pain Data: ${JSON.stringify(aud.painMap || aud.pains).slice(0, 1200)}`);
+    const painData = aud.audiencePains || aud.painMap || aud.pains;
+    if (painData) sections.push(`Pain Data: ${JSON.stringify(painData).slice(0, 1200)}`);
     if (aud.desireMap || aud.desires) sections.push(`Desire Data: ${JSON.stringify(aud.desireMap || aud.desires).slice(0, 1000)}`);
     if (aud.objectionMap || aud.objections) sections.push(`Objection Data: ${JSON.stringify(aud.objectionMap || aud.objections).slice(0, 800)}`);
     if (aud.awarenessLevel) sections.push(`Awareness Level: ${JSON.stringify(aud.awarenessLevel)}`);

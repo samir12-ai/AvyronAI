@@ -7,7 +7,8 @@ import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
 import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
-import { buildStrategyRoot } from "../shared/strategy-root";
+import { buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
+import { assembleStrategyRootInput } from "../shared/strategy-root-assembler";
 
 import { resolveAccountId } from "../auth";
 import { resolveOrManualJobId } from "../orchestrator/job-id";
@@ -135,46 +136,29 @@ export function registerMechanismEngineRoutes(app: Express) {
       console.log(`[MechanismEngine] SAVED | snapshotId=${saved.id} | status=${result.status} | confidence=${result.confidenceScore.toFixed(2)}`);
 
       let strategyRootResult: any = null;
+      let strategyRootError: { code: string; message: string; missingFields?: string[] } | null = null;
       if (result.status === "COMPLETE" || result.status === "LOW_CONFIDENCE") {
         try {
           const miSnapshotId = activeDiffSnapshot.miSnapshotId;
           const audienceSnapshotId = activeDiffSnapshot.audienceSnapshotId;
 
-          let audiencePains: any[] = [];
-          let audienceDesires: any = {};
-          let audienceTransformation: string | null = null;
-          let audienceObjections: any = {};
-          if (audienceSnapshotId) {
-            const [audSnap] = await db.select().from(audienceSnapshots)
-              .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId)))
-              .limit(1);
-            if (audSnap) {
-              audiencePains = safeJsonParse(audSnap.audiencePains) || [];
-              audienceDesires = safeJsonParse(audSnap.desireMap) || {};
-              audienceObjections = safeJsonParse(audSnap.objectionMap) || {};
-              const segments = safeJsonParse(audSnap.audienceSegments) || [];
-              audienceTransformation = segments[0]?.transformation || null;
-            }
-          }
+          // Differentiation context: in-memory result preferred; fall back to
+          // parsed snapshot row so the assembler always sees an object shape.
+          const differentiationContext = {
+            claimStructures: differentiationInput.claimStructures,
+            proofArchitecture:
+              (differentiationInput as any).proofArchitecture ??
+              safeJsonParse(activeDiffSnapshot.proofArchitecture) ?? [],
+          };
 
-          const diffProofArchitecture = safeJsonParse(activeDiffSnapshot.proofArchitecture) || [];
-          const proofTypes = diffProofArchitecture.map((p: any) => typeof p === "string" ? p : p?.type || p?.name || String(p));
-
-          const positioningContext = {
+          const positioningSnapshotForAssembler = {
             territories: safeJsonParse(posSnapshot.territories) || [],
             enemyDefinition: posSnapshot.enemyDefinition || null,
             contrastAxis: posSnapshot.contrastAxis || null,
             narrativeDirection: posSnapshot.narrativeDirection || null,
           };
 
-          const primaryMech = result.primaryMechanism;
-          const rawClaims = (differentiationInput.claimStructures || []) as any[];
-          const sortedClaims = [...rawClaims].sort((a: any, b: any) => (b?.overallScore || 0) - (a?.overallScore || 0));
-          const topClaim = sortedClaims[0]?.claim || null;
-          const mechClaim = topClaim || primaryMech?.mechanismPromise || null;
-          console.log(`[MechanismEngine] STRATEGY_ROOT_CLAIMS | claimsCount=${sortedClaims.length} | topClaim="${(topClaim || "").substring(0, 80)}" | mechPromise="${(primaryMech?.mechanismPromise || "").substring(0, 80)}"`);
-
-          strategyRootResult = await buildStrategyRoot({
+          const rootInput = await assembleStrategyRootInput({
             campaignId,
             accountId,
             miSnapshotId: miSnapshotId || "",
@@ -182,24 +166,41 @@ export function registerMechanismEngineRoutes(app: Express) {
             positioningSnapshotId,
             differentiationSnapshotId: activeDiffSnapshot.id,
             mechanismSnapshotId: saved.id,
-            primaryAxis: primaryMech?.axisAlignment?.primaryAxis || posSnapshot.contrastAxis || null,
-            contrastAxisText: posSnapshot.contrastAxis || null,
-            approvedMechanism: primaryMech || null,
-            approvedAudiencePains: audiencePains,
-            approvedDesires: audienceDesires,
-            approvedTransformation: audienceTransformation,
-            approvedClaim: mechClaim,
-            approvedClaims: sortedClaims,
-            approvedPromise: primaryMech?.mechanismPromise || null,
-            approvedObjections: audienceObjections,
-            approvedProofTypes: proofTypes,
-            approvedPositioningContext: positioningContext,
+            mechanismResult: result,
+            positioningSnapshot: positioningSnapshotForAssembler,
+            differentiationContext,
           });
+
+          console.log(`[MechanismEngine] STRATEGY_ROOT_CLAIMS | claimsCount=${(rootInput.approvedClaims as any[])?.length || 0} | topClaim="${String(rootInput.approvedClaim || "").substring(0, 80)}" | painsCount=${(rootInput.approvedAudiencePains as any[])?.length || 0}`);
+
+          strategyRootResult = await buildStrategyRoot(rootInput);
 
           console.log(`[MechanismEngine] STRATEGY_ROOT | id=${strategyRootResult.id} | hash=${strategyRootResult.rootHash} | isNew=${strategyRootResult.isNew}`);
         } catch (rootErr: any) {
-          console.error(`[MechanismEngine] Strategy root creation failed (non-blocking): ${rootErr.message}`);
+          if (rootErr instanceof StrategyRootIncompleteError) {
+            strategyRootError = {
+              code: rootErr.code,
+              message: rootErr.message,
+              missingFields: rootErr.missingFields,
+            };
+            console.error(`[MechanismEngine] STRATEGY_ROOT_REJECTED | missing=${rootErr.missingFields.join(",")}`);
+          } else {
+            strategyRootError = { code: "STRATEGY_ROOT_BUILD_FAILED", message: rootErr.message };
+            console.error(`[MechanismEngine] Strategy root creation failed: ${rootErr.message}`);
+          }
         }
+      }
+
+      // If the mechanism succeeded but the strategy root could not be built,
+      // surface 422 so the caller knows offers cannot be generated. The
+      // mechanism snapshot itself remains saved (audit trail intact).
+      if (strategyRootError) {
+        return res.status(422).json({
+          success: false,
+          snapshotId: saved.id,
+          error: strategyRootError,
+          ...result,
+        });
       }
 
       res.json({

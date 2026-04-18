@@ -28,7 +28,7 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
       }
       case "audience": {
         const out = output.output || output;
-        const rawPains = out.painMap || out.painProfiles || out.audiencePains;
+        const rawPains = out.audiencePains || out.painMap || out.painProfiles;
         const painsArr = typeof rawPains === "string" ? safeParseArr(rawPains) : (Array.isArray(rawPains) ? rawPains : []);
         const pains = painsArr.length;
         const rawSegments = out.audienceSegments;

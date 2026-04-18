@@ -256,7 +256,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
 
   const audience = results.get("audience");
   if (audience?.status === "SUCCESS" && audience.output) {
-    const pains = audience.output.painProfiles?.length || 0;
+    const pains = (audience.output.audiencePains || audience.output.painProfiles)?.length || 0;
     const segments = audience.output.audienceSegments?.length || 0;
     nonMiSections.push(`[ENGINE_OUTPUT] Audience: ${pains} pain profiles, ${segments} segments identified`);
   }

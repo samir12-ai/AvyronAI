@@ -116,7 +116,8 @@ import { runPositioningEngine } from "../positioning-engine/engine";
 import { runDifferentiationEngine } from "../differentiation-engine/engine";
 import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
-import { getActiveRoot, buildStrategyRoot } from "../shared/strategy-root";
+import { getActiveRoot, buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
+import { assembleStrategyRootInput, canonicalizeAudienceShape } from "../shared/strategy-root-assembler";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
 import { runAwarenessEngine } from "../awareness-engine/engine";
@@ -419,7 +420,9 @@ function extractAudienceInput(audienceResult: any): any {
   } else if (rawAwareness != null && typeof rawAwareness === "object" && typeof rawAwareness.level === "string") {
     awarenessLevel = rawAwareness.level;
   }
-  const painProfiles = audienceResult.painProfiles || audienceResult.painMap || audienceResult.audiencePains || [];
+  // Tolerate legacy aliases at INPUT only (test fixtures still use painProfiles).
+  // The emitted canonical key below is `audiencePains` exclusively.
+  const audiencePainsCanonical = audienceResult.audiencePains || audienceResult.painMap || audienceResult.painProfiles || [];
 
   // CONTRACT NOTE (text-policy):
   // Synthetic indexed keys (objection_N / desire_N) are RESERVED for internal
@@ -461,8 +464,9 @@ function extractAudienceInput(audienceResult: any): any {
     : (rawDesire && typeof rawDesire === "object" ? rawDesire : {});
   const segments = audienceResult.audienceSegments || audienceResult.segments || [];
   return {
-    painProfiles,
-    audiencePains: painProfiles,
+    // CANONICAL: only `audiencePains` is emitted. Legacy `painProfiles` /
+    // `painMap` aliases are intentionally NOT propagated.
+    audiencePains: audiencePainsCanonical,
     desireMap: desireMapObject,
     objectionMap: objectionMapObject,
     transformationMap: audienceResult.transformationMap || [],
@@ -632,7 +636,7 @@ function buildUpstreamLineage(ctx: EngineContext): SignalLineageEntry[] {
       return item.canonical || item.text || item.pain || item.desire || item.objection
         || item.name || item.label || item.description || "";
     };
-    const pains = audienceResult.painMap || audienceResult.painProfiles || audienceResult.audiencePains || [];
+    const pains = audienceResult.audiencePains || audienceResult.painMap || audienceResult.painProfiles || [];
     for (const p of pains.slice(0, 8)) {
       const text = extractSignalText(p);
       if (text) entries.push(createSourceLineageEntry("audience", "pain", text, idx++, audOrigin));
@@ -1168,7 +1172,10 @@ async function executeEngine(
         }
         output = result;
         snapshotId = result.snapshotId;
-        ctx.audience = result;
+        // Route through canonicalizeAudienceShape so every consumer sees
+        // `audiencePains` as the single source of truth, regardless of which
+        // shape the audience engine happened to emit on this run.
+        ctx.audience = canonicalizeAudienceShape(result);
         ctx.audienceSnapshotId = result.snapshotId;
 
         if (ctx.mi && ctx.audience) {
@@ -1227,7 +1234,7 @@ async function executeEngine(
         }
 
         if (ctx.ssc && ctx.audience) {
-          const pains = ctx.audience.painProfiles || [];
+          const pains = ctx.audience.audiencePains || [];
           ctx.ssc.painMap = pains.slice(0, 10).map((p: any) => ({
             canonical: typeof p === "string" ? p : p.pain || p.name || p.label || "",
             sourceSignal: typeof p === "string" ? p : p.evidence || p.signal || "",
@@ -1542,26 +1549,22 @@ async function executeEngine(
         // pipeline blocks with NO_ACTIVE_STRATEGY_ROOT.
         if (result.status !== "DEPTH_FAILED" && ctx.mechanismSnapshotId) {
           try {
-            const audSegments = (ctx.audience?.audienceSegments || ctx.audience?.segments || []) as any[];
-            const audienceTransformation = audSegments[0]?.transformation || null;
-            const diffProofArchitecture = (ctx.differentiation?.proofArchitecture || []) as any[];
-            const proofTypes = diffProofArchitecture.map((p: any) =>
-              typeof p === "string" ? p : p?.type || p?.name || String(p)
-            );
-            const positioningContext = {
+            // Use the same shared assembler the standalone mechanism-engine
+            // route uses, so both writers produce structurally identical
+            // StrategyRootInput objects. The assembler hydrates pains from
+            // the audience snapshot when ctx.audience is missing/empty.
+            const positioningSnapshotForAssembler = {
               territories: ctx.positioning?.territories || [],
               enemyDefinition: ctx.positioning?.enemyDefinition || null,
               contrastAxis: ctx.positioning?.contrastAxis || null,
               narrativeDirection: ctx.positioning?.narrativeDirection || null,
             };
-            const primaryMech = result.primaryMechanism;
-            const rawClaims = (ctx.differentiation?.claimStructures || []) as any[];
-            const sortedClaims = [...rawClaims].sort((a: any, b: any) => (b?.overallScore || 0) - (a?.overallScore || 0));
-            const topClaim = sortedClaims[0]?.claim || null;
-            const mechClaim = topClaim || primaryMech?.mechanismPromise || null;
-            console.log(`[Orchestrator] STRATEGY_ROOT_CLAIMS | claimsCount=${sortedClaims.length} | topClaim="${(topClaim || "").substring(0, 80)}" | mechPromise="${(primaryMech?.mechanismPromise || "").substring(0, 80)}"`);
+            const differentiationContext = {
+              claimStructures: ctx.differentiation?.claimStructures || [],
+              proofArchitecture: ctx.differentiation?.proofArchitecture || [],
+            };
 
-            const rootResult = await buildStrategyRoot({
+            const rootInput = await assembleStrategyRootInput({
               campaignId: config.campaignId,
               accountId: config.accountId,
               miSnapshotId: ctx.miSnapshotId || "",
@@ -1569,23 +1572,43 @@ async function executeEngine(
               positioningSnapshotId: ctx.positioningSnapshotId || "",
               differentiationSnapshotId: ctx.differentiationSnapshotId || "",
               mechanismSnapshotId: ctx.mechanismSnapshotId,
-              primaryAxis: primaryMech?.axisAlignment?.primaryAxis || ctx.positioning?.contrastAxis || null,
-              contrastAxisText: ctx.positioning?.contrastAxis || null,
-              approvedMechanism: primaryMech || null,
-              approvedAudiencePains: ctx.audience?.painProfiles || [],
-              approvedDesires: ctx.audience?.desireMap || {},
-              approvedTransformation: audienceTransformation,
-              approvedClaim: mechClaim,
-              approvedClaims: sortedClaims,
-              approvedPromise: primaryMech?.mechanismPromise || null,
-              approvedObjections: ctx.audience?.objectionMap || {},
-              approvedProofTypes: proofTypes,
-              approvedPositioningContext: positioningContext,
+              mechanismResult: result,
+              positioningSnapshot: positioningSnapshotForAssembler,
+              differentiationContext,
+              audienceOverride: ctx.audience,
             });
+
+            console.log(`[Orchestrator] STRATEGY_ROOT_CLAIMS | claimsCount=${(rootInput.approvedClaims as any[])?.length || 0} | topClaim="${String(rootInput.approvedClaim || "").substring(0, 80)}" | painsCount=${(rootInput.approvedAudiencePains as any[])?.length || 0}`);
+
+            const rootResult = await buildStrategyRoot(rootInput);
             ctx.strategyRootId = rootResult.id;
             console.log(`[Orchestrator] STRATEGY_ROOT_BUILT | id=${rootResult.id} | hash=${rootResult.rootHash} | runId=${rootResult.runId} | isNew=${rootResult.isNew}`);
           } catch (rootErr: any) {
+            if (rootErr instanceof StrategyRootIncompleteError) {
+              console.error(`[Orchestrator] STRATEGY_ROOT_REJECTED | missing=${rootErr.missingFields.join(",")} | mech=${ctx.mechanismSnapshotId} | aud=${ctx.audienceSnapshotId}`);
+              return {
+                step: "mechanism",
+                status: "BLOCKED",
+                error: {
+                  code: "STRATEGY_ROOT_INCOMPLETE",
+                  message: `Strategy root build rejected — missing fields: ${rootErr.missingFields.join(", ")}`,
+                  missingFields: rootErr.missingFields,
+                },
+                snapshotId,
+                durationMs: Date.now() - startTime,
+              } as any;
+            }
             console.error(`[Orchestrator] STRATEGY_ROOT_BUILD_FAILED | ${rootErr.message}`);
+            return {
+              step: "mechanism",
+              status: "BLOCKED",
+              error: {
+                code: "STRATEGY_ROOT_BUILD_FAILED",
+                message: rootErr.message,
+              },
+              snapshotId,
+              durationMs: Date.now() - startTime,
+            } as any;
           }
         }
         break;
@@ -2503,7 +2526,7 @@ async function executeEngine(
           return [];
         };
 
-        const audiencePains = safeParseArr(audInput.painProfiles);
+        const audiencePains = safeParseArr(audInput.audiencePains);
         const purchaseMotivations = audiencePains.slice(0, 4).map((p: any) => ({
           motivation: p.canonical || p.pain || p.description || "Unknown motivation",
           strength: typeof p.intensity === "number" ? p.intensity : (typeof p.severity === "number" ? p.severity : 0.5),
@@ -2903,7 +2926,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         if (signalCount > 0) {
           const cachedAudience = {
             ...row,
-            painMap: JSON.parse(row.audiencePains || "[]"),
+            // CANONICAL: emit `audiencePains` (not `painMap`). The
+            // canonicalizeAudienceShape() call below also strips legacy aliases.
+            audiencePains: JSON.parse(row.audiencePains || "[]"),
             desireMap: JSON.parse(row.desireMap || "[]"),
             objectionMap: JSON.parse(row.objectionMap || "[]"),
             transformationMap: JSON.parse(row.transformationMap || "[]"),
@@ -2917,7 +2942,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
             inputSummary: JSON.parse(row.inputSummary || "{}"),
             snapshotId: row.id,
           };
-          ctx.audience = cachedAudience;
+          ctx.audience = canonicalizeAudienceShape(cachedAudience);
           ctx.audienceSnapshotId = row.id;
           console.log(`[Orchestrator] SCOPED_HYDRATE | Loaded cached audience snapshot=${row.id} | structuredSignals=${signalCount}`);
 
