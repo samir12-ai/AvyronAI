@@ -1,0 +1,109 @@
+}
+Hi,
+
+We need to address the current block coming from the Statistical Validation engine.
+
+From the latest validation work, the reuse / regeneration contract is functioning correctly.  
+However, the pipeline is still being blocked by Statistical Validation rejecting the strategy, which prevents us from cleanly testing the downstream engines.
+
+This needs a dedicated audit and fix.
+
+---
+
+## Objective
+
+Identify exactly why Statistical Validation is blocking, determine whether the block is legitimate or caused by a logic / threshold / contract issue, and fix the root cause so we can continue testing the rest of the engine chain.
+
+---
+
+## What to investigate
+
+Please trace the current failing campaign / run and answer:
+
+1. Which exact Statistical Validation layer(s) are failing?
+2. What are the failing values / scores?
+3. What is the first true point of failure inside Statistical Validation?
+4. Is the rejection caused by:
+   - real low evidence / low claim confidence
+   - claim alignment failure
+   - contradiction logic
+   - threshold calibration issue
+   - contract mismatch
+   - or another internal logic problem?
+
+---
+
+## Important
+
+Do not simply remove or weaken the block.
+
+First determine:
+
+> is this a correct rejection  
+> or a false / overly strict rejection caused by system logic?
+
+---
+
+## If the rejection is false or structurally incorrect
+
+Then fix the root cause.
+
+Examples of acceptable root-level fixes:
+- contract mismatch
+- incorrect scoring path
+- broken claim/evidence mapping
+- bad threshold semantics
+- drift between validated claims and Statistical Validation inputs
+
+---
+
+## If the rejection is actually legitimate
+
+Then explain clearly:
+- why it is legitimate
+- what specific upstream issue causes it
+- what must be improved to pass
+
+---
+
+## After the audit
+
+Return:
+
+### 1. Root cause
+- one primary cause
+- one secondary cause only if necessary
+
+### 2. Code evidence
+- exact files
+- exact functions
+- exact failing logic path
+
+### 3. Classification
+Is this mainly:
+- data insufficiency
+- validation logic issue
+- threshold issue
+- contract issue
+- or claim/evidence propagation issue?
+
+### 4. Fix applied
+If a fix was needed:
+- what changed
+- why it solves the issue
+
+### 5. Re-validation
+After fixing, rerun and confirm whether the pipeline now passes Statistical Validation and allows downstream engines to be tested properly.
+
+---
+
+We do not want to bypass Statistical Validation.
+
+We want to make sure it is:
+- correct
+- fair
+- and not blocking the rest of the system for the wrong reason.
+
+Proceed with the audit and fix.
+
+Thanks

@@ -1395,6 +1395,9 @@ export async function runStatisticalValidationEngine(
   const originTypeDistribution = computeSignalComposition(upstreamLineage);
   console.log(`[StatisticalValidation] GROUNDING_METRICS | total=${claimValidations.length} | signalBacked=${signalBackedClaimCount} | lineageAnchored=${lineageAnchoredCount} | hypotheses=${hypotheses.length} | ratio=${signalBackedClaimRatio.toFixed(2)} | state=${validationState}`);
   console.log(`[StatisticalValidation] ORIGIN_TYPE_DISTRIBUTION | ${formatCompositionLog(originTypeDistribution)}`);
+  console.log(`[StatisticalValidation] LAYER_SCORES | ${layers.map(l => `${l.layerName}=${l.score.toFixed(2)}${l.passed ? "" : "*"}`).join(" | ")}`);
+  console.log(`[StatisticalValidation] CONFIDENCE_TRACE | weighted=${weightedScore.toFixed(3)} | minConstrained=${minConstrainedConfidence.toFixed(3)} | raw=${rawConfidence.toFixed(3)} | normalized=${confidenceNormalized} | postNormalize=${(confidenceNormalized ? normalizeConfidence(rawConfidence, reliability) : rawConfidence).toFixed(3)} | avgEvidenceStrength=${evidenceStrength.toFixed(3)} | final=${claimConfidenceScore.toFixed(3)}`);
+  console.log(`[StatisticalValidation] RELIABILITY_TRACE | overall=${reliability.overallReliability.toFixed(3)} | isWeak=${reliability.isWeak} | signalDensity=${reliability.signalDensity.toFixed(2)} | signalDiversity=${reliability.signalDiversity.toFixed(2)} | narrativeStability=${reliability.narrativeStability.toFixed(2)} | competitorValidity=${reliability.competitorValidity.toFixed(2)} | marketMaturity=${reliability.marketMaturityConfidence.toFixed(2)}`);
 
   const confidenceExplanation = buildConfidenceExplanation(
     claimConfidenceScore,
