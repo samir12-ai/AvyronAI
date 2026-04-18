@@ -1,0 +1,142 @@
+:::writing{variant=“email” id=“94821” subject=“Audit Required: Downstream Regeneration Behavior & Snapshot Reuse (Post C-1 Finding)”}
+Hi,
+
+After completing the C-1 validation run, we identified a critical behavior that needs to be audited before proceeding further (especially before Option C).
+
+This is not a minor issue — it directly affects claim stability and system predictability.
+
+⸻
+
+🔴 Core Finding
+
+Even with forceRefresh=false, the orchestrator:
+
+→ Re-runs all downstream engines (Audience, Positioning, Differentiation, Mechanism, Offer, etc.)
+→ Generates new snapshots every run
+
+Only Market Intelligence respects forceRefresh.
+
+This means:
+	•	“Same inputs” do NOT produce stable outputs
+	•	Claim variation across runs is expected (LLM regeneration), not a contract issue
+
+⸻
+
+⚠️ Why This Matters
+
+We just fixed the claim contract (Option B) successfully:
+	•	Claims propagate correctly
+	•	Offer is anchored to claims
+	•	No drift within a single run
+
+BUT:
+
+→ The system is still non-stable across runs, because upstream engines regenerate every time.
+
+So right now:
+	•	The system is consistent per run
+	•	But not deterministic across runs
+
+⸻
+
+🎯 Objective of This Task
+
+We need a clear, code-level audit and definition of:
+
+When should an engine regenerate vs reuse an existing snapshot?
+
+⸻
+
+Phase 1 — Audit (No changes yet)
+
+For each engine:
+	•	Market Intelligence
+	•	Audience
+	•	Positioning
+	•	Differentiation
+	•	Mechanism
+	•	Offer
+	•	Awareness / Funnel / Persuasion / etc.
+
+Answer:
+
+1. Does this engine ALWAYS regenerate?
+
+2. Does it support snapshot reuse today?
+
+3. What inputs determine whether reuse is valid?
+
+4. Is there any hidden refresh path (e.g. internal AI calls re-triggered)?
+
+⸻
+
+Phase 2 — forceRefresh Contract Definition
+
+Right now forceRefresh is misleading.
+
+We need you to clearly define and document ONE of the following behaviors:
+
+Option A — True Refresh Control
+	•	forceRefresh=false → reuse snapshots if inputs unchanged
+	•	forceRefresh=true → force regeneration
+
+Option B — Always Regenerate (Explicit)
+	•	Orchestrator always regenerates downstream engines
+	•	Rename or redefine forceRefresh to reflect MI-only behavior
+
+→ You must choose one and justify it
+
+⸻
+
+Phase 3 — Snapshot Reuse Feasibility
+
+For key engines (especially Differentiation, Mechanism, Offer):
+
+Evaluate:
+	•	Can we safely reuse snapshots?
+	•	What defines “same input”? (hash, lineage, upstream snapshot IDs)
+	•	What risks exist if reused?
+
+⸻
+
+Phase 4 — Output
+
+Send back:
+
+1. Engine-by-engine audit table
+
+2. Final decision on forceRefresh behavior
+
+3. Recommendation:
+	•	which engines should reuse
+	•	which must always regenerate
+
+⸻
+
+🚫 Important Constraints
+	•	Do NOT implement fixes yet
+	•	Do NOT add patches or partial logic
+	•	This is a diagnostic + architectural clarification step
+
+⸻
+
+🔒 Why This Comes Before Option C
+
+If we don’t fix or define regeneration behavior:
+	•	Option C (strict claim validator) will only catch errors
+	•	It will NOT solve instability across runs
+
+We need to understand and control regeneration first.
+
+⸻
+
+Once this is clear, we will:
+→ decide on stabilization strategy
+→ then proceed to Option C safely
+
+⸻
+
+Proceed with the audit only.
+
+Thanks.
+:::
