@@ -172,7 +172,12 @@ export const CANONICAL_SIGNAL_REGISTRY: Record<string, CanonicalSignalDefinition
   },
 };
 
-export const SIGNAL_MAPPING_CONFIDENCE_THRESHOLD = 0.75;
+// Aligned with the lineage acceptor's "direct match" threshold (semantic-lineage.ts).
+// A claim that survives the LINEAGE_GATE (>=0.55 direct, >=0.40 inferred) must not be
+// re-rejected by a stricter validation gate — that produced an internal contradiction
+// where claims were simultaneously "signal-backed" (ratio=1.00) and "not validated"
+// (claim_signal_alignment=0.40 due to mappingConfidence < 0.75).
+export const SIGNAL_MAPPING_CONFIDENCE_THRESHOLD = 0.55;
 
 export const PROOF_TYPE_CLASSIFIERS: Record<string, RegExp> = {
   transparency: /\b(transparen|clarity|visible|refund|pricing|hidden|honest|open|trust|reveal|disclose|upfront|clear cost|no surprise)\b/i,
