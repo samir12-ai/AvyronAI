@@ -149,3 +149,9 @@ id = "bRETsr0S4-1WQyPlGSo9I"
 uri = "file://.local/validation/PRE_LAUNCH_AUDIT.md"
 type = "text"
 title = "Pre-Launch System Audit Report"
+
+[[outputs]]
+id = "EFMicB1SmbdIoSWDTHFIO"
+uri = "file://.local/validation/INTELLIGENCE_LAYER_REVIEW.md"
+type = "text"
+title = "Engine Intelligence & Logic-Depth Review"
