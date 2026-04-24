@@ -743,6 +743,7 @@ export async function runAwarenessEngine(
   upstreamLineage: SignalLineageEntry[] = [],
   funnel: AwarenessFunnelInput = EMPTY_FUNNEL,
   analyticalEnrichment?: any,
+  upstreamSignals?: { buyerPsychology?: any; trustMechanism?: any; gameDimension?: any; valueArchitecture?: any } | null,
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
@@ -852,6 +853,46 @@ export async function runAwarenessEngine(
     }
   } catch (mbErr: any) {
     console.error(`[AwarenessEngine-V3] MYTH_BREAKER_FAILED | ${mbErr.message}`);
+  }
+
+  // ── INTELLIGENCE UPGRADE: Narrative Reframe Engineer (Phase 5) ──
+  // Re-engineers the buyer's mental model — current model → false bridge → new
+  // model → bridge mechanism. Consumes upstream P4 buyerPsychology so the
+  // reframe targets the buyer's ACTUAL current beliefs, not a generic myth.
+  // Safe fallback: returns null on AI failure → engine continues with legacy
+  // route + myth-breaker.
+  try {
+    const { engineerNarrativeReframe } = await import("./narrative-reframe");
+    const bp = upstreamSignals?.buyerPsychology;
+    const trust = upstreamSignals?.trustMechanism;
+    const game = upstreamSignals?.gameDimension;
+    const segments0 = (audience.audienceSegments || [])[0] as any;
+    const fallbackTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+    const reframe = await engineerNarrativeReframe({
+      awarenessStage: readinessStage,
+      primaryEntryRoute: primaryEntry,
+      triggerClass,
+      positioningStatement: (positioning as any)?.positioningStatement || (positioning as any)?.statement || null,
+      coreOffer: (offer as any)?.coreOffer || (offer as any)?.offerName || null,
+      audiencePains: (audience.audiencePains || []).slice(0, 8),
+      audienceObjections: Object.keys(audience.objectionMap || {}).slice(0, 6),
+      buyerBeliefModel: bp?.beliefModel || null,
+      buyerRejectionHistory: bp?.topRejectionPatterns || [],
+      buyerDecisionTrigger: bp?.decisionTrigger?.triggeringEvent || null,
+      buyerIdentityAspiration: bp?.identityAspiration?.aspirationalIdentity || null,
+      buyerSophisticationTier: bp?.sophisticationTier ?? fallbackTier,
+      trustMechanism: trust?.mechanism || trust?.transferMechanism || null,
+      gameDimension: game?.ourDimension || game?.ourGame || null,
+      accountId,
+    });
+    if (reframe) {
+      (primaryRoute as any).narrativeReframe = reframe;
+      console.log(`[AwarenessEngine-V3] NARRATIVE_REFRAME_ATTACHED | movement=${reframe.bridgeMechanism.movement} | judge=${reframe.judgeVerdict} | retries=${reframe.retryCount}`);
+    } else {
+      console.log(`[AwarenessEngine-V3] NARRATIVE_REFRAME_FALLBACK | reframe=null, continuing with legacy route`);
+    }
+  } catch (nrErr: any) {
+    console.error(`[AwarenessEngine-V3] NARRATIVE_REFRAME_FAILED | ${nrErr.message}`);
   }
 
   const alt = buildAlternativeRoute(primaryEntry, audience, mi, readinessStage);

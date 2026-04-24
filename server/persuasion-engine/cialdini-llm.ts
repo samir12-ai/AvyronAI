@@ -1,5 +1,5 @@
 import { aiChat } from "../ai-client";
-import type { CialdiniReasoning, CialdiniPrinciple } from "./types";
+import type { CialdiniReasoning, CialdiniPrinciple, TrustTransferDesign } from "./types";
 
 const PRINCIPLES: CialdiniPrinciple[] = [
   "reciprocity",
@@ -40,6 +40,7 @@ function buildPrompt(args: {
   enemyDefinition: string | null;
   trustRequirement: string;
   rejectedClaimPatterns: string[];
+  trustTransferDesign?: TrustTransferDesign;
 }): string {
   const rcBlock = args.rootCauses.length ? args.rootCauses.map(rc => `${rc.id}: ${rc.description}`).join("\n") : "(none)";
   const objBlock = args.objectionStatements.slice(0, 8).map((o, i) => `[OBJ${i + 1}] ${o}`).join("\n") || "(none)";
@@ -47,8 +48,25 @@ function buildPrompt(args: {
   const segBlock = args.audienceSegmentDescriptions.slice(0, 4).map((s, i) => `[SEG${i + 1}] ${s}`).join("\n") || "(none)";
   const rejectedBlock = args.rejectedClaimPatterns.length ? args.rejectedClaimPatterns.slice(0, 6).map(r => `- ${r}`).join("\n") : "(none)";
 
+  const ttBlock = args.trustTransferDesign
+    ? `\n═══ UPSTREAM TRUST-TRANSFER DESIGN (you MUST ground in this) ═══
+Buyer risk state: ${args.trustTransferDesign.buyerRiskState}
+Risk severity: ${args.trustTransferDesign.riskSeverity}
+Trust deficit: ${args.trustTransferDesign.trustDeficit}
+Designed transfer mechanism: ${args.trustTransferDesign.transferMechanism.name}
+  description: ${args.trustTransferDesign.transferMechanism.description}
+  proof artifact: ${args.trustTransferDesign.transferMechanism.proofArtifact}
+Required proof shape: ${args.trustTransferDesign.requiredProofShape}
+Commercial function: ${args.trustTransferDesign.commercialFunction}
+Failure modes already ruled out by upstream design:
+${args.trustTransferDesign.failureModes.map(f => `  - ${f.mechanism}: ${f.whyItWouldFail}`).join("\n")}
+
+GROUNDING RULE: The Cialdini principle you pick MUST be the natural label for the trust mechanism above. If the mechanism is "Named-CMO peer outcomes from same vertical", the principle is social_proof. If it is "Founder credentials + institutional endorsement", it is authority. If it is "Reframe scarcity as buyer's own quarterly budget", it is scarcity. The trust mechanism is the master; you are NAMING it, not re-deciding it.
+═══`
+    : "";
+
   return `You are a Buyer-Psychology Strategist (Cialdini-trained).
-Pick the ONE Cialdini principle that gives this market the highest probability of conversion, and prove WHY.
+Pick the ONE Cialdini principle that gives this market the highest probability of conversion, and prove WHY.${ttBlock}
 
 ═══ AUDIENCE PSYCHOLOGY ═══
 Sophistication tier: ${args.sophisticationTier ?? "unknown"} (1=naive, 5=saturated/burnt)
@@ -135,6 +153,7 @@ export async function pickCialdiniPrinciple(args: {
   trustRequirement: string;
   rejectedClaimPatterns: string[];
   accountId: string;
+  trustTransferDesign?: TrustTransferDesign;
 }): Promise<CialdiniReasoning | null> {
   const startTs = Date.now();
   if (args.objectionStatements.length === 0 && args.trustBarriers.length === 0) {

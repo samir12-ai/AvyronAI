@@ -91,3 +91,21 @@ Client-side data is stored using AsyncStorage. Server-side data is managed in Po
 - Twitter
 - LinkedIn
 - TikTok
+## Marketing-logic engine upgrade (Apr 2026)
+The 5 marketing engines were upgraded to reason like top marketers (not just relabel segments). Pipeline orchestration unchanged; outputs extended additively.
+
+Per-engine commercial-reasoning module (designer + LLM judge + 1 retry on REJECTED + safe `null` fallback to legacy output):
+- P1 Persuasion → `server/persuasion-engine/trust-transfer.ts` (`designTrustTransfer`)
+- P2 Positioning → `server/positioning-engine/category-game.ts` (`designCategoryGame`)
+- P3 Offer → `server/offer-engine/value-architect.ts` (`designValueArchitecture`)
+- P4 Audience → `server/audience-engine/buyer-psychology.ts` (`profileBuyerPsychology`)
+- P5 Awareness → `server/awareness-engine/narrative-reframe.ts` (`engineerNarrativeReframe`)
+
+Shared cross-engine commercial DNA:
+- `shared/commercial-dna.ts` — `composeCommercialDNA()` + `summarizeCommercialDNA()` + contradiction detector (`IDENTITY_DRIFT`, `GAME_TRUST_MISMATCH`)
+- `server/orchestrator/shared-strategic-context.ts` — new `commercialSignals` registry (5 signal types)
+- `server/orchestrator/index.ts` — emits 5 SSC commercial signals + composes DNA into final return
+
+Validation: `.local/validation/marketing-logic-upgrade-proof.{ts,md,json}` proves 12/12 cascade signals shift across L1 Audience → L2 Awareness → L3 Offer → L4 DNA when only buyer evidence varies; contradiction detector fires on synthetic mis-stitched DNA; empty signal set composes safely.
+
+If the AI judge returns final REJECTED in any module, the module returns `null` and the engine continues with its legacy output — pipeline never breaks.

@@ -65,6 +65,8 @@ interface PositioningEngineResult {
   differentiationVector: string[];
   proofSignals: string[];
   confidenceScore: number;
+  // Phase 2 marketing-logic upgrade — additive, optional. Engine never breaks if absent.
+  categoryGameDesign?: import("./category-game").CategoryGameDesign;
   inputSummary: {
     miSnapshotId: string;
     audienceSnapshotId: string;
@@ -2702,6 +2704,62 @@ CORRECTION REQUIRED:
   }
 
   const primaryTerritory = finalTerritories[0] || null;
+
+  // ── PHASE 2: Category-Game Strategist (commercial reasoning core) ──
+  // Runs AFTER deterministic territory selection — does not change which territory is
+  // selected, but adds a commercial-game design layer that downstream engines (offer,
+  // persuasion, awareness) can consume via the SSC `gameDimension` signal. Pipeline
+  // and existing fields preserved; on failure, result.categoryGameDesign is simply absent.
+  let categoryGameDesign: import("./category-game").CategoryGameDesign | undefined;
+  try {
+    if (primaryTerritory) {
+      const { designCategoryGame } = await import("./category-game");
+      // Pull competitor positioning text from MI snapshot's multiSourceSignals (richer than ciCompetitors row).
+      const multiSourceForGame = safeJsonParse(activeMiSnapshot.multiSourceSignals, {}) as Record<string, any>;
+      const competitorBriefs = competitors.slice(0, 6).map(c => {
+        const cName = c.name || "(unnamed)";
+        const ms = multiSourceForGame[cName] || multiSourceForGame[(c as any).competitorName] || {};
+        const positioningParts: string[] = [];
+        if (ms?.website?.headlineExtractions?.length) positioningParts.push(ms.website.headlineExtractions.slice(0, 3).join(" | "));
+        if (ms?.website?.positioningLanguage?.length) positioningParts.push(ms.website.positioningLanguage.slice(0, 3).join(" | "));
+        if (!positioningParts.length && c.messagingTone) positioningParts.push(`tone: ${c.messagingTone}`);
+        if (!positioningParts.length && c.hookStyles) positioningParts.push(`hooks: ${c.hookStyles}`);
+        if (!positioningParts.length && c.notes) positioningParts.push(c.notes);
+        if (!positioningParts.length) positioningParts.push(`${c.businessType || "competitor"} — ${c.primaryObjective || "unknown objective"}`);
+        return {
+          name: cName,
+          positioning: positioningParts.join(" || ").slice(0, 240),
+          authority: marketPower.find(m => m.competitorName === cName)?.authorityScore ?? undefined,
+        };
+      });
+      const painSignals = audiencePains.slice(0, 8).map((p: any) => typeof p === "string" ? p : (p?.label || p?.canonical || p?.text || JSON.stringify(p))).filter(Boolean);
+      const desireSignals = audienceDesires.slice(0, 8).map((d: any) => typeof d === "string" ? d : (d?.label || d?.canonical || d?.text || JSON.stringify(d))).filter(Boolean);
+      const objectionsRaw = safeJsonParse(audienceSnapshot.objectionMap, []) as any[];
+      const objections = (Array.isArray(objectionsRaw) ? objectionsRaw : []).slice(0, 6).map((o: any) => typeof o === "string" ? o : (o?.statement || o?.label || o?.text || JSON.stringify(o))).filter(Boolean);
+      const rejectedTerritoryPatterns = finalTerritories.slice(1, 5).map(t => t.name).filter(Boolean);
+
+      categoryGameDesign = await designCategoryGame({
+        category,
+        marketDiagnosis: activeMiSnapshot.marketDiagnosis || null,
+        competitorBriefs,
+        audiencePainSignals: painSignals,
+        audienceDesireSignals: desireSignals,
+        audienceObjections: objections,
+        productAdvantage: productDna?.strategicAdvantage || null,
+        productMechanism: productDna?.uniqueMechanism || null,
+        rejectedTerritoryPatterns,
+        accountId,
+      }) || undefined;
+      if (categoryGameDesign) {
+        console.log(`[PositioningEngine-V3] CATEGORY_GAME_DESIGNED | dimension="${categoryGameDesign.ourDimension}" | defensibility=${categoryGameDesign.defensibility} | judge=${categoryGameDesign.judgeVerdict} | retries=${categoryGameDesign.retryCount}`);
+      } else {
+        console.log(`[PositioningEngine-V3] CATEGORY_GAME_SKIPPED — designer returned null (legacy path active)`);
+      }
+    }
+  } catch (cgErr: any) {
+    console.warn(`[PositioningEngine-V3] CATEGORY_GAME_FAILED | ${cgErr.message} — continuing with legacy positioning`);
+  }
+
   const executionTimeMs = Date.now() - startTime;
 
   const rawConfidence = primaryTerritory
@@ -2842,6 +2900,7 @@ CORRECTION REQUIRED:
     confidenceScore: overallConfidence,
     engineConfidence: positioningEngineConfidence,
     dataConfidence: positioningDataConfidence,
+    categoryGameDesign,
     inputSummary,
     snapshotId: inserted.id,
     executionTimeMs,

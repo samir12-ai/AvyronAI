@@ -2079,6 +2079,7 @@ export async function runOfferEngine(
   mechanismEngineOutput?: any,
   strategyRoot?: any,
   analyticalEnrichment?: any,
+  upstreamSignals?: { trustMechanism?: any; gameDimension?: any } | null,
 ): Promise<OfferResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -2491,6 +2492,53 @@ export async function runOfferEngine(
     }
   } catch (idErr: any) {
     console.error(`[OfferEngine-V4] IDENTITY_REASONING_FAILED | ${idErr.message}`);
+  }
+
+  // ── PHASE 3 MARKETING-LOGIC UPGRADE: Value Architect ──
+  // Reasons commercially about feature→outcome→identity chain, names where commercial leverage
+  // sits, quantifies objection economics. Consumes upstream P1 trustMechanism + P2 gameDimension
+  // signals so offer extends (not contradicts) the trust + category strategy chosen upstream.
+  try {
+    const { designValueArchitecture } = await import("./value-architect");
+    const seg0Va = (audience.audienceSegments || [])[0] as any;
+    const rejectedClaimPatternsVa: string[] = [];
+    for (const seg of (audience.audienceSegments || []) as any[]) {
+      const profile = seg?.sophisticationProfile;
+      if (profile?.rejectedClaimPatterns) {
+        for (const p of profile.rejectedClaimPatterns) rejectedClaimPatternsVa.push(p.pattern);
+      }
+    }
+    const trustMechanismSignal = upstreamSignals?.trustMechanism || null;
+    const gameDimensionSignal = upstreamSignals?.gameDimension || null;
+    const valueArchitecture = await designValueArchitecture({
+      offerName: primaryOffer.offerName,
+      coreOutcome: primaryOffer.coreOutcome,
+      mechanismDescription: primaryOffer.mechanismDescription,
+      deliverables: primaryOffer.deliverables,
+      audiencePains: (audience.audiencePains || []).slice(0, 8),
+      audienceDesires: Object.keys(audience.desireMap || {}).slice(0, 8),
+      audienceObjections: Object.keys((audience as any).objectionMap || {}).slice(0, 6),
+      rejectedClaimPatterns: rejectedClaimPatternsVa,
+      trustMechanism: trustMechanismSignal,
+      gameDimension: gameDimensionSignal,
+      accountId,
+    });
+    if (valueArchitecture) {
+      primaryOffer.valueArchitecture = valueArchitecture;
+      diagnostics.valueArchitecture = {
+        leveragePoint: valueArchitecture.commercialLeverage.pointInChain,
+        wedge: valueArchitecture.primaryValueWedge.slice(0, 100),
+        groundedTrust: !!valueArchitecture.groundedInTrustMechanism,
+        groundedGame: !!valueArchitecture.groundedInGameDimension,
+        retries: valueArchitecture.retryCount,
+        judgeVerdict: valueArchitecture.judgeVerdict,
+      };
+      console.log(`[OfferEngine-V4] VALUE_ARCHITECTURE_ATTACHED | leveragePoint=${valueArchitecture.commercialLeverage.pointInChain} | groundedTrust=${!!valueArchitecture.groundedInTrustMechanism} | groundedGame=${!!valueArchitecture.groundedInGameDimension} | retries=${valueArchitecture.retryCount} | wedge="${valueArchitecture.primaryValueWedge.slice(0, 80)}"`);
+    } else {
+      console.log(`[OfferEngine-V4] VALUE_ARCHITECTURE_FALLBACK | designer returned null — engine continuing with legacy output`);
+    }
+  } catch (vaErr: any) {
+    console.error(`[OfferEngine-V4] VALUE_ARCHITECTURE_FAILED | ${vaErr.message} — engine continuing with legacy output`);
   }
 
   const altOutcome: OutcomeLayer = {

@@ -101,6 +101,20 @@ export interface OfferIdentityReasoning {
   generatedAt: string;
 }
 
+export interface OfferValueArchitecture {
+  outcomeChain: Array<{ feature: string; functional: string; emotional: string; identity: string }>;
+  identityShift: { fromIdentity: string; toIdentity: string; identityCost: string };
+  commercialLeverage: { pointInChain: "feature" | "functional" | "emotional" | "identity"; leverageMechanism: string; leverageProof: string };
+  objectionEconomics: Array<{ objection: string; revenueAtStakeIfUnresolved: string; neutralizingMechanism: string; costOfNeutralizing: string }>;
+  primaryValueWedge: string;
+  reasoningSteps: string[];
+  groundedInTrustMechanism: string | null;
+  groundedInGameDimension: string | null;
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  judgeReason: string;
+  retryCount: number;
+}
+
 export interface OfferCandidate {
   offerName: string;
   coreOutcome: string;
@@ -125,6 +139,7 @@ export interface OfferCandidate {
   frictionLevel: number;
   depthScores: OfferDepthScores;
   identityReasoning?: OfferIdentityReasoning;
+  valueArchitecture?: OfferValueArchitecture;
 }
 
 export interface OfferDepthScores {

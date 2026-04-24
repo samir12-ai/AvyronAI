@@ -152,6 +152,7 @@ export interface AudienceEngineV3Result {
   executionTimeMs: number;
   snapshotId: string;
   audienceSophistication?: import("./sophistication-llm").AudienceSophisticationOutput | null;
+  buyerPsychologyProfile?: import("./buyer-psychology").BuyerPsychologyProfile | null;
 }
 
 function sanitizeTexts(texts: string[]): { clean: string[]; removed: number } {
@@ -1942,6 +1943,58 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     }
   }
 
+  // ── PHASE 4 MARKETING-LOGIC UPGRADE: Buyer Psychology Profiler ──
+  // Reasons about belief model + rejection history + decision trigger + identity aspiration
+  // for the highest-density segment. Sophistication tier becomes a byproduct of belief-model
+  // maturity, not the primary output. Cialdini leverages are psychology-matched, not category-default.
+  let buyerPsychologyProfile: import("./buyer-psychology").BuyerPsychologyProfile | null = null;
+  if (totalSignalMatches >= AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI && audienceSegments.length > 0) {
+    try {
+      const { profileBuyerPsychology } = await import("./buyer-psychology");
+      const targetSegment: any = audienceSegments[0];
+      const rejectedClaimPatterns: string[] = [];
+      const segProfile = (targetSegment as any)?.sophisticationProfile;
+      if (segProfile?.rejectedClaimPatterns) {
+        for (const p of segProfile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
+      }
+      const competitorClaimsForPsych: string[] = [];
+      try {
+        const latestMi2 = await db.select()
+          .from(miSnapshots)
+          .where(eq(miSnapshots.id, miSnapshotId || ""))
+          .limit(1);
+        if (latestMi2[0]) {
+          const opps = JSON.parse((latestMi2[0].opportunitySignals as any) || "[]");
+          for (const o of opps.slice(0, 8)) {
+            const c = typeof o === "string" ? o : (o.signal || o.text || o.claim || "");
+            if (c) competitorClaimsForPsych.push(c);
+          }
+        }
+      } catch { /* ignore */ }
+
+      buyerPsychologyProfile = await profileBuyerPsychology({
+        segmentName: targetSegment.name || "Primary Segment",
+        segmentDescription: (targetSegment as any).description || "",
+        audiencePains: painMap.slice(0, 8).map(p => p.canonical),
+        audienceDesires: desireMap.slice(0, 8).map(d => d.canonical),
+        audienceObjections: objectionMap.slice(0, 8).map(o => o.canonical),
+        buyerComments: commentTexts.slice(0, 8),
+        competitorClaims: competitorClaimsForPsych,
+        rejectedClaimPatterns,
+        industry: businessContext.industry || "",
+        coreOffer: businessContext.coreOffer || "",
+        accountId,
+      });
+      if (buyerPsychologyProfile) {
+        console.log(`[AudienceEngine-V3] BUYER_PSYCHOLOGY_ATTACHED | tier=${buyerPsychologyProfile.sophisticationByproduct.tier} | aspirational="${buyerPsychologyProfile.identityAspiration.aspirationalIdentity.slice(0, 50)}" | leverages=[${buyerPsychologyProfile.cialdiniLeverages.join(",")}] | retries=${buyerPsychologyProfile.retryCount}`);
+      } else {
+        console.log(`[AudienceEngine-V3] BUYER_PSYCHOLOGY_FALLBACK | profiler returned null — engine continuing with legacy output`);
+      }
+    } catch (psychErr: any) {
+      console.error(`[AudienceEngine-V3] BUYER_PSYCHOLOGY_FAILED | ${psychErr.message} — engine continuing with legacy output`);
+    }
+  }
+
   const segmentDensity = computeSegmentDensity(painMap, desireMap, audienceSegments, miSnapshotId);
 
   const executionTimeMs = Date.now() - startTime;
@@ -2068,6 +2121,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     dataReliability,
     confidenceScore: dataReliability.overallReliability,
     audienceSophistication,
+    buyerPsychologyProfile,
   };
 }
 

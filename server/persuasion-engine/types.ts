@@ -181,6 +181,44 @@ export interface CialdiniReasoning {
   audienceSophisticationTier?: number;
   modelUsed: string;
   generatedAt: string;
+  /**
+   * When present, this principle was selected as a *consequence* of the upstream
+   * Trust Transfer Design (the marketing-logic core), not as a standalone label.
+   */
+  groundedInTrustMechanism?: string;
+}
+
+export type RiskSeverity = "low" | "moderate" | "high" | "critical";
+
+/**
+ * Trust Transfer Design — the commercial-reasoning output produced BEFORE
+ * Cialdini selection. Answers "what is this doing commercially?" by naming
+ * the buyer's risk state, current trust source, the deficit, the bridging
+ * mechanism, and the failure modes if a wrong mechanism were chosen.
+ *
+ * Cialdini selection becomes a downstream consequence of this design,
+ * not the primary classification.
+ */
+export interface TrustTransferDesign {
+  buyerRiskState: string;
+  riskSeverity: RiskSeverity;
+  currentTrustSources: string[];
+  trustDeficit: string;
+  transferMechanism: {
+    name: string;
+    description: string;
+    proofArtifact: string;
+  };
+  failureModes: Array<{ mechanism: string; whyItWouldFail: string }>;
+  requiredProofShape: string;
+  commercialFunction: string;
+  groundedSignals: string[];
+  reasoningSteps: string[];
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  judgeReason?: string;
+  retryCount: number;
+  modelUsed: string;
+  generatedAt: string;
 }
 
 export interface PersuasionRoute {
@@ -194,6 +232,11 @@ export interface PersuasionRoute {
   frictionNotes: string[];
   rejectionReason: string | null;
   cialdiniReasoning?: CialdiniReasoning;
+  /**
+   * Marketing-logic core — designs the commercial trust-transfer mechanism
+   * before any Cialdini label is picked. See TrustTransferDesign.
+   */
+  trustTransferDesign?: TrustTransferDesign;
   trustBarriers?: TrustBarrierClassification[];
   awarenessStageProperties?: AwarenessStageProperty[];
   objectionProofLinks?: ObjectionProofLink[];

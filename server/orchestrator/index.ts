@@ -37,6 +37,7 @@ import {
   addReasonTrace,
   addContradiction,
   getUnresolvedCriticalProblems,
+  emitCommercialSignal,
   type SharedStrategicContext,
   type ProblemEntry,
 } from "./shared-strategic-context";
@@ -1178,6 +1179,28 @@ async function executeEngine(
         ctx.audience = canonicalizeAudienceShape(result);
         ctx.audienceSnapshotId = result.snapshotId;
 
+        // ── COMMERCIAL SIGNAL EMISSION: buyerPsychology (Phase 4 marketing-logic upgrade) ──
+        // Audience runs first in pipeline, so this signal is available to ALL downstream
+        // engines (positioning, offer, awareness, persuasion).
+        try {
+          const bp = (result as any)?.buyerPsychologyProfile;
+          if (bp && ctx.ssc) {
+            emitCommercialSignal(ctx.ssc, "buyerPsychology", {
+              beliefModel: bp.beliefModel,
+              topRejectionPatterns: (bp.rejectionHistory || []).slice(0, 3).map((r: any) => r.pattern).filter(Boolean),
+              decisionTrigger: bp.decisionTrigger,
+              identityAspiration: bp.identityAspiration,
+              sophisticationTier: bp.sophisticationByproduct?.tier ?? 3,
+              cialdiniLeverages: bp.cialdiniLeverages || [],
+              segmentName: (result as any)?.audienceSegments?.[0]?.name || "Primary Segment",
+              judgeVerdict: bp.judgeVerdict,
+              emittedAt: Date.now(),
+            });
+          }
+        } catch (sscErr: any) {
+          console.warn(`[Orchestrator] buyerPsychology SSC emit failed: ${sscErr.message}`);
+        }
+
         if (ctx.mi && ctx.audience) {
           try {
             const aelStart = Date.now();
@@ -1340,6 +1363,27 @@ async function executeEngine(
         snapshotId = result.snapshotId;
         ctx.positioning = result;
         ctx.positioningSnapshotId = result.snapshotId;
+
+        // ── COMMERCIAL SIGNAL EMISSION: gameDimension (Phase 2 marketing-logic upgrade) ──
+        // Emit the positioning engine's category-game design so downstream Offer / Awareness / Persuasion
+        // engines can ground their decisions in the named strategic dimension.
+        try {
+          const cgd = (result as any)?.categoryGameDesign;
+          if (cgd && ctx.ssc) {
+            emitCommercialSignal(ctx.ssc, "gameDimension", {
+              buyerActualGame: cgd.buyerActualGame,
+              competitorGames: cgd.competitorGames,
+              ourDimension: cgd.ourDimension,
+              ourGame: cgd.ourGame,
+              defensibility: cgd.defensibility,
+              defensibilityProof: cgd.defensibilityProof,
+              judgeVerdict: cgd.judgeVerdict,
+              emittedAt: Date.now(),
+            });
+          }
+        } catch (sigErr: any) {
+          console.warn(`[Orchestrator] POSITIONING_SIGNAL_EMIT_FAILED | ${sigErr.message}`);
+        }
 
         if (result.status === "SIGNAL_REQUIRED" || result.status === "SIGNAL_DRIFT") {
           ctx.depthGateStatus!.positioning = result.status;
@@ -1682,10 +1726,31 @@ async function executeEngine(
           config.accountId, upstreamLineage,
           ctx.mechanism || undefined,
           activeRoot,
-          ctx.analyticalEnrichment
+          ctx.analyticalEnrichment,
+          ctx.ssc?.commercialSignals || null,
         );
         output = result;
         ctx.offer = result;
+
+        // ── COMMERCIAL SIGNAL EMISSION: valueArchitecture (Phase 3 marketing-logic upgrade) ──
+        // Emit so downstream (awareness, persuasion) can extend the wedge / leverage point.
+        try {
+          const va = (result as any)?.primaryOffer?.valueArchitecture;
+          if (va && ctx.ssc) {
+            emitCommercialSignal(ctx.ssc, "valueArchitecture", {
+              primaryValueWedge: va.primaryValueWedge,
+              identityShift: va.identityShift,
+              commercialLeverage: va.commercialLeverage,
+              topObjectionEconomics: (va.objectionEconomics || []).slice(0, 3),
+              groundedInTrustMechanism: va.groundedInTrustMechanism,
+              groundedInGameDimension: va.groundedInGameDimension,
+              judgeVerdict: va.judgeVerdict,
+              emittedAt: Date.now(),
+            });
+          }
+        } catch (sscErr: any) {
+          console.warn(`[Orchestrator] valueArchitecture SSC emit failed: ${sscErr.message}`);
+        }
 
         try {
           const [offerSnap] = await db.insert(offerSnapshots).values({
@@ -1779,10 +1844,37 @@ async function executeEngine(
           miInput, audInput, posInput, diffInput, offerInput,
           config.accountId, upstreamLineage,
           undefined,
-          ctx.analyticalEnrichment
+          ctx.analyticalEnrichment,
+          ctx.ssc?.commercialSignals || null,
         );
         output = result;
         ctx.awareness = result;
+
+        // ── COMMERCIAL SIGNAL EMISSION: narrativeReframe (Phase 5 marketing-logic upgrade) ──
+        try {
+          const nr = (result as any)?.primaryRoute?.narrativeReframe;
+          if (nr && ctx.ssc) {
+            const sigs = ctx.ssc.commercialSignals;
+            emitCommercialSignal(ctx.ssc, "narrativeReframe", {
+              currentModelStatement: nr.currentModel?.statement || "",
+              newModelReclassification: nr.newModel?.reclassification || "",
+              namedPrinciple: nr.newModel?.namedPrinciple || "",
+              bridgeMovement: nr.bridgeMechanism?.movement || "first_principle",
+              specificMove: nr.bridgeMechanism?.specificMove || "",
+              discomfortCost: {
+                privateAdmission: nr.discomfortCost?.privateAdmission || "",
+                statusGivenUp: nr.discomfortCost?.statusGivenUp || "",
+              },
+              groundedInBuyerBeliefModel: !!sigs?.buyerPsychology,
+              groundedInTrustMechanism: !!sigs?.trustMechanism,
+              groundedInGameDimension: !!sigs?.gameDimension,
+              judgeVerdict: nr.judgeVerdict,
+              emittedAt: Date.now(),
+            });
+          }
+        } catch (sscErr: any) {
+          console.warn(`[Orchestrator] narrativeReframe SSC emit failed: ${sscErr.message}`);
+        }
 
         try {
           const [awSnap] = await db.insert(awarenessSnapshots).values({
@@ -2070,6 +2162,27 @@ async function executeEngine(
         );
         output = result;
         ctx.persuasion = result;
+
+        // ── COMMERCIAL SIGNAL EMISSION: trustMechanism (Phase 1 marketing-logic upgrade) ──
+        // Emit the persuasion engine's trust-transfer design as a commercial signal
+        // for downstream consumers (content/funnel/channel engines + validation harness).
+        try {
+          const ttd = (result as any)?.primaryRoute?.trustTransferDesign;
+          if (ttd && ctx.ssc) {
+            emitCommercialSignal(ctx.ssc, "trustMechanism", {
+              buyerRiskState: ttd.buyerRiskState,
+              riskSeverity: ttd.riskSeverity,
+              trustDeficit: ttd.trustDeficit,
+              transferMechanism: ttd.transferMechanism?.name || "",
+              proofArtifact: ttd.transferMechanism?.proofArtifact || "",
+              commercialFunction: ttd.commercialFunction,
+              judgeVerdict: ttd.judgeVerdict,
+              emittedAt: Date.now(),
+            });
+          }
+        } catch (sigErr: any) {
+          console.warn(`[Orchestrator] PERSUASION_SIGNAL_EMIT_FAILED | ${sigErr.message}`);
+        }
 
         try {
           const [persSnap] = await db.insert(persuasionSnapshots).values({
@@ -3352,6 +3465,24 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   console.log(`[Orchestrator] Complete in ${durationMs}ms | Status: ${overallStatus} | Engines: ${completedEngines.length}/${ENGINE_PRIORITY_ORDER.length}`);
 
+  // ── PHASE 6: Compose Commercial DNA from all engine signals ──
+  // Pure projection — no AI, no I/O. Available on the orchestrator return
+  // shape so downstream consumers (content engines, funnel architect, channel
+  // selector) get the unified strategic backbone in one read.
+  let commercialDna: any = null;
+  try {
+    const { composeCommercialDNA } = await import("../../shared/commercial-dna");
+    commercialDna = composeCommercialDNA(config.campaignId, ctx.ssc?.commercialSignals || null);
+    console.log(`[Orchestrator] COMMERCIAL_DNA_COMPOSED | engines=${commercialDna.consistency.contributingEngineCount}/5 | full=${commercialDna.consistency.hasFullDna} | contradictions=${commercialDna.consistency.contradictions.length}`);
+    if (commercialDna.consistency.contradictions.length > 0) {
+      for (const c of commercialDna.consistency.contradictions) {
+        console.warn(`[Orchestrator] DNA_CONTRADICTION | ${c}`);
+      }
+    }
+  } catch (dnaErr: any) {
+    console.warn(`[Orchestrator] COMMERCIAL_DNA_COMPOSE_FAILED | ${dnaErr.message}`);
+  }
+
   return {
     jobId,
     status: overallStatus,
@@ -3363,6 +3494,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     durationMs,
     controlVerdict: controlVerdict || undefined,
     ssc: ctx.ssc || null,
+    commercialDna,
   };
 }
 

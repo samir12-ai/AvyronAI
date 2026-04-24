@@ -2339,26 +2339,54 @@ export async function analyzePersuasion(
     structuralWarnings,
   );
 
-  // ── INTELLIGENCE UPGRADE: Cialdini reasoning ──
+  // ── MARKETING-LOGIC CORE: Trust Transfer Design (commercial reasoning) ──
+  // Designs the specific commercial mechanism BEFORE any Cialdini label is picked.
+  // Cialdini selection (below) becomes a downstream consequence of this design.
+  let trustTransferDesignResult: import("./types").TrustTransferDesign | null = null;
+  const segments0 = (audience.audienceSegments || [])[0] as any;
+  const sophisticationTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+  const rejectedClaimPatterns: string[] = [];
+  for (const seg of (audience.audienceSegments || []) as any[]) {
+    const profile = seg?.sophisticationProfile;
+    if (profile?.rejectedClaimPatterns) {
+      for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
+    }
+  }
+  const objectionStatements = (routes.primary.objectionPriorities || [])
+    .map((o: any) => typeof o === "string" ? o : (o.objection || ""))
+    .filter(Boolean);
+  const trustBarrierStrings = (routes.primary.trustBarriers || [])
+    .map((b: any) => `${b.barrierType || ""}: ${b.persuasionImplication || b.source || ""}`)
+    .filter((s: string) => s.length > 2);
+  const segmentDescriptions = (audience.audienceSegments || [])
+    .map((s: any) => `${s.name || "?"} (pains: ${(s.painProfile || []).slice(0, 2).join("; ")})`);
+
+  try {
+    const { designTrustTransfer } = await import("./trust-transfer");
+    trustTransferDesignResult = await designTrustTransfer({
+      analyticalEnrichment: (mi as any).analyticalEnrichment || null,
+      objectionStatements,
+      trustBarriers: trustBarrierStrings,
+      audienceSegmentDescriptions: segmentDescriptions,
+      sophisticationTier,
+      awarenessStage: awareness.targetReadinessStage || "unknown",
+      marketDiagnosis: (mi as any).marketDiagnosis || null,
+      enemyDefinition: (offer as any)?.enemyDefinition || null,
+      rejectedClaimPatterns,
+      upstreamBuyerPsychology: null, // Phase 4 will populate this from audience.commercialSignals
+      accountId: accountId || "system",
+    });
+    if (trustTransferDesignResult) {
+      routes.primary.trustTransferDesign = trustTransferDesignResult;
+      console.log(`[PersuasionEngine-V3] TRUST_TRANSFER_ATTACHED | mechanism="${trustTransferDesignResult.transferMechanism.name}" | risk=${trustTransferDesignResult.riskSeverity} | judge=${trustTransferDesignResult.judgeVerdict}`);
+    }
+  } catch (ttErr: any) {
+    console.error(`[PersuasionEngine-V3] TRUST_TRANSFER_FAILED | ${ttErr.message} | falling back to legacy Cialdini-only`);
+  }
+
+  // ── INTELLIGENCE UPGRADE: Cialdini reasoning (now grounded in Trust Transfer Design when present) ──
   try {
     const { pickCialdiniPrinciple } = await import("./cialdini-llm");
-    const segments0 = (audience.audienceSegments || [])[0] as any;
-    const sophisticationTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
-    const rejectedClaimPatterns: string[] = [];
-    for (const seg of (audience.audienceSegments || []) as any[]) {
-      const profile = seg?.sophisticationProfile;
-      if (profile?.rejectedClaimPatterns) {
-        for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
-      }
-    }
-    const objectionStatements = (routes.primary.objectionPriorities || [])
-      .map((o: any) => typeof o === "string" ? o : (o.objection || ""))
-      .filter(Boolean);
-    const trustBarrierStrings = (routes.primary.trustBarriers || [])
-      .map((b: any) => `${b.barrierType || ""}: ${b.persuasionImplication || b.source || ""}`)
-      .filter((s: string) => s.length > 2);
-    const segmentDescriptions = (audience.audienceSegments || [])
-      .map((s: any) => `${s.name || "?"} (pains: ${(s.painProfile || []).slice(0, 2).join("; ")})`);
     const cialdiniReasoning = await pickCialdiniPrinciple({
       analyticalEnrichment: (mi as any).analyticalEnrichment || null,
       objectionStatements,
@@ -2373,10 +2401,14 @@ export async function analyzePersuasion(
         : "default",
       rejectedClaimPatterns,
       accountId: accountId || "system",
+      trustTransferDesign: trustTransferDesignResult || undefined,
     });
     if (cialdiniReasoning) {
+      if (trustTransferDesignResult) {
+        cialdiniReasoning.groundedInTrustMechanism = trustTransferDesignResult.transferMechanism.name;
+      }
       routes.primary.cialdiniReasoning = cialdiniReasoning;
-      console.log(`[PersuasionEngine-V3] CIALDINI_ATTACHED | principle=${cialdiniReasoning.primaryCialdiniPrinciple} | tier=${sophisticationTier ?? "?"} | rcRefs=${cialdiniReasoning.rootCauseRefs.join(",") || "(none)"}`);
+      console.log(`[PersuasionEngine-V3] CIALDINI_ATTACHED | principle=${cialdiniReasoning.primaryCialdiniPrinciple} | tier=${sophisticationTier ?? "?"} | rcRefs=${cialdiniReasoning.rootCauseRefs.join(",") || "(none)"}${cialdiniReasoning.groundedInTrustMechanism ? ` | groundedIn="${cialdiniReasoning.groundedInTrustMechanism}"` : ""}`);
     }
   } catch (cErr: any) {
     console.error(`[PersuasionEngine-V3] CIALDINI_FAILED | ${cErr.message}`);
