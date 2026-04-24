@@ -1967,7 +1967,7 @@ function applyPositioningLockConstraints(
   return result;
 }
 
-export function analyzePersuasion(
+export async function analyzePersuasion(
   mi: PersuasionMIInput,
   audience: PersuasionAudienceInput,
   positioning: PersuasionPositioningInput,
@@ -1978,7 +1978,8 @@ export function analyzePersuasion(
   awareness: PersuasionAwarenessInput,
   upstreamLineage: SignalLineageEntry[] = [],
   analyticalEnrichment?: any,
-): PersuasionResult {
+  accountId?: string,
+): Promise<PersuasionResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
 
@@ -2338,6 +2339,49 @@ export function analyzePersuasion(
     structuralWarnings,
   );
 
+  // ── INTELLIGENCE UPGRADE: Cialdini reasoning ──
+  try {
+    const { pickCialdiniPrinciple } = await import("./cialdini-llm");
+    const segments0 = (audience.audienceSegments || [])[0] as any;
+    const sophisticationTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+    const rejectedClaimPatterns: string[] = [];
+    for (const seg of (audience.audienceSegments || []) as any[]) {
+      const profile = seg?.sophisticationProfile;
+      if (profile?.rejectedClaimPatterns) {
+        for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
+      }
+    }
+    const objectionStatements = (routes.primary.objectionPriorities || [])
+      .map((o: any) => typeof o === "string" ? o : (o.objection || ""))
+      .filter(Boolean);
+    const trustBarrierStrings = (routes.primary.trustBarriers || [])
+      .map((b: any) => `${b.barrierType || ""}: ${b.persuasionImplication || b.source || ""}`)
+      .filter((s: string) => s.length > 2);
+    const segmentDescriptions = (audience.audienceSegments || [])
+      .map((s: any) => `${s.name || "?"} (pains: ${(s.painProfile || []).slice(0, 2).join("; ")})`);
+    const cialdiniReasoning = await pickCialdiniPrinciple({
+      analyticalEnrichment: (mi as any).analyticalEnrichment || null,
+      objectionStatements,
+      trustBarriers: trustBarrierStrings,
+      audienceSegmentDescriptions: segmentDescriptions,
+      sophisticationTier,
+      awarenessStage: awareness.targetReadinessStage || "unknown",
+      marketDiagnosis: (mi as any).marketDiagnosis || null,
+      enemyDefinition: (offer as any)?.enemyDefinition || null,
+      trustRequirement: routes.primary.trustSequence?.[0]
+        ? (typeof routes.primary.trustSequence[0] === "string" ? routes.primary.trustSequence[0] : (routes.primary.trustSequence[0] as any).step)
+        : "default",
+      rejectedClaimPatterns,
+      accountId: accountId || "system",
+    });
+    if (cialdiniReasoning) {
+      routes.primary.cialdiniReasoning = cialdiniReasoning;
+      console.log(`[PersuasionEngine-V3] CIALDINI_ATTACHED | principle=${cialdiniReasoning.primaryCialdiniPrinciple} | tier=${sophisticationTier ?? "?"} | rcRefs=${cialdiniReasoning.rootCauseRefs.join(",") || "(none)"}`);
+    }
+  } catch (cErr: any) {
+    console.error(`[PersuasionEngine-V3] CIALDINI_FAILED | ${cErr.message}`);
+  }
+
   let driftStatus: string = STATUS.COMPLETE;
   let driftStatusMessage: string | null = null;
   if (lockedDecisions.length > 0 && positioningDriftMinSimilarity < 0.20) {
@@ -2408,5 +2452,5 @@ export async function runPersuasionEngine(
   upstreamLineage: SignalLineageEntry[] = [],
   analyticalEnrichment?: any,
 ): Promise<PersuasionResult> {
-  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment);
+  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment, _accountId);
 }

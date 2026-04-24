@@ -2637,6 +2637,55 @@ CORRECTION REQUIRED:
     console.log(`[PositioningEngine-V3] SIGNAL_DIRECT_COMPOSITION COMPLETE | territories=${finalTerritories.length} | cards=${strategyCards.length}`);
   }
 
+  // ── INTELLIGENCE UPGRADE: Embedding-based Semantic Collision Detection ──
+  let semanticCollisions: any[] = [];
+  try {
+    const { computeSemanticCollisions } = await import("./semantic-collision");
+    const territoryClaims = finalTerritories.map(t => ({
+      name: t.name,
+      claimText: [t.name, t.enemyDefinition, t.contrastAxis, t.narrativeDirection].filter(Boolean).join(" — "),
+    }));
+    const competitorClaimList: Array<{ source: string; claim: string }> = [];
+    if (narrativeMap && Object.keys(narrativeMap).length > 0) {
+      for (const [comp, narratives] of Object.entries(narrativeMap)) {
+        for (const narr of (narratives as string[]).slice(0, 3)) {
+          if (narr && narr.length > 5) competitorClaimList.push({ source: comp, claim: narr });
+        }
+      }
+    }
+    if (competitorClaimList.length === 0) {
+      for (const c of competitors.slice(0, 6) as any[]) {
+        const candidate = c.narrativeStyle || c.bio || c.description || c.contentThemes || "";
+        const claim = typeof candidate === "string" ? candidate : JSON.stringify(candidate);
+        if (claim.length > 8) competitorClaimList.push({ source: c.competitorName || c.name || "competitor", claim: claim.slice(0, 240) });
+      }
+    }
+    semanticCollisions = await computeSemanticCollisions({
+      territoryClaims,
+      competitorClaims: competitorClaimList,
+      accountId,
+    });
+    for (const result of semanticCollisions) {
+      const t = finalTerritories.find(x => x.name === result.territoryName);
+      if (t) {
+        (t as any).semanticCollision = {
+          semanticCollisionScore: result.semanticCollisionScore,
+          collisionMeaning: result.collisionMeaning,
+          competitorEquivalentClaim: result.competitorEquivalentClaim,
+          competitorSource: result.competitorSource,
+          jaccardScore: result.jaccardScore,
+          perCompetitor: result.perCompetitor,
+          reasoningSteps: result.reasoningSteps,
+          modelUsed: result.modelUsed,
+          generatedAt: result.generatedAt,
+        };
+      }
+    }
+    console.log(`[PositioningEngine-V3] SEMANTIC_COLLISIONS_ATTACHED | territories=${semanticCollisions.length} | competitorClaims=${competitorClaimList.length}`);
+  } catch (scErr: any) {
+    console.error(`[PositioningEngine-V3] SEMANTIC_COLLISION_FAILED | ${scErr.message}`);
+  }
+
   const celCompliance = enforcePositioningCompliance(finalTerritories, analyticalEnrichment || null);
   if (celCompliance.violations.length > 0) {
     applyCompliancePenalties(finalTerritories, celCompliance);

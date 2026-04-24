@@ -165,6 +165,7 @@ export function sanitizeBoundary(text: string): { clean: boolean; violations: st
   return { clean: violations.length === 0, violations };
 }
 
+// signature kept; helper below is used in primary route construction
 function detectMarketMaturity(mi: AwarenessMIInput, audience: AwarenessAudienceInput): string {
   const maturity = safeNumber(audience.maturityIndex, 0.5);
   if (maturity < 0.3) return "emerging";
@@ -817,6 +818,41 @@ export async function runAwarenessEngine(
     frictionNotes: layerResults.flatMap(l => l.warnings).slice(0, 5),
     rejectionReason: null,
   };
+
+  // ── INTELLIGENCE UPGRADE: Myth-breaker reasoning ──
+  try {
+    const { generateMythBreaker } = await import("./myth-breaker-llm");
+    const segments0 = (audience.audienceSegments || [])[0] as any;
+    const sophisticationTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+    const rejectedClaimPatterns: string[] = [];
+    for (const seg of (audience.audienceSegments || []) as any[]) {
+      const profile = seg?.sophisticationProfile;
+      if (profile?.rejectedClaimPatterns) {
+        for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
+      }
+    }
+    const audienceBeliefs = (audience.audienceSegments || []).flatMap((s: any) => s.beliefProfile || []);
+    const objectionStatements = Object.keys(audience.objectionMap || {}).slice(0, 8);
+    const mythBreaker = await generateMythBreaker({
+      analyticalEnrichment: (mi as any).analyticalEnrichment || null,
+      audienceObjections: objectionStatements,
+      audienceBeliefs,
+      audiencePains: (audience.audiencePains || []).slice(0, 8),
+      marketDiagnosis: (mi as any).marketDiagnosis || null,
+      enemyDefinition: null,
+      contrastAxis: null,
+      awarenessStage: readinessStage,
+      sophisticationTier,
+      rejectedClaimPatterns,
+      accountId,
+    });
+    if (mythBreaker) {
+      primaryRoute.mythBreaker = mythBreaker;
+      console.log(`[AwarenessEngine-V3] MYTH_BREAKER_ATTACHED | rcRefs=${mythBreaker.rootCauseRefs.join(",") || "(none)"} | statement="${mythBreaker.mythBreakerStatement.slice(0, 80)}"`);
+    }
+  } catch (mbErr: any) {
+    console.error(`[AwarenessEngine-V3] MYTH_BREAKER_FAILED | ${mbErr.message}`);
+  }
 
   const alt = buildAlternativeRoute(primaryEntry, audience, mi, readinessStage);
   const altL7 = layer7_genericAwarenessDetector("", alt.entry, alt.trigger);

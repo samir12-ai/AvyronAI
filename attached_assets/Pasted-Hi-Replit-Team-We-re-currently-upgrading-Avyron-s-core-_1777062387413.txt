@@ -1,0 +1,189 @@
+Hi Replit Team,
+
+We’re currently upgrading Avyron’s core intelligence layer (not infrastructure, not agents, not memory). The focus is strictly on improving decision quality across engines.
+
+This is not a generic feature request — we need structured implementation with **clear reasoning, step-by-step logs, and strong proof of correctness at each stage**.
+
+---
+
+## 🎯 Objective
+
+Upgrade Avyron from a system that *understands* the market to one that can **reason, differentiate, and persuade with precision**.
+
+---
+
+## 🔧 Scope (Engines Only)
+
+### 1. Offer Engine Upgrade
+
+We need to extend the output schema with:
+
+* `identityPayoff`
+* `commercialReasoning`
+* `valueTranslation`
+
+**Requirement:**
+
+* The system must explicitly explain:
+
+  * Why this offer works psychologically
+  * What identity it targets
+  * How value is translated into perceived benefit
+
+**Proof Required:**
+
+* Before vs After outputs
+* Explanation of transformation logic
+* Why the new output is stronger (not just different)
+
+---
+
+### 2. Audience Engine Upgrade
+
+Add:
+
+* `sophisticationTier (1–5)`
+* `rejectedClaimPatterns`
+* `seenBeforeOffers`
+
+**Requirement:**
+
+* The system must classify audience maturity and adjust reasoning accordingly
+
+**Proof Required:**
+
+* Show classification reasoning
+* Explain why a specific tier was assigned
+* Demonstrate how this changes downstream decisions
+
+---
+
+### 3. Persuasion Engine Upgrade
+
+Add:
+
+* `primaryCialdiniPrinciple`
+* `principleRationale`
+* `buyerPsychologyFit`
+
+**Requirement:**
+
+* The system must choose persuasion strategy based on buyer psychology (not random or static rules)
+
+**Proof Required:**
+
+* Why this principle was selected over others
+* What type of buyer it fits
+* What would fail if another principle was used
+
+---
+
+### 4. Awareness Engine Upgrade
+
+Add:
+
+* `mythBreakerStatement`
+* `beliefToContradict`
+* `rootCauseContradicted`
+
+**Requirement:**
+
+* The system must generate a real contradiction, not just label a stage
+
+**Proof Required:**
+
+* What belief is being challenged
+* Why that belief exists
+* Why breaking it improves conversion
+
+---
+
+### 5. Positioning Engine Upgrade
+
+Replace or extend similarity logic with:
+
+* `semanticCollisionScore`
+* `collisionMeaning`
+* `competitorEquivalentClaim`
+
+**Requirement:**
+
+* Detect meaning-level overlap, not just keyword overlap
+
+**Proof Required:**
+
+* Show detected collision
+* Explain semantic similarity (not lexical)
+* Show how differentiation improves after fix
+
+---
+
+## ⚠️ Critical Requirements
+
+1. **Step-by-step execution log**
+
+   * What was done
+   * Why it was done
+   * What changed
+
+2. **No black-box outputs**
+
+   * Every decision must include reasoning
+
+3. **Strong validation proof**
+
+   * Not “it works”
+   * Show *why* it works better
+
+4. **Before/After comparisons for each engine**
+
+5. **No agent/memory changes**
+
+   * Strictly engine intelligence only
+
+---
+
+## 📦 Deliverables
+
+* Updated engine schemas
+* Reasoning-enhanced outputs
+* Validation logs
+* Before/after comparisons
+* Explanation of improvements per engine
+
+---
+
+## 🧠 Important Context
+
+This system is not meant to generate text.
+It is meant to **make better decisions than humans in marketing strategy**.
+
+We care about:
+
+* Depth of reasoning
+* Decision correctness
+* Persuasion strength
+
+Not:
+
+* Fancy outputs
+* Surface-level improvements
+
+---
+
+## Final Note
+
+If something cannot be proven with reasoning → it is considered incomplete.
+
+We want a system that:
+
+* explains itself
+* justifies decisions
+* improves outcomes measurably
+
+---
+
+Looking forward to a detailed execution and proof-driven implementation.
+
+Best,
+Avyron Team

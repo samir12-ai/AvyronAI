@@ -155,3 +155,9 @@ id = "EFMicB1SmbdIoSWDTHFIO"
 uri = "file://.local/validation/INTELLIGENCE_LAYER_REVIEW.md"
 type = "text"
 title = "Engine Intelligence & Logic-Depth Review"
+
+[[outputs]]
+id = "2ilGrhdjK5l2_woCSfl45"
+uri = "file://.local/validation/INTELLIGENCE_UPGRADE_PROOF.md"
+type = "text"
+title = "Engine Intelligence Upgrade — Before/After Proof"

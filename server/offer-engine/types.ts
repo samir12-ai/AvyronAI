@@ -90,6 +90,17 @@ export interface RiskReductionLayer {
   buyerConfidenceScore: number;
 }
 
+export interface OfferIdentityReasoning {
+  identityPayoff: string;
+  commercialReasoning: string;
+  valueTranslation: string;
+  groundedSignals: string[];
+  reasoningSteps: string[];
+  rejectedAlternatives: Array<{ alternative: string; reasonRejected: string }>;
+  modelUsed: string;
+  generatedAt: string;
+}
+
 export interface OfferCandidate {
   offerName: string;
   coreOutcome: string;
@@ -113,6 +124,7 @@ export interface OfferCandidate {
   integrityResult: { passed: boolean; failures: string[] };
   frictionLevel: number;
   depthScores: OfferDepthScores;
+  identityReasoning?: OfferIdentityReasoning;
 }
 
 export interface OfferDepthScores {

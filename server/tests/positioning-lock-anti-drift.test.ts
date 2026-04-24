@@ -294,17 +294,17 @@ const BASE_LINEAGE: SignalLineageEntry[] = [
 ];
 
 describe("analyzePersuasion – positioning lock drift detection", () => {
-  test("passes through without lock violations when lockedDecisions is empty", () => {
+  test("passes through without lock violations when lockedDecisions is empty", async () => {
     const { mi, audience, positioning, differentiation, offer, funnel, integrity, awareness } = buildTestPersuasionInputs({
       offerLockedDecisions: [],
       offerNonGenericAnchors: [],
     });
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, BASE_LINEAGE);
     const lockDriftWarnings = result.structuralWarnings.filter(w => w.includes("POSITIONING LOCK DRIFT"));
     expect(lockDriftWarnings).toHaveLength(0);
   });
 
-  test("detects drift when lockedDecisions are semantically distant from persuasion output", () => {
+  test("detects drift when lockedDecisions are semantically distant from persuasion output", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const driftOffer: PersuasionOfferInput = {
       offerName: "Generic Business Package",
@@ -322,12 +322,12 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
       ],
       nonGenericAnchors: ["quantum", "mainframe", "neural", "processor"],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, driftOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, driftOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const lockDriftWarnings = result.structuralWarnings.filter(w => w.includes("POSITIONING LOCK DRIFT"));
     expect(lockDriftWarnings.length).toBeGreaterThan(0);
   });
 
-  test("POSITIONING LOCK DRIFT warning includes score and threshold", () => {
+  test("POSITIONING LOCK DRIFT warning includes score and threshold", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const driftOffer: PersuasionOfferInput = {
       offerName: "Generic Consulting Package",
@@ -345,7 +345,7 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
       ],
       nonGenericAnchors: [],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, driftOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, driftOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const driftWarning = result.structuralWarnings.find(w => w.includes("POSITIONING LOCK DRIFT"));
     if (driftWarning) {
       expect(driftWarning).toMatch(/score=\d+\.\d+/);
@@ -353,7 +353,7 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
     }
   });
 
-  test("generic drift warning fires when most nonGenericAnchors are absent from route text", () => {
+  test("generic drift warning fires when most nonGenericAnchors are absent from route text", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const genericOffer: PersuasionOfferInput = {
       offerName: "Standard Growth Package",
@@ -367,12 +367,12 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
       lockedDecisions: [],
       nonGenericAnchors: ["xylophone", "zeppelin", "quasar", "neutrino", "parallax", "cataclysm"],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, genericOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, genericOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const genericWarnings = result.structuralWarnings.filter(w => w.includes("GENERIC DRIFT WARNING"));
     expect(genericWarnings.length).toBeGreaterThan(0);
   });
 
-  test("generic drift warning includes anchor counts", () => {
+  test("generic drift warning includes anchor counts", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const genericOffer: PersuasionOfferInput = {
       offerName: "Growth Package",
@@ -386,7 +386,7 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
       lockedDecisions: [],
       nonGenericAnchors: ["xylophone", "zeppelin", "quasar", "neutrino", "parallax"],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, genericOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, genericOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const genericWarning = result.structuralWarnings.find(w => w.includes("GENERIC DRIFT WARNING"));
     if (genericWarning) {
       expect(genericWarning).toMatch(/\d+\/\d+ positioning anchors/);
@@ -394,7 +394,7 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
     }
   });
 
-  test("no generic drift warning when most anchors ARE present in route output", () => {
+  test("no generic drift warning when most anchors ARE present in route output", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const onTargetOffer: PersuasionOfferInput = {
       offerName: "Revenue Flywheel Education Program",
@@ -413,12 +413,12 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
       makeSignal("positioning", "differentiation", "revenue flywheel pipeline automation", 2),
       makeSignal("differentiation", "mechanism", "flywheel system drives ARR growth", 3),
     ];
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, onTargetOffer, funnel, integrity, awareness, flyWheelLineage);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, onTargetOffer, funnel, integrity, awareness, flyWheelLineage);
     const genericWarnings = result.structuralWarnings.filter(w => w.includes("GENERIC DRIFT WARNING"));
     expect(genericWarnings).toHaveLength(0);
   });
 
-  test("both lock drift and generic warnings can coexist in structuralWarnings", () => {
+  test("both lock drift and generic warnings can coexist in structuralWarnings", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const badOffer: PersuasionOfferInput = {
       offerName: "Generic Consulting Package",
@@ -436,7 +436,7 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
       ],
       nonGenericAnchors: ["xylophone", "zeppelin", "quasar", "neutrino", "parallax"],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, badOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, badOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const allWarnings = result.structuralWarnings;
     const hasLockDrift = allWarnings.some(w => w.includes("POSITIONING LOCK DRIFT"));
     const hasGenericDrift = allWarnings.some(w => w.includes("GENERIC DRIFT WARNING"));
@@ -445,7 +445,7 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
 });
 
 describe("buildPersuasionRoutes – locked decisions enforce route content at generation time", () => {
-  test("routeName includes locked axis suffix when lockedDecisions contains contrast_axis", () => {
+  test("routeName includes locked axis suffix when lockedDecisions contains contrast_axis", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const lockedOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -459,11 +459,11 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       lockedDecisions: ["contrast_axis: automated pipeline vs manual spreadsheet tracking"],
       nonGenericAnchors: [],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
     expect(result.primaryRoute.routeName).toMatch(/\[locked axis:/);
   });
 
-  test("frictionNotes on primaryRoute includes LOCK CONSTRAINT when lockedDecisions provided", () => {
+  test("frictionNotes on primaryRoute includes LOCK CONSTRAINT when lockedDecisions provided", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const lockedOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -481,13 +481,13 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       ],
       nonGenericAnchors: [],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const lockConstraints = result.primaryRoute.frictionNotes.filter(n => n.startsWith("LOCK CONSTRAINT"));
     expect(lockConstraints.length).toBeGreaterThanOrEqual(1);
     expect(lockConstraints.some(n => n.includes("YOU MUST NOT reframe"))).toBe(true);
   });
 
-  test("frictionNotes includes ENEMY ANCHOR note when enemy is in lockedDecisions", () => {
+  test("frictionNotes includes ENEMY ANCHOR note when enemy is in lockedDecisions", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const lockedOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -501,13 +501,13 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       lockedDecisions: ["enemy: legacy spreadsheet vendor"],
       nonGenericAnchors: [],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const enemyNote = result.primaryRoute.frictionNotes.find(n => n.startsWith("ENEMY ANCHOR:"));
     expect(enemyNote).toBeDefined();
     expect(enemyNote).toMatch(/MUST be reflected in objection handling/);
   });
 
-  test("frictionNotes includes MECHANISM ANCHOR note when mechanism is in lockedDecisions", () => {
+  test("frictionNotes includes MECHANISM ANCHOR note when mechanism is in lockedDecisions", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const lockedOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -521,13 +521,13 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       lockedDecisions: ["mechanism: RevenueFlywheelOS"],
       nonGenericAnchors: [],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const mechNote = result.primaryRoute.frictionNotes.find(n => n.startsWith("MECHANISM ANCHOR:"));
     expect(mechNote).toBeDefined();
     expect(mechNote).toMatch(/MUST reflect .* as the solution vehicle/);
   });
 
-  test("primaryInfluenceDrivers includes a [locked_anchor] entry when nonGenericAnchors provided", () => {
+  test("primaryInfluenceDrivers includes a [locked_anchor] entry when nonGenericAnchors provided", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const lockedOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -541,13 +541,13 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       lockedDecisions: [],
       nonGenericAnchors: ["flywheel", "revenue", "pipeline"],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const lockedDriver = result.primaryRoute.primaryInfluenceDrivers.find(d => d.startsWith("[locked_anchor]"));
     expect(lockedDriver).toBeDefined();
     expect(lockedDriver).toContain("flywheel");
   });
 
-  test("frictionNotes includes ANCHOR REQUIREMENT when nonGenericAnchors provided", () => {
+  test("frictionNotes includes ANCHOR REQUIREMENT when nonGenericAnchors provided", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const lockedOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -561,13 +561,13 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       lockedDecisions: [],
       nonGenericAnchors: ["flywheel", "revenue", "pipeline"],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const anchorReq = result.primaryRoute.frictionNotes.find(n => n.startsWith("ANCHOR REQUIREMENT"));
     expect(anchorReq).toBeDefined();
     expect(anchorReq).toContain("flywheel");
   });
 
-  test("narrative_direction in lockedDecisions generates a LOCK CONSTRAINT for that value", () => {
+  test("narrative_direction in lockedDecisions generates a LOCK CONSTRAINT for that value", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const lockedOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -581,12 +581,12 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       lockedDecisions: ["narrative_direction: from chaos to controlled growth"],
       nonGenericAnchors: [],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const lockConstraints = result.primaryRoute.frictionNotes.filter(n => n.startsWith("LOCK CONSTRAINT"));
     expect(lockConstraints.some(n => n.includes("chaos to controlled growth"))).toBe(true);
   });
 
-  test("no lock constraint notes injected when lockedDecisions and nonGenericAnchors are both empty", () => {
+  test("no lock constraint notes injected when lockedDecisions and nonGenericAnchors are both empty", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const bareOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -600,7 +600,7 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       lockedDecisions: [],
       nonGenericAnchors: [],
     };
-    const result = analyzePersuasion(mi, audience, positioning, differentiation, bareOffer, funnel, integrity, awareness, BASE_LINEAGE);
+    const result = await analyzePersuasion(mi, audience, positioning, differentiation, bareOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const lockNotes = result.primaryRoute.frictionNotes.filter(n => n.startsWith("LOCK CONSTRAINT") || n.startsWith("ANCHOR REQUIREMENT") || n.startsWith("ENEMY ANCHOR") || n.startsWith("MECHANISM ANCHOR"));
     expect(lockNotes).toHaveLength(0);
   });

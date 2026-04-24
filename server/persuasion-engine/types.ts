@@ -161,6 +161,28 @@ export interface LayerResult {
   warnings: string[];
 }
 
+export type CialdiniPrinciple =
+  | "reciprocity"
+  | "commitment_consistency"
+  | "social_proof"
+  | "authority"
+  | "liking"
+  | "scarcity"
+  | "unity";
+
+export interface CialdiniReasoning {
+  primaryCialdiniPrinciple: CialdiniPrinciple;
+  principleRationale: string;
+  buyerPsychologyFit: string;
+  whyOthersFail: Array<{ principle: CialdiniPrinciple; whyItWouldFail: string }>;
+  groundedSignals: string[];
+  reasoningSteps: string[];
+  rootCauseRefs: string[];
+  audienceSophisticationTier?: number;
+  modelUsed: string;
+  generatedAt: string;
+}
+
 export interface PersuasionRoute {
   routeName: string;
   persuasionMode: string;
@@ -171,6 +193,7 @@ export interface PersuasionRoute {
   persuasionStrengthScore: number;
   frictionNotes: string[];
   rejectionReason: string | null;
+  cialdiniReasoning?: CialdiniReasoning;
   trustBarriers?: TrustBarrierClassification[];
   awarenessStageProperties?: AwarenessStageProperty[];
   objectionProofLinks?: ObjectionProofLink[];

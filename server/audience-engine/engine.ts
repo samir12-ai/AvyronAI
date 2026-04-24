@@ -31,6 +31,7 @@ import { pruneOldSnapshots, assessDataReliability as sharedAssessDataReliability
 import { aiChat } from "../ai-client";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity, type SemanticBridgeResult } from "./semantic-bridge";
+import { scoreAudienceSophistication, type AudienceSophisticationOutput } from "./sophistication-llm";
 
 interface EvidenceMeta {
   evidenceCount: number;
@@ -150,6 +151,7 @@ export interface AudienceEngineV3Result {
   engineVersion: number;
   executionTimeMs: number;
   snapshotId: string;
+  audienceSophistication?: import("./sophistication-llm").AudienceSophisticationOutput | null;
 }
 
 function sanitizeTexts(texts: string[]): { clean: string[]; removed: number } {
@@ -1887,6 +1889,59 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     );
   }
 
+  // ── INTELLIGENCE UPGRADE: Sophistication Tier Scoring (Schwartz tradition) ──
+  let audienceSophistication: AudienceSophisticationOutput | null = null;
+  if (audienceSegments.length > 0) {
+    try {
+      const competitorClaimsForSophistication: string[] = [];
+      try {
+        const latestMi = await db
+          .select({ marketDiagnosis: miSnapshots.marketDiagnosis, opportunitySignals: miSnapshots.opportunitySignals })
+          .from(miSnapshots)
+          .where(eq(miSnapshots.id, miSnapshotId || ""))
+          .limit(1);
+        if (latestMi[0]) {
+          const opps = JSON.parse((latestMi[0].opportunitySignals as any) || "[]");
+          for (const o of opps.slice(0, 8)) {
+            const c = typeof o === "string" ? o : (o.signal || o.text || o.claim || "");
+            if (c) competitorClaimsForSophistication.push(c);
+          }
+        }
+      } catch { /* ignore */ }
+
+      audienceSophistication = await scoreAudienceSophistication({
+        industry: businessContext.industry,
+        coreOffer: businessContext.coreOffer,
+        segments: audienceSegments.map(s => ({
+          name: s.name,
+          description: (s as any).description,
+          painProfile: s.painProfile || [],
+          desireProfile: s.desireProfile || [],
+          objectionProfile: s.objectionProfile || [],
+        })),
+        comments: commentTexts,
+        objections: objectionMap.slice(0, 12).map(o => o.canonical),
+        marketDiagnosis: null,
+        competitorClaims: competitorClaimsForSophistication,
+        accountId,
+      });
+
+      if (audienceSophistication) {
+        for (const segment of audienceSegments) {
+          const profile = audienceSophistication.segments.find(p =>
+            p.segmentName.toLowerCase().trim() === segment.name.toLowerCase().trim(),
+          );
+          if (profile) {
+            (segment as any).sophisticationProfile = profile;
+          }
+        }
+        console.log(`[AudienceEngine-V3] SOPHISTICATION_ATTACHED | globalTier=${audienceSophistication.globalTier} | segmentsScored=${audienceSophistication.segments.length}/${audienceSegments.length} | burnt=${audienceSophistication.marketIsBurnt}`);
+      }
+    } catch (sophErr: any) {
+      console.error(`[AudienceEngine-V3] SOPHISTICATION_FAILED | ${sophErr.message}`);
+    }
+  }
+
   const segmentDensity = computeSegmentDensity(painMap, desireMap, audienceSegments, miSnapshotId);
 
   const executionTimeMs = Date.now() - startTime;
@@ -2012,6 +2067,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     productDna: productDna || null,
     dataReliability,
     confidenceScore: dataReliability.overallReliability,
+    audienceSophistication,
   };
 }
 

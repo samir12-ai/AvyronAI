@@ -2447,6 +2447,52 @@ export async function runOfferEngine(
     { problemStatement: aiOffers.primary.problemStatement, proofPath: aiOffers.primary.proofPath, objectionHandling: aiOffers.primary.objectionHandling },
   );
 
+  // ── INTELLIGENCE UPGRADE: Identity / Commercial / Value Translation reasoning ──
+  try {
+    const { generateOfferIdentityReasoning } = await import("./identity-llm");
+    const segments0 = (audience.audienceSegments || [])[0] as any;
+    const sophisticationTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+    const rejectedClaimPatterns: string[] = [];
+    for (const seg of (audience.audienceSegments || []) as any[]) {
+      const profile = seg?.sophisticationProfile;
+      if (profile?.rejectedClaimPatterns) {
+        for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
+      }
+    }
+    const competitorEquivalentClaim = ((positioning as any)?.semanticCollisions || [])
+      .find((c: any) => c.competitorEquivalentClaim)?.competitorEquivalentClaim
+      || ((positioning as any)?.primaryTerritory?.semanticCollision?.competitorEquivalentClaim)
+      || null;
+    const cialdiniPrinciple = (positioning as any)?.cialdiniReasoning?.primaryCialdiniPrinciple
+      || (audience as any)?.cialdiniHint
+      || null;
+    const cialdiniRationale = (positioning as any)?.cialdiniReasoning?.principleRationale || null;
+
+    const identityReasoning = await generateOfferIdentityReasoning({
+      offerName: primaryOffer.offerName,
+      coreOutcome: primaryOffer.coreOutcome,
+      mechanismDescription: primaryOffer.mechanismDescription,
+      enemyDefinition: (positioning as any)?.enemyDefinition || null,
+      contrastAxis: (positioning as any)?.contrastAxis || null,
+      audiencePains: (audience.audiencePains || []).slice(0, 6),
+      audienceDesires: Object.keys(audience.desireMap || {}).slice(0, 6),
+      audienceObjections: Object.keys((audience as any).objectionMap || {}).slice(0, 6),
+      sophisticationTier,
+      rejectedClaimPatterns,
+      cialdiniPrinciple,
+      cialdiniRationale,
+      competitorEquivalentClaim,
+      analyticalEnrichment: (mi as any)?.analyticalEnrichment || null,
+      accountId,
+    });
+    if (identityReasoning) {
+      primaryOffer.identityReasoning = identityReasoning;
+      console.log(`[OfferEngine-V4] IDENTITY_REASONING_ATTACHED | tier=${sophisticationTier ?? "?"} | competitorEquivalent="${(competitorEquivalentClaim || "").slice(0, 60)}" | rejectedAlts=${identityReasoning.rejectedAlternatives.length}`);
+    }
+  } catch (idErr: any) {
+    console.error(`[OfferEngine-V4] IDENTITY_REASONING_FAILED | ${idErr.message}`);
+  }
+
   const altOutcome: OutcomeLayer = {
     ...l1Outcome,
     primaryOutcome: aiOffers.alternative.outcome || l1Outcome.transformationStatement,
