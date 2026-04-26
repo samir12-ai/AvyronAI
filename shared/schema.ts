@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -2479,3 +2479,296 @@ export const systemControlVerdicts = pgTable("system_control_verdicts", {
 });
 
 export type SystemControlVerdictRecord = typeof systemControlVerdicts.$inferSelect;
+
+
+// =============================================
+// PHASE 8.0 — REMIX ADAPTIVE PIPELINE OVERLAY
+// Source: Avyron Remix → Avyron Main migration
+// Additive only. Does not modify or replace any
+// existing engine snapshot/signal storage.
+// 12 tables: pipeline_runs/snapshots/signals/change_events/rejections/
+// acquisitions/eval_windows/user_truth/dna/dna_versions/clusters + boss_runs
+// =============================================
+// =============================================
+// REMIX PIPELINE OVERLAY (Phase 1)
+// Additive only. Does not modify or replace any
+// existing engine snapshot/signal storage.
+// =============================================
+export const pipelineRuns = pgTable("pipeline_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  lane: text("lane").notNull(), // user | competitor | bridge | shared
+  trigger: text("trigger").notNull().default("manual"), // cron | manual | approval | bridge
+  parentRunId: varchar("parent_run_id"),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  status: text("status").notNull().default("pending"), // pending | running | validated | rejected | failed
+  rejectionReasons: text("rejection_reasons"),
+  summary: text("summary"),
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineRun = typeof pipelineRuns.$inferSelect;
+export type InsertPipelineRun = typeof pipelineRuns.$inferInsert;
+
+export const pipelineSnapshots = pgTable("pipeline_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull(),
+  // Phase 6.5 — first-class lineage. Nullable for additive backfill safety;
+  // writers must populate; readers hard-reject rows with missing lineage.
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  acquisitionId: varchar("acquisition_id"),
+  windowId: varchar("window_id"),
+  entityId: varchar("entity_id").notNull(),
+  entityType: text("entity_type").notNull(),
+  lane: text("lane").notNull(),
+  source: text("source").notNull(),
+  collectedAt: timestamp("collected_at").notNull(),
+  payload: text("payload").notNull(),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineSnapshot = typeof pipelineSnapshots.$inferSelect;
+
+export const pipelineSignals = pgTable("pipeline_signals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull(),
+  // Phase 6.5 — first-class lineage (see pipelineSnapshots note).
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  acquisitionId: varchar("acquisition_id"),
+  windowId: varchar("window_id"),
+  derivedFromSignalId: varchar("derived_from_signal_id"),
+  sourceSnapshotId: varchar("source_snapshot_id").notNull(),
+  lane: text("lane").notNull(),
+  type: text("type").notNull(),
+  value: text("value").notNull(),
+  confidence: doublePrecision("confidence").notNull().default(0),
+  evidence: text("evidence"),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineSignal = typeof pipelineSignals.$inferSelect;
+
+export const pipelineChangeEvents = pgTable("pipeline_change_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull(),
+  // Phase 6.5 — first-class lineage (see pipelineSnapshots note).
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  acquisitionId: varchar("acquisition_id"),
+  windowId: varchar("window_id"),
+  baselineSnapshotId: varchar("baseline_snapshot_id").notNull(),
+  currentSnapshotId: varchar("current_snapshot_id").notNull(),
+  changeDimension: text("change_dimension").notNull(),
+  severity: text("severity").notNull(),
+  evidence: text("evidence"),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineChangeEvent = typeof pipelineChangeEvents.$inferSelect;
+
+// =============================================
+// Phase 6.5 — Integrity Engineering rejection log.
+// Locked by Samir 2026-04-20:
+//   Every hard-reject from the reader/writer boundary writes a row here.
+//   Provides queryable proof that the system is fail-closed and surfaces
+//   structured reasons on the admin dashboard. Append-only; no updates.
+// =============================================
+export const pipelineRejections = pgTable("pipeline_rejections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  observedAt: timestamp("observed_at").defaultNow().notNull(),
+  // Boundary that caught the violation: "reader" | "writer" | "harness".
+  boundary: text("boundary").notNull(),
+  // Logical table the rejected row came from (or "n/a" for non-row violations).
+  tableName: text("table_name").notNull(),
+  // Row id when known; null for shape/contract violations with no persisted row.
+  rowId: varchar("row_id"),
+  // Run id when the rejection happened in the context of a pipeline run.
+  runId: varchar("run_id"),
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  lane: text("lane"),
+  // Canonical machine-readable reason code (LINEAGE_MISSING_ACCOUNT, etc).
+  reasonCode: text("reason_code").notNull(),
+  // Human-readable detail.
+  reasonDetail: text("reason_detail").notNull(),
+  // JSON snapshot of lineage context (account_id, campaign_id, acquisition_id,
+  // expected vs observed values, etc) for debugging. Strict JSON, no fallback.
+  context: text("context"),
+});
+
+export type PipelineRejection = typeof pipelineRejections.$inferSelect;
+export type InsertPipelineRejection = typeof pipelineRejections.$inferInsert;
+
+// =============================================
+// Phase 2 — Centralized Collector overlay.
+// Single source of acquisition for the new pipeline.
+// Additive only. Legacy scrapers and their tables remain untouched.
+// =============================================
+export const pipelineAcquisitions = pgTable("pipeline_acquisitions", {
+  id: varchar("id").primaryKey(),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  lane: text("lane").notNull(),                 // user | competitor
+  entityType: text("entity_type").notNull(),    // user_channel | competitor_website | competitor_instagram | competitor_tiktok | competitor_reviews
+  entityId: varchar("entity_id").notNull(),
+  sourceAdapter: text("source_adapter").notNull(),
+  collectedAt: timestamp("collected_at").notNull(),
+  payload: text("payload").notNull(),           // JSON — adapter-normalized raw acquisition (no signals)
+  provenance: text("provenance").notNull(),     // JSON — upstream scraper, backend, timing, rate-limit, cache info
+  ttlMs: integer("ttl_ms").notNull(),
+  scopeHash: text("scope_hash").notNull().default("default"),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineAcquisition = typeof pipelineAcquisitions.$inferSelect;
+export type InsertPipelineAcquisition = typeof pipelineAcquisitions.$inferInsert;
+
+// =============================================
+// Phase 3 — Boss Agent overlay.
+// Orchestration-only. Records the decision/execution log for every Boss run.
+// Lane runs spawned by a Boss run reuse pipeline_runs.parentRunId = boss_runs.id.
+// =============================================
+export const bossRuns = pgTable("boss_runs", {
+  id: varchar("id").primaryKey(),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  trigger: text("trigger").notNull(),               // "manual" | "approval" (cron deferred to Phase 8)
+  status: text("status").notNull().default("running"), // "running" | "completed" | "partial" | "failed"
+  scope: text("scope"),                             // JSON — what the caller asked for
+  plan: text("plan"),                               // JSON — BossPlan
+  execution: text("execution"),                     // JSON — acquisitions + lane run ids + bridge run id
+  q1Verdict: text("q1_verdict").notNull().default("UNKNOWN"),    // "WORKING" | "DEGRADED" | "UNKNOWN"
+  q1Reasons: text("q1_reasons"),                    // JSON array
+  q2Verdict: text("q2_verdict").notNull().default("UNCERTAIN"),  // "STABLE" | "SHIFTED" | "UNCERTAIN"
+  q2Reasons: text("q2_reasons"),                    // JSON array
+  warnings: text("warnings"),                       // JSON array
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type BossRun = typeof bossRuns.$inferSelect;
+export type InsertBossRun = typeof bossRuns.$inferInsert;
+
+// =============================================
+// Phase 5 — User Truth Layer + Plan-Anchored Eval Windows.
+// Overlay-only. Locked by Samir 2026-04-20:
+//   - Anchor source = plan_approvals.decided_at (primary) /
+//     strategic_plans.updated_at (fallback w/ warning).
+//   - Each approved plan creates its own anchor — no retroactive mixing
+//     of rhythm expectations across different plans.
+//   - 4 truth fields exactly: total_leads, qualified_leads, booked_calls,
+//     paid_active. Nothing else (no notes, no derived ratios).
+//   - Truth FK-bound to a specific window so orphan truth is impossible.
+// =============================================
+export const pipelineEvalWindows = pgTable("pipeline_eval_windows", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  planId: varchar("plan_id").notNull(),                 // FK to strategic_plans.id
+  anchorAt: timestamp("anchor_at").notNull(),           // plan_approvals.decided_at OR fallback
+  anchorFallbackUsed: boolean("anchor_fallback_used").notNull().default(false),
+  windowIndex: integer("window_index").notNull(),       // 0 = first 7-day cycle from anchor
+  windowStart: timestamp("window_start").notNull(),     // inclusive
+  windowEnd: timestamp("window_end").notNull(),         // exclusive
+  state: text("state").notNull().default("open"),       // "open" | "closed_with_truth" | "closed_missing_truth" | "late_filled"
+  openedAt: timestamp("opened_at").notNull().defaultNow(),
+  closedAt: timestamp("closed_at"),
+  truthId: varchar("truth_id"),                         // FK to pipeline_user_truth.id
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  // Each (campaign, plan, window_index) gets exactly one row.
+  // Lazy-create uses INSERT ... ON CONFLICT DO NOTHING on this constraint.
+  campaignPlanWindowUnique: uniqueIndex("idx_pipeline_eval_windows_unique")
+    .on(table.campaignId, table.planId, table.windowIndex),
+}));
+
+export type PipelineEvalWindow = typeof pipelineEvalWindows.$inferSelect;
+export type InsertPipelineEvalWindow = typeof pipelineEvalWindows.$inferInsert;
+
+export const pipelineUserTruth = pgTable("pipeline_user_truth", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  windowId: varchar("window_id").notNull(),             // FK to pipeline_eval_windows.id (orphan truth impossible)
+  totalLeads: integer("total_leads").notNull(),
+  qualifiedLeads: integer("qualified_leads").notNull(),
+  bookedCalls: integer("booked_calls").notNull(),
+  paidActive: boolean("paid_active").notNull(),
+  submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+  submittedBy: varchar("submitted_by"),                 // admin user id from JWT (audit trail)
+  wasLate: boolean("was_late").notNull().default(false),
+  supersededAt: timestamp("superseded_at"),
+  supersededBy: varchar("superseded_by"),               // FK to a newer pipeline_user_truth.id
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineUserTruth = typeof pipelineUserTruth.$inferSelect;
+export type InsertPipelineUserTruth = typeof pipelineUserTruth.$inferInsert;
+
+// =============================================
+// Phase 6 — DNA lifecycle + Cluster comparison + Outcome-gated Q1.
+// Overlay-only. Locked by Samir 2026-04-20 (rev 2):
+//   - Q1 is a JOINED interpretation of three layers (Phase 5 execution +
+//     Phase 5 truth + Phase 6 cluster comparison). No single layer can
+//     promote WORKING on its own.
+//   - Active-DNA cardinality enforced at the DB level by a partial unique
+//     index on (account_id, campaign_id) WHERE status='active'.
+//   - Hypothesis edits do NOT mint a new dna_id — they append a
+//     pipeline_dna_versions row so the cluster baseline survives.
+//   - Cluster production is idempotent per (window_id, dna_id).
+// =============================================
+export const pipelineDna = pgTable("pipeline_dna", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  hypothesis: text("hypothesis").notNull(),
+  status: text("status").notNull().default("proposed"), // "proposed" | "active" | "paused" | "retired"
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  activatedAt: timestamp("activated_at"),
+  retiredAt: timestamp("retired_at"),
+  notes: text("notes"),
+});
+
+export type PipelineDna = typeof pipelineDna.$inferSelect;
+export type InsertPipelineDna = typeof pipelineDna.$inferInsert;
+
+export const pipelineDnaVersions = pgTable("pipeline_dna_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  dnaId: varchar("dna_id").notNull(),               // FK -> pipeline_dna.id
+  hypothesis: text("hypothesis").notNull(),         // snapshot at this version
+  status: text("status").notNull(),                 // snapshot at this version
+  changedBy: varchar("changed_by"),
+  changedAt: timestamp("changed_at").notNull().defaultNow(),
+  reason: text("reason"),                           // operator note
+});
+
+export type PipelineDnaVersion = typeof pipelineDnaVersions.$inferSelect;
+export type InsertPipelineDnaVersion = typeof pipelineDnaVersions.$inferInsert;
+
+export const pipelineClusters = pgTable("pipeline_clusters", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  dnaId: varchar("dna_id").notNull(),               // FK -> pipeline_dna.id
+  windowId: varchar("window_id").notNull(),         // FK -> pipeline_eval_windows.id
+  clusterSignature: jsonb("cluster_signature").notNull(),
+  producedAt: timestamp("produced_at").notNull().defaultNow(),
+  producedByRunId: varchar("produced_by_run_id"),   // FK -> boss_runs.id
+}, (table) => ({
+  // Idempotency boundary: re-running boss in the same window with same active DNA is a no-op.
+  windowDnaUnique: uniqueIndex("idx_pipeline_clusters_window_dna").on(table.windowId, table.dnaId),
+}));
+
+export type PipelineCluster = typeof pipelineClusters.$inferSelect;
+export type InsertPipelineCluster = typeof pipelineClusters.$inferInsert;

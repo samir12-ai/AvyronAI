@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Pipeline Overlay — Read-Only</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232d; --border: #2a3340;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --ok: #2ea043; --warn: #d29922; --bad: #f85149; --skip: #8b949e; --info: #79c0ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+  header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.5px; }
+  header .badge { font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); }
+  main { padding: 18px; max-width: 1400px; margin: 0 auto; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .filters { background: var(--panel); border: 1px solid var(--border); padding: 12px; border-radius: 6px; margin-bottom: 14px; }
+  .filters label { color: var(--muted); margin-right: 6px; }
+  .filters input, .filters select { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 5px 8px; border-radius: 4px; font: inherit; min-width: 220px; }
+  .filters select { min-width: 140px; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 6px 14px; border-radius: 4px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: white; }
+  button.primary:hover { background: #388bfd; color: white; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--panel2); color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  tr:last-child td { border-bottom: none; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: var(--panel2); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 14px; margin-bottom: 14px; }
+  .panel h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 4px 14px; font-size: 12px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.4px; }
+  .pill-ok { background: rgba(46,160,67,0.16); color: #56d364; border: 1px solid rgba(46,160,67,0.4); }
+  .pill-warn { background: rgba(210,153,34,0.16); color: #e3b341; border: 1px solid rgba(210,153,34,0.4); }
+  .pill-bad { background: rgba(248,81,73,0.16); color: #ff7b72; border: 1px solid rgba(248,81,73,0.4); }
+  .pill-skip { background: rgba(139,148,158,0.18); color: #b1bac4; border: 1px solid rgba(139,148,158,0.4); }
+  .pill-info { background: rgba(121,192,255,0.14); color: #79c0ff; border: 1px solid rgba(121,192,255,0.4); }
+  .warn-chip { display: inline-block; background: rgba(210,153,34,0.18); color: #e3b341; border: 1px solid rgba(210,153,34,0.5);
+    padding: 3px 8px; border-radius: 4px; font-size: 11px; margin: 2px 4px 2px 0; }
+  .skip-chip { display: inline-block; background: rgba(248,81,73,0.18); color: #ff7b72; border: 1px solid rgba(248,81,73,0.5);
+    padding: 3px 8px; border-radius: 4px; font-size: 11px; margin: 2px 4px 2px 0; font-weight: 600; }
+  .muted { color: var(--muted); }
+  pre { background: var(--panel2); border: 1px solid var(--border); padding: 8px 10px; border-radius: 4px;
+    overflow-x: auto; margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+  .auth-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .auth-card { background: var(--panel); border: 1px solid var(--border); padding: 22px; border-radius: 8px; min-width: 420px; }
+  .auth-card h2 { margin: 0 0 12px; font-size: 14px; }
+  .auth-card textarea { width: 100%; min-height: 120px; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; padding: 8px; font: 11px ui-monospace, monospace; }
+  .auth-card .err { color: var(--bad); margin: 8px 0 0; font-size: 12px; min-height: 16px; }
+  .empty { padding: 30px; text-align: center; color: var(--muted); }
+  .lineage-warn-banner { background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.5); color: #e3b341;
+    padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 12px; }
+  .crumb { color: var(--muted); margin-bottom: 12px; }
+  .crumb a { color: var(--accent); }
+  /* ─── Phase 8 — AI overlay (controlled consumption) ───
+     Visually distinct from rule-based panels. Purple stripe + dashed border
+     signals "this is descriptive AI interpretation, NOT decision logic". */
+  .ai-panel { background: var(--panel); border: 1px dashed #8957e5; border-left: 3px solid #8957e5;
+    border-radius: 6px; padding: 14px; margin-bottom: 14px; position: relative; }
+  .ai-panel h2 { margin: 0 0 4px; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.6px; color: #b392f0; }
+  .ai-panel .ai-sub { color: var(--muted); font-size: 11px; margin: 0 0 12px; font-style: italic; }
+  .ai-badge { display: inline-block; background: rgba(137,87,229,0.16); color: #b392f0;
+    border: 1px solid rgba(137,87,229,0.5); padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+  .ai-rule-divider { background: rgba(46,160,67,0.06); border-left: 3px solid var(--ok);
+    padding: 10px 12px; margin-bottom: 12px; border-radius: 4px; font-size: 12px; }
+  .ai-interp-block { background: rgba(137,87,229,0.06); border-left: 3px solid #8957e5;
+    padding: 10px 12px; margin-bottom: 10px; border-radius: 4px; font-size: 12px; }
+  .ai-interp-block .label { color: #b392f0; font-size: 10px; font-weight: 600; letter-spacing: 0.5px;
+    text-transform: uppercase; margin-bottom: 6px; }
+  .ai-trace { color: var(--muted); font-size: 10px; font-family: ui-monospace, monospace;
+    margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); word-break: break-all; }
+  .ai-status-ok { color: #56d364; }
+  .ai-status-disabled { color: var(--muted); }
+  .ai-status-error { color: #ff7b72; }
+  .ai-status-unavailable { color: #b1bac4; }
+  .ai-banner-mandatory { background: rgba(210,153,34,0.16); border: 1px solid rgba(210,153,34,0.5);
+    color: #e3b341; padding: 6px 10px; border-radius: 4px; font-size: 11px; margin-bottom: 10px;
+    font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PIPELINE OVERLAY</h1>
+  <span class="badge">read-only · operational</span>
+  <span class="badge" id="mode-badge">list</span>
+  <a href="#/" class="badge" style="text-decoration:none;cursor:pointer">runs</a>
+  <a href="#/rejections" class="badge" style="text-decoration:none;cursor:pointer">rejections</a>
+  <span style="flex:1"></span>
+  <button id="logout-btn" title="Forget token">forget token</button>
+</header>
+
+<main id="root">
+  <div class="empty">Loading…</div>
+</main>
+
+<script>
+const API = "/api/pipeline";
+const TOKEN_KEY = "pipeline-overlay-token";
+const $ = (q) => document.querySelector(q);
+const root = $("#root");
+
+function getToken() { return sessionStorage.getItem(TOKEN_KEY); }
+function setToken(t) { sessionStorage.setItem(TOKEN_KEY, t); }
+function clearToken() { sessionStorage.removeItem(TOKEN_KEY); }
+
+function bounceToLogin() {
+  // The shell is cookie-gated server-side, so we should already have a valid cookie
+  // when this page is rendered. But sessionStorage is required for /api/pipeline/* XHRs
+  // (they're header-gated). If sessionStorage is empty, send the user back to /login
+  // so they paste the token, which sets BOTH the cookie and sessionStorage.
+  location.href = "/admin/pipeline-overlay/login";
+}
+
+async function api(path) {
+  const tok = getToken();
+  if (!tok) { bounceToLogin(); throw new Error("no token"); }
+  const res = await fetch(API + path, { headers: { Authorization: "Bearer " + tok } });
+  if (res.status === 401 || res.status === 403) {
+    clearToken();
+    bounceToLogin();
+    throw new Error("auth");
+  }
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  if (!res.ok) throw new Error((body && body.message) || ("HTTP " + res.status));
+  return body;
+}
+
+$("#logout-btn").onclick = async () => {
+  clearToken();
+  try {
+    await fetch("/admin/pipeline-overlay/logout", { method: "POST", credentials: "same-origin" });
+  } catch {}
+  location.href = "/admin/pipeline-overlay/login";
+};
+
+// ── helpers ──────────────────────────────────────────────────────────
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function statusPill(s) {
+  if (s === "completed" || s === "validated") return `<span class="pill pill-ok">${esc(s)}</span>`;
+  if (s === "partial" || s === "running" || s === "pending") return `<span class="pill pill-warn">${esc(s)}</span>`;
+  if (s === "failed" || s === "rejected") return `<span class="pill pill-bad">${esc(s)}</span>`;
+  if (s === "skipped") return `<span class="pill pill-skip">${esc(s)}</span>`;
+  return `<span class="pill pill-info">${esc(s ?? "—")}</span>`;
+}
+function verdictPill(v) {
+  if (v === "STABLE" || v === "WORKING") return `<span class="pill pill-ok">${esc(v)}</span>`;
+  if (v === "SHIFTED" || v === "BROKEN") return `<span class="pill pill-bad">${esc(v)}</span>`;
+  if (v === "UNKNOWN") return `<span class="pill pill-skip">${esc(v)}</span>`;
+  return `<span class="pill pill-info">${esc(v ?? "—")}</span>`;
+}
+function freshPill(b) { return b ? `<span class="pill pill-ok">fresh</span>` : `<span class="pill pill-warn">stale</span>`; }
+function cachePill(b) { return b ? `<span class="pill pill-info">cache</span>` : `<span class="pill pill-skip">live</span>`; }
+function fmtTime(t) { if (!t) return "—"; try { return new Date(t).toLocaleString(); } catch { return String(t); } }
+function fmtDur(a, b) { if (!a || !b) return "—"; const ms = new Date(b).getTime() - new Date(a).getTime();
+  if (!isFinite(ms)) return "—"; if (ms < 1000) return ms + "ms"; if (ms < 60000) return (ms/1000).toFixed(1) + "s"; return (ms/60000).toFixed(1) + "m"; }
+function chips(list, cls) { if (!list || !list.length) return `<span class="muted">—</span>`;
+  return list.map(w => `<span class="${cls}">${esc(w)}</span>`).join(""); }
+
+// ── views ────────────────────────────────────────────────────────────
+async function viewList() {
+  $("#mode-badge").textContent = "list";
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const accountId = params.get("accountId") || "";
+  const campaignId = params.get("campaignId") || "";
+  const status = params.get("status") || "";
+
+  root.innerHTML = `
+    <div class="filters">
+      <div class="row">
+        <label>accountId</label>
+        <input id="f-account" value="${esc(accountId)}" placeholder="(optional)" />
+        <label>campaignId</label>
+        <input id="f-campaign" value="${esc(campaignId)}" placeholder="(optional)" />
+        <label>status</label>
+        <select id="f-status">
+          <option value="">any</option>
+          <option value="completed" ${status==="completed"?"selected":""}>completed</option>
+          <option value="partial" ${status==="partial"?"selected":""}>partial</option>
+          <option value="failed" ${status==="failed"?"selected":""}>failed</option>
+          <option value="running" ${status==="running"?"selected":""}>running</option>
+        </select>
+        <button class="primary" id="f-refresh">Refresh</button>
+      </div>
+    </div>
+    <div id="list-target"><div class="empty">Loading…</div></div>
+  `;
+  $("#f-refresh").onclick = () => {
+    const p = new URLSearchParams();
+    const a = $("#f-account").value.trim(); if (a) p.set("accountId", a);
+    const c = $("#f-campaign").value.trim(); if (c) p.set("campaignId", c);
+    const s = $("#f-status").value; if (s) p.set("status", s);
+    location.hash = "#/?" + p.toString();
+  };
+
+  const qs = new URLSearchParams();
+  if (accountId) qs.set("accountId", accountId);
+  if (campaignId) qs.set("campaignId", campaignId);
+  if (status) qs.set("status", status);
+  qs.set("limit", "50");
+
+  try {
+    const rows = await api("/boss/runs?" + qs.toString());
+    if (!rows.length) {
+      $("#list-target").innerHTML = `<div class="empty">No boss runs match these filters.</div>`;
+      return;
+    }
+    $("#list-target").innerHTML = `
+      <table>
+        <thead><tr>
+          <th>started</th><th>status</th><th>campaign</th><th>trigger</th>
+          <th>Q1</th><th>Q2</th><th>warnings</th><th>duration</th><th>boss id</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => {
+            const w = r.warnings ? JSON.parse(r.warnings) : [];
+            return `<tr class="clickable" data-id="${esc(r.id)}">
+              <td>${esc(fmtTime(r.startedAt || r.createdAt))}</td>
+              <td>${statusPill(r.status)}</td>
+              <td>${esc(r.campaignId)}</td>
+              <td>${esc(r.trigger)}</td>
+              <td>${verdictPill(r.q1Verdict)}</td>
+              <td>${verdictPill(r.q2Verdict)}</td>
+              <td>${w.length ? `<span class="pill pill-warn">${w.length}</span>` : `<span class="muted">0</span>`}</td>
+              <td class="muted">${esc(fmtDur(r.startedAt, r.finishedAt))}</td>
+              <td class="muted" style="font-size:11px">${esc(r.id)}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+    `;
+    document.querySelectorAll("tr.clickable").forEach(tr => {
+      tr.onclick = () => { location.hash = "#/run/" + tr.dataset.id; };
+    });
+  } catch (e) {
+    $("#list-target").innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// ─── Phase 5 — descriptive evaluation pill / rhythm notice / truth banner ───
+function evalPill(status, confidence) {
+  if (!status) return `<span class="muted">—</span>`;
+  const colorMap = {
+    complete: "#0a7d2c",
+    degraded: "#b87a00",
+    blocked: "#a8000c",
+    no_active_plan: "#5b6068",
+  };
+  const c = colorMap[status] || "#5b6068";
+  const conf = confidence ? ` · ${esc(confidence)}` : "";
+  return `<span class="pill" style="background:${c};color:#fff">${esc(status)}${conf}</span>`;
+}
+function rhythmPill(status) {
+  if (!status) return `<span class="muted">—</span>`;
+  const colorMap = {
+    compliant: "#0a7d2c",
+    partial: "#b87a00",
+    non_compliant: "#a8000c",
+    no_active_plan: "#5b6068",
+  };
+  const c = colorMap[status] || "#5b6068";
+  return `<span class="pill" style="background:${c};color:#fff">${esc(status)}</span>`;
+}
+function truthPill(status) {
+  if (!status) return `<span class="muted">—</span>`;
+  const colorMap = { submitted: "#0a7d2c", late: "#b87a00", missing: "#a8000c" };
+  const c = colorMap[status] || "#5b6068";
+  return `<span class="pill" style="background:${c};color:#fff">${esc(status)}</span>`;
+}
+
+function renderPhase5Section(phase5, campaignId, accountId) {
+  if (!phase5) return "";
+  const ctx = phase5.context || {};
+  const truthBanner = phase5.truthAction === "user_truth_required"
+    ? `<div class="lineage-warn-banner" style="background:#ffe2e2;border-color:#ffaaaa">
+         <strong>USER_TRUTH_REQUIRED</strong> — this evaluation window is open and missing operator truth.
+         Submit the 4 fields below before next run for a full-confidence evaluation.
+       </div>` : "";
+
+  const rhythmRows = (ctx.rhythm && ctx.rhythm.perChannel || []).map(c => `
+    <tr>
+      <td>${esc(c.channel)}</td>
+      <td>${c.planned}</td>
+      <td>${c.actual}</td>
+      <td>${(c.ratio*100).toFixed(0)}%</td>
+      <td>${rhythmPill(c.status)}</td>
+    </tr>`).join("");
+
+  const w = ctx.window;
+  const t = ctx.truth;
+
+  return `
+    ${truthBanner}
+    <div class="panel">
+      <h2>Phase 5 — evaluation context</h2>
+      <dl class="kv">
+        <dt>evaluation</dt><dd>${evalPill(phase5.evaluation_status, phase5.evaluation_confidence)}</dd>
+        <dt>truth</dt><dd>${truthPill(phase5.truth_status)} ${t && t.submittedAt ? `<span class="muted">@ ${esc(fmtTime(t.submittedAt))}</span>` : ""} ${t && t.wasLate ? `<span class="warn-chip">late</span>` : ""}</dd>
+        <dt>rhythm</dt><dd>${rhythmPill(phase5.rhythm_status)}</dd>
+        ${w ? `
+        <dt>window</dt><dd>plan <code>${esc(w.planId)}</code> · index ${w.windowIndex} · ${esc(w.state)}</dd>
+        <dt>range</dt><dd>${esc(fmtTime(w.windowStart))} → ${esc(fmtTime(w.windowEnd))}</dd>
+        <dt>anchor</dt><dd>${esc(fmtTime(w.anchorAt))} ${w.anchorFallbackUsed ? `<span class="warn-chip">fallback used</span>` : ""}</dd>` : ""}
+      </dl>
+      ${ctx.rhythm && ctx.rhythm.perChannel && ctx.rhythm.perChannel.length ? `
+        <h3 style="margin-top:12px">rhythm per channel (planned vs published, worst-channel-wins)</h3>
+        <table><thead><tr><th>channel</th><th>planned</th><th>actual</th><th>ratio</th><th>status</th></tr></thead>
+        <tbody>${rhythmRows}</tbody></table>
+      ` : (ctx.rhythm && ctx.rhythm.reason === "no_rhythm_planned" ? `<p class="muted">no_rhythm_planned</p>` : "")}
+      ${w && phase5.truthAction === "user_truth_required" ? `
+        <h3 style="margin-top:12px">submit operator truth (4 fields)</h3>
+        <form id="user-truth-form" onsubmit="return submitUserTruth(event, '${esc(campaignId)}', '${esc(accountId)}')" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+          <label>total_leads<br><input type="number" name="totalLeads" required min="0" step="1" style="width:90px"></label>
+          <label>qualified_leads<br><input type="number" name="qualifiedLeads" required min="0" step="1" style="width:110px"></label>
+          <label>booked_calls<br><input type="number" name="bookedCalls" required min="0" step="1" style="width:90px"></label>
+          <label>paid_active<br><select name="paidActive"><option value="false">false</option><option value="true">true</option></select></label>
+          <button type="submit">submit</button>
+          <span id="user-truth-msg" class="muted"></span>
+        </form>` : ""}
+    </div>
+  `;
+}
+
+async function submitUserTruth(ev, campaignId, accountId) {
+  ev.preventDefault();
+  const f = ev.target;
+  const msg = document.getElementById("user-truth-msg");
+  msg.textContent = "submitting…";
+  try {
+    const body = {
+      campaignId,
+      accountId,
+      totalLeads: parseInt(f.totalLeads.value, 10),
+      qualifiedLeads: parseInt(f.qualifiedLeads.value, 10),
+      bookedCalls: parseInt(f.bookedCalls.value, 10),
+      paidActive: f.paidActive.value === "true",
+    };
+    const r = await fetch("/api/pipeline/user-truth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      msg.textContent = `error: ${j.code || j.error || "failed"} — ${j.message || ""}`;
+      msg.style.color = "#a8000c";
+      return false;
+    }
+    msg.textContent = `accepted${j.superseded ? " (superseded prior)" : ""} · window state=${j.window.state}`;
+    msg.style.color = "#0a7d2c";
+  } catch (e) {
+    msg.textContent = `error: ${e.message}`;
+    msg.style.color = "#a8000c";
+  }
+  return false;
+}
+
+async function viewDetail(bossId) {
+  $("#mode-badge").textContent = "detail";
+  root.innerHTML = `<div class="crumb"><a href="#/">← back to list</a></div><div class="empty">Loading lineage…</div>`;
+  let data;
+  try { data = await api("/boss/runs/" + encodeURIComponent(bossId) + "/lineage"); }
+  catch (e) { root.innerHTML = `<div class="crumb"><a href="#/">← back</a></div><div class="empty">Error: ${esc(e.message)}</div>`; return; }
+
+  const b = data.boss;
+  const warnings = b.warnings || [];
+  const skipReasons = warnings.filter(w => w.startsWith("bridge_skipped:") || w.startsWith("lane_translation_skipped:") || w.startsWith("lane_run_failed:"));
+  const otherWarnings = warnings.filter(w => !skipReasons.includes(w));
+
+  root.innerHTML = `
+    <div class="crumb"><a href="#/">← back to list</a></div>
+
+    ${warnings.length ? `<div class="lineage-warn-banner">
+      <strong>${warnings.length} boss-level warning${warnings.length>1?"s":""}:</strong>
+      ${chips(skipReasons, "skip-chip")}
+      ${chips(otherWarnings, "warn-chip")}
+    </div>` : ""}
+
+    <div class="panel">
+      <h2>boss run</h2>
+      <dl class="kv">
+        <dt>id</dt><dd>${esc(b.id)}</dd>
+        <dt>status</dt><dd>${statusPill(b.status)}</dd>
+        <dt>trigger</dt><dd>${esc(b.trigger)}</dd>
+        <dt>account</dt><dd>${esc(b.accountId)}</dd>
+        <dt>campaign</dt><dd>${esc(b.campaignId)}</dd>
+        <dt>started</dt><dd>${esc(fmtTime(b.startedAt || b.createdAt))}</dd>
+        <dt>finished</dt><dd>${esc(fmtTime(b.finishedAt))}</dd>
+        <dt>duration</dt><dd>${esc(fmtDur(b.startedAt, b.finishedAt))}</dd>
+        <dt>scope</dt><dd><pre>${esc(JSON.stringify(b.scope, null, 2))}</pre></dd>
+      </dl>
+    </div>
+
+    ${renderPhase5Section(data.phase5, b.campaignId, b.accountId)}
+
+    ${renderPhase6Section(data.phase6)}
+
+    <div class="grid2">
+      <div class="panel">
+        <h2>Q1 — DNA working? <span class="ai-badge" style="background:rgba(46,160,67,0.16);color:#56d364;border-color:rgba(46,160,67,0.4)">rule-based</span></h2>
+        <p>${verdictPill(b.q1Verdict)}</p>
+        ${renderQ1Reasons(b.q1Reasons)}
+      </div>
+      <div class="panel">
+        <h2>Q2 — market shifted? <span class="ai-badge" style="background:rgba(46,160,67,0.16);color:#56d364;border-color:rgba(46,160,67,0.4)">rule-based</span></h2>
+        <p>${verdictPill(b.q2Verdict)}</p>
+        <pre>${esc(JSON.stringify(b.q2Reasons, null, 2))}</pre>
+      </div>
+    </div>
+
+    ${renderAIInterpretationPanel(b.id)}
+
+    <div class="panel">
+      <h2>plan</h2>
+      <p class="muted">bridge requested: ${b.plan && b.plan.bridgeRequested ? "yes" : "no"} · items: ${b.plan && b.plan.items ? b.plan.items.length : 0}</p>
+      ${b.plan && b.plan.items && b.plan.items.length ? `
+        <table><thead><tr><th>lane</th><th>entityType</th><th>entityId</th></tr></thead>
+          <tbody>${b.plan.items.map(i => `<tr><td>${esc(i.lane)}</td><td>${esc(i.entityType)}</td><td>${esc(i.entityId)}</td></tr>`).join("")}</tbody>
+        </table>` : `<div class="muted">no items planned</div>`}
+      ${b.plan && b.plan.notes && b.plan.notes.length ? `<p class="muted" style="margin-top:8px">notes: ${esc(b.plan.notes.join(" · "))}</p>` : ""}
+    </div>
+
+    <div class="panel">
+      <h2>acquisitions (${data.acquisitions.length})</h2>
+      ${data.acquisitions.length ? `
+        <table><thead><tr>
+          <th>acquisition id</th><th>lane</th><th>entityType</th><th>entityId</th>
+          <th>adapter</th><th>cache</th><th>fresh</th><th>age</th><th>ttl</th>
+        </tr></thead>
+        <tbody>${data.acquisitions.map(a => `<tr>
+          <td style="font-size:11px">${esc(a.id)}</td>
+          <td>${esc(a.lane)}</td>
+          <td>${esc(a.entityType)}</td>
+          <td style="font-size:11px">${esc(a.entityId)}</td>
+          <td class="muted">${esc(a.sourceAdapter)}</td>
+          <td>${cachePill(a.cacheHit)}</td>
+          <td>${freshPill(a.isFresh)}</td>
+          <td class="muted">${(a.ageMs/1000).toFixed(1)}s</td>
+          <td class="muted">${(a.ttlMs/1000).toFixed(0)}s</td>
+        </tr>`).join("")}</tbody></table>
+      ` : `<div class="muted">no acquisitions recorded</div>`}
+    </div>
+
+    <div class="panel">
+      <h2>lane runs (${data.laneRuns.length})</h2>
+      ${data.laneRuns.length ? `
+        <table><thead><tr>
+          <th>lane</th><th>status</th><th>run id</th><th>acquisition</th>
+          <th>snapshots</th><th>signals</th><th>change events</th><th>warnings / reason</th>
+        </tr></thead>
+        <tbody>${data.laneRuns.map(lr => `<tr>
+          <td>${esc(lr.lane)}</td>
+          <td>${statusPill(lr.status)}</td>
+          <td style="font-size:11px">${lr.runId ? esc(lr.runId) : `<span class="muted">—</span>`}</td>
+          <td style="font-size:11px">${lr.acquisitionId ? esc(lr.acquisitionId) : `<span class="muted">—</span>`}</td>
+          <td>${lr.snapshotCount}</td>
+          <td>${lr.signalCount}</td>
+          <td>${lr.changeEventCount}${(() => {
+            const sc = lr.severityCounts || {major:0, medium:0, mild:0};
+            const total = (sc.major||0) + (sc.medium||0) + (sc.mild||0);
+            if (total === 0) return "";
+            const parts = [];
+            if (sc.major)  parts.push(`<span class="warn-chip" title="major change events">maj ${sc.major}</span>`);
+            if (sc.medium) parts.push(`<span class="skip-chip" title="medium change events">med ${sc.medium}</span>`);
+            if (sc.mild)   parts.push(`<span class="muted" style="font-size:11px" title="mild change events">mild ${sc.mild}</span>`);
+            return ` <span style="margin-left:4px">${parts.join(" ")}</span>`;
+          })()}</td>
+          <td>${lr.reason ? `<span class="skip-chip">${esc(lr.reason)}</span>` : chips(lr.warnings, "warn-chip")}</td>
+        </tr>`).join("")}</tbody></table>
+      ` : `<div class="muted">no lane runs</div>`}
+    </div>
+
+    <div class="panel">
+      <h2>bridge</h2>
+      ${data.bridgeRun ? `
+        <dl class="kv">
+          <dt>status</dt><dd>${statusPill(data.bridgeRun.status)}</dd>
+          <dt>run id</dt><dd style="font-size:11px">${esc(data.bridgeRun.id)}</dd>
+          <dt>started</dt><dd>${esc(fmtTime(data.bridgeRun.startedAt))}</dd>
+          <dt>finished</dt><dd>${esc(fmtTime(data.bridgeRun.finishedAt))}</dd>
+        </dl>` :
+        (() => {
+          const skip = (b.warnings || []).find(w => w.startsWith("bridge_skipped:"));
+          return `<div class="skip-chip">${esc(skip || "no bridge run")}</div>`;
+        })()
+      }
+    </div>
+  `;
+
+  // Phase 8 — wire opt-in AI interpretation button. Operator must click;
+  // never auto-fetched.
+  const aiBtn = $("#ai-load-btn");
+  if (aiBtn) aiBtn.onclick = () => loadAIInterpretation(b.id);
+}
+
+// ─── Phase 6 — DNA + Cluster rendering ───
+function dnaStatusPill(s) {
+  if (!s) return `<span class="muted">—</span>`;
+  const map = { active: "#0a7d2c", proposed: "#3b6cd6", paused: "#b87a00", retired: "#5b6068" };
+  return `<span class="pill" style="background:${map[s]||"#5b6068"};color:#fff">${esc(s)}</span>`;
+}
+function clusterVerdictPill(v) {
+  if (!v) return `<span class="muted">—</span>`;
+  const map = {
+    clusters_unchanged: "#0a7d2c",
+    clusters_shifted: "#b87a00",
+    new_clusters: "#3b6cd6",
+    clusters_disappeared: "#a8000c",
+    clusters_unstable: "#a8000c",
+    no_baseline: "#5b6068",
+  };
+  return `<span class="pill" style="background:${map[v]||"#5b6068"};color:#fff">${esc(v)}</span>`;
+}
+function regressionPill(reg) {
+  if (!reg) return `<span class="muted">—</span>`;
+  if (reg.skipped) return `<span class="skip-chip">skipped:${esc(reg.reason||"")}</span>`;
+  if (reg.regressed) return `<span class="pill" style="background:#a8000c;color:#fff">regressed:${esc(reg.reason||"")}</span>`;
+  return `<span class="pill" style="background:#0a7d2c;color:#fff">no_regression</span>`;
+}
+
+function renderPhase6Section(phase6) {
+  if (!phase6) return "";
+  const dna = phase6.active_dna;
+  const cp = phase6.cluster_production || {};
+  const cmp = phase6.cluster_comparison || {};
+  const reg = phase6.outcome_regression || null;
+
+  const dnaBlock = dna ? `
+    <dl class="kv">
+      <dt>id</dt><dd style="font-size:11px">${esc(dna.id)}</dd>
+      <dt>status</dt><dd>${dnaStatusPill(dna.status)}</dd>
+      <dt>hypothesis</dt><dd>${esc(dna.hypothesis||"")}</dd>
+      <dt>activated</dt><dd>${esc(fmtTime(dna.activatedAt))}</dd>
+    </dl>` : `<div class="muted">no active DNA — Q1 will be UNKNOWN until one is activated</div>`;
+
+  const themesRows = (cmp.themesShifted || []).map(t => `
+    <tr><td>${esc(t.theme_token)}</td><td>${(t.baselineShare*100).toFixed(0)}%</td>
+        <td>${(t.currentShare*100).toFixed(0)}%</td><td>${(t.deltaPp).toFixed(1)} pp</td></tr>`).join("");
+
+  return `
+    <div class="grid2">
+      <div class="panel">
+        <h2>Phase 6 — DNA</h2>
+        ${dnaBlock}
+      </div>
+      <div class="panel">
+        <h2>Phase 6 — clusters</h2>
+        <dl class="kv">
+          <dt>production</dt><dd>${cp.produced
+            ? `<span class="pill" style="background:#0a7d2c;color:#fff">produced</span> <span class="muted">posts=${cp.postCount} · themes=${cp.themeCount}</span>`
+            : `<span class="skip-chip">skipped:${esc(cp.reason||"—")}</span>`}</dd>
+          <dt>comparison</dt><dd>${clusterVerdictPill(cmp.verdict)}</dd>
+          <dt>outcome regression</dt><dd>${regressionPill(reg)}</dd>
+        </dl>
+        ${(cmp.themesAdded && cmp.themesAdded.length) ? `<p class="muted" style="margin-top:6px">added: ${cmp.themesAdded.map(esc).join(", ")}</p>` : ""}
+        ${(cmp.themesRemoved && cmp.themesRemoved.length) ? `<p class="muted">removed: ${cmp.themesRemoved.map(esc).join(", ")}</p>` : ""}
+        ${themesRows ? `<table style="margin-top:8px"><thead><tr><th>theme</th><th>baseline</th><th>current</th><th>Δ</th></tr></thead><tbody>${themesRows}</tbody></table>` : ""}
+      </div>
+    </div>`;
+}
+
+// ─── Phase 8 — AI interpretation panel (controlled consumption) ───
+// Operator-initiated only. Renders into the ai-interp-target container after
+// the operator clicks "Load AI interpretation". The AI section is visually
+// distinct (purple dashed border) so it can never be confused with the
+// rule-based Q1/Q2 panels above.
+function renderAIInterpretationPanel(bossId) {
+  return `
+    <div class="ai-panel" id="ai-interp-panel">
+      <h2>AI interpretation <span class="ai-badge">descriptive only</span></h2>
+      <p class="ai-sub">"AI explains. The system decides." — outputs below describe the rule-based verdict above; they never change it.</p>
+      <button class="primary" id="ai-load-btn" data-run-id="${esc(bossId)}">Load AI interpretation</button>
+      <span class="muted" style="margin-left:10px;font-size:11px">opt-in · operator-initiated · separate from decision logic</span>
+      <div id="ai-interp-target" style="margin-top:12px"></div>
+    </div>`;
+}
+
+function statusLabel(status) {
+  const cls = "ai-status-" + status;
+  return `<span class="${cls}" style="font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:0.5px">${esc(status)}</span>`;
+}
+
+function renderTrace(trace) {
+  if (!trace || !trace.model_id) return "";
+  const fp = trace.prompt_fingerprint ? trace.prompt_fingerprint.slice(0, 12) : "—";
+  const rfp = trace.response_fingerprint ? trace.response_fingerprint.slice(0, 12) : "—";
+  return `<div class="ai-trace">
+    model=${esc(trace.model_id)} · prompt=${esc(trace.prompt_version)} ·
+    prompt_fp=${esc(fp)} · response_fp=${esc(rfp)} ·
+    latency=${trace.latency_ms}ms · at=${esc(trace.finished_at)}
+  </div>`;
+}
+
+function renderEnvelope(label, env, opts) {
+  opts = opts || {};
+  const status = env.status;
+  const heading = `<div class="label">${esc(label)} · ${statusLabel(status)}</div>`;
+  if (status === "disabled") {
+    return `<div class="ai-interp-block">${heading}
+      <div class="muted">AI overlays are disabled. Set <code>PIPELINE_AI_OVERLAY_ENABLED=true</code> on the server to enable interpretation.</div>
+    </div>`;
+  }
+  if (status === "unavailable") {
+    return `<div class="ai-interp-block">${heading}
+      <div class="muted">Not available for this run. Reason: <code>${esc(env.unavailableReason || "unspecified")}</code></div>
+    </div>`;
+  }
+  if (status === "error") {
+    return `<div class="ai-interp-block">${heading}
+      <div class="muted">AI interpretation could not be produced. Reason: <code>${esc(env.error || "unknown")}</code>. Rule-based verdict above is unaffected.</div>
+      ${renderTrace(env.trace)}
+    </div>`;
+  }
+  // status === "ok"
+  const banner = (env.data && env.data.interpretation_only === true)
+    ? `<div class="ai-banner-mandatory">interpretation_only — does not modify rule-based numbers, verdict, or reasons</div>`
+    : "";
+  const body = opts.renderBody ? opts.renderBody(env.data) : `<pre>${esc(JSON.stringify(env.data, null, 2))}</pre>`;
+  return `<div class="ai-interp-block">${heading}${banner}${body}${renderTrace(env.trace)}</div>`;
+}
+
+function renderExplanationBody(d) {
+  if (!d) return `<div class="muted">no narrative</div>`;
+  const drivers = Array.isArray(d.keyDrivers) && d.keyDrivers.length
+    ? `<ul style="margin:6px 0 0 18px;padding:0">${d.keyDrivers.map(k => `<li><code>${esc(k.citesReason||"")}</code> — ${esc(k.summary||"")}</li>`).join("")}</ul>`
+    : "";
+  return `<div style="margin-top:4px">${esc(d.narrative || "")}</div>
+    ${drivers ? `<div class="muted" style="margin-top:6px;font-size:10px">key drivers (each cites a verbatim rule reason):</div>${drivers}` : ""}`;
+}
+
+function renderQ2ReasoningBody(d) {
+  if (!d) return `<div class="muted">no Q2 reasoning</div>`;
+  const verdictBadge = `<span class="ai-badge" style="margin-right:6px">verdict cited: ${esc(d.verdictRestated || "")}</span>`;
+  // Phase 7.5 — commercial framing: marketRead + clientImplications + operatorWeighsNext.
+  // Back-compat fallback: legacy v1 envelopes still in cache may have narrative + signalRelationships + operatorAttention.
+  const marketRead = d.marketRead || d.narrative || "";
+  const implications = Array.isArray(d.clientImplications) && d.clientImplications.length
+    ? d.clientImplications
+    : (Array.isArray(d.signalRelationships) ? d.signalRelationships : []);
+  const operatorNext = d.operatorWeighsNext || d.operatorAttention || "";
+  const implsBlock = implications.length
+    ? `<div class="muted" style="margin-top:6px;font-size:10px">what this means for the client:</div>
+       <ul style="margin:4px 0 0 18px;padding:0">${implications.map(r => `<li>${esc(r)}</li>`).join("")}</ul>`
+    : "";
+  const operatorBlock = operatorNext.length
+    ? `<div style="margin-top:6px"><strong>operator weighs next:</strong> ${esc(operatorNext)}</div>`
+    : "";
+  return `<div>${verdictBadge}</div>
+    <div style="margin-top:4px"><strong>market read:</strong> ${esc(marketRead)}</div>
+    ${implsBlock}${operatorBlock}`;
+}
+
+function renderDnaBody(d) {
+  if (!d) return `<div class="muted">no cluster meaning</div>`;
+  const persuasion = d.persuasionLogic
+    ? `<div style="margin-top:4px"><strong>persuasion:</strong> ${esc(d.persuasionLogic.primary || "")}${
+        Array.isArray(d.persuasionLogic.supporting) && d.persuasionLogic.supporting.length
+          ? ` <span class="muted">(supporting: ${d.persuasionLogic.supporting.map(esc).join(", ")})</span>`
+          : ""}</div>` : "";
+  const tags = Array.isArray(d.strategyTypeTags) && d.strategyTypeTags.length
+    ? `<div style="margin-top:4px">tags: ${d.strategyTypeTags.map(t => `<span class="ai-badge" style="margin-right:4px">${esc(t)}</span>`).join("")}</div>` : "";
+  return `<div><strong>cluster meaning:</strong> ${esc(d.clusterMeaning || "")}</div>${persuasion}${tags}`;
+}
+
+async function loadAIInterpretation(bossId) {
+  const target = $("#ai-interp-target");
+  const btn = $("#ai-load-btn");
+  if (!target || !btn) return;
+  btn.disabled = true;
+  btn.textContent = "Loading…";
+  target.innerHTML = `<div class="muted">Calling AI overlays…</div>`;
+  let payload;
+  try {
+    payload = await api("/boss/runs/" + encodeURIComponent(bossId) + "/explanation");
+  } catch (e) {
+    target.innerHTML = `<div class="ai-interp-block"><div class="label">request failed · ${statusLabel("error")}</div><div class="muted">${esc(e.message)}</div></div>`;
+    btn.disabled = false; btn.textContent = "Retry";
+    return;
+  }
+  const enabled = payload.enabled === true;
+  const principle = `<div class="ai-rule-divider">
+    <strong style="color:#56d364">Principle:</strong> ${esc(payload.principle || "")} ·
+    <span class="muted">rule_based_is_truth=${payload.consumptionContract.rule_based_is_truth} ·
+    ai_never_changes_verdict=${payload.consumptionContract.ai_never_changes_verdict}</span>
+    ${enabled ? "" : `<div style="margin-top:6px;color:var(--muted)">overlays are currently <strong>disabled</strong> on the server — every block below will show <code>disabled</code></div>`}
+  </div>`;
+
+  const q1 = payload.q1.ai;
+  const q2 = payload.q2.ai;
+  target.innerHTML = principle +
+    `<h3 style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px">Q1 interpretations (describe DNA verdict above)</h3>` +
+    renderEnvelope("explanation — narrative for Q1", q1.explanation, { renderBody: renderExplanationBody }) +
+    renderEnvelope("DNA / cluster meaning", q1.dna, { renderBody: renderDnaBody }) +
+    renderEnvelope("competitor meaning", q1.competitor) +
+    renderEnvelope("user-interpretation — why it worked", q1.userInterpretation) +
+    `<h3 style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px">Q2 interpretation (describes market-shift verdict above)</h3>` +
+    renderEnvelope("explanation — narrative for Q2", q2.explanation, { renderBody: renderExplanationBody }) +
+    renderEnvelope("Q2 reasoning — competitor + user + DNA relationships", q2.q2Reasoning, { renderBody: renderQ2ReasoningBody });
+  btn.disabled = false;
+  btn.textContent = "Reload AI interpretation";
+}
+
+function renderQ1Reasons(reasons) {
+  if (!reasons || !Array.isArray(reasons) || reasons.length === 0) {
+    return `<div class="muted">no reasons recorded</div>`;
+  }
+  // Three-layer joined display: classify each reason chip by its prefix.
+  const chipFor = (r) => {
+    const cls = r.startsWith("dna_holding:") ? "pill" :
+                r.startsWith("dna_drift:") ? "warn-chip" :
+                r.startsWith("q1_skipped:") || r.startsWith("q1_no_baseline:") || r.startsWith("q1_insufficient:") ? "skip-chip" :
+                "skip-chip";
+    const style = r.startsWith("dna_holding:") ? "background:#0a7d2c;color:#fff" : "";
+    return `<span class="${cls}" style="${style}">${esc(r)}</span>`;
+  };
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px">${reasons.map(chipFor).join("")}</div>`;
+}
+
+// ─── Phase 6.5 — Integrity Engineering rejection panel ─────────────
+async function viewRejections() {
+  $("#mode-badge").textContent = "rejections";
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const reasonCode = params.get("reasonCode") || "";
+  const boundary = params.get("boundary") || "";
+  const campaignId = params.get("campaignId") || "";
+  const sinceHours = params.get("sinceHours") || "24";
+
+  root.innerHTML = `
+    <div class="filters">
+      <div class="row">
+        <label>reason_code</label>
+        <input id="rj-reason" value="${esc(reasonCode)}" placeholder="(any)" />
+        <label>boundary</label>
+        <select id="rj-boundary">
+          <option value="" ${boundary===""?"selected":""}>any</option>
+          <option value="reader" ${boundary==="reader"?"selected":""}>reader</option>
+          <option value="writer" ${boundary==="writer"?"selected":""}>writer</option>
+          <option value="harness" ${boundary==="harness"?"selected":""}>harness</option>
+        </select>
+        <label>campaignId</label>
+        <input id="rj-campaign" value="${esc(campaignId)}" placeholder="(optional)" />
+        <label>since (hours)</label>
+        <input id="rj-since" value="${esc(sinceHours)}" style="min-width:80px" />
+        <button class="primary" id="rj-refresh">Refresh</button>
+      </div>
+    </div>
+    <div id="rj-stats" class="panel"><div class="muted">Loading stats…</div></div>
+    <div id="rj-target"><div class="empty">Loading…</div></div>
+  `;
+  $("#rj-refresh").onclick = () => {
+    const p = new URLSearchParams();
+    const r = $("#rj-reason").value.trim(); if (r) p.set("reasonCode", r);
+    const b = $("#rj-boundary").value; if (b) p.set("boundary", b);
+    const c = $("#rj-campaign").value.trim(); if (c) p.set("campaignId", c);
+    const s = $("#rj-since").value.trim(); if (s) p.set("sinceHours", s);
+    location.hash = "#/rejections?" + p.toString();
+  };
+
+  const qs = new URLSearchParams();
+  if (reasonCode) qs.set("reasonCode", reasonCode);
+  if (boundary) qs.set("boundary", boundary);
+  if (campaignId) qs.set("campaignId", campaignId);
+  if (sinceHours) qs.set("sinceHours", sinceHours);
+  qs.set("limit", "200");
+
+  try {
+    const statsQs = new URLSearchParams();
+    if (campaignId) statsQs.set("campaignId", campaignId);
+    if (sinceHours) statsQs.set("sinceHours", sinceHours);
+    const stats = await api("/rejections/stats?" + statsQs.toString());
+    const grouped = {};
+    for (const s of (stats.stats ?? [])) {
+      grouped[s.reasonCode] = (grouped[s.reasonCode] ?? 0) + Number(s.n);
+    }
+    const codes = Object.keys(grouped).sort((a, b) => grouped[b] - grouped[a]);
+    if (!codes.length) {
+      $("#rj-stats").innerHTML = `<h2>integrity rejections — last ${esc(sinceHours)}h</h2><div class="muted">No rejections recorded in this window. Pipeline is clean.</div>`;
+    } else {
+      $("#rj-stats").innerHTML = `<h2>integrity rejections — last ${esc(sinceHours)}h</h2>` +
+        codes.map(c => `<span class="warn-chip" style="cursor:pointer" data-code="${esc(c)}">${esc(c)} · ${grouped[c]}</span>`).join("");
+      document.querySelectorAll("#rj-stats [data-code]").forEach(el => {
+        el.onclick = () => {
+          const p = new URLSearchParams();
+          p.set("reasonCode", el.dataset.code);
+          if (sinceHours) p.set("sinceHours", sinceHours);
+          if (campaignId) p.set("campaignId", campaignId);
+          location.hash = "#/rejections?" + p.toString();
+        };
+      });
+    }
+  } catch (e) {
+    $("#rj-stats").innerHTML = `<div class="empty">Stats error: ${esc(e.message)}</div>`;
+  }
+
+  try {
+    const data = await api("/rejections?" + qs.toString());
+    const rows = data.rejections ?? [];
+    if (!rows.length) {
+      $("#rj-target").innerHTML = `<div class="empty">No rejections match these filters.</div>`;
+      return;
+    }
+    $("#rj-target").innerHTML = `
+      <table>
+        <thead><tr>
+          <th>observed</th><th>boundary</th><th>table</th><th>reason_code</th>
+          <th>campaign</th><th>lane</th><th>row id</th><th>detail</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>
+            <td>${esc(fmtTime(r.observedAt))}</td>
+            <td><span class="pill pill-info">${esc(r.boundary)}</span></td>
+            <td class="muted">${esc(r.tableName)}</td>
+            <td><span class="pill pill-bad">${esc(r.reasonCode)}</span></td>
+            <td class="muted" style="font-size:11px">${esc(r.campaignId ?? "—")}</td>
+            <td class="muted">${esc(r.lane ?? "—")}</td>
+            <td class="muted" style="font-size:11px">${esc(r.rowId ?? "—")}</td>
+            <td>${esc(r.reasonDetail)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    `;
+  } catch (e) {
+    $("#rj-target").innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// ── routing ──────────────────────────────────────────────────────────
+function route() {
+  if (!getToken()) { bounceToLogin(); return; }
+  const h = location.hash || "#/";
+  const m = h.match(/^#\/run\/([^?]+)/);
+  if (m) viewDetail(decodeURIComponent(m[1]));
+  else if (h.startsWith("#/rejections")) viewRejections();
+  else viewList();
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>
