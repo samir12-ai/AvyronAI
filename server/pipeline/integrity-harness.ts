@@ -190,7 +190,9 @@ async function seedAcquisition(opts: {
     provenance: opts.provenance ?? '{"cache_hit":false,"warnings":[]}',
     collectedAt: new Date(),
     ttlMs: 60_000,
-    contentHash: `${HARNESS_PREFIX}${opts.id}`,
+    // Phase 8.0 fix (Main migration) — removed `contentHash` field;
+    // pipelineAcquisitions schema (shared/schema.ts L2615) has no such column.
+    // Bundle drift; harness fixture only, no runtime impact.
   });
 }
 

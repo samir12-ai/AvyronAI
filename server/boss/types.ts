@@ -1,4 +1,8 @@
 import type { CollectorEntityType, CollectorLane } from "../collector/envelope";
+// Phase 8.0 fix (Main migration) — imported so Phase6Context.q2_inputs can carry
+// the same structured market interpretation that drove Q2's verdict (see L497
+// of run.ts). Bundle author added the field to the writer but missed the type.
+import type { CompetitorInterpretation } from "../pipeline/lanes/competitor/interpret";
 
 export type BossTrigger = "manual" | "approval";
 
@@ -127,6 +131,10 @@ export interface BossExecutionPhase6Context {
     dna: { hasActiveDna: boolean; clusterComparisonVerdict: string | null; outcomeRegressed: boolean | null };
     lookbackDays: number;
     ruleCode: string;
+    // Phase 8.0 fix (Main migration) — added to match the writer at run.ts L497.
+    // Persists the structured Phase 7.3 interpretation so the explanation route
+    // and q2-reasoning overlay see the same market signal that drove the verdict.
+    interpretation?: CompetitorInterpretation | null;
   };
 }
 
@@ -147,7 +155,10 @@ export interface BossExecutionPhase5Context {
     submittedAt: string | null;
   } | null;
   rhythm: {
-    status: "compliant" | "partial" | "non_compliant" | "no_active_plan";
+    // Phase 8.0 fix (Main migration) — widened to 5 members to match
+    // BossExecution.rhythm_status (this file L81). Bundle author had drift
+    // between the two declarations; runtime already produced "rhythm_invalid".
+    status: "compliant" | "partial" | "non_compliant" | "no_active_plan" | "rhythm_invalid";
     plannedTotal: number;
     actualTotal: number;
     perChannel: Array<{

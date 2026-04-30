@@ -63,7 +63,9 @@ export interface AssembleInput {
     post_count: number;
     by_media_type: Record<string, number>;
     by_platform: Record<string, number>;
-    themes: Array<{ theme_token: string; post_count: number }>;
+    // Phase 8.0 fix (Main migration) — added per-theme `post_ids` to satisfy
+    // ClusterTheme structural type required by DnaAIInput.signature.
+    themes: Array<{ theme_token: string; post_count: number; post_ids: string[] }>;
     post_ids: string[];
   } | null;
   windowId?: string | null;

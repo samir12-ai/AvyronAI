@@ -137,7 +137,7 @@ router.get("/collector/acquisitions/:id", async (req: Request, res: Response) =>
   try {
     // Phase 6.5 — guarded read. Hard-rejects + logs if the acquisition row is
     // missing or has malformed payload/provenance JSON. No silent fallback.
-    const view = await readAcquisitionByIdOrReject(req.params.id);
+    const view = await readAcquisitionByIdOrReject((req.params.id as string));
     res.json({
       ...view.row,
       payload: view.payload,
@@ -196,7 +196,7 @@ router.get("/boss/runs", async (req: Request, res: Response) => {
 
 router.get("/boss/runs/:id", async (req: Request, res: Response) => {
   try {
-    const row = await getBossRun(req.params.id);
+    const row = await getBossRun((req.params.id as string));
     if (!row) return res.status(404).json({ error: "NotFound", message: "boss run not found" });
     res.json({
       ...row,
@@ -217,7 +217,7 @@ router.get("/boss/runs/:id", async (req: Request, res: Response) => {
 // referenced in execution + the bridge run if present. No mutations, no caching.
 router.get("/boss/runs/:id/lineage", async (req: Request, res: Response) => {
   try {
-    const boss = await getBossRun(req.params.id);
+    const boss = await getBossRun((req.params.id as string));
     if (!boss) return res.status(404).json({ error: "NotFound", message: "boss run not found" });
 
     const parsedBoss = {
@@ -380,7 +380,7 @@ router.get("/boss/runs/:id/lineage", async (req: Request, res: Response) => {
 // can show exactly what happened (ok / disabled / error / unavailable).
 router.get("/boss/runs/:id/explanation", async (req: Request, res: Response) => {
   try {
-    const boss = await getBossRun(req.params.id);
+    const boss = await getBossRun((req.params.id as string));
     if (!boss) return res.status(404).json({ error: "NotFound", message: "boss run not found" });
 
     const q1Reasons: string[] = boss.q1Reasons ? JSON.parse(boss.q1Reasons) : [];
@@ -549,7 +549,7 @@ router.get("/user-truth/window", async (req: Request, res: Response) => {
 
 router.get("/runs/:id", async (req: Request, res: Response) => {
   try {
-    const run = await getRun(req.params.id);
+    const run = await getRun((req.params.id as string));
     // Phase 6.5 — guarded reads. Each row passes the canonical contract +
     // lineage assertion; integrity violations hard-reject and are logged.
     const expected = { accountId: run.accountId, campaignId: run.campaignId };
@@ -650,7 +650,7 @@ router.post("/dna", async (req: Request, res: Response) => {
 router.post("/dna/:id/activate", async (req: Request, res: Response) => {
   try {
     const changedBy = (req as any).user?.id ?? null;
-    const row = await activateDna({ dnaId: req.params.id, changedBy, reason: req.body?.reason ?? null });
+    const row = await activateDna({ dnaId: (req.params.id as string), changedBy, reason: req.body?.reason ?? null });
     res.json(row);
   } catch (err) { handleDnaError(res, err); }
 });
@@ -658,7 +658,7 @@ router.post("/dna/:id/activate", async (req: Request, res: Response) => {
 router.post("/dna/:id/pause", async (req: Request, res: Response) => {
   try {
     const changedBy = (req as any).user?.id ?? null;
-    const row = await pauseDna({ dnaId: req.params.id, changedBy, reason: req.body?.reason ?? null });
+    const row = await pauseDna({ dnaId: (req.params.id as string), changedBy, reason: req.body?.reason ?? null });
     res.json(row);
   } catch (err) { handleDnaError(res, err); }
 });
@@ -666,7 +666,7 @@ router.post("/dna/:id/pause", async (req: Request, res: Response) => {
 router.post("/dna/:id/retire", async (req: Request, res: Response) => {
   try {
     const changedBy = (req as any).user?.id ?? null;
-    const row = await retireDna({ dnaId: req.params.id, changedBy, reason: req.body?.reason ?? null });
+    const row = await retireDna({ dnaId: (req.params.id as string), changedBy, reason: req.body?.reason ?? null });
     res.json(row);
   } catch (err) { handleDnaError(res, err); }
 });
@@ -676,14 +676,14 @@ router.patch("/dna/:id", async (req: Request, res: Response) => {
     const { hypothesis, reason } = req.body ?? {};
     if (!hypothesis) return res.status(400).json({ error: "BadRequest", message: "hypothesis required" });
     const changedBy = (req as any).user?.id ?? null;
-    const row = await editDnaHypothesis({ dnaId: req.params.id, hypothesis, changedBy, reason: reason ?? null });
+    const row = await editDnaHypothesis({ dnaId: (req.params.id as string), hypothesis, changedBy, reason: reason ?? null });
     res.json(row);
   } catch (err) { handleDnaError(res, err); }
 });
 
 router.get("/dna/:id/versions", async (req: Request, res: Response) => {
   try {
-    const versions = await listDnaVersions(req.params.id);
+    const versions = await listDnaVersions((req.params.id as string));
     res.json({ count: versions.length, versions });
   } catch (err) { handleDnaError(res, err); }
 });
