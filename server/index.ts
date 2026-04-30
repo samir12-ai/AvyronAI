@@ -19,9 +19,14 @@ import { migrateMemoryOutcomeProvenance } from "./migrations/009-memory-outcome-
 import { runMigration010 } from "./migrations/010-tiktok-validation-columns";
 import { migrateSystemControlVerdicts } from "./migrations/011-system-control-verdicts";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
-import { authMiddleware, optionalAuth } from "./auth";
+import { authMiddleware, optionalAuth, verifyAdminToken } from "./auth";
 import * as fs from "fs";
 import * as path from "path";
+// Phase 8.0 (Main migration) — adaptive pipeline overlay JSON router.
+// Mounted under /api/pipeline below. Self-protects with authMiddleware +
+// adminMiddleware internally (server/pipeline/routes.ts L32-33), so the /api
+// auth gate at L329 is harmless duplication, not a bypass.
+import pipelineRouter from "./pipeline/routes";
 
 const app = express();
 const log = console.log;
@@ -326,6 +331,119 @@ function setupErrorHandler(app: express.Application) {
     "/proxy/health",
   ];
 
+  // ─── Phase 8.0 (Main migration) §2.7.1 ─────────────────────────────
+  // Pipeline-overlay dashboard middleware. MUST mount above the /api auth
+  // gate so the cookie-gated browser navigation (HttpOnly pipelineOverlayToken)
+  // runs before any JWT-Authorization-header handler. Reconstructed from the
+  // manifest spec (the bundle ships only the two HTML templates; the original
+  // Remix server/index.ts L205-293 was not part of the 61-file copy set).
+  // ───────────────────────────────────────────────────────────────────
+  const PIPELINE_OVERLAY_COOKIE = "pipelineOverlayToken";
+  const PIPELINE_OVERLAY_COOKIE_MAX_AGE_SECONDS = 8 * 60 * 60; // 8h, per spec.
+
+  function readPipelineOverlayCookie(req: Request): string | null {
+    const raw = req.headers.cookie;
+    if (!raw) return null;
+    for (const part of raw.split(";")) {
+      const eq = part.indexOf("=");
+      if (eq < 0) continue;
+      const name = part.slice(0, eq).trim();
+      if (name !== PIPELINE_OVERLAY_COOKIE) continue;
+      const value = part.slice(eq + 1).trim();
+      try { return decodeURIComponent(value); } catch { return value; }
+    }
+    return null;
+  }
+
+  function pipelineOverlayCookieAttrs(maxAgeSeconds: number): string {
+    const isProd = process.env.NODE_ENV === "production";
+    const attrs = [
+      `Path=/admin/pipeline-overlay`,
+      `Max-Age=${maxAgeSeconds}`,
+      "HttpOnly",
+      "SameSite=Strict",
+    ];
+    if (isProd) attrs.push("Secure");
+    return attrs.join("; ");
+  }
+
+  function getOverlayAdminToken(req: Request): string | null {
+    // Header precedence over cookie (per §2.7.1) — supports both browser
+    // navigation (cookie) and curl/scripted access (Authorization: Bearer X).
+    const auth = req.headers.authorization;
+    if (auth?.startsWith("Bearer ")) return auth.slice(7).trim() || null;
+    return readPipelineOverlayCookie(req);
+  }
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path === "/admin/pipeline-overlay/login") {
+      if (req.method === "GET") {
+        try {
+          const html = fs.readFileSync(
+            path.resolve(process.cwd(), "server", "templates", "pipeline-overlay-login.html"),
+            "utf8",
+          );
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.setHeader("Cache-Control", "no-store");
+          return res.status(200).send(html);
+        } catch (err) {
+          console.error("[PipelineOverlay] failed to read login template:", err);
+          return res.status(500).json({ error: "template_read_failed" });
+        }
+      }
+      if (req.method === "POST") {
+        const body = (req.body ?? {}) as { token?: unknown };
+        const token = typeof body.token === "string" ? body.token.trim() : "";
+        if (!token) return res.status(400).json({ error: "token required" });
+        const accountId = verifyAdminToken(token);
+        if (!accountId) return res.status(401).json({ error: "invalid or non-admin token" });
+        const cookieValue = encodeURIComponent(token);
+        res.setHeader(
+          "Set-Cookie",
+          `${PIPELINE_OVERLAY_COOKIE}=${cookieValue}; ${pipelineOverlayCookieAttrs(PIPELINE_OVERLAY_COOKIE_MAX_AGE_SECONDS)}`,
+        );
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: "method not allowed" });
+    }
+
+    if (req.path === "/admin/pipeline-overlay/logout") {
+      if (req.method !== "POST") return res.status(405).json({ error: "method not allowed" });
+      // Clear cookie by setting Max-Age=0 with the same Path so the browser
+      // evicts it. Other attrs must match the original to ensure eviction.
+      res.setHeader(
+        "Set-Cookie",
+        `${PIPELINE_OVERLAY_COOKIE}=; ${pipelineOverlayCookieAttrs(0)}`,
+      );
+      return res.status(200).json({ ok: true });
+    }
+
+    if (req.path === "/admin/pipeline-overlay") {
+      if (req.method !== "GET") return res.status(405).json({ error: "method not allowed" });
+      const token = getOverlayAdminToken(req);
+      if (!token || !verifyAdminToken(token)) {
+        // 302 to login per §2.7.1. No-store to defeat back-button cache.
+        res.setHeader("Cache-Control", "no-store");
+        return res.redirect(302, "/admin/pipeline-overlay/login");
+      }
+      try {
+        const html = fs.readFileSync(
+          path.resolve(process.cwd(), "server", "templates", "pipeline-overlay.html"),
+          "utf8",
+        );
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        return res.status(200).send(html);
+      } catch (err) {
+        console.error("[PipelineOverlay] failed to read dashboard template:", err);
+        return res.status(500).json({ error: "template_read_failed" });
+      }
+    }
+
+    return next();
+  });
+  // ─── end §2.7.1 dashboard middleware ───────────────────────────────
+
   app.use("/api", (req, res, next) => {
     const subPath = req.path;
     const isPublic = PUBLIC_PATH_PREFIXES.some(p => subPath.startsWith(p) || subPath === p);
@@ -334,6 +452,12 @@ function setupErrorHandler(app: express.Application) {
     }
     return authMiddleware(req as any, res, next);
   });
+
+  // Phase 8.0 (Main migration) §2.7 — mount adaptive pipeline JSON router.
+  // After the /api auth gate (which sets req.accountId from JWT), before
+  // registerRoutes (so /api/pipeline/* takes precedence over any later
+  // catch-all). Router self-protects with adminMiddleware internally.
+  app.use("/api/pipeline", pipelineRouter);
 
   configureExpoAndLanding(app);
 

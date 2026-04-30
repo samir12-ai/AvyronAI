@@ -51,6 +51,24 @@ export function adminMiddleware(req: AuthRequest, res: Response, next: NextFunct
   next();
 }
 
+/**
+ * Phase 8.0 (Main migration) — verifies an admin JWT token outside the Express
+ * middleware chain. Used by the cookie-gated pipeline-overlay dashboard
+ * (server/index.ts §2.7.1 block) which validates tokens at form-submit time
+ * before setting an HttpOnly cookie. Mirrors the (verifyToken + ADMIN_ACCOUNT_IDS)
+ * check that adminMiddleware performs at request-handler time.
+ *
+ * @returns the validated admin accountId, or null if the token is invalid /
+ *          expired / non-admin.
+ */
+export function verifyAdminToken(token: string): string | null {
+  const payload = verifyToken(token);
+  if (!payload) return null;
+  const accountId = payload.accountId || payload.userId;
+  if (!ADMIN_ACCOUNT_IDS.has(accountId)) return null;
+  return accountId;
+}
+
 function generateToken(userId: string, email: string, accountId: string): string {
   return jwt.sign({ userId, email, accountId } as JwtPayload, JWT_SECRET, { expiresIn: "14d" });
 }
