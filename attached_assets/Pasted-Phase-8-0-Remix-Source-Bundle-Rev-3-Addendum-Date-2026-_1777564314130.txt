@@ -1,0 +1,70 @@
+Phase 8.0 — Remix Source Bundle, Rev 3 Addendum
+Date: 2026-04-26 Bundle: server/audits/phase8.0-remix-source-bundle.tar.gz Sha256 (rev 3): 934cd004d13756e75b617028771edf6da59c8b97d5e73a9b5f2a084aba572230 Size: 121,416 bytes (118.6 KB) Source-file count: 61 (was 58 in rev 2)
+
+1. The gap Sam reported
+"MANIFEST GAP: server/boss/policy/{dna-working,market-shift}.ts are missing from the bundle. Both exist in source. The system cannot function correctly without them."
+
+Confirmed. Both files existed in the Remix source tree but rev 2 of the bundle (and its MANIFEST.txt) listed neither. Cause: the entire server/boss/policy/ subdirectory was missed when the bundle was first packaged in rev 1 — find server/boss -name '*.ts' was scoped one level shallow. Rev 2 inherited the gap because it only swept for modified files, not for missing ones.
+
+2. Systematic completeness re-audit
+To avoid a rev 4 for the same class of bug, ran an exhaustive find server/{boss,pipeline} shared -name '*.ts' -o -name '*.html' and diffed against MANIFEST.txt.
+
+Finding	Action
+server/boss/policy/dna-working.ts (142 LOC, 6,131 B) — imported by boss/run.ts as evaluateQ1.	ADD
+server/boss/policy/market-shift.ts (469 LOC, 19,094 B) — imported by boss/run.ts as evaluateQ2, by ai-overlay/q2-reasoning.ts and ai-overlay/assemble.ts as type Q2EvaluationResult, and by pipeline/real-scenario-harness.ts as decideQ2, Q2CompetitorSnapshot, Q2DnaContext, Q2UserContext.	ADD
+server/boss/policy/q2-verdict-harness.ts (264 LOC, 9,839 B) — Q2-specific verdict test harness. Self-contained; imports only ./market-shift, ../../pipeline/lanes/competitor/interpret, ../types.	ADD (treat as a 4th harness alongside e2e / integrity / real-scenario)
+server/templates/landing-page.html, data-deletion.html, pricing.html	EXCLUDE (verified served by server/index.ts independent of pipeline router; they are base-product surfaces, not pipeline-overlay surfaces).
+Dashboard-serving middleware in server/index.ts lines 205-293	DOCUMENT (see §4 below — this is an integration-step bug in the manifest, not a missing-file bug; the HTMLs are in the bundle but rev 2's row 53/54 incorrectly said "served by routes.ts").
+No other gaps found. All .ts and .html files referenced by the in-bundle code resolve to either: (a) an in-bundle path, (b) a Main-side dependency declared in §0 of the manifest (@shared/schema, ../auth, ../db, ../collector/*), or (c) a standard package (drizzle-orm, express, zod, openai).
+
+3. Bundle changes (rev 2 → rev 3)
++ server/boss/policy/dna-working.ts          (NEW, 142 LOC)
++ server/boss/policy/market-shift.ts         (NEW, 469 LOC)
++ server/boss/policy/q2-verdict-harness.ts   (NEW, 264 LOC)
++ MANIFEST.txt                               (regenerated; 58 → 61 source-file rows; rev-3 changelog header)
+
+No existing files modified. No deletions.
+
+Verification:
+
+$ tar tzf server/audits/phase8.0-remix-source-bundle.tar.gz | grep -v '/$' | wc -l
+63                       (61 source files + MANIFEST.txt + README.md)
+$ awk -F' \\| ' '$1 ~ /^(server|shared)/ {print $4"  "$1}' \
+    remix-source-bundle/MANIFEST.txt | sha256sum -c -
+… 61 lines, all OK …
+
+All 61 source-file SHA-256 sums verify against the live filesystem.
+
+4. Manifest doc updates (phase8.0-remix-to-main-migration-manifest.md)
+Edits applied in the same change:
+
+§1 surface area — was "56 TypeScript files (8,800+ LOC) … 3 test harnesses"; now "59 TypeScript files (9,700+ LOC, including the server/boss/policy/ Q1+Q2 decision rules) … 4 test harnesses". (The 59 vs. 61 difference: two harness files in §1's count are the e2e + integrity ones; the rev-3 source-file inventory of 61 includes the q2-verdict harness explicitly. Numbers reconcile against MANIFEST.txt.)
+§2.5 Boss — added rows 41a / 41b / 41c for the three policy files, with full import-graph annotation. Row 42 (boss/run.ts) updated to call out "Imports evaluateQ1 (41a) and evaluateQ2 (41b)."
+§2.7 Routes + Dashboard — corrected rev-2 mistake. Rows 53/54 previously claimed the HTMLs were "served by routes.ts"; in fact they are served by an admin-gated middleware in server/index.ts (lines 205-293). Both rows now point to the new §2.7.1.
+§2.7.1 NEW — Dashboard-serving middleware copy block. Lists every symbol the receiving agent must paste into Main's index.ts (cookie helpers, three route handlers), documents the required verifyAdminToken symbol from server/auth.ts, the process.cwd()/server/templates/ filesystem dependency, and 4-step acceptance test.
+5. Why the original gap mattered (the failure mode without rev 3)
+Without the policy files:
+
+server/boss/run.ts line 31-32 (import { evaluateQ1 } from "./policy/dna-working"; import { evaluateQ2 } from "./policy/market-shift";) — TypeScript compile error TS2307: Cannot find module './policy/dna-working'. Boss runs cannot execute. Q1 and Q2 verdicts cannot be computed.
+server/pipeline/ai-overlay/q2-reasoning.ts line 40 + assemble.ts line 35 — TS2307 on Q2EvaluationResult type import. AI overlay assembly fails to compile, blocking every /api/pipeline/* route that produces an explanation.
+server/pipeline/real-scenario-harness.ts line 36 — TS2307 on decideQ2 and three Q2 context types. Production-shape harness cannot run, blocking the standard pre-deploy verification step.
+Without §2.7.1:
+
+Dashboard returns 404 from Main even after routes.ts is mounted. Sam (or any Main admin) cannot view rejection logs, run telemetry, or any dashboard panel — even though the JSON /api/pipeline/* endpoints work.
+Both failure modes are now eliminated by rev 3.
+
+6. What did NOT change in rev 3
+No source code changes. Every existing file in the bundle has the same SHA-256 as rev 2.
+No schema changes.
+No harness behavior changes. The integrity and e2e harnesses that were re-run in the rev-2 cleanup proof remain valid (their fixtures and assertions did not depend on policy/*).
+No re-run of the cleanup proof was required (the live DB remains at zero rows in all 12 pipeline_*/boss_runs tables; nothing in this rev wrote to the DB).
+7. Receiving-agent action delta from rev 2 → rev 3
+If the receiving agent already started a rev-2 migration:
+
+Add three files: copy server/boss/policy/{dna-working,market-shift,q2-verdict-harness}.ts from the new bundle into the same paths in Main.
+Re-run §0.1 verification gates — no new dependencies introduced, but the verifyAdminToken gate (§0.1.1) is now required for §2.7.1, not just for /api/pipeline/*.
+Add the §2.7.1 middleware block to Main's index.ts before any /api handler. Without this step, the dashboard 404s.
+Re-run the manifest's existing forbidden-zone validation gate after step 1 — the new policy/ files must NOT import from ai-overlay/ (verified clean in this rev).
+If the receiving agent has not yet started: use rev 3 from the outset; no delta needed.
+
+Status: Rev 3 complete and self-verifying. Bundle, MANIFEST.txt, migration manifest, and this addendum are mutually consistent. Awaiting Sam's confirmation before handoff.
