@@ -1,0 +1,127 @@
+:::writing{variant=“email” id=“88421” subject=“Engine Validation Results — Required Fixes Before Integration”}
+Hi,
+
+Good work on the validation — this is exactly the level of visibility we needed.
+
+Before we move forward to any integration (Phase 8.1), we need to fix a few critical blockers inside the engine system itself.
+
+⸻
+
+1) Do NOT Proceed to Integration Yet
+
+We are not ready to connect engines to the adaptive pipeline.
+
+Right now:
+	•	engine logic is partially upgraded
+	•	but there are still structural and output issues
+
+We need to stabilize this first.
+
+⸻
+
+2) P0 Blockers (Must Be Fixed)
+
+A) Mechanism Engine (Still v1)
+	•	Currently still operating on old logic
+	•	Producing high confidence (e.g. 0.95) on weak inputs
+
+This is a critical gap.
+
+Required:
+	•	Upgrade Mechanism to the same level as other engines
+	•	Apply real marketing logic (causality, “why it works”, alternative failure logic)
+	•	Ensure it does NOT produce inflated confidence without strong grounding
+
+⸻
+
+B) Offer Engine Output Bug
+	•	coreOutcome contains literal [object Object] strings
+	•	This is a hard bug, not just quality issue
+	•	It also passed through StatVal validation → unacceptable
+
+Required:
+	•	Fix serialization / formatting issue
+	•	Ensure all outputs are clean, readable, and structured
+	•	Add a guard so this cannot pass validation again
+
+⸻
+
+C) Audience Engine Frontend Missing
+	•	Audience is one of the most upgraded engines
+	•	But there is no proper frontend component rendering its logic
+
+Required:
+	•	Create a dedicated Audience UI component
+	•	Display:
+	•	awareness level
+	•	belief model
+	•	triggers
+	•	identity / psychology signals
+	•	Do NOT let it flow as untyped generic data
+
+⸻
+
+3) Enforcement Gap (Critical)
+
+This is very important:
+	•	Integrity engine returned: safeToExecute = false
+	•	But downstream engines (Budget, Channel, Iteration, Retention) still executed
+
+This breaks system doctrine.
+
+Required:
+	•	Orchestrator must STOP downstream execution when:
+safeToExecute = false
+	•	No engine should continue after a hard integrity block
+
+⸻
+
+4) Frontend Visibility Audit
+
+We need full alignment between backend and frontend.
+
+Required:
+	•	For each engine:
+	•	verify all V3 fields are visible in UI
+	•	ensure nothing is:
+	•	truncated
+	•	flattened
+	•	hidden
+	•	Fix any mismatch
+
+⸻
+
+5) Cleanup
+
+During fixes:
+	•	remove or flag:
+	•	legacy fields
+	•	unused outputs
+	•	duplicated logic paths
+	•	ensure no mixing between old and new logic
+
+⸻
+
+6) Re-run Validation
+
+After all fixes:
+	•	re-run the same MindAI validation
+	•	provide:
+	•	updated before/after comparison
+	•	confirmation that blockers are resolved
+	•	confirmation that frontend reflects full logic
+
+⸻
+
+7) Goal
+
+Before integration, we need:
+
+a stable engine system with correct logic, clean outputs, proper enforcement, and full frontend visibility
+
+⸻
+
+Do not move to Phase 8.1 until all of the above is resolved.
+
+Thanks.
+:::
