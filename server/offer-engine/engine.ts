@@ -586,8 +586,24 @@ export function layer1_outcomeConstruction(
   const rawPainPhrase = marketLanguage?.rawPainPhrases?.[0];
   const rawDesirePhrase = marketLanguage?.rawDesirePhrases?.[0];
 
-  const primaryPain = rawPainPhrase || (pains.length > 0 ? (typeof pains[0] === "string" ? pains[0] : pains[0]?.pain || pains[0]?.name || "unresolved challenge") : "unresolved challenge");
-  const primaryDesire = rawDesirePhrase || (desires.length > 0 ? desires[0][0] : "");
+  // T001: hard-coerce — never let an object slip into string interpolation
+  const coerceText = (v: any, fallback: string): string => {
+    if (v == null) return fallback;
+    if (typeof v === "string") return v.trim() || fallback;
+    if (typeof v === "object") {
+      const c = v.canonical || v.pain || v.name || v.label || v.text || v.desire || v.value;
+      return typeof c === "string" && c.trim() ? c.trim() : fallback;
+    }
+    return String(v);
+  };
+  const primaryPain = coerceText(
+    rawPainPhrase || (pains.length > 0 ? pains[0] : null),
+    "unresolved challenge",
+  );
+  const primaryDesire = coerceText(
+    rawDesirePhrase || (desires.length > 0 ? desires[0][0] : null),
+    "",
+  );
   const topTerritory = territories.length > 0 ? (territories[0].name || "") : "";
   const topPillar = pillars.length > 0 ? (pillars[0].name || "") : "";
 
@@ -3039,9 +3055,9 @@ export async function runOfferEngine(
   return {
     status,
     statusMessage,
-    primaryOffer,
-    alternativeOffer,
-    rejectedOffer: { offer: rejectedOffer, rejectionReason: aiOffers.rejected.rejectionReason },
+    primaryOffer: scrubOfferObjectLiterals(primaryOffer, structuralWarnings, contractViolations, "primary"),
+    alternativeOffer: scrubOfferObjectLiterals(alternativeOffer, structuralWarnings, contractViolations, "alternative"),
+    rejectedOffer: { offer: scrubOfferObjectLiterals(rejectedOffer, structuralWarnings, contractViolations, "rejected"), rejectionReason: aiOffers.rejected.rejectionReason },
     offerStrengthScore: primaryOffer.offerStrengthScore,
     positioningConsistency: posConsistency,
     hookMechanismAlignment: hookMechAlignment,
@@ -3061,6 +3077,49 @@ export async function runOfferEngine(
     celDepthCompliance: celDepth,
     depthGateResult: depthGateResultOffer,
   };
+}
+
+// T001: Final guard — strip/flag any "[object Object]" residue that slipped past safeLabel.
+// Returns the offer with object-literals scrubbed and records contract violations + warnings.
+function scrubOfferObjectLiterals(
+  offer: OfferCandidate,
+  structuralWarnings: string[],
+  contractViolations: string[],
+  label: string,
+): OfferCandidate {
+  if (!offer || offer.offerName === "No Offer") return offer;
+  const OBJ_LIT = /\[object Object\]/g;
+  const stringFields: (keyof OfferCandidate)[] = ["offerName", "coreOutcome", "mechanismDescription", "audienceFitExplanation"];
+  let touched = false;
+  for (const f of stringFields) {
+    const v = (offer as any)[f];
+    if (typeof v === "string" && OBJ_LIT.test(v)) {
+      const cleaned = v.replace(OBJ_LIT, "<unresolved>").replace(/\s+/g, " ").trim();
+      (offer as any)[f] = cleaned;
+      touched = true;
+      contractViolations.push(`OBJECT_LITERAL_LEAK | offer=${label} | field=${String(f)} | original="${v.slice(0, 100)}"`);
+      structuralWarnings.push(`Offer ${label}.${String(f)} contained "[object Object]" — scrubbed (upstream object→string coercion bug).`);
+    }
+  }
+  // Outcome layer mirrors
+  if (offer.outcomeLayer) {
+    for (const k of ["primaryOutcome", "transformationStatement"] as const) {
+      const v = (offer.outcomeLayer as any)[k];
+      if (typeof v === "string" && OBJ_LIT.test(v)) {
+        (offer.outcomeLayer as any)[k] = v.replace(OBJ_LIT, "<unresolved>").replace(/\s+/g, " ").trim();
+        touched = true;
+        contractViolations.push(`OBJECT_LITERAL_LEAK | offer=${label} | field=outcomeLayer.${k}`);
+      }
+    }
+  }
+  // Deliverables array
+  if (Array.isArray(offer.deliverables)) {
+    offer.deliverables = offer.deliverables.map((d: any) => typeof d === "string" ? d.replace(OBJ_LIT, "<unresolved>") : d);
+  }
+  if (touched) {
+    console.warn(`[OfferEngine] OBJECT_LITERAL_SCRUBBED | offer=${label} — see contractViolations`);
+  }
+  return offer;
 }
 
 function buildEmptyOffer(): OfferCandidate {

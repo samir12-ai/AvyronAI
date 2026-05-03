@@ -225,7 +225,12 @@ export interface PersuasionRoute {
   routeName: string;
   persuasionMode: string;
   primaryInfluenceDrivers: string[];
-  objectionPriorities: string[];
+  /** T005: structured objection — { tag:{category,awarenessStage}, objection:{canonical,frequency,evidence,confidence} }.
+   *  Strings are accepted for legacy downstream compat. */
+  objectionPriorities: Array<string | {
+    tag: { category: string; awarenessStage: string };
+    objection: { canonical: string; frequency: number | null; evidence: string[]; confidence: number | null };
+  }>;
   trustSequence: string[];
   messageOrderLogic: string[];
   persuasionStrengthScore: number;

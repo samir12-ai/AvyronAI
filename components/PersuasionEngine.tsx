@@ -504,12 +504,57 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
             {route.objectionPriorities.length > 0 && (
               <View style={styles.routeSection}>
                 <Text style={[styles.routeSectionTitle, { color: colors.textMuted }]}>Objection Priorities</Text>
-                {route.objectionPriorities.map((obj, i) => (
-                  <View key={i} style={styles.listItem}>
-                    <Ionicons name="alert-circle" size={12} color="#F59E0B" />
-                    <Text style={[styles.listItemText, { color: colors.text }]}>{obj}</Text>
-                  </View>
-                ))}
+                {route.objectionPriorities.map((obj: any, i: number) => {
+                  // T005: structured form { tag:{category,awarenessStage}, objection:{canonical,frequency,evidence,confidence} }
+                  // Legacy strings still accepted.
+                  if (typeof obj === 'string') {
+                    return (
+                      <View key={i} style={styles.listItem}>
+                        <Ionicons name="alert-circle" size={12} color="#F59E0B" />
+                        <Text style={[styles.listItemText, { color: colors.text }]}>{obj}</Text>
+                      </View>
+                    );
+                  }
+                  const tag = obj?.tag || {};
+                  const objection = obj?.objection || {};
+                  const category = String(tag.category || 'objection');
+                  const stage = String(tag.awarenessStage || '');
+                  const canonical = String(objection.canonical || '');
+                  const frequency = typeof objection.frequency === 'number' ? objection.frequency : null;
+                  const confidence = typeof objection.confidence === 'number' ? objection.confidence : null;
+                  const evidence: string[] = Array.isArray(objection.evidence) ? objection.evidence : [];
+                  return (
+                    <View key={i} style={[styles.listItem, { flexDirection: 'column', alignItems: 'flex-start', gap: 4, marginBottom: 8 }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <View style={[styles.tag, { backgroundColor: '#F59E0B' + '20' }]}>
+                          <Text style={[styles.tagText, { color: '#92400E', fontSize: 9, fontWeight: '700' }]}>
+                            {category.toUpperCase()}{stage && stage !== 'unknown' ? ` · ${stage}` : ''}
+                          </Text>
+                        </View>
+                        {frequency != null && (
+                          <View style={[styles.tag, { backgroundColor: '#6366F1' + '15' }]}>
+                            <Text style={[styles.tagText, { color: '#6366F1', fontSize: 9 }]}>freq {frequency}</Text>
+                          </View>
+                        )}
+                        {confidence != null && (
+                          <View style={[styles.tag, { backgroundColor: '#10B981' + '15' }]}>
+                            <Text style={[styles.tagText, { color: '#10B981', fontSize: 9 }]}>conf {(confidence * 100).toFixed(0)}%</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.listItemText, { color: colors.text, marginLeft: 0 }]}>{canonical}</Text>
+                      {evidence.length > 0 && (
+                        <View style={{ marginLeft: 8, marginTop: 2 }}>
+                          {evidence.slice(0, 2).map((e, ei) => (
+                            <Text key={ei} style={{ fontSize: 10, color: colors.textMuted, fontStyle: 'italic' }} numberOfLines={2}>
+                              "{e}"
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             )}
 

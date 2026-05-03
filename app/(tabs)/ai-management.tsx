@@ -28,6 +28,7 @@ import BuildThePlan from '@/components/BuildThePlan';
 import OrchestratorPanel from '@/components/OrchestratorPanel';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import ControlCenter from '@/components/ControlCenter';
+import AudienceEngine, { type AudienceEngineSnapshot } from '@/components/AudienceEngine';
 import MarketDatabaseAdmin from '@/components/MarketDatabaseAdmin';
 import PositioningStrategy from '@/components/PositioningStrategy';
 import DifferentiationEngine from '@/components/DifferentiationEngine';
@@ -146,7 +147,7 @@ export default function AIManagementScreen() {
   const [audienceError, setAudienceError] = useState('');
   const [expandedAudience, setExpandedAudience] = useState<number | null>(null);
 
-  const [audienceEngineData, setAudienceEngineData] = useState<any>(null);
+  const [audienceEngineData, setAudienceEngineData] = useState<AudienceEngineSnapshot | null>(null);
   const [audienceEngineLoading, setAudienceEngineLoading] = useState(false);
   const [audienceEngineError, setAudienceEngineError] = useState('');
   const [expandedPersona, setExpandedPersona] = useState<number | null>(null);
@@ -540,8 +541,17 @@ export default function AIManagementScreen() {
 
         {hasCachedData && (
           <DataFreshnessWarning
-            freshnessMetadata={ae.freshnessMetadata}
+            freshnessMetadata={(ae as any).freshnessMetadata}
             onRefresh={handleRunAudienceEngine}
+          />
+        )}
+
+        {/* T004: comprehensive AudienceEngine v3 panel — surfaces every commercial-reasoning field */}
+        {hasCachedData && (
+          <AudienceEngine
+            data={ae as AudienceEngineSnapshot}
+            loading={audienceEngineLoading}
+            error={audienceEngineError}
           />
         )}
 

@@ -221,6 +221,15 @@ VALID name examples (domain-grounded):
 4. The mechanism promise must be specific and measurable
 5. The mechanism problem must use audience language, not consultant language
 
+═══ MECHANISM v2 — COMMERCIAL REASONING DEPTH (REQUIRED, depth like Persuasion v3 / Differentiation v8) ═══
+Beyond the structural fields, every mechanism MUST justify itself commercially:
+- "whyItWorks": one paragraph (60-120 words) explaining the BUYER PSYCHOLOGY this mechanism converts — do NOT restate the steps; explain why a real buyer changes belief/behavior because of it. Reference at least one [RC#] root cause or [BB#] barrier.
+- "failureModes": 2-4 SPECIFIC counterfactual conditions under which this mechanism FAILS (audience type, market state, missing proof, wrong awareness stage). Be concrete; "if applied poorly" does NOT count.
+- "causalChain": ordered array of 3-5 steps, each {"cause": "what buyer believes/experiences (cite [RC#]/[BB#])", "impact": "structural change the mechanism produces", "behavior": "buyer behavior that follows", "upstreamSignalRefs": ["[RC#]", "[BB#]" ...]}. This is the cause→impact→behavior chain.
+- "commercialFunction": {"type": one of "trust_transfer"|"risk_reduction"|"identity_shift"|"perception_change"|"category_capture", "description": one sentence naming what commercial work this mechanism does}.
+- "upstreamDependency": {"positioningHook": which positioning element this anchors on (axis/contrast/enemy text), "differentiationHook": which differentiation pillar/claim this anchors on}.
+- "alternativeMechanisms": 1-2 mechanisms you considered but did NOT pick, each {"name", "whyAlternative": one sentence stating the trade-off and why the chosen primary is stronger}.
+
 ═══ OUTPUT FORMAT ═══
 Respond with ONLY valid JSON, no markdown:
 {
@@ -236,7 +245,19 @@ Respond with ONLY valid JSON, no markdown:
     "axisEmphasis": ["keyword1", "keyword2", "keyword3"],
     "rootCauseUsed": "[RC#] identifier and exact deep cause text used",
     "barrierResolved": "[BB#] identifier and exact barrier text resolved",
-    "anchorClaimIndex": 1
+    "anchorClaimIndex": 1,
+    "whyItWorks": "60-120 word buyer-psychology explanation citing [RC#]/[BB#]",
+    "failureModes": ["specific condition 1", "specific condition 2", "specific condition 3"],
+    "causalChain": [
+      { "cause": "buyer belief from [RC#] / [BB#]", "impact": "structural change", "behavior": "buyer behavior", "upstreamSignalRefs": ["[RC#]", "[BB#]"] },
+      { "cause": "...", "impact": "...", "behavior": "...", "upstreamSignalRefs": ["..."] },
+      { "cause": "...", "impact": "...", "behavior": "...", "upstreamSignalRefs": ["..."] }
+    ],
+    "commercialFunction": { "type": "trust_transfer|risk_reduction|identity_shift|perception_change|category_capture", "description": "one sentence" },
+    "upstreamDependency": { "positioningHook": "axis/contrast/enemy text", "differentiationHook": "pillar/claim text" },
+    "alternativeMechanisms": [
+      { "name": "alt 1 name", "whyAlternative": "trade-off and why primary wins" }
+    ]
   },
   "alternative": {
     "name": "alternative mechanism name",
@@ -249,7 +270,14 @@ Respond with ONLY valid JSON, no markdown:
     "structuralFrame": "The [Name] Framework|System|Protocol",
     "axisEmphasis": ["keyword1", "keyword2", "keyword3"],
     "rootCauseUsed": "[RC#] identifier and exact deep cause text used",
-    "barrierResolved": "[BB#] identifier and exact barrier text resolved"
+    "barrierResolved": "[BB#] identifier and exact barrier text resolved",
+    "whyItWorks": "60-120 word buyer-psychology explanation",
+    "failureModes": ["specific condition 1", "specific condition 2"],
+    "causalChain": [
+      { "cause": "...", "impact": "...", "behavior": "...", "upstreamSignalRefs": ["..."] }
+    ],
+    "commercialFunction": { "type": "trust_transfer|risk_reduction|identity_shift|perception_change|category_capture", "description": "one sentence" },
+    "upstreamDependency": { "positioningHook": "...", "differentiationHook": "..." }
   }
 }`;
 
@@ -407,10 +435,41 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
 
       const rawConfidence = computeConfidence(primaryMech, primaryAxis, pillars, finalValidation.consistent);
       const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
-      const confidence = clamp(rawConfidence * depthPenaltyFactor);
+      const rawLLMConfidence = clamp(rawConfidence * depthPenaltyFactor);
+
+      // T002 v2: confidence inheritance — mechanism cannot exceed upstream ceiling
+      // Ceiling = min(positioning.confidence, differentiation.confidence) + 0.05 margin
+      // (small margin allows mechanism to add a sliver of value, but cannot mask weak inputs)
+      const posConf = typeof positioning.confidenceScore === "number" ? positioning.confidenceScore : null;
+      const diffConf = typeof differentiation.confidenceScore === "number" ? differentiation.confidenceScore : null;
+      let inheritedConfidence: number;
+      if (posConf !== null && diffConf !== null) {
+        inheritedConfidence = clamp(Math.min(posConf, diffConf) + 0.05);
+      } else if (posConf !== null) {
+        inheritedConfidence = clamp(posConf + 0.05);
+      } else if (diffConf !== null) {
+        inheritedConfidence = clamp(diffConf + 0.05);
+      } else {
+        inheritedConfidence = 1.0; // no upstream confidence — no ceiling effect
+      }
+      const confidence = Math.min(rawLLMConfidence, inheritedConfidence);
+      const confidencePenalty = Math.max(0, rawLLMConfidence - confidence);
+
       const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
 
-      console.log(`[MechanismEngine] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | confidence=${confidence.toFixed(2)} | depthScore=${celDepth.causalDepthScore} | depthAttempts=${depthAttempt}`);
+      // T002 v2: collect alternativeMechanisms surfaced by the LLM for audit
+      const altMechanismsRaw = Array.isArray(parsed.primary?.alternativeMechanisms)
+        ? parsed.primary.alternativeMechanisms
+        : [];
+      const alternativeMechanisms = altMechanismsRaw
+        .filter((a: any) => a && typeof a === "object" && a.name)
+        .map((a: any) => ({
+          name: String(a.name),
+          whyAlternative: String(a.whyAlternative || ""),
+        }))
+        .slice(0, 3);
+
+      console.log(`[MechanismEngine-v2] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | rawConf=${rawLLMConfidence.toFixed(2)} | ceiling=${inheritedConfidence.toFixed(2)} | finalConf=${confidence.toFixed(2)} | penalty=${confidencePenalty.toFixed(2)} | posConf=${posConf?.toFixed(2) ?? "null"} | diffConf=${diffConf?.toFixed(2) ?? "null"} | depthScore=${celDepth.causalDepthScore} | depthAttempts=${depthAttempt} | hasWhyItWorks=${!!primaryMech.whyItWorks} | failureModes=${(primaryMech.failureModes || []).length} | causalChainSteps=${(primaryMech.causalChain || []).length}`);
 
       return {
         status: finalValidation.consistent ? STATUS.COMPLETE : STATUS.AXIS_REJECTED,
@@ -429,6 +488,11 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
         diagnostics: { ...diagnostics, depthGate: depthGateResult },
         celDepthCompliance: celDepth,
         depthGateResult,
+        // v2 audit trail
+        inheritedConfidence,
+        rawLLMConfidence,
+        confidencePenalty,
+        alternativeMechanisms,
       };
     } catch (error: any) {
       console.error(`[MechanismEngine] ERROR | ${error.message}`);
@@ -465,6 +529,41 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
 
 function buildMechanismOutput(raw: any, primaryAxis: string, pillars: any[]): MechanismOutput {
   const topPillar = pillars.length > 0 ? (pillars[0].name || pillars[0].territory || "core pillar") : "core pillar";
+
+  // T002 v2: parse new commercial-reasoning fields
+  const validFunctions = new Set(["trust_transfer", "risk_reduction", "identity_shift", "perception_change", "category_capture"]);
+  const cf = raw.commercialFunction;
+  const commercialFunction = (cf && typeof cf === "object" && validFunctions.has(cf.type))
+    ? { type: cf.type, description: typeof cf.description === "string" ? cf.description : "" }
+    : undefined;
+
+  const causalChain = Array.isArray(raw.causalChain)
+    ? raw.causalChain
+        .filter((s: any) => s && typeof s === "object" && (s.cause || s.impact || s.behavior))
+        .map((s: any) => ({
+          cause: String(s.cause || ""),
+          impact: String(s.impact || ""),
+          behavior: String(s.behavior || ""),
+          upstreamSignalRefs: Array.isArray(s.upstreamSignalRefs) ? s.upstreamSignalRefs.map(String) : [],
+        }))
+    : undefined;
+
+  const failureModes = Array.isArray(raw.failureModes)
+    ? raw.failureModes.filter((f: any) => typeof f === "string" && f.trim().length > 0).slice(0, 6)
+    : undefined;
+
+  const upstream = raw.upstreamDependency;
+  const upstreamDependency = (upstream && typeof upstream === "object")
+    ? {
+        positioningHook: String(upstream.positioningHook || ""),
+        differentiationHook: String(upstream.differentiationHook || ""),
+      }
+    : undefined;
+
+  const whyItWorks = typeof raw.whyItWorks === "string" && raw.whyItWorks.trim().length > 0
+    ? raw.whyItWorks.trim()
+    : undefined;
+
   return {
     mechanismName: raw.name || "Unnamed Mechanism",
     mechanismType: raw.type || "system",
@@ -480,6 +579,11 @@ function buildMechanismOutput(raw: any, primaryAxis: string, pillars: any[]): Me
     },
     structuralFrame: raw.structuralFrame || `The ${raw.name || "Core"} System`,
     differentiationLink: `Mechanism anchored to ${topPillar} via ${primaryAxis} axis`,
+    whyItWorks,
+    failureModes,
+    causalChain,
+    commercialFunction,
+    upstreamDependency,
   };
 }
 

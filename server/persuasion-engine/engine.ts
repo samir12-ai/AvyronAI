@@ -1701,25 +1701,58 @@ function buildPersuasionRoutes(
     ? driverFindings.replace("Selected influence drivers: ", "").split(", ")
     : ["authority", "proof_of_work"];
 
-  const objections: string[] = [];
+  // T005: objectionPriorities is now structured: { tag: {category, awarenessStage}, objection: {canonical, frequency, evidence} }
+  // Strings remain valid for downstream backwards-compat but new shapes are emitted.
+  const objections: any[] = [];
 
   if (structuredObjections && structuredObjections.length > 0) {
     const sorted = [...structuredObjections].sort((a, b) => b.confidence - a.confidence);
     for (const so of sorted.slice(0, 6)) {
-      objections.push(`[${so.objectionType}/${so.objectionStage}] ${so.objectionStatement}`);
+      objections.push({
+        tag: {
+          category: so.objectionType,
+          awarenessStage: so.objectionStage,
+        },
+        objection: {
+          canonical: so.objectionStatement,
+          frequency: (so as any).frequency ?? null,
+          evidence: Array.isArray((so as any).evidence) ? (so as any).evidence : [],
+          confidence: so.confidence,
+        },
+      });
     }
   } else {
-    const directObjections = Object.keys(audience.objectionMap || {}).slice(0, 5);
-    objections.push(...directObjections);
+    const objMap = audience.objectionMap || {};
+    const directKeys = Object.keys(objMap).slice(0, 5);
+    for (const k of directKeys) {
+      const v: any = (objMap as any)[k];
+      objections.push({
+        tag: { category: "direct", awarenessStage: "unknown" },
+        objection: {
+          canonical: (v && typeof v === "object" && v.canonical) ? v.canonical : k,
+          frequency: (v && typeof v === "object" && typeof v.frequency === "number") ? v.frequency : null,
+          evidence: (v && typeof v === "object" && Array.isArray(v.evidence)) ? v.evidence : [],
+          confidence: (v && typeof v === "object" && typeof v.confidence === "number") ? v.confidence : null,
+        },
+      });
+    }
 
     if (objections.length === 0) {
       for (const link of objectionProofLinks.slice(0, 4)) {
-        objections.push(`[inferred] ${link.objectionCategory}: ${link.objectionDetail.slice(0, 60)}`);
+        objections.push({
+          tag: { category: link.objectionCategory || "inferred", awarenessStage: "unknown" },
+          objection: { canonical: (link.objectionDetail || "").slice(0, 200), frequency: null, evidence: [], confidence: null },
+        });
       }
     }
 
     if (objections.length === 0 && (offer.riskNotes || []).length > 0) {
-      objections.push(...(offer.riskNotes || []).slice(0, 3).map(r => `risk: ${r}`));
+      for (const r of (offer.riskNotes || []).slice(0, 3)) {
+        objections.push({
+          tag: { category: "risk", awarenessStage: "unknown" },
+          objection: { canonical: r, frequency: null, evidence: [], confidence: null },
+        });
+      }
     }
   }
 

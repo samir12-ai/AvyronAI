@@ -2030,6 +2030,8 @@ export const awarenessSnapshots = pgTable("awareness_snapshots", {
   structuralWarnings: text("structural_warnings"),
   boundaryCheck: text("boundary_check"),
   dataReliability: text("data_reliability"),
+  // T008 [DEPRECATED 2026-05-03]: confidence_normalized — legacy boolean=false everywhere; engines no longer write to it.
+  // Column kept in DB for backwards compat; safe to drop in a follow-up migration once no consumer remains.
   confidenceNormalized: boolean("confidence_normalized").default(false),
   awarenessStrengthScore: doublePrecision("awareness_strength_score"),
   signalLineage: text("signal_lineage"),
@@ -2065,6 +2067,8 @@ export const persuasionSnapshots = pgTable("persuasion_snapshots", {
   structuralWarnings: text("structural_warnings"),
   boundaryCheck: text("boundary_check"),
   dataReliability: text("data_reliability"),
+  // T008 [DEPRECATED 2026-05-03]: confidence_normalized — legacy boolean=false everywhere; engines no longer write to it.
+  // Column kept in DB for backwards compat; safe to drop in a follow-up migration once no consumer remains.
   confidenceNormalized: boolean("confidence_normalized").default(false),
   persuasionStrengthScore: doublePrecision("persuasion_strength_score"),
   signalLineage: text("signal_lineage"),

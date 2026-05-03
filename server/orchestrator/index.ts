@@ -165,7 +165,7 @@ export interface OrchestratorConfig {
 
 export interface OrchestratorRunResult {
   jobId: string;
-  status: "COMPLETED" | "PARTIAL" | "BLOCKED" | "ERROR" | "NEEDS_INPUT";
+  status: "COMPLETED" | "PARTIAL" | "BLOCKED" | "ERROR" | "NEEDS_INPUT" | "BLOCKED_BY_INTEGRITY";
   completedEngines: string[];
   failedEngine?: string;
   blockReason?: string;
@@ -1547,6 +1547,8 @@ async function executeEngine(
           differentiationVector: posInput.differentiationVector || [],
           territories: posInput.territories || [],
           domainVocab: domainVocabParts || undefined,
+          // T002 v2: confidence flows downstream — mechanism inherits ceiling
+          confidenceScore: typeof ctx.positioning?.confidenceScore === "number" ? ctx.positioning.confidenceScore : null,
         };
         const diffForMech = {
           pillars: diffInput.claims || [],
@@ -1555,6 +1557,8 @@ async function executeEngine(
           authorityMode: ctx.differentiation?.authorityMode || null,
           claimStructures: ctx.differentiation?.claimStructures || [],
           proofArchitecture: ctx.differentiation?.proofArchitecture || [],
+          // T002 v2: confidence flows downstream
+          confidenceScore: typeof ctx.differentiation?.confidenceScore === "number" ? ctx.differentiation.confidenceScore : null,
         };
         const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment);
         output = result;
@@ -2767,6 +2771,31 @@ async function executeEngine(
       };
     }
 
+    // T003: Integrity enforcement gate — when integrity says safeToExecute=false,
+    // block all downstream engines (Budget, Channel, Iteration, Retention) unless
+    // an explicit override is set on the account or environment.
+    if (engineId === "integrity" && output && output.safeToExecute === false) {
+      const envOverride = process.env.INTEGRITY_OVERRIDE === "1" || process.env.INTEGRITY_OVERRIDE === "true";
+      const acctOverride = !!(config as any)?.accountMetadata?.INTEGRITY_OVERRIDE;
+      if (envOverride || acctOverride) {
+        console.warn(`[Orchestrator] INTEGRITY_OVERRIDE_ACTIVE | acctOverride=${acctOverride} envOverride=${envOverride} — downstream engines will run despite safeToExecute=false. Warnings: ${(output.structuralWarnings || []).slice(0, 3).join(" | ")}`);
+        // Record override on output so the snapshot reflects the bypass
+        output.overrideApplied = true;
+        output.overrideReason = envOverride ? "ENV_INTEGRITY_OVERRIDE" : "ACCOUNT_INTEGRITY_OVERRIDE";
+      } else {
+        const reasons = (output.structuralWarnings || []).slice(0, 5).join(" | ") || "Integrity engine flagged unsafe-to-execute";
+        console.warn(`[Orchestrator] BLOCKED_BY_INTEGRITY | safeToExecute=false | reasons=${reasons}`);
+        return {
+          engineId,
+          status: "BLOCKED_BY_INTEGRITY",
+          output,
+          snapshotId,
+          durationMs: Date.now() - startTime,
+          blockReason: `Integrity gate: ${reasons}`,
+        };
+      }
+    }
+
     return {
       engineId,
       status: "SUCCESS",
@@ -3268,12 +3297,12 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         .where(eq(orchestratorJobs.id, jobId));
 
       break;
-    } else if (stepResult.status === "BLOCKED" || stepResult.status === "ERROR") {
+    } else if (stepResult.status === "BLOCKED" || stepResult.status === "ERROR" || stepResult.status === "BLOCKED_BY_INTEGRITY") {
       if (shouldBlockDownstream(stepResult)) {
         failedEngine = engineDef.name;
         blockReason = stepResult.blockReason || stepResult.error || "Engine produced blocking result";
-        overallStatus = "BLOCKED";
-        console.warn(`[Orchestrator] BLOCKED at ${engineDef.name}: ${blockReason}`);
+        overallStatus = stepResult.status === "BLOCKED_BY_INTEGRITY" ? "BLOCKED_BY_INTEGRITY" : "BLOCKED";
+        console.warn(`[Orchestrator] ${overallStatus} at ${engineDef.name}: ${blockReason}`);
         break;
       } else {
         completedEngines.push(`${engineDef.name} (${stepResult.status})`);

@@ -987,6 +987,25 @@ function buildFunnelCandidate(
     priorityMatrixDecision: matrixDecision,
   };
 
+  // T006: trust-path proof-coverage penalty.
+  // Integrity engine flags "Differentiation has proof architecture but funnel has no proof placements"
+  // as a structural integrity warning. Funnel must reflect the same reality in its trust score
+  // so the two engines agree.
+  {
+    const proofArchLen = (differentiation.proofArchitecture || []).length;
+    const placementsLen = (proofResult.proofPlacements || []).length;
+    if (proofArchLen > 0 && placementsLen === 0) {
+      const beforePenalty = candidate.trustPathScore;
+      candidate.trustPathScore = clamp(candidate.trustPathScore * 0.55);
+      console.log(`[FunnelEngine] TRUST_PATH_PROOF_PENALTY | proofArch=${proofArchLen} placements=0 | trustPathScore=${beforePenalty.toFixed(2)}→${candidate.trustPathScore.toFixed(2)}`);
+    } else if (proofArchLen >= 2 && placementsLen === 1) {
+      // partial — soft penalty
+      const beforePenalty = candidate.trustPathScore;
+      candidate.trustPathScore = clamp(candidate.trustPathScore * 0.8);
+      console.log(`[FunnelEngine] TRUST_PATH_PROOF_PENALTY_SOFT | proofArch=${proofArchLen} placements=1 | trustPathScore=${beforePenalty.toFixed(2)}→${candidate.trustPathScore.toFixed(2)}`);
+    }
+  }
+
   const integrityResult = layer7_funnelIntegrityGuard(candidate, audience, offer, positioning, differentiation);
   candidate.integrityResult = integrityResult;
 
