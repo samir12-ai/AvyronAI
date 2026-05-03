@@ -21,6 +21,7 @@ import type { RunStatus } from "./runs";
 import { authMiddleware, adminMiddleware } from "../auth";
 import { acquire, getAcquisition, getAdapterRegistry, type AcquireInput, type CollectorEntityType, type CollectorLane } from "../collector";
 import { runBoss, planBoss, listBossRuns, getBossRun, BossRunInFlightError, type BossScope, type BossTrigger } from "../boss";
+import { withPipelineLaneLock, PipelineRunInFlightError } from "./run-lock";
 import { createDna, activateDna, pauseDna, retireDna, editDnaHypothesis, listDnaForCampaign, listDnaVersions, getActiveDna, DnaLifecycleError } from "./dna";
 import { assembleInterpretation } from "./ai-overlay/assemble";
 import { isOverlayEnabled } from "./ai-overlay/client";
@@ -35,6 +36,11 @@ router.use(adminMiddleware);
 function handleError(res: Response, err: unknown) {
   if (err instanceof PipelineValidationError) {
     return res.status(400).json(err.toJSON());
+  }
+  if (err instanceof PipelineRunInFlightError) {
+    return res
+      .status(409)
+      .json({ error: "Conflict", code: err.code, message: err.message });
   }
   const message = err instanceof Error ? err.message : "unknown error";
   return res.status(500).json({ error: "InternalError", message });
@@ -52,7 +58,9 @@ router.post("/runs/user", async (req: Request, res: Response) => {
         message: "accountId, campaignId, acquisitionId, entityId, source, payload required (Phase 6.5 lineage)",
       });
     }
-    const result = await runUserLane({ accountId, campaignId, acquisitionId, entityId, source, payload, collectedAt });
+    const result = await withPipelineLaneLock(accountId, campaignId, "user", () =>
+      runUserLane({ accountId, campaignId, acquisitionId, entityId, source, payload, collectedAt }),
+    );
     res.status(201).json(result);
   } catch (err) {
     handleError(res, err);
@@ -68,7 +76,9 @@ router.post("/runs/competitor", async (req: Request, res: Response) => {
         message: "accountId, campaignId, acquisitionId, entityId, source, payload required (Phase 6.5 lineage)",
       });
     }
-    const result = await runCompetitorLane({ accountId, campaignId, acquisitionId, entityId, source, payload, collectedAt, baselineSnapshotId });
+    const result = await withPipelineLaneLock(accountId, campaignId, "competitor", () =>
+      runCompetitorLane({ accountId, campaignId, acquisitionId, entityId, source, payload, collectedAt, baselineSnapshotId }),
+    );
     res.status(201).json(result);
   } catch (err) {
     handleError(res, err);
@@ -171,6 +181,58 @@ router.post("/boss/run", async (req: Request, res: Response) => {
     const t: BossTrigger = trigger === "approval" ? "approval" : "manual";
     const result = await runBoss({ accountId, campaignId, trigger: t, scope: scope as BossScope | undefined });
     res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof BossRunInFlightError) {
+      return res.status(409).json({ error: "Conflict", code: err.code, message: err.message });
+    }
+    handleError(res, err);
+  }
+});
+
+// ─── Phase 4 (Q2 SHIFTED) — operator-controlled rerun-on-fresh-data ──
+// Strict pre-conditions, locked by Samir 2026-04-30:
+//   1. Only triggered by an explicit operator click on the dashboard CTA
+//      (no scheduler / autopilot path calls this route).
+//   2. Only allowed when the parent boss run's q2Verdict === "SHIFTED".
+//   3. Spawns a fresh boss run with forceFreshAcquisition=true; lineage to
+//      the parent is recorded in scope.rerunOfBossRunId for the dashboard
+//      breadcrumb. The pipeline does NOT branch on rerunOfBossRunId.
+//   4. The parent run is preserved untouched. DNA is NOT auto-mutated by
+//      this route — DNA changes still flow through the existing manual
+//      DNA lifecycle (createDna / activateDna).
+router.post("/boss/runs/:id/rerun-on-fresh-data", async (req: Request, res: Response) => {
+  try {
+    const parent = await getBossRun(req.params.id as string);
+    if (!parent) {
+      return res.status(404).json({ error: "NotFound", message: "boss run not found" });
+    }
+    if (parent.q2Verdict !== "SHIFTED") {
+      return res.status(409).json({
+        error: "Conflict",
+        code: "Q2_NOT_SHIFTED",
+        message: `rerun-on-fresh-data is only allowed on SHIFTED parents; this run has q2Verdict=${parent.q2Verdict ?? "null"}`,
+      });
+    }
+    const parentScope = parent.scope ? JSON.parse(parent.scope) : {};
+    const scope: BossScope = {
+      forceFreshAcquisition: true,
+      rerunOfBossRunId: parent.id,
+      ...(Array.isArray(parentScope.onlyLanes) ? { onlyLanes: parentScope.onlyLanes } : {}),
+      ...(Array.isArray(parentScope.onlyEntityIds) ? { onlyEntityIds: parentScope.onlyEntityIds } : {}),
+    };
+    const result = await runBoss({
+      accountId: parent.accountId,
+      campaignId: parent.campaignId,
+      trigger: "manual",
+      scope,
+    });
+    res.status(201).json({
+      bossRunId: result.bossRunId,
+      parentBossRunId: parent.id,
+      status: result.status,
+      questions: result.questions,
+      forceFreshAcquisition: true,
+    });
   } catch (err) {
     if (err instanceof BossRunInFlightError) {
       return res.status(409).json({ error: "Conflict", code: err.code, message: err.message });

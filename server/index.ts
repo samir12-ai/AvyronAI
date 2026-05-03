@@ -463,6 +463,11 @@ function setupErrorHandler(app: express.Application) {
 
   const server = await registerRoutes(app);
 
+  // Phase 4 (2026-04-30) — scheduler timers (assigned inside listen callback,
+  // cleared in gracefulShutdown).
+  let userScrapeTimer: ReturnType<typeof setInterval> | null = null;
+  let competitorFetchTimer: ReturnType<typeof setInterval> | null = null;
+
   setupErrorHandler(app);
 
   const port = parseInt(process.env.PORT || "5000", 10);
@@ -499,6 +504,88 @@ function setupErrorHandler(app: express.Application) {
       setInterval(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Scheduled health check error:", err));
       }, HEALTH_CHECK_INTERVAL_MS);
+
+      // ─── Phase 4 (2026-04-30) — User-channel 48h scheduler ──────────────
+      // Hourly tick across ALL active campaigns (autopilot or not). Gates on
+      // needsUserChannelScrape (24-48h hash-spread per profile) before calling
+      // scrapeUserChannels. Strict invariant: scraper only writes to
+      // user_channel_snapshots; never mutates DNA, never triggers strategy.
+      const USER_SCRAPE_TICK_MS = 60 * 60 * 1000;
+      userScrapeTimer = setInterval(() => {
+        (async () => {
+          try {
+            const { needsUserChannelScrape, scrapeUserChannels } = await import("./user-channel-scraper");
+            const { db: dbRef } = await import("./db");
+            const { campaignSelections } = await import("@shared/schema");
+            const sels = await dbRef.select().from(campaignSelections);
+            for (const s of sels) {
+              if (!s.selectedCampaignId) continue;
+              try {
+                if (await needsUserChannelScrape(s.accountId, s.selectedCampaignId)) {
+                  console.log(`[Scheduler:user48h] scraping ${s.accountId}/${s.selectedCampaignId}`);
+                  await scrapeUserChannels(s.accountId, s.selectedCampaignId);
+                }
+              } catch (e: any) {
+                console.warn(`[Scheduler:user48h] ${s.accountId}/${s.selectedCampaignId} — ${e?.message || e}`);
+              }
+            }
+          } catch (e) {
+            console.error("[Scheduler:user48h] tick error:", e);
+          }
+        })();
+      }, USER_SCRAPE_TICK_MS);
+
+      // ─── Phase 4 (2026-04-30) — Competitor weekly scheduler ─────────────
+      // Hourly tick across ALL active campaigns. Enqueues a fetch job (via
+      // startFetchJob) when the most-recent ci_competitor_metrics_snapshot.last_fetch_at
+      // is older than 7 days. The fetch-orchestrator already dedupes
+      // RUNNING/QUEUED jobs and per-account creation locks. Strict invariant:
+      // never mutates DNA, never triggers strategy.
+      const COMPETITOR_FETCH_TICK_MS = 60 * 60 * 1000;
+      const COMPETITOR_FETCH_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+      competitorFetchTimer = setInterval(() => {
+        (async () => {
+          try {
+            const { db: dbRef } = await import("./db");
+            const { campaignSelections, miFetchJobs } = await import("@shared/schema");
+            const { startFetchJob } = await import("./market-intelligence-v3/fetch-orchestrator");
+            const drizzle = await import("drizzle-orm");
+            const sels = await dbRef.select().from(campaignSelections);
+            const cutoff = new Date(Date.now() - COMPETITOR_FETCH_STALE_MS);
+            for (const s of sels) {
+              if (!s.selectedCampaignId) continue;
+              try {
+                // mi_fetch_jobs is the campaign-keyed source of truth for the
+                // competitor lane. We use the most recent completedAt with
+                // status=DONE as the staleness anchor.
+                const [latest] = await dbRef
+                  .select({ completedAt: miFetchJobs.completedAt })
+                  .from(miFetchJobs)
+                  .where(drizzle.and(
+                    drizzle.eq(miFetchJobs.accountId, s.accountId),
+                    drizzle.eq(miFetchJobs.campaignId, s.selectedCampaignId),
+                    drizzle.eq(miFetchJobs.status, "DONE"),
+                  ))
+                  .orderBy(drizzle.desc(miFetchJobs.completedAt))
+                  .limit(1);
+                const last = latest?.completedAt;
+                if (!last || last < cutoff) {
+                  const jobId = await startFetchJob(s.accountId, s.selectedCampaignId);
+                  console.log(`[Scheduler:competitorWeekly] enqueued ${jobId} for ${s.accountId}/${s.selectedCampaignId} (last=${last ? last.toISOString() : "never"})`);
+                }
+              } catch (e: any) {
+                const msg = e?.message || String(e);
+                // "No active competitors" / "already in progress" are normal — log quietly.
+                if (!/No active competitors|already in progress|Reusing/i.test(msg)) {
+                  console.warn(`[Scheduler:competitorWeekly] ${s.accountId}/${s.selectedCampaignId} — ${msg}`);
+                }
+              }
+            }
+          } catch (e) {
+            console.error("[Scheduler:competitorWeekly] tick error:", e);
+          }
+        })();
+      }, COMPETITOR_FETCH_TICK_MS);
     },
   );
 
@@ -507,6 +594,8 @@ function setupErrorHandler(app: express.Application) {
     stopAutonomousWorker();
     await stopPublishWorker();
     stopSnapshotCleanupWorker();
+    if (userScrapeTimer) { clearInterval(userScrapeTimer); userScrapeTimer = null; }
+    if (competitorFetchTimer) { clearInterval(competitorFetchTimer); competitorFetchTimer = null; }
     server.close(() => {
       log("[Server] HTTP server closed");
       process.exit(0);

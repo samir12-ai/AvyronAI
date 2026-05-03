@@ -544,10 +544,21 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
 }
 
 /**
- * Checks per-profile freshness: returns true if ANY configured profile either has
- * no snapshot at all or its most recent snapshot is older than SCRAPE_INTERVAL_MS.
- * This ensures newly added channels and stale channels are never skipped by a
- * campaign-level timestamp check.
+ * Checks per-profile freshness: returns true if ANY configured profile either
+ * has no snapshot at all or its most recent snapshot is older than the minimum
+ * scrape interval. This ensures newly added channels and stale channels are
+ * never skipped by a campaign-level timestamp check.
+ *
+ * Uses MIN_SCRAPE_INTERVAL_MS as the "is the campaign due?" cutoff — the
+ * tighter end of the 24-48h window. Per-profile pacing inside
+ * scrapeUserChannels still applies the hash-spread interval, so this only
+ * decides whether to enter the per-profile loop at all.
+ *
+ * NOTE (2026-04-30): the previous bundle referenced a bare SCRAPE_INTERVAL_MS
+ * here, which was undefined and therefore made `cutoff = NaN`. Every
+ * `lastScrape.getTime() < NaN` comparison was false, so this guard silently
+ * returned false for every fresh-or-stale profile. The fix uses the explicit
+ * MIN_SCRAPE_INTERVAL_MS constant so the user 48h scheduler actually fires.
  */
 export async function needsUserChannelScrape(accountId: string, campaignId: string): Promise<boolean> {
   const profiles = await db
@@ -562,7 +573,7 @@ export async function needsUserChannelScrape(accountId: string, campaignId: stri
 
   if (profiles.length === 0) return false;
 
-  const cutoff = Date.now() - SCRAPE_INTERVAL_MS;
+  const cutoff = Date.now() - MIN_SCRAPE_INTERVAL_MS;
 
   for (const profile of profiles) {
     // Key by channel identity (platform + handle/URL) — not just platform

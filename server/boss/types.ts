@@ -19,6 +19,18 @@ export interface BossScope {
    * (collector freshness.force = true) for every entity in the plan.
    */
   forceFreshAcquisition?: boolean;
+  /**
+   * Lineage marker for operator-triggered "Run New Analysis on Fresh Data" reruns
+   * launched from the Q2=SHIFTED dashboard CTA. Strictly descriptive — the boss
+   * pipeline does NOT branch on this field; it is persisted in scope JSON so the
+   * dashboard can display the parent → child breadcrumb. NEVER auto-set; only
+   * set by the /boss/runs/:id/rerun-on-fresh-data endpoint when an operator
+   * explicitly clicks the CTA. Locked by Samir 2026-04-30:
+   *   - rerun is operator-controlled (no auto-rerun)
+   *   - DNA is not auto-mutated by the rerun
+   *   - parent run is preserved untouched
+   */
+  rerunOfBossRunId?: string;
 }
 
 /**

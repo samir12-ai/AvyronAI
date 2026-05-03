@@ -65,6 +65,24 @@
   .empty { padding: 30px; text-align: center; color: var(--muted); }
   .lineage-warn-banner { background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.5); color: #e3b341;
     padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 12px; }
+  /* ─── Phase 4 — Q2=SHIFTED operator-controlled rerun alert ─── */
+  .shifted-alert { background: rgba(248,81,73,0.10); border: 2px solid rgba(248,81,73,0.6);
+    color: #ff7b72; padding: 14px 18px; border-radius: 6px; margin-bottom: 14px; }
+  .shifted-alert-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; letter-spacing: 0.5px;
+    text-transform: uppercase; }
+  .shifted-alert-body { color: var(--text); font-size: 12px; margin: 0 0 10px; line-height: 1.5; }
+  .shifted-alert ul { color: var(--text); font-size: 11px; margin: 6px 0 12px; padding-left: 18px; }
+  .shifted-alert ul li { margin: 2px 0; }
+  .shifted-cta { background: #f85149; border-color: #f85149; color: #fff; font-weight: 600;
+    padding: 8px 16px; }
+  .shifted-cta:hover { background: #ff6e63; border-color: #ff6e63; color: #fff; }
+  /* ─── Phase 7.4 — Q2=INSUFFICIENT_DATA descriptive banner ─── */
+  .insufficient-banner { background: rgba(210,153,34,0.16); border: 1px solid rgba(210,153,34,0.5);
+    color: #e3b341; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 12px; }
+  .insufficient-banner strong { color: #e3b341; }
+  .lineage-breadcrumb { background: rgba(121,192,255,0.10); border: 1px solid rgba(121,192,255,0.4);
+    color: #79c0ff; padding: 6px 10px; border-radius: 4px; margin-bottom: 10px; font-size: 11px; }
+  .lineage-breadcrumb a { color: #79c0ff; }
   .crumb { color: var(--muted); margin-bottom: 12px; }
   .crumb a { color: var(--accent); }
   /* ─── Phase 8 — AI overlay (controlled consumption) ───
@@ -339,6 +357,43 @@ function renderPhase5Section(phase5, campaignId, accountId) {
   `;
 }
 
+// ─── Phase 4 (Q2=SHIFTED) — operator-clicked rerun-on-fresh-data CTA ───
+// POSTs to /boss/runs/:id/rerun-on-fresh-data which spawns a new boss run
+// with forceFreshAcquisition + rerunOfBossRunId lineage. NEVER auto-called.
+async function submitRerunOnFreshData(parentBossId) {
+  const msg = document.getElementById("rerun-msg");
+  if (!msg) return;
+  if (!confirm(
+    "Start a new Boss run with forceFreshAcquisition=true?\n\n" +
+    "• Operator-controlled (you are clicking this).\n" +
+    "• Active DNA will NOT be auto-mutated.\n" +
+    "• This run will be preserved as the parent in lineage."
+  )) return;
+  msg.textContent = "starting new boss run with fresh acquisition…";
+  msg.style.color = "";
+  try {
+    const tok = getToken();
+    if (!tok) { bounceToLogin(); return; }
+    const res = await fetch(API + "/boss/runs/" + encodeURIComponent(parentBossId) + "/rerun-on-fresh-data", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + tok, "Content-Type": "application/json" },
+    });
+    const j = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) { clearToken(); bounceToLogin(); return; }
+    if (!res.ok) {
+      msg.textContent = "error: " + (j.code || j.error || ("HTTP " + res.status)) + " — " + (j.message || "");
+      msg.style.color = "#ff7b72";
+      return;
+    }
+    msg.textContent = "started — boss run id " + j.bossRunId + " · navigating…";
+    msg.style.color = "#56d364";
+    setTimeout(() => { location.hash = "#/run/" + j.bossRunId; }, 700);
+  } catch (e) {
+    msg.textContent = "error: " + (e && e.message ? e.message : String(e));
+    msg.style.color = "#ff7b72";
+  }
+}
+
 async function submitUserTruth(ev, campaignId, accountId) {
   ev.preventDefault();
   const f = ev.target;
@@ -385,8 +440,57 @@ async function viewDetail(bossId) {
   const skipReasons = warnings.filter(w => w.startsWith("bridge_skipped:") || w.startsWith("lane_translation_skipped:") || w.startsWith("lane_run_failed:"));
   const otherWarnings = warnings.filter(w => !skipReasons.includes(w));
 
+  // ─── Phase 4 (Q2=SHIFTED) — operator-controlled rerun alert ───
+  // Renders a strong red alert + "Run New Analysis on Fresh Data" CTA when
+  // q2 verdict is SHIFTED. Locked by Samir 2026-04-30:
+  //   - alert is descriptive ONLY; nothing auto-runs
+  //   - operator must click the CTA to spawn a fresh boss run
+  //   - DNA is NEVER auto-mutated by this CTA
+  //   - parent run is preserved untouched; lineage breadcrumb appears on the child
+  const shiftedAlert = b.q2Verdict === "SHIFTED" ? `
+    <div class="shifted-alert">
+      <div class="shifted-alert-title">⚠ Market Shifted — Current Analysis May Be Stale</div>
+      <p class="shifted-alert-body">
+        Q2 evaluated <strong>SHIFTED</strong>. The competitive / market signal underlying this Boss
+        run has moved. The conclusions on this page reflect the market state <em>before</em> the shift,
+        and the strategy DNA was <strong>not</strong> auto-mutated.
+      </p>
+      <ul>
+        <li>Click the button below to start a <strong>new</strong> Boss run that re-acquires fresh data
+          (<code>forceFreshAcquisition: true</code>) and re-evaluates Q1 / Q2 against it.</li>
+        <li>This <strong>does not</strong> overwrite this run, <strong>does not</strong> mutate the active
+          DNA, and <strong>does not</strong> silently update strategy.</li>
+        <li>The new run is linked to this one in scope (<code>rerunOfBossRunId</code>) so lineage is
+          preserved.</li>
+      </ul>
+      <button class="primary shifted-cta" onclick="submitRerunOnFreshData('${esc(b.id)}')">Run New Analysis on Fresh Data</button>
+      <span id="rerun-msg" class="muted" style="margin-left:10px;font-size:11px"></span>
+    </div>
+  ` : "";
+
+  // ─── Phase 7.4 (Q2=INSUFFICIENT_DATA) — descriptive banner ───
+  // Verdict-distinct from STABLE. Operator should add channels / submit user truth.
+  const insufficientBanner = b.q2Verdict === "INSUFFICIENT_DATA" ? `
+    <div class="insufficient-banner">
+      <strong>Q2 = INSUFFICIENT_DATA.</strong> Not enough competitor or user-truth signal to decide
+      whether the market shifted. This is verdict-distinct from <code>STABLE</code> —
+      "we have no data" is not the same as "the market is calm". Add channels, submit user truth,
+      or wait for the next scheduled acquisition before relying on Q2.
+    </div>
+  ` : "";
+
+  // Lineage breadcrumb when this run was spawned by the SHIFTED CTA on a parent run.
+  const rerunOf = b.scope && b.scope.rerunOfBossRunId ? b.scope.rerunOfBossRunId : null;
+  const lineageBreadcrumb = rerunOf ? `
+    <div class="lineage-breadcrumb">↺ rerun-on-fresh-data of <a href="#/run/${esc(rerunOf)}">${esc(rerunOf)}</a></div>
+  ` : "";
+
   root.innerHTML = `
     <div class="crumb"><a href="#/">← back to list</a></div>
+
+    ${shiftedAlert}
+    ${insufficientBanner}
+    ${lineageBreadcrumb}
 
     ${warnings.length ? `<div class="lineage-warn-banner">
       <strong>${warnings.length} boss-level warning${warnings.length>1?"s":""}:</strong>
