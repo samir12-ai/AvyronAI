@@ -185,6 +185,31 @@ export interface BossExecutionPhase5Context {
 }
 
 export type Q1Verdict = "WORKING" | "DEGRADED" | "UNKNOWN";
+
+// Phase 8.1 — Q1 maturity interpretation. Locked by Samir 2026-05-03.
+//
+// This is a SEPARATE additive field from `Q1Verdict`. It NEVER changes the
+// verdict. It describes WHY the verdict is what it is, in operator-facing
+// language. Persisted as a `q1_interpretation:<state>` reason chip in the
+// existing `q1Reasons` JSON array (no schema migration), and exposed as
+// a top-level `q1Interpretation` field on the boss-runs read endpoints.
+//
+// The five states (per Samir's directive):
+//   - TOO_EARLY_TO_JUDGE — DNA age below threshold for the strategy type
+//   - GAINING_TRACTION   — DNA young but early-positive signal present
+//   - EXECUTION_TOO_LOW  — execution volume below minimum to judge structure
+//   - NEEDS_MORE_EXPOSURE — DNA mature on age, but post count still low
+//   - MATURE              — none of the above; standard verdict applies
+export type Q1Interpretation =
+  | "TOO_EARLY_TO_JUDGE"
+  | "GAINING_TRACTION"
+  | "EXECUTION_TOO_LOW"
+  | "NEEDS_MORE_EXPOSURE"
+  | "MATURE";
+
+// Strategy type drives the maturity threshold. Conservative defaults:
+// organic = 14d, paid = 5d, hybrid/unknown = 10d.
+export type StrategyType = "organic" | "paid" | "hybrid" | "unknown";
 // Phase 7.4 — Q2 verdict expanded by Samir 2026-04-24. INSUFFICIENT_DATA was
 // added so the Boss can refuse to decide when there is too little competitor
 // + user truth signal to reason about the market. STABLE / SHIFTED / UNCERTAIN

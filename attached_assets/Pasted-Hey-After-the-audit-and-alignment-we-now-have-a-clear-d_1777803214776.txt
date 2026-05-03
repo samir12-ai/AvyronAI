@@ -1,0 +1,223 @@
+Hey,
+
+After the audit and alignment, we now have a clear direction. The system is strong structurally, but this phase is about correcting behavior, control, and user interaction.
+
+This is NOT a rebuild. Do not change core architecture. This is refinement.
+
+---
+
+## 1. Core principle — fully user-controlled system
+
+No action should execute automatically.
+
+- No automatic reruns  
+- No automatic DNA mutation  
+- No automatic strategy changes  
+
+The system must:
+
+detect → explain → suggest → wait for user action
+
+All execution must be triggered by explicit user interaction (buttons / CTAs).
+
+---
+
+## 2. Q2 SHIFTED — actionable alert (not passive)
+
+When Q2 = SHIFTED:
+
+We need a strong, actionable dashboard alert (not just a badge).
+
+### Required behavior:
+
+- Show a top-level alert  
+- Explain that the market has shifted and current analysis may be outdated  
+- Add a CTA button:
+
+Run New Analysis
+
+### Button behavior:
+
+- Calls backend endpoint  
+- Runs a new pipeline analysis using fresh data  
+- Does NOT mutate DNA  
+- Does NOT auto-apply strategy changes  
+
+Flow:
+
+Q2 SHIFTED  
+→ alert  
+→ user clicks CTA  
+→ new analysis runs  
+→ results displayed with lineage  
+
+---
+
+## 3. Scheduling (monitoring only)
+
+We need actual schedulers:
+
+### User pipeline:
+- Run every ~48 hours  
+- Trigger user-channel scraping and evaluation  
+
+### Competitor pipeline:
+- Run weekly (~7 days)  
+- Enqueue MI fetch jobs and competitor analysis  
+
+Important:
+
+- These only update signals  
+- They must NOT trigger automatic strategy or DNA changes  
+
+---
+
+## 4. Strategy maturity / learning window (critical)
+
+Do NOT allow premature judgment of strategies.
+
+Before Q1 produces a strong verdict, add a maturity gate.
+
+The system must evaluate:
+
+- DNA age  
+- strategy type (organic / paid / hybrid)  
+- exposure volume  
+- rhythm compliance  
+- early traction signals  
+
+### Rules:
+
+- Do NOT mark strategy as DEGRADED in first 1–2 weeks without sufficient data  
+- Organic strategies require longer windows  
+- Paid strategies can be evaluated faster  
+- If execution is low → do NOT blame DNA  
+
+### Add interpretation states:
+
+- TOO_EARLY_TO_JUDGE  
+- GAINING_TRACTION  
+- EXECUTION_TOO_LOW  
+- NEEDS_MORE_EXPOSURE  
+
+These appear in dashboard + explanation layer.
+
+---
+
+## 5. Q2 = INSUFFICIENT_DATA — strong visibility
+
+Currently weak.
+
+We need:
+
+- clear banner / callout  
+- explicit message that system cannot judge market  
+
+This must NOT be confused with STABLE.
+
+---
+
+## 6. Concurrency protection
+
+Add per-(campaign, lane) lock.
+
+No duplicate runs allowed.
+
+---
+
+## 7. Preserve existing architecture (do NOT change)
+
+Keep as-is:
+
+- DNA ownership (operator-only)  
+- Boss Agent = verdict only  
+- AI overlay = explanation only  
+- lineage enforcement  
+- IG strategy / TikTok validation logic  
+
+---
+
+## 8. UX definition (must be defined BEFORE coding)
+
+Before implementation, define UX for each state.
+
+For each case, specify:
+
+- what user sees  
+- what CTA appears  
+- what endpoint is called  
+- what happens after click  
+- what must NOT happen automatically  
+
+States to cover:
+
+- Q2 SHIFTED  
+- Q2 INSUFFICIENT_DATA  
+- Q1 DEGRADED  
+- Q1 TOO_EARLY_TO_JUDGE  
+- rhythm issue  
+- missing truth  
+- execution too low  
+- needs more exposure  
+- paid/organic unclear  
+
+No implementation before UX is clearly defined.
+
+---
+
+## 9. Frontend ↔ Backend runtime consistency (critical)
+
+We must ensure there is NO mismatch between frontend state and backend truth.
+
+This is a strict requirement.
+
+### Requirements:
+
+- Frontend must always reflect backend state (no derived fake states)  
+- Q1/Q2, DNA status, alerts must come from backend source of truth  
+- No duplicated logic in frontend that can drift  
+- No stale state rendering  
+- No optimistic updates without backend confirmation  
+
+If needed:
+
+- introduce a state validation layer  
+- add runtime checks between frontend and API responses  
+- enforce a single source of truth model  
+
+Any inconsistency here breaks decision trust — this is critical.
+
+---
+
+## 10. Expected output
+
+After implementation, provide:
+
+- files changed  
+- scheduler implementation details  
+- maturity logic integration  
+- dashboard UX behavior  
+- proof that:
+  - no automatic actions occur  
+  - all execution is user-triggered  
+  - frontend matches backend state exactly  
+
+Run:
+
+- E2E  
+- integrity harness  
+- real-scenario harness  
+- scheduler tests  
+- dashboard alert tests  
+
+---
+
+This phase is about making the system behave correctly in real usage:
+
+- no hidden actions  
+- no premature judgment  
+- full user control  
+- clear decisions  
+- consistent UI  
+
+Proceed carefully.

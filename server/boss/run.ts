@@ -30,6 +30,7 @@ import { planBoss } from "./plan";
 import { translateEnvelopeToLanePayload } from "./envelope-to-lane";
 import { evaluateQ1 } from "./policy/dna-working";
 import { evaluateQ2 } from "./policy/market-shift";
+import { interpretQ1Maturity } from "./policy/q1-maturity";
 import { withCampaignLock } from "./concurrency";
 import { insertBossRun, newBossRunId, updateBossRun } from "./store";
 import { evaluateWindowState, autoCloseExpiredWindow } from "../pipeline/eval-windows";
@@ -448,6 +449,20 @@ export async function runBoss(input: BossRunInput): Promise<BossRunResult> {
     // ── Step 3: evaluate Q1/Q2 ────────────────────────────────────
     // Q1 receives the joined three-layer inputs. Promotion to WORKING requires
     // ALL gates (execution + truth + structure) to align — see dna-working.ts.
+    //
+    // Phase 8.1 (Samir 2026-05-03) — maturity dimensions:
+    //   dnaAgeDays from activeDna.activatedAt (null = no active DNA).
+    //   exposurePostCount from current cluster signature post_count (null = no
+    //     cluster produced — caller already handled the skip reason).
+    //   strategyType: kept "unknown" until a campaign-keyed strategy-type
+    //     source exists. Maturity policy treats unknown conservatively
+    //     (10-day threshold) — see q1-maturity.ts.
+    const dnaAgeDays = activeDna?.activatedAt
+      ? Math.max(0, Math.floor((Date.now() - activeDna.activatedAt.getTime()) / (24 * 60 * 60 * 1000)))
+      : null;
+    const exposurePostCount = currentClusterSig?.post_count ?? null;
+    const strategyType = "unknown" as const;
+
     const q1 = evaluateQ1({
       evaluationStatus: execution.evaluation_status,
       truthStatus: execution.truth_status,
@@ -458,7 +473,31 @@ export async function runBoss(input: BossRunInput): Promise<BossRunResult> {
       outcomeRegression: phase6Ctx.outcome_regression && "regressed" in phase6Ctx.outcome_regression
         ? { regressed: phase6Ctx.outcome_regression.regressed, reason: phase6Ctx.outcome_regression.reason }
         : null,
+      dnaAgeDays,
+      strategyType,
     });
+
+    // Phase 8.1 — maturity interpretation. Pure function, never mutates verdict.
+    // Persisted as a `q1_interpretation:<state>` chip in q1.reasons so the
+    // route layer (single source of truth) can extract it without a schema
+    // change. Positive traction = clusters_shifted/new_clusters with no
+    // outcome regression. The boss verdict still owns the final decision;
+    // this is descriptive only, per Samir's "AI/interpretation never
+    // changes verdict" lock.
+    const positiveTraction =
+      (phase6Ctx.q1_inputs.clusterComparison === "clusters_shifted" ||
+        phase6Ctx.q1_inputs.clusterComparison === "new_clusters") &&
+      phase6Ctx.q1_inputs.outcomeRegressed === false;
+    const maturity = interpretQ1Maturity({
+      q1Verdict: q1.verdict,
+      hasActiveDna: phase6Ctx.q1_inputs.hasActiveDna,
+      dnaAgeDays,
+      exposurePostCount,
+      strategyType,
+      rhythmStatus: execution.rhythm_status as any,
+      positiveTraction,
+    });
+    q1.reasons.push(maturity.reason);
     // Phase 7.4 — Q2 receives full descriptive context (user + DNA) so its
     // reasons array carries the surrounding state for the AI explanation
     // overlay. The decision tree itself does NOT branch on this context;

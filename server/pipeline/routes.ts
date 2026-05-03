@@ -250,7 +250,16 @@ router.get("/boss/runs", async (req: Request, res: Response) => {
       status: typeof status === "string" ? status : undefined,
       limit: typeof limit === "string" ? Math.max(1, Math.min(200, parseInt(limit, 10) || 50)) : undefined,
     });
-    res.json(rows);
+    // Phase 8.1 — extract Q1 maturity interpretation from persisted reasons
+    // and surface as a top-level `q1Interpretation` field. Single source of
+    // truth lives in the boss DB; the overlay reads this field as-is, no
+    // client-side parsing of the reasons array.
+    const { extractInterpretation } = await import("../boss/policy/q1-maturity");
+    const enriched = rows.map((r: any) => {
+      const reasonsArr = r.q1Reasons ? (Array.isArray(r.q1Reasons) ? r.q1Reasons : (() => { try { return JSON.parse(r.q1Reasons); } catch { return []; } })()) : [];
+      return { ...r, q1Interpretation: extractInterpretation(reasonsArr) };
+    });
+    res.json(enriched);
   } catch (err) {
     handleError(res, err);
   }
@@ -260,12 +269,15 @@ router.get("/boss/runs/:id", async (req: Request, res: Response) => {
   try {
     const row = await getBossRun((req.params.id as string));
     if (!row) return res.status(404).json({ error: "NotFound", message: "boss run not found" });
+    const { extractInterpretation } = await import("../boss/policy/q1-maturity");
+    const q1Reasons = row.q1Reasons ? JSON.parse(row.q1Reasons) : [];
     res.json({
       ...row,
       scope: row.scope ? JSON.parse(row.scope) : null,
       plan: row.plan ? JSON.parse(row.plan) : null,
       execution: row.execution ? JSON.parse(row.execution) : null,
-      q1Reasons: row.q1Reasons ? JSON.parse(row.q1Reasons) : [],
+      q1Reasons,
+      q1Interpretation: extractInterpretation(q1Reasons),
       q2Reasons: row.q2Reasons ? JSON.parse(row.q2Reasons) : [],
       warnings: row.warnings ? JSON.parse(row.warnings) : [],
     });
@@ -282,12 +294,21 @@ router.get("/boss/runs/:id/lineage", async (req: Request, res: Response) => {
     const boss = await getBossRun((req.params.id as string));
     if (!boss) return res.status(404).json({ error: "NotFound", message: "boss run not found" });
 
+    // Phase 8.1 — lineage is the endpoint the dashboard detail view actually
+    // hits (overlay JS line 435: api("/boss/runs/" + id + "/lineage")). It
+    // must surface q1Interpretation alongside the other top-level fields so
+    // the overlay can render the maturity badge without parsing reasons
+    // client-side. Single-source contract: extractInterpretation runs here
+    // (route layer), overlay reads the field as-is.
+    const { extractInterpretation } = await import("../boss/policy/q1-maturity");
+    const lineageQ1Reasons = boss.q1Reasons ? JSON.parse(boss.q1Reasons) : [];
     const parsedBoss = {
       ...boss,
       scope: boss.scope ? JSON.parse(boss.scope) : null,
       plan: boss.plan ? JSON.parse(boss.plan) : null,
       execution: boss.execution ? JSON.parse(boss.execution) : null,
-      q1Reasons: boss.q1Reasons ? JSON.parse(boss.q1Reasons) : [],
+      q1Reasons: lineageQ1Reasons,
+      q1Interpretation: extractInterpretation(lineageQ1Reasons),
       q2Reasons: boss.q2Reasons ? JSON.parse(boss.q2Reasons) : [],
       warnings: boss.warnings ? JSON.parse(boss.warnings) : [],
     };

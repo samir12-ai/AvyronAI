@@ -32,7 +32,7 @@
  * Anti-scope: this module emits a verdict + reasons. No scoring, no
  * recommendations, no nextAction. Recommendations are Q2's domain.
  */
-import type { BossQuestionVerdict, Q1Verdict } from "../types";
+import type { BossQuestionVerdict, Q1Verdict, StrategyType } from "../types";
 import type { ClusterComparisonVerdict } from "../../pipeline/cluster-comparator";
 
 export interface Q1Inputs {
@@ -47,7 +47,24 @@ export interface Q1Inputs {
   clusterProductionSkippedReason?: string | null;     // e.g. "window_not_terminal"
   clusterComparison?: ClusterComparisonVerdict | null;  // null when no comparison was produced
   outcomeRegression?: { regressed: boolean; reason?: string } | null;
+  // Phase 8.1 — maturity guard (Samir 2026-05-03):
+  //   "Do NOT mark strategy as DEGRADED in first 1–2 weeks without sufficient data."
+  // dnaAgeDays + strategyType drive guard G8. When dnaAgeDays is below the
+  // strategy-type-specific threshold, Q1 returns UNKNOWN BEFORE DEGRADED
+  // matchers fire — preventing premature DEGRADED on a fresh DNA. Both
+  // fields are optional; absence behaves as "old enough" (back-compat).
+  dnaAgeDays?: number | null;
+  strategyType?: StrategyType;
 }
+
+const MATURITY_AGE_THRESHOLDS: Record<StrategyType, number> = {
+  organic: 14,
+  paid: 5,
+  hybrid: 10,
+  // Mirrors q1-maturity.ts: unknown defaults to organic-equivalent (14d) so
+  // a strategy-type-less DNA gets the longest "no-DEGRADED" protection.
+  unknown: 14,
+};
 
 export function evaluateQ1(opts?: Q1Inputs): BossQuestionVerdict<Q1Verdict> {
   const o = opts ?? {};
@@ -104,6 +121,23 @@ export function evaluateQ1(opts?: Q1Inputs): BossQuestionVerdict<Q1Verdict> {
         : "q1_insufficient:rhythm_non_compliant",
     );
     return { verdict: "UNKNOWN", reasons };
+  }
+
+  // G8 — maturity guard (Phase 8.1, Samir 2026-05-03).
+  // If the active DNA is younger than its strategy-type threshold, we
+  // refuse to fire DEGRADED. This guard sits AFTER the structural guards
+  // (G2 confirms hasActiveDna, G3/G4 confirm cluster_comparison exists)
+  // and BEFORE the DEGRADED matchers, so a young DNA with disappeared/
+  // unstable clusters still routes to UNKNOWN with an explicit too-early
+  // reason instead of DEGRADED. The verdict policy stays purely rule-
+  // based; the operator sees the maturity interpretation badge separately.
+  if (typeof o.dnaAgeDays === "number" && o.dnaAgeDays >= 0) {
+    const stype: StrategyType = o.strategyType ?? "unknown";
+    const threshold = MATURITY_AGE_THRESHOLDS[stype];
+    if (o.dnaAgeDays < threshold) {
+      reasons.push(`q1_too_early:dna_too_young:${o.dnaAgeDays}d_under_${threshold}d_${stype}`);
+      return { verdict: "UNKNOWN", reasons };
+    }
   }
 
   // ── DEGRADED MATCHERS ──────────────────────────────────────────────

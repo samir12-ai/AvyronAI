@@ -521,6 +521,7 @@ async function viewDetail(bossId) {
       <div class="panel">
         <h2>Q1 — DNA working? <span class="ai-badge" style="background:rgba(46,160,67,0.16);color:#56d364;border-color:rgba(46,160,67,0.4)">rule-based</span></h2>
         <p>${verdictPill(b.q1Verdict)}</p>
+        ${renderQ1MaturityBadge(b.q1Interpretation)}
         ${renderQ1Reasons(b.q1Reasons)}
       </div>
       <div class="panel">
@@ -822,20 +823,46 @@ async function loadAIInterpretation(bossId) {
   btn.textContent = "Reload AI interpretation";
 }
 
+// Phase 8.1 (Samir 2026-05-03) — Q1 maturity interpretation badge.
+// Reads `q1Interpretation` from the response AS-IS. No client-side derivation
+// from reasons — the route layer is the single source of truth. Returns
+// empty string when the field is null or not yet present (back-compat).
+function renderQ1MaturityBadge(interp) {
+  if (!interp || typeof interp !== "string") return "";
+  if (interp === "MATURE") return "";
+  const palette = {
+    TOO_EARLY_TO_JUDGE:  { bg: "rgba(56,139,253,0.14)", color: "#79b8ff", border: "rgba(56,139,253,0.4)", label: "Too early to judge", body: "DNA is still under its strategy-type maturity threshold. The verdict cannot be DEGRADED yet — give it time to express." },
+    GAINING_TRACTION:    { bg: "rgba(46,160,67,0.14)",  color: "#56d364", border: "rgba(46,160,67,0.4)",  label: "Gaining traction",   body: "DNA is young, but early structural + outcome signals are positive. Verdict will mature in subsequent runs." },
+    EXECUTION_TOO_LOW:   { bg: "rgba(187,128,9,0.14)",  color: "#e3b341", border: "rgba(187,128,9,0.4)",  label: "Execution too low",  body: "Posting volume or rhythm is below threshold. The DNA isn't getting a fair chance — increase cadence rather than blame DNA." },
+    NEEDS_MORE_EXPOSURE: { bg: "rgba(187,128,9,0.14)",  color: "#e3b341", border: "rgba(187,128,9,0.4)",  label: "Needs more exposure", body: "DNA is mature on age, but exposure is still below the threshold to judge structural fit." },
+  };
+  const p = palette[interp];
+  if (!p) return "";
+  return `<div class="muted" style="margin:8px 0;padding:10px 12px;background:${p.bg};color:${p.color};border:1px solid ${p.border};border-radius:6px;font-size:12px">
+    <strong style="text-transform:uppercase;letter-spacing:0.4px">${esc(p.label)}</strong>
+    <div style="margin-top:4px;color:#c9d1d9">${esc(p.body)}</div>
+    <div style="margin-top:6px;font-size:11px;color:var(--muted)">interpretation: <code>${esc(interp)}</code> · informational only — does not change Q1 verdict</div>
+  </div>`;
+}
+
 function renderQ1Reasons(reasons) {
   if (!reasons || !Array.isArray(reasons) || reasons.length === 0) {
     return `<div class="muted">no reasons recorded</div>`;
   }
   // Three-layer joined display: classify each reason chip by its prefix.
+  // q1_interpretation:* is rendered separately as a maturity card above —
+  // hide it from the chip list to avoid duplicating the same signal.
+  const visible = reasons.filter((r) => typeof r === "string" && !r.startsWith("q1_interpretation:"));
+  if (visible.length === 0) return `<div class="muted">no reasons recorded</div>`;
   const chipFor = (r) => {
     const cls = r.startsWith("dna_holding:") ? "pill" :
                 r.startsWith("dna_drift:") ? "warn-chip" :
-                r.startsWith("q1_skipped:") || r.startsWith("q1_no_baseline:") || r.startsWith("q1_insufficient:") ? "skip-chip" :
+                r.startsWith("q1_skipped:") || r.startsWith("q1_no_baseline:") || r.startsWith("q1_insufficient:") || r.startsWith("q1_too_early:") ? "skip-chip" :
                 "skip-chip";
     const style = r.startsWith("dna_holding:") ? "background:#0a7d2c;color:#fff" : "";
     return `<span class="${cls}" style="${style}">${esc(r)}</span>`;
   };
-  return `<div style="display:flex;flex-wrap:wrap;gap:6px">${reasons.map(chipFor).join("")}</div>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px">${visible.map(chipFor).join("")}</div>`;
 }
 
 // ─── Phase 6.5 — Integrity Engineering rejection panel ─────────────
