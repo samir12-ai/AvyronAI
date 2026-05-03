@@ -1,6 +1,20 @@
 import { db } from "../db";
 import { orchestratorJobs } from "@shared/schema";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, inArray } from "drizzle-orm";
+
+// Statuses that indicate a run produced usable engine snapshots.
+// COMPLETED              -> all engines ran end-to-end
+// BLOCKED_BY_INTEGRITY   -> upstream engines (audience..integrity) ran;
+//                          downstream were correctly gated. Snapshots that
+//                          exist are valid and must be surfaced.
+// BLOCKED                -> legacy block status; upstream snapshots usable.
+// PARTIAL                -> some engines failed; valid snapshots still surfaced.
+const RESOLVABLE_STATUSES = [
+  "COMPLETED",
+  "BLOCKED_BY_INTEGRITY",
+  "BLOCKED",
+  "PARTIAL",
+];
 
 export interface ResolvedRun {
   runId: string | null;
@@ -28,7 +42,7 @@ export async function resolveRunId(
       and(
         eq(orchestratorJobs.accountId, accountId),
         eq(orchestratorJobs.campaignId, campaignId),
-        eq(orchestratorJobs.status, "COMPLETED"),
+        inArray(orchestratorJobs.status, RESOLVABLE_STATUSES),
       ),
     )
     .orderBy(desc(orchestratorJobs.completedAt))

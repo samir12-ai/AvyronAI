@@ -161,3 +161,9 @@ id = "2ilGrhdjK5l2_woCSfl45"
 uri = "file://.local/validation/INTELLIGENCE_UPGRADE_PROOF.md"
 type = "text"
 title = "Engine Intelligence Upgrade — Before/After Proof"
+
+[[outputs]]
+id = "Oci4Llsj46p9VLIHho4Wv"
+uri = "file://.local/validation/MindAI-Engine-Summary-2026-05-03.md"
+type = "text"
+title = "MindAI Engine Output Summary — 2026-05-03"
