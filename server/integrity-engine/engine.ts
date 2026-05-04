@@ -137,7 +137,17 @@ export function layer2_audienceOfferAlignment(
   const deliverables = offer.deliverables || [];
 
   if (pains.length > 0 && outcome) {
-    const painTexts = pains.slice(0, 5).map((p: any) => (typeof p === "string" ? p : p?.pain || p?.name || "").toLowerCase());
+    // Audience engine v3 emits structured pains as { canonical, frequency, evidence, ... }.
+    // Earlier shapes used { pain } or { name }. Probe canonical first so the
+    // alignment check reads real text instead of "" (the source of the
+    // long-standing false-positive "outcome does not reference pain language"
+    // ENFORCEMENT_BLOCK warning).
+    const painTexts = pains.slice(0, 5).map((p: any) =>
+      (typeof p === "string"
+        ? p
+        : (p?.canonical || p?.text || p?.canonicalText || p?.pain || p?.name || p?.label || p?.description || "")
+      ).toLowerCase()
+    );
     const anyMatch = painTexts.some((pt: string) => {
       const words = pt.split(/\s+/).filter((w: string) => w.length > 3);
       return words.some((w: string) => outcome.includes(w));

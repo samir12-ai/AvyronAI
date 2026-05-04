@@ -556,7 +556,38 @@ function extractFunnelInput(funnelResult: any): any {
     stageMap: rawStages,
     trustPath: Array.isArray(trustPathRaw) ? trustPathRaw : (trustPathRaw?.path || trustPathRaw?.stages || []),
     trustPathScore: funnelResult.trustPathAnalysis?.score ?? null,
-    proofPlacements: (() => { const pp = funnelResult.proofPlacementLogic?.placements || primary.proofPlacements || []; if (Array.isArray(pp)) return pp; if (typeof pp === 'string') { try { return JSON.parse(pp); } catch { return []; } } return []; })(),
+    proofPlacements: (() => {
+      // The real per-placement array lives at primary.proofPlacements
+      // (objects of { stage, proofType, placement, purpose }).
+      // funnelResult.proofPlacementLogic.placements is a COUNT (number),
+      // not an array — reading it first caused integrity to see 0 placements
+      // and fire the false-positive "no proof placements" warning.
+      // Order: primary.proofPlacements (real) -> stage-level proofs (real) ->
+      // proofPlacementLogic.placements only when it happens to be an array.
+      const fromPrimary = primary.proofPlacements;
+      if (Array.isArray(fromPrimary) && fromPrimary.length > 0) return fromPrimary;
+      if (typeof fromPrimary === 'string') {
+        try { const a = JSON.parse(fromPrimary); if (Array.isArray(a) && a.length > 0) return a; } catch {}
+      }
+      const stagePlacements: any[] = [];
+      for (const s of (rawStages || [])) {
+        const sp = s?.proofPlacements || s?.proofs || [];
+        if (Array.isArray(sp)) {
+          for (const item of sp) {
+            stagePlacements.push(typeof item === 'string'
+              ? { proofType: item, stage: s.name || s.stageName }
+              : { ...item, stage: item.stage || s.name || s.stageName });
+          }
+        }
+      }
+      if (stagePlacements.length > 0) return stagePlacements;
+      const fallback = funnelResult.proofPlacementLogic?.placements;
+      if (Array.isArray(fallback)) return fallback;
+      if (typeof fallback === 'string') {
+        try { const a = JSON.parse(fallback); if (Array.isArray(a)) return a; } catch {}
+      }
+      return [];
+    })(),
     frictionMap: primary.frictionMap || funnelResult.frictionMap || [],
     commitmentLevel: primary.commitmentLevel || funnelResult.commitmentLevel || "medium",
     entryTrigger: primary.entryTrigger || funnelResult.entryTrigger || { mechanismType: "unknown", purpose: "unknown" },
