@@ -38,7 +38,22 @@ function clamp(v: number, min = 0, max = 1): number {
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
-  try { return JSON.parse(text); } catch { return null; }
+  try { return JSON.parse(text); } catch {}
+
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const slice = text.slice(firstBrace, lastBrace + 1);
+    try { return JSON.parse(slice); } catch {}
+
+    const repaired = slice
+      .replace(/,(\s*[}\]])/g, "$1")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'");
+    try { return JSON.parse(repaired); } catch {}
+  }
+
+  return null;
 }
 
 function resolvePrimaryAxis(positioning: MechanismEnginePositioningInput): string {
@@ -117,7 +132,7 @@ export async function runMechanismEngine(
       statusMessage: "No positioning axis, contrast axis, or differentiation pillars available — cannot generate axis-aligned mechanism",
       primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
       alternativeMechanism: null,
-      axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "none", failures: ["Insufficient positioning data"] },
+      axisConsistency: { consistent: false, primaryAxis, mechanismAxis: primaryAxis, failures: ["Insufficient positioning data"] },
       confidenceScore: 0.2,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
@@ -293,27 +308,52 @@ Respond with ONLY valid JSON, no markdown:
     const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
 
     try {
-      const response = await aiChat({
+      let response = await aiChat({
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: fullPrompt }],
         max_tokens: 2000,
         temperature: 0.7,
       });
 
-      const content = response?.choices?.[0]?.message?.content || "";
-      const cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-      const parsed = safeJsonParse(cleaned);
+      let content = response?.choices?.[0]?.message?.content || "";
+      let cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      let parsed = safeJsonParse(cleaned);
 
       if (!parsed || !parsed.primary) {
-        console.log(`[MechanismEngine] AI_PARSE_FAILED | falling back to differentiation core`);
+        console.log(`[MechanismEngine] AI_PARSE_FAILED | attempting one-shot retry with strict JSON reinforcement`);
+        diagnostics.parseRetryAttempted = true;
+        const strictPrompt = `${fullPrompt}\n\n═══ STRICT OUTPUT FORMAT (PREVIOUS RESPONSE WAS UNPARSEABLE) ═══\nRespond with EXACTLY ONE valid JSON object and NOTHING else. No markdown, no preamble, no explanation. Start your response with "{" and end with "}". The top-level object MUST contain a "primary" key.`;
+        response = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: strictPrompt }],
+          max_tokens: 2000,
+          temperature: 0.3,
+        });
+        content = response?.choices?.[0]?.message?.content || "";
+        cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+        parsed = safeJsonParse(cleaned);
+      }
+
+      if (!parsed || !parsed.primary) {
+        console.log(`[MechanismEngine] AI_PARSE_FAILED_AFTER_RETRY | falling back to differentiation core with deterministic axis="${primaryAxis}"`);
         diagnostics.aiFailed = true;
+        diagnostics.parseRetryFailed = true;
+        const fallbackMech = buildFallbackMechanism(diffCore, primaryAxis);
+        const hasUsableFallback = !!(diffCore && diffCore.mechanismType !== "none" && diffCore.mechanismName);
         return {
-          status: STATUS.FAILED,
-          statusMessage: "Failed to parse AI mechanism generation response",
-          primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
+          status: hasUsableFallback ? STATUS.COMPLETE : STATUS.FAILED,
+          statusMessage: hasUsableFallback
+            ? `AI generation unparseable — using differentiation-core fallback (axis="${primaryAxis}" propagated deterministically; confidence reduced)`
+            : `AI generation unparseable and no differentiation-core fallback available (axis="${primaryAxis}" propagated deterministically)`,
+          primaryMechanism: fallbackMech,
           alternativeMechanism: null,
-          axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "unknown", failures: ["AI generation failed"] },
-          confidenceScore: 0.3,
+          axisConsistency: {
+            consistent: hasUsableFallback,
+            primaryAxis,
+            mechanismAxis: primaryAxis,
+            failures: hasUsableFallback ? [] : ["AI generation failed and no differentiation-core fallback available"],
+          },
+          confidenceScore: hasUsableFallback ? 0.4 : 0.3,
           executionTimeMs: Date.now() - startTime,
           engineVersion: ENGINE_VERSION,
           diagnostics,
@@ -505,7 +545,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
       statusMessage: `Mechanism generation failed: ${error.message}`,
       primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
       alternativeMechanism: null,
-      axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "fallback", failures: [error.message] },
+      axisConsistency: { consistent: false, primaryAxis, mechanismAxis: primaryAxis, failures: [error.message] },
       confidenceScore: 0.2,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
@@ -519,7 +559,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
     statusMessage: "Mechanism generation failed after all depth gate attempts",
     primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
     alternativeMechanism: null,
-    axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "unknown", failures: ["All attempts failed"] },
+    axisConsistency: { consistent: false, primaryAxis, mechanismAxis: primaryAxis, failures: ["All attempts failed"] },
     confidenceScore: 0,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,

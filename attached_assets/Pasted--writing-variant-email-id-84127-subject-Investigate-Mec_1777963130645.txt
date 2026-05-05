@@ -1,0 +1,145 @@
+:::writing{variant=“email” id=“84127” subject=“Investigate Mechanism Axis Failure (Root Cause + Fix Options)”}
+Hi,
+
+We need to investigate and fix the Mechanism → Offer axis mismatch issue at the root level.
+
+We’ve identified that the failure is not random — it comes from how the Mechanism engine outputs (or fails to output) the axis, which then causes:
+	•	axis = unknown
+	•	→ Offer AXIS_MISMATCH
+	•	→ cascade into Budget / Channel / System Control blocking
+
+⸻
+
+🎯 Objective
+
+Identify exactly which failure mode is happening, then apply the correct fix.
+
+There are 3 possible root causes — we need you to validate which one is actually occurring in the current code/run.
+
+⸻
+
+🧠 Root Cause Candidates
+
+1) LLM Output Shape Mismatch (Semantic correct, structurally wrong)
+
+Example:
+
+Instead of returning:
+
+"axis": "risk_reduction"
+
+It returns something like:
+
+"commercialFunction": "risk_reduction"
+
+or:
+
+"axis": "trust rebuilding"
+
+Meaning:
+	•	the logic is correct
+	•	but the field name or value format is not what the parser expects
+
+🔧 Fix if this is the case:
+	•	Normalize LLM output before parsing
+	•	Map synonyms → canonical axis values
+	•	Ensure axis is always extracted even if field name differs
+
+⸻
+
+2) Parser / Contract Fragility
+
+The Mechanism engine may be correctly producing the concept, but the parser is too strict.
+
+Example:
+	•	Code expects axis
+	•	Output contains the same idea under another field (e.g. commercialFunction.type)
+
+Result:
+
+axis = undefined → treated as unknown
+
+🔧 Fix if this is the case:
+	•	Expand extraction logic:
+	•	check multiple fields:
+	•	axis
+	•	commercialFunction.type
+	•	fallback fields if needed
+	•	Make parsing tolerant, not brittle
+
+⸻
+
+3) Missing Deterministic Fallback
+
+If the LLM fails to provide a valid axis, the system currently allows:
+
+axis = unknown
+
+Instead, it should derive it from upstream signals:
+
+Inputs available:
+	•	Audience pains (cost, distrust, proof)
+	•	Positioning enemy (lack of proof)
+	•	Differentiation (transparency, outcome proof)
+	•	Mechanism commercialFunction
+
+🔧 Fix if this is the case:
+	•	Add deterministic fallback:
+	•	derive axis from upstream signals
+	•	Axis must NEVER be “unknown”
+
+⸻
+
+📌 Important Clarification
+
+The issue is NOT:
+	•	audience misunderstanding
+	•	weak strategy
+	•	bad inputs
+
+The issue is:
+
+correct semantic reasoning → broken structural output → downstream failure
+
+⸻
+
+📋 What I Need From You
+	1.	Inspect the latest failing run(s) where:
+	•	axis = unknown
+	•	or Offer returns AXIS_MISMATCH
+	2.	Determine which of the 3 root causes above is actually happening:
+	•	(1) LLM shape mismatch
+	•	(2) parser fragility
+	•	(3) missing fallback
+	3.	For each confirmed issue:
+	•	show exact code location
+	•	show example payload
+	•	confirm why it fails
+	4.	Apply the appropriate fix:
+	•	normalization
+	•	parser expansion
+	•	fallback logic
+
+⸻
+
+🎯 Goal
+
+We want:
+
+Mechanism NEVER returns axis = unknown
+
+And:
+
+Offer always receives a valid, readable axis
+
+No silent structural failures.
+
+⸻
+
+Let me know:
+	•	which root cause is active
+	•	what fix you applied
+	•	and confirm with a new run that AXIS_MISMATCH no longer occurs
+
+Thanks.
+:::
