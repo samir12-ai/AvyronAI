@@ -1,0 +1,91 @@
+ابعتله يكمل فورًا على Phase D، بس أكّد إن الاختبار أهم من التنفيذ نفسه:
+
+:::writing{variant=“email” id=“36291” subject=“Proceed to Phase D Testing — Downstream Commercial Engine Upgrade”}
+Yes — proceed to Phase D now.
+
+Phase C is approved based on:
+	•	6 downstream commercial-reasoning modules wired
+	•	architect review GREEN
+	•	migration completed
+	•	backend clean
+	•	no new typecheck errors introduced
+	•	commercial judgment persisted end-to-end
+
+Now the most important part is proof.
+
+⸻
+
+Phase D Testing Requirements
+
+Please execute the full Phase D testing plan:
+	1.	9-archetype scenario matrix
+	2.	Failure injection tests
+	3.	Full MindAI end-to-end run
+	4.	Before/after comparison
+	5.	Dashboard/output visibility check
+	6.	Final composite report
+
+⸻
+
+What I Need Proven
+
+Do not only prove that the code runs.
+
+Prove that the downstream engines now reason better commercially.
+
+Specifically show:
+	•	StatVal is more context-aware
+	•	Budget is more adaptive and not purely kill-switch driven
+	•	Channel understands commercial function, not just traffic channel
+	•	Iteration produces better strategic learning loops
+	•	Retention reasons about trust/value continuity
+	•	System Control produces more nuanced verdicts when appropriate
+
+⸻
+
+Important Constraint
+
+Do not weaken enforcement.
+
+If a campaign should still be blocked, it should stay blocked.
+
+But the report must explain:
+	•	why it is blocked
+	•	whether the block is hard or conditional
+	•	what commercial path would unblock it
+	•	whether a limited/proof-collection mode is more appropriate
+
+⸻
+
+MindAI Run
+
+Run the full pipeline again on:
+
+campaign_1773576062201_6t0oxi
+
+Then report:
+	•	final run status
+	•	all engine outcomes
+	•	downstream commercial judgments
+	•	whether the previous block reasons changed
+	•	whether any new execution mode appears
+	•	what the system now recommends commercially
+
+⸻
+
+Deliverable
+
+Write the final Phase D/E report to:
+
+.local/validation/Downstream-Commercial-Upgrade-2026-05-07.md
+
+Include:
+	•	scenario matrix results
+	•	failure injection results
+	•	MindAI end-to-end result
+	•	before/after comparison
+	•	remaining gaps
+	•	recommended next actions
+
+Proceed.
+:::

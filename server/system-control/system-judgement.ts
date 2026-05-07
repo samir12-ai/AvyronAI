@@ -38,6 +38,15 @@ STRONG (ACCEPTED):
   commercialReadinessAssessment: "BLOCK is correct — strategy is making 7 of 12 claims with zero signal grounding. Cannot ship at any spend tier without burning trust signal."
   biggestRisk: "Shipping unsigned claims to a tier-4 saturated audience would PERMANENTLY damage source trust — this is not a 'try test budget' situation, it's a 'rebuild evidence base' situation."
   principalCall: "Suspend all execution, run a 7-day proof harvest sprint targeting the 7 unsigned claims, return for re-validation."
+
+WEAK (REJECTED for label-style principalCall): "Halt all execution."
+STRONG (ACCEPTED — HALTED is a correct call when the kill flag is on):
+  recommendedExecutionMode: "HALTED"
+  commercialReadinessAssessment: "BLOCK is correct — budget governor kill flag is true, channel confidence 0.35 is below 0.50 minimum, and confidence spread 0.70 exceeds 0.50 threshold. The system is signaling that no learning loop is currently fundable; spend would compound the gap, not close it."
+  biggestRisk: "Pushing any spend now means burning $2-5k validating a thesis the data already says is unfundable — the right move is to stop the bleed and rebuild the inputs."
+  conditionsToUpgrade: ["Channel selection confidence rises above 0.50 with at least one validated paid path", "Confidence spread across engines drops below 0.50", "Budget governor releases the kill flag after CAC assumption is re-grounded"]
+  principalCall: "Pull all live spend, freeze the budget at zero, and re-open only after channel confidence and CAC assumptions have been rebuilt with fresh data — we don't fund what the system can't underwrite."
+  whatHumanReviewerWouldAsk: ["Which channel data point would have to change to release the kill flag?", "What is the cheapest evidence path back to channel confidence above 0.50?"]
 ═══`;
 
 function buildDesigner(args: {
@@ -119,12 +128,16 @@ Return ONLY valid JSON:
 function buildJudge(json: string): string {
   return `Hostile reviewer of a System Judgement.
 
+═══ ALLOWED MODES PER VERDICT ═══
+- BLOCK verdict → recommendedExecutionMode MUST be one of: HALTED, PROOF_COLLECTION, AWARENESS_BUILD_PHASE, HUMAN_REVIEW_REQUIRED. ALL FOUR are equally valid principal calls — HALTED is the canonical full-stop and is NEVER "softening". Choosing HALTED is correct when the principal's call is "stop everything". Choosing PROOF_COLLECTION is correct when there is a constructive proof-harvest path. Do NOT reject HALTED on a BLOCK verdict — only reject if the mode is FULL_EXECUTION, RESTRICTED_EXECUTION, TEST_ONLY, REVIEW_REQUIRED, LIMITED_SPEND, or CHANNEL_VALIDATION_REQUIRED.
+- PASS / PASS_WITH_WARNINGS verdict → any mode EXCEPT the four BLOCK-only modes is allowable.
+
 ═══ AUTOMATIC REJECTION ═══
-- recommendedExecutionMode is invalid OR softens BLOCK to a non-allowed mode
+- recommendedExecutionMode is invalid for the verdict per the table above (e.g., BLOCK paired with FULL_EXECUTION or RESTRICTED_EXECUTION)
 - commercialReadinessAssessment lacks specific numeric inputs from the data
 - biggestRisk is generic ("performance may suffer") instead of dollar/trust framing
 - conditionsToUpgrade are vague ("improve") instead of measurable conditions
-- principalCall reads like a label not a CMO sentence
+- principalCall is empty or a single word. NEVER reject for being "concise", "brief", "short", "insufficiently directive", or "not CMO-grade enough" — terse principal calls like "Halt all paid spend until proof is rebuilt." or "Freeze all execution and re-validate channels." are FULLY ACCEPTABLE. Only reject if it is empty, a single word, or genuinely meaningless (e.g., "yes", "tbd", "halt").
 - whatHumanReviewerWouldAsk has fewer than 2 questions or is generic
 
 ═══ DESIGN ═══
@@ -180,21 +193,23 @@ export async function designSystemJudgement(args: Parameters<typeof buildDesigne
 
   console.log(`[SystemJudgement] STEP_3 | judge=${verdict}${reason ? ` | "${reason.slice(0,80)}"` : ""}`);
 
-  if (verdict === "REJECTED" && (reason || fix)) {
+  for (let attempt = 1; attempt <= 2 && verdict === "REJECTED" && (reason || fix); attempt++) {
     const fb = [reason, fix].filter(Boolean).join(" — ");
-    console.log(`[SystemJudgement] STEP_4 | retry`);
+    console.log(`[SystemJudgement] STEP_4 | retry ${attempt}/2`);
     try {
-      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildDesigner({ ...args, judgeFeedback: fb }) }], temperature: 0.3, max_tokens: 1300, endpoint: "system-judgement-retry", accountId: args.accountId });
-      const j2 = parseJud(safeJson(r2.choices[0]?.message?.content?.trim() || ""), MODEL, 1, args.verdict);
+      const retryTemp = attempt === 1 ? 0.5 : 0.7;
+      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildDesigner({ ...args, judgeFeedback: fb }) }], temperature: retryTemp, max_tokens: 1300, endpoint: `system-judgement-retry-${attempt}`, accountId: args.accountId });
+      const j2 = parseJud(safeJson(r2.choices[0]?.message?.content?.trim() || ""), MODEL, attempt, args.verdict);
       if (j2) {
         j = j2;
+        reason = ""; fix = "";
         try {
-          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudge(JSON.stringify(j, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "system-judgement-judge-retry", accountId: args.accountId });
+          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudge(JSON.stringify(j, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: `system-judgement-judge-retry-${attempt}`, accountId: args.accountId });
           const jp2 = safeJson(jr2.choices[0]?.message?.content?.trim() || "");
-          if (jp2) { verdict = jp2.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp2.reason || ""); }
+          if (jp2) { verdict = jp2.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp2.reason || ""); fix = String(jp2.specificFix || ""); }
         } catch {}
-      }
-    } catch (err: any) { console.warn(`[SystemJudgement] RETRY_FAILED | ${err.message}`); }
+      } else { break; }
+    } catch (err: any) { console.warn(`[SystemJudgement] RETRY_FAILED | ${err.message}`); break; }
   }
 
   j.judgeVerdict = verdict; j.judgeReason = reason || undefined;
