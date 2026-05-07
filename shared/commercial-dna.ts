@@ -30,6 +30,12 @@ import type {
   ValueArchitectureSignal,
   BuyerPsychologySignal,
   NarrativeReframeSignal,
+  ValidationQualitySignal,
+  BudgetStrategySignal,
+  ChannelOrchestrationSignal,
+  IterationStrategySignal,
+  RetentionEconomicsSignal,
+  SystemJudgementSignal,
 } from "../server/orchestrator/shared-strategic-context";
 
 // ─── DNA contribution types — one per engine ───
@@ -155,6 +161,57 @@ export function composeCommercialDNA(
           `GAME_TRUST_MISMATCH: Positioning game emphasizes outcomes/contracts but Persuasion trust model ("${(persuasion.trustModel || "").slice(0, 50)}") does not reference contract/outcome trust artifacts.`,
         );
       }
+    }
+  }
+
+  // ── Phase 2 (May 2026) downstream contradiction detectors ──
+  // These read the new commercial-decision signals (validationQuality, budgetStrategy,
+  // channelOrchestration, iterationStrategy, retentionEconomics, systemJudgement)
+  // and surface coherence breaks between strategy and the principal's commercial calls.
+  const vq = signals?.validationQuality;
+  const bs = signals?.budgetStrategy;
+  const co = signals?.channelOrchestration;
+  const it = signals?.iterationStrategy;
+  const sj = signals?.systemJudgement;
+
+  // IDENTITY_DRIFT_DOWNSTREAM — capital is asked to scale before validation says "usable_for_scale"
+  if (bs && vq) {
+    const wantsScaleCapital = bs.action === "scale" || bs.spendPace === "aggressive";
+    if (wantsScaleCapital && vq.commercialUsability !== "usable_for_scale") {
+      contradictions.push(
+        `IDENTITY_DRIFT_DOWNSTREAM: Budget strategy asks for ${bs.spendPace} ${bs.action} pace but Validation says commercialUsability="${vq.commercialUsability}" — capital is moving ahead of evidence.`,
+      );
+    }
+  }
+
+  // READINESS_MISALIGNMENT — channel chose scale-grade entry while validation says learning-only
+  if (co && vq) {
+    const aggressiveEntry = /(beachhead.and.spread|dual.front|scale|expansion)/i.test(co.marketEntryPattern || "");
+    const learningOnly = vq.commercialUsability === "usable_for_learning_only" || vq.commercialUsability === "not_usable";
+    if (aggressiveEntry && learningOnly) {
+      contradictions.push(
+        `READINESS_MISALIGNMENT: Channel marketEntryPattern="${(co.marketEntryPattern || "").slice(0, 60)}" assumes scale-grade readiness but Validation usability is "${vq.commercialUsability}" — narrow to single-channel-validation first.`,
+      );
+    }
+  }
+
+  // LEARNING_LOOP_BROKEN — iteration plan is missing the kill heuristic while validation is provisional/learning
+  if (it && vq) {
+    const provisional = vq.commercialUsability === "usable_for_test" || vq.commercialUsability === "usable_for_learning_only";
+    const killWeak = !it.killVsRetainHeuristic || it.killVsRetainHeuristic.length < 20 || /underperform|bad results|kill bad/i.test(it.killVsRetainHeuristic);
+    if (provisional && killWeak) {
+      contradictions.push(
+        `LEARNING_LOOP_BROKEN: Validation is "${vq.commercialUsability}" so the campaign is in learning mode, but Iteration killVsRetainHeuristic is missing or generic ("${(it.killVsRetainHeuristic || "(none)").slice(0, 60)}") — the loop cannot close.`,
+      );
+    }
+  }
+
+  // SYSTEM_PRINCIPAL_OVERRIDE — surface when system judgement softens or escalates the deterministic verdict
+  if (sj && bs) {
+    if (/HALTED|PROOF_COLLECTION|HUMAN_REVIEW_REQUIRED|AWARENESS_BUILD_PHASE/.test(sj.recommendedExecutionMode) && bs.spendPace !== "frozen") {
+      contradictions.push(
+        `SYSTEM_PRINCIPAL_OVERRIDE: System judgement recommended "${sj.recommendedExecutionMode}" but Budget strategy spendPace is "${bs.spendPace}" — execution layer must respect the principal's mode downgrade.`,
+      );
     }
   }
 

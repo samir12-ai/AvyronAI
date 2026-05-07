@@ -28,6 +28,7 @@ export async function storeControlVerdict(
     durationMs: verdict.durationMs,
     controlVersion: verdict.controlVersion,
     shadowMode: verdict.shadowMode,
+    commercialJudgement: verdict.commercialJudgement ? JSON.stringify(verdict.commercialJudgement) : null,
   }).returning({ id: systemControlVerdicts.id });
 
   return row.id;
@@ -57,6 +58,7 @@ function formatVerdictRow(row: typeof systemControlVerdicts.$inferSelect) {
     durationMs: row.durationMs,
     controlVersion: row.controlVersion,
     shadowMode: row.shadowMode,
+    commercialJudgement: parseJsonField(row.commercialJudgement, null),
     createdAt: row.createdAt,
   };
 }

@@ -138,6 +138,13 @@ import { runBudgetGovernorEngine } from "../strategy/budget-governor/engine";
 import { runChannelSelectionEngine } from "../strategy/channel-selection/engine";
 import { runIterationEngine } from "../strategy/iteration-engine/engine";
 import { runRetentionEngine } from "../strategy/retention-engine/engine";
+// ── Phase 2 (May 2026) downstream commercial-reasoning modules ──
+import { designValidationJudgement } from "../strategy/statistical-validation/validation-judgement";
+import { designBudgetStrategy } from "../strategy/budget-governor/budget-strategy";
+import { designChannelOrchestration } from "../strategy/channel-selection/channel-orchestration";
+import { designIterationStrategy } from "../strategy/iteration-engine/iteration-strategy";
+import { designRetentionEconomics } from "../strategy/retention-engine/retention-economics";
+import { designSystemJudgement } from "../system-control/system-judgement";
 
 export interface AgentProgressEvent {
   engineId: EngineId;
@@ -2327,6 +2334,60 @@ async function executeEngine(
         output = result;
         ctx.statisticalValidation = result;
 
+        // ── COMMERCIAL REASONING: validationJudgement (Phase 2 May 2026) ──
+        try {
+          if (ctx.ssc) {
+            const r: any = result;
+            const layerScores: Record<string, number> = {};
+            for (const lr of r.layerResults || []) {
+              const name = lr?.layerName ?? lr?.layer;
+              if (name && typeof lr.score === "number") layerScores[String(name)] = lr.score;
+            }
+            const vState = (r.validationState || "provisional") as "validated" | "provisional" | "weak" | "rejected";
+            const claimVals: any[] = Array.isArray(r.claimValidations) ? r.claimValidations : [];
+            const totalClaims = claimVals.length;
+            const sbcCount = claimVals.filter((c: any) => c?.signalBacked === true || c?.isSignalBacked === true || (typeof c?.signalEvidence === "number" && c.signalEvidence > 0) || (Array.isArray(c?.supportingSignals) && c.supportingSignals.length > 0)).length;
+            const sbcRatio = totalClaims > 0 ? sbcCount / totalClaims : (typeof r.signalBackedClaimRatio === "number" ? r.signalBackedClaimRatio : 0.5);
+            const eStrength = typeof r.evidenceStrength === "number" ? r.evidenceStrength : (typeof r.claimConfidenceScore === "number" ? r.claimConfidenceScore : (typeof r.confidenceScore === "number" ? r.confidenceScore : 0.5));
+            const unmapped = Array.isArray(r.unmappedSignals) ? r.unmappedSignals : [];
+            const lowConf = Array.isArray(r.lowConfidenceSignals) ? r.lowConfidenceSignals : [];
+            const hypoCount = claimVals.filter((c: any) => c?.classification === "hypothesis" || c?.isHypothesis === true).length;
+            const cj = await designValidationJudgement({
+              validationState: vState,
+              evidenceStrength: eStrength,
+              signalBackedClaimRatio: sbcRatio,
+              signalBackedClaimCount: sbcCount,
+              totalClaims,
+              hypothesisCount: hypoCount,
+              unmappedSignalCount: unmapped.length,
+              lowConfidenceSignalCount: lowConf.length,
+              reliabilityOverall: r.dataReliability?.overallReliability ?? r.dataReliability?.overall ?? 0.5,
+              topAssumptionFlags: (r.assumptionFlags || []).slice(0, 6).map((x: any) => typeof x === "string" ? x : (x?.message || JSON.stringify(x))),
+              topStructuralWarnings: (r.structuralWarnings || []).slice(0, 6).map((w: any) => typeof w === "string" ? w : (w?.message || JSON.stringify(w))),
+              layerScores,
+              accountId: config.accountId,
+            });
+            if (cj) {
+              cj.validationState = vState;
+              cj.evidenceStrength = eStrength;
+              cj.signalBackedClaimRatio = sbcRatio;
+              r.commercialJudgement = cj;
+              emitCommercialSignal(ctx.ssc, "validationQuality", {
+                validationState: cj.validationState,
+                evidenceStrength: cj.evidenceStrength,
+                signalBackedClaimRatio: cj.signalBackedClaimRatio,
+                commercialUsability: cj.commercialUsability,
+                topTrustGaps: cj.topTrustGaps,
+                whatWouldUnlockNextTier: cj.whatWouldUnlockNextTier,
+                judgeVerdict: cj.judgeVerdict,
+                emittedAt: Date.now(),
+              });
+            }
+          }
+        } catch (cjErr: any) {
+          console.warn(`[Orchestrator] STATVAL_COMMERCIAL_FAILED | ${cjErr.message}`);
+        }
+
         try {
           const [svSnap] = await db.insert(strategyValidationSnapshots).values({
             accountId: config.accountId,
@@ -2446,6 +2507,56 @@ async function executeEngine(
         output = result;
         ctx.budgetGovernor = result;
 
+        // ── COMMERCIAL REASONING: budgetStrategy (Phase 2 May 2026) ──
+        try {
+          if (ctx.ssc) {
+            const r: any = result;
+            const action = (r.decision?.action || "hold") as "test" | "scale" | "hold" | "halt";
+            const decisionConfidence = typeof r.budgetDecisionConfidence === "number" ? r.budgetDecisionConfidence : (typeof r.confidenceScore === "number" ? r.confidenceScore : 0.5);
+            const cacAssess = r.cacAssumptionCheck || r.cacReality || r.cacAssessment || {};
+            const reconciledConf = typeof r.baseValidationConfidence === "number" ? r.baseValidationConfidence : (typeof r.reconciledValidationConfidence === "number" ? r.reconciledValidationConfidence : validationConfidence);
+            const cj = await designBudgetStrategy({
+              action,
+              decisionConfidence,
+              validationState: validationState || "unknown",
+              reconciledValidationConfidence: reconciledConf,
+              offerStrength,
+              funnelStrength: funnelStrengthScore,
+              channelRisk: 0.5,
+              testBudgetMin: r.testBudgetRange?.min ?? 0,
+              testBudgetMax: r.testBudgetRange?.max ?? 0,
+              scaleBudgetMin: r.scaleBudgetRange?.min ?? 0,
+              scaleBudgetMax: r.scaleBudgetRange?.max ?? 0,
+              estimatedCAC: cacAssess.estimatedCAC ?? cacAssess.estimated ?? funnelProjections.expectedCPA ?? 0,
+              benchmarkCAC: cacAssess.industryBenchmarkCAC ?? cacAssess.benchmarkCAC ?? cacAssess.benchmark ?? 0,
+              cacRealistic: cacAssess.realistic !== false,
+              killFlag: !!r.killFlag,
+              killReasons: Array.isArray(r.killReasons) ? r.killReasons.map(String) : [],
+              riskFactors: Array.isArray(r.riskAssessment?.riskFactors) ? r.riskAssessment.riskFactors.map(String) : (Array.isArray(r.riskFactors) ? r.riskFactors.map(String) : []),
+              performanceConversions: campaignPerformance?.conversions ?? 0,
+              performanceSpend: campaignPerformance?.spend ?? 0,
+              marketIntensity,
+              accountId: config.accountId,
+            });
+            if (cj) {
+              cj.action = action;
+              r.commercialStrategy = cj;
+              emitCommercialSignal(ctx.ssc, "budgetStrategy", {
+                action: cj.action,
+                spendPace: cj.spendPace,
+                learningBudgetCarveOutPct: cj.learningBudgetCarveOutPct,
+                capitalEfficiencyAssessment: cj.capitalEfficiencyAssessment,
+                killTriggerThreshold: cj.killTriggerThreshold,
+                expansionPrecondition: cj.expansionPrecondition,
+                judgeVerdict: cj.judgeVerdict,
+                emittedAt: Date.now(),
+              });
+            }
+          }
+        } catch (cjErr: any) {
+          console.warn(`[Orchestrator] BUDGET_COMMERCIAL_FAILED | ${cjErr.message}`);
+        }
+
         try {
           const [bgSnap] = await db.insert(budgetGovernorSnapshots).values({
             accountId: config.accountId,
@@ -2528,6 +2639,59 @@ async function executeEngine(
         );
         output = result;
         ctx.channelSelection = result;
+
+        // ── COMMERCIAL REASONING: channelOrchestration (Phase 2 May 2026) ──
+        try {
+          if (ctx.ssc) {
+            const r: any = result;
+            const primary = r.primaryChannel || r.recommendedChannels?.[0] || {};
+            const secondary = r.secondaryChannel || r.recommendedChannels?.[1] || {};
+            const rejArr = Array.isArray(r.rejectedChannels) ? r.rejectedChannels : [];
+            const funnelStages = (() => {
+              const fs = ctx.funnel?.stages;
+              if (Array.isArray(fs)) return fs;
+              if (typeof fs === "string") { try { const p = JSON.parse(fs); return Array.isArray(p) ? p : []; } catch { return []; } }
+              return [];
+            })();
+            const stageType = (s: any): string => String(s?.stageType || s?.type || s?.stage || "").toLowerCase();
+            const cj = await designChannelOrchestration({
+              primaryChannelName: primary.channelName || primary.label || primary.channelKey || primary.name || "(none)",
+              secondaryChannelName: secondary.channelName || secondary.label || secondary.channelKey || secondary.name || "(none)",
+              primaryChannelType: primary.channelType || primary.type || "(unknown)",
+              secondaryChannelType: secondary.channelType || secondary.type || "(unknown)",
+              primaryFitScore: typeof primary.fitScore === "number" ? primary.fitScore : 0,
+              secondaryFitScore: typeof secondary.fitScore === "number" ? secondary.fitScore : 0,
+              channelMode: r.channelMode || "INTELLIGENT",
+              awarenessStage: awarenessInput.primaryRoute?.targetReadinessStage || ctx.ssc.awarenessMeaning?.stage || "unknown",
+              audienceMaturityIndex: typeof audInput.maturityIndex === "number" ? audInput.maturityIndex : null,
+              testBudgetMin: budgetInput.testBudgetMin,
+              testBudgetMax: budgetInput.testBudgetMax,
+              killFlag: !!budgetInput.killFlag,
+              expansionAllowed: !!budgetInput.expansionPermission,
+              rejectedChannels: rejArr.slice(0, 6).map((c: any) => `${c.channelName || c.label || c.channelKey || c.name || "?"} — ${c.rejectionReason || c.reason || "(no reason)"}`),
+              funnelAwarenessCount: funnelStages.filter((s: any) => /aware/.test(stageType(s))).length,
+              funnelNurtureCount: funnelStages.filter((s: any) => /(nurture|consider|interest|eval)/.test(stageType(s))).length,
+              funnelConversionCount: funnelStages.filter((s: any) => /(convers|purchase|decision|action|close)/.test(stageType(s))).length,
+              accountId: config.accountId,
+            });
+            if (cj) {
+              r.commercialOrchestration = cj;
+              emitCommercialSignal(ctx.ssc, "channelOrchestration", {
+                primaryChannel: cj.primaryChannel,
+                secondaryChannel: cj.secondaryChannel,
+                marketEntryPattern: cj.marketEntryPattern,
+                channelInterlock: cj.channelInterlock,
+                withdrawalTrigger: cj.withdrawalTrigger,
+                validationMilestone: cj.validationMilestone,
+                riskBudgetBalance: cj.riskBudgetBalance,
+                judgeVerdict: cj.judgeVerdict,
+                emittedAt: Date.now(),
+              });
+            }
+          }
+        } catch (cjErr: any) {
+          console.warn(`[Orchestrator] CHANNEL_COMMERCIAL_FAILED | ${cjErr.message}`);
+        }
 
         try {
           const [csSnap] = await db.insert(channelSelectionSnapshots).values({
@@ -2612,6 +2776,53 @@ async function executeEngine(
         );
         output = result;
         ctx.iteration = result;
+
+        // ── COMMERCIAL REASONING: iterationStrategy (Phase 2 May 2026) ──
+        try {
+          if (ctx.ssc) {
+            const r: any = result;
+            const hyps = Array.isArray(r.nextTestHypotheses) ? r.nextTestHypotheses : (Array.isArray(r.hypotheses) ? r.hypotheses : []);
+            const optTargets = Array.isArray(r.optimizationTargets) ? r.optimizationTargets : [];
+            const failed = Array.isArray(r.failedStrategyFlags) ? r.failedStrategyFlags : (Array.isArray(r.failedStrategies) ? r.failedStrategies : []);
+            const fatigue = Array.isArray(r.fatigueSignals) ? r.fatigueSignals : (Array.isArray(r.creativeFatigue?.signals) ? r.creativeFatigue.signals : []);
+            const layerScores: Record<string, number> = {};
+            for (const lr of r.layerResults || []) {
+              const name = lr?.layerName ?? lr?.layer;
+              if (name && typeof lr.score === "number") layerScores[String(name)] = lr.score;
+            }
+            const cr = (performance.clicks > 0 && performance.conversions > 0) ? performance.conversions / performance.clicks : 0;
+            const roas = performance.spend > 0 ? performance.revenue / performance.spend : 0;
+            const cpa = performance.conversions > 0 ? performance.spend / performance.conversions : 0;
+            const cj = await designIterationStrategy({
+              campaignId: config.campaignId,
+              performanceROAS: roas,
+              performanceCPA: cpa,
+              performanceConversions: performance.conversions,
+              funnelConversionRate: cr,
+              hypothesisCount: hyps.length,
+              topHypotheses: hyps.slice(0, 5).map((h: any) => typeof h === "string" ? h : (h.hypothesis || h.name || h.description || JSON.stringify(h).slice(0, 120))),
+              optimizationTargets: optTargets.slice(0, 5).map((t: any) => typeof t === "string" ? t : (t.targetArea || t.target || t.name || t.description || JSON.stringify(t).slice(0, 120))),
+              failedStrategies: failed.slice(0, 4).map((f: any) => typeof f === "string" ? f : (f.strategyName || f.strategy || f.name || f.failureReason || JSON.stringify(f).slice(0, 120))),
+              fatigueSignals: fatigue.slice(0, 4).map((f: any) => typeof f === "string" ? f : (f.signal || f.description || JSON.stringify(f).slice(0, 120))),
+              layerScores,
+              accountId: config.accountId,
+            });
+            if (cj) {
+              r.commercialIterationStrategy = cj;
+              emitCommercialSignal(ctx.ssc, "iterationStrategy", {
+                learningPriority: cj.learningPriority,
+                killVsRetainHeuristic: cj.killVsRetainHeuristic,
+                hypothesisDependencyChain: cj.hypothesisDependencyChain,
+                acceptableLossPerTest: cj.acceptableLossPerTest,
+                decisionVelocity: cj.decisionVelocity,
+                judgeVerdict: cj.judgeVerdict,
+                emittedAt: Date.now(),
+              });
+            }
+          }
+        } catch (cjErr: any) {
+          console.warn(`[Orchestrator] ITERATION_COMMERCIAL_FAILED | ${cjErr.message}`);
+        }
 
         try {
           const [iterSnap] = await db.insert(iterationSnapshots).values({
@@ -2752,6 +2963,46 @@ async function executeEngine(
         });
         output = result;
         ctx.retention = result;
+
+        // ── COMMERCIAL REASONING: retentionEconomics (Phase 2 May 2026) ──
+        try {
+          if (ctx.ssc) {
+            const r: any = result;
+            const loops = Array.isArray(r.retentionLoops) ? r.retentionLoops : [];
+            const churnFlags = Array.isArray(r.churnRiskFlags) ? r.churnRiskFlags : (Array.isArray(r.churnRisks) ? r.churnRisks : []);
+            const ltvPaths = Array.isArray(r.ltvExpansionPaths) ? r.ltvExpansionPaths : (Array.isArray(r.expansionPaths) ? r.expansionPaths : []);
+            const upsellTriggers = Array.isArray(r.upsellTriggers) ? r.upsellTriggers : [];
+            const cj = await designRetentionEconomics({
+              customerLTV: clv,
+              churnRate,
+              repeatPurchaseRate,
+              retentionWindowDays: rm?.dataWindowDays || null,
+              topMotivations: purchaseMotivations.slice(0, 5).map((m: any) => `${m.motivation} (strength ${m.strength.toFixed(2)})`),
+              topPostPurchaseObjections: postPurchaseObjections.slice(0, 5).map((o: any) => `${o.objection} (severity ${o.severity.toFixed(2)})`),
+              retentionLoops: loops.slice(0, 5).map((l: any) => typeof l === "string" ? l : (l.loopName || l.name || l.description || JSON.stringify(l).slice(0, 140))),
+              topChurnRiskFlags: churnFlags.slice(0, 5).map((c: any) => typeof c === "string" ? c : (c.risk || c.flag || c.description || JSON.stringify(c).slice(0, 140))),
+              topLTVPaths: ltvPaths.slice(0, 5).map((p: any) => typeof p === "string" ? p : (p.path || p.name || p.description || JSON.stringify(p).slice(0, 140))),
+              topUpsellTriggers: upsellTriggers.slice(0, 5).map((t: any) => typeof t === "string" ? t : (t.trigger || t.name || t.description || JSON.stringify(t).slice(0, 140))),
+              offerCoreOutcome: offerCtx.coreOutcome || null,
+              offerProofStrength: typeof offerCtx.proofStrength === "number" ? offerCtx.proofStrength : null,
+              accountId: config.accountId,
+            });
+            if (cj) {
+              r.commercialRetentionEconomics = cj;
+              emitCommercialSignal(ctx.ssc, "retentionEconomics", {
+                ltvUnlockSequence: cj.ltvUnlockSequence,
+                churnDefensePriority: cj.churnDefensePriority,
+                expansionRevenuePath: cj.expansionRevenuePath,
+                paybackPeriodAssessment: cj.paybackPeriodAssessment,
+                retentionROIThesis: cj.retentionROIThesis,
+                judgeVerdict: cj.judgeVerdict,
+                emittedAt: Date.now(),
+              });
+            }
+          }
+        } catch (cjErr: any) {
+          console.warn(`[Orchestrator] RETENTION_COMMERCIAL_FAILED | ${cjErr.message}`);
+        }
 
         try {
           const [retSnap] = await db.insert(retentionSnapshots).values({
@@ -3430,6 +3681,50 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       ssc: ctx.ssc || null,
       config: { campaignId: config.campaignId, accountId: config.accountId },
     });
+    // ── COMMERCIAL REASONING: systemJudgement (Phase 2 May 2026) ──
+    // Runs AFTER deterministic evaluateSystemControl so the principal's commercial
+    // call is computed against the full structural verdict + all upstream signals.
+    try {
+      if (controlVerdict && ctx.ssc) {
+        const sv = ctx.statisticalValidation || {};
+        const bg = ctx.budgetGovernor || {};
+        const cs = ctx.channelSelection || {};
+        const fn = ctx.funnel || {};
+        const dnaPresent = Object.values(ctx.ssc.commercialSignals || {}).filter(Boolean).length;
+        const cj = await designSystemJudgement({
+          verdict: controlVerdict.verdict,
+          proposedExecutionMode: controlVerdict.executionMode,
+          blockReasons: controlVerdict.blockReasons,
+          downgrades: controlVerdict.downgrades,
+          contradictions: controlVerdict.contradictions,
+          repairActions: controlVerdict.repairActions,
+          structuralChecksFailed: (controlVerdict.structuralChecks || []).filter((c: any) => c && c.passed === false).map((c: any) => c.check || c.details || "(unnamed)"),
+          validationState: (sv as any).validationState || null,
+          budgetAction: (bg as any).decision?.action || null,
+          channelConfidence: typeof (cs as any).confidenceScore === "number" ? (cs as any).confidenceScore : null,
+          signalBackedRatio: typeof (sv as any).signalBackedClaimRatio === "number" ? (sv as any).signalBackedClaimRatio : null,
+          funnelStrength: typeof (fn as any).funnelStrengthScore === "number" ? (fn as any).funnelStrengthScore : null,
+          commercialDnaPresent: Math.min(dnaPresent, 5),
+          accountId: config.accountId,
+        });
+        if (cj) {
+          controlVerdict.commercialJudgement = cj;
+          emitCommercialSignal(ctx.ssc, "systemJudgement", {
+            verdict: cj.verdict,
+            recommendedExecutionMode: cj.recommendedExecutionMode,
+            commercialReadinessAssessment: cj.commercialReadinessAssessment,
+            biggestRisk: cj.biggestRisk,
+            conditionsToUpgrade: cj.conditionsToUpgrade,
+            principalCall: cj.principalCall,
+            judgeVerdict: cj.judgeVerdict,
+            emittedAt: Date.now(),
+          });
+        }
+      }
+    } catch (cjErr: any) {
+      console.warn(`[Orchestrator] SYSTEM_CONTROL_COMMERCIAL_FAILED | ${cjErr.message}`);
+    }
+
     storeControlVerdict(config.accountId, config.campaignId, jobId, controlVerdict)
       .then(id => console.log(`[Orchestrator] CONTROL_VERDICT_STORED | id=${id} | verdict=${controlVerdict!.verdict}`))
       .catch(err => console.warn(`[Orchestrator] CONTROL_VERDICT_STORE_FAILED | error=${err.message}`));

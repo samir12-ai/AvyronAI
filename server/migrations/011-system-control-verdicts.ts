@@ -41,5 +41,11 @@ export async function migrateSystemControlVerdicts() {
     ON system_control_verdicts (created_at DESC)
   `);
 
+  // Phase 2 (May 2026) — additive: persist commercial judgement payload (JSON-as-text)
+  await db.execute(sql`
+    ALTER TABLE system_control_verdicts
+    ADD COLUMN IF NOT EXISTS commercial_judgement TEXT
+  `);
+
   console.log("[Migration-011] system_control_verdicts table ready.");
 }

@@ -186,12 +186,90 @@ export interface NarrativeReframeSignal {
   emittedAt: number;
 }
 
+// ─── Phase 2 (May 2026) downstream commercial signals ───
+// Emitted by the 6 downstream commercial-decision engines AFTER the 5 strategic
+// engines. These signals project per-engine commercial reasoning into the SSC
+// so the System Control layer (and any future cross-engine consumer) can reason
+// about the full commercial DNA, not just per-engine outputs.
+
+export interface ValidationQualitySignal {
+  validationState: "validated" | "provisional" | "weak" | "rejected";
+  evidenceStrength: number;
+  signalBackedClaimRatio: number;
+  commercialUsability: "usable_for_scale" | "usable_for_test" | "usable_for_learning_only" | "not_usable";
+  topTrustGaps: string[];
+  whatWouldUnlockNextTier: string;
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  emittedAt: number;
+}
+
+export interface BudgetStrategySignal {
+  action: "test" | "scale" | "hold" | "halt";
+  spendPace: "aggressive" | "measured" | "cautious" | "frozen";
+  learningBudgetCarveOutPct: number;
+  capitalEfficiencyAssessment: string;
+  killTriggerThreshold: string;
+  expansionPrecondition: string;
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  emittedAt: number;
+}
+
+export interface ChannelOrchestrationSignal {
+  primaryChannel: string;
+  secondaryChannel: string;
+  marketEntryPattern: string;
+  channelInterlock: string;
+  withdrawalTrigger: string;
+  validationMilestone: string;
+  riskBudgetBalance: string;
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  emittedAt: number;
+}
+
+export interface IterationStrategySignal {
+  learningPriority: string;
+  killVsRetainHeuristic: string;
+  hypothesisDependencyChain: string[];
+  acceptableLossPerTest: string;
+  decisionVelocity: "fast" | "measured" | "slow";
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  emittedAt: number;
+}
+
+export interface RetentionEconomicsSignal {
+  ltvUnlockSequence: string;
+  churnDefensePriority: string;
+  expansionRevenuePath: string;
+  paybackPeriodAssessment: string;
+  retentionROIThesis: string;
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  emittedAt: number;
+}
+
+export interface SystemJudgementSignal {
+  verdict: "PASS" | "DOWNGRADE" | "REPAIR" | "BLOCK";
+  recommendedExecutionMode: string;
+  commercialReadinessAssessment: string;
+  biggestRisk: string;
+  conditionsToUpgrade: string[];
+  principalCall: string;
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  emittedAt: number;
+}
+
 export interface CommercialSignals {
   trustMechanism?: TrustMechanismSignal;
   gameDimension?: GameDimensionSignal;
   valueArchitecture?: ValueArchitectureSignal;
   buyerPsychology?: BuyerPsychologySignal;
   narrativeReframe?: NarrativeReframeSignal;
+  // Phase 2 downstream signals
+  validationQuality?: ValidationQualitySignal;
+  budgetStrategy?: BudgetStrategySignal;
+  channelOrchestration?: ChannelOrchestrationSignal;
+  iterationStrategy?: IterationStrategySignal;
+  retentionEconomics?: RetentionEconomicsSignal;
+  systemJudgement?: SystemJudgementSignal;
 }
 
 export interface AwarenessMeaningRef {

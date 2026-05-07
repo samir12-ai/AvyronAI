@@ -155,4 +155,5 @@ export interface StatisticalValidationResult {
   unmappedSignals: string[];
   lowConfidenceSignals: string[];
   originTypeDistribution?: import("../../shared/signal-lineage").SignalComposition;
+  commercialJudgement?: import("./validation-judgement").ValidationJudgement | null;
 }

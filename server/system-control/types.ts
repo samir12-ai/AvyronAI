@@ -11,7 +11,13 @@ export type ExecutionMode =
   | "RESTRICTED_EXECUTION"
   | "TEST_ONLY"
   | "REVIEW_REQUIRED"
-  | "HALTED";
+  | "HALTED"
+  // Phase 2 (May 2026) marketing-intelligence-grade modes
+  | "LIMITED_SPEND"               // Budget Governor commercial fallback — small fixed-spend learning loop
+  | "PROOF_COLLECTION"            // StatVal commercial fallback — execution suspended pending proof harvest
+  | "CHANNEL_VALIDATION_REQUIRED" // Channel Selection commercial fallback — pilot single channel before scaling
+  | "AWARENESS_BUILD_PHASE"       // System judgement: market not ready for conversion-grade execution
+  | "HUMAN_REVIEW_REQUIRED";      // System judgement: principal-level decision exceeds automation envelope
 
 export type BlockCode =
   | "NO_CONVERSION_PATH"
@@ -101,6 +107,7 @@ export interface SystemControlVerdict {
   durationMs: number;
   controlVersion: string;
   shadowMode: boolean;
+  commercialJudgement?: import("./system-judgement").SystemJudgement | null;
 }
 
 export interface SystemControlInput {

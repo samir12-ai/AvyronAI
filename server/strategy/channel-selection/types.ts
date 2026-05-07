@@ -192,4 +192,5 @@ export interface ChannelSelectionResult {
   decisionGateScoring: DecisionGateScoring | null;
   structurallyRepaired: boolean;
   correctionAuditTrail: CorrectionAuditEntry[];
+  commercialOrchestration?: import("./channel-orchestration").ChannelOrchestration | null;
 }

@@ -87,4 +87,5 @@ export interface BudgetGovernorResult {
   engineVersion: number;
   layerDiagnostics: Record<string, any>;
   strategyAcceptability?: import("../../shared/strategy-acceptability").StrategyAcceptability;
+  commercialStrategy?: import("./budget-strategy").BudgetStrategy | null;
 }
