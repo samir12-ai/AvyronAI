@@ -89,6 +89,34 @@ interface BlockReason {
   message?: string;
 }
 
+interface RecoveryIssue {
+  blockCode?: string;
+  rootCauseCategory?: string;
+  ownerEngine?: string;
+  diagnosis?: string;
+  repairAction?: string;
+  successCriteria?: string;
+  requiredProof?: string[];
+  nextPossibleMode?: string;
+  priority?: number;
+  severity?: 'critical' | 'high';
+  source?: string;
+}
+
+interface RecoveryPlan {
+  currentVerdict?: string;
+  currentExecutionMode?: string;
+  blockCodes?: string[];
+  rootCauseSummary?: string;
+  issues?: RecoveryIssue[];
+  priorityOrder?: string[];
+  globalRecoveryPlan?: string[];
+  rerunRequirements?: string[];
+  humanReviewNeeded?: boolean;
+  generatedAt?: string;
+  source?: string;
+}
+
 interface ControlVerdict {
   hasVerdict: boolean;
   verdict?: {
@@ -96,6 +124,7 @@ interface ControlVerdict {
     executionMode?: string;
     blockReasons?: BlockReason[];
     commercialJudgement?: CommercialJudgement | null;
+    recoveryPlan?: RecoveryPlan | null;
     createdAt?: string;
   };
 }
@@ -710,6 +739,195 @@ export default function OrchestratorPanel() {
                 ))}
               </View>
             )}
+
+            {(() => {
+              const rp = v?.recoveryPlan || null;
+              if (!rp || !Array.isArray(rp.issues) || rp.issues.length === 0) return null;
+              const issues = rp.issues;
+              const recoveryBg = isDark ? '#0F1A14' : '#F0FDF4';
+              const issueBg = isDark ? '#0A1F14' : '#ECFDF5';
+              const proofBg = isDark ? '#0F1419' : '#F4F7F5';
+              return (
+                <View style={{
+                  marginTop: 16,
+                  backgroundColor: recoveryBg,
+                  borderRadius: 10,
+                  padding: 12,
+                  borderWidth: 1,
+                  borderColor: P.green + '40',
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name="medkit-outline" size={15} color={P.green} />
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: P.green, letterSpacing: 0.5 }}>
+                      RECOVERY PLAN · {issues.length} ISSUE{issues.length === 1 ? '' : 'S'} · {(rp.source || 'deterministic').toUpperCase()}
+                    </Text>
+                    {rp.humanReviewNeeded && (
+                      <Text style={{
+                        fontSize: 9, fontWeight: '700', color: P.amber,
+                        backgroundColor: P.amber + '20',
+                        paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
+                        letterSpacing: 0.4, textTransform: 'uppercase',
+                      }}>
+                        Human review
+                      </Text>
+                    )}
+                  </View>
+
+                  {rp.rootCauseSummary && (
+                    <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary, marginBottom: 10 }}>
+                      {rp.rootCauseSummary}
+                    </Text>
+                  )}
+
+                  {issues.map((iss, idx) => {
+                    const sevColor = iss.severity === 'critical' ? P.coral : P.amber;
+                    return (
+                      <View key={idx} style={{
+                        backgroundColor: issueBg,
+                        borderRadius: 8,
+                        padding: 10,
+                        marginBottom: 8,
+                        borderLeftWidth: 3,
+                        borderLeftColor: sevColor,
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                          <Text style={{
+                            fontSize: 10, fontWeight: '700', color: textPrimary,
+                            backgroundColor: isDark ? '#1A2A20' : '#D1FAE5',
+                            paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4,
+                            fontVariant: ['tabular-nums'],
+                          }}>
+                            #{iss.priority || idx + 1}
+                          </Text>
+                          {iss.ownerEngine && (
+                            <Text style={{
+                              fontSize: 10, fontWeight: '700', color: P.blue,
+                              backgroundColor: P.blue + '20',
+                              paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4,
+                              letterSpacing: 0.3,
+                            }}>
+                              {iss.ownerEngine}
+                            </Text>
+                          )}
+                          {iss.rootCauseCategory && (
+                            <Text style={{
+                              fontSize: 9, fontWeight: '600', color: textSec,
+                              backgroundColor: isDark ? '#1A1F26' : '#E5E7EB',
+                              paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4,
+                              letterSpacing: 0.3, textTransform: 'uppercase',
+                            }}>
+                              {iss.rootCauseCategory.replace(/_/g, ' ')}
+                            </Text>
+                          )}
+                          {iss.blockCode && (
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: sevColor, letterSpacing: 0.3 }}>
+                              {iss.blockCode}
+                            </Text>
+                          )}
+                        </View>
+
+                        {iss.diagnosis && (
+                          <View style={{ marginBottom: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 2 }}>
+                              DIAGNOSIS
+                            </Text>
+                            <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary }}>
+                              {iss.diagnosis}
+                            </Text>
+                          </View>
+                        )}
+
+                        {iss.repairAction && (
+                          <View style={{ marginBottom: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: P.green, letterSpacing: 0.4, marginBottom: 2 }}>
+                              REPAIR ACTION
+                            </Text>
+                            <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary }}>
+                              {iss.repairAction}
+                            </Text>
+                          </View>
+                        )}
+
+                        {iss.successCriteria && (
+                          <View style={{ marginBottom: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 2 }}>
+                              SUCCESS CRITERIA
+                            </Text>
+                            <Text style={{ fontSize: 11, lineHeight: 16, color: textSec }}>
+                              {iss.successCriteria}
+                            </Text>
+                          </View>
+                        )}
+
+                        {Array.isArray(iss.requiredProof) && iss.requiredProof.length > 0 && (
+                          <View style={{ marginTop: 4, marginBottom: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              REQUIRED PROOF
+                            </Text>
+                            {iss.requiredProof.map((p, pi) => (
+                              <View key={pi} style={{ flexDirection: 'row', gap: 6, alignItems: 'flex-start', marginBottom: 2 }}>
+                                <Ionicons name="document-text-outline" size={11} color={textMuted} style={{ marginTop: 2 }} />
+                                <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textSec }}>{p}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
+                        {iss.nextPossibleMode && (
+                          <View style={{
+                            marginTop: 4,
+                            alignSelf: 'flex-start',
+                            backgroundColor: P.green + '20',
+                            paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5,
+                            flexDirection: 'row', alignItems: 'center', gap: 4,
+                          }}>
+                            <Ionicons name="arrow-forward-circle-outline" size={11} color={P.green} />
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: P.green, letterSpacing: 0.3 }}>
+                              NEXT MODE: {iss.nextPossibleMode}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  {Array.isArray(rp.globalRecoveryPlan) && rp.globalRecoveryPlan.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: P.green, letterSpacing: 0.4, marginBottom: 6 }}>
+                        GLOBAL RECOVERY SEQUENCE
+                      </Text>
+                      {rp.globalRecoveryPlan.map((step, i) => (
+                        <View key={i} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: P.green, minWidth: 18, fontVariant: ['tabular-nums'] }}>
+                            {i + 1}.
+                          </Text>
+                          <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: textPrimary }}>{step}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {Array.isArray(rp.rerunRequirements) && rp.rerunRequirements.length > 0 && (
+                    <View style={{
+                      marginTop: 10,
+                      backgroundColor: proofBg,
+                      borderRadius: 8,
+                      padding: 10,
+                    }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: textSec, letterSpacing: 0.4, marginBottom: 6 }}>
+                        RE-RUN REQUIREMENTS · {rp.rerunRequirements.length}
+                      </Text>
+                      {rp.rerunRequirements.map((r, i) => (
+                        <View key={i} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                          <Ionicons name="checkbox-outline" size={13} color={textSec} style={{ marginTop: 1 }} />
+                          <Text style={{ flex: 1, fontSize: 11, lineHeight: 16, color: textSec }}>{r}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })()}
           </View>
         );
       })()}

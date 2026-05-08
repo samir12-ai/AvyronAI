@@ -3725,6 +3725,29 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       console.warn(`[Orchestrator] SYSTEM_CONTROL_COMMERCIAL_FAILED | ${cjErr.message}`);
     }
 
+    // ── UNIVERSAL RECOVERY PLAN (Phase 3 May 2026) ──
+    // Runs AFTER deterministic verdict + commercial judgement. Generates a
+    // structured, ownership-assigned, priority-ordered repair plan for any
+    // BLOCKED verdict. Pure deterministic v1 (registry-driven), null-safe,
+    // never weakens enforcement.
+    try {
+      if (controlVerdict && controlVerdict.verdict === "BLOCK") {
+        const { buildRecoveryPlan } = await import("../system-control/recovery-planner");
+        const plan = buildRecoveryPlan(controlVerdict, {
+          campaignId: config.campaignId,
+          accountId: config.accountId,
+          results,
+          ssc: ctx.ssc,
+        });
+        if (plan) {
+          controlVerdict.recoveryPlan = plan;
+          console.log(`[Orchestrator] RECOVERY_PLAN_BUILT | issues=${plan.issues.length} | humanReview=${plan.humanReviewNeeded} | source=${plan.source}`);
+        }
+      }
+    } catch (rpErr: any) {
+      console.warn(`[Orchestrator] RECOVERY_PLAN_FAILED | ${rpErr.message}`);
+    }
+
     storeControlVerdict(config.accountId, config.campaignId, jobId, controlVerdict)
       .then(id => console.log(`[Orchestrator] CONTROL_VERDICT_STORED | id=${id} | verdict=${controlVerdict!.verdict}`))
       .catch(err => console.warn(`[Orchestrator] CONTROL_VERDICT_STORE_FAILED | error=${err.message}`));

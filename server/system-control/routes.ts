@@ -29,6 +29,7 @@ export async function storeControlVerdict(
     controlVersion: verdict.controlVersion,
     shadowMode: verdict.shadowMode,
     commercialJudgement: verdict.commercialJudgement ? JSON.stringify(verdict.commercialJudgement) : null,
+    recoveryPlan: verdict.recoveryPlan ? JSON.stringify(verdict.recoveryPlan) : null,
   }).returning({ id: systemControlVerdicts.id });
 
   return row.id;
@@ -59,6 +60,7 @@ function formatVerdictRow(row: typeof systemControlVerdicts.$inferSelect) {
     controlVersion: row.controlVersion,
     shadowMode: row.shadowMode,
     commercialJudgement: parseJsonField(row.commercialJudgement, null),
+    recoveryPlan: parseJsonField(row.recoveryPlan, null),
     createdAt: row.createdAt,
   };
 }
@@ -166,5 +168,47 @@ export function registerSystemControlRoutes(app: Express) {
     }
   });
 
-  console.log("[SystemControl] Routes registered: GET /api/system-control/verdicts/:campaignId, /latest/:campaignId, /stats/:campaignId");
+  app.get("/api/system-control/recovery/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const accountId = resolveAccountId(req);
+      const { campaignId } = req.params;
+
+      const [row] = await db.select()
+        .from(systemControlVerdicts)
+        .where(and(
+          eq(systemControlVerdicts.accountId, accountId),
+          eq(systemControlVerdicts.campaignId, campaignId),
+        ))
+        .orderBy(desc(systemControlVerdicts.createdAt))
+        .limit(1);
+
+      if (!row) {
+        return res.json({ hasRecoveryPlan: false, reason: "no_verdict" });
+      }
+
+      const recoveryPlan = parseJsonField(row.recoveryPlan, null);
+      if (!recoveryPlan) {
+        return res.json({
+          hasRecoveryPlan: false,
+          reason: row.verdict === "BLOCK" ? "verdict_predates_recovery_layer" : "verdict_not_blocked",
+          verdict: row.verdict,
+          executionMode: row.executionMode,
+        });
+      }
+
+      res.json({
+        hasRecoveryPlan: true,
+        verdictId: row.id,
+        verdict: row.verdict,
+        executionMode: row.executionMode,
+        recoveryPlan,
+        createdAt: row.createdAt,
+      });
+    } catch (err: any) {
+      console.error("[SystemControl] Recovery plan fetch error:", err.message);
+      res.status(500).json({ error: "Failed to fetch recovery plan" });
+    }
+  });
+
+  console.log("[SystemControl] Routes registered: GET /api/system-control/verdicts/:campaignId, /latest/:campaignId, /stats/:campaignId, /recovery/:campaignId");
 }

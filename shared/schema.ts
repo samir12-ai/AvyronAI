@@ -2480,6 +2480,7 @@ export const systemControlVerdicts = pgTable("system_control_verdicts", {
   controlVersion: text("control_version"),
   shadowMode: boolean("shadow_mode").default(false),
   commercialJudgement: text("commercial_judgement"),
+  recoveryPlan: text("recovery_plan"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

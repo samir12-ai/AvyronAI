@@ -94,6 +94,47 @@ export interface RepairAction {
   detail: string;
 }
 
+export type RootCauseCategory =
+  | "strategy_issue"
+  | "offer_issue"
+  | "funnel_issue"
+  | "channel_issue"
+  | "proof_issue"
+  | "audience_mismatch"
+  | "validation_issue"
+  | "budget_risk"
+  | "system_parser_issue"
+  | "data_insufficiency";
+
+export interface RecoveryIssue {
+  blockCode: BlockCode | "UNKNOWN_BLOCK";
+  rootCauseCategory: RootCauseCategory;
+  ownerEngine: string;
+  diagnosis: string;
+  repairAction: string;
+  successCriteria: string;
+  requiredProof: string[];
+  nextPossibleMode: ExecutionMode;
+  priority: number;
+  severity: "critical" | "high";
+  source: "deterministic" | "llm_enriched";
+}
+
+export interface RecoveryPlan {
+  currentVerdict: SystemVerdict;
+  currentExecutionMode: ExecutionMode;
+  blockCodes: (BlockCode | "UNKNOWN_BLOCK")[];
+  rootCauseSummary: string;
+  issues: RecoveryIssue[];
+  priorityOrder: (BlockCode | "UNKNOWN_BLOCK")[];
+  globalRecoveryPlan: string[];
+  rerunRequirements: string[];
+  humanReviewNeeded: boolean;
+  generatedAt: string;
+  source: "deterministic" | "llm_enriched" | "fallback";
+  enrichmentNote?: string;
+}
+
 export interface SystemControlVerdict {
   verdict: SystemVerdict;
   executionMode: ExecutionMode;
@@ -108,6 +149,7 @@ export interface SystemControlVerdict {
   controlVersion: string;
   shadowMode: boolean;
   commercialJudgement?: import("./system-judgement").SystemJudgement | null;
+  recoveryPlan?: RecoveryPlan | null;
 }
 
 export interface SystemControlInput {

@@ -47,5 +47,11 @@ export async function migrateSystemControlVerdicts() {
     ADD COLUMN IF NOT EXISTS commercial_judgement TEXT
   `);
 
+  // Phase 3 (May 2026) — additive: persist universal recovery plan (JSON-as-text)
+  await db.execute(sql`
+    ALTER TABLE system_control_verdicts
+    ADD COLUMN IF NOT EXISTS recovery_plan TEXT
+  `);
+
   console.log("[Migration-011] system_control_verdicts table ready.");
 }
