@@ -142,6 +142,43 @@ function numSafe(v: any): number | null {
   return null;
 }
 
+// Phase R (May 2026): reliability assessment of the upstream pipeline.
+// Returns a score in [0,1] = (completed critical engines) / (total critical
+// engines considered) and the list of engines that did not complete with
+// their last-seen status. Used by enrichRecoveryPlan to short-circuit the
+// LLM diagnosis path when the pipeline itself is the actual problem.
+const RELIABILITY_CRITICAL_ENGINES = [
+  "audience", "market_intelligence", "positioning", "offer",
+  "funnel", "channel_selection", "statistical_validation", "budget_governor",
+];
+const RELIABILITY_FAILED_STATUSES = new Set([
+  "TIMEOUT", "ERROR", "SKIPPED", "BLOCKED", "SIGNAL_BLOCKED",
+  "DEPTH_BLOCKED", "BLOCKED_BY_INTEGRITY", "NEEDS_INPUT",
+]);
+function assessUpstreamReliability(results: Map<string, any> | null | undefined): {
+  score: number;
+  failedEngines: string[];
+  totalConsidered: number;
+  statusByEngine: Record<string, string>;
+} {
+  const statusByEngine: Record<string, string> = {};
+  const failedEngines: string[] = [];
+  let completed = 0;
+  for (const engineId of RELIABILITY_CRITICAL_ENGINES) {
+    const entry = results?.get(engineId);
+    const status = entry?.status ?? (entry === undefined ? "MISSING" : "UNKNOWN");
+    statusByEngine[engineId] = String(status);
+    if (RELIABILITY_FAILED_STATUSES.has(String(status)) || status === "MISSING") {
+      failedEngines.push(engineId);
+    } else if (status === "SUCCESS" || status === "PARTIAL") {
+      completed++;
+    }
+  }
+  const total = RELIABILITY_CRITICAL_ENGINES.length;
+  const score = total === 0 ? 1 : completed / total;
+  return { score, failedEngines, totalConsidered: total, statusByEngine };
+}
+
 function extractSignals(results: Map<string, any> | null | undefined): ExtractedSignals {
   const enginesPresent: string[] = [];
   // Try multiple key variants (canonical orchestrator EngineId is underscore;
@@ -476,7 +513,50 @@ export async function enrichRecoveryPlan(
   const signalsBlock = summarizeSignalsForPrompt(signals);
   const planBlock = summarizePlanForPrompt(plan);
 
-  console.log(`[RecoveryIntelligence] STEP_1 | designing | issues=${plan.issues.length} | engines_present=${signals.enginesPresent.length}`);
+  // Phase R (May 2026) — reliability gate. Before we let the designer LLM
+  // reason about a "commercial disease" we must verify the upstream pipeline
+  // actually ran. If most critical engines TIMED OUT, ERRORED, were SKIPPED
+  // or BLOCKED, the underlying cause is operational (the pipeline broke),
+  // not commercial — and any LLM-synthesized commercial diagnosis would
+  // amount to fabricating a story from absent data. Force-emit
+  // system_data_insufficiency with concrete unreached-engine evidence.
+  const reliability = assessUpstreamReliability(ctx.results);
+  console.log(
+    `[RecoveryIntelligence] STEP_1 | designing | issues=${plan.issues.length} ` +
+    `| engines_present=${signals.enginesPresent.length} ` +
+    `| reliability=${reliability.score.toFixed(2)} ` +
+    `| failed=${reliability.failedEngines.length} (${reliability.failedEngines.slice(0, 6).join(",")})`
+  );
+
+  if (reliability.score < 0.40 && reliability.failedEngines.length > 0) {
+    console.log(`[RecoveryIntelligence] RELIABILITY_FAST_PATH | score=${reliability.score.toFixed(2)} → emitting system_data_insufficiency`);
+    const intel: RecoveryIntelligence = {
+      commercialDisease: "system_data_insufficiency",
+      diseaseStatement:
+        `Recovery diagnosis suppressed: ${reliability.failedEngines.length} upstream engine(s) did not complete ` +
+        `(${reliability.failedEngines.slice(0, 5).join(", ")}${reliability.failedEngines.length > 5 ? ", …" : ""}). ` +
+        `Any commercial diagnosis would be unsupported by signal — the underlying defect is operational, not strategic.`,
+      causalDiagnosis: [{
+        cause: `Upstream pipeline reliability=${reliability.score.toFixed(2)} (below 0.40 floor); ${reliability.failedEngines.length} of ${reliability.totalConsidered} critical engines unreached`,
+        symptom: plan.issues.map(i => i.blockCode).join(", ") || "BLOCK reported on degraded pipeline",
+        downstreamEffect: "LLM-synthesized commercial diagnosis would compose a plausible-sounding root cause from missing data, masking the true defect (engine timeouts / errors / blocks)",
+        repair: `Resolve operational failures in [${reliability.failedEngines.slice(0, 6).join(", ")}] FIRST — re-run those engines, then re-attempt recovery diagnosis`,
+        evidenceCitations: reliability.failedEngines.slice(0, 6).map(e => `${e}.status=${reliability.statusByEngine[e]}`),
+      }],
+      strategicRecoveryThesis:
+        "The principal must trust nothing about the commercial story until the pipeline produces it. This is a reliability event, not a strategy event.",
+      priorityLogic: "Cannot prioritize commercial repairs ahead of operational ones. Restore engine completion first; commercial diagnosis becomes possible second.",
+      highestLeverageFix: `Fix the operational failures in [${reliability.failedEngines.slice(0, 4).join(", ")}] before any commercial repair attempt.`,
+      buyerPsychologyConstraint: "INSUFFICIENT_AUDIENCE_DATA — buyer constraint cannot be inferred when the engines that produce buyer signal did not complete.",
+      nextModeRationale: "SYSTEM_UNTRUSTED / HUMAN_REVIEW_REQUIRED is the only defensible mode: the system cannot certify any commercial recommendation it derives from a partially-failed pipeline.",
+      judgeVerdict: "NOT_RUN",
+      retryCount: 0,
+      modelUsed: "deterministic_reliability_short_circuit",
+      generatedAt: new Date().toISOString(),
+      upstreamSignalsUsed: signals.enginesPresent,
+    };
+    return { ...plan, source: "llm_enriched", intelligence: intel };
+  }
 
   // SHORT-CIRCUIT: when no upstream engine outputs are available, the designer
   // cannot ground a diagnosis. Skip the LLM round-trip and emit a pre-formed

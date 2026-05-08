@@ -3448,10 +3448,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       executeEngine(engineDef.id, ctx, config, results, jobId),
       new Promise<EngineStepResult>((resolve) =>
         setTimeout(() => {
-          console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${ENGINE_TIMEOUT_MS / 1000}s — forcing ERROR`);
+          console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${ENGINE_TIMEOUT_MS / 1000}s — marking TIMEOUT`);
           resolve({
             engineId: engineDef.id,
-            status: "ERROR",
+            status: "TIMEOUT",
             output: null,
             durationMs: ENGINE_TIMEOUT_MS,
             error: `Engine timed out after ${ENGINE_TIMEOUT_MS / 1000}s`,
@@ -3477,7 +3477,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
             executeEngine(engineDef.id, ctx, config, results, jobId),
             new Promise<EngineStepResult>((resolve) =>
               setTimeout(() => resolve({
-                engineId: engineDef.id, status: "ERROR", output: null, durationMs: ENGINE_TIMEOUT_MS,
+                engineId: engineDef.id, status: "TIMEOUT", output: null, durationMs: ENGINE_TIMEOUT_MS,
                 error: `Retry timed out after ${ENGINE_TIMEOUT_MS / 1000}s`,
               }), ENGINE_TIMEOUT_MS)
             ),

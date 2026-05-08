@@ -1,0 +1,298 @@
+Hi,
+
+We need to stop treating these as isolated bugs.
+
+We have now seen multiple recurring classes of problems:
+
+* stale snapshots being used as fresh evidence
+* skipped checks counted as PASS
+* failed engines still allowing downstream conclusions
+* dashboard showing misleading state
+* timeout handling causing inconsistent truth
+* old resolver logic leaking into new runs
+* engines disagreeing without reconciliation
+* system-control producing verdicts from incomplete data
+
+This must be fixed as a **system-wide reliability and truthfulness phase**.
+
+---
+
+## 1) Core Objective
+
+Build a complete reliability layer so the system never again produces a confident verdict from incomplete, stale, skipped, failed, or mismatched data.
+
+The rule must be:
+
+> If the system did not actually verify it, it cannot count as PASS.
+
+---
+
+## 2) Fix Skipped Checks
+
+Current critical bug:
+
+`engine not reached — check skipped`
+
+was counted as passed.
+
+This is unacceptable.
+
+Required behavior:
+
+* skipped ≠ passed
+* not reached ≠ passed
+* timeout ≠ passed
+* stale ≠ passed
+* missing snapshot ≠ passed
+
+Each check must resolve to one of:
+
+* PASS
+* FAIL
+* BLOCK
+* UNKNOWN
+* SKIPPED
+* STALE
+* NOT_REACHED
+* TIMEOUT
+
+Only real PASS counts as PASS.
+
+---
+
+## 3) Fix System Control Verdict Logic
+
+System Control must never return:
+
+`PASS / FULL_EXECUTION`
+
+unless:
+
+* all required engines completed
+* all required snapshots are fresh
+* all required checks actually ran
+* no critical engine timed out
+* no stale fallback was used
+* no required engine is missing
+* no contradiction remains unresolved
+
+If any required engine is missing or timed out, final verdict should be:
+
+* INCOMPLETE
+* SYSTEM_UNTRUSTED
+* HUMAN_REVIEW_REQUIRED
+* or BLOCKED_BY_PIPELINE_FAILURE
+
+not PASS.
+
+---
+
+## 4) Snapshot Freshness Enforcement
+
+Every engine snapshot used in a run must match:
+
+* current runId
+* current campaignId
+* current timestamp window
+* correct engine version
+* correct parent lineage
+
+No engine should use a 3-day-old snapshot as live evidence for a new run.
+
+Required:
+
+* run-level snapshot freshness check
+* reject stale snapshots from current verdict
+* surface stale evidence clearly in dashboard
+* prevent stale snapshots from feeding System Control
+
+---
+
+## 5) Timeout Handling
+
+Audience timeout exposed a serious reliability gap.
+
+Required:
+
+If an engine times out:
+
+* mark engine status = TIMEOUT
+* stop dependent engines if needed
+* do not generate final PASS
+* do not treat downstream skipped checks as passed
+* create clear recovery reason:
+
+  * owner engine
+  * timeout cause
+  * retry requirement
+  * whether run is incomplete
+
+Timeout must become a first-class state.
+
+---
+
+## 6) Engine Dependency Enforcement
+
+If engine B depends on engine A, then:
+
+* A missing / failed / stale result must block or downgrade B
+* B cannot silently use old data
+* downstream engines must record dependency status
+
+Example:
+
+If Audience times out:
+
+* Positioning cannot claim fresh buyer context
+* Offer cannot claim fresh audience alignment
+* Recovery Intelligence cannot claim current buyer psychology
+
+---
+
+## 7) Cross-Engine Contradiction Resolution
+
+If one engine says:
+
+* Funnel has no gaps
+
+but another says:
+
+* conversion rate indicates funnel/offer issue
+
+the system must not ignore this.
+
+Required:
+
+* contradiction detector
+* contradiction severity
+* owner engines
+* resolution requirement
+* final verdict impact
+
+Contradictions should produce:
+
+* HUMAN_REVIEW_REQUIRED
+  or
+* NEEDS_RECONCILIATION
+
+not silent PASS.
+
+---
+
+## 8) Dashboard Truthfulness
+
+Dashboard must reflect actual run truth.
+
+Required:
+
+* show run status exactly
+* show engine timeout / stale / skipped states
+* show if verdict is incomplete
+* show if recovery plan is based on stale data
+* prevent old completed runs from visually overriding newer failed runs
+* every card must display runId and snapshotId where relevant
+
+The dashboard must never imply the system is healthy when the run failed.
+
+---
+
+## 9) Recovery Logic Must Respect Reliability States
+
+Recovery Intelligence should not diagnose a commercial disease from incomplete data as if all engines ran.
+
+If data is incomplete, it should say:
+
+> “Commercial diagnosis unavailable because required engines did not complete.”
+
+or:
+
+> “Partial diagnosis only — Audience timed out, buyer psychology unavailable.”
+
+Recovery should distinguish:
+
+* commercial failure
+* system failure
+* data insufficiency
+* stale evidence
+* engine timeout
+
+---
+
+## 10) Required Audit + Implementation
+
+Please do this as a full reliability phase:
+
+### A) Audit
+
+Map every place where:
+
+* skipped becomes passed
+* stale data is allowed
+* old snapshots are reused
+* timeouts are treated as normal
+* missing engines are ignored
+* incomplete runs still produce verdicts
+
+### B) Fix
+
+Update:
+
+* orchestrator
+* system-control
+* resolver logic
+* snapshot readers
+* recovery planner
+* dashboard state handling
+* contradiction handling
+
+### C) Test
+
+Create tests for:
+
+1. Audience timeout
+2. engine not reached
+3. stale budget snapshot
+4. stale channel snapshot
+5. partial run
+6. contradiction between Funnel and Iteration
+7. missing required snapshot
+8. old completed run vs newer failed run
+9. recovery from incomplete data
+10. full successful run
+
+---
+
+## 11) Success Criteria
+
+This phase is complete only when:
+
+* skipped checks never count as pass
+* stale snapshots never feed final verdicts
+* timeout never results in FULL_EXECUTION
+* dashboard shows incomplete state truthfully
+* recovery plan distinguishes commercial vs system failure
+* system-control cannot produce PASS without real verified checks
+* all tests pass
+* full MarketMindAI run produces an honest final state
+
+---
+
+## 12) Final Goal
+
+We need to eliminate this entire bug class permanently.
+
+The system must become truth-safe.
+
+No confident verdict from incomplete data.
+
+No stale evidence.
+
+No skipped-as-passed logic.
+
+No dashboard false positives.
+
+No hidden resolver fallback.
+
+This is the highest priority before any new intelligence work.
+
+Thanks.

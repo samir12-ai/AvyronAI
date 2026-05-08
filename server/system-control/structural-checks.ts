@@ -3,7 +3,8 @@ import type { IntegrityReport } from "../system-integrity/types";
 import type { ComplianceResult } from "../causal-enforcement-layer/engine";
 import type { SignalComposition } from "../shared/signal-lineage";
 import type { SharedStrategicContext } from "../orchestrator/shared-strategic-context";
-import type { StructuralCheck, BlockReason, Downgrade, BlockCode, DowngradeCode } from "./types";
+import type { StructuralCheck, BlockReason, Downgrade, BlockCode, DowngradeCode, CheckStatus } from "./types";
+import { isUnverified, isVerifiedFail } from "./types";
 import {
   FUNNEL_STRENGTH_MINIMUM_FOR_SCALE,
   SIGNAL_TRUST_MINIMUM_FOR_LAUNCH,
@@ -11,16 +12,94 @@ import {
   CHANNEL_CONFIDENCE_MINIMUM,
 } from "./constants";
 
+// -----------------------------------------------------------------------------
+// Phase R (May 2026) reliability helpers
+// -----------------------------------------------------------------------------
+// Construct a check result with the correct (status, passed) pair. The boolean
+// `passed` is preserved only for backward compatibility with legacy readers —
+// the source of truth is `status`. Verdict-level logic must use `status === "PASS"`,
+// never `passed === true`. See server/system-control/types.ts for semantics.
+// -----------------------------------------------------------------------------
+
+function pass(check: string, details: string): StructuralCheck {
+  return { check, passed: true, status: "PASS", details };
+}
+
+function fail(check: string, details: string): StructuralCheck {
+  return { check, passed: false, status: "FAIL", details };
+}
+
+function notReached(check: string, engineLabel: string, statusSeen: string): StructuralCheck {
+  return {
+    check,
+    passed: false,
+    status: statusSeen === "TIMEOUT" ? "TIMEOUT" : "NOT_REACHED",
+    details: `${check}: ${engineLabel} did not produce required input (status=${statusSeen}) — check could not be verified`,
+    unverifiedReason: `${engineLabel}_${statusSeen.toLowerCase()}`,
+  };
+}
+
+function unknown(check: string, reason: string): StructuralCheck {
+  return {
+    check,
+    passed: false,
+    status: "UNKNOWN",
+    details: `${check}: required input missing — ${reason}`,
+    unverifiedReason: reason,
+  };
+}
+
+function skipped(check: string, reason: string): StructuralCheck {
+  // Use SKIPPED only when the check is genuinely Not-Applicable to the current
+  // system state (e.g. no objections were declared so objection-coverage cannot
+  // apply). SKIPPED is treated as "unverified" by verdict logic and will block
+  // a PASS verdict — that is intentional. If something is *truly* always-OK,
+  // model it as PASS, not SKIPPED.
+  return {
+    check,
+    passed: false,
+    status: "SKIPPED",
+    details: `${check}: not applicable — ${reason}`,
+    unverifiedReason: reason,
+  };
+}
+
+/**
+ * Engine statuses that mean "the engine did not successfully produce output."
+ * Includes TIMEOUT (Phase R). Used by every check that reads engine output to
+ * decide whether to mark the check NOT_REACHED instead of fabricating a PASS.
+ */
+const ENGINE_NOT_REACHED_STATUSES = new Set([
+  "SKIPPED",
+  "BLOCKED",
+  "ERROR",
+  "TIMEOUT",
+  "SIGNAL_BLOCKED",
+  "DEPTH_BLOCKED",
+  "BLOCKED_BY_INTEGRITY",
+  "NEEDS_INPUT",
+]);
+
+function engineDidNotComplete(result: EngineStepResult | undefined): { notReached: true; status: string } | { notReached: false } {
+  if (!result) return { notReached: true, status: "MISSING" };
+  if (ENGINE_NOT_REACHED_STATUSES.has(result.status)) {
+    return { notReached: true, status: result.status };
+  }
+  return { notReached: false };
+}
+
+// -----------------------------------------------------------------------------
+// Structural checks
+// -----------------------------------------------------------------------------
+
 export function checkConversionPath(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const channelResult = results.get("channel_selection");
-  if (!channelResult || channelResult.status === "SKIPPED" || channelResult.status === "BLOCKED" || channelResult.status === "SIGNAL_BLOCKED") {
-    return { check: "conversion_path_exists", passed: true, details: "Channel selection engine not reached — evaluability precondition not met, check skipped" };
-  }
-  if (channelResult.status === "ERROR") {
-    return { check: "conversion_path_exists", passed: true, details: "Channel selection engine errored — evaluability precondition not met, check skipped" };
+  const reach = engineDidNotComplete(channelResult);
+  if (reach.notReached) {
+    return notReached("conversion_path_exists", "channel_selection", reach.status);
   }
 
-  const output = channelResult.output;
+  const output = channelResult!.output;
   const conversionChannels =
     output?.funnelReconstruction?.funnelStages?.conversion
     ?? output?.funnelStages?.conversion
@@ -28,22 +107,23 @@ export function checkConversionPath(results: Map<EngineId, EngineStepResult>): S
   const conversionAssigned = output?.conversionChannelAssigned === true;
 
   if (conversionAssigned && (!conversionChannels || conversionChannels.length === 0)) {
-    return { check: "conversion_path_exists", passed: true, details: "Conversion channel assigned (flag set by engine)" };
+    // Engine claims it assigned a conversion channel but the array is empty —
+    // we can't verify either way without a channels array.
+    return unknown("conversion_path_exists", "engine claims conversionChannelAssigned=true but funnelStages.conversion is empty/missing");
   }
 
   if (!conversionChannels || !Array.isArray(conversionChannels) || conversionChannels.length === 0) {
     const warnings: string[] = output?.structuralWarnings || output?.warnings || [];
     const hasFunnelGapWarning = warnings.some((w: string) => w.includes("FUNNEL GAP"));
-    return {
-      check: "conversion_path_exists",
-      passed: false,
-      details: hasFunnelGapWarning
+    return fail(
+      "conversion_path_exists",
+      hasFunnelGapWarning
         ? "No conversion channel assigned and funnel completion enforcement failed"
         : "No conversion channel found in channel selection output",
-    };
+    );
   }
 
-  return { check: "conversion_path_exists", passed: true, details: `${conversionChannels.length} conversion channel(s) assigned` };
+  return pass("conversion_path_exists", `${conversionChannels.length} conversion channel(s) assigned`);
 }
 
 export function checkSignalGrounding(
@@ -51,104 +131,187 @@ export function checkSignalGrounding(
   budgetAction: string | null,
 ): StructuralCheck {
   if (!signalComposition) {
-    return { check: "signal_grounding", passed: true, details: "No signal composition data available — check skipped" };
+    return unknown("signal_grounding", "no signal composition data available — cannot verify grounding");
   }
 
   const hasRealData = signalComposition.realRatio > 0;
   const isScaling = budgetAction === "scale";
 
   if (isScaling && !hasRealData) {
-    return {
-      check: "signal_grounding",
-      passed: false,
-      details: `Budget action is "scale" but realRatio=${signalComposition.realRatio.toFixed(2)} — zero real performance data`,
-    };
+    return fail(
+      "signal_grounding",
+      `Budget action is "scale" but realRatio=${signalComposition.realRatio.toFixed(2)} — zero real performance data`,
+    );
   }
 
   if (isScaling && signalComposition.trustedRatio < SIGNAL_TRUST_MINIMUM_FOR_LAUNCH) {
-    return {
-      check: "signal_grounding",
-      passed: false,
-      details: `Budget action is "scale" but trustedRatio=${signalComposition.trustedRatio.toFixed(2)} — below ${SIGNAL_TRUST_MINIMUM_FOR_LAUNCH} minimum`,
-    };
+    return fail(
+      "signal_grounding",
+      `Budget action is "scale" but trustedRatio=${signalComposition.trustedRatio.toFixed(2)} — below ${SIGNAL_TRUST_MINIMUM_FOR_LAUNCH} minimum`,
+    );
   }
 
-  return {
-    check: "signal_grounding",
-    passed: true,
-    details: `realRatio=${signalComposition.realRatio.toFixed(2)} trustedRatio=${signalComposition.trustedRatio.toFixed(2)} budgetAction=${budgetAction}`,
-  };
+  return pass(
+    "signal_grounding",
+    `realRatio=${signalComposition.realRatio.toFixed(2)} trustedRatio=${signalComposition.trustedRatio.toFixed(2)} budgetAction=${budgetAction}`,
+  );
 }
 
 export function checkIntegrityStatus(integrityReport: IntegrityReport | null): StructuralCheck {
   if (!integrityReport) {
-    return { check: "integrity_status", passed: true, details: "No integrity report available — check skipped" };
+    return unknown("integrity_status", "no integrity report available — cannot verify integrity");
   }
 
   if (integrityReport.overallStatus === "FAIL") {
-    return {
-      check: "integrity_status",
-      passed: false,
-      details: `Integrity FAIL: ${integrityReport.failureReasons.join("; ")}`,
-    };
+    return fail("integrity_status", `Integrity FAIL: ${integrityReport.failureReasons.join("; ")}`);
   }
 
-  return {
-    check: "integrity_status",
-    passed: true,
-    details: `Integrity ${integrityReport.overallStatus} — leakage=${integrityReport.zeroLeakage ? "none" : "detected"} traceability=${integrityReport.traceabilityComplete ? "complete" : "incomplete"}`,
-  };
+  return pass(
+    "integrity_status",
+    `Integrity ${integrityReport.overallStatus} — leakage=${integrityReport.zeroLeakage ? "none" : "detected"} traceability=${integrityReport.traceabilityComplete ? "complete" : "incomplete"}`,
+  );
 }
 
 export function checkCELCompliance(celResults: ComplianceResult[]): StructuralCheck {
   if (!celResults || celResults.length === 0) {
-    return { check: "cel_compliance", passed: true, details: "No CEL results available — check skipped" };
+    return unknown("cel_compliance", "no CEL results available — cannot verify causal compliance");
   }
 
   const failed = celResults.filter((c: any) => c.passed === false || c.overallPassed === false);
   if (failed.length > 0) {
-    return {
-      check: "cel_compliance",
-      passed: false,
-      details: `${failed.length} CEL check(s) failed`,
-    };
+    return fail("cel_compliance", `${failed.length} CEL check(s) failed`);
   }
 
-  return { check: "cel_compliance", passed: true, details: `${celResults.length} CEL check(s) passed` };
+  return pass("cel_compliance", `${celResults.length} CEL check(s) passed`);
 }
 
 export function checkUpstreamEngineHealth(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const critical: EngineId[] = ["offer", "funnel", "positioning"];
   const failures: string[] = [];
+  const timedOut: string[] = [];
+  const missing: string[] = [];
 
   for (const engineId of critical) {
     const result = results.get(engineId);
-    if (result && (result.status === "ERROR" || result.status === "BLOCKED" || result.status === "SIGNAL_BLOCKED")) {
-      failures.push(`${engineId}: ${result.status}`);
+    if (!result) {
+      missing.push(engineId);
+      continue;
+    }
+    if (result.status === "ERROR" || result.status === "BLOCKED" || result.status === "SIGNAL_BLOCKED") {
+      failures.push(`${engineId}:${result.status}`);
+    } else if (result.status === "TIMEOUT") {
+      timedOut.push(engineId);
     }
   }
 
   if (failures.length > 0) {
-    return {
-      check: "upstream_engine_health",
-      passed: false,
-      details: `Critical engine failures: ${failures.join(", ")}`,
-    };
+    return fail("upstream_engine_health", `Critical engine failures: ${failures.join(", ")}`);
   }
 
-  return { check: "upstream_engine_health", passed: true, details: "All critical upstream engines healthy" };
+  if (timedOut.length > 0) {
+    // Genuine TIMEOUT — preserve the status so recovery can route correctly
+    // (timeout suggests retry; missing suggests pipeline-orchestration bug).
+    return notReached("upstream_engine_health", `engines_timed_out=[${timedOut.join(",")}]`, "TIMEOUT");
+  }
+
+  if (missing.length > 0) {
+    // Engines that were never registered in the results map at all — this is
+    // not a TIMEOUT (we have no evidence the engine ever started); it is an
+    // UNKNOWN reliability state. Distinguishing this matters for diagnostics
+    // and for recovery-intelligence routing.
+    return unknown("upstream_engine_health", `critical engines absent from results map: [${missing.join(",")}]`);
+  }
+
+  return pass("upstream_engine_health", "All critical upstream engines healthy");
+}
+
+/**
+ * Phase R (May 2026) — global pipeline-completeness gate.
+ *
+ * Independent of every other structural check. Iterates the full results map
+ * + a static required-engine list. Any engine that is MISSING from the
+ * results map, or present with a non-completed status (TIMEOUT/ERROR/
+ * SKIPPED/BLOCKED/SIGNAL_BLOCKED/DEPTH_BLOCKED/BLOCKED_BY_INTEGRITY/
+ * NEEDS_INPUT) means we ran an incomplete pipeline and we cannot trust the
+ * verdict. Returns NOT_REACHED (or TIMEOUT if every failure was a timeout)
+ * which propagates into the reliability-block path in collectBlockReasons.
+ *
+ * This is the structural-check counterpart of the same conservative rule
+ * recovery-intelligence applies (assessUpstreamReliability).
+ */
+const PIPELINE_REQUIRED_ENGINES: EngineId[] = [
+  "market_intelligence",
+  "audience",
+  "positioning",
+  "offer",
+  "funnel",
+  "channel_selection",
+  "statistical_validation",
+  "budget_governor",
+  "iteration",
+  "retention",
+];
+
+export function checkPipelineCompleteness(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const missing: string[] = [];
+  const timedOut: string[] = [];
+  const errored: string[] = [];
+  const skipped: string[] = [];
+  const blocked: string[] = [];
+
+  for (const engineId of PIPELINE_REQUIRED_ENGINES) {
+    const result = results.get(engineId);
+    if (!result) { missing.push(engineId); continue; }
+    switch (result.status) {
+      case "TIMEOUT": timedOut.push(engineId); break;
+      case "ERROR": errored.push(engineId); break;
+      case "SKIPPED": skipped.push(engineId); break;
+      case "BLOCKED":
+      case "SIGNAL_BLOCKED":
+      case "DEPTH_BLOCKED":
+      case "BLOCKED_BY_INTEGRITY":
+      case "NEEDS_INPUT":
+        blocked.push(`${engineId}:${result.status}`);
+        break;
+    }
+  }
+
+  const totalUnreached = missing.length + timedOut.length + errored.length + skipped.length + blocked.length;
+  if (totalUnreached === 0) {
+    return pass("pipeline_completeness", `All ${PIPELINE_REQUIRED_ENGINES.length} required engines completed`);
+  }
+
+  // If the only failures were timeouts, surface as TIMEOUT so the reliability
+  // block code becomes ENGINE_TIMEOUT and recovery can route to retry.
+  // Otherwise NOT_REACHED for the broader pipeline-incomplete bucket.
+  const onlyTimeouts = timedOut.length > 0 && errored.length === 0 && missing.length === 0
+    && skipped.length === 0 && blocked.length === 0;
+  const summaryParts: string[] = [];
+  if (missing.length) summaryParts.push(`missing=[${missing.join(",")}]`);
+  if (timedOut.length) summaryParts.push(`timed_out=[${timedOut.join(",")}]`);
+  if (errored.length) summaryParts.push(`errored=[${errored.join(",")}]`);
+  if (skipped.length) summaryParts.push(`skipped=[${skipped.join(",")}]`);
+  if (blocked.length) summaryParts.push(`blocked=[${blocked.join(",")}]`);
+  const summary = summaryParts.join(" ");
+
+  return notReached(
+    "pipeline_completeness",
+    `pipeline_incomplete (${totalUnreached}/${PIPELINE_REQUIRED_ENGINES.length} engines unreached): ${summary}`,
+    onlyTimeouts ? "TIMEOUT" : "MISSING",
+  );
 }
 
 export function checkFunnelStructuralCompleteness(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const channelResult = results.get("channel_selection");
-  if (!channelResult || channelResult.status === "SKIPPED" || channelResult.status === "BLOCKED" || channelResult.status === "SIGNAL_BLOCKED" || channelResult.status === "ERROR") {
-    return { check: "funnel_structural_completeness", passed: true, details: "Channel selection engine not reached — evaluability precondition not met, check skipped" };
+  const reach = engineDidNotComplete(channelResult);
+  if (reach.notReached) {
+    return notReached("funnel_structural_completeness", "channel_selection", reach.status);
   }
-  if (!channelResult?.output?.funnelStages) {
-    return { check: "funnel_structural_completeness", passed: true, details: "No funnel stage data — check skipped" };
+  if (!channelResult!.output?.funnelStages) {
+    return unknown("funnel_structural_completeness", "channel_selection produced no funnelStages");
   }
 
-  const stages = channelResult.output.funnelStages;
+  const stages = channelResult!.output.funnelStages;
   const awareness = Array.isArray(stages.awareness) ? stages.awareness.length : 0;
   const nurture = Array.isArray(stages.nurture) ? stages.nurture.length : 0;
   const conversion = Array.isArray(stages.conversion) ? stages.conversion.length : 0;
@@ -159,18 +322,16 @@ export function checkFunnelStructuralCompleteness(results: Map<EngineId, EngineS
   if (conversion === 0) missing.push("conversion");
 
   if (missing.length > 0) {
-    return {
-      check: "funnel_structural_completeness",
-      passed: false,
-      details: `Missing funnel stages: ${missing.join(", ")} (awareness=${awareness}, nurture=${nurture}, conversion=${conversion})`,
-    };
+    return fail(
+      "funnel_structural_completeness",
+      `Missing funnel stages: ${missing.join(", ")} (awareness=${awareness}, nurture=${nurture}, conversion=${conversion})`,
+    );
   }
 
-  return {
-    check: "funnel_structural_completeness",
-    passed: true,
-    details: `All stages present (awareness=${awareness}, nurture=${nurture}, conversion=${conversion})`,
-  };
+  return pass(
+    "funnel_structural_completeness",
+    `All stages present (awareness=${awareness}, nurture=${nurture}, conversion=${conversion})`,
+  );
 }
 
 export function checkBudgetFunnelAlignment(results: Map<EngineId, EngineStepResult>): {
@@ -236,22 +397,19 @@ export function checkBudgetCACVerification(results: Map<EngineId, EngineStepResu
 
 export function checkValidationResult(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const validationResult = results.get("statistical_validation");
-  if (!validationResult || validationResult.status === "SKIPPED") {
-    return { check: "validation_result", passed: true, details: "No statistical validation result — check skipped" };
+  const reach = engineDidNotComplete(validationResult);
+  if (reach.notReached) {
+    return notReached("validation_result", "statistical_validation", reach.status);
   }
 
-  const output = validationResult.output;
+  const output = validationResult!.output;
   const result = output?.result || output?.validationResult || output?.status;
 
   if (result === "rejected" || result === "REJECTED" || result === "fail" || result === "FAIL") {
-    return {
-      check: "validation_result",
-      passed: false,
-      details: `Statistical validation result="${result}" — strategy rejected by validation engine`,
-    };
+    return fail("validation_result", `Statistical validation result="${result}" — strategy rejected by validation engine`);
   }
 
-  return { check: "validation_result", passed: true, details: `Statistical validation result="${result || "n/a"}"` };
+  return pass("validation_result", `Statistical validation result="${result || "n/a"}"`);
 }
 
 export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineStepResult>): StructuralCheck {
@@ -259,36 +417,35 @@ export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineSte
   const allEngines = Array.from(results.entries());
 
   for (const [engineId, result] of allEngines) {
-    if (result.status === "SIGNAL_BLOCKED" || result.status === "ERROR") {
-      failedEngines.push(engineId);
+    if (result.status === "SIGNAL_BLOCKED" || result.status === "ERROR" || result.status === "TIMEOUT") {
+      failedEngines.push(`${engineId}:${result.status}`);
     }
   }
 
   if (failedEngines.length >= SIGNAL_GROUNDING_FAILURE_THRESHOLD) {
-    return {
-      check: "signal_grounding_mass_failure",
-      passed: false,
-      details: `${failedEngines.length} engines in SIGNAL_BLOCKED/ERROR state (threshold=${SIGNAL_GROUNDING_FAILURE_THRESHOLD}): ${failedEngines.join(", ")}`,
-    };
+    return fail(
+      "signal_grounding_mass_failure",
+      `${failedEngines.length} engines in SIGNAL_BLOCKED/ERROR/TIMEOUT state (threshold=${SIGNAL_GROUNDING_FAILURE_THRESHOLD}): ${failedEngines.join(", ")}`,
+    );
   }
 
-  return {
-    check: "signal_grounding_mass_failure",
-    passed: true,
-    details: `${failedEngines.length} engine(s) in failure state — below threshold of ${SIGNAL_GROUNDING_FAILURE_THRESHOLD}`,
-  };
+  return pass(
+    "signal_grounding_mass_failure",
+    `${failedEngines.length} engine(s) in failure state — below threshold of ${SIGNAL_GROUNDING_FAILURE_THRESHOLD}`,
+  );
 }
 
 export function checkOfferAudienceMisalignment(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const offerResult = results.get("offer");
-  if (!offerResult || offerResult.status === "SKIPPED" || offerResult.status === "BLOCKED" || offerResult.status === "SIGNAL_BLOCKED" || offerResult.status === "ERROR") {
-    return { check: "offer_audience_misalignment", passed: true, details: "Offer engine not reached — evaluability precondition not met, check skipped" };
+  const reach = engineDidNotComplete(offerResult);
+  if (reach.notReached) {
+    return notReached("offer_audience_misalignment", "offer", reach.status);
   }
-  if (!offerResult?.output) {
-    return { check: "offer_audience_misalignment", passed: true, details: "No offer output — check skipped" };
+  if (!offerResult!.output) {
+    return unknown("offer_audience_misalignment", "offer engine reported success but produced no output");
   }
 
-  const output = offerResult.output;
+  const output = offerResult!.output;
   const warnings: string[] = Array.isArray(output.structuralWarnings) ? output.structuralWarnings : [];
   const alignmentValidation = output.layerDiagnostics?.offerAlignmentValidation || output.offerAlignmentValidation;
 
@@ -304,36 +461,41 @@ export function checkOfferAudienceMisalignment(results: Map<EngineId, EngineStep
   const painNotAligned = integrityChecks && integrityChecks.painAligned === false;
 
   if (hasPainMisalignment || (alignmentFailed && painNotAligned)) {
-    return {
-      check: "offer_audience_misalignment",
-      passed: false,
-      details: `Offer does not address audience pains — ${hasPainMisalignment ? "pain signal mismatch detected" : "alignment validation failed with pain misalignment"}`,
-    };
+    return fail(
+      "offer_audience_misalignment",
+      `Offer does not address audience pains — ${hasPainMisalignment ? "pain signal mismatch detected" : "alignment validation failed with pain misalignment"}`,
+    );
   }
 
-  return { check: "offer_audience_misalignment", passed: true, details: "Offer addresses audience pains" };
+  return pass("offer_audience_misalignment", "Offer addresses audience pains");
 }
 
 export function checkZeroObjectionCoverage(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const offerResult = results.get("offer");
   const audienceResult = results.get("audience");
-  const offerNotReached = !offerResult || offerResult.status === "SKIPPED" || offerResult.status === "BLOCKED" || offerResult.status === "SIGNAL_BLOCKED" || offerResult.status === "ERROR";
-  const audienceNotReached = !audienceResult || audienceResult.status === "SKIPPED" || audienceResult.status === "BLOCKED" || audienceResult.status === "SIGNAL_BLOCKED" || audienceResult.status === "ERROR";
-  if (offerNotReached || audienceNotReached) {
-    return { check: "zero_objection_coverage", passed: true, details: "Offer or audience engine not reached — evaluability precondition not met, check skipped" };
+  const offerReach = engineDidNotComplete(offerResult);
+  const audienceReach = engineDidNotComplete(audienceResult);
+  if (offerReach.notReached) {
+    return notReached("zero_objection_coverage", "offer", offerReach.status);
   }
-  if (!offerResult?.output || !audienceResult?.output) {
-    return { check: "zero_objection_coverage", passed: true, details: "No offer/audience output — check skipped" };
+  if (audienceReach.notReached) {
+    return notReached("zero_objection_coverage", "audience", audienceReach.status);
+  }
+  if (!offerResult!.output || !audienceResult!.output) {
+    return unknown("zero_objection_coverage", "offer or audience produced empty output");
   }
 
-  const objectionMap = audienceResult.output.objectionMap || {};
+  const objectionMap = audienceResult!.output.objectionMap || {};
   const objections = Object.keys(objectionMap);
 
   if (objections.length === 0) {
-    return { check: "zero_objection_coverage", passed: true, details: "No audience objections declared — check not applicable" };
+    // Genuinely not applicable: there are no objections to cover. This is a
+    // verified-PASS condition because we successfully read the audience output
+    // and confirmed zero objections — not a "data missing" situation.
+    return pass("zero_objection_coverage", "No audience objections declared — coverage requirement vacuously satisfied");
   }
 
-  const offerOutput = offerResult.output;
+  const offerOutput = offerResult!.output;
   const primaryOffer = offerOutput.primaryOffer || offerOutput;
   const objectionHandling = Array.isArray(primaryOffer.objectionHandling) ? primaryOffer.objectionHandling : [];
   const riskNotes = Array.isArray(primaryOffer.riskNotes) ? primaryOffer.riskNotes : [];
@@ -344,47 +506,46 @@ export function checkZeroObjectionCoverage(results: Map<EngineId, EngineStepResu
     riskNotes.some((n: string) => n.toLowerCase().includes("objection") || n.toLowerCase().includes("risk"));
 
   if (!hasAnyCoverage) {
-    return {
-      check: "zero_objection_coverage",
-      passed: false,
-      details: `${objections.length} audience objection(s) exist but offer has zero objection coverage — no objection handling, proof alignment, or risk mitigation`,
-    };
+    return fail(
+      "zero_objection_coverage",
+      `${objections.length} audience objection(s) exist but offer has zero objection coverage — no objection handling, proof alignment, or risk mitigation`,
+    );
   }
 
-  return { check: "zero_objection_coverage", passed: true, details: `Objection coverage present for ${objections.length} audience objection(s)` };
+  return pass("zero_objection_coverage", `Objection coverage present for ${objections.length} audience objection(s)`);
 }
 
 export function checkChannelConfidenceMinimum(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const channelResult = results.get("channel_selection");
-  if (!channelResult || channelResult.status === "SKIPPED" || channelResult.status === "BLOCKED" || channelResult.status === "SIGNAL_BLOCKED" || channelResult.status === "ERROR") {
-    return { check: "channel_confidence_minimum", passed: true, details: "Channel selection engine not reached — evaluability precondition not met, check skipped" };
+  const reach = engineDidNotComplete(channelResult);
+  if (reach.notReached) {
+    return notReached("channel_confidence_minimum", "channel_selection", reach.status);
   }
-  if (!channelResult?.output) {
-    return { check: "channel_confidence_minimum", passed: true, details: "No channel selection output — check skipped" };
+  if (!channelResult!.output) {
+    return unknown("channel_confidence_minimum", "channel_selection produced no output");
   }
 
-  const output = channelResult.output;
+  const output = channelResult!.output;
   const confidence = typeof output.confidenceScore === "number" ? output.confidenceScore :
     typeof output.confidence === "number" ? output.confidence : null;
 
   if (confidence === null) {
-    return { check: "channel_confidence_minimum", passed: true, details: "No channel confidence score available — check skipped" };
+    return unknown("channel_confidence_minimum", "channel_selection emitted no confidenceScore field");
   }
 
   if (confidence < CHANNEL_CONFIDENCE_MINIMUM) {
-    return {
-      check: "channel_confidence_minimum",
-      passed: false,
-      details: `Channel selection confidence=${confidence.toFixed(2)} is below minimum threshold ${CHANNEL_CONFIDENCE_MINIMUM}`,
-    };
+    return fail(
+      "channel_confidence_minimum",
+      `Channel selection confidence=${confidence.toFixed(2)} is below minimum threshold ${CHANNEL_CONFIDENCE_MINIMUM}`,
+    );
   }
 
-  return { check: "channel_confidence_minimum", passed: true, details: `Channel confidence=${confidence.toFixed(2)} meets minimum ${CHANNEL_CONFIDENCE_MINIMUM}` };
+  return pass("channel_confidence_minimum", `Channel confidence=${confidence.toFixed(2)} meets minimum ${CHANNEL_CONFIDENCE_MINIMUM}`);
 }
 
 export function checkUnresolvedCriticalProblems(ssc: SharedStrategicContext | null): StructuralCheck {
   if (!ssc) {
-    return { check: "unresolved_critical_problems", passed: true, details: "No SSC available — check skipped" };
+    return unknown("unresolved_critical_problems", "no SSC available — problem registry cannot be inspected");
   }
 
   const unresolved = ssc.problemRegistry.filter(
@@ -393,19 +554,15 @@ export function checkUnresolvedCriticalProblems(ssc: SharedStrategicContext | nu
 
   if (unresolved.length > 0) {
     const descriptions = unresolved.map(p => `${p.id}(${p.status}): ${p.description.slice(0, 80)}`).join("; ");
-    return {
-      check: "unresolved_critical_problems",
-      passed: false,
-      details: `${unresolved.length} critical problem(s) unresolved: ${descriptions}`,
-    };
+    return fail("unresolved_critical_problems", `${unresolved.length} critical problem(s) unresolved: ${descriptions}`);
   }
 
-  return { check: "unresolved_critical_problems", passed: true, details: "No unresolved critical problems" };
+  return pass("unresolved_critical_problems", "No unresolved critical problems");
 }
 
 export function checkConfidenceChainIntegrity(ssc: SharedStrategicContext | null): StructuralCheck {
   if (!ssc || ssc.confidenceChain.length === 0) {
-    return { check: "confidence_chain_integrity", passed: true, details: "No confidence chain data — check skipped" };
+    return unknown("confidence_chain_integrity", "no confidence chain data — cannot verify integrity");
   }
 
   const violations: string[] = [];
@@ -419,64 +576,48 @@ export function checkConfidenceChainIntegrity(ssc: SharedStrategicContext | null
   }
 
   if (violations.length > 0) {
-    return {
-      check: "confidence_chain_integrity",
-      passed: false,
-      details: `${violations.length} engine(s) exceed confidence floor+0.20: ${violations.join("; ")}`,
-    };
+    return fail("confidence_chain_integrity", `${violations.length} engine(s) exceed confidence floor+0.20: ${violations.join("; ")}`);
   }
 
-  return {
-    check: "confidence_chain_integrity",
-    passed: true,
-    details: `All ${ssc.confidenceChain.length} engines within their inherited floor+0.20 bound`,
-  };
+  return pass("confidence_chain_integrity", `All ${ssc.confidenceChain.length} engines within their inherited floor+0.20 bound`);
 }
 
 export function checkPositioningHardGate(ssc: SharedStrategicContext | null): StructuralCheck {
   if (!ssc || ssc.confidenceChain.length === 0) {
-    return { check: "positioning_hard_gate", passed: true, details: "No confidence chain data — check skipped" };
+    return unknown("positioning_hard_gate", "no confidence chain data — positioning entry cannot be inspected");
   }
 
   const positioningEntry = ssc.confidenceChain.find(e => e.engineId === "positioning");
   if (!positioningEntry) {
-    return { check: "positioning_hard_gate", passed: true, details: "No positioning confidence entry — check skipped" };
+    return unknown("positioning_hard_gate", "no positioning confidence entry in chain — engine likely did not complete");
   }
 
   if (positioningEntry.engineConfidence < 0.40) {
-    return {
-      check: "positioning_hard_gate",
-      passed: false,
-      details: `Positioning engineConfidence=${positioningEntry.engineConfidence.toFixed(2)} is below hard gate threshold 0.40 (gates on engine logic quality, not data reliability)`,
-    };
+    return fail(
+      "positioning_hard_gate",
+      `Positioning engineConfidence=${positioningEntry.engineConfidence.toFixed(2)} is below hard gate threshold 0.40 (gates on engine logic quality, not data reliability)`,
+    );
   }
 
-  return {
-    check: "positioning_hard_gate",
-    passed: true,
-    details: `Positioning engineConfidence=${positioningEntry.engineConfidence.toFixed(2)} meets threshold 0.40`,
-  };
+  return pass(
+    "positioning_hard_gate",
+    `Positioning engineConfidence=${positioningEntry.engineConfidence.toFixed(2)} meets threshold 0.40`,
+  );
 }
 
 export function checkConfidenceSpread(ssc: SharedStrategicContext | null): StructuralCheck {
   if (!ssc || ssc.confidenceChain.length < 2) {
-    return { check: "confidence_spread", passed: true, details: "Insufficient confidence chain data — check skipped" };
+    return unknown("confidence_spread", "insufficient confidence chain data — at least 2 engines required");
   }
 
   // statistical_validation emits a *grounding quality* score (lineage
   // composition + signal origin ratios) rather than a self-evaluated engine
-  // confidence. It is categorically different from the output-quality
-  // confidences emitted by the other engines and therefore must not be
-  // compared to them for spread purposes — doing so conflates "how well was
-  // this output produced" with "how real is the underlying signal base" and
-  // produces false contradictions when upstream signals are competitor-
-  // dominated despite the pipeline being internally coherent. Exclude it
-  // from the spread extremes.
+  // confidence. Excluded from spread for the same reasons documented prior.
   const comparableEntries = ssc.confidenceChain.filter(
     e => e.engineId !== "statistical_validation",
   );
   if (comparableEntries.length < 2) {
-    return { check: "confidence_spread", passed: true, details: "Insufficient comparable confidence chain data — check skipped" };
+    return unknown("confidence_spread", "insufficient comparable confidence chain data — at least 2 non-statistical engines required");
   }
 
   const scores = comparableEntries.map(e => e.combinedConfidence);
@@ -488,50 +629,49 @@ export function checkConfidenceSpread(ssc: SharedStrategicContext | null): Struc
   if (spread > SPREAD_THRESHOLD) {
     const maxEngine = comparableEntries.find(e => e.combinedConfidence === maxScore)?.engineId ?? "unknown";
     const minEngine = comparableEntries.find(e => e.combinedConfidence === minScore)?.engineId ?? "unknown";
-    return {
-      check: "confidence_spread",
-      passed: false,
-      details: `Confidence spread=${spread.toFixed(2)} exceeds ${SPREAD_THRESHOLD.toFixed(2)} threshold — highest: ${maxEngine}(${maxScore.toFixed(2)}) lowest: ${minEngine}(${minScore.toFixed(2)})`,
-    };
+    return fail(
+      "confidence_spread",
+      `Confidence spread=${spread.toFixed(2)} exceeds ${SPREAD_THRESHOLD.toFixed(2)} threshold — highest: ${maxEngine}(${maxScore.toFixed(2)}) lowest: ${minEngine}(${minScore.toFixed(2)})`,
+    );
   }
 
-  return {
-    check: "confidence_spread",
-    passed: true,
-    details: `Confidence spread=${spread.toFixed(2)} within ${SPREAD_THRESHOLD.toFixed(2)} threshold (statistical_validation grounding-quality score excluded)`,
-  };
+  return pass(
+    "confidence_spread",
+    `Confidence spread=${spread.toFixed(2)} within ${SPREAD_THRESHOLD.toFixed(2)} threshold (statistical_validation grounding-quality score excluded)`,
+  );
 }
 
 export function checkBudgetOverrideZeroConfidence(ssc: SharedStrategicContext | null, results: Map<EngineId, EngineStepResult>): StructuralCheck {
   if (!ssc) {
-    return { check: "budget_override_zero_confidence", passed: true, details: "No SSC available — check skipped" };
+    return unknown("budget_override_zero_confidence", "no SSC available — confidence floor cannot be inspected");
   }
 
   if (ssc.confidenceFloor !== 0) {
-    return {
-      check: "budget_override_zero_confidence",
-      passed: true,
-      details: `Confidence floor=${ssc.confidenceFloor.toFixed(2)} — budget override allowed`,
-    };
+    return pass(
+      "budget_override_zero_confidence",
+      `Confidence floor=${ssc.confidenceFloor.toFixed(2)} — budget override allowed`,
+    );
   }
 
   const budgetResult = results.get("budget_governor");
   const budgetAction = budgetResult?.output?.decision?.action ?? null;
 
   if (budgetAction === "scale" || budgetAction === "test") {
-    return {
-      check: "budget_override_zero_confidence",
-      passed: false,
-      details: `Budget action="${budgetAction}" but confidenceFloor=0 — performance override blocked when system has zero confidence`,
-    };
+    return fail(
+      "budget_override_zero_confidence",
+      `Budget action="${budgetAction}" but confidenceFloor=0 — performance override blocked when system has zero confidence`,
+    );
   }
 
-  return {
-    check: "budget_override_zero_confidence",
-    passed: true,
-    details: `Confidence floor=0 but budget action="${budgetAction}" — no performance override attempted`,
-  };
+  return pass(
+    "budget_override_zero_confidence",
+    `Confidence floor=0 but budget action="${budgetAction}" — no performance override attempted`,
+  );
 }
+
+// -----------------------------------------------------------------------------
+// Block reason collection
+// -----------------------------------------------------------------------------
 
 export function collectBlockReasons(checks: StructuralCheck[], results: Map<EngineId, EngineStepResult>): BlockReason[] {
   const blocks: BlockReason[] = [];
@@ -558,121 +698,78 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
     });
   }
 
+  // Phase R: emit a single PIPELINE_INCOMPLETE block summarising every check
+  // that could not be verified. This guarantees an unverified pipeline can
+  // never produce a PASS verdict.
+  const unverifiedChecks = checks.filter(isUnverified);
+  if (unverifiedChecks.length > 0) {
+    const timeoutCount = unverifiedChecks.filter(c => c.status === "TIMEOUT").length;
+    const staleCount = unverifiedChecks.filter(c => c.status === "STALE").length;
+    const notReachedCount = unverifiedChecks.filter(c => c.status === "NOT_REACHED").length;
+    const unknownCount = unverifiedChecks.filter(c => c.status === "UNKNOWN").length;
+    const summary = unverifiedChecks
+      .slice(0, 6)
+      .map(c => `${c.check}=${c.status}${c.unverifiedReason ? `(${c.unverifiedReason})` : ""}`)
+      .join("; ");
+    blocks.push({
+      code: timeoutCount > 0 ? "ENGINE_TIMEOUT" : staleCount > 0 ? "STALE_SNAPSHOT_EVIDENCE" : "PIPELINE_INCOMPLETE",
+      description: `${unverifiedChecks.length} check(s) could not be verified ` +
+        `(timeout=${timeoutCount}, stale=${staleCount}, not_reached=${notReachedCount}, unknown=${unknownCount}). ` +
+        `Verdict cannot be trusted. First reasons: ${summary}`,
+      source: "system_control_pipeline",
+      severity: "critical",
+    });
+  }
+
+  // Phase R: only emit per-check FAIL blocks for genuinely verified failures.
+  // Unverified checks (NOT_REACHED/TIMEOUT/STALE/UNKNOWN/SKIPPED) must not be
+  // re-blamed as e.g. NO_CONVERSION_PATH when the truth is "we never ran the
+  // engine that decides conversion paths."
   for (const check of checks) {
-    if (check.passed) continue;
+    if (!isVerifiedFail(check)) continue;
 
     switch (check.check) {
       case "conversion_path_exists":
-        blocks.push({
-          code: "NO_CONVERSION_PATH",
-          description: check.details,
-          source: "structural_check",
-          severity: "critical",
-        });
+        blocks.push({ code: "NO_CONVERSION_PATH", description: check.details, source: "structural_check", severity: "critical" });
         break;
       case "signal_grounding":
-        blocks.push({
-          code: "SCALE_WITHOUT_REAL_DATA",
-          description: check.details,
-          source: "structural_check",
-          severity: "critical",
-        });
+        blocks.push({ code: "SCALE_WITHOUT_REAL_DATA", description: check.details, source: "structural_check", severity: "critical" });
         break;
       case "integrity_status":
-        blocks.push({
-          code: "INTEGRITY_FAILURE",
-          description: check.details,
-          source: "system_integrity",
-          severity: "critical",
-        });
+        blocks.push({ code: "INTEGRITY_FAILURE", description: check.details, source: "system_integrity", severity: "critical" });
         break;
       case "cel_compliance":
-        blocks.push({
-          code: "COMPLIANCE_FAILURE",
-          description: check.details,
-          source: "cel_enforcement",
-          severity: "high",
-        });
+        blocks.push({ code: "COMPLIANCE_FAILURE", description: check.details, source: "cel_enforcement", severity: "high" });
         break;
       case "validation_result":
-        blocks.push({
-          code: "VALIDATION_REJECTED",
-          description: check.details,
-          source: "statistical_validation",
-          severity: "critical",
-        });
+        blocks.push({ code: "VALIDATION_REJECTED", description: check.details, source: "statistical_validation", severity: "critical" });
         break;
       case "signal_grounding_mass_failure":
-        blocks.push({
-          code: "SIGNAL_GROUNDING_MASS_FAILURE",
-          description: check.details,
-          source: "structural_check",
-          severity: "critical",
-        });
+        blocks.push({ code: "SIGNAL_GROUNDING_MASS_FAILURE", description: check.details, source: "structural_check", severity: "critical" });
         break;
       case "offer_audience_misalignment":
-        blocks.push({
-          code: "OFFER_AUDIENCE_MISALIGNMENT",
-          description: check.details,
-          source: "offer_engine",
-          severity: "high",
-        });
+        blocks.push({ code: "OFFER_AUDIENCE_MISALIGNMENT", description: check.details, source: "offer_engine", severity: "high" });
         break;
       case "zero_objection_coverage":
-        blocks.push({
-          code: "ZERO_OBJECTION_COVERAGE",
-          description: check.details,
-          source: "offer_engine",
-          severity: "high",
-        });
+        blocks.push({ code: "ZERO_OBJECTION_COVERAGE", description: check.details, source: "offer_engine", severity: "high" });
         break;
       case "channel_confidence_minimum":
-        blocks.push({
-          code: "CHANNEL_CONFIDENCE_BELOW_MINIMUM",
-          description: check.details,
-          source: "channel_selection",
-          severity: "high",
-        });
+        blocks.push({ code: "CHANNEL_CONFIDENCE_BELOW_MINIMUM", description: check.details, source: "channel_selection", severity: "high" });
         break;
       case "unresolved_critical_problems":
-        blocks.push({
-          code: "UNRESOLVED_CRITICAL_PROBLEMS",
-          description: check.details,
-          source: "ssc_problem_registry",
-          severity: "critical",
-        });
+        blocks.push({ code: "UNRESOLVED_CRITICAL_PROBLEMS", description: check.details, source: "ssc_problem_registry", severity: "critical" });
         break;
       case "confidence_chain_integrity":
-        blocks.push({
-          code: "CONFIDENCE_CHAIN_VIOLATION",
-          description: check.details,
-          source: "ssc_confidence_chain",
-          severity: "critical",
-        });
+        blocks.push({ code: "CONFIDENCE_CHAIN_VIOLATION", description: check.details, source: "ssc_confidence_chain", severity: "critical" });
         break;
       case "positioning_hard_gate":
-        blocks.push({
-          code: "POSITIONING_HARD_GATE",
-          description: check.details,
-          source: "ssc_confidence_chain",
-          severity: "critical",
-        });
+        blocks.push({ code: "POSITIONING_HARD_GATE", description: check.details, source: "ssc_confidence_chain", severity: "critical" });
         break;
       case "confidence_spread":
-        blocks.push({
-          code: "CONFIDENCE_SPREAD_EXCESSIVE",
-          description: check.details,
-          source: "ssc_confidence_chain",
-          severity: "high",
-        });
+        blocks.push({ code: "CONFIDENCE_SPREAD_EXCESSIVE", description: check.details, source: "ssc_confidence_chain", severity: "high" });
         break;
       case "budget_override_zero_confidence":
-        blocks.push({
-          code: "BUDGET_OVERRIDE_ZERO_CONFIDENCE",
-          description: check.details,
-          source: "ssc_budget_guard",
-          severity: "critical",
-        });
+        blocks.push({ code: "BUDGET_OVERRIDE_ZERO_CONFIDENCE", description: check.details, source: "ssc_budget_guard", severity: "critical" });
         break;
     }
   }

@@ -17,7 +17,10 @@ export type ExecutionMode =
   | "PROOF_COLLECTION"            // StatVal commercial fallback — execution suspended pending proof harvest
   | "CHANNEL_VALIDATION_REQUIRED" // Channel Selection commercial fallback — pilot single channel before scaling
   | "AWARENESS_BUILD_PHASE"       // System judgement: market not ready for conversion-grade execution
-  | "HUMAN_REVIEW_REQUIRED";      // System judgement: principal-level decision exceeds automation envelope
+  | "HUMAN_REVIEW_REQUIRED"       // System judgement: principal-level decision exceeds automation envelope
+  // Phase R (May 2026) reliability/truthfulness modes
+  | "SYSTEM_UNTRUSTED"            // Pipeline incomplete / stale / timed out — verdict cannot be trusted, no execution
+  | "NEEDS_RECONCILIATION";       // Cross-engine contradiction unresolved — manual reconciliation required
 
 export type BlockCode =
   | "NO_CONVERSION_PATH"
@@ -35,7 +38,12 @@ export type BlockCode =
   | "CONFIDENCE_CHAIN_VIOLATION"
   | "POSITIONING_HARD_GATE"
   | "CONFIDENCE_SPREAD_EXCESSIVE"
-  | "BUDGET_OVERRIDE_ZERO_CONFIDENCE";
+  | "BUDGET_OVERRIDE_ZERO_CONFIDENCE"
+  // Phase R reliability blocks
+  | "PIPELINE_INCOMPLETE"           // one or more required checks could not be evaluated (NOT_REACHED/TIMEOUT/STALE/UNKNOWN)
+  | "STALE_SNAPSHOT_EVIDENCE"       // a check was forced to use a snapshot from a prior run
+  | "ENGINE_TIMEOUT"                // a critical engine timed out and downstream cannot be evaluated
+  | "UNRESOLVED_CONTRADICTION";     // cross-engine contradiction with no auto-resolution path
 
 export type DowngradeCode =
   | "UNVERIFIED_CAC"
@@ -65,10 +73,77 @@ export interface Downgrade {
   affectedEngine: string;
 }
 
+/**
+ * Reliability-grade status for a structural check. Replaces the previous
+ * boolean `passed` semantics where "skipped because data missing" was
+ * indistinguishable from "passed because data is good."
+ *
+ * Semantic rules:
+ *   - PASS         → check ran and the system genuinely satisfies the rule
+ *   - FAIL         → check ran and the system violates the rule
+ *   - BLOCK        → check ran and discovered a hard block
+ *   - SKIPPED      → check chose not to run (e.g. not applicable to this state)
+ *   - NOT_REACHED  → upstream engine did not produce required input
+ *   - TIMEOUT      → upstream engine timed out before producing input
+ *   - STALE        → only stale (prior-run) data was available
+ *   - UNKNOWN      → required data is missing in a way we cannot classify
+ *
+ * Only `status === "PASS"` counts toward checksPassed in any verdict logic.
+ * Any of {NOT_REACHED, TIMEOUT, STALE, UNKNOWN} renders the verdict
+ * untrustworthy and triggers PIPELINE_INCOMPLETE / SYSTEM_UNTRUSTED.
+ */
+export type CheckStatus =
+  | "PASS"
+  | "FAIL"
+  | "BLOCK"
+  | "SKIPPED"
+  | "NOT_REACHED"
+  | "TIMEOUT"
+  | "STALE"
+  | "UNKNOWN";
+
 export interface StructuralCheck {
   check: string;
+  /** True iff status === "PASS". Kept for backwards-compat readers, but verdict logic must use `status`. */
   passed: boolean;
+  /** Reliability-grade status. Only "PASS" counts as passed. */
+  status: CheckStatus;
   details: string;
+  /** Optional human-readable reason the check could not be verified (NOT_REACHED/TIMEOUT/STALE/UNKNOWN). */
+  unverifiedReason?: string;
+}
+
+/**
+ * Statuses that mean "this check did not actually verify the system."
+ *
+ * Note SKIPPED is included: if an applicability gate skipped the check we
+ * cannot truthfully claim the system passes the underlying rule, so SKIPPED
+ * must block a confident PASS verdict the same way NOT_REACHED/TIMEOUT do.
+ * If a check is genuinely vacuously-satisfied (e.g. "no objections were
+ * declared so coverage is trivially complete") it must return PASS, not
+ * SKIPPED — see structural-checks.ts:skipped() for the contract.
+ */
+export const UNVERIFIED_STATUSES: ReadonlyArray<CheckStatus> = [
+  "NOT_REACHED",
+  "TIMEOUT",
+  "STALE",
+  "UNKNOWN",
+  "SKIPPED",
+];
+
+/** Type guard: did this check actually verify the system passes the rule? */
+export function isVerifiedPass(c: StructuralCheck): boolean {
+  return c.status === "PASS";
+}
+
+/** Type guard: did this check actually verify the system FAILS the rule? */
+export function isVerifiedFail(c: StructuralCheck): boolean {
+  return c.status === "FAIL" || c.status === "BLOCK";
+}
+
+/** Type guard: was this check unable to verify the system either way? */
+export function isUnverified(c: StructuralCheck): boolean {
+  return UNVERIFIED_STATUSES.includes(c.status);
 }
 
 export interface Contradiction {

@@ -10,6 +10,7 @@ import type {
   RepairAction,
 } from "./types";
 import {
+  checkPipelineCompleteness,
   checkConversionPath,
   checkSignalGrounding,
   checkIntegrityStatus,
@@ -33,6 +34,7 @@ import {
 import { detectContradictions } from "./contradiction-detector";
 import { assessRepairability, executeRepairActions } from "./repair-actions";
 import { CONTROL_VERSION, INTEGRITY_RESTRICT_THRESHOLD } from "./constants";
+import { isUnverified, isVerifiedPass, isVerifiedFail } from "./types";
 
 export function evaluateSystemControl(input: SystemControlInput, options?: { shadowMode?: boolean }): SystemControlVerdict {
   const shadowMode = options?.shadowMode ?? false;
@@ -43,6 +45,11 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
 
   const structuralChecks: StructuralCheck[] = [];
 
+  // Phase R: pipeline-completeness gate runs FIRST so any missing/timed-out
+  // required engine is detected before downstream checks attempt to read
+  // their (absent) outputs. This is the global guard against a confident
+  // PASS verdict from a partially-failed pipeline.
+  structuralChecks.push(checkPipelineCompleteness(input.results));
   structuralChecks.push(checkConversionPath(input.results));
   structuralChecks.push(checkSignalGrounding(input.signalComposition, budgetAction));
   structuralChecks.push(checkIntegrityStatus(input.integrityReport));
@@ -198,7 +205,24 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   let verdict: SystemVerdict;
   let executionMode: ExecutionMode;
 
-  if (blockReasons.length > 0) {
+  // Phase R (May 2026): truthful verdict derivation. A verdict can never be
+  // PASS/FULL_EXECUTION when one or more required checks could not actually
+  // be verified. Distinguish three block flavours:
+  //   - Reliability blocks (PIPELINE_INCOMPLETE / ENGINE_TIMEOUT /
+  //     STALE_SNAPSHOT_EVIDENCE) → SYSTEM_UNTRUSTED, never auto-execute, no
+  //     repair (you cannot "repair" a pipeline that never ran).
+  //   - Real verified failures (NO_CONVERSION_PATH etc.) → HALTED with the
+  //     existing repair pathway.
+  //   - Both present → SYSTEM_UNTRUSTED takes priority because the verified
+  //     failures themselves can't be trusted on top of an unverified pipeline.
+  const reliabilityBlockCodes = new Set<string>(["PIPELINE_INCOMPLETE", "ENGINE_TIMEOUT", "STALE_SNAPSHOT_EVIDENCE"]);
+  const reliabilityBlocks = blockReasons.filter(b => reliabilityBlockCodes.has(b.code));
+  const hasReliabilityBlock = reliabilityBlocks.length > 0;
+
+  if (hasReliabilityBlock) {
+    verdict = "BLOCK";
+    executionMode = "SYSTEM_UNTRUSTED";
+  } else if (blockReasons.length > 0) {
     verdict = "BLOCK";
     executionMode = "HALTED";
   } else if (repairAttempted && repairActions.some(a => a.succeeded)) {
@@ -226,11 +250,20 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     }
   } else if (contradictions.length > 0) {
     verdict = "DOWNGRADE";
-    executionMode = "REVIEW_REQUIRED";
+    // Phase R: when there is a contradiction with no auto-resolution path the
+    // system must surface it as NEEDS_RECONCILIATION rather than silently
+    // downgrade to REVIEW_REQUIRED. Funnel↔Iteration in particular cannot be
+    // resolved without rerunning Funnel against Iteration's observed signals.
+    const hasUnresolvable = contradictions.some(c =>
+      (c.engineA === "funnel" && c.engineB === "iteration") ||
+      (c.engineA === "iteration" && c.engineB === "funnel")
+    );
+    executionMode = hasUnresolvable ? "NEEDS_RECONCILIATION" : "REVIEW_REQUIRED";
     downgrades.push({
       from: budgetAction || "test",
-      to: "review_required",
-      reason: `${contradictions.length} cross-engine contradiction(s) detected — verdict cannot be PASS until resolved`,
+      to: hasUnresolvable ? "needs_reconciliation" : "review_required",
+      reason: `${contradictions.length} cross-engine contradiction(s) detected — verdict cannot be PASS until resolved` +
+        (hasUnresolvable ? " (Funnel↔Iteration disagreement requires rerun, not auto-downgrade)" : ""),
       code: "CROSS_ENGINE_CONTRADICTIONS",
       affectedEngine: "system_control",
     });
@@ -262,8 +295,14 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
 }
 
 function logVerdict(verdict: SystemControlVerdict, config: { campaignId: string; accountId: string }): void {
-  const checksPass = verdict.structuralChecks.filter(c => c.passed).length;
-  const checksFail = verdict.structuralChecks.filter(c => !c.passed).length;
+  // Phase R (May 2026): only count *verified* PASS as passed. A check that
+  // returned NOT_REACHED/TIMEOUT/STALE/UNKNOWN/SKIPPED is unverified and must
+  // never be reported as "passed" in dashboards or logs.
+  const checksPass = verdict.structuralChecks.filter(isVerifiedPass).length;
+  const checksFail = verdict.structuralChecks.filter(isVerifiedFail).length;
+  const checksUnverified = verdict.structuralChecks.filter(isUnverified).length;
+  const checksSkipped = verdict.structuralChecks.filter(c => c.status === "SKIPPED").length;
+  const checksTotal = verdict.structuralChecks.length;
 
   console.log(
     `[SystemControl] ${verdict.shadowMode ? "SHADOW" : "ACTIVE"} | ` +
@@ -271,7 +310,7 @@ function logVerdict(verdict: SystemControlVerdict, config: { campaignId: string;
     `blocks=${verdict.blockReasons.length} | downgrades=${verdict.downgrades.length} | ` +
     `contradictions=${verdict.contradictions.length} | ` +
     `repairs=${verdict.repairActions.filter(a => a.succeeded).length}/${verdict.repairActions.length} | ` +
-    `checks=${checksPass}/${checksPass + checksFail} passed | ` +
+    `checks=${checksPass}/${checksTotal} verified-pass (failed=${checksFail}, unverified=${checksUnverified}, skipped=${checksSkipped}) | ` +
     `campaign=${config.campaignId} | ${verdict.durationMs}ms`
   );
 
@@ -301,8 +340,10 @@ function logVerdict(verdict: SystemControlVerdict, config: { campaignId: string;
   }
 
   for (const check of verdict.structuralChecks) {
-    if (!check.passed) {
+    if (isVerifiedFail(check)) {
       console.log(`[SystemControl] CHECK_FAILED | ${check.check} | ${check.details}`);
+    } else if (isUnverified(check)) {
+      console.log(`[SystemControl] CHECK_UNVERIFIED | ${check.check} | status=${check.status} | ${check.unverifiedReason ?? check.details}`);
     }
   }
 
@@ -314,8 +355,9 @@ function logVerdict(verdict: SystemControlVerdict, config: { campaignId: string;
     c.check.startsWith("budget_override_zero")
   );
   if (sscChecks.length > 0) {
-    const sscPass = sscChecks.filter(c => c.passed).length;
-    const sscFail = sscChecks.filter(c => !c.passed).length;
-    console.log(`[SystemControl] SSC_CHECKS | passed=${sscPass} failed=${sscFail} | total=${sscChecks.length}`);
+    const sscPass = sscChecks.filter(isVerifiedPass).length;
+    const sscFail = sscChecks.filter(isVerifiedFail).length;
+    const sscUnverified = sscChecks.filter(isUnverified).length;
+    console.log(`[SystemControl] SSC_CHECKS | verified-pass=${sscPass} failed=${sscFail} unverified=${sscUnverified} | total=${sscChecks.length}`);
   }
 }
