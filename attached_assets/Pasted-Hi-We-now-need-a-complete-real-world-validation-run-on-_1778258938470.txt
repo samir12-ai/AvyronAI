@@ -1,0 +1,252 @@
+Hi,
+
+We now need a complete real-world validation run on the MarketMindAI campaign.
+
+This is no longer a module test.
+
+This is an end-to-end system validation of the entire adaptive + intelligence + recovery stack after all recent upgrades.
+
+---
+
+## Objective
+
+Run the FULL pipeline on:
+
+`campaign_1773576062201_6t0oxi`
+(MarketMindAI)
+
+with:
+
+* force refresh enabled
+* all engines active
+* Recovery Intelligence layer active
+* commercial reasoning modules active
+* integrity enforcement active
+* system-control active
+
+We need to verify whether the system now behaves coherently from start → decision → recovery.
+
+---
+
+## What Must Be Verified
+
+### 1) Full Engine Chain
+
+Verify the entire sequence executes correctly:
+
+* Market Intelligence
+* Audience
+* Positioning
+* Differentiation
+* Mechanism v2
+* Offer
+* Awareness
+* Funnel
+* Persuasion
+* Integrity
+* Statistical Validation
+* Budget Governor
+* Channel Selection
+* Iteration
+* Retention
+* System Control
+* Recovery Logic
+* Recovery Intelligence
+
+---
+
+### 2) Verify Real Reasoning Propagation
+
+We need proof that signals propagate correctly across the entire stack.
+
+Examples:
+
+* audience distrust
+  → affects proof architecture
+  → affects funnel trust path
+  → affects validation confidence
+  → affects budget unlock
+  → affects system-control verdict
+  → affects recovery diagnosis
+
+And:
+
+* positioning ambiguity
+  → weak mechanism clarity
+  → weak conversion bridge
+  → weak channel confidence
+  → budget halt
+
+I want to see whether the system now reasons causally instead of behaving like isolated modules.
+
+---
+
+### 3) Verify Recovery Intelligence
+
+Confirm that Recovery Intelligence is actually improving the output quality.
+
+We need:
+
+### BEFORE
+
+What the deterministic recovery plan said
+
+vs
+
+### AFTER
+
+What the strategist enrichment layer added:
+
+* commercial disease
+* causal diagnosis
+* highest leverage fix
+* buyer psychology constraints
+* recovery thesis
+* strategic sequencing
+
+And verify:
+
+* no enforcement weakening
+* no mode escalation
+* no issue mutation
+* deterministic layer preserved
+
+---
+
+### 4) Verify Commercial Engine Behavior
+
+Specifically verify:
+
+#### Statistical Validation
+
+* validation confidence
+* proof readiness
+* signal-backed claims
+* usability classification
+
+#### Budget Governor
+
+* why spend is blocked or unlocked
+* whether confidence inheritance works correctly
+* whether budget pacing makes commercial sense
+
+#### Channel Selection
+
+* whether channels align with awareness + funnel + offer
+* whether conversion-path logic works
+* whether low-confidence channels are rejected correctly
+
+#### Iteration
+
+* whether the system proposes real learning hypotheses
+* not generic “test CTA” filler
+
+#### Retention
+
+* whether retention loops are commercially meaningful
+* not operational placeholders
+
+---
+
+### 5) Verify Dashboard Truthfulness
+
+Critically important.
+
+Confirm:
+
+* every engine tab shows the NEW run
+* no stale snapshots
+* no resolver mismatch
+* no hidden fallback to older COMPLETED runs
+* no caching inconsistencies
+
+Verify:
+
+* run IDs
+* snapshot IDs
+* engine versions
+* timestamps
+
+All must match the latest run.
+
+---
+
+### 6) Verify Final Verdict Quality
+
+If the campaign still BLOCKS:
+that is acceptable.
+
+But the block must now be:
+
+* commercially intelligent
+* causally correct
+* strategically explained
+
+NOT:
+
+* generic
+* fragmented
+* contradictory
+* operational-only
+
+---
+
+## Required Deliverables
+
+Please provide:
+
+### A) Full End-to-End Run Summary
+
+* full execution trace
+* engine statuses
+* timings
+* final verdict
+* recovery verdict
+
+---
+
+### B) Signal Propagation Audit
+
+Show how signals traveled across engines.
+
+---
+
+### C) Recovery Intelligence Comparison
+
+Deterministic vs enriched recovery.
+
+---
+
+### D) Commercial Quality Audit
+
+Evaluate:
+
+* strategic realism
+* causal reasoning
+* buyer psychology integration
+* prioritization quality
+* execution realism
+
+---
+
+### E) Dashboard Validation
+
+Prove frontend reflects the actual latest run.
+
+---
+
+### F) Final Conclusion
+
+Answer clearly:
+
+> Is the system now behaving like a unified adaptive commercial intelligence system?
+
+Or:
+
+> Which parts still behave mechanically?
+
+No implementation changes during this task.
+
+Validation + audit only.
+
+Thanks.
