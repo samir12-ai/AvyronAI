@@ -120,6 +120,56 @@ export interface RecoveryIssue {
   source: "deterministic" | "llm_enriched";
 }
 
+/**
+ * The named commercial disease pattern surfaced by the Recovery Intelligence
+ * layer. Names the underlying disease behind multiple block-code symptoms.
+ */
+export type CommercialDisease =
+  | "demand_without_delivery"        // MI sees demand, downstream cannot capture it
+  | "proof_gap"                      // claims outpace evidence; validation cannot ground
+  | "trust_gap"                      // buyer doesn't extend trust to the offer / brand
+  | "offer_audience_mismatch"        // offer shape doesn't match buyer psychology
+  | "funnel_conversion_gap"          // architecture missing a working conversion bridge
+  | "channel_market_mismatch"        // chosen channels can't reach this buyer profitably
+  | "validation_deficit"             // not enough real signal to make confident calls
+  | "budget_risk_uncertainty"        // unit economics unclear; spending blindly
+  | "execution_readiness_gap"        // strategy ahead of operational readiness
+  | "category_position_collapse"     // positioning hasn't earned its game
+  | "system_data_insufficiency"      // can't reason — upstream signals too thin
+  | "unknown_disease";               // pattern doesn't match a known disease
+
+export interface CausalDiagnosisStep {
+  cause: string;
+  symptom: string;
+  downstreamEffect: string;
+  repair: string;
+  evidenceCitations?: string[];
+}
+
+/**
+ * Strategist enrichment overlay produced by the Recovery Intelligence layer.
+ * Sits ON TOP of the deterministic recovery plan — does not replace it.
+ * Null when enrichment is unavailable / rejected by judge / unsafe to ship.
+ */
+export interface RecoveryIntelligence {
+  commercialDisease: CommercialDisease;
+  diseaseStatement: string;                // one-sentence plain-English diagnosis
+  causalDiagnosis: CausalDiagnosisStep[];  // cause → symptom → effect → repair chain
+  strategicRecoveryThesis: string;         // the principal's recovery thesis (1–2 sentences)
+  priorityLogic: string;                   // why this order — causal not symptomatic
+  highestLeverageFix: string;              // the single move that unlocks the most blocks
+  buyerPsychologyConstraint: string;       // dominant buyer constraint blocking conversion
+  nextModeRationale: string;               // why the recommended next mode is correct
+
+  // Lineage / audit
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  judgeReason?: string;
+  retryCount: number;
+  modelUsed: string;
+  generatedAt: string;
+  upstreamSignalsUsed: string[];           // engine names whose data grounded the diagnosis
+}
+
 export interface RecoveryPlan {
   currentVerdict: SystemVerdict;
   currentExecutionMode: ExecutionMode;
@@ -133,6 +183,8 @@ export interface RecoveryPlan {
   generatedAt: string;
   source: "deterministic" | "llm_enriched" | "fallback";
   enrichmentNote?: string;
+  /** Strategist-grade enrichment overlay; null when unavailable. */
+  intelligence?: RecoveryIntelligence | null;
 }
 
 export interface SystemControlVerdict {

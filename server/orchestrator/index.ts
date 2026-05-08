@@ -3733,15 +3733,29 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     try {
       if (controlVerdict && controlVerdict.verdict === "BLOCK") {
         const { buildRecoveryPlan } = await import("../system-control/recovery-planner");
-        const plan = buildRecoveryPlan(controlVerdict, {
+        let plan = buildRecoveryPlan(controlVerdict, {
           campaignId: config.campaignId,
           accountId: config.accountId,
           results,
           ssc: ctx.ssc,
         });
         if (plan) {
+          // ── RECOVERY INTELLIGENCE ENRICHMENT (Phase 3 May 2026) ──
+          // Strategist overlay: designer + judge + 1 retry + null fallback to
+          // deterministic plan. Never weakens enforcement. See
+          // server/system-control/recovery-intelligence.ts.
+          try {
+            const { enrichRecoveryPlan } = await import("../system-control/recovery-intelligence");
+            plan = await enrichRecoveryPlan(plan, {
+              campaignId: config.campaignId,
+              accountId: config.accountId,
+              results,
+            });
+          } catch (enrErr: any) {
+            console.warn(`[Orchestrator] RECOVERY_INTELLIGENCE_FAILED | ${enrErr.message} | shipping deterministic plan`);
+          }
           controlVerdict.recoveryPlan = plan;
-          console.log(`[Orchestrator] RECOVERY_PLAN_BUILT | issues=${plan.issues.length} | humanReview=${plan.humanReviewNeeded} | source=${plan.source}`);
+          console.log(`[Orchestrator] RECOVERY_PLAN_BUILT | issues=${plan.issues.length} | humanReview=${plan.humanReviewNeeded} | source=${plan.source} | intelligence=${plan.intelligence ? plan.intelligence.commercialDisease : "none"}`);
         }
       }
     } catch (rpErr: any) {

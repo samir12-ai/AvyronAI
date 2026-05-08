@@ -103,6 +103,30 @@ interface RecoveryIssue {
   source?: string;
 }
 
+interface CausalDiagnosisStep {
+  cause?: string;
+  symptom?: string;
+  downstreamEffect?: string;
+  repair?: string;
+  evidenceCitations?: string[];
+}
+
+interface RecoveryIntelligence {
+  commercialDisease?: string;
+  diseaseStatement?: string;
+  causalDiagnosis?: CausalDiagnosisStep[];
+  strategicRecoveryThesis?: string;
+  priorityLogic?: string;
+  highestLeverageFix?: string;
+  buyerPsychologyConstraint?: string;
+  nextModeRationale?: string;
+  judgeVerdict?: string;
+  retryCount?: number;
+  modelUsed?: string;
+  generatedAt?: string;
+  upstreamSignalsUsed?: string[];
+}
+
 interface RecoveryPlan {
   currentVerdict?: string;
   currentExecutionMode?: string;
@@ -115,6 +139,7 @@ interface RecoveryPlan {
   humanReviewNeeded?: boolean;
   generatedAt?: string;
   source?: string;
+  intelligence?: RecoveryIntelligence | null;
 }
 
 interface ControlVerdict {
@@ -778,6 +803,163 @@ export default function OrchestratorPanel() {
                       {rp.rootCauseSummary}
                     </Text>
                   )}
+
+                  {(() => {
+                    const intel = rp.intelligence || null;
+                    if (!intel || !intel.diseaseStatement) return null;
+                    const intelBg = isDark ? '#16121F' : '#F5F3FF';
+                    const intelBorder = isDark ? '#3D2A60' : '#C4B5FD';
+                    const intelAccent = '#8B5CF6';
+                    const stepBg = isDark ? '#1A1525' : '#FAF5FF';
+                    return (
+                      <View style={{
+                        marginBottom: 12,
+                        backgroundColor: intelBg,
+                        borderRadius: 10,
+                        padding: 12,
+                        borderWidth: 1,
+                        borderColor: intelBorder,
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                          <Ionicons name="bulb-outline" size={15} color={intelAccent} />
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: intelAccent, letterSpacing: 0.5 }}>
+                            RECOVERY INTELLIGENCE · STRATEGIST OVERLAY
+                          </Text>
+                          {intel.commercialDisease && (
+                            <Text style={{
+                              fontSize: 9, fontWeight: '700', color: intelAccent,
+                              backgroundColor: intelAccent + '22',
+                              paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4,
+                              letterSpacing: 0.4, textTransform: 'uppercase',
+                            }}>
+                              {intel.commercialDisease.replace(/_/g, ' ')}
+                            </Text>
+                          )}
+                          {intel.judgeVerdict && (
+                            <Text style={{
+                              fontSize: 9, fontWeight: '600',
+                              color: intel.judgeVerdict === 'ACCEPTED' ? P.green : textMuted,
+                              letterSpacing: 0.3,
+                            }}>
+                              judge:{intel.judgeVerdict}{intel.retryCount ? `·r${intel.retryCount}` : ''}
+                            </Text>
+                          )}
+                        </View>
+
+                        <View style={{ marginBottom: 10 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                            COMMERCIAL DISEASE
+                          </Text>
+                          <Text style={{ fontSize: 13, lineHeight: 18, color: textPrimary, fontWeight: '600' }}>
+                            {intel.diseaseStatement}
+                          </Text>
+                        </View>
+
+                        {intel.strategicRecoveryThesis && (
+                          <View style={{ marginBottom: 10 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              STRATEGIC RECOVERY THESIS
+                            </Text>
+                            <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary }}>
+                              {intel.strategicRecoveryThesis}
+                            </Text>
+                          </View>
+                        )}
+
+                        {Array.isArray(intel.causalDiagnosis) && intel.causalDiagnosis.length > 0 && (
+                          <View style={{ marginBottom: 10 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 6 }}>
+                              CAUSAL CHAIN · {intel.causalDiagnosis.length} STEP{intel.causalDiagnosis.length === 1 ? '' : 'S'}
+                            </Text>
+                            {intel.causalDiagnosis.map((step, si) => (
+                              <View key={si} style={{
+                                backgroundColor: stepBg,
+                                borderRadius: 7,
+                                padding: 9,
+                                marginBottom: 6,
+                                borderLeftWidth: 2,
+                                borderLeftColor: intelAccent,
+                              }}>
+                                {step.cause && (
+                                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: intelAccent, minWidth: 50 }}>CAUSE</Text>
+                                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textPrimary }}>{step.cause}</Text>
+                                  </View>
+                                )}
+                                {step.symptom && (
+                                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: P.amber, minWidth: 50 }}>SYMPTOM</Text>
+                                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textSec }}>{step.symptom}</Text>
+                                  </View>
+                                )}
+                                {step.downstreamEffect && (
+                                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: P.coral, minWidth: 50 }}>EFFECT</Text>
+                                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textSec }}>{step.downstreamEffect}</Text>
+                                  </View>
+                                )}
+                                {step.repair && (
+                                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: P.green, minWidth: 50 }}>REPAIR</Text>
+                                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textPrimary }}>{step.repair}</Text>
+                                  </View>
+                                )}
+                                {Array.isArray(step.evidenceCitations) && step.evidenceCitations.length > 0 && (
+                                  <Text style={{ fontSize: 9, color: textMuted, marginTop: 2, fontFamily: 'monospace' as any }}>
+                                    {step.evidenceCitations.join(' · ')}
+                                  </Text>
+                                )}
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
+                        {intel.highestLeverageFix && (
+                          <View style={{ marginBottom: 10, backgroundColor: P.green + '15', borderRadius: 7, padding: 9, borderLeftWidth: 3, borderLeftColor: P.green }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: P.green, letterSpacing: 0.4, marginBottom: 3 }}>
+                              HIGHEST-LEVERAGE FIX
+                            </Text>
+                            <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary, fontWeight: '500' }}>
+                              {intel.highestLeverageFix}
+                            </Text>
+                          </View>
+                        )}
+
+                        {intel.buyerPsychologyConstraint && (
+                          <View style={{ marginBottom: 8 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              BUYER PSYCHOLOGY CONSTRAINT
+                            </Text>
+                            <Text style={{ fontSize: 11, lineHeight: 16, color: textSec }}>
+                              {intel.buyerPsychologyConstraint}
+                            </Text>
+                          </View>
+                        )}
+
+                        {intel.priorityLogic && (
+                          <View style={{ marginBottom: 8 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              PRIORITY LOGIC
+                            </Text>
+                            <Text style={{ fontSize: 11, lineHeight: 16, color: textSec }}>
+                              {intel.priorityLogic}
+                            </Text>
+                          </View>
+                        )}
+
+                        {intel.nextModeRationale && (
+                          <View>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              NEXT-MODE RATIONALE
+                            </Text>
+                            <Text style={{ fontSize: 11, lineHeight: 16, color: textSec }}>
+                              {intel.nextModeRationale}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
 
                   {issues.map((iss, idx) => {
                     const sevColor = iss.severity === 'critical' ? P.coral : P.amber;
