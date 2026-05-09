@@ -1,0 +1,121 @@
+Hi,
+
+The global contract enforcement plan is directionally approved, but one critical deliverable is still missing before implementation:
+
+> the full required-output contract map for all 15 strategic engines.
+
+Right now the plan explains the architecture, but I still need to see exactly what each engine is required to output.
+
+Do not start implementation until this is documented clearly.
+
+---
+
+## Required Deliverable
+
+Please provide a complete contract map for every strategic engine:
+
+1. Market Intelligence
+2. Audience
+3. Positioning
+4. Differentiation
+5. Mechanism
+6. Offer
+7. Awareness
+8. Funnel
+9. Persuasion
+10. Integrity
+11. Statistical Validation
+12. Budget Governor
+13. Channel Selection
+14. Iteration
+15. Retention
+
+---
+
+## For Each Engine, Define
+
+For each engine, include:
+
+* required outputs
+* optional outputs
+* exact canonical field path
+* legacy field paths if any
+* field type/schema
+* downstream consumers
+* requiredBy checks
+* failure behavior if missing
+* whether the field is required for final verdict
+* whether reuse is allowed or current-run-only
+
+---
+
+## Important
+
+Do not guess.
+
+Read the actual engine result types and current consumers before defining the map.
+
+I want this based on the real codebase, not assumptions.
+
+---
+
+## Example Format
+
+```json
+{
+  "engine": "channel_selection",
+  "livenessRule": "current_run_only",
+  "requiredOutputs": [
+    {
+      "id": "primaryChannel",
+      "canonicalPath": ["primaryChannel"],
+      "type": "object",
+      "requiredBy": ["system_control.channel_confidence"],
+      "finalVerdictRequired": true,
+      "missingBehavior": "CONTRACT_INCOMPLETE"
+    },
+    {
+      "id": "funnelStages",
+      "canonicalPath": ["funnelReconstruction", "funnelStages"],
+      "legacyPaths": [["funnelStages"]],
+      "type": "object",
+      "requiredBy": [
+        "system_control.funnel_structural_completeness",
+        "repair_actions",
+        "contradiction_detector",
+        "build_plan_layer"
+      ],
+      "finalVerdictRequired": true,
+      "missingBehavior": "CONTRACT_INCOMPLETE"
+    }
+  ],
+  "optionalOutputs": []
+}
+```
+
+---
+
+## Also Include
+
+Please include a summary table:
+
+| Engine | Required Outputs Count | Final Verdict Required Fields | Downstream Consumers | Risk Level |
+| ------ | ---------------------: | ----------------------------- | -------------------- | ---------- |
+
+Risk level should indicate how dangerous it is if that engine output is missing or malformed.
+
+---
+
+## Approval Gate
+
+Implementation can only begin after I review and approve:
+
+* the 15-engine contract map
+* the required output list
+* canonical paths
+* downstream consumers
+* missing-field behavior
+
+This is mandatory.
+
+Thanks.
