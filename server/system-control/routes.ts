@@ -210,5 +210,108 @@ export function registerSystemControlRoutes(app: Express) {
     }
   });
 
-  console.log("[SystemControl] Routes registered: GET /api/system-control/verdicts/:campaignId, /latest/:campaignId, /stats/:campaignId, /recovery/:campaignId");
+  // ──────────────────────────────────────────────────────────────────────────
+  // Phase R T006 — Run truthfulness endpoint.
+  // Single combined response that powers the dashboard banner AND the
+  // dedicated audit-control screen. Combines:
+  //   - resolveRunId() (latest resolvable run + newerNonResolvableRun)
+  //   - latest stored SystemControlVerdict (verdict, blocks, structural checks,
+  //     contradictions, snapshot freshness)
+  //   - a derived `headline` field so the UI does not have to re-implement
+  //     truthfulness logic.
+  //
+  // Auth: same as the other system-control routes.
+  // ──────────────────────────────────────────────────────────────────────────
+  app.get("/api/system-control/run-truthfulness/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const accountId = resolveAccountId(req);
+      const { campaignId } = req.params;
+
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      // resolveRunId returns { runId: null } for the "no runs yet" case —
+      // it does NOT throw. Therefore we deliberately do NOT catch here:
+      // a thrown error means a real DB/runtime failure that must surface
+      // as 500, not be silently downgraded to a green-ish "no_run" state.
+      const resolved: any = await resolveRunId(campaignId, accountId, null);
+
+      // Latest stored verdict for the campaign (may belong to a different run
+      // than `resolved.runId` if the most recent run failed before producing
+      // a verdict — that case becomes part of the truthfulness signal).
+      const [verdictRow] = await db.select()
+        .from(systemControlVerdicts)
+        .where(and(
+          eq(systemControlVerdicts.accountId, accountId),
+          eq(systemControlVerdicts.campaignId, campaignId),
+        ))
+        .orderBy(desc(systemControlVerdicts.createdAt))
+        .limit(1);
+
+      const verdict = verdictRow ? formatVerdictRow(verdictRow) : null;
+
+      // Extract snapshot-freshness info from structural checks if present.
+      const checks: any[] = (verdict?.structuralChecks as any[]) || [];
+      const freshnessCheck = checks.find(c => c?.check === "snapshot_freshness");
+      const staleEngineMatch = freshnessCheck?.details?.match(/stale_engines=\[([^\]]*)\]/);
+      const staleEngines = staleEngineMatch && staleEngineMatch[1]
+        ? staleEngineMatch[1].split(",").map((s: string) => s.trim()).filter(Boolean)
+        : [];
+
+      const freshness = {
+        hasStaleSnapshots: freshnessCheck?.status === "STALE",
+        staleEngines,
+        details: freshnessCheck?.details ?? null,
+      };
+
+      // Headline derivation — single source of truth so banner and audit
+      // screen agree on what state we are in. Priority: no_run > shadowed >
+      // verdict (block/downgrade/review/repair) > ok.
+      let headline:
+        | "no_run"
+        | "shadowed"
+        | "system_untrusted"
+        | "blocked"
+        | "needs_reconciliation"
+        | "review_required"
+        | "downgrade"
+        | "repair"
+        | "ok" = "ok";
+
+      if (!resolved.runId && !verdict) {
+        headline = "no_run";
+      } else if (resolved.newerNonResolvableRun) {
+        headline = "shadowed";
+      } else if (verdict?.executionMode === "SYSTEM_UNTRUSTED") {
+        headline = "system_untrusted";
+      } else if (verdict?.executionMode === "NEEDS_RECONCILIATION") {
+        headline = "needs_reconciliation";
+      } else if (verdict?.executionMode === "HUMAN_REVIEW_REQUIRED" || verdict?.executionMode === "REVIEW_REQUIRED") {
+        headline = "review_required";
+      } else if (verdict?.verdict === "BLOCK") {
+        headline = "blocked";
+      } else if (verdict?.verdict === "REPAIR") {
+        headline = "repair";
+      } else if (verdict?.verdict === "DOWNGRADE") {
+        headline = "downgrade";
+      }
+
+      res.json({
+        campaignId,
+        runId: resolved.runId,
+        runStatus: resolved.status,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
+        newerNonResolvableRun: resolved.newerNonResolvableRun ?? null,
+        verdict,
+        freshness,
+        headline,
+        shouldShowBanner: headline !== "ok",
+      });
+    } catch (err: any) {
+      console.error("[SystemControl] run-truthfulness error:", err.message);
+      res.status(500).json({ error: "Failed to fetch run truthfulness" });
+    }
+  });
+
+  console.log("[SystemControl] Routes registered: GET /api/system-control/verdicts/:campaignId, /latest/:campaignId, /stats/:campaignId, /recovery/:campaignId, /run-truthfulness/:campaignId");
 }

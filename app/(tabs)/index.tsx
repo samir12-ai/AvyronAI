@@ -36,6 +36,7 @@ import NarrativeCard from '@/components/NarrativeCard';
 import { useRunAnchor } from '@/hooks/useRunAnchor';
 import { useAuth } from '@/context/AuthContext';
 import OnboardingAgent from '@/components/OnboardingAgent';
+import { RunTruthfulnessBanner } from '@/components/RunTruthfulnessBanner';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -141,6 +142,7 @@ function DashboardRunBound({ campaignId, isDark, onBuildPlan, onApprovePlan, isA
   const runId = anchor?.runId || null;
   return (
     <>
+      <RunTruthfulnessBanner campaignId={campaignId} isDark={isDark} />
       <PlanStatus
         campaignId={campaignId}
         isDark={isDark}
