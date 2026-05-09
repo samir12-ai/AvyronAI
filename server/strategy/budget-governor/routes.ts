@@ -9,6 +9,8 @@ import { resolveDataSource } from "../../data-source/resolver";
 
 import { resolveAccountId } from "../../auth";
 import { resolveOrManualJobId } from "../../orchestrator/job-id";
+import { wrapAsEnvelope } from "../../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -237,15 +239,41 @@ export function registerBudgetGovernorRoutes(app: Express) {
         return res.json({ success: true, snapshot: null, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
+      // Phase C3 — emit LiveSnapshotEnvelope. The parsed `result` carries
+      // the BG engine output (guardResult, decision, dataSource, etc.) that
+      // the budget_governor contract validates against.
+      const parsedResult = safeJsonParse(latest.result);
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("budget_governor", parsedResult, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=budget_governor snap=${latest.id} err=${e?.message ?? String(e)}`);
+      }
+
       return res.json({
         success: true,
         runId: __resolved.runId,
         isLatest: __resolved.isLatest,
         isStale: __resolved.isStale,
         completedAt: __resolved.completedAt,
+        envelope,
         snapshot: {
           ...latest,
-          result: safeJsonParse(latest.result),
+          result: parsedResult,
           layerResults: safeJsonParse(latest.layerResults),
           structuralWarnings: safeJsonParse(latest.structuralWarnings),
           boundaryCheck: safeJsonParse(latest.boundaryCheck),

@@ -4,6 +4,8 @@ import { checkValidationSession } from "../engine-hardening";
 
 import { resolveAccountId } from "../auth";
 import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 export function registerAudienceEngineRoutes(app: Express) {
   app.post("/api/audience-engine/analyze", async (req, res) => {
     try {
@@ -57,7 +59,32 @@ export function registerAudienceEngineRoutes(app: Express) {
         return res.status(404).json({ error: "No audience snapshot for this run", runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale });
       }
 
-      return res.json({ ...snapshot, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt });
+      // Phase C3 — emit LiveSnapshotEnvelope alongside legacy fields. The
+      // helper already returns the snapshot row spread with parsed
+      // painMap/desireMap/objectionMap/etc, which matches the audience
+      // contract's required paths.
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const staleness = computeStalenessCoefficient(snapshot as any);
+        envelope = wrapAsEnvelope("audience", snapshot, {
+          snapshotId: (snapshot as any).id,
+          campaignId,
+          runId: resolved.runId,
+          currentJobId: resolved.runId,
+          provenance: {
+            sourceJobId: (snapshot as any).jobId ?? null,
+            createdAt: (snapshot as any).createdAt ? new Date((snapshot as any).createdAt).toISOString() : null,
+            wasReused: (snapshot as any).jobId != null && (snapshot as any).jobId !== resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof (snapshot as any).engineVersion === "number" ? (snapshot as any).engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=audience snap=${(snapshot as any).id} err=${e?.message ?? String(e)}`);
+      }
+
+      return res.json({ ...snapshot, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt, envelope });
     } catch (err: any) {
       console.error("[AudienceEngine-Route] Latest error:", err.message);
       return res.status(500).json({ error: err.message });

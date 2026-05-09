@@ -24,6 +24,8 @@ import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
 import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -412,6 +414,35 @@ export function registerAwarenessEngineRoutes(app: Express) {
         return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
+      // Phase C3 — emit LiveSnapshotEnvelope. Build a small output object
+      // exposing primaryRoute + dataReliability fields the contract reads.
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const awarenessOutput = {
+          primaryRoute: safeJsonParse(latest.primaryRoute),
+          alternativeRoute: safeJsonParse(latest.alternativeRoute),
+          dataReliability: safeJsonParse(latest.dataReliability),
+          structuralWarnings: safeJsonParse(latest.structuralWarnings) || [],
+        };
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("awareness", awarenessOutput, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=awareness snap=${latest.id} err=${e?.message ?? String(e)}`);
+      }
+
       res.json({
         exists: true,
         runId: __resolved.runId,
@@ -423,6 +454,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
         status: latest.status,
         statusMessage: latest.statusMessage,
         engineVersion: latest.engineVersion,
+        envelope,
         primaryRoute: safeJsonParse(latest.primaryRoute),
         alternativeRoute: safeJsonParse(latest.alternativeRoute),
         rejectedRoute: safeJsonParse(latest.rejectedRoute),

@@ -17,6 +17,8 @@ import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
 import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -413,6 +415,38 @@ export function registerFunnelEngineRoutes(app: Express) {
         return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
+      // Phase C3 — emit LiveSnapshotEnvelope. Build output covering the
+      // funnel contract's required paths (primaryFunnel, funnelStrengthScore,
+      // trustPathAnalysis.gaps, confidenceScore).
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const funnelOutput = {
+          primaryFunnel: safeJsonParse(latest.primaryFunnel),
+          alternativeFunnel: safeJsonParse(latest.alternativeFunnel),
+          funnelStrengthScore: latest.funnelStrengthScore,
+          trustPathAnalysis: safeJsonParse(latest.trustPathAnalysis),
+          frictionMap: safeJsonParse(latest.frictionMap),
+          confidenceScore: latest.confidenceScore,
+        };
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("funnel", funnelOutput, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=funnel snap=${latest.id} err=${e?.message ?? String(e)}`);
+      }
+
       res.json({
         exists: true,
         runId: __resolved.runId,
@@ -424,6 +458,7 @@ export function registerFunnelEngineRoutes(app: Express) {
         status: latest.status,
         statusMessage: latest.statusMessage,
         engineVersion: latest.engineVersion,
+        envelope,
         primaryFunnel: safeJsonParse(latest.primaryFunnel),
         alternativeFunnel: safeJsonParse(latest.alternativeFunnel),
         rejectedFunnel: safeJsonParse(latest.rejectedFunnel),

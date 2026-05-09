@@ -25,6 +25,8 @@ import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
 import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -390,6 +392,58 @@ export function registerIntegrityEngineRoutes(app: Express) {
         return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
+      // Phase C3 — emit LiveSnapshotEnvelope. The integrity_snapshots table
+      // does not persist `zeroLeakage`/`traceabilityComplete`/`failureReasons`
+      // as separate columns, so we derive them deterministically from the
+      // already-persisted layerResults + flaggedInconsistencies + status. This
+      // matches the contract's read paths until/unless the schema is
+      // extended.
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const layerResultsParsed = safeJsonParse(latest.layerResults) || [];
+        const structuralWarningsParsed = safeJsonParse(latest.structuralWarnings) || [];
+        const flaggedInconsistenciesParsed = safeJsonParse(latest.flaggedInconsistencies) || [];
+        const failedLayers = Array.isArray(layerResultsParsed)
+          ? layerResultsParsed.filter((l: any) => l && (l.status === "FAIL" || l.status === "FAILED" || l.passed === false))
+          : [];
+        const failureReasons: string[] = [
+          ...failedLayers.map((l: any) => typeof l?.reason === "string" ? l.reason : (typeof l?.layer === "string" ? `${l.layer}_FAILED` : "LAYER_FAILED")),
+          ...(Array.isArray(flaggedInconsistenciesParsed) ? flaggedInconsistenciesParsed.map((i: any) => typeof i === "string" ? i : (i?.reason || i?.code || "INCONSISTENCY")) : []),
+        ].filter((r) => typeof r === "string" && r.length > 0);
+        const zeroLeakage = Array.isArray(flaggedInconsistenciesParsed) && flaggedInconsistenciesParsed.length === 0;
+        const traceabilityComplete = latest.safeToExecute === true && latest.status === "PASS" && failedLayers.length === 0;
+
+        const integrityOutput = {
+          overallIntegrityScore: latest.overallIntegrityScore,
+          safeToExecute: latest.safeToExecute,
+          status: latest.status,
+          overallStatus: latest.status,
+          zeroLeakage,
+          traceabilityComplete,
+          failureReasons,
+          structuralWarnings: structuralWarningsParsed,
+          flaggedInconsistencies: flaggedInconsistenciesParsed,
+          layerResults: layerResultsParsed,
+        };
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("integrity", integrityOutput, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=integrity snap=${latest.id} err=${e?.message ?? String(e)}`);
+      }
+
       res.json({
         exists: true,
         runId: __resolved.runId,
@@ -401,6 +455,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
         status: latest.status,
         statusMessage: latest.statusMessage,
         engineVersion: latest.engineVersion,
+        envelope,
         overallIntegrityScore: latest.overallIntegrityScore,
         safeToExecute: latest.safeToExecute,
         layerResults: safeJsonParse(latest.layerResults),

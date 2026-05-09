@@ -15,6 +15,8 @@ import { getActiveRoot, validateRootBinding, validatePreGeneration, validatePost
 
 import { resolveAccountId } from "../auth";
 import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -365,6 +367,39 @@ export function registerOfferEngineRoutes(app: Express) {
         layerDiagnostics: safeJsonParse(latest.layerDiagnostics),
       });
 
+      // Phase C3 — emit LiveSnapshotEnvelope. Pass the normalized offer
+      // payload + offerStrengthScore + structuralWarnings so contract paths
+      // (primaryOffer, primaryOffer.coreOutcome, etc.) resolve correctly.
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const offerOutput = {
+          primaryOffer: storedNormalized.primaryOffer,
+          alternativeOffer: storedNormalized.alternativeOffer,
+          rejectedOffer: storedNormalized.rejectedOffer,
+          offerStrengthScore: latest.offerStrengthScore,
+          confidenceScore: latest.confidenceScore,
+          structuralWarnings: safeJsonParse(latest.structuralWarnings) || [],
+          layerDiagnostics: storedNormalized.layerDiagnostics,
+        };
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("offer", offerOutput, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=offer snap=${latest.id} err=${e?.message ?? String(e)}`);
+      }
+
       res.json({
         exists: true,
         runId: __resolved.runId,
@@ -376,6 +411,7 @@ export function registerOfferEngineRoutes(app: Express) {
         status: latest.status,
         statusMessage: storedNormalized.statusMessage ?? latest.statusMessage,
         engineVersion: latest.engineVersion,
+        envelope,
         primaryOffer: storedNormalized.primaryOffer,
         alternativeOffer: storedNormalized.alternativeOffer,
         rejectedOffer: storedNormalized.rejectedOffer,

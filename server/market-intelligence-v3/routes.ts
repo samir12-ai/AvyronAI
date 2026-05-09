@@ -12,6 +12,8 @@ import type { MIv3Mode } from "./types";
 import { checkValidationSession } from "../engine-hardening";
 
 import { resolveAccountId } from "../auth";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "threats", "history"];
 
 function enforceEngineWhitelist(req: any): void {
@@ -128,6 +130,53 @@ export function registerMIv3Routes(app: Express) {
       const snapshot = snapshots[0];
       const readiness = getEngineReadinessState(snapshot, campaignId, ENGINE_VERSION);
       const result = buildResultFromSnapshot(snapshot);
+
+      // Phase C3 — emit LiveSnapshotEnvelope. MI's contract reads required
+      // fields at the *root* of the engine output (signalData, confidenceData,
+      // marketState, trajectoryData, dominanceData, diagnosticsData.signalComposition).
+      // `buildResultFromSnapshot` returns those fields nested differently, so
+      // we build a flat contract-facing object directly from the parsed
+      // snapshot text columns. MI is also the one engine with
+      // livenessRule="reuse_allowed", so wasReused is computed from
+      // snapshot.jobId vs resolved.runId. The MI snapshot uses
+      // `analysisVersion` (not `engineVersion`) for schemaVersion.
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const safeJsonParse = (text: any): any => {
+          if (!text) return null;
+          if (typeof text !== "string") return text;
+          try { return JSON.parse(text); } catch { return null; }
+        };
+        const miContractOutput = {
+          signalData: safeJsonParse((snapshot as any).signalData),
+          confidenceData: safeJsonParse((snapshot as any).confidenceData),
+          marketState: (snapshot as any).marketState ?? null,
+          trajectoryData: safeJsonParse((snapshot as any).trajectoryData),
+          dominanceData: safeJsonParse((snapshot as any).dominanceData),
+          diagnosticsData: safeJsonParse((snapshot as any).diagnosticsData),
+          narrativeSynthesis: (snapshot as any).narrativeSynthesis ?? null,
+          marketDiagnosis: (snapshot as any).marketDiagnosis ?? null,
+          objectionMapData: safeJsonParse((snapshot as any).objectionMapData),
+        };
+        const staleness = computeStalenessCoefficient(snapshot as any);
+        envelope = wrapAsEnvelope("market_intelligence", miContractOutput, {
+          snapshotId: snapshot.id,
+          campaignId,
+          runId: resolved.runId,
+          currentJobId: resolved.runId,
+          provenance: {
+            sourceJobId: (snapshot as any).jobId ?? null,
+            createdAt: snapshot.createdAt ? new Date(snapshot.createdAt).toISOString() : null,
+            wasReused: (snapshot as any).jobId != null && (snapshot as any).jobId !== resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof (snapshot as any).analysisVersion === "number" ? (snapshot as any).analysisVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=market_intelligence snap=${snapshot.id} err=${e?.message ?? String(e)}`);
+      }
+
       return res.json({
         snapshot,
         ...result,
@@ -138,6 +187,7 @@ export function registerMIv3Routes(app: Express) {
         isLatest: resolved.isLatest,
         isStale: resolved.isStale,
         completedAt: resolved.completedAt,
+        envelope,
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
