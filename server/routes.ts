@@ -52,6 +52,7 @@ import { registerSystemControlRoutes } from "./system-control/routes";
 import { registerFullReportRoutes } from "./system-control/full-report";
 import { registerExplorationBudgetRoutes } from "./exploration-budget/routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
+import * as crypto from "crypto";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
 import { registerAuthRoutes, resolveAccountId } from "./auth";
@@ -1578,7 +1579,6 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
       const encodedSig = parts[0];
       const payload = parts[1];
 
-      const crypto = require("crypto");
       const expectedSig = crypto
         .createHmac("sha256", META_APP_SECRET)
         .update(payload)

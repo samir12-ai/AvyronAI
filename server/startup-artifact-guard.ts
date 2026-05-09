@@ -1,7 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
-const SERVER_ROOT = path.resolve(__dirname);
+// ESM-safe __dirname. The production bundle is built with `--format=esm`, where
+// the CommonJS `__dirname` global is undefined and dereferencing it crashes the
+// process at module-load time. Derive the directory from import.meta.url so the
+// guard works under both tsx (dev) and the bundled ESM output (production).
+const SERVER_ROOT = path.dirname(fileURLToPath(import.meta.url));
 
 function findStaleJsArtifacts(dir: string): string[] {
   const stale: string[] = [];
