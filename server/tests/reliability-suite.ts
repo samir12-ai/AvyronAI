@@ -264,6 +264,129 @@ scenarios.push(runScenario(
   },
 ));
 
+// ─── S9: Stale snapshot (sourceJobId mismatch) → STALE_SNAPSHOT_EVIDENCE ────
+// A required engine result carries _provenance from a prior jobId. With
+// currentJobId provided in config, checkSnapshotFreshness must mark it STALE
+// and collectBlockReasons must promote it to STALE_SNAPSHOT_EVIDENCE.
+scenarios.push(runScenario(
+  "S9: stale snapshot (sourceJobId≠currentJobId) → STALE_SNAPSHOT_EVIDENCE, no PASS",
+  () => {
+    const r = buildHealthyResults();
+    // Attach prior-run provenance to one engine's output.
+    const audience = r.get("audience")!;
+    audience.output = {
+      ...audience.output,
+      _provenance: {
+        sourceJobId: "prior-run-job-zzz",
+        sourceSnapshotId: "snap-aaa",
+        createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
+        wasReused: true,
+        ageInDays: 5,
+      },
+    };
+    return buildInput(r, { config: { campaignId: "test-campaign", accountId: "test-account", currentJobId: "current-run-job-xyz" } as any });
+  },
+  (v) => {
+    const codes = v.blockReasons.map((b: any) => b.code);
+    const passed = v.verdict !== "PASS"
+      && codes.includes("STALE_SNAPSHOT_EVIDENCE");
+    return { passed, details: passed ? "OK" : `expected STALE_SNAPSHOT_EVIDENCE, got verdict=${v.verdict} mode=${v.executionMode} codes=${codes.join(",")}` };
+  },
+));
+
+// ─── S9b: freshnessClass NEEDS_REFRESH (no jobId mismatch) → STALE ─────────
+// Validates that the architect-found dead branch is now live: even with
+// matching sourceJobId, a NEEDS_REFRESH/INCOMPATIBLE classification must
+// trigger STALE.
+scenarios.push(runScenario(
+  "S9b: freshnessClass=NEEDS_REFRESH (matching jobId) → STALE_SNAPSHOT_EVIDENCE",
+  () => {
+    const r = buildHealthyResults();
+    const audience = r.get("audience")!;
+    audience.output = {
+      ...audience.output,
+      _provenance: {
+        sourceJobId: "current-run-job-xyz",
+        sourceSnapshotId: "snap-bbb",
+        createdAt: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
+        wasReused: true,
+        freshnessClass: "NEEDS_REFRESH",
+        ageInDays: 30,
+      },
+    };
+    return buildInput(r, { config: { campaignId: "test-campaign", accountId: "test-account", currentJobId: "current-run-job-xyz" } as any });
+  },
+  (v) => {
+    const codes = v.blockReasons.map((b: any) => b.code);
+    const passed = v.verdict !== "PASS" && codes.includes("STALE_SNAPSHOT_EVIDENCE");
+    return { passed, details: passed ? "OK" : `expected STALE_SNAPSHOT_EVIDENCE, got verdict=${v.verdict} codes=${codes.join(",")}` };
+  },
+));
+
+// ─── S10: Older completed run vs newer failed run → not silently stale-pass ─
+// Pure-function test of detectNewerNonResolvableRun: the dashboard/API
+// resolver MUST surface the newer failed run, not silently present the older
+// COMPLETED run as the active truth.
+import { detectNewerNonResolvableRun } from "../orchestrator/run-resolver";
+
+scenarios.push((() => {
+  const name = "S10: newer FAILED run shadows older COMPLETED — resolver must surface it";
+  try {
+    const olderCompleted = {
+      id: "run-old",
+      createdAt: new Date("2026-05-01T10:00:00Z"),
+      completedAt: new Date("2026-05-01T10:30:00Z"),
+    };
+    const newerFailed = {
+      id: "run-new",
+      status: "FAILED",
+      createdAt: new Date("2026-05-08T16:00:00Z"),
+      completedAt: null,
+    };
+    const shadow = detectNewerNonResolvableRun(olderCompleted, newerFailed);
+
+    // Control checks: must NOT shadow when:
+    //  (a) latestAny is itself resolvable (COMPLETED)
+    //  (b) latestAny is the same run as resolved
+    //  (c) latestAny is older than resolved
+    const noShadowControl = detectNewerNonResolvableRun(olderCompleted, {
+      id: "run-new", status: "COMPLETED", createdAt: new Date("2026-05-08T16:00:00Z"), completedAt: null,
+    });
+    const noShadowSame = detectNewerNonResolvableRun(olderCompleted, {
+      id: "run-old", status: "FAILED", createdAt: olderCompleted.createdAt, completedAt: olderCompleted.completedAt,
+    });
+    const noShadowOlder = detectNewerNonResolvableRun(olderCompleted, {
+      id: "run-older-failed", status: "FAILED", createdAt: new Date("2026-04-01T10:00:00Z"), completedAt: null,
+    });
+
+    const ok = shadow !== null
+      && shadow.runId === "run-new"
+      && shadow.status === "FAILED"
+      && noShadowControl === null
+      && noShadowSame === null
+      && noShadowOlder === null;
+
+    return {
+      name,
+      passed: ok,
+      details: ok
+        ? `shadowed=${shadow!.runId}/${shadow!.status}; controls null=ok`
+        : `shadow=${JSON.stringify(shadow)} ctrlControl=${JSON.stringify(noShadowControl)} ctrlSame=${JSON.stringify(noShadowSame)} ctrlOlder=${JSON.stringify(noShadowOlder)}`,
+      verdict: "n/a",
+      executionMode: "n/a",
+      blocks: [],
+      contradictions: 0,
+      verifiedPass: 0,
+      unverified: 0,
+    } as ScenarioResult;
+  } catch (e: any) {
+    return {
+      name, passed: false, details: `threw: ${e.message}`,
+      verdict: "n/a", executionMode: "n/a", blocks: [], contradictions: 0, verifiedPass: 0, unverified: 0,
+    } as ScenarioResult;
+  }
+})());
+
 // ─── Report ─────────────────────────────────────────────────────────────────
 console.log("\n══════════════════════════════════════════════════════════════════");
 console.log("Phase R (May 2026) — Reliability Suite Results");

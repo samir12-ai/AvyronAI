@@ -279,6 +279,30 @@ export interface SystemControlVerdict {
   recoveryPlan?: RecoveryPlan | null;
 }
 
+/**
+ * Phase R T002 — provenance attached to a hydrated engine output when System
+ * Control needs to decide whether the result is fresh-from-this-run or a
+ * reused snapshot from a prior run.
+ *
+ * Set by snapshot-reuse.ts:safeReuse() on every reuse hit. When absent, the
+ * result is assumed to come from a fresh in-run engine execution and freshness
+ * is not in question.
+ */
+export interface SnapshotProvenance {
+  /** jobId stamped on the snapshot row at the time it was originally written. */
+  sourceJobId: string | null;
+  /** Snapshot row id (for traceability). */
+  sourceSnapshotId: string;
+  /** ISO timestamp the snapshot was originally written. */
+  createdAt: string | null;
+  /** True iff the engine did not run this round; the result was loaded from cache. */
+  wasReused: boolean;
+  /** snapshot-trust freshness classification (FRESH/AGING/NEEDS_REFRESH/...) */
+  freshnessClass?: string;
+  /** Snapshot age in days at the moment the verdict is being computed. */
+  ageInDays?: number;
+}
+
 export interface SystemControlInput {
   results: Map<EngineId, EngineStepResult>;
   integrityReport: IntegrityReport | null;
@@ -289,5 +313,13 @@ export interface SystemControlInput {
   config: {
     campaignId: string;
     accountId: string;
+    /**
+     * Phase R T002 — the jobId for the run currently being evaluated. Required
+     * for `checkSnapshotFreshness` to detect engine outputs whose snapshot row
+     * carries a different sourceJobId (i.e. result silently reused from a
+     * prior run). When null/undefined, freshness check is skipped (legacy
+     * callers that have not been migrated yet).
+     */
+    currentJobId?: string | null;
   };
 }

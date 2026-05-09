@@ -3679,7 +3679,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       signalComposition: ctx.signalComposition || null,
       sglCoverageSufficient: sglSummaryData?.coverage?.coverageSufficient ?? null,
       ssc: ctx.ssc || null,
-      config: { campaignId: config.campaignId, accountId: config.accountId },
+      config: { campaignId: config.campaignId, accountId: config.accountId, currentJobId: jobId },
     });
     // ── COMMERCIAL REASONING: systemJudgement (Phase 2 May 2026) ──
     // Runs AFTER deterministic evaluateSystemControl so the principal's commercial

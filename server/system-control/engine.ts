@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import {
   checkPipelineCompleteness,
+  checkSnapshotFreshness,
   checkConversionPath,
   checkSignalGrounding,
   checkIntegrityStatus,
@@ -50,6 +51,10 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   // their (absent) outputs. This is the global guard against a confident
   // PASS verdict from a partially-failed pipeline.
   structuralChecks.push(checkPipelineCompleteness(input.results));
+  // Phase R T002 — snapshot freshness gate. Detects engine outputs silently
+  // reused from a different jobId / NEEDS_REFRESH / schema-INCOMPATIBLE
+  // snapshots. Skipped when currentJobId is not provided (legacy callers).
+  structuralChecks.push(checkSnapshotFreshness(input.results, input.config.currentJobId ?? null));
   structuralChecks.push(checkConversionPath(input.results));
   structuralChecks.push(checkSignalGrounding(input.signalComposition, budgetAction));
   structuralChecks.push(checkIntegrityStatus(input.integrityReport));

@@ -49,6 +49,21 @@ function unknown(check: string, reason: string): StructuralCheck {
   };
 }
 
+function stale(check: string, reason: string): StructuralCheck {
+  // STALE: a check could only be evaluated using snapshot data that does NOT
+  // belong to the current run (sourceJobId mismatch, or snapshot-trust class
+  // NEEDS_REFRESH/INCOMPATIBLE). Treated as unverified — see UNVERIFIED_STATUSES
+  // in types.ts. collectBlockReasons promotes a STALE-only batch to the
+  // STALE_SNAPSHOT_EVIDENCE block code; STALE never counts as PASS.
+  return {
+    check,
+    passed: false,
+    status: "STALE",
+    details: `${check}: only stale prior-run evidence available — ${reason}`,
+    unverifiedReason: reason,
+  };
+}
+
 function skipped(check: string, reason: string): StructuralCheck {
   // Use SKIPPED only when the check is genuinely Not-Applicable to the current
   // system state (e.g. no objections were declared so objection-coverage cannot
@@ -251,6 +266,73 @@ const PIPELINE_REQUIRED_ENGINES: EngineId[] = [
   "iteration",
   "retention",
 ];
+
+/**
+ * Phase R T002 — snapshot-freshness gate.
+ *
+ * For every required engine, inspect its output for an attached
+ * `_provenance` block (set by snapshot-reuse.ts:safeReuse on cache hits).
+ * If the result is a reuse from a different jobId, OR the snapshot is
+ * classified NEEDS_REFRESH/INCOMPATIBLE by snapshot-trust, the check fails
+ * STALE. This guarantees no PASS verdict can be issued from snapshots that
+ * silently belong to a previous run.
+ *
+ * Engine results without provenance are assumed to be fresh-from-this-run
+ * (snapshot-reuse only attaches provenance on cache hits). Therefore this
+ * check is non-disruptive when the orchestrator runs every engine end-to-end.
+ *
+ * If `currentJobId` is null/undefined we skip the check entirely (legacy
+ * caller path); explicit opt-in only.
+ */
+export function checkSnapshotFreshness(
+  results: Map<EngineId, EngineStepResult>,
+  currentJobId: string | null | undefined,
+): StructuralCheck {
+  if (!currentJobId) {
+    // Legacy callers (or test inputs) that have not opted into the freshness
+    // gate must not be punished — return PASS-noop. The orchestrator's only
+    // call site (server/orchestrator/index.ts) ALWAYS supplies currentJobId,
+    // so production verdicts are always gated.
+    return pass("snapshot_freshness", "freshness gate not opted-in (no currentJobId)");
+  }
+
+  const staleEngines: string[] = [];
+  const detail: string[] = [];
+
+  for (const engineId of PIPELINE_REQUIRED_ENGINES) {
+    const result = results.get(engineId);
+    if (!result) continue; // pipeline-completeness check owns the missing case
+    const provenance = (result.output as any)?._provenance;
+    if (!provenance || provenance.wasReused !== true) continue;
+
+    const sourceJobId = provenance.sourceJobId ?? null;
+    const freshnessClass = provenance.freshnessClass ?? null;
+    const ageInDays = provenance.ageInDays;
+
+    const jobMismatch = sourceJobId !== null && sourceJobId !== currentJobId;
+    const schemaIncompatible = freshnessClass === "INCOMPATIBLE";
+    const needsRefresh = freshnessClass === "NEEDS_REFRESH";
+
+    if (jobMismatch || schemaIncompatible || needsRefresh) {
+      staleEngines.push(engineId);
+      const reasons: string[] = [];
+      if (jobMismatch) reasons.push(`sourceJobId=${sourceJobId ?? "null"}≠currentJobId=${currentJobId}`);
+      if (schemaIncompatible) reasons.push(`schema=INCOMPATIBLE`);
+      if (needsRefresh) reasons.push(`freshness=NEEDS_REFRESH`);
+      if (typeof ageInDays === "number") reasons.push(`age=${ageInDays}d`);
+      detail.push(`${engineId}[${reasons.join(",")}]`);
+    }
+  }
+
+  if (staleEngines.length === 0) {
+    return pass("snapshot_freshness", "all required engines fresh-from-current-run or freshly reused");
+  }
+
+  return stale(
+    "snapshot_freshness",
+    `stale_engines=[${staleEngines.join(",")}] details=${detail.join(";")}`,
+  );
+}
 
 export function checkPipelineCompleteness(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const missing: string[] = [];

@@ -1,0 +1,107 @@
+Yes — proceed with **T002 Snapshot Freshness Gate** next.
+
+This is the higher priority before dashboard work.
+
+We already fixed the most dangerous issue:
+
+> skipped / missing / timeout checks no longer count as PASS
+
+Now we must eliminate the second major truthfulness risk:
+
+> stale snapshots being used as fresh evidence.
+
+---
+
+## Priority Order
+
+Please proceed in this order:
+
+1. **T002 — Snapshot Freshness Gate**
+2. S9 + S10 reliability tests
+3. **T006 — Dashboard Truthfulness**
+
+The dashboard should reflect the truth, but first the backend must enforce the truth.
+
+---
+
+## T002 Goal
+
+No final verdict should use stale snapshots as live evidence.
+
+Every snapshot consumed by System Control or downstream verdict logic must be verified against:
+
+* current runId
+* campaignId
+* engineId
+* timestamp freshness
+* engine version
+* lineage / parent job if available
+
+If a snapshot is reused intentionally, the system must mark it as reused, not fresh.
+
+---
+
+## Required Behavior
+
+Stale snapshot must NOT count as PASS.
+
+It should produce:
+
+* STALE
+* UNKNOWN
+* SYSTEM_UNTRUSTED
+* HUMAN_REVIEW_REQUIRED
+* or BLOCKED_BY_PIPELINE_FAILURE
+
+depending on severity.
+
+But never:
+
+> PASS / FULL_EXECUTION
+
+---
+
+## Required Tests
+
+Please add and pass:
+
+### S9 — Stale Snapshot
+
+A required engine snapshot is older than the current run or belongs to a previous job.
+
+Expected:
+
+* verdict ≠ PASS
+* execution mode ≠ FULL_EXECUTION
+* reason includes STALE_SNAPSHOT or equivalent
+
+### S10 — Older Completed Run vs Newer Failed Run
+
+A previous completed run exists, but a newer run failed or timed out.
+
+Expected:
+
+* UI/API/resolver must not silently show the older completed run as the active truth
+* latest state should reflect newer failed/incomplete run
+* no confident PASS should be shown from the older run
+
+---
+
+## After T002
+
+Once T002 + S9/S10 are green, move to:
+
+### T006 Dashboard Truthfulness
+
+The dashboard should then surface:
+
+* timeout
+* missing engines
+* stale snapshots
+* incomplete runs
+* system-untrusted verdicts
+* latest failed run vs older completed run
+
+But do not start dashboard work until snapshot freshness is enforced backend-side.
+
+Thanks.

@@ -17,6 +17,7 @@ import {
   iterationSnapshots,
   retentionSnapshots,
 } from "@shared/schema";
+import { buildFreshnessMetadata } from "../shared/snapshot-trust";
 
 export const REUSE_LOG = "[Reuse]";
 
@@ -122,6 +123,25 @@ async function safeReuse<H>(
   if (incompleteReason) {
     logReuseRejected(engine, snap.id, inputHash, `incomplete:${incompleteReason}`);
     return null;
+  }
+  // Phase R T002 — stamp every reuse hit with snapshot provenance so System
+  // Control can detect stale evidence (sourceJobId !== currentJobId, or
+  // freshness class NEEDS_REFRESH/INCOMPATIBLE) and so the dashboard can
+  // surface "this engine output came from a prior run". The orchestrator
+  // does NOT need to set this field on fresh-this-run executions; absent
+  // provenance == fresh.
+  try {
+    const fm = buildFreshnessMetadata(snap);
+    (hydrated as any)._provenance = {
+      sourceJobId: snap.jobId ?? null,
+      sourceSnapshotId: snap.id,
+      createdAt: snap.createdAt ? new Date(snap.createdAt).toISOString() : null,
+      wasReused: true,
+      freshnessClass: fm.freshnessClass,
+      ageInDays: fm.ageInDays,
+    };
+  } catch {
+    // Provenance is best-effort — never reject a reuse hit because of it.
   }
   return { snap, hydrated };
 }
