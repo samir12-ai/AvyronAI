@@ -1,0 +1,110 @@
+We’ve now completed the registry expansion and the contract system covers all 15 strategic engines.
+
+Current state:
+
+* C0 ✅ Registry foundation
+* C1 ✅ Core orchestrator/system-control cutover
+* C2 ✅ Shadow audit infrastructure
+* C3 ✅ Backend envelopes + FE trust badges
+* C4 ✅ Enforcement code path implemented (flag still OFF)
+* Registry coverage: 15/15 engines
+* Reliability suite: 11/11 PASS
+* Backend boots cleanly
+* Frontend envelope/truthfulness flow is active
+
+Before we flip:
+ENFORCE_ENGINE_CONTRACTS=true
+
+we need a real shadow telemetry pass on live campaign runs.
+
+Please do the following:
+
+1. Run multiple real end-to-end campaigns under shadow mode
+   Priority:
+
+* MarketMindAI
+* At least 2–3 additional campaigns with different states:
+
+  * healthy
+  * partially blocked
+  * low-confidence
+  * reused snapshots
+  * timeout/interrupted runs
+
+2. Capture and review all:
+   [ContractAudit] SHADOW
+   logs across all 15 engines.
+
+We need:
+
+* engine id
+* missing fields
+* invalid fields
+* stale/live trust state
+* contractStatus
+* snapshot provenance
+* legacyPath usage
+* false-positive rate
+
+3. Produce a Shadow Telemetry Report
+   Need:
+
+* every violation grouped by engine
+* real bug vs false-positive classification
+* fields that should become stricter schemas
+* fields that require migration support
+* legacy paths still actively used
+* any engine output shape drift
+* any snapshot reuse inconsistencies
+* recommendation:
+
+  * SAFE_TO_FLIP
+  * NEEDS_PATCHES_BEFORE_FLIP
+
+4. Verify current-run-only enforcement
+   Especially confirm:
+
+* no reused snapshot enters live evidence for strategic engines
+* stale snapshots are historical-only
+* wrong-run snapshots are rejected
+* incomplete contracts cannot silently PASS
+
+5. Confirm frontend truthfulness
+   Audit all engine tabs and badges:
+
+* stale
+* historical only
+* contract incomplete
+* reused unverified
+* incompatible version
+* rerun CTA
+
+Need screenshots + API payload verification.
+
+6. Recommend final C4 activation readiness
+   I want a final explicit recommendation:
+
+* can we safely enable:
+  ENFORCE_ENGINE_CONTRACTS=true
+* or not yet
+
+If not:
+
+* list exact blockers
+* exact engines
+* exact fields
+* exact fixes required
+
+Important:
+Do NOT weaken enforcement rules.
+Do NOT loosen contracts just to make runs pass.
+If shadow logs reveal failures, fix the engine outputs or contract mappings instead of bypassing validation.
+
+Goal:
+After C4 flips, the system must be incapable of:
+
+* using stale snapshots as live evidence
+* silently accepting incomplete outputs
+* reading wrong field paths
+* producing fake PASS states from partial data
+* masking failed/newer runs behind old successful runs
