@@ -95,6 +95,11 @@ import { ENGINE_VERSION as AWARENESS_ENGINE_VERSION } from "../../awareness-engi
 import { ENGINE_VERSION as INTEGRITY_ENGINE_VERSION } from "../../integrity-engine/constants";
 import { ENGINE_VERSION as STATISTICAL_VALIDATION_ENGINE_VERSION } from "../../strategy/statistical-validation/constants";
 import { ENGINE_VERSION as BUDGET_GOVERNOR_ENGINE_VERSION } from "../../strategy/budget-governor/constants";
+import { ENGINE_VERSION as DIFFERENTIATION_ENGINE_VERSION } from "../../differentiation-engine/constants";
+import { ENGINE_VERSION as MECHANISM_ENGINE_VERSION } from "../../mechanism-engine/constants";
+import { ENGINE_VERSION as PERSUASION_ENGINE_VERSION } from "../../persuasion-engine/constants";
+import { ENGINE_VERSION as ITERATION_ENGINE_VERSION } from "../../strategy/iteration-engine/constants";
+import { ENGINE_VERSION as RETENTION_ENGINE_VERSION } from "../../strategy/retention-engine/constants";
 
 // ────────────────────────────────────────────────────────────────────────────
 // C2 shared schemas — kept loose on purpose. The shadow-audit goal is
@@ -482,6 +487,129 @@ const BUDGET_GOVERNOR_CONTRACT: EngineContract = {
   requiredBy: ["channel_selection", "retention", "system_control", "build_plan_layer", "recovery_planner"],
 };
 
+// ────────────────────────────────────────────────────────────────────────────
+// HIGH/MEDIUM tier engines — added so the registry covers all 15. These
+// engines do not directly gate the System Control PASS/BLOCK verdict, but
+// their outputs feed downstream consumers (build_plan_layer, contradiction
+// detector, audit_control). Registering them lets shadow validation surface
+// any missing fields so we have full coverage before flipping
+// `ENFORCE_ENGINE_CONTRACTS=true`. Schemas stay loose — presence + obvious
+// shape — until shadow logs prove tighter shapes are safe.
+// Field IDs derived from `.local/plans/engine-contract-global-enforcement.md`
+// §4.3 cross-referenced against each engine's `*/types.ts`.
+// ────────────────────────────────────────────────────────────────────────────
+
+const DIFFERENTIATION_CONTRACT: EngineContract = {
+  engineId: "differentiation",
+  engineVersion: DIFFERENTIATION_ENGINE_VERSION,
+  livenessRule: "current_run_only",
+  requiredOutputs: [
+    { id: "pillars",            path: ["pillars"],            shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["mechanism", "offer", "awareness", "persuasion", "integrity", "build_plan_layer.differentiation_block"] },
+    { id: "mechanismFraming",   path: ["mechanismFraming"],   shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["mechanism", "offer", "persuasion"] },
+    { id: "mechanismCore",      path: ["mechanismCore"],      shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["mechanism", "offer", "persuasion"] },
+    { id: "claimStructures",    path: ["claimStructures"],    shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["mechanism", "offer", "persuasion", "integrity"] },
+    { id: "proofArchitecture",  path: ["proofArchitecture"],  shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["mechanism", "offer", "persuasion", "integrity"] },
+    { id: "authorityMode",      path: ["authorityMode"],      shape: z.string(),            emptyIsMissing: true,  consumers: ["persuasion", "integrity"] },
+    { id: "confidenceScore",    path: ["confidenceScore"],    shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["mechanism", "system_control.confidence_chain_integrity"] },
+  ],
+  optionalOutputs: [
+    { id: "trustPriorityMap",      path: ["trustPriorityMap"],      shape: z.array(z.any()), emptyIsMissing: false, consumers: ["persuasion"] },
+    { id: "stabilityResult",       path: ["stabilityResult"],       shape: LooseObjectSchema, emptyIsMissing: false, consumers: ["audit_control.differentiation_panel"] },
+    { id: "collisionDiagnostics",  path: ["collisionDiagnostics"],  shape: z.array(z.any()), emptyIsMissing: false, consumers: ["audit_control.differentiation_panel"] },
+    { id: "celDepthCompliance",    path: ["celDepthCompliance"],    shape: z.any().nullable(), emptyIsMissing: false, consumers: ["system_control.cel_depth"] },
+  ],
+  requiredBy: ["mechanism", "offer", "awareness", "persuasion", "integrity", "build_plan_layer", "system_control"],
+};
+
+const MECHANISM_CONTRACT: EngineContract = {
+  engineId: "mechanism",
+  engineVersion: MECHANISM_ENGINE_VERSION,
+  livenessRule: "current_run_only",
+  requiredOutputs: [
+    { id: "primaryMechanism",       path: ["primaryMechanism"],                     shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["offer", "persuasion", "awareness", "integrity", "build_plan_layer.mechanism_block"] },
+    { id: "mechanismName",          path: ["primaryMechanism", "mechanismName"],    shape: z.string(),        emptyIsMissing: true,  consumers: ["offer", "persuasion", "awareness", "integrity"] },
+    { id: "mechanismType",          path: ["primaryMechanism", "mechanismType"],    shape: z.string(),        emptyIsMissing: true,  consumers: ["offer", "persuasion", "awareness"] },
+    { id: "mechanismSteps",         path: ["primaryMechanism", "mechanismSteps"],   shape: StringArraySchema, emptyIsMissing: true,  consumers: ["offer", "persuasion", "build_plan_layer.mechanism_block"] },
+    { id: "mechanismPromise",       path: ["primaryMechanism", "mechanismPromise"], shape: z.string(),        emptyIsMissing: true,  consumers: ["offer", "persuasion", "awareness"] },
+    { id: "axisConsistency",        path: ["axisConsistency"],                      shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["system_control.axis_consistency", "integrity"] },
+    { id: "confidenceScore",        path: ["confidenceScore"],                      shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["offer", "persuasion", "system_control.confidence_chain_integrity"] },
+  ],
+  optionalOutputs: [
+    { id: "alternativeMechanism",   path: ["alternativeMechanism"],   shape: z.any().nullable(),  emptyIsMissing: false, consumers: ["audit_control.mechanism_panel"] },
+    { id: "inheritedConfidence",    path: ["inheritedConfidence"],    shape: z.number().optional(), emptyIsMissing: false, consumers: ["audit_control.mechanism_panel"] },
+    { id: "rawLLMConfidence",       path: ["rawLLMConfidence"],       shape: z.number().optional(), emptyIsMissing: false, consumers: ["audit_control.mechanism_panel"] },
+    { id: "alternativeMechanisms",  path: ["alternativeMechanisms"],  shape: z.array(z.any()).optional(), emptyIsMissing: false, consumers: ["audit_control.mechanism_panel"] },
+  ],
+  requiredBy: ["offer", "persuasion", "awareness", "integrity", "build_plan_layer", "system_control"],
+};
+
+const PERSUASION_CONTRACT: EngineContract = {
+  engineId: "persuasion",
+  engineVersion: PERSUASION_ENGINE_VERSION,
+  livenessRule: "current_run_only",
+  requiredOutputs: [
+    { id: "primaryRoute",                  path: ["primaryRoute"],                                shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["integrity", "build_plan_layer.persuasion_block", "system_control.persuasion_strength"] },
+    { id: "persuasionMode",                path: ["primaryRoute", "persuasionMode"],              shape: z.string(),        emptyIsMissing: true,  consumers: ["integrity", "system_control.contradiction_detector.awareness_persuasion_mismatch"] },
+    { id: "primaryInfluenceDrivers",       path: ["primaryRoute", "primaryInfluenceDrivers"],     shape: StringArraySchema, emptyIsMissing: true,  consumers: ["integrity", "build_plan_layer.persuasion_block"] },
+    { id: "objectionPriorities",           path: ["primaryRoute", "objectionPriorities"],         shape: z.array(z.any()),  emptyIsMissing: true,  consumers: ["integrity", "system_control.zero_objection_coverage"] },
+    { id: "trustSequence",                 path: ["primaryRoute", "trustSequence"],               shape: StringArraySchema, emptyIsMissing: true,  consumers: ["integrity", "build_plan_layer.persuasion_block"] },
+    { id: "persuasionStrengthScore",       path: ["primaryRoute", "persuasionStrengthScore"],     shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["budget_governor", "channel_selection", "system_control.persuasion_strength", "system_control.confidence_chain_integrity"] },
+    { id: "boundaryCheck",                 path: ["boundaryCheck"],                               shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["integrity", "system_control.boundary_violations"] },
+    { id: "dataReliability",               path: ["dataReliability"],                             shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["system_control.signal_grounding"] },
+  ],
+  optionalOutputs: [
+    { id: "alternativeRoute",      path: ["alternativeRoute"],      shape: z.any().nullable(), emptyIsMissing: false, consumers: ["audit_control.persuasion_panel"] },
+    { id: "rejectedRoute",         path: ["rejectedRoute"],         shape: z.any().nullable(), emptyIsMissing: false, consumers: ["audit_control.persuasion_panel"] },
+    { id: "structuralWarnings",    path: ["structuralWarnings"],    shape: StringArraySchema, emptyIsMissing: false, consumers: ["recovery_planner"] },
+    { id: "autoCorrection",        path: ["autoCorrection"],        shape: z.any().optional(), emptyIsMissing: false, consumers: ["audit_control.persuasion_panel"] },
+    { id: "strategyAcceptability", path: ["strategyAcceptability"], shape: z.any().optional(), emptyIsMissing: false, consumers: ["audit_control.acceptability"] },
+  ],
+  requiredBy: ["integrity", "budget_governor", "channel_selection", "build_plan_layer", "system_control"],
+};
+
+const ITERATION_CONTRACT: EngineContract = {
+  engineId: "iteration",
+  engineVersion: ITERATION_ENGINE_VERSION,
+  livenessRule: "current_run_only",
+  requiredOutputs: [
+    { id: "nextTestHypotheses",     path: ["nextTestHypotheses"],     shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["build_plan_layer.iteration_block", "system_control.contradiction_detector.funnel_iteration"] },
+    { id: "optimizationTargets",    path: ["optimizationTargets"],    shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["build_plan_layer.iteration_block"] },
+    { id: "iterationPlan",          path: ["iterationPlan"],          shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["build_plan_layer.iteration_block"] },
+    { id: "boundaryCheck",          path: ["boundaryCheck"],          shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["system_control.boundary_violations"] },
+    { id: "dataReliability",        path: ["dataReliability"],        shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["system_control.signal_grounding"] },
+    { id: "confidenceScore",        path: ["confidenceScore"],        shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["system_control.confidence_chain_integrity"] },
+  ],
+  optionalOutputs: [
+    { id: "failedStrategyFlags",        path: ["failedStrategyFlags"],        shape: z.array(z.any()), emptyIsMissing: false, consumers: ["audit_control.iteration_panel", "recovery_planner"] },
+    { id: "structuralWarnings",         path: ["structuralWarnings"],         shape: StringArraySchema, emptyIsMissing: false, consumers: ["recovery_planner"] },
+    { id: "strategyAcceptability",      path: ["strategyAcceptability"],      shape: z.any().optional(), emptyIsMissing: false, consumers: ["audit_control.acceptability"] },
+    { id: "commercialIterationStrategy", path: ["commercialIterationStrategy"], shape: z.any().nullable(), emptyIsMissing: false, consumers: ["build_plan_layer.causal_narrative", "commercial_dna"] },
+  ],
+  requiredBy: ["build_plan_layer", "system_control"],
+};
+
+const RETENTION_CONTRACT: EngineContract = {
+  engineId: "retention",
+  engineVersion: RETENTION_ENGINE_VERSION,
+  livenessRule: "current_run_only",
+  requiredOutputs: [
+    { id: "retentionLoops",     path: ["retentionLoops"],     shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["build_plan_layer.retention_block"] },
+    { id: "churnRiskFlags",     path: ["churnRiskFlags"],     shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["build_plan_layer.retention_block", "system_control.churn_risk"] },
+    { id: "ltvExpansionPaths",  path: ["ltvExpansionPaths"],  shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["build_plan_layer.retention_block"] },
+    { id: "upsellTriggers",     path: ["upsellTriggers"],     shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["build_plan_layer.retention_block"] },
+    { id: "guardResult",        path: ["guardResult"],        shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["system_control.retention_guard"] },
+    { id: "boundaryCheck",      path: ["boundaryCheck"],      shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["system_control.boundary_violations"] },
+    { id: "confidenceScore",    path: ["confidenceScore"],    shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["system_control.confidence_chain_integrity"] },
+  ],
+  optionalOutputs: [
+    { id: "structuralWarnings",            path: ["structuralWarnings"],            shape: StringArraySchema, emptyIsMissing: false, consumers: ["recovery_planner"] },
+    { id: "dataReliability",               path: ["dataReliability"],               shape: LooseObjectSchema, emptyIsMissing: false, consumers: ["system_control.signal_grounding"] },
+    { id: "strategyAcceptability",         path: ["strategyAcceptability"],         shape: z.any().optional(), emptyIsMissing: false, consumers: ["audit_control.acceptability"] },
+    { id: "commercialRetentionEconomics",  path: ["commercialRetentionEconomics"],  shape: z.any().nullable(), emptyIsMissing: false, consumers: ["build_plan_layer.causal_narrative", "commercial_dna"] },
+  ],
+  requiredBy: ["build_plan_layer", "system_control"],
+};
+
 export const ENGINE_CONTRACT_REGISTRY: Partial<Record<EngineId, EngineContract>> = {
   channel_selection: CHANNEL_SELECTION_CONTRACT,
   funnel: FUNNEL_CONTRACT,
@@ -493,7 +621,9 @@ export const ENGINE_CONTRACT_REGISTRY: Partial<Record<EngineId, EngineContract>>
   integrity: INTEGRITY_CONTRACT,
   statistical_validation: STATISTICAL_VALIDATION_CONTRACT,
   budget_governor: BUDGET_GOVERNOR_CONTRACT,
-  // Remaining HIGH/MEDIUM tier engines (differentiation, mechanism,
-  // persuasion, iteration, retention) deferred to a follow-up PR — they
-  // do not gate the verdict's PASS/BLOCK path that motivated this work.
+  differentiation: DIFFERENTIATION_CONTRACT,
+  mechanism: MECHANISM_CONTRACT,
+  persuasion: PERSUASION_CONTRACT,
+  iteration: ITERATION_CONTRACT,
+  retention: RETENTION_CONTRACT,
 };
