@@ -377,7 +377,8 @@ function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): 
   const mechanism = results.get("mechanism");
   if (mechanism?.status === "SUCCESS") {
     const out = mechanism.output?.output || mechanism.output;
-    if (out?.mechanismName) labels.push(out.mechanismName);
+    const mechName = out?.primaryMechanism?.mechanismName || out?.mechanismName;
+    if (mechName) labels.push(mechName);
   }
 
   const offer = results.get("offer");
@@ -456,8 +457,9 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): strin
   const mechanism = results.get("mechanism");
   if (mechanism?.status === "SUCCESS" && mechanism.output) {
     const out = mechanism.output.output || mechanism.output;
-    if (out.mechanismName) lines.push(`  Mechanism name: "${out.mechanismName}"`);
-    if (out.mechanismType) lines.push(`  Mechanism type: "${out.mechanismType}"`);
+    const mech = out.primaryMechanism || out;
+    if (mech.mechanismName) lines.push(`  Mechanism name: "${mech.mechanismName}"`);
+    if (mech.mechanismType) lines.push(`  Mechanism type: "${mech.mechanismType}"`);
   }
 
   const offer = results.get("offer");
@@ -483,7 +485,9 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): strin
   const persuasion = results.get("persuasion");
   if (persuasion?.status === "SUCCESS" && persuasion.output) {
     const out = persuasion.output.output || persuasion.output;
-    if (out.persuasionMode) lines.push(`  Persuasion mode: "${out.persuasionMode}"`);
+    const route = out.primaryRoute || out;
+    const persuasionMode = route.persuasionMode || out.persuasionMode;
+    if (persuasionMode) lines.push(`  Persuasion mode: "${persuasionMode}"`);
     const primaryRouteName = out.primaryRoute?.routeName || out.primaryRoute?.name;
     if (primaryRouteName) lines.push(`  Persuasion primary route: "${primaryRouteName}"`);
   }
