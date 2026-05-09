@@ -1,0 +1,195 @@
+Hi,
+
+We need to audit the existing Engine Contract system before applying any fixes.
+
+The latest MarketMindAI end-to-end run exposed a real handoff issue:
+
+* `channel_selection` completed successfully
+* but System Control reported:
+
+  * `funnel_structural_completeness = UNKNOWN`
+  * missing required input: `channel_selection.funnelStages`
+* final verdict became:
+
+  * `BLOCK / SYSTEM_UNTRUSTED`
+  * reason: `PIPELINE_INCOMPLETE`
+
+This means the Reliability Layer is working correctly.
+
+But now we need to understand why an engine can still report `SUCCESS` while missing a downstream-required output.
+
+---
+
+## Objective
+
+Please perform a focused audit of the existing Engine Contract system.
+
+Do NOT implement yet.
+
+I want a clear plan first.
+
+---
+
+## 1) Audit Questions
+
+Please inspect and answer:
+
+### A) Existing Contracts
+
+* Where are engine contracts currently defined?
+* Which engines have explicit required outputs?
+* Are required outputs validated before an engine can return `SUCCESS`?
+* Are contracts enforced at:
+
+  * engine return level?
+  * snapshot persistence level?
+  * orchestrator level?
+  * system-control level?
+
+---
+
+### B) Channel Selection Contract
+
+Specifically audit `channel_selection`.
+
+Find out:
+
+* Is `funnelStages` supposed to be emitted?
+* If yes, where is it defined?
+* Did the engine fail to produce it?
+* Or did it produce it under a different name / nested location?
+* Or did the orchestrator expect the wrong field?
+* Or did the contract not require it at all?
+
+I need the exact root cause.
+
+---
+
+### C) Downstream Dependency Mapping
+
+Audit how downstream checks declare dependencies.
+
+For example:
+
+* `funnel_structural_completeness`
+  depends on:
+
+  * `channel_selection.funnelStages`
+
+Please identify:
+
+* where these dependencies are declared
+* whether they are explicit or implicit
+* whether missing dependency behavior is standardized
+
+---
+
+## 2) Required Upgrade Plan
+
+After the audit, propose a concrete upgrade plan.
+
+The plan should cover:
+
+### A) Required Output Validation
+
+An engine should not be allowed to return clean `SUCCESS` if it is missing outputs required by downstream logic.
+
+Possible states:
+
+* SUCCESS
+* PARTIAL
+* CONTRACT_INCOMPLETE
+* INVALID_OUTPUT
+* NEEDS_INPUT
+
+Please propose the correct status model based on current architecture.
+
+---
+
+### B) Contract Enforcement Layers
+
+Define what should be enforced at each layer:
+
+#### Engine layer
+
+Validate own output before returning.
+
+#### Snapshot layer
+
+Reject or mark snapshots with incomplete contract state.
+
+#### Orchestrator layer
+
+Prevent downstream engines from consuming incomplete upstream outputs.
+
+#### System Control layer
+
+Trust but verify — detect any remaining missing required outputs.
+
+---
+
+### C) Contract Registry / Dependency Graph
+
+If not already complete, propose a centralized registry that maps:
+
+```json
+{
+  "engine": "channel_selection",
+  "requiredOutputs": ["selectedChannels", "confidence", "funnelStages"],
+  "downstreamConsumers": ["funnel_structural_completeness", "system_control"],
+  "requiredBy": ["system_control.funnel_structural_completeness"]
+}
+```
+
+This should make dependencies explicit, not hidden in scattered code.
+
+---
+
+### D) Backward Compatibility
+
+Please plan how to avoid breaking existing valid runs.
+
+If old snapshots lack newer contract fields:
+
+* mark them as legacy / incomplete
+* do not treat them as fresh verified evidence
+* do not silently pass them
+
+---
+
+## 3) Testing Requirements
+
+Please include tests for:
+
+1. Engine reports SUCCESS but missing required output
+2. Channel Selection missing `funnelStages`
+3. Output exists under wrong field name
+4. Snapshot persisted with incomplete contract
+5. Downstream engine tries to consume incomplete upstream result
+6. System Control receives incomplete contract
+7. Legacy snapshot missing new required field
+8. Healthy full run with all required outputs
+
+Expected:
+
+* no false PASS
+* no fake SUCCESS
+* no stale fallback
+* no silent downstream consumption
+
+---
+
+## 4) Deliverable
+
+Before implementation, please send:
+
+1. Engine Contract audit
+2. Root cause for the current Channel → Funnel issue
+3. Proposed contract enforcement plan
+4. Proposed status model
+5. Required tests
+6. Risk / compatibility notes
+
+Do not implement until we approve the plan.
+
+Thanks.
