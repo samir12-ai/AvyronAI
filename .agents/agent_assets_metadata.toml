@@ -167,3 +167,9 @@ id = "Oci4Llsj46p9VLIHho4Wv"
 uri = "file://.local/validation/MindAI-Engine-Summary-2026-05-03.md"
 type = "text"
 title = "MindAI Engine Output Summary — 2026-05-03"
+
+[[outputs]]
+id = "hssHdm-w8FNF5C_hoPR7E"
+uri = "file://.local/plans/15-engine-contract-map.md"
+type = "text"
+title = "15-Engine Contract Map"
