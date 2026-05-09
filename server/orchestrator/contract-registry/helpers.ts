@@ -217,6 +217,31 @@ function resolveFromAllPaths(output: unknown, field: ContractField): unknown {
   return undefined;
 }
 
+/**
+ * Returns a LIVE REFERENCE to the resolved value (no Zod copy, no trust
+ * gating, no engine-status check). Use ONLY when you need to mutate the
+ * underlying object — e.g. system-control's `executeConversionInjection`
+ * pushes onto `funnelStages.conversion` and the mutation must be visible
+ * downstream. Read-only consumers must use `requireContractField` so they
+ * pick up validation, freshness gating, and contract enforcement.
+ *
+ * Returns `undefined` if the field is unregistered or absent at every path.
+ */
+export function getContractFieldRaw<T = unknown>(
+  engineId: EngineId,
+  fieldId: string,
+  output: unknown,
+): T | undefined {
+  const contract = getContract(engineId);
+  if (!contract) return undefined;
+  const field =
+    contract.requiredOutputs.find((f) => f.id === fieldId) ??
+    contract.optionalOutputs.find((f) => f.id === fieldId);
+  if (!field) return undefined;
+  const v = resolveFromAllPaths(output, field);
+  return v as T | undefined;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // 5. The boundary helper — the ONLY way to read another engine's output (C1+)
 // ────────────────────────────────────────────────────────────────────────────

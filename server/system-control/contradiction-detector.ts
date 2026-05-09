@@ -2,17 +2,42 @@ import type { EngineId, EngineStepResult } from "../orchestrator/priority-matrix
 import type { IntegrityReport } from "../system-integrity/types";
 import type { Contradiction } from "./types";
 import { INTEGRITY_RESTRICT_THRESHOLD } from "./constants";
+import { requireContractField } from "../orchestrator/contract-registry";
+
+// Phase C1: same `funnelStages` cutover as in structural-checks.ts. Both
+// detectors below previously read `channelResult.output.funnelStages`
+// directly — a path the engine never writes to. Now they go through the
+// contract boundary helper so the registry's canonical path resolves.
+type ChannelFunnelStages = {
+  awareness: any[];
+  nurture: any[];
+  conversion: any[];
+};
+
+function getChannelFunnelStages(
+  results: Map<EngineId, EngineStepResult>,
+  currentJobId: string | null,
+): ChannelFunnelStages | null {
+  const fr = requireContractField<ChannelFunnelStages>(
+    "channel_selection",
+    "funnelStages",
+    results,
+    currentJobId,
+  );
+  return fr.status === "OK" ? fr.value : null;
+}
 
 export function detectContradictions(
   results: Map<EngineId, EngineStepResult>,
   integrityReport: IntegrityReport | null,
+  currentJobId: string | null = null,
 ): Contradiction[] {
   const contradictions: Contradiction[] = [];
 
-  detectBudgetScaleNoConversion(results, contradictions);
+  detectBudgetScaleNoConversion(results, contradictions, currentJobId);
   detectBudgetScaleWeakIntegrity(results, integrityReport, contradictions);
   detectApprovedPlanIncompleteContext(results, contradictions);
-  detectFunnelPassStructuralWeakness(results, contradictions);
+  detectFunnelPassStructuralWeakness(results, contradictions, currentJobId);
   detectChannelSelectionPersuasionMismatch(results, contradictions);
   detectFunnelIterationConflict(results, contradictions);
 
@@ -94,6 +119,7 @@ function detectFunnelIterationConflict(
 function detectBudgetScaleNoConversion(
   results: Map<EngineId, EngineStepResult>,
   contradictions: Contradiction[],
+  currentJobId: string | null = null,
 ): void {
   const budgetResult = results.get("budget_governor");
   const channelResult = results.get("channel_selection");
@@ -101,7 +127,9 @@ function detectBudgetScaleNoConversion(
   if (!budgetResult?.output || !channelResult?.output) return;
 
   const action = budgetResult.output.decision?.action;
-  const conversionChannels = channelResult.output.funnelStages?.conversion;
+  // C1 cutover: contract-boundary read replaces broken `output.funnelStages`.
+  const stages = getChannelFunnelStages(results, currentJobId);
+  const conversionChannels = stages?.conversion;
 
   if (action === "scale" && (!conversionChannels || conversionChannels.length === 0)) {
     contradictions.push({
@@ -164,6 +192,7 @@ function detectApprovedPlanIncompleteContext(
 function detectFunnelPassStructuralWeakness(
   results: Map<EngineId, EngineStepResult>,
   contradictions: Contradiction[],
+  currentJobId: string | null = null,
 ): void {
   const funnelResult = results.get("funnel");
   const channelResult = results.get("channel_selection");
@@ -171,7 +200,8 @@ function detectFunnelPassStructuralWeakness(
   if (!funnelResult || !channelResult?.output) return;
 
   if (funnelResult.status === "SUCCESS") {
-    const stages = channelResult.output.funnelStages;
+    // C1 cutover: contract-boundary read replaces broken `output.funnelStages`.
+    const stages = getChannelFunnelStages(results, currentJobId);
     if (stages) {
       const awarenessCount = Array.isArray(stages.awareness) ? stages.awareness.length : 0;
       const nurtureCount = Array.isArray(stages.nurture) ? stages.nurture.length : 0;

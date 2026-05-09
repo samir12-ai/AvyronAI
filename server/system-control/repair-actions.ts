@@ -1,6 +1,7 @@
 import type { EngineId, EngineStepResult } from "../orchestrator/priority-matrix";
 import type { IntegrityReport } from "../system-integrity/types";
 import type { BlockReason, RepairAction, RepairActionCode, BlockCode } from "./types";
+import { getContractFieldRaw } from "../orchestrator/contract-registry";
 
 const REPAIRABLE_BLOCKS: Record<BlockCode, RepairActionCode | null> = {
   NO_CONVERSION_PATH: "INJECT_FALLBACK_CONVERSION",
@@ -111,9 +112,21 @@ export function executeRepairActions(
 
 function executeConversionInjection(results: Map<EngineId, EngineStepResult>): boolean {
   const channelResult = results.get("channel_selection");
-  if (!channelResult?.output?.funnelStages) return false;
+  if (!channelResult?.output) return false;
 
-  const stages = channelResult.output.funnelStages;
+  // C1 cutover: resolve a LIVE REFERENCE to funnelStages via the contract
+  // registry so we mutate at the canonical path
+  // (`output.funnelReconstruction.funnelStages`) instead of the broken
+  // `output.funnelStages` location. `getContractFieldRaw` skips Zod parse
+  // and trust gating because the repair is the FIX for a NO_CONVERSION_PATH
+  // block — by definition the upstream check just ran and the path is
+  // already known to be present (or absent, in which case we early-return).
+  const stages = getContractFieldRaw<{
+    awareness?: any[];
+    nurture?: any[];
+    conversion?: any[];
+  }>("channel_selection", "funnelStages", channelResult.output);
+  if (!stages) return false;
   if (stages.conversion && stages.conversion.length > 0) return true;
 
   const existingKeys = new Set<string>();

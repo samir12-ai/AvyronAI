@@ -11,6 +11,38 @@ import {
   SIGNAL_GROUNDING_FAILURE_THRESHOLD,
   CHANNEL_CONFIDENCE_MINIMUM,
 } from "./constants";
+import { requireContractField } from "../orchestrator/contract-registry";
+
+// Phase C1 (May 2026) — funnelStages cutover. The 5 historical readers of
+// `channel_selection.output.funnelStages` (which the engine actually writes
+// at `funnelReconstruction.funnelStages`) now route through the contract
+// boundary helper. The registry's legacyPaths entry continues to resolve
+// snapshots stamped with the old shape so this PR is safe for in-flight runs.
+type ChannelFunnelStages = {
+  awareness: any[];
+  nurture: any[];
+  conversion: any[];
+};
+
+function readChannelFunnelStages(
+  results: Map<EngineId, EngineStepResult>,
+  currentJobId: string | null,
+):
+  | { kind: "ok"; stages: ChannelFunnelStages }
+  | { kind: "not_reached"; statusSeen: string }
+  | { kind: "stale"; reason: string }
+  | { kind: "incomplete"; reason: string } {
+  const fr = requireContractField<ChannelFunnelStages>(
+    "channel_selection",
+    "funnelStages",
+    results,
+    currentJobId,
+  );
+  if (fr.status === "OK") return { kind: "ok", stages: fr.value };
+  if (fr.status === "NOT_REACHED") return { kind: "not_reached", statusSeen: "MISSING" };
+  if (fr.status === "STALE") return { kind: "stale", reason: fr.reason };
+  return { kind: "incomplete", reason: fr.reason };
+}
 
 // -----------------------------------------------------------------------------
 // Phase R (May 2026) reliability helpers
@@ -107,18 +139,26 @@ function engineDidNotComplete(result: EngineStepResult | undefined): { notReache
 // Structural checks
 // -----------------------------------------------------------------------------
 
-export function checkConversionPath(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+export function checkConversionPath(
+  results: Map<EngineId, EngineStepResult>,
+  currentJobId: string | null = null,
+): StructuralCheck {
   const channelResult = results.get("channel_selection");
   const reach = engineDidNotComplete(channelResult);
   if (reach.notReached) {
     return notReached("conversion_path_exists", "channel_selection", reach.status);
   }
 
+  // C1 cutover: route through the contract boundary helper so this check
+  // and the 4 sibling readers all resolve from the same canonical path
+  // (`funnelReconstruction.funnelStages`) with legacyPath fallback.
+  const stagesResult = readChannelFunnelStages(results, currentJobId);
   const output = channelResult!.output;
   const conversionChannels =
-    output?.funnelReconstruction?.funnelStages?.conversion
-    ?? output?.funnelStages?.conversion
-    ?? null;
+    stagesResult.kind === "ok" ? stagesResult.stages.conversion ?? null : null;
+  if (stagesResult.kind === "stale") {
+    return stale("conversion_path_exists", `channel_selection.funnelStages: ${stagesResult.reason}`);
+  }
   const conversionAssigned = output?.conversionChannelAssigned === true;
 
   if (conversionAssigned && (!conversionChannels || conversionChannels.length === 0)) {
@@ -383,17 +423,32 @@ export function checkPipelineCompleteness(results: Map<EngineId, EngineStepResul
   );
 }
 
-export function checkFunnelStructuralCompleteness(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+export function checkFunnelStructuralCompleteness(
+  results: Map<EngineId, EngineStepResult>,
+  currentJobId: string | null = null,
+): StructuralCheck {
   const channelResult = results.get("channel_selection");
   const reach = engineDidNotComplete(channelResult);
   if (reach.notReached) {
     return notReached("funnel_structural_completeness", "channel_selection", reach.status);
   }
-  if (!channelResult!.output?.funnelStages) {
-    return unknown("funnel_structural_completeness", "channel_selection produced no funnelStages");
-  }
 
-  const stages = channelResult!.output.funnelStages;
+  // C1 cutover: contract-boundary read replaces the broken legacy-only path
+  // (`output.funnelStages`). The canonical location is
+  // `output.funnelReconstruction.funnelStages`; legacy is tolerated.
+  const stagesResult = readChannelFunnelStages(results, currentJobId);
+  if (stagesResult.kind === "stale") {
+    return stale("funnel_structural_completeness", `channel_selection.funnelStages: ${stagesResult.reason}`);
+  }
+  if (stagesResult.kind === "incomplete" || stagesResult.kind === "not_reached") {
+    return unknown(
+      "funnel_structural_completeness",
+      stagesResult.kind === "incomplete"
+        ? `channel_selection produced no funnelStages (${stagesResult.reason})`
+        : "channel_selection result missing from results map",
+    );
+  }
+  const stages = stagesResult.stages;
   const awareness = Array.isArray(stages.awareness) ? stages.awareness.length : 0;
   const nurture = Array.isArray(stages.nurture) ? stages.nurture.length : 0;
   const conversion = Array.isArray(stages.conversion) ? stages.conversion.length : 0;

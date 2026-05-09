@@ -55,12 +55,14 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   // reused from a different jobId / NEEDS_REFRESH / schema-INCOMPATIBLE
   // snapshots. Skipped when currentJobId is not provided (legacy callers).
   structuralChecks.push(checkSnapshotFreshness(input.results, input.config.currentJobId ?? null));
-  structuralChecks.push(checkConversionPath(input.results));
+  // Phase C1: pass currentJobId so the contract boundary helper applies its
+  // freshness/run-id gating to the funnelStages reads in these checks.
+  structuralChecks.push(checkConversionPath(input.results, input.config.currentJobId ?? null));
   structuralChecks.push(checkSignalGrounding(input.signalComposition, budgetAction));
   structuralChecks.push(checkIntegrityStatus(input.integrityReport));
   structuralChecks.push(checkCELCompliance(input.celResults));
   structuralChecks.push(checkUpstreamEngineHealth(input.results));
-  structuralChecks.push(checkFunnelStructuralCompleteness(input.results));
+  structuralChecks.push(checkFunnelStructuralCompleteness(input.results, input.config.currentJobId ?? null));
   structuralChecks.push(checkValidationResult(input.results));
   structuralChecks.push(checkSignalGroundingMassFailure(input.results));
   structuralChecks.push(checkOfferAudienceMisalignment(input.results));
@@ -73,7 +75,11 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkConfidenceSpread(input.ssc));
   structuralChecks.push(checkBudgetOverrideZeroConfidence(input.ssc, input.results));
 
-  const contradictions = detectContradictions(input.results, input.integrityReport);
+  const contradictions = detectContradictions(
+    input.results,
+    input.integrityReport,
+    input.config.currentJobId ?? null,
+  );
 
   let blockReasons = collectBlockReasons(structuralChecks, input.results);
 
@@ -141,8 +147,8 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
 
         const recheck: StructuralCheck[] = [];
         if (resolvedCodes.has("NO_CONVERSION_PATH")) {
-          recheck.push(checkConversionPath(input.results));
-          recheck.push(checkFunnelStructuralCompleteness(input.results));
+          recheck.push(checkConversionPath(input.results, input.config.currentJobId ?? null));
+          recheck.push(checkFunnelStructuralCompleteness(input.results, input.config.currentJobId ?? null));
         }
         if (resolvedCodes.has("SCALE_WITHOUT_REAL_DATA")) {
           const newBudgetAction = input.results.get("budget_governor")?.output?.decision?.action ?? null;

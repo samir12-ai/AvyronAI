@@ -17,6 +17,7 @@ import { summarizeEngine } from "../agent/summarizers";
 import type { IntegrityReport } from "../system-integrity/types";
 import { storeIntegrityReport } from "../system-integrity/routes";
 import { evaluateSystemControl } from "../system-control/engine";
+import { auditEngineContract } from "./contract-registry";
 import type { SystemControlVerdict } from "../system-control/types";
 import { storeControlVerdict } from "../system-control/routes";
 import { ENGINE_VERSION as DIFFERENTIATION_ENGINE_VERSION } from "../differentiation-engine/constants";
@@ -3522,6 +3523,16 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     }
 
     results.set(engineDef.id, stepResult);
+
+    // Phase C2 (May 2026) — shadow contract audit. Logs `[ContractAudit]`
+    // violations behind the ENFORCE_ENGINE_CONTRACTS env flag. Today the
+    // flag defaults to false, so this is OBSERVATION ONLY; engine status
+    // is never mutated. Audit is wrapped in a defensive try/catch inside
+    // the helper itself — it cannot throw out of here.
+    auditEngineContract(engineDef.id as EngineId, stepResult, {
+      jobId,
+      campaignId: config.campaignId ?? null,
+    });
 
     const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
       const r = results.get(e.id);

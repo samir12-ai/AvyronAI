@@ -36,10 +36,36 @@ function err(eng: EngineId, msg = "synthetic error"): EngineStepResult {
 }
 
 const HEALTHY_BUDGET = { decision: { action: "scale" }, funnelStrengthScore: 0.85, killFlag: false, warnings: [] };
+// Phase C1 (May 2026): the contract registry validates `funnelStages` against
+// the real engine schema (FunnelStageAssignment objects). Test fixtures that
+// used arrays of bare strings were a pre-C1 shorthand and now fail Zod parse,
+// causing every check that reads funnelStages to return UNKNOWN. Use the real
+// shape (channelName/channelKey/assignedRole) so the suite continues to
+// exercise the verdict path it was written for.
+const stageAssignment = (key: string, name: string, role: "awareness" | "nurture" | "conversion") => ({
+  channelName: name,
+  channelKey: key,
+  assignedRole: role,
+});
+const HEALTHY_DECISION_GATE = {
+  funnelIntegrityScore: 0.85,
+  persuasionAlignmentScore: 0.80,
+  budgetRealism: 0.85,
+  channelScalability: 0.80,
+  compositeGateScore: 0.83,
+};
 const HEALTHY_CHANNEL = {
-  funnelStages: { awareness: ["meta_ads"], nurture: ["email"], conversion: ["landing_page"] },
+  primaryChannel: { channelKey: "meta_ads", channelName: "Meta Ads", fitScore: 0.85, scalability: 0.8 },
+  funnelReconstruction: {
+    funnelStages: {
+      awareness: [stageAssignment("meta_ads", "Meta Ads", "awareness")],
+      nurture: [stageAssignment("email", "Email Nurture", "nurture")],
+      conversion: [stageAssignment("landing_page", "Landing Page", "conversion")],
+    },
+  },
   conversionChannelAssigned: true,
   confidenceScore: 0.85,
+  decisionGateScoring: HEALTHY_DECISION_GATE,
 };
 const HEALTHY_FUNNEL = { hasConversionPath: true, funnelStrengthScore: 0.80, structuralWarnings: [] };
 const HEALTHY_OFFER = {
@@ -212,9 +238,17 @@ scenarios.push(runScenario(
   () => {
     const r = buildHealthyResults();
     r.set("channel_selection", ok("channel_selection", {
-      funnelStages: { awareness: ["meta_ads"], nurture: ["email"], conversion: [] },
+      primaryChannel: { channelKey: "meta_ads", channelName: "Meta Ads", fitScore: 0.85, scalability: 0.8 },
+      funnelReconstruction: {
+        funnelStages: {
+          awareness: [stageAssignment("meta_ads", "Meta Ads", "awareness")],
+          nurture: [stageAssignment("email", "Email Nurture", "nurture")],
+          conversion: [],
+        },
+      },
       conversionChannelAssigned: false,
       confidenceScore: 0.85,
+      decisionGateScoring: HEALTHY_DECISION_GATE,
     }));
     return buildInput(r);
   },

@@ -45,5 +45,12 @@ export {
   classifyTrust,
   validateContractCompleteness,
   requireContractField,
+  getContractFieldRaw,
   wrapAsEnvelope,
 } from "./helpers";
+
+export {
+  auditEngineContract,
+  ENFORCE_ENGINE_CONTRACTS,
+} from "./audit";
+export type { ContractAuditOutcome } from "./audit";
