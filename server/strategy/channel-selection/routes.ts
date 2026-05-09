@@ -17,6 +17,13 @@ import { validateEngineDependencies, logDependencyCheck } from "../dependency-va
 
 import { resolveAccountId } from "../../auth";
 import { resolveOrManualJobId } from "../../orchestrator/job-id";
+import { wrapAsEnvelope } from "../../orchestrator/contract-registry";
+// Engine-agnostic freshness — `buildFreshnessMetadata` runs MI-specific
+// schema validation that would force every non-MI snapshot to
+// `freshnessClass = "INCOMPATIBLE"`. The contract registry already enforces
+// per-engine schema/version drift via `prov.schemaVersion` in `classifyTrust`,
+// so we only need the time-based freshness class here.
+import { computeStalenessCoefficient } from "../../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -252,6 +259,40 @@ export function registerChannelSelectionRoutes(app: Express) {
         return res.status(404).json({ error: "No channel selection snapshot for this run", runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
+      // Phase C3 pilot — emit a LiveSnapshotEnvelope alongside the legacy
+      // top-level fields so the FE can begin reading `envelope.isLiveEvidence`
+      // / `envelope.isHistoricalOnly` without breaking existing consumers.
+      // Provenance is derived from the persisted snapshot row (jobId,
+      // createdAt) plus freshness metadata from snapshot-trust.
+      const result = safeJsonParse(latest.result);
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("channel_selection", result, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          // Endpoint semantics: the caller is asking for "the snapshot belonging
+          // to this run." Pass the resolved runId as currentJobId so a snapshot
+          // whose jobId matches is correctly tagged CURRENT_RUN_VERIFIED.
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            // The SQL filter already pins jobId == resolved.runId, so
+            // wasReused is effectively false here; surfaced for envelope shape
+            // completeness only.
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        // Envelope construction must never break the route. Log + continue.
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=channel_selection snap=${latest.id} err=${e?.message ?? String(e)}`);
+      }
+
       return res.json({
         runId: __resolved.runId,
         isLatest: __resolved.isLatest,
@@ -260,7 +301,7 @@ export function registerChannelSelectionRoutes(app: Express) {
         snapshotId: latest.id,
         status: latest.status,
         statusMessage: latest.statusMessage,
-        result: safeJsonParse(latest.result),
+        result,
         layerResults: safeJsonParse(latest.layerResults),
         structuralWarnings: safeJsonParse(latest.structuralWarnings),
         boundaryCheck: safeJsonParse(latest.boundaryCheck),
@@ -269,6 +310,7 @@ export function registerChannelSelectionRoutes(app: Express) {
         executionTimeMs: latest.executionTimeMs,
         engineVersion: latest.engineVersion,
         createdAt: latest.createdAt,
+        envelope,
       });
     } catch (error: any) {
       console.error("[ChannelSelection] Latest fetch error:", error.message);
