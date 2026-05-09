@@ -700,13 +700,44 @@ export function runIntegrityEngine(
 
   const safeToExecute = boundaryCheck.passed && failedCount <= 2 && overallIntegrityScore >= 0.4 && !hasEnforcementFailure;
 
-  console.log(`[IntegrityEngine-V3] Complete | status=${status} | score=${overallIntegrityScore.toFixed(2)} | safeToExecute=${safeToExecute} | failed=${failedCount}/8 | warnings=${structuralWarnings.length} | boundary=${boundaryCheck.passed}`);
+  // ── Canonical integrity verdict (PASS / PARTIAL / FAIL) ──────────────────
+  // Per the engine contract registry, `overallStatus` is the integrity VERDICT
+  // (distinct from the engine-execution `status` field which carries
+  // COMPLETE / INTEGRITY_FAILED). This field MUST be emitted on every run —
+  // there is no legacy fallback. Consumers that need the verdict (system
+  // control, contradiction detector, recovery planner) read this field only.
+  let overallStatus: "PASS" | "PARTIAL" | "FAIL";
+  if (!boundaryCheck.passed || hasEnforcementFailure || failedCount >= 3 || !safeToExecute) {
+    overallStatus = "FAIL";
+  } else if (failedCount > 0 || structuralWarnings.length > 0) {
+    overallStatus = "PARTIAL";
+  } else {
+    overallStatus = "PASS";
+  }
+
+  // failureReasons / zeroLeakage / traceabilityComplete are required by the
+  // contract; derive them deterministically from the layer results so every
+  // run satisfies the contract without depending on a downstream wrapper.
+  const failureReasons: string[] = [];
+  if (!boundaryCheck.passed) failureReasons.push(`boundary_violation: ${boundaryCheck.violations?.join(", ") || "unspecified"}`);
+  if (hasEnforcementFailure) failureReasons.push("enforcement_block: pain alignment or objection coverage failed");
+  for (const layer of allLayers) {
+    if (!layer.passed) failureReasons.push(`layer_failed:${layer.layerName ?? "unknown"}`);
+  }
+  const zeroLeakage = flaggedInconsistencies.length === 0;
+  const traceabilityComplete = boundaryCheck.passed && failedCount === 0;
+
+  console.log(`[IntegrityEngine-V3] Complete | status=${status} | overallStatus=${overallStatus} | score=${overallIntegrityScore.toFixed(2)} | safeToExecute=${safeToExecute} | failed=${failedCount}/8 | warnings=${structuralWarnings.length} | boundary=${boundaryCheck.passed}`);
 
   return {
-    status,
+    status,                 // engine-execution status: COMPLETE | INTEGRITY_FAILED
+    overallStatus,          // canonical integrity VERDICT: PASS | PARTIAL | FAIL (no legacy fallback)
     statusMessage,
     overallIntegrityScore,
     safeToExecute,
+    failureReasons,
+    zeroLeakage,
+    traceabilityComplete,
     layerResults: allLayers,
     structuralWarnings,
     flaggedInconsistencies,

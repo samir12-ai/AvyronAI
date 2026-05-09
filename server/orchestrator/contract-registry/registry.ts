@@ -426,10 +426,13 @@ const INTEGRITY_CONTRACT: EngineContract = {
   requiredOutputs: [
     { id: "overallIntegrityScore", path: ["overallIntegrityScore"], shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["awareness", "persuasion", "system_control.integrity_status"] },
     { id: "safeToExecute",         path: ["safeToExecute"],         shape: z.boolean(),           emptyIsMissing: false, consumers: ["awareness", "persuasion", "build_plan_layer", "system_control.integrity_status"] },
-    // overallStatus is the CONTROL-layer status ('PASS'|'PARTIAL'|'FAIL'),
-    // distinct from the engine-execution `status` field. Legacy path
-    // tolerates pre-wrapper rows that only carried `status`.
-    { id: "overallStatus",         path: ["overallStatus"],         legacyPaths: [["status"]], shape: z.string(), emptyIsMissing: true, consumers: ["system_control.integrity_status", "system_control.contradiction_detector.budget_scale_weak_integrity"] },
+    // Canonical integrity VERDICT: 'PASS' | 'PARTIAL' | 'FAIL'.
+    // Distinct from the engine-execution `status` field (COMPLETE | INTEGRITY_FAILED).
+    // NO LEGACY FALLBACK — per Integrity contract hardening (May 2026):
+    // engines that fail to emit `overallStatus` must trip CONTRACT_INCOMPLETE.
+    // Reading the engine-execution `status` field as a verdict is forbidden,
+    // because COMPLETE/INTEGRITY_FAILED do not equal PASS/PARTIAL/FAIL.
+    { id: "overallStatus",         path: ["overallStatus"],         shape: z.enum(["PASS", "PARTIAL", "FAIL"]), emptyIsMissing: true, consumers: ["system_control.integrity_status", "system_control.contradiction_detector.budget_scale_weak_integrity"] },
     { id: "zeroLeakage",           path: ["zeroLeakage"],           shape: z.boolean(),           emptyIsMissing: false, consumers: ["system_control.integrity_status"] },
     { id: "traceabilityComplete",  path: ["traceabilityComplete"],  shape: z.boolean(),           emptyIsMissing: false, consumers: ["system_control.integrity_status"] },
     { id: "failureReasons",        path: ["failureReasons"],        shape: StringArraySchema,     emptyIsMissing: false, consumers: ["system_control.integrity_status", "recovery_planner"] },

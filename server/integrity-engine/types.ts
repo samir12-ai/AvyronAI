@@ -77,10 +77,16 @@ export interface LayerResult {
 }
 
 export interface IntegrityResult {
+  /** Engine-execution status: COMPLETE | INTEGRITY_FAILED. NOT a verdict. */
   status: string;
+  /** Canonical integrity VERDICT (PASS|PARTIAL|FAIL). No legacy fallback — see registry.ts INTEGRITY_CONTRACT. */
+  overallStatus: "PASS" | "PARTIAL" | "FAIL";
   statusMessage: string | null;
   overallIntegrityScore: number;
   safeToExecute: boolean;
+  failureReasons: string[];
+  zeroLeakage: boolean;
+  traceabilityComplete: boolean;
   layerResults: LayerResult[];
   structuralWarnings: string[];
   flaggedInconsistencies: string[];

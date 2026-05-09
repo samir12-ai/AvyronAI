@@ -394,30 +394,49 @@ export function registerIntegrityEngineRoutes(app: Express) {
 
       // Phase C3 — emit LiveSnapshotEnvelope. The integrity_snapshots table
       // does not persist `zeroLeakage`/`traceabilityComplete`/`failureReasons`
-      // as separate columns, so we derive them deterministically from the
-      // already-persisted layerResults + flaggedInconsistencies + status. This
-      // matches the contract's read paths until/unless the schema is
-      // extended.
+      // /`overallStatus` as separate columns, so we derive them deterministically
+      // from the already-persisted layerResults + flaggedInconsistencies +
+      // safeToExecute. This matches the contract's read paths until/unless the
+      // schema is extended.
+      //
+      // Integrity contract hardening (May 2026): `overallStatus` is the
+      // canonical VERDICT (PASS|PARTIAL|FAIL). It MUST NOT be derived from the
+      // engine-execution `status` column (which carries COMPLETE|INTEGRITY_FAILED).
+      // Mapping below mirrors the engine's own derivation in engine.ts.
       let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
       try {
         const layerResultsParsed = safeJsonParse(latest.layerResults) || [];
         const structuralWarningsParsed = safeJsonParse(latest.structuralWarnings) || [];
         const flaggedInconsistenciesParsed = safeJsonParse(latest.flaggedInconsistencies) || [];
+        const boundaryCheckParsed = safeJsonParse(latest.boundaryCheck) || { passed: true, violations: [] };
         const failedLayers = Array.isArray(layerResultsParsed)
           ? layerResultsParsed.filter((l: any) => l && (l.status === "FAIL" || l.status === "FAILED" || l.passed === false))
           : [];
+        const failedCount = failedLayers.length;
         const failureReasons: string[] = [
           ...failedLayers.map((l: any) => typeof l?.reason === "string" ? l.reason : (typeof l?.layer === "string" ? `${l.layer}_FAILED` : "LAYER_FAILED")),
           ...(Array.isArray(flaggedInconsistenciesParsed) ? flaggedInconsistenciesParsed.map((i: any) => typeof i === "string" ? i : (i?.reason || i?.code || "INCONSISTENCY")) : []),
         ].filter((r) => typeof r === "string" && r.length > 0);
         const zeroLeakage = Array.isArray(flaggedInconsistenciesParsed) && flaggedInconsistenciesParsed.length === 0;
-        const traceabilityComplete = latest.safeToExecute === true && latest.status === "PASS" && failedLayers.length === 0;
+        const traceabilityComplete = boundaryCheckParsed?.passed === true && failedCount === 0;
+        const structuralWarningsCount = Array.isArray(structuralWarningsParsed) ? structuralWarningsParsed.length : 0;
+
+        // Canonical verdict derivation — mirrors integrity-engine/engine.ts:706-719.
+        // Never trust `latest.status` (engine-execution semantics, NOT a verdict).
+        let overallStatus: "PASS" | "PARTIAL" | "FAIL";
+        if (boundaryCheckParsed?.passed !== true || failedCount >= 3 || latest.safeToExecute !== true) {
+          overallStatus = "FAIL";
+        } else if (failedCount > 0 || structuralWarningsCount > 0) {
+          overallStatus = "PARTIAL";
+        } else {
+          overallStatus = "PASS";
+        }
 
         const integrityOutput = {
           overallIntegrityScore: latest.overallIntegrityScore,
           safeToExecute: latest.safeToExecute,
-          status: latest.status,
-          overallStatus: latest.status,
+          status: latest.status,            // engine-execution status (display only)
+          overallStatus,                    // canonical verdict (derived, never aliased from status)
           zeroLeakage,
           traceabilityComplete,
           failureReasons,
