@@ -3698,7 +3698,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           downgrades: controlVerdict.downgrades,
           contradictions: controlVerdict.contradictions,
           repairActions: controlVerdict.repairActions,
-          structuralChecksFailed: (controlVerdict.structuralChecks || []).filter((c: any) => c && c.passed === false).map((c: any) => c.check || c.details || "(unnamed)"),
+          // Phase R T001: anything not status==="PASS" is non-passing for
+          // attribution purposes (FAIL, BLOCK, NOT_REACHED, TIMEOUT, STALE,
+          // UNKNOWN, SKIPPED). Legacy boolean `passed` is only consulted
+          // when status is absent.
+          structuralChecksFailed: (controlVerdict.structuralChecks || [])
+            .filter((c: any) => c && (c.status ? c.status !== "PASS" : c.passed === false))
+            .map((c: any) => c.check || c.details || "(unnamed)"),
           validationState: (sv as any).validationState || null,
           budgetAction: (bg as any).decision?.action || null,
           channelConfidence: typeof (cs as any).confidenceScore === "number" ? (cs as any).confidenceScore : null,

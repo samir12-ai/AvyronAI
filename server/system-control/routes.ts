@@ -24,7 +24,11 @@ export async function storeControlVerdict(
     repairActions: JSON.stringify(verdict.repairActions),
     repairAttempted: verdict.repairAttempted,
     checksTotal: verdict.structuralChecks.length,
-    checksPassed: verdict.structuralChecks.filter(c => c.passed).length,
+    // Phase R T001: only status==="PASS" counts. Legacy `c.passed` may be true
+    // for unverified rows (NOT_REACHED/TIMEOUT/STALE/UNKNOWN/SKIPPED) when a
+    // caller forgot to update both fields — that would persist an inflated
+    // pass-rate to the dashboard. Use the authoritative status field.
+    checksPassed: verdict.structuralChecks.filter(c => c.status === "PASS").length,
     durationMs: verdict.durationMs,
     controlVersion: verdict.controlVersion,
     shadowMode: verdict.shadowMode,
@@ -248,6 +252,24 @@ export function registerSystemControlRoutes(app: Express) {
 
       const verdict = verdictRow ? formatVerdictRow(verdictRow) : null;
 
+      // Phase R T006 (architect-found): determine whether the latest stored
+      // verdict actually belongs to the resolved run. If `resolved.runId`
+      // exists but the latest verdict's jobId doesn't match, the verdict is
+      // for a stale/older run and must NOT be presented as the current
+      // truthfulness picture — otherwise a freshly failed run that hasn't
+      // yet persisted a verdict could appear "ok" because we're showing the
+      // previous run's PASS verdict.
+      const verdictMatchesResolvedRun =
+        verdict !== null &&
+        resolved.runId !== null &&
+        (verdict.jobId === resolved.runId || verdict.jobId === null);
+      // ^ jobId === null is tolerated for legacy verdict rows written before
+      // the jobId column was populated. New verdicts always carry the jobId.
+      const verdictMissingForResolvedRun =
+        resolved.runId !== null && verdict !== null && !verdictMatchesResolvedRun;
+      const verdictAbsentForResolvedRun =
+        resolved.runId !== null && verdict === null;
+
       // Extract snapshot-freshness info from structural checks if present.
       const checks: any[] = (verdict?.structuralChecks as any[]) || [];
       const freshnessCheck = checks.find(c => c?.check === "snapshot_freshness");
@@ -280,6 +302,12 @@ export function registerSystemControlRoutes(app: Express) {
         headline = "no_run";
       } else if (resolved.newerNonResolvableRun) {
         headline = "shadowed";
+      } else if (verdictAbsentForResolvedRun || verdictMissingForResolvedRun) {
+        // The resolved run has no matching verdict (either not yet persisted
+        // or persistence failed). We refuse to default to "ok" because that
+        // would let a failed/incomplete run appear healthy on the dashboard
+        // until a verdict row eventually arrives.
+        headline = "system_untrusted";
       } else if (verdict?.executionMode === "SYSTEM_UNTRUSTED") {
         headline = "system_untrusted";
       } else if (verdict?.executionMode === "NEEDS_RECONCILIATION") {

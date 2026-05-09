@@ -427,10 +427,16 @@ function buildControlLayerSection(controlVerdict: any | null) {
     })),
     structuralChecks: {
       total: (controlVerdict.structuralChecks || []).length,
-      passed: (controlVerdict.structuralChecks || []).filter((c: any) => c.passed).length,
+      // Phase R T001: only status==="PASS" counts as a verified pass.
+      // Falling back to c.passed when status is absent preserves the count
+      // for legacy verdict rows written before the status field existed.
+      passed: (controlVerdict.structuralChecks || []).filter((c: any) =>
+        c?.status ? c.status === "PASS" : c?.passed === true
+      ).length,
       details: (controlVerdict.structuralChecks || []).map((c: any) => ({
         check: c.check,
-        passed: c.passed,
+        passed: c?.status ? c.status === "PASS" : c?.passed === true,
+        status: c?.status ?? (c?.passed ? "PASS" : "FAIL"),
         details: c.details,
       })),
     },
