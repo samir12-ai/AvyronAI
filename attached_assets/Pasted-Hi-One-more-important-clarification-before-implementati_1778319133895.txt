@@ -1,0 +1,261 @@
+Hi,
+
+One more important clarification before implementation.
+
+This cannot be limited to the pipeline only.
+
+The Engine Contract + Snapshot Enforcement upgrade must apply across the entire system — anywhere snapshots or engine outputs are read, reused, displayed, scored, judged, compared, or passed downstream.
+
+---
+
+## 1) Scope Expansion
+
+Please audit and update every system surface that touches engine outputs or snapshots, including:
+
+* orchestrator
+* System Control
+* Recovery Logic
+* Recovery Intelligence
+* Budget
+* Channel
+* Iteration
+* Retention
+* Statistical Validation
+* Integrity
+* dashboard engine tabs
+* AI Management / Pipeline view
+* full table view
+* audit-control screen
+* build-plan layer
+* repair-actions
+* contradiction-detector
+* snapshot reuse logic
+* snapshot readers
+* resolver logic
+* any API returning “latest” engine outputs
+
+The rule must be global:
+
+> no stale, legacy, reused, wrong-run, or contract-incomplete snapshot can be treated as live evidence anywhere.
+
+---
+
+## 2) Hard Snapshot Enforcement Everywhere
+
+For live decision-making, any snapshot must satisfy:
+
+1. current `runId`
+2. correct `campaignId`
+3. current engine version
+4. current execution window
+5. valid contract status
+6. complete required outputs
+7. valid downstream field mappings
+8. no stale / legacy / reused-as-substitute status
+
+If any condition fails:
+
+* it can be displayed as historical context
+* but it cannot be used for:
+
+  * final verdict
+  * commercial judgement
+  * recovery plan
+  * budget decision
+  * channel decision
+  * iteration plan
+  * retention plan
+  * strategy plan
+  * build-plan output
+  * contradiction resolution
+  * frontend “latest truth”
+
+---
+
+## 3) Required Engine Output Map
+
+I need a full required-output map for every strategic engine.
+
+For each of the 15 engines, define:
+
+* required outputs
+* optional outputs
+* exact field paths
+* field type/schema
+* downstream consumers
+* requiredBy checks
+* failure behavior if missing
+* whether legacy fallback is allowed
+* whether output is required for final verdict
+
+Engines:
+
+1. Market Intelligence
+2. Audience
+3. Positioning
+4. Differentiation
+5. Mechanism
+6. Offer
+7. Awareness
+8. Funnel
+9. Persuasion
+10. Integrity
+11. Statistical Validation
+12. Budget Governor
+13. Channel Selection
+14. Iteration
+15. Retention
+
+I want this as a real contract map, not scattered code comments.
+
+---
+
+## 4) Prevent Field Misplacement
+
+The Channel issue happened because:
+
+* engine emitted:
+
+  * `funnelReconstruction.funnelStages`
+* consumer expected:
+
+  * `output.funnelStages`
+
+This must never happen again.
+
+Required:
+
+* no manual downstream field reads
+* all field resolution through contract helper
+* shared aliases / legacy paths only if explicitly declared
+* all consumers use the same canonical contract path
+
+Example:
+
+```ts
+requireContractField("channel_selection", "funnelStages")
+```
+
+not:
+
+```ts
+output?.funnelStages
+```
+
+---
+
+## 5) Contract Validation Before SUCCESS
+
+No strategic engine should return clean `SUCCESS` unless:
+
+* all required outputs are present
+* all required outputs are in the correct field path
+* all required outputs satisfy schema
+* all required outputs are compatible with downstream consumers
+
+If not:
+
+use one of:
+
+* CONTRACT_INCOMPLETE
+* INVALID_OUTPUT
+* NEEDS_INPUT
+* PARTIAL
+* ERROR
+
+But not clean SUCCESS.
+
+---
+
+## 6) Snapshot Trust States
+
+Please define and enforce explicit snapshot trust states:
+
+* FRESH_VERIFIED
+* CURRENT_RUN_VERIFIED
+* REUSED_ALLOWED
+* REUSED_UNVERIFIED
+* STALE
+* LEGACY_UNVERIFIED
+* CONTRACT_INCOMPLETE
+* WRONG_RUN
+* INCOMPATIBLE_VERSION
+* NEEDS_REFRESH
+
+Only verified current-run snapshots should be eligible for live decisions.
+
+Everything else must be excluded from live reasoning.
+
+---
+
+## 7) API + Frontend Truthfulness
+
+Every API that returns engine outputs must include:
+
+* runId
+* snapshotId
+* sourceJobId
+* contractStatus
+* snapshotTrustState
+* freshnessClass
+* wasReused
+* isLiveEvidence
+* isHistoricalOnly
+* missingRequiredOutputs
+* invalidFields
+
+Frontend must never show old snapshots as “latest truth.”
+
+If historical data is shown, label it clearly:
+
+> Historical snapshot — not used for current verdict.
+
+---
+
+## 8) Testing Requirements
+
+Please expand the test suite to cover the whole system, not only pipeline:
+
+1. Old snapshot appears in engine tab
+2. Old snapshot tries to feed System Control
+3. Old snapshot tries to feed Recovery Logic
+4. Old snapshot tries to feed Build Plan
+5. Old snapshot tries to feed Budget / Channel / Iteration
+6. Wrong-run snapshot with valid fields
+7. Reused snapshot with valid fields but not approved for reuse
+8. Legacy snapshot with no contract metadata
+9. Contract-incomplete snapshot shown in UI
+10. Multiple consumers requesting same field path
+11. Channel `funnelStages` nested path resolution
+12. Healthy run with all fresh verified snapshots
+
+Expected:
+
+* no false live evidence
+* no fake SUCCESS
+* no downstream silent consumption
+* no dashboard stale truth
+* no contract field drift
+
+---
+
+## 9) Deliverable Before Implementation
+
+Please provide an updated plan that includes:
+
+1. global snapshot enforcement design
+2. full 15-engine contract map
+3. field path registry
+4. dependency graph
+5. status model
+6. snapshot trust model
+7. API/frontend propagation plan
+8. test matrix
+9. rollout strategy
+10. risks and compatibility notes
+
+This is not a local fix.
+
+This is the foundation for making the entire system deterministic, trusted, and production-safe.
+
+Thanks.
