@@ -71,7 +71,7 @@ export interface NeedsInputPayload {
 
 export interface EngineStepResult {
   engineId: EngineId;
-  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED" | "NEEDS_INPUT" | "BLOCKED_BY_INTEGRITY" | "TIMEOUT";
+  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED" | "NEEDS_INPUT" | "BLOCKED_BY_INTEGRITY" | "TIMEOUT" | "CONTRACT_INCOMPLETE";
   output: any;
   snapshotId?: string;
   durationMs: number;
@@ -100,7 +100,8 @@ export function shouldBlockDownstream(result: EngineStepResult): boolean {
     result.status === "TIMEOUT" ||
     result.status === "SIGNAL_BLOCKED" ||
     result.status === "DEPTH_BLOCKED" ||
-    result.status === "BLOCKED_BY_INTEGRITY"
+    result.status === "BLOCKED_BY_INTEGRITY" ||
+    result.status === "CONTRACT_INCOMPLETE"
   );
 }
 

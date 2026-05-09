@@ -18,6 +18,7 @@ import {
   retentionSnapshots,
 } from "@shared/schema";
 import { buildFreshnessMetadata } from "../shared/snapshot-trust";
+import { ENFORCE_ENGINE_CONTRACTS } from "./contract-registry/feature-flags";
 
 export const REUSE_LOG = "[Reuse]";
 
@@ -123,6 +124,18 @@ async function safeReuse<H>(
   if (incompleteReason) {
     logReuseRejected(engine, snap.id, inputHash, `incomplete:${incompleteReason}`);
     return null;
+  }
+  // Phase C4 — when enforcement is on, refuse reuse rows whose stored
+  // `contractStatus` (set by C2 audit at write time, when present on the
+  // snapshot row) is anything other than COMPLETE. Snapshots from before
+  // the contract registry existed have no contractStatus and bypass this
+  // gate via the per-engine completeness predicate above.
+  if (ENFORCE_ENGINE_CONTRACTS) {
+    const cs = (snap as any)?.contractStatus;
+    if (cs && cs !== "COMPLETE") {
+      logReuseRejected(engine, snap.id, inputHash, `contract_status:${cs}`);
+      return null;
+    }
   }
   // Phase R T002 — stamp every reuse hit with snapshot provenance so System
   // Control can detect stale evidence (sourceJobId !== currentJobId, or

@@ -13,6 +13,8 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
 
 interface LayerResult {
@@ -103,6 +105,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
   const [data, setData] = useState<AwarenessData | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [offerSnapshotId, setOfferSnapshotId] = useState<string | null>(null);
@@ -118,6 +121,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
       const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       setData(json);
+      setEnvelope(json?.envelope ?? null);
     } catch (err) {
       console.error('[AwarenessEngine] Fetch error:', err);
     } finally {
@@ -404,6 +408,12 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
           </View>
         )}
       </LinearGradient>
+
+      {envelope && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={runAnalysis} />
+        </View>
+      )}
 
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>

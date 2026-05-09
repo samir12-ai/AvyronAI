@@ -15,6 +15,8 @@ import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 
 interface LayerResult {
   layerName: string;
@@ -67,6 +69,7 @@ export default function IntegrityEngine({ isActive }: { isActive?: boolean }) {
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
   const [data, setData] = useState<IntegrityData | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [funnelSnapshotId, setFunnelSnapshotId] = useState<string | null>(null);
@@ -81,6 +84,7 @@ export default function IntegrityEngine({ isActive }: { isActive?: boolean }) {
       const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       setData(json);
+      setEnvelope(json?.envelope ?? null);
     } catch (err) {
       console.error('[IntegrityEngine] Fetch error:', err);
     } finally {
@@ -254,6 +258,12 @@ export default function IntegrityEngine({ isActive }: { isActive?: boolean }) {
           </View>
         )}
       </LinearGradient>
+
+      {envelope && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={runAnalysis} />
+        </View>
+      )}
 
       {hasData && (
         <View style={[styles.executionStatus, {

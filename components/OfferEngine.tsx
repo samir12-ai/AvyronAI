@@ -14,6 +14,8 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import { useColorScheme } from 'react-native';
 
@@ -146,6 +148,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
   const [data, setData] = useState<OfferData | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [activeSection, setActiveSection] = useState<'primary' | 'alternative' | 'rejected'>('primary');
@@ -161,6 +164,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
       const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       setData(json);
+      setEnvelope(json?.envelope ?? null);
     } catch (err) {
       console.error('[OfferEngine] Fetch error:', err);
     } finally {
@@ -648,6 +652,12 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           </View>
         )}
       </LinearGradient>
+
+      {envelope && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={runAnalysis} />
+        </View>
+      )}
 
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>

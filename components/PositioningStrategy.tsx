@@ -14,6 +14,8 @@ import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
 
 interface Territory {
@@ -100,6 +102,7 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
   const { selectedCampaignId } = useCampaign();
 
   const [snapshot, setSnapshot] = useState<PositioningSnapshot | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [miNormalized, setMiNormalized] = useState<ReturnType<typeof normalizeEngineSnapshot>>(null);
   const [audNormalized, setAudNormalized] = useState<ReturnType<typeof normalizeEngineSnapshot>>(null);
   const [miEngineState, setMiEngineState] = useState<string | null>(null);
@@ -120,6 +123,7 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
         const d = await safeApiJson(posRes);
         const norm = normalizeEngineSnapshot(d, 'positioning');
         setSnapshot(norm?.snapshot || d);
+        setEnvelope(d?.envelope ?? null);
       }
       if (miRes.ok) {
         const d = await safeApiJson(miRes);
@@ -208,6 +212,12 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
           </Text>
         </LinearGradient>
       </Pressable>
+
+      {envelope && (
+        <View style={{ marginTop: 8 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={hasDependencies ? runAnalysis : undefined} />
+        </View>
+      )}
 
       {!hasDependencies && (
         <View style={[s.depWarning, { backgroundColor: isDark ? '#1A1A2E' : '#FFF8E1' }]}>

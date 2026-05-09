@@ -32,14 +32,9 @@
 
 import type { EngineId, EngineStepResult } from "../priority-matrix";
 import { getContract, validateContractCompleteness } from "./index";
+import { ENFORCE_ENGINE_CONTRACTS } from "./feature-flags";
 
-/**
- * Read once at module load. Treat anything other than the literal string
- * "true" as false — including unset / "1" / "yes" — so accidental truthy
- * config doesn't enable enforcement before C4.
- */
-export const ENFORCE_ENGINE_CONTRACTS: boolean =
-  String(process.env.ENFORCE_ENGINE_CONTRACTS ?? "").toLowerCase() === "true";
+export { ENFORCE_ENGINE_CONTRACTS };
 
 export interface ContractAuditOutcome {
   engineId: EngineId;
@@ -131,6 +126,20 @@ export function auditEngineContract(
       `engine=${engineId} | status=${completeness.status} | ` +
       `jobId=${ctx.jobId ?? "n/a"} | campaign=${ctx.campaignId ?? "n/a"} | ${summary}`,
     );
+
+    // Phase C4 cutover — when enforcement is on, downgrade the engine's
+    // status from SUCCESS/PARTIAL to CONTRACT_INCOMPLETE so downstream
+    // consumers and System Control treat it as a non-result instead of
+    // green data. The downgrade preserves the original output for audit
+    // surfaces (FE envelope still renders the historical data) but
+    // `shouldBlockDownstream(...)` now returns true for it.
+    if (ENFORCE_ENGINE_CONTRACTS) {
+      stepResult.status = "CONTRACT_INCOMPLETE";
+      stepResult.blockReason =
+        completeness.status === "INCOMPLETE"
+          ? `contract_incomplete: missing required output(s) [${completeness.missingRequiredOutputs.join(",")}]`
+          : `contract_invalid: ${completeness.invalidFields.map((f) => `${f.fieldId} (${f.reason})`).join("; ")}`;
+    }
   }
 
   return outcome;

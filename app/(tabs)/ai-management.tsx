@@ -29,6 +29,7 @@ import OrchestratorPanel from '@/components/OrchestratorPanel';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import ControlCenter from '@/components/ControlCenter';
 import AudienceEngine, { type AudienceEngineSnapshot } from '@/components/AudienceEngine';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import MarketDatabaseAdmin from '@/components/MarketDatabaseAdmin';
 import PositioningStrategy from '@/components/PositioningStrategy';
 import DifferentiationEngine from '@/components/DifferentiationEngine';
@@ -148,6 +149,7 @@ export default function AIManagementScreen() {
   const [expandedAudience, setExpandedAudience] = useState<number | null>(null);
 
   const [audienceEngineData, setAudienceEngineData] = useState<AudienceEngineSnapshot | null>(null);
+  const [audienceEnvelope, setAudienceEnvelope] = useState<import('@/lib/envelope').LiveSnapshotEnvelope | null>(null);
   const [audienceEngineLoading, setAudienceEngineLoading] = useState(false);
   const [audienceEngineError, setAudienceEngineError] = useState('');
   const [expandedPersona, setExpandedPersona] = useState<number | null>(null);
@@ -181,6 +183,7 @@ export default function AIManagementScreen() {
         if (res.ok) {
           const data = await res.json();
           setAudienceEngineData(data);
+          setAudienceEnvelope(data?.envelope ?? null);
         }
       } catch {}
     };
@@ -230,6 +233,7 @@ export default function AIManagementScreen() {
 
       const data = await response.json();
       setAudienceEngineData(data);
+      setAudienceEnvelope(data?.envelope ?? null);
     } catch (err: any) {
       setAudienceEngineError(err.message || 'Audience analysis failed');
     } finally {
@@ -548,11 +552,18 @@ export default function AIManagementScreen() {
 
         {/* T004: comprehensive AudienceEngine v3 panel — surfaces every commercial-reasoning field */}
         {hasCachedData && (
-          <AudienceEngine
-            data={ae as AudienceEngineSnapshot}
-            loading={audienceEngineLoading}
-            error={audienceEngineError}
-          />
+          <>
+            {audienceEnvelope && (
+              <View style={{ marginHorizontal: 16, marginTop: 8 }}>
+                <EnvelopeBadge envelope={audienceEnvelope} onRerun={handleRunAudienceEngine} />
+              </View>
+            )}
+            <AudienceEngine
+              data={ae as AudienceEngineSnapshot}
+              loading={audienceEngineLoading}
+              error={audienceEngineError}
+            />
+          </>
         )}
 
         {hasCachedData && ae.status === 'DATASET_TOO_SMALL' && (
