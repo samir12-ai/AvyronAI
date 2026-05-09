@@ -184,7 +184,7 @@ export function validateContractCompleteness(
   const invalid: { fieldId: string; reason: string }[] = [];
 
   for (const field of contract.requiredOutputs) {
-    const resolved = resolveFromAllPaths(output, field);
+    const resolved = resolveFromAllPaths(output, field, engineId);
     if (resolved === undefined || (field.emptyIsMissing && isEmpty(resolved))) {
       missing.push(field.id);
       continue;
@@ -206,13 +206,25 @@ export function validateContractCompleteness(
   return { status: "COMPLETE", missingRequiredOutputs: [], invalidFields: [] };
 }
 
-/** Resolve via `path` first, then walk `legacyPaths` in order. */
-function resolveFromAllPaths(output: unknown, field: ContractField): unknown {
+/**
+ * Resolve via `path` first, then walk `legacyPaths` in order.
+ * Logs `[ContractAudit] LEGACY_HIT` when the canonical path misses but a
+ * legacy fallback resolves — surfaces dead-vs-live legacyPaths for C5 audits.
+ */
+function resolveFromAllPaths(output: unknown, field: ContractField, engineId?: string): unknown {
   const primary = resolvePath(output, field.path);
   if (primary !== undefined) return primary;
-  for (const lp of field.legacyPaths ?? []) {
+  const legacy = field.legacyPaths ?? [];
+  for (let i = 0; i < legacy.length; i++) {
+    const lp = legacy[i];
     const v = resolvePath(output, lp);
-    if (v !== undefined) return v;
+    if (v !== undefined) {
+      const tag = engineId ? `${engineId}.${field.id}` : field.id;
+      console.warn(
+        `[ContractAudit] LEGACY_HIT | ${tag} | canonicalPath=${JSON.stringify(field.path)} | legacyPathHit=${JSON.stringify(lp)} | legacyIndex=${i}`
+      );
+      return v;
+    }
   }
   return undefined;
 }
@@ -238,7 +250,7 @@ export function getContractFieldRaw<T = unknown>(
     contract.requiredOutputs.find((f) => f.id === fieldId) ??
     contract.optionalOutputs.find((f) => f.id === fieldId);
   if (!field) return undefined;
-  const v = resolveFromAllPaths(output, field);
+  const v = resolveFromAllPaths(output, field, engineId);
   return v as T | undefined;
 }
 
@@ -303,7 +315,7 @@ export function requireContractField<T = unknown>(
   }
 
   // Resolve the value (canonical path, then legacy paths).
-  const value = resolveFromAllPaths(result.output, field);
+  const value = resolveFromAllPaths(result.output, field, engineId);
   if (value === undefined || (field.emptyIsMissing && isEmpty(value))) {
     return {
       status: "INCOMPLETE",

@@ -144,11 +144,11 @@ const CHANNEL_SELECTION_CONTRACT: EngineContract = {
       // The bug that triggered this whole layer: 4 consumers were reading
       // `output.funnelStages` directly while the engine writes the value
       // at `output.funnelReconstruction.funnelStages`. After C1 cutover
-      // every consumer reads through this contract field; the legacy path
-      // is tolerated until shadow logs prove no one needs it.
+      // every consumer reads through this contract field; legacy path
+      // dropped in C5 (2026-05-09) — engine source verified to emit only
+      // the canonical nested path; live shadow run produced 0 violations.
       id: "funnelStages",
       path: ["funnelReconstruction", "funnelStages"],
-      legacyPaths: [["funnelStages"]],
       shape: FunnelStagesSchema,
       emptyIsMissing: true,
       consumers: [
@@ -335,11 +335,11 @@ const AUDIENCE_CONTRACT: EngineContract = {
   engineVersion: AUDIENCE_ENGINE_VERSION,
   livenessRule: "current_run_only",
   requiredOutputs: [
-    // Naming inconsistency from the audit: engine emits `painMap` in-memory
-    // but the snapshot column is `audiencePains`. Canonical path is the
-    // in-memory one (what the orchestrator results map exposes); legacy
-    // path catches snapshot-shaped reads.
-    { id: "audiencePains",     path: ["painMap"],          legacyPaths: [["audiencePains"]], shape: SignalItemArraySchema, emptyIsMissing: true, consumers: ["differentiation", "funnel", "offer", "awareness", "persuasion", "integrity", "channel_selection", "system_control.zero_objection_coverage", "system_control.offer_audience_misalignment"] },
+    // C5 (2026-05-09): legacy path `audiencePains` (snapshot column name)
+    // dropped — engine source verified to return `painMap` at root in-memory
+    // (engine.ts:2099); snapshot reads via getLatestAudienceSnapshot already
+    // map audiencePains→painMap before exposing the object.
+    { id: "audiencePains",     path: ["painMap"],          shape: SignalItemArraySchema, emptyIsMissing: true, consumers: ["differentiation", "funnel", "offer", "awareness", "persuasion", "integrity", "channel_selection", "system_control.zero_objection_coverage", "system_control.offer_audience_misalignment"] },
     { id: "desireMap",         path: ["desireMap"],        shape: SignalItemArraySchema, emptyIsMissing: true, consumers: ["differentiation", "funnel", "offer", "awareness", "persuasion", "integrity", "channel_selection"] },
     { id: "objectionMap",      path: ["objectionMap"],     shape: z.any(),               emptyIsMissing: true, consumers: ["differentiation", "funnel", "offer", "awareness", "persuasion", "integrity", "channel_selection", "system_control.zero_objection_coverage"] },
     { id: "emotionalDrivers",  path: ["emotionalDrivers"], shape: SignalItemArraySchema, emptyIsMissing: true, consumers: ["differentiation", "funnel", "offer", "awareness", "persuasion", "integrity", "channel_selection"] },
@@ -388,7 +388,8 @@ const OFFER_CONTRACT: EngineContract = {
     { id: "primaryOfferProofAlignment",  path: ["primaryOffer", "proofAlignment"],                        shape: StringArraySchema, emptyIsMissing: true,  consumers: ["funnel", "persuasion", "system_control.zero_objection_coverage"] },
     { id: "offerStrengthScore",          path: ["offerStrengthScore"],                                    shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["budget_governor", "funnel", "awareness", "persuasion", "channel_selection", "statistical_validation"] },
     { id: "structuralWarnings",          path: ["structuralWarnings"],                                    shape: StringArraySchema, emptyIsMissing: false, consumers: ["system_control.offer_audience_misalignment"] },
-    { id: "offerAlignmentValidation",    path: ["layerDiagnostics", "offerAlignmentValidation"],          legacyPaths: [["offerAlignmentValidation"]], shape: LooseObjectSchema, emptyIsMissing: true, consumers: ["system_control.offer_audience_misalignment"] },
+    // C5 (2026-05-09): legacy root path dropped — engine source verified to return `layerDiagnostics: { ...diagnostics }` only (engine.ts:2226/2268/2398/3069).
+    { id: "offerAlignmentValidation",    path: ["layerDiagnostics", "offerAlignmentValidation"],          shape: LooseObjectSchema, emptyIsMissing: true, consumers: ["system_control.offer_audience_misalignment"] },
     { id: "integrityChecks",             path: ["layerDiagnostics", "integrityChecks"],                   shape: LooseObjectSchema, emptyIsMissing: true, consumers: ["system_control.offer_audience_misalignment"] },
     { id: "confidenceScore",             path: ["confidenceScore"],                                       shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["system_control.confidence_chain_integrity"] },
   ],
@@ -445,14 +446,16 @@ const STATISTICAL_VALIDATION_CONTRACT: EngineContract = {
   engineVersion: STATISTICAL_VALIDATION_ENGINE_VERSION,
   livenessRule: "current_run_only",
   requiredOutputs: [
-    { id: "validationState",        path: ["validationState"],        legacyPaths: [["validationResult"], ["result"], ["status"]], shape: z.string(), emptyIsMissing: true, consumers: ["budget_governor", "channel_selection", "system_control.validation_result"] },
+    // C5 (2026-05-09): legacy paths dropped — engine source verified to return `validationState` at root (engine.ts:1432).
+    { id: "validationState",        path: ["validationState"],        shape: z.string(), emptyIsMissing: true, consumers: ["budget_governor", "channel_selection", "system_control.validation_result"] },
     { id: "claimConfidenceScore",   path: ["claimConfidenceScore"],   shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["budget_governor", "channel_selection"] },
     { id: "evidenceStrength",       path: ["evidenceStrength"],       shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["budget_governor", "channel_selection"] },
     { id: "assumptionFlags",        path: ["assumptionFlags"],        shape: StringArraySchema,     emptyIsMissing: false, consumers: ["channel_selection"] },
     { id: "claimValidations",       path: ["claimValidations"],       shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["audit_control.validation_panel", "build_plan_layer"] },
     { id: "signalClusters",         path: ["signalClusters"],         shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["audit_control.validation_panel"] },
     { id: "signalBackedClaimRatio", path: ["signalBackedClaimRatio"], shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["system_control.signal_grounding"] },
-    { id: "originTypeDistribution", path: ["originTypeDistribution"], legacyPaths: [["signalComposition"]], shape: LooseObjectSchema, emptyIsMissing: true, consumers: ["system_control.signal_grounding", "budget_governor"] },
+    // C5 (2026-05-09): legacy path dropped — engine source verified to return `originTypeDistribution` at root (engine.ts:1456).
+    { id: "originTypeDistribution", path: ["originTypeDistribution"], shape: LooseObjectSchema, emptyIsMissing: true, consumers: ["system_control.signal_grounding", "budget_governor"] },
     { id: "confidenceExplanation",  path: ["confidenceExplanation"],  shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["audit_control.validation_panel", "recovery_intelligence"] },
   ],
   optionalOutputs: [
@@ -475,7 +478,8 @@ const BUDGET_GOVERNOR_CONTRACT: EngineContract = {
     { id: "killFlag",            path: ["killFlag"],                              shape: z.boolean(),       emptyIsMissing: false, consumers: ["channel_selection", "system_control.collectBlockReasons"] },
     { id: "killReasons",         path: ["killReasons"],                           shape: StringArraySchema, emptyIsMissing: false, consumers: ["recovery_planner", "build_plan_layer.budget_block"] },
     { id: "guardResult",         path: ["guardResult"],                           shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["system_control.budget_cac_verification"] },
-    { id: "guardResultWarnings", path: ["guardResult", "warnings"],               legacyPaths: [["warnings"]], shape: StringArraySchema, emptyIsMissing: false, consumers: ["system_control.budget_cac_verification"] },
+    // C5 (2026-05-09): legacy path dropped — engine source verified to return `guardResult: { ..., warnings: [...] }` (engine.ts:464,501).
+    { id: "guardResultWarnings", path: ["guardResult", "warnings"],               shape: StringArraySchema, emptyIsMissing: false, consumers: ["system_control.budget_cac_verification"] },
     { id: "expansionPermission", path: ["expansionPermission"],                   shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["channel_selection"] },
     { id: "cacAssumptionCheck",  path: ["cacAssumptionCheck"],                    shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["system_control.budget_cac_verification"] },
     { id: "confidenceScore",     path: ["confidenceScore"],                       shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["system_control.confidence_chain_integrity"] },
