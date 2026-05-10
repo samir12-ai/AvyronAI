@@ -1,0 +1,147 @@
+Hi,
+
+One important implementation notice before starting U1–U8.
+
+I agree with the overall direction of the audit and the doctrine.
+
+However, I do NOT want us to change system behavior too early.
+
+The first priority is:
+
+> build the unified interpretation layer first,
+> without accidentally changing existing reasoning behavior.
+
+---
+
+## Important Implementation Rule
+
+Please do NOT immediately activate weighted enforcement logic globally.
+
+Before any major behavior change:
+
+* build the canonical infrastructure first
+* verify parity with current behavior
+* compare old vs new interpretation paths
+* validate confidence outputs
+* validate coverage scoring
+* validate retry behavior
+* validate live-evidence decisions
+
+Only after the canonical layer proves stable should enforcement become more active.
+
+---
+
+## Approved Direction
+
+Proceed with:
+
+* U1 → WeightSchema scaffold
+* U2 → CanonicalSnapshotReader scaffold
+* U3 → migrate P-disable snapshot reads to the canonical reader
+
+But:
+
+Do NOT aggressively retune weights or confidence behavior yet.
+
+The first pass should mostly be:
+
+> mechanical consolidation of existing logic,
+> not semantic re-interpretation.
+
+---
+
+## Very Important
+
+Add a new shadow-comparison phase before U4.
+
+Suggested phase:
+
+### U3.5 — Canonical Reader Shadow Comparison
+
+For the same run:
+
+compare:
+
+* old interpretation path
+* canonical reader interpretation path
+
+Check:
+
+* final confidence
+* field coverage
+* signal coverage
+* stale detection
+* live evidence
+* missing critical fields
+* retries triggered
+* verdict differences
+
+The goal is:
+
+> prove the canonical reader matches existing truth
+> and only improves reliability handling.
+
+We should not introduce hidden confidence drift or accidental downgrades without visibility.
+
+---
+
+## Retry Logic Notice
+
+Do NOT modify all engine-level retry loops yet.
+
+For now:
+
+* keep existing per-engine retry behavior stable
+* apply weighted retry policy only at orchestrator-gate level first
+
+We should avoid destabilizing the marketing-reasoning engines during the infrastructure phase.
+
+---
+
+## Distortion Guards Notice
+
+For the first deployment:
+
+* distortion guards should surface WARN only
+* not BLOCK/DOWNGRADE immediately
+
+We need shadow telemetry before turning them into hard enforcement.
+
+---
+
+## Frontend Priority
+
+Frontend coverage visualization is useful,
+but should come AFTER:
+
+1. canonical reader stability
+2. weighting stability
+3. retry stability
+4. enforcement stability
+
+Infrastructure truth comes first.
+
+---
+
+## Main Goal
+
+This phase should:
+
+* unify interpretation
+* unify weighting
+* unify trust
+* unify retries
+* unify snapshot reads
+* unify signal reasoning
+
+without destabilizing the existing system.
+
+The system should become:
+
+* more truthful
+* more reliable
+* more explainable
+
+without becoming fragile or over-strict.
+
+Thanks.
