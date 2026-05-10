@@ -179,3 +179,9 @@ id = "lkiK1pSZmY_2SRrbhPpRz"
 uri = "file://.local/plans/unified-reliability-doctrine-audit.md"
 type = "text"
 title = "Unified Weighted Reliability Doctrine — System-Wide Audit"
+
+[[outputs]]
+id = "3rpBwmefZSSSpDtLr_skj"
+uri = "file://.local/plans/repair-before-block-audit.md"
+type = "text"
+title = "Repair-Before-Block Audit (May 2026)"
