@@ -64,6 +64,8 @@
  *     authorization + parity proof — it is NOT a U5 cutover.
  */
 
+import { getFieldImportanceForRetry } from "../shared/weight-schema";
+
 /**
  * Where the retry should run. Today only `"engine-only"` is emitted by the
  * scaffold (mirrors current behavior). The other variants are declared so
@@ -133,11 +135,25 @@ export interface RetryPolicyDecision {
  * Decide whether the orchestrator should retry an engine that just failed
  * a mid-pipeline gate.
  *
- * U5a contract: the returned object is bit-for-bit equivalent to what the
- * inline policy at `server/orchestrator/index.ts:3493–3540` would compute
- * for the same `(gateShouldRetry, gateSeverity)` pair. No consumer is
- * wired yet — this function exists so U5b can prove parity before any
- * cutover.
+ * U5a/U5b/U5c contract (mechanical-consolidation phase): the returned
+ * object is bit-for-bit equivalent to what the inline policy at
+ * `server/orchestrator/index.ts:3493–3540` would compute for the same
+ * `(gateShouldRetry, gateSeverity)` pair. Proven by
+ * `.local/validation/retry-policy-shadow.ts` (180/180, 0 drift).
+ *
+ * U5d extension (importance-aware widening — opt-in by field registration):
+ *   - When `input.missingFieldId` is provided AND that field is registered
+ *     in `FIELD_IMPORTANCE_REGISTRY` with importance === "critical", the
+ *     policy MAY widen `maxAttempts` from 1 → 2. This is the ONLY behavior
+ *     change U5d introduces.
+ *   - When the field is not registered, or registered as anything other
+ *     than "critical", behavior is bit-for-bit identical to U5c.
+ *   - The U5d registry SHIPS EMPTY. Until a user-authorized PR registers
+ *     a specific field, this branch is provably unreachable in production
+ *     and the U5b parity harness still passes 180/180.
+ *   - Test code may register fields via `__testOnly_registerFieldImportance`
+ *     to exercise the activation path — see
+ *     `server/tests/retry-policy-importance-activation.test.ts`.
  *
  * No semantic change vs current behavior:
  *   1. Retry decision is taken DIRECTLY from `gateShouldRetry`. The
@@ -155,17 +171,29 @@ export function planRetry(input: RetryPolicyInput): RetryPolicyDecision {
   // (1) retry decision — direct mirror of `gateResult.shouldRetry`.
   const retry = input.gateShouldRetry === true;
 
-  // (2) scope — engine-only is the only value the U5a scaffold emits.
+  // (2) scope — engine-only is the only value U5d emits today. RESERVED
+  //     scopes ("field-only", "engine-plus-downstream") remain unreached
+  //     until a future phase introduces them with their own parity proof.
   const scope: RetryScope = "engine-only";
 
-  // (3) maxAttempts — exactly 1, matching the single retry attempt at
-  //     index.ts:3495. (If retry === false, the orchestrator never
-  //     consults this number, but the field is always populated for
-  //     contract clarity and to keep the U5b harness assertion total.)
-  const maxAttempts = 1;
+  // (3) maxAttempts — U5c baseline is 1. U5d allows widening to 2 when
+  //     the missing field is registered as importance==="critical" in
+  //     FIELD_IMPORTANCE_REGISTRY. Registry SHIPS EMPTY in U5d, so
+  //     this branch is provably unreached in production until a
+  //     user-authorized PR registers a specific field. The U5b parity
+  //     harness (180/180) must continue to pass.
+  //     Explicit if-discriminator (D1-clean: no `??`/`||` over the
+  //     value).
+  let maxAttempts = 1;
+  const importance = getFieldImportanceForRetry(input.missingFieldId);
+  if (importance === "critical") {
+    maxAttempts = 2;
+  }
 
   // (4) onFinalFailure — explicit `if`-discriminator (D1-clean: no `||`
-  //     or `??` over a verdict-shaped field).
+  //     or `??` over a verdict-shaped field). U5d does NOT change this
+  //     decision: importance widens only the retry-attempt budget, not
+  //     the BLOCK/CONTINUE verdict on final failure.
   let onFinalFailure: RetryFinalFailureAction;
   if (input.gateSeverity === "critical") {
     onFinalFailure = "BLOCK";
@@ -173,11 +201,12 @@ export function planRetry(input: RetryPolicyInput): RetryPolicyDecision {
     onFinalFailure = "CONTINUE";
   }
 
-  // Rationale is intentionally deterministic and IDENTICAL to
-  // `legacyMirrorRetryDecision`'s rationale for the same input — the U5b
-  // shadow harness can then assert full object-equality without
-  // special-casing the rationale field. Format change requires updating
-  // both functions in the same PR (the harness will fail otherwise).
+  // Rationale is deterministic. When importance does not widen behavior,
+  // it equals legacyMirrorRetryDecision's rationale for the same input,
+  // preserving U5b parity. When importance DOES widen (only via test
+  // override or future authorized registration), the maxAttempts field
+  // in the rationale string reflects the new value — making the
+  // widening visible in logs.
   const rationale = formatRetryRationale(input, { retry, scope, maxAttempts, onFinalFailure });
 
   return { retry, scope, maxAttempts, onFinalFailure, rationale };
