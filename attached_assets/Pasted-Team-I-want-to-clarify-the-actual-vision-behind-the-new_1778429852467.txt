@@ -1,0 +1,107 @@
+Team,
+
+I want to clarify the actual vision behind the new direction.
+
+The goal is NOT:
+
+* retry for everything
+* weakening truthfulness
+* bypassing real failures
+* or hiding critical commercial risks
+
+The real problem is this:
+
+today, some BLOCK states leave the user with no meaningful path forward.
+
+Example:
+`BUDGET_KILL`
+
+If the system simply says:
+
+* BLOCKED
+* budget kill triggered
+
+then the user is stuck.
+
+That is not operationally useful.
+
+The system should instead answer:
+
+* what exactly failed
+* why it failed
+* who owns the problem
+* whether repair is possible
+* whether retry is safe
+* what next action is required
+* what evidence/data is missing
+* what unlock condition exists
+* whether the system or the user can resolve it
+
+This is the real vision:
+
+Actionable Block Recovery.
+
+Meaning:
+
+Every BLOCK should become either:
+
+1. self-repaired safely
+   or
+2. accompanied by a clear recovery path
+
+But never:
+dead-end validation with no operational guidance.
+
+Important distinction:
+Some failures ARE safely repairable inside the system:
+
+* confidence spread
+* budget hold downgrade
+* channel-confidence downgrade
+* confidence-chain clamp
+
+Those are good candidates for the existing repair-before-block infrastructure because they:
+
+* strictly reduce risk
+* are pure mutations
+* require no engine reruns
+* preserve provenance
+* and do not weaken truthfulness
+
+But other failures are not safely repairable at runtime:
+
+* VALIDATION_REJECTED
+* BUDGET_KILL
+* SIGNAL_GROUNDING_MASS_FAILURE
+* PIPELINE_INCOMPLETE
+* STALE_SNAPSHOT_EVIDENCE
+
+For those:
+the system should not fake a retry or invent a repair.
+
+Instead, it should produce:
+
+* actionable recovery plans
+* proof-collection guidance
+* execution downgrade paths
+* validation windows
+* data requirements
+* responsible engine ownership
+* recovery sequencing
+
+Core principle:
+
+No dead-end BLOCK.
+
+A final BLOCK should always mean:
+
+* either repair was attempted safely
+* or repair was impossible/unsafe
+* AND the system clearly explains what must happen next
+
+The platform should behave like:
+a commercial operating system,
+not just a validator.
+
+Best,
+[Your Name]
