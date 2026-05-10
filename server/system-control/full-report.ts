@@ -378,6 +378,7 @@ function buildSystemSummary(
     // Offender O4 fixed: consumers should switch to `executionStatus`.
     executionStatus: job.status,
     overallStatus: job.status,
+    // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): final-report display string ("N/A" presentation default, not a decision verdict)
     finalVerdict: controlVerdict?.verdict || "N/A",
     executionMode: controlVerdict?.executionMode || "N/A",
     engineCounts: {
@@ -451,6 +452,7 @@ function buildControlLayerSection(controlVerdict: any | null) {
       details: (controlVerdict.structuralChecks || []).map((c: any) => ({
         check: c.check,
         passed: c?.status ? c.status === "PASS" : c?.passed === true,
+        // eslint-disable-next-line semantic/no-semantic-fallback -- S (H8): structural-check status derived from `c.passed` boolean — content derivation, not verdict substitution
         status: c?.status ?? (c?.passed ? "PASS" : "FAIL"),
         details: c.details,
       })),
@@ -612,6 +614,7 @@ function generateReadableSummary(report: any): string {
   lines.push("-".repeat(50));
   for (const eng of report.engineOutputs) {
     const confStr = formatConfidence(eng.confidenceScore);
+    // eslint-disable-next-line semantic/no-semantic-fallback -- F (H8): F1→F2 display conversion: engine SUCCESS rendered as PASS in operator report — presentation only
     const statusIcon = eng.status === "SUCCESS" ? "PASS" : eng.status;
     lines.push(`  ${eng.engine}`);
     lines.push(`    Status: ${statusIcon} | Confidence: ${confStr}${eng.executionTimeMs ? ` | ${eng.executionTimeMs}ms` : ""}`);

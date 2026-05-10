@@ -552,6 +552,7 @@ router.get("/api/decisions/proactive-insights", async (req, res) => {
         id: d.id,
         messageText,
         priority: d.priority || "medium",
+        // eslint-disable-next-line semantic/no-semantic-fallback -- D1-safe: `status` here is the autopilot-decision-row lifecycle column (pending/approved/rejected/applied) defaulting to schema default "pending" for unprocessed rows during serialization. NOT a verdict-shape semantic substitution.
         status: d.status || "pending",
         riskLevel: d.riskLevel || "low",
         createdAt: d.createdAt,

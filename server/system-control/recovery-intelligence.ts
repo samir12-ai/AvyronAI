@@ -166,6 +166,7 @@ function assessUpstreamReliability(results: Map<string, any> | null | undefined)
   let completed = 0;
   for (const engineId of RELIABILITY_CRITICAL_ENGINES) {
     const entry = results?.get(engineId);
+    // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): explicit case discrimination MISSING vs UNKNOWN — distinguishes absence cases (NOT silent COMPLETE substitution)
     const status = entry?.status ?? (entry === undefined ? "MISSING" : "UNKNOWN");
     statusByEngine[engineId] = String(status);
     if (RELIABILITY_FAILED_STATUSES.has(String(status)) || status === "MISSING") {
@@ -293,6 +294,7 @@ function summarizeSignalsForPrompt(s: ExtractedSignals): string {
   lines.push(`MI: confidence=${s.marketIntelligence.confidence ?? "?"} | qualifiedSignals=${s.marketIntelligence.qualifiedSignalCount} | demandSignal="${(s.marketIntelligence.categoryDemandSignal || "(none)").slice(0, 100)}"`);
   lines.push(`VALIDATION: state=${s.validation.state ?? "?"} | signalBackedRatio=${s.validation.signalBackedRatio ?? "?"} | commercialUsability=${s.validation.commercialUsability ?? "?"}`);
   lines.push(`BUDGET: decision=${s.budget.decision ?? "?"} | spendPace=${s.budget.spendPace ?? "?"} | capLevel=${s.budget.capLevel ?? "?"}`);
+  // eslint-disable-next-line semantic/no-semantic-fallback -- L (H8): recovery-intelligence judgement log line — operator-facing template string with "?" indicating absence
   lines.push(`SYSTEM_JUDGEMENT: verdict=${s.systemJudgement.verdict ?? "?"} | recommendedMode=${s.systemJudgement.recommendedMode ?? "?"} | biggestRisk="${(s.systemJudgement.biggestRisk || "(none)").slice(0, 120)}"`);
   return lines.join("\n");
 }

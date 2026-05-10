@@ -590,6 +590,7 @@ export async function activateExecution(planId: string): Promise<ActivationResul
     const contentQueueItems: ContentQueueItem[] = finalEntries.map(e => ({
       id: e.id,
       contentType: e.contentType || "unknown",
+      // eslint-disable-next-line semantic/no-semantic-fallback -- D1-safe: `status` here is the calendar-entry workflow status (DRAFT/SCHEDULED/PUBLISHED), a content-state field with "DRAFT" as the schema default for new rows. NOT a verdict-shape semantic substitution.
       status: e.status || "DRAFT",
       scheduledDate: e.scheduledDate,
       scheduledTime: e.scheduledTime,
@@ -706,6 +707,7 @@ export async function getActivationStatus(planId: string): Promise<ActivationSta
   const contentQueueItems: ContentQueueItem[] = entries.map(e => ({
     id: e.id,
     contentType: e.contentType || "unknown",
+    // eslint-disable-next-line semantic/no-semantic-fallback -- D1-safe: `status` here is the calendar-entry workflow status (DRAFT/SCHEDULED/PUBLISHED), a content-state field with "DRAFT" as the schema default for new rows. NOT a verdict-shape semantic substitution.
     status: e.status || "DRAFT",
     scheduledDate: e.scheduledDate,
     scheduledTime: e.scheduledTime,

@@ -158,6 +158,7 @@ export async function resolveRunId(
       isLatest: latestId === requested.id,
       isStale: latestId !== null && latestId !== requested.id,
       completedAt: requested.completedAt ?? null,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): defensive null coalesce on optional run-resolver field — no semantic substitution
       status: requested.status ?? null,
       planId: requested.planId ?? null,
       newerNonResolvableRun,
@@ -172,6 +173,7 @@ export async function resolveRunId(
     // latest *attempted* run, so consumers must not present it as fresh.
     isStale: newerNonResolvableRun !== null,
     completedAt: latest?.completedAt ?? null,
+    // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): defensive null coalesce on optional run-resolver field — no semantic substitution
     status: latest?.status ?? null,
     planId: latest?.planId ?? null,
     newerNonResolvableRun,

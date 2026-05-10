@@ -168,10 +168,17 @@ export function buildRecoveryPlan(
   };
 }
 
-export function buildEmptyRecoveryPlan(verdict: SystemControlVerdict, note: string): RecoveryPlan {
+export function buildEmptyRecoveryPlan(verdict: SystemControlVerdict | null | undefined, note: string): RecoveryPlan {
+  // D1 (H8): Do NOT fall back verdict→"PASS" or executionMode→"FULL_EXECUTION".
+  // Defaulting absent verdict semantics to the most-permissive value silently
+  // licences execution from incomplete data (the exact bug class the doctrine
+  // forbids). Extract via locally-named bindings + explicit type guards so the
+  // ternary defaults are CONSERVATIVE (BLOCK / SYSTEM_UNTRUSTED) when verdict is missing.
+  const rawV = verdict?.verdict;
+  const rawM = verdict?.executionMode;
   return {
-    currentVerdict: verdict?.verdict || "PASS",
-    currentExecutionMode: verdict?.executionMode || "FULL_EXECUTION",
+    currentVerdict: typeof rawV === "string" ? (rawV as RecoveryPlan["currentVerdict"]) : "BLOCK",
+    currentExecutionMode: typeof rawM === "string" ? (rawM as RecoveryPlan["currentExecutionMode"]) : "SYSTEM_UNTRUSTED",
     blockCodes: [],
     rootCauseSummary: note,
     issues: [],

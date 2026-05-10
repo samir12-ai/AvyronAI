@@ -196,6 +196,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         plan = p || null;
       }
 
+      // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): defensive null coalesce on optional jobId field — no semantic substitution
       const pipelineStatus = latestJob?.status || null;
       const pipelineBlocked = pipelineStatus === "BLOCKED";
       const pipelineFailed = pipelineStatus === "FAILED" || pipelineStatus === "ERROR";
@@ -738,6 +739,7 @@ export function registerOrchestratorV2Routes(app: Express) {
           PUBLISHED: "publishedCount",
         };
 
+        // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): empty-string normalization for object-key lookup, not a decision input
         const oldField = statusToField[item.status || ""];
         const newField = statusToField[status];
 
@@ -927,6 +929,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "01",
           engine: "Market Intelligence",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for MI status row
           status: miRow?.status ?? "—",
           keyOutput: miRow?.market_diagnosis
             ? String(miRow.market_diagnosis).slice(0, 300)
@@ -972,6 +975,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "03",
           engine: "Positioning",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for positioning row
           status: positioning?.status ?? (positioning?.id ? "COMPLETE" : "—"),
           keyOutput: [
             positioning?.territory?.name ? `Territory: ${positioning.territory.name}` : null,
@@ -984,6 +988,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "04",
           engine: "Differentiation",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for differentiation row
           status: differentiation?.status ?? "—",
           keyOutput: [
             differentiation?.differentiationPillars?.length
@@ -1008,6 +1013,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "05",
           engine: "Mechanism",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for mechanism row
           status: mechanism?.status ?? (mechanism?.exists ? "COMPLETE" : "—"),
           keyOutput: mechanism?.primaryMechanism
             ? [
@@ -1026,6 +1032,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "06",
           engine: "Offer",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for offer row
           status: offer?.status ?? "—",
           keyOutput: offer?.primaryOffer
             ? [
@@ -1047,6 +1054,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "07",
           engine: "Awareness",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for awareness row
           status: awareness?.status ?? (awareness?.exists ? "COMPLETE" : "—"),
           keyOutput: awareness?.primaryRoute
             ? [
@@ -1070,6 +1078,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "08",
           engine: "Funnel",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for funnel row
           status: funnel?.status ?? "—",
           keyOutput: funnel?.primaryFunnel
             ? [
@@ -1086,6 +1095,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "09",
           engine: "Persuasion",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for persuasion row
           status: persuasion?.status ?? (persuasion?.exists ? "COMPLETE" : "—"),
           keyOutput: persuasion?.primaryRoute
             ? [
@@ -1105,6 +1115,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "10",
           engine: "Integrity",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for integrity row
           status: integrity?.status ?? (integrity?.exists ? "COMPLETE" : "—"),
           keyOutput: [
             integrity?.overallIntegrityScore != null
@@ -1125,6 +1136,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "11",
           engine: "Statistical Validation",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for statistical-validation row
           status: statVal?.status ?? (statVal?.exists ? "COMPLETE" : "—"),
           keyOutput: statVal?.result
             ? [
@@ -1145,6 +1157,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "12",
           engine: "Budget Governor",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for budget row
           status: budget?.snapshot?.status ?? "—",
           keyOutput: budget?.snapshot?.result?.decision
             ? [
@@ -1162,6 +1175,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "13",
           engine: "Channel Selection",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for channel row
           status: channel?.status ?? "—",
           keyOutput: channel?.result?.primaryChannel
             ? [
@@ -1183,6 +1197,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "14",
           engine: "Iteration",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for iteration row
           status: iteration?.status ?? (iteration?.exists ? "COMPLETE" : "—"),
           keyOutput: [
             iteration?.nextTestHypotheses?.length
@@ -1198,6 +1213,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "15",
           engine: "Retention",
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for retention row
           status: retention?.snapshot?.status ?? "—",
           keyOutput: retention?.snapshot?.result?.retentionLoops?.length
             ? [

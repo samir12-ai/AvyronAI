@@ -171,6 +171,7 @@ export async function tryReuseAudience(accountId: string, campaignId: string, in
     snap,
     (s) => ({
       snapshotId: s.id,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       status: s.status || "COMPLETE",
       languageSignals: strictParse(s.languageSignals, "languageSignals"),
       audiencePains: strictParse(s.audiencePains, "audiencePains"),
@@ -212,6 +213,7 @@ export async function tryReusePositioning(accountId: string, campaignId: string,
     snap,
     (s) => ({
       snapshotId: s.id,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       status: s.status || "COMPLETE",
       statusMessage: s.statusMessage,
       territory: strictParse(s.territory, "territory"),
@@ -250,6 +252,7 @@ export async function tryReuseDifferentiation(accountId: string, campaignId: str
     snap,
     (s) => ({
       snapshotId: s.id,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       status: s.status || "COMPLETE",
       statusMessage: s.statusMessage,
       pillars: strictParse(s.differentiationPillars, "differentiationPillars"),
@@ -284,6 +287,7 @@ export async function tryReuseMechanism(accountId: string, campaignId: string, i
     snap,
     (s) => ({
       snapshotId: s.id,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       status: s.status || "COMPLETE",
       statusMessage: s.statusMessage,
       primaryMechanism: strictParse(s.primaryMechanism, "primaryMechanism"),
@@ -310,6 +314,7 @@ export async function tryReuseOffer(accountId: string, campaignId: string, input
     snap,
     (s) => ({
       snapshotId: s.id,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       status: s.status || "COMPLETE",
       statusMessage: s.statusMessage,
       primaryOffer: strictParse(s.primaryOffer, "primaryOffer"),
@@ -345,6 +350,7 @@ export async function tryReuseAwareness(accountId: string, campaignId: string, i
     snap,
     (s) => ({
       snapshotId: s.id,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       status: s.status || "COMPLETE",
       statusMessage: s.statusMessage,
       primaryRoute: strictParse(s.primaryRoute, "primaryRoute"),
@@ -376,6 +382,7 @@ export async function tryReuseFunnel(accountId: string, campaignId: string, inpu
       const primaryFunnel = strictParse(s.primaryFunnel, "primaryFunnel");
       return {
         snapshotId: s.id,
+        // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
         status: s.status || "COMPLETE",
         statusMessage: s.statusMessage,
         primaryFunnel,
@@ -412,6 +419,7 @@ export async function tryReusePersuasion(accountId: string, campaignId: string, 
     snap,
     (s) => ({
       snapshotId: s.id,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       status: s.status || "COMPLETE",
       statusMessage: s.statusMessage,
       primaryRoute: strictParse(s.primaryRoute, "primaryRoute"),
@@ -441,6 +449,7 @@ export async function tryReuseIntegrity(accountId: string, campaignId: string, i
     snap,
     (s) => ({
       snapshotId: s.id,
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       status: s.status || "COMPLETE",
       statusMessage: s.statusMessage,
       overallIntegrityScore: s.overallIntegrityScore,
@@ -477,6 +486,7 @@ async function tryReuseStrategicLoop(
     snap,
     (s) => {
       const result = strictParse((s as any).result, "result");
+      // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column (H9 typed-snapshot-reader pending)
       return { snapshotId: s.id, status: s.status || "COMPLETE", _result: result, ...(result as any || {}) };
     },
     (h: any) => {

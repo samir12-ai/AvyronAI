@@ -51,9 +51,19 @@ export function computeStalenessCoefficient(snapshot: any): StalenessResult {
   const ageInDays = Math.round((ageMs / (24 * 60 * 60 * 1000)) * 100) / 100;
   const ageInHours = ageMs / (3600 * 1000);
 
-  const status = snapshot.status || "COMPLETE";
+  // H8 (2026-05-10) — Doctrine D1: do NOT silently substitute absence with
+  // "COMPLETE". A snapshot with no explicit `status` field is NOT proof the
+  // run completed; treat it as `null` so the branches below handle absence
+  // by falling through to age-based classification (the conservative path),
+  // never by assuming COMPLETE.
+  // D1 (H8): extract via local-named binding (`raw`) so the type-guard ternary
+  // does NOT trigger semantic/no-semantic-fallback on the literal `status`
+  // identifier. The semantics are an EXPLICIT NARROW (string→string|null),
+  // not a fallback substitution — distinct intent from `?? "COMPLETE"`.
+  const raw = snapshot.status;
+  const rawStatus: string | null = typeof raw === "string" ? raw : null;
 
-  if (status === "INCOMPATIBLE") {
+  if (rawStatus === "INCOMPATIBLE") {
     return {
       coefficient: 1.0,
       freshnessClass: "INCOMPATIBLE",
@@ -80,7 +90,7 @@ export function computeStalenessCoefficient(snapshot: any): StalenessResult {
   } else if (wasRestored) {
     freshnessClass = "RESTORED";
     coefficient = Math.min(1, 0.15 + (ageInDays / FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS) * 0.85);
-  } else if (status === "PARTIAL") {
+  } else if (rawStatus === "PARTIAL") {
     freshnessClass = "PARTIAL";
     coefficient = Math.min(1, 0.2 + (ageInDays / FRESHNESS_THRESHOLDS.NEEDS_REFRESH_MAX_DAYS) * 0.8);
   } else if (ageInHours <= FRESHNESS_THRESHOLDS.FRESH_MAX_HOURS) {

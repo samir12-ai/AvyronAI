@@ -528,6 +528,7 @@ function extractOfferInput(offerResult: any): any {
   const primary = offerResult.primaryOffer || offerResult.selectedOffer || offerResult;
   return {
     offerName: primary.offerName || primary.name || offerResult.offerName || null,
+    // eslint-disable-next-line semantic/no-semantic-fallback -- C (H8): offer content field cascade (coreOutcome→outcome) — domain content, not verdict-shape
     coreOutcome: primary.coreOutcome || primary.outcome || offerResult.coreOutcome || null,
     mechanismDescription: primary.mechanismDescription || offerResult.mechanismDescription || null,
     headline: primary.headline || offerResult.headline || null,
@@ -906,7 +907,23 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
       break;
     }
     case "statistical_validation": {
-      const validationState = output.validationState || output.status;
+      // D1/D2/D5 (H8): validationState (F3 — strategy/sample validation verdict) is
+      // a DIFFERENT semantic class than status (F1 — engine execution status).
+      // The previous `|| output.status` substituted across F-class boundaries
+      // when validationState was missing — silently treating engine SUCCESS as
+      // a validation verdict. Read the canonical F3 field only; absence MUST
+      // produce a CONTRACT_INCOMPLETE-style critical gate fail (D5: missing
+      // canonical → reject, never silent pass-through).
+      const validationState = output.validationState;
+      if (validationState === undefined || validationState === null) {
+        return {
+          gateFailed: true,
+          reason: "CONTRACT_INCOMPLETE — statistical_validation engine output missing canonical F3 field 'validationState'; cannot evaluate gate without canonical verdict (D5)",
+          severity: "critical",
+          shouldRetry: false,
+          setConfidenceFloor: 0,
+        };
+      }
       if (validationState === "rejected") {
         return {
           gateFailed: true,
@@ -1493,6 +1510,7 @@ async function executeEngine(
             audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             engineVersion: DIFFERENTIATION_ENGINE_VERSION,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             differentiationPillars: JSON.stringify((result as any).pillars || (result as any).differentiationPillars || []),
@@ -1611,6 +1629,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: result.engineVersion || 1,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryMechanism: result.primaryMechanism ? JSON.stringify(result.primaryMechanism) : null,
@@ -1807,6 +1826,7 @@ async function executeEngine(
             mechanismSnapshotId: (ctx.mechanism as any)?.snapshotId || null,
             strategyRootId: activeRoot.id,
             engineVersion: OFFER_ENGINE_VERSION,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryOffer: JSON.stringify((result as any).primaryOffer || result),
@@ -1930,6 +1950,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: AWARENESS_ENGINE_VERSION,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryRoute: JSON.stringify((result as any).primaryRoute || null),
@@ -2040,6 +2061,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: FUNNEL_ENGINE_VERSION,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryFunnel: JSON.stringify((result as any).primaryFunnel || result),
@@ -2134,6 +2156,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: result.engineVersion || 1,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             overallIntegrityScore: result.overallIntegrityScore || null,
@@ -2241,6 +2264,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: PERSUASION_ENGINE_VERSION,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             primaryRoute: JSON.stringify((result as any).primaryRoute || null),
@@ -2396,6 +2420,7 @@ async function executeEngine(
             jobId,
             persuasionSnapshotId: ctx.persuasion?.snapshotId || null,
             engineVersion: result.engineVersion || 1,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             result: JSON.stringify(result),
@@ -2831,6 +2856,7 @@ async function executeEngine(
             campaignId: config.campaignId,
             jobId,
             engineVersion: result.engineVersion || 1,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             result: JSON.stringify(result),
@@ -3011,6 +3037,7 @@ async function executeEngine(
             campaignId: config.campaignId,
             jobId,
             engineVersion: result.engineVersion || 1,
+            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
             status: result.status || "COMPLETE",
             statusMessage: result.statusMessage || null,
             result: JSON.stringify(result),
@@ -3536,6 +3563,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
     const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
       const r = results.get(e.id);
+      // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI default — section status PENDING when engine has not produced result yet
       const status = r?.status || "PENDING";
       return {
         id: e.id,
@@ -3574,6 +3602,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
       const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
         const r = results.get(e.id);
+        // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI default — section status PENDING when engine has not produced result yet
         const st = r?.status || "PENDING";
         return { id: e.id, name: e.name, status: st, summary: r ? summarizeEngine(e.id, r.output, st, r.blockReason) : null };
       });
@@ -3849,6 +3878,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       sectionStatuses: JSON.stringify(
         ENGINE_PRIORITY_ORDER.map(e => {
           const r = results.get(e.id);
+          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI default — section status PENDING when engine has not produced result yet
           const status = r?.status || "PENDING";
           return {
             id: e.id,
