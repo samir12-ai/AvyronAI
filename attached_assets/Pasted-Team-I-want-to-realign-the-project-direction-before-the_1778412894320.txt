@@ -1,0 +1,114 @@
+Team,
+
+I want to realign the project direction before the next phase.
+
+The core goal of this system is NOT to endlessly add reliability layers, abstractions, or new detector systems.
+
+The real goal is:
+
+Build a commercially intelligent operating system that can:
+
+* understand which missing signals truly matter
+* retry intelligently when important outputs are missing
+* continue safely when optional details are missing
+* avoid unnecessary hard blocking
+* preserve truthful reasoning without becoming overly strict
+
+## Current status
+
+T001–T007 are effectively already implemented across the existing reliability layer plus the U-series extensions.
+
+We already have:
+
+* detection systems
+* ownership tracing
+* missing-field awareness
+* contract enforcement
+* freshness tracking
+* signal lineage
+* retry infrastructure
+* contradiction detection
+* trust interpretation
+* reliability suites
+
+The U-series extended and consolidated these systems:
+
+* U1: WeightSchema scaffold
+* U2: CanonicalSnapshotReader
+* U3/U3.5: canonical migration + parity proof
+* U4: audit confirming no remaining safe canonical migrations
+* U5a–U5d: retry-policy consolidation + parity harness + cutover + weighted retry infrastructure
+
+## Important architectural rule
+
+Before building ANY new mechanism:
+
+1. Audit the existing system first
+2. Identify whether the capability already exists
+3. Extend existing infrastructure
+4. Reuse existing signals and ownership paths
+5. Avoid parallel systems and duplicate logic
+
+Do NOT:
+
+* build new detection systems if detection already exists
+* rebuild trust systems already in production
+* create overlapping retry mechanisms
+* add new abstractions without proving a gap exists
+* widen architecture unless it directly serves the commercial reasoning goal
+
+The system is already large and interconnected.
+Unnecessary rebuilding increases:
+
+* semantic drift
+* duplicate truth sources
+* debugging complexity
+* maintenance overhead
+* confidence inconsistencies
+
+## Current vision
+
+The next practical evolution is NOT “more strictness”.
+
+The next evolution is:
+
+weighted intelligent recovery.
+
+Meaning:
+
+* critical missing fields → retry responsible engine → block only if still unresolved
+* important/medium missing fields → retry or confidence downgrade
+* optional missing fields → continue safely
+
+The orchestrator should behave like a smart operator, not a fragile validator.
+
+## Important:
+
+Every future task must start with:
+
+* audit
+* mapping existing ownership/detection paths
+* identifying current source-of-truth modules
+
+Only after that should implementation begin.
+
+The rule is:
+“connect and consolidate before creating.”
+
+## Next direction
+
+Proceed with:
+
+* U6 WARN-only distortion guards
+  OR
+* orchestrator-level weighted retry evolution
+
+But all work must:
+
+* preserve shadow comparability
+* avoid unnecessary behavior drift
+* avoid over-engineering
+* stay grounded in the actual commercial objective
+
+Best,
+[Your Name]
