@@ -78,6 +78,12 @@ import {
   type EngineStepResult,
   type NeedsInputPayload,
 } from "./priority-matrix";
+// U5c (May 2026) — Unified Weighted Reliability Doctrine: gate-retry
+// policy lives in decision-policy/retry-policy.ts. Cutover proven by
+// .local/validation/retry-policy-shadow.ts (180/180 parity, 0 drift).
+// Gate-only by user constraint — per-engine REJECTED-loop retries are
+// out of scope (boundary enforced by server/tests/retry-policy-boundary.test.ts).
+import { planRetry } from "../decision-policy/retry-policy";
 import { synthesizePlan } from "./plan-synthesis";
 import {
   buildMemoryContext,
@@ -3490,8 +3496,17 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           console.log(`[Orchestrator] SSC_FLOOR_OVERRIDE | engine=${engineDef.id} | newFloor=${gateResult.setConfidenceFloor} | reason=${gateResult.reason}`);
         }
 
-        if (gateResult.shouldRetry) {
-          console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason}`);
+        // U5c cutover — single source of truth for gate-retry policy.
+        // Bit-for-bit equivalent to the prior inline policy (proven by
+        // .local/validation/retry-policy-shadow.ts, 180/180 parity).
+        const retryDecision = planRetry({
+          engineId: engineDef.id,
+          gateShouldRetry: gateResult.shouldRetry,
+          gateSeverity: gateResult.severity,
+        });
+
+        if (retryDecision.retry) {
+          console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason} | policy=${retryDecision.rationale}`);
           const retryResult = await Promise.race([
             executeEngine(engineDef.id, ctx, config, results, jobId),
             new Promise<EngineStepResult>((resolve) =>
@@ -3510,7 +3525,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
             if (retryGate.setConfidenceFloor !== undefined) {
               ctx.ssc.confidenceFloor = retryGate.setConfidenceFloor;
             }
-            if (gateResult.severity === "critical") {
+            if (retryDecision.onFinalFailure === "BLOCK") {
               failedEngine = engineDef.name;
               blockReason = `Critical gate failure after retry: ${gateResult.reason}`;
               overallStatus = "BLOCKED";
@@ -3528,8 +3543,8 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         } else {
           registerProblem(ctx.ssc, engineDef.id as EngineIdType, "structural", gateResult.reason, gateResult.severity, 1.0,
             ENGINE_PRIORITY_ORDER.slice(i + 1).map(e => e.id) as EngineIdType[], i);
-          console.warn(`[Orchestrator] MID_PIPELINE_GATE_FAILED | engine=${engineDef.id} | reason=${gateResult.reason} | noRetry=true`);
-          if (gateResult.severity === "critical") {
+          console.warn(`[Orchestrator] MID_PIPELINE_GATE_FAILED | engine=${engineDef.id} | reason=${gateResult.reason} | noRetry=true | policy=${retryDecision.rationale}`);
+          if (retryDecision.onFinalFailure === "BLOCK") {
             failedEngine = engineDef.name;
             blockReason = `Critical gate failure (no retry): ${gateResult.reason}`;
             overallStatus = "BLOCKED";
