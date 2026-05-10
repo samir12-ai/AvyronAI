@@ -85,7 +85,9 @@ assert(
 
 // ── Test 1: canonical PASS verdict + COMPLETE engine status → COMPLETE ──
 {
-  const out = baseOutput({ overallStatus: "PASS", status: "COMPLETE" });
+  // H4 (May 2026): contract now also requires `integrityVerdict` (canonical).
+  // Engine emits both fields with identical values during the transition.
+  const out = baseOutput({ overallStatus: "PASS", integrityVerdict: "PASS", status: "COMPLETE" });
   const v = validateContractCompleteness("integrity", out);
   assert(
     v.status === "COMPLETE",
@@ -132,7 +134,7 @@ assert(
 
   // Prove the canonical-only path is what enforces this: emitting overallStatus
   // alongside the same engine `status` flips the verdict to COMPLETE.
-  const outFixed = baseOutput({ status: "FAIL", overallStatus: "FAIL" });
+  const outFixed = baseOutput({ status: "FAIL", overallStatus: "FAIL", integrityVerdict: "FAIL" });
   const v2 = validateContractCompleteness("integrity", outFixed);
   assert(
     v2.status === "COMPLETE",
@@ -157,6 +159,7 @@ assert(
   const liveShape = {
     status: "COMPLETE",
     overallStatus: "PASS",
+    integrityVerdict: "PASS",  // H4: canonical verdict alongside back-compat alias
     statusMessage: null,
     overallIntegrityScore: 0.92,
     safeToExecute: true,

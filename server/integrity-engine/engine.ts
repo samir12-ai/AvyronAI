@@ -731,7 +731,8 @@ export function runIntegrityEngine(
 
   return {
     status,                 // engine-execution status: COMPLETE | INTEGRITY_FAILED
-    overallStatus,          // canonical integrity VERDICT: PASS | PARTIAL | FAIL (no legacy fallback)
+    overallStatus,          // legacy integrity VERDICT field (PASS|PARTIAL|FAIL) — back-compat for FE SystemIntegrityPanel
+    integrityVerdict: overallStatus, // H4: canonical integrity VERDICT under a semantically-explicit name (same value as overallStatus during transition)
     statusMessage,
     overallIntegrityScore,
     safeToExecute,

@@ -18,6 +18,18 @@ export interface AgentStreamEvent {
   planId?: string;
   completedEngines?: string[];
   failedEngine?: string;
+  /**
+   * H2 (2026-05-10): canonical F1 (engine execution outcome —
+   * COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT|BLOCKED_BY_INTEGRITY).
+   * Prefer this in new FE code.
+   */
+  executionStatus?: string;
+  /**
+   * @deprecated Use `executionStatus`. Retained for back-compat. Same value
+   * as `executionStatus`. The name "overallStatus" wrongly suggests a verdict
+   * (F2/F6) — it is actually the orchestrator job's execution status (F1).
+   * Offender O5 fixed via additive rename.
+   */
   overallStatus?: string;
   error?: string;
 }
@@ -48,6 +60,10 @@ export class AgentOperator {
 
     send({
       type: "done",
+      // H2: emit canonical (executionStatus) + deprecated alias (overallStatus)
+      // with identical values during the FE-migration window. Both carry F1
+      // semantics — the orchestrator job's execution outcome, NOT a verdict.
+      executionStatus: result.status,
       overallStatus: result.status,
       planId: result.planId,
       completedEngines: result.completedEngines,

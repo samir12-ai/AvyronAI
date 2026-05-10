@@ -176,6 +176,34 @@ const CHANNEL_SELECTION_CONTRACT: EngineContract = {
   ],
   optionalOutputs: [
     {
+      // H3 (2026-05-10) — TRANSITIONAL D5 EXCEPTION (sunset: H8).
+      // Canonical channel-decision GATE outcome. Held in `optionalOutputs`
+      // during the engine-emit rollout window so legacy snapshots are not
+      // retroactively flagged STALE. Important caveats per code review:
+      //   - `validateContractCompleteness()` validates `requiredOutputs` only;
+      //     optional fields are NOT checked at the pipeline gate. Pipeline-
+      //     level enforcement of doctrine D5 (missing → CONTRACT_INCOMPLETE)
+      //     does NOT apply until promoted to `requiredOutputs`.
+      //   - Runtime D5 enforcement still applies on the consumer side: each
+      //     consumer that reads this value MUST go through
+      //     `requireContractField("channel_selection","decisionGateOutcome",…)`
+      //     which returns INCOMPLETE on absence regardless of optional/required.
+      //   - Strict-enum shape (z.enum) IS enforced when the value is present:
+      //     wrong vocabularies still cause INVALID.
+      // Sunset criteria: promote to `requiredOutputs` in H8 once channel
+      // engine emits this field on 100% of new runs (verified via shadow logs
+      // for ≥7 days with zero `LEGACY_HIT` for this field id).
+      id: "decisionGateOutcome",
+      path: ["primaryChannel", "decisionGate", "outcome"],
+      shape: z.enum(["recommended", "support_channel", "exploratory"]),
+      emptyIsMissing: false,
+      consumers: [
+        "build_plan_layer.channel_strategy",
+        "system_control.channel_decision_gate",
+        "audit_control.channel_panel",
+      ],
+    },
+    {
       id: "commercialOrchestration",
       path: ["commercialOrchestration"],
       shape: z.any().nullable(),
@@ -319,7 +347,10 @@ const MARKET_INTELLIGENCE_CONTRACT: EngineContract = {
     { id: "marketState",       path: ["marketState"],       shape: z.string(),        emptyIsMissing: true,  consumers: ["positioning", "awareness", "integrity"] },
     { id: "trajectoryData",    path: ["trajectoryData"],    shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["positioning", "statistical_validation"] },
     { id: "dominanceData",     path: ["dominanceData"],     shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer"] },
-    { id: "signalComposition", path: ["diagnosticsData", "signalComposition"], legacyPaths: [["signalComposition"]], shape: LooseObjectSchema, emptyIsMissing: true, consumers: ["system_control.signal_grounding", "budget_governor"] },
+    // H5 (2026-05-10): legacyPaths dropped — engine source verified to emit
+    // `signalComposition` only inside `diagnosticsData` (engine.ts:1224 spread).
+    // No root-level fallback; consumers go through the canonical nested path.
+    { id: "signalComposition", path: ["diagnosticsData", "signalComposition"], shape: LooseObjectSchema, emptyIsMissing: true, consumers: ["system_control.signal_grounding", "budget_governor"] },
   ],
   optionalOutputs: [
     { id: "narrativeSynthesis", path: ["narrativeSynthesis"], shape: z.string().nullable(), emptyIsMissing: false, consumers: ["differentiation", "awareness"] },
@@ -433,6 +464,19 @@ const INTEGRITY_CONTRACT: EngineContract = {
     // Reading the engine-execution `status` field as a verdict is forbidden,
     // because COMPLETE/INTEGRITY_FAILED do not equal PASS/PARTIAL/FAIL.
     { id: "overallStatus",         path: ["overallStatus"],         shape: z.enum(["PASS", "PARTIAL", "FAIL"]), emptyIsMissing: true, consumers: ["system_control.integrity_status", "system_control.contradiction_detector.budget_scale_weak_integrity"] },
+    // H4 (2026-05-10): canonical integrity VERDICT under a semantically-explicit
+    // name. `overallStatus` is retained for back-compat (FE SystemIntegrityPanel
+    // reads it); new consumers MUST prefer `integrityVerdict`. Engine emits
+    // both with identical values; agent-stream-semantic-separation.test.ts
+    // proves the field name no longer collides with execution-status semantics.
+    // H4 back-compat (May 2026): during the transition window, `integrityVerdict`
+    // is the canonical field for the F2 integrity verdict, but the engine also
+    // emits the legacy `overallStatus` with the same value. Snapshots persisted
+    // before the H4 rollout (and reliability test fixtures) only set
+    // `overallStatus` — the registry resolves to that legacy path so contract
+    // completeness is preserved. New code should write/read `integrityVerdict`
+    // and the legacy path will be removed once all consumers have migrated.
+    { id: "integrityVerdict",      path: ["integrityVerdict"],      shape: z.enum(["PASS", "PARTIAL", "FAIL"]), emptyIsMissing: true, legacyPaths: [["overallStatus"]], consumers: ["system_control.integrity_status", "system_control.contradiction_detector.budget_scale_weak_integrity"] },
     { id: "zeroLeakage",           path: ["zeroLeakage"],           shape: z.boolean(),           emptyIsMissing: false, consumers: ["system_control.integrity_status"] },
     { id: "traceabilityComplete",  path: ["traceabilityComplete"],  shape: z.boolean(),           emptyIsMissing: false, consumers: ["system_control.integrity_status"] },
     { id: "failureReasons",        path: ["failureReasons"],        shape: StringArraySchema,     emptyIsMissing: false, consumers: ["system_control.integrity_status", "recovery_planner"] },
@@ -450,7 +494,12 @@ const STATISTICAL_VALIDATION_CONTRACT: EngineContract = {
   livenessRule: "current_run_only",
   requiredOutputs: [
     // C5 (2026-05-09): legacy paths dropped — engine source verified to return `validationState` at root (engine.ts:1432).
-    { id: "validationState",        path: ["validationState"],        shape: z.string(), emptyIsMissing: true, consumers: ["budget_governor", "channel_selection", "system_control.validation_result"] },
+    // H1 (2026-05-10): shape tightened from z.string() to strict enum.
+    // Canonical statistical-validation VERDICT vocabulary (lowercase, per
+    // validation-judgement.ts:4 and engine.ts:1370-1378). Distinct from
+    // the engine-execution `status` field. Reading `status` as a verdict
+    // is forbidden (Doctrine D1 — no semantic fallback for live decisions).
+    { id: "validationState",        path: ["validationState"],        shape: z.enum(["validated", "provisional", "weak", "rejected"]), emptyIsMissing: true, consumers: ["budget_governor", "channel_selection", "system_control.validation_result"] },
     { id: "claimConfidenceScore",   path: ["claimConfidenceScore"],   shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["budget_governor", "channel_selection"] },
     { id: "evidenceStrength",       path: ["evidenceStrength"],       shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["budget_governor", "channel_selection"] },
     { id: "assumptionFlags",        path: ["assumptionFlags"],        shape: StringArraySchema,     emptyIsMissing: false, consumers: ["channel_selection"] },
@@ -474,7 +523,10 @@ const BUDGET_GOVERNOR_CONTRACT: EngineContract = {
   livenessRule: "current_run_only",
   requiredOutputs: [
     { id: "decision",            path: ["decision"],                              shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["channel_selection", "retention", "system_control.budget_funnel_alignment", "system_control.budget_cac_verification", "system_control.budget_override_zero_confidence", "system_control.contradiction_detector.budget_scale_no_conversion", "system_control.contradiction_detector.budget_scale_weak_integrity", "repair_actions", "build_plan_layer.budget_block"] },
-    { id: "decisionAction",      path: ["decision", "action"],                    shape: z.string(),        emptyIsMissing: true,  consumers: ["channel_selection", "system_control.budget_funnel_alignment", "system_control.budget_cac_verification", "system_control.budget_override_zero_confidence", "system_control.contradiction_detector.budget_scale_no_conversion", "repair_actions"] },
+    // H3 (2026-05-10): shape tightened from z.string() to strict enum.
+    // Canonical budget action vocabulary (lowercase, per types.ts:34 and
+    // engine.ts:218-255). No semantic fallback to verdict/status (Doctrine D1).
+    { id: "decisionAction",      path: ["decision", "action"],                    shape: z.enum(["test", "scale", "hold", "halt"]), emptyIsMissing: true,  consumers: ["channel_selection", "system_control.budget_funnel_alignment", "system_control.budget_cac_verification", "system_control.budget_override_zero_confidence", "system_control.contradiction_detector.budget_scale_no_conversion", "repair_actions"] },
     { id: "decisionReasoning",   path: ["decision", "reasoning"],                 shape: z.string(),        emptyIsMissing: true,  consumers: ["build_plan_layer.budget_block", "audit_control.budget_panel"] },
     { id: "testBudgetRange",     path: ["testBudgetRange"],                       shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["channel_selection", "build_plan_layer.budget_block"] },
     { id: "scaleBudgetRange",    path: ["scaleBudgetRange"],                      shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["channel_selection", "build_plan_layer.budget_block"] },

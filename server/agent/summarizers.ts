@@ -102,23 +102,32 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
         return `Integrity score: ${score !== undefined ? score : "checked"}.${stable !== undefined ? ` Stable: ${stable}.` : ""}`;
       }
       case "statistical_validation": {
+        // H1 (2026-05-10): canonical-only field read.
+        // `validationState` is the F3 verdict (validated|provisional|weak|rejected).
+        // Reading `result.status` (F1 engine-execution state) as a fallback is
+        // FORBIDDEN — that's the offender O1 patched here. If the canonical
+        // field is missing, surface "(missing verdict)" rather than fabricate.
         const out = output.output || output;
         const snap = safeParseObj(out.snapshot);
         const result = snap?.result || out.result || out;
-        const state = result.validationState || out.validationState || result.status;
-        const confidence = result.claimConfidenceScore || out.claimConfidenceScore || result.confidenceScore;
-        return `Statistical validation: ${state || "complete"}.${confidence !== undefined ? ` Claim confidence: ${confidence}.` : ""}`;
+        const state = result.validationState ?? out.validationState ?? null;
+        const confidence = result.claimConfidenceScore ?? out.claimConfidenceScore;
+        return `Statistical validation: ${state ?? "(missing verdict)"}.${confidence !== undefined ? ` Claim confidence: ${confidence}.` : ""}`;
       }
       case "budget_governor": {
+        // H2 (2026-05-10): canonical-only field read.
+        // `decision.action` is the F9 budget action (test|scale|hold|halt).
+        // The previous `verdict || status || "reviewed"` chain (offender O2)
+        // fabricated a verdict from execution-status semantics. Removed.
         const out = output.output || output;
         const snap = safeParseObj(out.snapshot);
         const result = snap?.result || out.result || out;
         const rawDecision = result.decision || out.decision;
-        const decision = typeof rawDecision === "object" ? (rawDecision?.verdict || rawDecision?.status || "reviewed") : rawDecision;
+        const action = typeof rawDecision === "object" ? rawDecision?.action : rawDecision;
         const budget = result.recommendedBudget || result.monthlyBudget || out.recommendedBudget || out.monthlyBudget;
         const testRange = result.testBudgetRange;
         const budgetStr = budget ? `$${budget}/mo` : (testRange ? `$${testRange.min}-$${testRange.max}/mo` : null);
-        return `Budget decision: ${decision || "reviewed"}.${budgetStr ? ` Recommended: ${budgetStr}.` : ""}`;
+        return `Budget action: ${action ?? "(missing action)"}.${budgetStr ? ` Recommended: ${budgetStr}.` : ""}`;
       }
       case "channel_selection": {
         const out = output.output || output;

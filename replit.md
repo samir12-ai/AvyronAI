@@ -91,6 +91,36 @@ Client-side data is stored using AsyncStorage. Server-side data is managed in Po
 - Twitter
 - LinkedIn
 - TikTok
+## Semantic Contract Hardening doctrine (May 2026 — H1–H7)
+
+System-wide policy that governs every live-decision and live-reporting field across orchestrator, system-control, recovery, snapshot, agent stream, build-plan, and contract registry. The five non-negotiable rules:
+
+| # | Rule | Enforcement point |
+|---|---|---|
+| **D1** | **No semantic fallback.** `?? status`, `\|\| status`, `?? verdict`, `\|\| verdict`, `?? outcome`, `\|\| outcome` patterns are FORBIDDEN on any live decision path. | Custom ESLint rule `semantic/no-semantic-fallback` (`.local/eslint-rules/no-semantic-fallback.js`) scoped to `server/{agent,system-control,orchestrator,build-plan-layer,recovery-*}/**`. |
+| **D2** | **Every meaning has its own canonical field.** A generic `status` may carry execution semantics ONLY (F1). Verdict (F2/F6), validation (F3), trust (F4), action (F9), and gate-outcome (F10) each get a dedicated field name. | Contract registry — every verdict-shaped field declared with its own `id` + canonical `path`. |
+| **D3** | **Strict enums only.** Every verdict-shaped field uses `z.enum([...])`, never `z.string()`. | Contract registry — `validationState`, `decisionAction`, `decisionGateOutcome`, `overallStatus`, `integrityVerdict` all `z.enum`. |
+| **D4** | **Legacy fields are historical only.** May exist for display/migration; MAY NOT satisfy contracts, orchestration, verdict logic, recovery, budget/channel decisions, or trust evaluation. | `legacyPaths` removed for verdict-shaped fields. Deprecated alias fields (`overallStatus` on agent stream, `overallStatus` on integrity output) are JSDoc-`@deprecated`. |
+| **D5** | **Missing canonical → CONTRACT_INCOMPLETE.** Never silently substitute another field. The boundary helper returns `INCOMPLETE` and live reasoning is blocked. | `requireContractField` + `classifyTrust`. |
+
+Reference implementation: `INTEGRITY_CONTRACT` in `server/orchestrator/contract-registry/registry.ts`. Proof suites: `server/tests/{integrity-contract,validation-contract,budget-action-contract,channel-decision-contract,agent-stream-semantic-separation}.test.ts`.
+
+**Transitional D4/D5 exceptions (sunset: H8)** — explicitly documented per code review:
+- `integrity.integrityVerdict.legacyPaths=[["overallStatus"]]` — D4 exception. Resolves to legacy `overallStatus` so pre-H4 snapshots remain contract-COMPLETE. Same-semantic alias (verdict↔verdict, NOT status↔verdict), so D1 risk is zero. Sunset: drop legacyPaths once all persisted snapshots have been re-run with the H4 engine.
+- `channel_selection.decisionGateOutcome` placed in `optionalOutputs` — D5 exception at the pipeline gate. `validateContractCompleteness()` checks `requiredOutputs` only; pipeline-level INCOMPLETE-on-absence does NOT fire while the field is optional. Runtime D5 still enforced via `requireContractField()` on the consumer side. Strict-enum shape IS enforced when present. Sunset: promote to `requiredOutputs` once channel engine emits the field on 100% of new runs (≥7-day shadow window with zero `LEGACY_HIT` for this field id).
+
+**Known H6 ESLint rule scope/coverage gaps (queued for H8)**:
+- Rule scope is restricted to `server/{agent,system-control,orchestrator,build-plan-layer,recovery-*}/**` — strategy engine modules can still introduce semantic fallback. H8 widens scope.
+- Rule inspects RHS identifiers in `LogicalExpression` only — misses LHS-offender patterns (`result?.outcome ?? alt`), ternary expressions, alias variables, destructured reads, and synonym field names. H8 either expands the AST detector or adds a complementary ts-morph type-flow check.
+- New tests are unit/fixture-level — adversarial integration proof (poisoned snapshots flowing through full system-control decision paths) is queued for H8.
+
+Canonical field names introduced/hardened in H1–H7:
+- `validationState` ∈ {validated|provisional|weak|rejected} — F3 statistical-validation verdict
+- `decision.action` ∈ {test|scale|hold|halt} — F9 budget-governor action
+- `primaryChannel.decisionGate.outcome` ∈ {recommended|support_channel|exploratory} — F10 channel decision-gate outcome
+- `integrityVerdict` ∈ {PASS|PARTIAL|FAIL} — F2 integrity verdict (canonical replacement for `overallStatus`)
+- `executionStatus` ∈ {COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT|BLOCKED_BY_INTEGRITY} — F1 execution status on agent stream + full-report (canonical replacement for `overallStatus`)
+
 ## Marketing-logic engine upgrade (Apr 2026)
 The 5 marketing engines were upgraded to reason like top marketers (not just relabel segments). Pipeline orchestration unchanged; outputs extended additively.
 

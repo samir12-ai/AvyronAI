@@ -161,6 +161,7 @@ function extractOfferKeyOutputs(snap: any): Record<string, any> {
   const primary = parseJson(snap.primaryOffer, null);
   return {
     offerName: primary?.name || primary?.offerName || primary?.title || (typeof primary === "string" ? primary.slice(0, 100) : null),
+    // eslint-disable-next-line semantic/no-semantic-fallback -- `outcome` here is a legacy field NAME on the offer payload (the desired customer outcome), not a verdict-shape semantic. Doctrine D1 does not apply: this is display extraction, not a live decision read.
     coreOutcome: primary?.coreOutcome || primary?.outcome || null,
     offerStrengthScore: snap.offerStrengthScore ?? null,
     hasAlternative: !!snap.alternativeOffer,
@@ -210,9 +211,15 @@ function extractPersuasionKeyOutputs(snap: any): Record<string, any> {
 }
 
 function extractValidationKeyOutputs(snap: any): Record<string, any> {
+  // H1 (2026-05-10): canonical-only read.
+  // `validationState` is the F3 verdict (validated|provisional|weak|rejected),
+  // declared in `STATISTICAL_VALIDATION_CONTRACT` as the canonical field.
+  // The previous chain `result?.verdict || result?.status || result?.outcome`
+  // (offender O3) fabricated a verdict from any-shaped string in any field,
+  // including F1 engine-execution status. Removed — Doctrine D1.
   const result = parseJson(snap.result, null);
   return {
-    validationResult: result?.verdict || result?.status || result?.outcome || (typeof result === "string" ? result.slice(0, 100) : null),
+    validationState: result?.validationState ?? null,
     dataReliability: snap.dataReliability || null,
   };
 }
@@ -362,6 +369,14 @@ function buildSystemSummary(
   const enginesWithWarnings = engines.filter(e => e.warnings.length > 0);
 
   return {
+    // H2 (2026-05-10): semantic separation.
+    // `executionStatus` is the canonical F1 field (the orchestrator job's
+    // execution outcome — COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT).
+    // `finalVerdict` is the F6 system-control verdict (PASS|DOWNGRADE|REPAIR|BLOCK).
+    // `overallStatus` is retained for back-compat but DEPRECATED — it has the
+    // wrong field name (it's not a "verdict", it's an execution status).
+    // Offender O4 fixed: consumers should switch to `executionStatus`.
+    executionStatus: job.status,
     overallStatus: job.status,
     finalVerdict: controlVerdict?.verdict || "N/A",
     executionMode: controlVerdict?.executionMode || "N/A",

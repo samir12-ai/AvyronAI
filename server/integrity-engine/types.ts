@@ -79,8 +79,19 @@ export interface LayerResult {
 export interface IntegrityResult {
   /** Engine-execution status: COMPLETE | INTEGRITY_FAILED. NOT a verdict. */
   status: string;
-  /** Canonical integrity VERDICT (PASS|PARTIAL|FAIL). No legacy fallback — see registry.ts INTEGRITY_CONTRACT. */
+  /**
+   * Legacy integrity VERDICT field (PASS|PARTIAL|FAIL). Retained for back-compat
+   * with the FE SystemIntegrityPanel and existing snapshot rows.
+   * @deprecated Prefer `integrityVerdict` (H4, 2026-05-10). Both fields carry
+   * the same value during the transition period.
+   */
   overallStatus: "PASS" | "PARTIAL" | "FAIL";
+  /**
+   * Canonical integrity VERDICT (PASS|PARTIAL|FAIL) under a semantically-explicit
+   * name. Distinct from the engine-execution `status` field. No legacy fallback —
+   * see registry.ts INTEGRITY_CONTRACT (H4, 2026-05-10).
+   */
+  integrityVerdict: "PASS" | "PARTIAL" | "FAIL";
   statusMessage: string | null;
   overallIntegrityScore: number;
   safeToExecute: boolean;

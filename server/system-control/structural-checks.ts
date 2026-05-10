@@ -539,14 +539,19 @@ export function checkValidationResult(results: Map<EngineId, EngineStepResult>):
     return notReached("validation_result", "statistical_validation", reach.status);
   }
 
+  // H6 (2026-05-10): canonical-only verdict read.
+  // The previous chain `output?.result || output?.validationResult || output?.status`
+  // was a live D1 violation — F1 engine-execution status (`status`) cannot
+  // satisfy the F3 validation-verdict contract (`validationState`).
+  // ESLint rule `semantic/no-semantic-fallback` flagged this site.
   const output = validationResult!.output;
-  const result = output?.result || output?.validationResult || output?.status;
+  const result = output?.validationState ?? output?.result?.validationState ?? null;
 
-  if (result === "rejected" || result === "REJECTED" || result === "fail" || result === "FAIL") {
-    return fail("validation_result", `Statistical validation result="${result}" — strategy rejected by validation engine`);
+  if (result === "rejected") {
+    return fail("validation_result", `Statistical validation validationState="rejected" — strategy rejected by validation engine`);
   }
 
-  return pass("validation_result", `Statistical validation result="${result || "n/a"}"`);
+  return pass("validation_result", `Statistical validation validationState="${result ?? "n/a"}"`);
 }
 
 export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineStepResult>): StructuralCheck {

@@ -436,7 +436,8 @@ export function registerIntegrityEngineRoutes(app: Express) {
           overallIntegrityScore: latest.overallIntegrityScore,
           safeToExecute: latest.safeToExecute,
           status: latest.status,            // engine-execution status (display only)
-          overallStatus,                    // canonical verdict (derived, never aliased from status)
+          overallStatus,                    // legacy verdict field (back-compat for FE SystemIntegrityPanel)
+          integrityVerdict: overallStatus,  // H4 (2026-05-10): canonical verdict under a semantically-explicit name (same value as overallStatus)
           zeroLeakage,
           traceabilityComplete,
           failureReasons,
