@@ -191,3 +191,9 @@ id = "iwBfmbQM9PV7lFibLt_-E"
 uri = "file://.local/runs/marketmindai-e2e-run-audit-orch_1778338988220_jjcwv2.md"
 type = "text"
 title = "MarketMindAI E2E Run Audit — orch_1778338988220_jjcwv2"
+
+[[outputs]]
+id = "o1aqSMbU6czStebfbPENT"
+uri = "file://.local/runs/marketmindai-engine-intelligence-breakdown-orch_1778338988220_jjcwv2.md"
+type = "text"
+title = "MarketMindAI — Per-Engine Intelligence Breakdown (orch_1778338988220_jjcwv2)"
