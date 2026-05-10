@@ -1,0 +1,94 @@
+Team,
+
+The latest audit clarified something important:
+
+the system already has most of the reliability and recovery infrastructure we need.
+
+The gap is no longer detection.
+
+The gap is operational recovery coverage.
+
+The key principle going forward is:
+
+No dead-end BLOCK.
+
+A BLOCK state should not leave the user stuck with:
+
+* no explanation
+* no next step
+* no ownership
+* no repair path
+* no understanding of whether recovery is possible
+
+The platform should behave like:
+a commercial operating system,
+not just a validator.
+
+The audit confirmed that:
+
+* evaluateSystemControl() already contains the repair-before-block insertion point
+* recovery-map already exists
+* recovery-planner already exists
+* repair-actions infrastructure already exists
+* retry-policy already exists
+* contradiction handling already exists
+
+So we are NOT rebuilding architecture.
+
+We are only extending recovery coverage on top of the existing system. 
+
+Authorize the following v1 wire-in only:
+
+Pure mutation repairs:
+
+* CAP_CONFIDENCE_AT_FLOOR_PLUS_DELTA
+* CLAMP_TO_LOWER_CONFIDENCE
+* FORCE_BUDGET_HOLD_ON_ZERO_FLOOR
+* MODE_DOWNGRADE_TO_CHANNEL_VALIDATION
+
+And add the two operational metadata fields:
+
+* retrySafe
+* resolverActor
+
+Constraints:
+
+* no engine reruns
+* no retry loops
+* no new detectors
+* no new alarm layers
+* no reliability rebuild
+* no truthfulness weakening
+* no orchestration expansion
+
+All repairs must remain:
+
+* single-pass
+* idempotent
+* provenance-stamped
+* downgrade-only
+* risk-reducing only
+
+Non-repairable commercial brake signals remain BLOCK/RecoveryPlan only:
+
+* VALIDATION_REJECTED
+* BUDGET_KILL
+* BUDGET_HALT
+* SIGNAL_GROUNDING_MASS_FAILURE
+* PIPELINE_INCOMPLETE
+* STALE_SNAPSHOT_EVIDENCE
+
+This is the important shift:
+
+The system should not only detect failure.
+
+It should:
+
+* safely repair what is repairable
+* clearly explain what is not repairable
+* and always provide an operational next step
+
+That is the target behavior of a commercial operating system.
+
+Best,
+[Your Name]

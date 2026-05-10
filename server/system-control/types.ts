@@ -157,7 +157,14 @@ export type RepairActionCode =
   | "INJECT_FALLBACK_CONVERSION"
   | "DOWNGRADE_SCALE_TO_TEST"
   | "REVALIDATE_INTEGRITY"
-  | "FLAG_FOR_REVIEW";
+  | "FLAG_FOR_REVIEW"
+  // v1 Actionable Block Recovery (May 2026) — pure-mutation repairs.
+  // Single-pass, idempotent, provenance-stamped, downgrade-only,
+  // risk-reducing only. No engine reruns. No retry loops.
+  | "CAP_CONFIDENCE_AT_FLOOR_PLUS_DELTA"
+  | "CLAMP_TO_LOWER_CONFIDENCE"
+  | "FORCE_BUDGET_HOLD_ON_ZERO_FLOOR"
+  | "MODE_DOWNGRADE_TO_CHANNEL_VALIDATION";
 
 export interface RepairAction {
   code: RepairActionCode;
@@ -167,7 +174,26 @@ export interface RepairAction {
   executed: boolean;
   succeeded: boolean;
   detail: string;
+  /**
+   * Optional execution-mode hint emitted by repair handlers that resolve a
+   * block via mode flip rather than data mutation (e.g. channel-confidence
+   * → CHANNEL_VALIDATION_REQUIRED). Verdict synthesis prefers this when the
+   * resolved-block path lands in REPAIR/DOWNGRADE.
+   */
+  modeHint?: ExecutionMode;
 }
+
+/**
+ * Who can resolve a given block code at runtime.
+ *
+ *   - "system"   → repair is wired (or could be re-executed by the system without
+ *                  external action) and operationally addressable in-platform
+ *   - "user"     → human review / decision required (HUMAN_REVIEW_REQUIRED path)
+ *   - "external" → real-world data acquisition required (proof collection,
+ *                  validation window, MI refresh) — neither system nor user
+ *                  can resolve at runtime
+ */
+export type ResolverActor = "system" | "user" | "external";
 
 export type RootCauseCategory =
   | "strategy_issue"
@@ -193,6 +219,20 @@ export interface RecoveryIssue {
   priority: number;
   severity: "critical" | "high";
   source: "deterministic" | "llm_enriched";
+  /**
+   * v1 Actionable Block Recovery (May 2026): is this block safely repairable
+   * inside `evaluateSystemControl()` at runtime? Derived from the static
+   * recovery-map declaration — never inferred per-run. Drives UI affordance:
+   * `true` → "Auto-resolve" / pre-applied; `false` → manual recovery path.
+   */
+  retrySafe: boolean;
+  /**
+   * v1 Actionable Block Recovery (May 2026): who can resolve this block? Lifts
+   * the previously-plan-level `humanReviewNeeded` boolean to per-issue
+   * granularity so a stuck user can see for each block whether the system,
+   * the user, or external data acquisition is required.
+   */
+  resolverActor: ResolverActor;
 }
 
 /**

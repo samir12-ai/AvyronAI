@@ -4,6 +4,7 @@ import type {
   SystemVerdict,
   ExecutionMode,
   BlockReason,
+  BlockCode,
   Downgrade,
   StructuralCheck,
   Contradiction,
@@ -134,6 +135,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
         assessment.recommendedActions,
         input.results,
         input.integrityReport,
+        input.ssc ?? null,
       );
 
       const resolvedCodes = new Set(
@@ -143,6 +145,17 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
       );
 
       if (resolvedCodes.size > 0) {
+        // v1 Actionable Block Recovery (May 2026): preserve the original block
+        // reasons keyed by code BEFORE filtering so we can re-attach any block
+        // whose post-mutation re-check still FAILs. Without this, a "succeeded"
+        // mutation that didn't actually move the structural needle (or a
+        // mode-flip handler that doesn't change underlying values) would
+        // silently clear the block — violating "verify against post-mutation
+        // state".
+        const resolvedBlocksByCode = new Map<string, BlockReason>();
+        for (const b of blockReasons) {
+          if (resolvedCodes.has(b.code)) resolvedBlocksByCode.set(b.code, b);
+        }
         blockReasons = blockReasons.filter(b => !resolvedCodes.has(b.code));
 
         const recheck: StructuralCheck[] = [];
@@ -154,11 +167,68 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
           const newBudgetAction = input.results.get("budget_governor")?.output?.decision?.action ?? null;
           recheck.push(checkSignalGrounding(input.signalComposition, newBudgetAction));
         }
+        // v1 Actionable Block Recovery (May 2026): re-verify the structural
+        // check whose target the pure-mutation repair just clamped. SSC was
+        // mutated in place; re-checks read the post-mutation state.
+        if (resolvedCodes.has("CONFIDENCE_CHAIN_VIOLATION")) {
+          recheck.push(checkConfidenceChainIntegrity(input.ssc));
+        }
+        if (resolvedCodes.has("CONFIDENCE_SPREAD_EXCESSIVE")) {
+          recheck.push(checkConfidenceSpread(input.ssc));
+        }
+        if (resolvedCodes.has("BUDGET_OVERRIDE_ZERO_CONFIDENCE")) {
+          recheck.push(checkBudgetOverrideZeroConfidence(input.ssc, input.results));
+        }
+        if (resolvedCodes.has("CHANNEL_CONFIDENCE_BELOW_MINIMUM")) {
+          recheck.push(checkChannelConfidenceMinimum(input.results));
+        }
 
         for (const rc of recheck) {
           const idx = structuralChecks.findIndex(c => c.check === rc.check);
           if (idx >= 0) structuralChecks[idx] = rc;
           else structuralChecks.push(rc);
+        }
+
+        // v1 Actionable Block Recovery (May 2026): authoritative re-check gate.
+        // For every re-check that still FAILs, locate the repair that targeted
+        // the corresponding block code:
+        //   - If the repair is a value-mutation (no modeHint) → revert. The
+        //     mutation didn't actually fix the structural condition, so the
+        //     block must be re-attached and the repair marked unsuccessful.
+        //   - If the repair is a mode-flip (modeHint set) → exempt. Mode-flip
+        //     repairs (e.g. CHANNEL_VALIDATION_REQUIRED) intentionally accept a
+        //     residual structural failure in exchange for a strictly-safer
+        //     execution mode, which is the doctrine-compliant resolution.
+        const checkToBlockCode: Record<string, string> = {
+          conversion_path: "NO_CONVERSION_PATH",
+          funnel_structural_completeness: "NO_CONVERSION_PATH",
+          signal_grounding: "SCALE_WITHOUT_REAL_DATA",
+          confidence_chain_integrity: "CONFIDENCE_CHAIN_VIOLATION",
+          confidence_spread: "CONFIDENCE_SPREAD_EXCESSIVE",
+          budget_override_zero_confidence: "BUDGET_OVERRIDE_ZERO_CONFIDENCE",
+          channel_confidence_minimum: "CHANNEL_CONFIDENCE_BELOW_MINIMUM",
+        };
+        for (const rc of recheck) {
+          if (rc.status !== "FAIL") continue;
+          const blockCode = checkToBlockCode[rc.check] as BlockCode | undefined;
+          if (!blockCode || !resolvedCodes.has(blockCode)) continue;
+
+          const repair = repairActions.find(a => a.targetBlock === blockCode && a.succeeded);
+          if (!repair) continue;
+          if (repair.modeHint) continue; // mode-flip exemption — doctrine-allowed
+
+          // Value-mutation repair did not actually resolve the structural
+          // condition. Revert: re-attach the original block and downgrade the
+          // repair record so verdict synthesis sees an unresolved BLOCK.
+          repair.succeeded = false;
+          repair.detail = `${repair.detail} | REVERTED: post-repair re-check still FAILed (${rc.details})`;
+          const originalBlock = resolvedBlocksByCode.get(blockCode);
+          if (originalBlock && !blockReasons.some(b => b.code === blockCode)) {
+            blockReasons.push(originalBlock);
+          }
+          console.warn(
+            `[SystemControl] REPAIR_REVERTED | code=${repair.code} | target=${blockCode} | reason=re-check still FAILing post-mutation`
+          );
         }
 
         const postRepairBudgetAction = input.results.get("budget_governor")?.output?.decision?.action ?? null;
@@ -238,7 +308,13 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     executionMode = "HALTED";
   } else if (repairAttempted && repairActions.some(a => a.succeeded)) {
     verdict = "REPAIR";
-    if (downgrades.length > 0) {
+    // v1 Actionable Block Recovery: a successful repair handler may emit a
+    // `modeHint` (e.g. CHANNEL_VALIDATION_REQUIRED for channel-confidence
+    // mode flips). When present, prefer it over the generic downgrade ladder.
+    const modeHint = repairActions.find(a => a.succeeded && a.modeHint)?.modeHint;
+    if (modeHint) {
+      executionMode = modeHint;
+    } else if (downgrades.length > 0) {
       const hasScaleDowngrade = downgrades.some(d => d.from === "scale");
       const hasTestDowngrade = downgrades.some(d => d.from === "test");
       if (hasScaleDowngrade) executionMode = "TEST_ONLY";

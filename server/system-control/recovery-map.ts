@@ -1,6 +1,7 @@
 import type {
   BlockCode,
   ExecutionMode,
+  ResolverActor,
   RootCauseCategory,
 } from "./types";
 
@@ -17,6 +18,52 @@ export interface RecoveryMapEntry {
   defaultNextMode: ExecutionMode;
 }
 
+/**
+ * v1 Actionable Block Recovery (May 2026): per-block-code operational
+ * metadata. Static — never inferred per-run. Drives `RecoveryIssue.retrySafe`
+ * and `RecoveryIssue.resolverActor` so the user sees, for every block, both
+ * whether the system can resolve it at runtime and who must act if not.
+ *
+ *   retrySafe=true  → block has a wired pure-mutation runtime repair
+ *                     OR a system-side mode-flip that strictly downgrades risk
+ *   retrySafe=false → real-world action / engine re-run / human review needed
+ *
+ *   resolverActor="system"   → in-platform resolution is possible
+ *   resolverActor="user"     → human review required (HUMAN_REVIEW_REQUIRED)
+ *   resolverActor="external" → real-world data acquisition required
+ *                              (proof collection / MI refresh / validation window)
+ */
+export const BLOCK_METADATA: Record<BlockCode | "UNKNOWN_BLOCK", { retrySafe: boolean; resolverActor: ResolverActor }> = {
+  // Wired-active runtime repairs (pre-v1)
+  NO_CONVERSION_PATH:               { retrySafe: true,  resolverActor: "system" },
+  SCALE_WITHOUT_REAL_DATA:          { retrySafe: true,  resolverActor: "system" },
+  // v1 pure-mutation repairs
+  CONFIDENCE_CHAIN_VIOLATION:       { retrySafe: true,  resolverActor: "system" },
+  CONFIDENCE_SPREAD_EXCESSIVE:      { retrySafe: true,  resolverActor: "system" },
+  BUDGET_OVERRIDE_ZERO_CONFIDENCE:  { retrySafe: true,  resolverActor: "system" },
+  CHANNEL_CONFIDENCE_BELOW_MINIMUM: { retrySafe: true,  resolverActor: "system" },
+  // Engine-rerun-required (system-driven, not safe inside system-control loop)
+  INTEGRITY_FAILURE:                { retrySafe: false, resolverActor: "system" },
+  COMPLIANCE_FAILURE:               { retrySafe: false, resolverActor: "system" },
+  OFFER_AUDIENCE_MISALIGNMENT:      { retrySafe: false, resolverActor: "system" },
+  ZERO_OBJECTION_COVERAGE:          { retrySafe: false, resolverActor: "system" },
+  // Truthfulness / commercial brake signals — must NOT be repaired
+  VALIDATION_REJECTED:              { retrySafe: false, resolverActor: "external" },
+  BUDGET_KILL:                      { retrySafe: false, resolverActor: "external" },
+  BUDGET_HALT:                      { retrySafe: false, resolverActor: "external" },
+  SIGNAL_GROUNDING_MASS_FAILURE:    { retrySafe: false, resolverActor: "external" },
+  // Human-review or architectural-truth signals
+  POSITIONING_HARD_GATE:            { retrySafe: false, resolverActor: "user" },
+  UNRESOLVED_CRITICAL_PROBLEMS:     { retrySafe: false, resolverActor: "user" },
+  // Phase R reliability blocks — system-domain (orchestrator/retry-policy/snapshot-refresh)
+  PIPELINE_INCOMPLETE:              { retrySafe: false, resolverActor: "system" },
+  STALE_SNAPSHOT_EVIDENCE:          { retrySafe: false, resolverActor: "system" },
+  ENGINE_TIMEOUT:                   { retrySafe: false, resolverActor: "system" },
+  UNRESOLVED_CONTRADICTION:         { retrySafe: false, resolverActor: "user" },
+  // Unknown — escalate to human
+  UNKNOWN_BLOCK:                    { retrySafe: false, resolverActor: "user" },
+};
+
 const RANK = {
   STRUCTURAL: 10,
   AUDIENCE: 20,
@@ -31,7 +78,12 @@ const RANK = {
   SYSTEM: 100,
 } as const;
 
-export const RECOVERY_MAP: Record<BlockCode | "UNKNOWN_BLOCK", RecoveryMapEntry> = {
+// Partial<Record<...>>: not every BlockCode has a strategic-recovery narrative
+// (Phase R reliability blocks like PIPELINE_INCOMPLETE / STALE_SNAPSHOT_EVIDENCE
+// / ENGINE_TIMEOUT / UNRESOLVED_CONTRADICTION are system-domain — they fall
+// through to UNKNOWN_BLOCK in `lookupRecovery()` while their per-block-code
+// operational metadata still lives in BLOCK_METADATA above).
+export const RECOVERY_MAP: Partial<Record<BlockCode | "UNKNOWN_BLOCK", RecoveryMapEntry>> & { UNKNOWN_BLOCK: RecoveryMapEntry } = {
   INTEGRITY_FAILURE: {
     meaning: "System Integrity engine flagged a structural failure across one or more strategic engines.",
     severity: "critical",
@@ -367,7 +419,7 @@ export const RECOVERY_MAP: Record<BlockCode | "UNKNOWN_BLOCK", RecoveryMapEntry>
 };
 
 export function lookupRecovery(code: string): RecoveryMapEntry {
-  return RECOVERY_MAP[code as BlockCode] || RECOVERY_MAP.UNKNOWN_BLOCK;
+  return RECOVERY_MAP[code as BlockCode] ?? RECOVERY_MAP.UNKNOWN_BLOCK;
 }
 
 export function listMappedBlockCodes(): string[] {

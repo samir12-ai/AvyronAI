@@ -7,7 +7,7 @@ import type {
   RootCauseCategory,
   SystemControlVerdict,
 } from "./types";
-import { lookupRecovery, RECOVERY_MAP } from "./recovery-map";
+import { lookupRecovery, RECOVERY_MAP, BLOCK_METADATA } from "./recovery-map";
 
 function canonicalCode(rawCode: string | undefined): BlockCode | "UNKNOWN_BLOCK" {
   if (!rawCode) return "UNKNOWN_BLOCK";
@@ -124,6 +124,9 @@ export function buildRecoveryPlan(
     const entry = lookupRecovery(reason.code);
     const isUnknown = canonical === "UNKNOWN_BLOCK";
     const baseDiagnosis = buildDiagnosis(reason, entry);
+    // v1 Actionable Block Recovery (May 2026): per-issue operational metadata
+    // sourced from the static BLOCK_METADATA registry. Never inferred per-run.
+    const meta = BLOCK_METADATA[canonical] ?? BLOCK_METADATA.UNKNOWN_BLOCK;
     return {
       blockCode: canonical,
       rootCauseCategory: entry.rootCauseCategory,
@@ -138,6 +141,8 @@ export function buildRecoveryPlan(
       priority: entry.repairOrderRank,
       severity: reason.severity || entry.severity,
       source: "deterministic",
+      retrySafe: meta.retrySafe,
+      resolverActor: meta.resolverActor,
     };
   });
 
