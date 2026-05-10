@@ -146,6 +146,7 @@ import { designChannelOrchestration } from "../strategy/channel-selection/channe
 import { designIterationStrategy } from "../strategy/iteration-engine/iteration-strategy";
 import { designRetentionEconomics } from "../strategy/retention-engine/retention-economics";
 import { designSystemJudgement } from "../system-control/system-judgement";
+import { resolveSnapshotWriteStatus } from "../shared/canonical-snapshot-reader";
 
 export interface AgentProgressEvent {
   engineId: EngineId;
@@ -1510,8 +1511,7 @@ async function executeEngine(
             audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             engineVersion: DIFFERENTIATION_ENGINE_VERSION,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             differentiationPillars: JSON.stringify((result as any).pillars || (result as any).differentiationPillars || []),
             proofArchitecture: JSON.stringify((result as any).proofArchitecture || null),
@@ -1629,8 +1629,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: result.engineVersion || 1,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             primaryMechanism: result.primaryMechanism ? JSON.stringify(result.primaryMechanism) : null,
             alternativeMechanism: result.alternativeMechanism ? JSON.stringify(result.alternativeMechanism) : null,
@@ -1826,8 +1825,7 @@ async function executeEngine(
             mechanismSnapshotId: (ctx.mechanism as any)?.snapshotId || null,
             strategyRootId: activeRoot.id,
             engineVersion: OFFER_ENGINE_VERSION,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             primaryOffer: JSON.stringify((result as any).primaryOffer || result),
             alternativeOffer: JSON.stringify((result as any).alternativeOffer || null),
@@ -1950,8 +1948,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: AWARENESS_ENGINE_VERSION,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             primaryRoute: JSON.stringify((result as any).primaryRoute || null),
             alternativeRoute: JSON.stringify((result as any).alternativeRoute || null),
@@ -2061,8 +2058,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: FUNNEL_ENGINE_VERSION,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             primaryFunnel: JSON.stringify((result as any).primaryFunnel || result),
             alternativeFunnel: JSON.stringify((result as any).alternativeFunnel || null),
@@ -2156,8 +2152,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: result.engineVersion || 1,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             overallIntegrityScore: result.overallIntegrityScore || null,
             safeToExecute: result.safeToExecute || false,
@@ -2264,8 +2259,7 @@ async function executeEngine(
             positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
             differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
             engineVersion: PERSUASION_ENGINE_VERSION,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             primaryRoute: JSON.stringify((result as any).primaryRoute || null),
             alternativeRoute: JSON.stringify((result as any).alternativeRoute || null),
@@ -2420,8 +2414,7 @@ async function executeEngine(
             jobId,
             persuasionSnapshotId: ctx.persuasion?.snapshotId || null,
             engineVersion: result.engineVersion || 1,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             result: JSON.stringify(result),
             layerResults: JSON.stringify(result.layerResults || []),
@@ -2856,8 +2849,7 @@ async function executeEngine(
             campaignId: config.campaignId,
             jobId,
             engineVersion: result.engineVersion || 1,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             result: JSON.stringify(result),
             layerResults: result.layerResults ? JSON.stringify(result.layerResults) : null,
@@ -3037,8 +3029,7 @@ async function executeEngine(
             campaignId: config.campaignId,
             jobId,
             engineVersion: result.engineVersion || 1,
-            // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence write to generic DB `status` column (H9 typed-snapshot-writer pending)
-            status: result.status || "COMPLETE",
+            status: resolveSnapshotWriteStatus(result),
             statusMessage: result.statusMessage || null,
             result: JSON.stringify(result),
             layerResults: result.layerResults ? JSON.stringify(result.layerResults) : null,

@@ -35,6 +35,7 @@ import {
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { getActiveRootBundle, detectStaleness } from "../root-bundle";
 import { getMemoryHealth, type MemoryHealthSummary } from "../memory-mutation/engine";
+import { readSnapshotStatus } from "../shared/canonical-snapshot-reader";
 
 export interface SystemContext {
   businessProfile: any;
@@ -252,8 +253,7 @@ export async function loadSystemContext(
           .where(and(eq(table.campaignId, campaignId), eq(table.accountId, accountId), eq((table as any).jobId, _runId)))
           .limit(1);
         if (snap) {
-          // eslint-disable-next-line semantic/no-semantic-fallback -- P (H8): persistence read of generic DB `status` column for agent-context snapshot serialization (H9 pending)
-          engineSnapshots[name] = { id: snap.id, status: snap.status || "COMPLETE", createdAt: snap.createdAt };
+          engineSnapshots[name] = { id: snap.id, status: readSnapshotStatus(snap), createdAt: snap.createdAt };
         }
       } catch {}
     }
