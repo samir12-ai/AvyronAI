@@ -64,7 +64,7 @@
  *     authorization + parity proof — it is NOT a U5 cutover.
  */
 
-import { getFieldImportanceForRetry } from "../shared/weight-schema";
+import { getFieldImportanceForRetry, type FieldImportance } from "../shared/weight-schema";
 
 /**
  * Where the retry should run. Today only `"engine-only"` is emitted by the
@@ -238,6 +238,150 @@ function formatRetryRationale(
  * baseline* the harness compares against. DO NOT refactor it to call
  * `planRetry` — that would defeat the parity proof.
  */
+// ────────────────────────────────────────────────────────────────────────────
+// R2a (May 2026) — Shadow Recommendation (OBSERVATION ONLY).
+//
+// Computes what `planRetry` WOULD return if `input.missingFieldId` were
+// registered in `FIELD_IMPORTANCE_REGISTRY` with importance === "critical",
+// WITHOUT mutating the registry.
+//
+// Constraints honored (per R2a authorization, May 2026):
+//   - No production retry behavior change. The orchestrator continues to
+//     consume the real `planRetry(input)` decision; this helper is only
+//     invoked for logging.
+//   - No registry population. The shadow path computes the importance-
+//     widened branch inline by passing a synthetic "critical" pin to a
+//     pure local copy of planRetry's algorithm — the production
+//     `FIELD_IMPORTANCE_REGISTRY` and `TEST_OVERRIDES` map are NOT
+//     touched, so cross-test isolation is preserved.
+//   - No detection systems added. Reuses the existing
+//     `MidPipelineGateResult.missingFieldId` ownership path.
+//
+// The returned `weighted` decision is what planRetry WOULD return if
+// the pilot field were registered as critical. The returned `current`
+// decision is what planRetry returns today (registry empty → no
+// widening). `wouldWiden` is true iff the two diverge.
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface ShadowRetryRecommendationInput extends RetryPolicyInput {
+  /**
+   * The single field id this R2a shadow run is piloting. If
+   * `input.missingFieldId !== pilotField`, the shadow returns
+   * `wouldRetry: current.retry` and `wouldWiden: false` (i.e. shadow
+   * recommendation is identical to the current decision — non-pilot
+   * fields are not part of this observation).
+   */
+  readonly pilotField: string;
+  /**
+   * Owning engine for the pilot field. Logged for audit; never used in
+   * the recommendation computation.
+   */
+  readonly pilotOwningEngine: string;
+}
+
+export interface ShadowRetryRecommendation {
+  /** What `planRetry` returned for this input today (production decision). */
+  readonly current: RetryPolicyDecision;
+  /** What `planRetry` would return if `pilotField` were registered as critical. */
+  readonly weighted: RetryPolicyDecision;
+  /** The field id this shadow recommendation is about. */
+  readonly field: string;
+  /** Engine that owns the field. */
+  readonly owningEngine: string;
+  /** The simulated importance class. R2a always pilots "critical". */
+  readonly importance: FieldImportance;
+  /** True iff `weighted.retry` differs from `current.retry`. */
+  readonly wouldRetry: boolean;
+  /**
+   * True iff the weighted decision widens the retry budget vs the current
+   * decision (e.g. maxAttempts 1 → 2). Per U5d, importance only widens
+   * `maxAttempts`, never the `retry` boolean — so `wouldWiden` is the
+   * meaningful R2a signal for the offer.painAlignment pilot.
+   */
+  readonly wouldWiden: boolean;
+  /** Why this recommendation diverges (or does not). */
+  readonly reason: string;
+  /** True iff this gate failure matched the pilot field. Non-matches are no-ops. */
+  readonly matchedPilot: boolean;
+}
+
+/**
+ * Pure, side-effect-free copy of planRetry's algorithm parameterized by a
+ * synthetic importance value. Used only by `computeShadowRetryRecommendation`
+ * to simulate the importance-widened branch without touching the real
+ * registry. Intentionally duplicated (NOT a refactor of planRetry) so the
+ * production code path remains the single source of truth — matching the
+ * U5b `legacyMirrorRetryDecision` pattern.
+ */
+function planRetryWithSyntheticImportance(
+  input: RetryPolicyInput,
+  syntheticImportance: FieldImportance | undefined,
+): RetryPolicyDecision {
+  const retry = input.gateShouldRetry === true;
+  const scope: RetryScope = "engine-only";
+  let maxAttempts = 1;
+  if (syntheticImportance === "critical") {
+    maxAttempts = 2;
+  }
+  let onFinalFailure: RetryFinalFailureAction;
+  if (input.gateSeverity === "critical") {
+    onFinalFailure = "BLOCK";
+  } else {
+    onFinalFailure = "CONTINUE";
+  }
+  const rationale = formatRetryRationale(input, { retry, scope, maxAttempts, onFinalFailure });
+  return { retry, scope, maxAttempts, onFinalFailure, rationale };
+}
+
+/**
+ * Compute the R2a shadow recommendation. Pure function — no I/O, no
+ * registry mutation, no console output. The caller is responsible for
+ * logging the returned record. Production retry behavior is unaffected.
+ */
+export function computeShadowRetryRecommendation(
+  input: ShadowRetryRecommendationInput,
+): ShadowRetryRecommendation {
+  // Current decision = exactly what planRetry returns today (registry empty).
+  const current = planRetry(input);
+
+  const matchedPilot =
+    input.missingFieldId !== undefined &&
+    input.missingFieldId === input.pilotField;
+
+  // Weighted decision: only diverges from current if the gate's
+  // missingFieldId matches the pilot. Otherwise we are not piloting this
+  // field and the shadow recommendation IS the current decision.
+  const weighted: RetryPolicyDecision = matchedPilot
+    ? planRetryWithSyntheticImportance(input, "critical")
+    : current;
+
+  const wouldRetry = weighted.retry !== current.retry;
+  const wouldWiden = weighted.maxAttempts > current.maxAttempts;
+
+  let reason: string;
+  if (!matchedPilot) {
+    reason = `non-pilot-field | observed=${input.missingFieldId ?? "none"} | pilot=${input.pilotField} | shadow=no-op`;
+  } else if (!wouldWiden && !wouldRetry) {
+    // Pilot matched, but importance widening had no effect (e.g. gate already
+    // declines retry — importance only widens maxAttempts on a retry path).
+    reason = `pilot-matched | gateShouldRetry=${input.gateShouldRetry} | importance-widening-no-op (importance only widens maxAttempts on retry-bearing gates)`;
+  } else {
+    reason = `pilot-matched | importance=critical would widen maxAttempts ${current.maxAttempts}→${weighted.maxAttempts}`;
+  }
+
+  return {
+    current,
+    weighted,
+    field: input.missingFieldId ?? "(none)",
+    owningEngine: input.pilotOwningEngine,
+    importance: "critical",
+    wouldRetry,
+    wouldWiden,
+    reason,
+    matchedPilot,
+  };
+}
+
 export function legacyMirrorRetryDecision(input: RetryPolicyInput): RetryPolicyDecision {
   // Verbatim recreation of the inline policy at
   // server/orchestrator/index.ts:3493–3540, distilled to the four

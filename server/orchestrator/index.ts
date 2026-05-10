@@ -878,6 +878,16 @@ interface MidPipelineGateResult {
   severity: "critical" | "high" | "medium";
   shouldRetry: boolean;
   setConfidenceFloor?: number;
+  /**
+   * R2a (May 2026, observation-only) — opaque id of the field whose absence
+   * or invalid value caused this gate to fire. Forwarded to `planRetry` so
+   * the importance-aware branch (`getFieldImportanceForRetry`) can be
+   * consulted. Today the production registry is empty, so passing this
+   * field cannot change `planRetry`'s output. The id is also consumed by
+   * `computeShadowRetryRecommendation` to log a shadow comparison without
+   * mutating the registry.
+   */
+  missingFieldId?: string;
 }
 
 function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ctx: EngineContext): MidPipelineGateResult | null {
@@ -894,6 +904,7 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
           reason: `Positioning engineConfidence ${engineConf.toFixed(2)} below 0.40 minimum (gates on engine logic quality, not data reliability)`,
           severity: "critical",
           shouldRetry: true,
+          missingFieldId: "positioning.engineConfidence",
         };
       }
       break;
@@ -909,6 +920,7 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
           reason: "Offer has zero pain alignment — does not address any audience pains",
           severity: "critical",
           shouldRetry: true,
+          missingFieldId: "offer.painAlignment",
         };
       }
       break;
@@ -929,6 +941,7 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
           severity: "critical",
           shouldRetry: false,
           setConfidenceFloor: 0,
+          missingFieldId: "statistical_validation.validationState",
         };
       }
       if (validationState === "rejected") {
@@ -938,6 +951,7 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
           severity: "critical",
           shouldRetry: false,
           setConfidenceFloor: 0,
+          missingFieldId: "statistical_validation.validationState",
         };
       }
       break;
@@ -954,6 +968,7 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
           reason: "Channel Selection produced zero conversion-capable channels",
           severity: "high",
           shouldRetry: false,
+          missingFieldId: "channel_selection.conversionChannels",
         };
       }
       break;
@@ -3503,7 +3518,40 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           engineId: engineDef.id,
           gateShouldRetry: gateResult.shouldRetry,
           gateSeverity: gateResult.severity,
+          missingFieldId: gateResult.missingFieldId,
         });
+
+        // R2a (May 2026, OBSERVATION ONLY) — log a shadow recommendation
+        // showing what `planRetry` WOULD return if the pilot field were
+        // registered as critical in `FIELD_IMPORTANCE_REGISTRY`. The
+        // production decision (`retryDecision` above) is unchanged because
+        // the registry stays empty. The shadow helper does not mutate the
+        // registry. Pilot field selected per the R1 audit
+        // (`.local/plans/field-importance-audit.md` §6) — `offer.painAlignment`
+        // is the highest-confidence critical field that actively triggers
+        // a retry-bearing gate today, making the comparison meaningful.
+        try {
+          const shadow = computeShadowRetryRecommendation({
+            engineId: engineDef.id,
+            gateShouldRetry: gateResult.shouldRetry,
+            gateSeverity: gateResult.severity,
+            missingFieldId: gateResult.missingFieldId,
+            pilotField: "offer.painAlignment",
+            pilotOwningEngine: "offer",
+          });
+          console.log(
+            `[ShadowRetry] engine=${engineDef.id} ` +
+            `field=${shadow.field} owningEngine=${shadow.owningEngine} ` +
+            `importance=${shadow.importance} matchedPilot=${shadow.matchedPilot} ` +
+            `wouldRetry=${shadow.wouldRetry} wouldWiden=${shadow.wouldWiden} ` +
+            `current={retry=${shadow.current.retry},maxAttempts=${shadow.current.maxAttempts},onFinalFailure=${shadow.current.onFinalFailure}} ` +
+            `weighted={retry=${shadow.weighted.retry},maxAttempts=${shadow.weighted.maxAttempts},onFinalFailure=${shadow.weighted.onFinalFailure}} ` +
+            `reason="${shadow.reason}"`
+          );
+        } catch (err) {
+          // Shadow path must never affect production. Swallow defensively.
+          console.warn(`[ShadowRetry] error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
 
         if (retryDecision.retry) {
           console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason} | policy=${retryDecision.rationale}`);
