@@ -89,6 +89,23 @@ const checks: Check[] = [];
   });
 }
 
+// Invariant 4b (dataflow): retryDecision MUST be bound to planRetry's return
+//   value — not aliased to gateResult fields. Catches the regression where
+//   someone redeclares `const retryDecision = { retry: gateResult.shouldRetry, ... }`
+//   without calling planRetry, defeating the cutover while keeping the
+//   variable name. Architect rec from U5c review (#2 — dataflow assertion).
+{
+  const dataflowPattern = /\bconst\s+retryDecision\s*=\s*planRetry\s*\(/;
+  const matched = dataflowPattern.test(src);
+  checks.push({
+    name: "retryDecision bound directly to planRetry() return value",
+    pass: matched,
+    detail: matched
+      ? "dataflow proven — retryDecision = planRetry(...)"
+      : "MISSING — retryDecision may be aliased; planRetry's decision could be bypassed",
+  });
+}
+
 // Invariant 5: BLOCK discriminator now reads `retryDecision.onFinalFailure === "BLOCK"`
 //   and NOT `gateResult.severity === "critical"` inside the gate-retry block.
 //   Note: `gateResult.severity` may legitimately appear elsewhere (e.g.,
