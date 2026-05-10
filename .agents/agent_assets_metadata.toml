@@ -173,3 +173,9 @@ id = "hssHdm-w8FNF5C_hoPR7E"
 uri = "file://.local/plans/15-engine-contract-map.md"
 type = "text"
 title = "15-Engine Contract Map"
+
+[[outputs]]
+id = "lkiK1pSZmY_2SRrbhPpRz"
+uri = "file://.local/plans/unified-reliability-doctrine-audit.md"
+type = "text"
+title = "Unified Weighted Reliability Doctrine — System-Wide Audit"
