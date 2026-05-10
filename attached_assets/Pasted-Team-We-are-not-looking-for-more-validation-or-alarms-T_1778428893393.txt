@@ -1,0 +1,83 @@
+Team,
+
+We are not looking for more validation or alarms.
+
+The next phase should focus on solving critical failures before blocking.
+
+Current goal:
+
+Repair-before-Block.
+
+Meaning:
+the system should not immediately BLOCK when it detects a critical issue if there is a reasonable repair path available.
+
+Before a final BLOCK, the orchestrator should attempt to resolve the issue using existing engines and existing ownership paths.
+
+Target surfaces:
+
+1. Unresolved critical problems
+
+* identify the responsible engine or upstream cause
+* retry or repair the responsible engine
+* only BLOCK if the issue remains unresolved after repair
+
+2. `safeToExecute = false`
+
+* inspect the reason behind unsafe execution
+* map it to the responsible domain:
+
+  * audience/offer alignment
+  * conversion path
+  * channel mismatch
+  * budget viability
+  * contradiction
+* trigger the smallest existing repair path before final BLOCK
+
+3. Integrity / contradiction failures
+
+* do not only flag the contradiction
+* attempt reconciliation using the relevant engines
+* examples:
+
+  * funnel vs iteration
+  * offer vs audience
+  * channel vs budget
+  * positioning vs offer
+
+Important constraints:
+
+* do not build new detection systems
+* do not add new alarm layers
+* do not rebuild reliability infrastructure
+* reuse existing ownership tracing, recovery logic, contracts, system-control, and retry-policy infrastructure
+* do not activate broad retry loops
+* start with audit/design only
+
+First task:
+create a repair-path audit.
+
+For each current BLOCK reason, identify:
+
+* block source
+* exact reason
+* responsible engine
+* upstream dependency if any
+* whether a repair attempt already exists
+* whether retry is safe
+* minimal repair action
+* stop condition
+* expected risk
+
+Output only a document first.
+
+No behavior change yet.
+
+The principle:
+
+A final BLOCK should mean:
+“repair was attempted or proven unsafe/impossible,”
+not merely:
+“a validator detected a problem.”
+
+Best,
+[Your Name]
