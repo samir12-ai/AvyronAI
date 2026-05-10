@@ -769,7 +769,7 @@ console.log("─".repeat(80));
   assert("Problem type 'alignment' defined with offer/funnel relevance", pAlignment.type === "alignment" && pAlignment.relevantEngines.includes("offer"));
   assert("Alignment problem severity is critical", pAlignment.severity === "critical");
   console.log(`  [evidence] Problem type=${pAlignment.type} | The enforcement hook (enforceProblemsPostEngine) inspects actual engine output metrics:`);
-  console.log(`  [evidence]   alignment+offer: checks signalGrounding.painAlignment — 0.70 → resolved, 0 → cannot_resolve`);
+  console.log(`  [evidence]   alignment+offer/funnel: branch removed (R-final, May 10 2026) — dead read on non-emitted signalGrounding.painAlignment; coverage held by 6 parallel runtime layers`);
   console.log(`  [evidence]   structural+positioning: checks confidenceScore — >=0.40 → resolved, <0.40 → cannot_resolve`);
   console.log(`  [evidence]   trust+diff/mech/offer: checks proofStrength/trustPath — >=0.5 → resolved`);
   console.log(`  [evidence]   conversion+channel: checks selectedChannels for role=conversion — found → resolved, not → cannot_resolve`);

@@ -1014,12 +1014,24 @@ function updateSSCAfterEngine(ssc: SharedStrategicContext, engineId: string, ste
 function detectProblemResolutionInOutput(engineId: string, output: any, problem: ProblemEntry): "resolved" | "deferred" | "cannot_resolve" | "unaddressed" {
   if (!output) return "unaddressed";
 
-  if (problem.type === "alignment" && (engineId === "offer" || engineId === "funnel")) {
-    const painAlignment = output.signalGrounding?.painAlignment ?? output.painAlignment ?? null;
-    const painScore = typeof painAlignment === "number" ? painAlignment : (painAlignment?.score ?? null);
-    if (painScore !== null && painScore > 0) return "resolved";
-    if (painScore === 0) return "cannot_resolve";
-  }
+  // R-final housekeeping (May 10, 2026, user-authorized) — alignment branch
+  // for offer/funnel deleted. The prior branch read
+  // `output.signalGrounding?.painAlignment ?? output.painAlignment`, but
+  // neither the offer engine nor the funnel engine ever emits either field
+  // at any depth (R2b-a + R3 verification, sealed in
+  // `.local/plans/r3-field-reality-audit.md`). painScore therefore evaluated
+  // to `null` on every run, neither the "resolved" nor "cannot_resolve"
+  // return fired, and execution fell through to the generic
+  // `severity in {critical,high} && engineConf >= 0.70 → deferred` branch
+  // below — identical to current behaviour with the dead read removed.
+  // Same commercial failure mode (offer→audience pain misalignment) is
+  // covered by 6 parallel runtime layers (Audience pain inference, CEL
+  // alignment enforcement, Integrity ALIGNMENT_CHAIN, system-control
+  // checkOfferAudienceMisalignment → OFFER_AUDIENCE_MISALIGNMENT block,
+  // contradiction detector, checkZeroObjectionCoverage). Per the final
+  // verification report (`.local/plans/r-phase-7claim-verification.md`,
+  // "Remaining over-blocking cases" item 1) and user authorization
+  // 2026-05-10. No retry pilot is being activated here.
 
   if (problem.type === "structural" && engineId === "positioning") {
     const conf = output.confidenceScore ?? output.specificityScore ?? 0;
