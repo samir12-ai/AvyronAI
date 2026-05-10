@@ -909,22 +909,23 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
       }
       break;
     }
-    case "offer": {
-      const painAlignment = output.signalGrounding?.painAlignment ?? output.painAlignment ?? null;
-      const painScore = typeof painAlignment === "number" ? painAlignment : (painAlignment?.score ?? null);
-      const hasPainCoverage = painScore === null ? true : painScore > 0;
-
-      if (!hasPainCoverage) {
-        return {
-          gateFailed: true,
-          reason: "Offer has zero pain alignment — does not address any audience pains",
-          severity: "critical",
-          shouldRetry: true,
-          missingFieldId: "offer.painAlignment",
-        };
-      }
-      break;
-    }
+    // R3 housekeeping (May 10, 2026, user-authorized) — `case "offer"` deleted.
+    // The painAlignment mid-pipeline gate was DEAD: it read
+    // `output.signalGrounding?.painAlignment ?? output.painAlignment`, but the
+    // offer engine never emits either field at any depth (R2b-a verification,
+    // sealed in `.local/plans/r2b-a-pain-coverage-verification.md`). The gate
+    // therefore short-circuited to `painScore === null → hasPainCoverage = true`
+    // on every run and fired exactly zero times in production. Same commercial
+    // failure mode (offer→pain misalignment) is covered by 5 parallel layers:
+    //   1. Audience engine pain inference + confidence floor
+    //   2. CEL alignment enforcement
+    //   3. Integrity engine cross-engine alignment checks
+    //   4. System-control structural checks
+    //   5. Contradiction detector
+    // Per R3 verdict (`.local/plans/r3-field-reality-audit.md` §3.1, §6 item 1)
+    // and user authorization 2026-05-10, removing the dead branch eliminates
+    // future audit/retry confusion and prevents anyone from re-wiring a retry
+    // pilot onto a non-emitted signal. No retry pilot is being activated here.
     case "statistical_validation": {
       // D1/D2/D5 (H8): validationState (F3 — strategy/sample validation verdict) is
       // a DIFFERENT semantic class than status (F1 — engine execution status).
@@ -957,18 +958,33 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
       break;
     }
     case "channel_selection": {
-      const channels = output.selectedChannels || output.channels || [];
-      const hasConversion = channels.some((c: any) =>
-        c.role === "conversion" || c.funnelStage === "Conversion" ||
-        c.purpose?.toLowerCase().includes("conversion")
-      );
-      if (channels.length > 0 && !hasConversion) {
+      // R3 housekeeping (May 10, 2026, user-authorized) — field-name drift fix.
+      // PREVIOUS (dead): read `output.selectedChannels || output.channels`,
+      // both of which the channel-selection engine never emits at the top level
+      // (engine.ts:1429-1451 returns `primaryChannel`, `secondaryChannel`,
+      // `conversionChannelAssigned`, `funnelReconstruction.funnelStages`).
+      // The `||` chain therefore evaluated to `[]` on every run, the
+      // `channels.length > 0 && !hasConversion` predicate was always false,
+      // and the gate fired exactly zero times. Commercial behaviour was
+      // preserved by `system-control/structural-checks.ts:checkConversionPath`
+      // (which already reads the canonical fields via `requireContractField`),
+      // but the orchestrator gate itself was dead.
+      // FIX: mirror system-control's read shape — consult the engine's
+      // canonical `conversionChannelAssigned` boolean (engine.ts:1388, 1445).
+      // When the engine succeeded but did NOT assign a conversion channel,
+      // fire the gate. When the field is absent (legacy/in-flight snapshots),
+      // skip the gate rather than forcing a retry — the downstream
+      // `checkConversionPath` will catch it via the contract boundary helper
+      // and produce the canonical CONTRACT_INCOMPLETE/UNKNOWN signal.
+      // Per R3 verdict (§3.5, §6 item 2) and user authorization 2026-05-10.
+      // No retry pilot is being activated here — `shouldRetry: false` retained.
+      if (output.conversionChannelAssigned === false) {
         return {
           gateFailed: true,
-          reason: "Channel Selection produced zero conversion-capable channels",
+          reason: "Channel Selection produced zero conversion-capable channels (conversionChannelAssigned=false)",
           severity: "high",
           shouldRetry: false,
-          missingFieldId: "channel_selection.conversionChannels",
+          missingFieldId: "channel_selection.conversionChannelAssigned",
         };
       }
       break;
@@ -1021,13 +1037,16 @@ function detectProblemResolutionInOutput(engineId: string, output: any, problem:
   }
 
   if (problem.type === "conversion" && engineId === "channel_selection") {
-    const channels = output.selectedChannels || output.channels || [];
-    const hasConversion = channels.some((c: any) =>
-      c.role === "conversion" || c.funnelStage === "Conversion" ||
-      c.purpose?.toLowerCase().includes("conversion")
-    );
-    if (hasConversion) return "resolved";
-    return "cannot_resolve";
+    // R3 housekeeping (May 10, 2026, user-authorized) — same field-name drift
+    // fix as `checkMidPipelineGate.case "channel_selection"` above. The prior
+    // `output.selectedChannels || output.channels` reads always evaluated to
+    // `[]`, so problem-resolution detection here was identically dead. Mirror
+    // system-control's canonical read: trust `conversionChannelAssigned`.
+    if (output.conversionChannelAssigned === true) return "resolved";
+    if (output.conversionChannelAssigned === false) return "cannot_resolve";
+    // Field absent (legacy snapshot): defer to system-control's
+    // contract-boundary check rather than fabricating a verdict here.
+    return "unaddressed";
   }
 
   if (problem.type === "market" && engineId === "positioning") {
