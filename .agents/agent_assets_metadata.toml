@@ -185,3 +185,9 @@ id = "3rpBwmefZSSSpDtLr_skj"
 uri = "file://.local/plans/repair-before-block-audit.md"
 type = "text"
 title = "Repair-Before-Block Audit (May 2026) — with Actionable Block Recovery alignment"
+
+[[outputs]]
+id = "iwBfmbQM9PV7lFibLt_-E"
+uri = "file://.local/runs/marketmindai-e2e-run-audit-orch_1778338988220_jjcwv2.md"
+type = "text"
+title = "MarketMindAI E2E Run Audit — orch_1778338988220_jjcwv2"
