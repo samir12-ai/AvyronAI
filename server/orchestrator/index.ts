@@ -83,7 +83,7 @@ import {
 // .local/validation/retry-policy-shadow.ts (180/180 parity, 0 drift).
 // Gate-only by user constraint — per-engine REJECTED-loop retries are
 // out of scope (boundary enforced by server/tests/retry-policy-boundary.test.ts).
-import { planRetry } from "../decision-policy/retry-policy";
+import { planRetry, computeShadowRetryRecommendation } from "../decision-policy/retry-policy";
 import { synthesizePlan } from "./plan-synthesis";
 import {
   buildMemoryContext,
@@ -3544,6 +3544,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
             `field=${shadow.field} owningEngine=${shadow.owningEngine} ` +
             `importance=${shadow.importance} matchedPilot=${shadow.matchedPilot} ` +
             `wouldRetry=${shadow.wouldRetry} wouldWiden=${shadow.wouldWiden} ` +
+            `budgetAxisWidened=${shadow.budgetAxisWidened} ` +
             `current={retry=${shadow.current.retry},maxAttempts=${shadow.current.maxAttempts},onFinalFailure=${shadow.current.onFinalFailure}} ` +
             `weighted={retry=${shadow.weighted.retry},maxAttempts=${shadow.weighted.maxAttempts},onFinalFailure=${shadow.weighted.onFinalFailure}} ` +
             `reason="${shadow.reason}"`

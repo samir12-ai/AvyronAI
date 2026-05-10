@@ -293,12 +293,22 @@ export interface ShadowRetryRecommendation {
   /** True iff `weighted.retry` differs from `current.retry`. */
   readonly wouldRetry: boolean;
   /**
-   * True iff the weighted decision widens the retry budget vs the current
-   * decision (e.g. maxAttempts 1 → 2). Per U5d, importance only widens
-   * `maxAttempts`, never the `retry` boolean — so `wouldWiden` is the
-   * meaningful R2a signal for the offer.painAlignment pilot.
+   * True iff the weighted decision would result in OPERATIONALLY meaningful
+   * widening at runtime: the `maxAttempts` axis grew AND the gate is
+   * retry-bearing (`weighted.retry === true`). On a halt-path gate the
+   * widened budget is unreachable, so this stays false. Use
+   * `budgetAxisWidened` when you need the raw structural signal.
    */
   readonly wouldWiden: boolean;
+  /**
+   * Raw structural signal — true whenever `weighted.maxAttempts >
+   * current.maxAttempts`, regardless of whether the wider budget is
+   * reachable at runtime. Added per architect review (R2a) so automated
+   * analysis can distinguish "budget axis moved but inert" from "no
+   * structural change at all" without re-deriving from the embedded
+   * decisions.
+   */
+  readonly budgetAxisWidened: boolean;
   /** Why this recommendation diverges (or does not). */
   readonly reason: string;
   /** True iff this gate failure matched the pilot field. Non-matches are no-ops. */
@@ -356,15 +366,24 @@ export function computeShadowRetryRecommendation(
     : current;
 
   const wouldRetry = weighted.retry !== current.retry;
-  const wouldWiden = weighted.maxAttempts > current.maxAttempts;
+  // `budgetAxisWidened` is the RAW structural signal — does maxAttempts
+  // increase? `wouldWiden` is the OPERATIONALLY meaningful signal — the
+  // budget grew AND the retry path is actually reachable. Splitting them
+  // (per architect R2a review) lets log readers and automated analysis
+  // distinguish "structural shift but inert at runtime" from "no shift at all".
+  const budgetAxisWidened = weighted.maxAttempts > current.maxAttempts;
+  const wouldWiden = budgetAxisWidened && weighted.retry === true;
 
   let reason: string;
   if (!matchedPilot) {
     reason = `non-pilot-field | observed=${input.missingFieldId ?? "none"} | pilot=${input.pilotField} | shadow=no-op`;
+  } else if (budgetAxisWidened && weighted.retry === false) {
+    // Pilot matched and the budget axis grew, but the gate refuses to retry
+    // — importance widening is operationally inert here. Distinct from the
+    // "no-op" case so log readers can see the latent budget shift.
+    reason = `pilot-matched | gateShouldRetry=false | budget-axis-widened-but-inert (maxAttempts ${current.maxAttempts}→${weighted.maxAttempts} unreachable at runtime)`;
   } else if (!wouldWiden && !wouldRetry) {
-    // Pilot matched, but importance widening had no effect (e.g. gate already
-    // declines retry — importance only widens maxAttempts on a retry path).
-    reason = `pilot-matched | gateShouldRetry=${input.gateShouldRetry} | importance-widening-no-op (importance only widens maxAttempts on retry-bearing gates)`;
+    reason = `pilot-matched | gateShouldRetry=${input.gateShouldRetry} | importance-widening-no-op`;
   } else {
     reason = `pilot-matched | importance=critical would widen maxAttempts ${current.maxAttempts}→${weighted.maxAttempts}`;
   }
@@ -377,6 +396,7 @@ export function computeShadowRetryRecommendation(
     importance: "critical",
     wouldRetry,
     wouldWiden,
+    budgetAxisWidened,
     reason,
     matchedPilot,
   };

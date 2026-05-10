@@ -42,7 +42,10 @@ const checks: Check[] = [];
 
 // Invariant 1: planRetry is imported from decision-policy/retry-policy
 {
-  const importPattern = /import\s*{\s*planRetry\s*}\s*from\s+['"][^'"]*decision-policy\/retry-policy['"]/;
+  // Tolerate co-imported symbols (e.g. `import { planRetry, computeShadowRetryRecommendation }`)
+  // — the doctrinal invariant is "planRetry is imported from decision-policy/retry-policy",
+  // not "planRetry is the sole symbol on its import line". R2a added the shadow helper.
+  const importPattern = /import\s*{[^}]*\bplanRetry\b[^}]*}\s*from\s+['"][^'"]*decision-policy\/retry-policy['"]/;
   const matched = importPattern.test(src);
   checks.push({
     name: "planRetry imported from decision-policy/retry-policy",
