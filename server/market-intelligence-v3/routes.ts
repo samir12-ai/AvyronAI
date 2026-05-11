@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { miSnapshots, miTelemetry, miSignalLogs, miRefreshSchedule } from "@shared/schema";
-import { inArray, eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import { MarketIntelligenceV3, validateEngineIsolation, rejectBlockedEngine, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, buildResultFromSnapshot } from "./engine";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
@@ -317,10 +317,13 @@ export function registerMIv3Routes(app: Express) {
       // P3 isolation seal: explicit body-level campaign ownership check.
       // requireCampaign validates the *currently selected* campaign for the
       // account; the request body could still reference an arbitrary
-      // campaignId. Verify it belongs to this account before kicking off any
-      // fetch work.
+      // campaignId. The canonical ownership table is `campaign_selections`
+      // (same one `requireCampaign` middleware uses).
       const ownedCampaign = await db.execute(
-        sql`SELECT id FROM campaigns WHERE id = ${campaignId} AND account_id = ${accountId} LIMIT 1`
+        sql`SELECT selected_campaign_id FROM campaign_selections
+            WHERE selected_campaign_id = ${String(campaignId)}
+              AND account_id = ${accountId}
+            LIMIT 1`
       );
       if (!ownedCampaign.rows?.length) {
         return res.status(404).json({ error: "Campaign not found" });

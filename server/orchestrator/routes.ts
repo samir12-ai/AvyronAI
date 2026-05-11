@@ -48,12 +48,18 @@ export function registerOrchestratorV2Routes(app: Express) {
       const accountId = resolveAccountId(req);
 
       // P3 isolation seal: explicitly verify the requested campaignId belongs
-      // to the authenticated account before doing anything with it. Without
-      // this, the body's `campaignId` could reference another tenant's
-      // campaign (the requireCampaign-style middleware on other routes only
-      // validates the *currently selected* campaign for the account).
+      // to the authenticated account before doing anything with it. The
+      // canonical ownership table is `campaign_selections` (this is the same
+      // table `requireCampaign` middleware queries — see
+      // server/campaign-routes.ts:1029). Without this check, the body's
+      // `campaignId` could reference another tenant's campaign because
+      // `requireCampaign` only validates the *currently selected* campaign
+      // for the account, not an arbitrary body-supplied one.
       const ownedCampaign = await db.execute(
-        sql`SELECT id FROM campaigns WHERE id = ${String(campaignId)} AND account_id = ${accountId} LIMIT 1`
+        sql`SELECT selected_campaign_id FROM campaign_selections
+            WHERE selected_campaign_id = ${String(campaignId)}
+              AND account_id = ${accountId}
+            LIMIT 1`
       );
       if (!ownedCampaign.rows?.length) {
         return res.status(404).json({ error: "Campaign not found" });
