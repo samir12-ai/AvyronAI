@@ -894,23 +894,138 @@ export default function SettingsScreen() {
               <Ionicons name="stats-chart" size={20} color={colors.primary} />
               <Text style={[styles.cardTitle, { color: colors.text }]}>Campaign Performance</Text>
             </View>
-            <View style={[styles.badge, { backgroundColor: isMetaConnected ? (colors.success + '20') : ('#6B7280' + '20') }]}>
-              <Text style={[styles.badgeText, { color: isMetaConnected ? colors.success : '#6B7280' }]}>
-                {isMetaConnected ? 'Meta Live' : 'System Tracked'}
+            <View style={[styles.badge, { backgroundColor: isMetaConnected ? (colors.success + '20') : (colors.primary + '20') }]}>
+              <Text style={[styles.badgeText, { color: isMetaConnected ? colors.success : colors.primary }]}>
+                {isMetaConnected ? 'Meta Live' : 'Manual Input'}
               </Text>
             </View>
           </View>
-          <View style={{ padding: 16, alignItems: 'center', gap: 8 }}>
-            <Ionicons name="analytics-outline" size={32} color={colors.textMuted} />
-            <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
-              {isMetaConnected ? 'Live data from Meta' : 'No performance data yet'}
-            </Text>
-            <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 18 }}>
-              {isMetaConnected
-                ? 'Performance metrics are pulled automatically from your connected Meta account.'
-                : 'Performance data is collected automatically from your connected channels. The system will begin learning after your first content is detected.'}
-            </Text>
-          </View>
+          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+            Enter your real campaign numbers. The system uses these in the Iteration Engine, Budget Governor, Channel Selection, Statistical Validation, and Build Plan layer.
+          </Text>
+
+          {!selectedCampaignId ? (
+            <View style={{ padding: 16, alignItems: 'center' }}>
+              <Text style={{ color: colors.textMuted, fontSize: 14 }}>Select a campaign first to enter performance metrics</Text>
+            </View>
+          ) : (
+            <View style={{ marginTop: 12, gap: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Spend ($)</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualSpend}
+                    onChangeText={setManualSpend}
+                    placeholder="e.g. 1500"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                    testID="manual-metric-spend"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Revenue ($)</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualRevenue}
+                    onChangeText={setManualRevenue}
+                    placeholder="e.g. 4200"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                    testID="manual-metric-revenue"
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Leads</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualLeads}
+                    onChangeText={setManualLeads}
+                    placeholder="e.g. 80"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    testID="manual-metric-leads"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Conversions</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualConversions}
+                    onChangeText={setManualConversions}
+                    placeholder="e.g. 24"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    testID="manual-metric-conversions"
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Impressions</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualImpressions}
+                    onChangeText={setManualImpressions}
+                    placeholder="e.g. 50000"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    testID="manual-metric-impressions"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Clicks</Text>
+                  <TextInput
+                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
+                    value={manualClicks}
+                    onChangeText={setManualClicks}
+                    placeholder="e.g. 1200"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    testID="manual-metric-clicks"
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4, padding: 10, borderRadius: 8, backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.cardBorder }}>
+                <View style={{ flex: 1, alignItems: 'center' }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: '600' as const }}>CPA (Cost / Conversion)</Text>
+                  <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' as const, marginTop: 2 }}>
+                    ${manualDerived.cpa.toFixed(2)}
+                  </Text>
+                </View>
+                <View style={{ width: 1, backgroundColor: colors.cardBorder }} />
+                <View style={{ flex: 1, alignItems: 'center' }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: '600' as const }}>ROAS (Revenue / Spend)</Text>
+                  <Text style={{ color: manualDerived.roas >= 1 ? colors.success : colors.text, fontSize: 16, fontWeight: '700' as const, marginTop: 2 }}>
+                    {manualDerived.roas.toFixed(2)}x
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={handleSaveManualMetrics}
+                disabled={manualSaving}
+                testID="save-manual-metrics"
+                style={({ pressed }) => [{
+                  marginTop: 8,
+                  padding: 14,
+                  borderRadius: 10,
+                  backgroundColor: colors.primary,
+                  alignItems: 'center',
+                  opacity: (pressed || manualSaving) ? 0.7 : 1,
+                }]}
+              >
+                {manualSaving ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={{ color: '#fff', fontWeight: '600' as const, fontSize: 15 }}>Save Campaign Metrics</Text>
+                )}
+              </Pressable>
+            </View>
+          )}
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -1068,75 +1183,6 @@ export default function SettingsScreen() {
               </Pressable>
             </View>
           )}
-        </View>
-
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardTitleRow}>
-              <Ionicons name="link" size={20} color={colors.primary} />
-              <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.connectedPlatforms')}</Text>
-            </View>
-            <View style={[styles.badge, { backgroundColor: colors.primary + '20' }]}>
-              <Text style={[styles.badgeText, { color: colors.primary }]}>{connectedCount} {t('settings.active')}</Text>
-            </View>
-          </View>
-          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            {t('settings.connectSocialDesc')}
-          </Text>
-          <View style={styles.connectionsList}>
-            {platformConnections.map(connection => {
-              const style = platformIcons[connection.id] || { icon: 'globe' as const, color: colors.primary };
-              const isMetaPlatform = connection.id === 'facebook' || connection.id === 'instagram';
-              return (
-                <PlatformConnection
-                  key={connection.id}
-                  name={connection.name}
-                  icon={style.icon}
-                  color={style.color}
-                  isConnected={connection.isConnected}
-                  onConnect={() => isMetaPlatform && !metaConnection.isConnected ? handleConnectMeta() : handleConnect(connection.id)}
-                  onDisconnect={() => isMetaPlatform ? handleDisconnectMeta() : handleDisconnect(connection.id)}
-                  hint={isMetaPlatform ? t('settings.viaMetaBusiness') : undefined}
-                />
-              );
-            })}
-          </View>
-        </View>
-
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={styles.cardTitleRow}>
-            <Ionicons name="time" size={20} color={colors.accent} />
-            <Text style={[styles.cardTitle, { color: colors.text }]}>{t('settings.autoPublishSchedule')}</Text>
-          </View>
-          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            {t('settings.autoPublishDesc')}
-          </Text>
-          <View style={styles.scheduleList}>
-            {postingSchedules.map(schedule => {
-              const connection = platformConnections.find(c => c.name === schedule.platform);
-              const isConnected = connection?.isConnected || false;
-              return (
-                <View 
-                  key={schedule.platform}
-                  style={[styles.scheduleItem, { backgroundColor: colors.inputBackground }]}
-                >
-                  <View style={styles.scheduleLeft}>
-                    <Text style={[styles.schedulePlatform, { color: colors.text }]}>{schedule.platform}</Text>
-                    <Text style={[styles.scheduleInfo, { color: colors.textMuted }]}>
-                      {schedule.times.join(', ')} on {schedule.days.join(', ')}
-                    </Text>
-                  </View>
-                  <Switch
-                    value={schedule.enabled && isConnected}
-                    onValueChange={(value) => handleScheduleToggle(schedule.platform, value)}
-                    disabled={!isConnected}
-                    trackColor={{ false: colors.inputBorder, true: colors.primary + '50' }}
-                    thumbColor={schedule.enabled && isConnected ? colors.primary : colors.textMuted}
-                  />
-                </View>
-              );
-            })}
-          </View>
         </View>
 
         <Pressable
