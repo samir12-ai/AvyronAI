@@ -197,3 +197,9 @@ id = "o1aqSMbU6czStebfbPENT"
 uri = "file://.local/runs/marketmindai-engine-intelligence-breakdown-orch_1778338988220_jjcwv2.md"
 type = "text"
 title = "MarketMindAI — Per-Engine Intelligence Breakdown (orch_1778338988220_jjcwv2)"
+
+[[outputs]]
+id = "1kwOBmI4BkbXJEunOe_GI"
+uri = "file://.local/plans/cross-campaign-account-leakage-audit.md"
+type = "text"
+title = "Cross-Campaign / Cross-Account Leakage Audit"

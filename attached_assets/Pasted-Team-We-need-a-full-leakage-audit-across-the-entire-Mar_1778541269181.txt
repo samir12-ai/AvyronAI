@@ -1,0 +1,134 @@
+Team,
+
+We need a full leakage audit across the entire MarketMindAI pipeline.
+
+Goal:
+verify that no information from one campaign can leak into another campaign, and no data from one account can leak into another account.
+
+This audit must cover the entire agent pipeline, not only the engines.
+
+Scope:
+
+* frontend account/campaign switching
+* API routes
+* orchestrator jobs
+* engine snapshots
+* agent context loading
+* snapshot reuse
+* recovery planning
+* system-control verdicts
+* performance metrics
+* manual campaign metrics
+* content performance snapshots
+* scraping pipeline
+* cache layers
+* database queries
+* any shared memory/context helpers
+
+Please verify:
+
+1. Cross-campaign isolation
+   When switching from campaign A to campaign B inside the same account:
+
+* no snapshots from campaign A are loaded into campaign B
+* no strategy plan from A appears in B
+* no metrics from A affect B
+* no recovery plan from A appears in B
+* no previous run verdict from A is reused for B
+* no frontend cached state from A remains visible after switching
+
+2. Cross-account isolation
+   When switching from account A to account B:
+
+* no campaign data crosses accounts
+* no metrics cross accounts
+* no snapshots cross accounts
+* no scraping data crosses accounts
+* no agent context crosses accounts
+* no cached frontend/API state crosses accounts
+
+3. Agent pipeline isolation
+   Audit the full agent context pipeline:
+
+* how context is loaded
+* how campaignId/accountId are passed
+* how snapshots are selected
+* how previous runs are reused
+* how memory/cache/state is scoped
+* how agent prompts are hydrated
+
+Make sure every context read is scoped by the correct:
+
+* accountId
+* campaignId
+* jobId/runId where applicable
+* sourceJobId for snapshots
+
+4. Snapshot reuse safety
+   Verify:
+
+* reused snapshots must belong to the same account/campaign
+* sourceJobId must be valid
+* stale snapshots cannot satisfy current truth
+* frontend cannot display an older run as current
+* no fallback path can accidentally select another campaign’s snapshot
+
+5. Metrics isolation
+   Verify specifically:
+
+* manual_campaign_metrics
+* campaign_metrics
+* content_performance_snapshots
+* performance_snapshots
+* Meta/connected account data
+* scraping results
+
+No metrics from campaign A should affect campaign B unless explicitly intended and safely scoped.
+
+6. Frontend leakage check
+   Test switching campaigns/accounts in the UI:
+
+* immediately after switch
+* after refresh
+* after background refetch
+* after run completion
+
+Verify no stale UI state appears:
+
+* old PASS state
+* old campaign metrics
+* old content performance
+* old strategy plan
+* old recovery state
+* old engine outputs
+
+7. Output requested
+   Please produce an audit file:
+
+`.local/plans/cross-campaign-account-leakage-audit.md`
+
+Include:
+
+* every data surface checked
+* query/file references
+* pass/fail per surface
+* exact leakage risks found
+* whether risk is theoretical or confirmed
+* recommended fix if needed
+* test scenarios run
+* frontend screenshots/logs where useful
+
+Important:
+Do not change code yet.
+
+This is audit-only.
+
+If any leakage risk is found, do not patch immediately.
+Report it clearly first with severity and proposed fix.
+
+Core rule:
+No campaign should ever inherit another campaign’s truth.
+No account should ever see or use another account’s data.
+
+Best,
+[Your Name]
