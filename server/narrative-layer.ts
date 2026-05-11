@@ -110,9 +110,16 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   const runId = resolved.runId;
   if (!runId) return { ...empty, runId: null, isLatest: true, isStale: false };
 
+  // P3 isolation seal: scope orchestrator_jobs lookup by accountId AND
+  // campaignId so a guessed/leaked runId from another tenant cannot return
+  // section statuses or completion timestamps. resolveRunId already validates
+  // ownership when a runId is supplied, but we defense-in-depth this raw read.
   const jobRows = await db.execute(
     sql`SELECT section_statuses, status, completed_at FROM orchestrator_jobs
-        WHERE id = ${runId} LIMIT 1`
+        WHERE id = ${runId}
+          AND account_id = ${accountId}
+          AND campaign_id = ${campaignId}
+        LIMIT 1`
   );
   const job = jobRows.rows?.[0];
   if (!job || !job.section_statuses) return { ...empty, runId, isLatest: resolved.isLatest, isStale: resolved.isStale };

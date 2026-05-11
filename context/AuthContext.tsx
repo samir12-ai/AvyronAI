@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, queryClient } from '@/lib/query-client';
 
 export interface SavedAccount {
   userId: string;
@@ -149,6 +149,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setToken(null);
     await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, AUTH_USER_KEY]);
+    // P1 isolation seal: blow away every cached server response and pending
+    // mutation so the next authed user can never read the previous user's
+    // React Query cache (cross-tenant leakage surface #1).
+    try {
+      queryClient.cancelQueries();
+      queryClient.clear();
+    } catch (e) {
+      console.warn('[Auth] queryClient.clear failed during clearAuth:', e);
+    }
   };
 
   const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
@@ -236,6 +245,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAdmin: false,
       };
 
+      // P1 isolation seal: clear cache BEFORE swapping tokens so no in-flight
+      // query can settle into the new account's cache slot with old-account data.
+      try {
+        queryClient.cancelQueries();
+        queryClient.clear();
+      } catch (e) {
+        console.warn('[Auth] queryClient.clear failed during switchToAccount:', e);
+      }
       setToken(account.token);
       setUser(resolvedUser);
       await AsyncStorage.setItem(AUTH_TOKEN_KEY, account.token);

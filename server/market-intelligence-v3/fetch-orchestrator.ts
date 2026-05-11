@@ -230,8 +230,17 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     return existingActive[0].id;
   }
 
+  // P4 isolation seal: dedup by (accountId, competitorHash) ONLY — never
+  // reuse another tenant's in-flight fetch job. A pre-hardening branch reused
+  // any RUNNING/QUEUED job with the same competitorHash regardless of
+  // account, which made one tenant's job durations, snapshots, and stop
+  // reasons observable by an unrelated tenant just because they tracked the
+  // same competitor set. Cross-account public-data sharing is intentionally
+  // dropped here; if reuse is desirable in the future it must happen via a
+  // shared snapshot store that is account-scoped on read.
   const existingDupHash = await db.select().from(miFetchJobs)
     .where(and(
+      eq(miFetchJobs.accountId, accountId),
       eq(miFetchJobs.competitorHash, hash),
       sql`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`,
     ))
@@ -239,7 +248,7 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     .limit(1);
 
   if (existingDupHash.length > 0) {
-    console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash} (different account/campaign but same competitor set)`);
+    console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash} for account ${accountId} (per-account scope)`);
     return existingDupHash[0].id;
   }
 
@@ -1427,9 +1436,15 @@ async function autoSignalCompletion(accountId: string, campaignId: string, signa
   console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION_COMPLETE: signal deficiency enrichment queued + inventory refreshed for ${accountId}/${campaignId} | deficientCount=${deficientCompetitors.length}`);
 }
 
-export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus | null> {
-  const [job] = await db.select().from(miFetchJobs)
-    .where(eq(miFetchJobs.id, jobId));
+export async function getFetchJobStatus(jobId: string, accountId?: string): Promise<FetchJobStatus | null> {
+  // P3 isolation seal: when called from an HTTP handler the accountId MUST be
+  // supplied so we never return another tenant's stage statuses, snapshot id,
+  // or fetch metadata. accountId is optional only for in-process callers that
+  // already operate inside a verified account context.
+  const whereClause = accountId
+    ? and(eq(miFetchJobs.id, jobId), eq(miFetchJobs.accountId, accountId))
+    : eq(miFetchJobs.id, jobId);
+  const [job] = await db.select().from(miFetchJobs).where(whereClause);
 
   if (!job) return null;
 

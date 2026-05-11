@@ -1,0 +1,200 @@
+Team,
+
+The leakage audit confirmed something important:
+
+The core orchestrator/snapshot reasoning layer is mostly correctly isolated.
+
+However, the system is NOT yet fully sealed from a multi-tenant isolation perspective.
+
+I do not want partial mitigation.
+
+I want every confirmed leakage surface closed completely — from the smallest stale frontend state to the largest backend isolation gap.
+
+This is now a system-hardening priority.
+
+## Main objective
+
+No campaign should ever inherit another campaign’s truth.
+No account should ever see, cache, reuse, or display another account’s data.
+
+Not even temporarily.
+Not even through frontend cache.
+Not even through stale state.
+Not even through deduplication side effects.
+Not even through recovery/reuse paths.
+
+## Priority order
+
+PRIORITY 1 — Frontend cache isolation (CRITICAL)
+The current React Query singleton + staleTime: Infinity + missing cache invalidation is the largest confirmed leakage surface.
+
+Seal it completely.
+
+Required:
+
+* queryClient.clear() on logout
+* queryClient.clear() on account switch
+* invalidateQueries()/removeQueries() on campaign switch
+* verify no stale query survives account transition
+* verify no stale PASS/recovery/metrics/strategy state remains visible
+
+Also:
+
+* every query key must be scoped correctly
+* include accountId where required
+* include campaignId where required
+* remove all ambiguous/global cache keys
+
+No stale frontend truth allowed.
+
+PRIORITY 2 — AsyncStorage isolation
+All local storage keys must become account-scoped.
+
+No shared:
+
+* BRAND_PROFILE
+* META_CONNECTION
+* CAMPAIGNS
+* POSTS
+* MEDIA
+* SCHEDULES
+* PLATFORM_CONNECTIONS
+
+Everything must be namespaced per account/user.
+
+Verify:
+
+* account switch
+* logout/login
+* cold restart
+* refresh after switch
+
+No local persistence leakage.
+
+PRIORITY 3 — Backend ownership enforcement
+Seal every route that accepts:
+
+* campaignId
+* jobId
+* fetchJobId
+* runId
+
+Required:
+
+* verify account ownership explicitly
+* no body-param trust
+* no job lookup by id alone
+* no fetch-status by raw jobId
+* no cross-account dedup visibility
+
+Any route returning:
+
+* orchestrator status
+* fetch status
+* run state
+* snapshot state
+* metrics
+* recovery state
+
+must enforce:
+(accountId + resource ownership)
+
+without exception.
+
+PRIORITY 4 — Shared dedup/cache isolation
+The following must be isolated safely:
+
+* MI-V3 dedup
+* profile scraper caches
+* rate limits
+* active fetch maps
+* any shared in-memory cache
+
+If shared public-data optimization remains:
+
+* explicitly document it
+* isolate private metadata
+* isolate quota/rate accounting
+* isolate status visibility
+
+No cross-account operational visibility leakage.
+
+PRIORITY 5 — Defense-in-depth trust isolation
+Extend trust validation to include:
+
+* sourceCampaignId
+* sourceAccountId
+
+Even if upstream filtering already exists.
+
+The trust layer should independently verify:
+
+* campaign match
+* account match
+* sourceJobId validity
+
+No assumptions.
+
+## Verification requirements
+
+After patches are complete:
+
+1. Run full leakage regression scenarios:
+
+* account switch
+* campaign switch
+* refresh after switch
+* background refetch
+* concurrent accounts
+* concurrent campaigns
+* stale snapshot attempts
+* cross-account job probing
+* dedup collision scenarios
+
+2. Explicitly verify:
+
+* no stale UI truth
+* no stale PASS states
+* no stale metrics
+* no stale strategy outputs
+* no stale recovery plans
+* no cross-account cache reuse
+* no cross-campaign snapshot reuse
+
+3. Produce final seal report:
+   `.local/plans/leakage-hardening-seal.md`
+
+Include:
+
+* every fix applied
+* every surface retested
+* before/after behavior
+* any remaining theoretical gaps
+* final PASS/FAIL verdict
+
+## Important doctrine constraints
+
+Do NOT:
+
+* weaken truthfulness
+* remove canonical snapshot protections
+* bypass contract enforcement
+* add fake frontend masking
+* introduce parallel reliability systems
+
+This is hardening and isolation work only.
+
+## Goal
+
+I want the system fully sealed operationally.
+
+No stale truth.
+No tenant bleed.
+No campaign inheritance.
+No cache confusion.
+No accidental reuse.
+
+The platform should behave like a properly isolated commercial operating system.
+
+Best,
+[Your Name]

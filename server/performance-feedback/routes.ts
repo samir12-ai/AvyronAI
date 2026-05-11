@@ -9,6 +9,7 @@ import {
   computeStabilitySignal,
 } from "./scoring";
 import { runMemoryMutation } from "../memory-mutation/engine";
+import { resolveAccountId } from "../auth";
 
 const CONTENT_TYPES = ["reel", "carousel", "story", "post"] as const;
 const VALID_SOURCES = ["manual", "meta-api"] as const;
@@ -20,7 +21,16 @@ function clampRate(val: number): number {
 
 export function registerPerformanceFeedbackRoutes(app: Express) {
   app.post("/api/performance/ingest", async (req: any, res) => {
-    const accountId = req.user?.accountId || req.accountId || "default";
+    // P3 isolation seal: drop the `|| "default"` fallback. Any request that
+    // reaches this handler without a verified account context must be
+    // rejected — otherwise unauthenticated requests collapsed every tenant's
+    // performance snapshots into a shared "default" bucket.
+    let accountId: string;
+    try {
+      accountId = resolveAccountId(req);
+    } catch {
+      return res.status(401).json({ error: "Authentication required" });
+    }
     const {
       campaignId,
       contentType,
@@ -127,7 +137,13 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
   });
 
   app.post("/api/memory/mutate", async (req: any, res) => {
-    const accountId = req.user?.accountId || req.accountId || "default";
+    // P3 isolation seal: same fix as /api/performance/ingest.
+    let accountId: string;
+    try {
+      accountId = resolveAccountId(req);
+    } catch {
+      return res.status(401).json({ error: "Authentication required" });
+    }
     const { campaignId } = req.body;
     if (!campaignId) {
       return res.status(400).json({ error: "campaignId is required" });
@@ -142,7 +158,13 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
   });
 
   app.get("/api/performance/summary/:campaignId", async (req: any, res) => {
-    const accountId = req.user?.accountId || req.accountId || "default";
+    // P3 isolation seal: same fix as /api/performance/ingest.
+    let accountId: string;
+    try {
+      accountId = resolveAccountId(req);
+    } catch {
+      return res.status(401).json({ error: "Authentication required" });
+    }
     const { campaignId } = req.params;
 
     const summaryByFormat: Record<string, any> = {};

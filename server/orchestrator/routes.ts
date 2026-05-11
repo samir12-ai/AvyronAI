@@ -47,6 +47,18 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       const accountId = resolveAccountId(req);
 
+      // P3 isolation seal: explicitly verify the requested campaignId belongs
+      // to the authenticated account before doing anything with it. Without
+      // this, the body's `campaignId` could reference another tenant's
+      // campaign (the requireCampaign-style middleware on other routes only
+      // validates the *currently selected* campaign for the account).
+      const ownedCampaign = await db.execute(
+        sql`SELECT id FROM campaigns WHERE id = ${String(campaignId)} AND account_id = ${accountId} LIMIT 1`
+      );
+      if (!ownedCampaign.rows?.length) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
+
       if (!pausedJobId) {
         const existing = await db.execute(
           sql`SELECT id FROM orchestrator_jobs
@@ -111,7 +123,10 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/orchestrator/status/:jobId", async (req: Request, res: Response) => {
     try {
-      const status = await getOrchestratorStatus(req.params.jobId);
+      // P3 isolation seal: scope status lookup by accountId so jobIds belonging
+      // to other tenants return 404 instead of leaking section statuses.
+      const accountId = resolveAccountId(req);
+      const status = await getOrchestratorStatus(req.params.jobId, accountId);
       if (!status) {
         return res.status(404).json({ error: "Job not found" });
       }

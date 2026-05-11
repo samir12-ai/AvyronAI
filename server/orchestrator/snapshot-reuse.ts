@@ -153,6 +153,11 @@ async function safeReuse<H>(
       wasReused: true,
       freshnessClass: fm.freshnessClass,
       ageInDays: fm.ageInDays,
+      // P5 isolation seal — stamp the source account/campaign so the trust
+      // classifier can fire WRONG_ACCOUNT / WRONG_CAMPAIGN if a buggy WHERE
+      // clause ever returns another tenant's snapshot for live decisions.
+      sourceAccountId: snap.accountId ?? null,
+      sourceCampaignId: snap.campaignId ?? null,
     };
   } catch {
     // Provenance is best-effort — never reject a reuse hit because of it.

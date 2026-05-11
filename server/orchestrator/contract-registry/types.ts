@@ -51,7 +51,20 @@ export type SnapshotTrustState =
   /** schemaVersion !== engineVersion. */
   | "INCOMPATIBLE_VERSION"
   /** snapshot-trust class NEEDS_REFRESH (kept distinct from generic STALE). */
-  | "NEEDS_REFRESH";
+  | "NEEDS_REFRESH"
+  /**
+   * P5 isolation seal — sourceAccountId on the provenance row does not match
+   * the current orchestrator's accountId. This is a HARD failure: it means a
+   * snapshot belonging to another tenant somehow reached a live-decision
+   * read. Never live-eligible. Logged at ERROR severity by the consumer.
+   */
+  | "WRONG_ACCOUNT"
+  /**
+   * P5 isolation seal — sourceCampaignId on the provenance row does not
+   * match the current orchestrator's campaignId (within the same account).
+   * Never live-eligible. Same severity as WRONG_ACCOUNT.
+   */
+  | "WRONG_CAMPAIGN";
 
 /** Contract-completeness verdict for a single snapshot row. */
 export type ContractStatus = "COMPLETE" | "INCOMPLETE" | "INVALID" | "LEGACY_NONE";
@@ -280,6 +293,19 @@ export interface ProvenanceForTrust {
    * `INCOMPATIBLE_VERSION` regardless of freshness.
    */
   schemaVersion?: number | null;
+  /**
+   * P5 isolation seal — the accountId / campaignId the snapshot was
+   * originally produced for. When set on the provenance row AND a current
+   * accountId/campaignId is supplied to `classifyTrust`, a mismatch produces
+   * `WRONG_ACCOUNT` / `WRONG_CAMPAIGN` (both non-live-eligible).
+   *
+   * Optional for backward compatibility: pre-P5 snapshots and in-process
+   * callers that don't yet pass the current account/campaign behave exactly
+   * as before. The cross-tenant kill-switch fires only when both sides are
+   * present and disagree.
+   */
+  sourceAccountId?: string | null;
+  sourceCampaignId?: string | null;
 }
 
 /** Mode for classifyTrust: strict (current_run_only) vs lenient (reuse_allowed). */

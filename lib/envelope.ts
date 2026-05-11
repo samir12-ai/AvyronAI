@@ -8,7 +8,12 @@ export type SnapshotTrustState =
   | "NEEDS_REFRESH"
   | "INCOMPATIBLE_VERSION"
   | "LEGACY_UNVERIFIED"
-  | "CONTRACT_INCOMPLETE";
+  | "CONTRACT_INCOMPLETE"
+  // P5 isolation seal — cross-tenant / cross-campaign kill-switch states.
+  // Mirrors `server/orchestrator/contract-registry/types.ts`. Never
+  // live-eligible; the FE renders them as a hard security badge.
+  | "WRONG_ACCOUNT"
+  | "WRONG_CAMPAIGN";
 
 export type FreshnessClass = "FRESH" | "AGING" | "STALE" | "NEEDS_REFRESH" | "INCOMPATIBLE";
 
@@ -86,6 +91,21 @@ export function classifyEnvelopeBadge(
       label: "Live evidence",
       detail: envelope.trustState === "FRESH_VERIFIED" ? "Fresh from current run" : "Verified for current run",
       color: "#10B981",
+    };
+  }
+
+  // P5 isolation seal — cross-tenant kill-switch states. Render as hard
+  // error badge so the user sees this is a SECURITY block, not a freshness
+  // issue. Should never appear in normal operation.
+  if (envelope.trustState === "WRONG_ACCOUNT" || envelope.trustState === "WRONG_CAMPAIGN") {
+    return {
+      kind: "incomplete",
+      label: "Cross-tenant block",
+      detail:
+        envelope.trustState === "WRONG_ACCOUNT"
+          ? "Snapshot belongs to a different account — blocked"
+          : "Snapshot belongs to a different campaign — blocked",
+      color: "#EF4444",
     };
   }
 

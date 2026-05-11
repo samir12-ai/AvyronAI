@@ -314,8 +314,20 @@ export function registerMIv3Routes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      // P3 isolation seal: explicit body-level campaign ownership check.
+      // requireCampaign validates the *currently selected* campaign for the
+      // account; the request body could still reference an arbitrary
+      // campaignId. Verify it belongs to this account before kicking off any
+      // fetch work.
+      const ownedCampaign = await db.execute(
+        sql`SELECT id FROM campaigns WHERE id = ${campaignId} AND account_id = ${accountId} LIMIT 1`
+      );
+      if (!ownedCampaign.rows?.length) {
+        return res.status(404).json({ error: "Campaign not found" });
+      }
+
       const jobId = await startFetchJob(accountId, campaignId);
-      const status = await getFetchJobStatus(jobId);
+      const status = await getFetchJobStatus(jobId, accountId);
       return res.json({ jobId, status: status?.status || "QUEUED", message: "Data collection job queued via Two-Speed system" });
     } catch (err: any) {
       console.error("[MIv3-Route] Fetch-job error:", err.message);
@@ -332,8 +344,11 @@ export function registerMIv3Routes(app: Express) {
 
   app.get("/api/ci/mi-v3/fetch-status/:jobId", async (req, res) => {
     try {
+      // P3 isolation seal: scope by accountId so cross-tenant jobId guesses
+      // return 404 instead of leaking stage status / snapshot id.
+      const accountId = resolveAccountId(req);
       const jobId = req.params.jobId;
-      const status = await getFetchJobStatus(jobId);
+      const status = await getFetchJobStatus(jobId, accountId);
 
       if (!status) {
         return res.status(404).json({ error: "Job not found" });

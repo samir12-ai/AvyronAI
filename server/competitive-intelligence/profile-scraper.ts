@@ -90,19 +90,26 @@ export function getScrapeStats(): ScrapeStats & { successRate: string; blockedRa
 }
 
 const MAX_BATCH_SIZE = 10;
-let currentBatchCount = 0;
-let batchResetTime = Date.now();
 const BATCH_WINDOW_MS = 60 * 60 * 1000;
 
-function checkBatchLimit(): boolean {
-  if (Date.now() - batchResetTime > BATCH_WINDOW_MS) {
-    currentBatchCount = 0;
-    batchResetTime = Date.now();
+// P4 isolation seal: per-account batch counter, profile cache, and rate-limit
+// map. The pre-hardening implementation used a single global counter / cache
+// keyed by handle, which meant Tenant A's 10 scrapes in an hour starved
+// Tenant B (and rate-limit hits cached A's result for B's reads). Every
+// observable bucket is now keyed by accountId.
+const batchCounters = new Map<string, { count: number; resetAt: number }>();
+
+function checkBatchLimit(accountId: string): boolean {
+  const now = Date.now();
+  let bucket = batchCounters.get(accountId);
+  if (!bucket || now - bucket.resetAt > BATCH_WINDOW_MS) {
+    bucket = { count: 0, resetAt: now };
+    batchCounters.set(accountId, bucket);
   }
-  if (currentBatchCount >= MAX_BATCH_SIZE) {
+  if (bucket.count >= MAX_BATCH_SIZE) {
     return false;
   }
-  currentBatchCount++;
+  bucket.count++;
   return true;
 }
 
@@ -110,6 +117,10 @@ const profileCache = new Map<string, { data: ScrapeResult; timestamp: number }>(
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 const rateLimitMap = new Map<string, number>();
 const RATE_LIMIT_MS = 10000;
+
+function nsCacheKey(accountId: string, base: string): string {
+  return `${accountId}::${base}`;
+}
 
 export function normalizeInstagramUrl(url: string): string {
   let handle = url.trim();
@@ -1272,7 +1283,11 @@ export async function scrapeCommentsForPosts(
 export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, accountId: string = "unknown"): Promise<ScrapeResult> {
   const profileUrl = normalizeInstagramUrl(rawUrl);
   const handle = extractHandleFromUrl(rawUrl);
-  const cacheKey = `instagram:${handle}`;
+  // P4 isolation seal: namespace cache + rate-limit keys by accountId. Two
+  // tenants asking for the same Instagram handle now get independent buckets,
+  // so one tenant's CACHE_HIT or RATE_LIMITED state cannot influence another.
+  const cacheKey = nsCacheKey(accountId, `instagram:${handle}`);
+  const rateKey = nsCacheKey(accountId, handle);
 
   const cached = profileCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -1280,15 +1295,15 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     return { ...cached.data, attempts: [...cached.data.attempts, "CACHE_HIT"] };
   }
 
-  const lastRequest = rateLimitMap.get(handle);
+  const lastRequest = rateLimitMap.get(rateKey);
   if (lastRequest && Date.now() - lastRequest < RATE_LIMIT_MS) {
     const cachedAny = profileCache.get(cacheKey);
     if (cachedAny) return { ...cachedAny.data, attempts: ["RATE_LIMITED", "CACHE_HIT"] };
   }
-  rateLimitMap.set(handle, Date.now());
+  rateLimitMap.set(rateKey, Date.now());
 
-  if (!checkBatchLimit()) {
-    console.log(`[CI Scraper] BATCH_LIMIT reached (${MAX_BATCH_SIZE} profiles/hour). Returning cached or blocked.`);
+  if (!checkBatchLimit(accountId)) {
+    console.log(`[CI Scraper] BATCH_LIMIT reached for account=${accountId} (${MAX_BATCH_SIZE} profiles/hour). Returning cached or blocked.`);
     const cachedFallback = profileCache.get(cacheKey);
     if (cachedFallback) return { ...cachedFallback.data, attempts: ["BATCH_LIMIT", "CACHE_HIT"] };
     return {
@@ -1425,6 +1440,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     paginationStopReason,
   };
 
+  // P4 isolation seal: cacheKey is already account-namespaced via nsCacheKey above.
   profileCache.set(cacheKey, { data: result, timestamp: Date.now() });
   return result;
 }

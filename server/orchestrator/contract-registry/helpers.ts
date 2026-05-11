@@ -113,7 +113,23 @@ export function classifyTrust(
   currentJobId: string | null,
   mode: ClassifyTrustMode,
   engineVersion: number,
+  currentAccountId?: string | null,
+  currentCampaignId?: string | null,
 ): SnapshotTrustState {
+  // 0. P5 isolation seal — cross-tenant / cross-campaign kill-switch.
+  // Fires BEFORE every other check: if a snapshot's provenance carries a
+  // sourceAccountId / sourceCampaignId AND the current consumer supplied
+  // the matching field AND the two disagree, never trust the value, no
+  // matter how fresh / contract-complete it looks. This catches the
+  // catastrophic class of bugs where a cache layer or a buggy WHERE
+  // clause returns another tenant's row to a live-decision path.
+  if (prov?.sourceAccountId != null && currentAccountId != null && prov.sourceAccountId !== currentAccountId) {
+    return "WRONG_ACCOUNT";
+  }
+  if (prov?.sourceCampaignId != null && currentCampaignId != null && prov.sourceCampaignId !== currentCampaignId) {
+    return "WRONG_CAMPAIGN";
+  }
+
   // 1. No provenance + no contract → pre-contract legacy snapshot.
   if (prov === null && contractStatus === "LEGACY_NONE") return "LEGACY_UNVERIFIED";
 
@@ -281,6 +297,16 @@ export function requireContractField<T = unknown>(
   fieldId: string,
   results: Map<EngineId, EngineStepResult>,
   currentJobId: string | null,
+  /**
+   * P5 isolation seal — the orchestrator's current accountId/campaignId.
+   * When supplied, `classifyTrust` will fire WRONG_ACCOUNT / WRONG_CAMPAIGN
+   * (and this helper will return STALE) if a snapshot's stamped
+   * sourceAccountId / sourceCampaignId disagrees with the current run's
+   * tenant. Optional for backward compatibility — when omitted, the
+   * cross-tenant kill-switch is a no-op (existing behavior).
+   */
+  currentAccountId?: string | null,
+  currentCampaignId?: string | null,
 ): ContractFieldResult<T> {
   const contract = getContract(engineId);
   if (!contract) {
@@ -344,6 +370,8 @@ export function requireContractField<T = unknown>(
     currentJobId,
     contract.livenessRule,
     contract.engineVersion,
+    currentAccountId,
+    currentCampaignId,
   );
 
   if (!isLiveEligible(trustState)) {
@@ -373,6 +401,11 @@ function extractProvenance(result: EngineStepResult): ProvenanceForTrust | null 
     freshnessClass: prov.freshnessClass ?? null,
     ageInDays: typeof prov.ageInDays === "number" ? prov.ageInDays : null,
     schemaVersion: typeof prov.schemaVersion === "number" ? prov.schemaVersion : null,
+    // P5 isolation seal — propagate the source account/campaign so
+    // classifyTrust can fire WRONG_ACCOUNT / WRONG_CAMPAIGN when the current
+    // consumer also passes its accountId/campaignId.
+    sourceAccountId: typeof prov.sourceAccountId === "string" ? prov.sourceAccountId : null,
+    sourceCampaignId: typeof prov.sourceCampaignId === "string" ? prov.sourceCampaignId : null,
   };
 }
 
@@ -398,6 +431,13 @@ export function wrapAsEnvelope<T>(
     runId: string | null;
     currentJobId: string | null;
     provenance: ProvenanceForTrust | null;
+    /**
+     * P5 isolation seal — current consumer's accountId. When supplied
+     * alongside a stamped `provenance.sourceAccountId`, a mismatch causes
+     * `classifyTrust` to return WRONG_ACCOUNT (never live-eligible).
+     * `ctx.campaignId` already supplies the campaign side of the check.
+     */
+    currentAccountId?: string | null;
   },
 ): LiveSnapshotEnvelope<T> {
   const contract = getContract(engineId);
@@ -411,6 +451,8 @@ export function wrapAsEnvelope<T>(
     ctx.currentJobId,
     livenessRule,
     engineVersion,
+    ctx.currentAccountId,
+    ctx.campaignId,
   );
 
   const isLiveEvidence = isLiveEligible(trustState);

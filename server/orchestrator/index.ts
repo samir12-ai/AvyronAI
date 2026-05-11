@@ -4023,11 +4023,19 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   };
 }
 
-export async function getOrchestratorStatus(jobId: string) {
+export async function getOrchestratorStatus(jobId: string, accountId?: string) {
+  // P3 isolation seal: when an accountId is supplied (always the case for
+  // HTTP routes), require the job to belong to that account so a user
+  // cannot probe another tenant's job state by guessing/exfiltrating jobIds.
+  // accountId is optional only for legacy in-process callers (worker, tests)
+  // that already operate within a verified account context.
+  const whereClause = accountId
+    ? and(eq(orchestratorJobs.id, jobId), eq(orchestratorJobs.accountId, accountId))
+    : eq(orchestratorJobs.id, jobId);
   const [job] = await db
     .select()
     .from(orchestratorJobs)
-    .where(eq(orchestratorJobs.id, jobId))
+    .where(whereClause)
     .limit(1);
 
   if (!job) return null;

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getApiUrl, authFetch } from '@/lib/query-client';
+import { getApiUrl, authFetch, queryClient } from '@/lib/query-client';
 import { useAuth } from './AuthContext';
 
 interface CampaignInfo {
@@ -113,6 +113,15 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setSelectedCampaign(data.selection);
         setWarning(null);
+        // P1 isolation seal: invalidate every campaign-scoped cache entry so
+        // queries keyed off `selectedCampaignId` re-fetch under the new
+        // campaign and cannot show stale data from the previous selection.
+        try {
+          await queryClient.cancelQueries();
+          queryClient.clear();
+        } catch (e) {
+          console.warn('[CampaignContext] queryClient.clear failed on selectCampaign:', e);
+        }
       } else {
         const err = await res.json();
         throw new Error(err.message || err.error || 'Failed to select campaign');
@@ -174,6 +183,15 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       await authFetch(getApiUrl('/api/campaigns/selected'), { method: 'DELETE' });
       setSelectedCampaign(null);
       setWarning(null);
+      // P1 isolation seal: drop all campaign-scoped cached data on
+      // deselection so the dashboard cannot render the previous campaign's
+      // KPIs against an empty selection.
+      try {
+        await queryClient.cancelQueries();
+        queryClient.clear();
+      } catch (e) {
+        console.warn('[CampaignContext] queryClient.clear failed on clearSelection:', e);
+      }
     } catch (err) {
       console.error('[CampaignContext] Failed to clear selection:', err);
     }
