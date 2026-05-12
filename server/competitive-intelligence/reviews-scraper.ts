@@ -406,8 +406,17 @@ export async function scrapeReviewsForCompetitor(
       return result;
     }
 
+    // Seal #5 / F7.6 — review IDs are sha256(placeId|author|fullText|time)
+    // truncated to 16 hex chars. This survives review-text edits made AFTER
+    // the previous prefix-based ID was generated (Google reviewers can edit
+    // the first 20 chars without changing review identity). Uniqueness comes
+    // from the (author + time) tuple in the hash input.
+    // Seal #5 / F7.7 — author NAME is never persisted. We store sha256(name)
+    // truncated to 12 hex chars (`authorHash`) for dedup + reviewer-pattern
+    // analysis. This is one-way; we cannot recover the name.
+    const { reviewIdHash, authorHash } = await import("./scrape-safety");
     for (const review of reviews) {
-      const reviewId = `google_${placeId || "unknown"}_${review.time}_${review.text.slice(0, 20).replace(/\W/g, "")}`;
+      const reviewId = reviewIdHash(placeId || "unknown", review.authorName || "anonymous", review.text, review.time);
       const existing = await db.select({ id: ciCompetitorReviews.id })
         .from(ciCompetitorReviews)
         .where(sql`${ciCompetitorReviews.competitorId} = ${competitorId} AND ${ciCompetitorReviews.reviewId} = ${reviewId}`)
@@ -426,6 +435,7 @@ export async function scrapeReviewsForCompetitor(
         platform: "google",
         reviewDate: review.time ? new Date(review.time * 1000) : null,
         isSynthetic: false,
+        authorHash: review.authorName ? authorHash(review.authorName) : null,
       });
       result.reviewsInserted++;
     }

@@ -61,20 +61,46 @@ async function apifyFetch(path: string, options: RequestInit = {}): Promise<any>
   const apiKey = getApifyApiKey();
   if (!apiKey) throw new Error("APIFY_API_KEY not configured");
 
-  const url = `${APIFY_BASE_URL}${path}${path.includes("?") ? "&" : "?"}token=${apiKey}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  // Seal #5 / F6.12 — circuit-breaker gate. If apify upstream has been failing,
+  // the breaker is OPEN and we short-circuit instead of stampeding the API.
+  const { isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } = await import("./scrape-safety");
+  const cb = isBreakerOpen("apify", "default");
+  if (cb.open) {
+    throw new Error(`BREAKER_OPEN: apify:default (${cb.reason})`);
+  }
+
+  // Seal #5 / F7.1 — never put the Apify token in the URL (logged by proxies,
+  // CDNs, browser histories, and Apify's own access logs). Pass it via the
+  // Authorization header instead. Strip any pre-existing ?token=... defensively.
+  const cleanedPath = path.replace(/([?&])token=[^&]*(&|$)/g, (_m, lead, tail) => (lead === "?" && tail === "" ? "" : lead === "&" && tail === "" ? "" : lead === "?" ? "?" : "&"));
+  const url = `${APIFY_BASE_URL}${cleanedPath}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+        ...(options.headers || {}),
+      },
+    });
+  } catch (err) {
+    recordBreakerFailure("apify", "default");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
+    recordBreakerFailure("apify", "default");
     const body = await res.text();
     throw new Error(`Apify API ${res.status}: ${body.substring(0, 300)}`);
   }
 
+  recordBreakerSuccess("apify", "default");
   return res.json();
 }
 

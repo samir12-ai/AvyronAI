@@ -121,18 +121,41 @@ export function registerCiCompetitorRoutes(app: Express) {
       const { name, platform, profileLink, businessType, primaryObjective,
         postingFrequency, contentTypeRatio, engagementRatio, ctaPatterns,
         discountFrequency, hookStyles, messagingTone, socialProofPresence,
-        screenshotUrls, notes, websiteUrl, blogUrl, tiktokUrl, googleMapsUrl } = req.body;
+        screenshotUrls, notes, websiteUrl, blogUrl, tiktokUrl, googleMapsUrl, tier } = req.body;
 
       if (!name || !profileLink || !businessType || !primaryObjective) {
         return res.status(400).json({ error: "name, profileLink, businessType, primaryObjective are required" });
       }
+
+      // Seal #5 / F8.1 — sanitize ALL user-supplied URLs before persistence.
+      // Bad URLs become persisted attack surface (logged, fed to scrapers, fed
+      // to LLM context). Reject up-front. Empty/null are allowed (optional fields).
+      const { validateUserUrl } = await import("./scrape-safety");
+      try {
+        const safeProfileLink = validateUserUrl(profileLink);
+        const safeWebsiteUrl = websiteUrl ? validateUserUrl(websiteUrl) : null;
+        const safeBlogUrl = blogUrl ? validateUserUrl(blogUrl) : null;
+        const safeTiktokUrl = tiktokUrl ? validateUserUrl(tiktokUrl) : null;
+        const safeGoogleMapsUrl = googleMapsUrl ? validateUserUrl(googleMapsUrl) : null;
+        // overwrite the locals so the insert below uses the validated values
+        (req.body as any).profileLink = safeProfileLink;
+        (req.body as any).websiteUrl = safeWebsiteUrl;
+        (req.body as any).blogUrl = safeBlogUrl;
+        (req.body as any).tiktokUrl = safeTiktokUrl;
+        (req.body as any).googleMapsUrl = safeGoogleMapsUrl;
+      } catch (urlErr: any) {
+        return res.status(400).json({ error: `Invalid URL: ${urlErr.message}` });
+      }
+      // F7.8 — accept optional tier ('A'|'B'); default 'B'. Tier-A competitors
+      // refresh on a 24h cooldown (priority); tier-B on the standard 72h.
+      const tierValue = tier === "A" ? "A" : "B";
 
       const [competitor] = await db.insert(ciCompetitors).values({
         accountId,
         campaignId,
         name,
         platform: platform || "instagram",
-        profileLink,
+        profileLink: (req.body as any).profileLink,
         businessType,
         primaryObjective,
         postingFrequency: postingFrequency !== undefined && postingFrequency !== null && postingFrequency !== '' ? (isNaN(parseInt(postingFrequency)) ? null : parseInt(postingFrequency)) : null,
@@ -145,10 +168,11 @@ export function registerCiCompetitorRoutes(app: Express) {
         socialProofPresence: socialProofPresence || null,
         screenshotUrls: screenshotUrls || null,
         notes: notes || null,
-        websiteUrl: websiteUrl || null,
-        blogUrl: blogUrl || null,
-        tiktokUrl: tiktokUrl || null,
-        googleMapsUrl: googleMapsUrl || null,
+        websiteUrl: (req.body as any).websiteUrl || null,
+        blogUrl: (req.body as any).blogUrl || null,
+        tiktokUrl: (req.body as any).tiktokUrl || null,
+        googleMapsUrl: (req.body as any).googleMapsUrl || null,
+        tier: tierValue,
         isDemo: false,
         enrichmentStatus: "PENDING",
         fetchMethod: null,
@@ -157,12 +181,19 @@ export function registerCiCompetitorRoutes(app: Express) {
         dataFreshnessDays: null,
       }).returning();
 
-      if (tiktokUrl || googleMapsUrl) {
-        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${tiktokUrl || null}, google_maps_url = ${googleMapsUrl || null} WHERE id = ${competitor.id}`);
+      // Seal #5 / F8.1 (architect-#10 fix): the post-insert raw SQL update
+      // previously used the UNSANITIZED `tiktokUrl`/`googleMapsUrl` from the
+      // closure, re-introducing attack surface. Use the sanitized req.body
+      // values that validateUserUrl already verified. Insert above also writes
+      // these fields, so this update is now defensive-only.
+      const safeTiktok = (req.body as any).tiktokUrl || null;
+      const safeMaps = (req.body as any).googleMapsUrl || null;
+      if (safeTiktok || safeMaps) {
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${safeTiktok}, google_maps_url = ${safeMaps} WHERE id = ${competitor.id}`);
       }
 
       const validation = validateEvidence(competitor);
-      res.json({ competitor: { ...competitor, tiktokUrl: tiktokUrl || null, googleMapsUrl: googleMapsUrl || null, evidenceComplete: validation.complete, missingFields: validation.missing } });
+      res.json({ competitor: { ...competitor, tiktokUrl: safeTiktok, googleMapsUrl: safeMaps, evidenceComplete: validation.complete, missingFields: validation.missing } });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -181,6 +212,11 @@ export function registerCiCompetitorRoutes(app: Express) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });
       }
 
+      // Seal #5 / F8.1 (architect-#10 fix): validate URL fields on PUT path
+      // too. Previously POST validated but PUT wrote raw user input.
+      const { validateUserUrl: _validateUserUrlPut } = await import("./scrape-safety");
+      const URL_FIELDS = new Set(["profileLink", "websiteUrl", "blogUrl", "tiktokUrl", "googleMapsUrl"]);
+
       const updates: any = { updatedAt: new Date() };
       const fields = ["name", "platform", "profileLink", "businessType", "primaryObjective",
         "postingFrequency", "contentTypeRatio", "engagementRatio", "ctaPatterns",
@@ -191,6 +227,15 @@ export function registerCiCompetitorRoutes(app: Express) {
         if (req.body[f] !== undefined) {
           if (f === "postingFrequency") { const v = req.body[f]; updates[f] = v !== undefined && v !== null && v !== '' ? (isNaN(parseInt(v)) ? null : parseInt(v)) : null; }
           else if (f === "engagementRatio") { const v = req.body[f]; updates[f] = v !== undefined && v !== null && v !== '' ? (isNaN(parseFloat(v)) ? null : parseFloat(v)) : null; }
+          else if (URL_FIELDS.has(f)) {
+            const raw = req.body[f];
+            if (raw === null || raw === "" || raw === undefined) {
+              updates[f] = null;
+            } else {
+              try { updates[f] = _validateUserUrlPut(raw); }
+              catch (urlErr: any) { return res.status(400).json({ error: `Invalid URL on ${f}: ${urlErr.message}` }); }
+            }
+          }
           else updates[f] = req.body[f];
         }
       }

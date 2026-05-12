@@ -946,6 +946,10 @@ export const ciCompetitors = pgTable("ci_competitors", {
   sharedProfileId: varchar("shared_profile_id"),
   tiktokUrl: text("tiktok_url"),
   googleMapsUrl: text("google_maps_url"),
+  // Seal #5 / F7.8 — refresh tier. 'A' = priority (24h cooldown), 'B' = standard
+  // (72h cooldown). Defaults to 'B' for safety; operators promote competitors
+  // to tier A explicitly via UI/API.
+  tier: text("tier").notNull().default("B"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1797,6 +1801,11 @@ export const ciCompetitorReviews = pgTable("ci_competitor_reviews", {
   platform: text("platform").notNull().default("google"),
   reviewDate: timestamp("review_date"),
   isSynthetic: boolean("is_synthetic").notNull().default(false),
+  // Seal #5 / F7.7 — sha256(name).slice(0,12). PII-safe alternative to
+  // persisting raw author names (which we never stored in production, but the
+  // extractor produced them). Used for cross-review dedup and reviewer-pattern
+  // analysis without revealing identity.
+  authorHash: varchar("author_hash", { length: 12 }),
   scrapedAt: timestamp("scraped_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });

@@ -20,6 +20,7 @@ import { runMigration010 } from "./migrations/010-tiktok-validation-columns";
 import { migrateSystemControlVerdicts } from "./migrations/011-system-control-verdicts";
 import { migrateTenantIsolationAccountId } from "./migrations/012-tenant-isolation-accountid";
 import { migrateAuthHardening } from "./migrations/013-auth-hardening";
+import { migrateScrapeSecurity } from "./migrations/014-scrape-security";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import { authMiddleware, optionalAuth, verifyAdminToken } from "./auth";
 import * as fs from "fs";
@@ -540,6 +541,7 @@ function setupErrorHandler(app: express.Application) {
       migrateSystemControlVerdicts().catch(err => console.error("[Migration-011] system control verdicts migration error:", err));
       migrateTenantIsolationAccountId().catch(err => console.error("[Migration-012] tenant isolation accountId migration error:", err));
       migrateAuthHardening().catch(err => console.error("[Migration-013] auth hardening migration error:", err));
+      migrateScrapeSecurity().catch(err => console.error("[Migration-014] scrape security migration error:", err));
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));

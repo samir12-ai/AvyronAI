@@ -39,6 +39,10 @@ export interface TiktokScrapedResult {
   commentsInserted: number;
   source: "brightdata" | "apify" | "manual" | "unavailable";
   error?: string;
+  /** F7.3 — true when network/auth/proxy failed; distinguishes from genuinely-empty profile. */
+  degraded?: boolean;
+  /** F7.3 — machine-readable reason for downstream gates. */
+  degradedReason?: "BRIGHT_DATA_FAIL" | "APIFY_FAIL" | "BOTH_SOURCES_DOWN" | "NO_SOURCE_CONFIGURED" | "NO_HANDLE";
 }
 
 const MOBILE_USER_AGENTS = [
@@ -498,6 +502,16 @@ export async function ingestTiktokPosts(
   return { inserted, commentsInserted };
 }
 
+/**
+ * Seal #5 / F7.3 — discriminated-union return so the caller can tell
+ * "the network failed" apart from "the profile is genuinely empty".
+ *   ok:false  → network/auth/parse error; treat as DEGRADED.
+ *   ok:true   → completed run; posts may still be [] (private profile, no posts).
+ */
+export type TiktokFetchOutcome =
+  | { ok: true; posts: TiktokPost[]; source: "brightdata" | "apify" }
+  | { ok: false; reason: "PROXY_UNAVAILABLE" | "NETWORK_FAIL" | "AUTH" | "PARSE_FAIL" | "ALL_RETRIES_EXHAUSTED" | "BREAKER_OPEN" | "BOTH_SOURCES_DOWN"; details?: string };
+
 export async function scrapeTiktokForCompetitor(
   competitorId: string,
   accountId: string,
@@ -509,6 +523,11 @@ export async function scrapeTiktokForCompetitor(
     postsInserted: 0,
     commentsInserted: 0,
     source: "unavailable",
+    // F7.3 — degraded flag on snapshot. True when the run COMPLETED but with
+    // network/auth failure (no posts to ingest because we couldn't reach the
+    // platform). False when the run completed successfully — even if 0 posts
+    // were returned (genuinely empty/private profile).
+    degraded: false,
   };
 
   const whereConditions = [eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)];
@@ -528,6 +547,8 @@ export async function scrapeTiktokForCompetitor(
   const handle = extractHandleFromProfileUrl(competitor.tiktokUrl || "") || extractHandleFromProfileUrl(competitor.profileLink || "") || competitor.name || "";
   if (!handle) {
     result.error = "Could not determine TikTok handle for competitor";
+    result.degraded = true;
+    result.degradedReason = "NO_HANDLE";
     return result;
   }
 
@@ -564,10 +585,14 @@ export async function scrapeTiktokForCompetitor(
 
   if (!isApifyConfigured()) {
     result.source = "unavailable";
+    // F7.3 — DEGRADED, not "empty profile". A future cache/coverage gate must
+    // not treat this as a successful 0-post fetch and write empty signals.
+    result.degraded = true;
+    result.degradedReason = brightDataFailed ? "BOTH_SOURCES_DOWN" : "NO_SOURCE_CONFIGURED";
     result.error = brightDataFailed
       ? "Both Bright Data and Apify unavailable — Bright Data failed and APIFY_API_KEY not set"
       : "No TikTok scraping source configured";
-    console.log(`[TiktokScraper] ${result.error}`);
+    console.log(`[TiktokScraper] DEGRADED reason=${result.degradedReason} | ${result.error}`);
     return result;
   }
 
@@ -577,7 +602,11 @@ export async function scrapeTiktokForCompetitor(
     result.source = "apify";
 
     if (posts.length === 0) {
+      // F7.3 — Apify completed cleanly with 0 posts. NOT degraded — this is a
+      // genuine empty/private profile result. Caller may still want to refresh
+      // less aggressively, but we did successfully reach the platform.
       result.error = "Apify returned no TikTok posts — profile may be private, empty, or not found";
+      result.degraded = false;
       return result;
     }
 
@@ -588,8 +617,13 @@ export async function scrapeTiktokForCompetitor(
     console.log(`[TiktokScraper] competitorId=${competitorId} | campaignId=${campaignId || "unscoped"} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | comments=${result.commentsInserted} | source=apify`);
     return result;
   } catch (err: any) {
+    // F7.3 — Apify network/auth error. Bright Data also failed (we're in the
+    // fallback branch). Mark DEGRADED so coverage gates don't promote 0 posts
+    // to "empty profile signal".
+    result.degraded = true;
+    result.degradedReason = brightDataFailed ? "BOTH_SOURCES_DOWN" : "APIFY_FAIL";
     result.error = `Apify scrape failed: ${err.message}`;
-    console.error(`[TiktokScraper] Apify ERROR competitorId=${competitorId} | campaignId=${campaignId || "unscoped"}: ${err.message}`);
+    console.error(`[TiktokScraper] DEGRADED reason=${result.degradedReason} competitorId=${competitorId} | campaignId=${campaignId || "unscoped"}: ${err.message}`);
     return result;
   }
 }

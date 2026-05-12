@@ -511,8 +511,13 @@ async function _executeFetch(
         }
       }
 
-      if (elapsed < FETCH_COOLDOWN_MS) {
-        const hoursLeft = Math.ceil((FETCH_COOLDOWN_MS - elapsed) / (60 * 60 * 1000));
+      // Seal #5 / F7.8 — tier-aware cooldown. Tier-A = priority competitor
+      // (24h refresh); Tier-B = standard (72h). Falls back to 72h if the
+      // tier column is unset or unrecognized.
+      const competitorTier = (competitor as any).tier === "A" ? "A" : "B";
+      const tierCooldownMs = competitorTier === "A" ? 24 * 60 * 60 * 1000 : FETCH_COOLDOWN_MS;
+      if (elapsed < tierCooldownMs) {
+        const hoursLeft = Math.ceil((tierCooldownMs - elapsed) / (60 * 60 * 1000));
 
         const livePostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
           .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
@@ -527,7 +532,8 @@ async function _executeFetch(
         if (!coverageMet) {
           console.log(`[DataAcq] COOLDOWN_BYPASS: Coverage insufficient for ${competitor.name} (${postsCollected}/${MIN_POSTS_THRESHOLD} posts). Allowing re-fetch despite ${hoursLeft}h cooldown remaining.`);
         } else {
-          console.log(`[DataAcq] 72h cooldown active for ${competitor.name}, ${hoursLeft}h remaining. Coverage met (${postsCollected} posts, ${commentsCollected} comments).`);
+          const tierLabel = competitorTier === "A" ? "24h (tier A)" : "72h (tier B)";
+          console.log(`[DataAcq] ${tierLabel} cooldown active for ${competitor.name}, ${hoursLeft}h remaining. Coverage met (${postsCollected} posts, ${commentsCollected} comments).`);
 
           return {
             competitorId,
@@ -541,7 +547,7 @@ async function _executeFetch(
             contentMix: latestMetrics[0].contentMix,
             fetchMethod: latestMetrics[0].fetchMethod || "CACHED",
             status: "COOLDOWN",
-            message: `72h refresh cooldown active. ${hoursLeft}h remaining.`,
+            message: `${tierLabel} refresh cooldown active. ${hoursLeft}h remaining.`,
           };
         }
       }

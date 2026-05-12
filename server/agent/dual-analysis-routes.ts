@@ -13,6 +13,7 @@ import type { Express, Request, Response } from "express";
 import { db } from "../db";
 import { miSnapshots, userChannelSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { wrapUntrustedText as _wrapUntrustedText, UNTRUSTED_INPUT_SYSTEM_RULE as _UNTRUSTED_RULE } from "../market-intelligence-v3/prompt-safety";
 import { resolveAccountId } from "../auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 import { aiChat } from "../ai-client";
@@ -109,14 +110,17 @@ function buildCompetitorContext(mi: any): string {
 }
 
 function buildUserContext(snaps: any[]): string {
+  // Seal #5 / F7.5 — wrap user-supplied handle/url in <scraped_text untrusted>
+  // so the prompt-safety system rule prevents injection ("Ignore previous
+  // instructions and …" embedded in a handle no longer derails the model).
   return snaps.map(snap => {
     const delta = snap.deltaFromPrevious ? JSON.parse(snap.deltaFromPrevious) : null;
     const data = snap.snapshotData ? JSON.parse(snap.snapshotData) : null;
     if (!data) return `Platform: ${snap.platform} — data unavailable`;
 
     const lines = [`USER CHANNEL — ${snap.platform.toUpperCase()} (${data.scrapeMode} scrape):`];
-    if (data.handle) lines.push(`• Handle: @${data.handle}`);
-    if (data.url) lines.push(`• URL: ${data.url}`);
+    if (data.handle) lines.push(`• Handle: ${_wrapUntrustedText(`@${data.handle}`, { field: "handle" })}`);
+    if (data.url) lines.push(`• URL: ${_wrapUntrustedText(data.url, { field: "url" })}`);
     lines.push(`• Posts in window: ${data.postCount}`);
     if (data.followers != null) lines.push(`• Followers: ${data.followers.toLocaleString()}`);
     if (data.avgEngagement != null) lines.push(`• Avg engagement per post: ${data.avgEngagement}`);
@@ -215,7 +219,9 @@ async function runDualAnalysis(
     };
   }
 
-  const prompt = `You are a dual-signal marketing strategy analyst. Your job is to compare competitor market intelligence with the user's own channel performance and classify the situation.
+  const prompt = `${_UNTRUSTED_RULE}
+
+You are a dual-signal marketing strategy analyst. Your job is to compare competitor market intelligence with the user's own channel performance and classify the situation.
 
 AVAILABLE DATA:
 ${competitorContext}

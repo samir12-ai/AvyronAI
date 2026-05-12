@@ -1,4 +1,5 @@
 import { getProxyConfig } from "../competitive-intelligence/proxy-pool-manager";
+import { resolveSafeUrl, pinnedLookup, isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } from "../competitive-intelligence/scrape-safety";
 import type { WebsiteExtraction, BlogExtraction } from "./source-types";
 
 const SCRAPE_TIMEOUT_MS = 30000;
@@ -6,21 +7,12 @@ const MAX_PAGES_PER_SITE = 6;
 const MAX_TEXT_PREVIEW = 3000;
 const STALE_THRESHOLD_DAYS = 7;
 
-const BLOCKED_HOSTNAMES = new Set([
-  "localhost", "127.0.0.1", "0.0.0.0", "[::1]", "metadata.google.internal",
-  "169.254.169.254", "metadata", "kubernetes.default",
-]);
-
-function validateScrapeUrl(rawUrl: string): string {
-  let parsed: URL;
-  try { parsed = new URL(rawUrl); } catch { throw new Error("Invalid URL"); }
-  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Only http/https URLs allowed");
-  const host = parsed.hostname.toLowerCase();
-  if (BLOCKED_HOSTNAMES.has(host)) throw new Error("Blocked hostname");
-  if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|fc|fd|fe80)/i.test(host)) throw new Error("Private network address blocked");
-  if (host.endsWith(".local") || host.endsWith(".internal")) throw new Error("Internal hostname blocked");
-  return parsed.toString();
-}
+// Seal #5 / F7.2 — SSRF defense moved to scrape-safety.resolveSafeUrl(). The
+// resolver does DNS lookup, checks the resolved IP against RFC1918, link-local,
+// loopback, IPv6 fc00::/7 + fe80::/10 + ::, decimal/hex IPv4 literals and
+// 0.0.0.0/8. fetchWithProxy() then pins the connection to that IP via
+// pinnedLookup() so a second DNS query cannot rebind to an internal IP between
+// the check and the TCP connect.
 
 interface FetchOptions {
   url: string;
@@ -30,6 +22,18 @@ interface FetchOptions {
 async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; status: number; ok: boolean }> {
   const proxy = getProxyConfig();
   const timeout = opts.timeoutMs || SCRAPE_TIMEOUT_MS;
+  const country = (process.env.BRIGHT_DATA_PROXY_COUNTRY || "us").toLowerCase();
+
+  // Seal #5 / F6.12 — breaker gate before any outbound attempt.
+  const cb = isBreakerOpen("website", country);
+  if (cb.open) {
+    throw new Error(`BREAKER_OPEN: website:${country} (${cb.reason})`);
+  }
+  // F7.2 — resolve hostname + check IP against block ranges before any I/O.
+  // The proxy path bypasses the IP pin (the proxy CONNECTs to the host on our
+  // behalf, so DNS rebinding doesn't affect our process) but the direct fetch
+  // path uses pinnedLookup to defeat rebinding.
+  const resolved = await resolveSafeUrl(opts.url);
 
   const baseHeaders: Record<string, string> = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -57,8 +61,12 @@ async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; statu
         dispatcher: new ProxyAgent(proxyUrl),
       } as any);
       const html = await res.text();
+      // F6.12 — record breaker state on outcome (5xx = upstream failure, 4xx = our request).
+      if (res.status >= 500) recordBreakerFailure("website", country);
+      else recordBreakerSuccess("website", country);
       return { html, status: res.status, ok: res.ok };
     } catch (proxyErr: any) {
+      recordBreakerFailure("website", country);
       const isConnectError = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|tunnel|socket|proxy/i.test(
         proxyErr.message + (proxyErr.cause?.message || "")
       );
@@ -73,13 +81,24 @@ async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; statu
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
+    // F7.2 — pin direct fetch to the resolved IP via custom undici Agent so
+    // a second DNS query (between resolveSafeUrl and fetch) cannot rebind
+    // the hostname to an internal address.
+    const { Agent } = await import("undici");
+    const dispatcher = new Agent({ connect: { lookup: pinnedLookup(resolved.ip, resolved.family) } });
     const res = await fetch(opts.url, {
       headers: baseHeaders,
       signal: controller.signal,
       redirect: "follow",
-    });
+      dispatcher,
+    } as any);
     const html = await res.text();
+    if (res.status >= 500) recordBreakerFailure("website", country);
+    else recordBreakerSuccess("website", country);
     return { html, status: res.status, ok: res.ok };
+  } catch (directErr) {
+    recordBreakerFailure("website", country);
+    throw directErr;
   } finally {
     clearTimeout(timer);
   }
@@ -331,7 +350,8 @@ export async function scrapeWebsite(
   if (!normalizedUrl.startsWith("http")) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
-  normalizedUrl = validateScrapeUrl(normalizedUrl);
+  // F7.2 — SSRF check now lives inside fetchWithProxy() via resolveSafeUrl().
+  // The async resolver throws before any I/O if the URL is unsafe.
 
   console.log(`[WebScraper] Starting structured extraction for ${competitorName}: ${normalizedUrl}`);
 
@@ -454,7 +474,7 @@ export async function scrapeBlog(
   if (!normalizedUrl.startsWith("http")) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
-  normalizedUrl = validateScrapeUrl(normalizedUrl);
+  // F7.2 — SSRF check now lives inside fetchWithProxy() via resolveSafeUrl().
 
   console.log(`[WebScraper] Blog extraction for ${competitorName}: ${normalizedUrl}`);
 
