@@ -697,6 +697,15 @@ export function registerFullReportRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const { campaignId } = req.params;
+      try {
+        const { assertCampaignBelongsTo, handleOwnershipError } = await import("../auth-helpers");
+        await assertCampaignBelongsTo(accountId, campaignId);
+        // (handleOwnershipError used below in catch path)
+      } catch (e) {
+        const { handleOwnershipError } = await import("../auth-helpers");
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
 
       const [job] = await db
         .select()
@@ -711,9 +720,9 @@ export function registerFullReportRoutes(app: Express) {
         .limit(1);
 
       if (!job) {
+        // Owner-gated already; safe to return generic 404 with no echo
         return res.status(404).json({
           error: "No orchestrator run found for this campaign",
-          campaignId,
         });
       }
 

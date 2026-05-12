@@ -3,6 +3,7 @@ import { db } from "../db";
 import { systemControlVerdicts } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { authMiddleware, resolveAccountId, type AuthRequest } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 import type { SystemControlVerdict } from "./types";
 
 export async function storeControlVerdict(
@@ -74,6 +75,8 @@ export function registerSystemControlRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const { campaignId } = req.params;
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
       const rows = await db.select()
@@ -100,6 +103,8 @@ export function registerSystemControlRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const { campaignId } = req.params;
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const [row] = await db.select()
         .from(systemControlVerdicts)
@@ -125,6 +130,8 @@ export function registerSystemControlRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const { campaignId } = req.params;
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const rows = await db.select()
         .from(systemControlVerdicts)
@@ -176,6 +183,8 @@ export function registerSystemControlRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const { campaignId } = req.params;
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const [row] = await db.select()
         .from(systemControlVerdicts)
@@ -230,6 +239,8 @@ export function registerSystemControlRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const { campaignId } = req.params;
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const { resolveRunId } = await import("../orchestrator/run-resolver");
       // resolveRunId returns { runId: null } for the "no runs yet" case —

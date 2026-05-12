@@ -100,10 +100,17 @@ export async function assertFetchJobBelongsTo(
   return row;
 }
 
-/** Express helper: writes a JSON 4xx if the error is an ownership error. */
+/** Express helper: writes a JSON 4xx if the error is an ownership error.
+ *  P3 isolation seal: response body intentionally OMITS campaignId/accountId
+ *  to prevent attacker-supplied identifiers from being reflected back in
+ *  denial responses (cross-tenant identifier leak surface). */
 export function handleOwnershipError(err: unknown, res: any): boolean {
-  if (err instanceof CampaignOwnershipError || err instanceof JobOwnershipError) {
-    res.status(err.status).json({ error: err.code, message: err.message });
+  if (err instanceof CampaignOwnershipError) {
+    res.status(err.status).json({ error: err.code, message: "Campaign not found" });
+    return true;
+  }
+  if (err instanceof JobOwnershipError) {
+    res.status(err.status).json({ error: err.code, message: "Job not found" });
     return true;
   }
   return false;

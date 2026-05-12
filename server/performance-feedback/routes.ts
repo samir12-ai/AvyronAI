@@ -50,13 +50,19 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
       notes,
     } = req.body;
 
-    if (!campaignId || !contentType || !periodLabel) {
-      return res.status(400).json({ error: "campaignId, contentType, and periodLabel are required" });
+    // P0-4 + V1 follow-up: ownership FIRST so a cross-tenant probe with a
+    // partially-valid body cannot distinguish "route exists / 400 missing
+    // field" from "route does not exist / 404". Only campaignId presence is
+    // checked here; the rest of the validation runs after the gate.
+    if (!campaignId) {
+      return res.status(400).json({ error: "campaignId is required" });
     }
-
-    // P0-4: body-level campaignId must belong to the authed account.
     try { await assertCampaignBelongsTo(accountId, campaignId); }
     catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+
+    if (!contentType || !periodLabel) {
+      return res.status(400).json({ error: "contentType and periodLabel are required" });
+    }
     if (!CONTENT_TYPES.includes(contentType as ContentType)) {
       return res.status(400).json({ error: `contentType must be one of: ${CONTENT_TYPES.join(", ")}` });
     }
