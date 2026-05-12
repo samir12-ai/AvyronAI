@@ -205,7 +205,7 @@ Return ONLY valid JSON in the schema above. No prose, no markdown, no commentary
   }
 }
 
-async function callJudge(candidate: any, input: DesignerInput): Promise<{ verdict: "ACCEPTED" | "REJECTED"; reason: string }> {
+async function callJudge(candidate: any, input: DesignerInput): Promise<{ status: "ACCEPTED" | "REJECTED" | "JUDGE_ERROR"; reason: string }> {
   const sys = `You are a hostile narrative-strategy critic. You reject any reframe that is a slogan or vibe rather than a real mental-model shift.
 
 Reject if ANY of:

@@ -619,6 +619,19 @@ export function detectMarketingClaimStrings(outputTexts: string[]): { present: b
       if (m) return { present: true, matchedPattern: re.source, sample: m[0] };
     }
   }
+  // F3.7 closure: ANY non-empty marketing output text counts as a claim,
+  // even when no regex keyword fires. The depth gate must not be bypassable
+  // by a classifier false-negative on novel/unstyled copy.
+  for (const text of outputTexts) {
+    const trimmed = (text ?? "").trim();
+    if (trimmed.length >= 8) {
+      return {
+        present: true,
+        matchedPattern: "NON_EMPTY_OUTPUT_FALLBACK",
+        sample: trimmed.slice(0, 80),
+      };
+    }
+  }
   return { present: false, matchedPattern: null, sample: null };
 }
 

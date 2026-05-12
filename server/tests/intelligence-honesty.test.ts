@@ -565,8 +565,14 @@ function runConsumerGuardTests() {
   const cel = require("../../server/causal-enforcement-layer/engine");
   const detect1 = cel.detectMarketingClaimStrings(["Our world-class product is the best on the market."]);
   assert(detect1.present === true, "detectMarketingClaimStrings: detects superlative marketing copy");
+  // F3.7 pass-10 doctrine: any non-empty output from a marketing engine counts as a claim
+  // (regex-keyword-only fallback was insufficient — classifier false-negative on novel/unstyled copy
+  // could bypass the depth gate). Test updated to reflect new "non-empty fallback" semantic.
   const detect2 = cel.detectMarketingClaimStrings(["The control group received a placebo dose of 50mg."]);
-  assert(detect2.present === false, "detectMarketingClaimStrings: ignores neutral/factual copy");
+  assert(detect2.present === true && detect2.matchedPattern === "NON_EMPTY_OUTPUT_FALLBACK",
+    "detectMarketingClaimStrings: F3.7 pass-10 — any non-empty marketing-engine output triggers (NON_EMPTY_OUTPUT_FALLBACK)");
+  const detect3 = cel.detectMarketingClaimStrings(["", "  ", "x"]);
+  assert(detect3.present === false, "detectMarketingClaimStrings: empty/whitespace/below-min-length → not present");
 
   // pass-6: isDepthBlocking with empty claimBreakdown but marketing copy in source -> blocks
   const fakeDepthLow = {
@@ -580,8 +586,10 @@ function runConsumerGuardTests() {
     "isDepthBlocking: low depth + no claims (no source) → not blocking (existing behavior preserved)");
   assert(cel.isDepthBlocking(fakeDepthLow, ["Get more sales with our revolutionary platform."]) === true,
     "isDepthBlocking: low depth + 0 classifier counts BUT marketing strings in source → blocks (F3.7 pass-6)");
-  assert(cel.isDepthBlocking(fakeDepthLow, ["The control group received a placebo dose of 50mg."]) === false,
-    "isDepthBlocking: low depth + 0 classifier counts + neutral source → not blocking");
+  assert(cel.isDepthBlocking(fakeDepthLow, ["The control group received a placebo dose of 50mg."]) === true,
+    "isDepthBlocking: F3.7 pass-10 — low depth + non-empty source (any text) → blocks (architect override of pass-6 neutral-pass behavior)");
+  assert(cel.isDepthBlocking(fakeDepthLow, ["", "  "]) === false,
+    "isDepthBlocking: low depth + empty/whitespace-only source → not blocking (depth gate only fires when there is actual output to enforce against)");
 
   // pass-6: D4-doctrine — consumer-guard uses typed AnalyticalPackage access (no `as any` casts)
   const guardSrc = fs.readFileSync("server/analytical-enrichment-layer/consumer-guard.ts", "utf8");

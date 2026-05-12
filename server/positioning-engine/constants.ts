@@ -104,7 +104,17 @@ export interface Territory {
   provenance?: "system_default" | "mi_traced" | "orphaned" | "partial_traced" | "fully_traced";
   degraded?: boolean;
   _systemMapped?: boolean;
-  semanticCollision?: { competitor: string; collisionScore: number; details: string };
+  semanticCollision?: {
+    semanticCollisionScore: number;
+    collisionMeaning: string;
+    competitorEquivalentClaim: string;
+    competitorSource?: string;
+    jaccardScore?: number;
+    perCompetitor?: Array<Record<string, unknown>>;
+    reasoningSteps?: string[];
+    modelUsed?: string;
+    generatedAt?: string;
+  };
 }
 
 export interface StrategyCard {
