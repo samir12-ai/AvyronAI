@@ -386,8 +386,12 @@ describe("Seal #2 F9.8 — refresh-token rotation + reuse detection", () => {
     expect(regBlock).toContain("issueSessionForDevice");
   });
 
-  it("access token TTL is 60m and refresh TTL is 30 days", () => {
-    expect(src).toMatch(/ACCESS_TOKEN_TTL\s*=\s*"60m"/);
+  it("access token TTL is 14d (compat-preserved) and refresh TTL is 30 days", () => {
+    // Code-review hardening: the original 60m TTL would have force-logged-out
+    // every existing mobile client (which has no refresh wiring yet). TTL is
+    // held at 14d through the JWT_LEGACY grace window; tightening to 60m is
+    // a follow-up after the client gains /api/auth/refresh handling.
+    expect(src).toMatch(/ACCESS_TOKEN_TTL\s*=\s*"14d"/);
     expect(src).toMatch(/REFRESH_TOKEN_TTL_MS\s*=\s*30\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
   });
 });

@@ -78,7 +78,13 @@ export function __setJwtLegacyCutoffMsForTest(ms: number) { JWT_LEGACY_CUTOFF_MS
 export function __getJwtLegacyCutoffMsForTest(): number { return JWT_LEGACY_CUTOFF_MS; }
 export function __resetJwtLegacyCutoffForTest() { JWT_LEGACY_CUTOFF_MS = resolveLegacyCutoffMs(); }
 
-const ACCESS_TOKEN_TTL = "60m";
+// Access-token TTL: kept at 14d during the JWT_LEGACY_GRACE window so
+// existing mobile clients (which do not yet implement /api/auth/refresh)
+// don't get force-logged-out every 60 minutes. Refresh-token rotation is
+// shipped additively in this seal; tightening the access TTL to 60m is a
+// follow-up that lands AFTER the client gains refresh wiring (tracked in
+// .local/plans/forensic-v2-seal.md "Sunset items").
+const ACCESS_TOKEN_TTL = "14d";
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ─── Seal #2 (Task #20) — F9.4 account lockout policy ───────────────────────
@@ -237,13 +243,27 @@ function verifyToken(token: string): JwtPayload | null {
   try {
     return jwt.verify(token, JWT_SECRET, { audience: JWT_AUDIENCE, issuer: JWT_ISSUER }) as JwtPayload;
   } catch {
-    // Legacy path (Seal #2 F9.2 grace window): tokens minted before this
-    // deploy lack aud/iss. We still accept them until the grace cutoff so
-    // active sessions don't all invalidate at once. Past the cutoff every
-    // token MUST carry aud/iss.
+    // Legacy path (Seal #2 F9.2 grace window). Code-review hardening:
+    // accepting ANY non-strict token during the grace window was too broad —
+    // a token with the WRONG aud/iss would also fall through. We now require
+    // BOTH:
+    //   1. The decoded payload has NO aud and NO iss (truly pre-deploy shape).
+    //      A token with wrong-aud is NOT legacy, it's tampered/foreign.
+    //   2. iat is set AND iat * 1000 < JWT_LEGACY_CUTOFF_MS — the token must
+    //      have been issued BEFORE the grace deadline. Tokens issued after
+    //      cutoff cannot ride the grace path.
+    // Past the cutoff timestamp every token MUST carry aud/iss.
     if (Date.now() >= JWT_LEGACY_CUTOFF_MS) {
       return null;
     }
+    // Inspect claims WITHOUT verifying signature (jwt.decode is unsigned).
+    const inspected = jwt.decode(token, { complete: true });
+    if (!inspected || typeof inspected === "string") return null;
+    const claims: any = inspected.payload || {};
+    if (claims.aud != null || claims.iss != null) return null;
+    if (typeof claims.iat !== "number") return null;
+    if (claims.iat * 1000 >= JWT_LEGACY_CUTOFF_MS) return null;
+    // Now run signature + exp verification (no aud/iss enforcement).
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
       JWT_LEGACY_METRICS.hits++;
@@ -289,6 +309,12 @@ export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunctio
 }
 
 // ─── Seal #2 (Task #20) — F9.4 lockout helpers ──────────────────────────────
+export async function __checkLockoutForTest(email: string) { return checkLockout(email); }
+export async function __recordLoginFailureForTest(email: string) { return recordLoginFailure(email); }
+export async function __clearLockoutForTest(email: string) { return clearLockout(email); }
+export async function __issueSessionForTest(opts: { userId: string; accountId: string; deviceFingerprint: string }) { return issueSessionForDevice(opts); }
+export function __parseRefreshTokenForTest(tok: string) { return parseRefreshToken(tok); }
+
 async function checkLockout(email: string): Promise<{ locked: boolean; retryAfterSec: number }> {
   const [row] = await db.select().from(authLockouts).where(eq(authLockouts.email, email)).limit(1);
   if (!row) return { locked: false, retryAfterSec: 0 };
