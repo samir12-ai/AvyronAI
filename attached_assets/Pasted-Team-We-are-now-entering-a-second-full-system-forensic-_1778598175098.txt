@@ -1,0 +1,246 @@
+Team,
+
+We are now entering a second full-system forensic audit pass.
+
+This is NOT a continuation of the previous audit.
+Assume nothing.
+Trust nothing automatically because it previously passed.
+
+I want a completely fresh, adversarial, line-by-line review of the entire system again from the first line of code to the last.
+
+Core rule:
+No file skipped.
+No “already reviewed.”
+No “probably safe.”
+No assumptions based on prior seals.
+
+This audit must behave as if a new independent security/runtime-truth/reliability team is reviewing the platform for the first time before scale.
+
+==================================================
+AUDIT OBJECTIVE
+===============
+
+Find:
+
+* anything missed
+* anything weak
+* anything inconsistent
+* anything stale
+* anything misleading
+* anything unsafe
+* anything silently downgraded
+* anything overly optimistic
+* anything not fully production-grade
+
+We already know the system is significantly hardened.
+
+Now I want to identify:
+
+* residual hidden risks
+* scaling risks
+* runtime edge cases
+* hidden coupling
+* truth-corruption possibilities
+* operational fragility
+* performance bottlenecks
+* intelligence dishonesty risks
+* UX/operator trust gaps
+
+==================================================
+MANDATORY AUDIT AREAS
+=====================
+
+1. Backend routes
+
+* every route
+* every query
+* every body param
+* every ownership check
+* every auth path
+* every denial response
+* every fallback
+* every status code
+
+2. Runtime truth system
+
+* snapshot lineage
+* sourceJobId propagation
+* latest-based reads
+* provenance handling
+* stale snapshot handling
+* degraded/incomplete pathways
+* runtime reuse
+* snapshot cleanup
+* recovery flows
+
+3. Intelligence honesty
+
+* inferred vs direct
+* benchmark vs real
+* confidence inflation
+* confidence floors
+* fake reassurance
+* silent downgrade
+* misleading verdicts
+* fabricated strategic certainty
+
+4. Engines
+
+* all engines
+* all validators
+* all contract boundaries
+* all schemas
+* all retry/recovery behavior
+* all fallback branches
+* all default values
+* all empty-data handling
+
+5. Frontend truthfulness
+
+* stale state
+* React Query behavior
+* local component state
+* misleading UI
+* fake green states
+* inconsistent badges
+* mismatch with backend canonical truth
+* cached old verdicts
+
+6. Scaling & operational maturity
+
+* queues
+* concurrency
+* lane locks
+* worker shutdown
+* cache growth
+* memory leaks
+* polling
+* background jobs
+* scraper scaling
+* proxy pools
+* retry storms
+* long-lived maps
+* cleanup workers
+
+7. Scraping infrastructure
+
+* scraper reliability
+* extraction quality
+* noise filtering
+* duplicate detection
+* stale evidence
+* benchmark contamination
+* evidence quality
+* public/private data mixing
+* quota handling
+* proxy handling
+
+8. Agent pipeline
+
+* memory/context hydration
+* plan synthesis
+* execution plans
+* content generation
+* runtime context bleed
+* recovery intelligence
+* shared helper reuse
+* prompt contamination
+* hidden inherited context
+
+9. Security
+
+* auth
+* JWT handling
+* token storage
+* CSP
+* uploads
+* ffmpeg usage
+* prompt injection
+* SSRF
+* XSS
+* path traversal
+* unsafe interpolation
+* HTML templating
+* rate limiting
+* secret handling
+
+10. Production readiness
+
+* logging
+* monitoring
+* observability
+* alerting
+* test coverage
+* regression quality
+* E2E quality
+* operational recovery
+* deploy safety
+* migration safety
+
+==================================================
+AUDIT EXECUTION RULES
+=====================
+
+* Audit only first.
+* No patching while auditing.
+* Document everything before fixing.
+* No minimizing findings.
+* No “acceptable because internal.”
+* No “unlikely edge case” dismissal.
+* Distinguish:
+
+  * theoretical
+  * realistic
+  * production-critical
+  * scaling-critical
+
+For every finding include:
+
+* exact file
+* exact lines
+* severity
+* exploitability
+* runtime impact
+* business impact
+* launch impact
+* scaling impact
+* proposed fix
+* urgency
+
+==================================================
+REQUIRED OUTPUTS
+================
+
+1.
+
+.local/plans/system-wide-forensic-audit-v2.md
+
+2.
+
+.local/plans/system-wide-forensic-closure-v2.md
+
+3.
+
+.local/validation/system-risk-matrix-v2.json
+
+==================================================
+FINAL GOAL
+==========
+
+I want to know:
+
+* what still breaks under scale
+* what still lies under pressure
+* what still leaks under edge cases
+* what still corrupts runtime truth
+* what still weakens intelligence quality
+* what still creates operator distrust
+
+No blind spots.
+No hidden assumptions.
+No protected sacred areas.
+
+Review the entire system again from scratch.
+
+Best,
+[Your Name]
