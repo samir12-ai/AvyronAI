@@ -123,6 +123,53 @@ Canonical field names introduced/hardened in H1–H7:
 - `integrityVerdict` ∈ {PASS|PARTIAL|FAIL} — F2 integrity verdict (canonical replacement for `overallStatus`)
 - `executionStatus` ∈ {COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT|BLOCKED_BY_INTEGRITY} — F1 execution status on agent stream + full-report (canonical replacement for `overallStatus`)
 
+## Required Replit Secrets (Seal #7 / F10.5)
+
+The env validator (`server/env-validator.ts`) refuses to boot if any of the following is missing. Set these via Replit Secrets — never via `.replit` `[userenv.shared]` (history-leak risk; F9.7).
+
+| Secret | Required | Purpose |
+|--------|----------|---------|
+| `DATABASE_URL` | always | Postgres connection string. |
+| `JWT_SECRET` | always | Auth token signing key. |
+| `OPENAI_API_KEY` | always | OpenAI client. |
+| `BRIGHT_DATA_PROXY_USERNAME` | always | Residential proxy auth (Instagram/TikTok/Web/Reviews scrapers). |
+| `BRIGHT_DATA_PROXY_COUNTRY` | always | Proxy geo-targeting code. |
+| `STRIPE_WEBHOOK_SECRET` | production only | Stripe signature verification on `/api/stripe/webhook`. |
+| `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL injected into landing/pricing HTML in place of host-header trust (F9.1). In `NODE_ENV !== production` it auto-derives from `REPLIT_DEV_DOMAIN`. |
+| `METRICS_ADMIN_TOKEN` | recommended | When set, gates `GET /metrics` via `X-Admin-Token`. Absent → endpoint is closed (401 to all). |
+| `SENTRY_DSN` | recommended | Server error reporting. Absent → Sentry shim is a no-op (logs `error reporting disabled`). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | Reserved for upstream OpenTelemetry adoption (in-house registry serves `/metrics` directly today). |
+| `JWT_LEGACY_CUTOFF_ISO` | optional | Operator override of the auto-persisted JWT legacy-grace cutoff (Seal #2 / F9.2). |
+| `AI_RATE_LIMIT_PER_HOUR` | optional | Override of 50 calls/hr/account/route on AI generation routes (Seal #2 / F1.8). |
+
+## Observability (Seal #7 / F9.5, F10.4, F10.6, F10.7, F10.8)
+
+- **`GET /healthz`** — unauthenticated liveness probe mounted before the `/api` middleware gate. Returns `{ ok: true, ts }`.
+- **`GET /metrics`** — Prometheus text exposition from the in-house OTel registry (`server/observability/otel.ts`). Admin-gated via `X-Admin-Token` header against `METRICS_ADMIN_TOKEN`; mounted before the `/api` gate.
+- **Structured logger (`server/logger.ts`)** — pino-compatible JSON-line facade. Every request gets a `traceId` (AsyncLocalStorage via `server/trace-context.ts`) propagated to child loggers. `stripSecrets()` redacts keys matching `/^(token|refresh.*token|access.*token|secret|api.*key|authorization|cookie|password|jwt)$/i` AND scans string values for inline `Bearer …`, `sk-…`, `eyJ…` patterns — applied to every error captured by the global handler before it reaches Sentry or response.
+- **Sentry shim (`server/observability/sentry.ts`)** — dynamic-import wrapper; when `SENTRY_DSN` is unset, becomes a no-op so dev boot logs `error reporting disabled`. The global error handler captures all 5xx and masks `error.message` to `"Internal server error"` in production (response shape `{ error: code }` only).
+- **Boot order** (`server/index.ts`): `validateEnv → initOTel → initSentry → ArtifactGuard → loggerMiddleware → /healthz → /metrics → /api → await runMigrations() → workers`.
+
+## Migration runner (Seal #7 / F10.1, F10.10)
+
+- `server/migrations/runner.ts` is the single migration entry point. Acquires `pg_try_advisory_lock(8675309)` to serialize across instances, applies pending SQL files from `server/migrations/sql/`, then runs the legacy `002–014` programmatic migrations in order. Records each step in `schema_migrations`.
+- **`REQUIRED_SCHEMA_VERSION = 16`** — boot refuses to start if the database last-applied version is lower than this AND migration application fails.
+- The 13 previously-inline migration calls in `server/index.ts` were deleted; a single `await runMigrations()` replaces them.
+- `npm run db:migrate` runs the runner standalone. `npm run db:generate` writes drizzle output to `server/migrations/sql/` (matches runtime).
+- `noTransaction` marker (first line `-- noTransaction`) is honored: the runner splits the SQL into individual statements so `CREATE INDEX CONCURRENTLY` can execute outside a transaction.
+- **SQL 015** rewrites Migration 012's tenant indexes as `CREATE INDEX CONCURRENTLY IF NOT EXISTS` and drops the old non-concurrent ones idempotently.
+- **SQL 016** creates `account_tombstones` (30-day quarantine) and `account_delete_confirmations` (10-minute bcrypt confirmation tokens) for the GDPR cascade.
+
+## GDPR account deletion (Seal #7 / F9.9)
+
+`server/account-lifecycle.ts` implements a two-phase, reversible-during-quarantine delete spanning **105 `accountId`-bearing tables**.
+
+- **Phase 1 (immediate):** `DELETE /api/account` — requires the `X-Account-Delete-Confirm` header (10-minute bcrypt token issued by `POST /api/account/delete-confirm`) plus password re-auth. Masks PII on `users` immediately (`username`, `email`, `password`, `stripe_customer_id` → `'deleted-' || id` sentinels), inserts an `account_tombstones` row with `purgeAfter = now() + 30d`, and writes an audit entry to `audit_log_archive`.
+- **Cancellation window:** `POST /api/account/delete-cancel` removes the tombstone any time before `purgeAfter` (PII mask is *not* reverted; user must contact support for restoration).
+- **Phase 2 (reaper):** `runTombstoneReaper()` runs daily (initial 60s after boot, 24h tick). For each expired tombstone, `cascadeDeleteAccount()` deletes from all 105 tables inside a single PG transaction — any error rolls back the whole account.
+- **`CASCADE_EXEMPT`:** `audit_log_archive`, `account_tombstones`, `account_delete_confirmations`, `schema_migrations`, `auth_lockouts`, `messages` (no `account_id` column).
+- Doctrine: no fallback coalescing, no silent failure modes — every error logged with `traceId` and surfaced to Sentry when configured.
+
 ## Marketing-logic engine upgrade (Apr 2026)
 The 5 marketing engines were upgraded to reason like top marketers (not just relabel segments). Pipeline orchestration unchanged; outputs extended additively.
 

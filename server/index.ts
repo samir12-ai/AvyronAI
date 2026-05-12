@@ -1,3 +1,19 @@
+// ─── Seal #7 (Task #25) — Boot order is load-bearing ─────────────────────────
+// 1. validateEnv() runs FIRST (before any other import resolves DB / AI clients)
+//    so the process exits cleanly with a readable error instead of crashing
+//    half-initialized inside ai-client.ts or db.ts.
+// 2. OTel + Sentry init must precede the auto-instrumented modules they wrap.
+// 3. Artifact guard last — it can safely assume env is valid.
+import { validateEnv } from "./env-validator";
+validateEnv();
+
+import { initOTel } from "./observability/otel";
+initOTel();
+
+import { initSentry, captureException, isSentryEnabled } from "./observability/sentry";
+// Fire-and-forget: Sentry must NEVER block boot. If init fails we degrade to no-op.
+initSentry().catch((err) => console.error("[Sentry] init promise rejected:", err));
+
 import { runStartupArtifactGuard } from "./startup-artifact-guard";
 runStartupArtifactGuard();
 
@@ -8,19 +24,12 @@ import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
-import { migrateStrategyMemoryColumns } from "./migrations/002-strategy-memory-columns";
-import { migrateUserChannelTables } from "./migrations/003-user-channel-tables";
-import { migrateMemoryConfidenceDirection } from "./migrations/004-memory-confidence-direction";
-import { migrateCalendarExplorationFields } from "./migrations/005-calendar-exploration-fields";
-import { migrateRhythmSnapshotColumns } from "./migrations/006-rhythm-snapshot-columns";
-import { migrateBuildPlanSnapshots } from "./migrations/007-build-plan-snapshots";
-import { migrateDecisionAttribution } from "./migrations/008-decision-attribution";
-import { migrateMemoryOutcomeProvenance } from "./migrations/009-memory-outcome-provenance";
-import { runMigration010 } from "./migrations/010-tiktok-validation-columns";
-import { migrateSystemControlVerdicts } from "./migrations/011-system-control-verdicts";
-import { migrateTenantIsolationAccountId } from "./migrations/012-tenant-isolation-accountid";
-import { migrateAuthHardening } from "./migrations/013-auth-hardening";
-import { migrateScrapeSecurity } from "./migrations/014-scrape-security";
+// Seal #7 (F10.1) — single migration runner replaces the 13 fire-and-forget
+// inline calls that previously raced each other on every boot.
+import { runMigrations } from "./migrations/runner";
+import { runTombstoneReaper } from "./account-lifecycle";
+import { logger, loggerMiddleware, stripSecrets } from "./logger";
+import { renderMetrics, recordHttpRequest } from "./observability/otel";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import { authMiddleware, optionalAuth, verifyAdminToken } from "./auth";
 import * as fs from "fs";
@@ -93,10 +102,15 @@ function setupBodyParsing(app: express.Application) {
 }
 
 function setupRequestLogging(app: express.Application) {
+  // Seal #7 (F10.6) — pino-shaped structured logger with traceId.
+  // Mounts loggerMiddleware FIRST so req.traceId + req.logger are available
+  // to every downstream handler (including the /api auth gate).
+  app.use(loggerMiddleware());
+
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const requestId = (req as any).traceId;
     (req as any).requestId = requestId;
     let capturedJsonResponse: Record<string, unknown> | undefined = undefined;
 
@@ -110,20 +124,33 @@ function setupRequestLogging(app: express.Application) {
     };
 
     res.on("finish", () => {
+      const durationMs = Date.now() - start;
+      // Seal #7 (F10.7) — every HTTP request observed in the histogram so
+      // /metrics has signal even for non-/api routes (landing, healthz).
+      try {
+        recordHttpRequest(req.method, path, res.statusCode, durationMs / 1000);
+      } catch { /* never let telemetry break a request */ }
+
       if (!path.startsWith("/api")) return;
 
-      const duration = Date.now() - start;
-
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
+      // Seal #7 (F9.5) — strip token-shaped fields BEFORE serialization.
+      // Previously the captured JSON (which routinely contained `token`,
+      // `refreshToken`, `password`) was JSON.stringified and truncated to 80
+      // chars, leaking secrets to console + log shippers.
+      const sanitized = capturedJsonResponse
+        ? stripSecrets(capturedJsonResponse)
+        : undefined;
+      logger.info(
+        {
+          component: "http",
+          method: req.method,
+          path,
+          status: res.statusCode,
+          durationMs,
+          ...(sanitized ? { response: sanitized } : {}),
+        },
+        `${req.method} ${path} ${res.statusCode}`,
+      );
     });
 
     next();
@@ -202,15 +229,16 @@ function serveLandingPage({
   landingPageTemplate: string;
   appName: string;
 }) {
-  const forwardedProto = req.header("x-forwarded-proto");
-  const protocol = forwardedProto || req.protocol || "https";
-  const forwardedHost = req.header("x-forwarded-host");
-  const host = forwardedHost || req.get("host");
-  const baseUrl = `${protocol}://${host}`;
-  const expsUrl = `${host}`;
-
-  log(`baseUrl`, baseUrl);
-  log(`expsUrl`, expsUrl);
+  // Seal #7 (F9.1) — host-header XSS / open-redirect fix.
+  // Previously: trusted attacker-controlled `Host` and `X-Forwarded-Host`
+  // headers and injected them into the landing page HTML, enabling
+  // arbitrary base-URL substitution (cookie-poisoning + phishing-link
+  // crafting). Now: PUBLIC_BASE_URL is the canonical source; env-validator
+  // refuses to boot if it's unset or malformed.
+  const baseUrl = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
+  const expsUrl = (() => {
+    try { return new URL(baseUrl).host; } catch { return baseUrl; }
+  })();
 
   const html = landingPageTemplate
     .replace(/BASE_URL_PLACEHOLDER/g, baseUrl)
@@ -253,11 +281,8 @@ function configureExpoAndLanding(app: express.Application) {
     if (req.path === "/pricing") {
       const pricingPath = path.resolve(process.cwd(), "server", "templates", "pricing.html");
       const pricingHtml = fs.readFileSync(pricingPath, "utf-8");
-      const forwardedProto = req.header("x-forwarded-proto");
-      const protocol = forwardedProto || req.protocol || "https";
-      const forwardedHost = req.header("x-forwarded-host");
-      const host = forwardedHost || req.get("host");
-      const baseUrl = `${protocol}://${host}`;
+      // Seal #7 (F9.1) — same host-header fix as serveLandingPage.
+      const baseUrl = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
       const finalHtml = pricingHtml
         .replace(/BASE_URL_PLACEHOLDER/g, baseUrl);
       setStaticSecurityHeaders(res);
@@ -331,7 +356,7 @@ function configureExpoAndLanding(app: express.Application) {
 }
 
 function setupErrorHandler(app: express.Application) {
-  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
     const error = err as {
       status?: number;
       statusCode?: number;
@@ -340,19 +365,41 @@ function setupErrorHandler(app: express.Application) {
     };
 
     const status = error.status || error.statusCode || 500;
-    const message = error.message || "Internal Server Error";
+    const isProd = process.env.NODE_ENV === "production";
+    // Seal #7 (F10.8) — surface 5xx to Sentry (no-op when DSN unset).
+    if (status >= 500) {
+      try {
+        captureException(err, {
+          traceId: (req as any).traceId,
+          method: req.method,
+          path: req.path,
+        });
+      } catch { /* never let telemetry crash the handler */ }
+    }
+    // Seal #7 — production hides upstream messages from clients (info leak)
+    // but still logs the full error structurally for ops.
+    const clientMessage =
+      isProd && status >= 500
+        ? "Internal Server Error"
+        : error.message || "Internal Server Error";
 
     if (status >= 500) {
-      console.error(`[ErrorHandler] ${status} — ${error.name || "Error"}:`, err);
+      logger.error(
+        { component: "errorHandler", status, name: error.name, err: String(err), stack: (err as any)?.stack },
+        `${req.method} ${req.path} → ${status}`,
+      );
     } else {
-      console.warn(`[ErrorHandler] ${status} — ${error.name || "Error"}: ${message}`);
+      logger.warn(
+        { component: "errorHandler", status, name: error.name, err: String(err) },
+        `${req.method} ${req.path} → ${status}`,
+      );
     }
 
     if (res.headersSent) {
       return next(err);
     }
 
-    return res.status(status).json({ message });
+    return res.status(status).json({ message: clientMessage });
   });
 }
 
@@ -367,6 +414,26 @@ function setupErrorHandler(app: express.Application) {
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
+
+  // ─── Seal #7 (Task #25 / F10.4, F10.7) — health + metrics ──────────────────
+  // Mounted BEFORE the /api auth gate so external probes (load balancers,
+  // Prometheus scrapers, uptime checks) can reach them without a JWT.
+  // /metrics is admin-token-gated to keep cardinality + business signal
+  // private even though the endpoint is unauthenticated to the auth layer.
+  app.get("/healthz", (_req: Request, res: Response) => {
+    // Liveness only — does NOT touch the DB. Readiness probe wraps the
+    // migration runner result during boot (see runMigrations() below).
+    res.status(200).json({ ok: true, ts: new Date().toISOString() });
+  });
+
+  app.get("/metrics", (req: Request, res: Response) => {
+    const adminToken = req.header("x-admin-token");
+    if (!adminToken || !verifyAdminToken(adminToken)) {
+      return res.status(401).type("text/plain").send("unauthorized\n");
+    }
+    res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    return res.status(200).send(renderMetrics());
+  });
 
   const PUBLIC_PATH_PREFIXES = [
     "/auth/",
@@ -515,6 +582,28 @@ function setupErrorHandler(app: express.Application) {
   setupErrorHandler(app);
 
   const port = parseInt(process.env.PORT || "5000", 10);
+
+  // Seal #7 (F10.1) — migrations MUST complete (or fail loudly) BEFORE the
+  // server starts accepting traffic and BEFORE any worker spins up. The
+  // runner enforces REQUIRED_SCHEMA_VERSION; any error here is a hard boot
+  // failure (process.exit(1)) so we never serve traffic against an
+  // inconsistent schema. Architect-review fix: previously runMigrations()
+  // ran inside the listen() callback (post-listen, fire-and-forget) which
+  // allowed the server to accept requests during/after a failed migration.
+  try {
+    const r = await runMigrations();
+    logger.info(
+      { component: "migrations", lastVersion: r.lastVersion, applied: r.applied.length },
+      "migrations complete"
+    );
+  } catch (err) {
+    logger.error({ component: "migrations", err: String(err) }, "migrations FAILED — refusing to start");
+    captureException(err, { phase: "boot-migrations" });
+    // Give Sentry a moment to flush before exit.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    process.exit(1);
+  }
+
   server.listen(
     {
       port,
@@ -529,19 +618,16 @@ function setupErrorHandler(app: express.Application) {
 
       invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
 
-      migrateStrategyMemoryColumns().catch(err => console.error("[Migration-002] strategy_memory column migration error:", err));
-      migrateUserChannelTables().catch(err => console.error("[Migration-003] user channel tables migration error:", err));
-      migrateMemoryConfidenceDirection().catch(err => console.error("[Migration-004] memory confidence direction migration error:", err));
-      migrateCalendarExplorationFields().catch(err => console.error("[Migration-005] calendar exploration fields migration error:", err));
-      migrateRhythmSnapshotColumns().catch(err => console.error("[Migration-006] rhythm snapshot columns migration error:", err));
-      migrateBuildPlanSnapshots().catch(err => console.error("[Migration-007] build_plan_snapshots migration error:", err));
-      migrateDecisionAttribution().catch(err => console.error("[Migration-008] decision attribution migration error:", err));
-      migrateMemoryOutcomeProvenance().catch(err => console.error("[Migration-009] memory outcome provenance migration error:", err));
-      runMigration010().catch(err => console.error("[Migration-010] tiktok validation columns migration error:", err));
-      migrateSystemControlVerdicts().catch(err => console.error("[Migration-011] system control verdicts migration error:", err));
-      migrateTenantIsolationAccountId().catch(err => console.error("[Migration-012] tenant isolation accountId migration error:", err));
-      migrateAuthHardening().catch(err => console.error("[Migration-013] auth hardening migration error:", err));
-      migrateScrapeSecurity().catch(err => console.error("[Migration-014] scrape security migration error:", err));
+      // Seal #7 (F9.9) — daily tombstone reaper. First tick after 1min so
+      // boot is fast; subsequent ticks every 24h. cascadeDeleteAccount is
+      // transactional, so a failed reap rolls back and retries next tick.
+      const REAPER_INTERVAL_MS = 24 * 60 * 60 * 1000;
+      setTimeout(() => {
+        runTombstoneReaper().catch(err => logger.error({ component: "reaper", err: String(err) }, "reaper tick failed"));
+        setInterval(() => {
+          runTombstoneReaper().catch(err => logger.error({ component: "reaper", err: String(err) }, "reaper tick failed"));
+        }, REAPER_INTERVAL_MS);
+      }, 60_000);
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));
