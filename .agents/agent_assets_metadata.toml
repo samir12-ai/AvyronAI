@@ -215,3 +215,21 @@ id = "XJeqZu_zMGJ1NtnaKdlRL"
 uri = "file://.local/plans/full-codebase-closure-plan.md"
 type = "text"
 title = "Full Codebase Closure Plan"
+
+[[outputs]]
+id = "gSE-z_rvchuiU4cs0hbcw"
+uri = "file://.local/plans/system-wide-forensic-audit-v2.md"
+type = "text"
+title = "System-Wide Forensic Audit v2 (101 findings)"
+
+[[outputs]]
+id = "-WOhXm3ffmZoBWuUqNk4R"
+uri = "file://.local/plans/system-wide-forensic-closure-v2.md"
+type = "text"
+title = "Forensic Closure Plan v2"
+
+[[outputs]]
+id = "cs6z2lU9122Dt3JF21kFb"
+uri = "file://.local/validation/system-risk-matrix-v2.json"
+type = "unspecified"
+title = "Risk Matrix v2 (machine-readable)"
