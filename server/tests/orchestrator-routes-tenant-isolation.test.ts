@@ -209,33 +209,22 @@ describe("Seal #4 F2.2 / D1 — studio status update has no semantic fallback", 
     expect(ROUTES_SRC).not.toContain('statusToField[item.status || ""]');
   });
 
-  it("an explicit presence ternary replaces the `|| \"\"` semantic fallback", () => {
-    // D1 fix preserves original semantics EXACTLY: if item.status is missing,
-    // the prior code computed `statusToField[""]` (undefined) and the
-    // `if (oldField)` guard skipped only the OLD-status decrement; new-status
-    // increment + PUBLISHED bookkeeping still ran. The ternary on a presence
-    // boolean is D1-clean (it's a presence check, not `||`/`??` on a decision
-    // input). An early-return that short-circuits the whole branch would be
-    // a regression — assert it's NOT there.
+  it("an explicit presence ternary replaces the empty-string coalesce", () => {
+    // Ternary preserves prior semantics; an early-return inside the
+    // bookkeeping branch would skip the new-status increment (regression).
     const studioHandlerStart = ROUTES_SRC.indexOf(
       'app.post("/api/studio/items/:itemId/status"'
     );
     expect(studioHandlerStart).toBeGreaterThan(-1);
     const studioHandler = ROUTES_SRC.slice(studioHandlerStart, studioHandlerStart + 4000);
-    // The new oldField line uses a ternary on item.status presence.
     expect(studioHandler).toMatch(
       /const\s+oldField\s*=\s*item\.status\s*\?\s*statusToField\[item\.status\]\s*:\s*undefined/
     );
-    // The bookkeeping branch must NOT short-circuit early — newField, the
-    // increment, and the PUBLISHED total update must remain reachable.
     expect(studioHandler).toMatch(/const\s+newField\s*=\s*statusToField\[status\]/);
     expect(studioHandler).toMatch(/totalPublished/);
-    // No early-return inside the `if (item.planId && ...)` bookkeeping
-    // block — that would skip the new-status increment for statusless items.
     expect(studioHandler).not.toMatch(
       /if\s*\(\s*!item\.status\s*\)\s*\{\s*return\s+res\.json/
     );
-    // The forbidden coalescing is gone.
     expect(studioHandler).not.toContain('item.status || ""');
   });
 

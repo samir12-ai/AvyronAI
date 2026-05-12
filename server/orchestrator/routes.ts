@@ -792,13 +792,8 @@ export function registerOrchestratorV2Routes(app: Express) {
           PUBLISHED: "publishedCount",
         };
 
-        // Seal #4 F2.2/D1: replaces a prior empty-string coalesce on
-        // item.status (forbidden as a decision input by the D1 doctrine)
-        // with an explicit presence check. Behavior preserved exactly:
-        // when item.status is missing, oldField is undefined so the
-        // `if (oldField)` decrement below is skipped, while new-status
-        // increment + PUBLISHED bookkeeping still run. The ternary is
-        // a presence test, not a coalesce on a decision input.
+        // Seal #4 F2.2/D1: presence ternary, not coalesce. Preserves prior
+        // semantics — missing status → no decrement, increment still runs.
         const oldField = item.status ? statusToField[item.status] : undefined;
         const newField = statusToField[status];
 
@@ -886,13 +881,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
         let miOutput: any = null;
         try {
-          // Seal #4 F2.1: tenant filter on raw SQL. accountId is resolved
-          // + ownership-asserted at handler boundary (L829/833). Without
-          // this AND clause an attacker who already passed campaign
-          // ownership for ANOTHER campaign of theirs could not reach
-          // here, but defense-in-depth at the SQL layer prevents future
-          // refactor regression (e.g. if the boundary assert is moved or
-          // a new caller is added that skips it).
+          // Seal #4 F2.1: tenant filter (defense-in-depth on top of boundary assert).
           const miRes = await db.execute(
             sql`SELECT competitor_data, signal_data, market_state, overall_confidence, dominance_data
                 FROM mi_snapshots
@@ -997,9 +986,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         safe(`${base}/api/strategy/retention-engine/latest${q}`),
       ]);
 
-      // Pull MI snapshot from DB
-      // Seal #4 F2.1: tenant filter on raw SQL (defense-in-depth — boundary
-      // ownership already asserted at L946 via assertCampaignBelongsTo).
+      // Seal #4 F2.1: tenant filter (defense-in-depth on top of boundary assert).
       let miRow: any = null;
       try {
         const miRes = await db.execute(
@@ -1016,16 +1003,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         return (Math.round(val * 1000) / 10).toFixed(1) + "%";
       }
 
-      // Seal #4 F2.6: summary-block honesty. Replaces the prior pattern
-      // `engine?.status ?? (engine?.id ? "COMPLETE" : "—")` which fabricated
-      // a COMPLETE status from id-presence (or `exists` flag). New rule:
-      //   - If snap is null/undefined → MISSING
-      //   - If snap.status is one of the canonical 4 → return as-is
-      //   - Otherwise → UNKNOWN with degraded:true (frontend Task #6 will
-      //     render UNKNOWN distinctly)
-      // Returns BOTH the status string AND a degraded flag that becomes
-      // `_provenance.degraded: true` on the row, so the dashboard can show
-      // a "data quality" indicator without the row silently looking healthy.
+      // Seal #4 F2.6: canonical status only; no fabrication from id/exists presence.
       type CanonStatus = "COMPLETE" | "PARTIAL" | "UNKNOWN" | "MISSING";
       function summarizeStatus(snap: any): { status: CanonStatus; degraded: boolean } {
         if (snap == null) return { status: "MISSING", degraded: false };
@@ -1035,7 +1013,6 @@ export function registerOrchestratorV2Routes(app: Express) {
         }
         return { status: "UNKNOWN", degraded: true };
       }
-      // For MI snapshots the status comes from a row, not a wrapper.
       function summarizeMiStatus(row: any): { status: CanonStatus; degraded: boolean } {
         if (row == null) return { status: "MISSING", degraded: false };
         const raw = row?.status;

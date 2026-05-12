@@ -1,27 +1,7 @@
-/**
- * Seal #4 (Task #22) — F2.1 cross-tenant HTTP behavioral proof.
- *
- * The static-pattern tripwire suite (`orchestrator-routes-tenant-isolation.test.ts`)
- * proves the SQL string includes `AND account_id = ${accountId}` and that
- * `assertCampaignBelongsTo` is wired at both handlers' boundaries. This file
- * adds the runtime proof the architect-review demanded:
- *
- *   - Mount the REAL `registerOrchestratorV2Routes` on a real express app.
- *   - Stand up TWO accounts; only ONE owns the test campaign.
- *   - Hit BOTH affected routes (`GET /api/orchestrator/summaries/:campaignId`
- *     and `GET /api/engines/table-summary`) as the WRONG tenant.
- *   - Assert HTTP 404 + `CAMPAIGN_NOT_FOUND` (the existence-non-disclosing
- *     code from `auth-helpers`) and that the DB SELECT for `mi_snapshots`
- *     was NEVER executed (proves the boundary assert short-circuits BEFORE
- *     any tenant-blind read could ever land).
- *   - As a control: hit the SAME routes as the OWNING tenant → 200/JSON,
- *     proving the tests are not vacuous (rejection isn't accidental).
- *
- * Mocks: `../auth` (header-driven resolveAccountId), `../auth-helpers`
- * (assertCampaignBelongsTo strictly compares the owner pair, real
- * CampaignOwnershipError + handleOwnershipError preserved), and `../db`
- * (chainable no-op so any unexpected query is observable, not a crash).
- */
+// Seal #4 F2.1 — cross-tenant HTTP integration proof. Mounts the real
+// orchestrator routes; asserts wrong-tenant requests to both affected
+// endpoints get 404 CAMPAIGN_NOT_FOUND and the mi_snapshots SELECT never
+// executes. Owning-tenant control proves rejection is not vacuous.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import express from "express";
@@ -32,16 +12,14 @@ const OWNER_ACCOUNT = "acc-owner";
 const OTHER_ACCOUNT = "acc-other";
 const OWNED_CAMPAIGN = "camp-owned";
 
-// ─── Mock auth: resolveAccountId reads x-account-id header ────────────────
 vi.mock("../auth", () => ({
   resolveAccountId: (req: any) => req.headers["x-account-id"] ?? "anon",
   authMiddleware: (_req: any, _res: any, next: any) => next(),
   optionalAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-// ─── Mock auth-helpers: assertCampaignBelongsTo strictly checks owner pair.
-// Real CampaignOwnershipError + handleOwnershipError are preserved so the
-// 404 + CAMPAIGN_NOT_FOUND response shape is the production response shape.
+// Real CampaignOwnershipError + handleOwnershipError preserved; only the
+// owner-pair check is stubbed so the test doesn't need a live DB.
 vi.mock("../auth-helpers", async () => {
   const actual = await vi.importActual<any>("../auth-helpers");
   return {
@@ -53,8 +31,7 @@ vi.mock("../auth-helpers", async () => {
   };
 });
 
-// ─── Mock db: chainable no-op. Tracks whether anything tried to query
-// `mi_snapshots` (proves the cross-tenant request never reached SQL).
+// Spy on db.execute to assert mi_snapshots SELECT never fires cross-tenant.
 const dbExecuteSpy = vi.fn(async (_sqlObj: any) => ({ rows: [] }));
 const dbSelectSpy = vi.fn();
 vi.mock("../db", () => {
@@ -79,10 +56,7 @@ vi.mock("../db", () => {
   };
 });
 
-// ─── Mock the heavyweight orchestrator + helper modules. We don't exercise
-// any of their logic — just need the module graph to load. The summaries
-// route reads `getLatestOrchestratorRun`; we make it return a row shaped
-// just enough for the owner-control test to render successfully.
+// Stub heavy deps so the module graph loads; only the boundary path matters here.
 vi.mock("../orchestrator/index", () => ({
   runOrchestrator: vi.fn(),
   getOrchestratorStatus: vi.fn(),
@@ -150,8 +124,6 @@ function request(opts: { method: string; path: string; accountId?: string }) {
   });
 }
 
-// Helper: did any db.execute call reference `mi_snapshots`? Drizzle wraps
-// raw SQL in an object whose stringification contains the query text.
 function miSnapshotsQueryAttempted(): boolean {
   return dbExecuteSpy.mock.calls.some((call) => {
     const arg = call[0];
