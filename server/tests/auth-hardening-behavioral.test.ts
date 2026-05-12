@@ -366,7 +366,21 @@ describe("F9.8 — refresh-token rotation + reuse cascade behavioral proofs", ()
     expect(row.revokedAt).toBeNull(); // tampered secret on ACTIVE session ≠ reuse
   });
 
-  it("/api/auth/logout revokes the device session by id", async () => {
+  it("/api/auth/logout with WRONG SECRET → 200 (UX preserved) but does NOT revoke (sessionId alone cannot revoke)", async () => {
+    seedUser("u-7", "u7@x.com");
+    const s = await auth.__issueSessionForTest({ userId: "u-7", accountId: "acc-7", deviceFingerprint: "dev-LW" });
+    const tampered = `${s.sessionId}.${"CCCC".repeat(8)}`;
+    const router = getRouter();
+    const result = await invokeRoute(router, "post", "/api/auth/logout", {
+      body: { refreshToken: tampered },
+      headers: {},
+    });
+    expect(result.status).toBe(200);
+    const row = tables.sessions.find(r => r.id === s.sessionId)!;
+    expect(row.revokedAt).toBeNull();
+  });
+
+  it("/api/auth/logout with CORRECT SECRET revokes the device session by id", async () => {
     seedUser("u-6", "u6@x.com");
     const s = await auth.__issueSessionForTest({ userId: "u-6", accountId: "acc-6", deviceFingerprint: "dev-L" });
     const router = getRouter();

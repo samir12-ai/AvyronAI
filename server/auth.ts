@@ -631,8 +631,21 @@ export function registerAuthRoutes(app: Router) {
       if (refreshToken && typeof refreshToken === "string") {
         const parsed = parseRefreshToken(refreshToken);
         if (parsed) {
-          await db.update(authSessions).set({ revokedAt: new Date(), revokeReason: "logout" })
-            .where(and(eq(authSessions.id, parsed.sessionId), isNull(authSessions.revokedAt)));
+          // Architect APPROVED_WITH_COMMENTS hardening: verify the refresh
+          // secret BEFORE revoking. Otherwise possession of a sessionId
+          // alone (e.g., from logs) would be enough to revoke a user's
+          // session — a session-revocation oracle and minor DoS vector.
+          // We silently no-op on mismatch; logout still returns 200 so
+          // the client UX is unchanged.
+          const [row] = await db.select().from(authSessions)
+            .where(eq(authSessions.id, parsed.sessionId)).limit(1);
+          if (row && !row.revokedAt) {
+            const ok = await bcrypt.compare(parsed.secret, row.refreshTokenHash);
+            if (ok) {
+              await db.update(authSessions).set({ revokedAt: new Date(), revokeReason: "logout" })
+                .where(and(eq(authSessions.id, parsed.sessionId), isNull(authSessions.revokedAt)));
+            }
+          }
         }
       }
       res.json({ success: true });
