@@ -452,10 +452,10 @@ async function runConcurrencyTest() {
   assert(get(accountId).length === 0, "outside ALS scope: accountId-keyed slot unaffected");
 }
 
-// ─── F3.10 per-consumer isPartial behavioral tests (pass-5) ───────────
+// ─── F3.10 per-consumer isPartial behavioral tests (pass-5/pass-6) ───────────
 function runConsumerGuardTests() {
-  section("F3.10 — acknowledgeAelInput / attachAelProvenance / formatAELForPrompt banner");
-  const { acknowledgeAelInput, attachAelProvenance } =
+  section("F3.10 — acknowledgeAelInput / attachAelProvenance / applyPartialAelDowngrade / formatAELForPrompt banner");
+  const { acknowledgeAelInput, attachAelProvenance, applyPartialAelDowngrade, AEL_PARTIAL_CONFIDENCE_MULTIPLIER } =
     require("../../server/analytical-enrichment-layer/consumer-guard");
   const { formatAELForPrompt } =
     require("../../server/analytical-enrichment-layer/engine");
@@ -525,17 +525,77 @@ function runConsumerGuardTests() {
       `${f}: imports + calls acknowledgeAelInput()`);
   }
 
-  // Leaf LLM consumers also attach provenance to their returned result
-  const leafConsumers = [
+  // Leaf LLM consumers + main engines now apply real downgrade (not just provenance log)
+  const downgradeConsumers = [
     "server/awareness-engine/myth-breaker-llm.ts",
     "server/offer-engine/identity-llm.ts",
     "server/persuasion-engine/cialdini-llm.ts",
+    "server/positioning-engine/engine.ts",
+    "server/offer-engine/engine.ts",
+    "server/persuasion-engine/engine.ts",
   ];
-  for (const f of leafConsumers) {
+  for (const f of downgradeConsumers) {
     const src = fs.readFileSync(f, "utf8");
-    assert(src.includes("attachAelProvenance(result"),
-      `${f}: calls attachAelProvenance(result, aelAck) on success return`);
+    assert(src.includes("applyPartialAelDowngrade("),
+      `${f}: calls applyPartialAelDowngrade(...) — pass-6 real block/downgrade`);
   }
+
+  // pass-6: applyPartialAelDowngrade actually mutates numeric confidence fields when partial
+  const r1: any = { confidenceScore: 0.8, score: 0.5, offerStrengthScore: 0.9, engineConfidence: 0.6 };
+  applyPartialAelDowngrade("TestEngine", r1, ackPartial);
+  const m = AEL_PARTIAL_CONFIDENCE_MULTIPLIER;
+  assert(Math.abs(r1.confidenceScore - 0.8 * m) < 1e-3,
+    `applyPartialAelDowngrade(partial): confidenceScore downgraded by ×${m}`);
+  assert(Math.abs(r1.score - 0.5 * m) < 1e-3,
+    `applyPartialAelDowngrade(partial): score downgraded by ×${m}`);
+  assert(Math.abs(r1.offerStrengthScore - 0.9 * m) < 1e-3,
+    `applyPartialAelDowngrade(partial): offerStrengthScore downgraded by ×${m}`);
+  assert(Math.abs(r1.engineConfidence - 0.6 * m) < 1e-3,
+    `applyPartialAelDowngrade(partial): engineConfidence downgraded by ×${m}`);
+  assert(r1._provenance?.aelPartialDowngradeApplied === true,
+    "applyPartialAelDowngrade(partial): records aelPartialDowngradeApplied=true");
+  assert(Array.isArray(r1._provenance?.aelPartialDowngradeFields) && r1._provenance.aelPartialDowngradeFields.length === 4,
+    "applyPartialAelDowngrade(partial): records all 4 downgraded fields");
+
+  // pass-6: NOT mutated when AEL is full
+  const r2: any = { confidenceScore: 0.8, score: 0.5 };
+  applyPartialAelDowngrade("TestEngine", r2, ackFull);
+  assert(r2.confidenceScore === 0.8 && r2.score === 0.5,
+    "applyPartialAelDowngrade(full): no mutation of numeric fields");
+  assert(r2._provenance?.aelPartialPropagated === false,
+    "applyPartialAelDowngrade(full): provenance still attached, partial=false");
+
+  // pass-6: F3.7 string-presence detector — fires on marketing copy even with 0 classifier counts
+  const cel = require("../../server/causal-enforcement-layer/engine");
+  const detect1 = cel.detectMarketingClaimStrings(["Our world-class product is the best on the market."]);
+  assert(detect1.present === true, "detectMarketingClaimStrings: detects superlative marketing copy");
+  const detect2 = cel.detectMarketingClaimStrings(["The control group received a placebo dose of 50mg."]);
+  assert(detect2.present === false, "detectMarketingClaimStrings: ignores neutral/factual copy");
+
+  // pass-6: isDepthBlocking with empty claimBreakdown but marketing copy in source -> blocks
+  const fakeDepthLow = {
+    engineId: "test", passed: false, score: 0.1, violations: [], appliedRules: [],
+    rootCausesEvaluated: 0, enforcementLog: [], causalDepthScore: 0.1,
+    rootCauseReferences: 0, causalChainReferences: 0, barrierReferences: 0,
+    claimBreakdown: { factual: 0, inferred: 0, emotional: 0 }, factualClaimCount: 0,
+    depthDiagnostics: { hasRootCauseGrounding: false, hasCausalChainUsage: false, hasBarrierResolution: false, hasBehavioralImpact: false, genericTermCount: 0, shallowPatternCount: 0 },
+  };
+  assert(cel.isDepthBlocking(fakeDepthLow) === false,
+    "isDepthBlocking: low depth + no claims (no source) → not blocking (existing behavior preserved)");
+  assert(cel.isDepthBlocking(fakeDepthLow, ["Get more sales with our revolutionary platform."]) === true,
+    "isDepthBlocking: low depth + 0 classifier counts BUT marketing strings in source → blocks (F3.7 pass-6)");
+  assert(cel.isDepthBlocking(fakeDepthLow, ["The control group received a placebo dose of 50mg."]) === false,
+    "isDepthBlocking: low depth + 0 classifier counts + neutral source → not blocking");
+
+  // pass-6: D4-doctrine — consumer-guard uses typed AnalyticalPackage access (no `as any` casts)
+  const guardSrc = fs.readFileSync("server/analytical-enrichment-layer/consumer-guard.ts", "utf8");
+  assert(!/\(ael as any\)\.isPartial/.test(guardSrc),
+    "consumer-guard.ts: no `(ael as any).isPartial` cast (typed access via AnalyticalPackage)");
+  assert(!/\(ael as any\)\.partialReason/.test(guardSrc),
+    "consumer-guard.ts: no `(ael as any).partialReason` cast (typed access via AnalyticalPackage)");
+  const aelEngineSrc = fs.readFileSync("server/analytical-enrichment-layer/engine.ts", "utf8");
+  assert(!/\(pkg as any\)\.isPartial/.test(aelEngineSrc),
+    "ael/engine.ts: formatAELForPrompt no longer uses `(pkg as any).isPartial` cast");
 }
 
 runConcurrencyTest().then(() => {

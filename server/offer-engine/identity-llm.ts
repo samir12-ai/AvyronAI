@@ -1,5 +1,5 @@
 import { aiChat } from "../ai-client";
-import { acknowledgeAelInput, attachAelProvenance } from "../analytical-enrichment-layer/consumer-guard";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import type { OfferIdentityReasoning } from "./types";
 
 function buildPrompt(args: {
@@ -171,7 +171,7 @@ export async function generateOfferIdentityReasoning(args: {
     modelUsed: "gpt-4.1-mini",
     generatedAt: new Date().toISOString(),
   };
-  attachAelProvenance(result as any, aelAck);
+  applyPartialAelDowngrade("OfferIdentity", result as any, aelAck);
 
   console.log(`[OfferIdentity] STEP_2 | parsed | identityPayoff="${result.identityPayoff.slice(0, 100)}" | rejectedAlts=${result.rejectedAlternatives.length} | groundedSignals=${result.groundedSignals.length}`);
   console.log(`[OfferIdentity] STEP_3 | DONE in ${Date.now() - startTs}ms`);

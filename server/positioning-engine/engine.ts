@@ -11,7 +11,7 @@ import { aiChat } from "../ai-client";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
-import { acknowledgeAelInput, attachAelProvenance } from "../analytical-enrichment-layer/consumer-guard";
+import { acknowledgeAelInput, attachAelProvenance, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import {
   enforcePositioningCompliance,
   buildCausalDirectiveForPrompt,
@@ -2911,7 +2911,7 @@ CORRECTION REQUIRED:
 
   console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence} | engineConfidence=${positioningEngineConfidence} | dataConfidence=${positioningDataConfidence}`);
 
-  return {
+  const __positioningResult: any = {
     status,
     statusMessage,
     territory: primaryTerritory,
@@ -2937,6 +2937,7 @@ CORRECTION REQUIRED:
     createdAt: new Date().toISOString(),
     signalTraceability,
   };
+  return applyPartialAelDowngrade("PositioningEngine-V3", __positioningResult, aelAck);
 }
 
 async function buildAndPersistEmptyResult(

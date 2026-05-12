@@ -1,5 +1,5 @@
 import { aiChat } from "../ai-client";
-import { acknowledgeAelInput, attachAelProvenance } from "../analytical-enrichment-layer/consumer-guard";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import type { CialdiniReasoning, CialdiniPrinciple, TrustTransferDesign } from "./types";
 
 const PRINCIPLES: CialdiniPrinciple[] = [
@@ -208,7 +208,7 @@ export async function pickCialdiniPrinciple(args: {
     modelUsed: "gpt-4.1-mini",
     generatedAt: new Date().toISOString(),
   };
-  attachAelProvenance(result as any, aelAck);
+  applyPartialAelDowngrade("PersuasionCialdini", result as any, aelAck);
 
   console.log(`[PersuasionCialdini] STEP_2 | parsed | principle=${result.primaryCialdiniPrinciple} | rcRefs=${result.rootCauseRefs.join(",") || "(none)"} | whyOthersFail=${result.whyOthersFail.length}`);
   console.log(`[PersuasionCialdini] STEP_3 | DONE in ${Date.now() - startTs}ms`);

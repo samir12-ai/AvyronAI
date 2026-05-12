@@ -1,5 +1,5 @@
 import { aiChat } from "../ai-client";
-import { acknowledgeAelInput, attachAelProvenance } from "../analytical-enrichment-layer/consumer-guard";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import type { MythBreakerReasoning } from "./types";
 
 interface RootCauseRef {
@@ -161,7 +161,7 @@ export async function generateMythBreaker(args: {
     modelUsed: "gpt-4.1-mini",
     generatedAt: new Date().toISOString(),
   };
-  attachAelProvenance(result as any, aelAck);
+  applyPartialAelDowngrade("AwarenessMythBreaker", result as any, aelAck);
 
   console.log(`[AwarenessMythBreaker] STEP_2 | parsed | mythBreaker="${result.mythBreakerStatement.slice(0, 100)}" | rcRefs=${result.rootCauseRefs.join(",") || "(none)"} | evidence=${result.evidenceForBelief.length}`);
   console.log(`[AwarenessMythBreaker] STEP_3 | DONE in ${Date.now() - startTs}ms`);

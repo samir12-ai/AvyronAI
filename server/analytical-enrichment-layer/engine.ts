@@ -359,8 +359,8 @@ export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
   if (totalInsights === 0) return "";
 
   const sections: string[] = [];
-  if ((pkg as any).isPartial === true) {
-    sections.push("\n⚠ AEL_PARTIAL_NOTICE: Analytical enrichment is DEGRADED (partialReason=" + ((pkg as any).partialReason || "unknown") + ").");
+  if (pkg.isPartial === true) {
+    sections.push("\n⚠ AEL_PARTIAL_NOTICE: Analytical enrichment is DEGRADED (partialReason=" + (pkg.partialReason || "unknown") + ").");
     sections.push("Treat all derived inferences as PROVISIONAL. Do not rely on root-cause depth as load-bearing evidence.\n");
   }
   sections.push("\n═══ DEEP ANALYTICAL CONTEXT (AEL v2 — Causal Interpretation) ═══");

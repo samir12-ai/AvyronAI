@@ -608,19 +608,48 @@ export interface DepthGateResult {
   failureReason: string | null;
 }
 
-export function isDepthBlocking(depthResult: DepthComplianceResult): boolean {
-  // Seal #8 / F3.7 — Depth gate now fires on ANY marketing-claim presence,
-  // not only factual claims. Inferred + emotional claims also drive buying
-  // decisions and so demand causal depth grounding. Previously only factual
-  // claims triggered the gate, letting opinion-laden / emotional copy bypass
-  // depth enforcement entirely.
+// Seal #8 / F3.7 (pass-6) — String-presence detector that fires on raw
+// marketing-claim language even when the classifier returns 0 counts.
+// This closes the bypass where shallow / emotional copy that the classifier
+// misclassified would have skipped the depth gate entirely.
+const MARKETING_CLAIM_STRING_PATTERNS: RegExp[] = [
+  /\b(best|fastest|easiest|cheapest|simplest|smartest|safest|strongest|leading|premium|world[- ]class|industry[- ]leading|cutting[- ]edge|state[- ]of[- ]the[- ]art|game[- ]chang(er|ing)|next[- ]gen(eration)?|revolutionary|breakthrough|unmatched|unrivaled|unparalleled|guaranteed|proven|trusted|effortless|seamless)\b/i,
+  /\b(transform|unlock|empower|skyrocket|supercharge|elevate|maximi[sz]e|optimi[sz]e|10x|2x faster|10x faster)\b/i,
+  /\b(more (sales|revenue|leads|customers|growth|impact|value|results)|drive (sales|revenue|leads|growth)|boost (sales|revenue|conversion|engagement))\b/i,
+  /\b(in (just |only )?(\d+|a few|minutes|hours|days)|same[- ]day|overnight|instantly|on demand)\b/i,
+  /\b(love it|you'?ll love|customers love|everyone loves)\b/i,
+];
+
+export function detectMarketingClaimStrings(outputTexts: string[]): { present: boolean; matchedPattern: string | null; sample: string | null } {
+  for (const text of outputTexts) {
+    if (!text) continue;
+    for (const re of MARKETING_CLAIM_STRING_PATTERNS) {
+      const m = re.exec(text);
+      if (m) return { present: true, matchedPattern: re.source, sample: m[0] };
+    }
+  }
+  return { present: false, matchedPattern: null, sample: null };
+}
+
+export function isDepthBlocking(depthResult: DepthComplianceResult, sourceTexts?: string[]): boolean {
+  // Seal #8 / F3.7 — Depth gate fires on ANY marketing-claim presence, derived
+  // EITHER from classifier counts OR (pass-6) from string-presence scan over
+  // the raw output sections. Pass-6 added the string-presence parallel trigger
+  // because the classifier was missing copy that bypassed enforcement.
   const cb = depthResult.claimBreakdown || { factual: 0, inferred: 0, emotional: 0 };
-  const hasAnyMarketingClaim =
+  const hasClassifierClaim =
     (cb.factual ?? 0) > 0 ||
     (cb.inferred ?? 0) > 0 ||
     (cb.emotional ?? 0) > 0;
+  const stringDetect = sourceTexts && sourceTexts.length > 0
+    ? detectMarketingClaimStrings(sourceTexts)
+    : { present: false, matchedPattern: null, sample: null };
+  const hasAnyMarketingClaim = hasClassifierClaim || stringDetect.present;
   if (depthResult.causalDepthScore < DEPTH_GATE_THRESHOLD) {
     if (!hasAnyMarketingClaim) return false;
+    if (!hasClassifierClaim && stringDetect.present) {
+      console.log(`[CEL-DepthGate] STRING_PRESENCE_TRIGGER | classifierMiss | matched="${stringDetect.sample}" | pattern=${stringDetect.matchedPattern}`);
+    }
     return true;
   }
   return false;
@@ -686,8 +715,9 @@ export function buildDepthGateResult(
   attempt: number,
   maxAttempts: number,
   regenerationLog: string[],
+  sourceTexts?: string[],
 ): DepthGateResult {
-  const blocked = isDepthBlocking(depthResult);
+  const blocked = isDepthBlocking(depthResult, sourceTexts);
   return {
     passed: !blocked,
     blocked,

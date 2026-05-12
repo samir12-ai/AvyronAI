@@ -168,7 +168,7 @@ function cascade(...candidates: unknown[]): string | null {
   return null;
 }
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
-import { acknowledgeAelInput } from "../analytical-enrichment-layer/consumer-guard";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
@@ -2107,7 +2107,7 @@ export async function runOfferEngine(
   upstreamSignals?: { trustMechanism?: any; gameDimension?: any } | null,
 ): Promise<OfferResult> {
   const startTime = Date.now();
-  acknowledgeAelInput("OfferEngine-V4", analyticalEnrichment, accountId);
+  const aelAck = acknowledgeAelInput("OfferEngine-V4", analyticalEnrichment, accountId);
   const diagnostics: Record<string, any> = {};
 
   if (mechanismEngineOutput?.primaryMechanism) {
@@ -3100,7 +3100,7 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V4] CONTRACT_VIOLATIONS=${contractViolations.length} | sample=${contractViolations.slice(0, 3).map(v => `${v.field}:${v.reason}`).join(",")}`);
   }
 
-  return {
+  const __offerResult: any = {
     status,
     statusMessage,
     primaryOffer: scrubOfferObjectLiterals(primaryOffer, structuralWarnings, contractViolations, "primary"),
@@ -3125,6 +3125,7 @@ export async function runOfferEngine(
     celDepthCompliance: celDepth,
     depthGateResult: depthGateResultOffer,
   };
+  return applyPartialAelDowngrade("OfferEngine-V4", __offerResult, aelAck);
 }
 
 // T001: Final guard — strip/flag any "[object Object]" residue that slipped past safeLabel.

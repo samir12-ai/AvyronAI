@@ -25,7 +25,7 @@ import {
   MESSAGE_STEP_CATEGORY_MAP,
 } from "./constants";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
-import { acknowledgeAelInput } from "../analytical-enrichment-layer/consumer-guard";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
@@ -2016,7 +2016,7 @@ export async function analyzePersuasion(
 ): Promise<PersuasionResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
-  acknowledgeAelInput("PersuasionEngine-V3", analyticalEnrichment, accountId);
+  const aelAck = acknowledgeAelInput("PersuasionEngine-V3", analyticalEnrichment, accountId);
 
   if (analyticalEnrichment) {
     const aelBlock = formatAELForPrompt(analyticalEnrichment);
@@ -2463,7 +2463,7 @@ export async function analyzePersuasion(
     }
   }
 
-  return {
+  const __persuasionResult: any = {
     status: driftStatus,
     statusMessage: driftStatusMessage,
     primaryRoute: routes.primary,
@@ -2481,6 +2481,7 @@ export async function analyzePersuasion(
     celDepthCompliance: celDepth,
     depthGateResult,
   };
+  return applyPartialAelDowngrade("PersuasionEngine-V3", __persuasionResult, aelAck);
 }
 
 function emptyRoute(name: string): PersuasionRoute {
