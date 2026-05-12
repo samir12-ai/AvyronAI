@@ -490,6 +490,7 @@ function logVerdict(verdict: SystemControlVerdict, config: { campaignId: string;
 
   if (verdict.repairActions.length > 0) {
     for (const ra of verdict.repairActions) {
+      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.3): canonical authoring site of the repair-action display status — composed from booleans (executed/succeeded), NOT aliased from another field. D1 forbids substitution of a missing canonical contract field, not the local composition of a display label.
       const status = !ra.executed ? "PENDING" : ra.succeeded ? "RESOLVED" : "FAILED";
       console.log(`[SystemControl] REPAIR_ACTION | ${status} | code=${ra.code} | target=${ra.targetBlock} | ${ra.detail || ra.description}`);
     }

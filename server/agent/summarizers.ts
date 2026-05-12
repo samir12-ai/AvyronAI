@@ -67,6 +67,7 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
         const out = output.output || output;
         const ofr = out.primaryOffer || out;
         const name = ofr.offerName || out.offerName;
+        // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.3): `outcome` here is offer transformation prose for the agent-stream summary string (display content), not a canonical contract verdict. Read precedence (nested → flat) is a structural shape probe, not a semantic substitution.
         const outcome = ofr.coreOutcome || out.coreOutcome;
         return name ? `Offer: "${name}".${outcome ? ` Core outcome: ${outcome}.` : ""}` : "Offer structured.";
       }

@@ -215,7 +215,7 @@ async function collectValidatedEngineOutputs(
     status: string | undefined,
   ): void => {
     if (status && GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: engineId as any, data: snap, depthGateStatus: status });
+      snapshots.push({ engineId, data: snap, depthGateStatus: status });
       return;
     }
     if (!status) {

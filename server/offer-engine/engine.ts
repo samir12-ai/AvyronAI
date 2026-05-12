@@ -2063,6 +2063,14 @@ Return JSON:
     const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
     const parsed = JSON.parse(cleanedResponse);
 
+    /* Seal #9 (F10.2): the `outcome` field on each parsed offer object is
+       the offer's TRANSFORMATION-STATEMENT domain content (a free-form
+       sentence describing what the offer delivers) — NOT a substitute for
+       a missing canonical contract verdict (which D1 forbids). Per-offer
+       string fallbacks are the documented placeholders when the LLM omits
+       the field. Same applies to the `outcome` reads in the catch-fallback
+       below and the OutcomeLayer constructions further down this file. */
+    /* eslint-disable semantic/no-semantic-fallback */
     return {
       primary: {
         name: parsed.primary?.name || "Primary Offer",
@@ -2084,6 +2092,7 @@ Return JSON:
         rejectionReason: parsed.rejected?.rejectionReason || "Did not meet specificity requirements",
       },
     };
+    /* eslint-enable semantic/no-semantic-fallback */
   } catch (err: any) {
     console.error(`[OfferEngine] AI generation failed: ${err.message}`);
     return {
@@ -2485,6 +2494,7 @@ export async function runOfferEngine(
 
   const primaryOutcome: OutcomeLayer = {
     ...l1Outcome,
+    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.2): `outcome` is offer transformation prose (domain content), not a canonical contract verdict; fallback to L1 outcome is the documented degraded-AI handoff.
     primaryOutcome: aiOffers.primary.outcome || l1Outcome.primaryOutcome,
   };
 
@@ -2607,6 +2617,7 @@ export async function runOfferEngine(
 
   const altOutcome: OutcomeLayer = {
     ...l1Outcome,
+    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.2): same rationale as primary above — alternative offer's outcome prose with documented degraded-AI fallback.
     primaryOutcome: aiOffers.alternative.outcome || l1Outcome.transformationStatement,
     specificityScore: clamp(l1Outcome.specificityScore * 0.9),
   };
@@ -2636,6 +2647,7 @@ export async function runOfferEngine(
   );
 
   const rejOutcome: OutcomeLayer = {
+    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.2): rejected-offer outcome prose; sentinel-string fallback is the documented placeholder for the rejected-candidate slot.
     primaryOutcome: aiOffers.rejected.outcome || "Generic market improvement",
     transformationStatement: "Vague transformation promise",
     specificityScore: 0.2,
@@ -2852,6 +2864,7 @@ export async function runOfferEngine(
       const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
       diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
 
+      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.2): retry-attempt outcome prose; same domain-content rationale as the primary OutcomeLayer above.
       const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
       const retryMechDesc = retryOffers.primary.mechanism || l2Mechanism.mechanismDescription;
       const retryMechLock = checkMechanismLock(retryMechDesc, differentiation);
@@ -2978,12 +2991,14 @@ export async function runOfferEngine(
         continue;
       }
 
+      /* eslint-disable semantic/no-semantic-fallback -- Seal #9 (F10.2): celSourceTexts collects raw text fields (name/outcome/mechanism prose) for the Causal Enforcement Layer's depth-gate scan; empty-string fallbacks coalesce missing prose into the text pool, not a canonical contract verdict substitution. */
       celSourceTexts = [
         aiOffers.primary?.name || "",
         aiOffers.primary?.outcome || "",
         aiOffers.primary?.mechanism || "",
         ...(aiOffers.primary?.deliverables || []),
       ];
+      /* eslint-enable semantic/no-semantic-fallback */
       celDepth = enforceEngineDepthCompliance(
         "offer",
         celSourceTexts,

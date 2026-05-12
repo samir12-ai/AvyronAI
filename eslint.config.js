@@ -49,11 +49,16 @@ module.exports = defineConfig([
       // budget-governor, statistical-validation, iteration-engine,
       // retention-engine) emit canonical verdict-shape fields
       // (validationState, decision.action, primaryChannel.decisionGate.outcome)
-      // and must obey D1. The engine *internals* of the legacy
-      // server/*-engine/engine.ts modules remain excluded — those use
-      // status/verdict/outcome as DOMAIN content fields, not as canonical
-      // contract fields, so widening into them would explode false positives.
+      // and must obey D1.
       "server/strategy/**/*.ts",
+      // Seal #9 / F10.2 — legacy engine internals are now in scope per task
+      // spec. Genuine D1 violations are rewritten; the legitimate authoring
+      // sites (where the engine COMPOSES its own canonical F1 status from a
+      // boolean guard result) carry narrowly-scoped in-line eslint-disable
+      // with documented rationale at each site (the assignment IS the
+      // canonical source, not a substitute for a missing canonical field
+      // from another engine — D1 forbids the latter, not the former).
+      "server/*-engine/engine.ts",
     ],
     plugins: {
       semantic: { rules: { "no-semantic-fallback": noSemanticFallback } },

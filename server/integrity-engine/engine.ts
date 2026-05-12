@@ -89,6 +89,12 @@ export function layer1_strategicConsistency(
 
   const pains = audience.audiencePains || [];
   const desires = Object.keys(audience.desireMap || {});
+  // Seal #9 (F10.2): `outcome` here is the integrity engine's local read of
+  // the OFFER's coreOutcome string for pain-match scoring — it's a typed
+  // domain content field, NOT a substitute for a missing canonical contract
+  // field (which D1 forbids). Empty-string fallback is the documented
+  // signal for "no offer outcome to score against" downstream.
+  // eslint-disable-next-line semantic/no-semantic-fallback
   const outcome = offer.coreOutcome || "";
   if (outcome && pains.length > 0) {
     const painTexts = pains.map((p: any) => (typeof p === "string" ? p : p?.pain || p?.name || "").toLowerCase());

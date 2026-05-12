@@ -261,6 +261,7 @@ export function registerSystemControlRoutes(app: Express) {
         .orderBy(desc(systemControlVerdicts.createdAt))
         .limit(1);
 
+      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.3): null-or-formatted-row read — `verdict` is composed from a row-presence boolean via formatVerdictRow(), not aliased from a missing canonical contract field. D1 forbids the latter, not the former.
       const verdict = verdictRow ? formatVerdictRow(verdictRow) : null;
 
       // Phase R T006 (architect-found): determine whether the latest stored

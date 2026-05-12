@@ -2834,6 +2834,7 @@ CORRECTION REQUIRED:
 
   const positioningDataConfidence = Math.round(dataReliability.overallReliability * 100) / 100;
 
+  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.3): this IS the canonical authoring site of the positioning engine's F1 status — the ternary composes status from the stability-check boolean (the engine's source of truth), it does NOT alias status from another field. D1 forbids substitution of a missing canonical field, not its authoring.
   const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";
   const hasAdvisories = stabilityResult.advisories.length > 0;
   const statusMessage = !stabilityResult.isStable
