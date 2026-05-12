@@ -55,8 +55,9 @@ import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager"
 import * as crypto from "crypto";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
-import { registerAuthRoutes, resolveAccountId } from "./auth";
+import { registerAuthRoutes, resolveAccountId, isAdminAccount } from "./auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
+import { aiRateLimitPerAccount } from "./middleware/ai-rate-limit";
 import { registerStagingAdminRoutes } from "./staging-admin-routes";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
@@ -68,7 +69,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
   registerStagingAdminRoutes(app);
 
-  app.get("/api/proxy/health", async (req, res) => {
+  app.get("/api/proxy/health", async (req: any, res) => {
+    // Seal #2 (Task #20) F1.6 — admin-only payload. Non-admin (and unauthed)
+    // callers get a stripped {ok:true} so existing health-check probes don't
+    // break, but proxy host/port/zone/credential metadata never leaks. Public
+    // path prefix is still in PUBLIC_PATH_PREFIXES so optionalAuth runs and
+    // req.accountId is set for admin checks; we DO NOT 403 — public probes
+    // are still answered, just without sensitive detail.
+    if (!isAdminAccount(req.accountId)) {
+      return res.json({ ok: true });
+    }
     try {
       const { getProxyConfig } = await import("./competitive-intelligence/proxy-pool-manager");
       const proxy = getProxyConfig();
@@ -165,7 +175,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/generate-content", async (req, res) => {
+  app.post("/api/generate-content", aiRateLimitPerAccount(), async (req, res) => {
     try {
       const { topic, contentType, platform, brandName, tone, targetAudience, industry, aiEngine, campaignId } = req.body;
 
@@ -284,7 +294,7 @@ Requirements:
     });
   });
 
-  app.post("/api/generate-ad", async (req, res) => {
+  app.post("/api/generate-ad", aiRateLimitPerAccount(), async (req, res) => {
     try {
       const { brandName, industry, tone, targetAudience, platforms, aiEngine } = req.body;
 
@@ -366,7 +376,7 @@ Make sure the content works well across all the specified platforms.`;
     }
   });
 
-  app.post("/api/generate-reel-script", async (req, res) => {
+  app.post("/api/generate-reel-script", aiRateLimitPerAccount(), async (req, res) => {
     try {
       const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal, ciContext, campaignId } = req.body;
 
@@ -1216,7 +1226,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     }
   });
 
-  app.post("/api/generate-calendar", async (req, res) => {
+  app.post("/api/generate-calendar", aiRateLimitPerAccount(), async (req, res) => {
     try {
       const { brandName, industry, tone, targetAudience, platforms, goals, products, month, year } = req.body;
 

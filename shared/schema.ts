@@ -2790,3 +2790,28 @@ export const pipelineClusters = pgTable("pipeline_clusters", {
 
 export type PipelineCluster = typeof pipelineClusters.$inferSelect;
 export type InsertPipelineCluster = typeof pipelineClusters.$inferInsert;
+
+// ─── Seal #2 (Task #20) — F9.4 account lockout & F9.8 refresh-token rotation ──
+// Auth-hardening tables. Migration 013 creates them in PG. Read by server/auth.ts.
+export const authLockouts = pgTable("auth_lockouts", {
+  email: text("email").primaryKey(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  windowStart: timestamp("window_start").notNull().defaultNow(),
+  lockedUntil: timestamp("locked_until"),
+  lastAttemptAt: timestamp("last_attempt_at").notNull().defaultNow(),
+});
+
+export const authSessions = pgTable("auth_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  deviceFingerprint: text("device_fingerprint").notNull().default("default"),
+  refreshTokenHash: text("refresh_token_hash").notNull(),
+  issuedAt: timestamp("issued_at").notNull().defaultNow(),
+  lastUsedAt: timestamp("last_used_at").notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+  revokeReason: text("revoke_reason"),
+});
+
+export type AuthLockout = typeof authLockouts.$inferSelect;
+export type AuthSession = typeof authSessions.$inferSelect;

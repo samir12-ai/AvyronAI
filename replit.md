@@ -76,8 +76,10 @@ Client-side data is stored using AsyncStorage. Server-side data is managed in Po
 - PostgreSQL
 
 ### User Authentication
-- JWT-based email/password authentication
+- JWT-based email/password authentication. Access tokens (60m TTL) carry `audience="avyron-ai"` + `issuer="avyron-auth"`; refresh tokens (30d) rotate on every `/api/auth/refresh` call and use the `auth_sessions` table with reuse detection (`SECURITY_REFRESH_REUSE` cascade-revokes the entire account on second use). Account lockout: 5 failed logins / 15min → 423 with 15min `Retry-After` (`auth_lockouts` table).
+- **JWT 7-day legacy grace window (Seal #2 / F9.2).** Pre-deploy tokens lacking `aud`/`iss` are still accepted for `JWT_LEGACY_GRACE_DAYS` (default 7d) so existing sessions don't all invalidate at once. Override sunset via `JWT_LEGACY_CUTOFF_ISO`. Operator runbook: monitor the `[Auth] JWT_LEGACY_GRACE | hits=...` log line — when it stops appearing for ≥48h, set `JWT_LEGACY_CUTOFF_ISO` to a past timestamp to force-close the grace window.
 - Stripe webhook integration for subscription management
+- Per-account AI generation rate limit (Seal #2 / F1.8): 50 calls/hr/account/route on `/api/generate-content|ad|reel-script|calendar`. Override via `AI_RATE_LIMIT_PER_HOUR`. Returns `429 + Retry-After + AI_RATE_LIMIT_EXCEEDED`.
 
 ### Video Credits System
 - Manages video generation credits for users.
