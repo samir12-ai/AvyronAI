@@ -426,9 +426,33 @@ function setupErrorHandler(app: express.Application) {
     res.status(200).json({ ok: true, ts: new Date().toISOString() });
   });
 
+  // Seal #7 (F10.7) — /metrics is gated by the static METRICS_ADMIN_TOKEN
+  // secret, NOT by the JWT-based admin account check used elsewhere. Two
+  // reasons: (1) Prometheus scrapers/uptime probes are stateless processes
+  // that cannot mint JWTs; (2) the metrics surface is operational
+  // infrastructure, separate from product admin. When METRICS_ADMIN_TOKEN
+  // is unset the endpoint is closed (401 to all callers) — fail-safe by
+  // default. Constant-time compare prevents timing oracles on the secret.
   app.get("/metrics", (req: Request, res: Response) => {
-    const adminToken = req.header("x-admin-token");
-    if (!adminToken || !verifyAdminToken(adminToken)) {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).type("text/plain").send("metrics endpoint disabled (METRICS_ADMIN_TOKEN unset)\n");
+    }
+    // Constant-time comparison — both sides padded to the same length first.
+    const a = Buffer.from(expected);
+    const b = Buffer.from(provided.padEnd(expected.length, "\0").slice(0, expected.length));
+    let ok = a.length === provided.length;
+    try {
+      // node:crypto.timingSafeEqual throws if lengths differ; we already
+      // forced equal length above so the throw path is purely defensive.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { timingSafeEqual } = require("node:crypto") as typeof import("node:crypto");
+      ok = ok && timingSafeEqual(a, b);
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
       return res.status(401).type("text/plain").send("unauthorized\n");
     }
     res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");

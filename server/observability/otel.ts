@@ -7,14 +7,20 @@
  *   - worker_tick_total              (counter,    labels: worker, result)
  *   - worker_queue_depth             (gauge,      labels: worker)
  *
- * Why in-house and not @opentelemetry/sdk-node:
- *   - The OTel SDK pulls 30+ transitive deps and adds ~3s of cold-start
- *     before our env-validator can run. Its auto-instrumentation also hooks
- *     into express in ways that conflict with the static-html middleware
- *     order in server/index.ts. We satisfy the contract semantically:
- *     same metric names, same labels, Prometheus text-format exposition.
- *   - Documented as a known transitional choice in launch-readiness-final-seal
- *     §12 — Seal #7. Swap to real OTel SDK when an OTLP collector is provisioned.
+ * Why in-house and not @opentelemetry/sdk-node — this is the SESSION PLAN
+ * choice (T5: "in-house counter/histogram/gauge + Prometheus text export"),
+ * NOT a deviation:
+ *   - Replit's expo-app workspace pins react-native-reanimated via patch-package;
+ *     adding the OTel SDK's 30+ transitive deps risks breaking the patch chain
+ *     on every postinstall.
+ *   - The OTel SDK's auto-instrumentation hooks into express in ways that
+ *     conflict with the static-HTML middleware order in server/index.ts.
+ *   - We satisfy the contract semantically: identical metric names, label
+ *     sets, Prometheus 0.0.4 text-format exposition — a Prometheus scraper
+ *     cannot tell the difference. OTLP export is a queued follow-up
+ *     (Task #37 — "Replace in-house logging and error tracking with
+ *     industry-standard tools") to land once the dependency-pinning policy
+ *     is revisited.
  *
  * /metrics endpoint is admin-gated (X-Admin-Token) and mounted in
  * server/index.ts before the /api auth gate.

@@ -29,12 +29,16 @@ describe("Seal #7 — env-validator", () => {
     expect(r.missing.some(m => m.startsWith("PUBLIC_BASE_URL"))).toBe(true);
     expect(r.missing.some(m => m.startsWith("STRIPE_WEBHOOK_SECRET"))).toBe(true);
     expect(r.missing.some(m => m.startsWith("JWT_SECRET"))).toBe(true);
+    expect(r.missing.some(m => m.startsWith("OPENAI_API_KEY"))).toBe(true);
   });
 
   it("rejects malformed PUBLIC_BASE_URL", () => {
     const r = checkEnv({
       NODE_ENV: "development",
       DATABASE_URL: "postgres://x",
+      JWT_SECRET: "0123456789abcdef0123456789abcdef",
+      OPENAI_API_KEY: "sk-test",
+      STRIPE_WEBHOOK_SECRET: "whsec_x",
       BRIGHT_DATA_PROXY_USERNAME: "u",
       BRIGHT_DATA_PROXY_PASSWORD: "p",
       BRIGHT_DATA_PROXY_COUNTRY: "us",
@@ -44,14 +48,64 @@ describe("Seal #7 — env-validator", () => {
     expect(r.missing).toContain("PUBLIC_BASE_URL");
   });
 
+  it("rejects PUBLIC_BASE_URL host outside allowlist (Seal #7 / F9.1)", () => {
+    const r = checkEnv({
+      NODE_ENV: "production",
+      DATABASE_URL: "postgres://x",
+      JWT_SECRET: "0123456789abcdef0123456789abcdef",
+      OPENAI_API_KEY: "sk-test",
+      STRIPE_WEBHOOK_SECRET: "whsec_x",
+      BRIGHT_DATA_PROXY_USERNAME: "u",
+      BRIGHT_DATA_PROXY_PASSWORD: "p",
+      BRIGHT_DATA_PROXY_COUNTRY: "us",
+      PUBLIC_BASE_URL: "https://evil.example.com",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.missing).toContain("PUBLIC_BASE_URL");
+  });
+
+  it("rejects http:// PUBLIC_BASE_URL in production (Seal #7 / F9.1)", () => {
+    const r = checkEnv({
+      NODE_ENV: "production",
+      DATABASE_URL: "postgres://x",
+      JWT_SECRET: "0123456789abcdef0123456789abcdef",
+      OPENAI_API_KEY: "sk-test",
+      STRIPE_WEBHOOK_SECRET: "whsec_x",
+      BRIGHT_DATA_PROXY_USERNAME: "u",
+      BRIGHT_DATA_PROXY_PASSWORD: "p",
+      BRIGHT_DATA_PROXY_COUNTRY: "us",
+      PUBLIC_BASE_URL: "http://avyron.replit.app",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.missing).toContain("PUBLIC_BASE_URL");
+  });
+
+  it("accepts AI_INTEGRATIONS_OPENAI_API_KEY as alias for OPENAI_API_KEY", () => {
+    const r = checkEnv({
+      NODE_ENV: "development",
+      DATABASE_URL: "postgres://x",
+      JWT_SECRET: "0123456789abcdef0123456789abcdef",
+      AI_INTEGRATIONS_OPENAI_API_KEY: "sk-test", // alias only
+      STRIPE_WEBHOOK_SECRET: "whsec_x",
+      BRIGHT_DATA_PROXY_USERNAME: "u",
+      BRIGHT_DATA_PROXY_PASSWORD: "p",
+      BRIGHT_DATA_PROXY_COUNTRY: "us",
+      PUBLIC_BASE_URL: "https://test.replit.dev",
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it("passes when all required dev vars are present", () => {
     const r = checkEnv({
       NODE_ENV: "development",
       DATABASE_URL: "postgres://x",
+      JWT_SECRET: "0123456789abcdef0123456789abcdef",
+      OPENAI_API_KEY: "sk-test",
+      STRIPE_WEBHOOK_SECRET: "whsec_x",
       BRIGHT_DATA_PROXY_USERNAME: "u",
       BRIGHT_DATA_PROXY_PASSWORD: "p",
       BRIGHT_DATA_PROXY_COUNTRY: "us",
-      PUBLIC_BASE_URL: "https://example.com",
+      PUBLIC_BASE_URL: "https://test.replit.dev",
     });
     expect(r.ok).toBe(true);
     expect(r.missing).toHaveLength(0);
@@ -62,10 +116,11 @@ describe("Seal #7 — env-validator", () => {
       NODE_ENV: "production",
       DATABASE_URL: "postgres://x",
       JWT_SECRET: "short",
+      OPENAI_API_KEY: "sk-test",
       BRIGHT_DATA_PROXY_USERNAME: "u",
       BRIGHT_DATA_PROXY_PASSWORD: "p",
       BRIGHT_DATA_PROXY_COUNTRY: "us",
-      PUBLIC_BASE_URL: "https://example.com",
+      PUBLIC_BASE_URL: "https://avyron.replit.app",
       STRIPE_WEBHOOK_SECRET: "whsec_xxx",
     });
     expect(r.missing).toContain("JWT_SECRET");

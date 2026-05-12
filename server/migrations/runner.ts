@@ -216,45 +216,56 @@ export async function runMigrations(opts: RunnerOptions = {}): Promise<{ applied
   const applied: MigrationFile[] = [];
 
   try {
-    // Advisory lock — non-blocking. If another replica holds it, wait briefly
-    // and try a few times. If still locked, that replica is doing the work;
-    // we fall through, read the resulting state, and proceed.
-    let gotLock = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      const r = await client.query<{ pg_try_advisory_lock: boolean }>(
-        "SELECT pg_try_advisory_lock($1)",
-        [ADVISORY_LOCK_KEY],
-      );
-      if (r.rows[0].pg_try_advisory_lock) { gotLock = true; break; }
-      await new Promise((res) => setTimeout(res, 1000));
-    }
-    if (!gotLock) {
-      console.warn("[Migrations] another instance holds the advisory lock — skipping apply, trusting their work");
-    } else {
-      try {
-        await ensureMigrationsTable(client);
-        const alreadyApplied = await getAppliedVersions(client);
-        const all = listSqlMigrations();
-        const pending = all.filter((m) => !alreadyApplied.has(m.version));
+    // Advisory lock — BLOCKING. Per architect-review: pg_try_advisory_lock
+    // with a "skip after timeout, trust the other replica" branch is unsafe
+    // because we can't actually verify the other replica completed the
+    // pending migration before we proceed to read schema state. Use the
+    // blocking pg_advisory_lock so we wait deterministically; only one
+    // replica can hold the lock at a time, and we always observe a
+    // consistent post-migration state when we resume.
+    //
+    // pg's statement_timeout does not apply to advisory-lock waits, so we
+    // bound the wait with a Promise.race against an explicit timeout. On
+    // timeout we throw — boot fails loudly rather than racing the other
+    // replica.
+    const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+    const lockAcquired = client.query("SELECT pg_advisory_lock($1)", [ADVISORY_LOCK_KEY]);
+    const lockTimeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `[Migrations] could not acquire advisory lock ${ADVISORY_LOCK_KEY} within ${LOCK_TIMEOUT_MS}ms — another instance may be stuck. Refusing to boot.`,
+            ),
+          ),
+        LOCK_TIMEOUT_MS,
+      ),
+    );
+    await Promise.race([lockAcquired, lockTimeout]);
 
-        if (pending.length === 0) {
-          console.log(`[Migrations] up-to-date (${all.length} sql migrations on disk, 0 pending)`);
-        } else {
-          console.log(`[Migrations] applying ${pending.length} pending sql migration(s)…`);
-          for (const m of pending) {
-            const dur = await applyOne(client, m);
-            console.log(`[Migrations] applied ${m.version}_${m.name} (${dur}ms)`);
-            applied.push(m);
-          }
-        }
+    try {
+      await ensureMigrationsTable(client);
+      const alreadyApplied = await getAppliedVersions(client);
+      const all = listSqlMigrations();
+      const pending = all.filter((m) => !alreadyApplied.has(m.version));
 
-        if (!opts.skipLegacy) {
-          // Legacy TS migrations — already idempotent. Run sequentially.
-          await runLegacyTsMigrations();
+      if (pending.length === 0) {
+        console.log(`[Migrations] up-to-date (${all.length} sql migrations on disk, 0 pending)`);
+      } else {
+        console.log(`[Migrations] applying ${pending.length} pending sql migration(s)…`);
+        for (const m of pending) {
+          const dur = await applyOne(client, m);
+          console.log(`[Migrations] applied ${m.version}_${m.name} (${dur}ms)`);
+          applied.push(m);
         }
-      } finally {
-        await client.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]);
       }
+
+      if (!opts.skipLegacy) {
+        // Legacy TS migrations — already idempotent. Run sequentially.
+        await runLegacyTsMigrations();
+      }
+    } finally {
+      await client.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]).catch(() => undefined);
     }
 
     const lastVersion = await (async () => {
