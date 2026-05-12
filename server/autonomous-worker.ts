@@ -335,6 +335,13 @@ async function checkIdleAccount(accountId: string, days: number): Promise<boolea
 }
 
 async function processAccount(accountId: string) {
+  // P1-18: never start a new account-level job after shutdown has begun.
+  // Combined with the workerTick gates this guarantees no NEW DB writes
+  // begin after SIGTERM; in-flight account work still gets its grace
+  // window from the 5s unref'd timer in the signal handler.
+  if (isShuttingDown) {
+    return;
+  }
   const jobId = await acquireLock(accountId);
   if (!jobId) {
     console.log(`[Worker] Account ${accountId} is locked, skipping`);
@@ -1169,6 +1176,12 @@ function classifyInsightTypeFromState(
 const WORKER_CONCURRENCY = 3;
 
 async function workerTick() {
+  // P1-18 (W4.1, post-architect-#3 fix): explicit shutdown gate at the top
+  // of every tick AND between batches. Without these two checks the
+  // `installShutdownHandlers()` flag was inert against in-flight ticks.
+  if (isShuttingDown) {
+    return;
+  }
   try {
     const accountIds = await getAccountsDueForProcessing();
 
@@ -1179,6 +1192,12 @@ async function workerTick() {
     console.log(`[Worker] Processing ${accountIds.length} account(s) across ${WORKER_CONCURRENCY} parallel lane(s): ${accountIds.join(", ")}`);
 
     for (let i = 0; i < accountIds.length; i += WORKER_CONCURRENCY) {
+      // Re-check between batches — a long-running first batch may have
+      // crossed a SIGTERM boundary; the remaining batches must not start.
+      if (isShuttingDown) {
+        console.log(`[Worker] Shutdown detected mid-tick — skipping remaining ${accountIds.length - i} account(s).`);
+        return;
+      }
       const batch = accountIds.slice(i, i + WORKER_CONCURRENCY);
       await Promise.all(batch.map((accountId) => processAccount(accountId)));
     }
@@ -1399,6 +1418,7 @@ function scheduleCIRefresh() {
 
 export function startAutonomousWorker() {
   console.log(`[Worker] Starting autonomous worker (5-min tick, 6h cycle threshold, ${WORKER_CONCURRENCY} parallel lanes)`);
+  installShutdownHandlers();
   ensureDefaultConfig().catch(err => console.error("[Worker] Failed to seed defaults:", err));
   workerTick();
   workerTimer = setInterval(workerTick, WORKER_INTERVAL_MS);
@@ -1421,4 +1441,46 @@ export function stopAutonomousWorker() {
     ciTimer = null;
     console.log("[CI Worker] Competitive intelligence checker stopped");
   }
+}
+
+// P1-18 (W4.1 launch-closure): SIGTERM/SIGINT handler. Replit sends SIGTERM
+// on graceful shutdown (default 15s window). Without an explicit handler,
+// in-flight worker ticks could be killed mid-DB-write, leaving stale lock
+// rows in `job_queue` that the next process would then have to clean up via
+// the stale-lock recovery path (acquireLock above, STALE_LOCK_MS=30min).
+// The handler:
+//   1. Sets `isShuttingDown` so any new worker tick exits immediately.
+//   2. Stops the interval timers so no new ticks are scheduled.
+//   3. Gives the process a small grace window for any in-flight tick to
+//      reach its `releaseLock` finally-block before letting the runtime
+//      exit naturally.
+// Idempotent — safe if Replit/test harness sends both SIGTERM and SIGINT.
+// Module-scope flag read by `workerTick` and `processAccount` to short-circuit
+// new work after SIGTERM/SIGINT (see installShutdownHandlers below).
+let isShuttingDown = false;
+export function isWorkerShuttingDown(): boolean {
+  return isShuttingDown;
+}
+let signalHandlersInstalled = false;
+export function installShutdownHandlers() {
+  if (signalHandlersInstalled) return;
+  signalHandlersInstalled = true;
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[Worker] Received ${signal} — initiating graceful shutdown.`);
+    try {
+      stopAutonomousWorker();
+    } catch (err: any) {
+      console.error(`[Worker] Error during stopAutonomousWorker on ${signal}:`, err?.message || err);
+    }
+    // Give in-flight ticks ~5s to finish their finally-block work
+    // (releaseLock, audit writes). Replit's default kill window is 15s so
+    // we stay well inside it.
+    setTimeout(() => {
+      console.log(`[Worker] Graceful shutdown grace period elapsed (${signal}).`);
+    }, 5000).unref();
+  };
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
 }

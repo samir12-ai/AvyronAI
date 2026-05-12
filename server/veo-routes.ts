@@ -34,36 +34,48 @@ function getVeoClient(): GoogleGenAI | null {
   return veoClientInstance;
 }
 
-const pendingImages = new Map<string, { filePath: string; mimeType: string; createdAt: number }>();
+// P1-19 (W4.1 launch-closure): pending image entries are now scoped per
+// userId. Without per-user scoping a malicious user who knew (or guessed)
+// another user's imageId could attach that image to their own video
+// generation request. The compound key (userId+imageId) eliminates that
+// cross-user pickup window even if imageIds were predictable.
+const pendingImages = new Map<string, { userId: string; filePath: string; mimeType: string; createdAt: number }>();
+
+function scopedKey(userId: string, imageId: string): string {
+  return `${userId}::${imageId}`;
+}
 
 function cleanupOldImages() {
   const now = Date.now();
-  for (const [id, entry] of pendingImages.entries()) {
+  for (const [key, entry] of pendingImages.entries()) {
     if (now - entry.createdAt > 30 * 60 * 1000) {
       try { fs.unlinkSync(entry.filePath); } catch {}
-      pendingImages.delete(id);
+      pendingImages.delete(key);
     }
   }
 }
 
-function readImageAsBase64(imageId: string): { imageBytes: string; mimeType: string } | null {
-  const entry = pendingImages.get(imageId);
+function readImageAsBase64(userId: string, imageId: string): { imageBytes: string; mimeType: string } | null {
+  const entry = pendingImages.get(scopedKey(userId, imageId));
   if (!entry) return null;
+  // Defense-in-depth: re-verify ownership match on the entry itself.
+  if (entry.userId !== userId) return null;
   try {
     const buffer = fs.readFileSync(entry.filePath);
     const imageBytes = buffer.toString("base64");
     return { imageBytes, mimeType: entry.mimeType };
   } catch (err) {
-    console.error(`[Veo] Failed to read image ${imageId}:`, err);
+    console.error(`[Veo] Failed to read image ${imageId} for user ${userId}:`, err);
     return null;
   }
 }
 
-function cleanupImage(imageId: string) {
-  const entry = pendingImages.get(imageId);
-  if (entry) {
+function cleanupImage(userId: string, imageId: string) {
+  const key = scopedKey(userId, imageId);
+  const entry = pendingImages.get(key);
+  if (entry && entry.userId === userId) {
     try { fs.unlinkSync(entry.filePath); } catch {}
-    pendingImages.delete(imageId);
+    pendingImages.delete(key);
   }
 }
 
@@ -73,7 +85,9 @@ export function registerVeoRoutes(app: Express) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
 
-  app.post("/api/veo/upload-image", (req, res, next) => {
+  // P1-19 (W4.1 launch-closure): authMiddleware now required so we have a
+  // userId to scope the pending image entry by.
+  app.post("/api/veo/upload-image", authMiddleware, (req, res, next) => {
     upload.single("image")(req, res, (err: any) => {
       if (err) {
         console.error("[VeoUpload] Multer error:", err.message);
@@ -84,8 +98,12 @@ export function registerVeoRoutes(app: Express) {
       }
       next();
     });
-  }, async (req, res) => {
+  }, async (req: AuthRequest, res) => {
     try {
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
       if (!req.file) {
         return res.status(400).json({ error: "No image file provided. Ensure the form field is named 'image'." });
       }
@@ -93,9 +111,10 @@ export function registerVeoRoutes(app: Express) {
       const mimeType = req.file.mimetype || "image/jpeg";
       const imageId = crypto.randomUUID();
 
-      console.log(`[VeoUpload] Received file: ${req.file.originalname} (${mimeType}, ${req.file.size} bytes) → id=${imageId}`);
+      console.log(`[VeoUpload] Received file: ${req.file.originalname} (${mimeType}, ${req.file.size} bytes) → id=${imageId} user=${userId}`);
 
-      pendingImages.set(imageId, {
+      pendingImages.set(scopedKey(userId, imageId), {
+        userId,
         filePath: req.file.path,
         mimeType,
         createdAt: Date.now(),
@@ -201,7 +220,8 @@ export function registerVeoRoutes(app: Express) {
       }
 
       if (lastFrameImageId) {
-        const lastFrameData = readImageAsBase64(lastFrameImageId);
+        // P1-19: scoped per-user lookup. Cross-user pickup returns null.
+        const lastFrameData = readImageAsBase64(userId, lastFrameImageId);
         if (lastFrameData) {
           config.lastFrame = {
             image: {
@@ -209,9 +229,9 @@ export function registerVeoRoutes(app: Express) {
               mimeType: lastFrameData.mimeType,
             },
           };
-          cleanupImage(lastFrameImageId);
+          cleanupImage(userId, lastFrameImageId);
         } else {
-          console.warn(`[VeoGenerate] Last frame image ${lastFrameImageId} not found, skipping`);
+          console.warn(`[VeoGenerate] Last frame image ${lastFrameImageId} not found for user ${userId}, skipping`);
         }
       }
 
@@ -222,13 +242,14 @@ export function registerVeoRoutes(app: Express) {
       };
 
       if (startImageId) {
-        const imageData = readImageAsBase64(startImageId);
+        // P1-19: scoped per-user lookup. Cross-user pickup returns null.
+        const imageData = readImageAsBase64(userId, startImageId);
         if (imageData) {
           params.image = {
             imageBytes: imageData.imageBytes,
             mimeType: imageData.mimeType,
           };
-          cleanupImage(startImageId);
+          cleanupImage(userId, startImageId);
         } else {
           return res.status(400).json({ error: "Start image not found. Please re-upload and try again." });
         }

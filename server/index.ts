@@ -161,6 +161,34 @@ function serveExpoManifest(platform: string, res: Response) {
   res.send(manifest);
 }
 
+// P1-9 (W5 launch-closure, post-architect-#3 fix): module-scoped helper so
+// the SAME security header set is applied to every public static HTML
+// response — landing (`/`), pricing (`/pricing`), data-deletion
+// (`/data-deletion`). The previous version of the helper was defined
+// inside the request-middleware closure and was therefore unreachable
+// from `serveLandingPage`, leaving the most-trafficked static page
+// (the landing page itself) without CSP/X-Frame-Options/etc.
+function setStaticSecurityHeaders(res: Response) {
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "img-src 'self' data: https:",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "script-src 'self' 'unsafe-inline'",
+      "connect-src 'self' https:",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "object-src 'none'",
+    ].join("; ")
+  );
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+}
+
 function serveLandingPage({
   req,
   res,
@@ -187,6 +215,7 @@ function serveLandingPage({
     .replace(/EXPS_URL_PLACEHOLDER/g, expsUrl)
     .replace(/APP_NAME_PLACEHOLDER/g, appName);
 
+  setStaticSecurityHeaders(res);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.status(200).send(html);
 }
@@ -208,9 +237,13 @@ function configureExpoAndLanding(app: express.Application) {
       return next();
     }
 
+    // P1-9 security headers — uses the module-scoped
+    // `setStaticSecurityHeaders` helper defined above so landing,
+    // pricing, and data-deletion all share the same policy.
     if (req.path === "/data-deletion") {
       const deletionPath = path.resolve(process.cwd(), "server", "templates", "data-deletion.html");
       const deletionHtml = fs.readFileSync(deletionPath, "utf-8");
+      setStaticSecurityHeaders(res);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.send(deletionHtml);
     }
@@ -225,6 +258,7 @@ function configureExpoAndLanding(app: express.Application) {
       const baseUrl = `${protocol}://${host}`;
       const finalHtml = pricingHtml
         .replace(/BASE_URL_PLACEHOLDER/g, baseUrl);
+      setStaticSecurityHeaders(res);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(200).send(finalHtml);
     }

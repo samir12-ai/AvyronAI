@@ -58,17 +58,48 @@ export function registerStrategyRoutes(app: Express) {
 
   app.post("/api/strategy/sync-performance", requireCampaign, async (req, res) => {
     try {
-      const { accessToken, pageId } = req.body;
-
+      // P1-20 (W4.1 launch-closure): the route used to accept `accessToken`
+      // and `pageId` directly from req.body. That bypassed Meta connection
+      // state and let any caller hand the server an arbitrary token to
+      // call Graph API on their behalf — and any data fetched would be
+      // attributed to the caller's campaign. Now we look up the connected
+      // Meta credentials for the authenticated account, decrypt the page
+      // token server-side, and only proceed when Meta is actually linked.
+      const accountId = (req as any).accountId as string | undefined;
+      if (!accountId) {
+        return res.status(401).json({ success: false, error: "AUTH_REQUIRED" });
+      }
+      const { metaCredentials } = await import("@shared/schema");
+      const { decryptToken } = await import("./meta-crypto");
+      // Deterministic single-row pick — if duplicate rows ever exist for an
+      // account (no DB-level unique constraint today), always use the most
+      // recently updated one rather than relying on undefined query order.
+      const creds = await db.select().from(metaCredentials)
+        .where(eq(metaCredentials.accountId, accountId))
+        .orderBy(desc(metaCredentials.updatedAt))
+        .limit(1);
+      const cred = creds[0];
       const campaignContext = (req as any).campaignContext;
 
-      if (!accessToken || !pageId) {
+      if (!cred || !cred.encryptedPageToken || !cred.ivPage || !cred.encryptionKeyVersion || !cred.pageId) {
         return res.status(400).json({
           success: false,
           error: "META_NOT_CONNECTED",
-          message: "Meta access token and page ID are required to sync performance data. Connect Meta in Settings or enter manual metrics.",
+          message: "Meta is not connected for this account. Connect Meta in Settings or enter manual metrics.",
         });
       }
+      let accessToken: string;
+      try {
+        accessToken = decryptToken(cred.encryptedPageToken, cred.ivPage, cred.encryptionKeyVersion);
+      } catch (decryptErr) {
+        console.error("[Strategy/sync-performance] page token decrypt failed:", (decryptErr as any)?.message);
+        return res.status(400).json({
+          success: false,
+          error: "META_TOKEN_INVALID",
+          message: "Stored Meta credentials could not be decrypted. Please reconnect Meta in Settings.",
+        });
+      }
+      const pageId = cred.pageId;
 
       try {
         const postsRes = await fetch(

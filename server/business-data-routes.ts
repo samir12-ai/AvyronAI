@@ -1,4 +1,5 @@
 import type { Express, Request, Response, NextFunction } from "express";
+import { z } from "zod";
 import { db } from "./db";
 import { businessDataLayer, campaignSelections } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
@@ -18,6 +19,29 @@ const REQUIRED_FIELDS = [
   "funnelObjective",
   "primaryConversionChannel",
 ] as const;
+
+// P1-22 (W4.1 launch-closure): Zod schema replaces ad-hoc string-walk
+// validation. Required fields enforced as non-empty strings; enum fields
+// enforced via z.enum; optional descriptive fields kept as plain strings.
+const businessDataPutSchema = z.object({
+  businessLocation: z.string().trim().min(1),
+  businessType: z.string().trim().min(1),
+  coreOffer: z.string().trim().min(1),
+  priceRange: z.string().trim().min(1),
+  targetAudienceAge: z.string().trim().min(1),
+  targetAudienceSegment: z.string().trim().min(1),
+  monthlyBudget: z.string().trim().min(1),
+  funnelObjective: z.enum(VALID_FUNNEL_OBJECTIVES),
+  primaryConversionChannel: z.enum(VALID_CONVERSION_CHANNELS),
+  productCategory: z.string().optional(),
+  coreProblemSolved: z.string().optional(),
+  uniqueMechanism: z.string().optional(),
+  strategicAdvantage: z.string().optional(),
+  targetDecisionMaker: z.string().optional(),
+  goalTarget: z.string().optional(),
+  goalTimeline: z.string().optional(),
+  goalDescription: z.string().optional(),
+}).strict();
 
 export function registerBusinessDataRoutes(app: Express) {
   app.get("/api/business-data/:campaignId", async (req: Request, res: Response) => {
@@ -60,58 +84,24 @@ export function registerBusinessDataRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
-      const missing: string[] = [];
-      for (const field of REQUIRED_FIELDS) {
-        if (!req.body[field] || String(req.body[field]).trim() === "") {
-          missing.push(field);
-        }
-      }
-
-      if (missing.length > 0) {
+      const parsed = businessDataPutSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const issues = parsed.error.issues;
+        const missing = issues
+          .filter((i) => i.code === "invalid_type" || i.code === "too_small")
+          .map((i) => i.path.join("."));
         return res.status(400).json({
-          error: "MISSING_FIELDS",
-          message: `Missing required fields: ${missing.join(", ")}`,
-          missingFields: missing,
+          error: "VALIDATION_FAILED",
+          message: issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+          missingFields: missing.length > 0 ? missing : undefined,
+          issues,
         });
       }
-
-      const funnelObjective = req.body.funnelObjective as string;
-      if (!VALID_FUNNEL_OBJECTIVES.includes(funnelObjective as any)) {
-        return res.status(400).json({
-          error: "INVALID_FUNNEL_OBJECTIVE",
-          message: `funnelObjective must be one of: ${VALID_FUNNEL_OBJECTIVES.join(", ")}`,
-        });
-      }
-
-      const primaryConversionChannel = req.body.primaryConversionChannel as string;
-      if (!VALID_CONVERSION_CHANNELS.includes(primaryConversionChannel as any)) {
-        return res.status(400).json({
-          error: "INVALID_CONVERSION_CHANNEL",
-          message: `primaryConversionChannel must be one of: ${VALID_CONVERSION_CHANNELS.join(", ")}`,
-        });
-      }
-
+      const body = parsed.data;
       const dataValues: Record<string, any> = {
-        businessLocation: req.body.businessLocation,
-        businessType: req.body.businessType,
-        coreOffer: req.body.coreOffer,
-        priceRange: req.body.priceRange,
-        targetAudienceAge: req.body.targetAudienceAge,
-        targetAudienceSegment: req.body.targetAudienceSegment,
-        monthlyBudget: req.body.monthlyBudget,
-        funnelObjective,
-        primaryConversionChannel,
+        ...body,
         updatedAt: new Date(),
       };
-
-      if (req.body.productCategory !== undefined) dataValues.productCategory = String(req.body.productCategory);
-      if (req.body.coreProblemSolved !== undefined) dataValues.coreProblemSolved = String(req.body.coreProblemSolved);
-      if (req.body.uniqueMechanism !== undefined) dataValues.uniqueMechanism = String(req.body.uniqueMechanism);
-      if (req.body.strategicAdvantage !== undefined) dataValues.strategicAdvantage = String(req.body.strategicAdvantage);
-      if (req.body.targetDecisionMaker !== undefined) dataValues.targetDecisionMaker = String(req.body.targetDecisionMaker);
-      if (req.body.goalTarget !== undefined) dataValues.goalTarget = String(req.body.goalTarget);
-      if (req.body.goalTimeline !== undefined) dataValues.goalTimeline = String(req.body.goalTimeline);
-      if (req.body.goalDescription !== undefined) dataValues.goalDescription = String(req.body.goalDescription);
 
       const existing = await db
         .select()
