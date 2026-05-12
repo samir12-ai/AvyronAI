@@ -616,7 +616,7 @@ export default function CreateScreen() {
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
-      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases', selectedCampaignId] });
       setSaveState('done');
       setTimeout(() => {
         setTopic('');
@@ -852,7 +852,7 @@ export default function CreateScreen() {
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
-      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases', selectedCampaignId] });
 
       try {
         await saveImageToGallery(generatedPoster);
@@ -2687,7 +2687,7 @@ export default function CreateScreen() {
 
                           queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
                           queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
-                          queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
+                          queryClient.invalidateQueries({ queryKey: ['/api/studio/cases', selectedCampaignId] });
                           setSaveState('done');
                           setTimeout(() => {
                             setSaveState('idle');
