@@ -31,6 +31,9 @@ import {
   checkPositioningHardGate,
   checkConfidenceSpread,
   checkBudgetOverrideZeroConfidence,
+  checkAnalyticalEnrichmentIntegrity,
+  checkSignalLineageUnknown,
+  checkConfidenceIntegrity,
   collectBlockReasons,
 } from "./structural-checks";
 import { detectContradictions } from "./contradiction-detector";
@@ -75,6 +78,19 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkPositioningHardGate(input.ssc));
   structuralChecks.push(checkConfidenceSpread(input.ssc));
   structuralChecks.push(checkBudgetOverrideZeroConfidence(input.ssc, input.results));
+  // Runtime Truth Track (May 2026):
+  //   T3.B — AEL partial-build gate (analytical-enrichment integrity)
+  //   T1.A — signal-lineage unknown-dominance gate
+  // Both pre-existed only as orchestrator console.warns; promoting to
+  // structural FAILs so System Control downgrades execution mode instead
+  // of letting downstream engines silently consume degraded inputs.
+  structuralChecks.push(checkAnalyticalEnrichmentIntegrity(input.analyticalEnrichmentPartial, input.analyticalEnrichmentReason));
+  structuralChecks.push(checkSignalLineageUnknown(input.signalComposition));
+  structuralChecks.push(checkConfidenceIntegrity(
+    input.confidenceIntegrityVerdict,
+    input.confidenceIntegrityCriticalAbsent,
+    input.confidenceIntegrityDegradedEngines,
+  ));
 
   const contradictions = detectContradictions(
     input.results,
@@ -85,6 +101,43 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   let blockReasons = collectBlockReasons(structuralChecks, input.results);
 
   const downgrades: Downgrade[] = [];
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Runtime Truth Track (May 2026) — convert specific structural FAILs into
+  // DOWNGRADES rather than BLOCKS. Per session-plan acceptance these gates
+  // (T3.B AEL_PARTIAL, T1.A SIGNAL_LINEAGE_UNKNOWN_DOMINANT, T3.A v2
+  // CONFIDENCE_INTEGRITY_DEGRADED) must downgrade execution to
+  // REVIEW_REQUIRED, not halt the run. INCOMPLETE confidence integrity
+  // remains a hard block (handled by collectBlockReasons).
+  // ────────────────────────────────────────────────────────────────────────
+  for (const sc of structuralChecks) {
+    if (sc.status !== "FAIL") continue;
+    if (sc.check === "analytical_enrichment_integrity") {
+      downgrades.push({
+        from: budgetAction || "test",
+        to: "review_required",
+        reason: sc.details,
+        code: "ANALYTICAL_ENRICHMENT_DEGRADED",
+        affectedEngine: "analytical_enrichment_layer",
+      });
+    } else if (sc.check === "signal_lineage_unknown") {
+      downgrades.push({
+        from: budgetAction || "test",
+        to: "review_required",
+        reason: sc.details,
+        code: "LINEAGE_UNTRUSTED",
+        affectedEngine: "signal_lineage",
+      });
+    } else if (sc.check === "confidence_integrity" && sc.details.startsWith("DEGRADED")) {
+      downgrades.push({
+        from: budgetAction || "test",
+        to: "review_required",
+        reason: sc.details,
+        code: "CONFIDENCE_INTEGRITY_DEGRADED",
+        affectedEngine: "confidence_integrity",
+      });
+    }
+  }
 
   const budgetFunnelCheck = checkBudgetFunnelAlignment(input.results);
   if (budgetFunnelCheck.contradiction && budgetFunnelCheck.downgrade) {

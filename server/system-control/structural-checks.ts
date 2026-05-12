@@ -913,8 +913,132 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
       case "budget_override_zero_confidence":
         blocks.push({ code: "BUDGET_OVERRIDE_ZERO_CONFIDENCE", description: check.details, source: "ssc_budget_guard", severity: "critical" });
         break;
+      // Runtime Truth Track (May 2026)
+      // NOTE: AEL_PARTIAL and SIGNAL_LINEAGE_UNKNOWN_DOMINANT are NOT mapped
+      // to blockReasons here. Per session-plan acceptance ("downgrade to
+      // REVIEW_REQUIRED"), `evaluateSystemControl` translates these
+      // structural FAILs into `downgrades` (verdict=DOWNGRADE,
+      // executionMode=REVIEW_REQUIRED) instead of HALTED blocks. Mapping
+      // either to a BlockReason here would force verdict=BLOCK +
+      // executionMode=HALTED, which is harsher than the intended policy.
+      // CONFIDENCE_INTEGRITY_INCOMPLETE IS a hard block: a critical engine
+      // emitting no confidence at all means downstream gates were bypassed
+      // by the pre-T3.A 0.5-default behaviour and the run cannot be trusted.
+      case "confidence_integrity":
+        // Only INCOMPLETE maps to a block; DEGRADED is downgraded in engine.ts.
+        if (check.details.startsWith("INCOMPLETE")) {
+          blocks.push({ code: "CONFIDENCE_INTEGRITY_INCOMPLETE", description: check.details, source: "confidence_integrity", severity: "critical" });
+        }
+        break;
     }
   }
 
   return blocks;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Runtime Truth Track (May 2026) — additional structural checks for the
+// confidence-integrity (T3.B) and lineage-integrity (T1.A) tracks. Both
+// surface previously-soft signals (an `AEL_PARTIAL` console.warn and a
+// `HIGH_UNKNOWN_RATIO` console.warn) as structural verdicts so System
+// Control can drive a deterministic execution-mode downgrade.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * T3.B — AEL partial-build gate. When the analytical-enrichment package was
+ * built with degraded data (parse failure, build error, partial LLM), every
+ * downstream strategy engine receives weaker enrichment context. Pre-T3.B
+ * the orchestrator only logged `AEL_PARTIAL`; this check converts that into
+ * a structural FAIL so the verdict downgrades to REVIEW_REQUIRED.
+ *
+ * Note: when AEL fully fails, the orchestrator returns an `AEL_BUILD_FAILED`
+ * BLOCKED step well before System Control runs. This check fires only on
+ * the in-between case: AEL succeeded structurally but came back partial.
+ */
+export function checkAnalyticalEnrichmentIntegrity(
+  isPartial: boolean | undefined,
+  reason: string | null | undefined,
+): StructuralCheck {
+  if (isPartial !== true) {
+    return pass(
+      "analytical_enrichment_integrity",
+      isPartial === false ? "AEL built with full enrichment" : "AEL state not provided",
+    );
+  }
+  return fail(
+    "analytical_enrichment_integrity",
+    `Analytical Enrichment Layer is PARTIAL (${reason ?? "no reason given"}) — downstream engines consumed degraded enrichment; live execution cannot proceed without review`,
+  );
+}
+
+/**
+ * T1.A — signal-lineage unknown-dominance gate. Pre-T1.A the orchestrator
+ * only logged `HIGH_UNKNOWN_RATIO` when more than 30% of signals were
+ * legacy/untagged. This check converts that into a structural FAIL so the
+ * verdict cannot reach FULL_EXECUTION while strategy is dominated by
+ * un-attributable signals.
+ *
+ * Threshold (0.30) intentionally matches the orchestrator's lineage-build
+ * warn threshold — a single source of truth for "untrusted lineage."
+ */
+/**
+ * T3.A v2 — confidence-integrity hard gate. The orchestrator already
+ * computes a per-run `ConfidenceIntegritySummary` via
+ * `summarizeConfidenceIntegrity()` over the provenance log. Pre-v2 this
+ * was returned on the response but never consulted by System Control.
+ * This check elevates the summary to a structural verdict so:
+ *   - INCOMPLETE (a critical engine emitted no confidence) → maps to
+ *     BlockCode.CONFIDENCE_INTEGRITY_INCOMPLETE → verdict BLOCK
+ *   - DEGRADED   (default_floor / inferred_synthesis on the chain, no
+ *     critical absence) → emitted as FAIL with details prefixed
+ *     "DEGRADED:" so engine.ts converts it into a downgrade with
+ *     code CONFIDENCE_INTEGRITY_DEGRADED instead of a block
+ *   - COMPLETE / absent verdict → PASS
+ */
+export function checkConfidenceIntegrity(
+  verdict: "COMPLETE" | "DEGRADED" | "INCOMPLETE" | null | undefined,
+  criticalAbsent: string[] | undefined,
+  degradedEngines: string[] | undefined,
+): StructuralCheck {
+  if (!verdict || verdict === "COMPLETE") {
+    return pass(
+      "confidence_integrity",
+      verdict === "COMPLETE" ? "all engine confidences carry direct_evidence provenance" : "confidence integrity not provided",
+    );
+  }
+  if (verdict === "INCOMPLETE") {
+    return fail(
+      "confidence_integrity",
+      `INCOMPLETE: critical engine(s) emitted no confidence — [${(criticalAbsent ?? []).join(", ")}] — pre-T3.A this would have silently defaulted to 0.5`,
+    );
+  }
+  // DEGRADED — structural FAIL whose details start with "DEGRADED:" so
+  // collectBlockReasons skips block-mapping and engine.ts converts to downgrade.
+  return fail(
+    "confidence_integrity",
+    `DEGRADED: ${(degradedEngines ?? []).length} engine(s) carry default_floor/inferred_synthesis provenance — [${(degradedEngines ?? []).join(", ")}]`,
+  );
+}
+
+const LINEAGE_UNKNOWN_RATIO_FAIL_THRESHOLD = 0.30;
+export function checkSignalLineageUnknown(
+  signalComposition: SignalComposition | null,
+): StructuralCheck {
+  if (!signalComposition || signalComposition.total === 0) {
+    return pass(
+      "signal_lineage_unknown",
+      "no signal composition data — lineage check skipped",
+    );
+  }
+  const r = signalComposition.unknownRatio;
+  if (r > LINEAGE_UNKNOWN_RATIO_FAIL_THRESHOLD) {
+    return fail(
+      "signal_lineage_unknown",
+      `Signal lineage is dominated by untagged/legacy signals: unknownRatio=${r.toFixed(2)} > ${LINEAGE_UNKNOWN_RATIO_FAIL_THRESHOLD} — strategy origin cannot be trusted`,
+    );
+  }
+  return pass(
+    "signal_lineage_unknown",
+    `unknownRatio=${r.toFixed(2)} ≤ ${LINEAGE_UNKNOWN_RATIO_FAIL_THRESHOLD}`,
+  );
 }

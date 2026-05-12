@@ -43,14 +43,22 @@ export type BlockCode =
   | "PIPELINE_INCOMPLETE"           // one or more required checks could not be evaluated (NOT_REACHED/TIMEOUT/STALE/UNKNOWN)
   | "STALE_SNAPSHOT_EVIDENCE"       // a check was forced to use a snapshot from a prior run
   | "ENGINE_TIMEOUT"                // a critical engine timed out and downstream cannot be evaluated
-  | "UNRESOLVED_CONTRADICTION";     // cross-engine contradiction with no auto-resolution path
+  | "UNRESOLVED_CONTRADICTION"      // cross-engine contradiction with no auto-resolution path
+  // Runtime Truth Track (May 2026)
+  | "ANALYTICAL_ENRICHMENT_PARTIAL" // T3.B — AEL built with degraded data (parse failure / build error / partial LLM)
+  | "SIGNAL_LINEAGE_UNKNOWN_DOMINANT" // T1.A — unknownRatio > 0.30 (untagged/legacy signals dominate strategy)
+  | "CONFIDENCE_INTEGRITY_INCOMPLETE"; // T3.A v2 — a critical engine emitted no confidence at all
 
 export type DowngradeCode =
   | "UNVERIFIED_CAC"
   | "WEAK_FUNNEL_FOR_SCALE"
   | "LOW_SIGNAL_TRUST"
   | "INTEGRITY_PARTIAL"
-  | "CROSS_ENGINE_CONTRADICTIONS";
+  | "CROSS_ENGINE_CONTRADICTIONS"
+  // Runtime Truth Track (May 2026)
+  | "ANALYTICAL_ENRICHMENT_DEGRADED" // T3.B downgrade companion when AEL partial but other gates pass
+  | "LINEAGE_UNTRUSTED"               // T1.A downgrade companion when unknownRatio > threshold but composition still has some real ratio
+  | "CONFIDENCE_INTEGRITY_DEGRADED";  // T3.A v2 downgrade when default_floor / inferred_synthesis present on the chain (no critical absence)
 
 export type ReviewCode =
   | "SYNTHESIS_DRIFT"
@@ -350,6 +358,39 @@ export interface SystemControlInput {
   signalComposition: SignalComposition | null;
   sglCoverageSufficient: boolean | null;
   ssc: SharedStrategicContext | null;
+  /**
+   * T3.B (Runtime Truth Track) — AEL partial-build flag propagated from
+   * orchestrator. When `true`, the analytical-enrichment package was built
+   * with degraded data (parse failure, build error, or LLM partial response)
+   * and `analyticalEnrichmentReason` carries the reason. Pre-T3.B this only
+   * surfaced as a console.warn (`AEL_PARTIAL`); now it MUST drive a
+   * deterministic execution-mode downgrade in System Control so downstream
+   * engines never silently consume incomplete enrichment for live decisions.
+   */
+  analyticalEnrichmentPartial?: boolean;
+  analyticalEnrichmentReason?: string | null;
+  /**
+   * T1.A (Runtime Truth Track) — pre-aggregated lineage observations from
+   * the orchestrator's signal-composition build pass. When `unknownRatio` is
+   * present and exceeds the lineage threshold, System Control surfaces it as
+   * a structural FAIL instead of treating untagged signals as benign noise.
+   */
+  signalCompositionUnknownThresholdHit?: boolean;
+  /**
+   * T3.A v2 (Runtime Truth Track) — runtime confidence-integrity verdict
+   * computed by `summarizeConfidenceIntegrity()` over the per-engine
+   * provenance log. Pre-v2 this was returned on the orchestrator response
+   * but never consulted by `evaluateSystemControl`, so the verdict was
+   * observational only. Now System Control hard-gates on it:
+   *   - "INCOMPLETE" (a critical engine emitted no confidence at all) →
+   *      blockReason `CONFIDENCE_INTEGRITY_INCOMPLETE`, verdict BLOCK
+   *   - "DEGRADED"   (any default_floor / inferred_synthesis on the chain) →
+   *      downgrade `CONFIDENCE_INTEGRITY_DEGRADED`, verdict DOWNGRADE
+   *   - "COMPLETE" or absent → no-op
+   */
+  confidenceIntegrityVerdict?: "COMPLETE" | "DEGRADED" | "INCOMPLETE" | null;
+  confidenceIntegrityCriticalAbsent?: string[];
+  confidenceIntegrityDegradedEngines?: string[];
   config: {
     campaignId: string;
     accountId: string;

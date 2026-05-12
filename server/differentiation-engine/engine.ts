@@ -90,10 +90,23 @@ function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<strin
     return p.canonical || p.pain || p.description || p.text || "";
   }).filter(Boolean);
 
+  // T3.A — Runtime Truth Track: derived objections inherit `inferred_synthesis`
+  // provenance and an explicit `evidenceCount: 0`. The numeric values are
+  // preserved for back-compat with downstream legacy consumers, but the
+  // provenance tag lets `summarizeConfidenceIntegrity` and build-plan-layer
+  // gates distinguish "actually observed at this confidence" from
+  // "default-floor synthesised from a regex match on a pain string."
   for (const painText of painTexts) {
     for (const { painPattern, objection } of OBJECTION_DERIVATION_PATTERNS) {
       if (painPattern.test(painText) && !derived[objection]) {
-        derived[objection] = { frequency: 0.5, severity: 0.5, source: "derived_from_pain", originalPain: painText };
+        derived[objection] = {
+          frequency: 0.5,
+          severity: 0.5,
+          source: "derived_from_pain",
+          originalPain: painText,
+          _provenance: "inferred_synthesis",
+          _evidenceCount: 0,
+        };
       }
     }
   }
@@ -104,7 +117,13 @@ function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<strin
     if (!driverText) continue;
     const lower = driverText.toLowerCase();
     if (/\b(fear|anxiety|worry|concern|hesitat|reluct)\b/.test(lower) && !derived[driverText]) {
-      derived[`Hesitation: ${driverText}`] = { frequency: 0.4, severity: 0.4, source: "derived_from_emotion" };
+      derived[`Hesitation: ${driverText}`] = {
+        frequency: 0.4,
+        severity: 0.4,
+        source: "derived_from_emotion",
+        _provenance: "inferred_synthesis",
+        _evidenceCount: 0,
+      };
     }
   }
 
@@ -118,7 +137,13 @@ function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<strin
     if (/\b(proven|guarantee|evidence|certainty|assurance)\b/.test(lower)) {
       const obj = `Demand for proof: ${desireText}`;
       if (!derived[obj]) {
-        derived[obj] = { frequency: 0.5, severity: 0.5, source: "derived_from_desire" };
+        derived[obj] = {
+          frequency: 0.5,
+          severity: 0.5,
+          source: "derived_from_desire",
+          _provenance: "inferred_synthesis",
+          _evidenceCount: 0,
+        };
       }
     }
   }

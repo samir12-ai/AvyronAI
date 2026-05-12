@@ -44,6 +44,12 @@ import {
 } from "./shared-strategic-context";
 import { resolveAwarenessMeaning } from "./canonical-meanings";
 import {
+  toExtractedConfidenceShape,
+  summarizeConfidenceIntegrity,
+  type EngineConfidenceProvenanceEntry,
+  type ConfidenceIntegritySummary,
+} from "../shared/confidence-provenance";
+import {
   orchestratorJobs,
   strategicPlans,
   growthCampaigns,
@@ -763,6 +769,29 @@ function buildUpstreamLineage(ctx: EngineContext): SignalLineageEntry[] {
 
   if (comp.unknownRatio > 0.3 && comp.total > 0) {
     console.warn(`[Orchestrator] HIGH_UNKNOWN_RATIO | unknownRatio=${(comp.unknownRatio * 100).toFixed(0)}% (${comp.unknown}/${comp.total}) — legacy/untagged signals dominate. These are NOT trusted.`);
+    // T1.A (Runtime Truth Track): promote the unknown-ratio warn to a
+    // structural problem in the SSC so System Control's
+    // `checkSignalLineageUnknown` (and `checkUnresolvedCriticalProblems`)
+    // can deterministically downgrade the verdict instead of treating
+    // untagged signals as benign noise. Severity=high (not critical) so
+    // the run is not auto-blocked for borderline cases — but it is now
+    // first-class evidence for the verdict.
+    if (ctx.ssc) {
+      try {
+        registerProblem(
+          ctx.ssc,
+          "market_intelligence" as EngineIdType,
+          "structural",
+          `HIGH_UNKNOWN_RATIO: unknownRatio=${(comp.unknownRatio * 100).toFixed(0)}% (${comp.unknown}/${comp.total}) — strategy lineage dominated by untagged signals`,
+          "high",
+          1.0,
+          [],
+          0,
+        );
+      } catch (regErr: any) {
+        console.warn(`[Orchestrator] HIGH_UNKNOWN_RATIO_REGISTER_FAILED | ${regErr.message}`);
+      }
+    }
   }
   if (comp.trustedRatio < 0.5 && comp.total > 5) {
     console.warn(`[Orchestrator] LOW_TRUSTED_RATIO | trustedRatio=${(comp.trustedRatio * 100).toFixed(0)}% — strategy lacks grounded (real + competitor) signals.`);
@@ -792,84 +821,54 @@ function resolveSglOrBlock(
 
 type EngineIdType = "market_intelligence" | "audience" | "positioning" | "differentiation" | "mechanism" | "offer" | "awareness" | "funnel" | "integrity" | "persuasion" | "statistical_validation" | "budget_governor" | "channel_selection" | "iteration" | "retention";
 
+/**
+ * T3.A — Confidence Provenance Layer (May 2026, Runtime Truth Track).
+ *
+ * Pre-T3.A this function used `?? 0.5` defaults inline for every engine.
+ * 0.5 sits exactly above system-control's positioning hard-gate (0.40)
+ * and below the combined-spread threshold (0.50), so an absent confidence
+ * silently bypassed both gates while looking "moderately confident."
+ *
+ * The new shape collapses absent values to 0 (consistent with the
+ * `if (!output) return 0` branch above) so existing system-control gates
+ * actually fire on degraded engines. Provenance is captured separately
+ * via `toExtractedConfidenceShape()` and persisted in
+ * `runConfidenceProvenanceLog` for the run's integrity verdict.
+ */
 function extractEngineConfidence(engineId: string, output: any): { dataConfidence: number; engineConfidence: number; combined: number } {
   if (!output) return { dataConfidence: 0, engineConfidence: 0, combined: 0 };
+  const { numeric } = toExtractedConfidenceShape(engineId, output);
+  return numeric;
+}
 
-  let dataConf = 0.5;
-  let engineConf = 0.5;
-
-  switch (engineId) {
-    case "market_intelligence": {
-      const miOutput = output.output ?? output;
-      engineConf = miOutput.confidence?.overall ?? output.overallConfidence ?? output.confidenceScore ?? 0.5;
-      dataConf = miOutput.dataReliability?.overallScore ?? miOutput.confidence?.factors?.dataCompleteness ?? engineConf;
-      break;
-    }
-    case "audience":
-      engineConf = output.confidenceScore ?? output.dataReliability?.overallReliability ?? 0.5;
-      dataConf = output.dataReliability?.overallReliability ?? output.dataReliability?.score ?? engineConf;
-      break;
-    case "positioning":
-      engineConf = output.engineConfidence ?? output.confidenceScore ?? 0.5;
-      dataConf = output.dataConfidence ?? output.specificityScore ?? engineConf;
-      break;
-    case "differentiation":
-      engineConf = output.confidenceScore ?? output.confidence ?? 0.5;
-      dataConf = output.celDepthCompliance?.causalDepthScore ?? engineConf;
-      break;
-    case "mechanism":
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = output.celDepthCompliance?.causalDepthScore ?? engineConf;
-      break;
-    case "offer":
-      engineConf = output.offerStrengthScore ?? output.confidenceScore ?? 0.5;
-      dataConf = output.proofLayer?.proofStrength ?? output.proofStrength ?? engineConf;
-      break;
-    case "awareness":
-      engineConf = output.primaryRoute?.awarenessStrengthScore ?? output.confidenceScore ?? 0.5;
-      dataConf = engineConf;
-      break;
-    case "funnel":
-      engineConf = output.funnelStrengthScore ?? output.confidenceScore ?? 0.5;
-      dataConf = output.trustPathAnalysis?.score ?? output.trustPathScore ?? engineConf;
-      break;
-    case "integrity":
-      engineConf = output.overallIntegrityScore ?? 0.5;
-      dataConf = engineConf;
-      break;
-    case "persuasion":
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = output.celDepthCompliance?.causalDepthScore ?? engineConf;
-      break;
-    case "statistical_validation":
-      engineConf = output.claimConfidenceScore ?? output.confidenceScore ?? 0.5;
-      dataConf = output.dataReliability?.overallScore ?? engineConf;
-      break;
-    case "budget_governor":
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = engineConf;
-      break;
-    case "channel_selection":
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = engineConf;
-      break;
-    case "iteration":
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = engineConf;
-      break;
-    case "retention":
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = engineConf;
-      break;
-    default:
-      engineConf = output.confidenceScore ?? 0.5;
-      dataConf = engineConf;
+/**
+ * Inspect engine confidence and return BOTH the numeric back-compat shape
+ * AND the provenance entry. Used by `updateSSCAfterEngine` to persist a
+ * per-engine provenance trail consumable by `summarizeConfidenceIntegrity`
+ * at run-end.
+ */
+function extractEngineConfidenceWithProvenance(engineId: string, output: any): {
+  dataConfidence: number;
+  engineConfidence: number;
+  combined: number;
+  provenance: EngineConfidenceProvenanceEntry;
+} {
+  if (!output) {
+    return {
+      dataConfidence: 0,
+      engineConfidence: 0,
+      combined: 0,
+      provenance: {
+        engineId,
+        dataConfidence: { value: null, provenance: "absent", reason: "no_output" },
+        engineConfidence: { value: null, provenance: "absent", reason: "no_output" },
+        combinedProvenance: "absent",
+        capturedAt: Date.now(),
+      },
+    };
   }
-
-  dataConf = Math.max(0, Math.min(1, dataConf));
-  engineConf = Math.max(0, Math.min(1, engineConf));
-  const combined = (dataConf + engineConf) / 2;
-  return { dataConfidence: dataConf, engineConfidence: engineConf, combined };
+  const { numeric, provenance } = toExtractedConfidenceShape(engineId, output);
+  return { ...numeric, provenance };
 }
 
 interface MidPipelineGateResult {
@@ -993,22 +992,33 @@ function checkMidPipelineGate(engineId: string, stepResult: EngineStepResult, ct
   return null;
 }
 
-function updateSSCAfterEngine(ssc: SharedStrategicContext, engineId: string, stepResult: EngineStepResult, pipelineStep: number): void {
+function updateSSCAfterEngine(
+  ssc: SharedStrategicContext,
+  engineId: string,
+  stepResult: EngineStepResult,
+  pipelineStep: number,
+  provenanceLog?: EngineConfidenceProvenanceEntry[],
+): void {
   if (stepResult.status !== "SUCCESS" && stepResult.status !== "PARTIAL") return;
   const output = stepResult.output;
   if (!output) return;
 
-  const conf = extractEngineConfidence(engineId, output);
-  const cappedCombined = Math.min(conf.combined, ssc.confidenceFloor === 0 ? 0 : conf.combined);
-  const cappedEngine = ssc.confidenceFloor === 0 ? 0 : conf.engineConfidence;
-  const cappedData = ssc.confidenceFloor === 0 ? 0 : conf.dataConfidence;
+  const { dataConfidence, engineConfidence, combined, provenance } =
+    extractEngineConfidenceWithProvenance(engineId, output);
+  if (provenanceLog) provenanceLog.push(provenance);
+
+  const cappedCombined = Math.min(combined, ssc.confidenceFloor === 0 ? 0 : combined);
+  const cappedEngine = ssc.confidenceFloor === 0 ? 0 : engineConfidence;
+  const cappedData = ssc.confidenceFloor === 0 ? 0 : dataConfidence;
 
   updateConfidenceChain(ssc, engineId as EngineIdType, cappedData, cappedEngine, cappedCombined);
 
-  if (ssc.confidenceFloor === 0 && conf.combined > 0) {
-    console.warn(`[Orchestrator] SSC_CONFIDENCE_CAPPED | engine=${engineId} | raw=${conf.combined.toFixed(2)} | capped=0.00 | reason=floor_is_zero_after_rejection`);
+  if (ssc.confidenceFloor === 0 && combined > 0) {
+    console.warn(`[Orchestrator] SSC_CONFIDENCE_CAPPED | engine=${engineId} | raw=${combined.toFixed(2)} | capped=0.00 | reason=floor_is_zero_after_rejection`);
   }
-  console.log(`[Orchestrator] SSC_CONFIDENCE | engine=${engineId} | data=${cappedData.toFixed(2)} | engine=${cappedEngine.toFixed(2)} | combined=${cappedCombined.toFixed(2)} | floor=${ssc.confidenceFloor.toFixed(2)}`);
+  console.log(
+    `[Orchestrator] SSC_CONFIDENCE | engine=${engineId} | data=${cappedData.toFixed(2)} | engine=${cappedEngine.toFixed(2)} | combined=${cappedCombined.toFixed(2)} | floor=${ssc.confidenceFloor.toFixed(2)} | dataProv=${provenance.dataConfidence.provenance} | engineProv=${provenance.engineConfidence.provenance} | verdict=${provenance.combinedProvenance}`
+  );
 }
 
 function detectProblemResolutionInOutput(engineId: string, output: any, problem: ProblemEntry): "resolved" | "deferred" | "cannot_resolve" | "unaddressed" {
@@ -3289,6 +3299,15 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   let ctx: EngineContext = { inputHashes: {} };
   let previousSectionStatuses: any[] = [];
 
+  // T3.A — Runtime Truth Track: per-run provenance trail for engine
+  // confidence emissions. Populated by `updateSSCAfterEngine` from the
+  // worst-case provenance of each engine's data + engine-logic reads.
+  // Summarised at run end via `summarizeConfidenceIntegrity` and surfaced
+  // on the orchestrator return as `confidenceIntegrity` so System Control
+  // and build-plan-layer can gate on the integrity verdict instead of
+  // trusting raw numerics that pre-T3.A were silently floored to 0.5.
+  const runConfidenceProvenanceLog: EngineConfidenceProvenanceEntry[] = [];
+
   ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
   console.log(`[Orchestrator] SSC_INITIALIZED | campaignId=${config.campaignId} | accountId=${config.accountId}`);
 
@@ -3532,7 +3551,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     ]);
 
     if (ctx.ssc && (stepResult.status === "SUCCESS" || stepResult.status === "PARTIAL")) {
-      updateSSCAfterEngine(ctx.ssc, engineDef.id, stepResult, i);
+      updateSSCAfterEngine(ctx.ssc, engineDef.id, stepResult, i, runConfidenceProvenanceLog);
       enforceProblemsPostEngine(ctx.ssc, engineDef.id, stepResult, preEngineProblems, i);
 
       const gateResult = checkMidPipelineGate(engineDef.id, stepResult, ctx);
@@ -3618,7 +3637,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
           stepResult = retryResult;
           if (retryResult.status === "SUCCESS" || retryResult.status === "PARTIAL") {
-            updateSSCAfterEngine(ctx.ssc, engineDef.id, retryResult, i);
+            updateSSCAfterEngine(ctx.ssc, engineDef.id, retryResult, i, runConfidenceProvenanceLog);
           }
         } else {
           registerProblem(ctx.ssc, engineDef.id as EngineIdType, "structural", gateResult.reason, gateResult.severity, 1.0,
@@ -3778,6 +3797,16 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     }
   }
 
+  // T3.A v2 — compute confidence integrity BEFORE evaluateSystemControl so
+  // the verdict can be used as a hard gate by `checkConfidenceIntegrity`.
+  // Pre-v2 this was computed only at return time → observational only.
+  let confidenceIntegritySummary: ConfidenceIntegritySummary | null = null;
+  try {
+    confidenceIntegritySummary = summarizeConfidenceIntegrity(runConfidenceProvenanceLog);
+  } catch (ciErr: any) {
+    console.warn(`[Orchestrator] CONFIDENCE_INTEGRITY_PRE_SYSCTRL_FAILED | ${ciErr.message}`);
+  }
+
   try {
     const engineOutputs: Record<string, any> = {};
     for (const [eid, result] of results) {
@@ -3805,6 +3834,22 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       signalComposition: ctx.signalComposition || null,
       sglCoverageSufficient: sglSummaryData?.coverage?.coverageSufficient ?? null,
       ssc: ctx.ssc || null,
+      // T3.B (Runtime Truth Track): propagate AEL partial-build flag so
+      // System Control's `checkAnalyticalEnrichmentIntegrity` can downgrade
+      // execution mode when the analytical-enrichment package was built
+      // with degraded data. Pre-T3.B this only surfaced as a console.warn.
+      analyticalEnrichmentPartial: ctx.analyticalEnrichment?.isPartial === true,
+      analyticalEnrichmentReason: ctx.analyticalEnrichment?.partialReason ?? null,
+      // T3.A v2 (Runtime Truth Track): pass the runtime confidence-integrity
+      // verdict so System Control's `checkConfidenceIntegrity` can hard-gate
+      // on missing/degraded engine confidences instead of letting the
+      // verdict be observational only.
+      confidenceIntegrityVerdict: confidenceIntegritySummary?.verdict ?? null,
+      confidenceIntegrityCriticalAbsent: confidenceIntegritySummary?.criticalAbsentEngines ?? [],
+      confidenceIntegrityDegradedEngines: [
+        ...(confidenceIntegritySummary?.defaultFloorEngines ?? []),
+        ...(confidenceIntegritySummary?.inferredSynthesisEngines ?? []),
+      ],
       config: { campaignId: config.campaignId, accountId: config.accountId, currentJobId: jobId },
     });
     // ── COMMERCIAL REASONING: systemJudgement (Phase 2 May 2026) ──
@@ -4008,6 +4053,42 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     console.warn(`[Orchestrator] COMMERCIAL_DNA_COMPOSE_FAILED | ${dnaErr.message}`);
   }
 
+  // T3.A — Runtime Truth Track: compute the run's confidence integrity
+  // verdict from the per-engine provenance log. COMPLETE = every engine
+  // emitted direct-evidence confidence on both data + engine-logic axes;
+  // DEGRADED = at least one inferred_synthesis or default_floor or absent
+  // engine but no critical engine missing; INCOMPLETE = at least one
+  // critical engine (MI, audience, positioning, offer, funnel, integrity)
+  // returned no confidence at all. This is the canonical D5 surface for
+  // the confidence axis — System Control and build-plan-layer must gate
+  // on `confidenceIntegrity.verdict`, not on raw numerics that pre-T3.A
+  // collapsed absent → 0.5.
+  // T3.A v2: prefer the pre-evaluateSystemControl computation when present
+  // (it was used as the hard-gate input). Recompute only if the earlier
+  // attempt failed.
+  let confidenceIntegrity: ConfidenceIntegritySummary | null = confidenceIntegritySummary;
+  try {
+    if (!confidenceIntegrity) confidenceIntegrity = summarizeConfidenceIntegrity(runConfidenceProvenanceLog);
+    console.log(
+      `[Orchestrator] CONFIDENCE_INTEGRITY | verdict=${confidenceIntegrity.verdict} | ` +
+      `engines=${confidenceIntegrity.totalEngines} | ` +
+      `direct=${confidenceIntegrity.byProvenance.direct_evidence} | ` +
+      `inferred=${confidenceIntegrity.byProvenance.inferred_synthesis} | ` +
+      `defaultFloor=${confidenceIntegrity.byProvenance.default_floor} | ` +
+      `absent=${confidenceIntegrity.byProvenance.absent} | ` +
+      `criticalAbsent=[${confidenceIntegrity.criticalAbsentEngines.join(",")}]`
+    );
+    if (confidenceIntegrity.verdict === "INCOMPLETE") {
+      console.warn(
+        `[Orchestrator] CONFIDENCE_INCOMPLETE | jobId=${jobId} | ` +
+        `criticalAbsentEngines=${confidenceIntegrity.criticalAbsentEngines.join(",")} | ` +
+        `reason=critical_engine_emitted_no_confidence_field — pre-T3.A this run would have been treated as 0.5-confidence`
+      );
+    }
+  } catch (ciErr: any) {
+    console.warn(`[Orchestrator] CONFIDENCE_INTEGRITY_FAILED | ${ciErr.message}`);
+  }
+
   return {
     jobId,
     status: overallStatus,
@@ -4020,6 +4101,8 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     controlVerdict: controlVerdict || undefined,
     ssc: ctx.ssc || null,
     commercialDna,
+    confidenceIntegrity,
+    confidenceProvenanceLog: runConfidenceProvenanceLog,
   };
 }
 

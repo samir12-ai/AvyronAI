@@ -35,6 +35,37 @@ export interface ConfidenceFactor {
   detail: string;
 }
 
+/**
+ * T1.A (Runtime Truth Track, May 2026) — lineage origin classification for
+ * every extracted signal. Pre-T1.A the synthesis loop's weighted averaging
+ * collapsed all origin metadata into a single confidence number, so a
+ * decision derived 100% from inferred narrative AI looked identical to one
+ * grounded in real reviews. This type tags every signal with a coarse
+ * origin so the synthesis output can carry `originType: "mixed"` (with a
+ * computed `realRatio`) instead of silently degrading to `unknown`.
+ *
+ * Mapping (see `extractAllSignals`):
+ *   - `real`       → reviews (direct customer testimony) + reviewsIntel pains
+ *   - `inferred`   → narrative-objection AI extractions; instagram
+ *                    `painInferences` (the field name itself signals
+ *                    inference); website `proofStructure`
+ *   - `competitor` → competitor-channel signals: tiktok hooks/captions,
+ *                    instagram hooks/CTA patterns, website positioning lang
+ *   - `unknown`    → reserved for future paths that cannot be classified
+ */
+export type SignalOriginType = "real" | "inferred" | "competitor" | "unknown";
+
+/**
+ * T1.A — synthesised origin for a `CrossSignalDecision`. Computed from the
+ * group's member-signal origins:
+ *   - all members same origin       → that origin
+ *   - mixed origins                  → "mixed" + `realRatio` carries the
+ *                                       fraction of `real` members
+ *   - all `unknown`                  → "unknown" (treated as untrusted by
+ *                                       budget-governor / system-control)
+ */
+export type DecisionOriginType = SignalOriginType | "mixed";
+
 export interface CrossSignalDecision {
   signalText: string;
   type: DecisionType;
@@ -49,6 +80,14 @@ export interface CrossSignalDecision {
   category: string;
   decisionReason: string;
   matchedEvidence: MatchedEvidence[];
+  /** T1.A — origin classification (real | inferred | competitor | mixed | unknown). */
+  originType: DecisionOriginType;
+  /** T1.A — fraction of group members tagged `real` (0..1). 0 = no real-grounded evidence. */
+  realRatio: number;
+  /** T1.A — true iff the group contains members from ≥2 distinct origin types. */
+  mixedLineage: boolean;
+  /** T1.A — full origin breakdown for downstream audit. */
+  originBreakdown: { real: number; inferred: number; competitor: number; unknown: number };
 }
 
 export interface CrossSignalDecisionResult {
@@ -261,6 +300,8 @@ interface ExtractedSignal {
   source: SourceType;
   category: "pain" | "objection" | "trust" | "hook" | "content";
   rawConfidence: number;
+  /** T1.A — lineage origin tag set at extraction time. Preserved through synthesis. */
+  originType: SignalOriginType;
 }
 
 function extractAllSignals(
@@ -271,48 +312,55 @@ function extractAllSignals(
 ): ExtractedSignal[] {
   const signals: ExtractedSignal[] = [];
 
+  // T1.A origin tagging key:
+  //   real       = direct customer testimony (reviews + reviewsIntel pains)
+  //   inferred   = AI/heuristic extractions where field name itself flags
+  //                inference (instagram.painInferences, tiktok.painInferences,
+  //                narrativeObjections, website.proofStructure)
+  //   competitor = competitor-channel content signals (instagram hooks/CTA,
+  //                tiktok hooks/captions, website positioningLanguage)
   if (multiSource.instagram) {
     for (const pain of multiSource.instagram.painInferences) {
-      signals.push({ text: pain, source: "instagram", category: "pain", rawConfidence: 0.6 });
+      signals.push({ text: pain, source: "instagram", category: "pain", rawConfidence: 0.6, originType: "inferred" });
     }
     for (const hook of multiSource.instagram.hooks) {
-      signals.push({ text: hook, source: "instagram", category: "hook", rawConfidence: 0.65 });
+      signals.push({ text: hook, source: "instagram", category: "hook", rawConfidence: 0.65, originType: "competitor" });
     }
     for (const cta of multiSource.instagram.ctaPatterns) {
-      signals.push({ text: cta, source: "instagram", category: "content", rawConfidence: 0.5 });
+      signals.push({ text: cta, source: "instagram", category: "content", rawConfidence: 0.5, originType: "competitor" });
     }
   }
 
   if (multiSource.tiktok) {
     for (const hook of multiSource.tiktok.validatedHooks) {
-      signals.push({ text: hook, source: "tiktok", category: "hook", rawConfidence: 0.8 });
+      signals.push({ text: hook, source: "tiktok", category: "hook", rawConfidence: 0.8, originType: "competitor" });
     }
     for (const pain of multiSource.tiktok.painInferences) {
-      signals.push({ text: pain, source: "tiktok", category: "pain", rawConfidence: 0.5 });
+      signals.push({ text: pain, source: "tiktok", category: "pain", rawConfidence: 0.5, originType: "inferred" });
     }
     for (const cap of multiSource.tiktok.highPerformingCaptions) {
-      signals.push({ text: cap, source: "tiktok", category: "content", rawConfidence: 0.75 });
+      signals.push({ text: cap, source: "tiktok", category: "content", rawConfidence: 0.75, originType: "competitor" });
     }
   }
 
   if (multiSource.reviews) {
     for (const pain of multiSource.reviews.painPoints) {
-      signals.push({ text: pain, source: "reviews", category: "pain", rawConfidence: 0.85 });
+      signals.push({ text: pain, source: "reviews", category: "pain", rawConfidence: 0.85, originType: "real" });
     }
     for (const obj of multiSource.reviews.objections) {
-      signals.push({ text: obj, source: "reviews", category: "objection", rawConfidence: 0.8 });
+      signals.push({ text: obj, source: "reviews", category: "objection", rawConfidence: 0.8, originType: "real" });
     }
     for (const tb of multiSource.reviews.trustBarriers) {
-      signals.push({ text: tb, source: "reviews", category: "trust", rawConfidence: 0.8 });
+      signals.push({ text: tb, source: "reviews", category: "trust", rawConfidence: 0.8, originType: "real" });
     }
   }
 
   if (multiSource.website) {
     for (const pos of multiSource.website.positioningLanguage.slice(0, 5)) {
-      signals.push({ text: pos, source: "website", category: "content", rawConfidence: 0.6 });
+      signals.push({ text: pos, source: "website", category: "content", rawConfidence: 0.6, originType: "competitor" });
     }
     for (const proof of multiSource.website.proofStructure.slice(0, 3)) {
-      signals.push({ text: proof, source: "website", category: "trust", rawConfidence: 0.5 });
+      signals.push({ text: proof, source: "website", category: "trust", rawConfidence: 0.5, originType: "inferred" });
     }
   }
 
@@ -326,6 +374,7 @@ function extractAllSignals(
         source: "instagram",
         category: cat,
         rawConfidence: obj.narrativeConfidence,
+        originType: "inferred",
       });
     }
   }
@@ -334,12 +383,44 @@ function extractAllSignals(
     for (const pain of reviewsIntel.painSignals) {
       const existing = signals.find(s => s.source === "reviews" && s.text === pain.painText);
       if (!existing) {
-        signals.push({ text: pain.painText, source: "reviews", category: "pain", rawConfidence: pain.confidence });
+        signals.push({ text: pain.painText, source: "reviews", category: "pain", rawConfidence: pain.confidence, originType: "real" });
       }
     }
   }
 
   return signals;
+}
+
+/**
+ * T1.A — compute the lineage breakdown for a synthesised group of signals.
+ * Returns the dominant origin (or "mixed" when ≥2 distinct origins are
+ * represented), the realRatio (fraction of `real` members), and the full
+ * counts. The collapse to "unknown" pre-T1.A erased this information; the
+ * synthesis loop now carries it forward verbatim.
+ */
+function computeGroupOriginLineage(group: ExtractedSignal[]): {
+  originType: DecisionOriginType;
+  realRatio: number;
+  mixedLineage: boolean;
+  originBreakdown: { real: number; inferred: number; competitor: number; unknown: number };
+} {
+  const breakdown = { real: 0, inferred: 0, competitor: 0, unknown: 0 };
+  for (const member of group) {
+    breakdown[member.originType] += 1;
+  }
+  const total = group.length;
+  const present = (Object.keys(breakdown) as Array<keyof typeof breakdown>).filter(k => breakdown[k] > 0);
+  const mixedLineage = present.length >= 2;
+  const realRatio = total > 0 ? breakdown.real / total : 0;
+  let originType: DecisionOriginType;
+  if (mixedLineage) {
+    originType = "mixed";
+  } else if (present.length === 1) {
+    originType = present[0];
+  } else {
+    originType = "unknown";
+  }
+  return { originType, realRatio: Math.round(realRatio * 1000) / 1000, mixedLineage, originBreakdown: breakdown };
 }
 
 function findSemanticGroups(signals: ExtractedSignal[]): Map<string, { members: ExtractedSignal[]; bestAgreement: AgreementType; bestMatchScore: number; evidenceTrail: MatchedEvidence[] }> {
@@ -649,6 +730,13 @@ export function runCrossSignalDecisionLayer(
 
     const decisionReason = buildDecisionReason(type, agreementType, uniqueSources, confidence, category, bestMatchScore);
 
+    // T1.A — preserve origin lineage through synthesis. Pre-T1.A this
+    // information was implicitly discarded by the weighted-confidence
+    // averaging; here we compute it from the group's member origins so
+    // downstream consumers (statistical-validation, budget-governor,
+    // system-control) can detect inferred-only chains and refuse to scale.
+    const lineage = computeGroupOriginLineage(group);
+
     decisions.push({
       signalText: canonicalText,
       type,
@@ -663,6 +751,10 @@ export function runCrossSignalDecisionLayer(
       category,
       decisionReason,
       matchedEvidence: evidenceTrail.slice(0, 10),
+      originType: lineage.originType,
+      realRatio: lineage.realRatio,
+      mixedLineage: lineage.mixedLineage,
+      originBreakdown: lineage.originBreakdown,
     });
   }
 

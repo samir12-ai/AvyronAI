@@ -506,6 +506,15 @@ const STATISTICAL_VALIDATION_CONTRACT: EngineContract = {
     { id: "claimValidations",       path: ["claimValidations"],       shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["audit_control.validation_panel", "build_plan_layer"] },
     { id: "signalClusters",         path: ["signalClusters"],         shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["audit_control.validation_panel"] },
     { id: "signalBackedClaimRatio", path: ["signalBackedClaimRatio"], shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["system_control.signal_grounding"] },
+    // T4.b (Runtime Truth Track, May 2026): the two grounding-truth lists
+    // were already emitted by the engine (engine.ts:448-500) but were not
+    // declared in the contract — downstream consumers could silently
+    // ignore them. Promoting both to required so a missing/null array
+    // surfaces as CONTRACT_INCOMPLETE under D5 doctrine.
+    // `emptyIsMissing: false` because an empty array IS a valid emission
+    // (means "no unmapped/low-conf signals were detected").
+    { id: "unmappedSignals",        path: ["unmappedSignals"],        shape: StringArraySchema, emptyIsMissing: false, consumers: ["system_control.signal_grounding", "build_plan_layer.causal_narrative", "audit_control.validation_panel"] },
+    { id: "lowConfidenceSignals",   path: ["lowConfidenceSignals"],   shape: StringArraySchema, emptyIsMissing: false, consumers: ["system_control.signal_grounding", "build_plan_layer.causal_narrative", "audit_control.validation_panel"] },
     // C5 (2026-05-09): legacy path dropped — engine source verified to return `originTypeDistribution` at root (engine.ts:1456).
     { id: "originTypeDistribution", path: ["originTypeDistribution"], shape: LooseObjectSchema, emptyIsMissing: true, consumers: ["system_control.signal_grounding", "budget_governor"] },
     { id: "confidenceExplanation",  path: ["confidenceExplanation"],  shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["audit_control.validation_panel", "recovery_intelligence"] },

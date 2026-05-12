@@ -142,15 +142,27 @@ export function initializeSignalGovernance(
     structuredSignals.psychological_drivers, "psychological_driver", sourceEngine, traceToken
   );
 
-  const objectionSignals: GovernedSignal[] = objectionMap
+  // T3.A — Runtime Truth Track: distinguish "explicit confidence supplied"
+  // from "no confidence value at all." Pre-T3.A `o.confidence || 0.5` silently
+  // promoted unscored objections past the SIGNAL_CONFIDENCE_FLOOR (which is
+  // 0.50). They now require an explicit numeric confidence at or above the
+  // floor; absent confidences are dropped with a count surfaced in the
+  // governance log so downstream confidence-integrity verdicts can detect
+  // default-floor objection contamination.
+  const objectionsWithExplicitConf = objectionMap.filter(o => typeof o.confidence === "number" && Number.isFinite(o.confidence));
+  const objectionsAbsentConf = objectionMap.length - objectionsWithExplicitConf.length;
+  if (objectionsAbsentConf > 0) {
+    console.warn(`[SGL] DEFAULT_FLOOR_OBJECTIONS_DROPPED | count=${objectionsAbsentConf} | reason=no_explicit_confidence (pre-T3.A defaulted to 0.5)`);
+  }
+  const objectionSignals: GovernedSignal[] = objectionsWithExplicitConf
     .filter(o => typeof o.label === "string" && o.label.trim().length > 0)
-    .filter(o => (o.confidence || 0.5) >= SIGNAL_CONFIDENCE_FLOOR)
+    .filter(o => (o.confidence as number) >= SIGNAL_CONFIDENCE_FLOOR)
     .filter(o => !isRawComment(o.label))
     .map((obj, idx) => ({
       signalId: `SGL_OBJECTION_${String(idx + 1).padStart(3, "0")}`,
       category: "objection" as const,
       text: sanitizeSignalText(obj.label),
-      confidence: obj.confidence || 0.5,
+      confidence: obj.confidence as number,
       evidence: purifyEvidence(obj.evidence || []),
       sourceEngine,
       sourceLayer: "surface",
