@@ -47,6 +47,21 @@ const STAGGER_DELAY_MS = 5000;
 
 const lastJobStartByAccount = new Map<string, number>();
 
+/**
+ * Phase 7 hardening (May 2026): bounded growth of the per-account
+ * stagger-tracking Map. Without periodic eviction, every account that
+ * ever started a fetch job leaves a permanent entry, accumulating
+ * indefinitely on long-running processes. We evict entries older than
+ * 24h on every accessor call (cheap, no timer needed).
+ */
+const ACCOUNT_STAGGER_TTL_MS = 24 * 60 * 60 * 1000;
+function pruneStaleAccountStaggerEntries(now: number = Date.now()): void {
+  const cutoff = now - ACCOUNT_STAGGER_TTL_MS;
+  for (const [accountId, ts] of lastJobStartByAccount) {
+    if (ts < cutoff) lastJobStartByAccount.delete(accountId);
+  }
+}
+
 type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED" | "COOLDOWN_ACTIVE";
 
 type StageStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "SKIPPED" | "SKIPPED_FETCH_COOLDOWN" | "CACHED_ANALYSIS" | "BLOCKED_INSUFFICIENT_DATA";
@@ -286,6 +301,7 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     return jobId;
   }
 
+  pruneStaleAccountStaggerEntries();
   const lastStart = lastJobStartByAccount.get(accountId);
   if (lastStart) {
     const elapsed = Date.now() - lastStart;

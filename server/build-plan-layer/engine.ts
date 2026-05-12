@@ -165,7 +165,14 @@ async function getLatestSnapshot(
     if (!snap && sourceJobId) {
       console.warn(`[BuildPlanLayer] SNAPSHOT_MISS_FOR_RUN | account=${accountId} campaign=${campaignId} jobId=${sourceJobId} table=${(table as any)?._?.name ?? "unknown"}`);
     } else if (!sourceJobId) {
-      console.warn(`[BuildPlanLayer] STALE_LINEAGE_READ | account=${accountId} campaign=${campaignId} table=${(table as any)?._?.name ?? "unknown"} — no sourceJobId provided; latest snapshot may belong to a different run`);
+      // Phase 4 hardening (May 2026): elevated from console.warn to a structured
+      // signal. The caller still receives the snapshot (D4 backwards compat —
+      // not every legacy reader passes sourceJobId yet), but the fact that we
+      // had to fall back to a latest-row read is captured on stderr at WARN
+      // level for log-based alerting. System Control consumes the upstream
+      // sourceJobId-presence flag separately via ctx wiring; this branch is
+      // the last-resort breadcrumb when that wiring is bypassed.
+      console.warn(`[BuildPlanLayer] STALE_LINEAGE_READ | severity=high | account=${accountId} campaign=${campaignId} table=${(table as any)?._?.name ?? "unknown"} — no sourceJobId provided; latest snapshot may belong to a different run. Caller MUST pass sourceJobId for runtime-truth correctness.`);
     }
     return snap || null;
   } catch {

@@ -78,11 +78,12 @@ const RANK = {
   SYSTEM: 100,
 } as const;
 
-// Partial<Record<...>>: not every BlockCode has a strategic-recovery narrative
-// (Phase R reliability blocks like PIPELINE_INCOMPLETE / STALE_SNAPSHOT_EVIDENCE
-// / ENGINE_TIMEOUT / UNRESOLVED_CONTRADICTION are system-domain — they fall
-// through to UNKNOWN_BLOCK in `lookupRecovery()` while their per-block-code
-// operational metadata still lives in BLOCK_METADATA above).
+// Phase 6 maturity (May 2026): system-domain reliability blocks now carry
+// explicit recovery narratives instead of falling through to the generic
+// "Manual investigation required" UNKNOWN_BLOCK template. This eliminates
+// opaque dead-end BLOCK states for the operator. The retrySafe / resolverActor
+// metadata for these blocks lives in BLOCK_METADATA above; this map adds the
+// strategic-recovery copy.
 export const RECOVERY_MAP: Partial<Record<BlockCode | "UNKNOWN_BLOCK", RecoveryMapEntry>> & { UNKNOWN_BLOCK: RecoveryMapEntry } = {
   INTEGRITY_FAILURE: {
     meaning: "System Integrity engine flagged a structural failure across one or more strategic engines.",
@@ -397,6 +398,62 @@ export const RECOVERY_MAP: Partial<Record<BlockCode | "UNKNOWN_BLOCK", RecoveryM
     ],
     requiredProof: ["SSC problems registry with no open critical entries"],
     allowedNextModes: ["RESTRICTED_EXECUTION", "REVIEW_REQUIRED", "HUMAN_REVIEW_REQUIRED"],
+    defaultNextMode: "REVIEW_REQUIRED",
+  },
+
+  PIPELINE_INCOMPLETE: {
+    meaning: "One or more required engines did not complete successfully — pipeline produced a partial run.",
+    severity: "critical",
+    ownerEngine: "Orchestrator",
+    rootCauseCategory: "system_parser_issue",
+    repairOrderRank: RANK.SYSTEM,
+    repairPatterns: [
+      "Inspect the engineExecutionStatus map for engines reporting status='ERROR' or 'TIMEOUT'",
+      "Review the engine run logs for the failing engine and identify the underlying error (proxy block, LLM rate-limit, schema validation, etc.)",
+      "Re-run the pipeline once the underlying cause is resolved (e.g., restore proxy capacity, wait for rate-limit reset, fix engine input)",
+      "If a non-critical engine continues to fail, scopedEngines re-run can isolate it without re-executing the full pipeline",
+    ],
+    successCriteria: [
+      "All required engines (per pipeline contract) report status='COMPLETE'",
+      "engineExecutionStatus contains no entries with status in ('ERROR','TIMEOUT','SKIPPED_REQUIRED')",
+    ],
+    requiredProof: ["Successful re-run of the pipeline with the same inputs and zero ERROR/TIMEOUT engines"],
+    allowedNextModes: ["RESTRICTED_EXECUTION", "REVIEW_REQUIRED", "HUMAN_REVIEW_REQUIRED"],
+    defaultNextMode: "REVIEW_REQUIRED",
+  },
+
+  ENGINE_TIMEOUT: {
+    meaning: "An individual engine exceeded its execution time budget and was force-cancelled.",
+    severity: "high",
+    ownerEngine: "Orchestrator (engine-specific)",
+    rootCauseCategory: "system_parser_issue",
+    repairOrderRank: RANK.SYSTEM,
+    repairPatterns: [
+      "Identify which engine timed out (engineExecutionStatus[engineId].status === 'TIMEOUT')",
+      "Check the engine's external dependencies — proxy pool health, LLM provider latency, DB query plans",
+      "If the timeout is reproducible, increase the engine's per-call timeout OR reduce its input cardinality (fewer competitors, narrower analysis window)",
+      "Re-run the pipeline; if the same engine times out again, escalate to engineering",
+    ],
+    successCriteria: ["Re-run completes with the previously-timing-out engine reporting status='COMPLETE'"],
+    requiredProof: ["Engine completes within its timeout budget on next run"],
+    allowedNextModes: ["RESTRICTED_EXECUTION", "REVIEW_REQUIRED"],
+    defaultNextMode: "REVIEW_REQUIRED",
+  },
+
+  STALE_SNAPSHOT_EVIDENCE: {
+    meaning: "A downstream engine read a snapshot that is older than the freshness window — evidence may not reflect current state.",
+    severity: "high",
+    ownerEngine: "Orchestrator (snapshot-resolver)",
+    rootCauseCategory: "system_parser_issue",
+    repairOrderRank: RANK.SYSTEM,
+    repairPatterns: [
+      "Force-refresh the upstream engine that produced the stale snapshot (e.g., re-run market_intelligence to refresh the MI snapshot)",
+      "Verify the freshness threshold for the snapshot type matches the campaign cadence (longer-cadence campaigns may need wider thresholds)",
+      "If the underlying data source is failing (e.g., proxy block), resolve the data-acquisition issue before the next pipeline run",
+    ],
+    successCriteria: ["All upstream snapshots referenced by the run are within their freshness windows"],
+    requiredProof: ["Snapshot timestamps within freshness window on next pipeline run"],
+    allowedNextModes: ["RESTRICTED_EXECUTION", "REVIEW_REQUIRED"],
     defaultNextMode: "REVIEW_REQUIRED",
   },
 

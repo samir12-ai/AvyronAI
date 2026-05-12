@@ -327,12 +327,32 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
         }
       }
     } else if (assessment.repairableBlocks.length > 0) {
-      repairActions = assessment.recommendedActions.map(a => ({
-        ...a,
-        executed: false,
-        succeeded: false,
-        detail: "Repair skipped — non-repairable blocks also present",
-      }));
+      // Phase 6 maturity (May 2026): execute the repairable subset even when
+      // non-repairable blocks coexist. Previously we skipped ALL repair actions
+      // if any non-repairable block was present — leaving operators with mixed
+      // failures whose independent repairable parts still required a manual
+      // re-run. Now we attempt the repairable subset; the verdict still
+      // reflects the non-repairable blocks (verdict derivation below is
+      // unchanged), but the operator gets partial mitigation automatically.
+      try {
+        const partialRepairs = executeRepairActions(
+          assessment.recommendedActions,
+          input,
+        );
+        repairActions = partialRepairs.map(r => ({
+          ...r,
+          detail: r.succeeded
+            ? `${r.detail ?? ""} (partial-repair: non-repairable blocks remain — verdict still reflects them)`.trim()
+            : (r.detail ?? "Repair attempt failed"),
+        }));
+      } catch (e) {
+        repairActions = assessment.recommendedActions.map(a => ({
+          ...a,
+          executed: false,
+          succeeded: false,
+          detail: `Partial-repair attempt threw — ${(e as Error)?.message ?? "unknown error"}`,
+        }));
+      }
     }
   }
 

@@ -398,6 +398,20 @@ function extractAllSignals(
  * counts. The collapse to "unknown" pre-T1.A erased this information; the
  * synthesis loop now carries it forward verbatim.
  */
+/**
+ * Phase 3 helper: cheap inline lineage view for the synthesis loop's
+ * realRatio penalty (we'd otherwise compute lineage twice — once for the
+ * penalty, once for the decision payload). Preserves identical math to
+ * computeGroupOriginLineage.realRatio so the penalty reflects exactly what
+ * the downstream lineage carrier reports.
+ */
+function lineagePreview(group: ExtractedSignal[]): { realRatio: number } {
+  const total = group.length;
+  if (total === 0) return { realRatio: 0 };
+  const real = group.filter(s => s.originType === "real").length;
+  return { realRatio: real / total };
+}
+
 function computeGroupOriginLineage(group: ExtractedSignal[]): {
   originType: DecisionOriginType;
   realRatio: number;
@@ -719,9 +733,27 @@ export function runCrossSignalDecisionLayer(
       confidence = Math.min(confidence, MEDIUM_CONFIDENCE_THRESHOLD + 0.1);
     }
 
+    // Phase 3 hardening (May 2026): apply realRatio penalty to confidence.
+    // Pre-fix: realRatio was computed and tagged on the decision but did not
+    // reduce confidence for inferred/competitor-dominant groups — meaning a
+    // pain inference with zero customer-testimony evidence could still emit
+    // 0.85+ confidence. Now: confidence is multiplied by a real-grounding
+    // floor that scales linearly from 0.65 (zero real signals) to 1.0 (all
+    // real). Caps the ceiling for inferred-only chains at ~0.65 of the raw
+    // computed score, while leaving fully-real chains untouched.
+    //
+    // Applied AFTER agreement boosts so that "3 inferred sources agreeing"
+    // does not get a free pass to high confidence (3-source agreement boost
+    // is 1.25×; the real-grounding floor of 0.65 brings the effective max
+    // back down into the medium band, where it belongs).
+    const __preLineagePenalty = confidence;
+    const realGroundingFloor = 0.65 + 0.35 * lineagePreview(group).realRatio;
+    confidence *= realGroundingFloor;
+
     const agreementType = uniqueSources.length === 1 ? "SINGLE_SOURCE" as AgreementType : bestAgreement;
     const type = classifyDecision(category, uniqueSources, agreementType, confidence);
     const confidenceLevel = getConfidenceLevel(confidence);
+    void __preLineagePenalty;
 
     const confidenceFactors = buildConfidenceFactors(
       uniqueSources, agreementType, bestMatchScore, coverageRatio, category,
