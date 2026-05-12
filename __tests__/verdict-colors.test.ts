@@ -19,6 +19,8 @@ import {
   labelForIntegrityVerdict,
   isCanonicalIntegrityVerdict,
   isCanonicalExecutionStatus,
+  isCanonicalValidationState,
+  labelForValidationState,
   iconForExecutionStatus,
   VERDICT_COLORS,
 } from '../lib/verdict-colors';
@@ -214,6 +216,51 @@ describe('BuildThePlan — sectionColors map cannot paint legacy SUCCESS green',
   it('PENDING → slate (#64748B), not amber (validator-#3 regression)', () => {
     expect(sectionColors.PENDING).toBe('#64748B');
     expect(sectionColors.PENDING).not.toBe('#F59E0B');
+  });
+});
+
+describe('StatisticalValidationEngine — helper-driven validation state (validator-#3)', () => {
+  // Mirrors the stateConfig object in StatisticalValidationEngine.tsx render.
+  const buildStateConfig = (state: string | null | undefined) => ({
+    color: colorForValidationState(state),
+    label: labelForValidationState(state),
+    isCanonical: isCanonicalValidationState(state),
+  });
+  it('validated → green + canonical', () => {
+    const c = buildStateConfig('validated');
+    expect(c.color).toBe('#10B981');
+    expect(c.label).toBe('Validated');
+    expect(c.isCanonical).toBe(true);
+  });
+  it('provisional → cyan (not green) + canonical', () => {
+    const c = buildStateConfig('provisional');
+    expect(c.color).not.toBe('#10B981');
+    expect(c.label).toBe('Provisional');
+    expect(c.isCanonical).toBe(true);
+  });
+  it('weak → amber + canonical', () => {
+    const c = buildStateConfig('weak');
+    expect(c.color).toBe('#F59E0B');
+    expect(c.label).toBe('Weak');
+    expect(c.isCanonical).toBe(true);
+  });
+  it('rejected → red + canonical', () => {
+    const c = buildStateConfig('rejected');
+    expect(c.color).toBe('#EF4444');
+    expect(c.label).toBe('Rejected');
+    expect(c.isCanonical).toBe(true);
+  });
+  it('missing field → slate + Unknown + NOT canonical (D5)', () => {
+    const c = buildStateConfig(undefined);
+    expect(c.color).toBe('#64748B');
+    expect(c.label).toBe('Unknown');
+    expect(c.isCanonical).toBe(false);
+  });
+  it('"unknown" sentinel → slate + Unknown + NOT canonical (D5)', () => {
+    const c = buildStateConfig('unknown');
+    expect(c.color).toBe('#64748B');
+    expect(c.label).toBe('Unknown');
+    expect(c.isCanonical).toBe(false);
   });
 });
 

@@ -181,6 +181,24 @@ export function isCanonicalIntegrityVerdict(canonical: string | null | undefined
 export function isCanonicalExecutionStatus(canonical: string | null | undefined): boolean {
   return !!(canonical && EXECUTION_STATUS_SET.has(canonical));
 }
+export function isCanonicalValidationState(state: string | null | undefined): boolean {
+  return !!(state && state !== 'unknown' && VALIDATION_STATE_SET.has(state));
+}
+/**
+ * Human-readable label for validation state. Returns the canonical enum value
+ * capitalized, or "Unknown" when the field is missing/non-canonical (D5).
+ */
+export function labelForValidationState(state: string | null | undefined): string {
+  if (!state || !VALIDATION_STATE_SET.has(state)) return 'Unknown';
+  switch (state) {
+    case 'validated': return 'Validated';
+    case 'provisional': return 'Provisional';
+    case 'weak': return 'Weak';
+    case 'rejected': return 'Rejected';
+    case 'unknown': return 'Unknown';
+    default: return 'Unknown';
+  }
+}
 
 /**
  * Canonical Ionicons name for an executionStatus enum. BLOCKED_BY_INTEGRITY

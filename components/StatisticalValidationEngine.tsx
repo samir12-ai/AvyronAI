@@ -13,6 +13,11 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
+import {
+  colorForValidationState,
+  labelForValidationState,
+  isCanonicalValidationState,
+} from '@/lib/verdict-colors';
 import type { LiveSnapshotEnvelope } from '@/lib/envelope';
 import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
@@ -117,15 +122,15 @@ const LAYER_ICONS: Record<string, string> = {
   confidence_calibration: "speedometer",
 };
 
-const STATE_CONFIG: Record<string, { color: string; label: string; icon: keyof typeof Ionicons.glyphMap }> = {
-  validated: { color: '#10B981', label: 'Validated', icon: 'checkmark-circle' },
-  provisional: { color: '#F59E0B', label: 'Provisional', icon: 'time' },
-  weak: { color: '#EF4444', label: 'Weak', icon: 'warning' },
-  rejected: { color: '#DC2626', label: 'Rejected', icon: 'close-circle' },
-  // Seal #6 / D5: explicit "unknown" entry for snapshots missing the canonical
-  // validationState field. Slate (not amber/red) so users see CONTRACT_INCOMPLETE
-  // rather than a fake-amber "Weak" verdict.
-  unknown: { color: '#64748B', label: 'Unknown', icon: 'help-circle' },
+// Icon mapping per validationState. Color and label are sourced from the
+// canonical helpers (`colorForValidationState`, `labelForValidationState`) so
+// every surface renders identical semantics for the same enum value.
+const STATE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  validated: 'checkmark-circle',
+  provisional: 'time',
+  weak: 'warning',
+  rejected: 'close-circle',
+  unknown: 'help-circle',
 };
 
 const EVIDENCE_TYPE_COLORS: Record<string, string> = {
@@ -462,10 +467,11 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
   // Missing canonical `validationState` ⇒ render as 'unknown' so the user
   // sees CONTRACT_INCOMPLETE instead of fake-amber confidence.
   const validationState = data?.validationState ?? 'unknown';
-  const stateConfig = STATE_CONFIG[validationState] || STATE_CONFIG.unknown || {
-    label: 'Unknown',
-    color: '#64748B',
-    icon: 'help-circle' as const,
+  const stateConfig = {
+    color: colorForValidationState(validationState),
+    label: labelForValidationState(validationState),
+    icon: STATE_ICONS[validationState] || STATE_ICONS.unknown,
+    isCanonical: isCanonicalValidationState(validationState),
   };
   const passedLayers = data?.layerResults?.filter(l => l.passed).length || 0;
   const totalLayers = data?.layerResults?.length || 7;
