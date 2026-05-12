@@ -168,6 +168,7 @@ function cascade(...candidates: unknown[]): string | null {
   return null;
 }
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { acknowledgeAelInput } from "../analytical-enrichment-layer/consumer-guard";
 import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
@@ -2106,6 +2107,7 @@ export async function runOfferEngine(
   upstreamSignals?: { trustMechanism?: any; gameDimension?: any } | null,
 ): Promise<OfferResult> {
   const startTime = Date.now();
+  acknowledgeAelInput("OfferEngine-V4", analyticalEnrichment, accountId);
   const diagnostics: Record<string, any> = {};
 
   if (mechanismEngineOutput?.primaryMechanism) {

@@ -11,6 +11,7 @@ import { aiChat } from "../ai-client";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { acknowledgeAelInput, attachAelProvenance } from "../analytical-enrichment-layer/consumer-guard";
 import {
   enforcePositioningCompliance,
   buildCausalDirectiveForPrompt,
@@ -2123,6 +2124,7 @@ export async function runPositioningEngine(
   jobId?: string,
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
+  const aelAck = acknowledgeAelInput("PositioningEngine-V3", analyticalEnrichment, accountId);
 
   const stateRefresh = await enforceGlobalStateRefresh(accountId, campaignId);
   if (stateRefresh.refreshRequired) {

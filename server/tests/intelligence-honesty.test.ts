@@ -452,7 +452,94 @@ async function runConcurrencyTest() {
   assert(get(accountId).length === 0, "outside ALS scope: accountId-keyed slot unaffected");
 }
 
+// ─── F3.10 per-consumer isPartial behavioral tests (pass-5) ───────────
+function runConsumerGuardTests() {
+  section("F3.10 — acknowledgeAelInput / attachAelProvenance / formatAELForPrompt banner");
+  const { acknowledgeAelInput, attachAelProvenance } =
+    require("../../server/analytical-enrichment-layer/consumer-guard");
+  const { formatAELForPrompt } =
+    require("../../server/analytical-enrichment-layer/engine");
+
+  const ackNull = acknowledgeAelInput("TestEngine", null, "acc-x");
+  assert(ackNull.usable === false && ackNull.partial === false && ackNull.reason === "AEL_MISSING",
+    "acknowledgeAelInput(null) → usable=false, partial=false, reason=AEL_MISSING");
+
+  const ackPartial = acknowledgeAelInput("TestEngine",
+    { isPartial: true, partialReason: "parse_failure", root_causes: [{ surfaceSignal: "x", deepCause: "y" }] }, "acc-x");
+  assert(ackPartial.usable === true && ackPartial.partial === true && ackPartial.reason === "AEL_PARTIAL"
+    && ackPartial.partialReason === "parse_failure",
+    "acknowledgeAelInput(isPartial:true) → usable=true, partial=true, reason=AEL_PARTIAL, partialReason propagated");
+
+  const ackFull = acknowledgeAelInput("TestEngine",
+    { root_causes: [{ surfaceSignal: "x", deepCause: "y" }], pain_types: [], causal_chains: [], buying_barriers: [], mechanism_gaps: [], trust_gaps: [] }, "acc-x");
+  assert(ackFull.usable === true && ackFull.partial === false && ackFull.reason === "AEL_OK",
+    "acknowledgeAelInput(full) → usable=true, partial=false, reason=AEL_OK");
+
+  const result1: any = { foo: "bar" };
+  attachAelProvenance(result1, ackPartial);
+  assert(result1._provenance?.aelPartialPropagated === true,
+    "attachAelProvenance(partial): result._provenance.aelPartialPropagated=true");
+  assert(result1._provenance?.aelAcknowledgement === "AEL_PARTIAL",
+    "attachAelProvenance(partial): result._provenance.aelAcknowledgement='AEL_PARTIAL'");
+  assert(result1._provenance?.aelPartialReason === "parse_failure",
+    "attachAelProvenance(partial): result._provenance.aelPartialReason propagated");
+
+  const result2: any = { _provenance: { existing: "keep-me" }, foo: "bar" };
+  attachAelProvenance(result2, ackFull);
+  assert(result2._provenance?.existing === "keep-me",
+    "attachAelProvenance preserves existing _provenance fields");
+  assert(result2._provenance?.aelPartialPropagated === false,
+    "attachAelProvenance(full): aelPartialPropagated=false");
+
+  // formatAELForPrompt banner emission
+  const fullPkg = {
+    root_causes: [{ surfaceSignal: "s", deepCause: "d", causalReasoning: "r", sourceData: "src", confidenceLevel: "high" }],
+    pain_types: [], causal_chains: [], buying_barriers: [], mechanism_gaps: [], trust_gaps: [],
+  };
+  const promptFull = formatAELForPrompt(fullPkg);
+  assert(!promptFull.includes("AEL_PARTIAL_NOTICE"),
+    "formatAELForPrompt(full): no AEL_PARTIAL_NOTICE banner");
+
+  const partialPkg = { ...fullPkg, isPartial: true, partialReason: "build_error" };
+  const promptPartial = formatAELForPrompt(partialPkg);
+  assert(promptPartial.includes("AEL_PARTIAL_NOTICE"),
+    "formatAELForPrompt(partial): emits AEL_PARTIAL_NOTICE degradation banner");
+  assert(promptPartial.includes("partialReason=build_error"),
+    "formatAELForPrompt(partial): banner includes partialReason");
+  assert(promptPartial.includes("PROVISIONAL"),
+    "formatAELForPrompt(partial): banner instructs LLM to treat inferences as PROVISIONAL");
+
+  // F3.10 source-presence: every required AEL consumer imports + invokes the helper
+  const fs = require("fs");
+  const consumers = [
+    "server/positioning-engine/engine.ts",
+    "server/awareness-engine/myth-breaker-llm.ts",
+    "server/offer-engine/engine.ts",
+    "server/offer-engine/identity-llm.ts",
+    "server/persuasion-engine/engine.ts",
+    "server/persuasion-engine/cialdini-llm.ts",
+  ];
+  for (const f of consumers) {
+    const src = fs.readFileSync(f, "utf8");
+    assert(src.includes("acknowledgeAelInput("),
+      `${f}: imports + calls acknowledgeAelInput()`);
+  }
+
+  // Leaf LLM consumers also attach provenance to their returned result
+  const leafConsumers = [
+    "server/awareness-engine/myth-breaker-llm.ts",
+    "server/offer-engine/identity-llm.ts",
+    "server/persuasion-engine/cialdini-llm.ts",
+  ];
+  for (const f of leafConsumers) {
+    const src = fs.readFileSync(f, "utf8");
+    assert(src.includes("attachAelProvenance(result"),
+      `${f}: calls attachAelProvenance(result, aelAck) on success return`);
+  }
+}
+
 runConcurrencyTest().then(() => {
+  runConsumerGuardTests();
   console.log(`\n══ RESULT ══  passed=${passed}  failed=${failed}`);
   if (failed > 0) { console.log("Failures:"); for (const f of failures) console.log(`  - ${f}`); process.exit(1); }
   process.exit(0);

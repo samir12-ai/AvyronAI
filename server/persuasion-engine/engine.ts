@@ -25,6 +25,7 @@ import {
   MESSAGE_STEP_CATEGORY_MAP,
 } from "./constants";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { acknowledgeAelInput } from "../analytical-enrichment-layer/consumer-guard";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
@@ -2015,6 +2016,7 @@ export async function analyzePersuasion(
 ): Promise<PersuasionResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+  acknowledgeAelInput("PersuasionEngine-V3", analyticalEnrichment, accountId);
 
   if (analyticalEnrichment) {
     const aelBlock = formatAELForPrompt(analyticalEnrichment);

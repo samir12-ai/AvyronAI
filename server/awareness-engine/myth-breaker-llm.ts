@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { acknowledgeAelInput, attachAelProvenance } from "../analytical-enrichment-layer/consumer-guard";
 import type { MythBreakerReasoning } from "./types";
 
 interface RootCauseRef {
@@ -116,6 +117,7 @@ export async function generateMythBreaker(args: {
   accountId: string;
 }): Promise<MythBreakerReasoning | null> {
   const startTs = Date.now();
+  const aelAck = acknowledgeAelInput("AwarenessMythBreaker", args.analyticalEnrichment, args.accountId);
   const rootCauses = extractRootCausesFromAEL(args.analyticalEnrichment);
 
   if (args.audienceObjections.length === 0 && args.audienceBeliefs.length === 0 && args.audiencePains.length === 0) {
@@ -159,6 +161,7 @@ export async function generateMythBreaker(args: {
     modelUsed: "gpt-4.1-mini",
     generatedAt: new Date().toISOString(),
   };
+  attachAelProvenance(result as any, aelAck);
 
   console.log(`[AwarenessMythBreaker] STEP_2 | parsed | mythBreaker="${result.mythBreakerStatement.slice(0, 100)}" | rcRefs=${result.rootCauseRefs.join(",") || "(none)"} | evidence=${result.evidenceForBelief.length}`);
   console.log(`[AwarenessMythBreaker] STEP_3 | DONE in ${Date.now() - startTs}ms`);
