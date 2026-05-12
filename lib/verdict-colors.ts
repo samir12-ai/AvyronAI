@@ -33,6 +33,12 @@ export const VERDICT_COLORS = {
   red: '#EF4444',
   slate: '#64748B',
   cyan: '#06B6D4',
+  /**
+   * Blue is the canonical color for the "user must act" semantic — used by
+   * NEEDS_INPUT (the engine pipeline is healthy but waiting on the operator).
+   * Distinct from amber (degraded) and slate (unknown / pending).
+   */
+  blue: '#3B82F6',
 } as const;
 
 const INTEGRITY_VERDICT_SET: ReadonlySet<string> = new Set(['PASS', 'PARTIAL', 'FAIL']);
@@ -87,9 +93,16 @@ export function colorForExecutionStatus(
       case 'COMPLETED':
         return VERDICT_COLORS.green;
       case 'PARTIAL':
-      case 'NEEDS_INPUT':
-      case 'PENDING':
         return VERDICT_COLORS.amber;
+      // Spec: NEEDS_INPUT = blue (operator action required, not failure).
+      case 'NEEDS_INPUT':
+        return VERDICT_COLORS.blue;
+      // Spec: PENDING = slate (queued / not yet started — distinct from amber).
+      case 'PENDING':
+        return VERDICT_COLORS.slate;
+      // BLOCKED_BY_INTEGRITY shares the red base color with BLOCKED — the
+      // *lock* iconography (rendered by the consumer via iconForExecutionStatus)
+      // is what disambiguates the two semantics.
       case 'BLOCKED':
       case 'BLOCKED_BY_INTEGRITY':
       case 'ERROR':
@@ -167,4 +180,37 @@ export function isCanonicalIntegrityVerdict(canonical: string | null | undefined
 }
 export function isCanonicalExecutionStatus(canonical: string | null | undefined): boolean {
   return !!(canonical && EXECUTION_STATUS_SET.has(canonical));
+}
+
+/**
+ * Canonical Ionicons name for an executionStatus enum. BLOCKED_BY_INTEGRITY
+ * gets a *lock* icon — distinct from generic BLOCKED's "ban" — so the
+ * "the integrity layer is holding execution" semantic is visible at a glance.
+ * Returns 'help-circle-outline' for missing/unknown so the UI never renders
+ * a misleading checkmark.
+ */
+export type ExecutionStatusIconName =
+  | 'checkmark-circle'
+  | 'alert-circle-outline'
+  | 'time-outline'
+  | 'pause-circle'
+  | 'lock-closed'
+  | 'ban'
+  | 'close-circle'
+  | 'help-circle-outline';
+
+export function iconForExecutionStatus(
+  canonical: string | null | undefined,
+): ExecutionStatusIconName {
+  if (!canonical || !EXECUTION_STATUS_SET.has(canonical)) return 'help-circle-outline';
+  switch (canonical) {
+    case 'COMPLETED': return 'checkmark-circle';
+    case 'PARTIAL': return 'alert-circle-outline';
+    case 'PENDING': return 'time-outline';
+    case 'NEEDS_INPUT': return 'pause-circle';
+    case 'BLOCKED_BY_INTEGRITY': return 'lock-closed';
+    case 'BLOCKED': return 'ban';
+    case 'ERROR': return 'close-circle';
+    default: return 'help-circle-outline';
+  }
 }

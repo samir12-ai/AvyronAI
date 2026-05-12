@@ -110,9 +110,15 @@ export default function AuditControlScreen() {
     system_untrusted: 'FAIL',
     blocked: 'FAIL',
   };
-  const canonicalVerdict =
-    (data as any)?.verdict?.verdict ??
-    ((data as any)?.integrityVerdict ?? null);
+  // Map the system-control verdict enum (PASS|DOWNGRADE|REPAIR|BLOCK) to the
+  // canonical IntegrityVerdict enum (PASS|PARTIAL|FAIL). Typed: `data` is
+  // `RunTruthfulness | undefined` so no `as any` cast is needed (Seal #6 / D3).
+  const verdictRaw = data?.verdict?.verdict ?? null;
+  const canonicalVerdict: 'PASS' | 'PARTIAL' | 'FAIL' | null =
+    verdictRaw === 'PASS' ? 'PASS'
+    : verdictRaw === 'BLOCK' ? 'FAIL'
+    : verdictRaw === 'DOWNGRADE' || verdictRaw === 'REPAIR' ? 'PARTIAL'
+    : null;
   const legacyVerdict = data?.headline ? headlineToVerdict[data.headline] ?? null : null;
   const headlineColor = colorForIntegrityVerdict(canonicalVerdict, legacyVerdict);
 

@@ -22,6 +22,7 @@ import { useCampaign } from '@/context/CampaignContext';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
 import PlanDocumentView from '@/components/PlanDocumentView';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
+import { colorForExecutionStatus, VERDICT_COLORS } from '@/lib/verdict-colors';
 
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
 type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'EXTRACTION_FALLBACK' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
@@ -2062,23 +2063,25 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         iteration: 'Iteration Engine',
         retention: 'Retention Engine',
       };
-      // Seal #6 / Task #24: canonical executionStatus enum drives colors.
-      // Legacy SUCCESS / COMPLETE are coerced to amber (PARTIAL semantic) —
-      // they appear here only to keep pre-canonical snapshots renderable
-      // without flashing green. D4: legacy fields cannot satisfy the canonical
-      // contract.
+      // Seal #6 / Task #24 (validator-#3): colors now sourced from the
+      // canonical helper `colorForExecutionStatus()`. Legacy SUCCESS / COMPLETE
+      // are still listed as legacy keys so pre-canonical snapshots render
+      // without flashing green. RUNNING / SKIPPED are local UI states (not
+      // part of the canonical executionStatus enum) and keep their literal
+      // colors. NEEDS_INPUT is blue (operator action), PENDING is slate
+      // (queued) — matches the spec asserted in __tests__/verdict-colors.test.ts.
       const sectionColors: Record<string, string> = {
-        PENDING: '#6B7280',
-        RUNNING: '#3B82F6',
-        COMPLETED: '#10B981', // canonical only
-        SUCCESS: '#F59E0B',   // legacy → amber, never green
-        COMPLETE: '#F59E0B',  // legacy → amber, never green
-        PARTIAL: '#F59E0B',
-        ERROR: '#EF4444',
-        BLOCKED: '#EF4444',
-        BLOCKED_BY_INTEGRITY: '#EF4444',
+        PENDING: VERDICT_COLORS.slate,
+        RUNNING: VERDICT_COLORS.blue,
+        COMPLETED: colorForExecutionStatus('COMPLETED'),
+        SUCCESS: colorForExecutionStatus(null, 'SUCCESS'),   // legacy → amber
+        COMPLETE: colorForExecutionStatus(null, 'SUCCESS'),  // legacy → amber
+        PARTIAL: colorForExecutionStatus('PARTIAL'),
+        ERROR: colorForExecutionStatus('ERROR'),
+        BLOCKED: colorForExecutionStatus('BLOCKED'),
+        BLOCKED_BY_INTEGRITY: colorForExecutionStatus('BLOCKED_BY_INTEGRITY'),
         SKIPPED: '#9CA3AF',
-        NEEDS_INPUT: '#F59E0B',
+        NEEDS_INPUT: colorForExecutionStatus('NEEDS_INPUT'),
       };
       const sectionIcons: Record<string, string> = {
         PENDING: 'ellipse-outline',

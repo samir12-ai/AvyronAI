@@ -19,6 +19,7 @@ import {
   labelForIntegrityVerdict,
   isCanonicalIntegrityVerdict,
   isCanonicalExecutionStatus,
+  iconForExecutionStatus,
   VERDICT_COLORS,
 } from '../lib/verdict-colors';
 
@@ -60,10 +61,12 @@ describe('colorForExecutionStatus — full enum (D2/D3)', () => {
   it('COMPLETED → green (only canonical-COMPLETED earns green)', () => {
     expect(colorForExecutionStatus('COMPLETED')).toBe(GREEN);
   });
+  // Spec (validator-#2): PENDING=slate (queued), NEEDS_INPUT=blue
+  // (operator-action), PARTIAL=amber (degraded), BLOCKED*=red, ERROR=red.
   it.each([
     ['PARTIAL', AMBER],
-    ['NEEDS_INPUT', AMBER],
-    ['PENDING', AMBER],
+    ['NEEDS_INPUT', VERDICT_COLORS.blue],
+    ['PENDING', SLATE],
     ['BLOCKED', RED],
     ['BLOCKED_BY_INTEGRITY', RED],
     ['ERROR', RED],
@@ -179,19 +182,20 @@ describe('OrchestratorPanel — legacy SUCCESS cannot render green (validator-#1
 });
 
 describe('BuildThePlan — sectionColors map cannot paint legacy SUCCESS green', () => {
-  // Mirrors the inline sectionColors map in BuildThePlan.tsx loading branch.
+  // Mirrors the inline sectionColors map in BuildThePlan.tsx loading branch
+  // (post-validator-#3: now sourced from colorForExecutionStatus helper).
   const sectionColors: Record<string, string> = {
-    PENDING: '#6B7280',
-    RUNNING: '#3B82F6',
-    COMPLETED: '#10B981',
-    SUCCESS: '#F59E0B',
-    COMPLETE: '#F59E0B',
-    PARTIAL: '#F59E0B',
-    ERROR: '#EF4444',
-    BLOCKED: '#EF4444',
-    BLOCKED_BY_INTEGRITY: '#EF4444',
+    PENDING: VERDICT_COLORS.slate,
+    RUNNING: VERDICT_COLORS.blue,
+    COMPLETED: colorForExecutionStatus('COMPLETED'),
+    SUCCESS: colorForExecutionStatus(null, 'SUCCESS'),
+    COMPLETE: colorForExecutionStatus(null, 'SUCCESS'),
+    PARTIAL: colorForExecutionStatus('PARTIAL'),
+    ERROR: colorForExecutionStatus('ERROR'),
+    BLOCKED: colorForExecutionStatus('BLOCKED'),
+    BLOCKED_BY_INTEGRITY: colorForExecutionStatus('BLOCKED_BY_INTEGRITY'),
     SKIPPED: '#9CA3AF',
-    NEEDS_INPUT: '#F59E0B',
+    NEEDS_INPUT: colorForExecutionStatus('NEEDS_INPUT'),
   };
   it('canonical COMPLETED → green (#10B981)', () => {
     expect(sectionColors.COMPLETED).toBe('#10B981');
@@ -201,6 +205,53 @@ describe('BuildThePlan — sectionColors map cannot paint legacy SUCCESS green',
     expect(sectionColors.COMPLETE).toBe('#F59E0B');
     expect(sectionColors.SUCCESS).not.toBe('#10B981');
     expect(sectionColors.COMPLETE).not.toBe('#10B981');
+  });
+  // validator-#3 regression: NEEDS_INPUT must be blue, PENDING slate.
+  it('NEEDS_INPUT → blue (#3B82F6), not amber (validator-#3 regression)', () => {
+    expect(sectionColors.NEEDS_INPUT).toBe('#3B82F6');
+    expect(sectionColors.NEEDS_INPUT).not.toBe('#F59E0B');
+  });
+  it('PENDING → slate (#64748B), not amber (validator-#3 regression)', () => {
+    expect(sectionColors.PENDING).toBe('#64748B');
+    expect(sectionColors.PENDING).not.toBe('#F59E0B');
+  });
+});
+
+describe('execution status — spec-compliant color mapping (validator-#2)', () => {
+  it('NEEDS_INPUT → blue (#3B82F6), not amber', () => {
+    expect(colorForExecutionStatus('NEEDS_INPUT', null)).toBe('#3B82F6');
+    expect(colorForExecutionStatus('NEEDS_INPUT', null)).not.toBe(AMBER);
+  });
+  it('PENDING → slate (#64748B), not amber', () => {
+    expect(colorForExecutionStatus('PENDING', null)).toBe(SLATE);
+    expect(colorForExecutionStatus('PENDING', null)).not.toBe(AMBER);
+  });
+  it('PARTIAL stays amber', () => {
+    expect(colorForExecutionStatus('PARTIAL', null)).toBe(AMBER);
+  });
+  it('BLOCKED_BY_INTEGRITY shares red color but distinct icon (lock-closed)', () => {
+    expect(colorForExecutionStatus('BLOCKED_BY_INTEGRITY', null)).toBe('#EF4444');
+    expect(colorForExecutionStatus('BLOCKED', null)).toBe('#EF4444');
+  });
+});
+
+describe('iconForExecutionStatus — BLOCKED_BY_INTEGRITY lock semantic', () => {
+  it('BLOCKED_BY_INTEGRITY → lock-closed (distinct from BLOCKED ban)', () => {
+    expect(iconForExecutionStatus('BLOCKED_BY_INTEGRITY')).toBe('lock-closed');
+    expect(iconForExecutionStatus('BLOCKED')).toBe('ban');
+  });
+  it('canonical statuses each map to a unique icon', () => {
+    expect(iconForExecutionStatus('COMPLETED')).toBe('checkmark-circle');
+    expect(iconForExecutionStatus('PARTIAL')).toBe('alert-circle-outline');
+    expect(iconForExecutionStatus('PENDING')).toBe('time-outline');
+    expect(iconForExecutionStatus('NEEDS_INPUT')).toBe('pause-circle');
+    expect(iconForExecutionStatus('ERROR')).toBe('close-circle');
+  });
+  it('missing/unknown → help icon (never checkmark)', () => {
+    expect(iconForExecutionStatus(null)).toBe('help-circle-outline');
+    expect(iconForExecutionStatus(undefined)).toBe('help-circle-outline');
+    expect(iconForExecutionStatus('SUCCESS')).toBe('help-circle-outline'); // legacy → no icon
+    expect(iconForExecutionStatus('GIBBERISH')).toBe('help-circle-outline');
   });
 });
 

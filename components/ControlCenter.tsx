@@ -21,6 +21,7 @@ import {
   colorForExecutionStatus,
   labelForExecutionStatus,
   isCanonicalExecutionStatus,
+  iconForExecutionStatus,
 } from '@/lib/verdict-colors';
 
 type PanelState = 'loading' | 'empty' | 'error' | 'success';
@@ -631,6 +632,9 @@ export default function ControlCenter() {
                 {d.executionStatus && (() => {
                   // Seal #6: full executionStatus enum (D2/D3). Legacy SUCCESS
                   // / FAILURE strings are coerced to amber/red — never green.
+                  // BLOCKED_BY_INTEGRITY renders with a distinct lock icon so
+                  // the "integrity layer is holding execution" semantic is
+                  // visible at a glance (vs generic BLOCKED's ban icon).
                   const isCanonical = isCanonicalExecutionStatus(d.executionStatus);
                   const color = colorForExecutionStatus(
                     isCanonical ? d.executionStatus : null,
@@ -640,8 +644,15 @@ export default function ControlCenter() {
                     isCanonical ? d.executionStatus : null,
                     isCanonical ? null : d.executionStatus,
                   );
+                  const iconName = iconForExecutionStatus(isCanonical ? d.executionStatus : null);
+                  const showIcon = isCanonical && (
+                    d.executionStatus === 'BLOCKED_BY_INTEGRITY'
+                    || d.executionStatus === 'BLOCKED'
+                    || d.executionStatus === 'NEEDS_INPUT'
+                  );
                   return (
-                    <View style={[s.statusPill, { backgroundColor: color + '15' }]}>
+                    <View style={[s.statusPill, { backgroundColor: color + '15', flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                      {showIcon && <Ionicons name={iconName} size={11} color={color} />}
                       <Text style={[s.statusPillText, { color }]}>
                         {label}{!isCanonical ? '*' : ''}
                       </Text>
