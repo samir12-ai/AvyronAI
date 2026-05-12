@@ -328,14 +328,19 @@ export function startSnapshotCleanupWorker(): void {
 
   cleanupTimer = setInterval(async () => {
     // Seal #7 / F10.7 — emit worker_tick_total metric per cycle.
+    // Seal #7 / pass-16 (architect #3): per-tick traceId for log/Sentry continuity.
     const { recordWorkerTick } = await import("./observability/otel");
-    try {
-      await runSnapshotCleanup();
-      recordWorkerTick("snapshot_cleanup", "ok");
-    } catch (err) {
-      recordWorkerTick("snapshot_cleanup", "error");
-      console.error("[SnapshotCleanup] Scheduled run error:", err);
-    }
+    const { traceContext } = await import("./trace-context");
+    const { randomUUID } = await import("node:crypto");
+    await traceContext.run({ traceId: `worker-snapshot-cleanup-${randomUUID()}` }, async () => {
+      try {
+        await runSnapshotCleanup();
+        recordWorkerTick("snapshot_cleanup", "ok");
+      } catch (err) {
+        recordWorkerTick("snapshot_cleanup", "error");
+        console.error("[SnapshotCleanup] Scheduled run error:", err);
+      }
+    });
   }, CLEANUP_INTERVAL_MS);
 }
 

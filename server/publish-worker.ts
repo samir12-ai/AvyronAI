@@ -607,20 +607,10 @@ export function startPublishWorker() {
   }).catch(() => {});
 
   publishTimer = setInterval(async () => {
-    // Seal #7 / F10.7 — emit worker_tick_total metric per cycle.
-    const { recordWorkerTick } = await import("./observability/otel");
-    if (isShuttingDown) {
-      recordWorkerTick("publish", "skipped");
-      return;
-    }
-    try {
-      await checkAndPublishDuePosts();
-      await fetchPostMetrics();
-      recordWorkerTick("publish", "ok");
-    } catch (err) {
-      recordWorkerTick("publish", "error");
-      console.error("[PublishWorker] tick error:", err);
-    }
+    // Seal #7 / pass-16 (architect #3): per-tick traceId for log/Sentry continuity.
+    const { traceContext } = await import("./trace-context");
+    const { randomUUID } = await import("node:crypto");
+    await traceContext.run({ traceId: `worker-publish-${randomUUID()}` }, () => publishTickBody());
   }, PUBLISH_CHECK_INTERVAL_MS);
 
   setTimeout(async () => {
@@ -629,6 +619,22 @@ export function startPublishWorker() {
       await fetchPostMetrics();
     }
   }, 10000);
+}
+
+async function publishTickBody() {
+  const { recordWorkerTick } = await import("./observability/otel");
+  if (isShuttingDown) {
+    recordWorkerTick("publish", "skipped");
+    return;
+  }
+  try {
+    await checkAndPublishDuePosts();
+    await fetchPostMetrics();
+    recordWorkerTick("publish", "ok");
+  } catch (err) {
+    recordWorkerTick("publish", "error");
+    console.error("[PublishWorker] tick error:", err);
+  }
 }
 
 export { cleanupStaleLocks, acquireLock, releaseLock, isNonRetryableError, STALE_LOCK_TIMEOUT_MS, MAX_RETRY_ATTEMPTS };

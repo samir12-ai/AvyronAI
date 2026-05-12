@@ -27,6 +27,8 @@ import { snapshotPreMetrics, evaluatePendingOutcomes, getRecentOutcomesForPrompt
 import { calculateConfidence, computeDecisionSuccessRate, getLast2Outcomes, checkSafeModeExitConditions } from "./confidence";
 import { aiChat } from "./ai-client";
 import { validateAgentDecisionBinding } from "./decision-policy";
+import { traceContext } from "./trace-context";
+import { randomUUID } from "node:crypto";
 
 const WORKER_INTERVAL_MS = 5 * 60 * 1000;
 const CYCLE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
@@ -1176,6 +1178,13 @@ function classifyInsightTypeFromState(
 const WORKER_CONCURRENCY = 3;
 
 async function workerTick() {
+  // Seal #7 / pass-16 (architect comment #3): wrap entire tick body in a
+  // fresh traceContext so logs/Sentry events emitted by worker code carry
+  // a per-tick traceId — same observability contract as HTTP requests.
+  return traceContext.run({ traceId: `worker-autonomous-${randomUUID()}` }, () => workerTickBody());
+}
+
+async function workerTickBody() {
   // P1-18 (W4.1, post-architect-#3 fix): explicit shutdown gate at the top
   // of every tick AND between batches. Without these two checks the
   // `installShutdownHandlers()` flag was inert against in-flight ticks.
