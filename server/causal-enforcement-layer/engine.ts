@@ -16,12 +16,34 @@ import {
 
 const LOG_PREFIX = "[CEL]";
 
+// P1-4 (runtime-truth-isolation): bounded LRU cache. The previous Map was
+// unbounded — any account could grow it indefinitely (one entry per
+// (account, campaign) pair) until process OOM. The eviction policy is
+// strict LRU on read+write with a hard size cap, and TTL is enforced on
+// every read so stale entries never serve a live decision. The cache key
+// remains `${accountId}:${campaignId}` (per-tenant); cross-run blending
+// within a tenant is gated downstream by sourceJobId checks in
+// classifyTrust + the build-plan-layer sourceJobId reads (P0-6).
 const celReportCache = new Map<string, { report: CELReport; storedAt: number }>();
 const CEL_REPORT_TTL = 30 * 60 * 1000;
+const CEL_REPORT_MAX_ENTRIES = 500;
+
+function celCacheTouch(key: string, value: { report: CELReport; storedAt: number }): void {
+  // Re-insertion at the end of the Map = LRU touch (Map preserves
+  // insertion order on iteration; the oldest key is the first one out).
+  celReportCache.delete(key);
+  celReportCache.set(key, value);
+  while (celReportCache.size > CEL_REPORT_MAX_ENTRIES) {
+    const oldest = celReportCache.keys().next().value;
+    if (oldest === undefined) break;
+    celReportCache.delete(oldest);
+    console.warn(`${LOG_PREFIX} CACHE_LRU_EVICT | key=${oldest} | reason=size_cap`);
+  }
+}
 
 export function storeCELReport(campaignId: string, accountId: string, report: CELReport): void {
   const key = `${accountId}:${campaignId}`;
-  celReportCache.set(key, { report, storedAt: Date.now() });
+  celCacheTouch(key, { report, storedAt: Date.now() });
   console.log(`${LOG_PREFIX} REPORT_STORED | campaign=${campaignId} | account=${accountId} | engines=${report.engineResults.length} | score=${report.overallScore}`);
 }
 
@@ -33,6 +55,8 @@ export function getCachedCELReport(campaignId: string, accountId: string): CELRe
     celReportCache.delete(key);
     return null;
   }
+  // LRU touch on read so hot keys survive eviction longer.
+  celCacheTouch(key, entry);
   return entry.report;
 }
 

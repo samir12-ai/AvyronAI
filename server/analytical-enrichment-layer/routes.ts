@@ -9,8 +9,25 @@ import { AnalyticalPackage } from "./types";
 import { authMiddleware, resolveAccountId, type AuthRequest } from "../auth";
 const LOG_PREFIX = "[AEL-Routes]";
 
+// P1-4 (runtime-truth-isolation): bounded LRU cache. Previously unbounded
+// (one entry per (account, campaign) pair could grow indefinitely). Hard
+// size cap + LRU touch on read/write + TTL enforcement on every read. Key
+// remains `${accountId}:${campaignId}` — cross-tenant isolation enforced;
+// cross-run blending within a tenant is gated downstream by classifyTrust.
 const aelCache = new Map<string, { pkg: AnalyticalPackage; timestamp: number }>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const AEL_MAX_ENTRIES = 500;
+
+function aelCacheTouch(key: string, value: { pkg: AnalyticalPackage; timestamp: number }): void {
+  aelCache.delete(key);
+  aelCache.set(key, value);
+  while (aelCache.size > AEL_MAX_ENTRIES) {
+    const oldest = aelCache.keys().next().value;
+    if (oldest === undefined) break;
+    aelCache.delete(oldest);
+    console.warn(`${LOG_PREFIX} CACHE_LRU_EVICT | key=${oldest} | reason=size_cap`);
+  }
+}
 
 export function getCachedAEL(campaignId: string, accountId: string): AnalyticalPackage | null {
   const key = `${accountId}:${campaignId}`;
@@ -20,12 +37,13 @@ export function getCachedAEL(campaignId: string, accountId: string): AnalyticalP
     aelCache.delete(key);
     return null;
   }
+  aelCacheTouch(key, entry);
   return entry.pkg;
 }
 
 export function setCachedAEL(campaignId: string, accountId: string, pkg: AnalyticalPackage): void {
   const key = `${accountId}:${campaignId}`;
-  aelCache.set(key, { pkg, timestamp: Date.now() });
+  aelCacheTouch(key, { pkg, timestamp: Date.now() });
 }
 
 export function registerAELRoutes(app: Express) {
