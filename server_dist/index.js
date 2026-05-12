@@ -63864,6 +63864,13 @@ function captureException(err, ctx) {
   } catch {
   }
 }
+async function flushSentry(timeoutMs = 2e3) {
+  if (!sentry) return;
+  try {
+    await sentry.flush(timeoutMs);
+  } catch {
+  }
+}
 
 // server/bootstrap.ts
 validateEnv();
@@ -97445,7 +97452,7 @@ function setupErrorHandler(app2) {
       "boot schema check FAILED \u2014 refusing to start"
     );
     captureException(err, { phase: "boot-migrations" });
-    await new Promise((resolve4) => setTimeout(resolve4, 500));
+    await flushSentry(2e3);
     process.exit(1);
   }
   server.listen(
@@ -97560,4 +97567,22 @@ function setupErrorHandler(app2) {
   }
   process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
   process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  process.on("uncaughtException", async (err) => {
+    try {
+      logger.error({ component: "process", err: String(err), stack: err?.stack }, "uncaughtException \u2014 process exiting");
+    } catch {
+    }
+    captureException(err, { phase: "uncaughtException" });
+    await flushSentry(2e3);
+    process.exit(1);
+  });
+  process.on("unhandledRejection", async (reason) => {
+    try {
+      logger.error({ component: "process", reason: String(reason) }, "unhandledRejection \u2014 process exiting");
+    } catch {
+    }
+    captureException(reason, { phase: "unhandledRejection" });
+    await flushSentry(2e3);
+    process.exit(1);
+  });
 })();

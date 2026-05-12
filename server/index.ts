@@ -3,7 +3,7 @@
 // order, so any module imported below will see a validated environment and
 // initialized observability. Do not reorder.
 import "./bootstrap";
-import { captureException, isSentryEnabled } from "./observability/sentry";
+import { captureException, flushSentry, isSentryEnabled } from "./observability/sentry";
 
 import { runStartupArtifactGuard } from "./startup-artifact-guard";
 runStartupArtifactGuard();
@@ -621,8 +621,9 @@ function setupErrorHandler(app: express.Application) {
       "boot schema check FAILED — refusing to start",
     );
     captureException(err, { phase: "boot-migrations" });
-    // Give Sentry a moment to flush before exit.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Pass-11: explicit flush instead of arbitrary 500ms wait — guarantees
+    // the boot-failure event reaches Sentry before the process dies.
+    await flushSentry(2000);
     process.exit(1);
   }
 
@@ -763,4 +764,27 @@ function setupErrorHandler(app: express.Application) {
 
   process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
   process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+  // Pass-11: fatal-exit Sentry flush. Architect-review feedback —
+  // `initSentry().catch(...)` in bootstrap.ts is non-blocking, so the SDK may
+  // not have finished loading at the moment a very-early uncaughtException
+  // fires. The flushSentry() helper is safe-no-op when the shim wasn't ready
+  // (returns immediately). When the SDK IS ready we get up to 2s to drain
+  // queued events to Sentry before the process exits 1.
+  process.on("uncaughtException", async (err) => {
+    try {
+      logger.error({ component: "process", err: String(err), stack: err?.stack }, "uncaughtException — process exiting");
+    } catch { /* never throw from telemetry */ }
+    captureException(err, { phase: "uncaughtException" });
+    await flushSentry(2000);
+    process.exit(1);
+  });
+  process.on("unhandledRejection", async (reason) => {
+    try {
+      logger.error({ component: "process", reason: String(reason) }, "unhandledRejection — process exiting");
+    } catch { /* never throw from telemetry */ }
+    captureException(reason, { phase: "unhandledRejection" });
+    await flushSentry(2000);
+    process.exit(1);
+  });
 })();
