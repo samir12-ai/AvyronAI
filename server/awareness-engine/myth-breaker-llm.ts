@@ -161,7 +161,7 @@ export async function generateMythBreaker(args: {
     modelUsed: "gpt-4.1-mini",
     generatedAt: new Date().toISOString(),
   };
-  applyPartialAelDowngrade("AwarenessMythBreaker", result as any, aelAck);
+  applyPartialAelDowngrade("AwarenessMythBreaker", result, aelAck);
 
   console.log(`[AwarenessMythBreaker] STEP_2 | parsed | mythBreaker="${result.mythBreakerStatement.slice(0, 100)}" | rcRefs=${result.rootCauseRefs.join(",") || "(none)"} | evidence=${result.evidenceForBelief.length}`);
   console.log(`[AwarenessMythBreaker] STEP_3 | DONE in ${Date.now() - startTs}ms`);

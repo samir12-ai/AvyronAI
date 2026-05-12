@@ -171,7 +171,7 @@ export async function generateOfferIdentityReasoning(args: {
     modelUsed: "gpt-4.1-mini",
     generatedAt: new Date().toISOString(),
   };
-  applyPartialAelDowngrade("OfferIdentity", result as any, aelAck);
+  applyPartialAelDowngrade("OfferIdentity", result, aelAck);
 
   console.log(`[OfferIdentity] STEP_2 | parsed | identityPayoff="${result.identityPayoff.slice(0, 100)}" | rejectedAlts=${result.rejectedAlternatives.length} | groundedSignals=${result.groundedSignals.length}`);
   console.log(`[OfferIdentity] STEP_3 | DONE in ${Date.now() - startTs}ms`);

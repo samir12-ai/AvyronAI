@@ -17,6 +17,7 @@ import {
   MIN_QUALIFYING_SIGNALS,
 } from "../shared/signal-lineage";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
@@ -748,9 +749,10 @@ export async function runAwarenessEngine(
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
 
+  const aelAck = acknowledgeAelInput("AwarenessEngine-V3", analyticalEnrichment ?? null, accountId);
   if (analyticalEnrichment) {
     const aelBlock = formatAELForPrompt(analyticalEnrichment);
-    console.log(`[AwarenessEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(analyticalEnrichment).filter(k => analyticalEnrichment[k] && (Array.isArray(analyticalEnrichment[k]) ? analyticalEnrichment[k].length > 0 : true)).length}`);
+    console.log(`[AwarenessEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(analyticalEnrichment).filter(k => analyticalEnrichment[k] && (Array.isArray(analyticalEnrichment[k]) ? analyticalEnrichment[k].length > 0 : true)).length} | partial=${aelAck.partial}`);
   }
 
   const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
@@ -968,24 +970,25 @@ export async function runAwarenessEngine(
     }
   }
 
+  const celSourceTexts = [
+    primaryRoute.routeName || "",
+    primaryRoute.entryMechanismType || "",
+    primaryRoute.targetReadinessStage || "",
+    primaryRoute.triggerClass || "",
+    primaryRoute.trustRequirement || "",
+    primaryRoute.funnelCompatibility || "",
+    ...primaryRoute.frictionNotes,
+  ];
   const celDepth = enforceEngineDepthCompliance(
     "awareness",
-    [
-      primaryRoute.routeName || "",
-      primaryRoute.entryMechanismType || "",
-      primaryRoute.targetReadinessStage || "",
-      primaryRoute.triggerClass || "",
-      primaryRoute.trustRequirement || "",
-      primaryRoute.funnelCompatibility || "",
-      ...primaryRoute.frictionNotes,
-    ],
+    celSourceTexts,
     analyticalEnrichment || null,
   );
 
   let depthGateResult: DepthGateResult | null = null;
 
-  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
-    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`]);
+  if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
+    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`], celSourceTexts);
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[AwarenessEngine-V3] CEL_DEPTH: ${logEntry}`);
     }
@@ -1022,9 +1025,9 @@ export async function runAwarenessEngine(
     console.log(`[AwarenessEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
 
-  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`]);
+  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`], celSourceTexts);
 
-  return {
+  const __awarenessResult = {
     status: STATUS.COMPLETE,
     statusMessage: confidenceNormalized
       ? `Analysis complete — confidence normalized due to data reliability (${reliability.overallReliability.toFixed(2)})`
@@ -1042,6 +1045,7 @@ export async function runAwarenessEngine(
     celDepthCompliance: celDepth,
     depthGateResult,
   };
+  return applyPartialAelDowngrade("AwarenessEngine-V3", __awarenessResult, aelAck);
 }
 
 function emptyRoute(name: string, reason: string | null = null): AwarenessRoute {

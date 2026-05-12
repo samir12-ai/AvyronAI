@@ -1456,18 +1456,19 @@ export async function runFunnelEngine(
 
   const criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
 
+  let celSourceTexts: string[] = [
+    primaryFunnel.funnelType || "",
+    ...(primaryFunnel.frictionMap || []).map((f: any) => `${f.stage || ""} ${f.frictionType || ""} ${f.mitigation || ""}`),
+    ...(primaryFunnel.trustPath || []).map((t: any) => `${t.stage || ""} ${t.proofType || ""} ${t.rationale || ""}`),
+  ];
   let celDepth = enforceEngineDepthCompliance(
     "funnel",
-    [
-      primaryFunnel.funnelType || "",
-      ...(primaryFunnel.frictionMap || []).map((f: any) => `${f.stage || ""} ${f.frictionType || ""} ${f.mitigation || ""}`),
-      ...(primaryFunnel.trustPath || []).map((t: any) => `${t.stage || ""} ${t.proofType || ""} ${t.rationale || ""}`),
-    ],
+    celSourceTexts,
     analyticalEnrichment || null,
   );
   diagnostics.celDepthCompliance = celDepth;
 
-  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+  if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
     for (let funnelDepthAttempt = 2; funnelDepthAttempt <= funnelDepthGateMaxAttempts; funnelDepthAttempt++) {
       funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt - 1}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
       funnelDepthRejectionContext = buildDepthRejectionDirective(celDepth, funnelDepthAttempt - 1);
@@ -1481,17 +1482,18 @@ export async function runFunnelEngine(
         continue;
       }
 
+      celSourceTexts = [
+        aiFunnels.primary?.type || "",
+        aiFunnels.primary?.name || "",
+      ];
       celDepth = enforceEngineDepthCompliance(
         "funnel",
-        [
-          aiFunnels.primary?.type || "",
-          aiFunnels.primary?.name || "",
-        ],
+        celSourceTexts,
         analyticalEnrichment || null,
       );
       diagnostics.celDepthCompliance = celDepth;
 
-      if (!isDepthBlocking(celDepth)) {
+      if (!isDepthBlocking(celDepth, celSourceTexts)) {
         funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
         console.log(`[FunnelEngine-V3] DEPTH_GATE: Attempt ${funnelDepthAttempt} PASSED | depthScore=${celDepth.causalDepthScore}`);
         break;
@@ -1499,7 +1501,7 @@ export async function runFunnelEngine(
 
       if (funnelDepthAttempt >= funnelDepthGateMaxAttempts) {
         funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: FINAL FAILURE (depthScore=${celDepth.causalDepthScore})`);
-        const depthGateResult = buildDepthGateResult(celDepth, funnelDepthAttempt, funnelDepthGateMaxAttempts, funnelDepthGateLog);
+        const depthGateResult = buildDepthGateResult(celDepth, funnelDepthAttempt, funnelDepthGateMaxAttempts, funnelDepthGateLog, celSourceTexts);
         console.log(`[FunnelEngine-V3] DEPTH_GATE: FINAL FAILURE after ${funnelDepthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
         return {
           status: "DEPTH_FAILED",
@@ -1532,7 +1534,7 @@ export async function runFunnelEngine(
   } else {
     console.log(`[FunnelEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
-  const depthGateResultFunnel = funnelDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, funnelDepthGateLog.length, funnelDepthGateMaxAttempts, funnelDepthGateLog) : null;
+  const depthGateResultFunnel = funnelDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, funnelDepthGateLog.length, funnelDepthGateMaxAttempts, funnelDepthGateLog, celSourceTexts) : null;
   diagnostics.depthGate = depthGateResultFunnel;
   const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
 

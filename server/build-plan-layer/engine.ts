@@ -1,4 +1,6 @@
 import { aiChat } from "../ai-client";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
+import type { AnalyticalPackage } from "../analytical-enrichment-layer/types";
 import { db } from "../db";
 import {
   positioningSnapshots,
@@ -511,8 +513,10 @@ export async function runBuildPlanLayer(
   campaignId: string,
   depthGateStatus?: Record<string, string>,
   sourceJobId?: string | null,
+  analyticalEnrichment?: AnalyticalPackage | null,
 ): Promise<BuildPlanResult> {
   const MAX_ATTEMPTS = 3;
+  const aelAck = acknowledgeAelInput("BuildPlanLayer", analyticalEnrichment ?? null, accountId);
 
   // P0-6: thread sourceJobId so every engine output read is scoped to the
   // same orchestrator run. If absent, getLatestSnapshot will emit
@@ -592,13 +596,14 @@ export async function runBuildPlanLayer(
       console.log(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`);
 
       if (actionability.passed) {
-        return {
+        const successResult: BuildPlanResult = {
           status: "SUCCESS",
           plan,
           actionabilityScore: actionability.score,
           failedBlocks: [],
           attempts: attempt,
         };
+        return applyPartialAelDowngrade("BuildPlanLayer", successResult, aelAck);
       }
 
       lastFailedBlocks = actionability.failedBlocks;

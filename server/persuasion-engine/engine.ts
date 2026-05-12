@@ -2302,27 +2302,28 @@ export async function analyzePersuasion(
     structuralWarnings.push(...outputBoundaryCheck.warnings);
   }
 
+  const celSourceTexts = [
+    routes.primary.routeName || "",
+    routes.primary.persuasionMode || "",
+    ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
+    ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
+    ...routes.primary.messageOrderLogic.map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
+    ...(routes.primary.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
+    ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
+    ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
+    ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
+    ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""} ${o.causalChainAlignment || ""}`),
+  ];
   const celDepth = enforceEngineDepthCompliance(
     "persuasion",
-    [
-      routes.primary.routeName || "",
-      routes.primary.persuasionMode || "",
-      ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
-      ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
-      ...routes.primary.messageOrderLogic.map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
-      ...(routes.primary.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
-      ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
-      ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
-      ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
-      ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""} ${o.causalChainAlignment || ""}`),
-    ],
+    celSourceTexts,
     analyticalEnrichment || null,
   );
 
   let depthGateResult: DepthGateResult | null = null;
 
-  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
-    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`]);
+  if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
+    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`], celSourceTexts);
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
     }
@@ -2364,7 +2365,7 @@ export async function analyzePersuasion(
     console.log(`[PersuasionEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
 
-  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`]);
+  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`], celSourceTexts);
 
   const finalLayersPassed = allLayers.filter(l => l.passed).length;
   const finalConfidence = routes.primary.persuasionStrengthScore;
@@ -2463,7 +2464,7 @@ export async function analyzePersuasion(
     }
   }
 
-  const __persuasionResult: any = {
+  const __persuasionResult = {
     status: driftStatus,
     statusMessage: driftStatusMessage,
     primaryRoute: routes.primary,

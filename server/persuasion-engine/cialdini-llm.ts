@@ -208,7 +208,7 @@ export async function pickCialdiniPrinciple(args: {
     modelUsed: "gpt-4.1-mini",
     generatedAt: new Date().toISOString(),
   };
-  applyPartialAelDowngrade("PersuasionCialdini", result as any, aelAck);
+  applyPartialAelDowngrade("PersuasionCialdini", result, aelAck);
 
   console.log(`[PersuasionCialdini] STEP_2 | parsed | principle=${result.primaryCialdiniPrinciple} | rcRefs=${result.rootCauseRefs.join(",") || "(none)"} | whyOthersFail=${result.whyOthersFail.length}`);
   console.log(`[PersuasionCialdini] STEP_3 | DONE in ${Date.now() - startTs}ms`);

@@ -425,25 +425,26 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
 
       const finalValidation = validateMechanismAxisAlignment(primaryMech, primaryAxis);
 
+      const celSourceTexts = [
+        primaryMech.mechanismDescription,
+        primaryMech.mechanismLogic,
+        primaryMech.mechanismPromise,
+        primaryMech.mechanismProblem,
+        ...primaryMech.mechanismSteps,
+      ];
       const celDepth = enforceEngineDepthCompliance(
         "mechanism",
-        [
-          primaryMech.mechanismDescription,
-          primaryMech.mechanismLogic,
-          primaryMech.mechanismPromise,
-          primaryMech.mechanismProblem,
-          ...primaryMech.mechanismSteps,
-        ],
+        celSourceTexts,
         analyticalEnrichment || null,
       );
       diagnostics.celDepthCompliance = celDepth;
 
-      if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+      if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
         depthGateLog.push(`Attempt ${depthAttempt}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
         console.log(`[MechanismEngine] DEPTH_GATE: Attempt ${depthAttempt} BLOCKED | depthScore=${celDepth.causalDepthScore} | violations=${celDepth.violations.length}`);
 
         if (depthAttempt >= depthGateMaxAttempts) {
-          const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+          const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
           console.log(`[MechanismEngine] DEPTH_GATE: FINAL FAILURE after ${depthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
           return {
             status: "DEPTH_FAILED",
@@ -495,7 +496,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
       const confidence = Math.min(rawLLMConfidence, inheritedConfidence);
       const confidencePenalty = Math.max(0, rawLLMConfidence - confidence);
 
-      const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+      const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
 
       // T002 v2: collect alternativeMechanisms surfaced by the LLM for audit
       const altMechanismsRaw = Array.isArray(parsed.primary?.alternativeMechanisms)

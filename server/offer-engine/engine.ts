@@ -2951,19 +2951,20 @@ export async function runOfferEngine(
       console.log(`[OfferEngine-V4] AUDIENCE_PAIN_GATE_FAILED | pains=${pains.length} desires=${desires.length} | demoting status COMPLETE → AUDIENCE_MISALIGNMENT`);
     }
 
-    let celDepth = enforceEngineDepthCompliance(
-    "offer",
-    [
+    let celSourceTexts: string[] = [
       primaryOffer.offerName || "",
       primaryOffer.coreOutcome || "",
       primaryOffer.mechanismDescription || "",
       ...(primaryOffer.deliverables || []).map((d: any) => typeof d === "string" ? d : `${d.name || ""} ${d.description || ""}`),
-    ],
+    ];
+    let celDepth = enforceEngineDepthCompliance(
+    "offer",
+    celSourceTexts,
     analyticalEnrichment || null,
   );
   diagnostics.celDepthCompliance = celDepth;
 
-  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+  if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
     for (let offerDepthAttempt = 2; offerDepthAttempt <= offerDepthGateMaxAttempts; offerDepthAttempt++) {
       offerDepthGateLog.push(`Attempt ${offerDepthAttempt - 1}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
       offerDepthRejectionContext = buildDepthRejectionDirective(celDepth, offerDepthAttempt - 1, posLock.lockedDecisions);
@@ -2977,19 +2978,20 @@ export async function runOfferEngine(
         continue;
       }
 
+      celSourceTexts = [
+        aiOffers.primary?.name || "",
+        aiOffers.primary?.outcome || "",
+        aiOffers.primary?.mechanism || "",
+        ...(aiOffers.primary?.deliverables || []),
+      ];
       celDepth = enforceEngineDepthCompliance(
         "offer",
-        [
-          aiOffers.primary?.name || "",
-          aiOffers.primary?.outcome || "",
-          aiOffers.primary?.mechanism || "",
-          ...(aiOffers.primary?.deliverables || []),
-        ],
+        celSourceTexts,
         analyticalEnrichment || null,
       );
       diagnostics.celDepthCompliance = celDepth;
 
-      if (!isDepthBlocking(celDepth)) {
+      if (!isDepthBlocking(celDepth, celSourceTexts)) {
         offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
         console.log(`[OfferEngine-V4] DEPTH_GATE: Attempt ${offerDepthAttempt} PASSED | depthScore=${celDepth.causalDepthScore}`);
         break;
@@ -2997,7 +2999,7 @@ export async function runOfferEngine(
 
       if (offerDepthAttempt >= offerDepthGateMaxAttempts) {
         offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: FINAL FAILURE (depthScore=${celDepth.causalDepthScore})`);
-        const depthGateResult = buildDepthGateResult(celDepth, offerDepthAttempt, offerDepthGateMaxAttempts, offerDepthGateLog);
+        const depthGateResult = buildDepthGateResult(celDepth, offerDepthAttempt, offerDepthGateMaxAttempts, offerDepthGateLog, celSourceTexts);
         console.log(`[OfferEngine-V4] DEPTH_GATE: FINAL FAILURE after ${offerDepthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
         return {
           status: "DEPTH_FAILED",
@@ -3030,7 +3032,7 @@ export async function runOfferEngine(
   } else {
     console.log(`[OfferEngine-V4] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
-  const depthGateResultOffer = offerDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, offerDepthGateLog.length, offerDepthGateMaxAttempts, offerDepthGateLog) : null;
+  const depthGateResultOffer = offerDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, offerDepthGateLog.length, offerDepthGateMaxAttempts, offerDepthGateLog, celSourceTexts) : null;
   diagnostics.depthGate = depthGateResultOffer;
   const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
 
@@ -3100,7 +3102,7 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V4] CONTRACT_VIOLATIONS=${contractViolations.length} | sample=${contractViolations.slice(0, 3).map(v => `${v.field}:${v.reason}`).join(",")}`);
   }
 
-  const __offerResult: any = {
+  const __offerResult = {
     status,
     statusMessage,
     primaryOffer: scrubOfferObjectLiterals(primaryOffer, structuralWarnings, contractViolations, "primary"),

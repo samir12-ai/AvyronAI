@@ -596,6 +596,63 @@ function runConsumerGuardTests() {
   const aelEngineSrc = fs.readFileSync("server/analytical-enrichment-layer/engine.ts", "utf8");
   assert(!/\(pkg as any\)\.isPartial/.test(aelEngineSrc),
     "ael/engine.ts: formatAELForPrompt no longer uses `(pkg as any).isPartial` cast");
+
+  // ─── PASS-7 ASSERTIONS ─────────────────────────────────────────────────
+  // F3.7 wired end-to-end at every depth-gate call site (sourceTexts threaded)
+  const f37Engines = [
+    "server/awareness-engine/engine.ts",
+    "server/persuasion-engine/engine.ts",
+    "server/offer-engine/engine.ts",
+    "server/funnel-engine/engine.ts",
+    "server/mechanism-engine/engine.ts",
+    "server/differentiation-engine/engine.ts",
+  ];
+  for (const f of f37Engines) {
+    const src = fs.readFileSync(f, "utf8");
+    assert(/\bcelSourceTexts\b/.test(src),
+      `${f}: declares celSourceTexts (F3.7 pass-7 wiring)`);
+    assert(/isDepthBlocking\(\s*celDepth\s*,\s*celSourceTexts/.test(src),
+      `${f}: passes celSourceTexts into isDepthBlocking (F3.7 pass-7 wiring)`);
+    assert(/buildDepthGateResult\(.*celSourceTexts/s.test(src),
+      `${f}: passes celSourceTexts into buildDepthGateResult (F3.7 pass-7 wiring)`);
+    assert(!/isDepthBlocking\(\s*celDepth\s*\)/.test(src),
+      `${f}: no remaining isDepthBlocking(celDepth) without sourceTexts (F3.7 pass-7 dead-wiring fix)`);
+  }
+
+  // F3.10 propagation extended to awareness + build-plan layers (pass-7)
+  const awarenessSrc = fs.readFileSync("server/awareness-engine/engine.ts", "utf8");
+  assert(/acknowledgeAelInput\(\s*"AwarenessEngine-V3"/.test(awarenessSrc),
+    "awareness-engine/engine.ts: calls acknowledgeAelInput (F3.10 pass-7)");
+  assert(/applyPartialAelDowngrade\(\s*"AwarenessEngine-V3"/.test(awarenessSrc),
+    "awareness-engine/engine.ts: calls applyPartialAelDowngrade on success return (F3.10 pass-7)");
+  const buildPlanSrc = fs.readFileSync("server/build-plan-layer/engine.ts", "utf8");
+  assert(/acknowledgeAelInput\(\s*"BuildPlanLayer"/.test(buildPlanSrc),
+    "build-plan-layer/engine.ts: calls acknowledgeAelInput (F3.10 pass-7)");
+  assert(/applyPartialAelDowngrade\(\s*"BuildPlanLayer"/.test(buildPlanSrc),
+    "build-plan-layer/engine.ts: calls applyPartialAelDowngrade on SUCCESS return (F3.10 pass-7)");
+  assert(/actionabilityScore/.test(buildPlanSrc) &&
+    /NUMERIC_DOWNGRADE_FIELDS|actionabilityScore/.test(fs.readFileSync("server/analytical-enrichment-layer/consumer-guard.ts", "utf8")),
+    "consumer-guard NUMERIC_DOWNGRADE_FIELDS includes actionabilityScore for build-plan (F3.10 pass-7)");
+
+  // Anti-slop pass-7 — newly introduced `as any` casts removed
+  const positioningSrc = fs.readFileSync("server/positioning-engine/engine.ts", "utf8");
+  const offerSrc = fs.readFileSync("server/offer-engine/engine.ts", "utf8");
+  const persuasionSrc = fs.readFileSync("server/persuasion-engine/engine.ts", "utf8");
+  assert(!/__positioningResult\s*:\s*any/.test(positioningSrc),
+    "positioning-engine: no `__positioningResult: any` (anti-slop pass-7)");
+  assert(!/__offerResult\s*:\s*any/.test(offerSrc),
+    "offer-engine: no `__offerResult: any` (anti-slop pass-7)");
+  assert(!/__persuasionResult\s*:\s*any/.test(persuasionSrc),
+    "persuasion-engine: no `__persuasionResult: any` (anti-slop pass-7)");
+  for (const f of [
+    "server/persuasion-engine/cialdini-llm.ts",
+    "server/offer-engine/identity-llm.ts",
+    "server/awareness-engine/myth-breaker-llm.ts",
+  ]) {
+    const src = fs.readFileSync(f, "utf8");
+    assert(!/applyPartialAelDowngrade\([^)]*result as any/.test(src),
+      `${f}: no result-as-any cast in applyPartialAelDowngrade (anti-slop pass-7)`);
+  }
 }
 
 runConcurrencyTest().then(() => {

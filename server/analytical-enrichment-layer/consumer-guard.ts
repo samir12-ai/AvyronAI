@@ -9,6 +9,16 @@ export interface AelAcknowledgement {
 
 export const AEL_PARTIAL_CONFIDENCE_MULTIPLIER = 0.7;
 
+const NUMERIC_DOWNGRADE_FIELDS = [
+  "confidenceScore",
+  "score",
+  "offerStrengthScore",
+  "engineConfidence",
+  "actionabilityScore",
+  "awarenessStrengthScore",
+  "persuasionStrengthScore",
+] as const;
+
 export function acknowledgeAelInput(
   engineName: string,
   ael: AnalyticalPackage | null | undefined,
@@ -26,18 +36,15 @@ export function acknowledgeAelInput(
   return { usable: true, partial: false, reason: "AEL_OK" };
 }
 
-interface ProvenanceCarrier {
-  _provenance?: Record<string, unknown>;
-}
-
-export function attachAelProvenance<T extends ProvenanceCarrier>(
+export function attachAelProvenance<T extends object>(
   result: T,
   ack: AelAcknowledgement,
 ): T {
-  const existing = result._provenance && typeof result._provenance === "object"
-    ? result._provenance
+  const r = result as Record<string, unknown>;
+  const existing = (r._provenance && typeof r._provenance === "object")
+    ? r._provenance as Record<string, unknown>
     : {};
-  result._provenance = {
+  r._provenance = {
     ...existing,
     aelPartialPropagated: ack.partial === true,
     aelAcknowledgement: ack.reason,
@@ -46,14 +53,7 @@ export function attachAelProvenance<T extends ProvenanceCarrier>(
   return result;
 }
 
-interface ConfidenceCarrier extends ProvenanceCarrier {
-  confidenceScore?: number;
-  score?: number;
-  offerStrengthScore?: number;
-  engineConfidence?: number;
-}
-
-export function applyPartialAelDowngrade<T extends ConfidenceCarrier>(
+export function applyPartialAelDowngrade<T extends object>(
   engineName: string,
   result: T,
   ack: AelAcknowledgement,
@@ -61,32 +61,24 @@ export function applyPartialAelDowngrade<T extends ConfidenceCarrier>(
   attachAelProvenance(result, ack);
   if (!ack.partial) return result;
 
+  const r = result as Record<string, unknown>;
   const m = AEL_PARTIAL_CONFIDENCE_MULTIPLIER;
   const downgraded: string[] = [];
 
-  if (typeof result.confidenceScore === "number") {
-    const before = result.confidenceScore;
-    result.confidenceScore = +(before * m).toFixed(4);
-    downgraded.push(`confidenceScore ${before.toFixed(3)}→${result.confidenceScore.toFixed(3)}`);
-  }
-  if (typeof result.score === "number") {
-    const before = result.score;
-    result.score = +(before * m).toFixed(4);
-    downgraded.push(`score ${before.toFixed(3)}→${result.score.toFixed(3)}`);
-  }
-  if (typeof result.offerStrengthScore === "number") {
-    const before = result.offerStrengthScore;
-    result.offerStrengthScore = +(before * m).toFixed(4);
-    downgraded.push(`offerStrengthScore ${before.toFixed(3)}→${result.offerStrengthScore.toFixed(3)}`);
-  }
-  if (typeof result.engineConfidence === "number") {
-    const before = result.engineConfidence;
-    result.engineConfidence = +(before * m).toFixed(4);
-    downgraded.push(`engineConfidence ${before.toFixed(3)}→${result.engineConfidence.toFixed(3)}`);
+  for (const field of NUMERIC_DOWNGRADE_FIELDS) {
+    const before = r[field];
+    if (typeof before === "number") {
+      const after = +(before * m).toFixed(4);
+      r[field] = after;
+      downgraded.push(`${field} ${before.toFixed(3)}→${after.toFixed(3)}`);
+    }
   }
 
-  result._provenance = {
-    ...(result._provenance || {}),
+  const existing = (r._provenance && typeof r._provenance === "object")
+    ? r._provenance as Record<string, unknown>
+    : {};
+  r._provenance = {
+    ...existing,
     aelPartialDowngradeApplied: downgraded.length > 0,
     aelPartialDowngradeMultiplier: m,
     aelPartialDowngradeFields: downgraded,

@@ -1463,19 +1463,20 @@ export async function runDifferentiationEngine(
       finalMechanism.description = applySoftSanitization(finalMechanism.description, BOUNDARY_SOFT_PATTERNS);
     }
 
+    const celSourceTexts = [
+      ...finalPillars.map(p => `${p.name} ${p.description}`),
+      ...finalClaims.map(c => c.claim),
+      finalMechanism.description,
+    ];
     celDepth = enforceEngineDepthCompliance(
       "differentiation",
-      [
-        ...finalPillars.map(p => `${p.name} ${p.description}`),
-        ...finalClaims.map(c => c.claim),
-        finalMechanism.description,
-      ],
+      celSourceTexts,
       analyticalEnrichment || null,
     );
 
-    if (!analyticalEnrichment || !isDepthBlocking(celDepth)) {
+    if (!analyticalEnrichment || !isDepthBlocking(celDepth, celSourceTexts)) {
       depthGateLog.push(`Attempt ${depthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
-      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
       if (celDepth.violations.length > 0) {
         for (const logEntry of celDepth.enforcementLog) {
           console.log(`[DifferentiationEngine-V3] CEL_DEPTH: ${logEntry}`);
@@ -1490,7 +1491,7 @@ export async function runDifferentiationEngine(
     console.log(`[DifferentiationEngine-V3] DEPTH_GATE: Attempt ${depthAttempt} BLOCKED | depthScore=${celDepth.causalDepthScore} | violations=${celDepth.violations.length}`);
 
     if (depthAttempt >= depthGateMaxAttempts) {
-      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
       console.log(`[DifferentiationEngine-V3] DEPTH_GATE: FINAL FAILURE after ${depthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
       const failedResult = buildEmptyResult("DEPTH_FAILED", `Depth gate failed after ${depthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`, Date.now() - startTime);
       failedResult.confidenceScore = 0;

@@ -2911,7 +2911,7 @@ CORRECTION REQUIRED:
 
   console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence} | engineConfidence=${positioningEngineConfidence} | dataConfidence=${positioningDataConfidence}`);
 
-  const __positioningResult: any = {
+  const __positioningResult = {
     status,
     statusMessage,
     territory: primaryTerritory,
