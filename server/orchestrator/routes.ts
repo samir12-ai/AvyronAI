@@ -792,15 +792,14 @@ export function registerOrchestratorV2Routes(app: Express) {
           PUBLISHED: "publishedCount",
         };
 
-        // Seal #4 F2.2/D1: explicit guard replaces the prior `|| ""`
-        // semantic-fallback. If a studio item has no recorded status,
-        // there is no prior counter to decrement — skip the bookkeeping
-        // entirely rather than fall through to an empty-string lookup
-        // (which D1 forbids on a decision input).
-        if (!item.status) {
-          return res.json({ success: true, status });
-        }
-        const oldField = statusToField[item.status];
+        // Seal #4 F2.2/D1: replaces a prior empty-string coalesce on
+        // item.status (forbidden as a decision input by the D1 doctrine)
+        // with an explicit presence check. Behavior preserved exactly:
+        // when item.status is missing, oldField is undefined so the
+        // `if (oldField)` decrement below is skipped, while new-status
+        // increment + PUBLISHED bookkeeping still run. The ternary is
+        // a presence test, not a coalesce on a decision input.
+        const oldField = item.status ? statusToField[item.status] : undefined;
         const newField = statusToField[status];
 
         const updates: Record<string, any> = {};
