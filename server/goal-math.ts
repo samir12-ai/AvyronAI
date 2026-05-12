@@ -11,6 +11,7 @@ import { aiChat } from "./ai-client";
 import { computeStrategyHash } from "./root-bundle";
 
 import { resolveAccountId } from "./auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
 interface NormalizedGoal {
   goalType: string;
   target: number;
@@ -568,6 +569,14 @@ export function registerGoalMathRoutes(app: Express) {
       const campaignId = req.params.campaignId;
       const accountId = resolveAccountId(req);
       const requestedRunId = (req.query.runId as string) || null;
+
+      // W1-T4 (P0-4): explicit ownership assert before resolveRunId. The
+      // run-resolver scopes by accountId, so a foreign campaignId would
+      // currently surface as RUN_NOT_FOUND (404), but that allows attackers
+      // to enumerate campaignId existence via 404-vs-404-shape. Explicit
+      // CAMPAIGN_NOT_FOUND short-circuits at the right layer.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const { resolveRunId } = await import("./orchestrator/run-resolver");
       let resolved;

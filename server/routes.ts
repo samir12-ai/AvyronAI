@@ -56,6 +56,7 @@ import * as crypto from "crypto";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
 import { registerAuthRoutes, resolveAccountId } from "./auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
 import { registerStagingAdminRoutes } from "./staging-admin-routes";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
@@ -154,6 +155,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter required" });
       }
+      // W1-T4 (P0-4): defense-in-depth campaignId ownership assert.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       const result = await validateRoutingIntegrity(accountId, campaignId);
       res.json(result);
     } catch (err: any) {
@@ -167,6 +171,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!topic) {
         return res.status(400).json({ error: "Topic is required" });
+      }
+
+      // W1-T4 (P0-4): if a campaignId is supplied, it MUST belong to the
+      // authed account. The downstream `getLatestContentDna(campaignId, accountId)`
+      // is already accountId-scoped (no data leak), but a foreign campaignId
+      // should be rejected explicitly so attackers cannot probe campaign-id
+      // existence by observing AI-output variance.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(resolveAccountId(req), String(campaignId)); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       }
 
       let dnaGuidance = "";
@@ -355,6 +369,13 @@ Make sure the content works well across all the specified platforms.`;
   app.post("/api/generate-reel-script", async (req, res) => {
     try {
       const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal, ciContext, campaignId } = req.body;
+
+      // W1-T4 (P0-4): if a campaignId is supplied, it MUST belong to the
+      // authed account. Same rationale as /api/generate-content above.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(resolveAccountId(req), String(campaignId)); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+      }
 
       if (ciContext) {
         return res.status(410).json({

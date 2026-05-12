@@ -1041,9 +1041,26 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
           )
         )
         .limit(1);
-    }
 
-    if (!selections || selections.length === 0) {
+      // W0-T1 (launch-closure): close silent-substitution gap. Previously, when a
+      // caller supplied a campaignId that did NOT belong to their account, the
+      // ownership filter returned 0 rows and we silently fell through to
+      // "select most-recent for this account" — caller got a DIFFERENT campaign
+      // than requested with no error, and any cross-tenant probing was invisible
+      // in logs. Now: explicit 403 + structured log when a foreign/unknown
+      // campaignId is supplied. The "no campaignId requested → load latest"
+      // convenience path (used by dashboard widgets) is preserved below.
+      if (selections.length === 0) {
+        console.warn(
+          `[Campaigns] CAMPAIGN_OWNERSHIP_REJECTED | accountId=${accountId} | requestedCampaignId=${requestedCampaignId} | path=${req.path}`
+        );
+        return res.status(403).json({
+          code: "CAMPAIGN_NOT_OWNED",
+          message: "Requested campaign is not owned by this account.",
+          requestId: `mw_owned_${Date.now()}`,
+        });
+      }
+    } else {
       selections = await db
         .select()
         .from(campaignSelections)
@@ -1092,7 +1109,25 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
 
     next();
   } catch (error: any) {
-    console.error("[Campaigns] Middleware error:", error);
-    return res.status(500).json({ code: "MIDDLEWARE_FAILED", message: "Failed to validate campaign context", requestId: `mw_err_${Date.now()}` });
+    // W0-T1 (launch-closure): preserve auth-context errors at their declared
+    // status. Previously every thrown error became 500 MIDDLEWARE_FAILED, which
+    // hid AuthConfigurationError (401, "no account context") behind a generic
+    // server-error and falsely suggested an outage when the real cause was a
+    // missing/expired session. Honor the declared `status` field on the error
+    // when present (AuthConfigurationError sets status=401), fall back to 500
+    // for anything else.
+    const status = typeof error?.status === "number" ? error.status : 500;
+    if (status === 500) {
+      console.error("[Campaigns] Middleware error:", error);
+    } else {
+      console.warn(`[Campaigns] Middleware ${status} | ${error?.name || "Error"}: ${error?.message || ""}`);
+    }
+    return res.status(status).json({
+      code: status === 401 ? "AUTH_REQUIRED" : "MIDDLEWARE_FAILED",
+      message: status === 401
+        ? (error?.message || "Authentication required.")
+        : "Failed to validate campaign context",
+      requestId: `mw_err_${Date.now()}`,
+    });
   }
 }
