@@ -111,13 +111,17 @@ describe("Seal #3 F1.10/F1.11/F9.6 — video ffmpeg injection defense", () => {
     // command) is NOT in the whitelist AND is in FORBIDDEN_SHELL_META, so
     // the validator rejects on whitespace before any command can chain.
     it("REJECTS the canonical `;cat /etc/passwd` shell-injection payload", () => {
+      // Pass-3: split-on-`;` + per-chain `[...]` label requirement means
+      // `cat /etc/passwd` (no leading `[`) is rejected with "chain missing
+      // input label". Either the whitelist/shell-meta path OR the label
+      // path is acceptable proof — both kill the payload before spawn.
       const noSpace = validateFilterComplex("[0:v]copy[v];cat /etc/passwd");
       expect(noSpace.ok).toBe(false);
-      if (!noSpace.ok) expect(noSpace.reason).toMatch(/whitelist|shell/);
+      if (!noSpace.ok) expect(noSpace.reason).toMatch(/whitelist|shell|label/);
 
       const withSpace = validateFilterComplex("[0:v]copy[v]; cat /etc/passwd");
       expect(withSpace.ok).toBe(false);
-      if (!withSpace.ok) expect(withSpace.reason).toMatch(/whitelist|shell/);
+      if (!withSpace.ok) expect(withSpace.reason).toMatch(/whitelist|shell|label/);
     });
 
     it("rejects empty + non-string + over-length", () => {

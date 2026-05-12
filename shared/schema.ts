@@ -493,10 +493,12 @@ export const insertReservationSchema = createInsertSchema(reservations).omit({
 });
 
 // ─── Seal #3 (Task #21) — F1.9 / F1.10 strict body schemas ──────────────────
-// Built via drizzle-zod's createInsertSchema().pick().strict() so the column
-// allowlist is derived directly from the table schema (no drift if a column
-// is renamed) and unknown keys produce Zod's `unrecognized_keys` issue. Per-
-// field regex constraints are layered on with `.extend()`.
+// Pass-3 (reviewer-aligned): built via drizzle-zod's createInsertSchema()
+// so the column allowlist is DERIVED FROM THE TABLE SCHEMA — if a column
+// is renamed or dropped, the `.pick({...})` here fails to type-check, so
+// the allowlist cannot silently drift from the database. `.strict()`
+// produces `unrecognized_keys` for any body field outside the picked set.
+// Per-field regex constraints are layered on with `.extend()`.
 const SEAL3_PHOTO_TEXT_RE = new RegExp("^[A-Za-z0-9 .,'\"!?@()_+\\-/\\[\\]]{0,500}$");
 const SEAL3_PHOTO_URL_RE = new RegExp("^https?://[A-Za-z0-9._~:/?#\\[\\]@!$'()*+,;=%\\-]{1,500}$", "i");
 const SEAL3_PHOTO_HANDLE_RE = new RegExp("^[A-Za-z0-9._@:\\-/]{1,100}$");
@@ -505,8 +507,22 @@ const SEAL3_PHOTO_PATH_RE = new RegExp("^[A-Za-z0-9._\\-/]{0,500}$");
 const SEAL3_VIDEO_TITLE_RE = new RegExp("^[A-Za-z0-9 .,'\"!?@()_+\\-/\\[\\]]{1,200}$");
 const SEAL3_VIDEO_TAG_RE = new RegExp("^[A-Za-z0-9 _\\-]{1,50}$");
 
-export const photographyProfileUpdateSchema = z
-  .object({
+export const photographyProfileUpdateSchema = createInsertSchema(photographerProfiles)
+  .pick({
+    name: true,
+    phone: true,
+    bio: true,
+    specialties: true,
+    profileImage: true,
+    coverImage: true,
+    location: true,
+    city: true,
+    country: true,
+    priceRange: true,
+    instagram: true,
+    website: true,
+  })
+  .extend({
     name: z.string().trim().min(1).max(120).regex(SEAL3_PHOTO_TEXT_RE),
     phone: z.string().trim().max(40).regex(SEAL3_PHOTO_PHONE_RE).nullable(),
     bio: z.string().trim().max(2000).regex(SEAL3_PHOTO_TEXT_RE).nullable(),
@@ -524,8 +540,9 @@ export const photographyProfileUpdateSchema = z
   .partial();
 export type PhotographyProfileUpdate = z.infer<typeof photographyProfileUpdateSchema>;
 
-export const videoProjectCreateSchema = z
-  .object({
+export const videoProjectCreateSchema = createInsertSchema(videoProjects)
+  .pick({ title: true, style: true, mood: true })
+  .extend({
     title: z.string().trim().min(1).max(200).regex(SEAL3_VIDEO_TITLE_RE),
     style: z.string().trim().min(1).max(50).regex(SEAL3_VIDEO_TAG_RE),
     mood: z.string().trim().min(1).max(50).regex(SEAL3_VIDEO_TAG_RE),
@@ -533,14 +550,6 @@ export const videoProjectCreateSchema = z
   .strict()
   .partial();
 export type VideoProjectCreate = z.infer<typeof videoProjectCreateSchema>;
-
-// Compile-time guarantee these schemas stay column-aligned with the tables.
-// If a column is renamed/removed, these type assertions fail to compile.
-type _PhotoCols = keyof typeof photographerProfiles.$inferInsert;
-type _VideoCols = keyof typeof videoProjects.$inferInsert;
-const _photoColAssert: keyof z.infer<typeof photographyProfileUpdateSchema> extends _PhotoCols ? true : never = true;
-const _videoColAssert: keyof z.infer<typeof videoProjectCreateSchema> extends _VideoCols ? true : never = true;
-void _photoColAssert; void _videoColAssert;
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
