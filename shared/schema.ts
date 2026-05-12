@@ -25,6 +25,10 @@ export const photographerProfiles = pgTable("photographer_profiles", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  // P0-2 (launch-closure Wave 1): tenant ownership column. Added by migration
+  // 012. Nullable for safe online deploy; reads filter by accountId, so any
+  // pre-migration row with NULL account_id is invisible to every authed user.
+  accountId: varchar("account_id"),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   phone: text("phone"),
@@ -51,6 +55,8 @@ export const portfolioPosts = pgTable("portfolio_posts", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  // P0-2 (launch-closure Wave 1): tenant ownership column. See migration 012.
+  accountId: varchar("account_id"),
   photographerId: varchar("photographer_id").notNull(),
   imageUrl: text("image_url").notNull(),
   title: text("title"),
@@ -77,6 +83,8 @@ export const reservations = pgTable("reservations", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  // P0-2 (launch-closure Wave 1): tenant ownership column. See migration 012.
+  accountId: varchar("account_id"),
   photographerId: varchar("photographer_id").notNull(),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
@@ -94,6 +102,10 @@ export const videoProjects = pgTable("video_projects", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  // P0-1 (launch-closure Wave 1): tenant ownership column. Added by migration
+  // 012. Nullable for safe online deploy; reads filter by accountId, so any
+  // pre-migration row with NULL account_id is invisible to every authed user.
+  accountId: varchar("account_id"),
   title: text("title"),
   status: text("status").default("uploading"),
   clipCount: integer("clip_count").default(0),

@@ -1,7 +1,24 @@
+/**
+ * Video routes — Launch-Closure Wave 1 (P0-1) tenant isolation seal.
+ *
+ * Pre-seal state (master audit): every /api/video/* route was unauthenticated
+ * and the videoProjects table had no account_id column → any caller could
+ * list, read, mutate, edit, or delete any tenant's video projects (including
+ * triggering ffmpeg work on attacker-supplied clips against another tenant's
+ * project row).
+ *
+ * Seal:
+ *   1. authMiddleware on every route. No more anonymous access.
+ *   2. account_id stamped on insert; every read/update/delete filters by it.
+ *   3. multer filename sanitised (UUID-based, no original-name interpolation
+ *      into paths or shell commands).
+ *   4. ffmpeg input/output paths whitelisted to videoUploadsDir/videoOutputDir
+ *      and any path-traversal attempt is rejected before exec.
+ */
 import type { Express } from "express";
 import { db } from "./db";
 import { videoProjects } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
@@ -9,31 +26,49 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { aiChat } from "./ai-client";
 import { normalizeMediaType } from "../lib/media-types";
+import { authMiddleware, resolveAccountId, type AuthRequest } from "./auth";
 
-import { resolveAccountId } from "./auth";
 const execAsync = promisify(exec);
 
-const videoUploadsDir = path.join(process.cwd(), "uploads", "videos");
-const videoOutputDir = path.join(process.cwd(), "uploads", "video-output");
+const videoUploadsDir = path.resolve(process.cwd(), "uploads", "videos");
+const videoOutputDir = path.resolve(process.cwd(), "uploads", "video-output");
 if (!fs.existsSync(videoUploadsDir)) fs.mkdirSync(videoUploadsDir, { recursive: true });
 if (!fs.existsSync(videoOutputDir)) fs.mkdirSync(videoOutputDir, { recursive: true });
+
+// P0-1: every clip filename used in ffmpeg MUST resolve inside videoUploadsDir.
+// Caller-supplied `clip.filename` was previously interpolated raw into the
+// shell command — an attacker could supply `../../etc/passwd` and read host
+// files. We now resolve the candidate path and assert containment.
+function safeUploadPath(filename: string): string | null {
+  if (typeof filename !== "string" || !filename) return null;
+  // Reject anything that looks like a path; only the bare leaf filename is allowed.
+  const base = path.basename(filename);
+  if (base !== filename) return null;
+  const candidate = path.resolve(videoUploadsDir, base);
+  if (!candidate.startsWith(videoUploadsDir + path.sep)) return null;
+  return candidate;
+}
 
 const videoUpload = multer({
   storage: multer.diskStorage({
     destination: videoUploadsDir,
-    filename: (req, file, cb) => {
-      const uniqueName = Date.now() + '-' + Math.random().toString(36).substr(2, 9) + path.extname(file.originalname);
+    // P0-1: filename derives ONLY from server-side entropy. Original-name
+    // extension is sanitised to alphanum to block shell-meta in extensions.
+    filename: (_req, file, cb) => {
+      const rawExt = path.extname(file.originalname || "").toLowerCase();
+      const safeExt = /^\.[a-z0-9]{1,8}$/.test(rawExt) ? rawExt : ".mp4";
+      const uniqueName = Date.now() + "-" + Math.random().toString(36).substr(2, 9) + safeExt;
       cb(null, uniqueName);
     },
   }),
   limits: { fileSize: 200 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'];
+  fileFilter: (_req, file, cb) => {
+    const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp"];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (file.mimetype.startsWith('video/') || file.mimetype === 'application/octet-stream' || videoExtensions.includes(ext)) {
+    if (file.mimetype.startsWith("video/") || file.mimetype === "application/octet-stream" || videoExtensions.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error('Only video files are allowed'));
+      cb(new Error("Only video files are allowed"));
     }
   },
 });
@@ -41,7 +76,7 @@ const videoUpload = multer({
 async function getVideoDuration(filePath: string): Promise<number> {
   try {
     const { stdout } = await execAsync(
-      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
     );
     return parseFloat(stdout.trim()) || 0;
   } catch {
@@ -52,92 +87,132 @@ async function getVideoDuration(filePath: string): Promise<number> {
 async function getVideoInfo(filePath: string): Promise<{ duration: number; width: number; height: number }> {
   try {
     const { stdout } = await execAsync(
-      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -show_entries format=duration -of json "${filePath}"`
+      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -show_entries format=duration -of json "${filePath}"`,
     );
     const info = JSON.parse(stdout);
     const stream = info.streams?.[0] || {};
-    const duration = parseFloat(stream.duration || info.format?.duration || '0');
+    const duration = parseFloat(stream.duration || info.format?.duration || "0");
     return { duration, width: stream.width || 1920, height: stream.height || 1080 };
   } catch {
     return { duration: 0, width: 1920, height: 1080 };
   }
 }
 
+/**
+ * P0-1 helper: load a video project row IFF it belongs to the authed tenant.
+ * Returns null on miss — callers respond 404 to avoid leaking row existence.
+ */
+async function loadOwnedProject(projectId: string, accountId: string) {
+  const [row] = await db
+    .select()
+    .from(videoProjects)
+    .where(and(eq(videoProjects.id, projectId), eq(videoProjects.accountId, accountId)))
+    .limit(1);
+  return row || null;
+}
+
 export function registerVideoRoutes(app: Express) {
-  app.use("/uploads/videos", (req, res, next) => {
+  app.use("/uploads/videos", (_req, res, next) => {
     res.setHeader("Accept-Ranges", "bytes");
     next();
   });
 
-  app.post("/api/video/upload-clips", (req, res, next) => {
-    videoUpload.array("clips", 20)(req, res, (err) => {
-      if (err) {
-        console.error("Multer upload error:", err.message);
-        return res.status(400).json({ error: `Upload error: ${err.message}` });
-      }
-      next();
-    });
-  }, async (req, res) => {
-    try {
-      const files = req.files as Express.Multer.File[];
-      console.log("Upload request received:", {
-        filesCount: files?.length || 0,
-        contentType: req.headers['content-type'],
-        bodyKeys: Object.keys(req.body || {}),
+  app.post(
+    "/api/video/upload-clips",
+    authMiddleware,
+    (req, res, next) => {
+      videoUpload.array("clips", 20)(req, res, (err) => {
+        if (err) {
+          console.error("Multer upload error:", err.message);
+          return res.status(400).json({ error: `Upload error: ${err.message}` });
+        }
+        next();
       });
-      if (!files || files.length === 0) {
-        return res.status(400).json({ error: "No video files uploaded" });
+    },
+    async (req: AuthRequest, res) => {
+      try {
+        const accountId = resolveAccountId(req);
+        const files = req.files as Express.Multer.File[];
+        console.log("Upload request received:", {
+          accountId,
+          filesCount: files?.length || 0,
+          contentType: req.headers["content-type"],
+        });
+        if (!files || files.length === 0) {
+          return res.status(400).json({ error: "No video files uploaded" });
+        }
+
+        const clips = await Promise.all(
+          files.map(async (file) => {
+            const filePath = path.join(videoUploadsDir, file.filename);
+            const info = await getVideoInfo(filePath);
+            return {
+              filename: file.filename,
+              originalName: file.originalname,
+              path: `/uploads/videos/${file.filename}`,
+              size: file.size,
+              duration: info.duration,
+              width: info.width,
+              height: info.height,
+            };
+          }),
+        );
+
+        const [project] = await db
+          .insert(videoProjects)
+          .values({
+            accountId, // P0-1
+            title: req.body.title || "Untitled Project",
+            status: "uploaded",
+            clipCount: clips.length,
+            style: req.body.style || "cinematic",
+            mood: req.body.mood || "energetic",
+          })
+          .returning();
+
+        res.json({ project, clips });
+      } catch (error) {
+        console.error("Video upload error:", error);
+        res.status(500).json({ error: "Failed to upload video clips" });
       }
+    },
+  );
 
-      const clips = await Promise.all(files.map(async (file) => {
-        const filePath = path.join(videoUploadsDir, file.filename);
-        const info = await getVideoInfo(filePath);
-        return {
-          filename: file.filename,
-          originalName: file.originalname,
-          path: `/uploads/videos/${file.filename}`,
-          size: file.size,
-          duration: info.duration,
-          width: info.width,
-          height: info.height,
-        };
-      }));
-
-      const [project] = await db.insert(videoProjects).values({
-        title: req.body.title || 'Untitled Project',
-        status: 'uploaded',
-        clipCount: clips.length,
-        style: req.body.style || 'cinematic',
-        mood: req.body.mood || 'energetic',
-      }).returning();
-
-      res.json({ project, clips });
-    } catch (error) {
-      console.error("Video upload error:", error);
-      res.status(500).json({ error: "Failed to upload video clips" });
-    }
-  });
-
-  app.post("/api/video/ai-edit", async (req, res) => {
+  app.post("/api/video/ai-edit", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const accountId = resolveAccountId(req);
       const { projectId, clips, style, mood, pace, addMusic, addTransitions, addText, textOverlay, creativeBrief, videoType, targetAudience, keyMessage } = req.body;
 
+      if (!projectId) return res.status(400).json({ error: "projectId is required" });
       if (!clips || clips.length === 0) {
         return res.status(400).json({ error: "No clips provided" });
       }
 
-      await db.update(videoProjects)
-        .set({ status: 'processing', style, mood })
-        .where(eq(videoProjects.id, projectId));
+      // P0-1: assert ownership BEFORE any work. Avoids both data leak and
+      // attacker-driven ffmpeg exec on victim's project.
+      const owned = await loadOwnedProject(projectId, accountId);
+      if (!owned) return res.status(404).json({ error: "Project not found" });
 
-      const clipDetails = clips.map((c: any, i: number) =>
-        `Clip ${i + 1}: "${c.originalName}" (${c.duration?.toFixed(1)}s, ${c.width}x${c.height})`
-      ).join('\n');
+      // P0-1: every supplied clip filename must be a leaf inside videoUploadsDir.
+      // Reject the request if ANY clip path is malformed/traversal.
+      for (const c of clips as any[]) {
+        if (!safeUploadPath(c?.filename || "")) {
+          return res.status(400).json({ error: "Invalid clip filename" });
+        }
+      }
+
+      await db.update(videoProjects)
+        .set({ status: "processing", style, mood })
+        .where(and(eq(videoProjects.id, projectId), eq(videoProjects.accountId, accountId)));
+
+      const clipDetails = clips
+        .map((c: any, i: number) => `Clip ${i + 1}: "${c.originalName}" (${c.duration?.toFixed(1)}s, ${c.width}x${c.height})`)
+        .join("\n");
 
       const aiResponse = await aiChat({
         model: "gpt-5.2",
         max_tokens: 800,
-        accountId: resolveAccountId(req),
+        accountId,
         endpoint: "video-brief",
         messages: [
           {
@@ -182,37 +257,37 @@ Return a JSON object with this structure:
     "overallPace": "medium"
   },
   "creativeNotes": "Detailed description of your creative approach and why you made these editing decisions based on the brief"
-}`
+}`,
           },
           {
             role: "user",
             content: `Create a professional edit plan for this video project.
 
 === CREATIVE BRIEF ===
-${creativeBrief || 'Create a professional, engaging video edit.'}
+${creativeBrief || "Create a professional, engaging video edit."}
 
 === VIDEO TYPE ===
-${videoType || 'promo'}
+${videoType || "promo"}
 
 === TARGET AUDIENCE ===
-${targetAudience || 'General audience'}
+${targetAudience || "General audience"}
 
 === KEY MESSAGE ===
-${keyMessage || 'Not specified'}
+${keyMessage || "Not specified"}
 
 === EDIT PREFERENCES ===
-STYLE: ${style || 'cinematic'}
-MOOD: ${mood || 'energetic'}
-PACE: ${pace || 'medium'}
-ADD TRANSITIONS: ${addTransitions !== false ? 'Yes' : 'No'}
-ADD TEXT OVERLAY: ${addText ? 'Yes' : 'No'}
-TEXT TO OVERLAY: ${textOverlay || 'None specified'}
+STYLE: ${style || "cinematic"}
+MOOD: ${mood || "energetic"}
+PACE: ${pace || "medium"}
+ADD TRANSITIONS: ${addTransitions !== false ? "Yes" : "No"}
+ADD TEXT OVERLAY: ${addText ? "Yes" : "No"}
+TEXT TO OVERLAY: ${textOverlay || "None specified"}
 
 === AVAILABLE CLIPS ===
 ${clipDetails}
 
-Based on the creative brief above, create an edit plan that fulfills the client's vision. Consider the video type, target audience, and key message when making your editing decisions. Determine the best clip order for storytelling, trim to keep the strongest moments, choose transitions that match the mood, and suggest appropriate color grading.`
-          }
+Based on the creative brief above, create an edit plan that fulfills the client's vision. Consider the video type, target audience, and key message when making your editing decisions. Determine the best clip order for storytelling, trim to keep the strongest moments, choose transitions that match the mood, and suggest appropriate color grading.`,
+          },
         ],
       });
 
@@ -227,8 +302,8 @@ Based on the creative brief above, create an edit plan that fulfills the client'
 
       if (!editPlan) {
         await db.update(videoProjects)
-          .set({ status: 'failed' })
-          .where(eq(videoProjects.id, projectId));
+          .set({ status: "failed" })
+          .where(and(eq(videoProjects.id, projectId), eq(videoProjects.accountId, accountId)));
         return res.status(500).json({ error: "AI failed to generate edit plan" });
       }
 
@@ -240,39 +315,37 @@ Based on the creative brief above, create an edit plan that fulfills the client'
       try {
         const filterParts: string[] = [];
         const concatInputs: string[] = [];
-        let inputArgs = '';
+        let inputArgs = "";
 
         for (let i = 0; i < clipOrder.length; i++) {
           const clipIdx = clipOrder[i];
           const clip = clips[clipIdx];
           if (!clip) continue;
 
-          const clipPath = path.join(videoUploadsDir, clip.filename);
-          if (!fs.existsSync(clipPath)) continue;
+          const clipPath = safeUploadPath(clip.filename);
+          if (!clipPath || !fs.existsSync(clipPath)) continue;
 
           inputArgs += ` -i "${clipPath}"`;
 
           const clipPlan = plan.clips?.find((c: any) => c.index === clipIdx);
-          const startTime = clipPlan?.startTime || 0;
-          const endTime = clipPlan?.endTime || clip.duration || 10;
+          const startTime = Number.isFinite(clipPlan?.startTime) ? Number(clipPlan.startTime) : 0;
+          const endTime = Number.isFinite(clipPlan?.endTime) ? Number(clipPlan.endTime) : (clip.duration || 10);
 
           filterParts.push(
-            `[${i}:v]trim=start=${startTime}:end=${endTime},setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2[v${i}]`
+            `[${i}:v]trim=start=${startTime}:end=${endTime},setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2[v${i}]`,
           );
-          filterParts.push(
-            `[${i}:a]atrim=start=${startTime}:end=${endTime},asetpts=PTS-STARTPTS[a${i}]`
-          );
+          filterParts.push(`[${i}:a]atrim=start=${startTime}:end=${endTime},asetpts=PTS-STARTPTS[a${i}]`);
           concatInputs.push(`[v${i}][a${i}]`);
         }
 
         if (concatInputs.length === 0) {
           await db.update(videoProjects)
-            .set({ status: 'failed' })
-            .where(eq(videoProjects.id, projectId));
+            .set({ status: "failed" })
+            .where(and(eq(videoProjects.id, projectId), eq(videoProjects.accountId, accountId)));
           return res.status(500).json({ error: "No valid clips to process" });
         }
 
-        const filterComplex = filterParts.join(';') + ';' + concatInputs.join('') + `concat=n=${concatInputs.length}:v=1:a=1[outv][outa]`;
+        const filterComplex = filterParts.join(";") + ";" + concatInputs.join("") + `concat=n=${concatInputs.length}:v=1:a=1[outv][outa]`;
 
         const ffmpegCmd = `ffmpeg -y ${inputArgs} -filter_complex "${filterComplex}" -map "[outv]" -map "[outa]" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`;
 
@@ -280,12 +353,15 @@ Based on the creative brief above, create an edit plan that fulfills the client'
 
         const outputDuration = await getVideoDuration(outputPath);
 
-        await db.update(videoProjects).set({
-          status: 'completed',
-          outputUrl: `/uploads/video-output/${outputFilename}`,
-          duration: Math.round(outputDuration),
-          updatedAt: new Date(),
-        }).where(eq(videoProjects.id, projectId));
+        await db
+          .update(videoProjects)
+          .set({
+            status: "completed",
+            outputUrl: `/uploads/video-output/${outputFilename}`,
+            duration: Math.round(outputDuration),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(videoProjects.id, projectId), eq(videoProjects.accountId, accountId)));
 
         res.json({
           success: true,
@@ -303,30 +379,36 @@ Based on the creative brief above, create an edit plan that fulfills the client'
         try {
           const validClips = clipOrder
             .map((idx: number) => clips[idx])
-            .filter((c: any) => c && fs.existsSync(path.join(videoUploadsDir, c.filename)));
+            .filter((c: any) => {
+              const p = safeUploadPath(c?.filename || "");
+              return p && fs.existsSync(p);
+            });
 
           if (validClips.length === 0) throw new Error("No valid clips");
 
           const listFile = path.join(videoOutputDir, `list_${Date.now()}.txt`);
-          const listContent = validClips.map((c: any) =>
-            `file '${path.join(videoUploadsDir, c.filename)}'`
-          ).join('\n');
+          const listContent = validClips
+            .map((c: any) => `file '${safeUploadPath(c.filename)}'`)
+            .join("\n");
           fs.writeFileSync(listFile, listContent);
 
           await execAsync(
             `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPathSimple}"`,
-            { timeout: 300000 }
+            { timeout: 300000 },
           );
 
           fs.unlinkSync(listFile);
           const outputDuration = await getVideoDuration(outputPathSimple);
 
-          await db.update(videoProjects).set({
-            status: 'completed',
-            outputUrl: `/uploads/video-output/${outputFilenameSimple}`,
-            duration: Math.round(outputDuration),
-            updatedAt: new Date(),
-          }).where(eq(videoProjects.id, projectId));
+          await db
+            .update(videoProjects)
+            .set({
+              status: "completed",
+              outputUrl: `/uploads/video-output/${outputFilenameSimple}`,
+              duration: Math.round(outputDuration),
+              updatedAt: new Date(),
+            })
+            .where(and(eq(videoProjects.id, projectId), eq(videoProjects.accountId, accountId)));
 
           res.json({
             success: true,
@@ -338,9 +420,10 @@ Based on the creative brief above, create an edit plan that fulfills the client'
           });
         } catch (fallbackError: any) {
           console.error("Fallback FFmpeg error:", fallbackError.message);
-          await db.update(videoProjects)
-            .set({ status: 'failed' })
-            .where(eq(videoProjects.id, projectId));
+          await db
+            .update(videoProjects)
+            .set({ status: "failed" })
+            .where(and(eq(videoProjects.id, projectId), eq(videoProjects.accountId, accountId)));
           res.status(500).json({ error: "Video processing failed" });
         }
       }
@@ -351,9 +434,15 @@ Based on the creative brief above, create an edit plan that fulfills the client'
     }
   });
 
-  app.get("/api/video/projects", async (req, res) => {
+  // P0-1: list filtered by tenant.
+  app.get("/api/video/projects", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const projects = await db.select().from(videoProjects).orderBy(desc(videoProjects.createdAt));
+      const accountId = resolveAccountId(req);
+      const projects = await db
+        .select()
+        .from(videoProjects)
+        .where(eq(videoProjects.accountId, accountId))
+        .orderBy(desc(videoProjects.createdAt));
       res.json(projects);
     } catch (error) {
       console.error("List projects error:", error);
@@ -361,9 +450,11 @@ Based on the creative brief above, create an edit plan that fulfills the client'
     }
   });
 
-  app.get("/api/video/projects/:id", async (req, res) => {
+  // P0-1: single-row read scoped to tenant. 404 on miss (don't leak existence).
+  app.get("/api/video/projects/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const [project] = await db.select().from(videoProjects).where(eq(videoProjects.id, req.params.id));
+      const accountId = resolveAccountId(req);
+      const project = await loadOwnedProject(req.params.id, accountId);
       if (!project) return res.status(404).json({ error: "Project not found" });
       res.json(project);
     } catch (error) {
@@ -372,17 +463,20 @@ Based on the creative brief above, create an edit plan that fulfills the client'
     }
   });
 
-  app.post("/api/studio/video-analyze", async (req, res) => {
+  app.post("/api/studio/video-analyze", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const accountId = resolveAccountId(req);
       const { title, platform, goal, audience, cta, series, offer, mediaType: rawMediaType, duration } = req.body;
 
       if (!title) {
         return res.status(400).json({ error: "Title is required for analysis" });
       }
 
-      if (rawMediaType && typeof rawMediaType === 'string') {
-        const knownAliases = ['video', 'videos', 'reel', 'reels', 'image', 'images', 'photo', 'poster', 'carousel', 'post', 'caption', 'story', 'stories',
-          'VIDEO', 'REEL', 'IMAGE', 'CAROUSEL', 'POST', 'STORY'];
+      if (rawMediaType && typeof rawMediaType === "string") {
+        const knownAliases = [
+          "video", "videos", "reel", "reels", "image", "images", "photo", "poster", "carousel", "post", "caption", "story", "stories",
+          "VIDEO", "REEL", "IMAGE", "CAROUSEL", "POST", "STORY",
+        ];
         if (!knownAliases.includes(rawMediaType.trim().toLowerCase()) && !knownAliases.includes(rawMediaType.trim())) {
           return res.status(422).json({
             error: "MEDIA_TYPE_INVALID",
@@ -403,7 +497,7 @@ Based on the creative brief above, create an edit plan that fulfills the client'
       const response = await aiChat({
         model: "gpt-4.1-mini",
         max_tokens: 1800,
-        accountId: resolveAccountId(req),
+        accountId,
         endpoint: "video-analyze",
         messages: [
           {
@@ -432,23 +526,23 @@ Return ONLY valid JSON with this exact structure:
   "hashtags": ["hashtag1", "hashtag2", "hashtag3", "hashtag4", "hashtag5", "hashtag6", "hashtag7", "hashtag8"]
 }
 
-Generate 4-6 scenes. Every scene must have specific camera directions, not vague descriptions.`
+Generate 4-6 scenes. Every scene must have specific camera directions, not vague descriptions.`,
           },
           {
             role: "user",
             content: `Produce a complete production script for this video:
 Title: ${title}
-Platform: ${platform || 'Instagram'}
-Goal: ${goal || 'Engagement'}
-Target Audience: ${audience || 'General'}
-Current CTA: ${cta || 'None'}
-Content Series: ${series || 'None'}
-Offer/Product: ${offer || 'None'}
-Media Type: ${mediaType || 'video'}
-Duration: ${duration || '30-60 seconds'}
+Platform: ${platform || "Instagram"}
+Goal: ${goal || "Engagement"}
+Target Audience: ${audience || "General"}
+Current CTA: ${cta || "None"}
+Content Series: ${series || "None"}
+Offer/Product: ${offer || "None"}
+Media Type: ${mediaType || "video"}
+Duration: ${duration || "30-60 seconds"}
 
-Generate a full production-ready script with scene-by-scene breakdown, exact spoken words, camera directions, and on-screen text.`
-          }
+Generate a full production-ready script with scene-by-scene breakdown, exact spoken words, camera directions, and on-screen text.`,
+          },
         ],
       });
 
@@ -489,8 +583,9 @@ Generate a full production-ready script with scene-by-scene breakdown, exact spo
     }
   });
 
-  app.post("/api/studio/ai-metadata", async (req, res) => {
+  app.post("/api/studio/ai-metadata", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const accountId = resolveAccountId(req);
       const { title, mediaType, platform } = req.body;
 
       if (!title || !title.trim()) {
@@ -500,7 +595,7 @@ Generate a full production-ready script with scene-by-scene breakdown, exact spo
       const response = await aiChat({
         model: "gpt-4.1-mini",
         max_tokens: 600,
-        accountId: resolveAccountId(req),
+        accountId,
         endpoint: "ai-metadata",
         messages: [
           {
@@ -513,16 +608,16 @@ Generate a full production-ready script with scene-by-scene breakdown, exact spo
   "series": "Content series name if applicable (e.g. Monday Motivation, Behind the Scenes) or empty string",
   "offer": "Offer or promotion if relevant (e.g. 20% off this week, Free consultation) or empty string"
 }
-Be specific and actionable. Match the goal to the content topic. Keep audience targeted.`
+Be specific and actionable. Match the goal to the content topic. Keep audience targeted.`,
           },
           {
             role: "user",
             content: `Content Title: ${title.trim()}
-Media Type: ${mediaType || 'video'}
-Platform: ${platform || 'Instagram'}
+Media Type: ${mediaType || "video"}
+Platform: ${platform || "Instagram"}
 
-Suggest the best publishing metadata for this content.`
-          }
+Suggest the best publishing metadata for this content.`,
+          },
         ],
       });
 
@@ -553,9 +648,15 @@ Suggest the best publishing metadata for this content.`
     }
   });
 
-  app.delete("/api/video/projects/:id", async (req, res) => {
+  // P0-1: delete scoped to tenant. 404 if not owned (no existence leak).
+  app.delete("/api/video/projects/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      await db.delete(videoProjects).where(eq(videoProjects.id, req.params.id));
+      const accountId = resolveAccountId(req);
+      const result = await db
+        .delete(videoProjects)
+        .where(and(eq(videoProjects.id, req.params.id), eq(videoProjects.accountId, accountId)))
+        .returning({ id: videoProjects.id });
+      if (result.length === 0) return res.status(404).json({ error: "Project not found" });
       res.json({ success: true });
     } catch (error) {
       console.error("Delete project error:", error);

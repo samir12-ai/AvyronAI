@@ -3,14 +3,23 @@ import { AgentOperator } from "./index";
 import { registerDualAnalysisRoutes } from "./dual-analysis-routes";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 export function registerAgentRoutes(app: Express) {
   registerDualAnalysisRoutes(app);
   app.post("/api/agent/run-stream", async (req: Request, res: Response) => {
     try {
+      const accountId = resolveAccountId(req);
       const { campaignId } = req.body;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+
+      // P0-4 (launch-closure Wave 1): body-supplied campaignId must belong
+      // to the authed account, otherwise the agent would create snapshots
+      // and run multi-engine work attributed to attacker.accountId but
+      // pointed at victim.campaignId — cross-tenant pollution.
+      try { await assertCampaignBelongsTo(accountId, String(campaignId)); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
@@ -27,7 +36,7 @@ export function registerAgentRoutes(app: Express) {
       send({ type: "started", campaignId, totalEngines: 15 });
 
       await new AgentOperator().runWithStream(
-        { accountId: resolveAccountId(req), campaignId: String(campaignId) },
+        { accountId, campaignId: String(campaignId) },
         send
       );
 

@@ -34,6 +34,9 @@ import { RequiredWorkCard } from '@/components/RequiredWorkCard';
 import DashboardChat from '@/components/DashboardChat';
 import NarrativeCard from '@/components/NarrativeCard';
 import { useRunAnchor } from '@/hooks/useRunAnchor';
+import { useRunTruthfulness } from '@/hooks/useRunTruthfulness';
+import type { MetricCardVerdict } from '@/components/MetricCard';
+import type { ProvenanceKind } from '@/components/DataProvenance';
 import { useAuth } from '@/context/AuthContext';
 import OnboardingAgent from '@/components/OnboardingAgent';
 import { RunTruthfulnessBanner } from '@/components/RunTruthfulnessBanner';
@@ -205,6 +208,32 @@ export default function DashboardScreen() {
 
   const activeCampaignRef = useRef<string | null>(selectedCampaignId);
   useEffect(() => { activeCampaignRef.current = selectedCampaignId; }, [selectedCampaignId]);
+
+  // P1-5/6 (launch-closure W3): bind dashboard metric truthfulness +
+  // provenance to the canonical run-truthfulness signal so trend deltas are
+  // hidden when the run is shadowed/untrusted/blocked, and so users can tell
+  // META-measured data apart from PLAN projections at a glance.
+  const { data: truthfulness } = useRunTruthfulness(selectedCampaignId);
+  const metricVerdict: MetricCardVerdict = (() => {
+    if (!truthfulness) return 'UNKNOWN';
+    if (truthfulness.isStale) return 'STALE';
+    if (truthfulness.headline === 'shadowed') return 'SHADOWED';
+    if (truthfulness.headline === 'system_untrusted') return 'UNTRUSTED';
+    const v = truthfulness.verdict?.verdict;
+    if (v === 'PASS') return 'PASS';
+    if (v === 'BLOCK') return 'FAIL';
+    if (v === 'DOWNGRADE' || v === 'REPAIR') return 'PARTIAL';
+    return 'UNKNOWN';
+  })();
+  const metricProvenance: ProvenanceKind | undefined = (() => {
+    // Reads dataSource set by /api/dashboard/metrics: META=measured,
+    // PLAN=projected, MANUAL=user-entered, NONE=no signal.
+    const ds = dataSource;
+    if (ds === 'META') return 'verified';
+    if (ds === 'PLAN') return 'projected';
+    if (ds === 'MANUAL') return 'manual';
+    return undefined;
+  })();
 
   const fetchMetrics = useCallback(async () => {
     const requestCampaign = selectedCampaignId;
@@ -690,12 +719,16 @@ export default function DashboardScreen() {
                       change={0}
                       icon="eye-outline"
                       isGradient
+                      integrityVerdict={metricVerdict}
+                      provenance={metricProvenance}
                     />
                     <MetricCard
                       title="Engagement"
                       value={formatNumber(metrics.engagement)}
                       change={0}
                       icon="heart-outline"
+                      integrityVerdict={metricVerdict}
+                      provenance={metricProvenance}
                     />
                   </View>
                 </View>

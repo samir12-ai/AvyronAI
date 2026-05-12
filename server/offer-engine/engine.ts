@@ -596,9 +596,17 @@ export function layer1_outcomeConstruction(
     }
     return String(v);
   };
+  // P0-6 defensive double-fence: by contract, runOfferEngine has already
+  // emitted OFFER_INPUT_INSUFFICIENT and returned before reaching layer1 when
+  // both `pains` and `rawPainPhrase` are empty. If we somehow get here in
+  // that state, throw rather than silently fabricate an "unresolved
+  // challenge" string — that fallback was the original P0-6 leak surface.
+  if (!rawPainPhrase && pains.length === 0) {
+    throw new Error("OFFER_INPUT_INSUFFICIENT: layer1_outcomeConstruction reached with no pain signals — runOfferEngine guard bypassed");
+  }
   const primaryPain = coerceText(
     rawPainPhrase || (pains.length > 0 ? pains[0] : null),
-    "unresolved challenge",
+    "",
   );
   const primaryDesire = coerceText(
     rawDesirePhrase || (desires.length > 0 ? desires[0][0] : null),
@@ -2296,6 +2304,44 @@ export async function runOfferEngine(
     objectionCount: marketLanguage.objectionLanguage.length,
   };
   console.log(`[OfferEngine-V4] MarketLanguageMap | pains=${marketLanguage.rawPainPhrases.length} | desires=${marketLanguage.rawDesirePhrases.length} | emotional=${marketLanguage.emotionalLanguage.length} | objections=${marketLanguage.objectionLanguage.length}`);
+
+  // P0-6 (launch-closure W2-T2): OFFER_INPUT_INSUFFICIENT hard-block.
+  // Refuse to synthesise an offer when neither the upstream Audience engine
+  // produced pains NOR the MarketLanguageMap has any rawPainPhrase. The
+  // legacy path used `coerceText(... , "unresolved challenge")` and emitted a
+  // fabricated transformation statement — a silent fallback that downstream
+  // gates could clear without ever knowing the offer had no real pain to
+  // resolve. We now early-return with an INSUFFICIENT_SIGNALS shape carrying
+  // blockCode=OFFER_INPUT_INSUFFICIENT so system-control routes the recovery
+  // (see server/system-control/recovery-map.ts entry of the same name).
+  const audiencePainCount = (audience.audiencePains || []).length;
+  const marketPainPhraseCount = marketLanguage.rawPainPhrases.length;
+  if (audiencePainCount === 0 && marketPainPhraseCount === 0) {
+    console.log(`[OfferEngine-V4] OFFER_INPUT_INSUFFICIENT | audiencePains=0 | marketPainPhrases=0 — refusing to fabricate "unresolved challenge" fallback`);
+    const emptyOffer = buildEmptyOffer();
+    const acceptability = assessStrategyAcceptability(0, 0, 5, false, [
+      "Offer cannot run without at least one audience pain or market pain phrase",
+    ]);
+    return {
+      status: STATUS.INSUFFICIENT_SIGNALS,
+      statusMessage:
+        "OFFER_INPUT_INSUFFICIENT: Audience produced 0 pain signals and MarketLanguageMap has 0 raw pain phrases. " +
+        "Re-run Audience engine after MI snapshot has populated source-language signals.",
+      primaryOffer: emptyOffer,
+      alternativeOffer: emptyOffer,
+      rejectedOffer: { offer: emptyOffer, rejectionReason: "OFFER_INPUT_INSUFFICIENT: no pains to resolve" },
+      offerStrengthScore: 0,
+      positioningConsistency: { consistent: false, contradictions: ["OFFER_INPUT_INSUFFICIENT"] },
+      hookMechanismAlignment: { aligned: false, failures: ["OFFER_INPUT_INSUFFICIENT"], hookAxis: null, mechanismAxis: null },
+      boundaryCheck: { passed: true, violations: [] },
+      structuralWarnings: ["OFFER_INPUT_INSUFFICIENT"],
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      layerDiagnostics: { ...diagnostics, blockCode: "OFFER_INPUT_INSUFFICIENT" },
+      strategyAcceptability: acceptability,
+    };
+  }
 
   const l1Outcome = layer1_outcomeConstruction(audience, positioning, differentiation, marketLanguage);
   diagnostics.layer1 = { specificityScore: l1Outcome.specificityScore };

@@ -24,6 +24,7 @@ import {
   checkValidationResult,
   checkSignalGroundingMassFailure,
   checkOfferAudienceMisalignment,
+  checkOfferInputSufficient,
   checkZeroObjectionCoverage,
   checkChannelConfidenceMinimum,
   checkUnresolvedCriticalProblems,
@@ -69,6 +70,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkFunnelStructuralCompleteness(input.results, input.config.currentJobId ?? null));
   structuralChecks.push(checkValidationResult(input.results));
   structuralChecks.push(checkSignalGroundingMassFailure(input.results));
+  structuralChecks.push(checkOfferInputSufficient(input.results));
   structuralChecks.push(checkOfferAudienceMisalignment(input.results));
   structuralChecks.push(checkZeroObjectionCoverage(input.results));
   structuralChecks.push(checkChannelConfidenceMinimum(input.results));

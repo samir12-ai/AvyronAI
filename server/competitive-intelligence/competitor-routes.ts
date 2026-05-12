@@ -6,6 +6,7 @@ import { featureFlagService } from "../feature-flags";
 import { getCompetitorDataCoverage } from "./data-acquisition";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 const REQUIRED_EVIDENCE_FIELDS = [
   "profileLink",
   "postingFrequency",
@@ -99,6 +100,13 @@ export function registerCiCompetitorRoutes(app: Express) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+      // P0-4 (launch-closure Wave 1): assert campaignId belongs to caller
+      // before inserting competitor records under (accountId, campaignId).
+      // Without this, attacker could create competitor entries pointing at
+      // a victim's campaignId — strategic pollution surface.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });

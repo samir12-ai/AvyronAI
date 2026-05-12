@@ -799,7 +799,11 @@ export async function runAwarenessEngine(
 
   let overallScore = 0;
   for (const lr of layerResults) {
-    const weight = LAYER_WEIGHTS[lr.layerName] || 0.1;
+    // P0-5 (launch-closure W2-T1): no 0.1 phantom weight for unknown layers.
+    // LAYER_WEIGHTS is the source of truth — an unrecognised layer
+    // contributes nothing to the overall awareness score (honest zero
+    // beats a synthetic 0.1 default that lets undeclared layers leak in).
+    const weight = LAYER_WEIGHTS[lr.layerName] ?? 0;
     overallScore += lr.score * weight;
   }
 

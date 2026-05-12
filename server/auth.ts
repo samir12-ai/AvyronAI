@@ -30,7 +30,50 @@ export class AuthConfigurationError extends Error {
     this.status = 401;
   }
 }
+// P1-3 (launch-closure W4): in production, refuse to boot if
+// STRIPE_WEBHOOK_SECRET is missing. The previous fallback to the
+// "x-internal-key === JWT_SECRET" branch let any holder of the JWT secret
+// forge a Stripe webhook and arbitrarily mutate `subscriptionStatus`,
+// `planType`, `videoCredits` for any user. JWT_SECRET is a session-signing
+// secret, not a payments secret — they must NOT share trust scope.
+if (process.env.NODE_ENV === "production" && !process.env.STRIPE_WEBHOOK_SECRET) {
+  console.error("[Auth] FATAL: STRIPE_WEBHOOK_SECRET is required in production. Refusing to start.");
+  throw new Error("STRIPE_WEBHOOK_SECRET environment variable is required in production");
+}
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
+
+// P1-3 (launch-closure W4): in-memory sliding-window rate limiter for
+// /api/auth/login and /api/auth/register — 5 attempts / minute / IP. Avoids
+// adding express-rate-limit (no new dependency) and is sufficient for a
+// single-replica Express deployment. If we scale horizontally, replace with
+// a Redis-backed limiter — flagged in the seal report as a follow-up.
+const AUTH_RATE_WINDOW_MS = 60_000;
+const AUTH_RATE_MAX = 5;
+const authRateState = new Map<string, number[]>();
+
+function authRateLimit(req: Request, res: Response, next: NextFunction) {
+  const ip = (req.ip || req.socket.remoteAddress || "unknown").toString();
+  const now = Date.now();
+  const cutoff = now - AUTH_RATE_WINDOW_MS;
+  const hits = (authRateState.get(ip) || []).filter(t => t > cutoff);
+  if (hits.length >= AUTH_RATE_MAX) {
+    const retryAfterSec = Math.max(1, Math.ceil((hits[0] + AUTH_RATE_WINDOW_MS - now) / 1000));
+    res.setHeader("Retry-After", String(retryAfterSec));
+    console.warn(`[Auth] RATE_LIMIT_HIT | ip=${ip} | path=${req.path} | hits=${hits.length}`);
+    return res.status(429).json({ error: "Too many attempts. Try again shortly.", retryAfterSec });
+  }
+  hits.push(now);
+  authRateState.set(ip, hits);
+  // periodic cheap GC: every ~1000 calls walk the map
+  if (authRateState.size > 1000 && Math.random() < 0.01) {
+    for (const [k, v] of authRateState.entries()) {
+      const live = v.filter(t => t > cutoff);
+      if (live.length === 0) authRateState.delete(k);
+      else authRateState.set(k, live);
+    }
+  }
+  next();
+}
 
 interface JwtPayload {
   userId: string;
@@ -122,7 +165,7 @@ export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunctio
 }
 
 export function registerAuthRoutes(app: Router) {
-  app.post("/api/auth/register", async (req: Request, res: Response) => {
+  app.post("/api/auth/register", authRateLimit, async (req: Request, res: Response) => {
     try {
       const { email, password, name } = req.body;
 
@@ -188,7 +231,7 @@ export function registerAuthRoutes(app: Router) {
     }
   });
 
-  app.post("/api/auth/login", async (req: Request, res: Response) => {
+  app.post("/api/auth/login", authRateLimit, async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body;
 
@@ -325,18 +368,18 @@ export function registerAuthRoutes(app: Router) {
 
   app.post("/api/stripe/webhook", async (req: Request, res: Response) => {
     try {
-      if (STRIPE_WEBHOOK_SECRET) {
-        const sig = req.headers["x-webhook-secret"] || req.headers["stripe-signature"];
-        if (sig !== STRIPE_WEBHOOK_SECRET) {
-          console.warn("[Stripe] Webhook rejected: invalid signature");
-          return res.status(403).json({ error: "Forbidden" });
-        }
-      } else {
-        const internalKey = req.headers["x-internal-key"];
-        if (internalKey !== JWT_SECRET) {
-          console.warn("[Stripe] Webhook rejected: no secret configured and no valid internal key");
-          return res.status(403).json({ error: "Forbidden" });
-        }
+      // P1-3 (launch-closure W4): no JWT_SECRET fallback. Production refuses
+      // to boot without STRIPE_WEBHOOK_SECRET (see top-of-file guard); dev
+      // requires the dedicated secret too. JWT_SECRET is for session signing
+      // and must not double as a payments-mutation key.
+      if (!STRIPE_WEBHOOK_SECRET) {
+        console.warn("[Stripe] Webhook rejected: STRIPE_WEBHOOK_SECRET not configured");
+        return res.status(503).json({ error: "Webhook secret not configured" });
+      }
+      const sig = req.headers["x-webhook-secret"] || req.headers["stripe-signature"];
+      if (sig !== STRIPE_WEBHOOK_SECRET) {
+        console.warn("[Stripe] Webhook rejected: invalid signature");
+        return res.status(403).json({ error: "Forbidden" });
       }
 
       const { userId, status, plan, addCredits } = req.body;

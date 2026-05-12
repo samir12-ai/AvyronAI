@@ -3134,6 +3134,25 @@ async function executeEngine(
       };
     }
 
+    // P0-6 (launch-closure W2-T2 architect-finding fix): when an engine emits
+    // INSUFFICIENT_SIGNALS (currently the offer engine's hard-block on
+    // missing pain — see `OFFER_INPUT_INSUFFICIENT` block code), do not mask
+    // it as SUCCESS. Promote to BLOCKED so system-control + recovery-map
+    // pick it up as a verifiable failure with a structured blockReason.
+    if (engineOutputStatus === "INSUFFICIENT_SIGNALS") {
+      const blockCode = (output as any)?.layerDiagnostics?.blockCode || (output as any)?.blockCode || "INSUFFICIENT_SIGNALS";
+      const reason = (output as any)?.statusMessage || `${engineId} engine reported insufficient input signals`;
+      console.log(`[Orchestrator] Engine ${engineId} returned INSUFFICIENT_SIGNALS (${blockCode}): ${reason}`);
+      return {
+        engineId,
+        status: "BLOCKED",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        blockReason: `${blockCode}: ${reason}`,
+      };
+    }
+
     // T003: Integrity enforcement gate — when integrity says safeToExecute=false,
     // block all downstream engines (Budget, Channel, Iteration, Retention) unless
     // an explicit override is set on the account or environment.

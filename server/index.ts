@@ -18,6 +18,7 @@ import { migrateDecisionAttribution } from "./migrations/008-decision-attributio
 import { migrateMemoryOutcomeProvenance } from "./migrations/009-memory-outcome-provenance";
 import { runMigration010 } from "./migrations/010-tiktok-validation-columns";
 import { migrateSystemControlVerdicts } from "./migrations/011-system-control-verdicts";
+import { migrateTenantIsolationAccountId } from "./migrations/012-tenant-isolation-accountid";
 import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state";
 import { authMiddleware, optionalAuth, verifyAdminToken } from "./auth";
 import * as fs from "fs";
@@ -320,6 +321,13 @@ function setupErrorHandler(app: express.Application) {
 }
 
 (async () => {
+  // P1-2 (launch-closure W4): trust the first proxy hop so req.ip resolves
+  // to the real client IP (not the load-balancer's address) behind Replit's
+  // edge. Required for the login rate-limit (server/auth.ts) to identify
+  // distinct callers — without this, every request appears to come from the
+  // proxy and the limit would lock the entire app on first contact.
+  app.set("trust proxy", 1);
+
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
@@ -495,6 +503,7 @@ function setupErrorHandler(app: express.Application) {
       migrateMemoryOutcomeProvenance().catch(err => console.error("[Migration-009] memory outcome provenance migration error:", err));
       runMigration010().catch(err => console.error("[Migration-010] tiktok validation columns migration error:", err));
       migrateSystemControlVerdicts().catch(err => console.error("[Migration-011] system control verdicts migration error:", err));
+      migrateTenantIsolationAccountId().catch(err => console.error("[Migration-012] tenant isolation accountId migration error:", err));
 
       setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));

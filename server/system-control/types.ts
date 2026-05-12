@@ -47,7 +47,12 @@ export type BlockCode =
   // Runtime Truth Track (May 2026)
   | "ANALYTICAL_ENRICHMENT_PARTIAL" // T3.B — AEL built with degraded data (parse failure / build error / partial LLM)
   | "SIGNAL_LINEAGE_UNKNOWN_DOMINANT" // T1.A — unknownRatio > 0.30 (untagged/legacy signals dominate strategy)
-  | "CONFIDENCE_INTEGRITY_INCOMPLETE"; // T3.A v2 — a critical engine emitted no confidence at all
+  | "CONFIDENCE_INTEGRITY_INCOMPLETE" // T3.A v2 — a critical engine emitted no confidence at all
+  // Launch-closure W2-T2 (P0-6): Offer engine refused to run because audience
+  // produced zero pain signals AND no MarketLanguage rawPainPhrases. Replaces
+  // the silent "unresolved challenge" string fallback that previously emitted
+  // a fabricated transformation statement.
+  | "OFFER_INPUT_INSUFFICIENT";
 
 export type DowngradeCode =
   | "UNVERIFIED_CAC"

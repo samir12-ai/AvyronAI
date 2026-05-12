@@ -520,7 +520,11 @@ function validateClaim(
   const contradictingSignals: string[] = [];
 
   let evidenceType: ClaimValidation["evidenceType"] = "assumption";
-  let evidenceStrength = 0.2;
+  // P0-5 (launch-closure W2-T1): zero-evidence base must score zero.
+  // The previous 0.2 baseline let a claim with no signal support score as
+  // "weakly grounded" purely from the assumption bucket. Now every accretion
+  // below has to earn its score from real signal matches.
+  let evidenceStrength = 0;
 
   let isNarrativeBased = false;
   for (const pattern of NARRATIVE_CLAIM_PATTERNS) {

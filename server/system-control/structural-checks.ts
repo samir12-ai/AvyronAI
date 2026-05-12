@@ -577,6 +577,37 @@ export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineSte
   );
 }
 
+/**
+ * P0-6 (launch-closure W2-T2 architect-finding fix): dedicated structural
+ * check that surfaces the offer-engine `OFFER_INPUT_INSUFFICIENT` hard-block
+ * as a verified FAIL even when the orchestrator marked the engine BLOCKED
+ * (which would otherwise short-circuit `engineDidNotComplete` to notReached
+ * and leave the block code orphaned). Reads the engine's
+ * `layerDiagnostics.blockCode` directly off `result.output` so it works in
+ * both BLOCKED and INSUFFICIENT_SIGNALS exit shapes.
+ */
+export function checkOfferInputSufficient(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const offerResult = results.get("offer");
+  if (!offerResult) {
+    return notReached("offer_input_sufficient", "offer", "MISSING");
+  }
+  const output = offerResult.output as any | null;
+  const blockCode =
+    output?.layerDiagnostics?.blockCode ||
+    output?.blockCode ||
+    null;
+  const outputStatus = output?.status || null;
+  const blocked =
+    blockCode === "OFFER_INPUT_INSUFFICIENT" ||
+    outputStatus === "INSUFFICIENT_SIGNALS" ||
+    (offerResult.status === "BLOCKED" && typeof offerResult.blockReason === "string" && offerResult.blockReason.includes("OFFER_INPUT_INSUFFICIENT"));
+  if (blocked) {
+    const detail = output?.statusMessage || offerResult.blockReason || "Offer engine reported insufficient input — no audience pains and no raw market-language pain phrases available.";
+    return fail("offer_input_sufficient", `OFFER_INPUT_INSUFFICIENT: ${detail}`);
+  }
+  return pass("offer_input_sufficient", "Offer engine has sufficient pain input");
+}
+
 export function checkOfferAudienceMisalignment(results: Map<EngineId, EngineStepResult>): StructuralCheck {
   const offerResult = results.get("offer");
   const reach = engineDidNotComplete(offerResult);
@@ -888,6 +919,11 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
         break;
       case "signal_grounding_mass_failure":
         blocks.push({ code: "SIGNAL_GROUNDING_MASS_FAILURE", description: check.details, source: "structural_check", severity: "critical" });
+        break;
+      case "offer_input_sufficient":
+        // P0-6 architect-finding fix: route the dedicated insufficient-input
+        // FAIL to the canonical BlockCode so recovery-map picks it up.
+        blocks.push({ code: "OFFER_INPUT_INSUFFICIENT", description: check.details, source: "offer_engine", severity: "critical" });
         break;
       case "offer_audience_misalignment":
         blocks.push({ code: "OFFER_AUDIENCE_MISALIGNMENT", description: check.details, source: "offer_engine", severity: "high" });

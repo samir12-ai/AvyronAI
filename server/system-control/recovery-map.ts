@@ -47,6 +47,10 @@ export const BLOCK_METADATA: Record<BlockCode | "UNKNOWN_BLOCK", { retrySafe: bo
   COMPLIANCE_FAILURE:               { retrySafe: false, resolverActor: "system" },
   OFFER_AUDIENCE_MISALIGNMENT:      { retrySafe: false, resolverActor: "system" },
   ZERO_OBJECTION_COVERAGE:          { retrySafe: false, resolverActor: "system" },
+  // Launch-closure W2-T2 (P0-6): Offer can only resume after Audience produces
+  // ≥1 grounded pain signal. That requires fresh MI / scraping data, so the
+  // resolver is system-driven (rerun upstream), not a runtime mutation.
+  OFFER_INPUT_INSUFFICIENT:         { retrySafe: false, resolverActor: "system" },
   // Truthfulness / commercial brake signals — must NOT be repaired
   VALIDATION_REJECTED:              { retrySafe: false, resolverActor: "external" },
   BUDGET_KILL:                      { retrySafe: false, resolverActor: "external" },
@@ -160,6 +164,29 @@ export const RECOVERY_MAP: Partial<Record<BlockCode | "UNKNOWN_BLOCK", RecoveryM
     requiredProof: ["Positioning snapshot with engineConfidence ≥ 0.40 and ≥ 1 grounded territory"],
     allowedNextModes: ["TEST_ONLY", "RESTRICTED_EXECUTION", "REVIEW_REQUIRED"],
     defaultNextMode: "REVIEW_REQUIRED",
+  },
+
+  OFFER_INPUT_INSUFFICIENT: {
+    meaning: "Offer engine refused to run because Audience produced zero pain signals and the MarketLanguageMap has no raw pain phrases. Replaces the legacy 'unresolved challenge' fabricated fallback.",
+    severity: "critical",
+    ownerEngine: "Offer",
+    rootCauseCategory: "data_insufficiency",
+    repairOrderRank: RANK.OFFER - 5,
+    repairPatterns: [
+      "Re-run MI snapshot to widen source-language coverage (Instagram + Website + Reviews minimum)",
+      "Re-run Audience engine after MI refresh; verify audience.audiencePains.length ≥ 1",
+      "Inspect Audience engine quality gate — if mediumQualitySignals were dropped, lower the medium threshold for one diagnostic run",
+    ],
+    successCriteria: [
+      "audience.audiencePains.length ≥ 1 OR offer.marketLanguage.rawPainPhrases.length ≥ 1",
+      "Offer engine status !== INSUFFICIENT_SIGNALS on rerun",
+    ],
+    requiredProof: [
+      "Audience snapshot id with audiencePains.length ≥ 1",
+      "Offer snapshot status COMPLETE with primaryPain field non-empty",
+    ],
+    allowedNextModes: ["PROOF_COLLECTION", "AWARENESS_BUILD_PHASE", "REVIEW_REQUIRED"],
+    defaultNextMode: "PROOF_COLLECTION",
   },
 
   OFFER_AUDIENCE_MISALIGNMENT: {
