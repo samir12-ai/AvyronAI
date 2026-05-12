@@ -289,7 +289,29 @@ describe("F9.8 — refresh-token rotation + reuse cascade behavioral proofs", ()
     expect(newRow.revokedAt).toBeNull();
   });
 
-  it("/api/auth/refresh on a revoked session → SECURITY_REFRESH_REUSE + cascade revokes ALL active sessions for the account", async () => {
+  it("/api/auth/refresh on a revoked session WITH WRONG SECRET → 401 invalid, NO cascade (sessionId-knowledge alone cannot DoS the account)", async () => {
+    seedUser("u-3b", "u3b@x.com");
+    const sA = await auth.__issueSessionForTest({ userId: "u-3b", accountId: "acc-3b", deviceFingerprint: "dev-X" });
+    const sB = await auth.__issueSessionForTest({ userId: "u-3b", accountId: "acc-3b", deviceFingerprint: "dev-Y" });
+    // Revoke A as if rotation already happened.
+    const aRow = tables.sessions.find(r => r.id === sA.sessionId)!;
+    aRow.revokedAt = new Date();
+    aRow.revokeReason = "rotated_refresh";
+
+    const tampered = `${sA.sessionId}.${"BBBB".repeat(8)}`;
+    const router = getRouter();
+    const result = await invokeRoute(router, "post", "/api/auth/refresh", {
+      body: { refreshToken: tampered, deviceFingerprint: "dev-X" },
+      headers: {},
+    });
+    expect(result.status).toBe(401);
+    expect(result.body.error).not.toBe("SECURITY_REFRESH_REUSE");
+    // sB MUST remain active — knowing the sessionId alone cannot cascade.
+    const bRowAfter = tables.sessions.find(r => r.id === sB.sessionId)!;
+    expect(bRowAfter.revokedAt).toBeNull();
+  });
+
+  it("/api/auth/refresh on a revoked session WITH CORRECT SECRET → SECURITY_REFRESH_REUSE + cascade revokes ALL active sessions for the account", async () => {
     seedUser("u-3", "u3@x.com");
     // Two active sessions on different devices (account = acc-3).
     const sA = await auth.__issueSessionForTest({ userId: "u-3", accountId: "acc-3", deviceFingerprint: "dev-X" });

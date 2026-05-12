@@ -571,10 +571,19 @@ export function registerAuthRoutes(app: Router) {
         return res.status(401).json({ error: "Invalid refresh token" });
       }
 
-      // Reuse detection: the row was already revoked. The presented secret
-      // is either the same one the legitimate client already rotated past
-      // or an attacker replaying a stolen token. EITHER WAY: treat the
-      // entire account as compromised. Revoke every active session.
+      // Architect re-review pass-3 hardening: bcrypt-verify the secret
+      // BEFORE any reuse/cascade logic. Otherwise possession of a known
+      // sessionId alone (e.g., from logs) could force an account-wide
+      // logout (DoS) and trigger false-positive compromise events.
+      // Cascade only fires when the presented secret PROVES possession.
+      const secretMatches = await bcrypt.compare(parsed.secret, row.refreshTokenHash);
+      if (!secretMatches) {
+        return res.status(401).json({ error: "Invalid refresh token" });
+      }
+
+      // Reuse detection: a secret that matches a REVOKED row's hash is
+      // proof of theft (or the legit client failed to update; either way
+      // we treat the account as compromised). Revoke every active session.
       if (row.revokedAt) {
         await db.update(authSessions).set({ revokedAt: new Date(), revokeReason: "reuse_detected_cascade" })
           .where(and(eq(authSessions.accountId, row.accountId), isNull(authSessions.revokedAt)));
@@ -586,11 +595,6 @@ export function registerAuthRoutes(app: Router) {
       if (Date.now() - row.issuedAt.getTime() > REFRESH_TOKEN_TTL_MS) {
         await db.update(authSessions).set({ revokedAt: new Date(), revokeReason: "expired" }).where(eq(authSessions.id, row.id));
         return res.status(401).json({ error: "Refresh token expired" });
-      }
-
-      const ok = await bcrypt.compare(parsed.secret, row.refreshTokenHash);
-      if (!ok) {
-        return res.status(401).json({ error: "Invalid refresh token" });
       }
 
       // Look up the user (for email payload).

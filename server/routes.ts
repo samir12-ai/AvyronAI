@@ -70,14 +70,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerStagingAdminRoutes(app);
 
   app.get("/api/proxy/health", async (req: any, res) => {
-    // Seal #2 (Task #20) F1.6 — admin-only payload. Non-admin (and unauthed)
-    // callers get a stripped {ok:true} so existing health-check probes don't
-    // break, but proxy host/port/zone/credential metadata never leaks. Public
-    // path prefix is still in PUBLIC_PATH_PREFIXES so optionalAuth runs and
-    // req.accountId is set for admin checks; we DO NOT 403 — public probes
-    // are still answered, just without sensitive detail.
+    // Seal #2 (Task #20) F1.6 — admin-only. Architect re-review pass-3
+    // tightened from "stripped 200 for non-admin" to explicit deny:
+    //   - unauthenticated  → 401
+    //   - authed non-admin → 403
+    //   - authed admin     → full payload
+    // Done BEFORE any sensitive field is referenced. Probes that need
+    // a 200 should hit /api/health (no proxy detail) instead.
+    if (!req.accountId) {
+      return res.status(401).json({ error: "AUTH_REQUIRED" });
+    }
     if (!isAdminAccount(req.accountId)) {
-      return res.json({ ok: true });
+      return res.status(403).json({ error: "ADMIN_ONLY" });
     }
     try {
       const { getProxyConfig } = await import("./competitive-intelligence/proxy-pool-manager");

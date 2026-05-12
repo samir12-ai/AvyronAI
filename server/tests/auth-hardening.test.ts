@@ -40,18 +40,16 @@ describe("Seal #2 F1.6 — /api/proxy/health admin gate", () => {
     expect(src).toMatch(/import\s*{[^}]*isAdminAccount[^}]*}\s*from\s*"\.\/auth"/);
   });
 
-  it("/api/proxy/health handler short-circuits non-admins to {ok:true}", () => {
-    // Locate the handler block and assert it strips the response.
+  it("/api/proxy/health handler 401s unauthed and 403s authed-non-admin (architect pass-3)", () => {
     const start = src.indexOf('app.get("/api/proxy/health"');
     expect(start).toBeGreaterThan(-1);
     const block = src.slice(start, start + 1500);
     expect(block).toMatch(/isAdminAccount\(req\.accountId\)/);
-    expect(block).toMatch(/return res\.json\(\{\s*ok:\s*true\s*\}\)/);
+    expect(block).toMatch(/status\(401\)[^]*AUTH_REQUIRED/);
+    expect(block).toMatch(/status\(403\)[^]*ADMIN_ONLY/);
   });
 
-  it("non-admin payload does NOT leak proxy host/port/zone/credentials", () => {
-    // The leak surface is the rich response object — make sure the early
-    // return path occurs BEFORE any of those fields are referenced.
+  it("non-admin gate fires BEFORE any proxy host/port/zone/credentials field is referenced", () => {
     const start = src.indexOf('app.get("/api/proxy/health"');
     const adminGate = src.indexOf("isAdminAccount(req.accountId)", start);
     const firstLeak = Math.min(
