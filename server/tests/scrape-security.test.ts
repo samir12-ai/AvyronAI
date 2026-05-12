@@ -180,8 +180,8 @@ describe("Seal #5 / F7.5 — Prompt injection defense", () => {
   });
   it("dual-analysis-routes wraps handle/url and prepends UNTRUSTED rule (source tripwire)", () => {
     const src = readFileSync(`${REPO}/server/agent/dual-analysis-routes.ts`, "utf-8");
-    expect(src).toMatch(/_wrapUntrustedText\(`@\$\{data\.handle\}`/);
-    expect(src).toMatch(/_wrapUntrustedText\(data\.url/);
+    expect(src).toMatch(/_wrapUntrustedText\(`@\$\{safeHandle\}`/);
+    expect(src).toMatch(/_wrapUntrustedText\(safeUrl/);
     expect(src).toMatch(/\$\{_UNTRUSTED_RULE\}/);
   });
 });
@@ -412,6 +412,28 @@ describe("Seal #5 / F8.1 — PUT /api/ci/competitors/:id validates URL fields", 
     expect(src).toMatch(/safeTiktok = \(req\.body as any\)\.tiktokUrl \|\| null/);
     expect(src).toMatch(/safeMaps = \(req\.body as any\)\.googleMapsUrl \|\| null/);
     expect(src).toMatch(/UPDATE ci_competitors SET tiktok_url = \$\{safeTiktok\}, google_maps_url = \$\{safeMaps\}/);
+  });
+  it("PUT route post-update raw SQL sync uses sanitized `updates` values (validator-#2 fix)", () => {
+    expect(src).toMatch(/safeTiktokPut = updates\.tiktokUrl \?\? null/);
+    expect(src).toMatch(/safeGmapsPut = updates\.googleMapsUrl \?\? null/);
+    expect(src).toMatch(/UPDATE ci_competitors SET tiktok_url = \$\{safeTiktokPut\}, google_maps_url = \$\{safeGmapsPut\}/);
+  });
+});
+
+describe("Seal #5 / F7.5 + F8.1 — dual-analysis ingest validates handle/url + checks injection (validator-#2)", () => {
+  const src = readFileSync(`${REPO}/server/agent/dual-analysis-routes.ts`, "utf-8");
+  it("imports validateHandle, validateUserUrl, detectInjectionTokens", () => {
+    expect(src).toMatch(/validateHandle as _validateHandle/);
+    expect(src).toMatch(/validateUserUrl as _validateUserUrl/);
+    expect(src).toMatch(/detectInjectionTokens as _detectInjection/);
+  });
+  it("calls each at the LLM-ingest boundary and emits redacted markers on failure", () => {
+    expect(src).toMatch(/_validateHandle\(String\(data\.handle\)\)/);
+    expect(src).toMatch(/_validateUserUrl\(String\(data\.url\)\)/);
+    expect(src).toMatch(/_detectInjection\(safeHandle\)/);
+    expect(src).toMatch(/_detectInjection\(safeUrl\)/);
+    expect(src).toMatch(/\[redacted: prompt-injection signal\]/);
+    expect(src).toMatch(/\[redacted: invalid format\]/);
   });
 });
 

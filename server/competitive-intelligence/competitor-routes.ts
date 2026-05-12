@@ -263,14 +263,19 @@ export function registerCiCompetitorRoutes(app: Express) {
 
       if (!updated) return res.status(404).json({ error: "Competitor not found" });
 
+      // Seal #5 / F8.1 (validator-#2 fix): use SANITIZED `updates` values
+      // (already through validateUserUrl above), not raw req.body, so the
+      // post-update sync cannot reintroduce non-canonical input.
       const hasTiktok = req.body.tiktokUrl !== undefined;
       const hasGmaps = req.body.googleMapsUrl !== undefined;
+      const safeTiktokPut = updates.tiktokUrl ?? null;
+      const safeGmapsPut = updates.googleMapsUrl ?? null;
       if (hasTiktok && hasGmaps) {
-        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${req.body.tiktokUrl || null}, google_maps_url = ${req.body.googleMapsUrl || null} WHERE id = ${id}`);
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${safeTiktokPut}, google_maps_url = ${safeGmapsPut} WHERE id = ${id}`);
       } else if (hasTiktok) {
-        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${req.body.tiktokUrl || null} WHERE id = ${id}`);
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${safeTiktokPut} WHERE id = ${id}`);
       } else if (hasGmaps) {
-        await db.execute(sql`UPDATE ci_competitors SET google_maps_url = ${req.body.googleMapsUrl || null} WHERE id = ${id}`);
+        await db.execute(sql`UPDATE ci_competitors SET google_maps_url = ${safeGmapsPut} WHERE id = ${id}`);
       }
       const extraRes = await db.execute(sql`SELECT tiktok_url, google_maps_url FROM ci_competitors WHERE id = ${id}`);
       const extra = (extraRes.rows as any[])[0] ?? {};
