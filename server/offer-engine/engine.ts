@@ -3001,7 +3001,7 @@ export async function runOfferEngine(
         offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: FINAL FAILURE (depthScore=${celDepth.causalDepthScore})`);
         const depthGateResult = buildDepthGateResult(celDepth, offerDepthAttempt, offerDepthGateMaxAttempts, offerDepthGateLog, celSourceTexts);
         console.log(`[OfferEngine-V4] DEPTH_GATE: FINAL FAILURE after ${offerDepthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
-        return {
+        return applyPartialAelDowngrade("OfferEngine-V4", {
           status: "DEPTH_FAILED",
           statusMessage: `Depth gate failed after ${offerDepthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`,
           primaryOffer: buildEmptyOffer(),
@@ -3020,7 +3020,7 @@ export async function runOfferEngine(
           signalGrounding: { groundedClaims: 0, totalClaims: 0, groundingRatio: 0, strippedClaims: [] },
           celDepthCompliance: celDepth,
           depthGateResult,
-        } as any;
+        } as any, aelAck);
       }
     }
   }

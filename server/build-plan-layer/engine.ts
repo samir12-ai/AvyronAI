@@ -527,14 +527,14 @@ export async function runBuildPlanLayer(
   const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus, sourceJobId);
 
   if (snapshots.length < 3) {
-    return {
+    return applyPartialAelDowngrade("BuildPlanLayer", {
       status: "INSUFFICIENT_DATA",
       plan: null,
       actionabilityScore: 0,
       failedBlocks: [],
       attempts: 0,
       error: `Only ${snapshots.length} validated engine outputs available. Need at least 3.`,
-    };
+    } as BuildPlanResult, aelAck);
   }
 
   const adaptiveRhythm = await computeAdaptiveRhythm(campaignId, accountId);
@@ -609,35 +609,35 @@ export async function runBuildPlanLayer(
       lastFailedBlocks = actionability.failedBlocks;
 
       if (attempt === MAX_ATTEMPTS) {
-        return {
+        return applyPartialAelDowngrade("BuildPlanLayer", {
           status: "ACTIONABILITY_FAILED",
           plan,
           actionabilityScore: actionability.score,
           failedBlocks: actionability.failedBlocks,
           attempts: attempt,
-        };
+        } as BuildPlanResult, aelAck);
       }
     } catch (err: any) {
       console.error(`[BuildPlanLayer] Attempt ${attempt} error:`, err.message);
       if (attempt === MAX_ATTEMPTS) {
-        return {
+        return applyPartialAelDowngrade("BuildPlanLayer", {
           status: "ERROR",
           plan: null,
           actionabilityScore: 0,
           failedBlocks: [],
           attempts: attempt,
           error: err.message,
-        };
+        } as BuildPlanResult, aelAck);
       }
     }
   }
 
-  return {
+  return applyPartialAelDowngrade("BuildPlanLayer", {
     status: "ERROR",
     plan: null,
     actionabilityScore: 0,
     failedBlocks: [],
     attempts: MAX_ATTEMPTS,
     error: "All attempts exhausted",
-  };
+  } as BuildPlanResult, aelAck);
 }

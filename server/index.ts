@@ -15,8 +15,6 @@ import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
-// Seal #7 (F10.1) — single migration runner. Per session-plan T8 +
-// architect-review pass-4: boot only VERIFIES the schema floor. Schema
 // changes are applied out-of-band via `npm run db:migrate`. Boot refuses
 // to start if the running code requires a version newer than what the DB
 // reports, so a forgotten migration step fails loudly instead of running
@@ -94,7 +92,6 @@ function setupBodyParsing(app: express.Application) {
 }
 
 function setupRequestLogging(app: express.Application) {
-  // Seal #7 (F10.6) — pino-shaped structured logger with traceId.
   // Mounts loggerMiddleware FIRST so req.traceId + req.logger are available
   // to every downstream handler (including the /api auth gate).
   app.use(loggerMiddleware());
@@ -117,7 +114,6 @@ function setupRequestLogging(app: express.Application) {
 
     res.on("finish", () => {
       const durationMs = Date.now() - start;
-      // Seal #7 (F10.7) — every HTTP request observed in the histogram so
       // /metrics has signal even for non-/api routes (landing, healthz).
       try {
         recordHttpRequest(req.method, path, res.statusCode, durationMs / 1000);
@@ -125,7 +121,6 @@ function setupRequestLogging(app: express.Application) {
 
       if (!path.startsWith("/api")) return;
 
-      // Seal #7 (F9.5) — strip token-shaped fields BEFORE serialization.
       // Previously the captured JSON (which routinely contained `token`,
       // `refreshToken`, `password`) was JSON.stringified and truncated to 80
       // chars, leaking secrets to console + log shippers.
@@ -221,7 +216,6 @@ function serveLandingPage({
   landingPageTemplate: string;
   appName: string;
 }) {
-  // Seal #7 (F9.1) — host-header XSS / open-redirect fix.
   // Previously: trusted attacker-controlled `Host` and `X-Forwarded-Host`
   // headers and injected them into the landing page HTML, enabling
   // arbitrary base-URL substitution (cookie-poisoning + phishing-link
@@ -273,7 +267,6 @@ function configureExpoAndLanding(app: express.Application) {
     if (req.path === "/pricing") {
       const pricingPath = path.resolve(process.cwd(), "server", "templates", "pricing.html");
       const pricingHtml = fs.readFileSync(pricingPath, "utf-8");
-      // Seal #7 (F9.1) — same host-header fix as serveLandingPage.
       const baseUrl = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
       const finalHtml = pricingHtml
         .replace(/BASE_URL_PLACEHOLDER/g, baseUrl);
@@ -358,7 +351,6 @@ function setupErrorHandler(app: express.Application) {
 
     const status = error.status || error.statusCode || 500;
     const isProd = process.env.NODE_ENV === "production";
-    // Seal #7 (F10.8) — surface 5xx to Sentry (no-op when DSN unset).
     if (status >= 500) {
       try {
         captureException(err, {
@@ -368,7 +360,6 @@ function setupErrorHandler(app: express.Application) {
         });
       } catch { /* never let telemetry crash the handler */ }
     }
-    // Seal #7 — production hides upstream messages from clients (info leak)
     // but still logs the full error structurally for ops.
     const clientMessage =
       isProd && status >= 500
@@ -418,7 +409,6 @@ function setupErrorHandler(app: express.Application) {
     res.status(200).json({ ok: true, ts: new Date().toISOString() });
   });
 
-  // Seal #7 (F10.7) — /metrics is gated by the static METRICS_ADMIN_TOKEN
   // secret, NOT by the JWT-based admin account check used elsewhere. Two
   // reasons: (1) Prometheus scrapers/uptime probes are stateless processes
   // that cannot mint JWTs; (2) the metrics surface is operational
@@ -597,7 +587,6 @@ function setupErrorHandler(app: express.Application) {
 
   const port = parseInt(process.env.PORT || "5000", 10);
 
-  // Seal #7 (F10.1) — boot verifies the schema floor; schema mutations are
   // owned by `npm run db:migrate`. Single-instance Replit operators may
   // opt-in to apply-at-boot with BOOT_AUTO_MIGRATE=true.
   const autoMigrate = process.env.BOOT_AUTO_MIGRATE === "true";
@@ -641,7 +630,6 @@ function setupErrorHandler(app: express.Application) {
 
       invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
 
-      // Seal #7 (F9.9) — daily tombstone reaper. First tick after 1min so
       // boot is fast; subsequent ticks every 24h. cascadeDeleteAccount is
       // transactional, so a failed reap rolls back and retries next tick.
       const REAPER_INTERVAL_MS = 24 * 60 * 60 * 1000;

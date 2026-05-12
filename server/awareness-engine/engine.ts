@@ -995,7 +995,7 @@ export async function runAwarenessEngine(
     console.log(`[AwarenessEngine-V3] DEPTH_GATE: DEPTH_FAILED — non-generative engine, cannot retry | depthScore=${celDepth.causalDepthScore}`);
     primaryRoute.awarenessStrengthScore = 0;
     alternativeRoute.awarenessStrengthScore = 0;
-    return {
+    return applyPartialAelDowngrade("AwarenessEngine-V3", {
       status: "DEPTH_FAILED",
       statusMessage: `Depth gate failed: depthScore=${celDepth.causalDepthScore} — non-generative engine, cannot regenerate`,
       primaryRoute,
@@ -1010,7 +1010,7 @@ export async function runAwarenessEngine(
       engineVersion: ENGINE_VERSION,
       celDepthCompliance: celDepth,
       depthGateResult,
-    };
+    }, aelAck);
   }
 
   if (celDepth.violations.length > 0) {

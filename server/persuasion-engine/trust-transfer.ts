@@ -287,7 +287,6 @@ export async function designTrustTransfer(args: {
   console.log(`[TrustTransfer] STEP_2 | design_v1 | mechanism="${design.transferMechanism.name}" | risk=${design.riskSeverity} | failureModes=${design.failureModes.length}`);
 
   // Judge step
-  // Seal #8 / F3.4 — default to REJECTED; only an explicit ACCEPTED verdict
   // from a parseable judge response flips it. Failure / unparseable / missing
   // verdict all stay REJECTED with a JUDGE_ERROR reason (no accept-by-default).
   let judgeVerdict: "ACCEPTED" | "REJECTED" = "REJECTED";
@@ -358,12 +357,10 @@ export async function designTrustTransfer(args: {
             judgeVerdict = judgeParsed2.verdict;
             judgeReason = String(judgeParsed2.reason || "").trim();
           } else {
-            // Seal #8 / F3.4 — unparseable retry-judge is NOT accept-by-default.
             judgeVerdict = "REJECTED";
             judgeReason = `JUDGE_ERROR: unparseable retry-judge output (raw="${judgeRaw2.slice(0, 80)}")`;
           }
         } catch (err: any) {
-          // Seal #8 / F3.4 — retry-judge failure stays REJECTED (default).
           judgeVerdict = "REJECTED";
           judgeReason = `JUDGE_ERROR: retry judge failed: ${err.message}`;
         }
@@ -379,7 +376,6 @@ export async function designTrustTransfer(args: {
   console.log(`[TrustTransfer] DONE in ${Date.now() - startTs}ms | finalVerdict=${design.judgeVerdict} | retries=${design.retryCount}`);
   if (design.judgeVerdict === "REJECTED") {
     console.warn(`[TrustTransfer] FINAL_REJECTED — falling back to legacy persuasion output (no trustTransferDesign emitted)`);
-    // Seal #8 / F3.3 — parallel rejection-surface (does NOT replace fallback).
     try {
       const { recordCommercialRejection } = await import("../../shared/commercial-dna");
       const reason = (design as any).judgeReason || "";

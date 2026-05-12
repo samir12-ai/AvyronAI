@@ -1,5 +1,5 @@
 /**
- * Seal #8 — CEL doctrine + intelligence honesty proof suite.
+ * Intelligence-honesty: CEL doctrine + intelligence honesty proof suite.
  *
  * Each test maps to a sub-finding (F3.1–F3.10). The suite proves:
  *   - F3.1 — orphan-floor 0.20 only when ≥1 grounded claim
@@ -279,7 +279,6 @@ section("F3.10 — SynthesizedPlan exposes _provenance.aelPartialPropagated");
     orchSrc.includes("clearCommercialRejections(config.accountId)"),
     "F3.3 lifecycle: orchestrator clears registry at run start",
   );
-  // Architect-pass-1 fix: F3.4 unparseable judge → REJECTED for buyer-psychology
   const buyerSrc2 = fs.readFileSync(
     require("path").resolve(__dirname, "../audience-engine/buyer-psychology.ts"),
     "utf8",
@@ -288,7 +287,6 @@ section("F3.10 — SynthesizedPlan exposes _provenance.aelPartialPropagated");
     /unparseable judge output/.test(buyerSrc2) && /JUDGE_ERROR: unparseable/.test(buyerSrc2),
     "F3.4 (buyer-psych): unparseable judge → REJECTED + JUDGE_ERROR (not NOT_RUN)",
   );
-  // Architect-pass-1 fix: F3.3+F3.10 persistence — degradation re-persisted to planJson
   assert(
     /db\.update\(strategicPlans\)[\s\S]{0,200}planJson:\s*JSON\.stringify\(planResult\.plan\)/.test(orchSrc),
     "F3.3/F3.10 persistence: degradation re-persisted to strategicPlans.planJson",
@@ -298,7 +296,6 @@ section("F3.10 — SynthesizedPlan exposes _provenance.aelPartialPropagated");
     "F3.3/F3.10 persistence: failure path logged with PLAN_DEGRADE_PERSIST_FAILED",
   );
 
-  // Architect-pass-2 fix: F3.4 uniformity — all 3 remaining commercial modules
   // must NOT accept-by-default on judge failure / unparseable.
   const path = require("path");
   const cgSrc = fs.readFileSync(path.resolve(__dirname, "../positioning-engine/category-game.ts"), "utf8");
@@ -328,7 +325,6 @@ section("F3.10 — SynthesizedPlan exposes _provenance.aelPartialPropagated");
   assert(/JUDGE_ERROR: unparseable retry-judge output/.test(ttSrc),
     "F3.4 (trust-transfer): unparseable retry-judge → JUDGE_ERROR (no silent ACCEPT)");
 
-  // Architect-pass-2 fix: F3.3 concurrency — registry now ALS-keyed.
   const dnaSrc = fs.readFileSync(path.resolve(__dirname, "../../shared/commercial-dna.ts"), "utf8");
   assert(/AsyncLocalStorage/.test(dnaSrc) && /__commercialRunKeyALS/.test(dnaSrc),
     "F3.3 concurrency: registry uses AsyncLocalStorage for per-run isolation");

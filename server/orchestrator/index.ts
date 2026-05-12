@@ -3330,7 +3330,6 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
   console.log(`[Orchestrator] SSC_INITIALIZED | campaignId=${config.campaignId} | accountId=${config.accountId}`);
 
-  // Seal #8 / F3.3 — clear the parallel commercial-reasoning rejection
   // registry for this account so a fresh run starts with an empty surface.
   // (Modules push to the registry on FINAL_REJECTED / JUDGE_ERROR; we read
   // it back at the end of the run and attach to plan synthesis context.)
@@ -3394,7 +3393,6 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // get the right jobId via the local variable — leaving plans non-run-bound.
   config.jobId = jobId;
 
-  // Seal #8 / F3.3 architect-pass-2 fix — concurrency hardening.
   // Enter ALS scope so every downstream module's recordCommercialRejection
   // is routed to a jobId-scoped registry slot, preventing parallel runs for
   // the same accountId from clobbering each other's rejection metadata.
@@ -4026,7 +4024,6 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       const planResult = await synthesizePlan(config, ctx, results, memoryContextBlock || undefined, loadedMemoryBlock);
       planId = planResult.planId;
 
-      // Seal #8 / F3.3 + F3.10 — surface commercial-reasoning rejections
       // and AEL partial-degradation onto the synthesized plan. The pipeline
       // already fell through to legacy output when modules rejected; this
       // is the *parallel surface* (not a replacement) so downstream gates
@@ -4056,7 +4053,6 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
             (rejections.length > 0 ? ` | modules=[${rejections.map(r => `${r.module}:${r.reason}`).join(",")}]` : "")
           );
 
-          // Seal #8 / F3.3+F3.10 persistence fix — synthesizePlan() already
           // wrote planJson to DB before returning. Re-persist here so the
           // degradation surface (commercialReasoningRejected, _provenance,
           // validationState='weak') survives in strategicPlans.planJson and
@@ -4178,11 +4174,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     console.warn(`[Orchestrator] CONFIDENCE_INTEGRITY_FAILED | ${ciErr.message}`);
   }
 
-  // Seal #8 / F3.3 architect-pass-4 fix — end-of-run registry cleanup.
   // Prevents unbounded growth of the ALS-keyed rejection map across many runs.
-  // Clear under the active ALS scope (resolves to jobId) AND explicitly by
-  // jobId as a belt-and-braces guard in case the ALS chain is detached by an
-  // intermediate await on a different runtime path.
+  // end-of-run registry cleanup — clear under the active ALS scope (resolves
+  // to jobId) AND explicitly by jobId as a belt-and-braces guard in case the
+  // ALS chain is detached by an intermediate await on a different runtime path.
   try {
     const { clearCommercialRejections } = await import("../../shared/commercial-dna");
     clearCommercialRejections(jobId);

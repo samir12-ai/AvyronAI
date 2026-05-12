@@ -238,18 +238,13 @@ Judge this candidate. Return ONLY the JSON verdict.`;
     const raw = resp?.choices?.[0]?.message?.content || "";
     const parsed = safeJSON<{ verdict: string; reason: string }>(raw);
     if (!parsed) {
-      // Seal #8 / F3.4 — judge unparseable is NOT accept-by-default. We have
-      // no positive evidence the candidate passes, so we surface JUDGE_ERROR
-      // and the caller treats it as a rejection (engine then falls through
-      // to legacy output via the existing return-null path).
-      return { verdict: "REJECTED", reason: "JUDGE_ERROR: judge response unparseable" };
+      return { status: "JUDGE_ERROR", reason: "judge response unparseable" };
     }
     const v = (parsed.verdict || "").toUpperCase().includes("REJECT") ? "REJECTED" : "ACCEPTED";
-    return { verdict: v as any, reason: parsed.reason || "" };
+    return { status: v as "ACCEPTED" | "REJECTED", reason: parsed.reason || "" };
   } catch (e: any) {
-    console.warn(`[NarrativeReframe] judge call failed: ${e.message} — treating as REJECTED (no positive verdict)`);
-    // Seal #8 / F3.4 — judge call failure is NOT accept-by-default.
-    return { verdict: "REJECTED", reason: `JUDGE_ERROR: ${e.message}` };
+    console.warn(`[NarrativeReframe] judge call failed: ${e.message} — treating as JUDGE_ERROR`);
+    return { status: "JUDGE_ERROR", reason: e.message };
   }
 }
 
@@ -280,20 +275,20 @@ export async function engineerNarrativeReframe(input: DesignerInput): Promise<Na
   }
   console.log(`[NarrativeReframe] STEP_2 | design_v1 | movement=${candidate.bridgeMechanism.movement} | newModel="${(candidate.newModel.reclassification || "").slice(0, 60)}"`);
 
-  let { verdict, reason } = await callJudge(candidate, input);
+  let { status, reason } = await callJudge(candidate, input);
   let retryCount = 0;
-  if (verdict === "REJECTED") {
+  if (status === "REJECTED") {
     retryCount = 1;
     console.log(`[NarrativeReframe] STEP_3 | judge=REJECTED | reason="${reason.slice(0, 100)}" | retrying`);
     const retry = await callDesigner(input, reason);
     if (validateShape(retry)) {
       candidate = retry;
       const second = await callJudge(candidate, input);
-      verdict = second.verdict;
+      status = second.status;
       reason = second.reason;
     }
   }
-  console.log(`[NarrativeReframe] STEP_3 | judge=${verdict} | reason="${reason.slice(0, 100)}"`);
+  console.log(`[NarrativeReframe] STEP_3 | judge=${status} | reason="${reason.slice(0, 100)}"`);
 
   const profile: NarrativeReframe = {
     currentModel: candidate.currentModel,
@@ -302,24 +297,19 @@ export async function engineerNarrativeReframe(input: DesignerInput): Promise<Na
     bridgeMechanism: candidate.bridgeMechanism,
     discomfortCost: candidate.discomfortCost,
     reasoningSteps: Array.isArray(candidate.reasoningSteps) ? candidate.reasoningSteps : [],
-    judgeVerdict: verdict,
+    judgeVerdict: status,
     judgeReason: reason,
     retryCount,
   };
 
-  console.log(`[NarrativeReframe] DONE in ${Date.now() - t0}ms | finalVerdict=${verdict} | retries=${retryCount} | movement=${profile.bridgeMechanism.movement}`);
-  if (verdict === "REJECTED") {
-    console.warn(`[NarrativeReframe] FINAL_REJECTED — falling back to legacy awareness output (no narrativeReframe emitted)`);
-    // Seal #8 / F3.3 — record on the parallel rejection-surface. The
-    // pipeline still falls through to legacy output (return null below),
-    // but plan synthesis can now SEE that this rejection happened and
-    // downgrade `validationState` accordingly.
+  console.log(`[NarrativeReframe] DONE in ${Date.now() - t0}ms | finalStatus=${status} | retries=${retryCount} | movement=${profile.bridgeMechanism.movement}`);
+  if (status === "REJECTED" || status === "JUDGE_ERROR") {
+    console.warn(`[NarrativeReframe] FINAL_${status} — falling back to legacy awareness output (no narrativeReframe emitted)`);
     try {
       const { recordCommercialRejection } = await import("../../shared/commercial-dna");
-      const isJudgeErr = (reason || "").startsWith("JUDGE_ERROR");
       recordCommercialRejection(input.accountId, {
         module: "awareness.narrativeReframe",
-        reason: isJudgeErr ? "JUDGE_ERROR" : "FINAL_REJECTED",
+        reason: status === "JUDGE_ERROR" ? "JUDGE_ERROR" : "FINAL_REJECTED",
         detail: reason || "",
       });
     } catch { /* registry never blocks pipeline */ }

@@ -2544,7 +2544,6 @@ CORRECTION REQUIRED:
 
       const hasSystemMapping = (territory as any)._systemMapped === true;
       if (hasSystemMapping) {
-        // Seal #8 / F3.8 — system-default provenance: deterministic mapping
         // is a usable starting point but cannot claim MI-traced confidence.
         // Tag provenance and cap at 0.30 (vs. MI-traced 0.85+).
         (territory as any).provenance = "system_default";
@@ -2564,7 +2563,6 @@ CORRECTION REQUIRED:
 
       const orphanResult = checkForOrphanClaims(claims, strategicSignalGate);
 
-      // Seal #8 / F3.2 — All-orphan territories are NO LONGER dropped.
       // They are retained with confidenceScore capped at ≤0.10 and marked
       // degraded so plan synthesis can see them, account for them, and
       // downgrade dependent decisions instead of silently losing the
@@ -2588,13 +2586,11 @@ CORRECTION REQUIRED:
         for (const orphan of orphanResult.orphanedClaims) {
           territory.stabilityNotes.push(`[HYPOTHESIS] Claim not directly traceable to MIv3 signal: "${orphan.slice(0, 80)}"`);
         }
-        // Seal #8 / F3.2 — orphan penalty is now per-claim 0.05 with NO
         // per-territory ceiling. Each orphaned claim costs 0.05 in full,
         // so a partially-orphaned territory's confidence reflects the real
         // grounding deficit rather than being clamped at -0.10.
         const orphanPenaltyPerClaim = 0.05;
         const totalPenalty = orphanResult.orphanedClaims.length * orphanPenaltyPerClaim;
-        // Seal #8 / F3.1 — floor 0.20 applies ONLY when at least one claim
         // is grounded (i.e. partial-orphan territory). The previous 0.15
         // floor for all-orphan territories has been removed (those are now
         // capped ≤0.10 above).
@@ -2791,7 +2787,6 @@ CORRECTION REQUIRED:
 
   const executionTimeMs = Date.now() - startTime;
 
-  // Seal #8 / F3.9 — keep raw confidence (no pre-rounding) so the
   // normalize/threshold gates downstream see actual values. Display
   // rounding happens at API/serialization boundary only.
   const rawConfidence = primaryTerritory ? primaryTerritory.confidenceScore : 0;

@@ -61,7 +61,7 @@ export function getCachedCELReport(campaignId: string, accountId: string): CELRe
 }
 
 /**
- * Seal #8 / F3.6 — per-rule pass thresholds.
+ * per-rule pass thresholds.
  * Default raised from 0.4 → 0.6 (a "passed" engine must clear the majority of
  * its causal-compliance budget, not just survive minor violations).
  * "Critical" rules — those whose root-cause is named CAUSAL_CHAIN or
@@ -234,7 +234,6 @@ export function enforcePositioningCompliance(
   };
 
   if (!ael || !ael.root_causes || ael.root_causes.length === 0) {
-    // Seal #8 / F3.5 — INCOMPLETE, NOT a silent PASS. Without AEL we cannot
     // evaluate causal compliance at all; the gate must treat this as a hard
     // fail so downstream callers don't get a green light from a non-evaluation.
     result.passed = false;
@@ -245,7 +244,6 @@ export function enforcePositioningCompliance(
     return result;
   }
 
-  // Seal #8 / F3.5 architect-pass-4 fix — partial AEL must also gate as
   // INCOMPLETE. A degraded enrichment package cannot ground positioning
   // territories' causal compliance any more than a missing one can.
   if (ael.isPartial === true) {
@@ -262,7 +260,6 @@ export function enforcePositioningCompliance(
   result.enforcementLog.push(`THEMES: ${themes.join(", ")} | primary=${primaryTheme}`);
 
   if (themes.length === 0) {
-    // Seal #8 / F3.5 — Without matching constraint rules we have no signal
     // either way. Mark INCOMPLETE so plan synthesis knows compliance was
     // not actually verified.
     result.passed = false;
@@ -341,7 +338,6 @@ export function enforcePositioningCompliance(
     result.verdict = "FAIL";
     result.reason = blockingViolations[0].violationType;
   } else if (majorViolations.length > 0) {
-    // Seal #8 / F3.6 — pass threshold raised from 0.4 to per-rule resolved
     // value (default 0.6, critical themes 0.75). Raw score compared, no
     // pre-rounding (F3.9).
     result.score = Math.max(0, 1 - (majorViolations.length * 0.3));
@@ -375,7 +371,6 @@ export function enforceGenericEngineCompliance(
   };
 
   if (!ael || !ael.root_causes || ael.root_causes.length === 0) {
-    // Seal #8 / F3.5 — INCOMPLETE, NOT silent PASS.
     result.passed = false;
     result.score = 0;
     result.verdict = "INCOMPLETE";
@@ -384,7 +379,6 @@ export function enforceGenericEngineCompliance(
     return result;
   }
 
-  // Seal #8 / F3.5 architect-pass-4 fix — partial AEL is INCOMPLETE.
   if (ael.isPartial === true) {
     result.passed = false;
     result.score = 0;
@@ -399,7 +393,6 @@ export function enforceGenericEngineCompliance(
   result.appliedRules = themes;
 
   if (!primaryTheme || themes.length === 0) {
-    // Seal #8 / F3.5 — Without matching rules we have no basis to PASS.
     result.passed = false;
     result.score = 0;
     result.verdict = "INCOMPLETE";
@@ -442,7 +435,6 @@ export function enforceGenericEngineCompliance(
     result.score = Math.max(0, result.score - 0.1 * genericHits.length);
   }
 
-  // Seal #8 / F3.6 — pass threshold raised from 0.4 to per-rule resolved
   // value (default 0.6, critical themes 0.75). Raw score compared (F3.9).
   const threshold = resolveConstraintThreshold(result.appliedRules);
   result.passed = result.score >= threshold;
@@ -608,7 +600,6 @@ export interface DepthGateResult {
   failureReason: string | null;
 }
 
-// Seal #8 / F3.7 (pass-6) — String-presence detector that fires on raw
 // marketing-claim language even when the classifier returns 0 counts.
 // This closes the bypass where shallow / emotional copy that the classifier
 // misclassified would have skipped the depth gate entirely.
@@ -632,7 +623,6 @@ export function detectMarketingClaimStrings(outputTexts: string[]): { present: b
 }
 
 export function isDepthBlocking(depthResult: DepthComplianceResult, sourceTexts?: string[]): boolean {
-  // Seal #8 / F3.7 — Depth gate fires on ANY marketing-claim presence, derived
   // EITHER from classifier counts OR (pass-6) from string-presence scan over
   // the raw output sections. Pass-6 added the string-presence parallel trigger
   // because the classifier was missing copy that bypassed enforcement.
@@ -875,7 +865,6 @@ export function enforceEngineDepthCompliance(
     result.depthDiagnostics.hasBehavioralImpact ? 0.15 : 0,
     Math.max(0, 0.10 - (genericTermCount * 0.02) - (shallowPatternCount * 0.03)),
   ];
-  // Seal #8 / F3.9 — Keep raw value (no pre-rounding) so the depth-gate
   // threshold compare in isDepthBlocking sees the actual score. Display
   // rounding happens at serialization time only.
   result.causalDepthScore = depthComponents.reduce((a, b) => a + b, 0);

@@ -2333,7 +2333,7 @@ export async function analyzePersuasion(
 
     const failedAcceptability = assessStrategyAcceptability(0, 0, allLayers.length, false, [...structuralWarnings, "DEPTH_FAILED"]);
 
-    return {
+    return applyPartialAelDowngrade("PersuasionEngine-V3", {
       status: "DEPTH_FAILED",
       statusMessage: `Depth gate failed: depthScore=${celDepth.causalDepthScore} — non-generative engine, cannot regenerate`,
       primaryRoute: routes.primary,
@@ -2350,7 +2350,7 @@ export async function analyzePersuasion(
       strategyAcceptability: failedAcceptability,
       celDepthCompliance: celDepth,
       depthGateResult,
-    };
+    }, aelAck);
   }
 
   if (celDepth.violations.length > 0) {

@@ -298,14 +298,12 @@ export async function designValueArchitecture(args: DesignerInput): Promise<Valu
       judgeReason = judged.reason || "";
       judgeFix = judged.fix || "";
     } else {
-      // Seal #8 / F3.4 — unparseable / missing-verdict judge output is NOT
       // accept-by-default. No positive evidence → REJECTED + JUDGE_ERROR.
       judgeVerdict = "REJECTED";
       judgeReason = `JUDGE_ERROR: unparseable judge output (raw="${judgeRaw.slice(0, 80)}")`;
     }
   } catch (err: any) {
     console.warn(`[ValueArchitect] JUDGE_FAILED | ${err.message} — treating as REJECTED (no positive verdict)`);
-    // Seal #8 / F3.4 — judge call failure is NOT accept-by-default.
     judgeVerdict = "REJECTED";
     judgeReason = `JUDGE_ERROR: ${err.message}`;
   }
@@ -389,7 +387,6 @@ export async function designValueArchitecture(args: DesignerInput): Promise<Valu
   console.log(`[ValueArchitect] DONE in ${Date.now() - startTs}ms | finalVerdict=${result.judgeVerdict} | retries=${result.retryCount} | leveragePoint=${result.commercialLeverage.pointInChain} | groundedTrust=${!!result.groundedInTrustMechanism} | groundedGame=${!!result.groundedInGameDimension}`);
   if (result.judgeVerdict === "REJECTED") {
     console.warn(`[ValueArchitect] FINAL_REJECTED — falling back to legacy offer output (no valueArchitecture emitted)`);
-    // Seal #8 / F3.3 — parallel rejection-surface (does NOT replace fallback).
     try {
       const { recordCommercialRejection } = await import("../../shared/commercial-dna");
       const isJudgeErr = String(result.judgeReason || "").startsWith("JUDGE_ERROR");

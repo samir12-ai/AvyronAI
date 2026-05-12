@@ -5,8 +5,7 @@
  * background workers, no transitive dependencies pulled. This is the
  * default in development.
  *
- * @sentry/node is now a first-class dependency (architect-review pass-3:
- * dynamic-import-without-dep meant DSN-set deployments could silently no-op
+ * @sentry/node is now a first-class dependency ( * dynamic-import-without-dep meant DSN-set deployments could silently no-op
  * if the package failed to install). The dynamic import remains so the
  * SDK is loaded only when SENTRY_DSN is set — saves boot time and
  * isolates init errors from the rest of observability.
