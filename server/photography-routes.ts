@@ -19,8 +19,7 @@
  */
 import type { Express } from "express";
 import { db } from "./db";
-import { photographerProfiles, portfolioPosts, postInteractions, reservations } from "@shared/schema";
-import { photographyProfileUpdateSchema } from "@shared/schema-seal3";
+import { photographerProfiles, portfolioPosts, postInteractions, reservations, photographyProfileUpdateSchema } from "@shared/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 import multer from "multer";
 import fs from "fs";

@@ -12,7 +12,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
-import { photographyProfileUpdateSchema } from "../../shared/schema-seal3";
+import { ZodIssueCode } from "zod";
+import { photographyProfileUpdateSchema } from "@shared/schema";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf-8");
@@ -67,11 +68,11 @@ describe("Seal #3 F1.9 — photography PUT mass-assignment defense", () => {
         // every offending key in `issue.keys`, NOT in `issue.path`. Walk both
         // shapes so the proof is honest about how Zod actually reports it.
         const flagged: string[] = [];
-        for (const i of out.error.issues) {
-          if ((i as any).code === "unrecognized_keys" && Array.isArray((i as any).keys)) {
-            for (const k of (i as any).keys) flagged.push(k);
+        for (const issue of out.error.issues) {
+          if (issue.code === ZodIssueCode.unrecognized_keys) {
+            for (const k of issue.keys) flagged.push(k);
           } else {
-            flagged.push(i.path.join("."));
+            flagged.push(issue.path.join("."));
           }
         }
         const expected = ["accountId", "id", "rating", "totalReviews", "isVerified", "createdAt", "completelyMadeUpField"];

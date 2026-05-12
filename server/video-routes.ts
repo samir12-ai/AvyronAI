@@ -17,8 +17,7 @@
  */
 import type { Express } from "express";
 import { db } from "./db";
-import { videoProjects } from "@shared/schema";
-import { videoProjectCreateSchema } from "@shared/schema-seal3";
+import { videoProjects, videoProjectCreateSchema } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import multer from "multer";
 import fs from "fs";

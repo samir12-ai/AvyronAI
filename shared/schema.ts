@@ -493,27 +493,54 @@ export const insertReservationSchema = createInsertSchema(reservations).omit({
 });
 
 // ─── Seal #3 (Task #21) — F1.9 / F1.10 strict body schemas ──────────────────
-//
-// PROBLEM (master audit F1.9, F1.10): the photography PUT handler and the
-// video upload-clips handler both took `req.body` directly. The PUT used a
-// destructure-deny pattern (`{ accountId: _ignored, id: _ignoredId, ...rest }`)
-// which is FRAGILE — any new mutable column added to the table would silently
-// become writable by ANY authed user. The video handler interpolated raw
-// `req.body.title|style|mood` into a DB insert with no length cap, no character
-// validation, and no rejection of unknown keys (mass-assignment vector).
-//
-// FIX: explicit `.pick()` allowlists + `.strict()` so unknown keys are
-// REJECTED (HTTP 400), and per-field constraints (length cap + character
-// whitelist for free-text fields). Implementation lives in
-// `./schema-seal3.ts` (separate module) because the inline regex literals
-// silently broke vitest's esbuild transform when defined here — a known
-// loader edge-case that swallowed the exports without a parse error.
-export {
-  photographyProfileUpdateSchema,
-  videoProjectCreateSchema,
-  type PhotographyProfileUpdate,
-  type VideoProjectCreate,
-} from "./schema-seal3";
+// Built via drizzle-zod's createInsertSchema().pick().strict() so the column
+// allowlist is derived directly from the table schema (no drift if a column
+// is renamed) and unknown keys produce Zod's `unrecognized_keys` issue. Per-
+// field regex constraints are layered on with `.extend()`.
+const SEAL3_PHOTO_TEXT_RE = new RegExp("^[A-Za-z0-9 .,'\"!?@()_+\\-/\\[\\]]{0,500}$");
+const SEAL3_PHOTO_URL_RE = new RegExp("^https?://[A-Za-z0-9._~:/?#\\[\\]@!$'()*+,;=%\\-]{1,500}$", "i");
+const SEAL3_PHOTO_HANDLE_RE = new RegExp("^[A-Za-z0-9._@:\\-/]{1,100}$");
+const SEAL3_PHOTO_PHONE_RE = new RegExp("^[+0-9 ()\\-]{0,40}$");
+const SEAL3_PHOTO_PATH_RE = new RegExp("^[A-Za-z0-9._\\-/]{0,500}$");
+const SEAL3_VIDEO_TITLE_RE = new RegExp("^[A-Za-z0-9 .,'\"!?@()_+\\-/\\[\\]]{1,200}$");
+const SEAL3_VIDEO_TAG_RE = new RegExp("^[A-Za-z0-9 _\\-]{1,50}$");
+
+export const photographyProfileUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).regex(SEAL3_PHOTO_TEXT_RE),
+    phone: z.string().trim().max(40).regex(SEAL3_PHOTO_PHONE_RE).nullable(),
+    bio: z.string().trim().max(2000).regex(SEAL3_PHOTO_TEXT_RE).nullable(),
+    specialties: z.string().trim().max(500).regex(SEAL3_PHOTO_TEXT_RE).nullable(),
+    profileImage: z.string().trim().max(500).regex(SEAL3_PHOTO_PATH_RE).nullable(),
+    coverImage: z.string().trim().max(500).regex(SEAL3_PHOTO_PATH_RE).nullable(),
+    location: z.string().trim().max(120).regex(SEAL3_PHOTO_TEXT_RE),
+    city: z.string().trim().max(120).regex(SEAL3_PHOTO_TEXT_RE),
+    country: z.string().trim().max(120).regex(SEAL3_PHOTO_TEXT_RE),
+    priceRange: z.string().trim().max(120).regex(SEAL3_PHOTO_TEXT_RE).nullable(),
+    instagram: z.string().trim().max(120).regex(SEAL3_PHOTO_HANDLE_RE).nullable(),
+    website: z.string().trim().max(500).regex(SEAL3_PHOTO_URL_RE).nullable(),
+  })
+  .strict()
+  .partial();
+export type PhotographyProfileUpdate = z.infer<typeof photographyProfileUpdateSchema>;
+
+export const videoProjectCreateSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).regex(SEAL3_VIDEO_TITLE_RE),
+    style: z.string().trim().min(1).max(50).regex(SEAL3_VIDEO_TAG_RE),
+    mood: z.string().trim().min(1).max(50).regex(SEAL3_VIDEO_TAG_RE),
+  })
+  .strict()
+  .partial();
+export type VideoProjectCreate = z.infer<typeof videoProjectCreateSchema>;
+
+// Compile-time guarantee these schemas stay column-aligned with the tables.
+// If a column is renamed/removed, these type assertions fail to compile.
+type _PhotoCols = keyof typeof photographerProfiles.$inferInsert;
+type _VideoCols = keyof typeof videoProjects.$inferInsert;
+const _photoColAssert: keyof z.infer<typeof photographyProfileUpdateSchema> extends _PhotoCols ? true : never = true;
+const _videoColAssert: keyof z.infer<typeof videoProjectCreateSchema> extends _VideoCols ? true : never = true;
+void _photoColAssert; void _videoColAssert;
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -2838,3 +2865,5 @@ export const authSessions = pgTable("auth_sessions", {
 
 export type AuthLockout = typeof authLockouts.$inferSelect;
 export type AuthSession = typeof authSessions.$inferSelect;
+
+

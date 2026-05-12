@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
 import { validateFilterComplex } from "../video-routes-helpers";
-import { videoProjectCreateSchema } from "../../shared/schema-seal3";
+import { videoProjectCreateSchema } from "@shared/schema";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf-8");
@@ -102,6 +102,22 @@ describe("Seal #3 F1.10/F1.11/F9.6 — video ffmpeg injection defense", () => {
         "[v0][a0]concat=n=1:v=1:a=1[outv][outa]";
       const out = validateFilterComplex(real);
       expect(out.ok).toBe(true);
+    });
+
+    // Reviewer-requested behavioral proof: the canonical `;cat /etc/passwd`
+    // payload (and its space-separated variant) MUST be rejected. Both rely
+    // on a single character — `;` is in the production filter syntax so it
+    // is whitelisted, but the SPACE between `;` and `cat` (or any shell
+    // command) is NOT in the whitelist AND is in FORBIDDEN_SHELL_META, so
+    // the validator rejects on whitespace before any command can chain.
+    it("REJECTS the canonical `;cat /etc/passwd` shell-injection payload", () => {
+      const noSpace = validateFilterComplex("[0:v]copy[v];cat /etc/passwd");
+      expect(noSpace.ok).toBe(false);
+      if (!noSpace.ok) expect(noSpace.reason).toMatch(/whitelist|shell/);
+
+      const withSpace = validateFilterComplex("[0:v]copy[v]; cat /etc/passwd");
+      expect(withSpace.ok).toBe(false);
+      if (!withSpace.ok) expect(withSpace.reason).toMatch(/whitelist|shell/);
     });
 
     it("rejects empty + non-string + over-length", () => {

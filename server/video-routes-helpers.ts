@@ -12,10 +12,13 @@
  *      outside the whitelist — and especially shell metacharacters like
  *      `;`, `&`, `|`, `$`, backtick, newline — is REJECTED.
  *
- *      NOTE: ffmpeg filter syntax legitimately uses `;` to separate filter
- *      chains and `(`, `)`, `/` for arithmetic. These ARE included in the
- *      whitelist because ffmpeg parses them itself once invoked via
- *      arg-array spawn (shell: false), so they cannot reach a shell.
+ *      NOTE: `;` (filter-chain separator), `(`, `)`, `/` (arithmetic) ARE
+ *      in the whitelist because the production filter graph at
+ *      video-routes.ts:372 emits them — they're inert under shell:false and
+ *      ffmpeg parses them itself. Whitespace and quotes are NOT in the
+ *      whitelist, so `;cat /etc/passwd` style payloads (which require a
+ *      space between `;` and the next token) are rejected at validation
+ *      time, BEFORE spawn is ever invoked.
  *
  *   2. runFfmpeg(args, opts) / runFfprobe(args, opts)
  *      Replace `execAsync(\`ffmpeg ...\`)` (which spawned `/bin/sh -c`)
@@ -27,12 +30,15 @@
  */
 import { spawn } from "node:child_process";
 
-// Whitelist: alphanumerics + ffmpeg-syntax chars actually used by our edit
-// pipeline. SHELL METACHARS ARE EXCLUDED EVEN THOUGH spawn(shell:false)
-// strips their power — defense-in-depth so a future regression to
-// shell-mode won't reopen the injection vector.
-const FILTER_COMPLEX_WHITELIST = /^[A-Za-z0-9:=,;\[\]*.\-+()/\s_@%']+$/;
-const FORBIDDEN_SHELL_META = /[&|$`\n\r\\<>"]/;
+// Tight whitelist matching the EXACT character set the server-built filter
+// graph at video-routes.ts emits: alphanumerics, `_` (ffmpeg filter names
+// like `force_original_aspect_ratio`), and the filter-syntax chars
+// (`:`, `=`, `,`, `;`, `[`, `]`, `(`, `)`, `/`, `*`, `.`, `-`, `+`).
+// Whitespace, quotes, `@`, `%`, `\`, `<`, `>`, `&`, `|`, `$`, backtick, and
+// newlines are NOT in the set. Rejecting whitespace alone kills the
+// `;cat /etc/passwd` family of payloads at validation time, BEFORE spawn.
+const FILTER_COMPLEX_WHITELIST = /^[A-Za-z0-9_:=,;\[\]*.\-+()\/]+$/;
+const FORBIDDEN_SHELL_META = /[&|$`\n\r\\<>"' \t]/;
 const FILTER_COMPLEX_MAX = 4096;
 
 export type ValidationResult = { ok: true } | { ok: false; reason: string };
