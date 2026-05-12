@@ -607,9 +607,19 @@ export function startPublishWorker() {
   }).catch(() => {});
 
   publishTimer = setInterval(async () => {
-    if (!isShuttingDown) {
+    // Seal #7 / F10.7 — emit worker_tick_total metric per cycle.
+    const { recordWorkerTick } = await import("./observability/otel");
+    if (isShuttingDown) {
+      recordWorkerTick("publish", "skipped");
+      return;
+    }
+    try {
       await checkAndPublishDuePosts();
       await fetchPostMetrics();
+      recordWorkerTick("publish", "ok");
+    } catch (err) {
+      recordWorkerTick("publish", "error");
+      console.error("[PublishWorker] tick error:", err);
     }
   }, PUBLISH_CHECK_INTERVAL_MS);
 

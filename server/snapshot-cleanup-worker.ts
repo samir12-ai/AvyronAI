@@ -326,8 +326,16 @@ export function startSnapshotCleanupWorker(): void {
     runSnapshotCleanup().catch(err => console.error("[SnapshotCleanup] Initial run error:", err));
   }, INITIAL_DELAY_MS);
 
-  cleanupTimer = setInterval(() => {
-    runSnapshotCleanup().catch(err => console.error("[SnapshotCleanup] Scheduled run error:", err));
+  cleanupTimer = setInterval(async () => {
+    // Seal #7 / F10.7 — emit worker_tick_total metric per cycle.
+    const { recordWorkerTick } = await import("./observability/otel");
+    try {
+      await runSnapshotCleanup();
+      recordWorkerTick("snapshot_cleanup", "ok");
+    } catch (err) {
+      recordWorkerTick("snapshot_cleanup", "error");
+      console.error("[SnapshotCleanup] Scheduled run error:", err);
+    }
   }, CLEANUP_INTERVAL_MS);
 }
 

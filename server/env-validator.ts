@@ -160,6 +160,18 @@ export function validateEnv(opts: { exitOnFailure?: boolean } = {}): EnvValidati
       }
       const altText = r.accepts ? ` (or ${r.accepts.join(" / ")})` : "";
       missing.push(`${r.key}${altText} — ${r.description}`);
+    } else if (r.accepts && r.accepts.length) {
+      // Architect-review pass-3 fix: bridge canonical ↔ alias env names.
+      // server/ai-client.ts reads `AI_INTEGRATIONS_OPENAI_API_KEY` only.
+      // If the operator sets just the canonical `OPENAI_API_KEY` we'd boot
+      // green and then crash on the first AI call. Mirror the value into
+      // every accepted alias (and vice versa) so all consumers find it
+      // regardless of which name was set first.
+      for (const alias of [r.key, ...r.accepts]) {
+        if (!process.env[alias] || !process.env[alias]!.trim()) {
+          process.env[alias] = v;
+        }
+      }
     }
   }
 

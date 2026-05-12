@@ -1,5 +1,30 @@
 import OpenAI from "openai";
 import { GoogleGenAI, Modality } from "@google/genai";
+import { recordAiCost } from "./observability/otel";
+import { logger } from "./logger";
+
+/**
+ * Seal #7 (F10.6/F10.7) — per-call USD cost estimation. Model rates are the
+ * public OpenAI/Gemini list prices ($/1K tokens) at the time of writing.
+ * Worth-tracking precision: nearest cent. When pricing changes, update here.
+ * Unknown models default to 0 — we still record so cardinality stays right.
+ */
+const MODEL_COST_USD_PER_1K_TOKENS: Record<string, number> = {
+  "gpt-4.1": 0.005,
+  "gpt-4o": 0.005,
+  "gpt-4o-mini": 0.00015,
+  "gpt-5": 0.01,
+  "gpt-5-mini": 0.0005,
+  "gemini-1.5-pro": 0.00125,
+  "gemini-1.5-flash": 0.000075,
+  "gemini-2.0-flash": 0.0001,
+  "gemini-2.5-flash": 0.0001,
+};
+
+function estimateCostUsd(model: string, totalTokens: number): number {
+  const ratePer1k = MODEL_COST_USD_PER_1K_TOKENS[model] ?? 0;
+  return (totalTokens / 1000) * ratePer1k;
+}
 
 const DEFAULT_MAX_TOKENS = 800;
 const HARD_TIMEOUT_MS = 45000;
@@ -114,6 +139,18 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
 
     success = true;
     actualTokens = result.usage?.total_tokens || rest.max_tokens;
+    // Seal #7 / F10.7 — emit ai_cost_usd_total + traceId-aware log.
+    const costUsd = estimateCostUsd(rest.model, actualTokens);
+    recordAiCost("openai", rest.model, costUsd);
+    logger.info({
+      msg: "ai.openai.call",
+      accountId,
+      endpoint,
+      model: rest.model,
+      tokens: actualTokens,
+      costUsd: Number(costUsd.toFixed(6)),
+      durationMs: Date.now() - startTime,
+    });
     return result;
   } catch (err: any) {
     if (err instanceof AICallError) throw err;
@@ -158,6 +195,18 @@ export async function aiGemini(options: AIGeminiOptions) {
 
     success = true;
     actualTokens = (result as any)?.usageMetadata?.totalTokenCount || maxTokens;
+    // Seal #7 / F10.7 — emit ai_cost_usd_total + traceId-aware log.
+    const costUsd = estimateCostUsd(model, actualTokens);
+    recordAiCost("gemini", model, costUsd);
+    logger.info({
+      msg: "ai.gemini.call",
+      accountId,
+      endpoint,
+      model,
+      tokens: actualTokens,
+      costUsd: Number(costUsd.toFixed(6)),
+      durationMs: Date.now() - startTime,
+    });
     return result;
   } catch (err: any) {
     if (err instanceof AICallError) throw err;
