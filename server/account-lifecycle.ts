@@ -27,7 +27,6 @@
  *   - account_tombstones → the row we're acting on; deleted last by reaper
  */
 import { Pool, PoolClient } from "pg";
-import * as bcrypt from "bcryptjs";
 import * as crypto from "node:crypto";
 import { logger } from "./logger";
 
@@ -164,14 +163,12 @@ export const CASCADE_TABLES: readonly string[] = Object.freeze([
 export const CASCADE_EXEMPT: readonly string[] = Object.freeze([
   "audit_log_archive",
   "account_tombstones",
-  "account_delete_confirmations",
   "schema_migrations",
-  "auth_lockouts",  // keyed by email, not account_id; survives intentionally
-  "messages",       // session-scoped, no account_id column
+  "auth_lockouts",
+  "messages",
 ]);
 
 const TOMBSTONE_RETENTION_DAYS = 30;
-const CONFIRMATION_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 let pool: Pool | null = null;
 function getPool(): Pool {
@@ -182,68 +179,6 @@ function getPool(): Pool {
 function hashIp(ip: string | undefined): string | null {
   if (!ip) return null;
   return crypto.createHash("sha256").update(ip).digest("hex").slice(0, 32);
-}
-
-/**
- * Step 1 of the user-facing flow: caller POSTs /api/account/delete-confirm
- * with their password. Server verifies password, mints a one-shot token,
- * stores its bcrypt, returns the plaintext token to the client.
- */
-export async function issueDeleteConfirmation(
-  accountId: string,
-  userId: string,
-): Promise<string> {
-  const token = crypto.randomBytes(32).toString("base64url");
-  const tokenHash = await bcrypt.hash(token, 10);
-  const expiresAt = new Date(Date.now() + CONFIRMATION_TOKEN_TTL_MS);
-  const c = await getPool().connect();
-  try {
-    // Invalidate any unused prior confirmations for this user.
-    await c.query(
-      "UPDATE account_delete_confirmations SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL",
-      [userId],
-    );
-    await c.query(
-      "INSERT INTO account_delete_confirmations (account_id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)",
-      [accountId, userId, tokenHash, expiresAt],
-    );
-  } finally {
-    c.release();
-  }
-  return token;
-}
-
-/**
- * Step 2: caller sends DELETE /api/account with header
- *   X-Account-Delete-Confirm: <token from step 1>
- * AND fresh password (re-verified). On success we mask PII immediately and
- * insert a tombstone row; the daily reaper does the physical cascade.
- */
-export async function consumeDeleteConfirmation(
-  accountId: string,
-  userId: string,
-  presentedToken: string,
-): Promise<boolean> {
-  const c = await getPool().connect();
-  try {
-    const r = await c.query<{ id: string; token_hash: string }>(
-      `SELECT id, token_hash FROM account_delete_confirmations
-       WHERE account_id = $1 AND user_id = $2 AND consumed_at IS NULL AND expires_at > now()
-       ORDER BY issued_at DESC LIMIT 1`,
-      [accountId, userId],
-    );
-    const row = r.rows[0];
-    if (!row) return false;
-    const ok = await bcrypt.compare(presentedToken, row.token_hash);
-    if (!ok) return false;
-    await c.query(
-      "UPDATE account_delete_confirmations SET consumed_at = now() WHERE id = $1",
-      [row.id],
-    );
-    return true;
-  } finally {
-    c.release();
-  }
 }
 
 /**

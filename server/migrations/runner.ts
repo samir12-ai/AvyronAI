@@ -245,6 +245,15 @@ export async function runMigrations(opts: RunnerOptions = {}): Promise<{ applied
 
     try {
       await ensureMigrationsTable(client);
+
+      // Pass-5 fix: legacy TS 002–014 MUST run BEFORE SQL 015/016 because
+      // SQL 015 builds CONCURRENT indexes on `account_id` columns added by
+      // legacy 012. Reverse order would fail on a fresh DB or any DB that
+      // hasn't yet applied 012.
+      if (!opts.skipLegacy) {
+        await runLegacyTsMigrations();
+      }
+
       const alreadyApplied = await getAppliedVersions(client);
       const all = listSqlMigrations();
       const pending = all.filter((m) => !alreadyApplied.has(m.version));
@@ -258,11 +267,6 @@ export async function runMigrations(opts: RunnerOptions = {}): Promise<{ applied
           console.log(`[Migrations] applied ${m.version}_${m.name} (${dur}ms)`);
           applied.push(m);
         }
-      }
-
-      if (!opts.skipLegacy) {
-        // Legacy TS migrations — already idempotent. Run sequentially.
-        await runLegacyTsMigrations();
       }
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]).catch(() => undefined);

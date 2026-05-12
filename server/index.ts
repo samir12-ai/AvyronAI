@@ -613,16 +613,10 @@ function setupErrorHandler(app: express.Application) {
 
   const port = parseInt(process.env.PORT || "5000", 10);
 
-  // Seal #7 (F10.1, pass-4) — boot VERIFIES the schema floor only; it does
-  // NOT mutate schema. Operators apply migrations via `npm run db:migrate`
-  // (which calls runMigrations()). Boot refuses to start if the DB reports
-  // a schema version below REQUIRED_SCHEMA_VERSION — better to fail loudly
-  // than to serve traffic against an older-than-expected schema. By default
-  // (BOOT_AUTO_MIGRATE=true), boot still applies pending migrations as a
-  // convenience for single-instance Replit deployments where there is no
-  // separate migrate step in the deploy pipeline; multi-instance operators
-  // should set BOOT_AUTO_MIGRATE=false and run db:migrate out-of-band.
-  const autoMigrate = process.env.BOOT_AUTO_MIGRATE !== "false";
+  // Seal #7 (F10.1) — boot verifies the schema floor; schema mutations are
+  // owned by `npm run db:migrate`. Single-instance Replit operators may
+  // opt-in to apply-at-boot with BOOT_AUTO_MIGRATE=true.
+  const autoMigrate = process.env.BOOT_AUTO_MIGRATE === "true";
   try {
     if (autoMigrate) {
       const r = await runMigrations();

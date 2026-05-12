@@ -1,23 +1,6 @@
 -- Seal #7 (Task #25 / F9.9) — GDPR account-lifecycle tables.
---
--- Three tables:
---
--- 1. account_tombstones — soft-delete record. cascadeDeleteAccount() inserts
---    a row here, masks PII on `users` immediately, and the daily reaper job
---    permanently deletes ~30 days later. Gives users a 30-day undo window
---    that satisfies GDPR Article 17 right-to-erasure (immediate masking) AND
---    operational sanity (we can recover from accidental deletion).
---
--- 2. audit_log_archive — write-only audit trail for cascade-delete events.
---    Lives OUTSIDE the cascade walk so the historical record survives the
---    deletion of the row it describes. Required for Article 30 records of
---    processing activities.
---
--- 3. account_delete_confirmations — one-shot confirmation tokens minted by
---    POST /api/account/delete-confirm. The token must be presented in the
---    X-Account-Delete-Confirm header alongside DELETE /api/account, with a
---    fresh password. Tokens expire after 10 minutes — defends against CSRF
---    even though the route is JWT-gated.
+-- account_tombstones: soft-delete record + 30-day reaper-after stamp.
+-- audit_log_archive: write-only trail (lives outside cascade walk).
 
 CREATE TABLE IF NOT EXISTS account_tombstones (
   account_id      VARCHAR PRIMARY KEY,
@@ -46,15 +29,4 @@ CREATE TABLE IF NOT EXISTS audit_log_archive (
 CREATE INDEX IF NOT EXISTS idx_audit_log_archive_account_event
   ON audit_log_archive (account_id, event_at DESC);
 
-CREATE TABLE IF NOT EXISTS account_delete_confirmations (
-  id            VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_id    VARCHAR NOT NULL,
-  user_id       VARCHAR NOT NULL,
-  token_hash    TEXT NOT NULL,                   -- bcrypt of confirmation token
-  issued_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  expires_at    TIMESTAMPTZ NOT NULL,
-  consumed_at   TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_account_delete_confirmations_lookup
-  ON account_delete_confirmations (account_id, expires_at);
+DROP TABLE IF EXISTS account_delete_confirmations;
