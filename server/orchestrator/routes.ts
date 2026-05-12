@@ -792,8 +792,15 @@ export function registerOrchestratorV2Routes(app: Express) {
           PUBLISHED: "publishedCount",
         };
 
-        // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): empty-string normalization for object-key lookup, not a decision input
-        const oldField = statusToField[item.status || ""];
+        // Seal #4 F2.2/D1: explicit guard replaces the prior `|| ""`
+        // semantic-fallback. If a studio item has no recorded status,
+        // there is no prior counter to decrement — skip the bookkeeping
+        // entirely rather than fall through to an empty-string lookup
+        // (which D1 forbids on a decision input).
+        if (!item.status) {
+          return res.json({ success: true, status });
+        }
+        const oldField = statusToField[item.status];
         const newField = statusToField[status];
 
         const updates: Record<string, any> = {};
@@ -880,9 +887,18 @@ export function registerOrchestratorV2Routes(app: Express) {
 
         let miOutput: any = null;
         try {
+          // Seal #4 F2.1: tenant filter on raw SQL. accountId is resolved
+          // + ownership-asserted at handler boundary (L829/833). Without
+          // this AND clause an attacker who already passed campaign
+          // ownership for ANOTHER campaign of theirs could not reach
+          // here, but defense-in-depth at the SQL layer prevents future
+          // refactor regression (e.g. if the boundary assert is moved or
+          // a new caller is added that skips it).
           const miRes = await db.execute(
             sql`SELECT competitor_data, signal_data, market_state, overall_confidence, dominance_data
-                FROM mi_snapshots WHERE campaign_id = ${campaignId} ORDER BY created_at DESC LIMIT 1`
+                FROM mi_snapshots
+                WHERE campaign_id = ${campaignId} AND account_id = ${accountId}
+                ORDER BY created_at DESC LIMIT 1`
           );
           const row = miRes.rows?.[0];
           if (row) {
@@ -983,11 +999,15 @@ export function registerOrchestratorV2Routes(app: Express) {
       ]);
 
       // Pull MI snapshot from DB
+      // Seal #4 F2.1: tenant filter on raw SQL (defense-in-depth — boundary
+      // ownership already asserted at L946 via assertCampaignBelongsTo).
       let miRow: any = null;
       try {
         const miRes = await db.execute(
           sql`SELECT id, status, overall_confidence, narrative_synthesis, market_diagnosis, market_state, created_at
-              FROM mi_snapshots WHERE campaign_id = ${campaignId} ORDER BY created_at DESC LIMIT 1`
+              FROM mi_snapshots
+              WHERE campaign_id = ${campaignId} AND account_id = ${accountId}
+              ORDER BY created_at DESC LIMIT 1`
         );
         miRow = miRes.rows?.[0] ?? null;
       } catch { /* ignore */ }
@@ -997,12 +1017,56 @@ export function registerOrchestratorV2Routes(app: Express) {
         return (Math.round(val * 1000) / 10).toFixed(1) + "%";
       }
 
+      // Seal #4 F2.6: summary-block honesty. Replaces the prior pattern
+      // `engine?.status ?? (engine?.id ? "COMPLETE" : "—")` which fabricated
+      // a COMPLETE status from id-presence (or `exists` flag). New rule:
+      //   - If snap is null/undefined → MISSING
+      //   - If snap.status is one of the canonical 4 → return as-is
+      //   - Otherwise → UNKNOWN with degraded:true (frontend Task #6 will
+      //     render UNKNOWN distinctly)
+      // Returns BOTH the status string AND a degraded flag that becomes
+      // `_provenance.degraded: true` on the row, so the dashboard can show
+      // a "data quality" indicator without the row silently looking healthy.
+      type CanonStatus = "COMPLETE" | "PARTIAL" | "UNKNOWN" | "MISSING";
+      function summarizeStatus(snap: any): { status: CanonStatus; degraded: boolean } {
+        if (snap == null) return { status: "MISSING", degraded: false };
+        const raw = snap?.status;
+        if (raw === "COMPLETE" || raw === "PARTIAL" || raw === "UNKNOWN" || raw === "MISSING") {
+          return { status: raw as CanonStatus, degraded: false };
+        }
+        return { status: "UNKNOWN", degraded: true };
+      }
+      // For MI snapshots the status comes from a row, not a wrapper.
+      function summarizeMiStatus(row: any): { status: CanonStatus; degraded: boolean } {
+        if (row == null) return { status: "MISSING", degraded: false };
+        const raw = row?.status;
+        if (raw === "COMPLETE" || raw === "PARTIAL" || raw === "UNKNOWN" || raw === "MISSING") {
+          return { status: raw as CanonStatus, degraded: false };
+        }
+        return { status: "UNKNOWN", degraded: true };
+      }
+      const miSt = summarizeMiStatus(miRow);
+      const audSt = summarizeStatus(audience);
+      const posSt = summarizeStatus(positioning);
+      const difSt = summarizeStatus(differentiation);
+      const mecSt = summarizeStatus(mechanism);
+      const offSt = summarizeStatus(offer);
+      const awaSt = summarizeStatus(awareness);
+      const funSt = summarizeStatus(funnel);
+      const perSt = summarizeStatus(persuasion);
+      const intSt = summarizeStatus(integrity);
+      const stvSt = summarizeStatus(statVal);
+      const budSt = summarizeStatus(budget?.snapshot);
+      const chnSt = summarizeStatus(channel);
+      const itrSt = summarizeStatus(iteration);
+      const retSt = summarizeStatus(retention?.snapshot);
+
       const rows = [
         {
           num: "01",
           engine: "Market Intelligence",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for MI status row
-          status: miRow?.status ?? "—",
+          status: miSt.status,
+          _provenance: { degraded: miSt.degraded },
           keyOutput: miRow?.market_diagnosis
             ? String(miRow.market_diagnosis).slice(0, 300)
             : miRow?.narrative_synthesis
@@ -1014,7 +1078,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "02",
           engine: "Audience",
-          status: audience?.id ? "COMPLETE" : "—",
+          status: audSt.status,
+          _provenance: { degraded: audSt.degraded },
           keyOutput: (() => {
             const awarenessLvl = audience?.awarenessLevel?.level ?? audience?.awarenessLevel;
             const maturityLvl = audience?.maturityIndex?.level ?? audience?.maturityIndex;
@@ -1047,8 +1112,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "03",
           engine: "Positioning",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for positioning row
-          status: positioning?.status ?? (positioning?.id ? "COMPLETE" : "—"),
+          status: posSt.status,
+          _provenance: { degraded: posSt.degraded },
           keyOutput: [
             positioning?.territory?.name ? `Territory: ${positioning.territory.name}` : null,
             positioning?.narrativeDirection ? `Direction: ${positioning.narrativeDirection}` : null,
@@ -1060,8 +1125,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "04",
           engine: "Differentiation",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for differentiation row
-          status: differentiation?.status ?? "—",
+          status: difSt.status,
+          _provenance: { degraded: difSt.degraded },
           keyOutput: [
             differentiation?.differentiationPillars?.length
               ? `${differentiation.differentiationPillars.length} pillars: ${differentiation.differentiationPillars.slice(0, 2).map((p: any) => p.name).join(", ")}`
@@ -1085,8 +1150,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "05",
           engine: "Mechanism",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for mechanism row
-          status: mechanism?.status ?? (mechanism?.exists ? "COMPLETE" : "—"),
+          status: mecSt.status,
+          _provenance: { degraded: mecSt.degraded },
           keyOutput: mechanism?.primaryMechanism
             ? [
                 `Name: ${mechanism.primaryMechanism.mechanismName}`,
@@ -1104,8 +1169,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "06",
           engine: "Offer",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for offer row
-          status: offer?.status ?? "—",
+          status: offSt.status,
+          _provenance: { degraded: offSt.degraded },
           keyOutput: offer?.primaryOffer
             ? [
                 offer.primaryOffer.offerName ? `Offer: ${offer.primaryOffer.offerName}` : null,
@@ -1126,8 +1191,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "07",
           engine: "Awareness",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for awareness row
-          status: awareness?.status ?? (awareness?.exists ? "COMPLETE" : "—"),
+          status: awaSt.status,
+          _provenance: { degraded: awaSt.degraded },
           keyOutput: awareness?.primaryRoute
             ? [
                 `Route: ${awareness.primaryRoute.routeName}`,
@@ -1150,8 +1215,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "08",
           engine: "Funnel",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for funnel row
-          status: funnel?.status ?? "—",
+          status: funSt.status,
+          _provenance: { degraded: funSt.degraded },
           keyOutput: funnel?.primaryFunnel
             ? [
                 `Funnel: ${funnel.primaryFunnel.funnelName}`,
@@ -1167,8 +1232,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "09",
           engine: "Persuasion",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for persuasion row
-          status: persuasion?.status ?? (persuasion?.exists ? "COMPLETE" : "—"),
+          status: perSt.status,
+          _provenance: { degraded: perSt.degraded },
           keyOutput: persuasion?.primaryRoute
             ? [
                 `Mode: ${persuasion.primaryRoute.persuasionMode}`,
@@ -1187,8 +1252,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "10",
           engine: "Integrity",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for integrity row
-          status: integrity?.status ?? (integrity?.exists ? "COMPLETE" : "—"),
+          status: intSt.status,
+          _provenance: { degraded: intSt.degraded },
           keyOutput: [
             integrity?.overallIntegrityScore != null
               ? `Integrity score: ${score(integrity.overallIntegrityScore)}`
@@ -1208,8 +1273,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "11",
           engine: "Statistical Validation",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for statistical-validation row
-          status: statVal?.status ?? (statVal?.exists ? "COMPLETE" : "—"),
+          status: stvSt.status,
+          _provenance: { degraded: stvSt.degraded },
           keyOutput: statVal?.result
             ? [
                 `State: ${statVal.result.validationState}`,
@@ -1229,8 +1294,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "12",
           engine: "Budget Governor",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for budget row
-          status: budget?.snapshot?.status ?? "—",
+          status: budSt.status,
+          _provenance: { degraded: budSt.degraded },
           keyOutput: budget?.snapshot?.result?.decision
             ? [
                 `Action: ${budget.snapshot.result.decision.action}`,
@@ -1247,8 +1312,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "13",
           engine: "Channel Selection",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for channel row
-          status: channel?.status ?? "—",
+          status: chnSt.status,
+          _provenance: { degraded: chnSt.degraded },
           keyOutput: channel?.result?.primaryChannel
             ? [
                 `Primary: ${channel.result.primaryChannel.channelName}`,
@@ -1269,8 +1334,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "14",
           engine: "Iteration",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for iteration row
-          status: iteration?.status ?? (iteration?.exists ? "COMPLETE" : "—"),
+          status: itrSt.status,
+          _provenance: { degraded: itrSt.degraded },
           keyOutput: [
             iteration?.nextTestHypotheses?.length
               ? `${iteration.nextTestHypotheses.length} test hypothesis: ${iteration.nextTestHypotheses[0]?.hypothesis ?? ""}`
@@ -1285,8 +1350,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "15",
           engine: "Retention",
-          // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): dashboard UI presentation default for retention row
-          status: retention?.snapshot?.status ?? "—",
+          status: retSt.status,
+          _provenance: { degraded: retSt.degraded },
           keyOutput: retention?.snapshot?.result?.retentionLoops?.length
             ? [
                 `${retention.snapshot.result.retentionLoops.length} retention loop(s)`,
