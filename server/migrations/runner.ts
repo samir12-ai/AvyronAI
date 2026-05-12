@@ -335,8 +335,28 @@ export async function verifySchemaFloor(opts: { databaseUrl?: string } = {}): Pr
   }
 }
 
-/** CLI entry — `npx tsx server/migrations/runner.ts`. */
-if (typeof require !== "undefined" && require.main === module) {
+/**
+ * CLI entry — `npx tsx server/migrations/runner.ts` (dev) or
+ * `node server/migrations/runner.js` (compiled).
+ *
+ * Pass-14: dual-mode entry-point detection so the CLI fires whether the file
+ * is loaded as CommonJS (tsx-shimmed `require.main`) OR pure ESM
+ * (`import.meta.url` matches the process entry point). Without the ESM
+ * fallback, an ESM-only runtime would silently no-op the CLI even though
+ * `npm run db:migrate` "completed".
+ */
+function isCliEntryPoint(): boolean {
+  if (typeof require !== "undefined" && require.main === module) return true;
+  try {
+    if (typeof import.meta?.url === "string" && process.argv[1]) {
+      const fileURLToPath = (globalThis as unknown as { require?: NodeRequire }).require?.("node:url")?.fileURLToPath;
+      if (fileURLToPath) return fileURLToPath(import.meta.url) === process.argv[1];
+    }
+  } catch { /* swallow — best-effort dual-mode probe */ }
+  return false;
+}
+
+if (isCliEntryPoint()) {
   runMigrations({ exitOnComplete: true })
     .then((r) => {
       console.log(`[Migrations] CLI complete — applied ${r.applied.length}, lastVersion=${r.lastVersion}`);
