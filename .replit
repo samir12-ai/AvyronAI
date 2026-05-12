@@ -96,5 +96,3 @@ waitForPort = 8081
 [userenv]
 
 [userenv.shared]
-BRIGHT_DATA_PROXY_USERNAME = "brd-customer-hl_824bff91-zone-marketmindai"
-BRIGHT_DATA_PROXY_COUNTRY = " United Arab Emirates"
