@@ -61,7 +61,7 @@ export function getCachedCELReport(campaignId: string, accountId: string): CELRe
 }
 
 /**
- * per-rule pass thresholds.
+ * Per-rule pass thresholds.
  * Default raised from 0.4 → 0.6 (a "passed" engine must clear the majority of
  * its causal-compliance budget, not just survive minor violations).
  * "Critical" rules — those whose root-cause is named CAUSAL_CHAIN or

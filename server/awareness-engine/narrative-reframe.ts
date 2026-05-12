@@ -57,7 +57,7 @@ export interface NarrativeReframe {
     whyItIsWorthIt: string;       // the upgrade they get for paying that cost
   };
   reasoningSteps: string[];
-  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "JUDGE_ERROR" | "NOT_RUN";
   judgeReason: string;
   retryCount: number;
 }

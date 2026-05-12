@@ -434,7 +434,7 @@ async function issueSessionForDevice(opts: {
 }
 
 // ─── Seal #7 (Task #25 / F9.9) — GDPR account-deletion routes ────────────────
-// Spec contract (session-plan T9, ):
+// Spec contract (session-plan T9):
 //   DELETE /api/account
 //     Headers: X-Account-Delete-Confirm: PERMANENTLY_DELETE  (literal)
 //     Body:    { password }                                  (fresh re-auth)

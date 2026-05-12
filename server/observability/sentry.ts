@@ -1,20 +1,14 @@
 /**
- * Seal #7 (Task #25 / F10.8) — Optional Sentry wrapper.
+ * Optional Sentry wrapper (F10.8).
  *
  * If SENTRY_DSN is unset, every method is a no-op — no boot cost, no
  * background workers, no transitive dependencies pulled. This is the
  * default in development.
  *
- * @sentry/node is now a first-class dependency ( * dynamic-import-without-dep meant DSN-set deployments could silently no-op
- * if the package failed to install). The dynamic import remains so the
- * SDK is loaded only when SENTRY_DSN is set — saves boot time and
- * isolates init errors from the rest of observability.
- *
- * If SENTRY_DSN is set AND `@sentry/node` resolves, we dynamic-import
- * it. We previously did NOT add @sentry/node to package.json because most
- * dev environments don't need it — operators add it before they set the
- * DSN. If the import fails we log once and continue — Sentry must NEVER
- * be the reason the server crashes.
+ * @sentry/node is a first-class dependency. The SDK is dynamically
+ * imported only when SENTRY_DSN is set — saves boot time and isolates
+ * init errors from the rest of observability. If the import fails we
+ * log once and continue — Sentry must NEVER be the reason the server crashes.
  */
 import { logger } from "../logger";
 

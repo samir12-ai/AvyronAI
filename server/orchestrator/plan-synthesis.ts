@@ -96,7 +96,7 @@ export interface SynthesizedPlan {
     slots: ExplorationSlot[];
   };
   /**
-   * parallel rejection-surface for commercial-reasoning
+   * Parallel rejection-surface for commercial-reasoning
    * modules. Populated by the orchestrator from the in-memory rejection
    * registry after all engines run. Each entry tells plan synthesis
    * (and any downstream auditor) that a commercial-reasoning module
@@ -111,7 +111,7 @@ export interface SynthesizedPlan {
     emittedAt: number;
   }>;
   /**
-   * propagation flag set when AEL ran in degraded
+   * Propagation flag set when AEL ran in degraded
    * (`isPartial`) mode. All engine outputs that consumed the partial
    * AEL inherit this provenance so plan synthesis and downstream
    * decision layers can distinguish a fully-grounded plan from one
@@ -123,7 +123,7 @@ export interface SynthesizedPlan {
     commercialReasoningDegraded?: boolean;
   };
   /**
-   * synthesis-level validationState downgrade. When
+   * Synthesis-level validationState downgrade. When
    * any commercial-reasoning rejection is recorded for the run OR AEL
    * was partial (F3.10), validationState is set to "weak" so downstream
    * gates see the degradation.

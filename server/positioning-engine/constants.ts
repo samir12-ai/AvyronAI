@@ -101,6 +101,10 @@ export interface Territory {
   domainFailure?: string;
   operationalProblem?: string;
   proofRequirement?: string;
+  provenance?: "system_default" | "mi_traced" | "orphaned" | "partial_traced" | "fully_traced";
+  degraded?: boolean;
+  _systemMapped?: boolean;
+  semanticCollision?: { competitor: string; collisionScore: number; details: string };
 }
 
 export interface StrategyCard {

@@ -1833,7 +1833,7 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
             ...seed.sourceSignalIds,
           ]);
           territories[idx].mappedSignalIds = Array.from(allGroundedIds);
-          (territories[idx] as any)._systemMapped = true;
+          territories[idx]._systemMapped = true;
 
           const groundedFields = [enemyGrounding.grounded, contrastGrounding.grounded, narrativeGrounding.grounded].filter(Boolean).length;
           const fallbackFields = 3 - groundedFields;
@@ -1880,8 +1880,8 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
       const existingIds = (territories[tIdx].mappedSignalIds || []).filter(id => validIdSet.has(id));
       const finalIds = Array.from(new Set([...existingIds, ...systemMappedIds]));
       territories[tIdx].mappedSignalIds = finalIds;
-      if (!(territories[tIdx] as any)._systemMapped) {
-        (territories[tIdx] as any)._systemMapped = systemMappedIds.length > 0;
+      if (!territories[tIdx]._systemMapped) {
+        territories[tIdx]._systemMapped = systemMappedIds.length > 0;
       }
       if (systemMappedIds.length > 0 && existingIds.length === 0) {
         territories[tIdx].stabilityNotes.push(`[SYSTEM_MAPPED] Deterministic signal mapping assigned ${systemMappedIds.length} signal(s)`);
@@ -2542,11 +2542,11 @@ CORRECTION REQUIRED:
     generatedTerritories = generatedTerritories.filter(territory => {
       const claims = [territory.name, territory.enemyDefinition, territory.contrastAxis, territory.narrativeDirection].filter(Boolean);
 
-      const hasSystemMapping = (territory as any)._systemMapped === true;
+      const hasSystemMapping = territory._systemMapped === true;
       if (hasSystemMapping) {
         // is a usable starting point but cannot claim MI-traced confidence.
         // Tag provenance and cap at 0.30 (vs. MI-traced 0.85+).
-        (territory as any).provenance = "system_default";
+        territory.provenance = "system_default";
         territory.confidenceScore = Math.min(territory.confidenceScore, 0.30);
         if (!territory.stabilityNotes) territory.stabilityNotes = [];
         territory.stabilityNotes.push(`[PROVENANCE_SYSTEM_DEFAULT] Deterministic system mapping — confidence capped at 0.30 vs. MI-traced 0.85+`);
@@ -2556,7 +2556,7 @@ CORRECTION REQUIRED:
 
       const hasAnyMappedSignals = territory.mappedSignalIds && territory.mappedSignalIds.length > 0;
       if (hasAnyMappedSignals) {
-        (territory as any).provenance = "mi_traced";
+        territory.provenance = "mi_traced";
         totalTracedClaims += claims.length;
         return true;
       }
@@ -2571,8 +2571,8 @@ CORRECTION REQUIRED:
         if (!territory.stabilityNotes) territory.stabilityNotes = [];
         territory.stabilityNotes.push(`[ORPHAN_ALL_CLAIMS] All ${claims.length} claims have no traceable MI/strategic signal grounding — territory marked degraded, confidence capped ≤0.10`);
         territory.confidenceScore = Math.min(territory.confidenceScore, 0.10);
-        (territory as any).provenance = "orphaned";
-        (territory as any).degraded = true;
+        territory.provenance = "orphaned";
+        territory.degraded = true;
         totalOrphanedClaims += orphanResult.orphanedClaims.length;
         console.log(`[PositioningEngine-V3] ORPHAN_DEGRADED | territory="${territory.name}" | all ${claims.length} claims orphaned — RETAINED with confidence≤0.10 + degraded flag`);
         return true;
@@ -2595,9 +2595,9 @@ CORRECTION REQUIRED:
         // floor for all-orphan territories has been removed (those are now
         // capped ≤0.10 above).
         territory.confidenceScore = Math.max(0.20, territory.confidenceScore - totalPenalty);
-        (territory as any).provenance = "partial_traced";
+        territory.provenance = "partial_traced";
       } else {
-        (territory as any).provenance = territory.provenance ?? "fully_traced";
+        territory.provenance = territory.provenance ?? "fully_traced";
       }
       return true;
     });
@@ -2695,7 +2695,7 @@ CORRECTION REQUIRED:
     for (const result of semanticCollisions) {
       const t = finalTerritories.find(x => x.name === result.territoryName);
       if (t) {
-        (t as any).semanticCollision = {
+        t.semanticCollision = {
           semanticCollisionScore: result.semanticCollisionScore,
           collisionMeaning: result.collisionMeaning,
           competitorEquivalentClaim: result.competitorEquivalentClaim,
