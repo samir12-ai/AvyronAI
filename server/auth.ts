@@ -6,6 +6,7 @@ import { db } from "./db";
 import { users, authLockouts, authSessions } from "@shared/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { featureFlagService } from "./feature-flags";
+import { requestAccountDeletion, cancelAccountDeletion } from "./account-lifecycle";
 
 // P0-3 (runtime-truth-isolation-seal): production must hard-fail if JWT_SECRET
 // missing. The previous fallback ("avyron_jwt_secret_" + REPL_ID) silently
@@ -442,9 +443,7 @@ async function issueSessionForDevice(opts: {
 //
 // All audit events go to audit_log_archive (survives the cascade).
 const DELETE_CONFIRM_LITERAL = "PERMANENTLY_DELETE";
-async function registerAccountDeletionRoutes(app: Router) {
-  const { requestAccountDeletion, cancelAccountDeletion } = await import("./account-lifecycle");
-
+function registerAccountDeletionRoutes(app: Router) {
   app.delete("/api/account", async (req: AuthRequest, res: Response) => {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Not authenticated" });
@@ -511,10 +510,7 @@ async function registerAccountDeletionRoutes(app: Router) {
 }
 
 export function registerAuthRoutes(app: Router) {
-  // Seal #7 — GDPR cascade routes (loaded async; non-blocking).
-  registerAccountDeletionRoutes(app).catch(err =>
-    console.error("[Auth] Failed to register account-deletion routes:", err)
-  );
+  registerAccountDeletionRoutes(app);
 
   app.post("/api/auth/register", authRateLimit, async (req: Request, res: Response) => {
     try {

@@ -93,8 +93,16 @@ class Histogram {
     }
     s.sum += value;
     s.count += 1;
+    // Increment only the single bucket the value falls into (smallest
+    // bucket where value <= boundary). render() then accumulates these
+    // into Prometheus cumulative bucket counts. Incrementing every
+    // matching bucket here would cause render's cumulative sum to
+    // double-count.
     for (let i = 0; i < this.buckets.length; i++) {
-      if (value <= this.buckets[i]) s.counts[i] += 1;
+      if (value <= this.buckets[i]) {
+        s.counts[i] += 1;
+        return;
+      }
     }
   }
   render(): string {
