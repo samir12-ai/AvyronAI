@@ -403,6 +403,11 @@ export interface CommercialRejection {
   emittedAt: number;
 }
 
+// Seal #8 / F3.3 architect-pass-4 fix — bounded LRU cap so registry cannot
+// grow unboundedly when orchestrator early-exit paths skip the end-of-run
+// `clearCommercialRejections(jobId)` cleanup. JS Map preserves insertion
+// order; on overflow we evict the oldest entry (FIFO/LRU-on-write).
+const __COMMERCIAL_REGISTRY_MAX_KEYS = 1000;
 const __commercialRejections = new Map<string, CommercialRejection[]>();
 
 // Seal #8 / F3.3 architect-pass-2 fix — concurrency hardening.
@@ -444,6 +449,19 @@ export function recordCommercialRejection(
   const arr = __commercialRejections.get(key) || [];
   arr.push({ ...rejection, emittedAt: Date.now() });
   __commercialRejections.set(key, arr);
+  // Bounded LRU eviction: if size exceeds cap, drop oldest insertion.
+  if (__commercialRejections.size > __COMMERCIAL_REGISTRY_MAX_KEYS) {
+    const oldest = __commercialRejections.keys().next().value;
+    if (oldest !== undefined) __commercialRejections.delete(oldest);
+  }
+}
+
+/** Test-only: introspect registry size for cap-enforcement assertions. */
+export function __commercialRegistrySize(): number {
+  return __commercialRejections.size;
+}
+export function __commercialRegistryMaxKeys(): number {
+  return __COMMERCIAL_REGISTRY_MAX_KEYS;
 }
 
 export function getCommercialRejections(runKey: string): CommercialRejection[] {

@@ -16,6 +16,12 @@ export interface ComplianceResult {
    * require positive confirmation.
    */
   verdict?: "PASS" | "FAIL" | "INCOMPLETE";
+  /**
+   * Seal #8 / F3.5 — machine-readable reason code accompanying verdict.
+   * Used by audit/snapshot consumers that cannot parse free-text enforcementLog.
+   * Values: AEL_MISSING | AEL_PARTIAL | NO_MATCHING_RULES | OK | <violation-code>.
+   */
+  reason?: string;
   score: number;
   violations: ComplianceViolation[];
   appliedRules: string[];

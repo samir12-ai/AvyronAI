@@ -340,6 +340,96 @@ section("F3.10 — SynthesizedPlan exposes _provenance.aelPartialPropagated");
     "F3.3 concurrency: orchestrator enters jobId-scoped ALS context");
 }
 
+// ─── Pass-4 fixes: F3.5 isPartial gate + reason field + registry cap ────
+section("Pass-4 — CEL isPartial gate + reason field + registry cap");
+{
+  const path = require("path");
+  const fs = require("fs") as typeof import("fs");
+  const celSrc = fs.readFileSync(path.resolve(__dirname, "../causal-enforcement-layer/engine.ts"), "utf8");
+  const celTypesSrc = fs.readFileSync(path.resolve(__dirname, "../causal-enforcement-layer/types.ts"), "utf8");
+  const dnaSrc2 = fs.readFileSync(path.resolve(__dirname, "../../shared/commercial-dna.ts"), "utf8");
+  const orchSrc2 = fs.readFileSync(path.resolve(__dirname, "../orchestrator/index.ts"), "utf8");
+
+  // F3.5 reason field on contract
+  assert(/reason\?\s*:\s*string/.test(celTypesSrc),
+    "Pass-4 F3.5: ComplianceResult declares optional `reason: string`");
+
+  // F3.5 isPartial gate in BOTH enforce functions
+  assert(/enforcePositioningCompliance[\s\S]{0,3000}ael\.isPartial\s*===\s*true[\s\S]{0,400}reason\s*=\s*"AEL_PARTIAL"/.test(celSrc),
+    "Pass-4 F3.5: enforcePositioningCompliance gates on ael.isPartial → AEL_PARTIAL");
+  assert(/enforceGenericEngineCompliance[\s\S]{0,3000}ael\.isPartial\s*===\s*true[\s\S]{0,400}reason\s*=\s*"AEL_PARTIAL"/.test(celSrc),
+    "Pass-4 F3.5: enforceGenericEngineCompliance gates on ael.isPartial → AEL_PARTIAL");
+
+  // F3.5 reason set on AEL_MISSING + NO_MATCHING_RULES + OK + violation paths
+  assert((celSrc.match(/reason\s*=\s*"AEL_MISSING"/g) || []).length >= 2,
+    "Pass-4 F3.5: reason='AEL_MISSING' set on both enforce functions");
+  assert(/reason\s*=\s*"NO_MATCHING_RULES"/.test(celSrc),
+    "Pass-4 F3.5: reason='NO_MATCHING_RULES' set on generic compliance");
+  assert((celSrc.match(/"OK"/g) || []).length >= 2,
+    "Pass-4 F3.5: reason='OK' set on PASS paths (positioning + generic)");
+  assert(/reason\s*=\s*blockingViolations\[0\]\.violationType/.test(celSrc),
+    "Pass-4 F3.5: blocking-violation reason = first violationType");
+
+  // F3.3 LRU cap + end-of-run cleanup
+  assert(/__COMMERCIAL_REGISTRY_MAX_KEYS\s*=\s*1000/.test(dnaSrc2),
+    "Pass-4 F3.3: registry has bounded MAX_KEYS=1000 cap");
+  assert(/__commercialRejections\.keys\(\)\.next\(\)\.value/.test(dnaSrc2),
+    "Pass-4 F3.3: registry evicts oldest entry on overflow (FIFO/LRU)");
+  assert(/end-of-run registry cleanup[\s\S]{0,400}clearCommercialRejections\(jobId\)/.test(orchSrc2),
+    "Pass-4 F3.3: orchestrator clears registry at end-of-run");
+}
+
+// ─── Pass-4 live behavioral: CEL isPartial gate ─────────────────────────
+section("Pass-4 live — CEL isPartial returns INCOMPLETE + AEL_PARTIAL");
+{
+  const { enforcePositioningCompliance, enforceGenericEngineCompliance } =
+    require("../causal-enforcement-layer/engine");
+  const partialAel: any = {
+    isPartial: true,
+    partialReason: "synthesis_failure",
+    root_causes: [
+      { surfaceSignal: "x", deepCause: "y", confidenceLevel: "high" },
+    ],
+  };
+  const posResult = enforcePositioningCompliance([], partialAel);
+  assert(posResult.verdict === "INCOMPLETE" && posResult.reason === "AEL_PARTIAL" && posResult.passed === false,
+    "Pass-4 F3.5 live: positioning isPartial → INCOMPLETE + AEL_PARTIAL + passed=false");
+  const genResult = enforceGenericEngineCompliance("offer", ["x"], partialAel);
+  assert(genResult.verdict === "INCOMPLETE" && genResult.reason === "AEL_PARTIAL" && genResult.passed === false,
+    "Pass-4 F3.5 live: generic isPartial → INCOMPLETE + AEL_PARTIAL + passed=false");
+
+  // Missing AEL still produces AEL_MISSING (not regressed)
+  const noAel = enforcePositioningCompliance([], null);
+  assert(noAel.verdict === "INCOMPLETE" && noAel.reason === "AEL_MISSING",
+    "Pass-4 F3.5 live: null AEL → INCOMPLETE + AEL_MISSING (no regression)");
+}
+
+// ─── Pass-4 live: registry LRU cap enforcement ──────────────────────────
+section("Pass-4 live — registry LRU cap evicts oldest on overflow");
+{
+  const { recordCommercialRejection: rec2, getCommercialRejections: get2,
+          clearCommercialRejections: clr2,
+          __commercialRegistrySize, __commercialRegistryMaxKeys } =
+    require("../../shared/commercial-dna");
+  const cap = __commercialRegistryMaxKeys();
+  // Drain everything left from prior tests
+  for (let i = 0; i < cap + 10; i++) clr2(`drain-${i}`);
+  const baseSize = __commercialRegistrySize();
+  // Write cap+50 distinct keys (no ALS scope → uses explicit key)
+  for (let i = 0; i < cap + 50; i++) {
+    rec2(`run-${i}`, { module: "audience.buyerPsychology", reason: "FINAL_REJECTED", detail: `${i}` } as any);
+  }
+  const size = __commercialRegistrySize();
+  assert(size <= cap,
+    `Pass-4 F3.3 live: registry size (${size}) ≤ cap (${cap}) after overflow writes`);
+  assert(get2(`run-0`).length === 0,
+    "Pass-4 F3.3 live: oldest key (run-0) evicted");
+  assert(get2(`run-${cap + 49}`).length === 1,
+    "Pass-4 F3.3 live: newest key retained");
+  // Clean up
+  for (let i = 0; i < cap + 60; i++) clr2(`run-${i}`);
+}
+
 // ─── F3.3 concurrency live behavioral test ──────────────────────────────
 async function runConcurrencyTest() {
   section("F3.3 concurrency — ALS-scoped registry isolates parallel runs");

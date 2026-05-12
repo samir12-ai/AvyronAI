@@ -240,7 +240,20 @@ export function enforcePositioningCompliance(
     result.passed = false;
     result.score = 0;
     result.verdict = "INCOMPLETE";
+    result.reason = "AEL_MISSING";
     result.enforcementLog.push("NO_AEL: No analytical enrichment available — verdict=INCOMPLETE (cannot evaluate)");
+    return result;
+  }
+
+  // Seal #8 / F3.5 architect-pass-4 fix — partial AEL must also gate as
+  // INCOMPLETE. A degraded enrichment package cannot ground positioning
+  // territories' causal compliance any more than a missing one can.
+  if (ael.isPartial === true) {
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.reason = "AEL_PARTIAL";
+    result.enforcementLog.push(`AEL_PARTIAL: ${ael.partialReason || "partial enrichment"} — verdict=INCOMPLETE (positioning cannot be grounded on degraded AEL)`);
     return result;
   }
 
@@ -326,6 +339,7 @@ export function enforcePositioningCompliance(
     result.passed = false;
     result.score = 0;
     result.verdict = "FAIL";
+    result.reason = blockingViolations[0].violationType;
   } else if (majorViolations.length > 0) {
     // Seal #8 / F3.6 — pass threshold raised from 0.4 to per-rule resolved
     // value (default 0.6, critical themes 0.75). Raw score compared, no
@@ -334,8 +348,10 @@ export function enforcePositioningCompliance(
     const threshold = resolveConstraintThreshold(result.appliedRules);
     result.passed = result.score >= threshold;
     result.verdict = result.passed ? "PASS" : "FAIL";
+    result.reason = result.passed ? "OK" : majorViolations[0].violationType;
   } else {
     result.verdict = "PASS";
+    result.reason = "OK";
   }
 
   result.enforcementLog.push(`RESULT: passed=${result.passed} | verdict=${result.verdict} | score=${result.score.toFixed(2)} | threshold=${resolveConstraintThreshold(result.appliedRules).toFixed(2)} | violations=${result.violations.length} (blocking=${blockingViolations.length}, major=${majorViolations.length})`);
@@ -363,7 +379,18 @@ export function enforceGenericEngineCompliance(
     result.passed = false;
     result.score = 0;
     result.verdict = "INCOMPLETE";
+    result.reason = "AEL_MISSING";
     result.enforcementLog.push(`NO_AEL: ${engineId} cannot be evaluated — verdict=INCOMPLETE`);
+    return result;
+  }
+
+  // Seal #8 / F3.5 architect-pass-4 fix — partial AEL is INCOMPLETE.
+  if (ael.isPartial === true) {
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.reason = "AEL_PARTIAL";
+    result.enforcementLog.push(`AEL_PARTIAL: ${engineId} — ${ael.partialReason || "partial enrichment"} — verdict=INCOMPLETE`);
     return result;
   }
 
@@ -376,6 +403,7 @@ export function enforceGenericEngineCompliance(
     result.passed = false;
     result.score = 0;
     result.verdict = "INCOMPLETE";
+    result.reason = "NO_MATCHING_RULES";
     result.enforcementLog.push(`NO_MATCHING_RULES: ${engineId} — verdict=INCOMPLETE`);
     return result;
   }
@@ -419,6 +447,9 @@ export function enforceGenericEngineCompliance(
   const threshold = resolveConstraintThreshold(result.appliedRules);
   result.passed = result.score >= threshold;
   result.verdict = result.passed ? "PASS" : "FAIL";
+  result.reason = result.passed
+    ? "OK"
+    : (result.violations[0]?.violationType || "BELOW_THRESHOLD");
   result.enforcementLog.push(`RESULT: passed=${result.passed} | verdict=${result.verdict} | score=${result.score.toFixed(2)} | threshold=${threshold.toFixed(2)} | violations=${result.violations.length}`);
 
   return result;

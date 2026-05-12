@@ -4178,6 +4178,16 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     console.warn(`[Orchestrator] CONFIDENCE_INTEGRITY_FAILED | ${ciErr.message}`);
   }
 
+  // Seal #8 / F3.3 architect-pass-4 fix — end-of-run registry cleanup.
+  // Prevents unbounded growth of the ALS-keyed rejection map across many runs.
+  // Clear under the active ALS scope (resolves to jobId) AND explicitly by
+  // jobId as a belt-and-braces guard in case the ALS chain is detached by an
+  // intermediate await on a different runtime path.
+  try {
+    const { clearCommercialRejections } = await import("../../shared/commercial-dna");
+    clearCommercialRejections(jobId);
+  } catch { /* registry never blocks pipeline */ }
+
   return {
     jobId,
     status: overallStatus,
