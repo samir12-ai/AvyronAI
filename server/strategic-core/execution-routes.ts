@@ -86,7 +86,7 @@ async function generateCreativeContent(
   title: string | null,
   scheduledDate: string,
   planContext: string,
-  accountId: string = "default"
+  accountId: string
 ): Promise<{ caption: string; creativeBrief: string; ctaCopy: string }> {
   const prompt = `You are an expert social media content creator. Generate content for a ${contentType} post.
 

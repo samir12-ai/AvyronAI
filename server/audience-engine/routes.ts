@@ -3,6 +3,7 @@ import { runAudienceEngine, getLatestAudienceSnapshot } from "./engine";
 import { checkValidationSession } from "../engine-hardening";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 import { resolveOrManualJobId } from "../orchestrator/job-id";
 import { wrapAsEnvelope } from "../orchestrator/contract-registry";
 import { computeStalenessCoefficient } from "../shared/snapshot-trust";
@@ -15,6 +16,10 @@ export function registerAudienceEngineRoutes(app: Express) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+
+      // P0-4: body-level campaignId must belong to the authed account.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const sessionCheck = checkValidationSession(validationSessionId, "audience-engine", campaignId);
       if (!sessionCheck.allowed) {
@@ -42,6 +47,10 @@ export function registerAudienceEngineRoutes(app: Express) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+
+      // P0-4: query-level campaignId must belong to the authed account.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const { resolveRunId } = await import("../orchestrator/run-resolver");
       let resolved;

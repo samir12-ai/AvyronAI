@@ -96,7 +96,7 @@ function humanize(text: string): string {
   return out;
 }
 
-export async function buildCausalNarrative(campaignId: string, accountId: string = "default", requestedRunId: string | null = null): Promise<CausalNarrative & { runId?: string | null; isLatest?: boolean; isStale?: boolean }> {
+export async function buildCausalNarrative(campaignId: string, accountId: string, requestedRunId: string | null = null): Promise<CausalNarrative & { runId?: string | null; isLatest?: boolean; isStale?: boolean }> {
   const empty: CausalNarrative = { hasNarrative: false, steps: [], oneLiner: "", engineCount: 0, completedAt: null };
 
   const { resolveRunId } = await import("./orchestrator/run-resolver");

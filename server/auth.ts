@@ -6,9 +6,19 @@ import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { featureFlagService } from "./feature-flags";
 
+// P0-3 (runtime-truth-isolation-seal): production must hard-fail if JWT_SECRET
+// missing. The previous fallback ("avyron_jwt_secret_" + REPL_ID) silently
+// produced predictable secrets in production environments where REPL_ID is
+// stable, allowing token forgery. Dev fallback retained for local DX only.
+if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
+  // Fatal — refuse to boot. Better to crash visibly than to serve forgeable tokens.
+  // eslint-disable-next-line no-console
+  console.error("[Auth] FATAL: JWT_SECRET is required in production. Refusing to start.");
+  throw new Error("JWT_SECRET environment variable is required in production");
+}
 const JWT_SECRET = process.env.JWT_SECRET || "avyron_jwt_secret_" + (process.env.REPL_ID || "dev");
 if (!process.env.JWT_SECRET) {
-  console.warn("[Auth] WARNING: JWT_SECRET not set — using fallback. Set JWT_SECRET in production.");
+  console.warn("[Auth] WARNING: JWT_SECRET not set — using DEV fallback. This will hard-fail in production.");
 }
 const TRIAL_DAYS = 7;
 

@@ -134,14 +134,39 @@ function enforceActionability(output: BuildPlanOutput): { passed: boolean; score
   return { passed: score >= 0.85 && structureOk, score, failedBlocks };
 }
 
-async function getLatestSnapshot(table: any, accountId: string, campaignId: string): Promise<any | null> {
+/**
+ * P0-6 (runtime-truth-isolation-seal): every snapshot read must declare a
+ * sourceJobId. The previous "latest by (accountId, campaignId)" pattern silently
+ * stitched together engine outputs from DIFFERENT runs whenever a single engine
+ * had failed and the orchestrator retried — producing build-plans whose
+ * positioning came from run A and whose offer came from run B, with no audit
+ * trail. When a `sourceJobId` is provided, every snapshot table is scoped by
+ * jobId so cross-run blending becomes structurally impossible. The legacy
+ * "latest" path is retained only when explicitly opted into (no runId provided)
+ * and emits a STALE_LINEAGE warning so the choice is visible in logs.
+ */
+async function getLatestSnapshot(
+  table: any,
+  accountId: string,
+  campaignId: string,
+  sourceJobId?: string | null,
+): Promise<any | null> {
   try {
+    const conditions = [eq(table.accountId, accountId), eq(table.campaignId, campaignId)];
+    if (sourceJobId && "jobId" in table) {
+      conditions.push(eq(table.jobId, sourceJobId));
+    }
     const [snap] = await db
       .select()
       .from(table)
-      .where(and(eq(table.accountId, accountId), eq(table.campaignId, campaignId)))
+      .where(and(...conditions))
       .orderBy(desc(table.createdAt))
       .limit(1);
+    if (!snap && sourceJobId) {
+      console.warn(`[BuildPlanLayer] SNAPSHOT_MISS_FOR_RUN | account=${accountId} campaign=${campaignId} jobId=${sourceJobId} table=${(table as any)?._?.name ?? "unknown"}`);
+    } else if (!sourceJobId) {
+      console.warn(`[BuildPlanLayer] STALE_LINEAGE_READ | account=${accountId} campaign=${campaignId} table=${(table as any)?._?.name ?? "unknown"} — no sourceJobId provided; latest snapshot may belong to a different run`);
+    }
     return snap || null;
   } catch {
     return null;
@@ -151,23 +176,24 @@ async function getLatestSnapshot(table: any, accountId: string, campaignId: stri
 async function collectValidatedEngineOutputs(
   accountId: string,
   campaignId: string,
-  depthGateStatus?: Record<string, string>
+  depthGateStatus?: Record<string, string>,
+  sourceJobId?: string | null,
 ): Promise<EngineSnapshot[]> {
   const snapshots: EngineSnapshot[] = [];
 
   const GATED_PASS_STATES = ["SIGNAL_PASSED", "DEPTH_PASSED"];
 
-  const miSnap = await getLatestSnapshot(miSnapshots, accountId, campaignId);
+  const miSnap = await getLatestSnapshot(miSnapshots, accountId, campaignId, sourceJobId);
   if (miSnap) {
     snapshots.push({ engineId: "market_intelligence", data: miSnap });
   }
 
-  const audienceSnap = await getLatestSnapshot(audienceSnapshots, accountId, campaignId);
+  const audienceSnap = await getLatestSnapshot(audienceSnapshots, accountId, campaignId, sourceJobId);
   if (audienceSnap) {
     snapshots.push({ engineId: "audience", data: audienceSnap });
   }
 
-  const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId);
+  const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId, sourceJobId);
   if (posSnap) {
     const status = depthGateStatus?.positioning;
     if (!status || GATED_PASS_STATES.includes(status)) {
@@ -175,7 +201,7 @@ async function collectValidatedEngineOutputs(
     }
   }
 
-  const diffSnap = await getLatestSnapshot(differentiationSnapshots, accountId, campaignId);
+  const diffSnap = await getLatestSnapshot(differentiationSnapshots, accountId, campaignId, sourceJobId);
   if (diffSnap) {
     const status = depthGateStatus?.differentiation;
     if (!status || GATED_PASS_STATES.includes(status)) {
@@ -183,7 +209,7 @@ async function collectValidatedEngineOutputs(
     }
   }
 
-  const mechSnap = await getLatestSnapshot(mechanismSnapshots, accountId, campaignId);
+  const mechSnap = await getLatestSnapshot(mechanismSnapshots, accountId, campaignId, sourceJobId);
   if (mechSnap) {
     const status = depthGateStatus?.mechanism;
     if (!status || GATED_PASS_STATES.includes(status)) {
@@ -191,7 +217,7 @@ async function collectValidatedEngineOutputs(
     }
   }
 
-  const offerSnap = await getLatestSnapshot(offerSnapshots, accountId, campaignId);
+  const offerSnap = await getLatestSnapshot(offerSnapshots, accountId, campaignId, sourceJobId);
   if (offerSnap) {
     const status = depthGateStatus?.offer;
     if (!status || GATED_PASS_STATES.includes(status)) {
@@ -199,7 +225,7 @@ async function collectValidatedEngineOutputs(
     }
   }
 
-  const funnelSnap = await getLatestSnapshot(funnelSnapshots, accountId, campaignId);
+  const funnelSnap = await getLatestSnapshot(funnelSnapshots, accountId, campaignId, sourceJobId);
   if (funnelSnap) {
     const status = depthGateStatus?.funnel;
     if (!status || GATED_PASS_STATES.includes(status)) {
@@ -207,7 +233,7 @@ async function collectValidatedEngineOutputs(
     }
   }
 
-  const awarenessSnap = await getLatestSnapshot(awarenessSnapshots, accountId, campaignId);
+  const awarenessSnap = await getLatestSnapshot(awarenessSnapshots, accountId, campaignId, sourceJobId);
   if (awarenessSnap) {
     const status = depthGateStatus?.awareness;
     if (!status || GATED_PASS_STATES.includes(status)) {
@@ -215,7 +241,7 @@ async function collectValidatedEngineOutputs(
     }
   }
 
-  const persuasionSnap = await getLatestSnapshot(persuasionSnapshots, accountId, campaignId);
+  const persuasionSnap = await getLatestSnapshot(persuasionSnapshots, accountId, campaignId, sourceJobId);
   if (persuasionSnap) {
     const status = depthGateStatus?.persuasion;
     if (!status || GATED_PASS_STATES.includes(status)) {
@@ -476,11 +502,18 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutp
 export async function runBuildPlanLayer(
   accountId: string,
   campaignId: string,
-  depthGateStatus?: Record<string, string>
+  depthGateStatus?: Record<string, string>,
+  sourceJobId?: string | null,
 ): Promise<BuildPlanResult> {
   const MAX_ATTEMPTS = 3;
 
-  const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus);
+  // P0-6: thread sourceJobId so every engine output read is scoped to the
+  // same orchestrator run. If absent, getLatestSnapshot will emit
+  // STALE_LINEAGE_READ warnings and fall back to "latest by table" behavior.
+  if (!sourceJobId) {
+    console.warn(`[BuildPlanLayer] RUN_WITHOUT_SOURCE_JOB | account=${accountId} campaign=${campaignId} — engine outputs may be stitched across runs`);
+  }
+  const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus, sourceJobId);
 
   if (snapshots.length < 3) {
     return {

@@ -5,6 +5,17 @@ import { eq, desc, sql, and } from "drizzle-orm";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import { authMiddleware, optionalAuth, type AuthRequest } from "./auth";
+
+// P0-1 (runtime-truth-isolation-seal): Photography is a public marketplace
+// surface (the schema has no per-account ownership column today), but every
+// MUTATION must be authenticated to prevent anonymous spam, profile
+// impersonation, and reservation injection. Reads remain public-by-design but
+// pass through `optionalAuth` so the userId is recorded when available.
+// Residual risk (documented in runtime-truth-isolation-seal.md §P0-1):
+// photographerProfiles/portfolioPosts/reservations have no `accountId` column,
+// so cross-account row ownership cannot yet be enforced; any authed user can
+// edit any profile. This is queued for a follow-up schema migration.
 
 const uploadsDir = path.join(process.cwd(), "uploads", "photography");
 if (!fs.existsSync(uploadsDir)) {
@@ -27,13 +38,13 @@ const photoUpload = multer({
 });
 
 export function registerPhotographyRoutes(app: Express) {
-  app.post("/api/photography/upload-image", photoUpload.single("image"), (req, res) => {
+  app.post("/api/photography/upload-image", authMiddleware, photoUpload.single("image"), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No image uploaded" });
     const imageUrl = `/uploads/photography/${req.file.filename}`;
     res.json({ imageUrl });
   });
 
-  app.post("/api/photography/photographers", async (req, res) => {
+  app.post("/api/photography/photographers", authMiddleware, async (req, res) => {
     try {
       const data = req.body;
       const [photographer] = await db.insert(photographerProfiles).values({
@@ -61,7 +72,7 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.get("/api/photography/photographers", async (req, res) => {
+  app.get("/api/photography/photographers", optionalAuth, async (req, res) => {
     try {
       const { city, specialty } = req.query;
       let photographers = await db.select().from(photographerProfiles).orderBy(desc(photographerProfiles.rating));
@@ -82,7 +93,7 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.get("/api/photography/photographers/:id", async (req, res) => {
+  app.get("/api/photography/photographers/:id", optionalAuth, async (req, res) => {
     try {
       const [photographer] = await db.select().from(photographerProfiles).where(eq(photographerProfiles.id, req.params.id));
       if (!photographer) return res.status(404).json({ error: "Photographer not found" });
@@ -93,7 +104,7 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.put("/api/photography/photographers/:id", async (req, res) => {
+  app.put("/api/photography/photographers/:id", authMiddleware, async (req, res) => {
     try {
       const data = req.body;
       const [updated] = await db.update(photographerProfiles)
@@ -108,7 +119,7 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.post("/api/photography/posts", async (req, res) => {
+  app.post("/api/photography/posts", authMiddleware, async (req, res) => {
     try {
       const data = req.body;
       const [post] = await db.insert(portfolioPosts).values({
@@ -126,7 +137,7 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.get("/api/photography/posts", async (req, res) => {
+  app.get("/api/photography/posts", optionalAuth, async (req, res) => {
     try {
       const { photographerId } = req.query;
       let query = db.select().from(portfolioPosts).orderBy(desc(portfolioPosts.createdAt));
@@ -146,9 +157,13 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.post("/api/photography/posts/:id/interact", async (req, res) => {
+  app.post("/api/photography/posts/:id/interact", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { type, userId } = req.body;
+      const { type } = req.body;
+      // P0-1: derive userId from the authed JWT, never trust the body — the
+      // previous body-supplied userId let any caller forge an interaction as
+      // any other user (vote stuffing, fake reservations).
+      const userId = req.userId!;
       if (!['like', 'share', 'reserve'].includes(type)) {
         return res.status(400).json({ error: "Invalid interaction type" });
       }
@@ -190,7 +205,7 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.post("/api/photography/reservations", async (req, res) => {
+  app.post("/api/photography/reservations", authMiddleware, async (req, res) => {
     try {
       const data = req.body;
       const [reservation] = await db.insert(reservations).values({
@@ -211,7 +226,7 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.get("/api/photography/reservations/:photographerId", async (req, res) => {
+  app.get("/api/photography/reservations/:photographerId", authMiddleware, async (req, res) => {
     try {
       const result = await db.select().from(reservations)
         .where(eq(reservations.photographerId, req.params.photographerId))
@@ -223,7 +238,7 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  app.put("/api/photography/reservations/:id/status", async (req, res) => {
+  app.put("/api/photography/reservations/:id/status", authMiddleware, async (req, res) => {
     try {
       const { status } = req.body;
       const [updated] = await db.update(reservations)

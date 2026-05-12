@@ -568,7 +568,7 @@ router.post("/user-truth", async (req: Request, res: Response) => {
     if (!campaignId) {
       return res.status(400).json({ error: "BadRequest", message: "campaignId required" });
     }
-    const accountId = (req as any).user?.accountId ?? bodyAccountId ?? "default";
+    const accountId = (req as any).user?.accountId ?? bodyAccountId;
     const submittedBy = (req as any).user?.id ?? null;
 
     // Server derives the window — client never picks.
@@ -610,7 +610,7 @@ router.get("/user-truth/window", async (req: Request, res: Response) => {
     if (!campaignId || typeof campaignId !== "string") {
       return res.status(400).json({ error: "BadRequest", message: "campaignId query param required" });
     }
-    const accountId = (req as any).user?.accountId ?? (typeof q_account === "string" ? q_account : "default");
+    const accountId = (req as any).user?.accountId ?? (typeof q_account === "string" ? q_account : null);
     const ws = await evaluateWindowState(accountId, campaignId, new Date());
     res.json({
       window: ws.window,
@@ -710,7 +710,7 @@ router.get("/dna", async (req: Request, res: Response) => {
     if (!campaignId || typeof campaignId !== "string") {
       return res.status(400).json({ error: "BadRequest", message: "campaignId query param required" });
     }
-    const accountId = (req as any).user?.accountId ?? (typeof q_account === "string" ? q_account : "default");
+    const accountId = (req as any).user?.accountId ?? (typeof q_account === "string" ? q_account : null);
     const rows = await listDnaForCampaign(accountId, campaignId);
     const active = rows.find((r) => r.status === "active") ?? null;
     res.json({ active, all: rows });
@@ -723,7 +723,7 @@ router.post("/dna", async (req: Request, res: Response) => {
     if (!campaignId || !hypothesis) {
       return res.status(400).json({ error: "BadRequest", message: "campaignId and hypothesis required" });
     }
-    const accountId = (req as any).user?.accountId ?? bodyAccount ?? "default";
+    const accountId = (req as any).user?.accountId ?? bodyAccount;
     const createdBy = (req as any).user?.id ?? null;
     const row = await createDna({ accountId, campaignId, hypothesis, createdBy, notes });
     res.status(201).json(row);
@@ -777,7 +777,7 @@ router.get("/dna/active", async (req: Request, res: Response) => {
     if (!campaignId || typeof campaignId !== "string") {
       return res.status(400).json({ error: "BadRequest", message: "campaignId query param required" });
     }
-    const accountId = (req as any).user?.accountId ?? (typeof q_account === "string" ? q_account : "default");
+    const accountId = (req as any).user?.accountId ?? (typeof q_account === "string" ? q_account : null);
     const row = await getActiveDna(accountId, campaignId);
     res.json({ active: row });
   } catch (err) { handleDnaError(res, err); }

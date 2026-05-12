@@ -302,7 +302,7 @@ export async function pruneOldSnapshots(
   table: any,
   campaignId: string,
   maxRetained: number = 20,
-  accountId: string = "default"
+  accountId: string
 ): Promise<number> {
   try {
     const { eq, and, desc } = await import("drizzle-orm");

@@ -35,7 +35,12 @@ export async function resolveDataMode(accountId: string): Promise<DataMode> {
   }
 }
 
-export async function getManualMetrics(campaignId: string, accountId: string = "default") {
+// P0-2 (runtime-truth-isolation-seal): every accountId parameter is now REQUIRED.
+// The previous `accountId: string` defaults silently routed
+// unauthenticated/legacy callers into a shared "default" tenant bucket, blurring
+// truth across accounts. Every live caller already passes an explicit
+// resolveAccountId(req); the defaults were dead code with isolation risk.
+export async function getManualMetrics(campaignId: string, accountId: string) {
   try {
     const rows = await db.select().from(manualCampaignMetrics)
       .where(and(
@@ -126,7 +131,7 @@ async function getPlanDrivenMetrics(campaignId: string, accountId: string): Prom
   }
 }
 
-export async function getDashboardMetrics(campaignId: string, accountId: string = "default"): Promise<DashboardMetricsResponse> {
+export async function getDashboardMetrics(campaignId: string, accountId: string): Promise<DashboardMetricsResponse> {
   const mode = await resolveDataMode(accountId);
 
   const [realMetrics, planMetrics, manual] = await Promise.all([
@@ -367,7 +372,7 @@ function postsFilter(campaignId: string, accountId: string) {
   );
 }
 
-export async function getCampaignMetrics(campaignId: string, accountId: string = "default"): Promise<CampaignMetrics> {
+export async function getCampaignMetrics(campaignId: string, accountId: string): Promise<CampaignMetrics> {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -440,7 +445,7 @@ export async function getCampaignMetrics(campaignId: string, accountId: string =
   };
 }
 
-export async function getRevenueSummary(campaignId: string, accountId: string = "default"): Promise<RevenueSummary> {
+export async function getRevenueSummary(campaignId: string, accountId: string): Promise<RevenueSummary> {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -822,7 +827,7 @@ async function checkDataIntegrity(campaignId: string, accountId: string, totalSp
   }
 }
 
-export async function detectPerformanceSignals(campaignId: string, accountId: string = "default"): Promise<PerformanceSignal[]> {
+export async function detectPerformanceSignals(campaignId: string, accountId: string): Promise<PerformanceSignal[]> {
   const signals: PerformanceSignal[] = [];
 
   console.log(`${LOG_PREFIX} [SignalDetection] Starting for campaign=${campaignId}, account=${accountId}`);

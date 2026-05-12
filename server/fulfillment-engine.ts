@@ -37,7 +37,7 @@ export interface FulfillmentResult {
 
 export async function computeFulfillment(
   campaignId: string,
-  accountId: string = "default"
+  accountId: string
 ): Promise<FulfillmentResult> {
   const activePlanStatuses = [
     "DRAFT",

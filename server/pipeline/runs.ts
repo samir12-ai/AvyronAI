@@ -22,7 +22,7 @@ export async function createRun(input: CreateRunInput): Promise<PipelineRun> {
   const [row] = await db
     .insert(pipelineRuns)
     .values({
-      accountId: input.accountId ?? "default",
+      accountId: input.accountId,
       campaignId: input.campaignId,
       lane: input.lane,
       trigger: input.trigger ?? "manual",

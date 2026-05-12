@@ -203,7 +203,7 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
   });
 }
 
-export async function getActiveRoot(campaignId: string, accountId: string = "default"): Promise<any | null> {
+export async function getActiveRoot(campaignId: string, accountId: string): Promise<any | null> {
   const [active] = await db.select().from(strategyRoots)
     .where(and(
       eq(strategyRoots.campaignId, campaignId),

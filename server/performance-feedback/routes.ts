@@ -10,6 +10,7 @@ import {
 } from "./scoring";
 import { runMemoryMutation } from "../memory-mutation/engine";
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 
 const CONTENT_TYPES = ["reel", "carousel", "story", "post"] as const;
 const VALID_SOURCES = ["manual", "meta-api"] as const;
@@ -52,6 +53,10 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
     if (!campaignId || !contentType || !periodLabel) {
       return res.status(400).json({ error: "campaignId, contentType, and periodLabel are required" });
     }
+
+    // P0-4: body-level campaignId must belong to the authed account.
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
     if (!CONTENT_TYPES.includes(contentType as ContentType)) {
       return res.status(400).json({ error: `contentType must be one of: ${CONTENT_TYPES.join(", ")}` });
     }
@@ -148,6 +153,9 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
     if (!campaignId) {
       return res.status(400).json({ error: "campaignId is required" });
     }
+    // P0-4: body-level campaignId must belong to the authed account.
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
     try {
       const result = await runMemoryMutation(accountId, campaignId);
       return res.json({ success: true, ...result });
@@ -166,6 +174,10 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
       return res.status(401).json({ error: "Authentication required" });
     }
     const { campaignId } = req.params;
+
+    // P0-4: param-level campaignId must belong to the authed account.
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
     const summaryByFormat: Record<string, any> = {};
 

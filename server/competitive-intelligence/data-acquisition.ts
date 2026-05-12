@@ -369,7 +369,7 @@ export interface FetchResult {
 
 export async function fetchCompetitorData(
   competitorId: string,
-  accountId: string = "default",
+  accountId: string,
   forceRefresh: boolean = false,
   proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
   collectionMode: CollectionMode = "FAST_PASS",
@@ -1300,7 +1300,7 @@ export async function enrichCompetitorWithComments(competitorId: string, account
   return { commentsGenerated: totalComments, status };
 }
 
-export async function getCompetitorDataCoverage(competitorId: string, accountId: string = "default") {
+export async function getCompetitorDataCoverage(competitorId: string, accountId: string) {
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
 
@@ -1364,7 +1364,7 @@ export async function getCompetitorDataCoverage(competitorId: string, accountId:
   };
 }
 
-export async function getStoredPostsForMIv3(competitorId: string, accountId: string = "default") {
+export async function getStoredPostsForMIv3(competitorId: string, accountId: string) {
   const posts = await db.select().from(ciCompetitorPosts)
     .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
     .orderBy(desc(ciCompetitorPosts.createdAt))
@@ -1384,7 +1384,7 @@ export async function getStoredPostsForMIv3(competitorId: string, accountId: str
   }));
 }
 
-export async function getStoredCommentsForMIv3(competitorId: string, accountId: string = "default") {
+export async function getStoredCommentsForMIv3(competitorId: string, accountId: string) {
   const comments = await db.select().from(ciCompetitorComments)
     .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)))
     .orderBy(desc(ciCompetitorComments.createdAt))
@@ -1400,7 +1400,7 @@ export async function getStoredCommentsForMIv3(competitorId: string, accountId: 
   }));
 }
 
-export async function getStoredTikTokPostsForMIv3(competitorId: string, accountId: string = "default") {
+export async function getStoredTikTokPostsForMIv3(competitorId: string, accountId: string) {
   const posts = await db.select().from(ciCompetitorPosts)
     .where(and(
       eq(ciCompetitorPosts.competitorId, competitorId),
@@ -1426,7 +1426,7 @@ export async function getStoredTikTokPostsForMIv3(competitorId: string, accountI
   }));
 }
 
-export async function getStoredTikTokCommentsForMIv3(competitorId: string, accountId: string = "default") {
+export async function getStoredTikTokCommentsForMIv3(competitorId: string, accountId: string) {
   const comments = await db.select().from(ciCompetitorComments)
     .where(and(
       eq(ciCompetitorComments.competitorId, competitorId),
@@ -1445,7 +1445,7 @@ export async function getStoredTikTokCommentsForMIv3(competitorId: string, accou
   }));
 }
 
-export async function getStoredReviewsForMIv3(competitorId: string, accountId: string = "default") {
+export async function getStoredReviewsForMIv3(competitorId: string, accountId: string) {
   const reviews = await db.select().from(ciCompetitorReviews)
     .where(and(
       eq(ciCompetitorReviews.competitorId, competitorId),
@@ -1658,7 +1658,7 @@ export async function cleanupExpiredSyntheticComments(): Promise<{ deleted: numb
   return { deleted, competitorsAffected, reEnriched, diagnostics };
 }
 
-export async function fetchAllCompetitors(accountId: string = "default", campaignId: string): Promise<FetchResult[]> {
+export async function fetchAllCompetitors(accountId: string, campaignId: string): Promise<FetchResult[]> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 

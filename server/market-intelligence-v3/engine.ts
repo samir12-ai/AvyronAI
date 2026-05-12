@@ -224,11 +224,11 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
   }
 
   const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
-  await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20, snapshotPayload.accountId || "default");
+  await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20, snapshotPayload.accountId);
 
   try {
     const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
-    const inv = await invalidateDownstreamOnRegeneration(snapshotPayload.campaignId, snapshotPayload.accountId || "default", "mi");
+    const inv = await invalidateDownstreamOnRegeneration(snapshotPayload.campaignId, snapshotPayload.accountId, "mi");
     if (inv.supersededRoots > 0) {
       console.log(`[MIv3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
     }

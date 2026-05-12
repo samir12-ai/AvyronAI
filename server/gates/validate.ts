@@ -32,8 +32,11 @@ export function validateQuery<T extends ZodSchema>(schema: T) {
   };
 }
 
+// P0-2: zod schemas no longer default accountId to "default" — every account
+// scope must come from the authed JWT (resolveAccountId). Body-supplied
+// accountId is accepted only for legacy compatibility but never substituted.
 export const accountIdQuery = z.object({
-  accountId: z.string().min(1).default("default"),
+  accountId: z.string().min(1).optional(),
 });
 
 export const paginationQuery = z.object({
@@ -43,21 +46,21 @@ export const paginationQuery = z.object({
 
 export const competitorAnalyzeBody = z.object({
   username: z.string().min(1).max(100),
-  accountId: z.string().min(1).default("default"),
+  accountId: z.string().min(1).optional(),
 });
 
 export const publishPostBody = z.object({
   mediaItemId: z.string().min(1),
   caption: z.string().min(1).max(2200),
   platform: z.enum(["instagram", "facebook"]),
-  accountId: z.string().min(1).default("default"),
+  accountId: z.string().min(1).optional(),
 });
 
 export const aiContentBody = z.object({
   prompt: z.string().min(1).max(5000),
   type: z.string().optional(),
   tone: z.string().optional(),
-  accountId: z.string().min(1).default("default"),
+  accountId: z.string().min(1).optional(),
 });
 
 export const schedulePostBody = z.object({
@@ -65,5 +68,5 @@ export const schedulePostBody = z.object({
   caption: z.string().min(1).max(2200),
   platform: z.enum(["instagram", "facebook"]),
   scheduledDate: z.string().min(1),
-  accountId: z.string().min(1).default("default"),
+  accountId: z.string().min(1).optional(),
 });

@@ -12,6 +12,7 @@ import type { MIv3Mode } from "./types";
 import { checkValidationSession } from "../engine-hardening";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, assertFetchJobBelongsTo, handleOwnershipError } from "../auth-helpers";
 import { wrapAsEnvelope } from "../orchestrator/contract-registry";
 import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 const ALLOWED_MODES: MIv3Mode[] = ["overview", "dominance", "threats", "history"];
@@ -39,6 +40,12 @@ export function registerMIv3Routes(app: Express) {
       if (!campaignId) {
         return res.status(422).json({ error: "campaignId is required" });
       }
+
+      // P0-4: body-level campaignId must belong to the authed account. Belt
+      // and suspenders even though `requireCampaign` middleware also enforces
+      // this — defensive in case middleware ordering changes.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const sessionCheck = checkValidationSession(validationSessionId, "market-intelligence-v3", campaignId);
       if (!sessionCheck.allowed) {

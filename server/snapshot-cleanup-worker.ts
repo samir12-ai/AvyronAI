@@ -113,7 +113,7 @@ async function archiveIncompatibleSnapshots(): Promise<{ table: string; archived
         await db.insert(snapshotArchive).values({
           originalId: row.id,
           sourceTable: config.name,
-          accountId: row.accountId || "default",
+          accountId: row.accountId,
           campaignId: row.campaignId || null,
           originalStatus: "INCOMPATIBLE",
           engineVersion: row.engineVersion || row.analysisVersion || null,

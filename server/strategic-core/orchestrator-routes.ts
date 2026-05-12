@@ -487,7 +487,7 @@ async function generateSingleSection(
 async function executeOrchestratorJob(jobId: string, blueprintId: string) {
   const startMs = Date.now();
   const stageTimes: Record<string, number> = {};
-  let accountId = "default";
+  let accountId;
   let campaignId = "";
 
   const log = (stage: string, extra?: Record<string, any>) => {
@@ -522,7 +522,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     let businessData: any = null;
     try {
       const cId = campaignContext?.campaignId || blueprint.campaignId;
-      const aId = campaignContext?.accountId || blueprint.accountId || "default";
+      const aId = campaignContext?.accountId || blueprint.accountId;
       if (cId) {
         const bizRows = await db.select().from(businessDataLayer).where(and(eq(businessDataLayer.campaignId, cId), eq(businessDataLayer.accountId, aId))).limit(1);
         if (bizRows.length > 0) businessData = bizRows[0];
@@ -534,7 +534,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     let performanceIntelligenceBlock = "";
     let performanceSignalsInjected = false;
     try {
-      const sAccountId = campaignContext?.accountId || "default";
+      const sAccountId = campaignContext?.accountId || accountId;
       const sCampaignId = campaignContext?.campaignId;
       if (sCampaignId) {
         const [memories, insights, moats] = await Promise.all([
@@ -555,7 +555,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       log("V2_ORCHESTRATOR_START", { accountId, campaignId });
       const v2Result = await runOrchestrator({
         accountId,
-        campaignId: campaignId || "default",
+        campaignId: campaignId,
         forceRefresh: false,
       });
       log("V2_ORCHESTRATOR_COMPLETE", {
@@ -570,7 +570,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
 
     let strategicContext: StrategicContext | null = null;
     try {
-      strategicContext = await buildStrategicContext(campaignId || "default", accountId);
+      strategicContext = await buildStrategicContext(campaignId, accountId);
       log("STRATEGIC_CONTEXT_BUILT", {
         marketMode: strategicContext.marketMode,
         awarenessLevel: strategicContext.awarenessLevel,
@@ -737,7 +737,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
           .where(eq(strategicBlueprints.id, blueprintId));
 
         const [blockedPlan] = await db.insert(strategicPlans).values({
-          accountId, blueprintId, campaignId: campaignId || "default",
+          accountId, blueprintId, campaignId: campaignId,
           planJson: JSON.stringify(orchestratorPlan),
           planSummary: `BLOCKED — ${uncertaintyResult.reasoning.substring(0, 100)}`,
           status: "BLOCKED", executionStatus: "IDLE",
@@ -776,7 +776,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     const [planRow] = await db.insert(strategicPlans).values({
       accountId,
       blueprintId,
-      campaignId: campaignId || "default",
+      campaignId: campaignId,
       planJson: JSON.stringify(orchestratorPlan),
       planSummary: summary,
       status: "DRAFT",
@@ -815,7 +815,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       await db.insert(planDocuments).values({
         planId: planRow.id,
         blueprintId,
-        campaignId: campaignId || "default",
+        campaignId: campaignId,
         accountId,
         version: nextVersion,
         fileName,
@@ -916,7 +916,7 @@ export function registerOrchestratorRoutes(app: Express) {
       const [job] = await db.insert(orchestratorJobs).values({
         blueprintId: id,
         accountId: blueprint.accountId,
-        campaignId: blueprint.campaignId || "default",
+        campaignId: blueprint.campaignId,
         status: "RUNNING",
         sectionStatuses: JSON.stringify(initSectionStatuses()),
       }).returning();
@@ -1214,7 +1214,7 @@ export function registerOrchestratorRoutes(app: Express) {
       }
 
       const accountId = blueprint.accountId;
-      const campaignId = blueprint.campaignId || "default";
+      const campaignId = blueprint.campaignId;
 
       const plans = await db.select().from(strategicPlans)
         .where(and(

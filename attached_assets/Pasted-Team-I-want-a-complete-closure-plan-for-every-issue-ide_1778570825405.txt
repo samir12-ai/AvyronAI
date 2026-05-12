@@ -1,0 +1,338 @@
+Team,
+
+I want a complete closure plan for every issue identified in the full-system runtime/isolation/truth audit.
+
+No partial mitigation.
+No “good enough.”
+No exceptions left behind.
+
+Goal:
+fully seal runtime truth, lineage, isolation, snapshot integrity, signal honesty, route ownership, and repair behavior across the entire system.
+
+This is now a structured closure phase.
+
+## Core rule
+
+No runtime truth should ever be:
+
+* stale
+* inherited incorrectly
+* mixed across runs
+* mixed across campaigns
+* mixed across accounts
+* inferred without labeling
+* reused without provenance
+* displayed misleadingly
+* trusted without lineage
+
+And no BLOCK should become a dead end if a safe repair path exists.
+
+## Execution doctrine
+
+1. Audit-first already completed.
+2. Now execute closure in strict phases.
+3. Every phase must:
+
+   * patch
+   * verify
+   * regression-test
+   * seal
+4. No silent assumptions.
+5. No “temporary” fallback logic.
+6. No new parallel architectures unless explicitly authorized.
+
+## PHASE P0 — Critical Isolation & Runtime Truth Sealing
+
+P0-1 — Seal photography routes
+
+* add verifyAuth globally
+* scope all CRUD by accountId
+* verify uploads/reservations/photographers are tenant-isolated
+* probe unauth access
+* probe foreign-account access
+
+P0-2 — Remove all accountId="default" fallbacks
+
+* especially campaign-data-layer.ts
+* full repo sweep for:
+
+  * "default"
+  * fallback account ids
+  * implicit tenant assumptions
+* no runtime fallback tenant allowed
+
+P0-3 — Remove JWT fallback secret
+
+* production must hard-fail if JWT_SECRET missing
+* verify startup failure behavior
+
+P0-4 — Body-level campaign ownership enforcement
+Seal every route accepting:
+
+* campaignId
+* runId
+* jobId
+* snapshotId
+* fetchJobId
+
+Use explicit ownership assertions everywhere.
+
+P0-5 — Seal concurrency isolation
+Fix:
+server/boss/concurrency.ts
+
+No global runId-only coordination.
+All concurrency keys must include:
+
+* accountId
+* campaignId where needed
+
+Verify:
+
+* no cross-tenant timing bleed
+* no lock collision
+* no wait-state inheritance
+
+P0-6 — Seal snapshot lineage
+This is the highest architectural priority.
+
+Eliminate all:
+
+* latest snapshot reads
+* unbounded snapshot hydration
+* no-sourceJobId reuse
+
+Every runtime truth read must include:
+
+* sourceJobId
+* sourceAccountId
+* sourceCampaignId
+
+No exceptions.
+
+Patch:
+
+* build-plan-layer
+* collectValidatedEngineOutputs
+* agent-context hydration
+* all legacy snapshot readers
+
+Verify:
+
+* concurrent runs
+* rapid sequential runs
+* partial snapshot overlap
+* stale snapshot rejection
+
+## PHASE P1 — Signal Honesty & Runtime Truth Integrity
+
+P1-1 — Preserve inferred-vs-direct lineage
+No inferred signal may silently become direct truth.
+
+Every signal must permanently retain:
+
+* originType
+* inferenceLevel
+* sourceEvidence
+* confidenceSource
+
+Patch:
+
+* audience engine
+* positioning engine
+* offer engine
+* MI-V3 signal engine
+
+Downstream engines must explicitly choose:
+
+* direct-only
+* inferred-allowed
+* benchmark-allowed
+
+No implicit upgrades.
+
+P1-2 — Confidence integrity
+Stop inflated confidence from sparse data.
+
+Add:
+
+* sparse-signal caps
+* benchmark confidence ceilings
+* minimum evidence thresholds
+* confidence-source labeling
+
+P1-3 — Runtime freshness integrity
+Fix:
+
+* currentJobId missing = PASS
+* stale snapshot auto-pass
+* provenance assumptions
+
+Missing lineage must become:
+
+* STALE
+* INCOMPLETE
+* or UNTRUSTED
+
+Never PASS.
+
+P1-4 — Cross-run cache isolation
+Seal:
+
+* CEL cache
+* AEL cache
+* module-level Maps
+* report caches
+
+All runtime caches must include:
+
+* accountId
+* campaignId
+* runId
+* TTL
+* max-size eviction
+
+P1-5 — Benchmark vs real truth separation
+System must never blur:
+
+* benchmark
+* manual
+* scraped
+* Meta live
+* inferred
+
+Frontend and engines must know the difference.
+
+No shared field names pretending they are equivalent truth.
+
+## PHASE P2 — Contract & Enforcement Hardening
+
+P2-1 — Tighten loose schemas
+Eliminate LooseObjectSchema / passthrough where possible.
+
+Complete:
+
+* Audience
+* Positioning
+* Offer
+* MI contracts
+
+Missing canonical fields must become explicit:
+
+* CONTRACT_INCOMPLETE
+* INVALID
+* NOT_REACHED
+
+P2-2 — Finish D5 sunset
+Remove transitional optional decisionGateOutcome behavior.
+
+No hidden semantic weakening.
+
+P2-3 — Expand no-semantic-fallback enforcement
+Extend rule scope to all server modules.
+
+No:
+
+* hidden fallbacks
+* semantic alias defaults
+* fake PASS labels
+* silent ternary recovery
+
+P2-4 — Frontend truthfulness
+Remove fabricated reassurance text:
+
+* “Mechanism defined”
+* “Offer structured”
+  etc.
+
+If data missing:
+show missing honestly.
+
+P2-5 — Repair isolation
+Repair actions must not mutate shared SSC state in-place.
+
+Clone before mutation.
+Seal repair lineage separately.
+
+## PHASE P3 — Repair-before-Block Completion
+
+Goal:
+If a problem is safely repairable,
+repair first,
+then block only if unresolved.
+
+P3-1 — Mixed repairable/non-repairable handling
+Current system abandons all repairable fixes if one terminal block exists.
+
+Fix:
+
+* repair repairable subset
+* preserve terminal subset
+* surface both cleanly
+
+P3-2 — User-actionable dead-end handling
+Every BLOCK must answer:
+
+* what failed
+* why
+* who resolves it
+* whether retrySafe
+* next recommended action
+* expected business impact
+
+No opaque dead-end BLOCKS.
+
+P3-3 — Runtime repair verification
+Every repair must:
+
+* re-check truth
+* re-check contracts
+* re-check freshness
+* re-check provenance
+
+No cosmetic repair success.
+
+## PHASE P4 — Verification & Sealing
+
+After every phase:
+
+* run regression suites
+* run leakage-defense verification
+* run concurrent-run tests
+* run stale snapshot tests
+* run frontend switch tests
+* run trust-layer probes
+* run cross-run lineage probes
+
+Then produce:
+`.local/plans/runtime-truth-isolation-seal.md`
+
+Include:
+
+* every issue closed
+* before/after behavior
+* verification evidence
+* remaining theoretical risks
+* final verdict
+
+## Final target
+
+The system should become:
+
+* tenant-isolated
+* run-isolated
+* snapshot-lineage-safe
+* provenance-aware
+* truth-honest
+* confidence-grounded
+* repair-capable
+* commercially reliable
+
+No stale truth.
+No fake certainty.
+No hidden inheritance.
+No silent fallback.
+No cross-run corruption.
+
+Best,
+[Your Name]

@@ -520,7 +520,7 @@ async function generatePlanWithAI(
   campaign: any,
   goalMathContext?: { goal: any; funnel: any; feasibility: any; archetype: any } | null,
   lockedDecisions?: string,
-  accountId: string = "default",
+  accountId: string,
   memoryContextBlock?: string,
   campaignId: string = "",
   precomputedRhythm?: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; reasoning: string; performanceBasis: string } | null,
