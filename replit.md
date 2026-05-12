@@ -153,7 +153,7 @@ The env validator (`server/env-validator.ts`) refuses to boot if any of the foll
 
 ## Migration runner (Seal #7 / F10.1, F10.10)
 
-- `server/migrations/runner.ts` is the single migration entry point. Acquires `pg_try_advisory_lock(8675309)` to serialize across instances, applies pending SQL files from `server/migrations/sql/`, then runs the legacy `002–014` programmatic migrations in order. Records each step in `schema_migrations`.
+- `server/migrations/runner.ts` is the single migration entry point. Acquires `pg_advisory_lock(8675309)` (blocking, bounded by a 5-minute `Promise.race` timeout that aborts boot) to serialize across instances, applies pending SQL files from `server/migrations/sql/`, then runs the legacy `002–014` programmatic migrations in order. Records each step in `schema_migrations`. (Pass-2 hardening swapped the spec-original `pg_try_advisory_lock` for the blocking variant — `try_*` would have returned false for the loser replica with no way to verify whether the winner was still mid-migration; blocking + timeout removes that ambiguity.)
 - **`REQUIRED_SCHEMA_VERSION = 16`** — boot refuses to start if the database last-applied version is lower than this AND migration application fails.
 - The 13 previously-inline migration calls in `server/index.ts` were deleted; a single `await runMigrations()` replaces them.
 - `npm run db:migrate` runs the runner standalone. `npm run db:generate` writes drizzle output to `server/migrations/sql/` (matches runtime).
