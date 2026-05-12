@@ -135,7 +135,10 @@ var init_otel = __esm({
         s.sum += value;
         s.count += 1;
         for (let i = 0; i < this.buckets.length; i++) {
-          if (value <= this.buckets[i]) s.counts[i] += 1;
+          if (value <= this.buckets[i]) {
+            s.counts[i] += 1;
+            return;
+          }
         }
       }
       render() {
@@ -2900,11 +2903,11 @@ async function checkAndReserveBudget(accountId, maxTokens) {
   }
 }
 function hashAccountId(accountId) {
-  let hash2 = 0;
+  let hash = 0;
   for (let i = 0; i < accountId.length; i++) {
-    hash2 = (hash2 << 5) - hash2 + accountId.charCodeAt(i) | 0;
+    hash = (hash << 5) - hash + accountId.charCodeAt(i) | 0;
   }
-  return hash2 & 2147483647;
+  return hash & 2147483647;
 }
 async function reconcileBudgetReservation(entry) {
   try {
@@ -13581,19 +13584,7 @@ var init_feature_flags = __esm({
 });
 
 // server/account-lifecycle.ts
-var account_lifecycle_exports = {};
-__export(account_lifecycle_exports, {
-  CASCADE_EXEMPT: () => CASCADE_EXEMPT,
-  CASCADE_TABLES: () => CASCADE_TABLES,
-  cancelAccountDeletion: () => cancelAccountDeletion,
-  cascadeDeleteAccount: () => cascadeDeleteAccount,
-  consumeDeleteConfirmation: () => consumeDeleteConfirmation,
-  issueDeleteConfirmation: () => issueDeleteConfirmation,
-  requestAccountDeletion: () => requestAccountDeletion,
-  runTombstoneReaper: () => runTombstoneReaper
-});
 import { Pool } from "pg";
-import * as bcrypt from "bcryptjs";
 import * as crypto6 from "node:crypto";
 function getPool() {
   if (!pool2) pool2 = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -13602,47 +13593,6 @@ function getPool() {
 function hashIp(ip) {
   if (!ip) return null;
   return crypto6.createHash("sha256").update(ip).digest("hex").slice(0, 32);
-}
-async function issueDeleteConfirmation(accountId, userId) {
-  const token = crypto6.randomBytes(32).toString("base64url");
-  const tokenHash = await bcrypt.hash(token, 10);
-  const expiresAt = new Date(Date.now() + CONFIRMATION_TOKEN_TTL_MS);
-  const c = await getPool().connect();
-  try {
-    await c.query(
-      "UPDATE account_delete_confirmations SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL",
-      [userId]
-    );
-    await c.query(
-      "INSERT INTO account_delete_confirmations (account_id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)",
-      [accountId, userId, tokenHash, expiresAt]
-    );
-  } finally {
-    c.release();
-  }
-  return token;
-}
-async function consumeDeleteConfirmation(accountId, userId, presentedToken) {
-  const c = await getPool().connect();
-  try {
-    const r = await c.query(
-      `SELECT id, token_hash FROM account_delete_confirmations
-       WHERE account_id = $1 AND user_id = $2 AND consumed_at IS NULL AND expires_at > now()
-       ORDER BY issued_at DESC LIMIT 1`,
-      [accountId, userId]
-    );
-    const row = r.rows[0];
-    if (!row) return false;
-    const ok = await bcrypt.compare(presentedToken, row.token_hash);
-    if (!ok) return false;
-    await c.query(
-      "UPDATE account_delete_confirmations SET consumed_at = now() WHERE id = $1",
-      [row.id]
-    );
-    return true;
-  } finally {
-    c.release();
-  }
 }
 async function requestAccountDeletion(opts) {
   const reaperAfter = new Date(Date.now() + TOMBSTONE_RETENTION_DAYS * 24 * 60 * 60 * 1e3);
@@ -13781,7 +13731,7 @@ async function cancelAccountDeletion(accountId) {
     c.release();
   }
 }
-var CASCADE_TABLES, CASCADE_EXEMPT, TOMBSTONE_RETENTION_DAYS, CONFIRMATION_TOKEN_TTL_MS, pool2;
+var CASCADE_TABLES, CASCADE_EXEMPT, TOMBSTONE_RETENTION_DAYS, pool2;
 var init_account_lifecycle = __esm({
   "server/account-lifecycle.ts"() {
     "use strict";
@@ -13913,21 +13863,17 @@ var init_account_lifecycle = __esm({
     CASCADE_EXEMPT = Object.freeze([
       "audit_log_archive",
       "account_tombstones",
-      "account_delete_confirmations",
       "schema_migrations",
       "auth_lockouts",
-      // keyed by email, not account_id; survives intentionally
       "messages"
-      // session-scoped, no account_id column
     ]);
     TOMBSTONE_RETENTION_DAYS = 30;
-    CONFIRMATION_TOKEN_TTL_MS = 10 * 60 * 1e3;
     pool2 = null;
   }
 });
 
 // server/auth.ts
-import bcrypt2 from "bcryptjs";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import * as crypto7 from "crypto";
 import { eq as eq8, and as and8, isNull, sql as sql6 } from "drizzle-orm";
@@ -14134,7 +14080,7 @@ function parseRefreshToken(token) {
 async function issueSessionForDevice(opts) {
   const { userId, accountId, deviceFingerprint } = opts;
   const secret = generateRefreshSecret();
-  const hash2 = await bcrypt2.hash(secret, BCRYPT_COST);
+  const hash = await bcrypt.hash(secret, BCRYPT_COST);
   await db.update(authSessions).set({ revokedAt: /* @__PURE__ */ new Date(), revokeReason: "rotated_login" }).where(and8(
     eq8(authSessions.accountId, accountId),
     eq8(authSessions.deviceFingerprint, deviceFingerprint),
@@ -14144,7 +14090,7 @@ async function issueSessionForDevice(opts) {
     accountId,
     userId,
     deviceFingerprint,
-    refreshTokenHash: hash2
+    refreshTokenHash: hash
   }).returning({ id: authSessions.id });
   return {
     sessionId: row.id,
@@ -14152,37 +14098,16 @@ async function issueSessionForDevice(opts) {
     expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
   };
 }
-async function registerAccountDeletionRoutes(app2) {
-  const { issueDeleteConfirmation: issueDeleteConfirmation2, consumeDeleteConfirmation: consumeDeleteConfirmation2, requestAccountDeletion: requestAccountDeletion2, cancelAccountDeletion: cancelAccountDeletion2 } = await Promise.resolve().then(() => (init_account_lifecycle(), account_lifecycle_exports));
-  app2.post("/api/account/delete-confirm", async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Not authenticated" });
-    const payload = verifyToken(authHeader.slice(7));
-    if (!payload) return res.status(401).json({ error: "Invalid token" });
-    const { password } = req.body ?? {};
-    if (typeof password !== "string" || !password) return res.status(400).json({ error: "Password required" });
-    try {
-      const [user] = await db.select().from(users).where(eq8(users.id, payload.userId)).limit(1);
-      if (!user) return res.status(404).json({ error: "User not found" });
-      const ok = await bcrypt2.compare(password, user.password);
-      if (!ok) return res.status(403).json({ error: "Password incorrect" });
-      const accountId = user.accountId || user.id;
-      const token = await issueDeleteConfirmation2(accountId, user.id);
-      return res.json({ confirmationToken: token, expiresInSeconds: 600 });
-    } catch (err) {
-      console.error("[Auth] delete-confirm error:", err);
-      return res.status(500).json({ error: "Failed to issue confirmation" });
-    }
-  });
+function registerAccountDeletionRoutes(app2) {
   app2.delete("/api/account", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Not authenticated" });
     const payload = verifyToken(authHeader.slice(7));
     if (!payload) return res.status(401).json({ error: "Invalid token" });
-    const confirmToken = req.headers["x-account-delete-confirm"];
+    const confirmHeader = req.headers["x-account-delete-confirm"];
     const { password } = req.body ?? {};
-    if (typeof confirmToken !== "string" || !confirmToken) {
-      return res.status(400).json({ error: "X-Account-Delete-Confirm header required (POST /api/account/delete-confirm first)" });
+    if (typeof confirmHeader !== "string" || confirmHeader !== DELETE_CONFIRM_LITERAL) {
+      return res.status(400).json({ error: `X-Account-Delete-Confirm header must equal '${DELETE_CONFIRM_LITERAL}'` });
     }
     if (typeof password !== "string" || !password) {
       return res.status(400).json({ error: "Password required for re-authentication" });
@@ -14190,14 +14115,13 @@ async function registerAccountDeletionRoutes(app2) {
     try {
       const [user] = await db.select().from(users).where(eq8(users.id, payload.userId)).limit(1);
       if (!user) return res.status(404).json({ error: "User not found" });
-      const ok = await bcrypt2.compare(password, user.password);
+      const ok = await bcrypt.compare(password, user.password);
       if (!ok) return res.status(403).json({ error: "Password incorrect" });
-      const accountId = user.accountId || user.id;
-      const consumed = await consumeDeleteConfirmation2(accountId, user.id, confirmToken);
-      if (!consumed) {
-        return res.status(403).json({ error: "Invalid or expired confirmation token" });
+      if (!user.accountId) {
+        await db.update(users).set({ accountId: user.id }).where(eq8(users.id, user.id));
       }
-      const r = await requestAccountDeletion2({
+      const accountId = user.accountId || user.id;
+      const r = await requestAccountDeletion({
         accountId,
         userId: user.id,
         ip: req.ip,
@@ -14222,7 +14146,7 @@ async function registerAccountDeletionRoutes(app2) {
       const [user] = await db.select().from(users).where(eq8(users.id, payload.userId)).limit(1);
       if (!user) return res.status(404).json({ error: "User not found" });
       const accountId = user.accountId || user.id;
-      const cancelled = await cancelAccountDeletion2(accountId);
+      const cancelled = await cancelAccountDeletion(accountId);
       return res.json({ cancelled, note: cancelled ? "Reaper cancelled. Note: PII that was masked at request time cannot be restored." : "No pending deletion to cancel." });
     } catch (err) {
       console.error("[Auth] delete-cancel error:", err);
@@ -14231,9 +14155,7 @@ async function registerAccountDeletionRoutes(app2) {
   });
 }
 function registerAuthRoutes(app2) {
-  registerAccountDeletionRoutes(app2).catch(
-    (err) => console.error("[Auth] Failed to register account-deletion routes:", err)
-  );
+  registerAccountDeletionRoutes(app2);
   app2.post("/api/auth/register", authRateLimit, async (req, res) => {
     try {
       const { email, password, name, deviceFingerprint } = req.body;
@@ -14248,7 +14170,7 @@ function registerAuthRoutes(app2) {
       if (existing.length > 0) {
         return res.status(409).json({ error: "An account with this email already exists" });
       }
-      const passwordHash = await bcrypt2.hash(password, BCRYPT_COST);
+      const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
       const now = /* @__PURE__ */ new Date();
       const trialEnd = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1e3);
       const [newUser] = await db.insert(users).values({
@@ -14314,11 +14236,11 @@ function registerAuthRoutes(app2) {
       }
       const [user] = await db.select().from(users).where(eq8(users.email, emailLower)).limit(1);
       if (!user) {
-        await bcrypt2.compare(password, DUMMY_BCRYPT_HASH);
+        await bcrypt.compare(password, DUMMY_BCRYPT_HASH);
         await recordLoginFailure(emailLower);
         return res.status(401).json({ error: "Invalid email or password" });
       }
-      const validPassword = await bcrypt2.compare(password, user.password);
+      const validPassword = await bcrypt.compare(password, user.password);
       if (!validPassword) {
         await recordLoginFailure(emailLower);
         return res.status(401).json({ error: "Invalid email or password" });
@@ -14376,7 +14298,7 @@ function registerAuthRoutes(app2) {
       if (!row) {
         return res.status(401).json({ error: "Invalid refresh token" });
       }
-      const secretMatches = await bcrypt2.compare(parsed.secret, row.refreshTokenHash);
+      const secretMatches = await bcrypt.compare(parsed.secret, row.refreshTokenHash);
       if (!secretMatches) {
         return res.status(401).json({ error: "Invalid refresh token" });
       }
@@ -14418,7 +14340,7 @@ function registerAuthRoutes(app2) {
         if (parsed) {
           const [row] = await db.select().from(authSessions).where(eq8(authSessions.id, parsed.sessionId)).limit(1);
           if (row && !row.revokedAt) {
-            const ok = await bcrypt2.compare(parsed.secret, row.refreshTokenHash);
+            const ok = await bcrypt.compare(parsed.secret, row.refreshTokenHash);
             if (ok) {
               await db.update(authSessions).set({ revokedAt: /* @__PURE__ */ new Date(), revokeReason: "logout" }).where(and8(eq8(authSessions.id, parsed.sessionId), isNull(authSessions.revokedAt)));
             }
@@ -14576,13 +14498,14 @@ function registerAuthRoutes(app2) {
     }
   });
 }
-var JWT_SECRET, TRIAL_DAYS, JWT_AUDIENCE, JWT_ISSUER, JWT_LEGACY_GRACE_DAYS, JWT_LEGACY_CUTOFF_MS, JWT_LEGACY_METRICS, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL_MS, LOCKOUT_WINDOW_MS, LOCKOUT_MAX_FAILURES, LOCKOUT_DURATION_MS, BCRYPT_COST, DUMMY_BCRYPT_HASH, AuthConfigurationError, STRIPE_WEBHOOK_SECRET, AUTH_RATE_WINDOW_MS, AUTH_RATE_MAX, authRateState, ADMIN_ACCOUNT_IDS;
+var JWT_SECRET, TRIAL_DAYS, JWT_AUDIENCE, JWT_ISSUER, JWT_LEGACY_GRACE_DAYS, JWT_LEGACY_CUTOFF_MS, JWT_LEGACY_METRICS, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL_MS, LOCKOUT_WINDOW_MS, LOCKOUT_MAX_FAILURES, LOCKOUT_DURATION_MS, BCRYPT_COST, DUMMY_BCRYPT_HASH, AuthConfigurationError, STRIPE_WEBHOOK_SECRET, AUTH_RATE_WINDOW_MS, AUTH_RATE_MAX, authRateState, ADMIN_ACCOUNT_IDS, DELETE_CONFIRM_LITERAL;
 var init_auth = __esm({
   "server/auth.ts"() {
     "use strict";
     init_db();
     init_schema();
     init_feature_flags();
+    init_account_lifecycle();
     if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
       console.error("[Auth] FATAL: JWT_SECRET is required in production. Refusing to start.");
       throw new Error("JWT_SECRET environment variable is required in production");
@@ -14603,7 +14526,7 @@ var init_auth = __esm({
     LOCKOUT_MAX_FAILURES = 5;
     LOCKOUT_DURATION_MS = 15 * 60 * 1e3;
     BCRYPT_COST = 12;
-    DUMMY_BCRYPT_HASH = bcrypt2.hashSync(
+    DUMMY_BCRYPT_HASH = bcrypt.hashSync(
       crypto7.randomBytes(32).toString("hex") + "-dummy-equalizer",
       BCRYPT_COST
     );
@@ -14626,6 +14549,7 @@ var init_auth = __esm({
     ADMIN_ACCOUNT_IDS = /* @__PURE__ */ new Set([
       "a2d87878-a1e9-41ea-a8a5-90beff569673"
     ]);
+    DELETE_CONFIRM_LITERAL = "PERMANENTLY_DELETE";
   }
 });
 
@@ -18752,7 +18676,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
     posts: [],
     comments: []
   }));
-  const hash2 = computeCompetitorHash(competitorInputs);
+  const hash = computeCompetitorHash(competitorInputs);
   const STALE_QUEUED_THRESHOLD_MS = 25 * 60 * 1e3;
   const staleQueuedCutoff = new Date(Date.now() - STALE_QUEUED_THRESHOLD_MS);
   const staleQueued = await db.update(miFetchJobs).set({ status: "FAILED", error: "Auto-expired: stuck in QUEUED for >25 minutes", completedAt: /* @__PURE__ */ new Date() }).where(and27(
@@ -18770,16 +18694,16 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
     sql26`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`
   )).orderBy(desc23(miFetchJobs.createdAt)).limit(1);
   if (existingActive.length > 0) {
-    console.log(`[FetchOrch] DEDUP: Reusing active ${existingActive[0].status} job ${existingActive[0].id} for ${lockKey} (competitorHash=${hash2})`);
+    console.log(`[FetchOrch] DEDUP: Reusing active ${existingActive[0].status} job ${existingActive[0].id} for ${lockKey} (competitorHash=${hash})`);
     return existingActive[0].id;
   }
   const existingDupHash = await db.select().from(miFetchJobs).where(and27(
     eq36(miFetchJobs.accountId, accountId),
-    eq36(miFetchJobs.competitorHash, hash2),
+    eq36(miFetchJobs.competitorHash, hash),
     sql26`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`
   )).orderBy(desc23(miFetchJobs.createdAt)).limit(1);
   if (existingDupHash.length > 0) {
-    console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash2} for account ${accountId} (per-account scope)`);
+    console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash} for account ${accountId} (per-account scope)`);
     return existingDupHash[0].id;
   }
   const runningCount = await getRunningJobCountForAccount(accountId);
@@ -18803,7 +18727,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
       id: jobId3,
       accountId,
       campaignId,
-      competitorHash: hash2,
+      competitorHash: hash,
       status: "QUEUED",
       priority: PRIORITY_FAST_PASS,
       stageStatuses: JSON.stringify(initialStages2),
@@ -18845,7 +18769,7 @@ async function _createAndStartJob(accountId, campaignId, lockKey) {
       id: jobId2,
       accountId,
       campaignId,
-      competitorHash: hash2,
+      competitorHash: hash,
       status: "RUNNING",
       stageStatuses: JSON.stringify(initialStages),
       fetchLimitReasons: JSON.stringify([]),
@@ -38171,13 +38095,13 @@ function serializeMemoryBlockForPrompt(block) {
 }
 function makeStrategyFingerprint(engineName, label, details) {
   const raw = `${engineName}::${label}::${(details || "").slice(0, 100)}`;
-  let hash2 = 0;
+  let hash = 0;
   for (let i = 0; i < raw.length; i++) {
     const char = raw.charCodeAt(i);
-    hash2 = (hash2 << 5) - hash2 + char;
-    hash2 |= 0;
+    hash = (hash << 5) - hash + char;
+    hash |= 0;
   }
-  return `fp_${Math.abs(hash2).toString(36)}`;
+  return `fp_${Math.abs(hash).toString(36)}`;
 }
 var NON_STRATEGIC_MEMORY_TYPES_SET, CONFIDENCE_ENFORCEMENT_MAP;
 var init_manager = __esm({
@@ -41234,14 +41158,14 @@ async function findReusable(table, accountId, campaignId, inputHash) {
   const rows = await db.select().from(table).where(and54(...conditions)).orderBy(desc45(table.createdAt)).limit(1);
   return rows[0] || null;
 }
-function logReuseHit(engine, snapshotId, hash2) {
-  console.log(`${REUSE_LOG} ${engine} | HIT | snapshotId=${snapshotId} | hash=${hash2}`);
+function logReuseHit(engine, snapshotId, hash) {
+  console.log(`${REUSE_LOG} ${engine} | HIT | snapshotId=${snapshotId} | hash=${hash}`);
 }
-function logReuseMiss(engine, hash2, reason = "no-match") {
-  console.log(`${REUSE_LOG} ${engine} | MISS | hash=${hash2} | reason=${reason}`);
+function logReuseMiss(engine, hash, reason = "no-match") {
+  console.log(`${REUSE_LOG} ${engine} | MISS | hash=${hash} | reason=${reason}`);
 }
-function logReuseRejected(engine, snapshotId, hash2, reason) {
-  console.warn(`${REUSE_LOG} ${engine} | REJECTED | snapshotId=${snapshotId} | hash=${hash2} | reason=${reason} \u2014 forcing regeneration`);
+function logReuseRejected(engine, snapshotId, hash, reason) {
+  console.warn(`${REUSE_LOG} ${engine} | REJECTED | snapshotId=${snapshotId} | hash=${hash} | reason=${reason} \u2014 forcing regeneration`);
 }
 async function safeReuse(engine, inputHash, snap, hydrate, completeness) {
   if (!snap) return null;
@@ -63896,7 +63820,7 @@ function validateEnv(opts = {}) {
   return result;
 }
 
-// server/index.ts
+// server/bootstrap.ts
 init_otel();
 
 // server/observability/sentry.ts
@@ -63940,6 +63864,11 @@ function captureException(err, ctx) {
   } catch {
   }
 }
+
+// server/bootstrap.ts
+validateEnv();
+initOTel();
+initSentry().catch((err) => console.error("[Sentry] init promise rejected:", err));
 
 // server/startup-artifact-guard.ts
 import * as fs from "fs";
@@ -90797,13 +90726,11 @@ async function workerTick() {
     recordWorkerTick2("autonomous", "skipped");
     return;
   }
-  let result = "ok";
   try {
     const accountIds = await getAccountsDueForProcessing();
     const { recordWorkerTick: recordWorkerTick2, setWorkerQueueDepth: setWorkerQueueDepth2 } = await Promise.resolve().then(() => (init_otel(), otel_exports));
     setWorkerQueueDepth2("autonomous", accountIds.length);
     if (accountIds.length === 0) {
-      result = "skipped";
       recordWorkerTick2("autonomous", "skipped");
       return;
     }
@@ -90820,12 +90747,10 @@ async function workerTick() {
     recordWorkerTick2("autonomous", "ok");
     setWorkerQueueDepth2("autonomous", 0);
   } catch (error) {
-    result = "error";
     console.error("[Worker] Tick error:", error);
     const { recordWorkerTick: recordWorkerTick2 } = await Promise.resolve().then(() => (init_otel(), otel_exports));
     recordWorkerTick2("autonomous", "error");
   }
-  void result;
 }
 async function ensureDefaultConfig() {
   const { guardrailConfig: guardrailConfig2, accountState: acctStateTable } = await Promise.resolve().then(() => (init_schema(), schema_exports));
@@ -91962,6 +91887,9 @@ async function runMigrations(opts = {}) {
     await Promise.race([lockAcquired, lockTimeout]);
     try {
       await ensureMigrationsTable(client);
+      if (!opts.skipLegacy) {
+        await runLegacyTsMigrations();
+      }
       const alreadyApplied = await getAppliedVersions(client);
       const all = listSqlMigrations();
       const pending = all.filter((m) => !alreadyApplied.has(m.version));
@@ -91974,9 +91902,6 @@ async function runMigrations(opts = {}) {
           console.log(`[Migrations] applied ${m.version}_${m.name} (${dur}ms)`);
           applied.push(m);
         }
-      }
-      if (!opts.skipLegacy) {
-        await runLegacyTsMigrations();
       }
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]).catch(() => void 0);
@@ -91991,6 +91916,33 @@ async function runMigrations(opts = {}) {
       );
     }
     return { applied, lastVersion };
+  } finally {
+    client.release();
+    await pool3.end();
+  }
+}
+async function verifySchemaFloor(opts = {}) {
+  const pool3 = new Pool2({ connectionString: opts.databaseUrl ?? process.env.DATABASE_URL });
+  const client = await pool3.connect();
+  try {
+    const exists = await client.query(
+      "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists"
+    );
+    if (!exists.rows[0]?.exists) {
+      throw new Error(
+        "[Migrations] schema_migrations table does not exist \u2014 run `npm run db:migrate` before starting the server."
+      );
+    }
+    const r = await client.query(
+      "SELECT MAX(version) AS max FROM schema_migrations"
+    );
+    const lastVersion = Number(r.rows[0]?.max ?? 0);
+    if (lastVersion < REQUIRED_SCHEMA_VERSION) {
+      throw new Error(
+        `[Migrations] DB schema_migrations.max=${lastVersion} < REQUIRED_SCHEMA_VERSION=${REQUIRED_SCHEMA_VERSION}. Run \`npm run db:migrate\` before starting the server.`
+      );
+    }
+    return { lastVersion };
   } finally {
     client.release();
     await pool3.end();
@@ -92014,6 +91966,7 @@ init_engine_state();
 init_auth();
 import * as fs7 from "fs";
 import * as path8 from "path";
+import { timingSafeEqual } from "node:crypto";
 
 // server/pipeline/routes.ts
 init_db();
@@ -97061,9 +97014,6 @@ router4.get("/dna/active", async (req, res) => {
 var routes_default = router4;
 
 // server/index.ts
-validateEnv();
-initOTel();
-initSentry().catch((err) => console.error("[Sentry] init promise rejected:", err));
 runStartupArtifactGuard();
 var app = express2();
 var log = console.log;
@@ -97314,7 +97264,7 @@ function setupErrorHandler(app2) {
     const clientMessage = isProd && status >= 500 ? "Internal Server Error" : error.message || "Internal Server Error";
     if (status >= 500) {
       logger.error(
-        { component: "errorHandler", status, name: error.name, err: String(err), stack: err?.stack },
+        { component: "errorHandler", status, name: error.name, err: String(err), stack: err instanceof Error ? err.stack : void 0 },
         `${req.method} ${req.path} \u2192 ${status}`
       );
     } else {
@@ -97347,7 +97297,6 @@ function setupErrorHandler(app2) {
     const b = Buffer.from(provided.padEnd(expected.length, "\0").slice(0, expected.length));
     let ok = a.length === provided.length;
     try {
-      const { timingSafeEqual } = __require("node:crypto");
       ok = ok && timingSafeEqual(a, b);
     } catch {
       ok = false;
@@ -97475,14 +97424,26 @@ function setupErrorHandler(app2) {
   let competitorFetchTimer = null;
   setupErrorHandler(app);
   const port = parseInt(process.env.PORT || "5000", 10);
+  const autoMigrate = process.env.BOOT_AUTO_MIGRATE === "true";
   try {
-    const r = await runMigrations();
-    logger.info(
-      { component: "migrations", lastVersion: r.lastVersion, applied: r.applied.length },
-      "migrations complete"
-    );
+    if (autoMigrate) {
+      const r = await runMigrations();
+      logger.info(
+        { component: "migrations", lastVersion: r.lastVersion, applied: r.applied.length, mode: "auto" },
+        "migrations complete"
+      );
+    } else {
+      const v = await verifySchemaFloor();
+      logger.info(
+        { component: "migrations", lastVersion: v.lastVersion, mode: "verify-only" },
+        "schema floor verified"
+      );
+    }
   } catch (err) {
-    logger.error({ component: "migrations", err: String(err) }, "migrations FAILED \u2014 refusing to start");
+    logger.error(
+      { component: "migrations", err: String(err), mode: autoMigrate ? "auto" : "verify-only" },
+      "boot schema check FAILED \u2014 refusing to start"
+    );
     captureException(err, { phase: "boot-migrations" });
     await new Promise((resolve4) => setTimeout(resolve4, 500));
     process.exit(1);
