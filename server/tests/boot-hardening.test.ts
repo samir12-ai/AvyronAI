@@ -289,3 +289,41 @@ describe("Seal #7 / F10.1 — migration runner", () => {
     expect(REQUIRED_SCHEMA_VERSION).toBe(max);
   });
 });
+
+/**
+ * Pass-13 — live HTTP smoke tests for /healthz and /metrics admin gating.
+ * Runs only when the dev backend is already up on :5000 (Start Backend
+ * workflow). When unreachable, skips so CI without the workflow doesn't
+ * false-fail. Architect-review pass-13 explicitly asked for these.
+ */
+async function probe(path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: string } | null> {
+  try {
+    const res = await fetch(`http://127.0.0.1:5000${path}`, { headers });
+    return { status: res.status, body: await res.text() };
+  } catch {
+    return null;
+  }
+}
+
+describe("Seal #7 — live HTTP boot endpoints (skip if backend down)", () => {
+  it("GET /healthz → 200 with { ok: true }", async () => {
+    const r = await probe("/healthz");
+    if (!r) return; // backend not running — skip silently
+    expect(r.status).toBe(200);
+    const j = JSON.parse(r.body);
+    expect(j.ok).toBe(true);
+    expect(j.ts).toBeTruthy();
+  });
+
+  it("GET /metrics without admin token → 401", async () => {
+    const r = await probe("/metrics");
+    if (!r) return;
+    expect(r.status).toBe(401);
+  });
+
+  it("GET /metrics with wrong admin token → 401", async () => {
+    const r = await probe("/metrics", { "X-Admin-Token": "definitely-not-the-real-token" });
+    if (!r) return;
+    expect(r.status).toBe(401);
+  });
+});

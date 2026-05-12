@@ -159,7 +159,7 @@ The env validator (`server/env-validator.ts`) refuses to boot if any of the foll
 - `npm run db:migrate` runs the runner standalone. `npm run db:generate` writes drizzle output to `server/migrations/sql/` (matches runtime).
 - `noTransaction` marker (first line `-- noTransaction`) is honored: the runner splits the SQL into individual statements so `CREATE INDEX CONCURRENTLY` can execute outside a transaction.
 - **SQL 015** rewrites Migration 012's tenant indexes as `CREATE INDEX CONCURRENTLY IF NOT EXISTS` and drops the old non-concurrent ones idempotently.
-- **SQL 016** creates `account_tombstones` (30-day quarantine) and `account_delete_confirmations` (10-minute bcrypt confirmation tokens) for the GDPR cascade.
+- **SQL 016** creates `account_tombstones` (30-day quarantine) for the GDPR cascade. (Earlier draft also created an `account_delete_confirmations` table for a 10-minute bcrypt token issuer endpoint — both the table and the endpoint were dropped in pass-4 when the route switched to the literal-header guard + body-password re-auth. The migration now contains a `DROP TABLE IF EXISTS account_delete_confirmations` statement so a previously-applied snapshot self-heals.)
 
 ## GDPR account deletion (Seal #7 / F9.9)
 
@@ -168,7 +168,7 @@ The env validator (`server/env-validator.ts`) refuses to boot if any of the foll
 - **Phase 1 (immediate):** `DELETE /api/account` requires three things: a valid Bearer token, the literal header `X-Account-Delete-Confirm: PERMANENTLY_DELETE`, and the user's current password in the JSON body (`{ "password": "..." }`) for fresh re-auth via `bcrypt.compare`. On success: masks PII on `users` immediately (`username`, `email`, `password`, `stripe_customer_id` → `'deleted-' || id` sentinels), inserts an `account_tombstones` row with `purgeAfter = now() + 30d`, and writes an audit entry to `audit_log_archive`. (Pass-4 simplification — earlier passes used a 10-minute bcrypt token issued by `POST /api/account/delete-confirm`; that token endpoint and the `account_delete_confirmations` table it backed are no longer wired. The body-password path replaced them as the re-auth proof.)
 - **Cancellation window:** `POST /api/account/delete-cancel` removes the tombstone any time before `purgeAfter` (PII mask is *not* reverted; user must contact support for restoration).
 - **Phase 2 (reaper):** `runTombstoneReaper()` runs daily (initial 60s after boot, 24h tick). For each expired tombstone, `cascadeDeleteAccount()` deletes from all 105 tables inside a single PG transaction — any error rolls back the whole account.
-- **`CASCADE_EXEMPT`:** `audit_log_archive`, `account_tombstones`, `account_delete_confirmations`, `schema_migrations`, `auth_lockouts`, `messages` (no `account_id` column).
+- **`CASCADE_EXEMPT`:** `audit_log_archive`, `account_tombstones`, `schema_migrations`, `auth_lockouts`, `messages` (no `account_id` column on `messages`). `account_delete_confirmations` is no longer in this list — the table was dropped in pass-4.
 - Doctrine: no fallback coalescing, no silent failure modes — every error logged with `traceId` and surfaced to Sentry when configured.
 
 ## Marketing-logic engine upgrade (Apr 2026)
