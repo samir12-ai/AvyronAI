@@ -1,0 +1,161 @@
+Team,
+
+I want a full system-wide code audit.
+
+This is not a targeted audit.
+This is not only runtime truth.
+This is not only leakage.
+This is not only engines.
+
+I want the entire codebase inspected.
+
+Core instruction:
+Do not leave a single file, route, helper, engine, frontend component, cache, worker, schema, or utility unreviewed.
+
+## Scope
+
+Audit everything:
+
+* backend
+* frontend
+* API routes
+* orchestrator
+* all engines
+* agent pipeline
+* system-control
+* recovery/repair
+* retry logic
+* snapshot system
+* signal lineage
+* contract registry
+* schemas
+* database queries
+* metrics
+* scraping
+* workers
+* queues
+* caches
+* auth
+* tenant/account/campaign isolation
+* frontend state
+* AsyncStorage
+* React Query
+* UI truthfulness
+* generated reports
+* tests
+* local validation scripts
+
+For every file reviewed, document:
+
+* file path
+* purpose
+* risk level
+* issues found
+* missing guards
+* stale logic
+* unsafe defaults
+* unscoped queries
+* semantic fallbacks
+* dead code
+* duplicate logic
+* unclear ownership
+* frontend/backend mismatch
+* test coverage status
+* recommended fix
+
+## Audit categories
+
+Check for:
+
+1. Security / isolation
+
+* account leakage
+* campaign leakage
+* unscoped routes
+* body-param trust
+* jobId/runId probing
+* unsafe auth defaults
+
+2. Runtime truth
+
+* stale snapshots
+* latest-based reads
+* missing sourceJobId
+* missing provenance
+* inferred truth treated as direct
+* benchmark/manual/scraped confusion
+
+3. Reliability
+
+* silent fallbacks
+* fake PASS states
+* missing contract enforcement
+* retry/repair inconsistencies
+* dead-end BLOCKS
+
+4. Frontend truthfulness
+
+* stale UI state
+* misleading cards
+* cached old data
+* fake reassurance text
+* incorrect badges
+* frontend not matching canonical backend truth
+
+5. Production readiness
+
+* memory leaks
+* unbounded caches
+* queue/run-lock risks
+* worker failures
+* missing TTLs
+* weak error handling
+* missing regression tests
+
+## Output requested
+
+Create a master audit file:
+
+`.local/plans/full-codebase-master-audit.md`
+
+Include:
+
+* complete file inventory
+* file-by-file findings
+* severity ranking
+* confirmed vs theoretical risk
+* fix recommendation
+* whether it blocks launch
+* whether test coverage exists
+
+Also create:
+
+`.local/plans/full-codebase-closure-plan.md`
+
+With:
+
+* P0 critical blockers
+* P1 important hardening
+* P2 cleanup/refactor
+* P3 documentation/tests
+* estimated order of execution
+* dependencies between fixes
+
+## Important
+
+Do not change code during the audit.
+
+Audit first.
+Patch later only after the full report is complete.
+
+Do not stop after partial findings.
+Do not summarize early.
+Do not inspect only obvious areas.
+
+I want the whole system reviewed end-to-end.
+
+Final goal:
+I want to know exactly what remains before launch, with no hidden corners left.
+
+Best,
+[Your Name]
