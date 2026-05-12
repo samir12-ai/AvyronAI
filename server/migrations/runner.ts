@@ -30,6 +30,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Pool, PoolClient } from "pg";
 
 /**
@@ -346,13 +347,19 @@ export async function verifySchemaFloor(opts: { databaseUrl?: string } = {}): Pr
  * `npm run db:migrate` "completed".
  */
 function isCliEntryPoint(): boolean {
+  // CJS path (tsx-shimmed `require` is available; check first because pure
+  // ESM evaluation of this branch is harmless — `require` is undefined and
+  // we short-circuit).
   if (typeof require !== "undefined" && require.main === module) return true;
+  // Pure-ESM path: top-level `fileURLToPath` import from `node:url` resolves
+  // the current file's URL → absolute path; compare to `process.argv[1]` to
+  // detect "this file IS the entry point". Wrapped in try/catch for older
+  // runtimes that don't honor `import.meta.url`.
   try {
     if (typeof import.meta?.url === "string" && process.argv[1]) {
-      const fileURLToPath = (globalThis as unknown as { require?: NodeRequire }).require?.("node:url")?.fileURLToPath;
-      if (fileURLToPath) return fileURLToPath(import.meta.url) === process.argv[1];
+      return fileURLToPath(import.meta.url) === process.argv[1];
     }
-  } catch { /* swallow — best-effort dual-mode probe */ }
+  } catch { /* swallow */ }
   return false;
 }
 
