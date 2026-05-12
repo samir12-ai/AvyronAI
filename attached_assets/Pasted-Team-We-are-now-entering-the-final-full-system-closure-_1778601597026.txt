@@ -1,0 +1,208 @@
+Team,
+
+We are now entering the final full-system closure phase.
+
+This is no longer an audit cycle.
+This is now a complete remediation and sealing mandate.
+
+The objective is simple:
+
+Seal all 101 findings.
+No exceptions.
+No temporary bypasses.
+No “acceptable for now.”
+No unresolved P0/P1 debt carried into scraping expansion.
+
+==================================================
+MANDATE
+=======
+
+I want every finding from:
+
+* system-wide-forensic-audit-v2.md
+* system-wide-forensic-closure-v2.md
+* system-risk-matrix-v2.json
+
+fully closed, verified, regression-tested, architect-reviewed, and sealed.
+
+This includes:
+
+* all 20 P0 launch blockers
+* all 75 P1 findings
+* all P2/P3 operational debt
+
+Everything.
+
+==================================================
+EXECUTION RULES
+===============
+
+1. No skipping
+   Do not defer because something is “unlikely.”
+   Do not downgrade severity to avoid fixing.
+   Do not hide residuals.
+
+2. No fake reassurance
+   Never mark PASS if:
+
+* canonical truth still differs from UI
+* degraded paths still present fake-green
+* fallback still inflates confidence
+* stale lineage still silently flows
+* cross-tenant possibility still exists
+
+3. No patch-only mentality
+   Every fix must include:
+
+* regression test
+* runtime verification
+* backend restart proof
+* architect review
+* seal evidence
+
+4. No broad rewrites unless necessary
+   Prefer:
+
+* surgical
+* isolated
+* doctrine-aligned
+* regression-safe
+  changes.
+
+5. No architectural drift
+   Preserve:
+
+* repair-before-block doctrine
+* truthfulness-first doctrine
+* canonical semantics
+* tenant isolation
+* runtime lineage
+* confidence integrity
+
+==================================================
+REQUIRED EXECUTION ORDER
+========================
+
+Wave A first:
+Close every P0 completely before touching scraping expansion.
+
+Priority order:
+A1 → cross-tenant exposure
+A2 → fake-green frontend truth
+A3 → doctrine/runtime truth gaps
+A4 → security + migration blockers
+
+Only after:
+
+* all 20 P0s sealed
+* regression suite green
+* architect PASS
+* backend healthy
+* frontend verified
+
+may Wave B begin.
+
+==================================================
+WAVE B
+======
+
+Seal every P1 finding:
+
+* doctrine completion
+* snapshot integrity
+* intelligence honesty
+* scaling maturity
+* observability
+* security hardening
+* engine contracts
+* frontend truthfulness
+* worker reliability
+* prompt injection defenses
+* operational maturity
+
+I want the system to become:
+
+* truthful under pressure
+* safe under scale
+* operationally stable
+* intelligence-honest
+* production-grade
+
+==================================================
+WAVE C
+======
+
+Finish:
+
+* polish debt
+* operational cleanup
+* CI integrity
+* test hygiene
+* build metadata
+* long-tail stability
+
+No unresolved backlog remains after Wave C.
+
+==================================================
+DELIVERABLES
+============
+
+Create:
+
+.local/plans/final-system-seal.md
+
+Include:
+
+* every finding
+* closure status
+* proof
+* regression reference
+* architect result
+* residuals (if any)
+* exact commit/patch references
+
+Also create:
+
+* final regression matrix
+* final risk matrix
+* final production readiness verdict
+
+==================================================
+IMPORTANT
+=========
+
+Do not stop after each cluster.
+Do not wait for incremental approvals.
+Continue executing until:
+
+* all 101 findings are closed
+  OR
+* a true architectural blocker is discovered.
+
+Only then return with:
+
+* the final consolidated closure report
+* remaining blockers (if any)
+* final launch readiness verdict
+
+==================================================
+END STATE
+=========
+
+The target state is:
+
+* no fake-green states
+* no cross-tenant leakage
+* no silent fallback corruption
+* no stale lineage trust
+* no runtime truth drift
+* no misleading confidence inflation
+* no scraping dishonesty
+* no operational blind spots
+
+After this phase completes, we move into the large-scale scraping expansion workshop.
+
+Proceed.
+
+Best,
+[Your Name]
