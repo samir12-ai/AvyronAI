@@ -3,7 +3,10 @@ import { ciCompetitorPosts, ciCompetitorComments, ciCompetitors } from "@shared/
 import { eq, and, sql } from "drizzle-orm";
 import { getProxyConfig } from "./proxy-pool-manager";
 
-const TIKTOK_SCRAPE_TIMEOUT_MS = 45000;
+// Seal #5 / F6.7 — outbound HTTP timeout aligned at 15s across all scrapers
+// (validator-#4 closure). 45s previously caused TikTok scrapes to hang past
+// the queue-processor tick interval; 15s + breaker is the hard contract.
+const TIKTOK_SCRAPE_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 2;
 const MAX_COMMENTS_PER_POST = 20;
 

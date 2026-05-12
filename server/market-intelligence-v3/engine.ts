@@ -191,6 +191,28 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
     snapshotPayload.analysisVersion = ENGINE_VERSION;
   }
 
+  // Seal #5 / F7.3 (validator-#4 closure) — surface scrape degradation onto
+  // the snapshot itself, not just worker logs. Caller may set
+  // `snapshotPayload._provenance = { degraded, reason }` (e.g. when all
+  // competitors had 0 posts after scrape). We embed it inside `telemetry`
+  // JSON so no schema migration is required and downstream consumers
+  // (system-control, freshness gates) can detect degraded inputs.
+  if (snapshotPayload._provenance) {
+    const prov = snapshotPayload._provenance;
+    let tel: any = {};
+    if (typeof snapshotPayload.telemetry === "string") {
+      try { tel = JSON.parse(snapshotPayload.telemetry); } catch { tel = {}; }
+    } else if (snapshotPayload.telemetry && typeof snapshotPayload.telemetry === "object") {
+      tel = snapshotPayload.telemetry;
+    }
+    tel._provenance = { degraded: !!prov.degraded, reason: prov.reason || null };
+    snapshotPayload.telemetry = JSON.stringify(tel);
+    delete snapshotPayload._provenance;
+    if (prov.degraded) {
+      console.log(`[MIv3] SNAPSHOT_PROVENANCE_DEGRADED | caller=${caller} | reason=${prov.reason || "unspecified"}`);
+    }
+  }
+
   if (snapshotPayload.status === "COMPLETE") {
     const completionCheck = validateSnapshotCompleteness(snapshotPayload);
     if (!completionCheck.valid) {
@@ -789,8 +811,24 @@ export class MarketIntelligenceV3 {
       }
       return true;
     });
+    // Seal #5 / F7.3 (validator-#4 closure) — track scrape-degradation at the
+    // snapshot level. If ≥50% of registered competitors had 0 posts after the
+    // scrape pass, the snapshot is built on degraded inputs and downstream
+    // consumers must know. Captured here, surfaced via persistValidatedSnapshot
+    // → telemetry._provenance.degraded.
+    const degradedRatio = allCompetitors.length > 0
+      ? (allCompetitors.length - competitors.length) / allCompetitors.length
+      : 0;
+    const provenanceDegraded = allCompetitors.length > 0 && degradedRatio >= 0.5;
+    const provenanceReason = competitors.length === 0 && allCompetitors.length > 0
+      ? "ALL_COMPETITORS_EMPTY"
+      : provenanceDegraded
+        ? `PARTIAL_SCRAPE_FAILURE_${Math.round(degradedRatio * 100)}PCT`
+        : null;
     if (competitors.length === 0 && allCompetitors.length > 0) {
       console.log(`[MIv3] SCRAPING_RESILIENCE: all ${allCompetitors.length} competitors have 0 posts — cannot proceed`);
+    } else if (provenanceDegraded) {
+      console.log(`[MIv3] SCRAPING_RESILIENCE: degraded inputs | competitors=${allCompetitors.length} | empty=${allCompetitors.length - competitors.length} | reason=${provenanceReason}`);
     }
     const competitorHash = computeCompetitorHash(competitors);
 
@@ -1213,6 +1251,10 @@ export class MarketIntelligenceV3 {
       snapshotSource: "FRESH_DATA" as const,
       fetchExecuted: true,
       telemetry: JSON.stringify({ ...telemetry, snapshotSource: "FRESH_DATA", fetchExecuted: true }),
+      // Seal #5 / F7.3 (validator-#4 closure) — pass scrape-degradation hint
+      // to persistValidatedSnapshot, which folds it into telemetry._provenance
+      // and emits SNAPSHOT_PROVENANCE_DEGRADED log.
+      _provenance: provenanceDegraded ? { degraded: true, reason: provenanceReason } : undefined,
       narrativeSynthesis,
       marketDiagnosis,
       threatSignals: JSON.stringify(threatSignals),

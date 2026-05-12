@@ -3,7 +3,10 @@ import { ciCompetitorReviews, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { getProxyConfig } from "./proxy-pool-manager";
 
-const SCRAPE_TIMEOUT_MS = 40000;
+// Seal #5 / F6.7 — outbound HTTP timeout aligned at 15s across all scrapers
+// (validator-#4 closure). 40s previously allowed slow proxies to hold worker
+// slots and starved the per-account budget; 15s + breaker is the hard contract.
+const SCRAPE_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 2;
 
 export interface ReviewScrapedResult {

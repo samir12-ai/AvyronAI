@@ -408,9 +408,9 @@ describe("Seal #5 / F8.1 — PUT /api/ci/competitors/:id validates URL fields", 
     expect(src).toMatch(/_validateUserUrlPut\(raw\)/);
     expect(src).toMatch(/Invalid URL on \$\{f\}:/);
   });
-  it("POST route post-insert raw SQL UPDATE uses sanitized req.body, not closure originals (architect-#10 fix)", () => {
-    expect(src).toMatch(/safeTiktok = \(req\.body as any\)\.tiktokUrl \|\| null/);
-    expect(src).toMatch(/safeMaps = \(req\.body as any\)\.googleMapsUrl \|\| null/);
+  it("POST route post-insert raw SQL UPDATE uses typed sanitized URL bag (validator-#4 — replaces prior `as any` pattern)", () => {
+    expect(src).toMatch(/const safeTiktok = safeUrls\.tiktokUrl/);
+    expect(src).toMatch(/const safeMaps = safeUrls\.googleMapsUrl/);
     expect(src).toMatch(/UPDATE ci_competitors SET tiktok_url = \$\{safeTiktok\}, google_maps_url = \$\{safeMaps\}/);
   });
   it("PUT route post-update raw SQL sync uses sanitized `updates` values (validator-#2 fix)", () => {
@@ -456,7 +456,7 @@ describe("Seal #5 / F7.5 detectInjectionTokens runtime contract", () => {
   });
 });
 
-describe("Seal #5 / F6.7 — outbound HTTP timeout = 15s (validator-#3)", () => {
+describe("Seal #5 / F6.7 — outbound HTTP timeout = 15s (validator-#3 + #4)", () => {
   it("apifyFetch uses a 15000ms AbortController timeout", () => {
     const src = readFileSync(`${REPO}/server/competitive-intelligence/tiktok-apify-scraper.ts`, "utf-8");
     expect(src).toMatch(/setTimeout\(\(\) => controller\.abort\(\), 15000\)/);
@@ -464,6 +464,51 @@ describe("Seal #5 / F6.7 — outbound HTTP timeout = 15s (validator-#3)", () => 
   it("website-scraper SCRAPE_TIMEOUT_MS is 15000", () => {
     const src = readFileSync(`${REPO}/server/market-intelligence-v3/website-scraper.ts`, "utf-8");
     expect(src).toMatch(/const SCRAPE_TIMEOUT_MS = 15000/);
+  });
+  it("reviews-scraper SCRAPE_TIMEOUT_MS is 15000 (validator-#4)", () => {
+    const src = readFileSync(`${REPO}/server/competitive-intelligence/reviews-scraper.ts`, "utf-8");
+    expect(src).toMatch(/const SCRAPE_TIMEOUT_MS = 15000/);
+    // negative: must NOT silently re-introduce 40s
+    expect(src).not.toMatch(/const SCRAPE_TIMEOUT_MS = 40000/);
+  });
+  it("tiktok-scraper TIKTOK_SCRAPE_TIMEOUT_MS is 15000 (validator-#4)", () => {
+    const src = readFileSync(`${REPO}/server/competitive-intelligence/tiktok-scraper.ts`, "utf-8");
+    expect(src).toMatch(/const TIKTOK_SCRAPE_TIMEOUT_MS = 15000/);
+    expect(src).not.toMatch(/const TIKTOK_SCRAPE_TIMEOUT_MS = 45000/);
+  });
+});
+
+describe("Seal #5 / F8.1 — no `(req.body as any)` casts on sanitized URL flow (validator-#4)", () => {
+  it("competitor-routes uses typed SanitizedUrls bag, not `as any` mutation", () => {
+    const src = readFileSync(`${REPO}/server/competitive-intelligence/competitor-routes.ts`, "utf-8");
+    // The sanitized handler uses a typed local
+    expect(src).toMatch(/type SanitizedUrls\s*=/);
+    expect(src).toMatch(/let safeUrls: SanitizedUrls/);
+    // And does NOT carry the prior anti-pattern
+    expect(src).not.toMatch(/\(req\.body as any\)\.profileLink\s*=/);
+    expect(src).not.toMatch(/\(req\.body as any\)\.tiktokUrl\s*=/);
+    expect(src).not.toMatch(/\(req\.body as any\)\.googleMapsUrl\s*=/);
+  });
+});
+
+describe("Seal #5 / F7.3 — _provenance.degraded propagation onto MIv3 snapshot (validator-#4)", () => {
+  it("engine.ts computes provenanceDegraded ratio from empty-competitor scrapes", () => {
+    const src = readFileSync(`${REPO}/server/market-intelligence-v3/engine.ts`, "utf-8");
+    expect(src).toMatch(/const provenanceDegraded = allCompetitors\.length > 0 && degradedRatio >= 0\.5/);
+    expect(src).toMatch(/ALL_COMPETITORS_EMPTY/);
+    expect(src).toMatch(/PARTIAL_SCRAPE_FAILURE_/);
+  });
+  it("snapshotPayload carries _provenance hint to persistValidatedSnapshot", () => {
+    const src = readFileSync(`${REPO}/server/market-intelligence-v3/engine.ts`, "utf-8");
+    expect(src).toMatch(/_provenance: provenanceDegraded \? \{ degraded: true, reason: provenanceReason \} : undefined/);
+  });
+  it("persistValidatedSnapshot folds _provenance into telemetry JSON and emits SNAPSHOT_PROVENANCE_DEGRADED log", () => {
+    const src = readFileSync(`${REPO}/server/market-intelligence-v3/engine.ts`, "utf-8");
+    expect(src).toMatch(/if \(snapshotPayload\._provenance\)/);
+    expect(src).toMatch(/tel\._provenance = \{ degraded: !!prov\.degraded, reason: prov\.reason \|\| null \}/);
+    expect(src).toMatch(/SNAPSHOT_PROVENANCE_DEGRADED/);
+    // telemetry is the chosen carrier (no schema migration required)
+    expect(src).toMatch(/snapshotPayload\.telemetry = JSON\.stringify\(tel\)/);
   });
 });
 

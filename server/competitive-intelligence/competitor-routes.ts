@@ -130,19 +130,27 @@ export function registerCiCompetitorRoutes(app: Express) {
       // Seal #5 / F8.1 — sanitize ALL user-supplied URLs before persistence.
       // Bad URLs become persisted attack surface (logged, fed to scrapers, fed
       // to LLM context). Reject up-front. Empty/null are allowed (optional fields).
+      // Seal #5 / F8.1 (validator-#4 closure): typed sanitized URL bag
+      // replaces the prior `(req.body as any)` mutation pattern. Casts to
+      // `any` in security-sensitive paths are forbidden by review policy —
+      // they erase type protection on the very fields that need it most.
+      type SanitizedUrls = {
+        profileLink: string;
+        websiteUrl: string | null;
+        blogUrl: string | null;
+        tiktokUrl: string | null;
+        googleMapsUrl: string | null;
+      };
       const { validateUserUrl } = await import("./scrape-safety");
+      let safeUrls: SanitizedUrls;
       try {
-        const safeProfileLink = validateUserUrl(profileLink);
-        const safeWebsiteUrl = websiteUrl ? validateUserUrl(websiteUrl) : null;
-        const safeBlogUrl = blogUrl ? validateUserUrl(blogUrl) : null;
-        const safeTiktokUrl = tiktokUrl ? validateUserUrl(tiktokUrl) : null;
-        const safeGoogleMapsUrl = googleMapsUrl ? validateUserUrl(googleMapsUrl) : null;
-        // overwrite the locals so the insert below uses the validated values
-        (req.body as any).profileLink = safeProfileLink;
-        (req.body as any).websiteUrl = safeWebsiteUrl;
-        (req.body as any).blogUrl = safeBlogUrl;
-        (req.body as any).tiktokUrl = safeTiktokUrl;
-        (req.body as any).googleMapsUrl = safeGoogleMapsUrl;
+        safeUrls = {
+          profileLink: validateUserUrl(profileLink),
+          websiteUrl: websiteUrl ? validateUserUrl(websiteUrl) : null,
+          blogUrl: blogUrl ? validateUserUrl(blogUrl) : null,
+          tiktokUrl: tiktokUrl ? validateUserUrl(tiktokUrl) : null,
+          googleMapsUrl: googleMapsUrl ? validateUserUrl(googleMapsUrl) : null,
+        };
       } catch (urlErr: any) {
         return res.status(400).json({ error: `Invalid URL: ${urlErr.message}` });
       }
@@ -155,7 +163,7 @@ export function registerCiCompetitorRoutes(app: Express) {
         campaignId,
         name,
         platform: platform || "instagram",
-        profileLink: (req.body as any).profileLink,
+        profileLink: safeUrls.profileLink,
         businessType,
         primaryObjective,
         postingFrequency: postingFrequency !== undefined && postingFrequency !== null && postingFrequency !== '' ? (isNaN(parseInt(postingFrequency)) ? null : parseInt(postingFrequency)) : null,
@@ -168,10 +176,10 @@ export function registerCiCompetitorRoutes(app: Express) {
         socialProofPresence: socialProofPresence || null,
         screenshotUrls: screenshotUrls || null,
         notes: notes || null,
-        websiteUrl: (req.body as any).websiteUrl || null,
-        blogUrl: (req.body as any).blogUrl || null,
-        tiktokUrl: (req.body as any).tiktokUrl || null,
-        googleMapsUrl: (req.body as any).googleMapsUrl || null,
+        websiteUrl: safeUrls.websiteUrl,
+        blogUrl: safeUrls.blogUrl,
+        tiktokUrl: safeUrls.tiktokUrl,
+        googleMapsUrl: safeUrls.googleMapsUrl,
         tier: tierValue,
         isDemo: false,
         enrichmentStatus: "PENDING",
@@ -183,11 +191,11 @@ export function registerCiCompetitorRoutes(app: Express) {
 
       // Seal #5 / F8.1 (architect-#10 fix): the post-insert raw SQL update
       // previously used the UNSANITIZED `tiktokUrl`/`googleMapsUrl` from the
-      // closure, re-introducing attack surface. Use the sanitized req.body
-      // values that validateUserUrl already verified. Insert above also writes
-      // these fields, so this update is now defensive-only.
-      const safeTiktok = (req.body as any).tiktokUrl || null;
-      const safeMaps = (req.body as any).googleMapsUrl || null;
+      // closure, re-introducing attack surface. Use the sanitized values that
+      // validateUserUrl already verified. Insert above also writes these
+      // fields, so this update is now defensive-only.
+      const safeTiktok = safeUrls.tiktokUrl;
+      const safeMaps = safeUrls.googleMapsUrl;
       if (safeTiktok || safeMaps) {
         await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${safeTiktok}, google_maps_url = ${safeMaps} WHERE id = ${competitor.id}`);
       }
