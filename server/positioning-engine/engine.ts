@@ -2542,23 +2542,40 @@ CORRECTION REQUIRED:
 
       const hasSystemMapping = (territory as any)._systemMapped === true;
       if (hasSystemMapping) {
+        // Seal #8 / F3.8 — system-default provenance: deterministic mapping
+        // is a usable starting point but cannot claim MI-traced confidence.
+        // Tag provenance and cap at 0.30 (vs. MI-traced 0.85+).
+        (territory as any).provenance = "system_default";
+        territory.confidenceScore = Math.min(territory.confidenceScore, 0.30);
+        if (!territory.stabilityNotes) territory.stabilityNotes = [];
+        territory.stabilityNotes.push(`[PROVENANCE_SYSTEM_DEFAULT] Deterministic system mapping — confidence capped at 0.30 vs. MI-traced 0.85+`);
         totalTracedClaims += claims.length;
         return true;
       }
 
       const hasAnyMappedSignals = territory.mappedSignalIds && territory.mappedSignalIds.length > 0;
       if (hasAnyMappedSignals) {
+        (territory as any).provenance = "mi_traced";
         totalTracedClaims += claims.length;
         return true;
       }
 
       const orphanResult = checkForOrphanClaims(claims, strategicSignalGate);
 
+      // Seal #8 / F3.2 — All-orphan territories are NO LONGER dropped.
+      // They are retained with confidenceScore capped at ≤0.10 and marked
+      // degraded so plan synthesis can see them, account for them, and
+      // downgrade dependent decisions instead of silently losing the
+      // territory entirely.
       if (orphanResult.orphanedClaims.length === claims.length) {
-        console.log(`[PositioningEngine-V3] ORPHAN_DROP | territory="${territory.name}" | all ${claims.length} claims orphaned — DROPPED (no signal grounding)`);
-        droppedTerritories++;
+        if (!territory.stabilityNotes) territory.stabilityNotes = [];
+        territory.stabilityNotes.push(`[ORPHAN_ALL_CLAIMS] All ${claims.length} claims have no traceable MI/strategic signal grounding — territory marked degraded, confidence capped ≤0.10`);
+        territory.confidenceScore = Math.min(territory.confidenceScore, 0.10);
+        (territory as any).provenance = "orphaned";
+        (territory as any).degraded = true;
         totalOrphanedClaims += orphanResult.orphanedClaims.length;
-        return false;
+        console.log(`[PositioningEngine-V3] ORPHAN_DEGRADED | territory="${territory.name}" | all ${claims.length} claims orphaned — RETAINED with confidence≤0.10 + degraded flag`);
+        return true;
       }
 
       totalOrphanedClaims += orphanResult.orphanedClaims.length;
@@ -2569,10 +2586,20 @@ CORRECTION REQUIRED:
         for (const orphan of orphanResult.orphanedClaims) {
           territory.stabilityNotes.push(`[HYPOTHESIS] Claim not directly traceable to MIv3 signal: "${orphan.slice(0, 80)}"`);
         }
+        // Seal #8 / F3.2 — orphan penalty is now per-claim 0.05 with NO
+        // per-territory ceiling. Each orphaned claim costs 0.05 in full,
+        // so a partially-orphaned territory's confidence reflects the real
+        // grounding deficit rather than being clamped at -0.10.
         const orphanPenaltyPerClaim = 0.05;
-        const maxOrphanPenalty = 0.10;
-        const totalPenalty = Math.min(orphanResult.orphanedClaims.length * orphanPenaltyPerClaim, maxOrphanPenalty);
-        territory.confidenceScore = Math.max(0.15, territory.confidenceScore - totalPenalty);
+        const totalPenalty = orphanResult.orphanedClaims.length * orphanPenaltyPerClaim;
+        // Seal #8 / F3.1 — floor 0.20 applies ONLY when at least one claim
+        // is grounded (i.e. partial-orphan territory). The previous 0.15
+        // floor for all-orphan territories has been removed (those are now
+        // capped ≤0.10 above).
+        territory.confidenceScore = Math.max(0.20, territory.confidenceScore - totalPenalty);
+        (territory as any).provenance = "partial_traced";
+      } else {
+        (territory as any).provenance = territory.provenance ?? "fully_traced";
       }
       return true;
     });
@@ -2762,9 +2789,10 @@ CORRECTION REQUIRED:
 
   const executionTimeMs = Date.now() - startTime;
 
-  const rawConfidence = primaryTerritory
-    ? Math.round(primaryTerritory.confidenceScore * 100) / 100
-    : 0;
+  // Seal #8 / F3.9 — keep raw confidence (no pre-rounding) so the
+  // normalize/threshold gates downstream see actual values. Display
+  // rounding happens at API/serialization boundary only.
+  const rawConfidence = primaryTerritory ? primaryTerritory.confidenceScore : 0;
   const overallConfidence = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== overallConfidence;
 

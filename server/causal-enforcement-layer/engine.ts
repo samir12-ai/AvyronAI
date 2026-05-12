@@ -60,6 +60,30 @@ export function getCachedCELReport(campaignId: string, accountId: string): CELRe
   return entry.report;
 }
 
+/**
+ * Seal #8 / F3.6 — per-rule pass thresholds.
+ * Default raised from 0.4 → 0.6 (a "passed" engine must clear the majority of
+ * its causal-compliance budget, not just survive minor violations).
+ * "Critical" rules — those whose root-cause is named CAUSAL_CHAIN or
+ * ROOT_CAUSE_GROUNDING in the engine taxonomy — require 0.75. The map keys
+ * are matched against ComplianceResult.appliedRules entries.
+ */
+export const DEFAULT_CONSTRAINT_THRESHOLD = 0.6;
+export const CONSTRAINT_THRESHOLDS: Record<string, number> = {
+  TRUST_OPACITY_RULE: 0.75,
+  VALUE_PERCEPTION_RULE: 0.75,
+  MECHANISM_COMPREHENSION_RULE: 0.75,
+  FEAR_RISK_RULE: 0.75,
+};
+export function resolveConstraintThreshold(appliedRules: string[]): number {
+  let max = DEFAULT_CONSTRAINT_THRESHOLD;
+  for (const id of appliedRules) {
+    const t = CONSTRAINT_THRESHOLDS[id];
+    if (typeof t === "number" && t > max) max = t;
+  }
+  return max;
+}
+
 const CAUSAL_CONSTRAINT_RULES: CausalConstraintRule[] = [
   {
     id: "TRUST_OPACITY_RULE",
@@ -210,7 +234,13 @@ export function enforcePositioningCompliance(
   };
 
   if (!ael || !ael.root_causes || ael.root_causes.length === 0) {
-    result.enforcementLog.push("NO_AEL: No analytical enrichment available — skipping enforcement");
+    // Seal #8 / F3.5 — INCOMPLETE, NOT a silent PASS. Without AEL we cannot
+    // evaluate causal compliance at all; the gate must treat this as a hard
+    // fail so downstream callers don't get a green light from a non-evaluation.
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.enforcementLog.push("NO_AEL: No analytical enrichment available — verdict=INCOMPLETE (cannot evaluate)");
     return result;
   }
 
@@ -219,7 +249,13 @@ export function enforcePositioningCompliance(
   result.enforcementLog.push(`THEMES: ${themes.join(", ")} | primary=${primaryTheme}`);
 
   if (themes.length === 0) {
-    result.enforcementLog.push("NO_MATCHING_RULES: AEL root causes did not match any constraint rules");
+    // Seal #8 / F3.5 — Without matching constraint rules we have no signal
+    // either way. Mark INCOMPLETE so plan synthesis knows compliance was
+    // not actually verified.
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.enforcementLog.push("NO_MATCHING_RULES: AEL root causes did not match any constraint rules — verdict=INCOMPLETE");
     return result;
   }
 
@@ -289,12 +325,20 @@ export function enforcePositioningCompliance(
   if (blockingViolations.length > 0) {
     result.passed = false;
     result.score = 0;
+    result.verdict = "FAIL";
   } else if (majorViolations.length > 0) {
+    // Seal #8 / F3.6 — pass threshold raised from 0.4 to per-rule resolved
+    // value (default 0.6, critical themes 0.75). Raw score compared, no
+    // pre-rounding (F3.9).
     result.score = Math.max(0, 1 - (majorViolations.length * 0.3));
-    result.passed = result.score >= 0.4;
+    const threshold = resolveConstraintThreshold(result.appliedRules);
+    result.passed = result.score >= threshold;
+    result.verdict = result.passed ? "PASS" : "FAIL";
+  } else {
+    result.verdict = "PASS";
   }
 
-  result.enforcementLog.push(`RESULT: passed=${result.passed} | score=${result.score.toFixed(2)} | violations=${result.violations.length} (blocking=${blockingViolations.length}, major=${majorViolations.length})`);
+  result.enforcementLog.push(`RESULT: passed=${result.passed} | verdict=${result.verdict} | score=${result.score.toFixed(2)} | threshold=${resolveConstraintThreshold(result.appliedRules).toFixed(2)} | violations=${result.violations.length} (blocking=${blockingViolations.length}, major=${majorViolations.length})`);
 
   return result;
 }
@@ -315,7 +359,11 @@ export function enforceGenericEngineCompliance(
   };
 
   if (!ael || !ael.root_causes || ael.root_causes.length === 0) {
-    result.enforcementLog.push("NO_AEL: Skipping enforcement");
+    // Seal #8 / F3.5 — INCOMPLETE, NOT silent PASS.
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.enforcementLog.push(`NO_AEL: ${engineId} cannot be evaluated — verdict=INCOMPLETE`);
     return result;
   }
 
@@ -324,7 +372,11 @@ export function enforceGenericEngineCompliance(
   result.appliedRules = themes;
 
   if (!primaryTheme || themes.length === 0) {
-    result.enforcementLog.push("NO_MATCHING_RULES: No causal themes detected");
+    // Seal #8 / F3.5 — Without matching rules we have no basis to PASS.
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.enforcementLog.push(`NO_MATCHING_RULES: ${engineId} — verdict=INCOMPLETE`);
     return result;
   }
 
@@ -362,8 +414,12 @@ export function enforceGenericEngineCompliance(
     result.score = Math.max(0, result.score - 0.1 * genericHits.length);
   }
 
-  result.passed = result.score >= 0.4;
-  result.enforcementLog.push(`RESULT: passed=${result.passed} | score=${result.score.toFixed(2)} | violations=${result.violations.length}`);
+  // Seal #8 / F3.6 — pass threshold raised from 0.4 to per-rule resolved
+  // value (default 0.6, critical themes 0.75). Raw score compared (F3.9).
+  const threshold = resolveConstraintThreshold(result.appliedRules);
+  result.passed = result.score >= threshold;
+  result.verdict = result.passed ? "PASS" : "FAIL";
+  result.enforcementLog.push(`RESULT: passed=${result.passed} | verdict=${result.verdict} | score=${result.score.toFixed(2)} | threshold=${threshold.toFixed(2)} | violations=${result.violations.length}`);
 
   return result;
 }
@@ -522,9 +578,18 @@ export interface DepthGateResult {
 }
 
 export function isDepthBlocking(depthResult: DepthComplianceResult): boolean {
-  const hasFactualClaims = depthResult.factualClaimCount > 0;
+  // Seal #8 / F3.7 — Depth gate now fires on ANY marketing-claim presence,
+  // not only factual claims. Inferred + emotional claims also drive buying
+  // decisions and so demand causal depth grounding. Previously only factual
+  // claims triggered the gate, letting opinion-laden / emotional copy bypass
+  // depth enforcement entirely.
+  const cb = depthResult.claimBreakdown || { factual: 0, inferred: 0, emotional: 0 };
+  const hasAnyMarketingClaim =
+    (cb.factual ?? 0) > 0 ||
+    (cb.inferred ?? 0) > 0 ||
+    (cb.emotional ?? 0) > 0;
   if (depthResult.causalDepthScore < DEPTH_GATE_THRESHOLD) {
-    if (!hasFactualClaims) return false;
+    if (!hasAnyMarketingClaim) return false;
     return true;
   }
   return false;
@@ -749,7 +814,10 @@ export function enforceEngineDepthCompliance(
     result.depthDiagnostics.hasBehavioralImpact ? 0.15 : 0,
     Math.max(0, 0.10 - (genericTermCount * 0.02) - (shallowPatternCount * 0.03)),
   ];
-  result.causalDepthScore = Math.round(depthComponents.reduce((a, b) => a + b, 0) * 100) / 100;
+  // Seal #8 / F3.9 — Keep raw value (no pre-rounding) so the depth-gate
+  // threshold compare in isDepthBlocking sees the actual score. Display
+  // rounding happens at serialization time only.
+  result.causalDepthScore = depthComponents.reduce((a, b) => a + b, 0);
 
   if (hasFactualClaims && !result.depthDiagnostics.hasRootCauseGrounding) {
     result.violations.push({
