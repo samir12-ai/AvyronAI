@@ -203,3 +203,15 @@ id = "1kwOBmI4BkbXJEunOe_GI"
 uri = "file://.local/plans/cross-campaign-account-leakage-audit.md"
 type = "text"
 title = "Cross-Campaign / Cross-Account Leakage Audit"
+
+[[outputs]]
+id = "lnk31svKjIrFX48D4nuXf"
+uri = "file://.local/plans/full-codebase-master-audit.md"
+type = "text"
+title = "Full Codebase Master Audit"
+
+[[outputs]]
+id = "XJeqZu_zMGJ1NtnaKdlRL"
+uri = "file://.local/plans/full-codebase-closure-plan.md"
+type = "text"
+title = "Full Codebase Closure Plan"
