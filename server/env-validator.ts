@@ -27,9 +27,20 @@
  * built-in OpenAI integration injects AI_INTEGRATIONS_OPENAI_API_KEY — we
  * accept either so the integration's preset works without rename.
  */
-const REQUIRED: Array<{ key: string; description: string; accepts?: string[] }> = [
+/**
+ * `productionOnly` — a narrow carve-out for secrets that the dev container
+ * does not need to function:
+ *   - JWT_SECRET: server/auth.ts ships a deterministic DEV fallback (logged
+ *     loudly at boot). In production we MUST refuse to boot without an
+ *     operator-set secret.
+ *   - STRIPE_WEBHOOK_SECRET: webhook handler refuses signed events when the
+ *     secret is unset, so the only route that depends on it is closed-by-
+ *     default. Required in production. Dev is allowed to boot without it
+ *     (per user direction — Stripe is not yet activated for this account).
+ */
+const REQUIRED: Array<{ key: string; description: string; accepts?: string[]; productionOnly?: boolean }> = [
   { key: "DATABASE_URL", description: "PostgreSQL connection URL" },
-  { key: "JWT_SECRET", description: "JWT signing secret (≥32 chars in prod)" },
+  { key: "JWT_SECRET", description: "JWT signing secret (≥32 chars in prod)", productionOnly: true },
   {
     key: "OPENAI_API_KEY",
     description: "OpenAI API key — content/strategy engines hard-depend on it",
@@ -43,7 +54,7 @@ const REQUIRED: Array<{ key: string; description: string; accepts?: string[] }> 
     description:
       "Canonical public base URL (https://app.example.com) — substituted into landing/pricing HTML; replaces trust in Host/X-Forwarded-Host (F9.1)",
   },
-  { key: "STRIPE_WEBHOOK_SECRET", description: "Stripe webhook signing secret" },
+  { key: "STRIPE_WEBHOOK_SECRET", description: "Stripe webhook signing secret", productionOnly: true },
 ];
 
 // Optional but RECOMMENDED — surfaced as warnings, never fatal.
@@ -143,6 +154,10 @@ export function validateEnv(opts: { exitOnFailure?: boolean } = {}): EnvValidati
   for (const r of REQUIRED) {
     const v = resolveValue(r, process.env);
     if (!v) {
+      if (r.productionOnly && !isProd) {
+        warnings.push(`${r.key} — ${r.description} (dev: not enforced; production boot WILL fail without it)`);
+        continue;
+      }
       const altText = r.accepts ? ` (or ${r.accepts.join(" / ")})` : "";
       missing.push(`${r.key}${altText} — ${r.description}`);
     }
@@ -192,7 +207,10 @@ export function checkEnv(env: NodeJS.ProcessEnv = process.env): EnvValidationRes
   const isProd = env.NODE_ENV === "production";
   for (const r of REQUIRED) {
     const v = resolveValue(r, env);
-    if (!v) missing.push(r.key);
+    if (!v) {
+      if (r.productionOnly && !isProd) continue;
+      missing.push(r.key);
+    }
   }
   if (env.PUBLIC_BASE_URL) {
     // Localhost is always allowed in tests; we only re-enforce the

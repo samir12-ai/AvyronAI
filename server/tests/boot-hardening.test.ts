@@ -36,9 +36,7 @@ describe("Seal #7 — env-validator", () => {
     const r = checkEnv({
       NODE_ENV: "development",
       DATABASE_URL: "postgres://x",
-      JWT_SECRET: "0123456789abcdef0123456789abcdef",
       OPENAI_API_KEY: "sk-test",
-      STRIPE_WEBHOOK_SECRET: "whsec_x",
       BRIGHT_DATA_PROXY_USERNAME: "u",
       BRIGHT_DATA_PROXY_PASSWORD: "p",
       BRIGHT_DATA_PROXY_COUNTRY: "us",
@@ -84,9 +82,7 @@ describe("Seal #7 — env-validator", () => {
     const r = checkEnv({
       NODE_ENV: "development",
       DATABASE_URL: "postgres://x",
-      JWT_SECRET: "0123456789abcdef0123456789abcdef",
       AI_INTEGRATIONS_OPENAI_API_KEY: "sk-test", // alias only
-      STRIPE_WEBHOOK_SECRET: "whsec_x",
       BRIGHT_DATA_PROXY_USERNAME: "u",
       BRIGHT_DATA_PROXY_PASSWORD: "p",
       BRIGHT_DATA_PROXY_COUNTRY: "us",
@@ -99,9 +95,7 @@ describe("Seal #7 — env-validator", () => {
     const r = checkEnv({
       NODE_ENV: "development",
       DATABASE_URL: "postgres://x",
-      JWT_SECRET: "0123456789abcdef0123456789abcdef",
       OPENAI_API_KEY: "sk-test",
-      STRIPE_WEBHOOK_SECRET: "whsec_x",
       BRIGHT_DATA_PROXY_USERNAME: "u",
       BRIGHT_DATA_PROXY_PASSWORD: "p",
       BRIGHT_DATA_PROXY_COUNTRY: "us",
@@ -109,6 +103,23 @@ describe("Seal #7 — env-validator", () => {
     });
     expect(r.ok).toBe(true);
     expect(r.missing).toHaveLength(0);
+  });
+
+  it("PRODUCTION boot requires JWT_SECRET + STRIPE_WEBHOOK_SECRET", () => {
+    // Mirror image: in production, the productionOnly carve-out is OFF and
+    // both secrets are required.
+    const r = checkEnv({
+      NODE_ENV: "production",
+      DATABASE_URL: "postgres://x",
+      OPENAI_API_KEY: "sk-test",
+      BRIGHT_DATA_PROXY_USERNAME: "u",
+      BRIGHT_DATA_PROXY_PASSWORD: "p",
+      BRIGHT_DATA_PROXY_COUNTRY: "us",
+      PUBLIC_BASE_URL: "https://avyron.replit.app",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.missing).toContain("JWT_SECRET");
+    expect(r.missing).toContain("STRIPE_WEBHOOK_SECRET");
   });
 
   it("rejects short JWT_SECRET in production", () => {

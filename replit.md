@@ -130,12 +130,13 @@ The env validator (`server/env-validator.ts`) refuses to boot if any of the foll
 | Secret | Required | Purpose |
 |--------|----------|---------|
 | `DATABASE_URL` | always | Postgres connection string. |
-| `JWT_SECRET` | always | Auth token signing key. |
-| `OPENAI_API_KEY` | always | OpenAI client. |
+| `JWT_SECRET` | production (dev: warn) | Auth token signing key. Dev container falls back to a deterministic JWT_SECRET (logged at boot); production boot is REFUSED without an operator-set value. |
+| `OPENAI_API_KEY` | always | OpenAI client. `AI_INTEGRATIONS_OPENAI_API_KEY` (set by the Replit OpenAI integration) is accepted as an alias. |
 | `BRIGHT_DATA_PROXY_USERNAME` | always | Residential proxy auth (Instagram/TikTok/Web/Reviews scrapers). |
 | `BRIGHT_DATA_PROXY_COUNTRY` | always | Proxy geo-targeting code. |
-| `STRIPE_WEBHOOK_SECRET` | production only | Stripe signature verification on `/api/stripe/webhook`. |
-| `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL injected into landing/pricing HTML in place of host-header trust (F9.1). In `NODE_ENV !== production` it auto-derives from `REPLIT_DEV_DOMAIN`. |
+| `STRIPE_WEBHOOK_SECRET` | production (dev: warn) | Stripe signature verification on `/api/stripe/webhook`. Dev boot allowed without it (Stripe gated behind webhook signature check; routes fail-closed when secret unset). Production boot REFUSED without it. |
+| `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL injected into landing/pricing HTML in place of host-header trust (F9.1). In `NODE_ENV !== production` it auto-derives from `REPLIT_DEV_DOMAIN`. **Validated**: must be a syntactically-valid absolute URL; `https://` enforced in production; hostname must end with `.replit.app` / `.replit.dev` / `.replit.co` OR appear (suffix or exact) in `ALLOWED_PUBLIC_HOSTS` (comma-separated). |
+| `ALLOWED_PUBLIC_HOSTS` | optional | Comma-separated list of additional hostnames whose suffix is accepted by the PUBLIC_BASE_URL validator (e.g. `app.avyron.io,staging.avyron.io`). |
 | `METRICS_ADMIN_TOKEN` | recommended | When set, gates `GET /metrics` via `X-Admin-Token`. Absent → endpoint is closed (401 to all). |
 | `SENTRY_DSN` | recommended | Server error reporting. Absent → Sentry shim is a no-op (logs `error reporting disabled`). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | Reserved for upstream OpenTelemetry adoption (in-house registry serves `/metrics` directly today). |
