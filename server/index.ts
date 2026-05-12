@@ -377,7 +377,7 @@ function setupErrorHandler(app: express.Application) {
 
     if (status >= 500) {
       logger.error(
-        { component: "errorHandler", status, name: error.name, err: String(err), stack: (err as any)?.stack },
+        { component: "errorHandler", status, name: error.name, err: String(err), stack: err instanceof Error ? err.stack : undefined },
         `${req.method} ${req.path} → ${status}`,
       );
     } else {

@@ -18,6 +18,7 @@
  *    today. We can swap to real pino later — the API surface
  *    (info/warn/error/debug/child) is intentionally pino-shaped.
  */
+import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { traceContext } from "./trace-context";
 
 const TOKEN_KEY_RE = /^(token|refreshToken|refresh_token|accessToken|access_token|secret|apiKey|api_key|authorization|cookie|password|passwordHash|password_hash|jwt|sessionToken|session_token|refreshTokenHash|refresh_token_hash)$/i;
@@ -159,8 +160,8 @@ declare global {
  * Express middleware: mints a traceId per request, stores it in
  * AsyncLocalStorage, and attaches a request-scoped child logger to req.
  */
-export function loggerMiddleware() {
-  return (req: any, _res: any, next: any) => {
+export function loggerMiddleware(): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction): void => {
     const traceId = `tr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
     req.traceId = traceId;
     req.logger = logger.child({ traceId, route: req.path });
