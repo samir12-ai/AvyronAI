@@ -7,6 +7,7 @@ import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 function generateTrackingId(): string {
   return `trk_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
 }
@@ -39,6 +40,11 @@ export function registerLeadCaptureRoutes(app: Express) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
       const { name, email, phone, customFields, sourceType, sourcePostId, sourceCampaign, sourceCtaVariantId, sourceTrackingId, sourceLandingPageId, sourceLeadMagnetId, campaignId } = req.body;
+      // Doctrine W5: campaignId is an optional FK tag; if supplied, validate ownership.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(accountId, campaignId); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+      }
       const inserted = await db.insert(leads).values({
         accountId, name, email, phone,
         customFields: customFields ? JSON.stringify(customFields) : null,
@@ -166,6 +172,13 @@ export function registerLeadCaptureRoutes(app: Express) {
       }
 
       const { name, email, phone, customFields, trackingId, campaignId } = req.body;
+      // Doctrine W5: campaignId is an optional FK tag; if supplied, validate.
+      // Note: form's accountId is derived from the form row, so the assert
+      // verifies that the supplied campaignId belongs to the form's account.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(accountId, campaignId); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+      }
       const inserted = await db.insert(leads).values({
         accountId, name, email, phone,
         customFields: customFields ? JSON.stringify(customFields) : null,
@@ -213,6 +226,11 @@ export function registerLeadCaptureRoutes(app: Express) {
       const { destinationUrl, linkType, postId, campaignId, ctaVariantId, whatsappNumber, whatsappMessage } = req.body;
       if (!destinationUrl) {
         return res.status(400).json({ error: "destinationUrl is required" });
+      }
+      // Doctrine W5: campaignId is an optional FK tag; if supplied, validate.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(accountId, campaignId); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       }
       const trackingId = generateTrackingId();
 

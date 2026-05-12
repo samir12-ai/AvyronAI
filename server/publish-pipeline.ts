@@ -9,6 +9,7 @@ import { FeatureFlagService } from "./feature-flags";
 import { runStudioAnalysis } from "./studio-analysis-engine";
 
 import { resolveAccountId } from "./auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
 const router = Router();
 
 router.post("/api/studio/case", async (req, res) => {
@@ -22,6 +23,8 @@ router.post("/api/studio/case", async (req, res) => {
         message: "campaignId is required. Every content item must be campaign-scoped.",
       });
     }
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
     const validation = validateCaseMetadata({ goal, audience, cta });
     if (!validation.valid) {
@@ -160,6 +163,8 @@ router.post("/api/studio/items", async (req, res) => {
         message: "campaignId is required. Every content item must be campaign-scoped.",
       });
     }
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
     const normalizedType = normalizeMediaType(rawContentType || "POST");
 
@@ -319,6 +324,8 @@ router.post("/api/studio/items/save-and-analyze", async (req, res) => {
         message: "campaignId is required. Every content item must be campaign-scoped.",
       });
     }
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
     const normalizedType = normalizeMediaType(rawContentType || "POST");
 

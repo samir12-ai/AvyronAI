@@ -52,10 +52,20 @@ export async function evaluateWindowState(
   const reasons: string[] = [];
 
   // 1) Active approved plan = latest APPROVED for this campaign.
+  // W5 (architect re-review #6): explicit accountId scope on top of campaignId.
+  // campaignId is a UUID and practically tenant-scoped, but the strict doctrine
+  // ("scoped query is not enough — explicit ownership truth at every boundary")
+  // requires the account filter so the FK chain into planApprovals + the
+  // anchorAt logic cannot be poisoned by any future campaignId-collision /
+  // routing-mistake. Removes the only T-H FK-only exemption.
   const planRows = await db
     .select()
     .from(strategicPlans)
-    .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.status, "APPROVED")))
+    .where(and(
+      eq(strategicPlans.accountId, accountId),
+      eq(strategicPlans.campaignId, campaignId),
+      eq(strategicPlans.status, "APPROVED"),
+    ))
     .orderBy(desc(strategicPlans.updatedAt))
     .limit(1);
 

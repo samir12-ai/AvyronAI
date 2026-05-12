@@ -3,6 +3,7 @@ import type OpenAI from "openai";
 import { chatStorage } from "./storage";
 import { loadSystemContext, buildSystemPrompt } from "../../orchestrator/agent-context";
 import { resolveAccountId, AuthRequest } from "../../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../../auth-helpers";
 import { computeAdaptiveRhythm } from "../../adaptive-rhythm/engine";
 import { getLatestGoalDecomposition, getLatestSimulation } from "../../goal-math";
 import { getOpenAI, PRIMARY_CHAT_MODEL } from "../../ai-client";
@@ -703,6 +704,12 @@ export function registerChatRoutes(app: Express): void {
       const accountId = resolveAccountId(req as AuthRequest) as string;
       const conversationId = parseInt(req.params.id);
       const { content, campaignId } = req.body;
+      // Doctrine W5: campaignId is optional but loaded into systemContext if
+      // present. Validate ownership before context hydration.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(accountId, String(campaignId)); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+      }
 
       const conv = await chatStorage.getConversation(conversationId, accountId);
       if (!conv) {

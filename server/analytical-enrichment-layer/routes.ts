@@ -7,6 +7,7 @@ import { eq, and, desc, inArray } from "drizzle-orm";
 import { AnalyticalPackage } from "./types";
 
 import { authMiddleware, resolveAccountId, type AuthRequest } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 const LOG_PREFIX = "[AEL-Routes]";
 
 // P1-4 (runtime-truth-isolation): bounded LRU cache. Previously unbounded
@@ -55,6 +56,10 @@ export function registerAELRoutes(app: Express) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+      // Doctrine W5 (architect-#9 MEDIUM): canonical helper at boundary;
+      // inline accountId WHERE below remains as defence-in-depth.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       console.log(`${LOG_PREFIX} BUILD_REQUEST | campaign=${campaignId}`);
 
@@ -107,6 +112,8 @@ export function registerAELRoutes(app: Express) {
     try {
       const { campaignId } = req.params;
       const accountId = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       const cacheKey = `${accountId}:${campaignId}`;
       const cached = getCachedAEL(campaignId, accountId);
 

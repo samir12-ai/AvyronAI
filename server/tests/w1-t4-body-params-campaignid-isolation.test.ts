@@ -40,7 +40,7 @@ const OWNERSHIP_GUARDED_FILES: Array<{ file: string; mustContain: string[] }> = 
   { file: "server/market-intelligence-v3/routes.ts",       mustContain: ["assertCampaignBelongsTo"] },
   { file: "server/competitive-intelligence/competitor-routes.ts", mustContain: ["assertCampaignBelongsTo"] },
   // F3 manifest (W0-T1):
-  { file: "server/orchestrator/routes.ts",                 mustContain: ["selected_campaign_id", "account_id"] }, // raw-SQL ownership check at /api/orchestrator/run
+  { file: "server/orchestrator/routes.ts",                 mustContain: ["assertCampaignBelongsTo"] }, // W5: migrated from raw-SQL to centralized helper
   { file: "server/goal-math.ts",                           mustContain: ["assertCampaignBelongsTo"] },
   { file: "server/exploration-budget/routes.ts",           mustContain: ["assertCampaignBelongsTo"] },
   { file: "server/system-integrity/routes.ts",             mustContain: ["assertCampaignBelongsTo"] },

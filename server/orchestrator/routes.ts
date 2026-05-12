@@ -24,6 +24,7 @@ import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
 
 import { resolveAccountId } from "../auth";
 import { resolveRunId } from "./run-resolver";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
     try {
@@ -47,22 +48,17 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       const accountId = resolveAccountId(req);
 
-      // P3 isolation seal: explicitly verify the requested campaignId belongs
-      // to the authenticated account before doing anything with it. The
-      // canonical ownership table is `campaign_selections` (this is the same
-      // table `requireCampaign` middleware queries — see
-      // server/campaign-routes.ts:1029). Without this check, the body's
-      // `campaignId` could reference another tenant's campaign because
-      // `requireCampaign` only validates the *currently selected* campaign
-      // for the account, not an arbitrary body-supplied one.
-      const ownedCampaign = await db.execute(
-        sql`SELECT selected_campaign_id FROM campaign_selections
-            WHERE selected_campaign_id = ${String(campaignId)}
-              AND account_id = ${accountId}
-            LIMIT 1`
-      );
-      if (!ownedCampaign.rows?.length) {
-        return res.status(404).json({ error: "Campaign not found" });
+      // W5 (P0-4 cleanup): use centralized assertCampaignBelongsTo helper
+      // instead of inline raw SQL. Same semantics (WHERE accountId AND
+      // selectedCampaignId LIMIT 1 against campaign_selections) — produces
+      // 404 CAMPAIGN_NOT_FOUND on mismatch (anti-enumeration, never confirms
+      // existence to a non-owner). Replaces the prior inline check that
+      // returned a generic 404 "Campaign not found" payload.
+      try {
+        await assertCampaignBelongsTo(accountId, String(campaignId));
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
       }
 
       if (!pausedJobId) {
@@ -145,6 +141,15 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/orchestrator/latest/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
+      // W5 (architect re-review #7): explicit ownership assert at the boundary.
+      // getLatestOrchestratorRun is account-scoped, but doctrine requires
+      // explicit ownership truth before any cross-module call.
+      try {
+        await assertCampaignBelongsTo(accountId, req.params.campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
       const job = await getLatestOrchestratorRun(accountId, req.params.campaignId);
       if (!job) {
         return res.json({ hasRun: false });
@@ -174,6 +179,16 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/plans/active/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
+      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // The downstream resolveRunId + DB queries below scope by accountId in
+      // their WHERE clauses, but strict doctrine requires explicit ownership
+      // truth before any cross-module call.
+      try {
+        await assertCampaignBelongsTo(accountId, req.params.campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
 
       let resolved;
       try {
@@ -624,6 +639,16 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const requestedRunId = (req.query.runId as string) || null;
+      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // Downstream loadSystemContext does scope reads by accountId, but the
+      // strict doctrine requires explicit ownership truth before any cross-
+      // module call.
+      try {
+        await assertCampaignBelongsTo(accountId, req.params.campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
       const context = await loadSystemContext(accountId, req.params.campaignId, requestedRunId);
       res.json(context);
     } catch (error: any) {
@@ -638,6 +663,13 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
+      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
 
       const fulfillment = await computeFulfillment(campaignId, accountId);
 
@@ -796,6 +828,13 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
+      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
       const job = await getLatestOrchestratorRun(accountId, campaignId);
       if (!job) {
         return res.json({ hasSummaries: false, engines: [] });
@@ -897,6 +936,18 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       if (!campaignId) return res.status(400).json({ error: "campaignId required" });
+
+      // W5 (architect re-review #7 F3): query.campaignId requires explicit
+      // ownership truth at the boundary. Downstream calls fan out to other
+      // local routes; without this assert, an attacker could enumerate
+      // foreign campaigns via this aggregator.
+      const accountId = resolveAccountId(req);
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
 
       const base = `http://localhost:${process.env.PORT || 5000}`;
       const q = `?campaignId=${encodeURIComponent(campaignId)}`;
@@ -1259,6 +1310,13 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/narrative/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
+      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      try {
+        await assertCampaignBelongsTo(accountId, req.params.campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
       const narrative = await buildCausalNarrative(req.params.campaignId, accountId, (req.query.runId as string) || null);
       res.json(narrative);
     } catch (error: any) {

@@ -107,6 +107,15 @@ export function registerMIv3Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
+      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // requireCampaign validates the *currently selected* campaign, but
+      // params.campaignId is supplied directly in the URL and could differ.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
       const requestedRunId = (req.query.runId as string) || null;
 
       const { resolveRunId } = await import("../orchestrator/run-resolver");
@@ -211,6 +220,17 @@ export function registerMIv3Routes(app: Express) {
 
       if (!campaignId) {
         return res.status(422).json({ error: "campaignId is required" });
+      }
+
+      // W5 (architect re-review #6): explicit body-level campaignId ownership
+      // assertion. requireCampaign validates the *currently selected* campaign
+      // for the account, but the body can still reference an arbitrary
+      // campaignId. Mirrors /fetch-job and /analyze.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
       }
 
       console.log(`[MIv3-Route] POST /api/ci/mi-v3/refresh | manual refresh | campaignId=${campaignId}`);
@@ -321,19 +341,16 @@ export function registerMIv3Routes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
-      // P3 isolation seal: explicit body-level campaign ownership check.
+      // W5 (P0-4 cleanup): use centralized assertCampaignBelongsTo helper.
       // requireCampaign validates the *currently selected* campaign for the
       // account; the request body could still reference an arbitrary
-      // campaignId. The canonical ownership table is `campaign_selections`
-      // (same one `requireCampaign` middleware uses).
-      const ownedCampaign = await db.execute(
-        sql`SELECT selected_campaign_id FROM campaign_selections
-            WHERE selected_campaign_id = ${String(campaignId)}
-              AND account_id = ${accountId}
-            LIMIT 1`
-      );
-      if (!ownedCampaign.rows?.length) {
-        return res.status(404).json({ error: "Campaign not found" });
+      // campaignId. Helper returns 404 CAMPAIGN_NOT_FOUND on mismatch
+      // (anti-enumeration), replacing the prior inline raw-SQL check.
+      try {
+        await assertCampaignBelongsTo(accountId, String(campaignId));
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
       }
 
       const jobId = await startFetchJob(accountId, campaignId);

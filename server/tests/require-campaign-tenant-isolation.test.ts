@@ -16,7 +16,8 @@
  *   1. Ownership filter present on the requested-campaign branch.
  *   2. Silent-substitution path is gone (no fallback when caller supplied
  *      a foreign campaignId).
- *   3. Foreign campaignId → 403 CAMPAIGN_NOT_OWNED + structured log.
+ *   3. Foreign campaignId → 404 CAMPAIGN_NOT_FOUND + structured log
+ *      (W5 normalization to anti-enumeration policy).
  *   4. Convenience fallback ONLY runs when no campaignId was requested.
  *   5. Body/params campaignId consumers (out of scope for this middleware)
  *      are enumerated so W1-T4 can prove each one.
@@ -107,14 +108,19 @@ describe("W0-T1 — requireCampaign tenant-isolation gate", () => {
     expect(body).toMatch(/eq\(\s*campaignSelections\.selectedCampaignId\s*,\s*requestedCampaignId\s*\)/);
   });
 
-  it("F2: silent-fallback gap is closed — foreign campaignId returns 403, not most-recent", () => {
-    // Sentinel proof: the explicit CAMPAIGN_NOT_OWNED branch must exist.
-    expect(body).toContain("CAMPAIGN_NOT_OWNED");
-    // It must return 403 (not 404, not silently fall through).
-    expect(body).toMatch(/return\s+res\.status\(403\)\.json\(\{\s*code:\s*"CAMPAIGN_NOT_OWNED"/);
-    // Structured log must accompany the rejection so cross-tenant probing is
-    // observable in production logs.
+  it("F2: silent-fallback gap is closed — foreign campaignId returns 404, not most-recent (W5 anti-enumeration)", () => {
+    // W5 normalization: response code is now CAMPAIGN_NOT_FOUND (404) so a
+    // non-owner can never distinguish "this id exists but isn't yours" from
+    // "this id does not exist at all" — matches assertCampaignBelongsTo.
+    expect(body).toContain('code: "CAMPAIGN_NOT_FOUND"');
+    expect(body).toMatch(/return\s+res\.status\(404\)\.json\(\{\s*code:\s*"CAMPAIGN_NOT_FOUND"/);
+    // Structured log must still accompany the rejection so cross-tenant
+    // probing remains observable in production logs (internal observability
+    // is decoupled from the public response).
     expect(body).toContain("CAMPAIGN_OWNERSHIP_REJECTED");
+    // The legacy 403 CAMPAIGN_NOT_OWNED response code MUST NOT reappear.
+    expect(body).not.toContain('code: "CAMPAIGN_NOT_OWNED"');
+    expect(body).not.toMatch(/res\.status\(403\)\.json\(\{\s*code:\s*"CAMPAIGN_NOT_OWNED"/);
   });
 
   it("F2 (anti-regression): the fallback DB query for 'most-recent for this account' must NOT execute when a campaignId was requested", () => {
@@ -125,29 +131,30 @@ describe("W0-T1 — requireCampaign tenant-isolation gate", () => {
     // The post-patch shape is:
     //   if (requestedCampaignId) {
     //     selections = await db.select()...where(and(...accountId, ...selectedCampaignId))...
-    //     if (selections.length === 0) { return 403 CAMPAIGN_NOT_OWNED; }
+    //     if (selections.length === 0) { return 404 CAMPAIGN_NOT_FOUND; }
     //   } else {
     //     selections = await db.select()...where(eq(...accountId)).orderBy(desc(...selectedAt))...
     //   }
     //
     // We assert: the orderBy(desc(...selectedAt)) — the signature of the
     // "most-recent" fallback — must appear AFTER an `} else {` token, and
-    // must NOT appear before the CAMPAIGN_NOT_OWNED return.
+    // must NOT appear before the CAMPAIGN_NOT_FOUND return.
     const fallbackIdx = body.indexOf("orderBy(desc(campaignSelections.selectedAt))");
     const elseIdx = body.lastIndexOf("} else {", fallbackIdx);
-    const notOwnedIdx = body.indexOf("CAMPAIGN_NOT_OWNED");
+    // W5: branch denial uses CAMPAIGN_NOT_FOUND code (anti-enumeration).
+    const notFoundReturnIdx = body.search(/res\.status\(404\)\.json\(\{\s*code:\s*"CAMPAIGN_NOT_FOUND"/);
     expect(fallbackIdx).toBeGreaterThan(-1);
     expect(elseIdx).toBeGreaterThan(-1);
-    expect(notOwnedIdx).toBeGreaterThan(-1);
+    expect(notFoundReturnIdx).toBeGreaterThan(-1);
     // else branch must wrap the fallback
     expect(elseIdx).toBeLessThan(fallbackIdx);
-    // and the not-owned return must come BEFORE the fallback (i.e. is in the
+    // and the not-found return must come BEFORE the fallback (i.e. is in the
     // requestedCampaignId branch, not after it)
-    expect(notOwnedIdx).toBeLessThan(fallbackIdx);
+    expect(notFoundReturnIdx).toBeLessThan(fallbackIdx);
   });
 
-  it("F4: error codes are distinct — CAMPAIGN_NOT_OWNED (foreign id) vs CAMPAIGN_REQUIRED (no selection) vs CAMPAIGN_INVALID (paused/removed)", () => {
-    expect(body).toContain('code: "CAMPAIGN_NOT_OWNED"');
+  it("F4: error codes are distinct — CAMPAIGN_NOT_FOUND (foreign id, W5) vs CAMPAIGN_REQUIRED (no selection) vs CAMPAIGN_INVALID (paused/removed)", () => {
+    expect(body).toContain('code: "CAMPAIGN_NOT_FOUND"');
     expect(body).toContain('code: "CAMPAIGN_REQUIRED"');
     expect(body).toContain('code: "CAMPAIGN_INVALID"');
   });
@@ -194,15 +201,18 @@ describe("W0-T1 — requireCampaign behavioral proofs", () => {
     authState.throwError = null;
   });
 
-  it("foreign ?campaignId → 403 CAMPAIGN_NOT_OWNED, next() not called", async () => {
+  it("foreign ?campaignId → 404 CAMPAIGN_NOT_FOUND, next() not called (W5 anti-enumeration)", async () => {
     // Ownership-filtered query returns 0 rows for a foreign campaignId.
     dbState.rows = [];
     const { req, res, next, status, json } = makeReqRes({ campaignId: "tenant-B-camp-999" });
     await requireCampaign(req, res, next);
     expect(next).not.toHaveBeenCalled();
-    expect(status).toHaveBeenCalledWith(403);
+    expect(status).toHaveBeenCalledWith(404);
     const body = json.mock.calls[0][0];
-    expect(body.code).toBe("CAMPAIGN_NOT_OWNED");
+    expect(body.code).toBe("CAMPAIGN_NOT_FOUND");
+    // Denial body MUST NOT echo back the attacker-supplied campaignId
+    // (otherwise it becomes a reflected-id leak surface).
+    expect(JSON.stringify(body)).not.toContain("tenant-B-camp-999");
   });
 
   it("no ?campaignId, latest selection exists → next() called with campaignContext populated", async () => {

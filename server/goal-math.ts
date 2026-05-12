@@ -522,6 +522,8 @@ export function registerGoalMathRoutes(app: Express) {
       const { campaignId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
       const accountId = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const result = await decomposeGoal(campaignId, accountId);
       res.json({ success: true, ...result });
@@ -536,6 +538,8 @@ export function registerGoalMathRoutes(app: Express) {
       const { campaignId, planId } = req.body;
       if (!campaignId) return res.status(400).json({ success: false, error: "campaignId required" });
       const accountId = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const [bizData] = await db.select().from(businessDataLayer)
         .where(and(eq(businessDataLayer.campaignId, campaignId), eq(businessDataLayer.accountId, accountId)))

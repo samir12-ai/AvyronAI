@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 import { scrapeReviewsForCompetitor, scrapeReviewsForCampaign } from "./reviews-scraper";
 import { scrapeTiktokForCompetitor, ingestTiktokPosts, type TiktokPost } from "./tiktok-scraper";
 import { db } from "../db";
@@ -20,6 +21,8 @@ export function registerReviewsTiktokRoutes(app: Express) {
       const { campaignId } = req.body;
 
       if (!campaignId) return res.status(400).json({ error: "campaignId required" });
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const owned = await validateCompetitorOwnership(competitorId, accountId, campaignId);
       if (!owned) return res.status(403).json({ error: "Competitor not found or access denied" });
@@ -37,6 +40,8 @@ export function registerReviewsTiktokRoutes(app: Express) {
       const { campaignId } = req.body;
 
       if (!campaignId) return res.status(400).json({ error: "campaignId required" });
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const results = await scrapeReviewsForCampaign(accountId, campaignId);
       const totalFetched = results.reduce((s, r) => s + r.reviewsFetched, 0);
@@ -54,6 +59,8 @@ export function registerReviewsTiktokRoutes(app: Express) {
       const { campaignId } = req.body;
 
       if (!campaignId) return res.status(400).json({ error: "campaignId required" });
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const owned = await validateCompetitorOwnership(competitorId, accountId, campaignId);
       if (!owned) return res.status(403).json({ error: "Competitor not found or access denied" });
@@ -73,6 +80,8 @@ export function registerReviewsTiktokRoutes(app: Express) {
 
       if (!campaignId) return res.status(400).json({ error: "campaignId required" });
       if (!Array.isArray(posts) || posts.length === 0) return res.status(400).json({ error: "posts array required (each: { postId, caption, hookText?, likes?, timestamp? })" });
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const owned = await validateCompetitorOwnership(competitorId, accountId, campaignId);
       if (!owned) return res.status(403).json({ error: "Competitor not found or access denied" });

@@ -1,0 +1,100 @@
+Team,
+
+Good.
+
+The important part is not that the earlier seals had gaps.
+
+The important part is that:
+the forensic process successfully exposed them before scale.
+
+That means the methodology is working.
+
+Continue with the same adversarial mindset.
+
+Next direction:
+proceed with the W5 cleanup wave focused on tasks #31 and #32.
+
+## Priority goals
+
+1. Resolve the remaining LOW integrity inconsistencies
+
+* 403 vs 404 ownership semantics consistency
+* raw-SQL ownership helper consistency
+* normalize denial behavior where appropriate
+* reduce semantic drift between ownership paths
+
+2. Build stronger regression tripwires
+   I want stronger protection against future “false sealed” states.
+
+Add regression coverage specifically for:
+
+* silent substitution behavior
+* fallback ownership routing
+* scoped-query-without-explicit-assert patterns
+* denial-body leakage
+* route-behavior inconsistency
+* runtime truth mismatch between backend/frontend
+* fake-green frontend states
+* stale lineage reuse
+* inferred→direct upgrade drift
+* confidence fallback inflation
+
+3. Add seal-verification doctrine checks
+   Create automated checks for:
+
+* routes reading campaignId without ownership proof nearby
+* latest-based snapshot reads
+* confidence default patterns
+* fake PASS fallthroughs
+* unresolved challenge placeholders
+* legacy semantic aliases
+* stale cache usage
+* missing provenance propagation
+
+Goal:
+future audits should detect these structurally before manual review.
+
+4. Continue adversarial seal verification
+   For every future “SEALED” area:
+
+* behaviorally re-probe it
+* distrust previous assumptions
+* verify runtime outcomes
+* verify denial semantics
+* verify frontend truthfulness
+* verify canonical truth propagation
+
+No “sealed once = trusted forever.”
+
+5. Keep honesty over optics
+   Do not reduce severity to make reports look cleaner.
+   Do not hide LOW findings.
+   Do not silently accept semantic inconsistencies.
+
+A visible LOW is healthier than a hidden integrity gap.
+
+## Deliverables
+
+Update:
+
+* final-system-seal.md
+* regression matrix
+* seal verification doctrine section
+
+And create:
+.local/plans/seal-regression-tripwires.md
+
+Document:
+
+* every automated tripwire added
+* what class of false-green it detects
+* what future regression it prevents
+
+The goal now is not only:
+“seal the system.”
+
+The goal is:
+make future false seals increasingly difficult to survive.
+
+Best,
+[Your Name]

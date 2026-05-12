@@ -14,6 +14,7 @@ import { db } from "../db";
 import { miSnapshots, userChannelSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 import { aiChat } from "../ai-client";
 
 export type DualAnalysisClassification =
@@ -299,7 +300,20 @@ export function registerDualAnalysisRoutes(app: Express) {
   app.post("/api/agent/dual-analysis/:campaignId", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
+      // Doctrine W5 (architect-#9 HIGH defence): the route handler reads
+      // campaignId from req.params ONLY; req.body.campaignId is ignored.
+      // We explicitly reject body-shadowing to prevent client confusion
+      // between intent and the asserted value.
+      if (req.body && typeof req.body === "object" && "campaignId" in req.body
+          && req.body.campaignId !== campaignId) {
+        return res.status(400).json({
+          error: "BadRequest",
+          message: "campaignId in body does not match path; path is canonical for this route",
+        });
+      }
       const accountId = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const result = await runDualAnalysis(accountId, campaignId);
       res.json({ success: true, analysis: result });
@@ -314,6 +328,8 @@ export function registerDualAnalysisRoutes(app: Express) {
     try {
       const { campaignId } = req.params;
       const accountId = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const result = await runDualAnalysis(accountId, campaignId);
       res.json({ success: true, analysis: result });

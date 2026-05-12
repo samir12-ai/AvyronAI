@@ -172,6 +172,10 @@ export function registerCiCompetitorRoutes(app: Express) {
     try {
       const { id } = req.params;
       const accountId = resolveAccountId(req);
+      // Body-level campaignId ownership is asserted just-in-time below,
+      // immediately after the campaignId is parsed off req.body. The PUT
+      // mutates `ci_competitors` rows and the WHERE clause also filters by
+      // accountId+campaignId, but explicit assert is required by W5 doctrine.
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });
@@ -194,6 +198,17 @@ export function registerCiCompetitorRoutes(app: Express) {
       const campaignId = req.body.campaignId as string;
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
+      }
+
+      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // The UPDATE WHERE clause below also filters by accountId AND campaignId,
+      // but strict doctrine requires explicit ownership truth before any
+      // tenant-scoped DB mutation.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
       }
 
       const [updated] = await db.update(ciCompetitors)

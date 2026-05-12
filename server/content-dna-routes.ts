@@ -20,6 +20,7 @@ import { aiChat } from "./ai-client";
 import { requireCampaign } from "./campaign-routes";
 
 import { resolveAccountId } from "./auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
 const safeJson = (v: any) => {
   try {
     return typeof v === "string" ? JSON.parse(v) : v;
@@ -403,6 +404,13 @@ export function registerContentDnaRoutes(app: Express) {
     try {
       const campaignId = req.params.campaignId;
       const accountId = resolveAccountId(req);
+      // W5 (architect re-review #7): explicit ownership assert at the boundary.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
       const dna = await getLatestContentDna(campaignId, accountId);
       if (!dna) {
         return res.json({ success: true, contentDna: null, message: "No Content DNA generated yet" });

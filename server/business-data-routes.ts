@@ -5,6 +5,7 @@ import { businessDataLayer, campaignSelections } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
 import { resolveAccountId } from "./auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
 const VALID_FUNNEL_OBJECTIVES = ["AWARENESS", "LEADS", "SALES", "AUTHORITY"] as const;
 const VALID_CONVERSION_CHANNELS = ["WHATSAPP", "WEBSITE", "DM", "FORM"] as const;
 
@@ -52,6 +53,10 @@ export function registerBusinessDataRoutes(app: Express) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+      // Doctrine W5 (architect-#9 LOW): canonical helper at boundary; inline
+      // accountId WHERE below remains as defence-in-depth.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const rows = await db
         .select()
@@ -78,6 +83,10 @@ export function registerBusinessDataRoutes(app: Express) {
   app.put("/api/business-data/:campaignId", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
+      // Doctrine W5 (architect-#9 LOW): canonical helper at boundary.
+      const accountIdForAssert = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountIdForAssert, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {

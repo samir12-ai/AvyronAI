@@ -1047,16 +1047,22 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
       // ownership filter returned 0 rows and we silently fell through to
       // "select most-recent for this account" — caller got a DIFFERENT campaign
       // than requested with no error, and any cross-tenant probing was invisible
-      // in logs. Now: explicit 403 + structured log when a foreign/unknown
-      // campaignId is supplied. The "no campaignId requested → load latest"
-      // convenience path (used by dashboard widgets) is preserved below.
+      // in logs.
+      // W5 (cleanup): normalize denial response to 404 CAMPAIGN_NOT_FOUND to
+      // match `assertCampaignBelongsTo` (server/auth-helpers.ts) — anti-
+      // enumeration policy: never confirm to a non-owner that a campaign id
+      // exists. The structured WARN log is preserved (with the original
+      // OWNERSHIP_REJECTED tag) so cross-tenant probing remains observable in
+      // production logs even though the public response is intentionally
+      // generic. The "no campaignId requested → load latest" convenience path
+      // (used by dashboard widgets) is preserved below.
       if (selections.length === 0) {
         console.warn(
           `[Campaigns] CAMPAIGN_OWNERSHIP_REJECTED | accountId=${accountId} | requestedCampaignId=${requestedCampaignId} | path=${req.path}`
         );
-        return res.status(403).json({
-          code: "CAMPAIGN_NOT_OWNED",
-          message: "Requested campaign is not owned by this account.",
+        return res.status(404).json({
+          code: "CAMPAIGN_NOT_FOUND",
+          message: "Campaign not found.",
           requestId: `mw_owned_${Date.now()}`,
         });
       }

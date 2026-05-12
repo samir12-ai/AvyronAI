@@ -7,6 +7,7 @@ import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 export function registerConversionTrackingRoutes(app: Express) {
   app.get("/api/track/:trackingId", async (req, res) => {
     try {
@@ -89,6 +90,12 @@ export function registerConversionTrackingRoutes(app: Express) {
       const { eventType, trackingId, leadId, postId, ctaVariantId, campaignId, landingPageId, leadMagnetId, metadata } = req.body;
       if (!eventType) {
         return res.status(400).json({ error: "eventType is required" });
+      }
+      // Doctrine W5: campaignId is an optional FK tag here, but if supplied it
+      // must belong to the caller — otherwise foreign analytics can be polluted.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(accountId, campaignId); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       }
       const inserted = await db.insert(conversionEvents).values({
         accountId, eventType, trackingId, leadId, postId, ctaVariantId,

@@ -7,6 +7,7 @@ import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 export function registerRevenueAttributionRoutes(app: Express) {
   app.get("/api/revenue", requireCampaign, async (req, res) => {
     try {
@@ -34,6 +35,11 @@ export function registerRevenueAttributionRoutes(app: Express) {
       const { leadId, amount, source, postId, campaignId, ctaVariantId, funnelStage, notes } = req.body;
       if (!amount) {
         return res.status(400).json({ error: "amount is required" });
+      }
+      // Doctrine W5: campaignId is an optional FK tag; if supplied, validate.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(accountId, campaignId); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       }
 
       const inserted = await db.insert(revenueEntries).values({
@@ -72,6 +78,11 @@ export function registerRevenueAttributionRoutes(app: Express) {
       const { amount, platform, campaignId, period, notes } = req.body;
       if (!amount) {
         return res.status(400).json({ error: "amount is required" });
+      }
+      // Doctrine W5: campaignId is an optional FK tag; if supplied, validate.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(accountId, campaignId); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       }
       const inserted = await db.insert(adSpendEntries).values({
         accountId, amount, platform, campaignId, period, notes,
