@@ -5,15 +5,17 @@
  * from F1 engine-execution status:
  *   - `primaryChannel.decisionGate.outcome` ∈ { recommended | support_channel | exploratory }
  *
- * Rollout note: the field is registered in `optionalOutputs` during the
- * engine-emit transition window — its strict enum shape is enforced when
- * present, but absence does not retroactively flag legacy snapshots STALE.
- * Promotion to `requiredOutputs` is a follow-on phase.
+ * Rollout note (post Seal #9 / F2.10): the field is now registered in
+ * `requiredOutputs` with `emptyIsMissing: true`. The H3 transitional
+ * exception (optional placement) is RETIRED. Absence at the pipeline gate
+ * surfaces as CONTRACT_INCOMPLETE per doctrine D5; presence is enforced
+ * with the strict enum shape.
  *
  * These tests prove:
- *   1. Field is registered with the canonical path
+ *   1. Field is registered in `requiredOutputs` with the canonical path
  *   2. Strict enum is z.enum (not z.string) — wrong vocab rejected
  *   3. Each canonical outcome value validates against the shape
+ *   4. emptyIsMissing=true (post-promotion D5 contract)
  *
  * Run with:  npx tsx server/tests/channel-decision-contract.test.ts
  */
@@ -36,12 +38,14 @@ console.log("  Channel Selection — decisionGate.outcome Contract (H3)");
 console.log("══════════════════════════════════════════════════════════════════\n");
 
 const contract = getContract("channel_selection");
+// Seal #9 / F2.10: lookup is REQUIRED-only. Optional fallback removed so a
+// regression that demoted the field back to `optionalOutputs` would fail S0
+// instead of silently passing on the legacy lookup path.
 const gateField: ContractField | undefined =
-  contract?.requiredOutputs.find((f) => f.id === "decisionGateOutcome") ??
-  contract?.optionalOutputs.find((f) => f.id === "decisionGateOutcome");
+  contract?.requiredOutputs.find((f) => f.id === "decisionGateOutcome");
 
-// ── S0: registry has the field with canonical path ─────────────────────────
-assert(!!gateField, "S0: registry has channel_selection.decisionGateOutcome (transition phase = optional)");
+// ── S0: registry has the field in requiredOutputs with canonical path ─────
+assert(!!gateField, "S0: channel_selection.decisionGateOutcome is in requiredOutputs (post Seal #9 promotion)");
 assert(
   JSON.stringify(gateField?.path) === JSON.stringify(["primaryChannel", "decisionGate", "outcome"]),
   "S0: canonical path is ['primaryChannel','decisionGate','outcome']",
@@ -78,13 +82,14 @@ for (const outcome of wrongVocabs) {
   );
 }
 
-// ── S3: doctrine D5 — when promoted to required, missing field MUST be ─────
-// CONTRACT_INCOMPLETE. Until promotion, the test asserts the wiring is in
-// place: `emptyIsMissing` is set and the field uses a strict enum shape, so
-// the eventual promotion is a one-line edit.
+// ── S3: doctrine D5 — promotion landed in Seal #9 (F2.10). The field is now
+// in `requiredOutputs` with `emptyIsMissing: true`, so absence is reported
+// as CONTRACT_INCOMPLETE at the pipeline gate (`validateContractCompleteness`)
+// instead of being silently tolerated. The H3 transitional exception is
+// retired; this assertion locks in the post-promotion contract shape.
 assert(
-  gateField?.emptyIsMissing === false,
-  "S3: emptyIsMissing=false during transition — empty/missing tolerated until engine reliably emits",
+  gateField?.emptyIsMissing === true,
+  "S3: emptyIsMissing=true post-promotion — missing canonical surfaces as CONTRACT_INCOMPLETE",
 );
 
 console.log("\n══════════════════════════════════════════════════════════════════");

@@ -876,6 +876,14 @@ export async function runIterationEngine(
 
   const confidenceScore = clamp(rawConfidence);
 
+  // Seal #9 (F10.2 / D1 documented exemption): `status` here is the engine's
+  // own canonical F1 execution-status assignment based on a guard-layer pass —
+  // NOT a substitute for a missing canonical contract field from another
+  // engine (which is what D1 forbids). The value is the source of truth that
+  // downstream consumers read, not a fallback for one. Same rationale applies
+  // to `retention-engine/engine.ts` and the broader engine-internals
+  // exemption documented in `eslint.config.js`.
+  // eslint-disable-next-line semantic/no-semantic-fallback
   let status: string = guardLayer.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
   let statusMessage: string = status === STATUS.PROVISIONAL
     ? "Iteration plan generated with guard warnings — operating in conservative mode"

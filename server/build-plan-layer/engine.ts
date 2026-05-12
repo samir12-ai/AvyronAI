@@ -202,61 +202,49 @@ async function collectValidatedEngineOutputs(
     snapshots.push({ engineId: "audience", data: audienceSnap });
   }
 
-  const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId, sourceJobId);
-  if (posSnap) {
-    const status = depthGateStatus?.positioning;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "positioning", data: posSnap, depthGateStatus: status });
+  // Seal #9 (F2.2 #7) — D5 honesty: a missing depth-gate status is
+  // CONTRACT_INCOMPLETE, NOT silently treated as PASS. The previous
+  // `!status || GATED_PASS_STATES.includes(status)` admitted snapshots
+  // whose depth-gate evaluation was absent — silently substituting
+  // "no verdict" for "pass". We now require an explicit gated-pass
+  // verdict; missing/non-pass snapshots are excluded from build-plan
+  // synthesis and logged as CONTRACT_INCOMPLETE for visibility.
+  const includeIfGatedPass = (
+    engineId: string,
+    snap: any,
+    status: string | undefined,
+  ): void => {
+    if (status && GATED_PASS_STATES.includes(status)) {
+      snapshots.push({ engineId: engineId as any, data: snap, depthGateStatus: status });
+      return;
     }
-  }
+    if (!status) {
+      console.warn(`[BuildPlanLayer] CONTRACT_INCOMPLETE | engine=${engineId} | reason=missing_depth_gate_status | account=${accountId} campaign=${campaignId}`);
+      return;
+    }
+    console.log(`[BuildPlanLayer] DEPTH_GATE_NOT_PASS | engine=${engineId} | status=${status}`);
+  };
+
+  const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId, sourceJobId);
+  if (posSnap) includeIfGatedPass("positioning", posSnap, depthGateStatus?.positioning);
 
   const diffSnap = await getLatestSnapshot(differentiationSnapshots, accountId, campaignId, sourceJobId);
-  if (diffSnap) {
-    const status = depthGateStatus?.differentiation;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "differentiation", data: diffSnap, depthGateStatus: status });
-    }
-  }
+  if (diffSnap) includeIfGatedPass("differentiation", diffSnap, depthGateStatus?.differentiation);
 
   const mechSnap = await getLatestSnapshot(mechanismSnapshots, accountId, campaignId, sourceJobId);
-  if (mechSnap) {
-    const status = depthGateStatus?.mechanism;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "mechanism", data: mechSnap, depthGateStatus: status });
-    }
-  }
+  if (mechSnap) includeIfGatedPass("mechanism", mechSnap, depthGateStatus?.mechanism);
 
   const offerSnap = await getLatestSnapshot(offerSnapshots, accountId, campaignId, sourceJobId);
-  if (offerSnap) {
-    const status = depthGateStatus?.offer;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "offer", data: offerSnap, depthGateStatus: status });
-    }
-  }
+  if (offerSnap) includeIfGatedPass("offer", offerSnap, depthGateStatus?.offer);
 
   const funnelSnap = await getLatestSnapshot(funnelSnapshots, accountId, campaignId, sourceJobId);
-  if (funnelSnap) {
-    const status = depthGateStatus?.funnel;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "funnel", data: funnelSnap, depthGateStatus: status });
-    }
-  }
+  if (funnelSnap) includeIfGatedPass("funnel", funnelSnap, depthGateStatus?.funnel);
 
   const awarenessSnap = await getLatestSnapshot(awarenessSnapshots, accountId, campaignId, sourceJobId);
-  if (awarenessSnap) {
-    const status = depthGateStatus?.awareness;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "awareness", data: awarenessSnap, depthGateStatus: status });
-    }
-  }
+  if (awarenessSnap) includeIfGatedPass("awareness", awarenessSnap, depthGateStatus?.awareness);
 
   const persuasionSnap = await getLatestSnapshot(persuasionSnapshots, accountId, campaignId, sourceJobId);
-  if (persuasionSnap) {
-    const status = depthGateStatus?.persuasion;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "persuasion", data: persuasionSnap, depthGateStatus: status });
-    }
-  }
+  if (persuasionSnap) includeIfGatedPass("persuasion", persuasionSnap, depthGateStatus?.persuasion);
 
   return snapshots;
 }

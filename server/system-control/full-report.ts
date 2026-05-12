@@ -148,6 +148,28 @@ function extractDifferentiationKeyOutputs(snap: any): Record<string, any> {
   };
 }
 
+function buildStructuralCheckDetail(c: any): { check: string; passed: boolean; status: string; details: any } {
+  // Seal #9 (F2.2 #3, F2.10) — D5: require canonical `status` enum.
+  // No verdict-from-boolean derivation. If `status` is absent or not in the
+  // canonical PASS/FAIL/CONTRACT_INCOMPLETE set, surface it as
+  // CONTRACT_INCOMPLETE so consumers see the missing-canonical signal
+  // instead of a silently-fabricated PASS/FAIL.
+  // Implemented with a guarded read (no ternary on a forbidden field) so
+  // the no-semantic-fallback rule passes without an eslint-disable.
+  let rawStatus = "";
+  if (c && typeof c.status === "string") rawStatus = c.status;
+  let canonicalStatus = "CONTRACT_INCOMPLETE";
+  if (rawStatus === "PASS" || rawStatus === "FAIL" || rawStatus === "CONTRACT_INCOMPLETE") {
+    canonicalStatus = rawStatus;
+  }
+  return {
+    check: c?.check ?? null,
+    passed: canonicalStatus === "PASS",
+    status: canonicalStatus,
+    details: c?.details ?? null,
+  };
+}
+
 function extractMechanismKeyOutputs(snap: any): Record<string, any> {
   const primary = parseJson(snap.primaryMechanism, null);
   return {
@@ -157,12 +179,24 @@ function extractMechanismKeyOutputs(snap: any): Record<string, any> {
   };
 }
 
+function pickOfferCoreOutcome(primary: any): string | null {
+  // Seal #9 (F2.2 #2) — D5 honesty: read the canonical `coreOutcome` ONLY.
+  // The legacy `outcome` field name from pre-H4 offer payloads is no longer
+  // accepted as a substitute (per doctrine D5: missing canonical → return
+  // null, never silently substitute another field). Implemented with a
+  // plain if-block (no ternary) so the lint rule does not flag the
+  // canonical `coreOutcome` read as a verdict-shape ternary branch.
+  if (!primary || typeof primary !== "object") return null;
+  const v = primary.coreOutcome;
+  if (typeof v === "string" && v.length > 0) return v;
+  return null;
+}
+
 function extractOfferKeyOutputs(snap: any): Record<string, any> {
   const primary = parseJson(snap.primaryOffer, null);
   return {
     offerName: primary?.name || primary?.offerName || primary?.title || (typeof primary === "string" ? primary.slice(0, 100) : null),
-    // eslint-disable-next-line semantic/no-semantic-fallback -- `outcome` here is a legacy field NAME on the offer payload (the desired customer outcome), not a verdict-shape semantic. Doctrine D1 does not apply: this is display extraction, not a live decision read.
-    coreOutcome: primary?.coreOutcome || primary?.outcome || null,
+    coreOutcome: pickOfferCoreOutcome(primary),
     offerStrengthScore: snap.offerStrengthScore ?? null,
     hasAlternative: !!snap.alternativeOffer,
     selectedOption: snap.selectedOption || null,
@@ -447,15 +481,9 @@ function buildControlLayerSection(controlVerdict: any | null) {
       // Falling back to c.passed when status is absent preserves the count
       // for legacy verdict rows written before the status field existed.
       passed: (controlVerdict.structuralChecks || []).filter((c: any) =>
-        c?.status ? c.status === "PASS" : c?.passed === true
+        typeof c?.status === "string" && c.status === "PASS"
       ).length,
-      details: (controlVerdict.structuralChecks || []).map((c: any) => ({
-        check: c.check,
-        passed: c?.status ? c.status === "PASS" : c?.passed === true,
-        // eslint-disable-next-line semantic/no-semantic-fallback -- S (H8): structural-check status derived from `c.passed` boolean — content derivation, not verdict substitution
-        status: c?.status ?? (c?.passed ? "PASS" : "FAIL"),
-        details: c.details,
-      })),
+      details: (controlVerdict.structuralChecks || []).map((c: any) => buildStructuralCheckDetail(c)),
     },
   };
 }

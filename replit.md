@@ -111,10 +111,22 @@ Reference implementation: `INTEGRITY_CONTRACT` in `server/orchestrator/contract-
 - `integrity.integrityVerdict.legacyPaths=[["overallStatus"]]` — D4 exception. Resolves to legacy `overallStatus` so pre-H4 snapshots remain contract-COMPLETE. Same-semantic alias (verdict↔verdict, NOT status↔verdict), so D1 risk is zero. Sunset: drop legacyPaths once all persisted snapshots have been re-run with the H4 engine.
 - `channel_selection.decisionGateOutcome` placed in `optionalOutputs` — D5 exception at the pipeline gate. `validateContractCompleteness()` checks `requiredOutputs` only; pipeline-level INCOMPLETE-on-absence does NOT fire while the field is optional. Runtime D5 still enforced via `requireContractField()` on the consumer side. Strict-enum shape IS enforced when present. Sunset: promote to `requiredOutputs` once channel engine emits the field on 100% of new runs (≥7-day shadow window with zero `LEGACY_HIT` for this field id).
 
-**Known H6 ESLint rule scope/coverage gaps (queued for H8)**:
-- Rule scope is restricted to `server/{agent,system-control,orchestrator,build-plan-layer,recovery-*}/**` — strategy engine modules can still introduce semantic fallback. H8 widens scope.
-- Rule inspects RHS identifiers in `LogicalExpression` only — misses LHS-offender patterns (`result?.outcome ?? alt`), ternary expressions, alias variables, destructured reads, and synonym field names. H8 either expands the AST detector or adds a complementary ts-morph type-flow check.
-- New tests are unit/fixture-level — adversarial integration proof (poisoned snapshots flowing through full system-control decision paths) is queued for H8.
+**H6 ESLint rule gaps — CLOSED in Seal #9 (Task #27, May 2026):**
+- ✅ Rule scope widened to include `server/strategy/**`. Engine *internals* (`server/*-engine/engine.ts` and the two strategy-engine F1 status-authoring sites) remain exempted via documented in-line `eslint-disable-next-line` comments — these are the AUTHORING site of the canonical status, not a D1-substitution of a missing canonical contract field. Rationale documented in `eslint.config.js` and at each disable site.
+- ✅ Rule extended with `checkVariableDeclarator` (alias-variable detection: `const status = a || b`) and `checkObjectPattern` (destructured-default detection: `const { status = "x" } = obj`). Two new messageIds (`semanticFallbackAlias`, `semanticFallbackDestructured`) added alongside the prior H6/H8 baseline.
+- ✅ Adversarial fixture proof in `server/tests/doctrine-regression.test.ts` (16/16 PASS): 11 offenders covering H6 RHS, H8 LHS/ternary, F10.3 alias + destructured patterns; 5 clean shapes proving zero false-positives on canonical helper-extracted reads.
+
+**Seal #9 / Task #27 audit-finding closures (May 12, 2026):**
+- **F2.2** (8 sites of semantic-fallback eslint-disables): ALL removed. Reads now go through helpers (`readSectionStatus`, `pickRunStatus`, `pickOfferCoreOutcome`, `pickConfidenceIntegrityVerdict`, `includeIfGatedPass`, `buildStructuralCheckDetail`) or guarded if-blocks. No ternary or logical-fallback expression reads a forbidden field name on a live decision path.
+- **F2.10**: `decisionGateOutcome` physically MOVED from `optionalOutputs` → `requiredOutputs` with `emptyIsMissing: true`. H3 transitional exception retired.
+- **F4.1**: registry enums tightened — `FunnelStageAssignment.assignedRole`, `FunnelStageObject.type`, MI `marketState` all `z.enum`. The `marketState` enum carries the actual emitted vocabulary from `deriveMarketState()` plus the `PARTIAL_DATA` / `INSUFFICIENT_DATA` / `PENDING` sentinels — verified against every emission site. Positioning narrative free-form prose (`enemyDefinition`, `contrastAxis`, `narrativeDirection`) intentionally remains `z.string().min(1)` (free-form prose, not verdict-shape — D3 doesn't apply).
+- **F4.2**: `ChannelCandidateSchema` rewritten to match the actual TS interface (`channelName`/`channelType` (z.enum)/`fitScore`/`audienceDensityScore` REQUIRED). Bogus `channelKey`/`scalability` fields removed.
+- **F10.2**: ESLint scope widened to include `server/strategy/**`. Verified 0 errors across the widened scope.
+- **F10.3**: rule extended with alias-variable + destructured-default detectors (see above). Adversarial fixture proof: 16/16 PASS.
+
+D1 in-line exemption sites (engine-internal F1 status authoring, NOT D1-substitutes):
+- `server/strategy/iteration-engine/engine.ts` — `let status = guardLayer.passed ? COMPLETE : PROVISIONAL`
+- `server/strategy/retention-engine/engine.ts` — `const status = guardResult.passed ? COMPLETE : PROVISIONAL`
 
 Canonical field names introduced/hardened in H1–H7:
 - `validationState` ∈ {validated|provisional|weak|rejected} — F3 statistical-validation verdict

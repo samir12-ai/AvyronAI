@@ -36,19 +36,43 @@ import type { EngineContract } from "./types";
 // substituted later by importing the engine's own Zod export when one exists.
 // ────────────────────────────────────────────────────────────────────────────
 
-/** ChannelCandidate — see server/strategy/channel-selection/types.ts */
+/**
+ * ChannelCandidate — see server/strategy/channel-selection/types.ts:83.
+ * Seal #9 (F4.2): the four channel-identity fields are now REQUIRED
+ * (engine emits them on every candidate). The schema previously declared
+ * `channelKey` and `scalability` which do not exist on the actual TS
+ * interface — those have been replaced with the real field names
+ * (`channelType` and `audienceDensityScore`) so the contract describes
+ * what the engine actually emits and the H8 transitional "all-optional"
+ * exception can be retired.
+ */
 const ChannelCandidateSchema = z.object({
-  channelKey: z.string().optional(),
-  channelName: z.string().optional(),
-  fitScore: z.number().optional(),
-  scalability: z.number().optional(),
+  channelName: z.string().min(1),
+  channelType: z.enum([
+    "social_organic",
+    "social_paid",
+    "search_paid",
+    "search_organic",
+    "email",
+    "referral",
+    "direct",
+    "community",
+    "partnerships",
+    "content_platform",
+  ]),
+  fitScore: z.number().min(0).max(1),
+  audienceDensityScore: z.number().min(0).max(1),
 }).passthrough();
 
-/** FunnelStageAssignment — see server/strategy/channel-selection/types.ts:137 */
+/**
+ * FunnelStageAssignment — see server/strategy/channel-selection/types.ts:137.
+ * Seal #9 (F4.1): assignedRole tightened from z.string() → strict z.enum
+ * mirroring the FunnelRole TS union.
+ */
 const FunnelStageAssignmentSchema = z.object({
   channelName: z.string(),
   channelKey: z.string(),
-  assignedRole: z.string(),
+  assignedRole: z.enum(["awareness", "nurture", "conversion"]),
 }).passthrough();
 
 const FunnelStagesSchema = z.object({
@@ -68,9 +92,27 @@ const DecisionGateScoringSchema = z.object({
 /** FunnelCandidate (loose — full shape lives in funnel-engine/types.ts). */
 const FunnelCandidateSchema = z.object({}).passthrough();
 
+/**
+ * FunnelStageObject — funnel-engine stage shape.
+ * Seal #9 (F4.1): `type` tightened from z.string() → strict z.enum of the
+ * canonical funnel-stage taxonomy used across the funnel/awareness/persuasion
+ * engines.
+ */
 const FunnelStageObjectSchema = z.object({
   name: z.string().optional(),
-  type: z.string().optional(),
+  type: z.enum([
+    "awareness",
+    "interest",
+    "consideration",
+    "intent",
+    "evaluation",
+    "decision",
+    "purchase",
+    "retention",
+    "advocacy",
+    "nurture",
+    "conversion",
+  ]).optional(),
 }).passthrough();
 
 const TrustPathAnalysisSchema = z.object({
@@ -173,36 +215,27 @@ const CHANNEL_SELECTION_CONTRACT: EngineContract = {
       emptyIsMissing: true,
       consumers: ["system_control.weak_funnel_for_scale"],
     },
-  ],
-  optionalOutputs: [
     {
-      // H3 (2026-05-10) — TRANSITIONAL D5 EXCEPTION (sunset: H8).
-      // Canonical channel-decision GATE outcome. Held in `optionalOutputs`
-      // during the engine-emit rollout window so legacy snapshots are not
-      // retroactively flagged STALE. Important caveats per code review:
-      //   - `validateContractCompleteness()` validates `requiredOutputs` only;
-      //     optional fields are NOT checked at the pipeline gate. Pipeline-
-      //     level enforcement of doctrine D5 (missing → CONTRACT_INCOMPLETE)
-      //     does NOT apply until promoted to `requiredOutputs`.
-      //   - Runtime D5 enforcement still applies on the consumer side: each
-      //     consumer that reads this value MUST go through
-      //     `requireContractField("channel_selection","decisionGateOutcome",…)`
-      //     which returns INCOMPLETE on absence regardless of optional/required.
-      //   - Strict-enum shape (z.enum) IS enforced when the value is present:
-      //     wrong vocabularies still cause INVALID.
-      // Sunset criteria: promote to `requiredOutputs` in H8 once channel
-      // engine emits this field on 100% of new runs (verified via shadow logs
-      // for ≥7 days with zero `LEGACY_HIT` for this field id).
+      // Seal #9 (F2.10) — promoted from optionalOutputs to requiredOutputs.
+      // The H3 transitional D5 exception is now retired: the channel engine
+      // emits `primaryChannel.decisionGate.outcome` on every run, the
+      // ≥7-day shadow window logged zero LEGACY_HIT for this field id, and
+      // pipeline-level `validateContractCompleteness()` now enforces
+      // missing → CONTRACT_INCOMPLETE alongside the existing consumer-side
+      // `requireContractField` check. Strict-enum shape (z.enum) is enforced
+      // when present.
       id: "decisionGateOutcome",
       path: ["primaryChannel", "decisionGate", "outcome"],
       shape: z.enum(["recommended", "support_channel", "exploratory"]),
-      emptyIsMissing: false,
+      emptyIsMissing: true,
       consumers: [
         "build_plan_layer.channel_strategy",
         "system_control.channel_decision_gate",
         "audit_control.channel_panel",
       ],
     },
+  ],
+  optionalOutputs: [
     {
       id: "commercialOrchestration",
       path: ["commercialOrchestration"],
@@ -344,7 +377,28 @@ const MARKET_INTELLIGENCE_CONTRACT: EngineContract = {
   requiredOutputs: [
     { id: "signalData",        path: ["signalData"],        shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["audience", "positioning", "differentiation", "funnel", "offer", "persuasion", "awareness", "integrity", "statistical_validation", "system_control.signal_grounding"] },
     { id: "confidenceData",    path: ["confidenceData"],    shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["audience", "positioning", "awareness", "persuasion", "statistical_validation", "system_control.confidence_chain_integrity"] },
-    { id: "marketState",       path: ["marketState"],       shape: z.string(),        emptyIsMissing: true,  consumers: ["positioning", "awareness", "integrity"] },
+    // Seal #9 (F4.1): marketState tightened from z.string() → strict z.enum
+    // of the canonical market-state taxonomy ACTUALLY emitted by
+    // `deriveMarketState()` in server/market-intelligence-v3/trajectory-engine.ts
+    // plus the two coverage/availability sentinels emitted by
+    // fetch-orchestrator (PARTIAL_DATA) and engine.ts fallback
+    // (INSUFFICIENT_DATA), and the pre-compute sentinel (PENDING) checked
+    // by engine.ts:115. These are the only values ever written to the
+    // canonical `marketState` field in production runs.
+    { id: "marketState",       path: ["marketState"],       shape: z.enum([
+      "HIGH_COMPETITION",
+      "GROWING_COMPETITION",
+      "SATURATED_MARKET",
+      "LOW_ACTIVITY",
+      "PRICE_PRESSURE",
+      "CONTENT_SATURATION",
+      "ESTABLISHED_COMPETITION",
+      "SUPPRESSED_DEMAND_MARKET",
+      "MODERATE_ACTIVITY",
+      "INSUFFICIENT_DATA",
+      "PARTIAL_DATA",
+      "PENDING",
+    ]), emptyIsMissing: true, consumers: ["positioning", "awareness", "integrity"] },
     { id: "trajectoryData",    path: ["trajectoryData"],    shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["positioning", "statistical_validation"] },
     { id: "dominanceData",     path: ["dominanceData"],     shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer"] },
     // H5 (2026-05-10): legacyPaths dropped — engine source verified to emit
@@ -394,9 +448,15 @@ const POSITIONING_CONTRACT: EngineContract = {
   requiredOutputs: [
     { id: "territories",           path: ["territories"],           shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer", "mechanism", "awareness", "persuasion", "integrity"] },
     { id: "primaryTerritory",      path: ["territory"],             shape: z.any().nullable(),    emptyIsMissing: true,  consumers: ["differentiation", "awareness"] },
-    { id: "enemyDefinition",       path: ["enemyDefinition"],       shape: z.string(),            emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer", "mechanism", "awareness", "persuasion", "integrity"] },
-    { id: "contrastAxis",          path: ["contrastAxis"],          shape: z.string(),            emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer", "mechanism", "awareness", "persuasion", "integrity"] },
-    { id: "narrativeDirection",    path: ["narrativeDirection"],    shape: z.string(),            emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer", "mechanism", "awareness", "persuasion", "integrity"] },
+    // Seal #9 (F4.1): positioning narrative fields kept as z.string().min(1)
+    // — these are free-form positioning copy (one-sentence narratives), not
+    // a closed enum vocabulary. emptyIsMissing already enforces non-empty;
+    // promoting to z.enum would be incorrect for natural-language fields.
+    // The doctrine D3 (strict enums) applies to verdict-shaped fields
+    // (status, verdict, outcome, action, gate-outcome), which these are not.
+    { id: "enemyDefinition",       path: ["enemyDefinition"],       shape: z.string().min(1),     emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer", "mechanism", "awareness", "persuasion", "integrity"] },
+    { id: "contrastAxis",          path: ["contrastAxis"],          shape: z.string().min(1),     emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer", "mechanism", "awareness", "persuasion", "integrity"] },
+    { id: "narrativeDirection",    path: ["narrativeDirection"],    shape: z.string().min(1),     emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer", "mechanism", "awareness", "persuasion", "integrity"] },
     { id: "differentiationVector", path: ["differentiationVector"], shape: StringArraySchema,     emptyIsMissing: true,  consumers: ["differentiation", "mechanism"] },
     { id: "confidenceScore",       path: ["confidenceScore"],       shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["mechanism", "awareness", "persuasion", "integrity", "system_control.positioning_hard_gate", "system_control.confidence_chain_integrity"] },
   ],

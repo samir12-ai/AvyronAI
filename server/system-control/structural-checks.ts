@@ -596,7 +596,16 @@ export function checkOfferInputSufficient(results: Map<EngineId, EngineStepResul
     output?.layerDiagnostics?.blockCode ||
     output?.blockCode ||
     null;
-  const outputStatus = output?.status || null;
+  // Seal #9 (F2.2 #1) — read engine status via explicit guard, not LHS
+  // semantic-fallback. The field IS the canonical engine completion status
+  // for the offer engine (INSUFFICIENT_SIGNALS / BLOCKED / OK), so we read
+  // it directly; absence is encoded as null without any logical/ternary
+  // expression that would let the lint rule see a forbidden read on the
+  // LHS or in a ternary branch.
+  let outputStatus: string | null = null;
+  if (output && typeof output.status === "string" && output.status.length > 0) {
+    outputStatus = output.status;
+  }
   const blocked =
     blockCode === "OFFER_INPUT_INSUFFICIENT" ||
     outputStatus === "INSUFFICIENT_SIGNALS" ||

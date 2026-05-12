@@ -522,6 +522,12 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
     };
   }
 
+  // Seal #9 (F10.2 / D1 documented exemption): canonical F1 execution-status
+  // assignment from a guard-layer pass — same rationale as
+  // `iteration-engine/engine.ts`. This is the AUTHORING site of the canonical
+  // status, not a fallback substitute for one missing on an upstream
+  // contract.
+  // eslint-disable-next-line semantic/no-semantic-fallback
   const status = guardResult.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
   const dedupedWarnings = deduplicateWarnings(warnings);
 
