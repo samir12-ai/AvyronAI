@@ -128,14 +128,18 @@ describe("Seal #2 F9.2 — JWT audience/issuer + grace window (source tripwires)
     expect(src).toMatch(/Date\.now\(\)\s*>=\s*JWT_LEGACY_CUTOFF_MS/);
   });
   it("malformed JWT_LEGACY_CUTOFF_ISO disables grace (cutoff=0) — fail-closed", () => {
-    // The resolveLegacyCutoffMs helper must return 0 (NOT NaN, NOT now+grace)
-    // when the env value cannot be parsed. Otherwise the architect-flagged
-    // permanent backdoor returns.
+    // Malformed env (operator typo) must NEVER fall through to a default — that
+    // was the original architect-flagged permanent-backdoor path.
     expect(src).toMatch(/Number\.isFinite\(parsed\)/);
     expect(src).toMatch(/JWT_LEGACY_CUTOFF_ISO is malformed[\s\S]*?return 0/);
   });
-  it("production with no JWT_LEGACY_CUTOFF_ISO disables grace", () => {
-    expect(src).toMatch(/NODE_ENV === "production"[\s\S]*?JWT_LEGACY_CUTOFF_ISO not set in production[\s\S]*?return 0/);
+  it("unset JWT_LEGACY_CUTOFF_ISO uses a STABLE persisted stamp (no sliding)", () => {
+    // Pass-5 architect requirement: a forgotten env var must NOT immediately
+    // invalidate every legacy session. Instead: derive once, persist, and
+    // re-read on subsequent boots so cutoff is stable across restarts.
+    expect(src).toMatch(/readPersistedCutoffMs/);
+    expect(src).toMatch(/writePersistedCutoffMs/);
+    expect(src).toMatch(/JWT_LEGACY_GRACE_DAYS\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
   });
 });
 
@@ -269,24 +273,64 @@ describe("Seal #2 F9.2 behavioral — env-boundary parsing of resolveLegacyCutof
     delete process.env.JWT_LEGACY_CUTOFF_ISO;
   });
 
-  it("unset env in production-like env → cutoff = 0 (fail-closed)", async () => {
+  it("unset env in production-like env → derives boot+7d AND persists (no immediate mass logout)", async () => {
     const { vi } = await import("vitest");
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
     vi.resetModules();
     delete process.env.JWT_LEGACY_CUTOFF_ISO;
+    const tmpFile = path.join(os.tmpdir(), `jwt-legacy-cutoff-test-${Date.now()}-${Math.random()}.stamp`);
+    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    process.env.JWT_LEGACY_STATE_FILE = tmpFile;
     const prevEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";
-    // Production also requires JWT_SECRET/STRIPE_WEBHOOK_SECRET to boot — set
-    // throwaway values so the boot guard doesn't crash before we reach our assertion.
     const prevJwt = process.env.JWT_SECRET; const prevStripe = process.env.STRIPE_WEBHOOK_SECRET;
     process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret-not-used";
     process.env.STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "test-webhook-not-used";
     try {
+      const t0 = Date.now();
       const auth = await import("../auth");
-      expect(auth.__getJwtLegacyCutoffMsForTest()).toBe(0);
+      const cutoff = auth.__getJwtLegacyCutoffMsForTest();
+      // Derived cutoff must be ~ now + 7d (within a small slack), NOT 0.
+      const sevenDays = 7 * 24 * 60 * 60 * 1000;
+      expect(cutoff).toBeGreaterThanOrEqual(t0 + sevenDays - 5000);
+      expect(cutoff).toBeLessThanOrEqual(Date.now() + sevenDays + 5000);
+      // Stamp file MUST exist with the same value (so a restart re-reads it).
+      expect(fs.existsSync(tmpFile)).toBe(true);
+      const persisted = Number(fs.readFileSync(tmpFile, "utf-8").trim());
+      expect(persisted).toBe(cutoff);
     } finally {
       process.env.NODE_ENV = prevEnv;
       if (prevJwt === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = prevJwt;
       if (prevStripe === undefined) delete process.env.STRIPE_WEBHOOK_SECRET; else process.env.STRIPE_WEBHOOK_SECRET = prevStripe;
+      delete process.env.JWT_LEGACY_STATE_FILE;
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    }
+  });
+
+  it("re-import after persistence → cutoff is STABLE (no sliding across restarts)", async () => {
+    const { vi } = await import("vitest");
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const tmpFile = path.join(os.tmpdir(), `jwt-legacy-cutoff-stable-${Date.now()}-${Math.random()}.stamp`);
+    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    process.env.JWT_LEGACY_STATE_FILE = tmpFile;
+    delete process.env.JWT_LEGACY_CUTOFF_ISO;
+    try {
+      vi.resetModules();
+      const auth1 = await import("../auth");
+      const c1 = auth1.__getJwtLegacyCutoffMsForTest();
+      // Wait long enough that a sliding default would diverge.
+      await new Promise(r => setTimeout(r, 50));
+      vi.resetModules();
+      const auth2 = await import("../auth");
+      const c2 = auth2.__getJwtLegacyCutoffMsForTest();
+      expect(c2).toBe(c1);
+    } finally {
+      delete process.env.JWT_LEGACY_STATE_FILE;
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
     }
   });
 });

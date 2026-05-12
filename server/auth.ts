@@ -34,23 +34,52 @@ export const JWT_AUDIENCE = "avyron-ai";
 export const JWT_ISSUER = "avyron-auth";
 const JWT_LEGACY_GRACE_DAYS = Number(process.env.JWT_LEGACY_GRACE_DAYS) || 7;
 
-// Seal #2 (Task #20) F9.2 — architect-feedback hardening:
+// Seal #2 (Task #20) F9.2 — multi-pass architect hardening:
 //
-// PROBLEM the architect flagged:
-//   The previous implementation computed `Date.now() + grace` at module load
-//   when `JWT_LEGACY_CUTOFF_ISO` was unset. Every restart slid the cutoff
-//   forward → grace became effectively PERMANENT. Malformed env values
-//   produced NaN and the `Date.now() >= NaN` guard was always false → silent
-//   permanent bypass. Both paths defeated the "temporary" intent.
+// PROBLEM (pass 1): naive `Date.now() + grace` at module load slid forward on
+//   every restart → grace became PERMANENT. Malformed env produced NaN → silent
+//   permanent bypass.
+// PROBLEM (pass 5): pass-1's "production unset → cutoff=0" was too strict —
+//   it would IMMEDIATELY invalidate every legacy 14d session if an operator
+//   forgot the env var on first deploy, breaking the migration guarantee.
 //
-// FIX (fail-closed):
-//   - In production, `JWT_LEGACY_CUTOFF_ISO` MUST be set and parseable.
-//     Anything else → cutoff = 0 (legacy verify disabled outright).
-//   - In dev, an unset env falls back to boot+grace (sliding is acceptable
-//     for local DX). A malformed env in dev is still rejected (cutoff = 0)
-//     so dev behavior matches prod's failure mode.
-//   - Cutoff is captured ONCE at boot. We log the resolved sunset on startup
-//     so operators can verify the persisted value.
+// FINAL FIX (stable persisted default + strict env parsing):
+//   - If `JWT_LEGACY_CUTOFF_ISO` is set AND parseable → use it (operator wins).
+//   - If `JWT_LEGACY_CUTOFF_ISO` is set but malformed → cutoff = 0
+//     (fail-closed; obvious operator typo, refuse to guess).
+//   - If `JWT_LEGACY_CUTOFF_ISO` is unset → derive `now + JWT_LEGACY_GRACE_DAYS`
+//     ONCE and persist to `.local/state/jwt-legacy-cutoff` (or `JWT_LEGACY_STATE_FILE`).
+//     Subsequent boots READ the persisted timestamp → STABLE across restarts,
+//     no sliding, no permanent backdoor. Honors the 7d migration guarantee
+//     even if the operator forgets the env var on first deploy.
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+function legacyCutoffStateFile(): string {
+  if (process.env.JWT_LEGACY_STATE_FILE) return process.env.JWT_LEGACY_STATE_FILE;
+  return path.resolve(process.cwd(), ".local/state/jwt-legacy-cutoff");
+}
+
+function readPersistedCutoffMs(): number | null {
+  try {
+    const f = legacyCutoffStateFile();
+    if (!fs.existsSync(f)) return null;
+    const raw = fs.readFileSync(f, "utf-8").trim();
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+
+function writePersistedCutoffMs(ms: number): void {
+  try {
+    const f = legacyCutoffStateFile();
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, String(ms), "utf-8");
+  } catch (err) {
+    console.error("[Auth] failed to persist JWT_LEGACY_CUTOFF stamp:", err);
+  }
+}
+
 function resolveLegacyCutoffMs(): number {
   const raw = process.env.JWT_LEGACY_CUTOFF_ISO;
   if (raw && raw.trim()) {
@@ -62,13 +91,18 @@ function resolveLegacyCutoffMs(): number {
     console.error(`[Auth] FATAL: JWT_LEGACY_CUTOFF_ISO is malformed (${raw}). Disabling legacy grace (cutoff=0).`);
     return 0;
   }
-  if (process.env.NODE_ENV === "production") {
-    console.error("[Auth] FATAL: JWT_LEGACY_CUTOFF_ISO not set in production. Disabling legacy grace (cutoff=0).");
-    return 0;
+  // Env unset → use a STABLE persisted stamp so restarts don't slide and a
+  // forgotten env var doesn't break the 7d migration guarantee.
+  const persisted = readPersistedCutoffMs();
+  if (persisted) {
+    console.log(`[Auth] JWT_LEGACY_CUTOFF resolved from persisted stamp → ${new Date(persisted).toISOString()}`);
+    return persisted;
   }
-  const dev = Date.now() + JWT_LEGACY_GRACE_DAYS * 24 * 60 * 60 * 1000;
-  console.warn(`[Auth] DEV: JWT_LEGACY_CUTOFF_ISO unset — using boot+${JWT_LEGACY_GRACE_DAYS}d=${new Date(dev).toISOString()}. SET JWT_LEGACY_CUTOFF_ISO IN PRODUCTION.`);
-  return dev;
+  const fresh = Date.now() + JWT_LEGACY_GRACE_DAYS * 24 * 60 * 60 * 1000;
+  writePersistedCutoffMs(fresh);
+  const envBanner = process.env.NODE_ENV === "production" ? "PROD" : "DEV";
+  console.warn(`[Auth] ${envBanner}: JWT_LEGACY_CUTOFF_ISO unset — derived stable cutoff = boot+${JWT_LEGACY_GRACE_DAYS}d = ${new Date(fresh).toISOString()} (persisted to ${legacyCutoffStateFile()}). To override, set JWT_LEGACY_CUTOFF_ISO.`);
+  return fresh;
 }
 let JWT_LEGACY_CUTOFF_MS = resolveLegacyCutoffMs();
 export const JWT_LEGACY_METRICS = { hits: 0, lastHitAt: 0 };
