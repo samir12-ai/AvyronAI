@@ -1184,14 +1184,12 @@ async function workerTick() {
     recordWorkerTick("autonomous", "skipped");
     return;
   }
-  let result: "ok" | "error" | "skipped" = "ok";
   try {
     const accountIds = await getAccountsDueForProcessing();
     const { recordWorkerTick, setWorkerQueueDepth } = await import("./observability/otel");
     setWorkerQueueDepth("autonomous", accountIds.length);
 
     if (accountIds.length === 0) {
-      result = "skipped";
       recordWorkerTick("autonomous", "skipped");
       return;
     }
@@ -1199,8 +1197,6 @@ async function workerTick() {
     console.log(`[Worker] Processing ${accountIds.length} account(s) across ${WORKER_CONCURRENCY} parallel lane(s): ${accountIds.join(", ")}`);
 
     for (let i = 0; i < accountIds.length; i += WORKER_CONCURRENCY) {
-      // Re-check between batches — a long-running first batch may have
-      // crossed a SIGTERM boundary; the remaining batches must not start.
       if (isShuttingDown) {
         console.log(`[Worker] Shutdown detected mid-tick — skipping remaining ${accountIds.length - i} account(s).`);
         recordWorkerTick("autonomous", "skipped");
@@ -1212,12 +1208,10 @@ async function workerTick() {
     recordWorkerTick("autonomous", "ok");
     setWorkerQueueDepth("autonomous", 0);
   } catch (error) {
-    result = "error";
     console.error("[Worker] Tick error:", error);
     const { recordWorkerTick } = await import("./observability/otel");
     recordWorkerTick("autonomous", "error");
   }
-  void result;
 }
 
 async function ensureDefaultConfig() {

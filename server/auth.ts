@@ -467,6 +467,12 @@ async function registerAccountDeletionRoutes(app: Router) {
       if (!user) return res.status(404).json({ error: "User not found" });
       const ok = await bcrypt.compare(password, user.password);
       if (!ok) return res.status(403).json({ error: "Password incorrect" });
+      // Normalize legacy users with NULL account_id BEFORE issuing the
+      // tombstone. Otherwise phase-1 mask + phase-2 cascade (both keyed on
+      // account_id) would silently miss this user's row entirely.
+      if (!user.accountId) {
+        await db.update(users).set({ accountId: user.id }).where(eq(users.id, user.id));
+      }
       const accountId = user.accountId || user.id;
       const r = await requestAccountDeletion({
         accountId,

@@ -144,6 +144,17 @@ function makeLogger(bindings: Record<string, unknown>): Logger {
 
 export const logger: Logger = makeLogger({});
 
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      traceId?: string;
+      requestId?: string;
+      logger?: Logger;
+    }
+  }
+}
+
 /**
  * Express middleware: mints a traceId per request, stores it in
  * AsyncLocalStorage, and attaches a request-scoped child logger to req.

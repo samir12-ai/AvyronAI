@@ -1,18 +1,9 @@
-// ─── Seal #7 (Task #25) — Boot order is load-bearing ─────────────────────────
-// 1. validateEnv() runs FIRST (before any other import resolves DB / AI clients)
-//    so the process exits cleanly with a readable error instead of crashing
-//    half-initialized inside ai-client.ts or db.ts.
-// 2. OTel + Sentry init must precede the auto-instrumented modules they wrap.
-// 3. Artifact guard last — it can safely assume env is valid.
-import { validateEnv } from "./env-validator";
-validateEnv();
-
-import { initOTel } from "./observability/otel";
-initOTel();
-
-import { initSentry, captureException, isSentryEnabled } from "./observability/sentry";
-// Fire-and-forget: Sentry must NEVER block boot. If init fails we degrade to no-op.
-initSentry().catch((err) => console.error("[Sentry] init promise rejected:", err));
+// Bootstrap MUST be the first import — it runs validateEnv() → initOTel() →
+// initSentry() at module-top-level. ESM evaluates imports in declaration
+// order, so any module imported below will see a validated environment and
+// initialized observability. Do not reorder.
+import "./bootstrap";
+import { captureException, isSentryEnabled } from "./observability/sentry";
 
 import { runStartupArtifactGuard } from "./startup-artifact-guard";
 runStartupArtifactGuard();
@@ -38,14 +29,7 @@ import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state"
 import { authMiddleware, optionalAuth, verifyAdminToken } from "./auth";
 import * as fs from "fs";
 import * as path from "path";
-// Pass-4 fix: static ESM import — bundling with --format=esm rewrites
-// `require("node:crypto")` to `__require(...)` which throws under Node ESM,
-// causing the /metrics gate to always 401 even with the correct token.
 import { timingSafeEqual } from "node:crypto";
-// Phase 8.0 (Main migration) — adaptive pipeline overlay JSON router.
-// Mounted under /api/pipeline below. Self-protects with authMiddleware +
-// adminMiddleware internally (server/pipeline/routes.ts L32-33), so the /api
-// auth gate at L329 is harmless duplication, not a bypass.
 import pipelineRouter from "./pipeline/routes";
 
 const app = express();
@@ -118,8 +102,8 @@ function setupRequestLogging(app: express.Application) {
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;
-    const requestId = (req as any).traceId;
-    (req as any).requestId = requestId;
+    const requestId = req.traceId;
+    req.requestId = requestId;
     let capturedJsonResponse: Record<string, unknown> | undefined = undefined;
 
     const originalResJson = res.json;
@@ -378,7 +362,7 @@ function setupErrorHandler(app: express.Application) {
     if (status >= 500) {
       try {
         captureException(err, {
-          traceId: (req as any).traceId,
+          traceId: req.traceId,
           method: req.method,
           path: req.path,
         });
