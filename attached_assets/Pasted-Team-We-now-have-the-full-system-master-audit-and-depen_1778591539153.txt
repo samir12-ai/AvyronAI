@@ -1,0 +1,335 @@
+Team,
+
+We now have the full-system master audit and dependency-aware closure plan.
+
+Before we enter the large scraping expansion phase, I want the entire launch-blocking and trust-integrity surface sealed properly.
+
+No shortcuts.
+No partial fixes.
+No “we’ll clean later.”
+
+The scraping expansion must NOT begin while core trust/isolation/truth gaps remain open.
+
+This is now the official launch-closure execution roadmap.
+
+==================================================
+PHASE 0 — CRITICAL GATING VERIFICATION
+======================================
+
+## [P0-7] VERIFY requireCampaign OWNERSHIP ENFORCEMENT
+
+Priority: IMMEDIATE / BLOCKS EVERYTHING
+
+Tasks:
+
+* locate actual requireCampaign definition
+* verify:
+  campaign.accountId === req.user.accountId
+* audit every route relying on requireCampaign
+* add regression test proving cross-tenant rejection
+
+Deliverable:
+
+* proof document
+* PASS/FAIL verdict
+* if FAIL:
+  immediate systemic patch plan
+
+Nothing else proceeds until this is verified.
+
+==================================================
+WAVE 1 — TENANT ISOLATION + TOKEN SECURITY
+==========================================
+
+## [P0-1] VIDEO ROUTES TENANT ISOLATION
+
+Fix:
+
+* add accountId filters
+* ownership guards
+* secure ai-edit routes
+* sanitize filename interpolation
+
+Tests:
+
+* cross-tenant GET
+* cross-tenant PUT
+* cross-tenant DELETE
+* cross-tenant AI edit
+
+---
+
+## [P0-2] PHOTOGRAPHY TENANT ISOLATION
+
+Fix:
+
+* add accountId columns
+* migration + backfill
+* NOT NULL enforcement
+* ownership middleware
+* tenant-scoped GET queries
+
+Tests:
+
+* cross-tenant reservation access
+* cross-tenant profile edit
+* foreign profile mutation
+
+---
+
+## [P0-3] SECURE TOKEN STORAGE
+
+Replace:
+
+* AsyncStorage auth token
+
+With:
+
+* expo-secure-store
+
+Requirements:
+
+* migration path
+* upgrade compatibility
+* no token persistence breakage
+* verify AsyncStorage no longer stores JWT
+
+---
+
+## [P0-4] BODY campaignId OWNERSHIP HARDENING
+
+Apply assertCampaignBelongsTo() everywhere.
+
+Audit ALL:
+
+* req.body.campaignId
+* req.query.campaignId
+* req.params.campaignId
+
+Routes already identified:
+
+* generate-content
+* generate-ad
+* agent routes
+* audience routes
+* MI-V3 routes
+* competitor routes
+
+Run full ripgrep again after patching.
+
+Tests:
+
+* every route rejects foreign campaignId
+
+==================================================
+WAVE 2 — TRUTH INTEGRITY HARDENING
+==================================
+
+## [P0-5] REMOVE CONFIDENCE FLOOR PANDEMIC
+
+Highest truth-integrity priority.
+
+Eliminate:
+
+* 0.2 defaults
+* 0.3 defaults
+* 0.4 defaults
+* Math.max confidence floors
+* fallback confidence inflation
+
+Affected engines:
+
+* audience
+* awareness
+* offer
+* statistical-validation
+
+Required behavior:
+
+* no evidence = 0.0
+  OR
+* degraded/incomplete state
+
+Use:
+applySparseEvidenceCap()
+
+Add:
+
+* provenance tags
+* evidenceCount tracking
+
+Regression:
+
+* zero-evidence tests MUST emit 0.0
+
+---
+
+## [P0-6] REMOVE “UNRESOLVED CHALLENGE” FAKE FALLBACK
+
+Offer engine must NEVER fabricate a fake pain.
+
+Replace:
+"unresolved challenge"
+
+With:
+
+* OFFER_INPUT_INSUFFICIENT
+* hard BLOCK
+* recovery route
+
+Add:
+
+* recovery-map entry
+* recovery guidance
+* regression tests
+
+==================================================
+WAVE 3 — FRONTEND TRUTHFULNESS
+==============================
+
+## [P1-5] METRICCARD TRUTHFULNESS
+
+MetricCard must respect:
+
+* integrityVerdict
+* stale state
+* shadowed state
+* untrusted state
+
+No green growth on invalid runs.
+
+---
+
+## [P1-6] DATA PROVENANCE UI
+
+Every metric must visually distinguish:
+
+* verified
+* benchmark
+* projected
+* manual
+* inferred
+
+No blended truth presentation.
+
+---
+
+## [P1-7] REACT QUERY HARDENING
+
+Replace:
+staleTime: Infinity
+
+With:
+
+* bounded staleTime
+* mutation error surfacing
+* global failure handling
+
+---
+
+## [P1-8] MOBILE INPUT HARDENING
+
+Replace forbidden KeyboardAvoidingView usage.
+
+==================================================
+WAVE 4 — AUTH + RELIABILITY HARDENING
+=====================================
+
+[P1-2] GLOBAL ERROR HANDLER
+[P1-3] LOGIN RATE LIMIT
+[P1-4] JWT REVOCATION / LOGOUT
+[P1-17] DETERMINISTIC SYSTEM-JUDGEMENT FALLBACK
+[P1-18] AUTONOMOUS WORKER SHUTDOWN SAFETY
+[P1-19] VEO USER-SCOPED pendingImages
+[P1-20] META TOKEN FROM DB ONLY
+[P1-21] BRAND ROUTE OWNERSHIP
+[P1-22] ZOD VALIDATION HARDENING
+
+==================================================
+WAVE 5 — TESTS + DOCTRINE + ENGINE HARDENING
+============================================
+
+[P1-9] TEMPLATE CSP + AUTO-ESCAPE
+[P1-10] CONFIDENCE ENGINE HARD BLOCKS
+[P1-11] PROXY POOL REAPER
+[P1-13] SNAPSHOT CLEANUP SAFETY
+[P1-14] FIELD_IMPORTANCE_REGISTRY ACTIVATION
+[P1-15] OPERATIONAL MEMORY MINIMUM FLOOR
+[P1-16] CEL PRIMARY-THEME WARNING
+[P1-23] MISSING ENGINE TESTS
+[P1-24] WEAK ASSERTION REPLACEMENT
+[P1-26] ESLINT RULE EXPANSION
+[P1-27] REPLIT.MD DOCTRINE RECONCILIATION
+[P1-28] shared/schema.ts SPLIT
+
+==================================================
+MANDATORY RULES DURING EXECUTION
+================================
+
+* No new architecture layers
+* No parallel systems
+* No hidden fallbacks
+* No fake reassurance
+* No confidence inflation
+* No silent PASS states
+* No inferred→direct upgrades
+* No stale truth promotion
+* No latest-based reads
+* No route without ownership enforcement
+
+Every fix must include:
+
+* regression test
+* verification proof
+* architect review
+* seal entry
+
+==================================================
+FINAL DELIVERABLES
+==================
+
+1.
+
+.local/plans/full-codebase-master-audit.md
+
+2.
+
+.local/plans/full-codebase-closure-plan.md
+
+3.
+
+.local/plans/launch-readiness-final-seal.md
+
+Must include:
+
+* all P0 closed
+* all P1 closed or explicitly deferred
+* regression results
+* truth-integrity verification
+* tenant-isolation verification
+* frontend truthfulness verification
+* production readiness verdict
+
+==================================================
+NEXT PHASE AFTER THIS
+=====================
+
+Only AFTER all launch blockers are sealed:
+we enter the large scraping workshop.
+
+That phase will focus on:
+
+* scraper reliability
+* extraction quality
+* anti-noise filtering
+* signal grounding
+* evidence quality
+* source diversification
+* benchmark realism
+* social/content/performance ingestion depth
+* commercial-intelligence enrichment
+
+But scraping expansion starts ONLY after the core launch/truth/isolation layer is fully sealed.
+
+Best,
+[Your Name]
