@@ -74,8 +74,11 @@ async function apifyFetch(path: string, options: RequestInit = {}): Promise<any>
   // Authorization header instead. Strip any pre-existing ?token=... defensively.
   const cleanedPath = path.replace(/([?&])token=[^&]*(&|$)/g, (_m, lead, tail) => (lead === "?" && tail === "" ? "" : lead === "&" && tail === "" ? "" : lead === "?" ? "?" : "&"));
   const url = `${APIFY_BASE_URL}${cleanedPath}`;
+  // F6.7 — 15s outbound timeout per validator-#3. Apify run-status polls live
+  // under waitForRun() with its own deadline; this timeout protects a single
+  // HTTP call from hanging on a wedged Apify endpoint.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), 15000);
   let res: Response;
   try {
     res = await fetch(url, {

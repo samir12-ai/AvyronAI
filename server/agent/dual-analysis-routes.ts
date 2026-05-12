@@ -131,7 +131,7 @@ function buildUserContext(snaps: any[]): string {
       try {
         const safeHandle = _validateHandle(String(data.handle));
         const inj = _detectInjection(safeHandle);
-        if (inj.hit) {
+        if (inj.suspicious) {
           console.warn(`[DualAnalysis] F7.5 injection token in snapshot.handle — dropped (account=${snap.accountId ?? "?"} platform=${snap.platform})`);
           lines.push(`• Handle: [redacted: prompt-injection signal]`);
         } else {
@@ -146,7 +146,7 @@ function buildUserContext(snaps: any[]): string {
       try {
         const safeUrl = _validateUserUrl(String(data.url));
         const inj = _detectInjection(safeUrl);
-        if (inj.hit) {
+        if (inj.suspicious) {
           console.warn(`[DualAnalysis] F7.5 injection token in snapshot.url — dropped (account=${snap.accountId ?? "?"} platform=${snap.platform})`);
           lines.push(`• URL: [redacted: prompt-injection signal]`);
         } else {

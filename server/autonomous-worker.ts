@@ -1346,7 +1346,13 @@ async function runSharedPoolRefresh() {
         if (tiktokScraped >= 5) break;
         try {
           const result = await scrapeTiktokForCompetitor(comp.id, comp.account_id, comp.campaign_id);
-          console.log(`[CI Worker] TikTok scrape: competitor=${comp.name} | campaign=${comp.campaign_id} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | source=${result.source}`);
+          // F7.3 (validator-#3 propagation): surface degraded outcomes so
+          // downstream coverage gates / freshness telemetry can distinguish
+          // empty-OK runs from genuinely-failed scrapes. Persisting
+          // degradation onto MI v3 snapshot _provenance is tracked as a
+          // follow-up (no MI snapshot is written from this worker today).
+          const _degTag = result.degraded ? `DEGRADED(${result.degradedReason})` : "OK";
+          console.log(`[CI Worker] TikTok scrape: competitor=${comp.name} | campaign=${comp.campaign_id} | ${_degTag} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | source=${result.source}`);
           tiktokScraped++;
         } catch (tktErr: any) {
           console.error(`[CI Worker] TikTok scrape error for ${comp.name} (campaign=${comp.campaign_id}): ${tktErr.message}`);

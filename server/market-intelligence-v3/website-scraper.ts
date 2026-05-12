@@ -2,7 +2,7 @@ import { getProxyConfig } from "../competitive-intelligence/proxy-pool-manager";
 import { resolveSafeUrl, pinnedLookup, isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } from "../competitive-intelligence/scrape-safety";
 import type { WebsiteExtraction, BlogExtraction } from "./source-types";
 
-const SCRAPE_TIMEOUT_MS = 30000;
+const SCRAPE_TIMEOUT_MS = 15000;
 const MAX_PAGES_PER_SITE = 6;
 const MAX_TEXT_PREVIEW = 3000;
 const STALE_THRESHOLD_DAYS = 7;
