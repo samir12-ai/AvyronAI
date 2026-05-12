@@ -364,3 +364,94 @@ export function summarizeCommercialDNA(dna: CommercialDNA): string {
   }
   return lines.join("\n");
 }
+
+/**
+ * Seal #8 / F3.3 — Commercial-reasoning rejection registry.
+ *
+ * Doctrine recap: when a commercial-reasoning module's judge returns
+ * FINAL_REJECTED (or its judge call throws / unparseable), the module STILL
+ * returns null and the engine STILL falls through to its legacy output —
+ * pipeline never breaks. But that silent fallthrough hid the rejection from
+ * downstream plan synthesis.
+ *
+ * This registry adds a PARALLEL rejection-surface (it does NOT replace the
+ * fallthrough): each module records its rejection here, the orchestrator
+ * collects and attaches the rejections to ctx after all engines run, and
+ * plan synthesis can then reflect the degraded reasoning quality
+ * (`commercialReasoningRejected` field + `validationState=weak` downgrade).
+ *
+ * The registry is keyed per orchestrator run; callers must call
+ * `clearCommercialRejections(runKey)` at run start (orchestrator) or pass
+ * unique runKeys to avoid cross-run leakage.
+ */
+export type CommercialRejectionModule =
+  | "persuasion.trustTransfer"
+  | "positioning.categoryGame"
+  | "offer.valueArchitect"
+  | "audience.buyerPsychology"
+  | "awareness.narrativeReframe";
+
+export type CommercialRejectionReason =
+  | "FINAL_REJECTED"      // judge issued REJECTED on both v1 and retry
+  | "JUDGE_ERROR"         // judge call threw or returned unparseable JSON
+  | "DESIGN_INVALID";     // designer output failed schema validation
+
+export interface CommercialRejection {
+  module: CommercialRejectionModule;
+  reason: CommercialRejectionReason;
+  detail: string;
+  emittedAt: number;
+}
+
+const __commercialRejections = new Map<string, CommercialRejection[]>();
+
+// Seal #8 / F3.3 architect-pass-2 fix — concurrency hardening.
+// Per-run AsyncLocalStorage scope so parallel orchestrator runs for the SAME
+// account can't clobber each other's rejection registry. Orchestrator wraps
+// the synthesis path with `runWithCommercialRunKey(jobId, ...)`, and inside
+// that scope the registry key is jobId-derived rather than accountId-derived.
+// When no ALS context is set (tests, ad-hoc) we fall back to the explicit
+// runKey arg (preserves backward compat with all current call sites).
+import { AsyncLocalStorage } from "node:async_hooks";
+const __commercialRunKeyALS = new AsyncLocalStorage<string>();
+export function runWithCommercialRunKey<T>(runKey: string, fn: () => T | Promise<T>): T | Promise<T> {
+  if (!runKey) return fn();
+  return __commercialRunKeyALS.run(runKey, fn);
+}
+/**
+ * Imperative ALS entry — orchestrator calls this once jobId is known so every
+ * downstream module's `recordCommercialRejection(args.accountId, ...)` is
+ * routed to the jobId-scoped registry slot. Avoids needing to wrap the entire
+ * 800-line orchestrator body in a callback. Each orchestrator run executes in
+ * its own async chain (top-level handler), so `enterWith` per-run is safe.
+ */
+export function enterCommercialRunKey(runKey: string): void {
+  if (!runKey) return;
+  __commercialRunKeyALS.enterWith(runKey);
+}
+function __resolveRunKey(explicit: string): string {
+  // ALS wins when set — guarantees orchestrator's per-run jobId scope is
+  // honored even if a downstream module passes accountId.
+  return __commercialRunKeyALS.getStore() || explicit;
+}
+
+export function recordCommercialRejection(
+  runKey: string,
+  rejection: Omit<CommercialRejection, "emittedAt">,
+): void {
+  const key = __resolveRunKey(runKey);
+  if (!key) return;
+  const arr = __commercialRejections.get(key) || [];
+  arr.push({ ...rejection, emittedAt: Date.now() });
+  __commercialRejections.set(key, arr);
+}
+
+export function getCommercialRejections(runKey: string): CommercialRejection[] {
+  const key = __resolveRunKey(runKey);
+  return __commercialRejections.get(key) ? [...__commercialRejections.get(key)!] : [];
+}
+
+export function clearCommercialRejections(runKey: string): void {
+  const key = __resolveRunKey(runKey);
+  __commercialRejections.delete(key);
+}

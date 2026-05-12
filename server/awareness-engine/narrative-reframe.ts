@@ -237,12 +237,19 @@ Judge this candidate. Return ONLY the JSON verdict.`;
     });
     const raw = resp?.choices?.[0]?.message?.content || "";
     const parsed = safeJSON<{ verdict: string; reason: string }>(raw);
-    if (!parsed) return { verdict: "ACCEPTED", reason: "judge unparseable — defaulting to accept" };
+    if (!parsed) {
+      // Seal #8 / F3.4 — judge unparseable is NOT accept-by-default. We have
+      // no positive evidence the candidate passes, so we surface JUDGE_ERROR
+      // and the caller treats it as a rejection (engine then falls through
+      // to legacy output via the existing return-null path).
+      return { verdict: "REJECTED", reason: "JUDGE_ERROR: judge response unparseable" };
+    }
     const v = (parsed.verdict || "").toUpperCase().includes("REJECT") ? "REJECTED" : "ACCEPTED";
     return { verdict: v as any, reason: parsed.reason || "" };
   } catch (e: any) {
-    console.warn(`[NarrativeReframe] judge call failed: ${e.message} — defaulting to accept`);
-    return { verdict: "ACCEPTED", reason: "judge errored — defaulting to accept" };
+    console.warn(`[NarrativeReframe] judge call failed: ${e.message} — treating as REJECTED (no positive verdict)`);
+    // Seal #8 / F3.4 — judge call failure is NOT accept-by-default.
+    return { verdict: "REJECTED", reason: `JUDGE_ERROR: ${e.message}` };
   }
 }
 
@@ -303,6 +310,19 @@ export async function engineerNarrativeReframe(input: DesignerInput): Promise<Na
   console.log(`[NarrativeReframe] DONE in ${Date.now() - t0}ms | finalVerdict=${verdict} | retries=${retryCount} | movement=${profile.bridgeMechanism.movement}`);
   if (verdict === "REJECTED") {
     console.warn(`[NarrativeReframe] FINAL_REJECTED — falling back to legacy awareness output (no narrativeReframe emitted)`);
+    // Seal #8 / F3.3 — record on the parallel rejection-surface. The
+    // pipeline still falls through to legacy output (return null below),
+    // but plan synthesis can now SEE that this rejection happened and
+    // downgrade `validationState` accordingly.
+    try {
+      const { recordCommercialRejection } = await import("../../shared/commercial-dna");
+      const isJudgeErr = (reason || "").startsWith("JUDGE_ERROR");
+      recordCommercialRejection(input.accountId, {
+        module: "awareness.narrativeReframe",
+        reason: isJudgeErr ? "JUDGE_ERROR" : "FINAL_REJECTED",
+        detail: reason || "",
+      });
+    } catch { /* registry never blocks pipeline */ }
     return null;
   }
   return profile;

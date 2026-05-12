@@ -247,10 +247,17 @@ export async function designCategoryGame(args: DesignerInput): Promise<CategoryG
       judgeVerdict = judged.verdict as any;
       judgeReason = judged.reason || "";
       judgeFix = judged.fix || "";
+    } else {
+      // Seal #8 / F3.4 — unparseable / missing-verdict judge output is NOT
+      // accept-by-default. No positive evidence → REJECTED + JUDGE_ERROR.
+      judgeVerdict = "REJECTED";
+      judgeReason = `JUDGE_ERROR: unparseable judge output (raw="${judgeRaw.slice(0, 80)}")`;
     }
   } catch (err: any) {
-    console.warn(`[CategoryGame] JUDGE_FAILED | ${err.message} — accepting v1 as fallback`);
-    judgeVerdict = "ACCEPTED";
+    console.warn(`[CategoryGame] JUDGE_FAILED | ${err.message} — treating as REJECTED (no positive verdict)`);
+    // Seal #8 / F3.4 — judge call failure is NOT accept-by-default.
+    judgeVerdict = "REJECTED";
+    judgeReason = `JUDGE_ERROR: ${err.message}`;
   }
   console.log(`[CategoryGame] STEP_3 | judge=${judgeVerdict} | reason="${judgeReason.slice(0, 80)}"`);
 
@@ -320,6 +327,16 @@ export async function designCategoryGame(args: DesignerInput): Promise<CategoryG
   console.log(`[CategoryGame] DONE in ${Date.now() - startTs}ms | finalVerdict=${result.judgeVerdict} | retries=${result.retryCount} | defensibility=${result.defensibility}`);
   if (result.judgeVerdict === "REJECTED") {
     console.warn(`[CategoryGame] FINAL_REJECTED — falling back to legacy positioning output (no categoryGameDesign emitted)`);
+    // Seal #8 / F3.3 — parallel rejection-surface (does NOT replace fallback).
+    try {
+      const { recordCommercialRejection } = await import("../../shared/commercial-dna");
+      const isJudgeErr = String(result.judgeReason || "").startsWith("JUDGE_ERROR");
+      recordCommercialRejection(args.accountId, {
+        module: "positioning.categoryGame",
+        reason: isJudgeErr ? "JUDGE_ERROR" : "FINAL_REJECTED",
+        detail: String(result.judgeReason || ""),
+      });
+    } catch { /* registry never blocks pipeline */ }
     return null;
   }
   return result;

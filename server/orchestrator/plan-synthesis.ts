@@ -95,6 +95,40 @@ export interface SynthesizedPlan {
     rationale: string;
     slots: ExplorationSlot[];
   };
+  /**
+   * Seal #8 / F3.3 — parallel rejection-surface for commercial-reasoning
+   * modules. Populated by the orchestrator from the in-memory rejection
+   * registry after all engines run. Each entry tells plan synthesis
+   * (and any downstream auditor) that a commercial-reasoning module
+   * fell back to legacy output. The plan is still emitted (modules
+   * return null and engines continue), but `validationState` should be
+   * downgraded by readers on non-empty rejection list.
+   */
+  commercialReasoningRejected?: Array<{
+    module: string;
+    reason: "FINAL_REJECTED" | "JUDGE_ERROR" | "DESIGN_INVALID";
+    detail: string;
+    emittedAt: number;
+  }>;
+  /**
+   * Seal #8 / F3.10 — propagation flag set when AEL ran in degraded
+   * (`isPartial`) mode. All engine outputs that consumed the partial
+   * AEL inherit this provenance so plan synthesis and downstream
+   * decision layers can distinguish a fully-grounded plan from one
+   * built on degraded enrichment.
+   */
+  _provenance?: {
+    aelPartialPropagated?: boolean;
+    aelPartialReason?: string;
+    commercialReasoningDegraded?: boolean;
+  };
+  /**
+   * Seal #8 / F3.3 — synthesis-level validationState downgrade. When
+   * any commercial-reasoning rejection is recorded for the run OR AEL
+   * was partial (F3.10), validationState is set to "weak" so downstream
+   * gates see the degradation.
+   */
+  validationState?: "validated" | "provisional" | "weak" | "rejected";
 }
 
 function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any): SynthesizedPlan {

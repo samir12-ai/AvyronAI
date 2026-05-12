@@ -3330,6 +3330,15 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
   console.log(`[Orchestrator] SSC_INITIALIZED | campaignId=${config.campaignId} | accountId=${config.accountId}`);
 
+  // Seal #8 / F3.3 — clear the parallel commercial-reasoning rejection
+  // registry for this account so a fresh run starts with an empty surface.
+  // (Modules push to the registry on FINAL_REJECTED / JUDGE_ERROR; we read
+  // it back at the end of the run and attach to plan synthesis context.)
+  try {
+    const { clearCommercialRejections } = await import("../../shared/commercial-dna");
+    clearCommercialRejections(config.accountId);
+  } catch { /* registry never blocks pipeline */ }
+
   if (config.pausedJobId) {
     jobId = config.pausedJobId;
     const [pausedJob] = await db
@@ -3384,6 +3393,17 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // inserts NULL into strategic_plans.job_id even though engine snapshots
   // get the right jobId via the local variable — leaving plans non-run-bound.
   config.jobId = jobId;
+
+  // Seal #8 / F3.3 architect-pass-2 fix — concurrency hardening.
+  // Enter ALS scope so every downstream module's recordCommercialRejection
+  // is routed to a jobId-scoped registry slot, preventing parallel runs for
+  // the same accountId from clobbering each other's rejection metadata.
+  try {
+    const { enterCommercialRunKey, clearCommercialRejections } = await import("../../shared/commercial-dna");
+    enterCommercialRunKey(jobId);
+    // Also clear under the now-active ALS scope (jobId-keyed slot starts empty).
+    clearCommercialRejections(jobId);
+  } catch { /* registry never blocks pipeline */ }
 
   const results = new Map<EngineId, EngineStepResult>();
   const completedEngines: string[] = [];
@@ -4005,6 +4025,56 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     try {
       const planResult = await synthesizePlan(config, ctx, results, memoryContextBlock || undefined, loadedMemoryBlock);
       planId = planResult.planId;
+
+      // Seal #8 / F3.3 + F3.10 — surface commercial-reasoning rejections
+      // and AEL partial-degradation onto the synthesized plan. The pipeline
+      // already fell through to legacy output when modules rejected; this
+      // is the *parallel surface* (not a replacement) so downstream gates
+      // can downgrade validationState and any auditor can see the truth.
+      try {
+        const { getCommercialRejections } = await import("../../shared/commercial-dna");
+        const rejections = getCommercialRejections(config.accountId);
+        const aelPartial = (ctx as any).analyticalEnrichment?.isPartial === true;
+        const aelPartialReason = (ctx as any).analyticalEnrichment?.partialReason || "";
+
+        if (rejections.length > 0 || aelPartial) {
+          planResult.plan.commercialReasoningRejected = rejections.length > 0 ? rejections : undefined;
+          planResult.plan._provenance = {
+            ...(planResult.plan._provenance || {}),
+            commercialReasoningDegraded: rejections.length > 0,
+            aelPartialPropagated: aelPartial,
+            aelPartialReason: aelPartial ? aelPartialReason : undefined,
+          };
+          // F3.3 doctrine: validationState downgrades to "weak" on any
+          // rejection or AEL-partial. Never upgrades — if synthesis already
+          // set "rejected", keep it.
+          if (planResult.plan.validationState !== "rejected") {
+            planResult.plan.validationState = "weak";
+          }
+          console.warn(
+            `[Orchestrator] PLAN_DEGRADED | rejections=${rejections.length} | aelPartial=${aelPartial} | validationState=${planResult.plan.validationState}` +
+            (rejections.length > 0 ? ` | modules=[${rejections.map(r => `${r.module}:${r.reason}`).join(",")}]` : "")
+          );
+
+          // Seal #8 / F3.3+F3.10 persistence fix — synthesizePlan() already
+          // wrote planJson to DB before returning. Re-persist here so the
+          // degradation surface (commercialReasoningRejected, _provenance,
+          // validationState='weak') survives in strategicPlans.planJson and
+          // is visible to downstream readers/auditors.
+          if (planId) {
+            try {
+              await db.update(strategicPlans)
+                .set({ planJson: JSON.stringify(planResult.plan) })
+                .where(eq(strategicPlans.id, planId));
+            } catch (persistErr: any) {
+              console.warn(`[Orchestrator] PLAN_DEGRADE_PERSIST_FAILED | planId=${planId} | ${persistErr.message}`);
+            }
+          }
+        }
+      } catch (degradeErr: any) {
+        console.warn(`[Orchestrator] PLAN_DEGRADE_SURFACE_FAILED | ${degradeErr.message}`);
+      }
+
       if (planId) {
         await writeStrategyMemoryEntries(config, results, planId, planResult.plan);
       }

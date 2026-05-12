@@ -261,10 +261,19 @@ export async function profileBuyerPsychology(args: DesignerInput): Promise<Buyer
       judgeVerdict = judged.verdict as any;
       judgeReason = judged.reason || "";
       judgeFix = judged.fix || "";
+    } else {
+      // Seal #8 / F3.4 — unparseable / missing-verdict judge output is NOT
+      // accept-by-default. No positive evidence → REJECTED + JUDGE_ERROR.
+      judgeVerdict = "REJECTED";
+      judgeReason = `JUDGE_ERROR: unparseable judge output (raw="${judgeRaw.slice(0, 80)}")`;
     }
   } catch (err: any) {
-    console.warn(`[BuyerPsychology] JUDGE_FAILED | ${err.message} — accepting v1 as fallback`);
-    judgeVerdict = "ACCEPTED";
+    console.warn(`[BuyerPsychology] JUDGE_FAILED | ${err.message} — treating as REJECTED (no positive verdict)`);
+    // Seal #8 / F3.4 — judge failure is NOT accept-by-default. We have no
+    // positive evidence the candidate passes, so mark REJECTED with a
+    // JUDGE_ERROR reason so the parallel rejection-surface (F3.3) can see it.
+    judgeVerdict = "REJECTED";
+    judgeReason = `JUDGE_ERROR: ${err.message}`;
   }
   console.log(`[BuyerPsychology] STEP_3 | judge=${judgeVerdict} | reason="${judgeReason.slice(0, 80)}"`);
 
@@ -342,6 +351,16 @@ export async function profileBuyerPsychology(args: DesignerInput): Promise<Buyer
   console.log(`[BuyerPsychology] DONE in ${Date.now() - startTs}ms | finalVerdict=${result.judgeVerdict} | retries=${result.retryCount} | tier=${result.sophisticationByproduct.tier} | leverages=[${result.cialdiniLeverages.join(",")}]`);
   if (result.judgeVerdict === "REJECTED") {
     console.warn(`[BuyerPsychology] FINAL_REJECTED — falling back to legacy audience output (no buyerPsychology emitted)`);
+    // Seal #8 / F3.3 — parallel rejection-surface (does NOT replace fallback).
+    try {
+      const { recordCommercialRejection } = await import("../../shared/commercial-dna");
+      const isJudgeErr = (judgeReason || "").startsWith("JUDGE_ERROR");
+      recordCommercialRejection(args.accountId, {
+        module: "audience.buyerPsychology",
+        reason: isJudgeErr ? "JUDGE_ERROR" : "FINAL_REJECTED",
+        detail: judgeReason || "",
+      });
+    } catch { /* registry never blocks pipeline */ }
     return null;
   }
   return result;

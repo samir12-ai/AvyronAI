@@ -287,8 +287,11 @@ export async function designTrustTransfer(args: {
   console.log(`[TrustTransfer] STEP_2 | design_v1 | mechanism="${design.transferMechanism.name}" | risk=${design.riskSeverity} | failureModes=${design.failureModes.length}`);
 
   // Judge step
-  let judgeVerdict: "ACCEPTED" | "REJECTED" = "ACCEPTED";
-  let judgeReason = "";
+  // Seal #8 / F3.4 — default to REJECTED; only an explicit ACCEPTED verdict
+  // from a parseable judge response flips it. Failure / unparseable / missing
+  // verdict all stay REJECTED with a JUDGE_ERROR reason (no accept-by-default).
+  let judgeVerdict: "ACCEPTED" | "REJECTED" = "REJECTED";
+  let judgeReason = "JUDGE_ERROR: judge did not run";
   let specificFix = "";
   try {
     const judgePrompt = buildJudgePrompt(JSON.stringify(design, null, 2));
@@ -302,15 +305,18 @@ export async function designTrustTransfer(args: {
     });
     const judgeRaw = judgeResp.choices[0]?.message?.content?.trim() || "";
     const judgeParsed = safeJsonParse(judgeRaw);
-    if (judgeParsed) {
-      judgeVerdict = judgeParsed.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED";
+    if (judgeParsed && (judgeParsed.verdict === "ACCEPTED" || judgeParsed.verdict === "REJECTED")) {
+      judgeVerdict = judgeParsed.verdict;
       judgeReason = String(judgeParsed.reason || "").trim();
       specificFix = String(judgeParsed.specificFix || "").trim();
+    } else {
+      judgeVerdict = "REJECTED";
+      judgeReason = `JUDGE_ERROR: unparseable judge output (raw="${judgeRaw.slice(0, 80)}")`;
     }
   } catch (err: any) {
-    console.warn(`[TrustTransfer] JUDGE_FAILED | ${err.message} | accepting v1 by default`);
-    judgeVerdict = "ACCEPTED";
-    judgeReason = "judge_unavailable";
+    console.warn(`[TrustTransfer] JUDGE_FAILED | ${err.message} | treating as REJECTED (no positive verdict)`);
+    judgeVerdict = "REJECTED";
+    judgeReason = `JUDGE_ERROR: ${err.message}`;
   }
 
   console.log(`[TrustTransfer] STEP_3 | judge=${judgeVerdict}${judgeReason ? ` | reason="${judgeReason.slice(0, 80)}"` : ""}`);
@@ -348,11 +354,19 @@ export async function designTrustTransfer(args: {
           });
           const judgeRaw2 = judgeResp2.choices[0]?.message?.content?.trim() || "";
           const judgeParsed2 = safeJsonParse(judgeRaw2);
-          if (judgeParsed2) {
-            judgeVerdict = judgeParsed2.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED";
+          if (judgeParsed2 && (judgeParsed2.verdict === "ACCEPTED" || judgeParsed2.verdict === "REJECTED")) {
+            judgeVerdict = judgeParsed2.verdict;
             judgeReason = String(judgeParsed2.reason || "").trim();
+          } else {
+            // Seal #8 / F3.4 — unparseable retry-judge is NOT accept-by-default.
+            judgeVerdict = "REJECTED";
+            judgeReason = `JUDGE_ERROR: unparseable retry-judge output (raw="${judgeRaw2.slice(0, 80)}")`;
           }
-        } catch {/* keep prior */}
+        } catch (err: any) {
+          // Seal #8 / F3.4 — retry-judge failure stays REJECTED (default).
+          judgeVerdict = "REJECTED";
+          judgeReason = `JUDGE_ERROR: retry judge failed: ${err.message}`;
+        }
       }
     } catch (err: any) {
       console.warn(`[TrustTransfer] RETRY_FAILED | ${err.message} | keeping v1`);
@@ -365,6 +379,17 @@ export async function designTrustTransfer(args: {
   console.log(`[TrustTransfer] DONE in ${Date.now() - startTs}ms | finalVerdict=${design.judgeVerdict} | retries=${design.retryCount}`);
   if (design.judgeVerdict === "REJECTED") {
     console.warn(`[TrustTransfer] FINAL_REJECTED — falling back to legacy persuasion output (no trustTransferDesign emitted)`);
+    // Seal #8 / F3.3 — parallel rejection-surface (does NOT replace fallback).
+    try {
+      const { recordCommercialRejection } = await import("../../shared/commercial-dna");
+      const reason = (design as any).judgeReason || "";
+      const isJudgeErr = String(reason).startsWith("JUDGE_ERROR");
+      recordCommercialRejection(args.accountId, {
+        module: "persuasion.trustTransfer",
+        reason: isJudgeErr ? "JUDGE_ERROR" : "FINAL_REJECTED",
+        detail: String(reason),
+      });
+    } catch { /* registry never blocks pipeline */ }
     return null;
   }
   return design;
