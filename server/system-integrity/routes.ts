@@ -17,19 +17,28 @@ export function getStoredIntegrityReport(campaignId: string, accountId: string):
 
 export function registerIntegrityRoutes(app: Express) {
   app.get("/api/system-integrity/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
-    const accountId = resolveAccountId(req);
-    // W1-T4 (P0-4): cache key is `${accountId}:${campaignId}` so a foreign
-    // campaignId can never reach another tenant's report (the lookup misses).
-    // Explicit assert is defense-in-depth — produces a 404 instead of a
-    // {hasReport:false} which can be used to probe campaign-id existence.
-    try { await assertCampaignBelongsTo(accountId, req.params.campaignId); }
-    catch (e) { if (handleOwnershipError(e, res)) return; return; }
-    const key = `${accountId}:${req.params.campaignId}`;
-    const report = integrityReports.get(key);
-    if (!report) {
-      return res.json({ hasReport: false });
+    try {
+      const accountId = resolveAccountId(req);
+      // W1-T4 (P0-4): cache key is `${accountId}:${campaignId}` so a foreign
+      // campaignId can never reach another tenant's report (the lookup misses).
+      // Explicit assert is defense-in-depth — produces a 404 instead of a
+      // {hasReport:false} which can be used to probe campaign-id existence.
+      try { await assertCampaignBelongsTo(accountId, req.params.campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+      const key = `${accountId}:${req.params.campaignId}`;
+      const report = integrityReports.get(key);
+      if (!report) {
+        return res.json({ hasReport: false });
+      }
+      res.json({ hasReport: true, report });
+    } catch (err: any) {
+      // Match the pattern used by sibling P0-4 handlers — never let a non-ownership
+      // error fall through silently (would hang the request).
+      console.error("[SystemIntegrity] Unhandled error:", err?.message || err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "INTERNAL_ERROR", message: "Failed to load integrity report" });
+      }
     }
-    res.json({ hasReport: true, report });
   });
 
   console.log("[SystemIntegrity] Routes registered: GET /api/system-integrity/:campaignId");
