@@ -18,17 +18,19 @@
 import type { Express } from "express";
 import { db } from "./db";
 import { videoProjects } from "@shared/schema";
+import { videoProjectCreateSchema } from "@shared/schema-seal3";
 import { eq, and, desc } from "drizzle-orm";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
-import { exec } from "child_process";
-import { promisify } from "util";
 import { aiChat } from "./ai-client";
 import { normalizeMediaType } from "../lib/media-types";
 import { authMiddleware, resolveAccountId, type AuthRequest } from "./auth";
-
-const execAsync = promisify(exec);
+// Seal #3 (Task #21) F1.10/F1.11/F9.6: replace shell-form `execAsync(\`ffmpeg ...\`)`
+// with arg-array `spawn("ffmpeg", [...], { shell: false })` to eliminate shell
+// injection entirely, and validate AI-derived filter strings against a
+// restrictive whitelist.
+import { runFfmpeg, runFfprobe, validateFilterComplex } from "./video-routes-helpers";
 
 const videoUploadsDir = path.resolve(process.cwd(), "uploads", "videos");
 const videoOutputDir = path.resolve(process.cwd(), "uploads", "video-output");
@@ -75,8 +77,10 @@ const videoUpload = multer({
 
 async function getVideoDuration(filePath: string): Promise<number> {
   try {
-    const { stdout } = await execAsync(
-      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
+    // Seal #3 F9.6: arg-array spawn — no shell, no interpolation.
+    const { stdout } = await runFfprobe(
+      ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath],
+      { timeoutMs: 30_000 },
     );
     return parseFloat(stdout.trim()) || 0;
   } catch {
@@ -86,8 +90,9 @@ async function getVideoDuration(filePath: string): Promise<number> {
 
 async function getVideoInfo(filePath: string): Promise<{ duration: number; width: number; height: number }> {
   try {
-    const { stdout } = await execAsync(
-      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -show_entries format=duration -of json "${filePath}"`,
+    const { stdout } = await runFfprobe(
+      ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration", "-show_entries", "format=duration", "-of", "json", filePath],
+      { timeoutMs: 30_000 },
     );
     const info = JSON.parse(stdout);
     const stream = info.streams?.[0] || {};
@@ -142,6 +147,25 @@ export function registerVideoRoutes(app: Express) {
           return res.status(400).json({ error: "No video files uploaded" });
         }
 
+        // Seal #3 F1.10: validate body BEFORE any DB write or filesystem
+        // commitment. Strict schema → unknown keys (e.g. accountId, status,
+        // outputUrl) are REJECTED. Multer parses multipart text fields as
+        // strings on req.body, so the schema sees raw user input.
+        const parsedBody = videoProjectCreateSchema.safeParse(req.body);
+        if (!parsedBody.success) {
+          // Clean up the just-uploaded files since we won't be persisting a
+          // project row that points at them.
+          for (const f of files) {
+            try { fs.unlinkSync(path.join(videoUploadsDir, f.filename)); } catch {}
+          }
+          const issues = parsedBody.error.issues.map(i => ({
+            field: i.path.join("."),
+            code: i.code,
+          }));
+          return res.status(400).json({ error: "INVALID_BODY", issues });
+        }
+        const bodyData = parsedBody.data;
+
         const clips = await Promise.all(
           files.map(async (file) => {
             const filePath = path.join(videoUploadsDir, file.filename);
@@ -162,11 +186,11 @@ export function registerVideoRoutes(app: Express) {
           .insert(videoProjects)
           .values({
             accountId, // P0-1
-            title: req.body.title || "Untitled Project",
+            title: bodyData.title || "Untitled Project",
             status: "uploaded",
             clipCount: clips.length,
-            style: req.body.style || "cinematic",
-            mood: req.body.mood || "energetic",
+            style: bodyData.style || "cinematic",
+            mood: bodyData.mood || "energetic",
           })
           .returning();
 
@@ -347,9 +371,49 @@ Based on the creative brief above, create an edit plan that fulfills the client'
 
         const filterComplex = filterParts.join(";") + ";" + concatInputs.join("") + `concat=n=${concatInputs.length}:v=1:a=1[outv][outa]`;
 
-        const ffmpegCmd = `ffmpeg -y ${inputArgs} -filter_complex "${filterComplex}" -map "[outv]" -map "[outa]" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`;
+        // Seal #3 F1.11/F9.6: defense-in-depth. The filter string is built
+        // from server-controlled templates with AI-derived NUMERIC values
+        // (already coerced via Number.isFinite above), but we still gate on
+        // the whitelist before spawn so any future regression that lets an
+        // LLM-supplied string flow into the filter is caught here.
+        const filterCheck = validateFilterComplex(filterComplex);
+        if (!filterCheck.ok) {
+          await db.update(videoProjects)
+            .set({ status: "failed" })
+            .where(and(eq(videoProjects.id, projectId), eq(videoProjects.accountId, accountId)));
+          return res.status(400).json({ error: "INVALID_FILTER", reason: filterCheck.reason });
+        }
 
-        await execAsync(ffmpegCmd, { timeout: 300000 });
+        // Seal #3 F1.11: arg-array spawn (shell:false) — every input path,
+        // every flag, every value is a separate argv element so shell
+        // metacharacters cannot escape into a shell.
+        // Build the inputs array by reusing the same safeUploadPath that
+        // gated the filter graph above (concatInputs/filterParts walks the
+        // same clipOrder loop, so the index alignment is preserved).
+        const inputPathArgs: string[] = [];
+        for (let i = 0; i < clipOrder.length; i++) {
+          const clipIdx = clipOrder[i];
+          const c = clips[clipIdx];
+          if (!c) continue;
+          const p = safeUploadPath(c.filename);
+          if (!p || !fs.existsSync(p)) continue;
+          inputPathArgs.push("-i", p);
+        }
+        const ffmpegArgs = [
+          "-y",
+          ...inputPathArgs,
+          "-filter_complex", filterComplex,
+          "-map", "[outv]",
+          "-map", "[outa]",
+          "-c:v", "libx264",
+          "-preset", "fast",
+          "-crf", "23",
+          "-c:a", "aac",
+          "-b:a", "128k",
+          "-movflags", "+faststart",
+          outputPath,
+        ];
+        await runFfmpeg(ffmpegArgs, { timeoutMs: 300_000 });
 
         const outputDuration = await getVideoDuration(outputPath);
 
@@ -387,14 +451,34 @@ Based on the creative brief above, create an edit plan that fulfills the client'
           if (validClips.length === 0) throw new Error("No valid clips");
 
           const listFile = path.join(videoOutputDir, `list_${Date.now()}.txt`);
+          // Seal #3 F1.11: ffmpeg's concat-demuxer list file uses single
+          // quotes around the path. safeUploadPath has already validated
+          // the basename has no path separators or shell metacharacters, so
+          // the embedded path is always a leaf inside videoUploadsDir. Even
+          // so, defensively strip any single-quote that somehow makes it
+          // through (cannot happen with the current validator, but keeps
+          // the file format unparseable for an attacker if the validator
+          // ever regresses).
           const listContent = validClips
-            .map((c: any) => `file '${safeUploadPath(c.filename)}'`)
+            .map((c: any) => `file '${String(safeUploadPath(c.filename)).replace(/'/g, "")}'`)
             .join("\n");
           fs.writeFileSync(listFile, listContent);
 
-          await execAsync(
-            `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart "${outputPathSimple}"`,
-            { timeout: 300000 },
+          await runFfmpeg(
+            [
+              "-y",
+              "-f", "concat",
+              "-safe", "0",
+              "-i", listFile,
+              "-c:v", "libx264",
+              "-preset", "fast",
+              "-crf", "23",
+              "-c:a", "aac",
+              "-b:a", "128k",
+              "-movflags", "+faststart",
+              outputPathSimple,
+            ],
+            { timeoutMs: 300_000 },
           );
 
           fs.unlinkSync(listFile);

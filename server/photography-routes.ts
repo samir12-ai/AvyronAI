@@ -20,6 +20,7 @@
 import type { Express } from "express";
 import { db } from "./db";
 import { photographerProfiles, portfolioPosts, postInteractions, reservations } from "@shared/schema";
+import { photographyProfileUpdateSchema } from "@shared/schema-seal3";
 import { eq, desc, sql, and } from "drizzle-orm";
 import multer from "multer";
 import fs from "fs";
@@ -128,16 +129,27 @@ export function registerPhotographyRoutes(app: Express) {
     }
   });
 
-  // P0-2: profile updates require ownership. Pre-seal, any authed user could
-  // overwrite any profile (including changing email/profile_image to phish).
-  // Now: caller must own the row. Pre-migration rows (account_id NULL) are
-  // immutable through the API — they must be claimed via a separate flow.
+  // P0-2 + Seal #3 F1.9: profile updates require ownership AND a strict
+  // allowlist of body fields. The previous destructure-deny pattern
+  // (`{ accountId, id, ...safeData }`) was fragile — any new mutable column
+  // added to the table would silently become writable. The strict zod schema
+  // REJECTS unknown keys with HTTP 400. Identity/audit columns (id, accountId,
+  // email, rating, totalReviews, isVerified, createdAt, updatedAt) are
+  // deliberately not in the allowlist so they cannot be tampered with.
   app.put("/api/photography/photographers/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const accountId = resolveAccountId(req);
-      const data = req.body;
-      // Defensive: never let body override accountId.
-      const { accountId: _ignored, id: _ignoredId, ...safeData } = data;
+      const parsed = photographyProfileUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        // Echo only field+code, never the offending value (avoid reflecting
+        // attacker payloads back into logs/clients).
+        const issues = parsed.error.issues.map(i => ({
+          field: i.path.join("."),
+          code: i.code,
+        }));
+        return res.status(400).json({ error: "INVALID_BODY", issues });
+      }
+      const safeData = parsed.data;
       const [updated] = await db
         .update(photographerProfiles)
         .set({ ...safeData, updatedAt: new Date() })

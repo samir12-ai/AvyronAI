@@ -492,6 +492,29 @@ export const insertReservationSchema = createInsertSchema(reservations).omit({
   status: true,
 });
 
+// ─── Seal #3 (Task #21) — F1.9 / F1.10 strict body schemas ──────────────────
+//
+// PROBLEM (master audit F1.9, F1.10): the photography PUT handler and the
+// video upload-clips handler both took `req.body` directly. The PUT used a
+// destructure-deny pattern (`{ accountId: _ignored, id: _ignoredId, ...rest }`)
+// which is FRAGILE — any new mutable column added to the table would silently
+// become writable by ANY authed user. The video handler interpolated raw
+// `req.body.title|style|mood` into a DB insert with no length cap, no character
+// validation, and no rejection of unknown keys (mass-assignment vector).
+//
+// FIX: explicit `.pick()` allowlists + `.strict()` so unknown keys are
+// REJECTED (HTTP 400), and per-field constraints (length cap + character
+// whitelist for free-text fields). Implementation lives in
+// `./schema-seal3.ts` (separate module) because the inline regex literals
+// silently broke vitest's esbuild transform when defined here — a known
+// loader edge-case that swallowed the exports without a parse error.
+export {
+  photographyProfileUpdateSchema,
+  videoProjectCreateSchema,
+  type PhotographyProfileUpdate,
+  type VideoProjectCreate,
+} from "./schema-seal3";
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type PhotographerProfile = typeof photographerProfiles.$inferSelect;
