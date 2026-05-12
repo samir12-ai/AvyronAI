@@ -24,9 +24,13 @@ import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
-// Seal #7 (F10.1) — single migration runner replaces the 13 fire-and-forget
-// inline calls that previously raced each other on every boot.
-import { runMigrations } from "./migrations/runner";
+// Seal #7 (F10.1) — single migration runner. Per session-plan T8 +
+// architect-review pass-4: boot only VERIFIES the schema floor. Schema
+// changes are applied out-of-band via `npm run db:migrate`. Boot refuses
+// to start if the running code requires a version newer than what the DB
+// reports, so a forgotten migration step fails loudly instead of running
+// against an inconsistent schema.
+import { verifySchemaFloor, runMigrations } from "./migrations/runner";
 import { runTombstoneReaper } from "./account-lifecycle";
 import { logger, loggerMiddleware, stripSecrets } from "./logger";
 import { renderMetrics, recordHttpRequest } from "./observability/otel";
@@ -34,6 +38,10 @@ import { invalidateStaleSnapshots } from "./market-intelligence-v3/engine-state"
 import { authMiddleware, optionalAuth, verifyAdminToken } from "./auth";
 import * as fs from "fs";
 import * as path from "path";
+// Pass-4 fix: static ESM import — bundling with --format=esm rewrites
+// `require("node:crypto")` to `__require(...)` which throws under Node ESM,
+// causing the /metrics gate to always 401 even with the correct token.
+import { timingSafeEqual } from "node:crypto";
 // Phase 8.0 (Main migration) — adaptive pipeline overlay JSON router.
 // Mounted under /api/pipeline below. Self-protects with authMiddleware +
 // adminMiddleware internally (server/pipeline/routes.ts L32-33), so the /api
@@ -446,8 +454,6 @@ function setupErrorHandler(app: express.Application) {
     try {
       // node:crypto.timingSafeEqual throws if lengths differ; we already
       // forced equal length above so the throw path is purely defensive.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { timingSafeEqual } = require("node:crypto") as typeof import("node:crypto");
       ok = ok && timingSafeEqual(a, b);
     } catch {
       ok = false;
@@ -607,21 +613,35 @@ function setupErrorHandler(app: express.Application) {
 
   const port = parseInt(process.env.PORT || "5000", 10);
 
-  // Seal #7 (F10.1) — migrations MUST complete (or fail loudly) BEFORE the
-  // server starts accepting traffic and BEFORE any worker spins up. The
-  // runner enforces REQUIRED_SCHEMA_VERSION; any error here is a hard boot
-  // failure (process.exit(1)) so we never serve traffic against an
-  // inconsistent schema. Architect-review fix: previously runMigrations()
-  // ran inside the listen() callback (post-listen, fire-and-forget) which
-  // allowed the server to accept requests during/after a failed migration.
+  // Seal #7 (F10.1, pass-4) — boot VERIFIES the schema floor only; it does
+  // NOT mutate schema. Operators apply migrations via `npm run db:migrate`
+  // (which calls runMigrations()). Boot refuses to start if the DB reports
+  // a schema version below REQUIRED_SCHEMA_VERSION — better to fail loudly
+  // than to serve traffic against an older-than-expected schema. By default
+  // (BOOT_AUTO_MIGRATE=true), boot still applies pending migrations as a
+  // convenience for single-instance Replit deployments where there is no
+  // separate migrate step in the deploy pipeline; multi-instance operators
+  // should set BOOT_AUTO_MIGRATE=false and run db:migrate out-of-band.
+  const autoMigrate = process.env.BOOT_AUTO_MIGRATE !== "false";
   try {
-    const r = await runMigrations();
-    logger.info(
-      { component: "migrations", lastVersion: r.lastVersion, applied: r.applied.length },
-      "migrations complete"
-    );
+    if (autoMigrate) {
+      const r = await runMigrations();
+      logger.info(
+        { component: "migrations", lastVersion: r.lastVersion, applied: r.applied.length, mode: "auto" },
+        "migrations complete",
+      );
+    } else {
+      const v = await verifySchemaFloor();
+      logger.info(
+        { component: "migrations", lastVersion: v.lastVersion, mode: "verify-only" },
+        "schema floor verified",
+      );
+    }
   } catch (err) {
-    logger.error({ component: "migrations", err: String(err) }, "migrations FAILED — refusing to start");
+    logger.error(
+      { component: "migrations", err: String(err), mode: autoMigrate ? "auto" : "verify-only" },
+      "boot schema check FAILED — refusing to start",
+    );
     captureException(err, { phase: "boot-migrations" });
     // Give Sentry a moment to flush before exit.
     await new Promise((resolve) => setTimeout(resolve, 500));

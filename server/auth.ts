@@ -433,39 +433,17 @@ async function issueSessionForDevice(opts: {
 }
 
 // ─── Seal #7 (Task #25 / F9.9) — GDPR account-deletion routes ────────────────
-// Two-step flow:
-//   1. POST /api/account/delete-confirm  { password }
-//      → verifies password, returns one-shot token (TTL 10min).
-//   2. DELETE /api/account
-//      Headers: X-Account-Delete-Confirm: <token>
-//      Body:    { password }   ← re-verified
-//      → masks PII immediately, schedules cascade reaper for +30 days.
+// Spec contract (session-plan T9, architect-review pass-4):
+//   DELETE /api/account
+//     Headers: X-Account-Delete-Confirm: PERMANENTLY_DELETE  (literal)
+//     Body:    { password }                                  (fresh re-auth)
+//   → masks PII immediately, schedules cascade reaper for +30 days.
+//   Cancellable any time before purgeAfter via POST /api/account/delete-cancel.
+//
 // All audit events go to audit_log_archive (survives the cascade).
+const DELETE_CONFIRM_LITERAL = "PERMANENTLY_DELETE";
 async function registerAccountDeletionRoutes(app: Router) {
-  const { issueDeleteConfirmation, consumeDeleteConfirmation, requestAccountDeletion, cancelAccountDeletion } =
-    await import("./account-lifecycle");
-
-  app.post("/api/account/delete-confirm", async (req: AuthRequest, res: Response) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Not authenticated" });
-    const payload = verifyToken(authHeader.slice(7));
-    if (!payload) return res.status(401).json({ error: "Invalid token" });
-    const { password } = req.body ?? {};
-    if (typeof password !== "string" || !password) return res.status(400).json({ error: "Password required" });
-
-    try {
-      const [user] = await db.select().from(users).where(eq(users.id, payload.userId)).limit(1);
-      if (!user) return res.status(404).json({ error: "User not found" });
-      const ok = await bcrypt.compare(password, user.password);
-      if (!ok) return res.status(403).json({ error: "Password incorrect" });
-      const accountId = user.accountId || user.id;
-      const token = await issueDeleteConfirmation(accountId, user.id);
-      return res.json({ confirmationToken: token, expiresInSeconds: 600 });
-    } catch (err) {
-      console.error("[Auth] delete-confirm error:", err);
-      return res.status(500).json({ error: "Failed to issue confirmation" });
-    }
-  });
+  const { requestAccountDeletion, cancelAccountDeletion } = await import("./account-lifecycle");
 
   app.delete("/api/account", async (req: AuthRequest, res: Response) => {
     const authHeader = req.headers.authorization;
@@ -473,10 +451,12 @@ async function registerAccountDeletionRoutes(app: Router) {
     const payload = verifyToken(authHeader.slice(7));
     if (!payload) return res.status(401).json({ error: "Invalid token" });
 
-    const confirmToken = req.headers["x-account-delete-confirm"];
+    const confirmHeader = req.headers["x-account-delete-confirm"];
     const { password } = req.body ?? {};
-    if (typeof confirmToken !== "string" || !confirmToken) {
-      return res.status(400).json({ error: "X-Account-Delete-Confirm header required (POST /api/account/delete-confirm first)" });
+    if (typeof confirmHeader !== "string" || confirmHeader !== DELETE_CONFIRM_LITERAL) {
+      return res
+        .status(400)
+        .json({ error: `X-Account-Delete-Confirm header must equal '${DELETE_CONFIRM_LITERAL}'` });
     }
     if (typeof password !== "string" || !password) {
       return res.status(400).json({ error: "Password required for re-authentication" });
@@ -488,10 +468,6 @@ async function registerAccountDeletionRoutes(app: Router) {
       const ok = await bcrypt.compare(password, user.password);
       if (!ok) return res.status(403).json({ error: "Password incorrect" });
       const accountId = user.accountId || user.id;
-      const consumed = await consumeDeleteConfirmation(accountId, user.id, confirmToken);
-      if (!consumed) {
-        return res.status(403).json({ error: "Invalid or expired confirmation token" });
-      }
       const r = await requestAccountDeletion({
         accountId,
         userId: user.id,
@@ -501,7 +477,8 @@ async function registerAccountDeletionRoutes(app: Router) {
       return res.json({
         ok: true,
         deletionScheduledFor: r.reaperAfter.toISOString(),
-        message: "Account deletion requested. PII has been masked immediately. Full data removal will complete in 30 days. Cancel via POST /api/account/delete-cancel before then.",
+        message:
+          "Account deletion requested. PII has been masked immediately. Full data removal will complete in 30 days. Cancel via POST /api/account/delete-cancel before then.",
       });
     } catch (err) {
       console.error("[Auth] DELETE /api/account error:", err);

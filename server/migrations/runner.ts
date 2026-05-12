@@ -289,6 +289,48 @@ export async function runMigrations(opts: RunnerOptions = {}): Promise<{ applied
   }
 }
 
+/**
+ * Seal #7 / F10.1 pass-4 — boot-time schema-floor verification.
+ *
+ * Used by `server/index.ts` when `BOOT_AUTO_MIGRATE=false` (multi-instance
+ * deployments where `npm run db:migrate` is part of the deploy pipeline,
+ * not the boot path). Reads `MAX(version)` from `schema_migrations` under
+ * a NON-blocking advisory-lock-free read and throws if the result is less
+ * than `REQUIRED_SCHEMA_VERSION` so the process exits before accepting
+ * traffic. Does NOT mutate schema.
+ */
+export async function verifySchemaFloor(opts: { databaseUrl?: string } = {}): Promise<{ lastVersion: number }> {
+  const pool = new Pool({ connectionString: opts.databaseUrl ?? process.env.DATABASE_URL });
+  const client = await pool.connect();
+  try {
+    // Defensive: ensure the table exists. If a brand-new DB has never had
+    // the runner applied to it, surface a clear error instead of an opaque
+    // "relation does not exist" from MAX(version).
+    const exists = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists",
+    );
+    if (!exists.rows[0]?.exists) {
+      throw new Error(
+        "[Migrations] schema_migrations table does not exist — run `npm run db:migrate` before starting the server.",
+      );
+    }
+    const r = await client.query<{ max: number | null }>(
+      "SELECT MAX(version) AS max FROM schema_migrations",
+    );
+    const lastVersion = Number(r.rows[0]?.max ?? 0);
+    if (lastVersion < REQUIRED_SCHEMA_VERSION) {
+      throw new Error(
+        `[Migrations] DB schema_migrations.max=${lastVersion} < REQUIRED_SCHEMA_VERSION=${REQUIRED_SCHEMA_VERSION}. ` +
+          `Run \`npm run db:migrate\` before starting the server.`,
+      );
+    }
+    return { lastVersion };
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
 /** CLI entry — `npx tsx server/migrations/runner.ts`. */
 if (typeof require !== "undefined" && require.main === module) {
   runMigrations({ exitOnComplete: true })
