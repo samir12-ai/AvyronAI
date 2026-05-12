@@ -76,7 +76,10 @@ interface StatisticalValidationData {
   statusMessage?: string | null;
   claimConfidenceScore?: number;
   evidenceStrength?: number;
-  validationState?: "validated" | "provisional" | "weak" | "rejected";
+  /** Canonical F3 statistical-validation verdict (D3 strict enum). 'unknown'
+   *  is rendered when the field is missing from the snapshot — never silently
+   *  defaulted to 'weak' (Seal #6 / D5). */
+  validationState?: "validated" | "provisional" | "weak" | "rejected" | "unknown";
   assumptionFlags?: string[];
   claimValidations?: ClaimValidation[];
   layerResults?: LayerResult[];
@@ -119,6 +122,10 @@ const STATE_CONFIG: Record<string, { color: string; label: string; icon: keyof t
   provisional: { color: '#F59E0B', label: 'Provisional', icon: 'time' },
   weak: { color: '#EF4444', label: 'Weak', icon: 'warning' },
   rejected: { color: '#DC2626', label: 'Rejected', icon: 'close-circle' },
+  // Seal #6 / D5: explicit "unknown" entry for snapshots missing the canonical
+  // validationState field. Slate (not amber/red) so users see CONTRACT_INCOMPLETE
+  // rather than a fake-amber "Weak" verdict.
+  unknown: { color: '#64748B', label: 'Unknown', icon: 'help-circle' },
 };
 
 const EVIDENCE_TYPE_COLORS: Record<string, string> = {
@@ -451,8 +458,15 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
   const hasData = data?.exists && data.layerResults;
   const confidencePercent = Math.round((data?.claimConfidenceScore || 0) * 100);
   const evidencePercent = Math.round((data?.evidenceStrength || 0) * 100);
-  const validationState = data?.validationState || 'weak';
-  const stateConfig = STATE_CONFIG[validationState] || STATE_CONFIG.weak;
+  // Canonical-truth migration (Seal #6 / D5): never silently default to 'weak'.
+  // Missing canonical `validationState` ⇒ render as 'unknown' so the user
+  // sees CONTRACT_INCOMPLETE instead of fake-amber confidence.
+  const validationState = data?.validationState ?? 'unknown';
+  const stateConfig = STATE_CONFIG[validationState] || STATE_CONFIG.unknown || {
+    label: 'Unknown',
+    color: '#64748B',
+    icon: 'help-circle' as const,
+  };
   const passedLayers = data?.layerResults?.filter(l => l.passed).length || 0;
   const totalLayers = data?.layerResults?.length || 7;
 

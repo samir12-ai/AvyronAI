@@ -17,6 +17,11 @@ import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
 import type { LiveSnapshotEnvelope } from '@/lib/envelope';
 import { EnvelopeBadge } from '@/components/EnvelopeBadge';
+import {
+  colorForIntegrityVerdict,
+  labelForIntegrityVerdict,
+  isCanonicalIntegrityVerdict,
+} from '@/lib/verdict-colors';
 
 interface LayerResult {
   layerName: string;
@@ -32,6 +37,16 @@ interface IntegrityData {
   status?: string;
   statusMessage?: string | null;
   overallIntegrityScore?: number;
+  /**
+   * Canonical F2 verdict (Seal #6 / D2). Authoritative. When present, drives
+   * all status colors and labels.
+   */
+  integrityVerdict?: 'PASS' | 'PARTIAL' | 'FAIL';
+  /**
+   * @deprecated Legacy boolean (D4). Used only as a tiebreaker when canonical
+   * `integrityVerdict` is absent — and even then the helper coerces
+   * `safeToExecute=true` to PARTIAL (amber), never green.
+   */
   safeToExecute?: boolean;
   layerResults?: LayerResult[];
   structuralWarnings?: string[];
@@ -221,9 +236,21 @@ export default function IntegrityEngine({ isActive }: { isActive?: boolean }) {
   }
 
   const hasData = data?.exists && data.layerResults;
-  const safeToExecute = data?.safeToExecute;
   const passedLayers = data?.layerResults?.filter(l => l.passed).length || 0;
   const totalLayers = data?.layerResults?.length || 8;
+
+  // Canonical-truth migration (Seal #6): integrityVerdict is the source of
+  // truth. safeToExecute is a legacy boolean — converted to a verdict-shaped
+  // string so the helper can apply the green-prevention rule.
+  const verdictCanonical = data?.integrityVerdict ?? null;
+  const verdictLegacy = typeof data?.safeToExecute === 'boolean'
+    ? (data.safeToExecute ? 'PASS' : 'FAIL')
+    : null;
+  const verdictColor = colorForIntegrityVerdict(verdictCanonical, verdictLegacy);
+  const verdictLabel = labelForIntegrityVerdict(verdictCanonical, verdictLegacy);
+  const isCanonical = isCanonicalIntegrityVerdict(verdictCanonical);
+  const isPass = verdictLabel === 'PASS';
+  const isFail = verdictLabel === 'FAIL';
 
   return (
     <View style={styles.container}>
@@ -250,9 +277,9 @@ export default function IntegrityEngine({ isActive }: { isActive?: boolean }) {
               <Text style={styles.headerMetaValue}>{passedLayers}/{totalLayers}</Text>
             </View>
             <View style={styles.headerMetaItem}>
-              <Text style={styles.headerMetaLabel}>Status</Text>
-              <Text style={styles.headerMetaValue}>
-                {safeToExecute ? 'SAFE' : 'REVIEW'}
+              <Text style={styles.headerMetaLabel}>Verdict</Text>
+              <Text style={[styles.headerMetaValue, { color: '#fff' }]}>
+                {verdictLabel}{!isCanonical && verdictLegacy ? '*' : ''}
               </Text>
             </View>
           </View>
@@ -267,24 +294,30 @@ export default function IntegrityEngine({ isActive }: { isActive?: boolean }) {
 
       {hasData && (
         <View style={[styles.executionStatus, {
-          backgroundColor: safeToExecute ? '#10B98110' : '#EF444410',
-          borderColor: safeToExecute ? '#10B98130' : '#EF444430',
+          backgroundColor: verdictColor + '10',
+          borderColor: verdictColor + '30',
         }]}>
           <Ionicons
-            name={safeToExecute ? "checkmark-shield" : "alert-circle"}
+            name={isPass ? 'checkmark-shield' : isFail ? 'alert-circle' : 'warning-outline'}
             size={20}
-            color={safeToExecute ? '#10B981' : '#EF4444'}
+            color={verdictColor}
           />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.executionStatusTitle, {
-              color: safeToExecute ? '#10B981' : '#EF4444'
-            }]}>
-              {safeToExecute ? 'Safe to Execute' : 'Review Required'}
+            <Text style={[styles.executionStatusTitle, { color: verdictColor }]}>
+              {isPass
+                ? 'Safe to Execute'
+                : isFail
+                  ? 'Execution Blocked'
+                  : !isCanonical && verdictLegacy
+                    ? 'Verdict Unverified'
+                    : 'Review Required'}
             </Text>
             <Text style={[styles.executionStatusDesc, { color: colors.textSecondary }]}>
-              {safeToExecute
+              {isPass
                 ? 'Strategy is internally consistent and ready for execution engines'
-                : `${totalLayers - passedLayers} validation layer(s) flagged issues that need attention`
+                : !isCanonical && verdictLegacy
+                  ? 'Snapshot predates canonical integrityVerdict — re-run the engine for a trusted verdict'
+                  : `${totalLayers - passedLayers} validation layer(s) flagged issues that need attention`
               }
             </Text>
           </View>

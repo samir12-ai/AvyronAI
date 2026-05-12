@@ -5,7 +5,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRunTruthfulness, type StructuralCheckLite, type TruthfulnessHeadline } from "@/hooks/useRunTruthfulness";
 import { useCampaign } from "@/context/CampaignContext";
+import { colorForIntegrityVerdict } from "@/lib/verdict-colors";
 
+// Per-check status colors (NOT verdict colors). These are operational check
+// states (PASS/FAIL/STALE/TIMEOUT/etc.) emitted by useRunTruthfulness — they
+// are already canonical at the hook boundary and do not have a "legacy"
+// fallback to coerce. Verdict-shaped fields (verdict.verdict, headline) go
+// through `colorForIntegrityVerdict` instead.
 const STATUS_COLORS: Record<string, string> = {
   PASS: "#85BB65",
   FAIL: "#FF6B6B",
@@ -88,10 +94,27 @@ export default function AuditControlScreen() {
   const textPrimary = isDark ? "#E8EDF2" : "#1A2332";
   const textSec = isDark ? "#8892A4" : "#546478";
 
-  const headlineColor =
-    data?.headline === "ok" ? "#85BB65" :
-    data?.headline === "shadowed" || data?.headline === "downgrade" || data?.headline === "review_required" || data?.headline === "no_run" ? "#FFB347" :
-    "#FF6B6B";
+  // Seal #6: derive the headline color from the canonical integrity verdict
+  // (`data.verdict.verdict`) when present, mapping the headline to a verdict
+  // shape only as a fall-through. This keeps the audit screen consistent
+  // with every other verdict-rendering surface and prevents a green pixel
+  // for any non-PASS verdict.
+  const headlineToVerdict: Record<string, 'PASS' | 'PARTIAL' | 'FAIL'> = {
+    ok: 'PASS',
+    shadowed: 'PARTIAL',
+    downgrade: 'PARTIAL',
+    review_required: 'PARTIAL',
+    no_run: 'PARTIAL',
+    needs_reconciliation: 'PARTIAL',
+    repair: 'PARTIAL',
+    system_untrusted: 'FAIL',
+    blocked: 'FAIL',
+  };
+  const canonicalVerdict =
+    (data as any)?.verdict?.verdict ??
+    ((data as any)?.integrityVerdict ?? null);
+  const legacyVerdict = data?.headline ? headlineToVerdict[data.headline] ?? null : null;
+  const headlineColor = colorForIntegrityVerdict(canonicalVerdict, legacyVerdict);
 
   return (
     <View style={{ flex: 1, backgroundColor: bg }}>

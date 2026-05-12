@@ -10,6 +10,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, authFetch } from '@/lib/query-client';
+import {
+  colorForIntegrityVerdict,
+  labelForIntegrityVerdict,
+  isCanonicalIntegrityVerdict,
+} from '@/lib/verdict-colors';
 
 interface EngineCheck {
   engineId: string;
@@ -35,6 +40,16 @@ interface AlignmentCheck {
 interface IntegrityReport {
   reportId: string;
   timestamp: string;
+  /**
+   * Canonical F2 integrity verdict (Seal #6 / D2). Authoritative when present.
+   * Server should emit this on every new report.
+   */
+  integrityVerdict?: 'PASS' | 'PARTIAL' | 'FAIL';
+  /**
+   * @deprecated Legacy field — historical/migration only (D4). When canonical
+   * `integrityVerdict` is missing, this is rendered as PARTIAL even if it says
+   * PASS, so a pre-canonical snapshot can never paint the UI green.
+   */
   overallStatus: 'PASS' | 'FAIL' | 'PARTIAL';
   engineChecks: EngineCheck[];
   crossEngineAlignment: AlignmentCheck[];
@@ -53,6 +68,7 @@ function StatusBadge({ status, isDark }: { status: string; isDark: boolean }) {
     PASS: { bg: '#22c55e20', text: '#22c55e' },
     FAIL: { bg: '#ef444420', text: '#ef4444' },
     PARTIAL: { bg: '#f59e0b20', text: '#f59e0b' },
+    UNKNOWN: { bg: isDark ? '#33333340' : '#e5e7eb40', text: isDark ? '#888' : '#999' },
     SKIPPED: { bg: isDark ? '#33333340' : '#e5e7eb40', text: isDark ? '#888' : '#999' },
     BLOCKED: { bg: '#ef444410', text: '#f87171' },
   };
@@ -60,6 +76,19 @@ function StatusBadge({ status, isDark }: { status: string; isDark: boolean }) {
   return (
     <View style={[s.badge, { backgroundColor: c.bg }]}>
       <Text style={[s.badgeText, { color: c.text }]}>{status}</Text>
+    </View>
+  );
+}
+
+function VerdictBadge({ canonical, legacy }: { canonical?: string | null; legacy?: string | null }) {
+  const color = colorForIntegrityVerdict(canonical, legacy);
+  const label = labelForIntegrityVerdict(canonical, legacy);
+  const isCanonical = isCanonicalIntegrityVerdict(canonical);
+  return (
+    <View style={[s.badge, { backgroundColor: color + '20' }]}>
+      <Text style={[s.badgeText, { color }]}>
+        {label}{!isCanonical && (canonical || legacy) ? '*' : ''}
+      </Text>
     </View>
   );
 }
@@ -174,10 +203,16 @@ export default function SystemIntegrityPanel() {
       .finally(() => setLoading(false));
   }, [activeCampaignId]);
 
-  const statusIcon = report?.overallStatus === 'PASS' ? 'shield-checkmark' :
-    report?.overallStatus === 'PARTIAL' ? 'warning' : 'shield';
-  const statusColor = report?.overallStatus === 'PASS' ? '#22c55e' :
-    report?.overallStatus === 'PARTIAL' ? '#f59e0b' : '#ef4444';
+  // Canonical-truth migration (Seal #6): read `integrityVerdict` first; legacy
+  // `overallStatus` is consulted only when canonical is absent and is coerced
+  // to PARTIAL (never PASS) by the verdict-colors helper.
+  const verdictCanonical = report?.integrityVerdict ?? null;
+  const verdictLegacy = report?.overallStatus ?? null;
+  const isCanonical = isCanonicalIntegrityVerdict(verdictCanonical);
+  const verdictLabel = labelForIntegrityVerdict(verdictCanonical, verdictLegacy);
+  const statusColor = colorForIntegrityVerdict(verdictCanonical, verdictLegacy);
+  const statusIcon = verdictLabel === 'PASS' ? 'shield-checkmark' :
+    verdictLabel === 'PARTIAL' ? 'warning' : 'shield';
 
   return (
     <View style={[s.container, { backgroundColor: bg, borderColor: border }]}>
@@ -185,7 +220,10 @@ export default function SystemIntegrityPanel() {
         <View style={s.headerLeft}>
           <Ionicons name="shield-checkmark-outline" size={18} color={report ? statusColor : muted} />
           <Text style={[s.title, { color: text }]}>System Integrity</Text>
-          {report && <StatusBadge status={report.overallStatus} isDark={isDark} />}
+          {report && <VerdictBadge canonical={verdictCanonical} legacy={verdictLegacy} />}
+          {report && !isCanonical && (verdictCanonical || verdictLegacy) && (
+            <Text style={[s.caveat, { color: muted }]}>legacy snapshot</Text>
+          )}
         </View>
         <Ionicons name={collapsed ? 'chevron-down' : 'chevron-up'} size={16} color={muted} />
       </Pressable>
@@ -300,4 +338,5 @@ const s = StyleSheet.create({
   failureText: { fontSize: 11, marginBottom: 4, paddingLeft: 4 },
   emptyText: { fontSize: 13, textAlign: 'center', paddingVertical: 20 },
   errorText: { fontSize: 13, textAlign: 'center', paddingVertical: 10 },
+  caveat: { fontSize: 10, fontStyle: 'italic' as const, marginLeft: 4 },
 });

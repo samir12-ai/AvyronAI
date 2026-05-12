@@ -16,6 +16,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
+import {
+  colorForExecutionStatus,
+  labelForExecutionStatus,
+  isCanonicalExecutionStatus,
+} from '@/lib/verdict-colors';
 import PlanDocumentView from '@/components/PlanDocumentView';
 import EngineTableModal from '@/components/EngineTableModal';
 
@@ -53,6 +58,15 @@ const P = {
 interface EngineSection {
   id: string;
   name: string;
+  /**
+   * Canonical F1 execution status (Seal #6 / D2). Authoritative when present.
+   * One of: COMPLETED | PARTIAL | BLOCKED | BLOCKED_BY_INTEGRITY | NEEDS_INPUT | ERROR | PENDING.
+   */
+  executionStatus?: string | null;
+  /**
+   * @deprecated Legacy free-form status (D4). Kept as a fall-through for
+   * pre-canonical snapshots. Legacy SUCCESS is rendered amber, never green.
+   */
   status: string;
   summary?: string | null;
 }
@@ -192,9 +206,12 @@ const ENGINE_ORDER = [
 ];
 
 function EngineRow({
-  id, name, status, index, isRunning, runningIdx, isDark, summary,
+  id, name, status, executionStatus, index, isRunning, runningIdx, isDark, summary,
 }: {
-  id: string; name: string; status: string; index: number;
+  id: string; name: string; status: string;
+  /** Canonical F1 execution status (Seal #6). Drives color/icon when present. */
+  executionStatus?: string | null;
+  index: number;
   isRunning: boolean; runningIdx: number; isDark: boolean; summary?: string | null;
 }) {
   const meta = ENGINE_META[id] || { icon: 'cube-outline' as any, color: P.blue, shortName: name };
@@ -225,6 +242,12 @@ function EngineRow({
   let statusLabel = 'Pending';
   let statusIcon: keyof typeof Ionicons.glyphMap = 'ellipse-outline';
 
+  // Seal #6 / Task #24: route every "done" pixel through the canonical helper.
+  // Legacy SUCCESS without canonical executionStatus → amber 'Done*' (never
+  // green). Pipeline-specific tags (DEPTH_FAILED / DEPTH_CASCADE_BLOCKED /
+  // SIGNAL_INSUFFICIENT) keep their amber/coral semantics — they are NOT
+  // legacy-success aliases.
+  const isCanonical = isCanonicalExecutionStatus(executionStatus);
   if (isCurrentlyRunning) {
     statusColor = P.blue;
     statusLabel = 'Running';
@@ -233,15 +256,11 @@ function EngineRow({
     statusColor = textMuted;
     statusLabel = 'Queued';
     statusIcon = 'time-outline';
-  } else if (status === 'SUCCESS') {
-    statusColor = P.green;
-    statusLabel = 'Done';
-    statusIcon = 'checkmark-circle';
-  } else if (status === 'FAILED' || status === 'DEPTH_FAILED') {
+  } else if (status === 'DEPTH_FAILED') {
     statusColor = P.coral;
     statusLabel = 'Failed';
     statusIcon = 'close-circle';
-  } else if (status === 'BLOCKED' || status === 'DEPTH_CASCADE_BLOCKED') {
+  } else if (status === 'DEPTH_CASCADE_BLOCKED') {
     statusColor = P.amber;
     statusLabel = 'Blocked';
     statusIcon = 'alert-circle-outline';
@@ -249,13 +268,34 @@ function EngineRow({
     statusColor = P.amber;
     statusLabel = 'Low Signal';
     statusIcon = 'warning-outline';
-  } else if (status) {
-    statusColor = P.teal;
-    statusLabel = 'Complete';
-    statusIcon = 'checkmark-done-circle-outline';
+  } else if (executionStatus || status) {
+    statusColor = colorForExecutionStatus(executionStatus, status);
+    const baseLabel = labelForExecutionStatus(executionStatus, status);
+    // Map enum → user-friendly verb
+    if (isCanonical && executionStatus === 'COMPLETED') {
+      statusLabel = 'Done';
+      statusIcon = 'checkmark-circle';
+    } else if (baseLabel === 'PARTIAL') {
+      statusLabel = isCanonical ? 'Partial' : 'Done*';
+      statusIcon = 'warning-outline';
+    } else if (baseLabel === 'BLOCKED' || baseLabel === 'BLOCKED_BY_INTEGRITY') {
+      statusLabel = 'Blocked';
+      statusIcon = 'remove-circle';
+    } else if (baseLabel === 'ERROR' || baseLabel === 'FAILED' || baseLabel === 'FAILURE') {
+      statusLabel = 'Failed';
+      statusIcon = 'close-circle';
+    } else if (baseLabel === 'PENDING' || baseLabel === 'NEEDS_INPUT') {
+      statusLabel = baseLabel === 'PENDING' ? 'Queued' : 'Needs Input';
+      statusIcon = 'time-outline';
+    } else {
+      statusLabel = baseLabel;
+      statusIcon = 'ellipse-outline';
+    }
   }
 
-  const terminalSuccess = ['SUCCESS', 'COMPLETED', 'COMPLETE'].includes(status.toUpperCase());
+  // "Terminal success" (gates summary visibility) requires CANONICAL COMPLETED.
+  // Legacy SUCCESS no longer earns a summary preview — D4 enforcement.
+  const terminalSuccess = isCanonical && executionStatus === 'COMPLETED';
   const showSummary = !isRunning && !isPending && !!summary && terminalSuccess;
 
   return (
@@ -433,8 +473,20 @@ export default function OrchestratorPanel() {
   const sectionMap: Record<string, EngineSection> = {};
   for (const s2 of sections) sectionMap[s2.id] = s2;
 
-  const completedCount = sections.filter(s2 => s2.status === 'SUCCESS').length;
-  const failedCount = sections.filter(s2 => s2.status !== 'SUCCESS').length;
+  // Seal #6 / D4: only canonical COMPLETED earns "completed". Legacy SUCCESS
+  // is no longer counted — a pre-canonical snapshot cannot inflate the
+  // pass-rate. Failed = anything that's NOT canonical-COMPLETED AND has SOME
+  // status emitted (so unstarted PENDING rows aren't counted as failed).
+  const completedCount = sections.filter(
+    s2 => isCanonicalExecutionStatus(s2.executionStatus) && s2.executionStatus === 'COMPLETED',
+  ).length;
+  const failedCount = sections.filter(s2 => {
+    const canonical = isCanonicalExecutionStatus(s2.executionStatus);
+    if (canonical && s2.executionStatus === 'COMPLETED') return false;
+    if (canonical && s2.executionStatus === 'PENDING') return false;
+    if (!canonical && (!s2.status || s2.status === 'PENDING')) return false;
+    return true;
+  }).length;
 
   const runningIdx = running
     ? Math.min(
@@ -1236,12 +1288,19 @@ export default function OrchestratorPanel() {
           {ENGINE_ORDER.map((engineId, idx) => {
             const sec = sectionMap[engineId];
             const name = sec?.name || (ENGINE_META[engineId]?.shortName) || engineId;
-            const status = sec?.status || (running && runningIdx > idx ? 'SUCCESS' : '');
+            // Seal #6: in-flight rows that have already been passed by the
+            // running cursor get the CANONICAL COMPLETED placeholder — not
+            // legacy 'SUCCESS' — so their pixels go through the canonical
+            // green path. Real backend sections override via `sec?.executionStatus`.
+            const status = sec?.status || (running && runningIdx > idx ? 'COMPLETED' : '');
+            const executionStatus = sec?.executionStatus
+              ?? (running && runningIdx > idx ? 'COMPLETED' : null);
             return (
               <EngineRow
                 key={engineId}
                 id={engineId}
                 name={name}
+                executionStatus={executionStatus}
                 status={status}
                 index={idx}
                 isRunning={running}

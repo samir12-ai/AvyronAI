@@ -2062,23 +2062,34 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
         iteration: 'Iteration Engine',
         retention: 'Retention Engine',
       };
+      // Seal #6 / Task #24: canonical executionStatus enum drives colors.
+      // Legacy SUCCESS / COMPLETE are coerced to amber (PARTIAL semantic) —
+      // they appear here only to keep pre-canonical snapshots renderable
+      // without flashing green. D4: legacy fields cannot satisfy the canonical
+      // contract.
       const sectionColors: Record<string, string> = {
         PENDING: '#6B7280',
         RUNNING: '#3B82F6',
-        SUCCESS: '#10B981',
+        COMPLETED: '#10B981', // canonical only
+        SUCCESS: '#F59E0B',   // legacy → amber, never green
+        COMPLETE: '#F59E0B',  // legacy → amber, never green
         PARTIAL: '#F59E0B',
         ERROR: '#EF4444',
         BLOCKED: '#EF4444',
+        BLOCKED_BY_INTEGRITY: '#EF4444',
         SKIPPED: '#9CA3AF',
         NEEDS_INPUT: '#F59E0B',
       };
       const sectionIcons: Record<string, string> = {
         PENDING: 'ellipse-outline',
         RUNNING: 'sync',
-        SUCCESS: 'checkmark-circle',
+        COMPLETED: 'checkmark-circle',
+        SUCCESS: 'alert-circle-outline',  // legacy → warning icon
+        COMPLETE: 'alert-circle-outline', // legacy → warning icon
         PARTIAL: 'alert-circle-outline',
         ERROR: 'close-circle',
         BLOCKED: 'ban',
+        BLOCKED_BY_INTEGRITY: 'ban',
         SKIPPED: 'remove-circle-outline',
         NEEDS_INPUT: 'pause-circle',
       };

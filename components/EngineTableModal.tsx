@@ -12,6 +12,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getApiUrl, authFetch } from '@/lib/query-client';
+import {
+  colorForExecutionStatus,
+  labelForExecutionStatus,
+  isCanonicalExecutionStatus,
+} from '@/lib/verdict-colors';
 
 const P = {
   green: '#10B981',
@@ -67,6 +72,9 @@ interface Props {
 interface EngineEntry {
   id: string;
   name: string;
+  /** Canonical F1 execution status from `executionStatus`. May fall through to legacy `status`. */
+  executionStatus?: string | null;
+  /** @deprecated Legacy free-form status (D4). */
   status: string;
   durationMs?: number;
   confidence?: number;
@@ -74,13 +82,42 @@ interface EngineEntry {
   summary?: string | null;
 }
 
-function statusIcon(status: string): { name: keyof typeof Ionicons.glyphMap; color: string } {
-  const s = (status || '').toUpperCase();
-  if (s === 'SUCCESS' || s === 'COMPLETED' || s === 'COMPLETE') return { name: 'checkmark-circle', color: '#10B981' };
-  if (s.includes('FAIL') || s === 'ERROR') return { name: 'close-circle', color: '#F43F5E' };
-  if (s === 'SKIPPED') return { name: 'remove-circle-outline', color: '#8892A4' };
-  if (s === 'RUNNING' || s === 'IN_PROGRESS') return { name: 'hourglass-outline', color: '#F59E0B' };
-  return { name: 'ellipse-outline', color: '#8892A4' };
+/**
+ * Status icon driven by canonical executionStatus enum (Seal #6).
+ * Legacy SUCCESS/COMPLETE map to amber (PARTIAL) — never green — so a
+ * pre-canonical snapshot cannot fake success.
+ */
+function statusIcon(canonical?: string | null, legacy?: string): { name: keyof typeof Ionicons.glyphMap; color: string } {
+  const color = colorForExecutionStatus(canonical, legacy);
+  const enumStatus = isCanonicalExecutionStatus(canonical) ? canonical! : (legacy || '').toUpperCase();
+  switch (enumStatus) {
+    case 'COMPLETED':
+      return { name: 'checkmark-circle', color };
+    case 'PARTIAL':
+    case 'NEEDS_INPUT':
+      return { name: 'warning-outline', color };
+    case 'PENDING':
+      return { name: 'ellipse-outline', color };
+    case 'BLOCKED':
+    case 'BLOCKED_BY_INTEGRITY':
+      return { name: 'remove-circle', color };
+    case 'ERROR':
+      return { name: 'close-circle', color };
+    case 'SUCCESS':
+    case 'COMPLETE':
+      // Legacy binary success → amber (never green).
+      return { name: 'warning-outline', color };
+    case 'FAILED':
+    case 'FAILURE':
+      return { name: 'close-circle', color };
+    case 'SKIPPED':
+      return { name: 'remove-circle-outline', color };
+    case 'RUNNING':
+    case 'IN_PROGRESS':
+      return { name: 'hourglass-outline', color: '#F59E0B' };
+    default:
+      return { name: 'ellipse-outline', color };
+  }
 }
 
 function gradeColor(grade?: string): string {
@@ -97,7 +134,10 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
   const isDark = useColorScheme() === 'dark';
   const [engines, setEngines] = useState<EngineEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [overallStatus, setOverallStatus] = useState('');
+  // Canonical execution status (Seal #6 / D2). The legacy `status` is kept
+  // as a fall-through ONLY for snapshots that predate the canonical field.
+  const [executionStatus, setExecutionStatus] = useState<string | null>(null);
+  const [legacyStatus, setLegacyStatus] = useState<string>('');
   const [totalDuration, setTotalDuration] = useState(0);
 
   const textPrimary = isDark ? '#E8EDF2' : '#1A2332';
@@ -126,6 +166,7 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
           return {
             id: engineId,
             name: ENGINE_META[engineId]?.shortName || engineId,
+            executionStatus: found?.executionStatus ?? null,
             status: found?.status || 'PENDING',
             durationMs: found?.durationMs || found?.duration,
             confidence: found?.confidence,
@@ -134,14 +175,20 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
           };
         });
         setEngines(mapped);
-        setOverallStatus(data?.status || '');
+        setExecutionStatus(data?.executionStatus ?? null);
+        setLegacyStatus(data?.status || '');
         setTotalDuration(data?.durationMs || 0);
       })
       .catch(() => setEngines([]))
       .finally(() => setLoading(false));
   }, [visible, campaignId]);
 
-  const successCount = engines.filter(e => ['SUCCESS', 'COMPLETED', 'COMPLETE'].includes(e.status.toUpperCase())).length;
+  // Count only canonical COMPLETED — legacy SUCCESS no longer earns "completed"
+  // status here (D4: legacy fields cannot satisfy live decisions / counters).
+  const completedCount = engines.filter(e => isCanonicalExecutionStatus(e.executionStatus) && e.executionStatus === 'COMPLETED').length;
+  const overallLabel = labelForExecutionStatus(executionStatus, legacyStatus);
+  const overallColor = colorForExecutionStatus(executionStatus, legacyStatus);
+  const overallCanonical = isCanonicalExecutionStatus(executionStatus);
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
@@ -150,9 +197,14 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
           <View style={{ flex: 1 }}>
             <Text style={[s.title, { color: textPrimary }]}>Engine Status Table</Text>
             <Text style={[s.subtitle, { color: textSec }]}>
-              {successCount}/{engines.length} engines completed
+              {completedCount}/{engines.length} engines completed
               {totalDuration > 0 ? ` · ${(totalDuration / 1000).toFixed(1)}s` : ''}
             </Text>
+            {(executionStatus || legacyStatus) && (
+              <Text style={[s.subtitle, { color: overallColor, marginTop: 2 }]}>
+                {overallLabel}{!overallCanonical && legacyStatus ? ' (legacy snapshot)' : ''}
+              </Text>
+            )}
           </View>
           <Pressable onPress={onClose} style={[s.closeBtn, { backgroundColor: isDark ? '#1A2030' : '#F0F0F5' }]}>
             <Ionicons name="close" size={20} color={textSec} />
@@ -173,8 +225,11 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
             </View>
             {engines.map((engine, idx) => {
               const meta = ENGINE_META[engine.id] || { icon: 'cube-outline' as any, color: P.blue, shortName: engine.name };
-              const si = statusIcon(engine.status);
-              const isComplete = engine.status === 'SUCCESS' || engine.status === 'COMPLETED' || engine.status === 'COMPLETE';
+              const si = statusIcon(engine.executionStatus, engine.status);
+              // "Complete" = canonical COMPLETED only. Legacy SUCCESS is shown
+              // as PARTIAL via the verdict-colors helper.
+              const isComplete = isCanonicalExecutionStatus(engine.executionStatus) && engine.executionStatus === 'COMPLETED';
+              const rowLabel = labelForExecutionStatus(engine.executionStatus, engine.status);
               return (
                 <View key={engine.id} style={[s.row, { backgroundColor: cardBg, borderColor, flexDirection: 'column', alignItems: 'stretch', gap: 0 }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -188,7 +243,7 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
                     <View style={[s.colStatus, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
                       <Ionicons name={si.name} size={14} color={si.color} />
                       <Text style={[s.statusText, { color: si.color }]} numberOfLines={1}>
-                        {isComplete ? 'OK' : engine.status}
+                        {isComplete ? 'OK' : rowLabel}
                       </Text>
                     </View>
                     <Text style={[s.colTime, { color: textSec }]}>
