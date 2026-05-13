@@ -68,6 +68,16 @@ const OFFENDERS: Array<{ label: string; code: string; messageId: string }> = [
   { label: "pass-3 — alias suffix `validationState`", code: `const validationState = a || b;`, messageId: "semanticFallbackAlias" },
   { label: "pass-3 — alias suffix `decisionAction`", code: `const decisionAction = a ?? b;`, messageId: "semanticFallbackAlias" },
   { label: "pass-3 — destructured suffix `budgetAction`", code: `const { budgetAction = "halt" } = obj;`, messageId: "semanticFallbackDestructured" },
+  // Pass-4 final — un-anchored F10.3 vocabulary: rename-to-evade loophole.
+  // Non-suffix identifiers containing a verdict-shape token MUST also fire,
+  // otherwise `const statusLabel = a || b` silently substitutes a generic
+  // canonical-field read.
+  { label: "pass-4 — alias non-suffix `statusLabel`", code: `const statusLabel = a || b;`, messageId: "semanticFallbackAlias" },
+  { label: "pass-4 — alias non-suffix `actionValue`", code: `const actionValue = a ?? b;`, messageId: "semanticFallbackAlias" },
+  { label: "pass-4 — alias mid-token `outcomeText`", code: `const outcomeText = a || b;`, messageId: "semanticFallbackAlias" },
+  { label: "pass-4 — alias prefix `verdictRecord`", code: `const verdictRecord = a ?? b;`, messageId: "semanticFallbackAlias" },
+  { label: "pass-4 — destructured non-suffix `statusLabel`", code: `const { statusLabel = "x" } = obj;`, messageId: "semanticFallbackDestructured" },
+  { label: "pass-4 — destructured prefix `actionPlan`", code: `const { actionPlan = "noop" } = obj;`, messageId: "semanticFallbackDestructured" },
 ];
 
 for (const off of OFFENDERS) {
@@ -98,6 +108,12 @@ const CLEAN: Array<{ label: string; code: string }> = [
   // now in OFFENDERS — see additions above.
   { label: "pass-3 clean — benign suffix collision `firstName`", code: `const firstName = a || "anon";` },
   { label: "pass-3 clean — benign suffix collision `myCounter`", code: `const myCounter = a || 0;` },
+  // Pass-4 clean — un-anchored regex MUST stay silent on identifiers that
+  // contain none of (status|verdict|outcome|state|action) tokens, even when
+  // the assignment is a logical-fallback expression.
+  { label: "pass-4 clean — `description` (no verdict-shape token)", code: `const description = a || "n/a";` },
+  { label: "pass-4 clean — `displayLabel` (no verdict-shape token)", code: `const displayLabel = a ?? "—";` },
+  { label: "pass-4 clean — destructured `description` with default", code: `const { description = "n/a" } = obj;` },
 ];
 
 for (const c of CLEAN) {
