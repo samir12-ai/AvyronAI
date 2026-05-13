@@ -121,3 +121,86 @@ describe("Seal #10 / F8.3 — optimistic locking CAS semantics", () => {
     expect(rows[0].data).toBe("v3");
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// Pass-5 architect-required binding tests — import + assert against the
+// REAL production functions, not local mirror models. Closes the
+// "tests mirror local logic" finding.
+// ───────────────────────────────────────────────────────────────────────────
+import { checkMiGateRejections, checkAnalyticalEnrichmentIntegrity, collectBlockReasons } from "../system-control/structural-checks";
+import { countAelDownstreamConsumers } from "../orchestrator/index";
+
+describe("Seal #10 / pass-5 — checkMiGateRejections (production binding)", () => {
+  it("PASSes when no MI rejections recorded", () => {
+    const r = checkMiGateRejections(undefined, new Map());
+    expect(r.status).toBe("PASS");
+    expect(r.check).toBe("mi_gate_integrity");
+  });
+
+  it("PASSes when rejections exist but no engine ran (recovery resume)", () => {
+    const r = checkMiGateRejections(
+      [{ engineId: "positioning", reason: "MI_FRESHNESS_STALE", detail: "x" }],
+      new Map([["positioning", { status: "SKIPPED" }]]),
+    );
+    expect(r.status).toBe("PASS");
+  });
+
+  it("FAILs with BLOCK: prefix when rejections exist AND engines ran", () => {
+    const r = checkMiGateRejections(
+      [
+        { engineId: "positioning", reason: "MI_FRESHNESS_STALE", detail: "stale snapshot" },
+        { engineId: "offer", reason: "MI_LINEAGE_MISMATCH", detail: "cross-run" },
+      ],
+      new Map([["positioning", { status: "COMPLETED" }]]),
+    );
+    expect(r.status).toBe("FAIL");
+    expect(r.details.startsWith("BLOCK:")).toBe(true);
+    expect(r.details).toContain("MI_FRESHNESS_STALE");
+  });
+
+  it("collectBlockReasons promotes mi_gate_integrity BLOCK: to MI_GATE_REJECTED", () => {
+    const fail = checkMiGateRejections(
+      [{ engineId: "positioning", reason: "MI_FRESHNESS_STALE", detail: "x" }],
+      new Map([["positioning", { status: "COMPLETED" }]]),
+    );
+    const blocks = collectBlockReasons([fail], new Map() as any);
+    const mi = blocks.find((b) => b.code === "MI_GATE_REJECTED");
+    expect(mi).toBeDefined();
+    expect(mi?.severity).toBe("critical");
+  });
+});
+
+describe("Seal #10 / pass-5 — countAelDownstreamConsumers (production binding)", () => {
+  it("returns 0 when isPartial=false even with strategy engines in results", () => {
+    const results = new Map<string, { status: string }>([
+      ["positioning", { status: "COMPLETED" }],
+      ["offer", { status: "COMPLETED" }],
+    ]);
+    expect(countAelDownstreamConsumers(results, false)).toBe(0);
+  });
+
+  it("counts non-SKIPPED AEL consumers when isPartial=true", () => {
+    const results = new Map<string, { status: string }>([
+      ["market_intelligence", { status: "COMPLETED" }],
+      ["audience_engine", { status: "COMPLETED" }],
+      ["positioning", { status: "COMPLETED" }],
+      ["offer", { status: "COMPLETED" }],
+      ["funnel", { status: "SKIPPED" }],
+      ["build_plan_layer", { status: "COMPLETED" }],
+    ]);
+    expect(countAelDownstreamConsumers(results, true)).toBe(3);
+  });
+
+  it("AEL partial+consumers wires through checkAnalyticalEnrichmentIntegrity to BLOCK:", () => {
+    const consumers = countAelDownstreamConsumers(
+      new Map([["positioning", { status: "COMPLETED" }]]),
+      true,
+    );
+    expect(consumers).toBe(1);
+    const r = checkAnalyticalEnrichmentIntegrity(true, "EMPTY_ANALYTICAL_PACKAGE", consumers);
+    expect(r.status).toBe("FAIL");
+    expect(r.details.startsWith("BLOCK:")).toBe(true);
+    const blocks = collectBlockReasons([r], new Map() as any);
+    expect(blocks.find((b) => b.code === "ANALYTICAL_ENRICHMENT_BLOCKED")).toBeDefined();
+  });
+});

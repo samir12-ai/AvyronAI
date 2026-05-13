@@ -33,6 +33,7 @@ import {
   checkConfidenceSpread,
   checkBudgetOverrideZeroConfidence,
   checkAnalyticalEnrichmentIntegrity,
+  checkMiGateRejections,
   checkSignalLineageUnknown,
   checkConfidenceIntegrity,
   collectBlockReasons,
@@ -96,6 +97,9 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     input.analyticalEnrichmentDownstreamConsumers ?? 0,
   ));
   structuralChecks.push(checkSignalLineageUnknown(input.signalComposition));
+  // Seal #10 / Task #28 / pass-5 — MI gate rejection structural check.
+  // Forbids silent "rejected MI → empty MI" coercion for live decisions.
+  structuralChecks.push(checkMiGateRejections(input.miGateRejections, input.results));
   structuralChecks.push(checkConfidenceIntegrity(
     input.confidenceIntegrityVerdict,
     input.confidenceIntegrityCriticalAbsent,

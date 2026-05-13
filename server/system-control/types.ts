@@ -386,6 +386,17 @@ export interface SystemControlInput {
    */
   analyticalEnrichmentDownstreamConsumers?: number;
   /**
+   * Seal #10 / Task #28 / pass-5 — list of MI-snapshot gate rejections
+   * collected during the run by `extractMiInput`. Each entry carries the
+   * reason (`MI_ENVELOPE_INVALID` | `MI_FRESHNESS_*` | `MI_LINEAGE_MISMATCH`
+   * | `MI_OUTPUT_MISSING`) plus the engineId that attempted the read. When
+   * non-empty AND any AEL-consumer engine ran, `checkMiGateRejections`
+   * raises a structural BLOCK so the verdict cannot silently reduce to
+   * "empty MI" execution. Pass-5 closure of the architect's "MI gate
+   * routing is incomplete" finding.
+   */
+  miGateRejections?: { engineId: string; reason: string; detail: string }[];
+  /**
    * T1.A (Runtime Truth Track) — pre-aggregated lineage observations from
    * the orchestrator's signal-composition build pass. When `unknownRatio` is
    * present and exceeds the lineage threshold, System Control surfaces it as

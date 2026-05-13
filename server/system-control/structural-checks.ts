@@ -1030,6 +1030,20 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
           });
         }
         break;
+      // Seal #10 / Task #28 / pass-5 — MI gate rejection block mapping.
+      // checkMiGateRejections emits a "BLOCK:"-prefixed FAIL when MI was
+      // rejected during the run AND consumer engines ran. Promote here so
+      // the verdict cannot pass with silently-substituted empty MI.
+      case "mi_gate_integrity":
+        if (check.details.startsWith("BLOCK:")) {
+          blocks.push({
+            code: "MI_GATE_REJECTED",
+            description: check.details,
+            source: "market_intelligence",
+            severity: "critical",
+          });
+        }
+        break;
     }
   }
 
@@ -1043,6 +1057,40 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
 // `HIGH_UNKNOWN_RATIO` console.warn) as structural verdicts so System
 // Control can drive a deterministic execution-mode downgrade.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Seal #10 / Task #28 / pass-5 — MI gate rejection structural check.
+ *
+ * `extractMiInput` collects every MI snapshot rejection (envelope invalid,
+ * freshness fail, lineage mismatch, missing output) into
+ * `ctx.miGateRejections`. When any rejection occurred AND at least one
+ * engine consumed MI during the run, this check raises a hard BLOCK so the
+ * verdict layer cannot silently downgrade to "empty MI" execution. When
+ * the run never read MI (rejections without consumers) we return PASS so
+ * the run can continue (e.g. a recovery resume that skipped strategy).
+ */
+export function checkMiGateRejections(
+  rejections: { engineId: string; reason: string; detail: string }[] | undefined,
+  results: Map<string, { status: string }>,
+): StructuralCheck {
+  if (!rejections || rejections.length === 0) {
+    return pass("mi_gate_integrity", "no MI gate rejections recorded");
+  }
+  // If any strategic engine actually executed, MI rejection means it ran
+  // with empty MI — that is the silent-degrade we are forbidding.
+  const anyConsumed = Array.from(results.values()).some((r) => r.status !== "SKIPPED");
+  if (!anyConsumed) {
+    return pass(
+      "mi_gate_integrity",
+      `MI rejected ${rejections.length}x but no engines consumed MI — no silent degrade risk`,
+    );
+  }
+  const summary = rejections.slice(0, 3).map((r) => `${r.engineId}:${r.reason}`).join(",");
+  return fail(
+    "mi_gate_integrity",
+    `BLOCK: MI snapshot was rejected ${rejections.length}x by extractMiInput (${summary}) and ${results.size} engine(s) ran — refusing to silently substitute empty MI for live decisions`,
+  );
+}
 
 /**
  * T3.B — AEL partial-build gate. When the analytical-enrichment package was

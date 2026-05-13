@@ -236,6 +236,54 @@ interface EngineContext {
   signalComposition?: SignalComposition;
   performanceLineage?: SignalLineageEntry[];
   inputHashes?: Record<string, string>;
+  // Seal #10 / Task #28 / pass-5 — collected MI gate rejections during this
+  // run. Each entry is pushed by `extractMiInput` when the MI envelope is
+  // incomplete, freshness-failed, or lineage-mismatched. Surfaced into
+  // System Control's `miGateRejections` input so the structural check can
+  // BLOCK execution rather than silently coercing to empty MI.
+  miGateRejections?: { engineId: string; reason: string; detail: string }[];
+}
+
+// Seal #10 / Task #28 / pass-5 — list of strategic engines whose runtime
+// reads `ctx.analyticalEnrichment`. Used post-engine-loop to count how many
+// downstream consumers actually executed AFTER AEL emitted a partial
+// package. Sourced by enumerating every `ctx.analyticalEnrichment` reader
+// in this file (positioning, differentiation, mechanism, offer, funnel,
+// persuasion, integrity, awareness, channel-selection, budget-governor,
+// iteration, retention, build-plan-layer).
+const AEL_CONSUMER_ENGINES: string[] = [
+  "positioning",
+  "differentiation",
+  "mechanism",
+  "offer",
+  "funnel",
+  "persuasion",
+  "integrity",
+  "awareness",
+  "channel-selection",
+  "channel_selection",
+  "budget-governor",
+  "budget_governor",
+  "iteration",
+  "iteration-engine",
+  "retention",
+  "retention-engine",
+  "build-plan-layer",
+  "build_plan_layer",
+];
+
+export function countAelDownstreamConsumers(
+  results: Map<string, { status: string }>,
+  isPartial: boolean,
+): number {
+  if (!isPartial) return 0;
+  let n = 0;
+  for (const [id, r] of results) {
+    if (!AEL_CONSUMER_ENGINES.includes(id)) continue;
+    if (r.status === "SKIPPED") continue;
+    n++;
+  }
+  return n;
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -431,14 +479,36 @@ function miGateRejection(reason: MiGateRejection["reason"], detail: string): MiG
   };
 }
 
-function extractMiInput(miResult: any, currentJobId?: string | null): any {
+function extractMiInput(
+  miResult: any,
+  currentJobId?: string | null,
+  collector?: { ctx?: OrchestrationContext; engineId?: string },
+): any {
+  // Seal #10 / Task #28 / pass-5 — record every MI gate rejection into
+  // ctx.miGateRejections so System Control receives the rejection list and
+  // can refuse to "silently coerce to empty MI". Engines themselves still
+  // see the empty-MI shape (`competitors:[]`, `signals:[]`, ...) so their
+  // null-guards continue to work; the rejection is now also a first-class
+  // signal at the verdict layer.
+  const record = (reason: string, detail: string) => {
+    if (collector?.ctx) {
+      collector.ctx.miGateRejections = collector.ctx.miGateRejections ?? [];
+      collector.ctx.miGateRejections.push({
+        engineId: collector.engineId ?? "unknown",
+        reason,
+        detail,
+      });
+    }
+  };
   if (miResult == null) return {};
   const env = MiResultEnvelopeSchema.safeParse(miResult);
   if (!env.success) {
     const issues = env.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}=${i.code}`).join(",");
+    record("MI_ENVELOPE_INVALID", `envelope parse failed | issues=${issues}`);
     return miGateRejection("MI_ENVELOPE_INVALID", `envelope parse failed | issues=${issues}`);
   }
   if (!env.data.output || typeof env.data.output !== "object") {
+    record("MI_OUTPUT_MISSING", "envelope.output is null or non-object");
     return miGateRejection("MI_OUTPUT_MISSING", "envelope.output is null or non-object");
   }
 
@@ -454,19 +524,24 @@ function extractMiInput(miResult: any, currentJobId?: string | null): any {
   const prov = out?._provenance;
   if (prov && typeof prov === "object") {
     if (prov.freshnessClass === "NEEDS_REFRESH") {
-      return miGateRejection("MI_FRESHNESS_NEEDS_REFRESH", `freshnessClass=NEEDS_REFRESH provJobId=${prov.jobId ?? "null"}`);
+      const d = `freshnessClass=NEEDS_REFRESH provJobId=${prov.jobId ?? "null"}`;
+      record("MI_FRESHNESS_NEEDS_REFRESH", d);
+      return miGateRejection("MI_FRESHNESS_NEEDS_REFRESH", d);
     }
     if (prov.freshnessClass === "INCOMPATIBLE") {
-      return miGateRejection("MI_FRESHNESS_INCOMPATIBLE", `freshnessClass=INCOMPATIBLE provJobId=${prov.jobId ?? "null"}`);
+      const d = `freshnessClass=INCOMPATIBLE provJobId=${prov.jobId ?? "null"}`;
+      record("MI_FRESHNESS_INCOMPATIBLE", d);
+      return miGateRejection("MI_FRESHNESS_INCOMPATIBLE", d);
     }
     if (prov.freshnessClass === "STALE") {
-      return miGateRejection("MI_FRESHNESS_STALE", `freshnessClass=STALE provJobId=${prov.jobId ?? "null"}`);
+      const d = `freshnessClass=STALE provJobId=${prov.jobId ?? "null"}`;
+      record("MI_FRESHNESS_STALE", d);
+      return miGateRejection("MI_FRESHNESS_STALE", d);
     }
     if (currentJobId && prov.jobId && prov.jobId !== currentJobId) {
-      return miGateRejection(
-        "MI_LINEAGE_MISMATCH",
-        `provJobId=${prov.jobId} currentJobId=${currentJobId} — refusing cross-run MI snapshot`,
-      );
+      const d = `provJobId=${prov.jobId} currentJobId=${currentJobId} — refusing cross-run MI snapshot`;
+      record("MI_LINEAGE_MISMATCH", d);
+      return miGateRejection("MI_LINEAGE_MISMATCH", d);
     }
   }
   return extractMiInputBody(env.data, out);
@@ -1682,7 +1757,7 @@ async function executeEngine(
           }
         }
         if (!diffReused) {
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         result = await runDifferentiationEngine(
@@ -1952,7 +2027,7 @@ async function executeEngine(
           }
           logReuseMiss("offer", offerInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2089,7 +2164,7 @@ async function executeEngine(
           }
           logReuseMiss("awareness", awarenessInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2209,7 +2284,7 @@ async function executeEngine(
           }
           logReuseMiss("funnel", funnelInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -2322,7 +2397,7 @@ async function executeEngine(
           }
           logReuseMiss("integrity", integrityInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2391,7 +2466,7 @@ async function executeEngine(
           }
           logReuseMiss("persuasion", persuasionInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2533,7 +2608,7 @@ async function executeEngine(
           }
           logReuseMiss("statistical_validation", svInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
         const funnelInput = extractFunnelInput(ctx.funnel);
@@ -4027,6 +4102,23 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       // with degraded data. Pre-T3.B this only surfaced as a console.warn.
       analyticalEnrichmentPartial: ctx.analyticalEnrichment?.isPartial === true,
       analyticalEnrichmentReason: ctx.analyticalEnrichment?.partialReason ?? null,
+      // Seal #10 / Task #28 / pass-5 — runtime count of strategy engines that
+      // ran AFTER AEL emitted a partial package. countAelDownstreamConsumers
+      // walks `results` and counts AEL-consumer engine ids whose status is
+      // not SKIPPED. When > 0 + AEL partial,
+      // checkAnalyticalEnrichmentIntegrity escalates to a hard BLOCK
+      // (architect pass-5 finding: previously this field was unpopulated so
+      // the block path was unreachable in production).
+      analyticalEnrichmentDownstreamConsumers: countAelDownstreamConsumers(
+        results as unknown as Map<string, { status: string }>,
+        ctx.analyticalEnrichment?.isPartial === true,
+      ),
+      // Seal #10 / Task #28 / pass-5 — propagate collected MI gate rejections
+      // (populated by extractMiInput call sites with `{ ctx }`). When any
+      // engine consumed MI and rejections occurred, checkMiGateRejections
+      // emits a hard BLOCK ("MI_GATE_REJECTED") instead of silently
+      // accepting the empty-MI coercion.
+      miGateRejections: ctx.miGateRejections ?? [],
       // T3.A v2 (Runtime Truth Track): pass the runtime confidence-integrity
       // verdict so System Control's `checkConfidenceIntegrity` can hard-gate
       // on missing/degraded engine confidences instead of letting the
