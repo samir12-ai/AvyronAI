@@ -256,6 +256,13 @@ function generateCalendarSlots(
   return slots;
 }
 
+// F8.3 documented exception: this is a single atomic SQL statement that flips
+// every account-scoped RUNNING plan into emergency-stop in one transaction.
+// Per-row CAS is not applicable — the operation is a kill-switch with no
+// "expected version" semantics; the desired guarantee (every RUNNING plan
+// reaches the stopped state, no lost updates) is provided by the single
+// statement's atomicity. The version column is bumped so concurrent CAS
+// writers on those rows correctly see CONCURRENT_MODIFICATION.
 export async function emergencyStopAllRunningPlans(accountId: string, reason: string): Promise<void> {
   await db
     .update(strategicPlans)
@@ -263,6 +270,7 @@ export async function emergencyStopAllRunningPlans(accountId: string, reason: st
       emergencyStopped: true,
       emergencyStoppedAt: new Date(),
       emergencyStoppedReason: reason,
+      version: sql`${strategicPlans.version} + 1`,
     })
     .where(and(
       eq(strategicPlans.accountId, accountId),

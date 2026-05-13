@@ -6,6 +6,7 @@ import { eq, desc, gte, and, sql, ne, notInArray } from "drizzle-orm";
 import { NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
 import { logAuditEvent } from "./audit-logger";
 import { logAudit } from "../audit";
+import { casUpdateStrategicPlan } from "./cas-helper";
 import * as crypto from "crypto";
 import { buildStrategicContext, type StrategicContext } from "../engine-contracts/context-kernel";
 import { wrapEngineOutput, type EngineOutput } from "../engine-contracts/engine-contract";
@@ -1089,9 +1090,15 @@ export function registerOrchestratorRoutes(app: Express) {
         });
       }
 
-      await db.update(strategicPlans)
-        .set({ status: "APPROVED", updatedAt: new Date() })
-        .where(eq(strategicPlans.id, plan.id));
+      // F8.3 — CAS via casUpdateStrategicPlan helper.
+      try {
+        await casUpdateStrategicPlan(plan.id, { status: "APPROVED", updatedAt: new Date() });
+      } catch (casErr: any) {
+        if (casErr?.code === "CONCURRENT_MODIFICATION") {
+          return res.status(409).json({ success: false, error: "CONCURRENT_MODIFICATION", message: "Plan was modified concurrently", requestId });
+        }
+        throw casErr;
+      }
 
       await db.insert(planApprovals).values({
         planId: plan.id,
@@ -1167,9 +1174,16 @@ export function registerOrchestratorRoutes(app: Express) {
       let previousStatus = "NONE";
       for (const p of existingPlans) {
         previousStatus = p.status;
-        await db.update(strategicPlans)
-          .set({ status: "SUPERSEDED", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, p.id));
+        // F8.3 — CAS via casUpdateStrategicPlan helper.
+        try {
+          await casUpdateStrategicPlan(p.id, { status: "SUPERSEDED", updatedAt: new Date() });
+        } catch (casErr: any) {
+          if (casErr?.code !== "CONCURRENT_MODIFICATION") throw casErr;
+          // Concurrent writer already changed the row — re-read latest status
+          // and continue (regenerate path remains idempotent).
+          const [latest] = await db.select({ status: strategicPlans.status }).from(strategicPlans).where(eq(strategicPlans.id, p.id)).limit(1);
+          previousStatus = latest?.status ?? previousStatus;
+        }
       }
 
       await db.update(strategicBlueprints)

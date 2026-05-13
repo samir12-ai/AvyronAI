@@ -3,6 +3,7 @@ import { strategicPlans, requiredWork, calendarEntries, businessDataLayer } from
 import { eq, and, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { createAttributionEntries } from "../decision-attribution";
+import { casUpdateStrategicPlan } from "../strategic-core/cas-helper";
 import { aiChat } from "../ai-client";
 import { lockRootBundle } from "../root-bundle";
 import { decomposeGoal, generateSimulation, normalizeGoal, computeFunnelMath, checkFeasibility } from "../goal-math";
@@ -1544,9 +1545,8 @@ export async function synthesizePlan(
 
   if (calendarSlots.length > 0) {
     const inserted = await db.insert(calendarEntries).values(calendarSlots).returning({ id: calendarEntries.id, contentType: calendarEntries.contentType });
-    await db.update(strategicPlans)
-      .set({ totalCalendarEntries: calendarSlots.length })
-      .where(eq(strategicPlans.id, plan.id));
+    // F8.3 — CAS via casUpdateStrategicPlan helper.
+    await casUpdateStrategicPlan(plan.id, { totalCalendarEntries: calendarSlots.length });
 
     const byType = new Map<string, string[]>();
     for (const entry of inserted) {

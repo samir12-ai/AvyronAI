@@ -18,6 +18,7 @@ import {
 } from "@shared/schema";
 import { eq, and, or, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
+import { casUpdateStrategicPlan } from "../strategic-core/cas-helper";
 import { computeFulfillment } from "../fulfillment-engine";
 import { buildCausalNarrative } from "../narrative-layer";
 import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
@@ -568,13 +569,18 @@ export function registerOrchestratorV2Routes(app: Express) {
         });
       }
 
-      const updated = await db.update(strategicPlans)
-        .set({ status: "APPROVED", updatedAt: new Date() })
-        .where(and(eq(strategicPlans.id, planId), or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW"))))
-        .returning({ id: strategicPlans.id });
-
-      if (!updated.length) {
+      // F8.3 — CAS via casUpdateStrategicPlan helper. Status guard
+      // (DRAFT/READY_FOR_REVIEW) is preserved by re-checking before CAS.
+      if (plan.status !== "DRAFT" && plan.status !== "READY_FOR_REVIEW") {
         return res.status(409).json({ error: "Plan was already approved or changed by another request" });
+      }
+      try {
+        await casUpdateStrategicPlan(planId, { status: "APPROVED", updatedAt: new Date() });
+      } catch (casErr: any) {
+        if (casErr?.code === "CONCURRENT_MODIFICATION") {
+          return res.status(409).json({ error: "Plan was modified concurrently by another request" });
+        }
+        throw casErr;
       }
 
       let rhythmSnapshot: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; approvedAt: string } | null = null;
@@ -587,9 +593,8 @@ export function registerOrchestratorV2Routes(app: Express) {
           postsPerWeek: rhythm.postsPerWeek,
           approvedAt: new Date().toISOString(),
         };
-        await db.update(strategicPlans)
-          .set({ approvedRhythmJson: JSON.stringify(rhythmSnapshot) })
-          .where(eq(strategicPlans.id, planId));
+        // F8.3 — CAS via casUpdateStrategicPlan helper.
+        await casUpdateStrategicPlan(planId, { approvedRhythmJson: JSON.stringify(rhythmSnapshot) });
       } catch (snapshotErr: any) {
         console.warn("[ApproveRoute] Failed to capture rhythm snapshot (non-blocking):", snapshotErr.message);
       }
@@ -617,9 +622,15 @@ export function registerOrchestratorV2Routes(app: Express) {
       const [plan] = await db.select({ id: strategicPlans.id }).from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "Plan not found" });
 
-      await db.update(strategicPlans)
-        .set({ status: "REJECTED", updatedAt: new Date() })
-        .where(eq(strategicPlans.id, planId));
+      // F8.3 — CAS via casUpdateStrategicPlan helper.
+      try {
+        await casUpdateStrategicPlan(planId, { status: "REJECTED", updatedAt: new Date() });
+      } catch (casErr: any) {
+        if (casErr?.code === "CONCURRENT_MODIFICATION") {
+          return res.status(409).json({ error: "Plan was modified concurrently by another request" });
+        }
+        throw casErr;
+      }
 
       await db.insert(planApprovals).values({
         planId,
@@ -812,9 +823,11 @@ export function registerOrchestratorV2Routes(app: Express) {
         }
 
         if (status === "PUBLISHED" && item.status !== "PUBLISHED") {
-          await db.update(strategicPlans)
-            .set({ totalPublished: sql`${strategicPlans.totalPublished} + 1` })
-            .where(eq(strategicPlans.id, item.planId));
+          // F8.3 — CAS via casUpdateStrategicPlan helper. Counter increment
+          // wrapped in CAS to prevent lost updates under concurrent publish.
+          await casUpdateStrategicPlan(item.planId, {
+            totalPublished: sql`${strategicPlans.totalPublished} + 1`,
+          });
         }
       }
 
