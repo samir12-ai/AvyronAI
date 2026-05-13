@@ -54,12 +54,19 @@ async function loadInFlightJobIds(): Promise<Set<string>> {
 // permanently strand the row and over-protect its snapshots.
 async function reapStaleInFlightJobs(): Promise<number> {
   try {
+    // Seal #10 / Task #28 / F8.2 — architect pass-3: BOTH predicates honour
+    // the grace window. The prior version reaped immediately when
+    // `expectedCompleteBy < now`, which would kill a long-running orches-
+    // tration the second its 30-min budget expired. Now both clauses
+    // require `… < now - GRACE` so a job has 60min past its deadline (or
+    // 60min past its start when no deadline was set) before its row is
+    // dropped and its snapshots become eligible for cleanup.
     const cutoff = new Date(Date.now() - IN_FLIGHT_REAP_GRACE_MS);
     const reaped = await db
       .delete(inFlightJobs)
       .where(
         or(
-          lt(inFlightJobs.expectedCompleteBy, new Date()),
+          lt(inFlightJobs.expectedCompleteBy, cutoff),
           lt(inFlightJobs.startedAt, cutoff),
         )!,
       )
@@ -220,7 +227,7 @@ async function purgeExpiredSnapshots(protectedIds: Set<string>, inFlightJobIds: 
           if (rowTimestamp >= completeCutoff) continue;
         }
 
-        const rowJobId = (row as any).jobId as string | null;
+        const rowJobId: string | null = row.jobId ?? null;
         if (rowJobId && inFlightJobIds.has(rowJobId)) {
           inFlightSkipped++;
           continue;
@@ -330,7 +337,7 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>, inFlightJobIds:
         for (const row of orphaned) {
           const compositeKey = `${config.name}:${row.id}`;
           if (protectedIds.has(compositeKey)) continue;
-          const rowJobId = (row as any).jobId as string | null;
+          const rowJobId: string | null = row.jobId ?? null;
           if (rowJobId && inFlightJobIds.has(rowJobId)) {
             inFlightSkipped++;
             continue;

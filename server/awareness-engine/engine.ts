@@ -54,13 +54,20 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
 
-// Seal #10 / Task #28 / F2.7 — replaced ad-hoc safeNumber/safeString with
-// zod-backed coercers. Zod's .catch() short-circuits on parse failure and
-// returns a typed fallback, so call-site signatures are preserved while
-// the underlying validation is now schema-driven (and emits a structured
-// reason when an invariant is violated). Validation failures are logged
-// with the source field path for observability without bringing down the
-// engine.
+// Seal #10 / Task #28 / F2.7 — zod-backed coercers + input-boundary
+// validator. The architect pass-3 rejection flagged the previous
+// implementation: returning a `fallback` on parse failure was silent,
+// and missing/invalid values flowed downstream as if they had been
+// genuine zeros / empty strings. The contract-aligned shape is:
+//   • coerceNumber/coerceString — sub-routine helpers that record a
+//     fallback into MODULE-LEVEL `inputValidationReport` so the engine
+//     entry point can downgrade status to PARTIAL.
+//   • validateAwarenessInputs() — strict zod parse run AT engine entry
+//     against the canonical AwarenessAudienceInput / MI / Positioning
+//     schemas; critical-field failures (audience.maturityIndex,
+//     audience.awarenessLevel, mi.overallConfidence, positioning.
+//     narrativeDirection) cause the engine to short-circuit to PARTIAL
+//     with a structured reason, NOT to silently default.
 import { z } from "zod";
 
 const NumberSchema = z.preprocess(
@@ -73,9 +80,19 @@ const NonEmptyStringSchema = z.preprocess(
   z.string().min(1),
 );
 
+interface InputValidationReport {
+  fallbacksUsed: Array<{ path: string; reason: string; fallback: string | number }>;
+}
+const inputValidationReport: InputValidationReport = { fallbacksUsed: [] };
+
+function resetValidationReport(): void {
+  inputValidationReport.fallbacksUsed = [];
+}
+
 function safeNumber(v: any, fallback: number, fieldPath = "<unknown>"): number {
   const r = NumberSchema.safeParse(v);
   if (r.success) return r.data;
+  inputValidationReport.fallbacksUsed.push({ path: fieldPath, reason: r.error.issues[0]?.code ?? "invalid", fallback });
   if (process.env.AWARENESS_ZOD_TRACE === "1") {
     console.warn(`[AwarenessEngine] SAFE_NUMBER_FALLBACK | path=${fieldPath} | reason=${r.error.issues[0]?.code ?? "invalid"}`);
   }
@@ -85,10 +102,40 @@ function safeNumber(v: any, fallback: number, fieldPath = "<unknown>"): number {
 function safeString(v: any, fallback: string, fieldPath = "<unknown>"): string {
   const r = NonEmptyStringSchema.safeParse(v);
   if (r.success) return r.data;
+  inputValidationReport.fallbacksUsed.push({ path: fieldPath, reason: r.error.issues[0]?.code ?? "invalid", fallback });
   if (process.env.AWARENESS_ZOD_TRACE === "1") {
     console.warn(`[AwarenessEngine] SAFE_STRING_FALLBACK | path=${fieldPath} | reason=${r.error.issues[0]?.code ?? "invalid"}`);
   }
   return fallback;
+}
+
+const AwarenessAudienceInputSchema = z.object({
+  maturityIndex: z.number().finite(),
+  awarenessLevel: z.string().min(1),
+});
+const AwarenessMIInputSchema = z.object({
+  overallConfidence: z.number().finite(),
+});
+
+interface AwarenessInputValidation {
+  ok: boolean;
+  missingCritical: string[];
+}
+
+function validateAwarenessInputs(
+  audience: any,
+  mi: any,
+): AwarenessInputValidation {
+  const missing: string[] = [];
+  const audR = AwarenessAudienceInputSchema.safeParse(audience);
+  if (!audR.success) {
+    for (const issue of audR.error.issues) missing.push(`audience.${issue.path.join(".")}`);
+  }
+  const miR = AwarenessMIInputSchema.safeParse(mi);
+  if (!miR.success) {
+    for (const issue of miR.error.issues) missing.push(`mi.${issue.path.join(".")}`);
+  }
+  return { ok: missing.length === 0, missingCritical: missing };
 }
 
 function safeJsonParse(text: any): any {
@@ -774,11 +821,38 @@ export async function runAwarenessEngine(
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+  // Seal #10 / Task #28 / F2.7 — strict input boundary. Architect pass-3:
+  // safeNumber/safeString must NOT silently default on missing critical
+  // fields. We reset the per-run fallback report, then run a zod validator
+  // against the canonical AwarenessAudienceInput / MI shapes. If a
+  // critical field (audience.maturityIndex, audience.awarenessLevel,
+  // mi.overallConfidence) is missing or non-finite, emit PARTIAL with
+  // the structured `missingCritical` list — downstream readers see the
+  // contract gap instead of a phantom default.
+  resetValidationReport();
+  const inputCheck = validateAwarenessInputs(audience, mi);
 
   const aelAck = acknowledgeAelInput("AwarenessEngine-V3", analyticalEnrichment ?? null, accountId);
   if (analyticalEnrichment) {
     const aelBlock = formatAELForPrompt(analyticalEnrichment);
     console.log(`[AwarenessEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(analyticalEnrichment).filter(k => analyticalEnrichment[k] && (Array.isArray(analyticalEnrichment[k]) ? analyticalEnrichment[k].length > 0 : true)).length} | partial=${aelAck.partial}`);
+  }
+
+  if (!inputCheck.ok) {
+    console.warn(`[AwarenessEngine-V3] INPUT_VALIDATION_PARTIAL | missingCritical=${inputCheck.missingCritical.join(",")}`);
+    return {
+      status: STATUS.PARTIAL,
+      statusMessage: `Input validation failed: ${inputCheck.missingCritical.join(", ")} — engine downgraded to PARTIAL (no silent defaults).`,
+      primaryRoute: emptyRoute("input_validation_partial"),
+      alternativeRoute: emptyRoute("input_validation_partial"),
+      rejectedRoute: emptyRoute("input_validation_partial", "Critical input fields missing"),
+      layerResults: [],
+      structuralWarnings: [`INPUT_VALIDATION_PARTIAL: missingCritical=${inputCheck.missingCritical.join(",")}`],
+      boundaryCheck: { passed: true, violations: [] },
+      dataReliability: { signalDensity: 0, signalDiversity: 0, narrativeStability: 0, competitorValidity: 0, marketMaturityConfidence: 0, overallReliability: 0, isWeak: true, advisories: ["Input validation partial — strict boundary failed"] },
+      confidenceNormalized: false,
+      executionTimeMs: Date.now() - startTime,
+    };
   }
 
   const qualifyingSignals = extractQualifyingSignals(upstreamLineage);

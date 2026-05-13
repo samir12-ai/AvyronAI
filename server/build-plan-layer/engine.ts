@@ -1,5 +1,13 @@
 import { aiChat } from "../ai-client";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
+import { logSafe } from "../log-redact";
+
+// Seal #10 / Task #28 / F2.7 — typed accessor for Drizzle table internals
+// (replaces ad-hoc `(table as any)?._?.name` casts in log emission).
+type DrizzleTableInternals = { _?: { name?: string } };
+function tableName(t: unknown): string {
+  return ((t as DrizzleTableInternals)?._?.name) ?? "unknown";
+}
 import type { AnalyticalPackage } from "../analytical-enrichment-layer/types";
 import { db } from "../db";
 import {
@@ -165,7 +173,7 @@ async function getLatestSnapshot(
       .orderBy(desc(table.createdAt))
       .limit(1);
     if (!snap && sourceJobId) {
-      console.warn(`[BuildPlanLayer] SNAPSHOT_MISS_FOR_RUN | account=${accountId} campaign=${campaignId} jobId=${sourceJobId} table=${(table as any)?._?.name ?? "unknown"}`);
+      console.warn(logSafe(`[BuildPlanLayer] SNAPSHOT_MISS_FOR_RUN | account=${accountId} campaign=${campaignId} jobId=${sourceJobId} table=${tableName(table)}`));
     } else if (!sourceJobId) {
       // Phase 4 hardening (May 2026): elevated from console.warn to a structured
       // signal. The caller still receives the snapshot (D4 backwards compat —
@@ -174,7 +182,7 @@ async function getLatestSnapshot(
       // level for log-based alerting. System Control consumes the upstream
       // sourceJobId-presence flag separately via ctx wiring; this branch is
       // the last-resort breadcrumb when that wiring is bypassed.
-      console.warn(`[BuildPlanLayer] STALE_LINEAGE_READ | severity=high | account=${accountId} campaign=${campaignId} table=${(table as any)?._?.name ?? "unknown"} — no sourceJobId provided; latest snapshot may belong to a different run. Caller MUST pass sourceJobId for runtime-truth correctness.`);
+      console.warn(logSafe(`[BuildPlanLayer] STALE_LINEAGE_READ | severity=high | account=${accountId} campaign=${campaignId} table=${tableName(table)} — no sourceJobId provided; latest snapshot may belong to a different run. Caller MUST pass sourceJobId for runtime-truth correctness.`));
     }
     return snap || null;
   } catch {
@@ -568,20 +576,23 @@ export async function runBuildPlanLayer(
   // and contradict each other. Allow only in test mode (NODE_ENV==='test')
   // for fixture-driven tests; production refuses to synthesize a build plan
   // from un-bound snapshots.
+  // Seal #10 / Task #28 / F2.5 — STALE_LINEAGE_BLOCK is a HARD block on
+  // every code path, not env-conditional. Architect pass-3 flagged the
+  // prior NODE_ENV==='production' guard as a regression: a missing
+  // sourceJobId means we cannot prove which run the snapshots belong to,
+  // and dev/test runs that violate this contract should fail loud rather
+  // than silently produce a plan from cross-run-stitched data.
   if (!sourceJobId) {
-    if (process.env.NODE_ENV === "production") {
-      console.error(`[BuildPlanLayer] STALE_LINEAGE_BLOCK | account=${accountId} campaign=${campaignId} — refusing build-plan synthesis without sourceJobId (cross-run snapshot stitching forbidden)`);
-      const staleLineageDowngrade: BuildPlanResult = {
-        status: "INSUFFICIENT_DATA",
-        plan: null,
-        actionabilityScore: 0,
-        failedBlocks: [],
-        attempts: 0,
-        error: "STALE_LINEAGE_BLOCK: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
-      };
-      return applyPartialAelDowngrade("BuildPlanLayer", staleLineageDowngrade, aelAck);
-    }
-    console.warn(`[BuildPlanLayer] RUN_WITHOUT_SOURCE_JOB | account=${accountId} campaign=${campaignId} — engine outputs may be stitched across runs (allowed in non-prod)`);
+    console.error(logSafe(`[BuildPlanLayer] STALE_LINEAGE_BLOCK | account=${accountId} campaign=${campaignId} — refusing build-plan synthesis without sourceJobId (cross-run snapshot stitching forbidden)`));
+    const staleLineageDowngrade: BuildPlanResult = {
+      status: "INSUFFICIENT_DATA",
+      plan: null,
+      actionabilityScore: 0,
+      failedBlocks: ["STALE_LINEAGE_BLOCK"],
+      attempts: 0,
+      error: "STALE_LINEAGE_BLOCK: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
+    };
+    return applyPartialAelDowngrade("BuildPlanLayer", staleLineageDowngrade, aelAck);
   }
   const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus, sourceJobId);
 

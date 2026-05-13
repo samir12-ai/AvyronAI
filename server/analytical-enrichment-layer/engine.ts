@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { logSafe } from "../log-redact";
 import {
   AnalyticalPackage,
   AELInput,
@@ -280,7 +281,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
     const content = response.choices?.[0]?.message?.content || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.warn(`${LOG_PREFIX} PARSE_FAIL | No JSON found in response`);
+      console.warn(logSafe(`${LOG_PREFIX} PARSE_FAIL | No JSON found in response`));
       return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: "AEL response contained no parseable JSON" };
     }
 
@@ -309,7 +310,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
     return pkg;
   } catch (err: any) {
     const elapsed = Date.now() - startTime;
-    console.error(`${LOG_PREFIX} BUILD_ERROR | campaign=${input.campaignId} | elapsed=${elapsed}ms | error=${err.message}`);
+    console.error(logSafe(`${LOG_PREFIX} BUILD_ERROR | campaign=${input.campaignId} | elapsed=${elapsed}ms | error=${err.message}`));
     return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: `AEL build failed: ${err.message}` };
   }
 }
