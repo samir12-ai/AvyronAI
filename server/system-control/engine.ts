@@ -91,8 +91,9 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     input.analyticalEnrichmentReason,
     // Seal #10 / Task #28 / F2.3 — propagate downstream-consumer count so
     // the structural check escalates from DOWNGRADE to BLOCK when engines
-    // already consumed the degraded enrichment.
-    (input as any).analyticalEnrichmentDownstreamConsumers ?? 0,
+    // already consumed the degraded enrichment. Field is part of the
+    // canonical SystemControlInput contract (no `as any` bypass).
+    input.analyticalEnrichmentDownstreamConsumers ?? 0,
   ));
   structuralChecks.push(checkSignalLineageUnknown(input.signalComposition));
   structuralChecks.push(checkConfidenceIntegrity(

@@ -386,27 +386,87 @@ const MiResultEnvelopeSchema = z.object({
   trajectoryData: z.any().nullable().optional(),
 });
 
-function extractMiInput(miResult: any): any {
+// Seal #10 / Task #28 / F2.5 + F4.6 — structured MI gate rejection. Returned
+// in place of an MI input when the snapshot is stale, cross-run, or
+// otherwise contract-incomplete. Engines that destructure the result and
+// apply `?? []` continue to behave as if MI is missing; the orchestrator's
+// recovery / system-control path can additionally inspect `__miGateRejected`
+// to surface the rejection in the run report.
+type MiGateRejection = {
+  __miGateRejected: true;
+  reason:
+    | "MI_ENVELOPE_INVALID"
+    | "MI_FRESHNESS_NEEDS_REFRESH"
+    | "MI_FRESHNESS_INCOMPATIBLE"
+    | "MI_FRESHNESS_STALE"
+    | "MI_LINEAGE_MISMATCH"
+    | "MI_OUTPUT_MISSING";
+  detail: string;
+  // Empty placeholders so engines that read e.g. `mi.competitors` keep
+  // working without per-engine null guards.
+  competitors: never[];
+  signals: never[];
+  taggedSignals: never[];
+  opportunitySignals: never[];
+  threatSignals: never[];
+  competitorIntentMap: never[];
+  audienceIntentSignals: never[];
+  missingSignalFlags: never[];
+};
+
+function miGateRejection(reason: MiGateRejection["reason"], detail: string): MiGateRejection {
+  console.warn(`[Orchestrator] MI_GATE_REJECTED | reason=${reason} | ${detail}`);
+  return {
+    __miGateRejected: true,
+    reason,
+    detail,
+    competitors: [],
+    signals: [],
+    taggedSignals: [],
+    opportunitySignals: [],
+    threatSignals: [],
+    competitorIntentMap: [],
+    audienceIntentSignals: [],
+    missingSignalFlags: [],
+  };
+}
+
+function extractMiInput(miResult: any, currentJobId?: string | null): any {
   if (miResult == null) return {};
   const env = MiResultEnvelopeSchema.safeParse(miResult);
   if (!env.success) {
     const issues = env.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}=${i.code}`).join(",");
-    console.warn(`[Orchestrator] MI_EXTRACT_CONTRACT_INCOMPLETE | reason=mi_envelope_invalid | issues=${issues}`);
-    return {};
+    return miGateRejection("MI_ENVELOPE_INVALID", `envelope parse failed | issues=${issues}`);
   }
-  if (!env.data.output || typeof env.data.output !== "object") return {};
+  if (!env.data.output || typeof env.data.output !== "object") {
+    return miGateRejection("MI_OUTPUT_MISSING", "envelope.output is null or non-object");
+  }
 
   // Seal #10 / Task #28 / F2.5 + F4.6 — MI snapshot freshness/lineage gate.
-  // Refuse NEEDS_REFRESH or INCOMPATIBLE freshness; refuse a snapshot whose
-  // _provenance.jobId disagrees with the orchestrator's current jobId. In
-  // either case the MI is treated as missing for this run so engines fall
-  // back to an empty input rather than consuming stale or cross-run data.
+  // Refuse NEEDS_REFRESH, INCOMPATIBLE, AND STALE (architect pass-2 flagged
+  // STALE was missing); enforce `_provenance.jobId === currentJobId` for
+  // every read so cross-run snapshot stitching is impossible during a live
+  // orchestration. The freshness=PASSED case has no jobId requirement
+  // because some snapshot tables (e.g. shared MI cache) deliberately serve
+  // pre-warmed data; lineage is enforced only when a jobId is present on
+  // both the snapshot AND the orchestrator context.
   const out: any = env.data.output;
   const prov = out?._provenance;
   if (prov && typeof prov === "object") {
-    if (prov.freshnessClass === "NEEDS_REFRESH" || prov.freshnessClass === "INCOMPATIBLE") {
-      console.warn(`[Orchestrator] MI_FRESHNESS_REFUSED | freshnessClass=${prov.freshnessClass} | reason=stale_or_incompatible`);
-      return {};
+    if (prov.freshnessClass === "NEEDS_REFRESH") {
+      return miGateRejection("MI_FRESHNESS_NEEDS_REFRESH", `freshnessClass=NEEDS_REFRESH provJobId=${prov.jobId ?? "null"}`);
+    }
+    if (prov.freshnessClass === "INCOMPATIBLE") {
+      return miGateRejection("MI_FRESHNESS_INCOMPATIBLE", `freshnessClass=INCOMPATIBLE provJobId=${prov.jobId ?? "null"}`);
+    }
+    if (prov.freshnessClass === "STALE") {
+      return miGateRejection("MI_FRESHNESS_STALE", `freshnessClass=STALE provJobId=${prov.jobId ?? "null"}`);
+    }
+    if (currentJobId && prov.jobId && prov.jobId !== currentJobId) {
+      return miGateRejection(
+        "MI_LINEAGE_MISMATCH",
+        `provJobId=${prov.jobId} currentJobId=${currentJobId} — refusing cross-run MI snapshot`,
+      );
     }
   }
   return extractMiInputBody(env.data, out);
@@ -1622,7 +1682,7 @@ async function executeEngine(
           }
         }
         if (!diffReused) {
-        const miInput = extractMiInput(ctx.mi);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         result = await runDifferentiationEngine(
@@ -1892,7 +1952,7 @@ async function executeEngine(
           }
           logReuseMiss("offer", offerInputHash);
         }
-        const miInput = extractMiInput(ctx.mi);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2029,7 +2089,7 @@ async function executeEngine(
           }
           logReuseMiss("awareness", awarenessInputHash);
         }
-        const miInput = extractMiInput(ctx.mi);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2149,7 +2209,7 @@ async function executeEngine(
           }
           logReuseMiss("funnel", funnelInputHash);
         }
-        const miInput = extractMiInput(ctx.mi);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -2262,7 +2322,7 @@ async function executeEngine(
           }
           logReuseMiss("integrity", integrityInputHash);
         }
-        const miInput = extractMiInput(ctx.mi);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2331,7 +2391,7 @@ async function executeEngine(
           }
           logReuseMiss("persuasion", persuasionInputHash);
         }
-        const miInput = extractMiInput(ctx.mi);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2473,7 +2533,7 @@ async function executeEngine(
           }
           logReuseMiss("statistical_validation", svInputHash);
         }
-        const miInput = extractMiInput(ctx.mi);
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null);
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
         const funnelInput = extractFunnelInput(ctx.funnel);

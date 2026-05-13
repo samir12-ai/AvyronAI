@@ -1011,6 +1011,25 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
           blocks.push({ code: "CONFIDENCE_INTEGRITY_INCOMPLETE", description: check.details, source: "confidence_integrity", severity: "critical" });
         }
         break;
+      // Seal #10 / Task #28 / F2.3 — analytical_enrichment_integrity check
+      // emits a "BLOCK:"-prefixed FAIL when AEL is PARTIAL AND downstream
+      // engines already consumed the degraded enrichment. engine.ts skips
+      // the downgrade conversion for that case, expecting THIS map to
+      // promote it to a hard BlockReason. Without this case the BLOCK:
+      // prefix was effectively dropped (architect-flagged in pass-2).
+      // The non-BLOCK FAIL (downstreamConsumers===0) is intentionally
+      // routed to a downgrade in engine.ts and must not be re-blocked
+      // here.
+      case "analytical_enrichment_integrity":
+        if (check.details.startsWith("BLOCK:")) {
+          blocks.push({
+            code: "ANALYTICAL_ENRICHMENT_BLOCKED",
+            description: check.details,
+            source: "analytical_enrichment_layer",
+            severity: "critical",
+          });
+        }
+        break;
     }
   }
 

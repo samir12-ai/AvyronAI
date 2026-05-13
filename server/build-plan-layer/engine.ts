@@ -441,7 +441,7 @@ const BuildPlanResponseSchema = z.object({
       proof: z.string().optional().default(""),
       education: z.string().optional().default(""),
       conversion: z.string().optional().default(""),
-    }).optional().default({} as any),
+    }).optional().default(() => ({ problems: "", proof: "", education: "", conversion: "" })),
     contentAngles: z.array(z.any()).optional().default([]),
     hookStyles: z.array(z.any()).optional().default([]),
     messagingThemes: z.array(z.any()).optional().default([]),
@@ -456,7 +456,7 @@ const BuildPlanResponseSchema = z.object({
     daily: z.array(z.any()).optional(),
     weekly: z.array(z.any()).optional(),
     biweekly: z.array(z.any()).optional(),
-  }).optional().default({} as any),
+  }).optional().default(() => ({ daily: [], weekly: [], biweekly: [] })),
 });
 
 function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutput | null {
@@ -571,13 +571,15 @@ export async function runBuildPlanLayer(
   if (!sourceJobId) {
     if (process.env.NODE_ENV === "production") {
       console.error(`[BuildPlanLayer] STALE_LINEAGE_BLOCK | account=${accountId} campaign=${campaignId} — refusing build-plan synthesis without sourceJobId (cross-run snapshot stitching forbidden)`);
-      return applyPartialAelDowngrade("BuildPlanLayer", {
-        status: "INSUFFICIENT_DATA" as any,
-        statusReason: "STALE_LINEAGE_BLOCK: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
+      const staleLineageDowngrade: BuildPlanResult = {
+        status: "INSUFFICIENT_DATA",
+        plan: null,
+        actionabilityScore: 0,
+        failedBlocks: [],
         attempts: 0,
-        snapshotsUsed: 0,
-        provenanceCheck: { passed: false, missingSnapshots: [], outputs: [] },
-      } as any, aelAck);
+        error: "STALE_LINEAGE_BLOCK: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
+      };
+      return applyPartialAelDowngrade("BuildPlanLayer", staleLineageDowngrade, aelAck);
     }
     console.warn(`[BuildPlanLayer] RUN_WITHOUT_SOURCE_JOB | account=${accountId} campaign=${campaignId} — engine outputs may be stitched across runs (allowed in non-prod)`);
   }

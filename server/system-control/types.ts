@@ -375,6 +375,17 @@ export interface SystemControlInput {
   analyticalEnrichmentPartial?: boolean;
   analyticalEnrichmentReason?: string | null;
   /**
+   * Seal #10 / Task #28 / F2.3 — count of strategy engines that ran AFTER
+   * AEL emitted a partial package (i.e. engines that actually consumed the
+   * degraded enrichment). When this is > 0, `checkAnalyticalEnrichmentIntegrity`
+   * escalates from a soft DOWNGRADE to a hard BLOCK, and `collectBlockReasons`
+   * maps that to a `ANALYTICAL_ENRICHMENT_BLOCKED` verdict-blocking reason.
+   * 0 means AEL was partial but no downstream engine read it (rare; e.g.
+   * AEL partial after the strategy phase was already skipped) — downgrade
+   * remains the correct verdict.
+   */
+  analyticalEnrichmentDownstreamConsumers?: number;
+  /**
    * T1.A (Runtime Truth Track) — pre-aggregated lineage observations from
    * the orchestrator's signal-composition build pass. When `unknownRatio` is
    * present and exceeds the lineage threshold, System Control surfaces it as
