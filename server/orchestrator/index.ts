@@ -3579,15 +3579,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       .where(eq(orchestratorJobs.id, jobId));
   } else {
     jobId = config.preassignedJobId || `orch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    // Seal #10 / Task #28 / pass-7 — atomic registration. The
-    // orchestrator_jobs row (which is the lineage anchor every
-    // downstream engine snapshot writes its job_id against) and the
-    // in_flight_jobs row (which the snapshot-cleanup-worker JOINs
-    // against to prove a run is still active) MUST be created in the
-    // same transaction. Pre-pass-7 they were two sequential inserts —
-    // a crash between them could leave an orchestrator_jobs row whose
-    // engine snapshots were vulnerable to mid-run cleanup. Both rows
-    // now commit-or-rollback together.
+    // F8.2 / pass-7 — orchestrator_jobs (lineage anchor) and in_flight_jobs
+    // (cleanup-worker JOIN target) commit-or-rollback in one tx so a crash
+    // can't leave one without the other.
     await db.transaction(async (tx) => {
       if (!config.preassignedJobId) {
         await tx.insert(orchestratorJobs).values({
@@ -3601,10 +3595,6 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           ),
         });
       }
-      // F8.2 — in_flight_jobs registration is no longer best-effort
-      // and is now atomic with the orchestrator_jobs insert above.
-      // ON CONFLICT DO NOTHING handles the resumed-job path where the
-      // row may already exist.
       await tx.insert(inFlightJobs).values({
         jobId,
         accountId: config.accountId,

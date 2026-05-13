@@ -57,12 +57,15 @@ export interface BuildPlanOutput {
 }
 
 export interface BuildPlanResult {
-  status: "SUCCESS" | "ACTIONABILITY_FAILED" | "INSUFFICIENT_DATA" | "ERROR";
+  status: "SUCCESS" | "ACTIONABILITY_FAILED" | "INSUFFICIENT_DATA" | "BLOCKED" | "ERROR";
   plan: BuildPlanOutput | null;
   actionabilityScore: number;
   failedBlocks: string[];
   attempts: number;
   error?: string;
+  // F2.9 / pass-8 — structured block reason, surfaced when status==="BLOCKED".
+  // Documented values: "STALE_LINEAGE" (no sourceJobId provided).
+  reason?: "STALE_LINEAGE";
 }
 
 interface EngineSnapshot {
@@ -570,32 +573,23 @@ export async function runBuildPlanLayer(
   const MAX_ATTEMPTS = 3;
   const aelAck = acknowledgeAelInput("BuildPlanLayer", analyticalEnrichment ?? null, accountId);
 
-  // P0-6: thread sourceJobId so every engine output read is scoped to the
-  // same orchestrator run. If absent, getLatestSnapshot will emit
-  // STALE_LINEAGE_READ warnings and fall back to "latest by table" behavior.
-  // Seal #10 / Task #28 / F2.5 — STALE_LINEAGE_READ promoted from warn to
-  // BLOCK in production paths. When sourceJobId is absent the orchestrator
-  // is reading "latest by table" snapshots which may belong to a prior run
-  // and contradict each other. Allow only in test mode (NODE_ENV==='test')
-  // for fixture-driven tests; production refuses to synthesize a build plan
-  // from un-bound snapshots.
-  // Seal #10 / Task #28 / F2.5 — STALE_LINEAGE_BLOCK is a HARD block on
-  // every code path, not env-conditional. Architect pass-3 flagged the
-  // prior NODE_ENV==='production' guard as a regression: a missing
-  // sourceJobId means we cannot prove which run the snapshots belong to,
-  // and dev/test runs that violate this contract should fail loud rather
-  // than silently produce a plan from cross-run-stitched data.
+  // F2.5 / F2.9 / pass-8 — hard BLOCK when sourceJobId is absent.
+  // Without it we cannot prove the snapshots belong to the same run, so
+  // synthesis is refused on every code path (no NODE_ENV gate). The
+  // public contract is `{status:"BLOCKED", reason:"STALE_LINEAGE"}` so
+  // downstream consumers and tests have a stable shape to switch on.
   if (!sourceJobId) {
     console.error(logSafe(`[BuildPlanLayer] STALE_LINEAGE_BLOCK | account=${accountId} campaign=${campaignId} — refusing build-plan synthesis without sourceJobId (cross-run snapshot stitching forbidden)`));
-    const staleLineageDowngrade: BuildPlanResult = {
-      status: "INSUFFICIENT_DATA",
+    const blockedResult: BuildPlanResult = {
+      status: "BLOCKED",
+      reason: "STALE_LINEAGE",
       plan: null,
       actionabilityScore: 0,
       failedBlocks: ["STALE_LINEAGE_BLOCK"],
       attempts: 0,
-      error: "STALE_LINEAGE_BLOCK: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
+      error: "STALE_LINEAGE: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
     };
-    return applyPartialAelDowngrade("BuildPlanLayer", staleLineageDowngrade, aelAck);
+    return applyPartialAelDowngrade("BuildPlanLayer", blockedResult, aelAck);
   }
   const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus, sourceJobId);
 

@@ -435,31 +435,34 @@ function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): 
   return labels;
 }
 
-// Seal #10 / Task #28 / F4.4 — verifySynthesisPreservation rebuilt on a
-// structured-field assertion model. The prior implementation walked the
-// stringified plan and accepted a 50%-keyword match (e.g. a positioning
-// territory of "Outcome-First Acquisition" was considered preserved if the
-// plan text mentioned ANY of {outcome, first, acquisition} — even in a
-// completely unrelated section). The new implementation:
-//   1. collects every plan string field at any depth into a flat set,
-//   2. asserts the locked label appears as an EXACT substring in at least
-//      one of those collected strings (case-insensitive, whole label only).
-// Keyword-fallback is removed entirely. A locked decision is preserved iff
-// its full label text appears verbatim somewhere in the synthesized plan.
-function collectPlanStrings(node: any, out: string[] = [], depth = 0): string[] {
-  if (node == null || depth > 12) return out;
+// F4.4 / pass-8 — structured-field assertion. Every locked decision is the
+// VALUE of some plan field (positioning territory name, mechanism name,
+// offer name, differentiation pillar name). A locked decision is preserved
+// iff that exact value appears as a complete string field somewhere in the
+// synthesized plan. We walk the plan tree, collect every string-typed leaf
+// into a normalized Set, and assert set membership by exact equality —
+// substring matching is forbidden (would let an unrelated section that
+// happened to mention the label as part of prose count as preservation).
+function collectPlanStringSet(
+  node: unknown,
+  out: Set<string>,
+  depth: number,
+): void {
+  if (node == null || depth > 12) return;
   if (typeof node === "string") {
-    if (node.trim().length > 0) out.push(node.toLowerCase());
-    return out;
+    const norm = node.toLowerCase().trim();
+    if (norm.length > 0) out.add(norm);
+    return;
   }
   if (Array.isArray(node)) {
-    for (const v of node) collectPlanStrings(v, out, depth + 1);
-    return out;
+    for (const v of node) collectPlanStringSet(v, out, depth + 1);
+    return;
   }
   if (typeof node === "object") {
-    for (const v of Object.values(node)) collectPlanStrings(v, out, depth + 1);
+    for (const v of Object.values(node as Record<string, unknown>)) {
+      collectPlanStringSet(v, out, depth + 1);
+    }
   }
-  return out;
 }
 
 function verifySynthesisPreservation(plan: SynthesizedPlan, lockedLabels: string[]): SynthesizedPlan["synthesisVerification"] {
@@ -468,15 +471,15 @@ function verifySynthesisPreservation(plan: SynthesizedPlan, lockedLabels: string
   }
 
   const { lockedDecisionLabels: _labels, synthesisVerification: _verif, planSource: _src, degraded: _deg, ...contentOnly } = plan;
-  const strings = collectPlanStrings(contentOnly);
+  const planValues = new Set<string>();
+  collectPlanStringSet(contentOnly, planValues, 0);
   const missing: string[] = [];
   let preserved = 0;
 
   for (const label of lockedLabels) {
     const normalized = label.toLowerCase().trim();
     if (normalized.length < 3) continue;
-    const exactPresent = strings.some((s) => s.includes(normalized));
-    if (exactPresent) {
+    if (planValues.has(normalized)) {
       preserved++;
     } else {
       missing.push(label);
