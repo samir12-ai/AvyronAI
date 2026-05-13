@@ -3525,16 +3525,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // trator runs and could purge a snapshot the in-flight engine was about
   // to read. ON CONFLICT DO NOTHING handles the resumed-job path where the
   // row may already exist.
-  try {
-    await db.insert(inFlightJobs).values({
-      jobId,
-      accountId: config.accountId,
-      campaignId: config.campaignId,
-      expectedCompleteBy: new Date(Date.now() + 30 * 60 * 1000),
-    }).onConflictDoNothing();
-  } catch (regErr: any) {
-    console.warn(`[Orchestrator] IN_FLIGHT_REGISTRATION_FAILED | jobId=${jobId} | error=${regErr.message}`);
-  }
+  // Seal #10 / Task #28 / F8.2 — architect pass-4: in_flight_jobs
+  // registration is no longer best-effort. A registration failure means
+  // the snapshot-cleanup-worker cannot prove this run is active, so the
+  // safe move is to ABORT the orchestrator run rather than silently
+  // continue and risk having mid-run snapshots purged. Caller surfaces
+  // the throw as a job-level ERROR with a structured reason.
+  await db.insert(inFlightJobs).values({
+    jobId,
+    accountId: config.accountId,
+    campaignId: config.campaignId,
+    expectedCompleteBy: new Date(Date.now() + 30 * 60 * 1000),
+  }).onConflictDoNothing();
 
   // Mirror the local jobId onto config so downstream callers (synthesizePlan,
   // engine adapters that read config.jobId) see the same run identifier as

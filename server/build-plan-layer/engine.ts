@@ -77,7 +77,10 @@ const ACTIONABILITY_RULES = [
   { name: "usability", test: (v: string) => !/\b(various|multiple|different|many|several|some)\b/i.test(v) || v.length > 50 },
 ];
 
-function safeParseSnapshot(raw: any): any | null {
+type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
+type SnapshotRow = { data: unknown };
+
+function safeParseSnapshot(raw: SnapshotRow | { data: Json } | null | undefined): Json | null {
   try {
     if (typeof raw === "string") return JSON.parse(raw);
     return raw;

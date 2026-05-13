@@ -902,8 +902,11 @@ async function executeFetchJob(
     let snapshotIdCreated: string | null = null;
     if (anyAnalysisRan) {
       try {
+        // Seal #10 / Task #28 / F4.10 — latest-snapshot lookup must filter to
+        // COMPLETE only; PARTIAL snapshots are deliberately not the canonical
+        // "latest" for downstream synthesis even when the run is recovering.
         const latestSnap = await db.select({ id: miSnapshots.id }).from(miSnapshots)
-          .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"])))
+          .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.status, "COMPLETE")))
           .orderBy(desc(miSnapshots.createdAt)).limit(1);
         if (latestSnap.length > 0) {
           snapshotIdCreated = latestSnap[0].id;

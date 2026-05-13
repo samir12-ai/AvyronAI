@@ -19,6 +19,7 @@ import { activateExecution } from "../execution-activation/engine";
 
 import { resolveAccountId } from "../auth";
 import { resolveRunId } from "../orchestrator/run-resolver";
+import { casUpdateStrategicPlan, casUpdateStrategicPlanByVersion } from "./cas-helper";
 
 async function verifyPlanOwnership(planId: string | string[], req: Request): Promise<{ plan: any } | null> {
   const id = Array.isArray(planId) ? planId[0] : planId;
@@ -439,10 +440,13 @@ export function registerExecutionRoutes(app: Express) {
         const plan = (req as any).plan;
         const { reason, decidedBy = "client" } = req.body;
 
-        await db
-          .update(strategicPlans)
-          .set({ status: "APPROVED", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, plan.id));
+        // Seal #10 / Task #28 / F8.3 — CAS using plan.version loaded by verifyPlanOwnership.
+        try {
+          await casUpdateStrategicPlanByVersion(plan.id, plan.version, { status: "APPROVED", updatedAt: new Date() });
+        } catch (e: any) {
+          if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+          throw e;
+        }
 
         await db.insert(planApprovals).values({
           planId: plan.id,
@@ -481,10 +485,12 @@ export function registerExecutionRoutes(app: Express) {
           return res.status(400).json({ error: "Rejection reason is required" });
         }
 
-        await db
-          .update(strategicPlans)
-          .set({ status: "REJECTED", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, plan.id));
+        try {
+          await casUpdateStrategicPlanByVersion(plan.id, plan.version, { status: "REJECTED", updatedAt: new Date() });
+        } catch (e: any) {
+          if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+          throw e;
+        }
 
         await db.insert(planApprovals).values({
           planId: plan.id,
@@ -518,16 +524,18 @@ export function registerExecutionRoutes(app: Express) {
         return res.status(409).json({ error: "ALREADY_STOPPED", message: "Emergency stop already active." });
       }
 
-      await db
-        .update(strategicPlans)
-        .set({
+      try {
+        await casUpdateStrategicPlanByVersion(planId, plan.version, {
           emergencyStopped: true,
           emergencyStoppedAt: new Date(),
           emergencyStoppedReason: reason || "Manual emergency stop",
           executionStatus: "PAUSED",
           updatedAt: new Date(),
-        })
-        .where(eq(strategicPlans.id, planId));
+        });
+      } catch (e: any) {
+        if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+        throw e;
+      }
 
       await logAudit(plan.accountId, "EMERGENCY_STOP_TRIGGERED", {
         details: { planId, reason, previousExecutionStatus: plan.executionStatus },
@@ -551,16 +559,18 @@ export function registerExecutionRoutes(app: Express) {
         return res.status(409).json({ error: "NOT_STOPPED", message: "Plan is not in emergency stop state." });
       }
 
-      await db
-        .update(strategicPlans)
-        .set({
+      try {
+        await casUpdateStrategicPlanByVersion(planId, plan.version, {
           emergencyStopped: false,
           emergencyStoppedAt: null,
           emergencyStoppedReason: null,
           executionStatus: "IDLE",
           updatedAt: new Date(),
-        })
-        .where(eq(strategicPlans.id, planId));
+        });
+      } catch (e: any) {
+        if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+        throw e;
+      }
 
       await logAudit(plan.accountId, "EXECUTION_RESUMED", {
         details: { planId },
@@ -585,10 +595,12 @@ export function registerExecutionRoutes(app: Express) {
           return res.status(409).json({ error: "EMERGENCY_STOPPED", message: "Cannot execute while emergency stop is active." });
         }
 
-        await db
-          .update(strategicPlans)
-          .set({ executionStatus: "RUNNING", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, plan.id));
+        try {
+          await casUpdateStrategicPlanByVersion(plan.id, plan.version, { executionStatus: "RUNNING", updatedAt: new Date() });
+        } catch (e: any) {
+          if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+          throw e;
+        }
 
         try {
           let planJson: any;
@@ -668,15 +680,18 @@ export function registerExecutionRoutes(app: Express) {
             .where(eq(calendarEntries.planId, plan.id));
 
           if (existingEntries.length > 0) {
-            await db
-              .update(strategicPlans)
-              .set({
-                executionStatus: "COMPLETED",
-                generatedToCalendarAt: new Date(),
-                totalCalendarEntries: existingEntries.length,
-                updatedAt: new Date(),
-              })
-              .where(eq(strategicPlans.id, plan.id));
+            await casUpdateStrategicPlan(plan.id, {
+              executionStatus: "COMPLETED",
+              generatedToCalendarAt: new Date(),
+              totalCalendarEntries: existingEntries.length,
+              updatedAt: new Date(),
+            }).catch((e: any) => {
+              if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") {
+                console.warn(`[ExecutionRoutes] CAS_CONFLICT idempotent-completion plan=${plan.id}`);
+                return { updated: false, newVersion: 0 };
+              }
+              throw e;
+            });
 
             return res.json({
               success: true,
@@ -710,16 +725,19 @@ export function registerExecutionRoutes(app: Express) {
             }
           }
 
-          await db
-            .update(strategicPlans)
-            .set({
-              executionStatus: "COMPLETED",
-              status: "GENERATED_TO_CALENDAR",
-              generatedToCalendarAt: new Date(),
-              totalCalendarEntries: slots.length,
-              updatedAt: new Date(),
-            })
-            .where(eq(strategicPlans.id, plan.id));
+          await casUpdateStrategicPlan(plan.id, {
+            executionStatus: "COMPLETED",
+            status: "GENERATED_TO_CALENDAR",
+            generatedToCalendarAt: new Date(),
+            totalCalendarEntries: slots.length,
+            updatedAt: new Date(),
+          }).catch((e: any) => {
+            if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") {
+              console.warn(`[ExecutionRoutes] CAS_CONFLICT calendar-completion plan=${plan.id}`);
+              return { updated: false, newVersion: 0 };
+            }
+            throw e;
+          });
 
           await logAudit(plan.accountId, "CALENDAR_ENTRIES_GENERATED", {
             details: { planId: plan.id, entries: slots.length, periodDays },
@@ -732,10 +750,8 @@ export function registerExecutionRoutes(app: Express) {
             totals,
           });
         } catch (innerErr: any) {
-          await db
-            .update(strategicPlans)
-            .set({ executionStatus: "FAILED", updatedAt: new Date() })
-            .where(eq(strategicPlans.id, plan.id));
+          await casUpdateStrategicPlan(plan.id, { executionStatus: "FAILED", updatedAt: new Date() })
+            .catch(() => { /* CAS conflict is benign here — another writer already moved the plan */ });
 
           await logAudit(plan.accountId, "EXECUTION_FAILED", {
             details: { planId: plan.id, error: innerErr.message },
@@ -979,10 +995,18 @@ export function registerExecutionRoutes(app: Express) {
           studioDeleted += deleted.length;
         }
 
-        await tx
-          .update(strategicPlans)
-          .set({ executionStatus: "IDLE", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, planId));
+        // Seal #10 / Task #28 / F8.3 — CAS inside the existing tx. Read
+        // version inside the tx for consistency, then conditional update.
+        const [verRow] = await tx.select({ version: strategicPlans.version })
+          .from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+        const expectedVersion = verRow?.version ?? 1;
+        const upd = await tx.update(strategicPlans)
+          .set({ executionStatus: "IDLE", updatedAt: new Date(), version: sql`${strategicPlans.version} + 1` })
+          .where(and(eq(strategicPlans.id, planId), eq(strategicPlans.version, expectedVersion)))
+          .returning({ id: strategicPlans.id });
+        if (upd.length === 0) {
+          throw new Error(`CONCURRENT_MODIFICATION: strategic_plans.id=${planId} expectedVersion=${expectedVersion}`);
+        }
       });
 
       await logAudit(plan.accountId, "FAILED_ENTRIES_RESET", {
