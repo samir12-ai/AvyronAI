@@ -596,15 +596,20 @@ export function checkOfferInputSufficient(results: Map<EngineId, EngineStepResul
     output?.layerDiagnostics?.blockCode ||
     output?.blockCode ||
     null;
-  // Seal #9 (F2.2 #1) — read engine status via explicit guard, not LHS
-  // semantic-fallback. The field IS the canonical engine completion status
-  // for the offer engine (INSUFFICIENT_SIGNALS / BLOCKED / OK), so we read
-  // it directly; absence is encoded as null without any logical/ternary
-  // expression that would let the lint rule see a forbidden read on the
-  // LHS or in a ternary branch.
+  // Seal #9 (F2.2 #1, code-review pass-2) — D5 visibility: when the offer
+  // engine fails to emit its canonical completion status, surface
+  // CONTRACT_INCOMPLETE (via `unknown(...)`) instead of silently treating
+  // the missing value as "not blocked" and returning pass(). This site
+  // previously normalized the missing read to null, which let an under-
+  // emitting engine slip through the structural check unobserved.
   let outputStatus: string | null = null;
+  let outputStatusMissing = false;
   if (output && typeof output.status === "string" && output.status.length > 0) {
     outputStatus = output.status;
+  } else if (output) {
+    // Engine produced output but omitted the canonical `status` field — D5
+    // says: do not silently substitute, surface incompleteness explicitly.
+    outputStatusMissing = true;
   }
   const blocked =
     blockCode === "OFFER_INPUT_INSUFFICIENT" ||
@@ -613,6 +618,13 @@ export function checkOfferInputSufficient(results: Map<EngineId, EngineStepResul
   if (blocked) {
     const detail = output?.statusMessage || offerResult.blockReason || "Offer engine reported insufficient input — no audience pains and no raw market-language pain phrases available.";
     return fail("offer_input_sufficient", `OFFER_INPUT_INSUFFICIENT: ${detail}`);
+  }
+  if (outputStatusMissing && blockCode === null && offerResult.status !== "BLOCKED") {
+    // No blockCode and no engine-execution BLOCKED state, but the offer
+    // engine omitted its canonical completion `status` — we cannot honestly
+    // claim "sufficient pain input"; flag the gap so the verdict pipeline
+    // can register CONTRACT_INCOMPLETE.
+    return unknown("offer_input_sufficient", "CONTRACT_INCOMPLETE: offer engine output missing canonical `status` field — cannot verify pain-input sufficiency");
   }
   return pass("offer_input_sufficient", "Offer engine has sufficient pain input");
 }

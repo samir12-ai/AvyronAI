@@ -179,17 +179,29 @@ function extractMechanismKeyOutputs(snap: any): Record<string, any> {
   };
 }
 
-function pickOfferCoreOutcome(primary: any): string | null {
-  // Seal #9 (F2.2 #2) — D5 honesty: read the canonical `coreOutcome` ONLY.
-  // The legacy `outcome` field name from pre-H4 offer payloads is no longer
-  // accepted as a substitute (per doctrine D5: missing canonical → return
-  // null, never silently substitute another field). Implemented with a
-  // plain if-block (no ternary) so the lint rule does not flag the
-  // canonical `coreOutcome` read as a verdict-shape ternary branch.
-  if (!primary || typeof primary !== "object") return null;
+/**
+ * Seal #9 (F2.2 #2, code-review pass-2): D5 explicit-incomplete marker.
+ *
+ * Returns the canonical offer `coreOutcome` string when present, or the
+ * literal sentinel `"CONTRACT_INCOMPLETE"` when the field is missing /
+ * blank / non-string. This is intentionally NOT `null` — D5 forbids the
+ * silent substitution of one canonical meaning for another, AND forbids
+ * a contract gap from looking indistinguishable from "not applicable" in
+ * downstream consumers. The sentinel string surfaces the gap on the wire
+ * (full-report JSON output) so observability and audit panels can attribute
+ * the incompleteness to the offer engine instead of misreading null as
+ * "no offer required."
+ */
+export const CONTRACT_INCOMPLETE_MARKER = "CONTRACT_INCOMPLETE" as const;
+
+function pickOfferCoreOutcome(primary: any): string {
+  // Implemented with a plain if-block (no ternary) so the lint rule does
+  // not flag the canonical `coreOutcome` read as a verdict-shape ternary
+  // branch.
+  if (!primary || typeof primary !== "object") return CONTRACT_INCOMPLETE_MARKER;
   const v = primary.coreOutcome;
   if (typeof v === "string" && v.length > 0) return v;
-  return null;
+  return CONTRACT_INCOMPLETE_MARKER;
 }
 
 function extractOfferKeyOutputs(snap: any): Record<string, any> {

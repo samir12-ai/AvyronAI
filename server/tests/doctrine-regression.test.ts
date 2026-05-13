@@ -88,6 +88,13 @@ const CLEAN: Array<{ label: string; code: string }> = [
   { label: "ternary TEST reads forbidden — body does not", code: `const x = a.status ? "yes" : "no";` },
   { label: "if-statement reads forbidden — not in fallback expression", code: `function f(r: any){ if (r) return r.status; return "x"; }` },
   { label: "destructured WITHOUT default for verdict-shape name", code: `const { status } = obj;` },
+  // Seal #9 (pass-3) — alias detector intentionally narrow. Suffix-style
+  // canonical names assigned via logical fallback at the alias site do
+  // NOT trip the alias detector (rationale in no-semantic-fallback.js).
+  { label: "pass-3 clean — alias-LHS suffix `validationState` (intentionally silent)", code: `const validationState = a || b;` },
+  { label: "pass-3 clean — alias-LHS suffix `decisionAction` (intentionally silent)", code: `const decisionAction = a ?? b;` },
+  { label: "pass-3 clean — destructured suffix `validationState` (intentionally silent)", code: `const { validationState = "weak" } = obj;` },
+  { label: "pass-3 clean — benign suffix collision `firstName`", code: `const firstName = a || "anon";` },
 ];
 
 for (const c of CLEAN) {
@@ -103,10 +110,73 @@ for (const c of CLEAN) {
   });
 }
 
+// ── Fixture-file proof (code-review pass-2) ──────────────────────────────
+//
+// The audit asked for fixture-based lint proof. We additionally lint the
+// real fixture files in `.local/eslint-rules/__fixtures__/` and assert the
+// rule reports the EXPECTED set of offenders + zero false positives on
+// the clean fixture. This protects against the inline-RuleTester suite
+// drifting away from the production fixtures.
+
+import { Linter } from "eslint";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const tsParser = require("@typescript-eslint/parser");
+
+// Flat-config Linter (ESLint 9). `defineRule` was removed in flat config —
+// rules are passed inline via the `plugins` map of the per-call config.
+const linter = new Linter({ configType: "flat" });
+
+const FIXTURE_DIR = join(__dirname, "..", "..", ".local", "eslint-rules", "__fixtures__");
+
+function lintFixture(name: string): Linter.LintMessage[] {
+  const code = readFileSync(join(FIXTURE_DIR, name), "utf-8");
+  return linter.verify(code, [
+    {
+      languageOptions: {
+        parser: tsParser,
+        parserOptions: { ecmaVersion: 2022, sourceType: "module" },
+      },
+      plugins: {
+        semantic: { rules: { "no-semantic-fallback": rule } },
+      },
+      rules: { "semantic/no-semantic-fallback": "error" },
+    },
+  ]);
+}
+
+const RULE_ID = "semantic/no-semantic-fallback";
+
+check("FIXTURE — offenders.ts: rule reports ≥11 violations", () => {
+  const messages = lintFixture("offenders.ts");
+  const violations = messages.filter((m) => m.ruleId === RULE_ID);
+  if (violations.length < 11) {
+    throw new Error(`expected ≥11 violations, got ${violations.length}: ${violations.map((m) => `L${m.line}:${m.messageId}`).join(", ")}`);
+  }
+});
+
+check("FIXTURE — offenders.ts: every messageId variant is exercised", () => {
+  const messages = lintFixture("offenders.ts");
+  const ids = new Set(messages.filter((m) => m.ruleId === RULE_ID).map((m) => m.messageId));
+  const required = ["semanticFallbackRhs", "semanticFallbackLhs", "semanticFallbackTernary", "semanticFallbackAlias", "semanticFallbackDestructured"];
+  for (const r of required) {
+    if (!ids.has(r)) throw new Error(`fixture missing ${r}; have: ${[...ids].join(",")}`);
+  }
+});
+
+check("FIXTURE — clean.ts: rule reports ZERO violations (no false positives)", () => {
+  const messages = lintFixture("clean.ts");
+  const violations = messages.filter((m) => m.ruleId === RULE_ID);
+  if (violations.length > 0) {
+    throw new Error(`expected 0 violations, got ${violations.length}: ${violations.map((v) => `L${v.line}:${v.messageId}=${v.message}`).join(" | ")}`);
+  }
+});
+
 // ── Summary ───────────────────────────────────────────────────────────────
 console.log("\n══════════════════════════════════════════════════════════════════");
 if (failed === 0) {
-  console.log(`${PASS} all assertions passed (${OFFENDERS.length} offenders + ${CLEAN.length} clean)`);
+  console.log(`${PASS} all assertions passed (${OFFENDERS.length} offenders + ${CLEAN.length} clean + 3 fixture-file proofs)`);
   process.exit(0);
 } else {
   console.log(`${FAIL} ${failed} assertion(s) failed`);
