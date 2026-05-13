@@ -258,6 +258,32 @@ export const NON_STRATEGIC_MEMORY_TYPES = [
   "self_improvement",
 ] as const;
 
+/**
+ * Seal #10 / Task #28 / F4.9 — centralized helper any READ path that loads
+ * strategy_memory rows for AI context (build-plan, plan synthesis, autonomous
+ * worker, system-control reports, audit panes) MUST use to filter out
+ * operational/non-strategic memory types. Pre-#28, only WRITE paths went
+ * through `policyEnforcedMemoryCheck()`; reads silently included operational
+ * rows in the AI context, polluting strategy with content_rhythm noise.
+ *
+ * Returns the canonical exclusion list as a plain string[] for callers using
+ * `notInArray(strategyMemory.memoryType, NON_STRATEGIC_MEMORY_TYPES_ARR)`.
+ * Centralizing the cast removes the per-callsite `[...NON_STRATEGIC_MEMORY_TYPES]`
+ * spread, making it impossible to forget the conversion.
+ */
+export const NON_STRATEGIC_MEMORY_TYPES_ARR: string[] = [...NON_STRATEGIC_MEMORY_TYPES];
+
+/**
+ * Returns true when the given memory type is operational/non-strategic and
+ * therefore MUST be excluded from any AI-context read. Use at any call-site
+ * where the read can't be expressed as a single SQL filter (e.g. when
+ * post-filtering a rows array assembled from multiple sources).
+ */
+export function isNonStrategicMemoryType(memoryType: string | null | undefined): boolean {
+  if (!memoryType) return false;
+  return (NON_STRATEGIC_MEMORY_TYPES_ARR as readonly string[]).includes(memoryType);
+}
+
 export function policyEnforcedMemoryCheck(
   confidenceScore: number,
   direction: "reinforce" | "avoid" | "neutral",

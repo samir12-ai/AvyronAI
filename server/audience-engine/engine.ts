@@ -114,7 +114,13 @@ export interface StructuredSignals {
   psychological_drivers: StructuredSignalCluster[];
 }
 
-export type EngineStatus = "COMPLETE" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE" | "MISSING_DEPENDENCY";
+// Seal #10 / Task #28 / F2.9 — `PARTIAL` added: emitted when the engine
+// produced usable output but signal coverage was below the qualifying
+// threshold (or only some downstream maps populated). Distinct from
+// INSUFFICIENT_SIGNALS (no usable output) and DEFENSIVE_MODE (low-trust).
+// Downstream consumers (System Control, snapshot reuse) treat PARTIAL as
+// "use with caution" — never as COMPLETE.
+export type EngineStatus = "COMPLETE" | "PARTIAL" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE" | "MISSING_DEPENDENCY";
 
 export interface AudienceEngineV3Result {
   status: EngineStatus;
@@ -2021,6 +2027,23 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   } else if (isDefensiveMode) {
     status = "DEFENSIVE_MODE";
     statusMessage = "Low signal environment detected — Audience intelligence limited — More market data required";
+  } else {
+    // Seal #10 / Task #28 / F2.9 — PARTIAL emission: engine produced usable
+    // output but coverage is incomplete. Triggers when (a) signals are above
+    // the AI floor but below the doubled "rich coverage" mark, OR (b) any of
+    // the core maps came back empty, OR (c) no audience segments resolved.
+    // Snapshot-reuse + System Control read this status verbatim.
+    const richSignalFloor = AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI * 2;
+    const coreMaps = [painMap, desireMap, objectionMap];
+    const anyEmpty = coreMaps.some((m) => !Array.isArray(m) || m.length === 0);
+    if (totalSignalMatches < richSignalFloor || anyEmpty || (audienceSegments?.length ?? 0) === 0) {
+      status = "PARTIAL";
+      const reasons: string[] = [];
+      if (totalSignalMatches < richSignalFloor) reasons.push(`signals=${totalSignalMatches}<${richSignalFloor}`);
+      if (anyEmpty) reasons.push("core_map_empty");
+      if ((audienceSegments?.length ?? 0) === 0) reasons.push("no_segments");
+      statusMessage = `PARTIAL audience output — coverage incomplete (${reasons.join("; ")}); downstream engines must treat as low-confidence`;
+    }
   }
 
   const inputSummary = {

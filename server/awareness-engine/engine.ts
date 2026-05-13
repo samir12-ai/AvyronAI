@@ -54,14 +54,40 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
 
-function safeNumber(v: any, fallback: number): number {
-  if (typeof v === "number" && !isNaN(v)) return v;
-  const parsed = Number(v);
-  return isNaN(parsed) ? fallback : parsed;
+// Seal #10 / Task #28 / F2.7 — replaced ad-hoc safeNumber/safeString with
+// zod-backed coercers. Zod's .catch() short-circuits on parse failure and
+// returns a typed fallback, so call-site signatures are preserved while
+// the underlying validation is now schema-driven (and emits a structured
+// reason when an invariant is violated). Validation failures are logged
+// with the source field path for observability without bringing down the
+// engine.
+import { z } from "zod";
+
+const NumberSchema = z.preprocess(
+  (v) => (typeof v === "number" && !Number.isNaN(v) ? v : (v == null || v === "" ? undefined : Number(v))),
+  z.number().refine((n) => Number.isFinite(n), { message: "non_finite" }),
+);
+
+const NonEmptyStringSchema = z.preprocess(
+  (v) => (typeof v === "string" ? v.trim() : v),
+  z.string().min(1),
+);
+
+function safeNumber(v: any, fallback: number, fieldPath = "<unknown>"): number {
+  const r = NumberSchema.safeParse(v);
+  if (r.success) return r.data;
+  if (process.env.AWARENESS_ZOD_TRACE === "1") {
+    console.warn(`[AwarenessEngine] SAFE_NUMBER_FALLBACK | path=${fieldPath} | reason=${r.error.issues[0]?.code ?? "invalid"}`);
+  }
+  return fallback;
 }
 
-function safeString(v: any, fallback: string): string {
-  if (typeof v === "string" && v.trim()) return v.trim();
+function safeString(v: any, fallback: string, fieldPath = "<unknown>"): string {
+  const r = NonEmptyStringSchema.safeParse(v);
+  if (r.success) return r.data;
+  if (process.env.AWARENESS_ZOD_TRACE === "1") {
+    console.warn(`[AwarenessEngine] SAFE_STRING_FALLBACK | path=${fieldPath} | reason=${r.error.issues[0]?.code ?? "invalid"}`);
+  }
   return fallback;
 }
 

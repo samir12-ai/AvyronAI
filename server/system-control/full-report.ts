@@ -21,7 +21,8 @@ import {
   iterationSnapshots,
   retentionSnapshots,
 } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, notInArray } from "drizzle-orm";
+import { NON_STRATEGIC_MEMORY_TYPES_ARR } from "../decision-policy";
 import { authMiddleware, resolveAccountId, type AuthRequest } from "../auth";
 import { getStoredIntegrityReport } from "../system-integrity/routes";
 import { getCachedCELReport } from "../causal-enforcement-layer/engine";
@@ -586,6 +587,11 @@ function rowToSlot(row: any) {
 }
 
 async function buildMemorySection(campaignId: string, accountId: string) {
+  // Seal #10 / Task #28 / F4.9 — System Control's memory section feeds the
+  // strategic full-report; operational rows (content_rhythm,
+  // exploration_budget, mutation_log, agent_action, self_improvement) are
+  // execution telemetry, not strategy signal. Excluding them keeps the
+  // top-reinforce / top-avoid surfaces strategy-only.
   const rows = await db
     .select()
     .from(strategyMemory)
@@ -593,6 +599,7 @@ async function buildMemorySection(campaignId: string, accountId: string) {
       and(
         eq(strategyMemory.accountId, accountId),
         eq(strategyMemory.campaignId, campaignId),
+        notInArray(strategyMemory.memoryType, NON_STRATEGIC_MEMORY_TYPES_ARR),
       )
     )
     .orderBy(desc(strategyMemory.updatedAt))

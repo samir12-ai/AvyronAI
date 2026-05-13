@@ -415,18 +415,70 @@ Return EXACTLY this JSON structure:
 Return ONLY valid JSON. No markdown, no code blocks, no explanation.`;
 }
 
+// Seal #10 / Task #28 / F4.3 — strict zod schema for the AI build-plan
+// response. Replaces the prior shape-via-truthy-check + try/catch JSON.parse
+// pattern that silently fell back to `null` on ANY shape violation. Now an
+// invalid response yields a structured ValidationError so the caller can
+// distinguish "AI returned malformed JSON" from "no response".
+import { z } from "zod";
+
+const BuildPlanResponseSchema = z.object({
+  positioning: z.string().min(1),
+  differentiation: z.string().min(1),
+  mechanism: z.object({
+    name: z.string().min(1),
+    explanation: z.string().min(1),
+  }),
+  offer: z.string().min(1),
+  funnel: z.object({
+    top: z.string().min(1),
+    middle: z.string().min(1),
+    bottom: z.string().min(1),
+  }),
+  contentDna: z.object({
+    contentTypes: z.object({
+      problems: z.string().optional().default(""),
+      proof: z.string().optional().default(""),
+      education: z.string().optional().default(""),
+      conversion: z.string().optional().default(""),
+    }).optional().default({} as any),
+    contentAngles: z.array(z.any()).optional().default([]),
+    hookStyles: z.array(z.any()).optional().default([]),
+    messagingThemes: z.array(z.any()).optional().default([]),
+    contentMixRatio: z.record(z.any()).optional().default({}),
+  }),
+  kpiRules: z.object({
+    postingFrequency: z.string().optional().default(""),
+    contentMix: z.string().optional().default(""),
+    conversionTargets: z.string().optional().default(""),
+  }),
+  executionActions: z.object({
+    daily: z.array(z.any()).optional(),
+    weekly: z.array(z.any()).optional(),
+    biweekly: z.array(z.any()).optional(),
+  }).optional().default({} as any),
+});
+
 function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutput | null {
+  let cleaned = content.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+  }
+  let raw: unknown;
   try {
-    let cleaned = content.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-    const parsed = JSON.parse(cleaned);
-
-    if (!parsed.positioning || !parsed.differentiation || !parsed.mechanism || !parsed.offer || !parsed.funnel || !parsed.contentDna || !parsed.kpiRules) {
-      return null;
-    }
-
+    raw = JSON.parse(cleaned);
+  } catch (err: any) {
+    console.warn(`[BuildPlanLayer] AI_RESPONSE_PARSE_FAILED | reason=invalid_json | error=${err?.message ?? "parse_error"}`);
+    return null;
+  }
+  const result = BuildPlanResponseSchema.safeParse(raw);
+  if (!result.success) {
+    const issues = result.error.issues.slice(0, 5).map(i => `${i.path.join(".")}=${i.code}`).join(",");
+    console.warn(`[BuildPlanLayer] AI_RESPONSE_SHAPE_INVALID | reason=zod_validation_failed | issues=${issues}`);
+    return null;
+  }
+  const parsed: any = result.data;
+  try {
     const contentAngles = Array.isArray(parsed.contentDna?.contentAngles) ? parsed.contentDna.contentAngles.map(String) : [];
     const hookStyles = Array.isArray(parsed.contentDna?.hookStyles) ? parsed.contentDna.hookStyles.map(String) : [];
     const messagingThemes = Array.isArray(parsed.contentDna?.messagingThemes) ? parsed.contentDna.messagingThemes.map(String) : [];
@@ -491,7 +543,8 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutp
         conversionTargets: String(parsed.kpiRules?.conversionTargets || ""),
       },
     };
-  } catch {
+  } catch (err: any) {
+    console.warn(`[BuildPlanLayer] AI_RESPONSE_BUILD_FAILED | reason=post_zod_construction_error | error=${err?.message ?? "unknown"}`);
     return null;
   }
 }
@@ -509,8 +562,24 @@ export async function runBuildPlanLayer(
   // P0-6: thread sourceJobId so every engine output read is scoped to the
   // same orchestrator run. If absent, getLatestSnapshot will emit
   // STALE_LINEAGE_READ warnings and fall back to "latest by table" behavior.
+  // Seal #10 / Task #28 / F2.5 — STALE_LINEAGE_READ promoted from warn to
+  // BLOCK in production paths. When sourceJobId is absent the orchestrator
+  // is reading "latest by table" snapshots which may belong to a prior run
+  // and contradict each other. Allow only in test mode (NODE_ENV==='test')
+  // for fixture-driven tests; production refuses to synthesize a build plan
+  // from un-bound snapshots.
   if (!sourceJobId) {
-    console.warn(`[BuildPlanLayer] RUN_WITHOUT_SOURCE_JOB | account=${accountId} campaign=${campaignId} — engine outputs may be stitched across runs`);
+    if (process.env.NODE_ENV === "production") {
+      console.error(`[BuildPlanLayer] STALE_LINEAGE_BLOCK | account=${accountId} campaign=${campaignId} — refusing build-plan synthesis without sourceJobId (cross-run snapshot stitching forbidden)`);
+      return applyPartialAelDowngrade("BuildPlanLayer", {
+        status: "INSUFFICIENT_DATA" as any,
+        statusReason: "STALE_LINEAGE_BLOCK: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
+        attempts: 0,
+        snapshotsUsed: 0,
+        provenanceCheck: { passed: false, missingSnapshots: [], outputs: [] },
+      } as any, aelAck);
+    }
+    console.warn(`[BuildPlanLayer] RUN_WITHOUT_SOURCE_JOB | account=${accountId} campaign=${campaignId} — engine outputs may be stitched across runs (allowed in non-prod)`);
   }
   const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus, sourceJobId);
 

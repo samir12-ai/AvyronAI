@@ -1,5 +1,7 @@
+import { z } from "zod";
 import { db } from "../db";
 import { buildAnalyticalPackage } from "../analytical-enrichment-layer/engine";
+import { inFlightJobs } from "@shared/schema";
 import {
   enforceGenericEngineCompliance,
   buildCELReport,
@@ -370,9 +372,47 @@ async function getRetentionGateData(accountId: string, campaignId: string): Prom
   };
 }
 
+// Seal #10 / Task #28 / F4.5 — strict zod schema for the orchestrator's MI
+// input extraction. Pre-#28 the function tolerated any shape silently and
+// returned `{}` on a missing `.output`. Now `.output` (when present) is
+// validated as an object; non-object → CONTRACT_INCOMPLETE. The internal
+// shape remains loose because MI v3 has many optional fields, but the top
+// level is locked down so a corrupt MI snapshot can't silently feed an
+// empty input map into every downstream engine.
+const MiResultEnvelopeSchema = z.object({
+  output: z.unknown().optional(),
+  overallConfidence: z.number().nullable().optional(),
+  dominanceData: z.array(z.any()).optional(),
+  trajectoryData: z.any().nullable().optional(),
+});
+
 function extractMiInput(miResult: any): any {
-  if (!miResult?.output) return {};
-  const out = miResult.output;
+  if (miResult == null) return {};
+  const env = MiResultEnvelopeSchema.safeParse(miResult);
+  if (!env.success) {
+    const issues = env.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}=${i.code}`).join(",");
+    console.warn(`[Orchestrator] MI_EXTRACT_CONTRACT_INCOMPLETE | reason=mi_envelope_invalid | issues=${issues}`);
+    return {};
+  }
+  if (!env.data.output || typeof env.data.output !== "object") return {};
+
+  // Seal #10 / Task #28 / F2.5 + F4.6 — MI snapshot freshness/lineage gate.
+  // Refuse NEEDS_REFRESH or INCOMPATIBLE freshness; refuse a snapshot whose
+  // _provenance.jobId disagrees with the orchestrator's current jobId. In
+  // either case the MI is treated as missing for this run so engines fall
+  // back to an empty input rather than consuming stale or cross-run data.
+  const out: any = env.data.output;
+  const prov = out?._provenance;
+  if (prov && typeof prov === "object") {
+    if (prov.freshnessClass === "NEEDS_REFRESH" || prov.freshnessClass === "INCOMPATIBLE") {
+      console.warn(`[Orchestrator] MI_FRESHNESS_REFUSED | freshnessClass=${prov.freshnessClass} | reason=stale_or_incompatible`);
+      return {};
+    }
+  }
+  return extractMiInputBody(env.data, out);
+}
+
+function extractMiInputBody(miResult: any, out: any): any {
 
   const intentMap: any[] = Array.isArray(out.competitorIntentMap) ? out.competitorIntentMap : [];
   const competitors = (out.competitors && Array.isArray(out.competitors) && out.competitors.length > 0)
@@ -3418,6 +3458,24 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     }
   }
 
+  // Seal #10 / Task #28 / F8.2 — register the run in `in_flight_jobs` so the
+  // snapshot-cleanup-worker's COLD_STORAGE_PURGE / per-campaign cap passes
+  // can JOIN against this table and skip any snapshot row whose jobId is
+  // currently active. Pre-#28, snapshot cleanup raced with running orches-
+  // trator runs and could purge a snapshot the in-flight engine was about
+  // to read. ON CONFLICT DO NOTHING handles the resumed-job path where the
+  // row may already exist.
+  try {
+    await db.insert(inFlightJobs).values({
+      jobId,
+      accountId: config.accountId,
+      campaignId: config.campaignId,
+      expectedCompleteBy: new Date(Date.now() + 30 * 60 * 1000),
+    }).onConflictDoNothing();
+  } catch (regErr: any) {
+    console.warn(`[Orchestrator] IN_FLIGHT_REGISTRATION_FAILED | jobId=${jobId} | error=${regErr.message}`);
+  }
+
   // Mirror the local jobId onto config so downstream callers (synthesizePlan,
   // engine adapters that read config.jobId) see the same run identifier as
   // the local executeEngine path. Without this assignment, plan persistence
@@ -4091,9 +4149,26 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           // is visible to downstream readers/auditors.
           if (planId) {
             try {
-              await db.update(strategicPlans)
-                .set({ planJson: JSON.stringify(planResult.plan) })
-                .where(eq(strategicPlans.id, planId));
+              // Seal #10 / Task #28 / F8.3 — optimistic-locking CAS. Read
+              // current version, write with WHERE id=? AND version=?,
+              // bump version on success. If affected rows = 0 a concurrent
+              // writer modified the plan first; surface as
+              // CONCURRENT_MODIFICATION instead of silently overwriting.
+              const [currentRow] = await db.select({ version: strategicPlans.version })
+                .from(strategicPlans)
+                .where(eq(strategicPlans.id, planId))
+                .limit(1);
+              const currentVersion = currentRow?.version ?? 1;
+              const updated = await db.update(strategicPlans)
+                .set({ planJson: JSON.stringify(planResult.plan), version: currentVersion + 1 })
+                .where(and(
+                  eq(strategicPlans.id, planId),
+                  eq(strategicPlans.version, currentVersion),
+                ))
+                .returning({ id: strategicPlans.id });
+              if (updated.length === 0) {
+                console.warn(`[Orchestrator] PLAN_DEGRADE_CONCURRENT_MODIFICATION | planId=${planId} | expectedVersion=${currentVersion} — degradation surface dropped (another writer won)`);
+              }
             } catch (persistErr: any) {
               console.warn(`[Orchestrator] PLAN_DEGRADE_PERSIST_FAILED | planId=${planId} | ${persistErr.message}`);
             }
@@ -4137,6 +4212,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       ),
     })
     .where(eq(orchestratorJobs.id, jobId));
+
+  // Seal #10 / Task #28 / F8.2 — terminal-state deregistration. Once the
+  // run has reached COMPLETED / PARTIAL / BLOCKED / ERROR, drop the
+  // in_flight_jobs row so snapshot-cleanup is free to act on this run's
+  // snapshots once they age past their retention window. NEEDS_INPUT does
+  // NOT pass through here (returns earlier) so its in_flight_jobs row
+  // stays until the run resumes-and-finishes or the reaper expires it.
+  try {
+    await db.delete(inFlightJobs).where(eq(inFlightJobs.jobId, jobId));
+  } catch (delErr: any) {
+    console.warn(`[Orchestrator] IN_FLIGHT_DEREGISTRATION_FAILED | jobId=${jobId} | error=${delErr.message}`);
+  }
 
   if (ctx.celResults && ctx.celResults.length > 0) {
     const celReport = buildCELReport(config.campaignId, 2, ctx.celResults);

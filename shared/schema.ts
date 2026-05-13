@@ -1311,6 +1311,11 @@ export const strategicPlans = pgTable("strategic_plans", {
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),
   approvedRhythmJson: text("approved_rhythm_json"),
+  // Seal #10 / Task #28 / F8.3 — optimistic-locking version. Every UPDATE
+  // must include WHERE version=? + SET version=version+1; affected-rows=0
+  // throws CONCURRENT_MODIFICATION instead of silently overwriting a
+  // concurrent edit (e.g. plan approval racing plan synthesis re-write).
+  version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1325,7 +1330,23 @@ export const planApprovals = pgTable("plan_approvals", {
   reason: text("reason"),
   decidedBy: text("decided_by").default("client"),
   rhythmSnapshotJson: text("rhythm_snapshot_json"),
+  // Seal #10 / Task #28 / F8.4 — optimistic-locking version (same contract
+  // as strategicPlans.version above).
+  version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Seal #10 / Task #28 / F8.2 — in_flight_jobs: snapshot-cleanup-worker
+// MUST exclude any snapshot whose jobId is currently in this table. The
+// orchestrator inserts on job start, deletes on terminal status (COMPLETED
+// / NEEDS_INPUT / BLOCKED / ERROR). Reaper deletes rows whose started_at
+// is older than the orchestrator wall-clock budget (currently ~30 min).
+export const inFlightJobs = pgTable("in_flight_jobs", {
+  jobId: varchar("job_id").primaryKey(),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  expectedCompleteBy: timestamp("expected_complete_by"),
 });
 
 export const requiredWork = pgTable("required_work", {

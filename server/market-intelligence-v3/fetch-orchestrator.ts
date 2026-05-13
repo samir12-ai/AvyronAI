@@ -1165,11 +1165,16 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     }
   }
 
+  // Seal #10 / Task #28 / F4.10 — version-baseline read tightened to
+  // status='COMPLETE' only. PARTIAL snapshots intentionally do NOT bump the
+  // version baseline because they would let a degraded run set the version
+  // line, causing the next COMPLETE snapshot to inherit a "PARTIAL is now
+  // current" lineage. The result is incomplete-data drift across runs.
   const previousSnapshots = await db.select().from(miSnapshots)
     .where(and(
       eq(miSnapshots.accountId, accountId),
       eq(miSnapshots.campaignId, campaignId),
-      inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
+      eq(miSnapshots.status, "COMPLETE"),
     ))
     .orderBy(desc(miSnapshots.createdAt))
     .limit(1);

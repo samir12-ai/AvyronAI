@@ -121,7 +121,17 @@ export async function buildAnalyticalPackage(input: AELInput): Promise<Analytica
 
   if (!inputSummary.hasMI && !inputSummary.hasAudience) {
     console.log(`${LOG_PREFIX} SKIP | No MI or Audience data available — returning empty package`);
-    return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary };
+    // Seal #10 / Task #28 / F2.4 — the empty-input branch must also flag
+    // the package as partial so System Control can detect it. Pre-#28 this
+    // returned EMPTY without `isPartial=true`, letting downstream consumers
+    // believe a clean COMPLETE package was emitted.
+    return {
+      ...EMPTY_ANALYTICAL_PACKAGE,
+      generatedAt: new Date().toISOString(),
+      inputSummary,
+      isPartial: true,
+      partialReason: "EMPTY_ANALYTICAL_PACKAGE: no MI or Audience input available",
+    };
   }
 
   const contextBlock = buildContextBlock(input);

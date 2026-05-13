@@ -86,7 +86,14 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   // Both pre-existed only as orchestrator console.warns; promoting to
   // structural FAILs so System Control downgrades execution mode instead
   // of letting downstream engines silently consume degraded inputs.
-  structuralChecks.push(checkAnalyticalEnrichmentIntegrity(input.analyticalEnrichmentPartial, input.analyticalEnrichmentReason));
+  structuralChecks.push(checkAnalyticalEnrichmentIntegrity(
+    input.analyticalEnrichmentPartial,
+    input.analyticalEnrichmentReason,
+    // Seal #10 / Task #28 / F2.3 — propagate downstream-consumer count so
+    // the structural check escalates from DOWNGRADE to BLOCK when engines
+    // already consumed the degraded enrichment.
+    (input as any).analyticalEnrichmentDownstreamConsumers ?? 0,
+  ));
   structuralChecks.push(checkSignalLineageUnknown(input.signalComposition));
   structuralChecks.push(checkConfidenceIntegrity(
     input.confidenceIntegrityVerdict,
@@ -115,6 +122,10 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   for (const sc of structuralChecks) {
     if (sc.status !== "FAIL") continue;
     if (sc.check === "analytical_enrichment_integrity") {
+      // Seal #10 / Task #28 / F2.3 — when the structural check returned a
+      // "BLOCK:"-prefixed FAIL (downstreamConsumers>0) skip the downgrade
+      // path so collectBlockReasons can promote it to a hard BlockReason.
+      if (sc.details.startsWith("BLOCK:")) continue;
       downgrades.push({
         from: budgetActionValue || "test",
         to: "review_required",

@@ -64,9 +64,23 @@ async function transitionState(planId: string, from: string, to: string, account
     return false;
   }
 
-  await db.update(strategicPlans)
-    .set({ executionStatus: to, updatedAt: new Date() })
-    .where(eq(strategicPlans.id, planId));
+  // Seal #10 / Task #28 / F8.3 — CAS-style transition: include the source
+  // state in the WHERE clause so a concurrent writer that already advanced
+  // the plan past `from` is detected (no rows updated). The pre-existing
+  // atomic-lock at L320 already does this for ACTIVATING; we extend the
+  // pattern to all subsequent transitions.
+  const updated = await db.update(strategicPlans)
+    .set({ executionStatus: to, updatedAt: new Date(), version: sql`${strategicPlans.version} + 1` })
+    .where(and(
+      eq(strategicPlans.id, planId),
+      eq(strategicPlans.executionStatus, from),
+    ))
+    .returning({ id: strategicPlans.id });
+
+  if (updated.length === 0) {
+    console.warn(`[ExecutionActivation] CONCURRENT_TRANSITION_BLOCKED | plan=${planId} | from=${from} → to=${to} (another writer changed state first)`);
+    return false;
+  }
 
   await logAudit(accountId, "EXECUTION_STATE_TRANSITION", {
     details: { planId, from, to },

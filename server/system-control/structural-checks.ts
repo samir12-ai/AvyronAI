@@ -1039,6 +1039,7 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
 export function checkAnalyticalEnrichmentIntegrity(
   isPartial: boolean | undefined,
   reason: string | null | undefined,
+  downstreamConsumers: number = 0,
 ): StructuralCheck {
   if (isPartial !== true) {
     return pass(
@@ -1046,9 +1047,20 @@ export function checkAnalyticalEnrichmentIntegrity(
       isPartial === false ? "AEL built with full enrichment" : "AEL state not provided",
     );
   }
+  // Seal #10 / Task #28 / F2.3 — when AEL is PARTIAL AND at least one
+  // downstream engine actually consumed the degraded enrichment, this is a
+  // hard structural BLOCK (not a downgrade). The "BLOCK:" prefix signals
+  // engine.ts to skip the downgrade-conversion branch and let
+  // collectBlockReasons map this into a verdict-blocking reason.
+  if (downstreamConsumers > 0) {
+    return fail(
+      "analytical_enrichment_integrity",
+      `BLOCK: Analytical Enrichment Layer is PARTIAL (${reason ?? "no reason given"}) and ${downstreamConsumers} downstream engine(s) consumed the degraded enrichment — live execution BLOCKED until AEL is rebuilt with full data`,
+    );
+  }
   return fail(
     "analytical_enrichment_integrity",
-    `Analytical Enrichment Layer is PARTIAL (${reason ?? "no reason given"}) — downstream engines consumed degraded enrichment; live execution cannot proceed without review`,
+    `Analytical Enrichment Layer is PARTIAL (${reason ?? "no reason given"}) — no downstream consumers yet; downgrade-only`,
   );
 }
 

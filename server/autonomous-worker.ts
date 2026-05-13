@@ -15,7 +15,8 @@ import {
 } from "@shared/schema";
 import { ACTIVE_PLAN_STATUSES_SQL } from "./plan-constants";
 
-import { eq, and, sql, desc, gte, lte, ne } from "drizzle-orm";
+import { eq, and, sql, desc, gte, lte, ne, notInArray } from "drizzle-orm";
+import { NON_STRATEGIC_MEMORY_TYPES_ARR } from "./decision-policy";
 
 const LEGACY_CAMPAIGN = "unscoped_legacy";
 import { logAudit } from "./audit";
@@ -131,7 +132,13 @@ async function runStrategyAnalysis(
           .where(and(
             eq(strategyMemory.accountId, accountId),
             eq(strategyMemory.campaignId, activeCampaignId),
-            ne(strategyMemory.campaignId, LEGACY_CAMPAIGN)
+            ne(strategyMemory.campaignId, LEGACY_CAMPAIGN),
+            // Seal #10 / Task #28 / F4.9 — exclude operational/non-strategic
+            // memory types from the AI-context read. content_rhythm and
+            // exploration_budget are operational state, not strategy signal —
+            // including them in the autonomous worker's context pollutes
+            // strategy reasoning with rhythm-counter noise.
+            notInArray(strategyMemory.memoryType, NON_STRATEGIC_MEMORY_TYPES_ARR),
           ))
           .orderBy(desc(strategyMemory.updatedAt))
           .limit(20)
