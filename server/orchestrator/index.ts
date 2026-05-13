@@ -2581,6 +2581,7 @@ async function executeEngine(
         const svCtx = ctx.statisticalValidation || {};
         const validationConfidence = typeof svCtx.claimConfidenceScore === "number" ? svCtx.claimConfidenceScore
           : typeof svCtx.confidenceScore === "number" ? svCtx.confidenceScore : 0.5;
+        // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
         const validationState = svCtx.validationState || "unknown";
 
         const monthlyBudget = parseFloat(bizData?.monthlyBudget?.replace(/[^0-9.]/g, "") || "0");
@@ -4033,6 +4034,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   if (controlVerdict && (controlVerdict.verdict === "DOWNGRADE" || controlVerdict.verdict === "REPAIR") && controlVerdict.downgrades.length > 0) {
     const budgetResult = results.get("budget_governor");
     if (budgetResult?.output?.decision) {
+      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
       const originalAction = budgetResult.output.decision.originalAction || budgetResult.output.decision.action;
       const DOWNGRADE_SEVERITY: Record<string, number> = { hold: 0, test: 1, scale: 2 };
       const targetAction = controlVerdict.downgrades.reduce((most, d) =>

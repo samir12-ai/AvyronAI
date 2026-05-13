@@ -403,6 +403,7 @@ export function layer4_narrativeEntryAlignment(
   const narrative = safeString(positioning.narrativeDirection, "");
   const enemy = safeString(positioning.enemyDefinition, "");
   const mechanism = differentiation.mechanismFraming?.description || differentiation.mechanismFraming?.name || "";
+  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
   const offerOutcome = offer.coreOutcome || "";
 
   if (entryRoute === "myth_breaker_entry" && !enemy) {

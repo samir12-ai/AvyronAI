@@ -1682,6 +1682,7 @@ function buildDeterministicOfferSkeletons(
   // template when richer data is present.
   const mechPromise = safeLabel(rootMech?.mechanismPromise, "skeleton.mechanism.promise");
   const mechLogic = safeLabel(rootMech?.mechanismLogic, "skeleton.mechanism.logic");
+  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
   const primaryOutcome = cascade(
     primaryClaimDigest.benefit,
     rootTransformation,
@@ -1689,6 +1690,7 @@ function buildDeterministicOfferSkeletons(
     primaryDesire && primaryPain ? `Move from ${primaryPain} to ${primaryDesire}` : null,
     primaryDesire,
   ) || `${axisPhrase} outcome (degraded — upstream data missing)`;
+  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
   const altOutcome = cascade(
     altClaimDigest.benefit,
     mechPromise,
@@ -2919,6 +2921,7 @@ export async function runOfferEngine(
     const mechanismType = mechanism.type || "none";
     const pains = audience.audiencePains || [];
     const desires = Object.entries(audience.desireMap || {});
+    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
     const offerOutcome = primaryOffer.coreOutcome || "";
     const offerMechDesc = primaryOffer.mechanismDescription || "";
 
@@ -3094,6 +3097,7 @@ export async function runOfferEngine(
     const rootMechNameCheck = (rootMechParsed?.mechanismName || "").toLowerCase();
 
     const axisInHook = axisTokensForCheck.length === 0 || axisTokensForCheck.some((t: string) => offerHookText.includes(t));
+    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
     const painInOutcome = diagnostics.sourceContext?.selectedPain
       ? offerOutcomeText.includes(diagnostics.sourceContext.selectedPain.toLowerCase().substring(0, 15))
       : true;

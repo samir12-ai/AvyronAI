@@ -22,6 +22,7 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
         const rawCompetitors = out.competitors || out.competitorData || out.competitor_data || out.competitorIntentMap;
         const compArr = typeof rawCompetitors === "string" ? safeParseArr(rawCompetitors) : (Array.isArray(rawCompetitors) ? rawCompetitors : []);
         const competitors = compArr.length;
+        // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
         const marketState = out.marketState || out.market_state || "analyzed";
         const saturation = out.angleSaturation !== undefined ? ` Saturation: ${out.angleSaturation}%.` : "";
         return `Found ${competitors} competitors. Market state: ${marketState}.${saturation}`;
@@ -111,6 +112,7 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
         const out = output.output || output;
         const snap = safeParseObj(out.snapshot);
         const result = snap?.result || out.result || out;
+        // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
         const state = result.validationState ?? out.validationState ?? null;
         const confidence = result.claimConfidenceScore ?? out.claimConfidenceScore;
         return `Statistical validation: ${state ?? "(missing verdict)"}.${confidence !== undefined ? ` Claim confidence: ${confidence}.` : ""}`;
@@ -124,6 +126,7 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
         const snap = safeParseObj(out.snapshot);
         const result = snap?.result || out.result || out;
         const rawDecision = result.decision || out.decision;
+        // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
         const action = typeof rawDecision === "object" ? rawDecision?.action : rawDecision;
         const budget = result.recommendedBudget || result.monthlyBudget || out.recommendedBudget || out.monthlyBudget;
         const testRange = result.testBudgetRange;

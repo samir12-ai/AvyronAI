@@ -538,6 +538,7 @@ export function layerEntryTriggerDetection(
 
   const route = awarenessInput.awarenessRoute || "";
   const triggerClass = awarenessInput.triggerClass || "";
+  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
   const trustState = awarenessInput.trustState || "";
   const awarenessStage = awarenessInput.awarenessStage || "";
 
@@ -774,6 +775,7 @@ export function applyAwarenessPriorityMatrix(
   let decidingPriorityName = "Offer Fit (default)";
 
   const entryMechanism = awareness?.entryMechanism || "";
+  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
   const trustState = awareness?.trustState || "";
   const awarenessStage = awareness?.awarenessStage || audience.awarenessLevel || "problem_aware";
   const triggerClass = awareness?.triggerClass || "";

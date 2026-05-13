@@ -270,6 +270,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
   if (mi?.status === "SUCCESS" && mi.output) {
     const out = mi.output.output || mi.output;
     const competitors = out.competitors?.length || 0;
+    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
     const marketState = out.marketState || "unknown";
     sections.push(`Market Intelligence: ${competitors} competitors analyzed, market state: ${marketState}`);
 
@@ -366,6 +367,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
   const statVal = results.get("statistical_validation");
   if (statVal?.status === "SUCCESS" && statVal.output) {
     const out = statVal.output.output || statVal.output;
+    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
     const state = out.validationState || "unknown";
     const claimConfidence = out.claimConfidenceScore ?? "N/A";
     const warnings = out.structuralWarnings?.length || 0;

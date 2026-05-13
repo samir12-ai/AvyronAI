@@ -64,6 +64,10 @@ const OFFENDERS: Array<{ label: string; code: string; messageId: string }> = [
   // Seal #9 destructured default
   { label: "F10.3 — destructured `{ status = \"x\" }`", code: `const { status = "PENDING" } = obj;`, messageId: "semanticFallbackDestructured" },
   { label: "F10.3 — destructured `{ outcome = ... }`", code: `const { outcome = "fallback" } = obj;`, messageId: "semanticFallbackDestructured" },
+  // Pass-3 final — wider F10.3 vocabulary on suffix-style canonical names.
+  { label: "pass-3 — alias suffix `validationState`", code: `const validationState = a || b;`, messageId: "semanticFallbackAlias" },
+  { label: "pass-3 — alias suffix `decisionAction`", code: `const decisionAction = a ?? b;`, messageId: "semanticFallbackAlias" },
+  { label: "pass-3 — destructured suffix `budgetAction`", code: `const { budgetAction = "halt" } = obj;`, messageId: "semanticFallbackDestructured" },
 ];
 
 for (const off of OFFENDERS) {
@@ -88,13 +92,12 @@ const CLEAN: Array<{ label: string; code: string }> = [
   { label: "ternary TEST reads forbidden — body does not", code: `const x = a.status ? "yes" : "no";` },
   { label: "if-statement reads forbidden — not in fallback expression", code: `function f(r: any){ if (r) return r.status; return "x"; }` },
   { label: "destructured WITHOUT default for verdict-shape name", code: `const { status } = obj;` },
-  // Seal #9 (pass-3) — alias detector intentionally narrow. Suffix-style
-  // canonical names assigned via logical fallback at the alias site do
-  // NOT trip the alias detector (rationale in no-semantic-fallback.js).
-  { label: "pass-3 clean — alias-LHS suffix `validationState` (intentionally silent)", code: `const validationState = a || b;` },
-  { label: "pass-3 clean — alias-LHS suffix `decisionAction` (intentionally silent)", code: `const decisionAction = a ?? b;` },
-  { label: "pass-3 clean — destructured suffix `validationState` (intentionally silent)", code: `const { validationState = "weak" } = obj;` },
+  // Seal #9 (pass-3 final) — benign suffix collisions on identifiers
+  // that do NOT end in (status|verdict|outcome|state|action) MUST stay
+  // silent. Suffix-style canonical aliases (validationState, etc.) are
+  // now in OFFENDERS — see additions above.
   { label: "pass-3 clean — benign suffix collision `firstName`", code: `const firstName = a || "anon";` },
+  { label: "pass-3 clean — benign suffix collision `myCounter`", code: `const myCounter = a || 0;` },
 ];
 
 for (const c of CLEAN) {

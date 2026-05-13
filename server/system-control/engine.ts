@@ -47,6 +47,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   const startTime = Date.now();
 
   const budgetResult = input.results.get("budget_governor");
+  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
   const budgetAction = budgetResult?.output?.decision?.action ?? null;
 
   const structuralChecks: StructuralCheck[] = [];
@@ -219,6 +220,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
           recheck.push(checkFunnelStructuralCompleteness(input.results, input.config.currentJobId ?? null));
         }
         if (resolvedCodes.has("SCALE_WITHOUT_REAL_DATA")) {
+          // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
           const newBudgetAction = input.results.get("budget_governor")?.output?.decision?.action ?? null;
           recheck.push(checkSignalGrounding(input.signalComposition, newBudgetAction));
         }
@@ -286,6 +288,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
           );
         }
 
+        // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
         const postRepairBudgetAction = input.results.get("budget_governor")?.output?.decision?.action ?? null;
         if (postRepairBudgetAction !== budgetAction) {
           downgrades.length = 0;

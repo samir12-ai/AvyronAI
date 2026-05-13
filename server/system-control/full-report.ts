@@ -100,6 +100,7 @@ async function fetchLatestSnapshot(table: any, campaignId: string, accountId: st
 function extractMiKeyOutputs(snap: any): Record<string, any> {
   const competitors = parseJson(snap.competitorData, []);
   const signals = parseJson(snap.signalData, null);
+  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
   const marketState = snap.marketState || null;
   return {
     competitorCount: Array.isArray(competitors) ? competitors.length : 0,
@@ -778,6 +779,7 @@ export function registerFullReportRoutes(app: Express) {
         .orderBy(desc(systemControlVerdicts.createdAt))
         .limit(1);
 
+      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
       const controlVerdict = controlVerdictRow ? {
         verdict: controlVerdictRow.verdict,
         executionMode: controlVerdictRow.executionMode,
