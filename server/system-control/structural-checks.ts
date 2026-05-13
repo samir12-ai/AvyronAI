@@ -578,7 +578,7 @@ export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineSte
 }
 
 /**
- * P0-6 (launch-closure W2-T2 architect-finding fix): dedicated structural
+ * dedicated structural
  * check that surfaces the offer-engine `OFFER_INPUT_INSUFFICIENT` hard-block
  * as a verified FAIL even when the orchestrator marked the engine BLOCKED
  * (which would otherwise short-circuit `engineDidNotComplete` to notReached
@@ -595,7 +595,7 @@ export function checkOfferInputSufficient(
     return notReached("offer_input_sufficient", "offer", "MISSING");
   }
 
-  // Seal #9 (F2.2 #1 / pass-4) — canonical contract read. The offer engine's
+  // canonical contract read. The offer engine's
   // `status` field is registered in OFFER_CONTRACT (z.enum), so we read it
   // through the boundary helper instead of via bespoke `output?.status`
   // logic. This satisfies D2 (each meaning has its own canonical field),
@@ -632,7 +632,7 @@ export function checkOfferInputSufficient(
     return fail("offer_input_sufficient", `OFFER_INPUT_INSUFFICIENT: ${detail}`);
   }
 
-  // Architect pass-4 finding: explicit branch handling for every
+  // explicit branch handling for every
   // ContractFieldResult status. requireContractField returns NOT_REACHED
   // whenever engine status is not SUCCESS|PARTIAL — so ERROR/TIMEOUT/SKIPPED
   // (and BLOCKED without the OFFER_INPUT_INSUFFICIENT signal already caught
@@ -1011,12 +1011,12 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
           blocks.push({ code: "CONFIDENCE_INTEGRITY_INCOMPLETE", description: check.details, source: "confidence_integrity", severity: "critical" });
         }
         break;
-      // Seal #10 / Task #28 / F2.3 — analytical_enrichment_integrity check
+      // analytical_enrichment_integrity check
       // emits a "BLOCK:"-prefixed FAIL when AEL is PARTIAL AND downstream
       // engines already consumed the degraded enrichment. engine.ts skips
       // the downgrade conversion for that case, expecting THIS map to
       // promote it to a hard BlockReason. Without this case the BLOCK:
-      // prefix was effectively dropped (architect-flagged in pass-2).
+      // prefix was effectively dropped (previously flagged).
       // The non-BLOCK FAIL (downstreamConsumers===0) is intentionally
       // routed to a downgrade in engine.ts and must not be re-blocked
       // here.
@@ -1030,7 +1030,7 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
           });
         }
         break;
-      // Seal #10 / Task #28 / pass-5 — MI gate rejection block mapping.
+      // MI gate rejection block mapping.
       // checkMiGateRejections emits a "BLOCK:"-prefixed FAIL when MI was
       // rejected during the run AND consumer engines ran. Promote here so
       // the verdict cannot pass with silently-substituted empty MI.
@@ -1059,7 +1059,7 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Seal #10 / Task #28 / pass-5 — MI gate rejection structural check.
+ * MI gate rejection structural check.
  *
  * `extractMiInput` collects every MI snapshot rejection (envelope invalid,
  * freshness fail, lineage mismatch, missing output) into
@@ -1076,10 +1076,10 @@ export function checkMiGateRejections(
   if (!rejections || rejections.length === 0) {
     return pass("mi_gate_integrity", "no MI gate rejections recorded");
   }
-  // Seal #10 / Task #28 / pass-6 — tighten the gate: BLOCK only when the
+  // tighten the gate: BLOCK only when the
   // specific engine that REJECTED MI actually completed (i.e. proceeded
-  // to consume the empty-MI substitute). Pre-pass-6 we blocked on "any
-  // engine ran"; architect flagged this as overbroad — a recovery resume
+  // to consume the empty-MI substitute). pre-fix we blocked on "any
+  // engine ran"; previously flagged this as overbroad — a recovery resume
   // that ran an unrelated engine after an MI rejection from a SKIPPED
   // engine should not hard-block. Now each rejection must be paired with
   // its rejecting engine completing for the BLOCK to fire.
@@ -1122,7 +1122,7 @@ export function checkAnalyticalEnrichmentIntegrity(
       isPartial === false ? "AEL built with full enrichment" : "AEL state not provided",
     );
   }
-  // Seal #10 / Task #28 / F2.3 — when AEL is PARTIAL AND at least one
+  // when AEL is PARTIAL AND at least one
   // downstream engine actually consumed the degraded enrichment, this is a
   // hard structural BLOCK (not a downgrade). The "BLOCK:" prefix signals
   // engine.ts to skip the downgrade-conversion branch and let

@@ -90,14 +90,14 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkAnalyticalEnrichmentIntegrity(
     input.analyticalEnrichmentPartial,
     input.analyticalEnrichmentReason,
-    // Seal #10 / Task #28 / F2.3 — propagate downstream-consumer count so
+    // propagate downstream-consumer count so
     // the structural check escalates from DOWNGRADE to BLOCK when engines
     // already consumed the degraded enrichment. Field is part of the
     // canonical SystemControlInput contract (no `as any` bypass).
     input.analyticalEnrichmentDownstreamConsumers ?? 0,
   ));
   structuralChecks.push(checkSignalLineageUnknown(input.signalComposition));
-  // Seal #10 / Task #28 / pass-5 — MI gate rejection structural check.
+  // MI gate rejection structural check.
   // Forbids silent "rejected MI → empty MI" coercion for live decisions.
   structuralChecks.push(checkMiGateRejections(input.miGateRejections, input.results));
   structuralChecks.push(checkConfidenceIntegrity(
@@ -127,7 +127,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   for (const sc of structuralChecks) {
     if (sc.status !== "FAIL") continue;
     if (sc.check === "analytical_enrichment_integrity") {
-      // Seal #10 / Task #28 / F2.3 — when the structural check returned a
+      // when the structural check returned a
       // "BLOCK:"-prefixed FAIL (downstreamConsumers>0) skip the downgrade
       // path so collectBlockReasons can promote it to a hard BlockReason.
       if (sc.details.startsWith("BLOCK:")) continue;

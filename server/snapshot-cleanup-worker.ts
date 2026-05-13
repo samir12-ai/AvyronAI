@@ -66,7 +66,7 @@ async function reapStaleInFlightJobs(): Promise<number> {
       .delete(inFlightJobs)
       .where(
         // `startedAt < cutoff` is a fallback
-        // ONLY when expectedCompleteBy IS NULL. Pre-pass-6 the OR clause
+        // ONLY when expectedCompleteBy IS NULL. pre-fix the OR clause
         // could reap a long-running job (expectedCompleteBy still in the
         // future) just because startedAt was older than the cutoff —
         // that broke the intended grace semantics. Now we either gate on
@@ -435,7 +435,7 @@ export function startSnapshotCleanupWorker(): void {
 
   cleanupTimer = setInterval(async () => {
     // Seal #7 / F10.7 — emit worker_tick_total metric per cycle.
-    // Seal #7 / pass-16 (architect #3): per-tick traceId for log/Sentry continuity.
+    // per-tick traceId for log/Sentry continuity.
     const { recordWorkerTick } = await import("./observability/otel");
     const { traceContext } = await import("./trace-context");
     const { randomUUID } = await import("node:crypto");

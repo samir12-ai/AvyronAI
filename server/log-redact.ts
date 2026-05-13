@@ -1,5 +1,5 @@
 /**
- * Seal #10 / Task #28 / F2.8 — global log-redaction helper.
+ * global log-redaction helper.
  *
  * `logSafe(value)` returns a structurally-cloned copy of `value` with any
  * field whose key matches a secret/PII pattern stripped to "[REDACTED]",

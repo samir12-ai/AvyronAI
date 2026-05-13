@@ -3341,7 +3341,7 @@ async function executeEngine(
       };
     }
 
-    // P0-6 (launch-closure W2-T2 architect-finding fix): when an engine emits
+    // when an engine emits
     // INSUFFICIENT_SIGNALS (currently the offer engine's hard-block on
     // missing pain — see `OFFER_INPUT_INSUFFICIENT` block code), do not mask
     // it as SUCCESS. Promote to BLOCKED so system-control + recovery-map
@@ -3579,7 +3579,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       .where(eq(orchestratorJobs.id, jobId));
   } else {
     jobId = config.preassignedJobId || `orch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    // F8.2 / pass-7 — orchestrator_jobs (lineage anchor) and in_flight_jobs
+    // F8.2 — orchestrator_jobs (lineage anchor) and in_flight_jobs
     // (cleanup-worker JOIN target) commit-or-rollback in one tx so a crash
     // can't leave one without the other.
     await db.transaction(async (tx) => {

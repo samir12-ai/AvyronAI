@@ -902,7 +902,7 @@ async function executeFetchJob(
     let snapshotIdCreated: string | null = null;
     if (anyAnalysisRan) {
       try {
-        // Seal #10 / Task #28 / F4.10 — latest-snapshot lookup must filter to
+        // latest-snapshot lookup must filter to
         // COMPLETE only; PARTIAL snapshots are deliberately not the canonical
         // "latest" for downstream synthesis even when the run is recovering.
         const latestSnap = await db.select({ id: miSnapshots.id }).from(miSnapshots)
@@ -1168,7 +1168,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     }
   }
 
-  // Seal #10 / Task #28 / F4.10 — version-baseline read tightened to
+  // version-baseline read tightened to
   // status='COMPLETE' only. PARTIAL snapshots intentionally do NOT bump the
   // version baseline because they would let a degraded run set the version
   // line, causing the next COMPLETE snapshot to inherit a "PARTIAL is now

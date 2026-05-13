@@ -2,7 +2,7 @@ import { aiChat } from "../ai-client";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import { logSafe } from "../log-redact";
 
-// Seal #10 / Task #28 / F2.7 — typed accessor for Drizzle table internals
+// typed accessor for Drizzle table internals
 // (replaces ad-hoc `(table as any)?._?.name` casts in log emission).
 type DrizzleTableInternals = { _?: { name?: string } };
 function tableName(t: unknown): string {
@@ -59,7 +59,7 @@ export interface BuildPlanOutput {
 export type BuildPlanBlockReason = "STALE_LINEAGE" | "AI_RESPONSE_INVALID";
 
 export interface BuildPlanResult {
-  status: "SUCCESS" | "ACTIONABILITY_FAILED" | "INSUFFICIENT_DATA" | "BLOCKED" | "ERROR";
+  status: "SUCCESS" | "ACTIONABILITY_FAILED" | "INSUFFICIENT_DATA" | "BLOCKED" | "INCOMPLETE" | "ERROR";
   plan: BuildPlanOutput | null;
   actionabilityScore: number;
   failedBlocks: string[];
@@ -429,7 +429,7 @@ Return EXACTLY this JSON structure:
 Return ONLY valid JSON. No markdown, no code blocks, no explanation.`;
 }
 
-// Seal #10 / Task #28 / F4.3 — strict zod schema for the AI build-plan
+// strict zod schema for the AI build-plan
 // response. Replaces the prior shape-via-truthy-check + try/catch JSON.parse
 // pattern that silently fell back to `null` on ANY shape violation. Now an
 // invalid response yields a structured ValidationError so the caller can
@@ -581,7 +581,7 @@ export async function runBuildPlanLayer(
   const MAX_ATTEMPTS = 3;
   const aelAck = acknowledgeAelInput("BuildPlanLayer", analyticalEnrichment ?? null, accountId);
 
-  // F2.5 / F2.9 / pass-8 — hard BLOCK when sourceJobId is absent.
+  // hard BLOCK when sourceJobId is absent.
   // Without it we cannot prove the snapshots belong to the same run, so
   // synthesis is refused on every code path (no NODE_ENV gate). The
   // public contract is `{status:"BLOCKED", reason:"STALE_LINEAGE"}` so
@@ -647,14 +647,12 @@ export async function runBuildPlanLayer(
 
       const parseResult = parseAIResponse(content, adaptiveRhythm);
       if (!parseResult.ok) {
-        // F8.3 / pass-9 — SHAPE_INVALID is a contract failure (zod said the
-        // AI didn't return a build-plan-shaped object). Short-circuit to
-        // BLOCKED with reason="AI_RESPONSE_INVALID" instead of retrying or
-        // returning null — the AI cannot recover a shape contract by retry.
-        // JSON_MALFORMED keeps the retry loop (transient stream truncation).
+        // SHAPE_INVALID = zod-shape contract failure → INCOMPLETE (not BLOCKED:
+        // task spec calls for an "incomplete signal", not a hard execution
+        // block). JSON_MALFORMED keeps the retry loop.
         if (parseResult.kind === "SHAPE_INVALID") {
-          const blockedShape: BuildPlanResult = {
-            status: "BLOCKED",
+          const incompleteShape: BuildPlanResult = {
+            status: "INCOMPLETE",
             reason: "AI_RESPONSE_INVALID",
             plan: null,
             actionabilityScore: 0,
@@ -662,7 +660,7 @@ export async function runBuildPlanLayer(
             attempts: attempt,
             error: `AI_RESPONSE_INVALID: ${parseResult.detail}`,
           };
-          return applyPartialAelDowngrade("BuildPlanLayer", blockedShape, aelAck);
+          return applyPartialAelDowngrade("BuildPlanLayer", incompleteShape, aelAck);
         }
         console.warn(`[BuildPlanLayer] Attempt ${attempt}: ${parseResult.kind} (${parseResult.detail}) — retrying`);
         continue;

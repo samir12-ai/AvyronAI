@@ -114,7 +114,7 @@ export interface StructuredSignals {
   psychological_drivers: StructuredSignalCluster[];
 }
 
-// Seal #10 / Task #28 / F2.9 — `PARTIAL` added: emitted when the engine
+// `PARTIAL` added: emitted when the engine
 // produced usable output but signal coverage was below the qualifying
 // threshold (or only some downstream maps populated). Distinct from
 // INSUFFICIENT_SIGNALS (no usable output) and DEFENSIVE_MODE (low-trust).
@@ -2028,7 +2028,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     status = "DEFENSIVE_MODE";
     statusMessage = "Low signal environment detected — Audience intelligence limited — More market data required";
   } else {
-    // Seal #10 / Task #28 / F2.9 — PARTIAL emission: engine produced usable
+    // PARTIAL emission: engine produced usable
     // output but coverage is incomplete. Triggers when (a) signals are above
     // the AI floor but below the doubled "rich coverage" mark, OR (b) any of
     // the core maps came back empty, OR (c) no audience segments resolved.
