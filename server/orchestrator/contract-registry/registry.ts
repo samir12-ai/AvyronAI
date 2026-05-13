@@ -473,6 +473,24 @@ const OFFER_CONTRACT: EngineContract = {
   engineVersion: OFFER_ENGINE_VERSION,
   livenessRule: "current_run_only",
   requiredOutputs: [
+    // Seal #9 (F2.2 #1 / pass-4) — D2/D3: offer engine's canonical F1
+    // completion `status` is now a registered contract field. Strict z.enum of
+    // every value emitted by `STATUS` in `server/offer-engine/constants.ts`.
+    // Consumed by `system_control.offer_input_sufficient` via
+    // `requireContractField` (replaces the bespoke `output?.status` read that
+    // previously normalized the missing case to null).
+    { id: "status",                      path: ["status"],                                                shape: z.enum([
+      "COMPLETE",
+      "MISSING_DEPENDENCY",
+      "INSUFFICIENT_SIGNALS",
+      "INTEGRITY_FAILED",
+      "POSITIONING_MISMATCH",
+      "PARTIAL",
+      "AUDIENCE_MISALIGNMENT",
+      "INVALID_ROOT_BINDING",
+      "AXIS_MISMATCH",
+      "DEPTH_FAILED",
+    ]),                                                                       emptyIsMissing: true,  consumers: ["system_control.offer_input_sufficient"] },
     { id: "primaryOffer",                path: ["primaryOffer"],                                          shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["funnel", "awareness", "persuasion", "integrity", "channel_selection", "statistical_validation", "budget_governor", "retention", "build_plan_layer.offer_block", "system_control.offer_audience_misalignment", "system_control.zero_objection_coverage"] },
     { id: "primaryOfferCoreOutcome",     path: ["primaryOffer", "coreOutcome"],                           shape: z.string(),        emptyIsMissing: true,  consumers: ["funnel", "awareness", "persuasion", "channel_selection", "retention", "build_plan_layer.offer_block"] },
     { id: "primaryOfferObjectionHandling", path: ["primaryOffer", "objectionHandling"],                   shape: StringArraySchema, emptyIsMissing: true,  consumers: ["system_control.zero_objection_coverage"] },

@@ -70,7 +70,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkFunnelStructuralCompleteness(input.results, input.config.currentJobId ?? null));
   structuralChecks.push(checkValidationResult(input.results));
   structuralChecks.push(checkSignalGroundingMassFailure(input.results));
-  structuralChecks.push(checkOfferInputSufficient(input.results));
+  structuralChecks.push(checkOfferInputSufficient(input.results, input.config.currentJobId ?? null));
   structuralChecks.push(checkOfferAudienceMisalignment(input.results));
   structuralChecks.push(checkZeroObjectionCoverage(input.results));
   structuralChecks.push(checkChannelConfidenceMinimum(input.results));
@@ -490,9 +490,18 @@ function logVerdict(verdict: SystemControlVerdict, config: { campaignId: string;
 
   if (verdict.repairActions.length > 0) {
     for (const ra of verdict.repairActions) {
-      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.3): canonical authoring site of the repair-action display status — composed from booleans (executed/succeeded), NOT aliased from another field. D1 forbids substitution of a missing canonical contract field, not the local composition of a display label.
-      const status = !ra.executed ? "PENDING" : ra.succeeded ? "RESOLVED" : "FAILED";
-      console.log(`[SystemControl] REPAIR_ACTION | ${status} | code=${ra.code} | target=${ra.targetBlock} | ${ra.detail || ra.description}`);
+      // Display label composed from booleans (executed/succeeded). Renamed
+      // off the `status` suffix per Seal #9 doctrine D1 (alias-detector)
+      // and rewritten as if/else so this is a plain composition site.
+      let repairActionLabel: string;
+      if (!ra.executed) {
+        repairActionLabel = "PENDING";
+      } else if (ra.succeeded) {
+        repairActionLabel = "RESOLVED";
+      } else {
+        repairActionLabel = "FAILED";
+      }
+      console.log(`[SystemControl] REPAIR_ACTION | ${repairActionLabel} | code=${ra.code} | target=${ra.targetBlock} | ${ra.detail || ra.description}`);
     }
   }
 

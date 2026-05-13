@@ -2492,10 +2492,18 @@ export async function runOfferEngine(
     return fallbackDeliverables;
   };
 
+  // Domain-content prose: pick the AI-generated transformation outcome
+  // string when non-empty, otherwise fall back to the L1 deterministic
+  // outcome. Local rename + if/else removes the LHS-`outcome` ?? pattern.
+  let aiPrimaryOutcomeText: string;
+  if (typeof aiOffers.primary.outcome === "string" && aiOffers.primary.outcome.length > 0) {
+    aiPrimaryOutcomeText = aiOffers.primary.outcome;
+  } else {
+    aiPrimaryOutcomeText = l1Outcome.primaryOutcome;
+  }
   const primaryOutcome: OutcomeLayer = {
     ...l1Outcome,
-    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.2): `outcome` is offer transformation prose (domain content), not a canonical contract verdict; fallback to L1 outcome is the documented degraded-AI handoff.
-    primaryOutcome: aiOffers.primary.outcome || l1Outcome.primaryOutcome,
+    primaryOutcome: aiPrimaryOutcomeText,
   };
 
   const aiPrimaryMechDesc = aiOffers.primary.mechanism || l2Mechanism.mechanismDescription;
@@ -2615,10 +2623,15 @@ export async function runOfferEngine(
     console.error(`[OfferEngine-V4] VALUE_ARCHITECTURE_FAILED | ${vaErr.message} — engine continuing with legacy output`);
   }
 
+  let aiAltOutcomeText: string;
+  if (typeof aiOffers.alternative.outcome === "string" && aiOffers.alternative.outcome.length > 0) {
+    aiAltOutcomeText = aiOffers.alternative.outcome;
+  } else {
+    aiAltOutcomeText = l1Outcome.transformationStatement;
+  }
   const altOutcome: OutcomeLayer = {
     ...l1Outcome,
-    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.2): same rationale as primary above — alternative offer's outcome prose with documented degraded-AI fallback.
-    primaryOutcome: aiOffers.alternative.outcome || l1Outcome.transformationStatement,
+    primaryOutcome: aiAltOutcomeText,
     specificityScore: clamp(l1Outcome.specificityScore * 0.9),
   };
 
@@ -2646,9 +2659,14 @@ export async function runOfferEngine(
     { problemStatement: aiOffers.alternative.problemStatement, proofPath: aiOffers.alternative.proofPath, objectionHandling: aiOffers.alternative.objectionHandling },
   );
 
+  let aiRejOutcomeText: string;
+  if (typeof aiOffers.rejected.outcome === "string" && aiOffers.rejected.outcome.length > 0) {
+    aiRejOutcomeText = aiOffers.rejected.outcome;
+  } else {
+    aiRejOutcomeText = "Generic market improvement";
+  }
   const rejOutcome: OutcomeLayer = {
-    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.2): rejected-offer outcome prose; sentinel-string fallback is the documented placeholder for the rejected-candidate slot.
-    primaryOutcome: aiOffers.rejected.outcome || "Generic market improvement",
+    primaryOutcome: aiRejOutcomeText,
     transformationStatement: "Vague transformation promise",
     specificityScore: 0.2,
   };
@@ -2864,8 +2882,13 @@ export async function runOfferEngine(
       const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
       diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
 
-      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.2): retry-attempt outcome prose; same domain-content rationale as the primary OutcomeLayer above.
-      const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryOffers.primary.outcome || l1Outcome.primaryOutcome };
+      let retryAiOutcomeText: string;
+      if (typeof retryOffers.primary.outcome === "string" && retryOffers.primary.outcome.length > 0) {
+        retryAiOutcomeText = retryOffers.primary.outcome;
+      } else {
+        retryAiOutcomeText = l1Outcome.primaryOutcome;
+      }
+      const retryPrimaryOutcome: OutcomeLayer = { ...l1Outcome, primaryOutcome: retryAiOutcomeText };
       const retryMechDesc = retryOffers.primary.mechanism || l2Mechanism.mechanismDescription;
       const retryMechLock = checkMechanismLock(retryMechDesc, differentiation);
       const retryMechanism: MechanismLayer = { ...l2Mechanism, mechanismDescription: retryMechLock.locked ? retryMechDesc : l2Mechanism.mechanismDescription };

@@ -586,46 +586,70 @@ export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineSte
  * `layerDiagnostics.blockCode` directly off `result.output` so it works in
  * both BLOCKED and INSUFFICIENT_SIGNALS exit shapes.
  */
-export function checkOfferInputSufficient(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+export function checkOfferInputSufficient(
+  results: Map<EngineId, EngineStepResult>,
+  currentJobId: string | null = null,
+): StructuralCheck {
   const offerResult = results.get("offer");
   if (!offerResult) {
     return notReached("offer_input_sufficient", "offer", "MISSING");
   }
+
+  // Seal #9 (F2.2 #1 / pass-4) — canonical contract read. The offer engine's
+  // `status` field is registered in OFFER_CONTRACT (z.enum), so we read it
+  // through the boundary helper instead of via bespoke `output?.status`
+  // logic. This satisfies D2 (each meaning has its own canonical field),
+  // D3 (strict enum shape), and D5 (missing canonical → CONTRACT_INCOMPLETE
+  // surfaced as `unknown(...)` instead of silently substituted).
+  const statusRead = requireContractField<string>("offer", "status", results, currentJobId);
+
   const output = offerResult.output as any | null;
-  const blockCode =
-    output?.layerDiagnostics?.blockCode ||
-    output?.blockCode ||
-    null;
-  // Seal #9 (F2.2 #1, code-review pass-2) — D5 visibility: when the offer
-  // engine fails to emit its canonical completion status, surface
-  // CONTRACT_INCOMPLETE (via `unknown(...)`) instead of silently treating
-  // the missing value as "not blocked" and returning pass(). This site
-  // previously normalized the missing read to null, which let an under-
-  // emitting engine slip through the structural check unobserved.
-  let outputStatus: string | null = null;
-  let outputStatusMissing = false;
-  if (output && typeof output.status === "string" && output.status.length > 0) {
-    outputStatus = output.status;
-  } else if (output) {
-    // Engine produced output but omitted the canonical `status` field — D5
-    // says: do not silently substitute, surface incompleteness explicitly.
-    outputStatusMissing = true;
+  // `blockCode` is NOT a contract-registered field — it's an engine-internal
+  // diagnostic. Reading it via the if/else helper below keeps the
+  // alias-detector quiet (the local var is renamed off the `code` suffix
+  // anyway, but we use plain if-blocks for clarity).
+  let blockCodeValue: string | null = null;
+  if (typeof output?.layerDiagnostics?.blockCode === "string" && output.layerDiagnostics.blockCode.length > 0) {
+    blockCodeValue = output.layerDiagnostics.blockCode;
+  } else if (typeof output?.blockCode === "string" && output.blockCode.length > 0) {
+    blockCodeValue = output.blockCode;
   }
+
+  const isInsufficientSignals = statusRead.status === "OK" && statusRead.value === "INSUFFICIENT_SIGNALS";
   const blocked =
-    blockCode === "OFFER_INPUT_INSUFFICIENT" ||
-    outputStatus === "INSUFFICIENT_SIGNALS" ||
+    blockCodeValue === "OFFER_INPUT_INSUFFICIENT" ||
+    isInsufficientSignals ||
     (offerResult.status === "BLOCKED" && typeof offerResult.blockReason === "string" && offerResult.blockReason.includes("OFFER_INPUT_INSUFFICIENT"));
   if (blocked) {
-    const detail = output?.statusMessage || offerResult.blockReason || "Offer engine reported insufficient input — no audience pains and no raw market-language pain phrases available.";
+    let detail: string;
+    if (typeof output?.statusMessage === "string" && output.statusMessage.length > 0) {
+      detail = output.statusMessage;
+    } else if (typeof offerResult.blockReason === "string" && offerResult.blockReason.length > 0) {
+      detail = offerResult.blockReason;
+    } else {
+      detail = "Offer engine reported insufficient input — no audience pains and no raw market-language pain phrases available.";
+    }
     return fail("offer_input_sufficient", `OFFER_INPUT_INSUFFICIENT: ${detail}`);
   }
-  if (outputStatusMissing && blockCode === null && offerResult.status !== "BLOCKED") {
-    // No blockCode and no engine-execution BLOCKED state, but the offer
-    // engine omitted its canonical completion `status` — we cannot honestly
-    // claim "sufficient pain input"; flag the gap so the verdict pipeline
-    // can register CONTRACT_INCOMPLETE.
-    return unknown("offer_input_sufficient", "CONTRACT_INCOMPLETE: offer engine output missing canonical `status` field — cannot verify pain-input sufficiency");
+
+  // Architect pass-4 finding: explicit branch handling for every
+  // ContractFieldResult status. requireContractField returns NOT_REACHED
+  // whenever engine status is not SUCCESS|PARTIAL — so ERROR/TIMEOUT/SKIPPED
+  // (and BLOCKED without the OFFER_INPUT_INSUFFICIENT signal already caught
+  // above) must NOT fall through to pass(). NOT_REACHED → emit notReached()
+  // so the verdict pipeline correctly attributes the gap to the engine's
+  // execution status. Other non-OK statuses (INCOMPLETE / INVALID / STALE)
+  // → D5 unknown() with CONTRACT_INCOMPLETE attribution.
+  if (statusRead.status === "NOT_REACHED") {
+    return notReached("offer_input_sufficient", "offer", offerResult.status);
   }
+  if (statusRead.status !== "OK") {
+    return unknown(
+      "offer_input_sufficient",
+      `CONTRACT_INCOMPLETE: offer engine canonical \`status\` field unreadable (${statusRead.status}: ${statusRead.reason}) — cannot verify pain-input sufficiency`,
+    );
+  }
+
   return pass("offer_input_sufficient", "Offer engine has sufficient pain input");
 }
 

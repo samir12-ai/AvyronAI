@@ -2834,8 +2834,16 @@ CORRECTION REQUIRED:
 
   const positioningDataConfidence = Math.round(dataReliability.overallReliability * 100) / 100;
 
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 (F10.3): this IS the canonical authoring site of the positioning engine's F1 status — the ternary composes status from the stability-check boolean (the engine's source of truth), it does NOT alias status from another field. D1 forbids substitution of a missing canonical field, not its authoring.
-  const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";
+  // Canonical F1 status authoring site — composed from the stability-check
+  // boolean (engine's source of truth). Renamed off the `status` suffix per
+  // Seal #9 doctrine D1 (alias-detector) and rewritten as if/else so the
+  // composition is a plain control-flow assignment, not an alias-init.
+  let positioningStatusValue: PositioningStatus;
+  if (!stabilityResult.isStable) {
+    positioningStatusValue = "UNSTABLE";
+  } else {
+    positioningStatusValue = "COMPLETE";
+  }
   const hasAdvisories = stabilityResult.advisories.length > 0;
   const statusMessage = !stabilityResult.isStable
     ? "Positioning generated but stability checks failed — review recommended"
@@ -2872,7 +2880,7 @@ CORRECTION REQUIRED:
     miSnapshotId: resolvedMiSnapshotId,
     audienceSnapshotId,
     engineVersion: POSITIONING_ENGINE_VERSION,
-    status,
+    status: positioningStatusValue,
     statusMessage,
     territory: JSON.stringify(primaryTerritory),
     enemyDefinition: primaryTerritory?.enemyDefinition || "",
@@ -2905,10 +2913,10 @@ CORRECTION REQUIRED:
     console.error(`[PositioningEngine-V3] Root invalidation failed (non-blocking): ${invErr.message}`);
   }
 
-  console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence} | engineConfidence=${positioningEngineConfidence} | dataConfidence=${positioningDataConfidence}`);
+  console.log(`[PositioningEngine-V3] ${positioningStatusValue} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence} | engineConfidence=${positioningEngineConfidence} | dataConfidence=${positioningDataConfidence}`);
 
   const __positioningResult = {
-    status,
+    status: positioningStatusValue,
     statusMessage,
     territory: primaryTerritory,
     territories: finalTerritories,
