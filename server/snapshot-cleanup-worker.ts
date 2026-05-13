@@ -434,7 +434,7 @@ export function startSnapshotCleanupWorker(): void {
   }, INITIAL_DELAY_MS);
 
   cleanupTimer = setInterval(async () => {
-    // Seal #7 / F10.7 — emit worker_tick_total metric per cycle.
+    // F10.7 — emit worker_tick_total metric per cycle.
     // per-tick traceId for log/Sentry continuity.
     const { recordWorkerTick } = await import("./observability/otel");
     const { traceContext } = await import("./trace-context");

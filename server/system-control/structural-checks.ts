@@ -966,7 +966,7 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
         blocks.push({ code: "SIGNAL_GROUNDING_MASS_FAILURE", description: check.details, source: "structural_check", severity: "critical" });
         break;
       case "offer_input_sufficient":
-        // P0-6 architect-finding fix: route the dedicated insufficient-input
+        // route the dedicated insufficient-input
         // FAIL to the canonical BlockCode so recovery-map picks it up.
         blocks.push({ code: "OFFER_INPUT_INSUFFICIENT", description: check.details, source: "offer_engine", severity: "critical" });
         break;

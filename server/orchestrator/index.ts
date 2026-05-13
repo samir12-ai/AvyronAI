@@ -3579,9 +3579,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       .where(eq(orchestratorJobs.id, jobId));
   } else {
     jobId = config.preassignedJobId || `orch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    // F8.2 — orchestrator_jobs (lineage anchor) and in_flight_jobs
-    // (cleanup-worker JOIN target) commit-or-rollback in one tx so a crash
-    // can't leave one without the other.
+    // F8.2 — atomic registration of orchestrator_jobs + in_flight_jobs.
     await db.transaction(async (tx) => {
       if (!config.preassignedJobId) {
         await tx.insert(orchestratorJobs).values({
@@ -3610,6 +3608,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // inserts NULL into strategic_plans.job_id even though engine snapshots
   // get the right jobId via the local variable — leaving plans non-run-bound.
   config.jobId = jobId;
+
+  // F8.2 — guaranteed in_flight_jobs cleanup. Set true once the explicit
+  // terminal-state delete (or the NEEDS_INPUT preserve-row branch) runs;
+  // otherwise the finally below deregisters on throw/abort.
+  let inFlightCleanupHandled = false;
+
+  try {
 
   // Enter ALS scope so every downstream module's recordCommercialRejection
   // is routed to a jobId-scoped registry slot, preventing parallel runs for
@@ -3996,6 +4001,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   if (overallStatus === "NEEDS_INPUT") {
     const durationMs = Date.now() - startTime;
+    // NEEDS_INPUT intentionally preserves the in_flight_jobs row until the
+    // run resumes-and-finishes (or the reaper expires it). Mark handled so
+    // the finally block does NOT deregister.
+    inFlightCleanupHandled = true;
     return { jobId, status: "NEEDS_INPUT", completedEngines, durationMs, results, needsInput: needsInputPayload };
   }
 
@@ -4358,14 +4367,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     })
     .where(eq(orchestratorJobs.id, jobId));
 
-  // F8.2 — terminal-state deregistration. Once the
-  // run has reached COMPLETED / PARTIAL / BLOCKED / ERROR, drop the
-  // in_flight_jobs row so snapshot-cleanup is free to act on this run's
-  // snapshots once they age past their retention window. NEEDS_INPUT does
-  // NOT pass through here (returns earlier) so its in_flight_jobs row
-  // stays until the run resumes-and-finishes or the reaper expires it.
+  // F8.2 — terminal-state deregistration (COMPLETED/PARTIAL/BLOCKED/ERROR).
   try {
     await db.delete(inFlightJobs).where(eq(inFlightJobs.jobId, jobId));
+    inFlightCleanupHandled = true;
   } catch (delErr: any) {
     console.warn(`[Orchestrator] IN_FLIGHT_DEREGISTRATION_FAILED | jobId=${jobId} | error=${delErr.message}`);
   }
@@ -4461,6 +4466,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     confidenceIntegrity,
     confidenceProvenanceLog: runConfidenceProvenanceLog,
   };
+  } finally {
+    // F8.2 — guaranteed deregistration on throw/abort. Skipped when the
+    // explicit terminal-state delete already ran or NEEDS_INPUT preserved
+    // the row deliberately.
+    if (!inFlightCleanupHandled) {
+      try {
+        await db.delete(inFlightJobs).where(eq(inFlightJobs.jobId, jobId));
+      } catch (delErr: any) {
+        console.warn(`[Orchestrator] IN_FLIGHT_DEREGISTRATION_FAILED_IN_FINALLY | jobId=${jobId} | error=${delErr?.message}`);
+      }
+    }
+  }
 }
 
 export async function getOrchestratorStatus(jobId: string, accountId?: string) {
