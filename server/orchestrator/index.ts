@@ -236,7 +236,7 @@ interface EngineContext {
   signalComposition?: SignalComposition;
   performanceLineage?: SignalLineageEntry[];
   inputHashes?: Record<string, string>;
-  // Seal #10 / Task #28 / pass-5 — collected MI gate rejections during this
+  // F2.5 — collected MI gate rejections during this
   // run. Each entry is pushed by `extractMiInput` when the MI envelope is
   // incomplete, freshness-failed, or lineage-mismatched. Surfaced into
   // System Control's `miGateRejections` input so the structural check can
@@ -244,7 +244,7 @@ interface EngineContext {
   miGateRejections?: { engineId: string; reason: string; detail: string }[];
 }
 
-// Seal #10 / Task #28 / pass-5 — list of strategic engines whose runtime
+// F2.3 — list of strategic engines whose runtime
 // reads `ctx.analyticalEnrichment`. Used post-engine-loop to count how many
 // downstream consumers actually executed AFTER AEL emitted a partial
 // package. Sourced by enumerating every `ctx.analyticalEnrichment` reader
@@ -420,7 +420,7 @@ async function getRetentionGateData(accountId: string, campaignId: string): Prom
   };
 }
 
-// Seal #10 / Task #28 / F4.5 — strict zod schema for the orchestrator's MI
+// F4.5 — strict zod schema for the orchestrator's MI
 // input extraction. Pre-#28 the function tolerated any shape silently and
 // returned `{}` on a missing `.output`. Now `.output` (when present) is
 // validated as an object; non-object → CONTRACT_INCOMPLETE. The internal
@@ -434,7 +434,7 @@ const MiResultEnvelopeSchema = z.object({
   trajectoryData: z.any().nullable().optional(),
 });
 
-// Seal #10 / Task #28 / F2.5 + F4.6 — structured MI gate rejection. Returned
+// F2.5 + F4.6 — structured MI gate rejection. Returned
 // in place of an MI input when the snapshot is stale, cross-run, or
 // otherwise contract-incomplete. Engines that destructure the result and
 // apply `?? []` continue to behave as if MI is missing; the orchestrator's
@@ -484,7 +484,7 @@ function extractMiInput(
   currentJobId?: string | null,
   collector?: { ctx?: OrchestrationContext; engineId?: string },
 ): any {
-  // Seal #10 / Task #28 / pass-5 — record every MI gate rejection into
+  // F2.5 — record every MI gate rejection into
   // ctx.miGateRejections so System Control receives the rejection list and
   // can refuse to "silently coerce to empty MI". Engines themselves still
   // see the empty-MI shape (`competitors:[]`, `signals:[]`, ...) so their
@@ -512,8 +512,8 @@ function extractMiInput(
     return miGateRejection("MI_OUTPUT_MISSING", "envelope.output is null or non-object");
   }
 
-  // Seal #10 / Task #28 / F2.5 + F4.6 — MI snapshot freshness/lineage gate.
-  // Refuse NEEDS_REFRESH, INCOMPATIBLE, AND STALE (architect pass-2 flagged
+  // F2.5 + F4.6 — MI snapshot freshness/lineage gate.
+  // Refuse NEEDS_REFRESH, INCOMPATIBLE, AND STALE (
   // STALE was missing); enforce `_provenance.jobId === currentJobId` for
   // every read so cross-run snapshot stitching is impossible during a live
   // orchestration. The freshness=PASSED case has no jobId requirement
@@ -4093,18 +4093,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       // with degraded data. Pre-T3.B this only surfaced as a console.warn.
       analyticalEnrichmentPartial: ctx.analyticalEnrichment?.isPartial === true,
       analyticalEnrichmentReason: ctx.analyticalEnrichment?.partialReason ?? null,
-      // Seal #10 / Task #28 / pass-5 — runtime count of strategy engines that
+      // F2.3 — runtime count of strategy engines that
       // ran AFTER AEL emitted a partial package. countAelDownstreamConsumers
       // walks `results` and counts AEL-consumer engine ids whose status is
       // not SKIPPED. When > 0 + AEL partial,
       // checkAnalyticalEnrichmentIntegrity escalates to a hard BLOCK
-      // (architect pass-5 finding: previously this field was unpopulated so
+      // (previously this field was unpopulated so
       // the block path was unreachable in production).
       analyticalEnrichmentDownstreamConsumers: countAelDownstreamConsumers(
         results as unknown as Map<string, { status: string }>,
         ctx.analyticalEnrichment?.isPartial === true,
       ),
-      // Seal #10 / Task #28 / pass-5 — propagate collected MI gate rejections
+      // F2.5 — propagate collected MI gate rejections
       // (populated by extractMiInput call sites with `{ ctx }`). When any
       // engine consumed MI and rejections occurred, checkMiGateRejections
       // emits a hard BLOCK ("MI_GATE_REJECTED") instead of silently
@@ -4294,7 +4294,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           // is visible to downstream readers/auditors.
           if (planId) {
             try {
-              // Seal #10 / Task #28 / F8.3 — optimistic-locking CAS. Read
+              // F8.3 — optimistic-locking CAS. Read
               // current version, write with WHERE id=? AND version=?,
               // bump version on success. If affected rows = 0 a concurrent
               // writer modified the plan first; surface as
@@ -4358,7 +4358,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     })
     .where(eq(orchestratorJobs.id, jobId));
 
-  // Seal #10 / Task #28 / F8.2 — terminal-state deregistration. Once the
+  // F8.2 — terminal-state deregistration. Once the
   // run has reached COMPLETED / PARTIAL / BLOCKED / ERROR, drop the
   // in_flight_jobs row so snapshot-cleanup is free to act on this run's
   // snapshots once they age past their retention window. NEEDS_INPUT does

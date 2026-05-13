@@ -1,6 +1,7 @@
 // Seal #10 / Task #28 — engine contracts proof suite (T2, T3, T5, T7).
 import { describe, it, expect } from "vitest";
 import { checkAnalyticalEnrichmentIntegrity } from "../system-control/structural-checks";
+import { verifySynthesisPreservation } from "../orchestrator/plan-synthesis";
 
 describe("Seal #10 / F2.3 — checkAnalyticalEnrichmentIntegrity escalates to BLOCK when consumers > 0", () => {
   it("returns PASS when AEL is not partial", () => {
@@ -103,53 +104,47 @@ describe("Seal #10 / F2.9 — audience-engine PARTIAL emission", () => {
   });
 });
 
-describe("Seal #10 / F4.4 — verifySynthesisPreservation requires exact-substring match", () => {
-  // Mirror of plan-synthesis.ts collectPlanStrings + structured-assertion
-  // logic, frozen here so the proof fails if the production code reverts
-  // to keyword-fallback matching.
-  function collectStrings(node: any, out: string[] = [], depth = 0): string[] {
-    if (node == null || depth > 12) return out;
-    if (typeof node === "string") { if (node.trim()) out.push(node.toLowerCase()); return out; }
-    if (Array.isArray(node)) { for (const v of node) collectStrings(v, out, depth + 1); return out; }
-    if (typeof node === "object") { for (const v of Object.values(node)) collectStrings(v, out, depth + 1); }
-    return out;
-  }
-  function verify(plan: any, lockedLabels: string[]) {
-    const strings = collectStrings(plan);
-    const missing: string[] = [];
-    let preserved = 0;
-    for (const label of lockedLabels) {
-      const norm = label.toLowerCase().trim();
-      if (norm.length < 3) continue;
-      strings.some(s => s.includes(norm)) ? preserved++ : missing.push(label);
-    }
-    return { passed: missing.length === 0, preserved, missing };
+describe("F4.4 — verifySynthesisPreservation requires exact field-value equality", () => {
+  // Bind directly to the production export — no mirror logic. If the
+  // production rule reverts to substring matching these tests fail.
+  function makePlan(content: any): any {
+    return { ...content, planSource: "decision_driven", degraded: false };
   }
 
   it("rejects keyword-only matches (the pre-#28 false positive)", () => {
-    // Plan mentions "outcome" and "first" in unrelated sections — pre-#28
-    // this would have falsely satisfied the locked label "Outcome-First
-    // Acquisition" via 50%-keyword-match. Post-#28 it must be MISSING.
-    const plan = {
+    // The plan mentions "outcome" and "first" in unrelated sections, but
+    // no field's exact value equals "Outcome-First Acquisition".
+    const plan = makePlan({
       positioning: { territory: "Velocity-Driven Markets" },
       offer: { description: "Outcome guarantee with first-month refund" },
-    };
-    const r = verify(plan, ["Outcome-First Acquisition"]);
+    });
+    const r = verifySynthesisPreservation(plan, ["Outcome-First Acquisition"]);
     expect(r.passed).toBe(false);
     expect(r.missing).toEqual(["Outcome-First Acquisition"]);
   });
 
-  it("accepts exact-substring presence even nested deep", () => {
-    const plan = {
+  it("rejects substring presence inside a longer prose field", () => {
+    // The label appears as a SUBSTRING of a longer string, not as a complete
+    // field value. The production rule must reject this.
+    const plan = makePlan({
+      positioning: { territory: { name: "Our Outcome-First Acquisition Strategy For 2026" } },
+    });
+    const r = verifySynthesisPreservation(plan, ["Outcome-First Acquisition"]);
+    expect(r.passed).toBe(false);
+    expect(r.missing).toEqual(["Outcome-First Acquisition"]);
+  });
+
+  it("accepts exact field-value equality nested deep", () => {
+    const plan = makePlan({
       positioning: { territory: { name: "Outcome-First Acquisition" } },
-    };
-    const r = verify(plan, ["Outcome-First Acquisition"]);
+    });
+    const r = verifySynthesisPreservation(plan, ["Outcome-First Acquisition"]);
     expect(r.passed).toBe(true);
     expect(r.preserved).toBe(1);
   });
 
   it("ignores labels shorter than 3 chars", () => {
-    const r = verify({ a: "x" }, ["ab"]);
+    const r = verifySynthesisPreservation(makePlan({ a: "x" }), ["ab"]);
     expect(r.passed).toBe(true);
   });
 });

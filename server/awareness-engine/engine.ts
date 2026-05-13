@@ -54,8 +54,8 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
 
-// Seal #10 / Task #28 / F2.7 — zod-backed coercers + input-boundary
-// validator. The architect pass-3 rejection flagged the previous
+// F2.7 — zod-backed coercers + input-boundary
+// validator. The previous
 // implementation: returning a `fallback` on parse failure was silent,
 // and missing/invalid values flowed downstream as if they had been
 // genuine zeros / empty strings. The contract-aligned shape is:
@@ -89,7 +89,7 @@ function resetValidationReport(): void {
   inputValidationReport.fallbacksUsed = [];
 }
 
-// Seal #10 / Task #28 / pass-6 — `safeNumber`/`safeString` REMOVED. Architect
+// F2.7 — `safeNumber`/`safeString` REMOVED.
 // finding: silent fallback at the contract boundary hides missing critical
 // inputs. The strict zod boundary (`validateAwarenessInputs` at engine
 // entry) now guarantees that audience.maturityIndex, audience.awarenessLevel,
@@ -811,7 +811,7 @@ export async function runAwarenessEngine(
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
-  // Seal #10 / Task #28 / F2.7 — strict input boundary. Architect pass-3:
+  // F2.7 — strict input boundary:
   // safeNumber/safeString must NOT silently default on missing critical
   // fields. We reset the per-run fallback report, then run a zod validator
   // against the canonical AwarenessAudienceInput / MI shapes. If a
@@ -829,7 +829,7 @@ export async function runAwarenessEngine(
   }
 
   if (!inputCheck.ok) {
-    // Seal #10 / Task #28 / pass-6 — F4.3: missing critical inputs MUST emit
+    // F4.3 — missing critical inputs MUST emit
     // INCOMPLETE (not PARTIAL). PARTIAL is reserved for "engine produced
     // output but some optional dimensions were weak"; INCOMPLETE means the
     // contract boundary was breached and the engine refused to substitute

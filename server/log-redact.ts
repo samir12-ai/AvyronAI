@@ -18,7 +18,7 @@
 const SECRET_KEY_RE =
   /^(token|access[_-]?token|refresh[_-]?token|secret|api[_-]?key|authorization|cookie|password|jwt|bearer|email|phone|phone[_-]?number|ssn|dob|address)$/i;
 
-// Seal #10 / Task #28 / pass-7 — extended PII surface area. Architect
+// F2.8 — extended PII surface area.
 // finding: prior pattern set covered Bearer / sk- / JWT / email but not
 // inline phone numbers or proper-noun-shaped tokens (capitalised
 // 2–4-word sequences that frequently leak person/org names from scraped

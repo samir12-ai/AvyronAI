@@ -435,15 +435,9 @@ function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): 
   return labels;
 }
 
-// F4.4 / pass-8 — structured-field assertion. Every locked decision is the
-// VALUE of some plan field (positioning territory name, mechanism name,
-// offer name, differentiation pillar name). A locked decision is preserved
-// iff that exact value appears as a complete string field somewhere in the
-// synthesized plan. We walk the plan tree, collect every string-typed leaf
-// into a normalized Set, and assert set membership by exact equality —
-// substring matching is forbidden (would let an unrelated section that
-// happened to mention the label as part of prose count as preservation).
-function collectPlanStringSet(
+// Locked-decision preservation: collect every string leaf in the plan tree
+// into a normalized Set; preservation = exact set membership (no substring).
+export function collectPlanStringSet(
   node: unknown,
   out: Set<string>,
   depth: number,
@@ -465,7 +459,7 @@ function collectPlanStringSet(
   }
 }
 
-function verifySynthesisPreservation(plan: SynthesizedPlan, lockedLabels: string[]): SynthesizedPlan["synthesisVerification"] {
+export function verifySynthesisPreservation(plan: SynthesizedPlan, lockedLabels: string[]): SynthesizedPlan["synthesisVerification"] {
   if (lockedLabels.length === 0) {
     return { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
   }

@@ -56,6 +56,8 @@ export interface BuildPlanOutput {
   memoryOverrides?: MemoryOverride[];
 }
 
+export type BuildPlanBlockReason = "STALE_LINEAGE" | "AI_RESPONSE_INVALID";
+
 export interface BuildPlanResult {
   status: "SUCCESS" | "ACTIONABILITY_FAILED" | "INSUFFICIENT_DATA" | "BLOCKED" | "ERROR";
   plan: BuildPlanOutput | null;
@@ -63,9 +65,7 @@ export interface BuildPlanResult {
   failedBlocks: string[];
   attempts: number;
   error?: string;
-  // F2.9 / pass-8 — structured block reason, surfaced when status==="BLOCKED".
-  // Documented values: "STALE_LINEAGE" (no sourceJobId provided).
-  reason?: "STALE_LINEAGE";
+  reason?: BuildPlanBlockReason;
 }
 
 interface EngineSnapshot {
@@ -473,7 +473,12 @@ const BuildPlanResponseSchema = z.object({
   }).optional().default(() => ({ daily: [], weekly: [], biweekly: [] })),
 });
 
-function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutput | null {
+type BuildPlanResponse = z.infer<typeof BuildPlanResponseSchema>;
+type ParseAIResult =
+  | { ok: true; plan: BuildPlanOutput }
+  | { ok: false; kind: "JSON_MALFORMED" | "SHAPE_INVALID"; detail: string };
+
+function parseAIResponse(content: string, rhythm: AdaptiveRhythm): ParseAIResult {
   let cleaned = content.trim();
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -482,16 +487,17 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutp
   try {
     raw = JSON.parse(cleaned);
   } catch (err: any) {
-    console.warn(`[BuildPlanLayer] AI_RESPONSE_PARSE_FAILED | reason=invalid_json | error=${err?.message ?? "parse_error"}`);
-    return null;
+    const detail = err?.message ?? "parse_error";
+    console.warn(`[BuildPlanLayer] AI_RESPONSE_PARSE_FAILED | reason=invalid_json | error=${detail}`);
+    return { ok: false, kind: "JSON_MALFORMED", detail };
   }
   const result = BuildPlanResponseSchema.safeParse(raw);
   if (!result.success) {
-    const issues = result.error.issues.slice(0, 5).map(i => `${i.path.join(".")}=${i.code}`).join(",");
-    console.warn(`[BuildPlanLayer] AI_RESPONSE_SHAPE_INVALID | reason=zod_validation_failed | issues=${issues}`);
-    return null;
+    const detail = result.error.issues.slice(0, 5).map(i => `${i.path.join(".")}=${i.code}`).join(",");
+    console.warn(`[BuildPlanLayer] AI_RESPONSE_SHAPE_INVALID | reason=zod_validation_failed | issues=${detail}`);
+    return { ok: false, kind: "SHAPE_INVALID", detail };
   }
-  const parsed: any = result.data;
+  const parsed: BuildPlanResponse = result.data;
   try {
     const contentAngles = Array.isArray(parsed.contentDna?.contentAngles) ? parsed.contentDna.contentAngles.map(String) : [];
     const hookStyles = Array.isArray(parsed.contentDna?.hookStyles) ? parsed.contentDna.hookStyles.map(String) : [];
@@ -500,7 +506,7 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutp
 
     const execActions = parsed.executionActions || {};
 
-    return {
+    const built: BuildPlanOutput = {
       positioning: String(parsed.positioning),
       differentiation: String(parsed.differentiation),
       mechanism: {
@@ -557,9 +563,11 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutp
         conversionTargets: String(parsed.kpiRules?.conversionTargets || ""),
       },
     };
+    return { ok: true, plan: built };
   } catch (err: any) {
-    console.warn(`[BuildPlanLayer] AI_RESPONSE_BUILD_FAILED | reason=post_zod_construction_error | error=${err?.message ?? "unknown"}`);
-    return null;
+    const detail = err?.message ?? "unknown";
+    console.warn(`[BuildPlanLayer] AI_RESPONSE_BUILD_FAILED | reason=post_zod_construction_error | error=${detail}`);
+    return { ok: false, kind: "SHAPE_INVALID", detail };
   }
 }
 
@@ -637,11 +645,29 @@ export async function runBuildPlanLayer(
         continue;
       }
 
-      const plan = parseAIResponse(content, adaptiveRhythm);
-      if (!plan) {
-        console.warn(`[BuildPlanLayer] Attempt ${attempt}: Failed to parse response`);
+      const parseResult = parseAIResponse(content, adaptiveRhythm);
+      if (!parseResult.ok) {
+        // F8.3 / pass-9 — SHAPE_INVALID is a contract failure (zod said the
+        // AI didn't return a build-plan-shaped object). Short-circuit to
+        // BLOCKED with reason="AI_RESPONSE_INVALID" instead of retrying or
+        // returning null — the AI cannot recover a shape contract by retry.
+        // JSON_MALFORMED keeps the retry loop (transient stream truncation).
+        if (parseResult.kind === "SHAPE_INVALID") {
+          const blockedShape: BuildPlanResult = {
+            status: "BLOCKED",
+            reason: "AI_RESPONSE_INVALID",
+            plan: null,
+            actionabilityScore: 0,
+            failedBlocks: ["AI_RESPONSE_SHAPE_INVALID"],
+            attempts: attempt,
+            error: `AI_RESPONSE_INVALID: ${parseResult.detail}`,
+          };
+          return applyPartialAelDowngrade("BuildPlanLayer", blockedShape, aelAck);
+        }
+        console.warn(`[BuildPlanLayer] Attempt ${attempt}: ${parseResult.kind} (${parseResult.detail}) — retrying`);
         continue;
       }
+      const plan = parseResult.plan;
 
       if (memoryBlockForConstraints && (memoryBlockForConstraints.reinforceSlots.length > 0 || memoryBlockForConstraints.avoidSlots.length > 0)) {
         try {
