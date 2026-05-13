@@ -54,50 +54,13 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
 
-// zod-backed coercers + input-boundary
-// validator. The previous
-// implementation: returning a `fallback` on parse failure was silent,
-// and missing/invalid values flowed downstream as if they had been
-// genuine zeros / empty strings. The contract-aligned shape is:
-//   • coerceNumber/coerceString — sub-routine helpers that record a
-//     fallback into MODULE-LEVEL `inputValidationReport` so the engine
-//     entry point can downgrade status to PARTIAL.
-//   • validateAwarenessInputs() — strict zod parse run AT engine entry
-//     against the canonical AwarenessAudienceInput / MI / Positioning
-//     schemas; critical-field failures (audience.maturityIndex,
-//     audience.awarenessLevel, mi.overallConfidence, positioning.
-//     narrativeDirection) cause the engine to short-circuit to PARTIAL
-//     with a structured reason, NOT to silently default.
+// Input-boundary validator. `safeNumber`/`safeString` removed: silent
+// fallback at the contract boundary hides missing critical inputs.
+// validateAwarenessInputs() at engine entry guarantees audience.
+// maturityIndex, audience.awarenessLevel, and mi.overallConfidence are
+// present and well-typed; non-critical optional fields use per-field
+// nullish coalescing with explicit literal defaults.
 import { z } from "zod";
-
-const NumberSchema = z.preprocess(
-  (v) => (typeof v === "number" && !Number.isNaN(v) ? v : (v == null || v === "" ? undefined : Number(v))),
-  z.number().refine((n) => Number.isFinite(n), { message: "non_finite" }),
-);
-
-const NonEmptyStringSchema = z.preprocess(
-  (v) => (typeof v === "string" ? v.trim() : v),
-  z.string().min(1),
-);
-
-interface InputValidationReport {
-  fallbacksUsed: Array<{ path: string; reason: string; fallback: string | number }>;
-}
-const inputValidationReport: InputValidationReport = { fallbacksUsed: [] };
-
-function resetValidationReport(): void {
-  inputValidationReport.fallbacksUsed = [];
-}
-
-// `safeNumber`/`safeString` REMOVED.
-// finding: silent fallback at the contract boundary hides missing critical
-// inputs. The strict zod boundary (`validateAwarenessInputs` at engine
-// entry) now guarantees that audience.maturityIndex, audience.awarenessLevel,
-// and mi.overallConfidence are present and well-typed before downstream
-// helpers run. For non-critical optional fields (e.g. positioning.narrative-
-// Direction, positioning.enemyDefinition), call sites use direct nullish
-// coalescing on a per-field basis with an explicit literal default — no
-// generic helper that could hide a missing critical field.
 
 const AwarenessAudienceInputSchema = z.object({
   maturityIndex: z.number().finite(),
@@ -819,7 +782,6 @@ export async function runAwarenessEngine(
   // mi.overallConfidence) is missing or non-finite, emit PARTIAL with
   // the structured `missingCritical` list — downstream readers see the
   // contract gap instead of a phantom default.
-  resetValidationReport();
   const inputCheck = validateAwarenessInputs(audience, mi);
 
   const aelAck = acknowledgeAelInput("AwarenessEngine-V3", analyticalEnrichment ?? null, accountId);
