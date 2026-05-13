@@ -82,8 +82,10 @@ export interface AnalyticalPackage {
   confidence_notes: ConfidenceNote[];
   generatedAt: string;
   version: number;
+  status?: "COMPLETE" | "INCOMPLETE";
   isPartial?: boolean;
-  partialReason?: string;
+  partialReason?: AELPartialReason | string;
+  partialDetail?: string;
   inputSummary: {
     hasMI: boolean;
     hasAudience: boolean;
@@ -92,6 +94,11 @@ export interface AnalyticalPackage {
     signalCount: number;
   };
 }
+
+export type AELPartialReason =
+  | "EMPTY_ANALYTICAL_PACKAGE"
+  | "AEL_PARSE_FAILURE"
+  | "AEL_BUILD_ERROR";
 
 export interface AELInput {
   mi: any;

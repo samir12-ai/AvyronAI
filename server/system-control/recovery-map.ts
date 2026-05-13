@@ -51,6 +51,8 @@ export const BLOCK_METADATA: Record<BlockCode | "UNKNOWN_BLOCK", { retrySafe: bo
   // ≥1 grounded pain signal. That requires fresh MI / scraping data, so the
   // resolver is system-driven (rerun upstream), not a runtime mutation.
   OFFER_INPUT_INSUFFICIENT:         { retrySafe: false, resolverActor: "system" },
+  ANALYTICAL_ENRICHMENT_BLOCKED:    { retrySafe: true,  resolverActor: "system" },
+  MI_GATE_REJECTED:                 { retrySafe: true,  resolverActor: "system" },
   // Truthfulness / commercial brake signals — must NOT be repaired
   VALIDATION_REJECTED:              { retrySafe: false, resolverActor: "external" },
   BUDGET_KILL:                      { retrySafe: false, resolverActor: "external" },
@@ -186,6 +188,38 @@ export const RECOVERY_MAP: Partial<Record<BlockCode | "UNKNOWN_BLOCK", RecoveryM
       "Offer snapshot status COMPLETE with primaryPain field non-empty",
     ],
     allowedNextModes: ["PROOF_COLLECTION", "AWARENESS_BUILD_PHASE", "REVIEW_REQUIRED"],
+    defaultNextMode: "PROOF_COLLECTION",
+  },
+
+  ANALYTICAL_ENRICHMENT_BLOCKED: {
+    meaning: "AEL emitted a PARTIAL/INCOMPLETE analytical package while at least one downstream consumer engine ran on it.",
+    severity: "critical",
+    ownerEngine: "AEL",
+    rootCauseCategory: "data_insufficiency",
+    repairOrderRank: RANK.AUDIENCE,
+    repairPatterns: [
+      "Re-run MI + Audience to widen the input set, then rebuild AEL",
+      "Inspect AEL partialReason (EMPTY_ANALYTICAL_PACKAGE / AEL_PARSE_FAILURE / AEL_BUILD_ERROR) and address the matching upstream gap",
+    ],
+    successCriteria: ["AEL pkg.status === 'COMPLETE' AND pkg.isPartial !== true"],
+    requiredProof: ["Fresh AEL snapshot with status COMPLETE"],
+    allowedNextModes: ["PROOF_COLLECTION", "REVIEW_REQUIRED"],
+    defaultNextMode: "PROOF_COLLECTION",
+  },
+
+  MI_GATE_REJECTED: {
+    meaning: "One or more MI-snapshot reads were rejected by the freshness/lineage gate during this run; downstream engines could not consume the snapshot.",
+    severity: "critical",
+    ownerEngine: "MI",
+    rootCauseCategory: "data_insufficiency",
+    repairOrderRank: RANK.AUDIENCE - 5,
+    repairPatterns: [
+      "Trigger an MI refresh so a fresh COMPLETE snapshot is bound to the current jobId",
+      "Inspect each rejection reason (MI_FRESHNESS_* / MI_LINEAGE_MISMATCH / MI_OUTPUT_MISSING) and clear the matching condition",
+    ],
+    successCriteria: ["No MI gate rejections recorded for the next run"],
+    requiredProof: ["A COMPLETE MI snapshot with provenance.freshnessClass=FRESH bound to the new jobId"],
+    allowedNextModes: ["PROOF_COLLECTION", "REVIEW_REQUIRED"],
     defaultNextMode: "PROOF_COLLECTION",
   },
 

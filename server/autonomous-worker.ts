@@ -133,11 +133,8 @@ async function runStrategyAnalysis(
             eq(strategyMemory.accountId, accountId),
             eq(strategyMemory.campaignId, activeCampaignId),
             ne(strategyMemory.campaignId, LEGACY_CAMPAIGN),
-            // Seal #10 / Task #28 / F4.9 — exclude operational/non-strategic
-            // memory types from the AI-context read. content_rhythm and
-            // exploration_budget are operational state, not strategy signal —
-            // including them in the autonomous worker's context pollutes
-            // strategy reasoning with rhythm-counter noise.
+            // Exclude operational/non-strategic memory types
+            // (content_rhythm, exploration_budget) from the AI-context read.
             notInArray(strategyMemory.memoryType, NON_STRATEGIC_MEMORY_TYPES_ARR),
           ))
           .orderBy(desc(strategyMemory.updatedAt))
@@ -344,7 +341,7 @@ async function checkIdleAccount(accountId: string, days: number): Promise<boolea
 }
 
 async function processAccount(accountId: string) {
-  // P1-18: never start a new account-level job after shutdown has begun.
+  // Never start a new account-level job after shutdown has begun.
   // Combined with the workerTick gates this guarantees no NEW DB writes
   // begin after SIGTERM; in-flight account work still gets its grace
   // window from the 5s unref'd timer in the signal handler.
@@ -1185,15 +1182,14 @@ function classifyInsightTypeFromState(
 const WORKER_CONCURRENCY = 3;
 
 async function workerTick() {
-  // Seal #7 / pass-16 (architect comment #3): wrap entire tick body in a
-  // fresh traceContext so logs/Sentry events emitted by worker code carry
-  // a per-tick traceId — same observability contract as HTTP requests.
+  // Per-tick traceId so worker logs/Sentry carry the same observability
+  // contract as HTTP requests.
   return traceContext.run({ traceId: `worker-autonomous-${randomUUID()}` }, () => workerTickBody());
 }
 
 async function workerTickBody() {
-  // P1-18 (W4.1, post-architect-#3 fix): explicit shutdown gate at the top
-  // of every tick AND between batches. Without these two checks the
+  // Explicit shutdown gate at the top of every tick AND between batches.
+  // Without these two checks the
   // `installShutdownHandlers()` flag was inert against in-flight ticks.
   if (isShuttingDown) {
     const { recordWorkerTick } = await import("./observability/otel");
@@ -1473,7 +1469,7 @@ export function stopAutonomousWorker() {
   }
 }
 
-// P1-18 (W4.1 launch-closure): SIGTERM/SIGINT handler. Replit sends SIGTERM
+// SIGTERM/SIGINT handler. Replit sends SIGTERM
 // on graceful shutdown (default 15s window). Without an explicit handler,
 // in-flight worker ticks could be killed mid-DB-write, leaving stale lock
 // rows in `job_queue` that the next process would then have to clean up via

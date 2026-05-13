@@ -52,7 +52,11 @@ export type BlockCode =
   // produced zero pain signals AND no MarketLanguage rawPainPhrases. Replaces
   // the silent "unresolved challenge" string fallback that previously emitted
   // a fabricated transformation statement.
-  | "OFFER_INPUT_INSUFFICIENT";
+  | "OFFER_INPUT_INSUFFICIENT"
+  // Hard-block when AEL emits PARTIAL while ≥1 downstream consumer ran.
+  | "ANALYTICAL_ENRICHMENT_BLOCKED"
+  // Hard-block when MI snapshot gate rejected ≥1 read during the run.
+  | "MI_GATE_REJECTED";
 
 export type DowngradeCode =
   | "UNVERIFIED_CAC"

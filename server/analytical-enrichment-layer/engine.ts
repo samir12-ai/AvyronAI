@@ -128,10 +128,12 @@ export async function buildAnalyticalPackage(input: AELInput): Promise<Analytica
     // believe a clean COMPLETE package was emitted.
     return {
       ...EMPTY_ANALYTICAL_PACKAGE,
+      status: "INCOMPLETE",
       generatedAt: new Date().toISOString(),
       inputSummary,
       isPartial: true,
-      partialReason: "EMPTY_ANALYTICAL_PACKAGE: no MI or Audience input available",
+      partialReason: "EMPTY_ANALYTICAL_PACKAGE",
+      partialDetail: "no MI or Audience input available",
     };
   }
 
@@ -282,7 +284,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.warn(logSafe(`${LOG_PREFIX} PARSE_FAIL | No JSON found in response`));
-      return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: "AEL response contained no parseable JSON" };
+      return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: "AEL_PARSE_FAILURE", partialDetail: "AEL response contained no parseable JSON" };
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
@@ -311,7 +313,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
   } catch (err: any) {
     const elapsed = Date.now() - startTime;
     console.error(logSafe(`${LOG_PREFIX} BUILD_ERROR | campaign=${input.campaignId} | elapsed=${elapsed}ms | error=${err.message}`));
-    return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: `AEL build failed: ${err.message}` };
+    return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: "AEL_BUILD_ERROR", partialDetail: `AEL build failed: ${err.message}` };
   }
 }
 
