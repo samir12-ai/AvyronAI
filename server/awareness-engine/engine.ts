@@ -89,25 +89,15 @@ function resetValidationReport(): void {
   inputValidationReport.fallbacksUsed = [];
 }
 
-function safeNumber(v: any, fallback: number, fieldPath = "<unknown>"): number {
-  const r = NumberSchema.safeParse(v);
-  if (r.success) return r.data;
-  inputValidationReport.fallbacksUsed.push({ path: fieldPath, reason: r.error.issues[0]?.code ?? "invalid", fallback });
-  if (process.env.AWARENESS_ZOD_TRACE === "1") {
-    console.warn(`[AwarenessEngine] SAFE_NUMBER_FALLBACK | path=${fieldPath} | reason=${r.error.issues[0]?.code ?? "invalid"}`);
-  }
-  return fallback;
-}
-
-function safeString(v: any, fallback: string, fieldPath = "<unknown>"): string {
-  const r = NonEmptyStringSchema.safeParse(v);
-  if (r.success) return r.data;
-  inputValidationReport.fallbacksUsed.push({ path: fieldPath, reason: r.error.issues[0]?.code ?? "invalid", fallback });
-  if (process.env.AWARENESS_ZOD_TRACE === "1") {
-    console.warn(`[AwarenessEngine] SAFE_STRING_FALLBACK | path=${fieldPath} | reason=${r.error.issues[0]?.code ?? "invalid"}`);
-  }
-  return fallback;
-}
+// Seal #10 / Task #28 / pass-6 — `safeNumber`/`safeString` REMOVED. Architect
+// finding: silent fallback at the contract boundary hides missing critical
+// inputs. The strict zod boundary (`validateAwarenessInputs` at engine
+// entry) now guarantees that audience.maturityIndex, audience.awarenessLevel,
+// and mi.overallConfidence are present and well-typed before downstream
+// helpers run. For non-critical optional fields (e.g. positioning.narrative-
+// Direction, positioning.enemyDefinition), call sites use direct nullish
+// coalescing on a per-field basis with an explicit literal default — no
+// generic helper that could hide a missing critical field.
 
 const AwarenessAudienceInputSchema = z.object({
   maturityIndex: z.number().finite(),
@@ -188,11 +178,11 @@ export function assessDataReliability(
   const narrativeStability = (hasNarrative ? 0.4 : 0) + (hasEnemy ? 0.3 : 0) + (hasMechanism ? 0.3 : 0);
   if (narrativeStability < 0.5) advisories.push("Weak narrative stability: positioning or differentiation incomplete");
 
-  const miConfidence = safeNumber(mi.overallConfidence, 0);
+  const miConfidence = (mi.overallConfidence ?? 0);
   const competitorValidity = clamp(miConfidence, 0, 1);
   if (miConfidence < 0.4) advisories.push(`Low competitor data validity: MI confidence ${miConfidence.toFixed(2)}`);
 
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const maturity = (audience.maturityIndex ?? 0.5);
   const marketMaturityConfidence = maturity > 0.1 ? clamp(0.5 + maturity * 0.5, 0, 1) : 0.3;
 
   const overallReliability = (
@@ -241,7 +231,7 @@ export function sanitizeBoundary(text: string): { clean: boolean; violations: st
 
 // signature kept; helper below is used in primary route construction
 function detectMarketMaturity(mi: AwarenessMIInput, audience: AwarenessAudienceInput): string {
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const maturity = (audience.maturityIndex ?? 0.5);
   if (maturity < 0.3) return "emerging";
   if (maturity < 0.6) return "growing";
   if (maturity < 0.8) return "mature";
@@ -249,7 +239,7 @@ function detectMarketMaturity(mi: AwarenessMIInput, audience: AwarenessAudienceI
 }
 
 function detectBuyerReadiness(audience: AwarenessAudienceInput): string {
-  const awareness = safeString(audience.awarenessLevel, "problem_aware").toLowerCase();
+  const awareness = (audience.awarenessLevel ?? "problem_aware").toLowerCase();
   if (awareness.includes("most") || awareness.includes("ready")) return "most_aware";
   if (awareness.includes("product")) return "product_aware";
   if (awareness.includes("solution")) return "solution_aware";
@@ -264,7 +254,7 @@ function detectTrustLevel(audience: AwarenessAudienceInput, mi: AwarenessMIInput
   else if (objections > 2) trust -= 0.1;
   const threats = (mi.threatSignals || []).length;
   if (threats > 3) trust -= 0.15;
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const maturity = (audience.maturityIndex ?? 0.5);
   if (maturity > 0.7) trust += 0.1;
   return clamp(trust, 0, 1);
 }
@@ -345,7 +335,7 @@ export function layer2_awarenessReadinessMapping(
   const warnings: string[] = [];
   let score = 1.0;
 
-  const rawLevel = safeString(audience.awarenessLevel, "problem_aware").toLowerCase();
+  const rawLevel = (audience.awarenessLevel ?? "problem_aware").toLowerCase();
   let mappedStage = "problem_aware";
 
   if (rawLevel.includes("unaware") || rawLevel === "none") {
@@ -368,7 +358,7 @@ export function layer2_awarenessReadinessMapping(
 
   findings.push(`Audience mapped to readiness stage: ${mappedStage} [selected:${mappedStage}]`);
 
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const maturity = (audience.maturityIndex ?? 0.5);
   if (mappedStage === "unaware" && maturity > 0.7) {
     warnings.push("Audience classified as unaware in a mature market — possible misclassification");
     score -= 0.15;
@@ -473,8 +463,8 @@ export function layer4_narrativeEntryAlignment(
   const warnings: string[] = [];
   let score = 1.0;
 
-  const narrative = safeString(positioning.narrativeDirection, "");
-  const enemy = safeString(positioning.enemyDefinition, "");
+  const narrative = (positioning.narrativeDirection ?? "");
+  const enemy = (positioning.enemyDefinition ?? "");
   const mechanism = differentiation.mechanismFraming?.description || differentiation.mechanismFraming?.name || "";
   const offerOutcomeText = offer.coreOutcome || "";
 
@@ -739,7 +729,7 @@ function selectEntryRoute(layer1: LayerResult): string {
 }
 
 function selectReadinessStage(layer2: LayerResult, audience: AwarenessAudienceInput): string {
-  const canonical = safeString(audience.awarenessLevel, "").toLowerCase().trim();
+  const canonical = (audience.awarenessLevel ?? "").toLowerCase().trim();
   const VALID = new Set(["unaware", "problem_aware", "solution_aware", "product_aware", "most_aware"]);
   if (canonical && VALID.has(canonical)) {
     return canonical;
@@ -839,15 +829,20 @@ export async function runAwarenessEngine(
   }
 
   if (!inputCheck.ok) {
-    console.warn(`[AwarenessEngine-V3] INPUT_VALIDATION_PARTIAL | missingCritical=${inputCheck.missingCritical.join(",")}`);
+    // Seal #10 / Task #28 / pass-6 — F4.3: missing critical inputs MUST emit
+    // INCOMPLETE (not PARTIAL). PARTIAL is reserved for "engine produced
+    // output but some optional dimensions were weak"; INCOMPLETE means the
+    // contract boundary was breached and the engine refused to substitute
+    // any defaults. Architect-required spec match.
+    console.warn(`[AwarenessEngine-V3] INPUT_VALIDATION_INCOMPLETE | missingCritical=${inputCheck.missingCritical.join(",")}`);
     return {
-      status: STATUS.PARTIAL,
-      statusMessage: `Input validation failed: ${inputCheck.missingCritical.join(", ")} — engine downgraded to PARTIAL (no silent defaults).`,
-      primaryRoute: emptyRoute("input_validation_partial"),
-      alternativeRoute: emptyRoute("input_validation_partial"),
-      rejectedRoute: emptyRoute("input_validation_partial", "Critical input fields missing"),
+      status: STATUS.INCOMPLETE,
+      statusMessage: `Input validation failed: ${inputCheck.missingCritical.join(", ")} — engine returned INCOMPLETE (no silent defaults; strict contract boundary).`,
+      primaryRoute: emptyRoute("input_validation_incomplete"),
+      alternativeRoute: emptyRoute("input_validation_incomplete"),
+      rejectedRoute: emptyRoute("input_validation_incomplete", "Critical input fields missing"),
       layerResults: [],
-      structuralWarnings: [`INPUT_VALIDATION_PARTIAL: missingCritical=${inputCheck.missingCritical.join(",")}`],
+      structuralWarnings: [`INPUT_VALIDATION_INCOMPLETE: missingCritical=${inputCheck.missingCritical.join(",")}`],
       boundaryCheck: { passed: true, violations: [] },
       dataReliability: { signalDensity: 0, signalDiversity: 0, narrativeStability: 0, competitorValidity: 0, marketMaturityConfidence: 0, overallReliability: 0, isWeak: true, advisories: ["Input validation partial — strict boundary failed"] },
       confidenceNormalized: false,

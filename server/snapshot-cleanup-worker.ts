@@ -65,9 +65,19 @@ async function reapStaleInFlightJobs(): Promise<number> {
     const reaped = await db
       .delete(inFlightJobs)
       .where(
+        // Seal #10 / Task #28 / pass-6 — `startedAt < cutoff` is a fallback
+        // ONLY when expectedCompleteBy IS NULL. Pre-pass-6 the OR clause
+        // could reap a long-running job (expectedCompleteBy still in the
+        // future) just because startedAt was older than the cutoff —
+        // that broke the intended grace semantics. Now we either gate on
+        // expectedCompleteBy when it's set, or fall back to startedAt only
+        // when no deadline was recorded.
         or(
           lt(inFlightJobs.expectedCompleteBy, cutoff),
-          lt(inFlightJobs.startedAt, cutoff),
+          and(
+            isNull(inFlightJobs.expectedCompleteBy),
+            lt(inFlightJobs.startedAt, cutoff),
+          ),
         )!,
       )
       .returning({ jobId: inFlightJobs.jobId });

@@ -1076,19 +1076,27 @@ export function checkMiGateRejections(
   if (!rejections || rejections.length === 0) {
     return pass("mi_gate_integrity", "no MI gate rejections recorded");
   }
-  // If any strategic engine actually executed, MI rejection means it ran
-  // with empty MI — that is the silent-degrade we are forbidding.
-  const anyConsumed = Array.from(results.values()).some((r) => r.status !== "SKIPPED");
-  if (!anyConsumed) {
+  // Seal #10 / Task #28 / pass-6 — tighten the gate: BLOCK only when the
+  // specific engine that REJECTED MI actually completed (i.e. proceeded
+  // to consume the empty-MI substitute). Pre-pass-6 we blocked on "any
+  // engine ran"; architect flagged this as overbroad — a recovery resume
+  // that ran an unrelated engine after an MI rejection from a SKIPPED
+  // engine should not hard-block. Now each rejection must be paired with
+  // its rejecting engine completing for the BLOCK to fire.
+  const consumedRejections = rejections.filter((r) => {
+    const er = results.get(r.engineId);
+    return er !== undefined && er.status !== "SKIPPED";
+  });
+  if (consumedRejections.length === 0) {
     return pass(
       "mi_gate_integrity",
-      `MI rejected ${rejections.length}x but no engines consumed MI — no silent degrade risk`,
+      `MI rejected ${rejections.length}x but rejecting engines did not run (skipped or absent) — no silent degrade risk`,
     );
   }
-  const summary = rejections.slice(0, 3).map((r) => `${r.engineId}:${r.reason}`).join(",");
+  const summary = consumedRejections.slice(0, 3).map((r) => `${r.engineId}:${r.reason}`).join(",");
   return fail(
     "mi_gate_integrity",
-    `BLOCK: MI snapshot was rejected ${rejections.length}x by extractMiInput (${summary}) and ${results.size} engine(s) ran — refusing to silently substitute empty MI for live decisions`,
+    `BLOCK: MI snapshot was rejected ${consumedRejections.length}x by engines that PROCEEDED to execute (${summary}) — refusing to silently substitute empty MI for live decisions`,
   );
 }
 
