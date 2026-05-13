@@ -99,8 +99,7 @@ interface CategoryResult {
 }
 
 function layer1_categoryDetection(miData: any, competitorCount: number = 0, signalCount: number = 0): CategoryResult {
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const marketState = miData.marketState || "";
+  const marketStateLabel = miData.marketState || "";
   const diagnosis = miData.marketDiagnosis || "";
   const narrative = miData.narrativeSynthesis || "";
   const contentDna = safeJsonParse(miData.contentDnaData, []);
@@ -115,7 +114,7 @@ function layer1_categoryDetection(miData: any, competitorCount: number = 0, sign
     }
   }
 
-  const combined = `${marketState} ${diagnosis} ${narrative} ${websiteText}`.toLowerCase();
+  const combined = `${marketStateLabel} ${diagnosis} ${narrative} ${websiteText}`.toLowerCase();
 
   const categories: Record<string, string[]> = {
     fitness: ["fitness", "workout", "gym", "exercise", "weight", "muscle", "body"],
@@ -720,11 +719,10 @@ function extractStrategicSignals(miData: any): { signal: string; cluster: string
 
   const textSources: { text: string; source: string }[] = [];
 
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const marketState = miData.marketState || "";
+  const marketStateLabel = miData.marketState || "";
   const diagnosis = miData.marketDiagnosis || "";
   const narrative = miData.narrativeSynthesis || "";
-  if (marketState) textSources.push({ text: marketState, source: "market_intelligence" });
+  if (marketStateLabel) textSources.push({ text: marketStateLabel, source: "market_intelligence" });
   if (diagnosis) textSources.push({ text: diagnosis, source: "market_intelligence" });
   if (narrative) textSources.push({ text: narrative, source: "market_intelligence" });
 

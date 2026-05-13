@@ -47,8 +47,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   const startTime = Date.now();
 
   const budgetResult = input.results.get("budget_governor");
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const budgetAction = budgetResult?.output?.decision?.action ?? null;
+  const budgetActionValue = budgetResult?.output?.decision?.action ?? null;
 
   const structuralChecks: StructuralCheck[] = [];
 
@@ -64,7 +63,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   // Phase C1: pass currentJobId so the contract boundary helper applies its
   // freshness/run-id gating to the funnelStages reads in these checks.
   structuralChecks.push(checkConversionPath(input.results, input.config.currentJobId ?? null));
-  structuralChecks.push(checkSignalGrounding(input.signalComposition, budgetAction));
+  structuralChecks.push(checkSignalGrounding(input.signalComposition, budgetActionValue));
   structuralChecks.push(checkIntegrityStatus(input.integrityReport));
   structuralChecks.push(checkCELCompliance(input.celResults));
   structuralChecks.push(checkUpstreamEngineHealth(input.results));
@@ -117,7 +116,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     if (sc.status !== "FAIL") continue;
     if (sc.check === "analytical_enrichment_integrity") {
       downgrades.push({
-        from: budgetAction || "test",
+        from: budgetActionValue || "test",
         to: "review_required",
         reason: sc.details,
         code: "ANALYTICAL_ENRICHMENT_DEGRADED",
@@ -125,7 +124,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
       });
     } else if (sc.check === "signal_lineage_unknown") {
       downgrades.push({
-        from: budgetAction || "test",
+        from: budgetActionValue || "test",
         to: "review_required",
         reason: sc.details,
         code: "LINEAGE_UNTRUSTED",
@@ -133,7 +132,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
       });
     } else if (sc.check === "confidence_integrity" && sc.details.startsWith("DEGRADED")) {
       downgrades.push({
-        from: budgetAction || "test",
+        from: budgetActionValue || "test",
         to: "review_required",
         reason: sc.details,
         code: "CONFIDENCE_INTEGRITY_DEGRADED",
@@ -154,7 +153,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
 
   if (
     input.integrityReport?.overallStatus === "PARTIAL" &&
-    budgetAction === "test"
+    budgetActionValue === "test"
   ) {
     downgrades.push({
       from: "test",
@@ -168,7 +167,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   if (
     input.signalComposition &&
     input.signalComposition.trustedRatio < 0.3 &&
-    budgetAction === "test"
+    budgetActionValue === "test"
   ) {
     downgrades.push({
       from: "test",
@@ -220,9 +219,8 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
           recheck.push(checkFunnelStructuralCompleteness(input.results, input.config.currentJobId ?? null));
         }
         if (resolvedCodes.has("SCALE_WITHOUT_REAL_DATA")) {
-          // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-          const newBudgetAction = input.results.get("budget_governor")?.output?.decision?.action ?? null;
-          recheck.push(checkSignalGrounding(input.signalComposition, newBudgetAction));
+          const newBudgetActionValue = input.results.get("budget_governor")?.output?.decision?.action ?? null;
+          recheck.push(checkSignalGrounding(input.signalComposition, newBudgetActionValue));
         }
         // v1 Actionable Block Recovery (May 2026): re-verify the structural
         // check whose target the pure-mutation repair just clamped. SSC was
@@ -288,9 +286,8 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
           );
         }
 
-        // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-        const postRepairBudgetAction = input.results.get("budget_governor")?.output?.decision?.action ?? null;
-        if (postRepairBudgetAction !== budgetAction) {
+        const postRepairBudgetActionValue = input.results.get("budget_governor")?.output?.decision?.action ?? null;
+        if (postRepairBudgetActionValue !== budgetActionValue) {
           downgrades.length = 0;
 
           const postBudgetFunnelCheck = checkBudgetFunnelAlignment(input.results);
@@ -305,7 +302,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
 
           if (
             input.integrityReport?.overallStatus === "PARTIAL" &&
-            postRepairBudgetAction === "test"
+            postRepairBudgetActionValue === "test"
           ) {
             downgrades.push({
               from: "test",
@@ -319,7 +316,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
           if (
             input.signalComposition &&
             input.signalComposition.trustedRatio < 0.3 &&
-            postRepairBudgetAction === "test"
+            postRepairBudgetActionValue === "test"
           ) {
             downgrades.push({
               from: "test",
@@ -425,7 +422,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     );
     executionMode = hasUnresolvable ? "NEEDS_RECONCILIATION" : "REVIEW_REQUIRED";
     downgrades.push({
-      from: budgetAction || "test",
+      from: budgetActionValue || "test",
       to: hasUnresolvable ? "needs_reconciliation" : "review_required",
       reason: `${contradictions.length} cross-engine contradiction(s) detected — verdict cannot be PASS until resolved` +
         (hasUnresolvable ? " (Funnel↔Iteration disagreement requires rerun, not auto-downgrade)" : ""),

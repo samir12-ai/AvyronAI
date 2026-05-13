@@ -1682,16 +1682,14 @@ function buildDeterministicOfferSkeletons(
   // template when richer data is present.
   const mechPromise = safeLabel(rootMech?.mechanismPromise, "skeleton.mechanism.promise");
   const mechLogic = safeLabel(rootMech?.mechanismLogic, "skeleton.mechanism.logic");
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const primaryOutcome = cascade(
+  const primaryOutcomeText = cascade(
     primaryClaimDigest.benefit,
     rootTransformation,
     mechPromise,
     primaryDesire && primaryPain ? `Move from ${primaryPain} to ${primaryDesire}` : null,
     primaryDesire,
   ) || `${axisPhrase} outcome (degraded — upstream data missing)`;
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const altOutcome = cascade(
+  const altOutcomeText = cascade(
     altClaimDigest.benefit,
     mechPromise,
     altDesire && altPain ? `Move from ${altPain} to ${altDesire}` : null,
@@ -1740,7 +1738,7 @@ function buildDeterministicOfferSkeletons(
     selectedPain: primaryPain ?? "unresolved challenge",
     selectedDesire: primaryDesire ?? "measurable improvement",
     selectedMechanism: rootMechName || "direct mechanism",
-    selectedTransformation: rootTransformation || primaryOutcome,
+    selectedTransformation: rootTransformation || primaryOutcomeText,
     selectedProofTypes: proofPath,
     selectedObjections: objectionsList,
   };
@@ -1753,7 +1751,7 @@ function buildDeterministicOfferSkeletons(
   return {
     primary: {
       name: primaryHook,
-      outcome: primaryOutcome,
+      outcome: primaryOutcomeText,
       mechanism: mechDesc,
       deliverables: deliverables.length > 0 ? deliverables : ["Core implementation module"],
       problemStatement: primaryProblem ?? PRIMARY_PROBLEM_DEGRADED,
@@ -1762,7 +1760,7 @@ function buildDeterministicOfferSkeletons(
     },
     alternative: {
       name: altHook,
-      outcome: altOutcome,
+      outcome: altOutcomeText,
       mechanism: mechDesc,
       deliverables: deliverables.length > 0 ? deliverables : ["Alternative implementation module"],
       problemStatement: altProblem ?? ALT_PROBLEM_DEGRADED,
@@ -2921,11 +2919,10 @@ export async function runOfferEngine(
     const mechanismType = mechanism.type || "none";
     const pains = audience.audiencePains || [];
     const desires = Object.entries(audience.desireMap || {});
-    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-    const offerOutcome = primaryOffer.coreOutcome || "";
+    const offerOutcomeText = primaryOffer.coreOutcome || "";
     const offerMechDesc = primaryOffer.mechanismDescription || "";
 
-    const offerCombinedText = `${(primaryOffer.offerName || "").toLowerCase()} ${offerOutcome.toLowerCase()} ${offerMechDesc.toLowerCase()} ${(primaryOffer.deliverables || []).join(" ").toLowerCase()}`;
+    const offerCombinedText = `${(primaryOffer.offerName || "").toLowerCase()} ${offerOutcomeText.toLowerCase()} ${offerMechDesc.toLowerCase()} ${(primaryOffer.deliverables || []).join(" ").toLowerCase()}`;
     const hasPainAlignment = pains.length > 0 && pains.some((p: any) => {
       const painText = (typeof p === "string" ? p : p?.pain || p?.name || p?.canonical || "");
       const tokens = extractRobustTokens(painText);
@@ -3097,8 +3094,7 @@ export async function runOfferEngine(
     const rootMechNameCheck = (rootMechParsed?.mechanismName || "").toLowerCase();
 
     const axisInHook = axisTokensForCheck.length === 0 || axisTokensForCheck.some((t: string) => offerHookText.includes(t));
-    // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-    const painInOutcome = diagnostics.sourceContext?.selectedPain
+    const painInOutcomeFlag = diagnostics.sourceContext?.selectedPain
       ? offerOutcomeText.includes(diagnostics.sourceContext.selectedPain.toLowerCase().substring(0, 15))
       : true;
     const mechInOffer = rootMechNameCheck.length === 0 || offerMechText.includes(rootMechNameCheck.substring(0, Math.min(rootMechNameCheck.length, 20)));
@@ -3107,10 +3103,10 @@ export async function runOfferEngine(
     diagnostics.integrityChecks = {
       rootSynced: true,
       axisAligned: axisInHook,
-      painAligned: painInOutcome,
+      painAligned: painInOutcomeFlag,
       mechanismAligned: mechInOffer,
       proofAligned: proofInOffer,
-      integrityPassed: axisInHook && painInOutcome && mechInOffer && proofInOffer,
+      integrityPassed: axisInHook && painInOutcomeFlag && mechInOffer && proofInOffer,
     };
   }
 

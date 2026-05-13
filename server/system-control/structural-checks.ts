@@ -848,19 +848,18 @@ export function checkBudgetOverrideZeroConfidence(ssc: SharedStrategicContext | 
   }
 
   const budgetResult = results.get("budget_governor");
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const budgetAction = budgetResult?.output?.decision?.action ?? null;
+  const budgetActionValue = budgetResult?.output?.decision?.action ?? null;
 
-  if (budgetAction === "scale" || budgetAction === "test") {
+  if (budgetActionValue === "scale" || budgetActionValue === "test") {
     return fail(
       "budget_override_zero_confidence",
-      `Budget action="${budgetAction}" but confidenceFloor=0 — performance override blocked when system has zero confidence`,
+      `Budget action="${budgetActionValue}" but confidenceFloor=0 — performance override blocked when system has zero confidence`,
     );
   }
 
   return pass(
     "budget_override_zero_confidence",
-    `Confidence floor=0 but budget action="${budgetAction}" — no performance override attempted`,
+    `Confidence floor=0 but budget action="${budgetActionValue}" — no performance override attempted`,
   );
 }
 

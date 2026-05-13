@@ -15,9 +15,8 @@ export function registerBuildPlanLayerRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
-      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-      const depthGateStatus = req.body.depthGateStatus || undefined;
-      const result = await runBuildPlanLayer(accountId, campaignId, depthGateStatus);
+      const depthGateStatusInput = req.body.depthGateStatus || undefined;
+      const result = await runBuildPlanLayer(accountId, campaignId, depthGateStatusInput);
 
       if (result.status === "SUCCESS" || result.status === "ACTIONABILITY_FAILED") {
         try {

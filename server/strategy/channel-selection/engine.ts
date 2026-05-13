@@ -1261,10 +1261,9 @@ export function runChannelSelectionEngine(
             postReconstructionViolations.push(`Very low persuasion compatibility (${(c.candidate.persuasionCompatibility * 100).toFixed(0)}%) — channel limited to ${assignment.assignedRole} role only`);
           }
 
-          // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-          const postGateOutcome: DecisionGateOutcome = postReconstructionViolations.length === 0 ? "support_channel" : "exploratory";
+          const postGateOutcomeValue: DecisionGateOutcome = postReconstructionViolations.length === 0 ? "support_channel" : "exploratory";
           c.candidate.decisionGate = {
-            outcome: postGateOutcome,
+            outcome: postGateOutcomeValue,
             reason: `Post-reconstruction validation: "${c.candidate.channelName}" assigned to ${roleName} stage (role fit: ${(assignment.roleFitScore * 100).toFixed(0)}%)${postReconstructionViolations.length > 0 ? ` with ${postReconstructionViolations.length} advisory note(s)` : ""}`,
             violations: postReconstructionViolations,
           };

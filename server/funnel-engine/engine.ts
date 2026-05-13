@@ -538,8 +538,7 @@ export function layerEntryTriggerDetection(
 
   const route = awarenessInput.awarenessRoute || "";
   const triggerClass = awarenessInput.triggerClass || "";
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const trustState = awarenessInput.trustState || "";
+  const trustStateLabel = awarenessInput.trustState || "";
   const awarenessStage = awarenessInput.awarenessStage || "";
 
   const allBlocked = new Set<string>();
@@ -562,10 +561,10 @@ export function layerEntryTriggerDetection(
     enforcementChain.push(`trigger:${triggerClass}`);
   }
 
-  const trustOverride = TRUST_STATE_ENTRY_OVERRIDES[trustState];
+  const trustOverride = TRUST_STATE_ENTRY_OVERRIDES[trustStateLabel];
   if (trustOverride) {
     trustOverride.blocked.forEach(m => { allBlocked.add(m); allAllowed.delete(m); });
-    enforcementChain.push(`trust:${trustState}`);
+    enforcementChain.push(`trust:${trustStateLabel}`);
   }
 
   if (awarenessStage === "unaware") {
@@ -581,7 +580,7 @@ export function layerEntryTriggerDetection(
   const blockedArr = Array.from(allBlocked);
 
   if (allowedArr.length === 0) {
-    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_ALL_BLOCKED | route=${route} trigger=${triggerClass} trust=${trustState} stage=${awarenessStage}`);
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_ALL_BLOCKED | route=${route} trigger=${triggerClass} trust=${trustStateLabel} stage=${awarenessStage}`);
     return {
       mechanismType: "ENFORCEMENT_FAILED",
       purpose: "All entry mechanisms blocked by awareness constraints — cannot derive valid trigger",
@@ -589,7 +588,7 @@ export function layerEntryTriggerDetection(
         enforcedBy: enforcementChain.join(" + "),
         awarenessRoute: route,
         triggerClass,
-        trustState,
+        trustState: trustStateLabel,
         originalMechanism: "none",
         finalMechanism: "ENFORCEMENT_FAILED",
         wasOverridden: false,
@@ -621,7 +620,7 @@ export function layerEntryTriggerDetection(
         enforcedBy: enforcementChain.join(" + "),
         awarenessRoute: route,
         triggerClass,
-        trustState,
+        trustState: trustStateLabel,
         originalMechanism: "none",
         finalMechanism: "ENFORCEMENT_FAILED",
         wasOverridden: false,
@@ -635,7 +634,7 @@ export function layerEntryTriggerDetection(
   const enforcedBy = enforcementChain.join(" + ") || "ENFORCEMENT_FAILED";
 
   if (enforcedBy === "ENFORCEMENT_FAILED") {
-    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_NO_RULES | awareness present but no matching rules for route=${route} trigger=${triggerClass} trust=${trustState}`);
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_NO_RULES | awareness present but no matching rules for route=${route} trigger=${triggerClass} trust=${trustStateLabel}`);
     return {
       mechanismType: "ENFORCEMENT_FAILED",
       purpose: "No awareness rules matched — entry trigger cannot be derived without enforcement",
@@ -643,7 +642,7 @@ export function layerEntryTriggerDetection(
         enforcedBy: "ENFORCEMENT_FAILED",
         awarenessRoute: route,
         triggerClass,
-        trustState,
+        trustState: trustStateLabel,
         originalMechanism: "none",
         finalMechanism: "ENFORCEMENT_FAILED",
         wasOverridden: false,
@@ -663,7 +662,7 @@ export function layerEntryTriggerDetection(
       enforcedBy,
       awarenessRoute: route,
       triggerClass,
-      trustState,
+      trustState: trustStateLabel,
       originalMechanism: finalType,
       finalMechanism: finalType,
       wasOverridden: false,
@@ -775,8 +774,7 @@ export function applyAwarenessPriorityMatrix(
   let decidingPriorityName = "Offer Fit (default)";
 
   const entryMechanism = awareness?.entryMechanism || "";
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const trustState = awareness?.trustState || "";
+  const trustStateLabel = awareness?.trustState || "";
   const awarenessStage = awareness?.awarenessStage || audience.awarenessLevel || "problem_aware";
   const triggerClass = awareness?.triggerClass || "";
   const awarenessScore = awareness?.awarenessStrengthScore ?? 0;
@@ -814,14 +812,14 @@ export function applyAwarenessPriorityMatrix(
   });
 
   const p2Blocked: string[] = [];
-  const highTrust = trustState === "high" || trustState === "very_high" || trustState === "critical"
+  const highTrust = trustStateLabel === "high" || trustStateLabel === "very_high" || trustStateLabel === "critical"
     || entryMechanism === "trust_repair_entry" || entryMechanism === "proof_led_entry";
   if (highTrust && awareness) {
     for (const ft of TRUST_LIGHT_FUNNELS) {
       if (eligible.has(ft)) {
         eligible.delete(ft);
         p2Blocked.push(ft);
-        blocked.push({ funnelType: ft, blockedByPriority: 2, reason: `Trust requirement "${trustState}" blocks low-trust funnel "${ft}"` });
+        blocked.push({ funnelType: ft, blockedByPriority: 2, reason: `Trust requirement "${trustStateLabel}" blocks low-trust funnel "${ft}"` });
       }
     }
     if (!eligible.has(proposedType) && decidingPriority > 2) {

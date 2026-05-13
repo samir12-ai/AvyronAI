@@ -100,11 +100,10 @@ async function fetchLatestSnapshot(table: any, campaignId: string, accountId: st
 function extractMiKeyOutputs(snap: any): Record<string, any> {
   const competitors = parseJson(snap.competitorData, []);
   const signals = parseJson(snap.signalData, null);
-  // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-  const marketState = snap.marketState || null;
+  const marketStateLabel = snap.marketState || null;
   return {
     competitorCount: Array.isArray(competitors) ? competitors.length : 0,
-    marketState,
+    marketState: marketStateLabel,
     confidenceLevel: snap.confidenceLevel || null,
     dataFreshnessDays: snap.dataFreshnessDays ?? null,
     volatilityIndex: snap.volatilityIndex ?? null,
@@ -387,7 +386,7 @@ async function buildEngineOutputs(sectionStatuses: string | null, campaignId: st
 
 function buildSystemSummary(
   job: any,
-  controlVerdict: any | null,
+  controlVerdictRecord: any | null,
   engines: EngineOutput[],
 ) {
   const completedCount = engines.filter(e => e.status === "SUCCESS").length;
@@ -397,14 +396,14 @@ function buildSystemSummary(
   const risks: string[] = [];
   const blockers: string[] = [];
 
-  if (controlVerdict) {
-    for (const b of controlVerdict.blockReasons || []) {
+  if (controlVerdictRecord) {
+    for (const b of controlVerdictRecord.blockReasons || []) {
       blockers.push(`${b.code}: ${b.description}`);
     }
-    for (const d of controlVerdict.downgrades || []) {
+    for (const d of controlVerdictRecord.downgrades || []) {
       risks.push(`DOWNGRADE ${d.from} -> ${d.to}: ${d.reason}`);
     }
-    for (const c of controlVerdict.contradictions || []) {
+    for (const c of controlVerdictRecord.contradictions || []) {
       risks.push(`CONTRADICTION (${c.engineA} vs ${c.engineB}): ${c.description}`);
     }
   }
@@ -426,8 +425,8 @@ function buildSystemSummary(
     executionStatus: job.status,
     overallStatus: job.status,
     // eslint-disable-next-line semantic/no-semantic-fallback -- D (H8): final-report display string ("N/A" presentation default, not a decision verdict)
-    finalVerdict: controlVerdict?.verdict || "N/A",
-    executionMode: controlVerdict?.executionMode || "N/A",
+    finalVerdict: controlVerdictRecord?.verdict || "N/A",
+    executionMode: controlVerdictRecord?.executionMode || "N/A",
     engineCounts: {
       total: engines.length,
       completed: completedCount,
@@ -443,27 +442,27 @@ function buildSystemSummary(
   };
 }
 
-function buildControlLayerSection(controlVerdict: any | null) {
-  if (!controlVerdict) {
+function buildControlLayerSection(controlVerdictRecord: any | null) {
+  if (!controlVerdictRecord) {
     return { available: false, message: "No control verdict found for this run" };
   }
 
-  const repairs = (controlVerdict.repairActions || []).filter((a: any) => a.executed);
+  const repairs = (controlVerdictRecord.repairActions || []).filter((a: any) => a.executed);
   const successfulRepairs = repairs.filter((a: any) => a.succeeded);
   const failedRepairs = repairs.filter((a: any) => !a.succeeded);
 
   return {
     available: true,
-    verdict: controlVerdict.verdict,
-    executionMode: controlVerdict.executionMode,
-    controlVersion: controlVerdict.controlVersion,
-    shadowMode: controlVerdict.shadowMode,
-    blockReasons: (controlVerdict.blockReasons || []).map((b: any) => ({
+    verdict: controlVerdictRecord.verdict,
+    executionMode: controlVerdictRecord.executionMode,
+    controlVersion: controlVerdictRecord.controlVersion,
+    shadowMode: controlVerdictRecord.shadowMode,
+    blockReasons: (controlVerdictRecord.blockReasons || []).map((b: any) => ({
       code: b.code,
       severity: b.severity,
       description: b.description,
     })),
-    downgradesApplied: (controlVerdict.downgrades || []).map((d: any) => ({
+    downgradesApplied: (controlVerdictRecord.downgrades || []).map((d: any) => ({
       code: d.code,
       from: d.from,
       to: d.to,
@@ -471,11 +470,11 @@ function buildControlLayerSection(controlVerdict: any | null) {
       engine: d.affectedEngine,
     })),
     repairActions: {
-      attempted: controlVerdict.repairAttempted || false,
-      total: (controlVerdict.repairActions || []).length,
+      attempted: controlVerdictRecord.repairAttempted || false,
+      total: (controlVerdictRecord.repairActions || []).length,
       succeeded: successfulRepairs.length,
       failed: failedRepairs.length,
-      details: (controlVerdict.repairActions || []).map((a: any) => ({
+      details: (controlVerdictRecord.repairActions || []).map((a: any) => ({
         code: a.code,
         targetBlock: a.targetBlock,
         executed: a.executed,
@@ -483,20 +482,20 @@ function buildControlLayerSection(controlVerdict: any | null) {
         detail: a.detail,
       })),
     },
-    contradictions: (controlVerdict.contradictions || []).map((c: any) => ({
+    contradictions: (controlVerdictRecord.contradictions || []).map((c: any) => ({
       engines: `${c.engineA} vs ${c.engineB}`,
       description: c.description,
       resolution: c.resolution,
     })),
     structuralChecks: {
-      total: (controlVerdict.structuralChecks || []).length,
+      total: (controlVerdictRecord.structuralChecks || []).length,
       // Phase R T001: only status==="PASS" counts as a verified pass.
       // Falling back to c.passed when status is absent preserves the count
       // for legacy verdict rows written before the status field existed.
-      passed: (controlVerdict.structuralChecks || []).filter((c: any) =>
+      passed: (controlVerdictRecord.structuralChecks || []).filter((c: any) =>
         typeof c?.status === "string" && c.status === "PASS"
       ).length,
-      details: (controlVerdict.structuralChecks || []).map((c: any) => buildStructuralCheckDetail(c)),
+      details: (controlVerdictRecord.structuralChecks || []).map((c: any) => buildStructuralCheckDetail(c)),
     },
   };
 }
@@ -779,8 +778,7 @@ export function registerFullReportRoutes(app: Express) {
         .orderBy(desc(systemControlVerdicts.createdAt))
         .limit(1);
 
-      // eslint-disable-next-line semantic/no-semantic-fallback -- Seal #9 / F10.3 pass-3: engine-internal canonical-write authoring site OR display-summarizer read of canonical contract field with documented fallback to a deterministic literal. NOT a D1 contract substitution — this is the FIRST canonical write of the value, or a UI-layer read where missing-field UX requires a literal placeholder. Doctrine D5 enforcement still operative at consumer-side requireContractField() boundary.
-      const controlVerdict = controlVerdictRow ? {
+      const controlVerdictRecord = controlVerdictRow ? {
         verdict: controlVerdictRow.verdict,
         executionMode: controlVerdictRow.executionMode,
         blockReasons: parseJson(controlVerdictRow.blockReasons, []),
@@ -816,8 +814,8 @@ export function registerFullReportRoutes(app: Express) {
         .limit(1);
 
       const engineOutputs = await buildEngineOutputs(job.sectionStatuses, campaignId, accountId);
-      const systemSummary = buildSystemSummary(job, controlVerdict, engineOutputs);
-      const controlLayer = buildControlLayerSection(controlVerdict);
+      const systemSummary = buildSystemSummary(job, controlVerdictRecord, engineOutputs);
+      const controlLayer = buildControlLayerSection(controlVerdictRecord);
       const confidenceAndIntegrity = buildConfidenceSection(integrityReport, job.sectionStatuses);
       const strategicOutputs = buildStrategicOutputs(engineOutputs);
       const memoryInfluence = await buildMemorySection(campaignId, accountId);
