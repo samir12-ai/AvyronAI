@@ -1757,7 +1757,7 @@ async function executeEngine(
           }
         }
         if (!diffReused) {
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "differentiation" });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         result = await runDifferentiationEngine(
@@ -2027,7 +2027,7 @@ async function executeEngine(
           }
           logReuseMiss("offer", offerInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "offer" });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2164,7 +2164,7 @@ async function executeEngine(
           }
           logReuseMiss("awareness", awarenessInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "awareness" });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2284,7 +2284,7 @@ async function executeEngine(
           }
           logReuseMiss("funnel", funnelInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "funnel" });
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -2397,7 +2397,7 @@ async function executeEngine(
           }
           logReuseMiss("integrity", integrityInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "integrity" });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2466,7 +2466,7 @@ async function executeEngine(
           }
           logReuseMiss("persuasion", persuasionInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "persuasion" });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
@@ -2608,7 +2608,7 @@ async function executeEngine(
           }
           logReuseMiss("statistical_validation", svInputHash);
         }
-        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx });
+        const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "statistical_validation" });
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
         const funnelInput = extractFunnelInput(ctx.funnel);
@@ -3579,39 +3579,40 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       .where(eq(orchestratorJobs.id, jobId));
   } else {
     jobId = config.preassignedJobId || `orch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    if (!config.preassignedJobId) {
-      await db.insert(orchestratorJobs).values({
-        id: jobId,
-        blueprintId: "orchestrator-v2",
+    // Seal #10 / Task #28 / pass-7 — atomic registration. The
+    // orchestrator_jobs row (which is the lineage anchor every
+    // downstream engine snapshot writes its job_id against) and the
+    // in_flight_jobs row (which the snapshot-cleanup-worker JOINs
+    // against to prove a run is still active) MUST be created in the
+    // same transaction. Pre-pass-7 they were two sequential inserts —
+    // a crash between them could leave an orchestrator_jobs row whose
+    // engine snapshots were vulnerable to mid-run cleanup. Both rows
+    // now commit-or-rollback together.
+    await db.transaction(async (tx) => {
+      if (!config.preassignedJobId) {
+        await tx.insert(orchestratorJobs).values({
+          id: jobId,
+          blueprintId: "orchestrator-v2",
+          accountId: config.accountId,
+          campaignId: config.campaignId,
+          status: "RUNNING",
+          sectionStatuses: JSON.stringify(
+            ENGINE_PRIORITY_ORDER.map(e => ({ id: e.id, name: e.name, status: "PENDING" }))
+          ),
+        });
+      }
+      // F8.2 — in_flight_jobs registration is no longer best-effort
+      // and is now atomic with the orchestrator_jobs insert above.
+      // ON CONFLICT DO NOTHING handles the resumed-job path where the
+      // row may already exist.
+      await tx.insert(inFlightJobs).values({
+        jobId,
         accountId: config.accountId,
         campaignId: config.campaignId,
-        status: "RUNNING",
-        sectionStatuses: JSON.stringify(
-          ENGINE_PRIORITY_ORDER.map(e => ({ id: e.id, name: e.name, status: "PENDING" }))
-        ),
-      });
-    }
+        expectedCompleteBy: new Date(Date.now() + 30 * 60 * 1000),
+      }).onConflictDoNothing();
+    });
   }
-
-  // Seal #10 / Task #28 / F8.2 — register the run in `in_flight_jobs` so the
-  // snapshot-cleanup-worker's COLD_STORAGE_PURGE / per-campaign cap passes
-  // can JOIN against this table and skip any snapshot row whose jobId is
-  // currently active. Pre-#28, snapshot cleanup raced with running orches-
-  // trator runs and could purge a snapshot the in-flight engine was about
-  // to read. ON CONFLICT DO NOTHING handles the resumed-job path where the
-  // row may already exist.
-  // Seal #10 / Task #28 / F8.2 — architect pass-4: in_flight_jobs
-  // registration is no longer best-effort. A registration failure means
-  // the snapshot-cleanup-worker cannot prove this run is active, so the
-  // safe move is to ABORT the orchestrator run rather than silently
-  // continue and risk having mid-run snapshots purged. Caller surfaces
-  // the throw as a job-level ERROR with a structured reason.
-  await db.insert(inFlightJobs).values({
-    jobId,
-    accountId: config.accountId,
-    campaignId: config.campaignId,
-    expectedCompleteBy: new Date(Date.now() + 30 * 60 * 1000),
-  }).onConflictDoNothing();
 
   // Mirror the local jobId onto config so downstream callers (synthesizePlan,
   // engine adapters that read config.jobId) see the same run identifier as

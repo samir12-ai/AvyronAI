@@ -18,11 +18,27 @@
 const SECRET_KEY_RE =
   /^(token|access[_-]?token|refresh[_-]?token|secret|api[_-]?key|authorization|cookie|password|jwt|bearer|email|phone|phone[_-]?number|ssn|dob|address)$/i;
 
+// Seal #10 / Task #28 / pass-7 — extended PII surface area. Architect
+// finding: prior pattern set covered Bearer / sk- / JWT / email but not
+// inline phone numbers or proper-noun-shaped tokens (capitalised
+// 2–4-word sequences that frequently leak person/org names from scraped
+// sources). Both classes are now redacted inline.
 const INLINE_SECRET_PATTERNS: RegExp[] = [
   /\bBearer\s+[A-Za-z0-9._\-+/=]{16,}\b/g,
   /\bsk-[A-Za-z0-9]{20,}\b/g,
   /\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b/g,
   /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g,
+  // E.164-shaped or NANP-shaped phone numbers. Covers `+15551234567`,
+  // `+1 555-123-4567`, `(555) 123-4567`, `555.123.4567`, `5551234567`.
+  // Word-boundary anchored to avoid stripping unrelated digit runs.
+  /\+?\d{1,3}[\s.\-]?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}\b/g,
+  // Proper-noun-shaped tokens: 2–4 capitalised words in sequence. Tuned
+  // to avoid matching sentence-initial single capitals ("The", "A", "I")
+  // by requiring at least TWO consecutive capitalised words. Will mask
+  // `John Smith`, `Jane Marie Doe`, `Acme Industries Corp`. Trade-off:
+  // legitimate brand names co-occurring in pairs (`Replit Inc`) will
+  // also be redacted, which is the intended fail-safe for log emission.
+  /\b[A-Z][a-z]{1,20}(?:\s+[A-Z][a-z]{1,20}){1,3}\b/g,
 ];
 
 const REDACTED = "[REDACTED]";
