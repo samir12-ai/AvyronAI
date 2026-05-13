@@ -1,6 +1,13 @@
 import { aiChat } from "../ai-client";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import { logSafe } from "../log-redact";
+import { wrapUntrustedText, UNTRUSTED_INPUT_SYSTEM_RULE } from "../market-intelligence-v3/prompt-safety";
+
+function u(text: unknown, source: string): string {
+  const s = String(text ?? "").trim();
+  if (!s) return "";
+  return wrapUntrustedText(s, { source });
+}
 
 // typed accessor for Drizzle table internals
 // (replaces ad-hoc `(table as any)?._?.name` casts in log emission).
@@ -233,10 +240,10 @@ async function collectValidatedEngineOutputs(
       return;
     }
     if (!status) {
-      console.warn(`[BuildPlanLayer] CONTRACT_INCOMPLETE | engine=${engineId} | reason=missing_depth_gate_status | account=${accountId} campaign=${campaignId}`);
+      console.warn(logSafe(`[BuildPlanLayer] CONTRACT_INCOMPLETE | engine=${engineId} | reason=missing_depth_gate_status | account=${accountId} campaign=${campaignId}`));
       return;
     }
-    console.log(`[BuildPlanLayer] DEPTH_GATE_NOT_PASS | engine=${engineId} | status=${status}`);
+    console.log(logSafe(`[BuildPlanLayer] DEPTH_GATE_NOT_PASS | engine=${engineId} | status=${status}`));
   };
 
   const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId, sourceJobId);
@@ -285,61 +292,63 @@ function buildEngineContext(snapshots: EngineSnapshot[]): string {
       case "market_intelligence": {
         const competitors = safeArr(data.competitorData).slice(0, 5).map((c: any) => c.name || c.handle || "unknown").join(", ");
         const signals = safeArr(data.signalData).slice(0, 5).map((s: any) => s.text || s.signal || "").join("; ");
-        parts.push(`[Market Intelligence] Competitors: ${competitors}. Key signals: ${signals}. Market state: ${data.marketState || "active"}`);
+        parts.push(`[Market Intelligence] Competitors: ${u(competitors, "mi.competitors")}. Key signals: ${u(signals, "mi.signals")}. Market state: ${u(data.marketState || "active", "mi.marketState")}`);
         break;
       }
       case "audience": {
         const pains = safeArr(data.audiencePains).slice(0, 3).map((p: any) => typeof p === "string" ? p : p.pain || p.label || p.name || "").join("; ");
         const desires = safeArr(data.desireMap).slice(0, 3).map((d: any) => typeof d === "string" ? d : d.desire || d.label || d.name || "").join("; ");
         const segments = safeArr(data.audienceSegments).slice(0, 2).map((s: any) => typeof s === "string" ? s : s.name || s.segment || "").join(", ");
-        parts.push(`[Audience] Top pains: ${pains}. Top desires: ${desires}. Segments: ${segments}`);
+        parts.push(`[Audience] Top pains: ${u(pains, "audience.pains")}. Top desires: ${u(desires, "audience.desires")}. Segments: ${u(segments, "audience.segments")}`);
         break;
       }
       case "positioning": {
         const result = safeParse(data.result) || data;
         const narrative = result.narrative || result.narrativeDirection || data.narrativeDirection || "";
         const territories = safeArr(result.territories || data.territories).slice(0, 2).map((t: any) => typeof t === "string" ? t : t.name || t.territory || "").join(", ");
-        parts.push(`[Positioning] Narrative: ${narrative}. Territories: ${territories}`);
+        parts.push(`[Positioning] Narrative: ${u(narrative, "positioning.narrative")}. Territories: ${u(territories, "positioning.territories")}`);
         break;
       }
       case "differentiation": {
         const result = safeParse(data.result) || data;
         const claims = safeArr(result.validatedClaims || result.claimStructures || data.claimStructures).slice(0, 3).map((c: any) => typeof c === "string" ? c : c.claim || c.title || "").join("; ");
         const mode = result.authorityMode?.mode || result.authorityMode || data.authorityMode || "";
-        parts.push(`[Differentiation] Claims: ${claims}. Authority mode: ${typeof mode === "object" ? mode.mode || "" : mode}`);
+        const modeStr = typeof mode === "object" ? mode.mode || "" : mode;
+        parts.push(`[Differentiation] Claims: ${u(claims, "differentiation.claims")}. Authority mode: ${u(modeStr, "differentiation.authorityMode")}`);
         break;
       }
       case "mechanism": {
         const result = safeParse(data.result) || data;
         const name = result.mechanismName || result.name || data.mechanismName || "";
         const explanation = result.mechanismExplanation || result.explanation || result.howItWorks || "";
-        parts.push(`[Mechanism] Name: ${name}. Explanation: ${typeof explanation === "string" ? explanation.substring(0, 200) : ""}`);
+        const explStr = typeof explanation === "string" ? explanation.substring(0, 200) : "";
+        parts.push(`[Mechanism] Name: ${u(name, "mechanism.name")}. Explanation: ${u(explStr, "mechanism.explanation")}`);
         break;
       }
       case "offer": {
         const result = safeParse(data.result) || data;
         const headline = result.offerHeadline || result.headline || data.offerHeadline || "";
         const value = result.primaryValueProp || result.valueProposition || "";
-        parts.push(`[Offer] Headline: ${typeof headline === "string" ? headline : ""}.  Value: ${typeof value === "string" ? value : ""}`);
+        parts.push(`[Offer] Headline: ${u(typeof headline === "string" ? headline : "", "offer.headline")}.  Value: ${u(typeof value === "string" ? value : "", "offer.value")}`);
         break;
       }
       case "funnel": {
         const result = safeParse(data.result) || data;
         const stages = safeArr(result.stages || result.funnelStages || data.stages).slice(0, 3).map((s: any) => `${s.name || s.stage || ""}: ${s.objective || s.description || ""}`).join(" → ");
-        parts.push(`[Funnel] ${stages}`);
+        parts.push(`[Funnel] ${u(stages, "funnel.stages")}`);
         break;
       }
       case "awareness": {
         const result = safeParse(data.result) || data;
         const route = result.primaryRoute?.routeName || result.primaryRoute?.name || "";
-        parts.push(`[Awareness] Primary route: ${route}`);
+        parts.push(`[Awareness] Primary route: ${u(route, "awareness.primaryRoute")}`);
         break;
       }
       case "persuasion": {
         const result = safeParse(data.result) || data;
         const route = result.primaryRoute?.routeName || result.primaryRoute?.name || "";
         const alt = result.alternativeRoute?.routeName || "";
-        parts.push(`[Persuasion] Primary: ${route}${alt ? `, Alternative: ${alt}` : ""}`);
+        parts.push(`[Persuasion] Primary: ${u(route, "persuasion.primaryRoute")}${alt ? `, Alternative: ${u(alt, "persuasion.alternativeRoute")}` : ""}`);
         break;
       }
     }
@@ -355,6 +364,8 @@ function buildBuildPlanPrompt(engineContext: string, rhythm: AdaptiveRhythm, pre
   }
 
   return `You are an Execution Synthesis Engine. Convert analysis into EXACT ACTIONS the user does TODAY.
+
+${UNTRUSTED_INPUT_SYSTEM_RULE}
 
 CRITICAL RULES:
 - NO paragraphs, NO theory, NO abstract KPIs, NO generic percentages
@@ -488,13 +499,13 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): ParseAIResult
     raw = JSON.parse(cleaned);
   } catch (err: any) {
     const detail = err?.message ?? "parse_error";
-    console.warn(`[BuildPlanLayer] AI_RESPONSE_PARSE_FAILED | reason=invalid_json | error=${detail}`);
+    console.warn(logSafe(`[BuildPlanLayer] AI_RESPONSE_PARSE_FAILED | reason=invalid_json | error=${detail}`));
     return { ok: false, kind: "JSON_MALFORMED", detail };
   }
   const result = BuildPlanResponseSchema.safeParse(raw);
   if (!result.success) {
     const detail = result.error.issues.slice(0, 5).map(i => `${i.path.join(".")}=${i.code}`).join(",");
-    console.warn(`[BuildPlanLayer] AI_RESPONSE_SHAPE_INVALID | reason=zod_validation_failed | issues=${detail}`);
+    console.warn(logSafe(`[BuildPlanLayer] AI_RESPONSE_SHAPE_INVALID | reason=zod_validation_failed | issues=${detail}`));
     return { ok: false, kind: "SHAPE_INVALID", detail };
   }
   const parsed: BuildPlanResponse = result.data;
@@ -566,7 +577,7 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): ParseAIResult
     return { ok: true, plan: built };
   } catch (err: any) {
     const detail = err?.message ?? "unknown";
-    console.warn(`[BuildPlanLayer] AI_RESPONSE_BUILD_FAILED | reason=post_zod_construction_error | error=${detail}`);
+    console.warn(logSafe(`[BuildPlanLayer] AI_RESPONSE_BUILD_FAILED | reason=post_zod_construction_error | error=${detail}`));
     return { ok: false, kind: "SHAPE_INVALID", detail };
   }
 }
@@ -614,13 +625,13 @@ export async function runBuildPlanLayer(
 
   const adaptiveRhythm = await computeAdaptiveRhythm(campaignId, accountId);
 
-  console.log(`[BuildPlanLayer] Adaptive rhythm: reels=${adaptiveRhythm.reelsPerWeek}/wk carousels=${adaptiveRhythm.carouselsPerWeek}/wk stories=${adaptiveRhythm.storiesPerDay}/day posts=${adaptiveRhythm.postsPerWeek}/wk | basis=${adaptiveRhythm.performanceBasis}`);
+  console.log(logSafe(`[BuildPlanLayer] Adaptive rhythm: reels=${adaptiveRhythm.reelsPerWeek}/wk carousels=${adaptiveRhythm.carouselsPerWeek}/wk stories=${adaptiveRhythm.storiesPerDay}/day posts=${adaptiveRhythm.postsPerWeek}/wk | basis=${adaptiveRhythm.performanceBasis}`));
 
   let memoryBlockForConstraints: import("../memory-system/types").MemoryBlock | null = null;
   try {
     memoryBlockForConstraints = await buildMemoryContext(campaignId, accountId);
   } catch (memErr: any) {
-    console.warn(`[BuildPlanLayer] Memory context load failed (non-blocking):`, memErr.message);
+    console.warn(logSafe(`[BuildPlanLayer] Memory context load failed (non-blocking): ${memErr?.message ?? ""}`));
   }
 
   const engineContext = buildEngineContext(snapshots);
@@ -641,7 +652,7 @@ export async function runBuildPlanLayer(
 
       const content = response.choices?.[0]?.message?.content;
       if (!content) {
-        console.warn(`[BuildPlanLayer] Attempt ${attempt}: Empty AI response`);
+        console.warn(logSafe(`[BuildPlanLayer] Attempt ${attempt}: Empty AI response`));
         continue;
       }
 
@@ -662,7 +673,7 @@ export async function runBuildPlanLayer(
           };
           return applyPartialAelDowngrade("BuildPlanLayer", incompleteShape, aelAck);
         }
-        console.warn(`[BuildPlanLayer] Attempt ${attempt}: ${parseResult.kind} (${parseResult.detail}) — retrying`);
+        console.warn(logSafe(`[BuildPlanLayer] Attempt ${attempt}: ${parseResult.kind} (${parseResult.detail}) — retrying`));
         continue;
       }
       const plan = parseResult.plan;
@@ -676,15 +687,15 @@ export async function runBuildPlanLayer(
           if (overrides.length > 0) {
             plan.contentDna.weeklyStructure = { reels: adjusted.reelsPerWeek ?? ws.reels, carousels: adjusted.carouselsPerWeek ?? ws.carousels, stories: adjusted.storiesPerDay ?? ws.stories };
             plan.memoryOverrides = overrides;
-            console.log(`[BuildPlanLayer] MEMORY_CONSTRAINTS_APPLIED | overrides=${overrides.length} | fields=${overrides.map(o => o.field).join(",")}`);
+            console.log(logSafe(`[BuildPlanLayer] MEMORY_CONSTRAINTS_APPLIED | overrides=${overrides.length} | fields=${overrides.map(o => o.field).join(",")}`));
           }
         } catch (memApplyErr: any) {
-          console.warn(`[BuildPlanLayer] Memory constraint application failed (non-blocking):`, memApplyErr.message);
+          console.warn(logSafe(`[BuildPlanLayer] Memory constraint application failed (non-blocking): ${memApplyErr?.message ?? ""}`));
         }
       }
 
       const actionability = enforceActionability(plan);
-      console.log(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`);
+      console.log(logSafe(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`));
 
       if (actionability.passed) {
         const successResult: BuildPlanResult = {
@@ -709,7 +720,7 @@ export async function runBuildPlanLayer(
         } as BuildPlanResult, aelAck);
       }
     } catch (err: any) {
-      console.error(`[BuildPlanLayer] Attempt ${attempt} error:`, err.message);
+      console.error(logSafe(`[BuildPlanLayer] Attempt ${attempt} error: ${err?.message ?? ""}`));
       if (attempt === MAX_ATTEMPTS) {
         return applyPartialAelDowngrade("BuildPlanLayer", {
           status: "ERROR",
