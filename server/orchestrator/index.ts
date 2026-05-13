@@ -2741,7 +2741,7 @@ async function executeEngine(
           expectedROAS: 2.0,
         };
 
-        const miCtxBG = ctx.mi?.output || ctx.mi || {};
+        const miCtxBG = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "budget_governor" });
         const competitors = miCtxBG.competitors || [];
         const marketIntensity = competitors.length > 0 ? Math.min(competitors.length / 10, 1.0) : 0.5;
         const competitorSpendEstimate = competitors.length * 500;

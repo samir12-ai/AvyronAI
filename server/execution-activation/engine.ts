@@ -331,11 +331,20 @@ export async function activateExecution(planId: string): Promise<ActivationResul
     };
   }
 
+  // F8.3 — CAS: bind to plan.version + previousState so a concurrent
+  // activator that already advanced past `previousState` is detected
+  // (zero rows updated).
+  const planRow = await db.select({ version: strategicPlans.version })
+    .from(strategicPlans)
+    .where(eq(strategicPlans.id, planId))
+    .limit(1);
+  const planVersion = planRow[0]?.version ?? 1;
   const lockResult = await db.update(strategicPlans)
-    .set({ executionStatus: EXECUTION_STATES.ACTIVATING, updatedAt: new Date() })
+    .set({ executionStatus: EXECUTION_STATES.ACTIVATING, updatedAt: new Date(), version: sql`${strategicPlans.version} + 1` })
     .where(and(
       eq(strategicPlans.id, planId),
       eq(strategicPlans.executionStatus, previousState),
+      eq(strategicPlans.version, planVersion),
     ))
     .returning({ id: strategicPlans.id });
 
