@@ -399,41 +399,46 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
   return sections.join("\n");
 }
 
-function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): string[] {
-  const labels: string[] = [];
+export interface LockedLabel {
+  label: string;
+  /** Top-level plan field where this label is expected to appear (e.g. "positioning", "mechanism", "offer", "differentiation"). When set, verifySynthesisPreservation restricts its search to plan[scope]. */
+  scope?: string;
+}
+
+function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): LockedLabel[] {
+  const out: LockedLabel[] = [];
 
   const positioning = results.get("positioning");
   if (positioning?.status === "SUCCESS" && positioning.output) {
-    const out = positioning.output;
-    const primary = (out.territories || [])[0];
-    if (primary?.name) labels.push(primary.name);
+    const primary = (positioning.output.territories || [])[0];
+    if (primary?.name) out.push({ label: primary.name, scope: "positioning" });
   }
 
   const mechanism = results.get("mechanism");
   if (mechanism?.status === "SUCCESS") {
-    const out = mechanism.output?.output || mechanism.output;
-    const mechName = out?.primaryMechanism?.mechanismName || out?.mechanismName;
-    if (mechName) labels.push(mechName);
+    const m = mechanism.output?.output || mechanism.output;
+    const mechName = m?.primaryMechanism?.mechanismName || m?.mechanismName;
+    if (mechName) out.push({ label: mechName, scope: "mechanism" });
   }
 
   const offer = results.get("offer");
   if (offer?.status === "SUCCESS") {
-    const out = offer.output?.output || offer.output;
-    if (out?.offerName) labels.push(out.offerName);
+    const o = offer.output?.output || offer.output;
+    if (o?.offerName) out.push({ label: o.offerName, scope: "offer" });
   }
 
   const diff = results.get("differentiation");
   if (diff?.status === "SUCCESS") {
-    const out = diff.output?.output || diff.output;
-    if (out?.pillars?.length > 0) {
-      for (const p of out.pillars) {
+    const d = diff.output?.output || diff.output;
+    if (d?.pillars?.length > 0) {
+      for (const p of d.pillars) {
         const name = p.name || p.pillarName;
-        if (name) labels.push(name);
+        if (name) out.push({ label: name, scope: "differentiation" });
       }
     }
   }
 
-  return labels;
+  return out;
 }
 
 // Locked-decision preservation: collect every string leaf in the plan tree
@@ -460,25 +465,42 @@ export function collectPlanStringSet(
   }
 }
 
-export function verifySynthesisPreservation(plan: SynthesizedPlan, lockedLabels: string[]): SynthesizedPlan["synthesisVerification"] {
+// F4.4 — field-addressed preservation. Each locked decision is checked
+// against the specific plan subtree it should appear in (scope). Generic
+// string[] still works (legacy global scan). Membership is exact-leaf
+// (no substring) so "Outcome-First" never matches "Our Outcome-First …".
+export function verifySynthesisPreservation(
+  plan: SynthesizedPlan,
+  lockedLabels: Array<string | LockedLabel>,
+): SynthesizedPlan["synthesisVerification"] {
   if (lockedLabels.length === 0) {
     return { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
   }
 
   const { lockedDecisionLabels: _labels, synthesisVerification: _verif, planSource: _src, degraded: _deg, ...contentOnly } = plan;
-  const planValues = new Set<string>();
-  collectPlanStringSet(contentOnly, planValues, 0);
+  // Pre-compute scoped string sets on demand (cached per-scope).
+  const scopeSetCache = new Map<string, Set<string>>();
+  function setForScope(scope: string | undefined): Set<string> {
+    const key = scope ?? "__global__";
+    let s = scopeSetCache.get(key);
+    if (!s) {
+      s = new Set<string>();
+      const root = scope ? (contentOnly as Record<string, unknown>)[scope] : contentOnly;
+      collectPlanStringSet(root, s, 0);
+      scopeSetCache.set(key, s);
+    }
+    return s;
+  }
+
   const missing: string[] = [];
   let preserved = 0;
-
-  for (const label of lockedLabels) {
+  for (const item of lockedLabels) {
+    const { label, scope } = typeof item === "string" ? { label: item, scope: undefined } : item;
     const normalized = label.toLowerCase().trim();
     if (normalized.length < 3) continue;
-    if (planValues.has(normalized)) {
-      preserved++;
-    } else {
-      missing.push(label);
-    }
+    const set = setForScope(scope);
+    if (set.has(normalized)) preserved++;
+    else missing.push(label);
   }
 
   return {
@@ -1217,7 +1239,7 @@ export async function synthesizePlan(
     synthesized.degraded = planSource !== "decision_driven";
 
     synthesized.synthesisVerification = verification;
-    synthesized.lockedDecisionLabels = lockedLabels;
+    synthesized.lockedDecisionLabels = lockedLabels.map(l => l.label);
 
     if (!verification.passed) {
       console.warn(

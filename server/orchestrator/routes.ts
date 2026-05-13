@@ -18,7 +18,7 @@ import {
 } from "@shared/schema";
 import { eq, and, or, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
-import { casUpdateStrategicPlan } from "../strategic-core/cas-helper";
+import { casUpdateStrategicPlan, casUpdateStrategicPlanByVersion } from "../strategic-core/cas-helper";
 import { computeFulfillment } from "../fulfillment-engine";
 import { buildCausalNarrative } from "../narrative-layer";
 import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
@@ -569,16 +569,20 @@ export function registerOrchestratorV2Routes(app: Express) {
         });
       }
 
-      // F8.3 — CAS via casUpdateStrategicPlan helper. Status guard
-      // (DRAFT/READY_FOR_REVIEW) is preserved by re-checking before CAS.
-      if (plan.status !== "DRAFT" && plan.status !== "READY_FOR_REVIEW") {
-        return res.status(409).json({ error: "Plan was already approved or changed by another request" });
-      }
+      // F8.3 — atomic CAS: bind to plan.version AND status predicate in
+      // a single UPDATE so a concurrent writer that flipped the row to
+      // APPROVED/REJECTED between the SELECT above and this write is
+      // detected (no rows updated → 409).
       try {
-        await casUpdateStrategicPlan(planId, { status: "APPROVED", updatedAt: new Date() });
+        await casUpdateStrategicPlanByVersion(
+          planId,
+          plan.version,
+          { status: "APPROVED", updatedAt: new Date() },
+          or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW")),
+        );
       } catch (casErr: any) {
         if (casErr?.code === "CONCURRENT_MODIFICATION") {
-          return res.status(409).json({ error: "Plan was modified concurrently by another request" });
+          return res.status(409).json({ error: "Plan was modified concurrently or already approved/rejected" });
         }
         throw casErr;
       }
@@ -593,7 +597,6 @@ export function registerOrchestratorV2Routes(app: Express) {
           postsPerWeek: rhythm.postsPerWeek,
           approvedAt: new Date().toISOString(),
         };
-        // F8.3 — CAS via casUpdateStrategicPlan helper.
         await casUpdateStrategicPlan(planId, { approvedRhythmJson: JSON.stringify(rhythmSnapshot) });
       } catch (snapshotErr: any) {
         console.warn("[ApproveRoute] Failed to capture rhythm snapshot (non-blocking):", snapshotErr.message);
@@ -622,7 +625,6 @@ export function registerOrchestratorV2Routes(app: Express) {
       const [plan] = await db.select({ id: strategicPlans.id }).from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "Plan not found" });
 
-      // F8.3 — CAS via casUpdateStrategicPlan helper.
       try {
         await casUpdateStrategicPlan(planId, { status: "REJECTED", updatedAt: new Date() });
       } catch (casErr: any) {
@@ -823,8 +825,6 @@ export function registerOrchestratorV2Routes(app: Express) {
         }
 
         if (status === "PUBLISHED" && item.status !== "PUBLISHED") {
-          // F8.3 — CAS via casUpdateStrategicPlan helper. Counter increment
-          // wrapped in CAS to prevent lost updates under concurrent publish.
           await casUpdateStrategicPlan(item.planId, {
             totalPublished: sql`${strategicPlans.totalPublished} + 1`,
           });

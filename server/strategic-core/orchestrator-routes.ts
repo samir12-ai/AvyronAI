@@ -2,11 +2,11 @@ import type { Express, Request, Response } from "express";
 import { aiChat, AICallError } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints, strategicPlans, planApprovals, strategyMemory, strategyInsights, moatCandidates, businessDataLayer, planDocuments, requiredWork, calendarEntries, orchestratorJobs } from "@shared/schema";
-import { eq, desc, gte, and, sql, ne, notInArray } from "drizzle-orm";
+import { eq, desc, gte, and, or, sql, ne, notInArray } from "drizzle-orm";
 import { NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
 import { logAuditEvent } from "./audit-logger";
 import { logAudit } from "../audit";
-import { casUpdateStrategicPlan } from "./cas-helper";
+import { casUpdateStrategicPlan, casUpdateStrategicPlanByVersion } from "./cas-helper";
 import * as crypto from "crypto";
 import { buildStrategicContext, type StrategicContext } from "../engine-contracts/context-kernel";
 import { wrapEngineOutput, type EngineOutput } from "../engine-contracts/engine-contract";
@@ -1090,12 +1090,19 @@ export function registerOrchestratorRoutes(app: Express) {
         });
       }
 
-      // F8.3 — CAS via casUpdateStrategicPlan helper.
+      // F8.3 — atomic CAS: bind to plan.version AND status predicate so a
+      // concurrent writer that flipped the row past DRAFT/READY_FOR_REVIEW
+      // is detected (no rows updated → 409).
       try {
-        await casUpdateStrategicPlan(plan.id, { status: "APPROVED", updatedAt: new Date() });
+        await casUpdateStrategicPlanByVersion(
+          plan.id,
+          plan.version,
+          { status: "APPROVED", updatedAt: new Date() },
+          or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW")),
+        );
       } catch (casErr: any) {
         if (casErr?.code === "CONCURRENT_MODIFICATION") {
-          return res.status(409).json({ success: false, error: "CONCURRENT_MODIFICATION", message: "Plan was modified concurrently", requestId });
+          return res.status(409).json({ success: false, error: "CONCURRENT_MODIFICATION", message: "Plan was modified concurrently or already approved/rejected", requestId });
         }
         throw casErr;
       }

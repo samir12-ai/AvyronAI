@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "../db";
 import { strategicPlans } from "@shared/schema";
 
@@ -23,13 +23,16 @@ export async function casUpdateStrategicPlanByVersion(
   planId: string,
   expectedVersion: number,
   set: Record<string, unknown>,
+  extraWhere?: SQL,
 ): Promise<{ updated: boolean; newVersion: number }> {
+  const predicates = [
+    eq(strategicPlans.id, planId),
+    eq(strategicPlans.version, expectedVersion),
+  ];
+  if (extraWhere) predicates.push(extraWhere);
   const updated = await db.update(strategicPlans)
     .set({ ...set, version: sql`${strategicPlans.version} + 1` })
-    .where(and(
-      eq(strategicPlans.id, planId),
-      eq(strategicPlans.version, expectedVersion),
-    ))
+    .where(and(...predicates))
     .returning({ id: strategicPlans.id, version: strategicPlans.version });
   if (updated.length === 0) {
     const err = new Error(
