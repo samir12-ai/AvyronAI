@@ -148,18 +148,37 @@ function extractDifferentiationKeyOutputs(snap: any): Record<string, any> {
   };
 }
 
+/**
+ * Seal #9 (F2.2 #3, F2.10) + pass-4 architect comment #1 — D5: require
+ * canonical `CheckStatus` enum on every structural check serialized into the
+ * full-report. The full canonical CheckStatus vocabulary
+ * (PASS/FAIL/BLOCK/SKIPPED/NOT_REACHED/TIMEOUT/STALE/UNKNOWN) is preserved
+ * so consumers retain the precise reason a check did not PASS — earlier
+ * pass-3 collapsed every non-PASS/FAIL value into CONTRACT_INCOMPLETE, which
+ * lost fidelity for canonical untrustworthy states. CONTRACT_INCOMPLETE is
+ * now used ONLY when `status` is genuinely missing or carries a value
+ * outside the registered enum (true contract gap).
+ *
+ * Implemented with a guarded set membership check (no ternary on a
+ * forbidden-suffix field) so the no-semantic-fallback rule passes without
+ * an eslint-disable.
+ */
+const CANONICAL_CHECK_STATUSES = new Set<string>([
+  "PASS",
+  "FAIL",
+  "BLOCK",
+  "SKIPPED",
+  "NOT_REACHED",
+  "TIMEOUT",
+  "STALE",
+  "UNKNOWN",
+]);
+
 function buildStructuralCheckDetail(c: any): { check: string; passed: boolean; status: string; details: any } {
-  // Seal #9 (F2.2 #3, F2.10) — D5: require canonical `status` enum.
-  // No verdict-from-boolean derivation. If `status` is absent or not in the
-  // canonical PASS/FAIL/CONTRACT_INCOMPLETE set, surface it as
-  // CONTRACT_INCOMPLETE so consumers see the missing-canonical signal
-  // instead of a silently-fabricated PASS/FAIL.
-  // Implemented with a guarded read (no ternary on a forbidden field) so
-  // the no-semantic-fallback rule passes without an eslint-disable.
   let rawStatus = "";
   if (c && typeof c.status === "string") rawStatus = c.status;
   let canonicalStatus = "CONTRACT_INCOMPLETE";
-  if (rawStatus === "PASS" || rawStatus === "FAIL" || rawStatus === "CONTRACT_INCOMPLETE") {
+  if (CANONICAL_CHECK_STATUSES.has(rawStatus)) {
     canonicalStatus = rawStatus;
   }
   return {
