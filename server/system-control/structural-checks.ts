@@ -1016,7 +1016,7 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
       // engines already consumed the degraded enrichment. engine.ts skips
       // the downgrade conversion for that case, expecting THIS map to
       // promote it to a hard BlockReason. Without this case the BLOCK:
-      // prefix was effectively dropped (previously flagged).
+      // prefix was effectively dropped ().
       // The non-BLOCK FAIL (downstreamConsumers===0) is intentionally
       // routed to a downgrade in engine.ts and must not be re-blocked
       // here.
@@ -1079,7 +1079,7 @@ export function checkMiGateRejections(
   // tighten the gate: BLOCK only when the
   // specific engine that REJECTED MI actually completed (i.e. proceeded
   // to consume the empty-MI substitute). pre-fix we blocked on "any
-  // engine ran"; previously flagged this as overbroad — a recovery resume
+  // engine ran"; this as overbroad — a recovery resume
   // that ran an unrelated engine after an MI rejection from a SKIPPED
   // engine should not hard-block. Now each rejection must be paired with
   // its rejecting engine completing for the BLOCK to fire.

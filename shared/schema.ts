@@ -25,7 +25,7 @@ export const photographerProfiles = pgTable("photographer_profiles", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  // P0-2 (launch-closure Wave 1): tenant ownership column. Added by migration
+  // tenant ownership column. Added by migration
   // 012. Nullable for safe online deploy; reads filter by accountId, so any
   // pre-migration row with NULL account_id is invisible to every authed user.
   accountId: varchar("account_id"),
@@ -55,7 +55,7 @@ export const portfolioPosts = pgTable("portfolio_posts", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  // P0-2 (launch-closure Wave 1): tenant ownership column. See migration 012.
+  // tenant ownership column. See migration 012.
   accountId: varchar("account_id"),
   photographerId: varchar("photographer_id").notNull(),
   imageUrl: text("image_url").notNull(),
@@ -83,7 +83,7 @@ export const reservations = pgTable("reservations", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  // P0-2 (launch-closure Wave 1): tenant ownership column. See migration 012.
+  // tenant ownership column. See migration 012.
   accountId: varchar("account_id"),
   photographerId: varchar("photographer_id").notNull(),
   customerName: text("customer_name").notNull(),
@@ -102,7 +102,7 @@ export const videoProjects = pgTable("video_projects", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  // P0-1 (launch-closure Wave 1): tenant ownership column. Added by migration
+  // tenant ownership column. Added by migration
   // 012. Nullable for safe online deploy; reads filter by accountId, so any
   // pre-migration row with NULL account_id is invisible to every authed user.
   accountId: varchar("account_id"),
@@ -492,7 +492,7 @@ export const insertReservationSchema = createInsertSchema(reservations).omit({
   status: true,
 });
 
-// ─── Seal #3 (Task #21) — F1.9 / F1.10 strict body schemas ──────────────────
+// ─── () — F1.9 / F1.10 strict body schemas ──────────────────
 // Pass-3 (reviewer-aligned): built via drizzle-zod's createInsertSchema()
 // so the column allowlist is DERIVED FROM THE TABLE SCHEMA — if a column
 // is renamed or dropped, the `.pick({...})` here fails to type-check, so
@@ -946,7 +946,7 @@ export const ciCompetitors = pgTable("ci_competitors", {
   sharedProfileId: varchar("shared_profile_id"),
   tiktokUrl: text("tiktok_url"),
   googleMapsUrl: text("google_maps_url"),
-  // Seal #5 / F7.8 — refresh tier. 'A' = priority (24h cooldown), 'B' = standard
+  // refresh tier. 'A' = priority (24h cooldown), 'B' = standard
   // (72h cooldown). Defaults to 'B' for safety; operators promote competitors
   // to tier A explicitly via UI/API.
   tier: text("tier").notNull().default("B"),
@@ -1311,7 +1311,7 @@ export const strategicPlans = pgTable("strategic_plans", {
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),
   approvedRhythmJson: text("approved_rhythm_json"),
-  // Seal #10 / Task #28 / F8.3 — optimistic-locking version. Every UPDATE
+  // optimistic-locking version. Every UPDATE
   // must include WHERE version=? + SET version=version+1; affected-rows=0
   // throws CONCURRENT_MODIFICATION instead of silently overwriting a
   // concurrent edit (e.g. plan approval racing plan synthesis re-write).
@@ -1330,13 +1330,13 @@ export const planApprovals = pgTable("plan_approvals", {
   reason: text("reason"),
   decidedBy: text("decided_by").default("client"),
   rhythmSnapshotJson: text("rhythm_snapshot_json"),
-  // Seal #10 / Task #28 / F8.4 — optimistic-locking version (same contract
+  // optimistic-locking version (same contract
   // as strategicPlans.version above).
   version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// Seal #10 / Task #28 / F8.2 — in_flight_jobs: snapshot-cleanup-worker
+// in_flight_jobs: snapshot-cleanup-worker
 // MUST exclude any snapshot whose jobId is currently in this table. The
 // orchestrator inserts on job start, deletes on terminal status (COMPLETED
 // / NEEDS_INPUT / BLOCKED / ERROR). Reaper deletes rows whose started_at
@@ -1822,7 +1822,7 @@ export const ciCompetitorReviews = pgTable("ci_competitor_reviews", {
   platform: text("platform").notNull().default("google"),
   reviewDate: timestamp("review_date"),
   isSynthetic: boolean("is_synthetic").notNull().default(false),
-  // Seal #5 / F7.7 — sha256(name).slice(0,12). PII-safe alternative to
+  // sha256(name).slice(0,12). PII-safe alternative to
   // persisting raw author names (which we never stored in production, but the
   // extractor produced them). Used for cross-review dedup and reviewer-pattern
   // analysis without revealing identity.
@@ -2513,7 +2513,7 @@ export const strategyRoots = pgTable("strategy_roots", {
 export type StrategyRoot = typeof strategyRoots.$inferSelect;
 
 // =============================================
-// USER CHANNEL SCRAPING (Task #10)
+// USER CHANNEL SCRAPING ()
 // =============================================
 export const userPublicProfiles = pgTable("user_public_profiles", {
   id: varchar("id")
@@ -2880,7 +2880,7 @@ export const pipelineClusters = pgTable("pipeline_clusters", {
 export type PipelineCluster = typeof pipelineClusters.$inferSelect;
 export type InsertPipelineCluster = typeof pipelineClusters.$inferInsert;
 
-// ─── Seal #2 (Task #20) — F9.4 account lockout & F9.8 refresh-token rotation ──
+// ─── () — F9.4 account lockout & F9.8 refresh-token rotation ──
 // Auth-hardening tables. Migration 013 creates them in PG. Read by server/auth.ts.
 export const authLockouts = pgTable("auth_lockouts", {
   email: text("email").primaryKey(),

@@ -232,7 +232,6 @@ export function registerSystemControlRoutes(app: Express) {
   //     contradictions, snapshot freshness)
   //   - a derived `headline` field so the UI does not have to re-implement
   //     truthfulness logic.
-  //
   // Auth: same as the other system-control routes.
   // ──────────────────────────────────────────────────────────────────────────
   app.get("/api/system-control/run-truthfulness/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
@@ -261,7 +260,7 @@ export function registerSystemControlRoutes(app: Express) {
         .orderBy(desc(systemControlVerdicts.createdAt))
         .limit(1);
 
-      // Renamed off the `verdict` suffix per Seal #9 doctrine D1 (F10.3) so
+      // Renamed off the `verdict` suffix per D-rule (F10.3) so
       // the alias-detector does not flag the conditional-init shape. The
       // value is still a row-presence boolean composition through
       // formatVerdictRow(), not a substitution of a missing contract field.
@@ -272,7 +271,7 @@ export function registerSystemControlRoutes(app: Express) {
         verdictRecord = null;
       }
 
-      // Phase R T006 (architect-found): determine whether the latest stored
+      // determine whether the latest stored
       // verdict actually belongs to the resolved run. If `resolved.runId`
       // exists but the latest verdict's jobId doesn't match, the verdict is
       // for a stale/older run and must NOT be presented as the current

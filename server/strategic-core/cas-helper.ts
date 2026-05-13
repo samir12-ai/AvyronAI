@@ -3,7 +3,7 @@ import { db } from "../db";
 import { strategicPlans } from "@shared/schema";
 
 /**
- * Seal #10 / Task #28 / F8.3 — optimistic-locking helper.
+ * optimistic-locking helper.
  *
  * Read the plan's current version, then UPDATE with
  * `WHERE id = ? AND version = ?` and `SET version = version + 1`.

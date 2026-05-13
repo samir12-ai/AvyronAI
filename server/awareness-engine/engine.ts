@@ -54,7 +54,7 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
 
-// F2.7 — zod-backed coercers + input-boundary
+// zod-backed coercers + input-boundary
 // validator. The previous
 // implementation: returning a `fallback` on parse failure was silent,
 // and missing/invalid values flowed downstream as if they had been
@@ -89,7 +89,7 @@ function resetValidationReport(): void {
   inputValidationReport.fallbacksUsed = [];
 }
 
-// F2.7 — `safeNumber`/`safeString` REMOVED.
+// `safeNumber`/`safeString` REMOVED.
 // finding: silent fallback at the contract boundary hides missing critical
 // inputs. The strict zod boundary (`validateAwarenessInputs` at engine
 // entry) now guarantees that audience.maturityIndex, audience.awarenessLevel,
@@ -811,7 +811,7 @@ export async function runAwarenessEngine(
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
-  // F2.7 — strict input boundary:
+  // strict input boundary:
   // safeNumber/safeString must NOT silently default on missing critical
   // fields. We reset the per-run fallback report, then run a zod validator
   // against the canonical AwarenessAudienceInput / MI shapes. If a
@@ -829,7 +829,7 @@ export async function runAwarenessEngine(
   }
 
   if (!inputCheck.ok) {
-    // F4.3 — missing critical inputs MUST emit
+    // missing critical inputs MUST emit
     // INCOMPLETE (not PARTIAL). PARTIAL is reserved for "engine produced
     // output but some optional dimensions were weak"; INCOMPLETE means the
     // contract boundary was breached and the engine refused to substitute
@@ -896,7 +896,7 @@ export async function runAwarenessEngine(
 
   let overallScore = 0;
   for (const lr of layerResults) {
-    // P0-5 (launch-closure W2-T1): no 0.1 phantom weight for unknown layers.
+    // no 0.1 phantom weight for unknown layers.
     // LAYER_WEIGHTS is the source of truth — an unrecognised layer
     // contributes nothing to the overall awareness score (honest zero
     // beats a synthetic 0.1 default that lets undeclared layers leak in).

@@ -150,19 +150,12 @@ function extractDifferentiationKeyOutputs(snap: any): Record<string, any> {
 }
 
 /**
- * Seal #9 (F2.2 #3, F2.10) + pass-4 architect comment #1 — D5: require
- * canonical `CheckStatus` enum on every structural check serialized into the
- * full-report. The full canonical CheckStatus vocabulary
- * (PASS/FAIL/BLOCK/SKIPPED/NOT_REACHED/TIMEOUT/STALE/UNKNOWN) is preserved
- * so consumers retain the precise reason a check did not PASS — earlier
- * pass-3 collapsed every non-PASS/FAIL value into CONTRACT_INCOMPLETE, which
- * lost fidelity for canonical untrustworthy states. CONTRACT_INCOMPLETE is
- * now used ONLY when `status` is genuinely missing or carries a value
- * outside the registered enum (true contract gap).
- *
- * Implemented with a guarded set membership check (no ternary on a
- * forbidden-suffix field) so the no-semantic-fallback rule passes without
- * an eslint-disable.
+ * Require canonical `CheckStatus` enum on every structural check serialized
+ * into the full-report. The full vocabulary
+ * (PASS/FAIL/BLOCK/SKIPPED/NOT_REACHED/TIMEOUT/STALE/UNKNOWN) is preserved so
+ * consumers retain the precise reason a check did not PASS. CONTRACT_INCOMPLETE
+ * is used ONLY when `status` is genuinely missing or carries a value outside
+ * the registered enum.
  */
 const CANONICAL_CHECK_STATUSES = new Set<string>([
   "PASS",
@@ -200,7 +193,7 @@ function extractMechanismKeyOutputs(snap: any): Record<string, any> {
 }
 
 /**
- * Seal #9 (F2.2 #2, code-review pass-2): D5 explicit-incomplete marker.
+ * (F2.2 #2, code-review ): D5 explicit-incomplete marker.
  *
  * Returns the canonical offer `coreOutcome` string when present, or the
  * literal sentinel `"CONTRACT_INCOMPLETE"` when the field is missing /
@@ -215,7 +208,7 @@ function extractMechanismKeyOutputs(snap: any): Record<string, any> {
 export const CONTRACT_INCOMPLETE_MARKER = "CONTRACT_INCOMPLETE" as const;
 
 /**
- * Seal #9 (F10.3 / pass-4) — display-text pickers for the SystemControlVerdict
+ * display-text pickers for the SystemControlVerdict
  * record. Replace the prior `controlVerdictRecord?.verdict || "N/A"` and
  * `controlVerdictRecord?.executionMode || "N/A"` ternary-style fallbacks at
  * the full-report header. The verdict / executionMode fields are the canonical
@@ -587,7 +580,7 @@ function rowToSlot(row: any) {
 }
 
 async function buildMemorySection(campaignId: string, accountId: string) {
-  // Seal #10 / Task #28 / F4.9 — System Control's memory section feeds the
+  // System Control's memory section feeds the
   // strategic full-report; operational rows (content_rhythm,
   // exploration_budget, mutation_log, agent_action, self_improvement) are
   // execution telemetry, not strategy signal. Excluding them keeps the

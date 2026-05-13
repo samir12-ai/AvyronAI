@@ -142,7 +142,7 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/orchestrator/latest/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      // W5 (architect re-review #7): explicit ownership assert at the boundary.
+      // explicit ownership assert at the boundary.
       // getLatestOrchestratorRun is account-scoped, but doctrine requires
       // explicit ownership truth before any cross-module call.
       try {
@@ -180,7 +180,7 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/plans/active/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // explicit ownership assert at the boundary.
       // The downstream resolveRunId + DB queries below scope by accountId in
       // their WHERE clauses, but strict doctrine requires explicit ownership
       // truth before any cross-module call.
@@ -569,7 +569,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         });
       }
 
-      // F8.3 — atomic CAS: bind to plan.version AND status predicate in
+      // atomic CAS: bind to plan.version AND status predicate in
       // a single UPDATE so a concurrent writer that flipped the row to
       // APPROVED/REJECTED between the SELECT above and this write is
       // detected (no rows updated → 409).
@@ -652,7 +652,7 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const requestedRunId = (req.query.runId as string) || null;
-      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // explicit ownership assert at the boundary.
       // Downstream loadSystemContext does scope reads by accountId, but the
       // strict doctrine requires explicit ownership truth before any cross-
       // module call.
@@ -676,7 +676,7 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
-      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // explicit ownership assert at the boundary.
       try {
         await assertCampaignBelongsTo(accountId, campaignId);
       } catch (e) {
@@ -805,7 +805,7 @@ export function registerOrchestratorV2Routes(app: Express) {
           PUBLISHED: "publishedCount",
         };
 
-        // Seal #4 F2.2/D1: presence ternary, not coalesce. Preserves prior
+        // F2.2/D1: presence ternary, not coalesce. Preserves prior
         // semantics — missing status → no decrement, increment still runs.
         const oldField = item.status ? statusToField[item.status] : undefined;
         const newField = statusToField[status];
@@ -842,7 +842,7 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
-      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // explicit ownership assert at the boundary.
       try {
         await assertCampaignBelongsTo(accountId, campaignId);
       } catch (e) {
@@ -894,7 +894,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
         let miOutput: any = null;
         try {
-          // Seal #4 F2.1: tenant filter (defense-in-depth on top of boundary assert).
+          // F2.1: tenant filter (defense-in-depth on top of boundary assert).
           const miRes = await db.execute(
             sql`SELECT competitor_data, signal_data, market_state, overall_confidence, dominance_data
                 FROM mi_snapshots
@@ -954,7 +954,7 @@ export function registerOrchestratorV2Routes(app: Express) {
       const campaignId = req.query.campaignId as string;
       if (!campaignId) return res.status(400).json({ error: "campaignId required" });
 
-      // W5 (architect re-review #7 F3): query.campaignId requires explicit
+      // query.campaignId requires explicit
       // ownership truth at the boundary. Downstream calls fan out to other
       // local routes; without this assert, an attacker could enumerate
       // foreign campaigns via this aggregator.
@@ -999,7 +999,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         safe(`${base}/api/strategy/retention-engine/latest${q}`),
       ]);
 
-      // Seal #4 F2.1: tenant filter (defense-in-depth on top of boundary assert).
+      // F2.1: tenant filter (defense-in-depth on top of boundary assert).
       let miRow: any = null;
       try {
         const miRes = await db.execute(
@@ -1016,7 +1016,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         return (Math.round(val * 1000) / 10).toFixed(1) + "%";
       }
 
-      // Seal #4 F2.6: canonical status only; no fabrication from id/exists presence.
+      // F2.6: canonical status only; no fabrication from id/exists presence.
       type CanonStatus = "COMPLETE" | "PARTIAL" | "UNKNOWN" | "MISSING";
       function summarizeStatus(snap: any): { status: CanonStatus; degraded: boolean } {
         if (snap == null) return { status: "MISSING", degraded: false };
@@ -1364,7 +1364,7 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/narrative/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // explicit ownership assert at the boundary.
       try {
         await assertCampaignBelongsTo(accountId, req.params.campaignId);
       } catch (e) {

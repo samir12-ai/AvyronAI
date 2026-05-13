@@ -28,14 +28,14 @@ const INITIAL_DELAY_MS = 5 * 60 * 1000;
 const COLD_STORAGE_DAYS = 30;
 const COMPLETE_RETENTION_DAYS = 90;
 const MAX_SNAPSHOTS_PER_CAMPAIGN = 20;
-// F8.2 — stale in-flight reaper window. The orches-
+// stale in-flight reaper window. The orches-
 // trator sets `expectedCompleteBy = now + 30min` on insert; rows older than
 // this without a terminal-state DELETE are unrecoverable (orchestrator
 // crashed, NEEDS_INPUT permanently abandoned, etc.) and must be reaped so
 // snapshot cleanup is not blocked indefinitely.
 const IN_FLIGHT_REAP_GRACE_MS = 60 * 60 * 1000; // 30min budget + 30min grace
 
-// F8.2 — fetch the live in-flight job set once per
+// fetch the live in-flight job set once per
 // cleanup cycle. Returned as a Set for O(1) membership tests in every
 // downstream filter pass.
 async function loadInFlightJobIds(): Promise<Set<string>> {
@@ -48,13 +48,13 @@ async function loadInFlightJobIds(): Promise<Set<string>> {
   }
 }
 
-// F8.2 — reaper. Drops rows whose start was so long
+// reaper. Drops rows whose start was so long
 // ago that `expectedCompleteBy + grace` has elapsed; without this, an
 // orchestrator crash or a NEEDS_INPUT run that the user abandoned would
 // permanently strand the row and over-protect its snapshots.
 async function reapStaleInFlightJobs(): Promise<number> {
   try {
-    // F8.2 — BOTH predicates honour
+    // BOTH predicates honour
     // the grace window. The prior version reaped immediately when
     // `expectedCompleteBy < now`, which would kill a long-running orches-
     // tration the second its 30-min budget expired. Now both clauses
@@ -207,7 +207,7 @@ async function purgeExpiredSnapshots(protectedIds: Set<string>, inFlightJobIds: 
     try {
       const tsCol = getTimestampCol(config);
       const hasStatus = config.table.status !== undefined;
-      // F8.2 — also pull jobId so the in-flight filter
+      // also pull jobId so the in-flight filter
       // below is non-trivial. Without this column the filter saw `undefined`
       // for every row and the protection was a no-op.
       const hasJobId = config.table.jobId !== undefined;
@@ -279,7 +279,7 @@ async function enforcePerCampaignCap(protectedIds: Set<string>, inFlightJobIds: 
 
       for (const { campaignId, count } of campaigns) {
         const excess = count - MAX_SNAPSHOTS_PER_CAMPAIGN;
-        // F8.2 — pull jobId so we can also exclude
+        // pull jobId so we can also exclude
         // in-flight rows from the cap-driven delete (
         // gap: prior version only filtered protectedIds).
         const toDelete = await db
@@ -330,7 +330,7 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>, inFlightJobIds:
     for (const config of campaignScopedTables) {
       try {
         const hasJobId = config.table.jobId !== undefined;
-        // F8.2 — also pull jobId so orphan purge
+        // also pull jobId so orphan purge
         // doesn't rip a snapshot out from under an in-flight run that may
         // be about to consume it.
         const orphaned = await db
@@ -379,7 +379,7 @@ async function runSnapshotCleanup(): Promise<void> {
     const protectedIds = await getLatestSnapshotIds();
     console.log(`[SnapshotCleanup] ACTIVE_SESSION_PROTECTION | protectedSnapshots=${protectedIds.size}`);
 
-    // F8.2 — reap stale in_flight rows BEFORE loading
+    // reap stale in_flight rows BEFORE loading
     // the active set so abandoned runs (orchestrator crash, NEEDS_INPUT
     // never resumed) stop over-protecting their snapshots.
     const reapedInFlight = await reapStaleInFlightJobs();
@@ -434,7 +434,7 @@ export function startSnapshotCleanupWorker(): void {
   }, INITIAL_DELAY_MS);
 
   cleanupTimer = setInterval(async () => {
-    // F10.7 — emit worker_tick_total metric per cycle.
+    // emit worker_tick_total metric per cycle.
     // per-tick traceId for log/Sentry continuity.
     const { recordWorkerTick } = await import("./observability/otel");
     const { traceContext } = await import("./trace-context");

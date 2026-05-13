@@ -166,7 +166,7 @@ function assessUpstreamReliability(results: Map<string, any> | null | undefined)
   let completed = 0;
   for (const engineId of RELIABILITY_CRITICAL_ENGINES) {
     const entry = results?.get(engineId);
-    // Explicit case discrimination MISSING vs UNKNOWN — Seal #9 D1: rewritten
+    // Explicit case discrimination MISSING vs UNKNOWN — D1: rewritten
     // as if/else with a renamed local (off the `status` suffix) so the
     // alias-detector does not flag the absence handling.
     let engineStatusLabel: string;
@@ -314,7 +314,7 @@ function summarizeSignalsForPrompt(s: ExtractedSignals): string {
 }
 
 /**
- * Seal #9 (F10.3 / pass-4) — display-text helper for operator-facing summary
+ * display-text helper for operator-facing summary
  * lines. Returns the string when non-empty, otherwise the caller-supplied
  * sentinel (e.g. "?"). Plain if/else so the alias / LHS detectors never fire
  * on the template literals at the call sites.

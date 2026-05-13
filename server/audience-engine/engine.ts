@@ -510,7 +510,7 @@ function applyEvidenceIntegrityFilter(signals: SignalItem[]): SignalItem[] {
     }
     if (s.evidenceCount >= 1 || s.frequency >= 1) {
       const evidenceRatio = Math.min(s.evidenceCount, s.frequency) / MIN_EVIDENCE_PER_SIGNAL;
-      // P0-5 (launch-closure W2-T1): no synthetic confidence floor. If the
+      // no synthetic confidence floor. If the
       // raw signal already carries 0 confidence, the downgrade emits 0 — we
       // never invent a 0.05 minimum. Honest zero is better than a fabricated
       // pulse that downstream gates can clear.
@@ -534,7 +534,7 @@ function inferPainsFromObjections(objectionMap: SignalItem[], inputSnapshotId: s
       frequency: Math.max(1, Math.round(obj.frequency * 0.7)),
       evidence: obj.evidence.slice(0, 2),
       evidenceCount: Math.max(1, Math.round(obj.evidenceCount * 0.7)),
-      // P0-5: no 0.1 floor — inferred confidence is a strict multiple of the
+      // no 0.1 floor — inferred confidence is a strict multiple of the
       // source objection's confidence. If the source is zero, the inference is zero.
       confidenceScore: obj.confidenceScore * 0.6,
       sourceSignals: [...obj.sourceSignals, "inferred_from_objection"],
@@ -553,7 +553,7 @@ function inferPainsFromEmotionalDrivers(drivers: SignalItem[], inputSnapshotId: 
       frequency: Math.max(1, Math.round(driver.frequency * 0.5)),
       evidence: driver.evidence.slice(0, 2),
       evidenceCount: Math.max(1, Math.round(driver.evidenceCount * 0.5)),
-      // P0-5: no 0.1 floor — see inferPainsFromObjections.
+      // no 0.1 floor — see inferPainsFromObjections.
       confidenceScore: driver.confidenceScore * 0.5,
       sourceSignals: [...driver.sourceSignals, "inferred_from_emotional_driver"],
       inputSnapshotId,
@@ -1809,7 +1809,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
       frequency: bs.frequency || 1,
       evidence: bs.evidence || [],
       evidenceCount: bs.evidenceCount || 1,
-      // P0-5: no 0.1 floor and no 0.3 phantom-default. A bridge signal that
+      // no 0.1 floor and no 0.3 phantom-default. A bridge signal that
       // carries no confidence emits zero; downstream gates decide whether to
       // surface it or drop it.
       confidenceScore: (typeof bs.confidenceScore === "number" ? bs.confidenceScore : 0) * 0.7,

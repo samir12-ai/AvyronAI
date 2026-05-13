@@ -507,7 +507,7 @@ function logVerdict(verdict: SystemControlVerdict, config: { campaignId: string;
   if (verdict.repairActions.length > 0) {
     for (const ra of verdict.repairActions) {
       // Display label composed from booleans (executed/succeeded). Renamed
-      // off the `status` suffix per Seal #9 doctrine D1 (alias-detector)
+      // off the `status` suffix per D-rule (alias-detector)
       // and rewritten as if/else so this is a plain composition site.
       let repairActionLabel: string;
       if (!ra.executed) {

@@ -56,7 +56,7 @@ export function registerAELRoutes(app: Express) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
-      // Doctrine W5 (architect-#9 MEDIUM): canonical helper at boundary;
+      // canonical helper at boundary;
       // inline accountId WHERE below remains as defence-in-depth.
       try { await assertCampaignBelongsTo(accountId, campaignId); }
       catch (e) { if (handleOwnershipError(e, res)) return; throw e; }

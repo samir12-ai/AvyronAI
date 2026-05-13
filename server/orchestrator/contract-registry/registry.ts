@@ -38,7 +38,7 @@ import type { EngineContract } from "./types";
 
 /**
  * ChannelCandidate — see server/strategy/channel-selection/types.ts:83.
- * Seal #9 (F4.2): the four channel-identity fields are now REQUIRED
+ * (F4.2): the four channel-identity fields are now REQUIRED
  * (engine emits them on every candidate). The schema previously declared
  * `channelKey` and `scalability` which do not exist on the actual TS
  * interface — those have been replaced with the real field names
@@ -66,7 +66,7 @@ const ChannelCandidateSchema = z.object({
 
 /**
  * FunnelStageAssignment — see server/strategy/channel-selection/types.ts:137.
- * Seal #9 (F4.1): assignedRole tightened from z.string() → strict z.enum
+ * (F4.1): assignedRole tightened from z.string() → strict z.enum
  * mirroring the FunnelRole TS union.
  */
 const FunnelStageAssignmentSchema = z.object({
@@ -94,7 +94,7 @@ const FunnelCandidateSchema = z.object({}).passthrough();
 
 /**
  * FunnelStageObject — funnel-engine stage shape.
- * Seal #9 (F4.1): `type` tightened from z.string() → strict z.enum of the
+ * (F4.1): `type` tightened from z.string() → strict z.enum of the
  * canonical funnel-stage taxonomy used across the funnel/awareness/persuasion
  * engines.
  */
@@ -216,7 +216,7 @@ const CHANNEL_SELECTION_CONTRACT: EngineContract = {
       consumers: ["system_control.weak_funnel_for_scale"],
     },
     {
-      // Seal #9 (F2.10) — promoted from optionalOutputs to requiredOutputs.
+      // promoted from optionalOutputs to requiredOutputs.
       // The H3 transitional D5 exception is now retired: the channel engine
       // emits `primaryChannel.decisionGate.outcome` on every run, the
       // ≥7-day shadow window logged zero LEGACY_HIT for this field id, and
@@ -377,7 +377,7 @@ const MARKET_INTELLIGENCE_CONTRACT: EngineContract = {
   requiredOutputs: [
     { id: "signalData",        path: ["signalData"],        shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["audience", "positioning", "differentiation", "funnel", "offer", "persuasion", "awareness", "integrity", "statistical_validation", "system_control.signal_grounding"] },
     { id: "confidenceData",    path: ["confidenceData"],    shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["audience", "positioning", "awareness", "persuasion", "statistical_validation", "system_control.confidence_chain_integrity"] },
-    // Seal #9 (F4.1): marketState tightened from z.string() → strict z.enum
+    // (F4.1): marketState tightened from z.string() → strict z.enum
     // of the canonical market-state taxonomy ACTUALLY emitted by
     // `deriveMarketState()` in server/market-intelligence-v3/trajectory-engine.ts
     // plus the two coverage/availability sentinels emitted by
@@ -448,7 +448,7 @@ const POSITIONING_CONTRACT: EngineContract = {
   requiredOutputs: [
     { id: "territories",           path: ["territories"],           shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["differentiation", "funnel", "offer", "mechanism", "awareness", "persuasion", "integrity"] },
     { id: "primaryTerritory",      path: ["territory"],             shape: z.any().nullable(),    emptyIsMissing: true,  consumers: ["differentiation", "awareness"] },
-    // Seal #9 (F4.1): positioning narrative fields kept as z.string().min(1)
+    // (F4.1): positioning narrative fields kept as z.string().min(1)
     // — these are free-form positioning copy (one-sentence narratives), not
     // a closed enum vocabulary. emptyIsMissing already enforces non-empty;
     // promoting to z.enum would be incorrect for natural-language fields.
@@ -473,7 +473,7 @@ const OFFER_CONTRACT: EngineContract = {
   engineVersion: OFFER_ENGINE_VERSION,
   livenessRule: "current_run_only",
   requiredOutputs: [
-    // Seal #9 (F2.2 #1 / pass-4) — D2/D3: offer engine's canonical F1
+    // D2/D3: offer engine's canonical F1
     // completion `status` is now a registered contract field. Strict z.enum of
     // every value emitted by `STATUS` in `server/offer-engine/constants.ts`.
     // Consumed by `system_control.offer_input_sufficient` via

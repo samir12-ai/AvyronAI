@@ -47,7 +47,7 @@ export const BLOCK_METADATA: Record<BlockCode | "UNKNOWN_BLOCK", { retrySafe: bo
   COMPLIANCE_FAILURE:               { retrySafe: false, resolverActor: "system" },
   OFFER_AUDIENCE_MISALIGNMENT:      { retrySafe: false, resolverActor: "system" },
   ZERO_OBJECTION_COVERAGE:          { retrySafe: false, resolverActor: "system" },
-  // Launch-closure W2-T2 (P0-6): Offer can only resume after Audience produces
+  // Offer can only resume after Audience produces
   // ≥1 grounded pain signal. That requires fresh MI / scraping data, so the
   // resolver is system-driven (rerun upstream), not a runtime mutation.
   OFFER_INPUT_INSUFFICIENT:         { retrySafe: false, resolverActor: "system" },

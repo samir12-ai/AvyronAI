@@ -448,7 +448,7 @@ export function registerExecutionRoutes(app: Express) {
         const plan = (req as any).plan;
         const { reason, decidedBy = "client" } = req.body;
 
-        // F8.3 — CAS using plan.version loaded by verifyPlanOwnership.
+        // CAS using plan.version loaded by verifyPlanOwnership.
         try {
           await casUpdateStrategicPlanByVersion(plan.id, plan.version, { status: "APPROVED", updatedAt: new Date() });
         } catch (e: any) {
@@ -1003,7 +1003,7 @@ export function registerExecutionRoutes(app: Express) {
           studioDeleted += deleted.length;
         }
 
-        // F8.3 — CAS inside the existing tx. Read
+        // CAS inside the existing tx. Read
         // version inside the tx for consistency, then conditional update.
         const [verRow] = await tx.select({ version: strategicPlans.version })
           .from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);

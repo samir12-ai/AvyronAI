@@ -48,7 +48,7 @@ export type BlockCode =
   | "ANALYTICAL_ENRICHMENT_PARTIAL" // T3.B — AEL built with degraded data (parse failure / build error / partial LLM)
   | "SIGNAL_LINEAGE_UNKNOWN_DOMINANT" // T1.A — unknownRatio > 0.30 (untagged/legacy signals dominate strategy)
   | "CONFIDENCE_INTEGRITY_INCOMPLETE" // T3.A v2 — a critical engine emitted no confidence at all
-  // Launch-closure W2-T2 (P0-6): Offer engine refused to run because audience
+  // Offer engine refused to run because audience
   // produced zero pain signals AND no MarketLanguage rawPainPhrases. Replaces
   // the silent "unresolved challenge" string fallback that previously emitted
   // a fabricated transformation statement.
@@ -375,7 +375,7 @@ export interface SystemControlInput {
   analyticalEnrichmentPartial?: boolean;
   analyticalEnrichmentReason?: string | null;
   /**
-   * Seal #10 / Task #28 / F2.3 — count of strategy engines that ran AFTER
+   * count of strategy engines that ran AFTER
    * AEL emitted a partial package (i.e. engines that actually consumed the
    * degraded enrichment). When this is > 0, `checkAnalyticalEnrichmentIntegrity`
    * escalates from a soft DOWNGRADE to a hard BLOCK, and `collectBlockReasons`
@@ -386,14 +386,13 @@ export interface SystemControlInput {
    */
   analyticalEnrichmentDownstreamConsumers?: number;
   /**
-   * Seal #10 / Task #28 / pass-5 — list of MI-snapshot gate rejections
+   * list of MI-snapshot gate rejections
    * collected during the run by `extractMiInput`. Each entry carries the
    * reason (`MI_ENVELOPE_INVALID` | `MI_FRESHNESS_*` | `MI_LINEAGE_MISMATCH`
    * | `MI_OUTPUT_MISSING`) plus the engineId that attempted the read. When
    * non-empty AND any AEL-consumer engine ran, `checkMiGateRejections`
    * raises a structural BLOCK so the verdict cannot silently reduce to
-   * "empty MI" execution. Pass-5 closure of the architect's "MI gate
-   * routing is incomplete" finding.
+   * "empty MI" execution.
    */
   miGateRejections?: { engineId: string; reason: string; detail: string }[];
   /**

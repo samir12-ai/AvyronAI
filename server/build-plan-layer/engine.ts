@@ -151,7 +151,7 @@ function enforceActionability(output: BuildPlanOutput): { passed: boolean; score
 }
 
 /**
- * P0-6 (runtime-truth-isolation-seal): every snapshot read must declare a
+ * every snapshot read must declare a
  * sourceJobId. The previous "latest by (accountId, campaignId)" pattern silently
  * stitched together engine outputs from DIFFERENT runs whenever a single engine
  * had failed and the orchestrator retried — producing build-plans whose
@@ -216,7 +216,7 @@ async function collectValidatedEngineOutputs(
     snapshots.push({ engineId: "audience", data: audienceSnap });
   }
 
-  // Seal #9 (F2.2 #7) — D5 honesty: a missing depth-gate status is
+  // D5 honesty: a missing depth-gate status is
   // CONTRACT_INCOMPLETE, NOT silently treated as PASS. The previous
   // `!status || GATED_PASS_STATES.includes(status)` admitted snapshots
   // whose depth-gate evaluation was absent — silently substituting

@@ -178,7 +178,7 @@ export async function resolveRunId(
   };
 }
 
-// Seal #9 (F2.2 #8) — extract the run status read out of the LHS
+// extract the run status read out of the LHS
 // fallback expression so the lint rule's no-semantic-fallback check
 // passes without an eslint-disable. The DB column IS the canonical
 // run-status field (drizzle nullable string column), so we read it

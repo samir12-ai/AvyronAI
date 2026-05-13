@@ -1090,7 +1090,7 @@ export function registerOrchestratorRoutes(app: Express) {
         });
       }
 
-      // F8.3 — atomic CAS: bind to plan.version AND status predicate so a
+      // atomic CAS: bind to plan.version AND status predicate so a
       // concurrent writer that flipped the row past DRAFT/READY_FOR_REVIEW
       // is detected (no rows updated → 409).
       try {
@@ -1181,7 +1181,7 @@ export function registerOrchestratorRoutes(app: Express) {
       let previousStatus = "NONE";
       for (const p of existingPlans) {
         previousStatus = p.status;
-        // F8.3 — CAS via casUpdateStrategicPlan helper.
+        // CAS via casUpdateStrategicPlan helper.
         try {
           await casUpdateStrategicPlan(p.id, { status: "SUPERSEDED", updatedAt: new Date() });
         } catch (casErr: any) {

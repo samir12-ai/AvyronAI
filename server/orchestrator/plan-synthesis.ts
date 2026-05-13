@@ -465,7 +465,7 @@ export function collectPlanStringSet(
   }
 }
 
-// F4.4 — field-addressed preservation. Each locked decision is checked
+// field-addressed preservation. Each locked decision is checked
 // against the specific plan subtree it should appear in (scope). Generic
 // string[] still works (legacy global scan). Membership is exact-leaf
 // (no substring) so "Outcome-First" never matches "Our Outcome-First …".
@@ -1567,7 +1567,7 @@ export async function synthesizePlan(
 
   if (calendarSlots.length > 0) {
     const inserted = await db.insert(calendarEntries).values(calendarSlots).returning({ id: calendarEntries.id, contentType: calendarEntries.contentType });
-    // F8.3 — CAS via casUpdateStrategicPlan helper.
+    // CAS via casUpdateStrategicPlan helper.
     await casUpdateStrategicPlan(plan.id, { totalCalendarEntries: calendarSlots.length });
 
     const byType = new Map<string, string[]>();

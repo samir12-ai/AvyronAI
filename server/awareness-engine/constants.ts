@@ -3,7 +3,7 @@ export const ENGINE_VERSION = 2;
 export const STATUS = {
   COMPLETE: "COMPLETE",
   PARTIAL: "PARTIAL",
-  // F4.3 — strict input-contract status used when
+  // strict input-contract status used when
   // critical inputs (audience.maturityIndex, audience.awarenessLevel,
   // mi.overallConfidence) are missing or non-finite at engine entry.
   // Distinguished from PARTIAL: PARTIAL = some signals weak / some

@@ -236,7 +236,7 @@ interface EngineContext {
   signalComposition?: SignalComposition;
   performanceLineage?: SignalLineageEntry[];
   inputHashes?: Record<string, string>;
-  // F2.5 — collected MI gate rejections during this
+  // collected MI gate rejections during this
   // run. Each entry is pushed by `extractMiInput` when the MI envelope is
   // incomplete, freshness-failed, or lineage-mismatched. Surfaced into
   // System Control's `miGateRejections` input so the structural check can
@@ -244,7 +244,7 @@ interface EngineContext {
   miGateRejections?: { engineId: string; reason: string; detail: string }[];
 }
 
-// F2.3 — list of strategic engines whose runtime
+// list of strategic engines whose runtime
 // reads `ctx.analyticalEnrichment`. Used post-engine-loop to count how many
 // downstream consumers actually executed AFTER AEL emitted a partial
 // package. Sourced by enumerating every `ctx.analyticalEnrichment` reader
@@ -420,7 +420,7 @@ async function getRetentionGateData(accountId: string, campaignId: string): Prom
   };
 }
 
-// F4.5 — strict zod schema for the orchestrator's MI
+// strict zod schema for the orchestrator's MI
 // input extraction. Pre-#28 the function tolerated any shape silently and
 // returned `{}` on a missing `.output`. Now `.output` (when present) is
 // validated as an object; non-object → CONTRACT_INCOMPLETE. The internal
@@ -434,7 +434,7 @@ const MiResultEnvelopeSchema = z.object({
   trajectoryData: z.any().nullable().optional(),
 });
 
-// F2.5 + F4.6 — structured MI gate rejection. Returned
+// structured MI gate rejection. Returned
 // in place of an MI input when the snapshot is stale, cross-run, or
 // otherwise contract-incomplete. Engines that destructure the result and
 // apply `?? []` continue to behave as if MI is missing; the orchestrator's
@@ -484,7 +484,7 @@ function extractMiInput(
   currentJobId?: string | null,
   collector?: { ctx?: OrchestrationContext; engineId?: string },
 ): any {
-  // F2.5 — record every MI gate rejection into
+  // record every MI gate rejection into
   // ctx.miGateRejections so System Control receives the rejection list and
   // can refuse to "silently coerce to empty MI". Engines themselves still
   // see the empty-MI shape (`competitors:[]`, `signals:[]`, ...) so their
@@ -512,7 +512,7 @@ function extractMiInput(
     return miGateRejection("MI_OUTPUT_MISSING", "envelope.output is null or non-object");
   }
 
-  // F2.5 + F4.6 — MI snapshot freshness/lineage gate.
+  // MI snapshot freshness/lineage gate.
   // Refuse NEEDS_REFRESH, INCOMPATIBLE, AND STALE (
   // STALE was missing); enforce `_provenance.jobId === currentJobId` for
   // every read so cross-run snapshot stitching is impossible during a live
@@ -711,7 +711,7 @@ function extractDifferentiationInput(diffResult: any): any {
   };
 }
 
-// Seal #9 (F2.2 #5) — D5: missing engine status surfaces as
+// D5: missing engine status surfaces as
 // "CONTRACT_INCOMPLETE" (not "PENDING"), so dashboard / sectionStatuses
 // consumers can distinguish "engine has not yet emitted" from "engine
 // emitted no status field at all". Helper extracts the read out of any
@@ -725,10 +725,7 @@ function readSectionStatus(r: { status?: unknown } | undefined): string {
   return "CONTRACT_INCOMPLETE";
 }
 
-// Seal #9 (F2.2 — orchestrator confidence-integrity verdict read).
-// Extracted out of an LHS `?? null` fallback so the no-semantic-fallback
-// rule passes without an eslint-disable. The field IS the canonical
-// confidence-integrity verdict; absence yields null.
+// Canonical confidence-integrity verdict read; absence yields null.
 function pickConfidenceIntegrityVerdict(
   summary: { verdict?: unknown } | null | undefined,
 ): string | null {
@@ -743,7 +740,7 @@ function extractOfferInput(offerResult: any): any {
   const primary = offerResult.primaryOffer || offerResult.selectedOffer || offerResult;
   return {
     offerName: primary.offerName || primary.name || offerResult.offerName || null,
-    // Seal #9 (F2.2 #4) — D5 honesty: canonical `coreOutcome` only.
+    // D5 honesty: canonical `coreOutcome` only.
     // Legacy `primary.outcome` fallback dropped; engines emitting only
     // the legacy name are surfaced as null so the contract miss is visible.
     coreOutcome:
@@ -3579,7 +3576,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       .where(eq(orchestratorJobs.id, jobId));
   } else {
     jobId = config.preassignedJobId || `orch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    // F8.2 — atomic registration of orchestrator_jobs + in_flight_jobs.
+    // atomic registration of orchestrator_jobs + in_flight_jobs.
     await db.transaction(async (tx) => {
       if (!config.preassignedJobId) {
         await tx.insert(orchestratorJobs).values({
@@ -3609,7 +3606,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // get the right jobId via the local variable — leaving plans non-run-bound.
   config.jobId = jobId;
 
-  // F8.2 — guaranteed in_flight_jobs cleanup. Set true once the explicit
+  // guaranteed in_flight_jobs cleanup. Set true once the explicit
   // terminal-state delete (or the NEEDS_INPUT preserve-row branch) runs;
   // otherwise the finally below deregisters on throw/abort.
   let inFlightCleanupHandled = false;
@@ -4102,7 +4099,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       // with degraded data. Pre-T3.B this only surfaced as a console.warn.
       analyticalEnrichmentPartial: ctx.analyticalEnrichment?.isPartial === true,
       analyticalEnrichmentReason: ctx.analyticalEnrichment?.partialReason ?? null,
-      // F2.3 — runtime count of strategy engines that
+      // runtime count of strategy engines that
       // ran AFTER AEL emitted a partial package. countAelDownstreamConsumers
       // walks `results` and counts AEL-consumer engine ids whose status is
       // not SKIPPED. When > 0 + AEL partial,
@@ -4113,7 +4110,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         results as unknown as Map<string, { status: string }>,
         ctx.analyticalEnrichment?.isPartial === true,
       ),
-      // F2.5 — propagate collected MI gate rejections
+      // propagate collected MI gate rejections
       // (populated by extractMiInput call sites with `{ ctx }`). When any
       // engine consumed MI and rejections occurred, checkMiGateRejections
       // emits a hard BLOCK ("MI_GATE_REJECTED") instead of silently
@@ -4123,7 +4120,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       // verdict so System Control's `checkConfidenceIntegrity` can hard-gate
       // on missing/degraded engine confidences instead of letting the
       // verdict be observational only.
-      // Seal #9 (F2.2 — pre-existing offender) — read via helper to keep
+      // read via helper to keep
       // the verdict-shape access out of any LHS fallback expression.
       confidenceIntegrityVerdict: pickConfidenceIntegrityVerdict(confidenceIntegritySummary),
       confidenceIntegrityCriticalAbsent: confidenceIntegritySummary?.criticalAbsentEngines ?? [],
@@ -4303,7 +4300,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           // is visible to downstream readers/auditors.
           if (planId) {
             try {
-              // F8.3 — optimistic-locking CAS. Read
+              // optimistic-locking CAS. Read
               // current version, write with WHERE id=? AND version=?,
               // bump version on success. If affected rows = 0 a concurrent
               // writer modified the plan first; surface as
@@ -4367,7 +4364,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     })
     .where(eq(orchestratorJobs.id, jobId));
 
-  // F8.2 — terminal-state deregistration (COMPLETED/PARTIAL/BLOCKED/ERROR).
+  // terminal-state deregistration (COMPLETED/PARTIAL/BLOCKED/ERROR).
   try {
     await db.delete(inFlightJobs).where(eq(inFlightJobs.jobId, jobId));
     inFlightCleanupHandled = true;
@@ -4389,9 +4386,8 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   console.log(`[Orchestrator] Complete in ${durationMs}ms | Status: ${overallStatus} | Engines: ${completedEngines.length}/${ENGINE_PRIORITY_ORDER.length}`);
 
   // ── PHASE 6: Compose Commercial DNA from all engine signals ──
-  // Pure projection — no AI, no I/O. Available on the orchestrator return
-  // shape so downstream consumers (content engines, funnel architect, channel
-  // selector) get the unified strategic backbone in one read.
+  // Pure projection — no AI, no I/O. Exposed on the run result so downstream
+  // consumers get the unified strategic backbone in one read.
   let commercialDna: any = null;
   try {
     const { composeCommercialDNA } = await import("../../shared/commercial-dna");
@@ -4467,7 +4463,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     confidenceProvenanceLog: runConfidenceProvenanceLog,
   };
   } finally {
-    // F8.2 — guaranteed deregistration on throw/abort. Skipped when the
+    // guaranteed deregistration on throw/abort. Skipped when the
     // explicit terminal-state delete already ran or NEEDS_INPUT preserved
     // the row deliberately.
     if (!inFlightCleanupHandled) {
