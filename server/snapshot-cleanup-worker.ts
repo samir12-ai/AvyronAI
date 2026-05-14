@@ -468,7 +468,10 @@ async function _runSnapshotCleanupBody(): Promise<void> {
     }
 
     const protectedIds = await getLatestSnapshotIds();
-    console.log(`[SnapshotCleanup] ACTIVE_SESSION_PROTECTION | protectedSnapshots=${protectedIds.size}`);
+    // Pass-6 round-3 (architect comment): report TRUE protected snapshot
+    // count (sum of per-table sets), not Map.size (= table count).
+    const protectedCount = [...protectedIds.values()].reduce((s, set) => s + set.size, 0);
+    console.log(`[SnapshotCleanup] ACTIVE_SESSION_PROTECTION | protectedSnapshots=${protectedCount} | tables=${protectedIds.size}`);
 
     // reap stale in_flight rows BEFORE loading
     // the active set so abandoned runs (orchestrator crash, NEEDS_INPUT
@@ -499,7 +502,7 @@ async function _runSnapshotCleanupBody(): Promise<void> {
         cappedDeleted: totalCapDeleted,
         orphanedDeleted: totalOrphanDeleted,
         totalDeleted,
-        protectedSnapshots: protectedIds.size,
+        protectedSnapshots: protectedCount,
         durationMs,
         coldStorageDays: COLD_STORAGE_DAYS,
         maxPerCampaign: MAX_SNAPSHOTS_PER_CAMPAIGN,
