@@ -155,11 +155,15 @@ function getOrCreatePool(accountId: string): AccountPool {
     pools.delete(accountId);
     pools.set(accountId, pool);
   }
-  // Per-pool sticky-bindings bound (FIFO trim).
+  // Per-binding TTL pass (architect pass-3): drop bindings idle > 24h
+  // before applying the size cap. This prevents stale bindings from
+  // surviving indefinitely just because the pool itself stays warm.
+  evictExpiredStickyBindings(pool.stickyBindings);
+  // Per-pool sticky-bindings bound (FIFO trim, oldest touchedAt first).
   if (pool.stickyBindings.size > MAX_STICKY_BINDINGS) {
     const overflow = pool.stickyBindings.size - MAX_STICKY_BINDINGS;
-    const keys = [...pool.stickyBindings.keys()].slice(0, overflow);
-    for (const k of keys) pool.stickyBindings.delete(k);
+    const sorted = [...pool.stickyBindings.entries()].sort((a, b) => a[1].touchedAt - b[1].touchedAt);
+    for (let i = 0; i < overflow; i++) pool.stickyBindings.delete(sorted[i][0]);
   }
   // Per-pool session bound: drop oldest by createdAt above MAX_SESSIONS_PER_POOL.
   if (pool.sessions.size > MAX_SESSIONS_PER_POOL) {
@@ -302,15 +306,19 @@ export function acquireStickySession(
   const pool = getOrCreatePool(accountId);
   const bindingKey = `${accountId}:${campaignId}:${competitorHash}`;
 
-  const existingSessionId = pool.stickyBindings.get(bindingKey);
-  if (existingSessionId) {
-    const existingSession = pool.sessions.get(existingSessionId);
+  const existing = pool.stickyBindings.get(bindingKey);
+  if (existing) {
+    const ageMs = Date.now() - existing.touchedAt;
+    const expired = ageMs > STICKY_BINDING_TTL_MS;
+    const existingSession = !expired ? pool.sessions.get(existing.sessionId) : undefined;
     if (existingSession && !existingSession.isQuarantined && Date.now() - existingSession.createdAt < SESSION_TTL_MS) {
+      // Touch on read so an actively-used binding rolls its 24h TTL forward.
+      existing.touchedAt = Date.now();
       return {
         accountId, campaignId, competitorHash,
         session: existingSession,
         attemptNumber: 1,
-        usedSessionIds: new Set([existingSessionId]),
+        usedSessionIds: new Set([existing.sessionId]),
       };
     }
     pool.stickyBindings.delete(bindingKey);
@@ -319,7 +327,7 @@ export function acquireStickySession(
   const session = createSession(accountId);
   if (!session) return null;
 
-  pool.stickyBindings.set(bindingKey, session.sessionId);
+  pool.stickyBindings.set(bindingKey, { sessionId: session.sessionId, touchedAt: Date.now() });
   return {
     accountId, campaignId, competitorHash,
     session,
@@ -347,7 +355,7 @@ export function rotateSessionOnBlock(ctx: StickySessionContext, blockClass: Bloc
 
   const pool = getOrCreatePool(ctx.accountId);
   const bindingKey = `${ctx.accountId}:${ctx.campaignId}:${ctx.competitorHash}`;
-  pool.stickyBindings.set(bindingKey, newSession.sessionId);
+  pool.stickyBindings.set(bindingKey, { sessionId: newSession.sessionId, touchedAt: Date.now() });
 
   const newUsed = new Set(ctx.usedSessionIds);
   newUsed.add(newSession.sessionId);

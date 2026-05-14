@@ -129,13 +129,20 @@ let isShuttingDown = false;
 let cleanupRunningPromise: Promise<void> | null = null;
 let signalHandlersInstalled = false;
 
-// Seal #11 / Task #29 / F6.8 — orphan grace window.
-// Pre-fix: any snapshot whose campaignId no longer appeared in
-// `campaign_selections` was eligible for immediate deletion on the next
-// cleanup cycle. A user simply switching campaigns would lose all snapshot
-// history for the deselected one within 6 hours. Now we require the
-// snapshot to be at least ORPHAN_GRACE_DAYS old before its missing
-// campaign reference is treated as a hard orphan.
+// Seal #11 / Task #29 / F6.8 (architect pass-3 fix).
+// Pre-fix #1: orphan deletion fired immediately on first sighting of a
+// snapshot whose campaignId no longer appeared in `campaign_selections`.
+// Pre-fix #2 (pass-2): we gated on snapshot age (ORPHAN_GRACE_DAYS old) —
+// architect rejected this because a 30-day-old snapshot whose campaign
+// was deselected just now would be deleted on the very next cycle.
+// Now: every cleanup pass records the FIRST time a (table, snapshot_id)
+// is observed in an orphaned state into `snapshot_orphan_observed`. A
+// row is only eligible for deletion once
+// `(now - first_observed_at) >= ORPHAN_GRACE_DAYS`. If a snapshot is
+// later seen as non-orphan (its campaign is re-selected), the tracking
+// row is removed so the grace counter resets if it later becomes orphan
+// again. No `campaigns.deleted_at` column exists in this schema, so
+// first-observed-orphan-at is the closest proxy to deselection age.
 const ORPHAN_GRACE_DAYS = 7;
 
 interface SnapshotTableConfig {
@@ -377,23 +384,55 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>, inFlightJobIds:
     // by an in-flight migration. Only snapshots older than the grace
     // window get reaped on the orphan path.
     const orphanGraceCutoff = new Date(Date.now() - ORPHAN_GRACE_DAYS * 24 * 60 * 60 * 1000);
+    const activeIdSet = new Set(activeCampaignIds);
     for (const config of campaignScopedTables) {
       try {
-        const tsCol = getTimestampCol(config);
         const hasJobId = config.table.jobId !== undefined;
-        // also pull jobId so orphan purge
-        // doesn't rip a snapshot out from under an in-flight run that may
-        // be about to consume it. Now also pulls the snapshot timestamp
-        // so we can apply the orphan-grace window.
         const orphaned = await db
           .select({
             id: config.table.id,
             campaignId: config.table.campaignId,
             jobId: hasJobId ? config.table.jobId : sql<string | null>`NULL`,
-            ts: tsCol,
           })
           .from(config.table)
           .where(notInArray(config.table.campaignId, activeCampaignIds));
+
+        // 1) Reset grace counters for snapshot_orphan_observed rows whose
+        //    campaign has come BACK into the active selection set since
+        //    last cycle. Cheap: scoped to this table_name only.
+        await db.execute(sql`
+          DELETE FROM snapshot_orphan_observed
+          WHERE table_name = ${config.name}
+            AND campaign_id = ANY(${sql.raw(`ARRAY[${activeCampaignIds.map(id => `'${id}'::uuid`).join(",") || "NULL::uuid"}]`)})
+        `).catch((e: any) => console.error(`[SnapshotCleanup] ORPHAN_RESET_ERROR | ${config.name} | ${e.message}`));
+
+        // 2) Upsert first_observed_at for every currently-orphan snapshot.
+        //    ON CONFLICT DO NOTHING preserves the original observation timestamp.
+        if (orphaned.length > 0) {
+          const valuesSql = orphaned
+            .map((r: any) => `('${config.name}', '${r.id}'::uuid, '${r.campaignId}'::uuid)`)
+            .join(",");
+          await db.execute(sql.raw(`
+            INSERT INTO snapshot_orphan_observed (table_name, snapshot_id, campaign_id)
+            VALUES ${valuesSql}
+            ON CONFLICT (table_name, snapshot_id) DO NOTHING
+          `)).catch((e: any) => console.error(`[SnapshotCleanup] ORPHAN_OBSERVE_ERROR | ${config.name} | ${e.message}`));
+        }
+
+        // 3) Read first_observed_at for these snapshots and gate deletion
+        //    on (now - first_observed_at) >= ORPHAN_GRACE_DAYS.
+        const observedRows = orphaned.length > 0
+          ? await db.execute<{ snapshot_id: string; first_observed_at: Date }>(sql.raw(`
+              SELECT snapshot_id, first_observed_at
+              FROM snapshot_orphan_observed
+              WHERE table_name = '${config.name}'
+                AND snapshot_id = ANY(ARRAY[${orphaned.map((r: any) => `'${r.id}'::uuid`).join(",")}])
+            `))
+          : { rows: [] as any[] };
+        const observedAtById = new Map<string, Date>();
+        for (const r of (observedRows as any).rows ?? []) {
+          observedAtById.set(r.snapshot_id, new Date(r.first_observed_at));
+        }
 
         const toDelete: string[] = [];
         let inFlightSkipped = 0;
@@ -406,8 +445,10 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>, inFlightJobIds:
             inFlightSkipped++;
             continue;
           }
-          const rowTs = row.ts ? new Date(row.ts) : new Date();
-          if (rowTs >= orphanGraceCutoff) {
+          // Orphan-AGE gate (not snapshot-age). first_observed_at is the
+          // moment THIS cleanup worker first saw the campaign as orphan.
+          const observedAt = observedAtById.get(row.id);
+          if (!observedAt || observedAt >= orphanGraceCutoff) {
             graceSkipped++;
             continue;
           }
@@ -417,6 +458,12 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>, inFlightJobIds:
         if (toDelete.length > 0) {
           const deleted = await batchedDeleteByIds(config.table, toDelete);
           results.push({ table: config.name, deleted });
+          // Drop tracking rows for the snapshots we just deleted.
+          await db.execute(sql.raw(`
+            DELETE FROM snapshot_orphan_observed
+            WHERE table_name = '${config.name}'
+              AND snapshot_id = ANY(ARRAY[${toDelete.map(id => `'${id}'::uuid`).join(",")}])
+          `)).catch(() => {});
           console.log(`[SnapshotCleanup] ORPHAN_PURGE | ${config.name} | deleted=${deleted} | reason=campaign_not_found | inFlightSkipped=${inFlightSkipped} | graceSkipped=${graceSkipped} | graceDays=${ORPHAN_GRACE_DAYS}`);
         } else if (graceSkipped > 0 || inFlightSkipped > 0) {
           console.log(`[SnapshotCleanup] ORPHAN_PURGE | ${config.name} | deleted=0 | inFlightSkipped=${inFlightSkipped} | graceSkipped=${graceSkipped}`);

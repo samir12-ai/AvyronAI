@@ -357,4 +357,90 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     expect(src).toMatch(/lastClassification\s*=\s*"META_TIMEOUT"/);
     expect(src).toMatch(/logAudit\([^,]+,\s*"META_TIMEOUT"/);
   });
+
+  // ---------------------------------------------------------------------
+  // Pass-4 architect fixes
+  // ---------------------------------------------------------------------
+
+  it("F6.2 (pass-4) — sticky-binding TTL evicts entries idle > 24h", async () => {
+    // Architect pass-3 rejection: pool-level LRU is not enough; each
+    // sticky binding must carry its own touchedAt and expire after 24h
+    // even if the parent pool stays warm.
+    const mod = await import("../competitive-intelligence/proxy-pool-manager");
+    expect(typeof mod.evictExpiredStickyBindings).toBe("function");
+    expect(mod.STICKY_BINDING_TTL_MS).toBe(24 * 60 * 60 * 1000);
+
+    const bindings = new Map<string, { sessionId: string; touchedAt: number }>();
+    const now = Date.now();
+    bindings.set("fresh", { sessionId: "s1", touchedAt: now - 60_000 });          // 1min old
+    bindings.set("borderline", { sessionId: "s2", touchedAt: now - (24 * 3600 * 1000 - 1) });
+    bindings.set("expired", { sessionId: "s3", touchedAt: now - (25 * 3600 * 1000) });
+    bindings.set("ancient", { sessionId: "s4", touchedAt: now - (90 * 24 * 3600 * 1000) });
+
+    const evicted = mod.evictExpiredStickyBindings(bindings, now);
+    expect(evicted).toBe(2);
+    expect(bindings.has("fresh")).toBe(true);
+    expect(bindings.has("borderline")).toBe(true);
+    expect(bindings.has("expired")).toBe(false);
+    expect(bindings.has("ancient")).toBe(false);
+  });
+
+  it("F6.2 (pass-4) — sticky binding shape carries explicit per-entry touchedAt", async () => {
+    // Source-shape proof: the struct stored in stickyBindings is
+    // { sessionId, touchedAt }, not a bare string. Source-level proof
+    // because the runtime mutator is buried inside acquireStickySession
+    // (requires a real proxy + scrape lifecycle to drive end-to-end).
+    const fs = await import("fs");
+    const src = await fs.promises.readFile(
+      "server/competitive-intelligence/proxy-pool-manager.ts",
+      "utf8",
+    );
+    expect(src).toMatch(/interface StickyBinding\s*\{[^}]*sessionId[^}]*touchedAt[^}]*\}/s);
+    expect(src).toMatch(/stickyBindings:\s*Map<string,\s*StickyBinding>/);
+    expect(src).toMatch(/STICKY_BINDING_TTL_MS/);
+    // Read-touch — actively-used bindings must roll forward.
+    expect(src).toMatch(/existing\.touchedAt\s*=\s*Date\.now\(\)/);
+    // Insert sites must include touchedAt.
+    expect(src).toMatch(/sessionId:\s*session\.sessionId,\s*touchedAt:\s*Date\.now\(\)/);
+    expect(src).toMatch(/sessionId:\s*newSession\.sessionId,\s*touchedAt:\s*Date\.now\(\)/);
+  });
+
+  it("F6.8 (pass-4) — orphan grace gates on first_observed_at, not snapshot age", async () => {
+    // Architect pass-3 rejection: snapshot-age grace meant a 30-day-old
+    // snapshot whose campaign was deselected just now would be deleted
+    // on the very next cleanup tick. Now we observe-then-wait via
+    // snapshot_orphan_observed.
+    const fs = await import("fs");
+    const src = await fs.promises.readFile("server/snapshot-cleanup-worker.ts", "utf8");
+    // Documented design: first_observed_at gate, not row.ts gate.
+    expect(src).toMatch(/snapshot_orphan_observed/);
+    expect(src).toMatch(/first_observed_at/);
+    expect(src).toMatch(/ON CONFLICT \(table_name, snapshot_id\) DO NOTHING/);
+    // Reset path: when a campaign comes back into the active selection
+    // set, its tracking rows are deleted (grace counter resets).
+    expect(src).toMatch(/DELETE FROM snapshot_orphan_observed[\s\S]*WHERE table_name/);
+    // Gate logic — observedAt comparison, not row.ts comparison.
+    expect(src).toMatch(/observedAt\s*>=\s*orphanGraceCutoff/);
+    // The pre-fix `rowTs >= orphanGraceCutoff` MUST be gone (regression
+    // guard against re-introducing snapshot-age gating).
+    expect(src).not.toMatch(/rowTs\s*>=\s*orphanGraceCutoff/);
+  });
+
+  it("F6.8 (pass-4) — migration 020 declares snapshot_orphan_observed with composite PK + indexes", async () => {
+    const fs = await import("fs");
+    const sqlSrc = await fs.promises.readFile(
+      "server/migrations/sql/020_snapshot_orphan_observed.sql",
+      "utf8",
+    );
+    expect(sqlSrc).toMatch(/CREATE TABLE IF NOT EXISTS snapshot_orphan_observed/);
+    expect(sqlSrc).toMatch(/PRIMARY KEY \(table_name, snapshot_id\)/);
+    expect(sqlSrc).toMatch(/first_observed_at\s+timestamptz\s+NOT NULL\s+DEFAULT now\(\)/);
+    expect(sqlSrc).toMatch(/CREATE INDEX IF NOT EXISTS snapshot_orphan_observed_first_observed_at_idx/);
+    expect(sqlSrc).toMatch(/CREATE INDEX IF NOT EXISTS snapshot_orphan_observed_campaign_id_idx/);
+
+    // Schema floor must be bumped to 20 so the runner refuses to boot
+    // against a DB that hasn't applied this migration.
+    const runnerSrc = await fs.promises.readFile("server/migrations/runner.ts", "utf8");
+    expect(runnerSrc).toMatch(/REQUIRED_SCHEMA_VERSION\s*=\s*20/);
+  });
 });
