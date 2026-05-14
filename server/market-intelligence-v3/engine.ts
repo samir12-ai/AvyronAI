@@ -855,7 +855,14 @@ export class MarketIntelligenceV3 {
 
     const totalPosts = competitors.reduce((s, c) => s + (c.posts?.length || 0), 0);
     const totalComments = competitors.reduce((s, c) => s + (c.comments?.length || 0), 0);
-    const tokenBudget = computeTokenBudget(competitors.length, totalComments, totalPosts);
+    // Seal #11 / Task #29 / F6.1 — read-through persistence keyed by
+    // (jobId, "mi-v3"). On crash-restart the recomputed budget is replaced
+    // by the originally-persisted projection so selectedMode is stable.
+    const { getOrComputeBudget } = await import("./token-budget-store");
+    const tokenBudget = await getOrComputeBudget(
+      jobId ? { jobId, provider: "mi-v3" } : null,
+      { competitorCount: competitors.length, totalComments, totalPosts },
+    );
     const executionMode = tokenBudget.selectedMode;
 
     for (const comp of competitors) {

@@ -1065,7 +1065,17 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const competitorHash = computeCompetitorHash(competitorInputs);
   const totalPosts = competitorInputs.reduce((s, c) => s + (c.posts?.length || 0), 0);
   const totalComments = competitorInputs.reduce((s, c) => s + (c.comments?.length || 0), 0);
-  const tokenBudget = computeTokenBudget(competitorInputs.length, totalComments, totalPosts);
+  // Seal #11 / Task #29 / F6.1 — read-through persistence keyed by
+  // (snapshotJobKey, "mi-v3-fetch-orch"). persistSnapshotAfterFetch has
+  // no fetch-job id in scope (it runs after multiple fetch jobs land),
+  // so we key on (accountId, campaignId, fetch-window) — stable across
+  // a worker crash/restart for the SAME persistence cycle.
+  const { getOrComputeBudget } = await import("./token-budget-store");
+  const snapshotJobKey = `persist:${accountId}:${campaignId}:${competitorHash}`;
+  const tokenBudget = await getOrComputeBudget(
+    { jobId: snapshotJobKey, provider: "mi-v3-fetch-orch" },
+    { competitorCount: competitorInputs.length, totalComments, totalPosts },
+  );
   const executionMode = tokenBudget.selectedMode;
 
   for (const comp of competitorInputs) {

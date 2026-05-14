@@ -9,6 +9,32 @@ import { recordMetaApiCall } from "./meta-metrics";
 import { classifyMetaError, classifyNetworkError, recordTemporaryError, recordSuccess, isInBackoff } from "./meta-error-classifier";
 
 const PUBLISH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+
+// Seal #11 / Task #29 / F6.6 — Meta Graph API timeouts.
+// Pre-fix: every fetch() to graph.facebook.com had no timeout. A network
+// stall (proxy hang, DNS resolution timeout, slow Meta endpoint) would
+// pin a worker tick indefinitely; the next publishTimer firing would
+// race the prior tick. Now: every Meta call goes through fetchMeta()
+// with a 15s AbortController; on timeout we throw a labeled error that
+// the existing retry/backoff classifier treats as transient.
+const META_API_TIMEOUT_MS = 15_000;
+async function fetchMeta(input: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), META_API_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === "AbortError" || controller.signal.aborted) {
+      const e: any = new Error(`META_TIMEOUT after ${META_API_TIMEOUT_MS}ms`);
+      e.code = "META_TIMEOUT";
+      e.transient = true;
+      throw e;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const MAX_RETRY_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 2000;
 const STALE_LOCK_TIMEOUT_MS = 10 * 60 * 1000;

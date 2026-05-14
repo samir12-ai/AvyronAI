@@ -1349,6 +1349,23 @@ export const inFlightJobs = pgTable("in_flight_jobs", {
   expectedCompleteBy: timestamp("expected_complete_by"),
 });
 
+// Seal #11 / Task #29 / F6.1
+// ai_token_budget: per-(jobId, provider) persistence of the MI v3 token-budget
+// projection. Engine + fetch-orchestrator persist on first compute and read
+// through on subsequent calls so a restart after crash gets the SAME
+// projection (and therefore the same selectedMode) instead of recomputing
+// under different sample counts.
+export const aiTokenBudget = pgTable("ai_token_budget", {
+  jobId: varchar("job_id").notNull(),
+  provider: varchar("provider").notNull(),
+  projectedTokens: integer("projected_tokens").notNull(),
+  ceiling: integer("ceiling").notNull(),
+  selectedMode: varchar("selected_mode").notNull(),
+  downgradeReason: text("downgrade_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
 export const requiredWork = pgTable("required_work", {
   id: varchar("id")
     .primaryKey()

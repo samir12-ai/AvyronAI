@@ -47,7 +47,22 @@ interface AccountPool {
   sessions: Map<string, ProxySession>;
   telemetry: ProxyTelemetryEntry[];
   stickyBindings: Map<string, string>;
+  lastTouchedAt: number;
 }
+
+// Seal #11 / Task #29 / F6.2 — bounded pool registry.
+// Pre-fix: `pools = new Map<accountId, AccountPool>()` grew without bound;
+// every account that ever ran a scrape (or every random accountId in a
+// load-test / abuse scenario) added a row that lived for the lifetime of
+// the process. Same for per-pool stickyBindings/sessions Maps.
+//
+// Now: pools is bounded by MAX_POOLS (LRU evict by `lastTouchedAt`); each
+// pool's stickyBindings is bounded by MAX_STICKY_BINDINGS, sessions are
+// bounded by SESSION_TTL_MS (already enforced) + MAX_SESSIONS_PER_POOL.
+const MAX_POOLS = parseInt(process.env.PROXY_MAX_POOLS || "10000", 10);
+const MAX_STICKY_BINDINGS = 500;
+const MAX_SESSIONS_PER_POOL = 100;
+const POOL_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export function getProxyConfig(): { host: string; port: string; username: string; password: string } | null {
   const host = process.env.BRIGHT_DATA_PROXY_HOST;
@@ -70,11 +85,54 @@ function jitteredDelay(min: number, max: number): Promise<void> {
 const pools = new Map<string, AccountPool>();
 const MAX_TELEMETRY_PER_ACCOUNT = 500;
 
+function evictIdlePools(): number {
+  const now = Date.now();
+  let evicted = 0;
+  // Drop any pool idle longer than POOL_IDLE_TTL_MS first (cheap pass).
+  for (const [accountId, pool] of pools) {
+    if (now - pool.lastTouchedAt > POOL_IDLE_TTL_MS) {
+      pools.delete(accountId);
+      evicted++;
+    }
+  }
+  // If still over MAX_POOLS, evict LRU (oldest lastTouchedAt) until under.
+  if (pools.size > MAX_POOLS) {
+    const sorted = [...pools.entries()].sort((a, b) => a[1].lastTouchedAt - b[1].lastTouchedAt);
+    const overflow = pools.size - MAX_POOLS;
+    for (let i = 0; i < overflow; i++) {
+      pools.delete(sorted[i][0]);
+      evicted++;
+    }
+  }
+  if (evicted > 0) {
+    console.log(`[ProxyPool] LRU_EVICT | evicted=${evicted} | remaining=${pools.size} | maxPools=${MAX_POOLS}`);
+  }
+  return evicted;
+}
+
 function getOrCreatePool(accountId: string): AccountPool {
   let pool = pools.get(accountId);
   if (!pool) {
-    pool = { sessions: new Map(), telemetry: [], stickyBindings: new Map() };
+    if (pools.size >= MAX_POOLS) evictIdlePools();
+    pool = { sessions: new Map(), telemetry: [], stickyBindings: new Map(), lastTouchedAt: Date.now() };
     pools.set(accountId, pool);
+  } else {
+    // LRU touch — move-to-end for recency.
+    pool.lastTouchedAt = Date.now();
+    pools.delete(accountId);
+    pools.set(accountId, pool);
+  }
+  // Per-pool sticky-bindings bound (FIFO trim).
+  if (pool.stickyBindings.size > MAX_STICKY_BINDINGS) {
+    const overflow = pool.stickyBindings.size - MAX_STICKY_BINDINGS;
+    const keys = [...pool.stickyBindings.keys()].slice(0, overflow);
+    for (const k of keys) pool.stickyBindings.delete(k);
+  }
+  // Per-pool session bound: drop oldest by createdAt above MAX_SESSIONS_PER_POOL.
+  if (pool.sessions.size > MAX_SESSIONS_PER_POOL) {
+    const sorted = [...pool.sessions.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
+    const overflow = pool.sessions.size - MAX_SESSIONS_PER_POOL;
+    for (let i = 0; i < overflow; i++) pool.sessions.delete(sorted[i][0]);
   }
   return pool;
 }

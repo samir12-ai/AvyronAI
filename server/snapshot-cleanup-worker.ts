@@ -94,6 +94,50 @@ async function reapStaleInFlightJobs(): Promise<number> {
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 let initialTimeout: ReturnType<typeof setTimeout> | null = null;
 
+// Seal #11 / Task #29 / F6.5 — batched DELETE helper.
+// Pre-fix: every purge fired a single `DELETE … WHERE id IN (... thousands ...)`
+// which held an exclusive lock on the table for the full statement and
+// could explode the WAL on a busy DB. Now we chunk to 1000 ids/statement
+// with a 50ms sleep between batches so other writers get a chance.
+const DELETE_BATCH_SIZE = 1000;
+const DELETE_BATCH_SLEEP_MS = 50;
+async function batchedDeleteByIds(table: any, ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  let total = 0;
+  for (let i = 0; i < ids.length; i += DELETE_BATCH_SIZE) {
+    if (isShuttingDown) {
+      console.log(`[SnapshotCleanup] Shutdown mid-batch — stopping after ${total} deletes`);
+      return total;
+    }
+    const chunk = ids.slice(i, i + DELETE_BATCH_SIZE);
+    await db.delete(table).where(inArray(table.id, chunk));
+    total += chunk.length;
+    if (i + DELETE_BATCH_SIZE < ids.length) {
+      await new Promise((r) => setTimeout(r, DELETE_BATCH_SLEEP_MS));
+    }
+  }
+  return total;
+}
+
+// Seal #11 / Task #29 / F6.11 — graceful-shutdown gating.
+// Pre-fix: SIGTERM cleared the timers but a tick already in-flight kept
+// running (and writing) for the full cleanup duration; the process exited
+// while DELETEs were mid-statement. Now `isShuttingDown` short-circuits at
+// the top of every cycle and inside batchedDeleteByIds, and stop() awaits
+// the in-flight cycle.
+let isShuttingDown = false;
+let cleanupRunningPromise: Promise<void> | null = null;
+let signalHandlersInstalled = false;
+
+// Seal #11 / Task #29 / F6.8 — orphan grace window.
+// Pre-fix: any snapshot whose campaignId no longer appeared in
+// `campaign_selections` was eligible for immediate deletion on the next
+// cleanup cycle. A user simply switching campaigns would lose all snapshot
+// history for the deselected one within 6 hours. Now we require the
+// snapshot to be at least ORPHAN_GRACE_DAYS old before its missing
+// campaign reference is treated as a hard orphan.
+const ORPHAN_GRACE_DAYS = 7;
+
 interface SnapshotTableConfig {
   name: string;
   table: any;
@@ -247,8 +291,8 @@ async function purgeExpiredSnapshots(protectedIds: Set<string>, inFlightJobIds: 
       }
 
       if (toDelete.length > 0) {
-        await db.delete(config.table).where(inArray(config.table.id, toDelete));
-        results.push({ table: config.name, deleted: toDelete.length });
+        const deleted = await batchedDeleteByIds(config.table, toDelete);
+        results.push({ table: config.name, deleted });
       }
       console.log(`[SnapshotCleanup] COLD_STORAGE_PURGE | ${config.name} | deleted=${toDelete.length} | nonCompleteCutoff=${nonCompleteCutoff.toISOString()} | completeCutoff=${completeCutoff.toISOString()} | protectedSkipped=${candidates.length - toDelete.length - inFlightSkipped} | inFlightSkipped=${inFlightSkipped}`);
     } catch (err: any) {
@@ -298,9 +342,9 @@ async function enforcePerCampaignCap(protectedIds: Set<string>, inFlightJobIds: 
           .map((r: any) => r.id);
 
         if (filteredIds.length > 0) {
-          await db.delete(config.table).where(inArray(config.table.id, filteredIds));
-          results.push({ table: config.name, campaign: campaignId, deleted: filteredIds.length });
-          console.log(`[SnapshotCleanup] CAP_ENFORCE | ${config.name} | campaign=${campaignId} | deleted=${filteredIds.length} | was=${count} | cap=${MAX_SNAPSHOTS_PER_CAMPAIGN} | inFlightSkipped=${toDelete.length - filteredIds.length}`);
+          const deleted = await batchedDeleteByIds(config.table, filteredIds);
+          results.push({ table: config.name, campaign: campaignId, deleted });
+          console.log(`[SnapshotCleanup] CAP_ENFORCE | ${config.name} | campaign=${campaignId} | deleted=${deleted} | was=${count} | cap=${MAX_SNAPSHOTS_PER_CAMPAIGN} | inFlightSkipped=${toDelete.length - filteredIds.length}`);
         }
       }
     } catch (err: any) {
@@ -327,23 +371,33 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>, inFlightJobIds:
       return results;
     }
 
+    // Seal #11 / Task #29 / F6.8 — orphan grace cutoff. Snapshots younger
+    // than this are PROTECTED from orphan-driven deletion: they may have
+    // been written by a campaign the user has just switched away from, or
+    // by an in-flight migration. Only snapshots older than the grace
+    // window get reaped on the orphan path.
+    const orphanGraceCutoff = new Date(Date.now() - ORPHAN_GRACE_DAYS * 24 * 60 * 60 * 1000);
     for (const config of campaignScopedTables) {
       try {
+        const tsCol = getTimestampCol(config);
         const hasJobId = config.table.jobId !== undefined;
         // also pull jobId so orphan purge
         // doesn't rip a snapshot out from under an in-flight run that may
-        // be about to consume it.
+        // be about to consume it. Now also pulls the snapshot timestamp
+        // so we can apply the orphan-grace window.
         const orphaned = await db
           .select({
             id: config.table.id,
             campaignId: config.table.campaignId,
             jobId: hasJobId ? config.table.jobId : sql<string | null>`NULL`,
+            ts: tsCol,
           })
           .from(config.table)
           .where(notInArray(config.table.campaignId, activeCampaignIds));
 
         const toDelete: string[] = [];
         let inFlightSkipped = 0;
+        let graceSkipped = 0;
         for (const row of orphaned) {
           const compositeKey = `${config.name}:${row.id}`;
           if (protectedIds.has(compositeKey)) continue;
@@ -352,13 +406,20 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>, inFlightJobIds:
             inFlightSkipped++;
             continue;
           }
+          const rowTs = row.ts ? new Date(row.ts) : new Date();
+          if (rowTs >= orphanGraceCutoff) {
+            graceSkipped++;
+            continue;
+          }
           toDelete.push(row.id);
         }
 
         if (toDelete.length > 0) {
-          await db.delete(config.table).where(inArray(config.table.id, toDelete));
-          results.push({ table: config.name, deleted: toDelete.length });
-          console.log(`[SnapshotCleanup] ORPHAN_PURGE | ${config.name} | deleted=${toDelete.length} | reason=campaign_not_found | inFlightSkipped=${inFlightSkipped}`);
+          const deleted = await batchedDeleteByIds(config.table, toDelete);
+          results.push({ table: config.name, deleted });
+          console.log(`[SnapshotCleanup] ORPHAN_PURGE | ${config.name} | deleted=${deleted} | reason=campaign_not_found | inFlightSkipped=${inFlightSkipped} | graceSkipped=${graceSkipped} | graceDays=${ORPHAN_GRACE_DAYS}`);
+        } else if (graceSkipped > 0 || inFlightSkipped > 0) {
+          console.log(`[SnapshotCleanup] ORPHAN_PURGE | ${config.name} | deleted=0 | inFlightSkipped=${inFlightSkipped} | graceSkipped=${graceSkipped}`);
         }
       } catch (err: any) {
         console.error(`[SnapshotCleanup] ORPHAN_PURGE_ERROR | ${config.name} | ${err.message}`);
@@ -372,10 +433,37 @@ async function purgeOrphanedSnapshots(protectedIds: Set<string>, inFlightJobIds:
 }
 
 async function runSnapshotCleanup(): Promise<void> {
+  if (isShuttingDown) {
+    console.log("[SnapshotCleanup] Shutdown in progress — skipping cycle");
+    return;
+  }
+  if (cleanupRunningPromise) {
+    console.log("[SnapshotCleanup] Cycle already running — skipping");
+    return cleanupRunningPromise;
+  }
+  cleanupRunningPromise = _runSnapshotCleanupBody();
+  try {
+    await cleanupRunningPromise;
+  } finally {
+    cleanupRunningPromise = null;
+  }
+}
+
+async function _runSnapshotCleanupBody(): Promise<void> {
   const startTime = Date.now();
   console.log(`[SnapshotCleanup] Starting scheduled cleanup cycle | mode=DATA_ARCHIVING | completeRetention=${COMPLETE_RETENTION_DAYS}d | nonCompleteRetention=${COLD_STORAGE_DAYS}d`);
 
   try {
+    // Seal #11 / Task #29 / F6.1 — opportunistically sweep expired
+    // ai_token_budget rows so the table can't grow unbounded.
+    try {
+      const { purgeExpiredTokenBudgets } = await import("./market-intelligence-v3/token-budget-store");
+      const tbPurged = await purgeExpiredTokenBudgets();
+      if (tbPurged > 0) console.log(`[SnapshotCleanup] AI_TOKEN_BUDGET_PURGE | deleted=${tbPurged}`);
+    } catch (err: any) {
+      console.error(`[SnapshotCleanup] AI_TOKEN_BUDGET_PURGE_ERROR | ${err?.message || err}`);
+    }
+
     const protectedIds = await getLatestSnapshotIds();
     console.log(`[SnapshotCleanup] ACTIVE_SESSION_PROTECTION | protectedSnapshots=${protectedIds.size}`);
 
@@ -426,7 +514,9 @@ async function runSnapshotCleanup(): Promise<void> {
 }
 
 export function startSnapshotCleanupWorker(): void {
-  console.log(`[SnapshotCleanup] Starting worker | mode=DATA_ARCHIVING | interval=${CLEANUP_INTERVAL_MS / 3600000}h | completeRetention=${COMPLETE_RETENTION_DAYS}d | nonCompleteRetention=${COLD_STORAGE_DAYS}d | cap=${MAX_SNAPSHOTS_PER_CAMPAIGN}/campaign | initialDelay=${INITIAL_DELAY_MS / 60000}min`);
+  console.log(`[SnapshotCleanup] Starting worker | mode=DATA_ARCHIVING | interval=${CLEANUP_INTERVAL_MS / 3600000}h | completeRetention=${COMPLETE_RETENTION_DAYS}d | nonCompleteRetention=${COLD_STORAGE_DAYS}d | cap=${MAX_SNAPSHOTS_PER_CAMPAIGN}/campaign | initialDelay=${INITIAL_DELAY_MS / 60000}min | orphanGrace=${ORPHAN_GRACE_DAYS}d`);
+  isShuttingDown = false;
+  installSnapshotCleanupShutdownHandlers();
 
   initialTimeout = setTimeout(() => {
     initialTimeout = null;
@@ -451,7 +541,8 @@ export function startSnapshotCleanupWorker(): void {
   }, CLEANUP_INTERVAL_MS);
 }
 
-export function stopSnapshotCleanupWorker(): void {
+export async function stopSnapshotCleanupWorker(): Promise<void> {
+  isShuttingDown = true;
   if (initialTimeout) {
     clearTimeout(initialTimeout);
     initialTimeout = null;
@@ -460,5 +551,31 @@ export function stopSnapshotCleanupWorker(): void {
     clearInterval(cleanupTimer);
     cleanupTimer = null;
   }
+  // Seal #11 / Task #29 / F6.11 — await in-flight cycle so we don't kill
+  // the process mid-DELETE.
+  if (cleanupRunningPromise) {
+    console.log("[SnapshotCleanup] Awaiting in-flight cycle before exit…");
+    try {
+      await cleanupRunningPromise;
+    } catch (err: any) {
+      console.error("[SnapshotCleanup] In-flight cycle errored during shutdown:", err?.message || err);
+    }
+  }
   console.log("[SnapshotCleanup] Worker stopped");
+}
+
+// Seal #11 / Task #29 / F6.11 — install SIGTERM/SIGINT handlers so the
+// snapshot-cleanup-worker mirrors the autonomous-worker shutdown contract.
+function installSnapshotCleanupShutdownHandlers(): void {
+  if (signalHandlersInstalled) return;
+  signalHandlersInstalled = true;
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (isShuttingDown) return;
+    console.log(`[SnapshotCleanup] Received ${signal} — initiating graceful shutdown.`);
+    stopSnapshotCleanupWorker().catch((err: any) => {
+      console.error(`[SnapshotCleanup] stopSnapshotCleanupWorker errored on ${signal}:`, err?.message || err);
+    });
+  };
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
 }

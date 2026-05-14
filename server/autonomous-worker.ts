@@ -1181,10 +1181,52 @@ function classifyInsightTypeFromState(
 /** Number of accounts processed in parallel per worker tick. */
 const WORKER_CONCURRENCY = 3;
 
+// Seal #11 / Task #29 / F6.4 — Postgres advisory lock + tick jitter.
+// Pre-fix: every replica's setInterval fired its own workerTick on the
+// same 5-min boundary. Two replicas processing the same accountId could
+// race for the same lock row and waste cycles. Now: an advisory lock keyed
+// on `hashtext('worker_tick_autonomous')` ensures only ONE replica runs a
+// tick at a time; ±30s jitter on the next tick decorrelates timers.
+const WORKER_TICK_LOCK_KEY = 0x4F574EAF; // stable int — `hashtext('worker_tick_autonomous')` once-derived
+const WORKER_TICK_JITTER_MS = 30_000;
+let workerJitterTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function tryAcquireWorkerLock(): Promise<boolean> {
+  try {
+    const r: any = await db.execute(sql`SELECT pg_try_advisory_lock(${WORKER_TICK_LOCK_KEY}) AS got`);
+    const got = (r as any).rows?.[0]?.got ?? (Array.isArray(r) ? r[0]?.got : false);
+    return got === true;
+  } catch (err: any) {
+    console.error("[Worker] Advisory-lock acquire failed:", err?.message || err);
+    return false;
+  }
+}
+
+async function releaseWorkerLock(): Promise<void> {
+  try {
+    await db.execute(sql`SELECT pg_advisory_unlock(${WORKER_TICK_LOCK_KEY})`);
+  } catch (err: any) {
+    console.error("[Worker] Advisory-lock release failed:", err?.message || err);
+  }
+}
+
 async function workerTick() {
   // Per-tick traceId so worker logs/Sentry carry the same observability
   // contract as HTTP requests.
-  return traceContext.run({ traceId: `worker-autonomous-${randomUUID()}` }, () => workerTickBody());
+  return traceContext.run({ traceId: `worker-autonomous-${randomUUID()}` }, async () => {
+    const acquired = await tryAcquireWorkerLock();
+    if (!acquired) {
+      console.log("[Worker] Tick skipped — another replica holds the advisory lock");
+      const { recordWorkerTick } = await import("./observability/otel");
+      recordWorkerTick("autonomous", "skipped");
+      return;
+    }
+    try {
+      await workerTickBody();
+    } finally {
+      await releaseWorkerLock();
+    }
+  });
 }
 
 async function workerTickBody() {
@@ -1259,15 +1301,20 @@ let ciTimer: ReturnType<typeof setTimeout> | null = null;
 function getNextCIIntervalMs(): number {
   return CI_MIN_INTERVAL_MS + Math.random() * (CI_MAX_INTERVAL_MS - CI_MIN_INTERVAL_MS);
 }
-let sharedPoolRunning = false;
+// Seal #11 / Task #29 / F6.10 — Promise-based concurrency gate.
+// Pre-fix: `sharedPoolRunning: boolean` flipped synchronously, but a SIGTERM
+// arriving mid-run had no way to await the in-flight execution — the timer
+// was cleared and the process exited while the long-running refresh kept
+// writing DB rows. Now `sharedPoolRunningPromise` holds the live Promise
+// so `stopAutonomousWorker` (and the SIGTERM handler) can `await` it.
+let sharedPoolRunningPromise: Promise<void> | null = null;
 
-async function runSharedPoolRefresh() {
-  if (sharedPoolRunning) {
+async function runSharedPoolRefresh(): Promise<void> {
+  if (sharedPoolRunningPromise) {
     console.log("[CI Worker] Shared pool refresh already running — skipping this tick");
-    return;
+    return sharedPoolRunningPromise;
   }
-  sharedPoolRunning = true;
-
+  sharedPoolRunningPromise = (async () => {
   try {
     const { getStaleSharedProfiles, fanOutSharedReuse } = await import("./competitive-intelligence/shared-profile-store");
     const { fetchCompetitorData } = await import("./competitive-intelligence/data-acquisition");
@@ -1422,9 +1469,17 @@ async function runSharedPoolRefresh() {
     }
   } catch (error) {
     console.error("[CI Worker] Shared pool refresh error:", error);
-  } finally {
-    sharedPoolRunning = false;
   }
+  })();
+  try {
+    await sharedPoolRunningPromise;
+  } finally {
+    sharedPoolRunningPromise = null;
+  }
+}
+
+export function isSharedPoolRefreshRunning(): boolean {
+  return sharedPoolRunningPromise !== null;
 }
 
 /**
@@ -1447,7 +1502,19 @@ export function startAutonomousWorker() {
   installShutdownHandlers();
   ensureDefaultConfig().catch(err => console.error("[Worker] Failed to seed defaults:", err));
   workerTick();
-  workerTimer = setInterval(workerTick, WORKER_INTERVAL_MS);
+  // Seal #11 / Task #29 / F6.4 — jittered self-rescheduling tick.
+  // Replaces fixed setInterval so two replicas booted within seconds of
+  // each other don't tick on the exact same wall-clock boundary forever.
+  const scheduleNextTick = () => {
+    if (isShuttingDown) return;
+    const jitter = (Math.random() * 2 - 1) * WORKER_TICK_JITTER_MS; // ±30s
+    const delay = WORKER_INTERVAL_MS + jitter;
+    workerJitterTimer = setTimeout(async () => {
+      await workerTick();
+      scheduleNextTick();
+    }, delay);
+  };
+  scheduleNextTick();
 
   setTimeout(async () => {
     await runSharedPoolRefresh();
@@ -1456,16 +1523,30 @@ export function startAutonomousWorker() {
   console.log("[CI Worker] Shared pool refresh worker started (24–48h randomized interval, initial run in 60s)");
 }
 
-export function stopAutonomousWorker() {
+export async function stopAutonomousWorker(): Promise<void> {
   if (workerTimer) {
     clearInterval(workerTimer);
     workerTimer = null;
     console.log("[Worker] Autonomous worker stopped");
   }
+  if (workerJitterTimer) {
+    clearTimeout(workerJitterTimer);
+    workerJitterTimer = null;
+  }
   if (ciTimer) {
     clearTimeout(ciTimer);
     ciTimer = null;
     console.log("[CI Worker] Competitive intelligence checker stopped");
+  }
+  // Seal #11 / Task #29 / F6.10 — await any in-flight shared-pool refresh
+  // so we don't tear down the process while it's mid-DB-write.
+  if (sharedPoolRunningPromise) {
+    console.log("[CI Worker] Awaiting in-flight shared pool refresh before exit…");
+    try {
+      await sharedPoolRunningPromise;
+    } catch (err: any) {
+      console.error("[CI Worker] In-flight refresh errored during shutdown:", err?.message || err);
+    }
   }
 }
 
@@ -1495,11 +1576,12 @@ export function installShutdownHandlers() {
     if (isShuttingDown) return;
     isShuttingDown = true;
     console.log(`[Worker] Received ${signal} — initiating graceful shutdown.`);
-    try {
-      stopAutonomousWorker();
-    } catch (err: any) {
+    // Fire-and-await: stopAutonomousWorker is now async (awaits in-flight
+    // shared-pool refresh per F6.10). Must not throw out of the signal
+    // handler.
+    stopAutonomousWorker().catch((err: any) => {
       console.error(`[Worker] Error during stopAutonomousWorker on ${signal}:`, err?.message || err);
-    }
+    });
     // Give in-flight ticks ~5s to finish their finally-block work
     // (releaseLock, audit writes). Replit's default kill window is 15s so
     // we stay well inside it.
