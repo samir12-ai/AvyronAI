@@ -4,7 +4,7 @@ import type { CollectorEntityType, CollectorLane } from "../collector/envelope";
 // of run.ts). Bundle author added the field to the writer but missed the type.
 import type { CompetitorInterpretation } from "../pipeline/lanes/competitor/interpret";
 
-export type BossTrigger = "manual" | "approval";
+export type BossTrigger = "manual" | "approval" | "scheduled";
 
 export type BossLaneScope = "user" | "competitor" | "bridge";
 

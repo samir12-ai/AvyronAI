@@ -146,6 +146,32 @@ Canonical field names introduced/hardened in H1–H7:
 - `integrityVerdict` ∈ {PASS|PARTIAL|FAIL} — F2 integrity verdict (canonical replacement for `overallStatus`)
 - `executionStatus` ∈ {COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT|BLOCKED_BY_INTEGRITY} — F1 execution status on agent stream + full-report (canonical replacement for `overallStatus`)
 
+## Operational Continuity Layer (Seal #13 / Track #1, May 2026)
+
+**Doctrine: operational silence is now considered a system failure category.** Triggered by a May 2026 audit that found the weekly User Agent evaluation pipeline silently produced zero output for ~4 weeks because no scheduler invoked `runBoss()` — no errors, no alerts, just a quiet absence of work.
+
+**Track #1 implementation (this seal):**
+
+- **Hourly continuity scheduler** (`server/continuity/scheduler.ts`). Self-rescheduling `setTimeout` with ±60s jitter (mirrors `autonomous-worker.ts` F6.4 pattern). First tick 60s post-listen. Disabled by `CONTINUITY_SCHEDULER_DISABLED=true`. Test override via `CONTINUITY_TICK_INTERVAL_MS`.
+- **Idempotent invocation.** Each tick lists every (account, campaign) with the latest APPROVED `strategic_plans` row, computes the expected `window_index` from the resolved anchor, and invokes `runBoss({ trigger: "scheduled" })` ONLY when the most-recent `boss_runs.started_at` is < the current window's `windowStart`. Wrapped in `withCampaignLock` so a manual API trigger racing the scheduler resolves to `BossRunInFlightError` → counted as `skipped_in_flight`. Single in-flight tick guard via in-process promise prevents overlapping ticks.
+- **Long-gap re-anchor policy.** When (gap from anchor > 1 `WINDOW_MS`) AND (zero `pipeline_eval_windows` rows for the active plan), the scheduler writes a `plan_anchor_resets` row with `reanchored_at = now`, `reason = "long_gap_no_windows_opened"`, `source = "continuity_scheduler"`. `evaluateWindowState()` in `server/pipeline/eval-windows.ts` reads `plan_anchor_resets` and treats the most-recent `reanchoredAt` strictly NEWER than the approval-derived anchor as the effective anchor (pushes `"anchor_reset_applied"` reason). **The no-backfill doctrine is preserved**: missed windows are NOT invented, the cycle simply restarts at `window_index=0` going forward. Re-anchor is gated to plans with zero opened windows so cluster-comparison baselines on plans with history are never corrupted.
+- **Missed-window detection.** Per-campaign `expected_window_index − max(pipeline_eval_windows.window_index)`. Counted on `continuity_missed_windows_total` and recorded on the `continuity_ticks.notes` row. Re-anchored campaigns reset to 0 going forward but the historical count remains visible on the tick row.
+- **Dead-cycle detection.** Campaign with no `boss_runs` for `DEAD_CYCLE_THRESHOLD_MS` (8 days) → `continuity_dead_cycles_total` increment + `CONTINUITY_DEAD_CYCLE` audit event with `sinceDays`, `lastBossRunAt`, `anchorSource`, `expectedWindowIndex` payload.
+- **Persistence.** Every tick writes one `continuity_ticks` row (campaigns scanned, runs invoked, runs skipped/failed/reanchored, missed windows, dead cycles, per-campaign decisions JSON). A missing row in this table for >2× `intervalMs` is the operator-visible signal that the scheduler itself has stalled (alarm bell deferred to Track #2 / Seal #14).
+- **Observability.** 11 Prometheus counters/gauges in `server/continuity/metrics.ts` concatenated to the existing `/metrics` exposition. New unauthenticated `GET /healthz/continuity` heartbeat probe returns the most-recent `TickReport` (operational counters only, no user data).
+- **Audit event types added** to `server/audit.ts`: `CONTINUITY_REANCHOR`, `CONTINUITY_DEAD_CYCLE`, `CONTINUITY_MISSED_WINDOWS`.
+- **Schema migration 021** (`plan_anchor_resets`, `continuity_ticks` tables). `REQUIRED_SCHEMA_VERSION` bumped 20 → 21.
+- **`BossTrigger` extended** to include `"scheduled"` (alongside `"manual" | "approval"`).
+
+**Operator runbook (Track #1 surface):**
+- `GET /healthz/continuity` returns `{ schedulerUp, lastTickAt, lastTickReport, intervalMs }`. `lastTickAt` should be within `intervalMs * 1.2` at all times.
+- `continuity_scheduler_last_tick_epoch_seconds` gauge — Prometheus alert if `(time() - value) > 7200`.
+- `continuity_dead_cycles_total > 0` indicates one or more active campaigns have stopped evaluating.
+- `continuity_missed_windows_total` accumulates the historical depth of silence even after re-anchor.
+- A re-anchor event is normal AFTER a long idle period; if it appears on a campaign that was actively running last week, that's a production incident — investigate `plan_anchor_resets.reason` and the surrounding boss_runs.
+
+**Tracks #2–#6 design** is locked in `.local/docs/seal-13-to-17-plan.md` and queued as separate project tasks: Track #2 (continuity supervisor + 10-chain registry + multi-replica advisory lock), Track #3 (silent-degradation hardening sweep, 20 categories), Track #4 (observability expansion + dashboards), Track #5 (18-scenario end-to-end lifecycle test suite), Track #6 (8 post-implementation audits).
+
 ## Required Replit Secrets (Seal #7 / F10.5)
 
 The env validator (`server/env-validator.ts`) refuses to boot if any of the following is missing. Set these via Replit Secrets — never via `.replit` `[userenv.shared]` (history-leak risk; F9.7).

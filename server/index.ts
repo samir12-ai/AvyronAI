@@ -12,6 +12,12 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { startAutonomousWorker, stopAutonomousWorker } from "./autonomous-worker";
+import {
+  startContinuityScheduler,
+  stopContinuityScheduler,
+  getContinuityHealth,
+  renderContinuityMetrics,
+} from "./continuity";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { runAllHealthChecks } from "./meta-token-manager";
@@ -409,6 +415,48 @@ function setupErrorHandler(app: express.Application) {
     res.status(200).json({ ok: true, ts: new Date().toISOString() });
   });
 
+  // Seal #13 / Track #1 — continuity scheduler heartbeat probe.
+  // Public surface returns AGGREGATE COUNTERS ONLY — no per-tenant
+  // identifiers (accountId/campaignId/planId/per-campaign decisions).
+  // This satisfies external uptime probes / load balancers without
+  // leaking tenant operational data. The full TickReport (including
+  // per-campaign decisions) is served only when the request carries the
+  // METRICS_ADMIN_TOKEN, mirroring the /metrics gating model.
+  app.get("/healthz/continuity", (req: Request, res: Response) => {
+    const health = getContinuityHealth();
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    let isAdmin = false;
+    if (expected && provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch {
+        isAdmin = false;
+      }
+    }
+    if (isAdmin) {
+      return res.status(200).json(health);
+    }
+    // Strip per-tenant fields. Keep timestamps + counters + scheduler
+    // up/down state so unauthenticated probes can still alarm on
+    // staleness.
+    const { lastTickReport, ...rest } = health;
+    const safeReport = lastTickReport
+      ? {
+          tickAt: lastTickReport.tickAt,
+          durationMs: lastTickReport.durationMs,
+          campaignsScanned: lastTickReport.campaignsScanned,
+          runsInvoked: lastTickReport.runsInvoked,
+          runsSkippedIdempotent: lastTickReport.runsSkippedIdempotent,
+          runsFailed: lastTickReport.runsFailed,
+          reanchorsWritten: lastTickReport.reanchorsWritten,
+          missedWindowsDetected: lastTickReport.missedWindowsDetected,
+          deadCyclesDetected: lastTickReport.deadCyclesDetected,
+        }
+      : null;
+    return res.status(200).json({ ...rest, lastTickReport: safeReport });
+  });
+
   // secret, NOT by the JWT-based admin account check used elsewhere. Two
   // reasons: (1) Prometheus scrapers/uptime probes are stateless processes
   // that cannot mint JWTs; (2) the metrics surface is operational
@@ -436,7 +484,9 @@ function setupErrorHandler(app: express.Application) {
       return res.status(401).type("text/plain").send("unauthorized\n");
     }
     res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
-    return res.status(200).send(renderMetrics());
+    // Seal #13 / Track #1 — continuity metrics are concatenated to the
+    // primary registry's exposition. Same Prometheus 0.0.4 text format.
+    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics());
   });
 
   const PUBLIC_PATH_PREFIXES = [
@@ -628,6 +678,11 @@ function setupErrorHandler(app: express.Application) {
       startAutonomousWorker();
       startPublishWorker();
       startSnapshotCleanupWorker();
+      // Seal #13 / Track #1 — operational continuity heartbeat. Hourly
+      // tick + idempotent runBoss invocation per campaign. First tick
+      // 60s post-listen so other workers are up first. Disabled by
+      // CONTINUITY_SCHEDULER_DISABLED=true (used by tests).
+      startContinuityScheduler();
 
       invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
 
@@ -739,6 +794,7 @@ function setupErrorHandler(app: express.Application) {
     stopAutonomousWorker();
     await stopPublishWorker();
     stopSnapshotCleanupWorker();
+    await stopContinuityScheduler();
     if (userScrapeTimer) { clearInterval(userScrapeTimer); userScrapeTimer = null; }
     if (competitorFetchTimer) { clearInterval(competitorFetchTimer); competitorFetchTimer = null; }
     server.close(() => {

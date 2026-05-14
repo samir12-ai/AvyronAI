@@ -1349,6 +1349,47 @@ export const inFlightJobs = pgTable("in_flight_jobs", {
   expectedCompleteBy: timestamp("expected_complete_by"),
 });
 
+// Seal #13 / Track #1 — Operational continuity layer.
+//
+// plan_anchor_resets: explicit re-anchor records consulted by
+// evaluateWindowState() in addition to plan_approvals.decided_at.
+// The scheduler writes a row here when it detects a long gap
+// (>1 window since the most-recent anchor with no eval windows
+// produced) so that the next evaluation cycle starts cleanly at
+// window_index=0 instead of jumping to index N with N orphan
+// windows. Append-only.
+export const planAnchorResets = pgTable("plan_anchor_resets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  planId: varchar("plan_id").notNull(),
+  reanchoredAt: timestamp("reanchored_at").notNull(),
+  reason: text("reason").notNull(),
+  source: text("source").notNull().default("continuity_scheduler"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type PlanAnchorReset = typeof planAnchorResets.$inferSelect;
+export type InsertPlanAnchorReset = typeof planAnchorResets.$inferInsert;
+
+// continuity_ticks: one row per continuity scheduler tick. Drives
+// the /healthz/continuity endpoint and gives ops a paper trail
+// explaining WHY no boss_run was produced for a given window.
+export const continuityTicks = pgTable("continuity_ticks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tickAt: timestamp("tick_at").notNull().defaultNow(),
+  durationMs: integer("duration_ms").notNull().default(0),
+  campaignsScanned: integer("campaigns_scanned").notNull().default(0),
+  runsInvoked: integer("runs_invoked").notNull().default(0),
+  runsSkippedIdempotent: integer("runs_skipped_idempotent").notNull().default(0),
+  runsFailed: integer("runs_failed").notNull().default(0),
+  reanchorsWritten: integer("reanchors_written").notNull().default(0),
+  missedWindowsDetected: integer("missed_windows_detected").notNull().default(0),
+  deadCyclesDetected: integer("dead_cycles_detected").notNull().default(0),
+  notes: jsonb("notes").notNull().default(sql`'[]'::jsonb`),
+});
+export type ContinuityTick = typeof continuityTicks.$inferSelect;
+export type InsertContinuityTick = typeof continuityTicks.$inferInsert;
+
 // F6.8 — orphan-observation tracking. (table_name, snapshot_id) PK with
 // first_observed_at gates orphan deletion to ORPHAN_GRACE_DAYS after the
 // first time this worker saw the snapshot in an orphaned state.

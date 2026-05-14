@@ -17,6 +17,7 @@ import {
   pipelineEvalWindows,
   strategicPlans,
   planApprovals,
+  planAnchorResets,
   type PipelineEvalWindow,
 } from "@shared/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -95,6 +96,25 @@ export async function evaluateWindowState(
     anchorFallbackUsed = true;
     anchorAt = (plan.updatedAt ?? plan.createdAt ?? now) as Date;
     reasons.push("anchor_fallback_used");
+  }
+
+  // Seal #13 / Track #1 — long-gap re-anchor.
+  // The continuity scheduler writes plan_anchor_resets rows when it
+  // detects a long gap (>1 window) since the last activity with no
+  // eval windows produced for the active plan. We treat the most
+  // recent reanchored_at strictly NEWER than the approval-derived
+  // anchor as the effective anchor going forward. We do NOT mix this
+  // with anchorFallbackUsed: a re-anchor is an explicit operator-
+  // (or scheduler-)driven event, not a fallback.
+  const reanchorRows = await db
+    .select()
+    .from(planAnchorResets)
+    .where(eq(planAnchorResets.planId, plan.id))
+    .orderBy(desc(planAnchorResets.reanchoredAt))
+    .limit(1);
+  if (reanchorRows.length > 0 && reanchorRows[0].reanchoredAt > anchorAt) {
+    anchorAt = reanchorRows[0].reanchoredAt as Date;
+    reasons.push("anchor_reset_applied");
   }
 
   // 3) Compute window_index from anchor — rolling 7-day cycles, no calendar.
