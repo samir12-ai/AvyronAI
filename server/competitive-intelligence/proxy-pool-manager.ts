@@ -43,10 +43,18 @@ export interface ProxyTelemetryEntry {
   success: boolean;
 }
 
+// Seal #11 / Task #29 / F6.2 (architect pass-3): sticky bindings carry an
+// explicit per-entry `touchedAt` so we can enforce a 24h TTL on EACH
+// binding independently — pool-level LRU alone could keep a stale
+// binding alive indefinitely if the pool itself stays warm.
+interface StickyBinding {
+  sessionId: string;
+  touchedAt: number;
+}
 interface AccountPool {
   sessions: Map<string, ProxySession>;
   telemetry: ProxyTelemetryEntry[];
-  stickyBindings: Map<string, string>;
+  stickyBindings: Map<string, StickyBinding>;
   lastTouchedAt: number;
 }
 
@@ -63,6 +71,31 @@ const MAX_POOLS = parseInt(process.env.PROXY_MAX_POOLS || "10000", 10);
 const MAX_STICKY_BINDINGS = 500;
 const MAX_SESSIONS_PER_POOL = 100;
 const POOL_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
+// Per-binding TTL (architect pass-3 requirement) — must match the pool TTL
+// so a binding that has not been touched in 24h is reaped on the next
+// access regardless of whether the parent pool is hot.
+export const STICKY_BINDING_TTL_MS = parseInt(
+  process.env.PROXY_STICKY_BINDING_TTL_MS || String(24 * 60 * 60 * 1000),
+  10,
+);
+
+/**
+ * Drop sticky bindings whose touchedAt is older than STICKY_BINDING_TTL_MS.
+ * Exported for behavioral testing of the per-binding TTL contract.
+ */
+export function evictExpiredStickyBindings(
+  bindings: Map<string, { sessionId: string; touchedAt: number }>,
+  now: number = Date.now(),
+): number {
+  let evicted = 0;
+  for (const [k, v] of bindings) {
+    if (now - v.touchedAt > STICKY_BINDING_TTL_MS) {
+      bindings.delete(k);
+      evicted++;
+    }
+  }
+  return evicted;
+}
 
 export function getProxyConfig(): { host: string; port: string; username: string; password: string } | null {
   const host = process.env.BRIGHT_DATA_PROXY_HOST;
