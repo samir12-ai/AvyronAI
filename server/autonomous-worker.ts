@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, pool } from "./db";
 import {
   accountState,
   jobQueue,
@@ -1184,27 +1184,43 @@ const WORKER_CONCURRENCY = 3;
 // Seal #11 / Task #29 / F6.4 — Postgres advisory lock + tick jitter.
 // Pre-fix: every replica's setInterval fired its own workerTick on the
 // same 5-min boundary. Two replicas processing the same accountId could
-// race for the same lock row and waste cycles. Now: an advisory lock keyed
-// on `hashtext('worker_tick_autonomous')` ensures only ONE replica runs a
-// tick at a time; ±30s jitter on the next tick decorrelates timers.
+// race for the same lock row and waste cycles. Now: a SESSION-scoped
+// advisory lock keyed on `hashtext('worker_tick_autonomous')` ensures only
+// ONE replica runs a tick at a time; ±30s jitter on the next tick
+// decorrelates timers.
+//
+// IMPORTANT (architect-flagged correctness): pg_advisory_lock is
+// session-scoped, so acquire AND release MUST happen on the SAME pinned
+// PoolClient. The previous implementation called `db.execute(...)` twice
+// — once to acquire, once to release — which routed each statement
+// through a fresh checked-out client and silently failed to release the
+// lock from the original session. We now check out a single client for
+// the entire workerTick lifetime and explicitly release it (which also
+// drops any session-held locks) in finally.
 const WORKER_TICK_LOCK_KEY = 0x4F574EAF; // stable int — `hashtext('worker_tick_autonomous')` once-derived
 const WORKER_TICK_JITTER_MS = 30_000;
 let workerJitterTimer: ReturnType<typeof setTimeout> | null = null;
 
-async function tryAcquireWorkerLock(): Promise<boolean> {
+async function tryAcquireWorkerLockOn(client: import("pg").PoolClient): Promise<boolean> {
   try {
-    const r: any = await db.execute(sql`SELECT pg_try_advisory_lock(${WORKER_TICK_LOCK_KEY}) AS got`);
-    const got = (r as any).rows?.[0]?.got ?? (Array.isArray(r) ? r[0]?.got : false);
-    return got === true;
+    const r = await client.query<{ got: boolean }>(
+      `SELECT pg_try_advisory_lock(${WORKER_TICK_LOCK_KEY}) AS got`,
+    );
+    return r.rows[0]?.got === true;
   } catch (err: any) {
     console.error("[Worker] Advisory-lock acquire failed:", err?.message || err);
     return false;
   }
 }
 
-async function releaseWorkerLock(): Promise<void> {
+async function releaseWorkerLockOn(client: import("pg").PoolClient): Promise<void> {
   try {
-    await db.execute(sql`SELECT pg_advisory_unlock(${WORKER_TICK_LOCK_KEY})`);
+    const r = await client.query<{ released: boolean }>(
+      `SELECT pg_advisory_unlock(${WORKER_TICK_LOCK_KEY}) AS released`,
+    );
+    if (r.rows[0]?.released !== true) {
+      console.error("[Worker] Advisory-lock release returned false (lock not held by this session)");
+    }
   } catch (err: any) {
     console.error("[Worker] Advisory-lock release failed:", err?.message || err);
   }
@@ -1214,17 +1230,34 @@ async function workerTick() {
   // Per-tick traceId so worker logs/Sentry carry the same observability
   // contract as HTTP requests.
   return traceContext.run({ traceId: `worker-autonomous-${randomUUID()}` }, async () => {
-    const acquired = await tryAcquireWorkerLock();
-    if (!acquired) {
-      console.log("[Worker] Tick skipped — another replica holds the advisory lock");
-      const { recordWorkerTick } = await import("./observability/otel");
-      recordWorkerTick("autonomous", "skipped");
+    let client: import("pg").PoolClient | null = null;
+    try {
+      client = await pool.connect();
+    } catch (err: any) {
+      console.error("[Worker] Could not acquire pool client for advisory lock:", err?.message || err);
       return;
     }
     try {
-      await workerTickBody();
+      const acquired = await tryAcquireWorkerLockOn(client);
+      if (!acquired) {
+        console.log("[Worker] Tick skipped — another replica holds the advisory lock");
+        const { recordWorkerTick } = await import("./observability/otel");
+        recordWorkerTick("autonomous", "skipped");
+        return;
+      }
+      try {
+        await workerTickBody();
+      } finally {
+        await releaseWorkerLockOn(client);
+      }
     } finally {
-      await releaseWorkerLock();
+      // Releasing the client back to the pool ALSO drops any
+      // session-held advisory locks as a defense-in-depth, so even if
+      // releaseWorkerLockOn fails we cannot leak the lock past the next
+      // pool checkout cycle.
+      try { client.release(); } catch (e: any) {
+        console.error("[Worker] PoolClient release failed:", e?.message || e);
+      }
     }
   });
 }

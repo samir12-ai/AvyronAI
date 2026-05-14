@@ -189,7 +189,7 @@ async function publishToMeta(post: any, accessToken: string, pageId: string, acc
 
     if (platform === "facebook" || platform.includes("facebook")) {
       const start = Date.now();
-      const fbResponse = await fetch(
+      const fbResponse = await fetchMeta(
         `https://graph.facebook.com/v18.0/${pageId}/feed`,
         {
           method: "POST",
@@ -222,7 +222,7 @@ async function publishToMeta(post: any, accessToken: string, pageId: string, acc
     if (platform === "instagram" || platform.includes("instagram")) {
       if (post.mediaUri) {
         const start = Date.now();
-        const containerRes = await fetch(
+        const containerRes = await fetchMeta(
           `https://graph.facebook.com/v18.0/${pageId}/media`,
           {
             method: "POST",
@@ -239,7 +239,7 @@ async function publishToMeta(post: any, accessToken: string, pageId: string, acc
         if (containerData.id) {
           recordMetaApiCall(acctId, true, containerLatency);
           const pubStart = Date.now();
-          const publishRes = await fetch(
+          const publishRes = await fetchMeta(
             `https://graph.facebook.com/v18.0/${pageId}/media_publish`,
             {
               method: "POST",
@@ -585,7 +585,7 @@ async function fetchPostMetrics() {
         const serverTokens = await getServerSidePageToken(accountId);
         if (!serverTokens) continue;
 
-        const metricsRes = await fetch(
+        const metricsRes = await fetchMeta(
           `https://graph.facebook.com/v21.0/${post.metaPostId}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${serverTokens.token}`
         );
         const metricsData = await metricsRes.json();

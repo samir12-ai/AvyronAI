@@ -343,7 +343,35 @@ const MIN_COMMENTS_THRESHOLD = MI_THRESHOLDS.MIN_COMMENTS_SAMPLE;
 
 export { TARGET_POSTS_FAST, TARGET_POSTS_DEEP, MAX_COMMENT_POSTS_DEEP, MAX_COMMENTS_PER_POST_DEEP, CACHE_REUSE_WINDOW_MS };
 
-const activeFetches = new Map<string, Promise<FetchResult>>();
+// Seal #11 / Task #29 / F6.9 — bounded in-flight fetch tracking.
+// Pre-fix: every entry in `activeFetches` lived for the entire duration
+// of `_executeFetch`. If an upstream HTTP call hung indefinitely (proxy
+// stall, scraper deadlock, never-resolving promise), the entry never got
+// deleted — and every subsequent call for the same (account, competitor)
+// reused the dead promise forever. Now: each in-flight entry carries an
+// abortController + a 60s wall-clock watchdog that forces the entry to
+// be evicted from the map (and resolved with INSUFFICIENT_DATA) so the
+// next call can re-attempt with a fresh promise.
+const FETCH_WATCHDOG_TIMEOUT_MS = 60_000;
+interface ActiveFetch {
+  promise: Promise<FetchResult>;
+  abortController: AbortController;
+  startedAt: number;
+}
+const activeFetches = new Map<string, ActiveFetch>();
+
+export function cancelFetch(accountId: string, competitorId: string): boolean {
+  const lockKey = `${accountId}:${competitorId}`;
+  const entry = activeFetches.get(lockKey);
+  if (!entry) return false;
+  try { entry.abortController.abort(); } catch {}
+  activeFetches.delete(lockKey);
+  return true;
+}
+
+export function getActiveFetchCount(): number {
+  return activeFetches.size;
+}
 
 export interface FetchResult {
   competitorId: string;
@@ -378,15 +406,54 @@ export async function fetchCompetitorData(
   const lockKey = `${accountId}:${competitorId}`;
   const existing = activeFetches.get(lockKey);
   if (existing) {
-    console.log(`[DataAcq] Concurrent fetch detected for ${lockKey}, reusing in-flight`);
-    return existing;
+    // F6.9 watchdog — if the in-flight entry has been alive longer than
+    // FETCH_WATCHDOG_TIMEOUT_MS, treat it as dead, abort, evict, and
+    // start a fresh fetch. This is the safety net for the case where
+    // _executeFetch's inner await never resolves.
+    if (Date.now() - existing.startedAt > FETCH_WATCHDOG_TIMEOUT_MS) {
+      console.warn(`[DataAcq] WATCHDOG_EVICT | ${lockKey} | ageMs=${Date.now() - existing.startedAt} | aborting and restarting`);
+      try { existing.abortController.abort(); } catch {}
+      activeFetches.delete(lockKey);
+    } else {
+      console.log(`[DataAcq] Concurrent fetch detected for ${lockKey}, reusing in-flight`);
+      return existing.promise;
+    }
   }
 
-  const promise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode, fetchOptions);
-  activeFetches.set(lockKey, promise);
+  const abortController = new AbortController();
+  const innerPromise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode, fetchOptions);
+  // Race the inner promise against a 60s watchdog. Whichever resolves
+  // first wins; the watchdog ensures the activeFetches entry CANNOT
+  // outlive FETCH_WATCHDOG_TIMEOUT_MS even if _executeFetch hangs.
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  const watchdogPromise = new Promise<FetchResult>((resolve) => {
+    watchdogTimer = setTimeout(() => {
+      console.warn(`[DataAcq] FETCH_TIMEOUT | ${lockKey} | timeoutMs=${FETCH_WATCHDOG_TIMEOUT_MS} | returning INSUFFICIENT_DATA`);
+      try { abortController.abort(); } catch {}
+      resolve({
+        competitorId,
+        postsCollected: 0,
+        commentsCollected: 0,
+        ctaCoverage: 0,
+        ctaTypes: [],
+        followers: null,
+        engagementRate: null,
+        postingFrequency: null,
+        contentMix: null,
+        fetchMethod: "watchdog_timeout",
+        status: "INSUFFICIENT_DATA",
+        message: `Fetch exceeded ${FETCH_WATCHDOG_TIMEOUT_MS}ms watchdog`,
+      });
+    }, FETCH_WATCHDOG_TIMEOUT_MS);
+  });
+  const racedPromise = Promise.race([innerPromise, watchdogPromise]);
+
+  activeFetches.set(lockKey, { promise: racedPromise, abortController, startedAt: Date.now() });
   try {
-    return await promise;
+    const result = await racedPromise;
+    return result;
   } finally {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
     activeFetches.delete(lockKey);
   }
 }
