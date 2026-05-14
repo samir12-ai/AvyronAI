@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { publishedPosts, accountState, metaCredentials } from "@shared/schema";
 import { eq, sql, and } from "drizzle-orm";
-import { logAudit } from "./audit";
+import { logAudit, type AuditEventType } from "./audit";
 import * as crypto from "crypto";
 import { decryptToken, redactToken } from "./meta-crypto";
 import type { MetaMode } from "./meta-status";
@@ -458,7 +458,7 @@ async function checkAndPublishDuePosts() {
 
         const metaMode = (acctState.metaMode as MetaMode) || "DISCONNECTED";
         let publishMode: "REAL" | "BLOCKED" = "BLOCKED";
-        let result: { success: boolean; postId?: string; error?: string; attempts: number };
+        let result: Awaited<ReturnType<typeof publishToMetaWithRetry>>;
 
         if (metaMode === "REAL") {
           const serverTokens = await getServerSidePageToken(accountId);
@@ -571,10 +571,10 @@ async function checkAndPublishDuePosts() {
               )
             );
 
-          const finalStatus = isMetaTimeout
+          const finalStatus: AuditEventType = isMetaTimeout
             ? "META_TIMEOUT"
             : (reachedTerminal ? "PUBLISH_FAILED" : "META_API_ERROR");
-          await logAudit(accountId, finalStatus as any, {
+          await logAudit(accountId, finalStatus, {
             details: {
               postId: post.id,
               platform: post.platform,

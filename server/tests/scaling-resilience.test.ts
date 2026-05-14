@@ -433,7 +433,7 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     expect(src).toMatch(/result\.classified === "META_TIMEOUT"/);
     expect(src).toMatch(/reachedTerminal\s*=\s*currentAttempts >= MAX_RETRY_ATTEMPTS \* 2 && !isMetaTimeout/);
     expect(src).toMatch(/META_TIMEOUT:\s*\$\{result\.error/);
-    expect(src).toMatch(/finalStatus\s*=\s*isMetaTimeout\s*\?\s*"META_TIMEOUT"/);
+    expect(src).toMatch(/finalStatus(?:\s*:\s*\w+)?\s*=\s*isMetaTimeout\s*\?\s*"META_TIMEOUT"/);
     expect(src).toMatch(/reason:\s*isMetaTimeout\s*\?\s*"META_TIMEOUT"/);
     expect(src).toMatch(/willRequeue:\s*!reachedTerminal/);
   });
