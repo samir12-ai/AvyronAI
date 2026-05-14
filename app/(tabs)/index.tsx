@@ -18,6 +18,7 @@ import { router } from 'expo-router';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { WEB_TOP_INSET } from '@/lib/insets';
 import AvyronLogo from '@/components/AvyronLogo';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
@@ -594,7 +595,7 @@ export default function DashboardScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           s.scrollContent,
-          { paddingTop: Platform.OS === 'web' ? 67 + 8 : insets.top + 8 },
+          { paddingTop: Platform.OS === 'web' ? WEB_TOP_INSET + 8 : insets.top + 8 },
         ]}
         refreshControl={
           <RefreshControl 

@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 import * as Haptics from 'expo-haptics';
+import { WEB_TOP_INSET, WEB_BOTTOM_INSET } from '@/lib/insets';
 
 const P = {
   mint: '#8B5CF6',
@@ -477,7 +478,7 @@ export default function AgentScreen() {
   return (
     <View style={[s.container, { backgroundColor: bgColor }]}>
       <View style={[s.header, {
-        paddingTop: isWeb ? 67 : insets.top,
+        paddingTop: isWeb ? WEB_TOP_INSET : insets.top,
         backgroundColor: cardBg,
         borderBottomColor: borderColor,
       }]}>
@@ -571,7 +572,7 @@ export default function AgentScreen() {
         <View style={[s.inputBar, {
           backgroundColor: cardBg,
           borderTopColor: borderColor,
-          paddingBottom: isWeb ? 34 : Math.max(insets.bottom, 8),
+          paddingBottom: isWeb ? WEB_BOTTOM_INSET : Math.max(insets.bottom, 8),
         }]}>
           <TextInput
             style={[s.textInput, {

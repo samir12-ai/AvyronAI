@@ -856,8 +856,16 @@ export function registerAuthRoutes(app: Router) {
         console.warn("[Stripe] Webhook rejected: STRIPE_WEBHOOK_SECRET not configured");
         return res.status(503).json({ error: "Webhook secret not configured" });
       }
-      const sig = req.headers["x-webhook-secret"] || req.headers["stripe-signature"];
-      if (sig !== STRIPE_WEBHOOK_SECRET) {
+      const sigRaw = req.headers["x-webhook-secret"] || req.headers["stripe-signature"];
+      const sig = Array.isArray(sigRaw) ? sigRaw[0] : sigRaw;
+      // F9.3 — constant-time compare with length-padding to prevent
+      // both early-exit timing leaks and byte-length leaks.
+      const sigBuf = Buffer.from(String(sig ?? ""), "utf8");
+      const expected = Buffer.from(STRIPE_WEBHOOK_SECRET, "utf8");
+      const padLen = Math.max(sigBuf.length, expected.length);
+      const sigPadded = Buffer.concat([sigBuf, Buffer.alloc(padLen - sigBuf.length)]);
+      const expectedPadded = Buffer.concat([expected, Buffer.alloc(padLen - expected.length)]);
+      if (sigBuf.length !== expected.length || !crypto.timingSafeEqual(sigPadded, expectedPadded)) {
         console.warn("[Stripe] Webhook rejected: invalid signature");
         return res.status(403).json({ error: "Forbidden" });
       }
