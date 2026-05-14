@@ -859,13 +859,18 @@ export function registerAuthRoutes(app: Router) {
       const sigRaw = req.headers["x-webhook-secret"] || req.headers["stripe-signature"];
       const sig = Array.isArray(sigRaw) ? sigRaw[0] : sigRaw;
       // F9.3 — constant-time compare with length-padding to prevent
-      // both early-exit timing leaks and byte-length leaks.
+      // both early-exit timing leaks AND byte-length timing leaks.
+      // Both checks ALWAYS execute (no short-circuit `||` / `&&`); the two
+      // booleans are folded with bitwise `&` so total work is constant
+      // regardless of which (or both) of length/content actually mismatch.
       const sigBuf = Buffer.from(String(sig ?? ""), "utf8");
       const expected = Buffer.from(STRIPE_WEBHOOK_SECRET, "utf8");
-      const padLen = Math.max(sigBuf.length, expected.length);
+      const padLen = Math.max(sigBuf.length, expected.length, 1);
       const sigPadded = Buffer.concat([sigBuf, Buffer.alloc(padLen - sigBuf.length)]);
       const expectedPadded = Buffer.concat([expected, Buffer.alloc(padLen - expected.length)]);
-      if (sigBuf.length !== expected.length || !crypto.timingSafeEqual(sigPadded, expectedPadded)) {
+      const contentOk = crypto.timingSafeEqual(sigPadded, expectedPadded) ? 1 : 0;
+      const lengthOk = sigBuf.length === expected.length ? 1 : 0;
+      if ((contentOk & lengthOk) !== 1) {
         console.warn("[Stripe] Webhook rejected: invalid signature");
         return res.status(403).json({ error: "Forbidden" });
       }
