@@ -1,0 +1,237 @@
+Hi team,
+
+After completing the full audit of the User Agent Pipeline weekly evaluation flow, we identified that the issue was not an agent execution failure, but a systemic operational continuity failure.
+
+The system currently contains strong evaluation doctrine, semantic enforcement, and fail-safe guards, but lacks a true operational continuity layer that guarantees lifecycle persistence, cadence maintenance, and autonomous execution continuity.
+
+This is now a top-priority architecture issue.
+
+The system must evolve from:
+“capable of evaluating”
+to:
+“guaranteed to continuously operate, monitor, recover, and self-surface operational degradation.”
+
+The recent incident exposed multiple categories of operational gaps which must now be permanently sealed.
+
+==================================================
+MANDATORY IMPLEMENTATIONS
+=========================
+
+1. Autonomous Scheduler / Continuity Heartbeat Layer
+
+---
+
+A real autonomous execution layer must be added.
+
+Current issue:
+
+* No scheduler invokes runBoss()
+* Weekly cadence depends on manual triggering
+* Windows never open unless explicitly called
+* Entire evaluation lifecycle can silently stall
+
+Required:
+
+* Add scheduled orchestration heartbeat
+* Daily/hourly cadence with idempotent campaign locking
+* Automatic boss execution for all eligible campaigns
+* Lifecycle continuity monitor
+* Dead-cycle detection
+* Missed-window detection
+* Missing-run escalation
+
+The system must NEVER depend on manual invocation for core evaluation cycles again.
+
+==================================================
+
+2. Operational Continuity Monitoring
+
+---
+
+The system currently validates truth, but does not maintain operational continuity.
+
+We need a dedicated continuity supervision layer that continuously validates:
+
+* Active DNA presence
+* Publishing continuity
+* Truth submission continuity
+* Evaluation cadence continuity
+* Boss-run continuity
+* Cluster generation continuity
+* Plan freshness
+* Window lifecycle progression
+* Pipeline health persistence
+* Agent execution rhythm
+
+Any broken continuity chain must trigger:
+
+* alerts
+* degraded-state classification
+* audit logs
+* dashboard warnings
+* escalation reporting
+
+Silence is no longer acceptable behavior.
+
+==================================================
+
+3. Silent Runtime Degradation Prevention
+
+---
+
+This is extremely important.
+
+We need a full audit and hardening pass against:
+
+* runtime leaking
+* silent skips
+* dangling async execution
+* stalled workers
+* orphaned evaluations
+* memory leaks
+* lock persistence
+* deadlock scenarios
+* partial state commits
+* async starvation
+* scheduler drift
+* retry amplification
+* unclosed intervals/timers
+* event-loop blocking
+* queue starvation
+* state desynchronization
+* stale lifecycle references
+* abandoned in-flight jobs
+* degraded long-running orchestration
+
+I want aggressive inspection on ALL operational lifecycle paths.
+
+Not only:
+“does it crash?”
+
+But:
+
+* can it silently degrade?
+* can cadence drift?
+* can windows stall?
+* can workers stop progressing?
+* can queues freeze?
+* can retries inflate?
+* can stale references survive?
+* can runtime state diverge from DB truth?
+* can orchestration continue in partially corrupted state?
+
+Any category of operational ambiguity must be considered a critical architectural risk.
+
+==================================================
+
+4. Mandatory Observability Expansion
+
+---
+
+We need deeper operational observability across:
+
+* scheduler lifecycle
+* orchestration cadence
+* worker health
+* queue depth
+* lock duration
+* retry counts
+* stalled execution
+* evaluation progression
+* heartbeat freshness
+* active/inactive campaign states
+* window aging
+* skipped execution reasons
+* degraded evaluation causes
+
+All skips must become visible.
+
+“No output” is not acceptable unless explicitly classified and surfaced.
+
+==================================================
+
+5. Mandatory End-to-End Lifecycle Tests
+
+---
+
+I want real lifecycle tests covering:
+
+* scheduler execution
+* multi-week evaluation continuity
+* missing DNA
+* missing truth
+* missing posts
+* stale plans
+* degraded cadence
+* lock contention
+* scheduler recovery
+* orchestrator recovery
+* worker restart recovery
+* retry stabilization
+* empty-world scenarios
+* cluster generation continuity
+* long-gap reactivation
+* heartbeat restoration
+* orphan cleanup
+* partial infrastructure failure
+
+No mocked doctrine-only tests.
+
+I want real behavior tests exercising production orchestration paths.
+
+==================================================
+
+6. Post-Implementation Audits (MANDATORY)
+
+---
+
+After implementation:
+
+* run full architectural audit
+* run operational continuity audit
+* run runtime integrity audit
+* run scheduler reliability audit
+* run orchestration stability audit
+* run memory/runtime leak audit
+* run degraded-state audit
+* run fail-safe validation audit
+
+I also want explicit reports for:
+
+* unresolved risks
+* partial protections
+* theoretical failure surfaces
+* remaining silent-failure possibilities
+* scaling risks
+* cadence instability risks
+* operational bottlenecks
+
+Do NOT mark this layer complete until all audits pass.
+
+==================================================
+
+7. Core Principle Going Forward
+
+---
+
+The system must never:
+
+* silently stop evaluating
+* silently stop progressing
+* silently skip lifecycle phases
+* silently lose cadence
+* silently degrade operationally
+* silently drift from reality
+* silently enter inactive states
+
+If operational continuity is broken, the system must explicitly surface:
+
+* WHY
+* WHERE
+* SINCE WHEN
+* IMPACT LEVEL
+* RECOVERY PATH
+
+Operational silence is now considered a system failure category.
+
+Thanks.
