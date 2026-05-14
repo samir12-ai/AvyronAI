@@ -1,13 +1,16 @@
 /**
  * Seal #11 / Task #29 — scaling, concurrency, worker resilience.
  *
- * Smoke-style regression tests for the 10 audit findings closed by this
- * task (F6.1, F6.2, F6.3, F6.4, F6.5, F6.6, F6.8, F6.9, F6.10, F6.11).
- * These tests do not hit the network — they validate the in-process
- * contracts of the helpers/modules that were added or modified.
+ * Tests for the 10 audit findings closed by this task (F6.1, F6.2,
+ * F6.3, F6.4, F6.5, F6.6, F6.8, F6.9, F6.10, F6.11). Mix of:
+ *   - Source-contract assertions (catch regressions of the documented
+ *     code shape — fast, no I/O).
+ *   - Behavioral assertions (architect-required for F6.4/F6.6/F6.9 —
+ *     execute module logic and assert state transitions/leak prevention).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import * as http from "http";
 
 describe("Seal #11 — scaling & resilience contracts", () => {
   it("F6.1 — token-budget store exposes read-through API", async () => {
@@ -169,7 +172,8 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     const src = await import("fs").then((fs) =>
       fs.promises.readFile("server/publish-worker.ts", "utf8"),
     );
-    expect(src).toMatch(/META_API_TIMEOUT_MS\s*=\s*15_000/);
+    expect(src).toMatch(/META_API_TIMEOUT_MS\s*=\s*parseInt\(/);
+    expect(src).toMatch(/"15000"/);
     expect(src).toMatch(/async function fetchMeta/);
     expect(src).toMatch(/new AbortController\(\)/);
     expect(src).toMatch(/META_TIMEOUT/);
@@ -221,7 +225,9 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     const src = await import("fs").then((fs) =>
       fs.promises.readFile("server/competitive-intelligence/data-acquisition.ts", "utf8"),
     );
-    expect(src).toMatch(/FETCH_WATCHDOG_TIMEOUT_MS\s*=\s*60_000/);
+    // Architect-tightened to 45s default (env-overridable) — was 60s in pass-1.
+    expect(src).toMatch(/FETCH_WATCHDOG_TIMEOUT_MS\s*=\s*parseInt\(/);
+    expect(src).toMatch(/"45000"/);
     expect(src).toMatch(/interface ActiveFetch/);
     expect(src).toMatch(/abortController/);
     expect(src).toMatch(/export function cancelFetch/);
@@ -245,5 +251,110 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     );
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS\s+ai_token_budget/i);
     expect(sql).toMatch(/PRIMARY KEY/i);
+  });
+
+  // -------------------------------------------------------------------
+  // Behavioral tests (architect-required)
+  // -------------------------------------------------------------------
+
+  it("F6.9 — withWatchdog returns timeout fallback, aborts the controller, and clears its timer (no leak)", async () => {
+    const { withWatchdog, FETCH_WATCHDOG_TIMEOUT_MS } = await import(
+      "../competitive-intelligence/data-acquisition"
+    );
+    // Sanity: env-tightened to 45s by default per architect requirement.
+    expect(FETCH_WATCHDOG_TIMEOUT_MS).toBe(45_000);
+
+    // Force a never-resolving promise; a tiny watchdog should win and
+    // the abort signal should be raised, with no pending timer left.
+    const ctrl = new AbortController();
+    const neverResolves = new Promise<string>(() => {}); // hangs forever
+    const before = (process as any)._getActiveHandles?.().length ?? -1;
+    const t0 = Date.now();
+    const { value, timedOut } = await withWatchdog<string>(
+      neverResolves,
+      50,
+      ctrl,
+      () => "TIMEOUT_FALLBACK",
+    );
+    const elapsed = Date.now() - t0;
+    // Allow event-loop slop.
+    await new Promise((r) => setTimeout(r, 10));
+    const after = (process as any)._getActiveHandles?.().length ?? -1;
+
+    expect(timedOut).toBe(true);
+    expect(value).toBe("TIMEOUT_FALLBACK");
+    expect(ctrl.signal.aborted).toBe(true);
+    expect(elapsed).toBeLessThan(500);
+    // Timer must be cleared in finally — handle count is bounded
+    // (allow ±2 for unrelated event-loop handles).
+    if (before !== -1 && after !== -1) {
+      expect(after).toBeLessThanOrEqual(before + 2);
+    }
+  });
+
+  it("F6.9 — withWatchdog passes through fast result and never aborts the controller", async () => {
+    const { withWatchdog } = await import(
+      "../competitive-intelligence/data-acquisition"
+    );
+    const ctrl = new AbortController();
+    const fast = Promise.resolve("OK");
+    const { value, timedOut } = await withWatchdog<string>(
+      fast,
+      10_000,
+      ctrl,
+      () => "SHOULD_NOT_FIRE",
+    );
+    expect(value).toBe("OK");
+    expect(timedOut).toBe(false);
+    expect(ctrl.signal.aborted).toBe(false);
+  });
+
+  it("F6.6 — fetchMeta surfaces META_TIMEOUT (transient=true) when the upstream hangs past the timeout", async () => {
+    // Override META_API_TIMEOUT_MS to 200ms via env BEFORE the module
+    // is first imported, then use vi.resetModules to force a fresh load
+    // so the new env value takes effect.
+    process.env.META_API_TIMEOUT_MS = "200";
+    vi.resetModules();
+    const mod = await import("../publish-worker");
+    expect(mod.META_API_TIMEOUT_MS).toBe(200);
+
+    // Spin up a TCP server that accepts the connection but never
+    // responds — a true simulation of a Meta endpoint stall.
+    const heldSockets: any[] = [];
+    const server = http.createServer((_req, res) => {
+      heldSockets.push(res);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address() as { port: number };
+
+    let caught: any = null;
+    try {
+      await mod.fetchMeta(`http://127.0.0.1:${addr.port}/`);
+    } catch (err: any) {
+      caught = err;
+    }
+    for (const r of heldSockets) {
+      try { r.destroy(); } catch {}
+    }
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+
+    expect(caught).toBeTruthy();
+    expect(caught.code).toBe("META_TIMEOUT");
+    expect(caught.transient).toBe(true);
+    expect(String(caught.message)).toMatch(/META_TIMEOUT/);
+
+    delete process.env.META_API_TIMEOUT_MS;
+    vi.resetModules();
+  });
+
+  it("F6.6 — publish-worker source explicitly preserves META_TIMEOUT classification on the error path", async () => {
+    // Catch-block must classify META_TIMEOUT into lastClassification +
+    // emit a dedicated audit event before recordTemporaryError. Source
+    // assertion guards against future regressions of the hot path.
+    const fs = await import("fs");
+    const src = await fs.promises.readFile("server/publish-worker.ts", "utf8");
+    expect(src).toMatch(/error\?\.code === "META_TIMEOUT"/);
+    expect(src).toMatch(/lastClassification\s*=\s*"META_TIMEOUT"/);
+    expect(src).toMatch(/logAudit\([^,]+,\s*"META_TIMEOUT"/);
   });
 });

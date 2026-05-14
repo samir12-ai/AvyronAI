@@ -349,16 +349,53 @@ export { TARGET_POSTS_FAST, TARGET_POSTS_DEEP, MAX_COMMENT_POSTS_DEEP, MAX_COMME
 // stall, scraper deadlock, never-resolving promise), the entry never got
 // deleted — and every subsequent call for the same (account, competitor)
 // reused the dead promise forever. Now: each in-flight entry carries an
-// abortController + a 60s wall-clock watchdog that forces the entry to
-// be evicted from the map (and resolved with INSUFFICIENT_DATA) so the
-// next call can re-attempt with a fresh promise.
-const FETCH_WATCHDOG_TIMEOUT_MS = 60_000;
+// abortController + a 45s wall-clock watchdog (architect-tightened from
+// the initial 60s) that forces the entry to be evicted from the map (and
+// resolved with INSUFFICIENT_DATA) so the next call can re-attempt with a
+// fresh promise. The AbortController.signal is THREADED into _executeFetch
+// so cancellable scraper paths see signal.aborted at every checkpoint
+// and throw FETCH_ABORTED rather than continuing background work.
+export const FETCH_WATCHDOG_TIMEOUT_MS = parseInt(
+  process.env.FETCH_WATCHDOG_TIMEOUT_MS || "45000",
+  10,
+);
 interface ActiveFetch {
   promise: Promise<FetchResult>;
   abortController: AbortController;
   startedAt: number;
 }
 const activeFetches = new Map<string, ActiveFetch>();
+
+/**
+ * Race a promise against a wall-clock timeout. On timeout, abort the
+ * controller, run onTimeout(), and resolve with the fallback value.
+ * Always clears the timer in finally so we never leak handles.
+ *
+ * Exported for behavioral testing (architect-required: must validate
+ * timer cleanup + leak prevention under forced timeout, not via regex).
+ */
+export async function withWatchdog<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  abortController: AbortController,
+  onTimeout: () => T,
+): Promise<{ value: T; timedOut: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  const watchdogPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      try { abortController.abort(); } catch {}
+      resolve(onTimeout());
+    }, timeoutMs);
+  });
+  try {
+    const value = await Promise.race([promise, watchdogPromise]);
+    return { value, timedOut };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export function cancelFetch(accountId: string, competitorId: string): boolean {
   const lockKey = `${accountId}:${competitorId}`;
@@ -421,16 +458,19 @@ export async function fetchCompetitorData(
   }
 
   const abortController = new AbortController();
-  const innerPromise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode, fetchOptions);
-  // Race the inner promise against a 60s watchdog. Whichever resolves
-  // first wins; the watchdog ensures the activeFetches entry CANNOT
-  // outlive FETCH_WATCHDOG_TIMEOUT_MS even if _executeFetch hangs.
-  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
-  const watchdogPromise = new Promise<FetchResult>((resolve) => {
-    watchdogTimer = setTimeout(() => {
+  // Thread the abort signal into _executeFetch so cancellable awaits
+  // (scraper, DB checkpoints) can observe signal.aborted and bail.
+  const innerPromise = _executeFetch(
+    competitorId, accountId, forceRefresh, proxyCtx, collectionMode, fetchOptions,
+    abortController.signal,
+  );
+  const racedTask = withWatchdog<FetchResult>(
+    innerPromise,
+    FETCH_WATCHDOG_TIMEOUT_MS,
+    abortController,
+    () => {
       console.warn(`[DataAcq] FETCH_TIMEOUT | ${lockKey} | timeoutMs=${FETCH_WATCHDOG_TIMEOUT_MS} | returning INSUFFICIENT_DATA`);
-      try { abortController.abort(); } catch {}
-      resolve({
+      return {
         competitorId,
         postsCollected: 0,
         commentsCollected: 0,
@@ -441,20 +481,28 @@ export async function fetchCompetitorData(
         postingFrequency: null,
         contentMix: null,
         fetchMethod: "watchdog_timeout",
-        status: "INSUFFICIENT_DATA",
+        status: "INSUFFICIENT_DATA" as const,
         message: `Fetch exceeded ${FETCH_WATCHDOG_TIMEOUT_MS}ms watchdog`,
-      });
-    }, FETCH_WATCHDOG_TIMEOUT_MS);
-  });
-  const racedPromise = Promise.race([innerPromise, watchdogPromise]);
+      };
+    },
+  ).then(({ value }) => value);
 
-  activeFetches.set(lockKey, { promise: racedPromise, abortController, startedAt: Date.now() });
+  activeFetches.set(lockKey, { promise: racedTask, abortController, startedAt: Date.now() });
   try {
-    const result = await racedPromise;
-    return result;
+    return await racedTask;
   } finally {
-    if (watchdogTimer) clearTimeout(watchdogTimer);
     activeFetches.delete(lockKey);
+  }
+}
+
+/** Throws FETCH_ABORTED if the abort signal has been triggered. Called
+ *  at every major checkpoint inside _executeFetch so the watchdog can
+ *  actually preempt long-running scraper work. */
+function checkAborted(signal: AbortSignal | undefined, where: string): void {
+  if (signal?.aborted) {
+    const e: any = new Error(`FETCH_ABORTED at ${where}`);
+    e.code = "FETCH_ABORTED";
+    throw e;
   }
 }
 
@@ -465,7 +513,9 @@ async function _executeFetch(
   proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
   collectionMode: CollectionMode = "FAST_PASS",
   fetchOptions?: FetchOptions,
+  signal?: AbortSignal,
 ): Promise<FetchResult> {
+  checkAborted(signal, "executeFetch:entry");
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
 
@@ -666,7 +716,9 @@ async function _executeFetch(
 
   console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""} | maxPosts=${maxPosts}`);
 
+  checkAborted(signal, "executeFetch:beforeProfileScrape");
   const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts, accountId);
+  checkAborted(signal, "executeFetch:afterProfileScrape");
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
     console.log(`[DataAcq] Scrape blocked for ${competitor.name}`);
@@ -1242,7 +1294,9 @@ export async function enrichCompetitorWithComments(competitorId: string, account
 
   try {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — attempting profile re-scrape for embedded comments`);
+    checkAborted(signal, "executeFetch:beforeDeepRescrape");
     const profileRescrape = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, 30, accountId);
+    checkAborted(signal, "executeFetch:afterDeepRescrape");
     const embeddedComments = profileRescrape.embeddedComments || [];
 
     if (embeddedComments.length > 0) {
@@ -1287,7 +1341,9 @@ export async function enrichCompetitorWithComments(competitorId: string, account
       }));
 
       const commentsNeeded = Math.max(MIN_COMMENTS_THRESHOLD - existingComments, 50);
+      checkAborted(signal, "executeFetch:beforeCommentScrape");
       const scrapeResult = await scrapeCommentsForPosts(postsForScraping, proxyCtx, commentsNeeded);
+      checkAborted(signal, "executeFetch:afterCommentScrape");
 
       const allScrapedComments = scrapeResult.results.flatMap(r => r.comments);
       const scrapeSpamResult = filterSpamComments(allScrapedComments);

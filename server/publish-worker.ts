@@ -17,8 +17,11 @@ const PUBLISH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 // race the prior tick. Now: every Meta call goes through fetchMeta()
 // with a 15s AbortController; on timeout we throw a labeled error that
 // the existing retry/backoff classifier treats as transient.
-const META_API_TIMEOUT_MS = 15_000;
-async function fetchMeta(input: string, init: RequestInit = {}): Promise<Response> {
+export const META_API_TIMEOUT_MS = parseInt(
+  process.env.META_API_TIMEOUT_MS || "15000",
+  10,
+);
+export async function fetchMeta(input: string, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), META_API_TIMEOUT_MS);
   try {
@@ -133,8 +136,25 @@ async function publishToMetaWithRetry(
         console.log(`[PublishWorker] Retry ${attempt}/${MAX_RETRY_ATTEMPTS} for post ${post.id} in ${Math.round(backoff)}ms`);
         await sleep(backoff);
       }
-    } catch (error) {
-      lastError = String(error);
+    } catch (error: any) {
+      lastError = String(error?.message ?? error);
+      // F6.6 — preserve META_TIMEOUT classification deterministically.
+      // Pre-fix: every thrown error fell into a generic recordTemporaryError
+      // bucket, losing the timeout signal in audit + return classification.
+      // Now: when fetchMeta surfaces a META_TIMEOUT, we explicitly tag the
+      // classification, emit a dedicated audit event, and still apply
+      // transient backoff so the post is requeued on the next tick.
+      if (error?.code === "META_TIMEOUT") {
+        lastClassification = "META_TIMEOUT";
+        await logAudit(accountId, "META_TIMEOUT", {
+          details: {
+            postId: post.id,
+            attempt,
+            timeoutMs: META_API_TIMEOUT_MS,
+            transient: true,
+          },
+        });
+      }
       recordTemporaryError(accountId);
       if (attempt < MAX_RETRY_ATTEMPTS) {
         const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
