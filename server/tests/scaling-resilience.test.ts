@@ -426,6 +426,46 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     expect(src).not.toMatch(/rowTs\s*>=\s*orphanGraceCutoff/);
   });
 
+  it("F6.6 (pass-5) — publish-worker branches publish state on META_TIMEOUT classification", async () => {
+    // Architect pass-4 rejection: classification was preserved inside
+    // publishToMetaWithRetry but the caller-side state transition did
+    // NOT branch on it — so a META_TIMEOUT could still flip the post
+    // into terminal "failed" once attempts exceeded the cap, AND the
+    // audit row carried no reason field. Now: META_TIMEOUT forces
+    // requeue (status="scheduled"), brands lastPublishError with the
+    // explicit reason, and emits a META_TIMEOUT audit event with
+    // reason + willRequeue tags.
+    const fs = await import("fs");
+    const src = await fs.promises.readFile("server/publish-worker.ts", "utf8");
+    expect(src).toMatch(/result\.classified === "META_TIMEOUT"/);
+    expect(src).toMatch(/reachedTerminal\s*=\s*currentAttempts >= MAX_RETRY_ATTEMPTS \* 2 && !isMetaTimeout/);
+    expect(src).toMatch(/META_TIMEOUT:\s*\$\{result\.error/);
+    expect(src).toMatch(/finalStatus\s*=\s*isMetaTimeout\s*\?\s*"META_TIMEOUT"/);
+    expect(src).toMatch(/reason:\s*isMetaTimeout\s*\?\s*"META_TIMEOUT"/);
+    expect(src).toMatch(/willRequeue:\s*!reachedTerminal/);
+  });
+
+  it("F6.9 (pass-5) — enrichCompetitorWithComments does NOT call checkAborted (no signal in scope)", async () => {
+    // Architect pass-4 caught a ReferenceError: pass-3 added
+    // checkAborted(signal,...) inside enrichCompetitorWithComments which
+    // has no `signal` parameter. The function runs OUTSIDE the watchdog'd
+    // _executeFetch path, so checkAborted must be confined to _executeFetch.
+    const fs = await import("fs");
+    const src = await fs.promises.readFile(
+      "server/competitive-intelligence/data-acquisition.ts",
+      "utf8",
+    );
+    // Find the function body and assert it is checkAborted-free.
+    const fnMatch = src.match(/export async function enrichCompetitorWithComments[\s\S]*?\n\}\n/);
+    expect(fnMatch).toBeTruthy();
+    expect(fnMatch![0]).not.toMatch(/checkAborted\(/);
+    // Confirm checkAborted IS still present in _executeFetch (regression
+    // guard against accidentally removing it from the actual hot path).
+    const exec = src.match(/async function _executeFetch[\s\S]*?\n\}\n/);
+    expect(exec).toBeTruthy();
+    expect(exec![0]).toMatch(/checkAborted\(signal/);
+  });
+
   it("F6.8 (pass-4) — migration 020 declares snapshot_orphan_observed with composite PK + indexes", async () => {
     const fs = await import("fs");
     const sqlSrc = await fs.promises.readFile(

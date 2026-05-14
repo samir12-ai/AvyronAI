@@ -1294,9 +1294,10 @@ export async function enrichCompetitorWithComments(competitorId: string, account
 
   try {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — attempting profile re-scrape for embedded comments`);
-    checkAborted(signal, "executeFetch:beforeDeepRescrape");
+    // NOTE: enrichCompetitorWithComments runs OUTSIDE the watchdog'd
+    // _executeFetch path (called by enrich-only flows that have no
+    // AbortSignal), so checkAborted is intentionally not invoked here.
     const profileRescrape = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, 30, accountId);
-    checkAborted(signal, "executeFetch:afterDeepRescrape");
     const embeddedComments = profileRescrape.embeddedComments || [];
 
     if (embeddedComments.length > 0) {
@@ -1341,9 +1342,8 @@ export async function enrichCompetitorWithComments(competitorId: string, account
       }));
 
       const commentsNeeded = Math.max(MIN_COMMENTS_THRESHOLD - existingComments, 50);
-      checkAborted(signal, "executeFetch:beforeCommentScrape");
+      // See note above — no AbortSignal threaded into this path.
       const scrapeResult = await scrapeCommentsForPosts(postsForScraping, proxyCtx, commentsNeeded);
-      checkAborted(signal, "executeFetch:afterCommentScrape");
 
       const allScrapedComments = scrapeResult.results.flatMap(r => r.comments);
       const scrapeSpamResult = filterSpamComments(allScrapedComments);

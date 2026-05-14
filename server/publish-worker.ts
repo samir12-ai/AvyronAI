@@ -539,12 +539,24 @@ async function checkAndPublishDuePosts() {
           console.log(`[PublishWorker] [${publishMode}] Published post ${post.id} to ${post.platform} (attempts: ${result.attempts})`);
         } else {
           const currentAttempts = (post.publishAttempts || 0) + result.attempts;
+          // F6.6 (pass-5) — when the inner classification is META_TIMEOUT,
+          // surface the reason explicitly through the lastPublishError
+          // string AND tag the publish state as "scheduled" (transient
+          // requeue) regardless of attempt count, so a single timeout
+          // does not flip a post into terminal "failed" prematurely.
+          // The audit row is also branded META_TIMEOUT so operators can
+          // see timeout-vs-error breakdown.
+          const isMetaTimeout = result.classified === "META_TIMEOUT";
+          const reachedTerminal = currentAttempts >= MAX_RETRY_ATTEMPTS * 2 && !isMetaTimeout;
+          const errorMessage = isMetaTimeout
+            ? `META_TIMEOUT: ${result.error || "Meta API request timed out"} (will retry)`
+            : (result.error || null);
 
           await db.update(publishedPosts)
             .set({
-              status: currentAttempts >= MAX_RETRY_ATTEMPTS * 2 ? "failed" : "scheduled",
+              status: reachedTerminal ? "failed" : "scheduled",
               publishAttempts: currentAttempts,
-              lastPublishError: result.error || null,
+              lastPublishError: errorMessage,
               publishLockToken: null,
               publishLockedAt: null,
               publishMode,
@@ -557,14 +569,19 @@ async function checkAndPublishDuePosts() {
               )
             );
 
-          const finalStatus = currentAttempts >= MAX_RETRY_ATTEMPTS * 2 ? "PUBLISH_FAILED" : "META_API_ERROR";
+          const finalStatus = isMetaTimeout
+            ? "META_TIMEOUT"
+            : (reachedTerminal ? "PUBLISH_FAILED" : "META_API_ERROR");
           await logAudit(accountId, finalStatus as any, {
             details: {
               postId: post.id,
               platform: post.platform,
               error: result.error,
+              classified: result.classified,
+              reason: isMetaTimeout ? "META_TIMEOUT" : undefined,
               publishMode,
               totalAttempts: currentAttempts,
+              willRequeue: !reachedTerminal,
             },
           });
 
