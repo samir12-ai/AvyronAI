@@ -165,11 +165,10 @@ function selectHealthySession(accountId: string, excludeIds: Set<string> = new S
       pool.sessions.delete(session.sessionId);
       continue;
     }
-    // Pass-6 round-3 — quarantine recovery. When the cooldown window has
-    // elapsed, clear the quarantine flag + reset block-history counters
-    // so the session is reusable. Without this, a once-quarantined
-    // session was permanently excluded until TTL eviction (architect
-    // pass-6 round-2 regression).
+    // Quarantine recovery: when the cooldown window has elapsed, clear
+    // the quarantine flag and reset block-history counters so the
+    // session is reusable. Without this, a once-quarantined session
+    // would remain permanently excluded until TTL eviction.
     if (session.isQuarantined) {
       if (session.cooldownUntil && session.cooldownUntil <= now) {
         session.isQuarantined = false;

@@ -26,11 +26,12 @@ export async function fetchMeta(input: string, init: RequestInit = {}): Promise<
   const timer = setTimeout(() => controller.abort(), META_API_TIMEOUT_MS);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
-  } catch (err: any) {
-    if (err?.name === "AbortError" || controller.signal.aborted) {
-      const e: any = new Error(`META_TIMEOUT after ${META_API_TIMEOUT_MS}ms`);
-      e.code = "META_TIMEOUT";
-      e.transient = true;
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError" || controller.signal.aborted) {
+      const e = Object.assign(new Error(`META_TIMEOUT after ${META_API_TIMEOUT_MS}ms`), {
+        code: "META_TIMEOUT" as const,
+        transient: true,
+      });
       throw e;
     }
     throw err;
@@ -136,8 +137,9 @@ async function publishToMetaWithRetry(
         console.log(`[PublishWorker] Retry ${attempt}/${MAX_RETRY_ATTEMPTS} for post ${post.id} in ${Math.round(backoff)}ms`);
         await sleep(backoff);
       }
-    } catch (error: any) {
-      lastError = String(error?.message ?? error);
+    } catch (error) {
+      const errObj = error as { message?: string; code?: string };
+      lastError = String(errObj?.message ?? error);
       // F6.6 — preserve META_TIMEOUT classification deterministically.
       // Pre-fix: every thrown error fell into a generic recordTemporaryError
       // bucket, losing the timeout signal in audit + return classification.

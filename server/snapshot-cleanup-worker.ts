@@ -468,8 +468,8 @@ async function _runSnapshotCleanupBody(): Promise<void> {
     }
 
     const protectedIds = await getLatestSnapshotIds();
-    // Pass-6 round-3 (architect comment): report TRUE protected snapshot
-    // count (sum of per-table sets), not Map.size (= table count).
+    // Sum of per-table protected sets (Map.size would only report
+    // table count, not the actual snapshot count).
     const protectedCount = [...protectedIds.values()].reduce((s, set) => s + set.size, 0);
     console.log(`[SnapshotCleanup] ACTIVE_SESSION_PROTECTION | protectedSnapshots=${protectedCount} | tables=${protectedIds.size}`);
 
