@@ -299,27 +299,45 @@ async function enforcePerCampaignCap(
         .having(sql`count(*) > ${MAX_SNAPSHOTS_PER_CAMPAIGN}`);
 
       for (const { campaignId, count } of campaigns) {
+        // Bound deletion to exactly `excess` rows total. Earlier
+        // implementation passed a fixed-LIMIT subquery into
+        // batchedDelete; the predicate re-evaluated each iteration kept
+        // matching after the cap was reached, draining the table below
+        // MAX_SNAPSHOTS_PER_CAMPAIGN. Track remaining quota explicitly
+        // so we stop once `excess` rows have been deleted.
         const excess = count - MAX_SNAPSHOTS_PER_CAMPAIGN;
-        // Predicate: id IN (oldest `excess` rows for this campaign that
-        // pass the protected/in-flight filter). Re-evaluated each batch.
-        const oldestSubq = sql`(
-          SELECT inner_t.id FROM ${config.table} inner_t
-          WHERE inner_t.campaign_id = ${campaignId}
-          ORDER BY inner_t.${sql.raw(config.timestampColumn === "fetchedAt" ? "fetched_at" : "created_at")} ASC
-          LIMIT ${excess}
-        )`;
+        let remaining = excess;
+        let totalDeleted = 0;
+        const tsColumn = config.timestampColumn === "fetchedAt" ? "fetched_at" : "created_at";
 
-        const where = and(
-          eq(config.table.campaignId, campaignId),
-          sql`${config.table.id} IN ${oldestSubq}`,
-          notInIds(config.table.id, protectedIds) ?? sql`true`,
-          jobIdNotInflight(hasJobId ? config.table.jobId : null, inFlightJobIds) ?? sql`true`,
-        )!;
+        while (remaining > 0 && !isShuttingDown) {
+          const batch = Math.min(remaining, DELETE_BATCH_SIZE);
+          const oldestSubq = sql`(
+            SELECT inner_t.id FROM ${config.table} inner_t
+            WHERE inner_t.campaign_id = ${campaignId}
+            ORDER BY inner_t.${sql.raw(tsColumn)} ASC
+            LIMIT ${batch}
+          )`;
+          const where = and(
+            eq(config.table.campaignId, campaignId),
+            sql`${config.table.id} IN ${oldestSubq}`,
+            notInIds(config.table.id, protectedIds) ?? sql`true`,
+            jobIdNotInflight(hasJobId ? config.table.jobId : null, inFlightJobIds) ?? sql`true`,
+          )!;
+          const deletedRows = await db
+            .delete(config.table)
+            .where(where)
+            .returning({ id: config.table.id });
+          if (deletedRows.length === 0) break;
+          totalDeleted += deletedRows.length;
+          remaining -= deletedRows.length;
+          if (deletedRows.length < batch) break;
+          await new Promise((r) => setTimeout(r, DELETE_BATCH_SLEEP_MS));
+        }
 
-        const deleted = await batchedDelete(config.table, where);
-        if (deleted > 0) {
-          results.push({ table: config.name, campaign: campaignId, deleted });
-          console.log(`[SnapshotCleanup] CAP_ENFORCE | ${config.name} | campaign=${campaignId} | deleted=${deleted} | was=${count} | cap=${MAX_SNAPSHOTS_PER_CAMPAIGN}`);
+        if (totalDeleted > 0) {
+          results.push({ table: config.name, campaign: campaignId, deleted: totalDeleted });
+          console.log(`[SnapshotCleanup] CAP_ENFORCE | ${config.name} | campaign=${campaignId} | deleted=${totalDeleted} | was=${count} | cap=${MAX_SNAPSHOTS_PER_CAMPAIGN}`);
         }
       }
     } catch (err) {
