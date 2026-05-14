@@ -1,0 +1,128 @@
+{
+  "$schema": "system-risk-matrix/v1",
+  "seal": "Seal #12 / Task #30",
+  "generatedAt": "2026-05-14T00:00:00Z",
+  "generator": "main-agent (final cross-cutting review)",
+  "scope": "Tasks #1-#12 + Seal #12 deliverables (F10.9, F10.11, F10.12, F5.7, F5.9, F7.9, F9.3, F9.10)",
+  "overallStatus": "SEALED",
+  "categories": {
+    "doctrine": {
+      "name": "Semantic Contract Hardening (D1-D5)",
+      "status": "GREEN",
+      "items": [
+        { "id": "D1", "rule": "no semantic fallback", "status": "ENFORCED", "mechanism": "ESLint semantic/no-semantic-fallback (server/{agent,system-control,orchestrator,build-plan-layer,recovery-*,strategy}/**)", "exceptions": 4, "exceptionsAllowlistedIn": "replit.md#inline-suppression-allowlist" },
+        { "id": "D2", "rule": "canonical fields per meaning", "status": "ENFORCED", "mechanism": "contract-registry/registry.ts" },
+        { "id": "D3", "rule": "strict enums for verdict fields", "status": "ENFORCED", "mechanism": "z.enum on validationState/decisionAction/decisionGateOutcome/integrityVerdict/executionStatus" },
+        { "id": "D4", "rule": "legacy fields display-only", "status": "ENFORCED_WITH_TRANSITIONAL_EXCEPTION", "exceptions": ["integrity.integrityVerdict.legacyPaths sunset post-H4 rotation"] },
+        { "id": "D5", "rule": "CONTRACT_INCOMPLETE on missing canonical", "status": "ENFORCED", "mechanism": "requireContractField + classifyTrust" }
+      ]
+    },
+    "snapshotLineage": {
+      "name": "Snapshot lineage + freshness + provenance (Task #28 / Seal #10)",
+      "status": "GREEN",
+      "items": [
+        { "id": "F2.5", "title": "build-plan-layer STALE_LINEAGE_READ block", "status": "CLOSED", "test": "snapshot-lineage.test.ts" },
+        { "id": "F4.6", "title": "orchestrator MI freshness+lineage gate", "status": "CLOSED", "test": "engine-contracts.test.ts" },
+        { "id": "F4.10", "title": "fetch-orchestrator status='COMPLETE' filter", "status": "CLOSED", "test": "snapshot-lineage.test.ts" },
+        { "id": "F8.2", "title": "in_flight_jobs JOIN in cleanup worker", "status": "CLOSED", "test": "snapshot-lineage.test.ts" }
+      ]
+    },
+    "engineContracts": {
+      "name": "Engine input/output contracts (Task #28)",
+      "status": "GREEN",
+      "items": [
+        { "id": "F2.3", "title": "system-control AEL→BLOCK when consumers>0", "status": "CLOSED", "test": "engine-contracts.test.ts" },
+        { "id": "F2.4", "title": "AEL EMPTY_ANALYTICAL_PACKAGE marker", "status": "CLOSED", "test": "engine-contracts.test.ts" },
+        { "id": "F2.7", "title": "build-plan-layer + awareness-engine zod input boundary", "status": "CLOSED", "test": "engine-contracts.test.ts" },
+        { "id": "F2.8", "title": "AEL PII-strip on log emission", "status": "CLOSED", "test": "engine-contracts.test.ts" },
+        { "id": "F2.9", "title": "audience-engine PARTIAL status", "status": "CLOSED", "test": "engine-contracts.test.ts" },
+        { "id": "F4.3", "title": "build-plan-layer zod parse of AI response", "status": "CLOSED", "test": "engine-contracts.test.ts" },
+        { "id": "F4.4", "title": "plan-synthesis structured-field assertion", "status": "CLOSED", "test": "engine-contracts.test.ts" },
+        { "id": "F4.5", "title": "orchestrator extractMiInput zod", "status": "CLOSED", "test": "engine-contracts.test.ts" }
+      ]
+    },
+    "agentPipeline": {
+      "name": "Agent pipeline + decision policy + concurrency (Task #28)",
+      "status": "GREEN",
+      "items": [
+        { "id": "F4.9", "title": "decision-policy operational vs strategic memory READ filter", "status": "CLOSED", "test": "agent-pipeline.test.ts" },
+        { "id": "F8.3", "title": "strategicPlans.version + CAS update", "status": "CLOSED", "test": "agent-pipeline.test.ts" },
+        { "id": "F8.4", "title": "planApprovals optimistic locking", "status": "CLOSED", "test": "agent-pipeline.test.ts" },
+        { "id": "F8.5", "title": "agent stream semantic separation", "status": "CLOSED", "test": "agent-stream-semantic-separation.test.ts" }
+      ]
+    },
+    "auth": {
+      "name": "Authentication / refresh / lockout (Seal #2)",
+      "status": "GREEN",
+      "items": [
+        { "id": "F1.8", "title": "Per-account AI rate limit 50/hr", "status": "CLOSED" },
+        { "id": "F9.2", "title": "JWT 7d legacy grace window with persisted cutoff", "status": "CLOSED" },
+        { "id": "F9.3", "title": "Stripe webhook constant-time compare (Seal #12)", "status": "CLOSED", "test": "regression-suite-expansion.test.ts", "details": "crypto.timingSafeEqual on length-padded buffers; bitwise & fold (no short-circuit)" }
+      ]
+    },
+    "observability": {
+      "name": "Observability + ops surface (Seal #7)",
+      "status": "GREEN",
+      "items": [
+        { "id": "F9.5", "title": "Structured pino logger + traceId propagation", "status": "CLOSED" },
+        { "id": "F10.4", "title": "GET /healthz unauthenticated liveness", "status": "CLOSED" },
+        { "id": "F10.6", "title": "GET /metrics admin-gated", "status": "CLOSED" },
+        { "id": "F10.7", "title": "Sentry shim + secret redaction", "status": "CLOSED" },
+        { "id": "F10.8", "title": "Boot order (validateEnv→initOTel→initSentry→...)", "status": "CLOSED" },
+        { "id": "F9.10", "title": "GET /api/version (Seal #12)", "status": "CLOSED", "test": "regression-suite-expansion.test.ts" }
+      ]
+    },
+    "frontendDoctrine": {
+      "name": "Frontend mobile/web hardening (Seal #12)",
+      "status": "GREEN",
+      "items": [
+        { "id": "F5.7", "title": "Web inset constants centralized in lib/insets.ts", "status": "CLOSED", "test": "regression-suite-expansion.test.ts" },
+        { "id": "F5.9", "title": "scrollEnabled boolean coercion sweep", "status": "CLOSED_VERIFY_ONLY", "details": "No non-coerced patterns found; sweep verified clean" }
+      ]
+    },
+    "operationalGuards": {
+      "name": "Operational guards + CI hardening (Seal #12)",
+      "status": "GREEN",
+      "items": [
+        { "id": "F7.9", "title": "ENGINE_VERSION pre-push bump guard", "status": "CLOSED", "test": "regression-suite-expansion.test.ts" },
+        { "id": "F10.9", "title": "Regression suite expansion (P0+P1)", "status": "CLOSED", "test": "regression-suite-expansion.test.ts (9 tests)" },
+        { "id": "F10.11", "title": "Drizzle-typed test fixtures", "status": "CLOSED", "test": "drizzle-typed-fixtures.test.ts (6 tests)" },
+        { "id": "F10.12", "title": "Strategy engine integration tests", "status": "CLOSED", "test": "strategy-engines-integration.test.ts (5 tests)" }
+      ]
+    }
+  },
+  "openItems": [
+    {
+      "id": "OPS-001",
+      "title": "Bright Data zone / Apify quota rotation",
+      "severity": "MEDIUM",
+      "status": "BLOCKED_OPERATOR_ACTION",
+      "impact": "TikTok scraper degrades to BOTH_SOURCES_DOWN; downstream MI signals receive PARTIAL flag (handled correctly).",
+      "owner": "operator",
+      "remediation": "Rotate Apify subscription or increase Bright Data zone quota."
+    },
+    {
+      "id": "OPS-002",
+      "title": "Snapshot orphan column type drift (legacy uuid tables)",
+      "severity": "LOW",
+      "status": "DEFERRED",
+      "impact": "ORPHAN_PURGE_ERROR log spam in cleanup worker; rows are skipped (fail-closed).",
+      "owner": "next sprint",
+      "remediation": "Migration 021 ALTER COLUMN TYPE varchar on legacy snapshot_orphan_observed table."
+    }
+  ],
+  "testFootprint": {
+    "totalTestFiles": 79,
+    "newInSeal12": 3,
+    "newInSeal12TestCount": 20,
+    "newInSeal12Files": [
+      "server/tests/strategy-engines-integration.test.ts",
+      "server/tests/regression-suite-expansion.test.ts",
+      "server/tests/drizzle-typed-fixtures.test.ts"
+    ]
+  },
+  "architectVerdict": {
+    "round1": "REJECTED — Stripe short-circuit + missing deliverables",
+    "round2": "PASS (after fix) — bitwise & fold; 5 deliverables added; 20 net new tests"
+  }
+}
