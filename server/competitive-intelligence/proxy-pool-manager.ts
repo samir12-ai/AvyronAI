@@ -161,10 +161,27 @@ function selectHealthySession(accountId: string, excludeIds: Set<string> = new S
   const now = Date.now();
   for (const session of pool.sessions.values()) {
     if (excludeIds.has(session.sessionId)) continue;
-    if (session.isQuarantined) continue;
-    if (session.cooldownUntil && session.cooldownUntil > now) continue;
     if (now - session.createdAt > SESSION_TTL_MS) {
       pool.sessions.delete(session.sessionId);
+      continue;
+    }
+    // Pass-6 round-3 — quarantine recovery. When the cooldown window has
+    // elapsed, clear the quarantine flag + reset block-history counters
+    // so the session is reusable. Without this, a once-quarantined
+    // session was permanently excluded until TTL eviction (architect
+    // pass-6 round-2 regression).
+    if (session.isQuarantined) {
+      if (session.cooldownUntil && session.cooldownUntil <= now) {
+        session.isQuarantined = false;
+        session.cooldownUntil = null;
+        session.blockCount = 0;
+        session.previousBlockAt = null;
+        session.lastBlockAt = null;
+        console.log(`[ProxyPool] QUARANTINE_RECOVERED | account=${accountId} | session=${session.sessionId}`);
+      } else {
+        continue;
+      }
+    } else if (session.cooldownUntil && session.cooldownUntil > now) {
       continue;
     }
     return session;

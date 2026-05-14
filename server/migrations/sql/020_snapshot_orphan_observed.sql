@@ -16,11 +16,17 @@
 -- Composite PK on (table_name, snapshot_id) — one row per snapshot per
 -- snapshot-table.
 
+-- Pass-6 round-3 fix: ID column types must MATCH the existing snapshot
+-- + campaign tables (which use varchar in shared/schema.ts — e.g.
+-- mi_snapshots.id, campaign_selections.selected_campaign_id). Migration
+-- previously declared uuid → operator-class mismatch on the orphan
+-- subquery joins. Aligning to varchar; campaign_id NOT NULL to match
+-- the drizzle model.
 CREATE TABLE IF NOT EXISTS snapshot_orphan_observed (
-  table_name      text         NOT NULL,
-  snapshot_id     uuid         NOT NULL,
-  first_observed_at timestamptz NOT NULL DEFAULT now(),
-  campaign_id     uuid,
+  table_name        varchar      NOT NULL,
+  snapshot_id       varchar      NOT NULL,
+  campaign_id       varchar      NOT NULL,
+  first_observed_at timestamptz  NOT NULL DEFAULT now(),
   PRIMARY KEY (table_name, snapshot_id)
 );
 
