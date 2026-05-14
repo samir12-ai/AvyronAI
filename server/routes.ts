@@ -18,6 +18,7 @@ import { registerMarketIntelligenceV3 } from "./market-intelligence-v3";
 import { registerAudienceEngineRoutes } from "./audience-engine/routes";
 import { registerPositioningEngineRoutes } from "./positioning-engine/routes";
 import { registerStrategicCoreRoutes } from "./strategic-core";
+import { versionHandler } from "./lib/version-handler";
 import { registerCampaignRoutes, requireCampaign } from "./campaign-routes";
 import { registerDataSourceRoutes } from "./data-source/routes";
 import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from "./meta-status";
@@ -69,31 +70,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
   registerStagingAdminRoutes(app);
 
-  // F9.10 — public version endpoint. Reads buildSha from GIT_COMMIT_SHA
-  // env var (set at build time) or falls back to .git/HEAD. No auth.
-  app.get("/api/version", async (_req, res) => {
-    let buildSha = process.env.GIT_COMMIT_SHA || "unknown";
-    if (buildSha === "unknown") {
-      try {
-        const fs = await import("fs/promises");
-        const head = (await fs.readFile(".git/HEAD", "utf8")).trim();
-        if (head.startsWith("ref: ")) {
-          const refPath = head.slice(5);
-          buildSha = (await fs.readFile(`.git/${refPath}`, "utf8")).trim().slice(0, 12);
-        } else {
-          buildSha = head.slice(0, 12);
-        }
-      } catch {
-        buildSha = "unknown";
-      }
-    }
-    res.json({
-      version: process.env.npm_package_version || "0.0.0",
-      buildSha,
-      builtAt: process.env.BUILD_TIMESTAMP || null,
-      env: process.env.NODE_ENV || "development",
-    });
-  });
+  // F9.10 — public version endpoint. Handler extracted to
+  // ./lib/version-handler.ts so behavior tests mount the EXACT same
+  // function (not a copy).
+  app.get("/api/version", versionHandler);
 
   app.get("/api/proxy/health", async (req: any, res) => {
     // Seal #2 (Task #20) F1.6 — admin-only. Architect re-review pass-3

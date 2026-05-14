@@ -7,6 +7,7 @@ import { users, authLockouts, authSessions } from "@shared/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { featureFlagService } from "./feature-flags";
 import { requestAccountDeletion, cancelAccountDeletion } from "./account-lifecycle";
+import { verifyStripeWebhookSignature } from "./lib/stripe-signature";
 
 // P0-3 (runtime-truth-isolation-seal): production must hard-fail if JWT_SECRET
 // missing. The previous fallback ("avyron_jwt_secret_" + REPL_ID) silently
@@ -863,14 +864,7 @@ export function registerAuthRoutes(app: Router) {
       // Both checks ALWAYS execute (no short-circuit `||` / `&&`); the two
       // booleans are folded with bitwise `&` so total work is constant
       // regardless of which (or both) of length/content actually mismatch.
-      const sigBuf = Buffer.from(String(sig ?? ""), "utf8");
-      const expected = Buffer.from(STRIPE_WEBHOOK_SECRET, "utf8");
-      const padLen = Math.max(sigBuf.length, expected.length, 1);
-      const sigPadded = Buffer.concat([sigBuf, Buffer.alloc(padLen - sigBuf.length)]);
-      const expectedPadded = Buffer.concat([expected, Buffer.alloc(padLen - expected.length)]);
-      const contentOk = crypto.timingSafeEqual(sigPadded, expectedPadded) ? 1 : 0;
-      const lengthOk = sigBuf.length === expected.length ? 1 : 0;
-      if ((contentOk & lengthOk) !== 1) {
+      if (!verifyStripeWebhookSignature(typeof sig === "string" ? sig : null, STRIPE_WEBHOOK_SECRET)) {
         console.warn("[Stripe] Webhook rejected: invalid signature");
         return res.status(403).json({ error: "Forbidden" });
       }

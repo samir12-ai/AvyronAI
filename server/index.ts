@@ -444,6 +444,7 @@ function setupErrorHandler(app: express.Application) {
     "/stripe/webhook",
     "/onboarding/track",
     "/proxy/health",
+    "/version",
   ];
 
   // ─── Phase 8.0 (Main migration) §2.7.1 ─────────────────────────────
