@@ -343,18 +343,10 @@ const MIN_COMMENTS_THRESHOLD = MI_THRESHOLDS.MIN_COMMENTS_SAMPLE;
 
 export { TARGET_POSTS_FAST, TARGET_POSTS_DEEP, MAX_COMMENT_POSTS_DEEP, MAX_COMMENTS_PER_POST_DEEP, CACHE_REUSE_WINDOW_MS };
 
-// Seal #11 / Task #29 / F6.9 — bounded in-flight fetch tracking.
-// Pre-fix: every entry in `activeFetches` lived for the entire duration
-// of `_executeFetch`. If an upstream HTTP call hung indefinitely (proxy
-// stall, scraper deadlock, never-resolving promise), the entry never got
-// deleted — and every subsequent call for the same (account, competitor)
-// reused the dead promise forever. Now: each in-flight entry carries an
-// abortController + a 45s wall-clock watchdog (architect-tightened from
-// the initial 60s) that forces the entry to be evicted from the map (and
-// resolved with INSUFFICIENT_DATA) so the next call can re-attempt with a
-// fresh promise. The AbortController.signal is THREADED into _executeFetch
-// so cancellable scraper paths see signal.aborted at every checkpoint
-// and throw FETCH_ABORTED rather than continuing background work.
+// F6.9 — each in-flight fetch carries an AbortController + 45s wall-clock
+// watchdog. On timeout the entry is aborted+evicted and resolved with
+// INSUFFICIENT_DATA so a fresh attempt can run. The signal is threaded
+// into _executeFetch so cancellable paths short-circuit via FETCH_ABORTED.
 export const FETCH_WATCHDOG_TIMEOUT_MS = parseInt(
   process.env.FETCH_WATCHDOG_TIMEOUT_MS || "45000",
   10,

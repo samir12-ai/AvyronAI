@@ -65,6 +65,7 @@
     "https-proxy-agent": "^7.0.6",
     "i18n-js": "^4.5.2",
     "jsonwebtoken": "^9.0.3",
+    "lru-cache": "^11.3.6",
     "multer": "^2.0.2",
     "openai": "^6.17.0",
     "p-limit": "^7.3.0",

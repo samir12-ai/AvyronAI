@@ -1349,6 +1349,16 @@ export const inFlightJobs = pgTable("in_flight_jobs", {
   expectedCompleteBy: timestamp("expected_complete_by"),
 });
 
+// F6.8 — orphan-observation tracking. (table_name, snapshot_id) PK with
+// first_observed_at gates orphan deletion to ORPHAN_GRACE_DAYS after the
+// first time this worker saw the snapshot in an orphaned state.
+export const snapshotOrphanObserved = pgTable("snapshot_orphan_observed", {
+  tableName: varchar("table_name").notNull(),
+  snapshotId: varchar("snapshot_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  firstObservedAt: timestamp("first_observed_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Seal #11 / Task #29 / F6.1
 // ai_token_budget: per-(jobId, provider) persistence of the MI v3 token-budget
 // projection. Engine + fetch-orchestrator persist on first compute and read

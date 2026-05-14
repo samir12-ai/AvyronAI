@@ -477,17 +477,17 @@ async function processAccount(accountId: string) {
     const currentAcct = await db.select().from(accountState)
       .where(eq(accountState.accountId, accountId))
       .limit(1);
-    const acctState = currentAcct[0] || state[0];
-    const currentMode = acctState.state || "ACTIVE";
-    let prevRecoveryCycles = acctState.recoveryCyclesStable || 0;
+    const acctRecord = currentAcct[0] || state[0];
+    const currentMode = acctRecord.state || "ACTIVE";
+    let prevRecoveryCycles = acctRecord.recoveryCyclesStable || 0;
 
     const confidenceResult = calculateConfidence({
-      volatilityIndex: acctState.volatilityIndex || 0,
+      volatilityIndex: acctRecord.volatilityIndex || 0,
       volatilityThreshold: volThreshold,
       decisionSuccessRate: decSuccessRate,
       totalDecisions: decTotal,
-      driftFlag: acctState.driftFlag || false,
-      guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
+      driftFlag: acctRecord.driftFlag || false,
+      guardrailTriggers24h: acctRecord.guardrailTriggers24h || 0,
       currentState: currentMode,
     });
 
@@ -514,10 +514,10 @@ async function processAccount(accountId: string) {
 
     if (currentMode === "SAFE_MODE") {
       const exitCheck = checkSafeModeExitConditions({
-        volatilityIndex: acctState.volatilityIndex || 0,
+        volatilityIndex: acctRecord.volatilityIndex || 0,
         volatilityThreshold: volThreshold,
-        guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
-        driftFlag: acctState.driftFlag || false,
+        guardrailTriggers24h: acctRecord.guardrailTriggers24h || 0,
+        driftFlag: acctRecord.driftFlag || false,
         last2Outcomes,
       });
 
@@ -571,10 +571,10 @@ async function processAccount(accountId: string) {
         prevRecoveryCycles = 0;
       } else {
         const exitCheck = checkSafeModeExitConditions({
-          volatilityIndex: acctState.volatilityIndex || 0,
+          volatilityIndex: acctRecord.volatilityIndex || 0,
           volatilityThreshold: volThreshold,
-          guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
-          driftFlag: acctState.driftFlag || false,
+          guardrailTriggers24h: acctRecord.guardrailTriggers24h || 0,
+          driftFlag: acctRecord.driftFlag || false,
           last2Outcomes,
         });
 
@@ -647,9 +647,9 @@ async function processAccount(accountId: string) {
     const refreshedState = await db.select().from(accountState)
       .where(eq(accountState.accountId, accountId))
       .limit(1);
-    const finalState = refreshedState[0] || acctState;
-    const activeMode = finalState.state || "ACTIVE";
-    const finalConfidence = finalState.confidenceScore || confidenceResult.score;
+    const finalRecord = refreshedState[0] || acctRecord;
+    const activeMode = finalRecord.state || "ACTIVE";
+    const finalConfidence = finalRecord.confidenceScore || confidenceResult.score;
 
     const canAutoExecute = activeMode === "ACTIVE" || activeMode === "FULL_AUTOPILOT" || activeMode === "RECOVERY_MODE";
     const isRecovery = activeMode === "RECOVERY_MODE";
@@ -709,8 +709,8 @@ async function processAccount(accountId: string) {
                   parsed,
                 );
                 totalSignalsWritten += written;
-              } catch (parseErr: any) {
-                console.warn(`[Worker] Failed to parse channel snapshot for signal ingest: ${parseErr.message}`);
+              } catch (parseErr) {
+                console.warn(`[Worker] Failed to parse channel snapshot for signal ingest: ${(parseErr as Error).message}`);
               }
             }
 
@@ -718,13 +718,13 @@ async function processAccount(accountId: string) {
               console.log(`[Worker] Channel signal ingest complete: ${totalSignalsWritten} format signal(s) written. Triggering memory mutation.`);
               // Fire-and-forget: channel data is now the primary mutation input
               runMemoryMutation(accountId, activeCampaignId).catch((err: any) =>
-                console.warn(`[Worker] Channel-triggered memory mutation error: ${err.message}`),
+                console.warn(`[Worker] Channel-triggered memory mutation error: ${(err as Error).message}`),
               );
             } else {
               console.log(`[Worker] No channel format signals written (insufficient per-type data) — skipping channel mutation trigger.`);
             }
-          } catch (signalErr: any) {
-            console.warn(`[Worker] Channel signal ingest/mutation error (non-blocking): ${signalErr.message}`);
+          } catch (signalErr) {
+            console.warn(`[Worker] Channel signal ingest/mutation error (non-blocking): ${(signalErr as Error).message}`);
           }
         }
         // Build delta context from the latest snapshot per channel (uses deltaFromPrevious JSON)
@@ -766,8 +766,8 @@ async function processAccount(accountId: string) {
           if (lines.length > 0) userChannelDeltaContext = lines.join("\n");
         }
       }
-    } catch (scrapeErr: any) {
-      console.error(`[Worker] User channel scrape/delta error for ${accountId}:`, scrapeErr.message);
+    } catch (scrapeErr) {
+      console.error(`[Worker] User channel scrape/delta error for ${accountId}:`, (scrapeErr as Error).message);
     }
 
     const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext, activePlanContext, userChannelDeltaContext);
@@ -801,8 +801,8 @@ async function processAccount(accountId: string) {
         guardrailResult,
         {
           state: activeMode,
-          volatilityIndex: finalState.volatilityIndex || 0,
-          driftFlag: finalState.driftFlag || false,
+          volatilityIndex: finalRecord.volatilityIndex || 0,
+          driftFlag: finalRecord.driftFlag || false,
         }
       );
 
@@ -847,7 +847,7 @@ async function processAccount(accountId: string) {
       }
 
       const insightType = compliance
-        ? classifyInsightTypeFromState(compliance, finalState.volatilityIndex || 0, finalState.driftFlag || false, decision.trigger, decision.action)
+        ? classifyInsightTypeFromState(compliance, finalRecord.volatilityIndex || 0, finalRecord.driftFlag || false, decision.trigger, decision.action)
         : classifyInsightType(decision.trigger, decision.action);
 
       const inserted = await db.insert(strategyDecisions).values({
@@ -869,7 +869,7 @@ async function processAccount(accountId: string) {
       const decisionId = inserted[0]?.id;
       if (!decisionId) continue;
 
-      const canExec = riskResult.autoExecutable && !blocked && finalState.autopilotOn && canAutoExecute;
+      const canExec = riskResult.autoExecutable && !blocked && finalRecord.autopilotOn && canAutoExecute;
 
       if (canExec) {
         await db.update(strategyDecisions)
@@ -1181,23 +1181,11 @@ function classifyInsightTypeFromState(
 /** Number of accounts processed in parallel per worker tick. */
 const WORKER_CONCURRENCY = 3;
 
-// Seal #11 / Task #29 / F6.4 — Postgres advisory lock + tick jitter.
-// Pre-fix: every replica's setInterval fired its own workerTick on the
-// same 5-min boundary. Two replicas processing the same accountId could
-// race for the same lock row and waste cycles. Now: a SESSION-scoped
-// advisory lock keyed on `hashtext('worker_tick_autonomous')` ensures only
-// ONE replica runs a tick at a time; ±30s jitter on the next tick
-// decorrelates timers.
-//
-// IMPORTANT (architect-flagged correctness): pg_advisory_lock is
-// session-scoped, so acquire AND release MUST happen on the SAME pinned
-// PoolClient. The previous implementation called `db.execute(...)` twice
-// — once to acquire, once to release — which routed each statement
-// through a fresh checked-out client and silently failed to release the
-// lock from the original session. We now check out a single client for
-// the entire workerTick lifetime and explicitly release it (which also
-// drops any session-held locks) in finally.
-const WORKER_TICK_LOCK_KEY = 0x4F574EAF; // stable int — `hashtext('worker_tick_autonomous')` once-derived
+// F6.4 — Postgres SESSION-scoped advisory lock + ±30s tick jitter so only
+// one replica runs a tick at a time. Acquire AND release MUST share the
+// SAME pinned PoolClient (lock is session-scoped); workerTick checks out
+// one client for its lifetime and releases it in finally.
+const WORKER_TICK_LOCK_KEY = 0x4F574EAF;
 const WORKER_TICK_JITTER_MS = 30_000;
 let workerJitterTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1207,8 +1195,8 @@ async function tryAcquireWorkerLockOn(client: import("pg").PoolClient): Promise<
       `SELECT pg_try_advisory_lock(${WORKER_TICK_LOCK_KEY}) AS got`,
     );
     return r.rows[0]?.got === true;
-  } catch (err: any) {
-    console.error("[Worker] Advisory-lock acquire failed:", err?.message || err);
+  } catch (err) {
+    console.error("[Worker] Advisory-lock acquire failed:", (err as Error)?.message || err);
     return false;
   }
 }
@@ -1221,8 +1209,8 @@ async function releaseWorkerLockOn(client: import("pg").PoolClient): Promise<voi
     if (r.rows[0]?.released !== true) {
       console.error("[Worker] Advisory-lock release returned false (lock not held by this session)");
     }
-  } catch (err: any) {
-    console.error("[Worker] Advisory-lock release failed:", err?.message || err);
+  } catch (err) {
+    console.error("[Worker] Advisory-lock release failed:", (err as Error)?.message || err);
   }
 }
 
@@ -1233,8 +1221,8 @@ async function workerTick() {
     let client: import("pg").PoolClient | null = null;
     try {
       client = await pool.connect();
-    } catch (err: any) {
-      console.error("[Worker] Could not acquire pool client for advisory lock:", err?.message || err);
+    } catch (err) {
+      console.error("[Worker] Could not acquire pool client for advisory lock:", (err as Error)?.message || err);
       return;
     }
     try {
@@ -1255,8 +1243,8 @@ async function workerTick() {
       // session-held advisory locks as a defense-in-depth, so even if
       // releaseWorkerLockOn fails we cannot leak the lock past the next
       // pool checkout cycle.
-      try { client.release(); } catch (e: any) {
-        console.error("[Worker] PoolClient release failed:", e?.message || e);
+      try { client.release(); } catch (e) {
+        console.error("[Worker] PoolClient release failed:", (e as Error)?.message || e);
       }
     }
   });
@@ -1334,12 +1322,8 @@ let ciTimer: ReturnType<typeof setTimeout> | null = null;
 function getNextCIIntervalMs(): number {
   return CI_MIN_INTERVAL_MS + Math.random() * (CI_MAX_INTERVAL_MS - CI_MIN_INTERVAL_MS);
 }
-// Seal #11 / Task #29 / F6.10 — Promise-based concurrency gate.
-// Pre-fix: `sharedPoolRunning: boolean` flipped synchronously, but a SIGTERM
-// arriving mid-run had no way to await the in-flight execution — the timer
-// was cleared and the process exited while the long-running refresh kept
-// writing DB rows. Now `sharedPoolRunningPromise` holds the live Promise
-// so `stopAutonomousWorker` (and the SIGTERM handler) can `await` it.
+// F6.10 — Promise-based concurrency gate so SIGTERM can await in-flight
+// shared-pool refresh before the process exits.
 let sharedPoolRunningPromise: Promise<void> | null = null;
 
 async function runSharedPoolRefresh(): Promise<void> {
@@ -1454,8 +1438,8 @@ async function runSharedPoolRefresh(): Promise<void> {
           const _degTag = result.degraded ? `DEGRADED(${result.degradedReason})` : "OK";
           console.log(`[CI Worker] TikTok scrape: competitor=${comp.name} | campaign=${comp.campaign_id} | ${_degTag} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | source=${result.source}`);
           tiktokScraped++;
-        } catch (tktErr: any) {
-          console.error(`[CI Worker] TikTok scrape error for ${comp.name} (campaign=${comp.campaign_id}): ${tktErr.message}`);
+        } catch (tktErr) {
+          console.error(`[CI Worker] TikTok scrape error for ${comp.name} (campaign=${comp.campaign_id}): ${(tktErr as Error).message}`);
         }
         await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
       }
@@ -1463,8 +1447,8 @@ async function runSharedPoolRefresh(): Promise<void> {
       if (tiktokScraped > 0) {
         console.log(`[CI Worker] TikTok auto-scrape complete: ${tiktokScraped} competitor(s) processed`);
       }
-    } catch (tiktokErr: any) {
-      console.error(`[CI Worker] TikTok auto-scraping module error (non-blocking): ${tiktokErr.message}`);
+    } catch (tiktokErr) {
+      console.error(`[CI Worker] TikTok auto-scraping module error (non-blocking): ${(tiktokErr as Error).message}`);
     }
 
     try {
@@ -1488,8 +1472,8 @@ async function runSharedPoolRefresh(): Promise<void> {
             console.log(`[CI Worker] Reviews scrape: scrapeReviewsForCompetitor not exported — skipping`);
             break;
           }
-        } catch (revErr: any) {
-          console.error(`[CI Worker] Reviews scrape error for ${comp.name}: ${revErr.message}`);
+        } catch (revErr) {
+          console.error(`[CI Worker] Reviews scrape error for ${comp.name}: ${(revErr as Error).message}`);
         }
         await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
       }
@@ -1497,8 +1481,8 @@ async function runSharedPoolRefresh(): Promise<void> {
       if (reviewsScraped > 0) {
         console.log(`[CI Worker] Reviews auto-scrape complete: ${reviewsScraped} competitor(s) processed`);
       }
-    } catch (reviewErr: any) {
-      console.error(`[CI Worker] Reviews auto-scraping module error (non-blocking): ${reviewErr.message}`);
+    } catch (reviewErr) {
+      console.error(`[CI Worker] Reviews auto-scraping module error (non-blocking): ${(reviewErr as Error).message}`);
     }
   } catch (error) {
     console.error("[CI Worker] Shared pool refresh error:", error);
@@ -1571,32 +1555,20 @@ export async function stopAutonomousWorker(): Promise<void> {
     ciTimer = null;
     console.log("[CI Worker] Competitive intelligence checker stopped");
   }
-  // Seal #11 / Task #29 / F6.10 — await any in-flight shared-pool refresh
-  // so we don't tear down the process while it's mid-DB-write.
+  // F6.10 — await any in-flight shared-pool refresh before exit.
   if (sharedPoolRunningPromise) {
     console.log("[CI Worker] Awaiting in-flight shared pool refresh before exit…");
     try {
       await sharedPoolRunningPromise;
-    } catch (err: any) {
-      console.error("[CI Worker] In-flight refresh errored during shutdown:", err?.message || err);
+    } catch (err) {
+      console.error("[CI Worker] In-flight refresh errored during shutdown:", (err as Error)?.message || err);
     }
   }
 }
 
-// SIGTERM/SIGINT handler. Replit sends SIGTERM
-// on graceful shutdown (default 15s window). Without an explicit handler,
-// in-flight worker ticks could be killed mid-DB-write, leaving stale lock
-// rows in `job_queue` that the next process would then have to clean up via
-// the stale-lock recovery path (acquireLock above, STALE_LOCK_MS=30min).
-// The handler:
-//   1. Sets `isShuttingDown` so any new worker tick exits immediately.
-//   2. Stops the interval timers so no new ticks are scheduled.
-//   3. Gives the process a small grace window for any in-flight tick to
-//      reach its `releaseLock` finally-block before letting the runtime
-//      exit naturally.
-// Idempotent — safe if Replit/test harness sends both SIGTERM and SIGINT.
-// Module-scope flag read by `workerTick` and `processAccount` to short-circuit
-// new work after SIGTERM/SIGINT (see installShutdownHandlers below).
+// F6.11 — SIGTERM/SIGINT handler. Sets isShuttingDown, stops timers, then
+// gives in-flight ticks ~5s to reach their releaseLock finally-block.
+// Idempotent. Read by workerTick/processAccount to short-circuit new work.
 let isShuttingDown = false;
 export function isWorkerShuttingDown(): boolean {
   return isShuttingDown;
@@ -1613,7 +1585,7 @@ export function installShutdownHandlers() {
     // shared-pool refresh per F6.10). Must not throw out of the signal
     // handler.
     stopAutonomousWorker().catch((err: any) => {
-      console.error(`[Worker] Error during stopAutonomousWorker on ${signal}:`, err?.message || err);
+      console.error(`[Worker] Error during stopAutonomousWorker on ${signal}:`, (err as Error)?.message || err);
     });
     // Give in-flight ticks ~5s to finish their finally-block work
     // (releaseLock, audit writes). Replit's default kill window is 15s so
