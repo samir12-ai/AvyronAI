@@ -238,3 +238,59 @@ Shared cross-engine commercial DNA:
 Validation: `.local/validation/marketing-logic-upgrade-proof.{ts,md,json}` proves 12/12 cascade signals shift across L1 Audience → L2 Awareness → L3 Offer → L4 DNA when only buyer evidence varies; contradiction detector fires on synthetic mis-stitched DNA; empty signal set composes safely.
 
 If the AI judge returns final REJECTED in any module, the module returns `null` and the engine continues with its legacy output — pipeline never breaks.
+
+## Operational Continuity Layer — Seal #14 / Track #2 (May 2026)
+
+**Doctrine extension: operational silence is now multi-replica safe AND observed across the full producer surface.** Track #2 closes the BLOCKER gaps surfaced by the post-Track-#1 audit:
+
+- **T1-A3 (BLOCKER)** — Track #1's `inFlightTick` Map was process-local. Two scheduler replicas would each invoke `runBoss` for the same (campaign, window) concurrently. NOW: every window invocation is preceded by a DB-level claim handshake against `continuity_window_claims` (PRIMARY KEY = `(campaign_id, plan_id, window_index)`, INSERT ON CONFLICT DO NOTHING). Postgres guarantees exactly one of N concurrent INSERTs wins; the rest get an empty RETURNING set and skip with `decision="skipped_claimed_by_other_replica"`. No pg_advisory locks (connection-scoped, brittle under pool reuse).
+- **T1-A5 (BLOCKER)** — Pre-seal, only the continuity scheduler itself was observed. The other 9 scheduled producers (autonomous-worker, publish-worker, snapshot-cleanup, ci-shared-pool, mi-queue-processor, tombstone-reaper, meta-token-health, ael-cel-reruns, continuity-supervisor itself) could silently stall in exactly the same way. NOW: 10-chain operational registry in `server/continuity/chain-registry.ts` declares each chain's expected interval + `introspect()` query. The new continuity supervisor (`server/continuity/supervisor.ts`) classifies every chain every 5min using the shared `classifyChainState()` 4-state enum.
+
+### Non-negotiable invariants
+
+| # | Invariant | Enforcement |
+|---|---|---|
+| **INVARIANT-RETRY** | Failed OR partial boss runs MUST NEVER be suppressed. | `SUCCESS_STATUSES = new Set(["completed"])` in `scheduler.ts`. `partial` and `failed` outcomes both DELETE the claim row via `releaseClaimForRetry()` so the next tick re-claims and retries. Operator directive May 2026 — any change letting `partial` or `failed` short-circuit a window is a P0 defect re-introducing the original outage. Test proof: `server/tests/continuity-multi-replica.test.ts` — "a failed runBoss DELETEs the claim row" + "a partial runBoss ALSO releases the claim". |
+| **MULTI-REPLICA-SAFE** | Two scheduler instances MUST NOT both invoke runBoss for the same (campaign, plan, window). | DB-level claim handshake via `tryClaimWindow()` → `INSERT INTO continuity_window_claims ... ON CONFLICT DO NOTHING RETURNING`. Test proof: `continuity-multi-replica.test.ts` — "two concurrent tryClaimWindow calls — only one wins". |
+| **CHAIN-STATE-EXPLICIT** | A chain that lacks introspection wiring MUST be classified UNKNOWN, never silently HEALTHY. | `classifyChainState({ introspectionAvailable: false })` returns `state: "UNKNOWN"`. Test proof: `continuity-supervisor.test.ts` — "returns UNKNOWN when introspection is not wired". The 3 chains currently UNKNOWN (`mi_queue_processor`, `tombstone_reaper`, `ael_cel_reruns`) will be promoted in Track #3. |
+| **NO-TENANT-LEAK** | Public `/healthz/continuity` MUST NOT expose per-tenant fields (campaignId, accountId, planId). | Admin-gated full report (timing-safe `METRICS_ADMIN_TOKEN` check) returns the unredacted health + supervisor + replicaId. Public surface returns operational counters + per-chain state/lag (no tenant identifiers — only `chainId`, `state` enum, `lagMs`). |
+
+### State enum (`ChainState`)
+
+| State | Meaning | Trigger |
+|---|---|---|
+| `HEALTHY` | Lag within 1× expected interval. | `lag <= expectedIntervalMs * degradedMultiplier` |
+| `DEGRADED` | Lag between 1× and dead threshold. Operator-actionable, not yet P1. | `degradedMultiplier * interval < lag <= deadMultiplier * interval` |
+| `DEAD` | Lag exceeds dead threshold (default 4×). P1 — `CONTINUITY_CHAIN_LAG` audit fires on transition; for the scheduler heartbeat, `CONTINUITY_HEARTBEAT_STALE` fires. | `lag > deadMultiplier * interval` OR `lastObservedRunAt === null` (with introspection wired) |
+| `UNKNOWN` | Introspection not wired (`introspect: null`). Surfaced explicitly so operators see the gap. | `introspectionAvailable === false` |
+
+### Track #2 surface (operator runbook)
+
+- `GET /healthz/continuity` (public) — adds `supervisor.{schedulerState, schedulerHeartbeatAgeMs, chainsHealthy/Degraded/Dead/Unknown, chains[]}`. Alarm if `supervisor.schedulerState !== "HEALTHY"` for ≥10min, or `supervisor.chainsDead > 0`, or `lastSupervisorTickAt` older than `intervalMs * 1.2`.
+- `GET /healthz/continuity` with `x-admin-token` — adds `replicaId` for forensic correlation when investigating which replica owned a window, and the unredacted per-tenant decision log.
+- `REPLICA_ID` env var — set to pod/instance ID in multi-replica deploys. Defaults to `replica_<uuid>` per process. Stored on every `continuity_window_claims.claimed_by` row + emitted in `[Server] Continuity layer up — replicaId=...` boot log.
+- `CONTINUITY_SUPERVISOR_DISABLED=true` — disables the supervisor (used by tests).
+- `CONTINUITY_SUPERVISOR_INTERVAL_MS` — overrides 5min cadence (tests only).
+
+### Prometheus metrics added (12)
+
+`continuity_window_claims_acquired_total`, `continuity_window_claims_lost_other_replica_total`, `continuity_window_claims_already_completed_total`, `continuity_window_claims_released_total` (INVARIANT-RETRY enforcement counter), `continuity_supervisor_up`, `continuity_supervisor_ticks_total`, `continuity_supervisor_last_tick_epoch_seconds`, `continuity_scheduler_heartbeat_age_ms`, `continuity_heartbeat_stale_total`, `continuity_chain_lag_ms{chain}`, `continuity_chain_state{chain,state}`, `continuity_chain_lag_events_total{chain,state}`.
+
+### Audit event types added (3)
+
+`CONTINUITY_HEARTBEAT_STALE` — supervisor classified scheduler as DEAD. `CONTINUITY_CHAIN_LAG` — fires ONLY on state transition into DEGRADED/DEAD (no spam for chains that have been DEAD for hours). `CONTINUITY_REPLICA_CONFLICT` — best-effort forensic event when our replica loses a claim race to another replica.
+
+### Schema migration 022 (`REQUIRED_SCHEMA_VERSION` 21 → 22)
+
+Three new tables:
+- `continuity_window_claims` — `(campaign_id, plan_id, window_index)` PRIMARY KEY + `claimed_by`/`claimed_at`/`status`/`outcome`/`outcome_at`/`boss_run_id`. The atomic primitive.
+- `chain_registry_state` — current `lastState` + `lastStateChangedAt` + `lastObservedLagMs` per chain. Drives the transition-only audit gate.
+- `continuity_supervisor_ticks` — paper-trail row written every supervisor tick. A missing row for >2× `intervalMs` IS itself the P1 signal that the supervisor has stalled.
+
+### Track #2 D1/D5 hygiene
+
+No new `eslint-disable semantic/no-semantic-fallback` suppressions added. The new code uses only canonical field reads + explicit if-blocks. New `decision` enum values (`skipped_claimed_by_other_replica`, `skipped_completed_claim_exists`) added to `PerCampaignDecision.decision` strict union. New `ChainState` is a `z.enum`-shape TypeScript union with no string fallbacks.
+
+### Tracks #3–#7 (deferred)
+
+Track #3 (silent-degradation sweep): wire `introspect()` for the 3 currently-UNKNOWN chains, add stale-claim sweeper (kill `in_progress` claims older than 2× WINDOW_MS), add per-worker run tables to replace audit_log heartbeat introspection. Track #4 (alerting bridge): wire Prometheus alert rules + PagerDuty/Opsgenie. Track #5 (cross-region replica coordination). Track #6 (compute-class budget rebalancer). Track #7 (autonomous remediation playbooks). All deferred to subsequent seals; design notes in `.local/docs/seal-13-to-17-plan.md`.

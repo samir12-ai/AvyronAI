@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, jsonb, primaryKey, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1389,6 +1389,71 @@ export const continuityTicks = pgTable("continuity_ticks", {
 });
 export type ContinuityTick = typeof continuityTicks.$inferSelect;
 export type InsertContinuityTick = typeof continuityTicks.$inferInsert;
+
+// Seal #14 / Track #2 — Continuity Supervision Layer.
+//
+// continuity_window_claims: DB-level idempotency lock per
+// (campaign_id, plan_id, window_index). Replaces the single-process
+// inFlightTick Map with a multi-replica-safe claim handshake. INSERT
+// ON CONFLICT DO NOTHING is the lock acquire; DELETE on failed/partial
+// boss_run is the retry hook (preserves INVARIANT-RETRY: failed runs
+// MUST never be suppressed). UPDATE to status='completed' on success
+// is the idempotency sentinel.
+export const continuityWindowClaims = pgTable("continuity_window_claims", {
+  campaignId: varchar("campaign_id").notNull(),
+  planId: varchar("plan_id").notNull(),
+  windowIndex: integer("window_index").notNull(),
+  accountId: varchar("account_id").notNull(),
+  claimedBy: varchar("claimed_by").notNull(),
+  claimedAt: timestamp("claimed_at").notNull().defaultNow(),
+  status: varchar("status").notNull().default("in_progress"),
+  outcome: varchar("outcome"),
+  outcomeAt: timestamp("outcome_at"),
+  bossRunId: varchar("boss_run_id"),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.campaignId, t.planId, t.windowIndex] }),
+}));
+export type ContinuityWindowClaim = typeof continuityWindowClaims.$inferSelect;
+export type InsertContinuityWindowClaim = typeof continuityWindowClaims.$inferInsert;
+
+// chain_registry_state: observability state for the 10-chain operational
+// registry. Updated every supervisor tick (~5min). last_state ∈
+// {HEALTHY, DEGRADED, DEAD, UNKNOWN}; UNKNOWN means
+// introspection_available=false (no data-source query wired yet — these
+// chains will be promoted in Track #3 silent-degradation sweep).
+export const chainRegistryState = pgTable("chain_registry_state", {
+  chainId: varchar("chain_id").primaryKey(),
+  expectedIntervalMs: bigint("expected_interval_ms", { mode: "number" }).notNull(),
+  lastObservedRunAt: timestamp("last_observed_run_at"),
+  lastObservedLagMs: bigint("last_observed_lag_ms", { mode: "number" }),
+  lastState: varchar("last_state").notNull().default("UNKNOWN"),
+  lastStateChangedAt: timestamp("last_state_changed_at").notNull().defaultNow(),
+  introspectionAvailable: boolean("introspection_available").notNull().default(true),
+  notes: jsonb("notes").notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export type ChainRegistryStateRow = typeof chainRegistryState.$inferSelect;
+export type InsertChainRegistryState = typeof chainRegistryState.$inferInsert;
+
+// continuity_supervisor_ticks: paper trail for the continuity supervisor
+// itself. A missing row for >2× supervisor interval is the operator-
+// visible signal that the supervisor has stalled (the watcher of the
+// watchers).
+export const continuitySupervisorTicks = pgTable("continuity_supervisor_ticks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tickAt: timestamp("tick_at").notNull().defaultNow(),
+  durationMs: integer("duration_ms").notNull().default(0),
+  schedulerHeartbeatAgeMs: bigint("scheduler_heartbeat_age_ms", { mode: "number" }),
+  schedulerState: varchar("scheduler_state").notNull().default("UNKNOWN"),
+  chainsChecked: integer("chains_checked").notNull().default(0),
+  chainsHealthy: integer("chains_healthy").notNull().default(0),
+  chainsDegraded: integer("chains_degraded").notNull().default(0),
+  chainsDead: integer("chains_dead").notNull().default(0),
+  chainsUnknown: integer("chains_unknown").notNull().default(0),
+  details: jsonb("details").notNull().default(sql`'[]'::jsonb`),
+});
+export type ContinuitySupervisorTick = typeof continuitySupervisorTicks.$inferSelect;
+export type InsertContinuitySupervisorTick = typeof continuitySupervisorTicks.$inferInsert;
 
 // F6.8 — orphan-observation tracking. (table_name, snapshot_id) PK with
 // first_observed_at gates orphan deletion to ORPHAN_GRACE_DAYS after the

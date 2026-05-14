@@ -17,6 +17,10 @@ import {
   stopContinuityScheduler,
   getContinuityHealth,
   renderContinuityMetrics,
+  startContinuitySupervisor,
+  stopContinuitySupervisor,
+  getSupervisorHealth,
+  getReplicaId,
 } from "./continuity";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
@@ -424,6 +428,7 @@ function setupErrorHandler(app: express.Application) {
   // METRICS_ADMIN_TOKEN, mirroring the /metrics gating model.
   app.get("/healthz/continuity", (req: Request, res: Response) => {
     const health = getContinuityHealth();
+    const supervisor = getSupervisorHealth();
     const expected = process.env.METRICS_ADMIN_TOKEN;
     const provided = req.header("x-admin-token") ?? "";
     let isAdmin = false;
@@ -435,11 +440,20 @@ function setupErrorHandler(app: express.Application) {
       }
     }
     if (isAdmin) {
-      return res.status(200).json(health);
+      // Seal #14 — admin gets the full report including per-chain
+      // observations. Replica id is included for forensic correlation
+      // when investigating which replica owned a window.
+      return res.status(200).json({
+        ...health,
+        replicaId: getReplicaId(),
+        supervisor,
+      });
     }
     // Strip per-tenant fields. Keep timestamps + counters + scheduler
     // up/down state so unauthenticated probes can still alarm on
-    // staleness.
+    // staleness. Seal #14 — supervisor + chain summary IS exposed
+    // publicly because it carries no tenant identifiers (only chainId,
+    // state enum, and lag in ms — operational counters only).
     const { lastTickReport, ...rest } = health;
     const safeReport = lastTickReport
       ? {
@@ -454,7 +468,31 @@ function setupErrorHandler(app: express.Application) {
           deadCyclesDetected: lastTickReport.deadCyclesDetected,
         }
       : null;
-    return res.status(200).json({ ...rest, lastTickReport: safeReport });
+    const safeSupervisor = supervisor.lastReport
+      ? {
+          supervisorUp: supervisor.supervisorUp,
+          lastSupervisorTickAt: supervisor.lastSupervisorTickAt,
+          intervalMs: supervisor.intervalMs,
+          schedulerState: supervisor.lastReport.schedulerState,
+          schedulerHeartbeatAgeMs: supervisor.lastReport.schedulerHeartbeatAgeMs,
+          chainsChecked: supervisor.lastReport.chainsChecked,
+          chainsHealthy: supervisor.lastReport.chainsHealthy,
+          chainsDegraded: supervisor.lastReport.chainsDegraded,
+          chainsDead: supervisor.lastReport.chainsDead,
+          chainsUnknown: supervisor.lastReport.chainsUnknown,
+          chains: supervisor.lastReport.chains.map((c) => ({
+            chainId: c.chainId,
+            state: c.state,
+            lagMs: c.lagMs,
+            introspectionAvailable: c.introspectionAvailable,
+          })),
+        }
+      : {
+          supervisorUp: supervisor.supervisorUp,
+          lastSupervisorTickAt: supervisor.lastSupervisorTickAt,
+          intervalMs: supervisor.intervalMs,
+        };
+    return res.status(200).json({ ...rest, lastTickReport: safeReport, supervisor: safeSupervisor });
   });
 
   // secret, NOT by the JWT-based admin account check used elsewhere. Two
@@ -683,6 +721,11 @@ function setupErrorHandler(app: express.Application) {
       // 60s post-listen so other workers are up first. Disabled by
       // CONTINUITY_SCHEDULER_DISABLED=true (used by tests).
       startContinuityScheduler();
+      // Seal #14 / Track #2 — continuity supervisor (the watcher of the
+      // watchers). Detects scheduler heartbeat-stale + per-chain lag
+      // across the 10-chain operational registry.
+      startContinuitySupervisor();
+      log(`[Server] Continuity layer up — replicaId=${getReplicaId()}`);
 
       invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
 
@@ -795,6 +838,7 @@ function setupErrorHandler(app: express.Application) {
     await stopPublishWorker();
     stopSnapshotCleanupWorker();
     await stopContinuityScheduler();
+    await stopContinuitySupervisor();
     if (userScrapeTimer) { clearInterval(userScrapeTimer); userScrapeTimer = null; }
     if (competitorFetchTimer) { clearInterval(competitorFetchTimer); competitorFetchTimer = null; }
     server.close(() => {

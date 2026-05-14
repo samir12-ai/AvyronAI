@@ -103,6 +103,56 @@ export const continuityMetrics = {
     "continuity_scheduler_up",
     "1 if the continuity scheduler tick loop is currently scheduled, 0 otherwise",
   ),
+  // Seal #14 / Track #2 — multi-replica claim metrics.
+  claimsAcquired: new Counter(
+    "continuity_window_claims_acquired_total",
+    "Per-window claims this replica successfully INSERTed (it owns the work)",
+  ),
+  claimsLostToOtherReplica: new Counter(
+    "continuity_window_claims_lost_other_replica_total",
+    "Per-window claims this replica lost to a concurrent replica (ON CONFLICT DO NOTHING)",
+  ),
+  claimsAlreadyCompleted: new Counter(
+    "continuity_window_claims_already_completed_total",
+    "Per-window claims short-circuited because a completed claim row already exists",
+  ),
+  claimsReleasedOnFailure: new Counter(
+    "continuity_window_claims_released_total",
+    "Per-window claim rows DELETEd because boss_run failed/partial (INVARIANT-RETRY enforcement)",
+  ),
+  // Seal #14 / Track #2 — supervisor metrics.
+  supervisorUp: new Gauge(
+    "continuity_supervisor_up",
+    "1 if the continuity supervisor tick loop is currently scheduled, 0 otherwise",
+  ),
+  supervisorTicksTotal: new Counter(
+    "continuity_supervisor_ticks_total",
+    "Continuity supervisor ticks completed",
+  ),
+  supervisorLastTickEpochSeconds: new Gauge(
+    "continuity_supervisor_last_tick_epoch_seconds",
+    "Unix timestamp of the most recent supervisor tick (heartbeat freshness for the supervisor itself)",
+  ),
+  schedulerHeartbeatAgeMs: new Gauge(
+    "continuity_scheduler_heartbeat_age_ms",
+    "Milliseconds since the most recent continuity_scheduler tick observed by the supervisor",
+  ),
+  heartbeatStaleEvents: new Counter(
+    "continuity_heartbeat_stale_total",
+    "Times the supervisor classified the scheduler as DEAD (CONTINUITY_HEARTBEAT_STALE audits fired)",
+  ),
+  chainLagMs: new Gauge(
+    "continuity_chain_lag_ms",
+    "Per-chain milliseconds since last observed successful run (chain label)",
+  ),
+  chainState: new Gauge(
+    "continuity_chain_state",
+    "Per-chain classified state (chain + state labels; 1 = currently in this state, set to 0 on transition)",
+  ),
+  chainLagEvents: new Counter(
+    "continuity_chain_lag_events_total",
+    "Per-chain state-transition events into DEGRADED/DEAD (chain + state labels)",
+  ),
 };
 
 export function renderContinuityMetrics(): string {
@@ -118,6 +168,18 @@ export function renderContinuityMetrics(): string {
     continuityMetrics.missedWindows.render(),
     continuityMetrics.deadCycles.render(),
     continuityMetrics.schedulerUp.render(),
+    continuityMetrics.claimsAcquired.render(),
+    continuityMetrics.claimsLostToOtherReplica.render(),
+    continuityMetrics.claimsAlreadyCompleted.render(),
+    continuityMetrics.claimsReleasedOnFailure.render(),
+    continuityMetrics.supervisorUp.render(),
+    continuityMetrics.supervisorTicksTotal.render(),
+    continuityMetrics.supervisorLastTickEpochSeconds.render(),
+    continuityMetrics.schedulerHeartbeatAgeMs.render(),
+    continuityMetrics.heartbeatStaleEvents.render(),
+    continuityMetrics.chainLagMs.render(),
+    continuityMetrics.chainState.render(),
+    continuityMetrics.chainLagEvents.render(),
     "",
   ].join("\n\n");
 }

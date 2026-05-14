@@ -75,13 +75,30 @@ import {
   pipelineEvalWindows,
   continuityTicks,
   bossRuns,
+  continuityWindowClaims,
 } from "@shared/schema";
 import { and, desc, eq, sql, max as drizzleMax } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { runBoss } from "../boss";
 import { BossRunInFlightError } from "../boss/concurrency";
 import { logAudit } from "../audit";
 import { logger } from "../logger";
 import { continuityMetrics } from "./metrics";
+
+/**
+ * Seal #14 / Track #2 — replica identity.
+ *
+ * Each process gets a stable identifier used as `claimed_by` on every
+ * continuity_window_claims row it inserts. In Kubernetes/Replit Autoscale
+ * deployments operators should set REPLICA_ID to the pod/instance ID; in
+ * single-process dev we generate a random one at boot. This identifier
+ * gives operators a forensic trail when investigating "which replica
+ * picked up which window."
+ */
+const REPLICA_ID = process.env.REPLICA_ID ?? `replica_${randomUUID()}`;
+export function getReplicaId(): string {
+  return REPLICA_ID;
+}
 
 export const WINDOW_DAYS = 7;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -106,6 +123,8 @@ export interface PerCampaignDecision {
     | "skipped_already_evaluated"
     | "skipped_in_flight"
     | "skipped_no_advance"
+    | "skipped_claimed_by_other_replica"
+    | "skipped_completed_claim_exists"
     | "reanchored_then_invoked"
     | "failed";
   reason?: string;
@@ -115,6 +134,8 @@ export interface PerCampaignDecision {
   deadCycleDays?: number | null;
   bossRunId?: string;
   reanchored?: boolean;
+  /** Seal #14 — the replica that won the claim for this window. */
+  claimedBy?: string;
 }
 
 export interface TickReport {
@@ -315,6 +336,229 @@ async function latestRunInWindow(
  * a campaign that has SOME history — that would corrupt cluster
  * comparison baselines.
  */
+/**
+ * Seal #14 / Track #2 — DB-level claim handshake. The atomic primitive
+ * is INSERT ... ON CONFLICT DO NOTHING RETURNING. Postgres guarantees
+ * exactly one of N concurrent INSERTs against the same primary key
+ * succeeds; the rest get an empty RETURNING set. That's our "winner takes
+ * the work, loser skips" without needing pg_advisory locks (which are
+ * connection-scoped and brittle under pool reuse).
+ *
+ * Exported for tests.
+ */
+export interface ClaimAttempt {
+  acquired: boolean;
+  alreadyCompleted: boolean;
+  ownedBy?: string;
+}
+
+export async function tryClaimWindow(
+  plan: { accountId: string; campaignId: string; planId: string },
+  windowIndex: number,
+  now: Date,
+): Promise<ClaimAttempt> {
+  // Fast-path: existing row check. If a `completed` row exists, we
+  // short-circuit; if an `in_progress` row exists, another replica owns
+  // it. We do this before the INSERT to surface the more specific
+  // skip reason ("completed" vs "claimed by other") in the decision log.
+  try {
+    const existing = await db
+      .select({
+        status: continuityWindowClaims.status,
+        claimedBy: continuityWindowClaims.claimedBy,
+      })
+      .from(continuityWindowClaims)
+      .where(
+        and(
+          eq(continuityWindowClaims.campaignId, plan.campaignId),
+          eq(continuityWindowClaims.planId, plan.planId),
+          eq(continuityWindowClaims.windowIndex, windowIndex),
+        ),
+      )
+      .limit(1);
+    if (existing.length > 0) {
+      const row = existing[0];
+      if (row.status === "completed") {
+        return { acquired: false, alreadyCompleted: true, ownedBy: row.claimedBy };
+      }
+      // status='in_progress' from any replica (could even be ours from a
+      // crash-restart). We do NOT take it over here — the supervisor's
+      // stale-claim sweep (Track #3) will handle that case.
+      return { acquired: false, alreadyCompleted: false, ownedBy: row.claimedBy };
+    }
+  } catch (err) {
+    // If the read fails (e.g. transient DB error), fall through to the
+    // INSERT attempt — that path is itself atomic and will tell us the
+    // truth via ON CONFLICT.
+    logger.warn(
+      { component: "continuity-scheduler", err: String(err) },
+      "[ContinuityScheduler] tryClaimWindow read failed, attempting insert",
+    );
+  }
+
+  try {
+    const inserted = await db
+      .insert(continuityWindowClaims)
+      .values({
+        campaignId: plan.campaignId,
+        planId: plan.planId,
+        windowIndex,
+        accountId: plan.accountId,
+        claimedBy: REPLICA_ID,
+        claimedAt: now,
+        status: "in_progress",
+      })
+      .onConflictDoNothing({
+        target: [
+          continuityWindowClaims.campaignId,
+          continuityWindowClaims.planId,
+          continuityWindowClaims.windowIndex,
+        ],
+      })
+      .returning({ claimedBy: continuityWindowClaims.claimedBy });
+    if (inserted.length === 0) {
+      // Lost the race. Re-read to learn which replica won (best-effort,
+      // for forensics only — failure to read here is non-fatal).
+      try {
+        const winner = await db
+          .select({
+            claimedBy: continuityWindowClaims.claimedBy,
+            status: continuityWindowClaims.status,
+          })
+          .from(continuityWindowClaims)
+          .where(
+            and(
+              eq(continuityWindowClaims.campaignId, plan.campaignId),
+              eq(continuityWindowClaims.planId, plan.planId),
+              eq(continuityWindowClaims.windowIndex, windowIndex),
+            ),
+          )
+          .limit(1);
+        const row = winner[0];
+        if (row?.status === "completed") {
+          return { acquired: false, alreadyCompleted: true, ownedBy: row.claimedBy };
+        }
+        return { acquired: false, alreadyCompleted: false, ownedBy: row?.claimedBy };
+      } catch {
+        return { acquired: false, alreadyCompleted: false };
+      }
+    }
+    return { acquired: true, alreadyCompleted: false, ownedBy: REPLICA_ID };
+  } catch (err) {
+    // Fail-closed: if the INSERT itself errors, treat as "couldn't claim"
+    // so we don't accidentally invoke runBoss without an idempotency
+    // sentinel. The next tick will retry.
+    logger.error(
+      { component: "continuity-scheduler", err: String(err) },
+      "[ContinuityScheduler] tryClaimWindow insert failed, treating as un-acquired",
+    );
+    return { acquired: false, alreadyCompleted: false };
+  }
+}
+
+export async function markClaimCompleted(
+  plan: { campaignId: string; planId: string },
+  windowIndex: number,
+  bossRunId: string,
+  outcome: "ok" | "partial",
+  now: Date,
+): Promise<void> {
+  // Architect-flagged finding #3 — affected-row check. If the UPDATE
+  // matches 0 rows (claim went missing, claimed_by no longer matches us,
+  // status already changed by another path), we MUST surface that. Logged
+  // as ERROR + metric increment so operators see the inconsistency
+  // rather than the scheduler silently believing the claim is closed.
+  try {
+    const updated = await db
+      .update(continuityWindowClaims)
+      .set({
+        status: "completed",
+        outcome,
+        outcomeAt: now,
+        bossRunId,
+      })
+      .where(
+        and(
+          eq(continuityWindowClaims.campaignId, plan.campaignId),
+          eq(continuityWindowClaims.planId, plan.planId),
+          eq(continuityWindowClaims.windowIndex, windowIndex),
+          eq(continuityWindowClaims.claimedBy, REPLICA_ID),
+        ),
+      )
+      .returning({ campaignId: continuityWindowClaims.campaignId });
+    if (updated.length === 0) {
+      logger.error(
+        {
+          component: "continuity-scheduler",
+          campaignId: plan.campaignId,
+          planId: plan.planId,
+          windowIndex,
+          bossRunId,
+          replicaId: REPLICA_ID,
+        },
+        "[ContinuityScheduler] markClaimCompleted matched 0 rows — claim row missing or owned by different replica; runBoss completed but claim sentinel inconsistent",
+      );
+    }
+  } catch (err) {
+    logger.error(
+      { component: "continuity-scheduler", err: String(err) },
+      "[ContinuityScheduler] markClaimCompleted threw",
+    );
+  }
+}
+
+/**
+ * INVARIANT-RETRY (Seal #14, non-negotiable): on failed/partial boss_run,
+ * DELETE the claim row so the next tick can re-claim and retry. Pre-seal
+ * we left the claim row in `in_progress` which would have silently
+ * blocked the next tick — exactly the failure mode the May 2026 outage
+ * was made of. Callers MUST invoke this on any non-completed runBoss
+ * outcome (failure throw, partial result, BossRunInFlightError EXCEPTED
+ * because the in-flight call will finalize the claim itself).
+ */
+export async function releaseClaimForRetry(
+  plan: { campaignId: string; planId: string },
+  windowIndex: number,
+): Promise<void> {
+  // Architect-flagged finding #3 — affected-row check. INVARIANT-RETRY
+  // demands the claim row actually be deleted. If DELETE matches 0 rows
+  // (we don't own it, status changed underfoot, or DB is unreachable),
+  // the next tick will see status='in_progress' and skip
+  // (`claimed_by_other_replica`), silently suppressing the retry — the
+  // exact failure mode this seal exists to prevent. Surface as ERROR.
+  try {
+    const deleted = await db
+      .delete(continuityWindowClaims)
+      .where(
+        and(
+          eq(continuityWindowClaims.campaignId, plan.campaignId),
+          eq(continuityWindowClaims.planId, plan.planId),
+          eq(continuityWindowClaims.windowIndex, windowIndex),
+          eq(continuityWindowClaims.claimedBy, REPLICA_ID),
+          eq(continuityWindowClaims.status, "in_progress"),
+        ),
+      )
+      .returning({ campaignId: continuityWindowClaims.campaignId });
+    if (deleted.length === 0) {
+      logger.error(
+        {
+          component: "continuity-scheduler",
+          campaignId: plan.campaignId,
+          planId: plan.planId,
+          windowIndex,
+          replicaId: REPLICA_ID,
+        },
+        "[ContinuityScheduler] releaseClaimForRetry matched 0 rows — INVARIANT-RETRY may be violated for this window (next tick will see no in_progress claim from us; if some other state exists, retry is suppressed)",
+      );
+    }
+  } catch (err) {
+    logger.error(
+      { component: "continuity-scheduler", err: String(err) },
+      "[ContinuityScheduler] releaseClaimForRetry threw — next tick may not retry",
+    );
+  }
+}
+
 function shouldReanchor(
   expectedWindowIndex: number,
   maxObservedWindowIndex: number | null,
@@ -470,16 +714,18 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
         }
 
         // Idempotency: if the most recent boss_run STARTED in the current
-        // window AND finished SUCCESSFULLY, we've already evaluated this
-        // window — skip. We compute "start of current window" as
+        // window AND finished with status='completed', we've already
+        // evaluated this window — skip. INVARIANT-RETRY (Seal #14): a
+        // failed OR partial run does NOT satisfy the window — the
+        // scheduler invokes runBoss again on the next tick. This is
+        // non-negotiable per operator directive May 2026; any change
+        // that lets `partial` or `failed` short-circuit the window is a
+        // P0 defect re-introducing the original outage.
+        //
+        // We compute "start of current window" as
         // (effectiveAnchor + expectedWindowIndex * WINDOW_MS), matching
         // eval-windows.ts exactly.
-        //
-        // A failed/partial run in the current window is treated as
-        // "needs retry" — the scheduler invokes runBoss again. This closes
-        // the silent-under-execution hole the seal was created to fix:
-        // pre-change, a single failed run blocked the entire week.
-        const SUCCESS_STATUSES = new Set(["completed", "partial"]);
+        const SUCCESS_STATUSES = new Set(["completed"]);
         const effectiveAnchor = reanchored ? now : anchorAt;
         const currentWindowStart = new Date(
           effectiveAnchor.getTime() + windowState.expectedWindowIndex * WINDOW_MS,
@@ -504,13 +750,99 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
           }
         }
 
+        // Seal #14 / Track #2 — multi-replica claim handshake.
+        // Try to INSERT a claim row for this (campaign, plan, window).
+        // ON CONFLICT DO NOTHING gives us atomic "winner takes the work,
+        // loser skips" semantics across replicas. The single-process
+        // inFlightTick guard remains as a fast-path for the same-process
+        // case (no DB round-trip).
+        const claim = await tryClaimWindow(plan, windowState.expectedWindowIndex, now);
+        if (!claim.acquired) {
+          if (claim.alreadyCompleted) {
+            decisions.push({
+              accountId: plan.accountId,
+              campaignId: plan.campaignId,
+              planId: plan.planId,
+              decision: "skipped_completed_claim_exists",
+              reason: "completed_claim_exists",
+              expectedWindowIndex: windowState.expectedWindowIndex,
+              observedWindowIndex: windowState.maxObservedWindowIndex,
+              missedWindows: windowState.missedWindows,
+              deadCycleDays,
+              claimedBy: claim.ownedBy,
+            });
+            runsSkipped += 1;
+            continuityMetrics.runsSkipped.inc({ reason: "completed_claim_exists" });
+            continuityMetrics.claimsAlreadyCompleted.inc();
+            continue;
+          }
+          decisions.push({
+            accountId: plan.accountId,
+            campaignId: plan.campaignId,
+            planId: plan.planId,
+            decision: "skipped_claimed_by_other_replica",
+            reason: "claimed_by_other_replica",
+            expectedWindowIndex: windowState.expectedWindowIndex,
+            observedWindowIndex: windowState.maxObservedWindowIndex,
+            missedWindows: windowState.missedWindows,
+            deadCycleDays,
+            claimedBy: claim.ownedBy,
+          });
+          runsSkipped += 1;
+          continuityMetrics.runsSkipped.inc({ reason: "claimed_by_other_replica" });
+          continuityMetrics.claimsLostToOtherReplica.inc();
+          if (claim.ownedBy && claim.ownedBy !== REPLICA_ID) {
+            await logAudit(plan.accountId, "CONTINUITY_REPLICA_CONFLICT", {
+              details: {
+                campaignId: plan.campaignId,
+                planId: plan.planId,
+                windowIndex: windowState.expectedWindowIndex,
+                ourReplicaId: REPLICA_ID,
+                ownedBy: claim.ownedBy,
+              },
+            }).catch(() => undefined);
+          }
+          continue;
+        }
+        continuityMetrics.claimsAcquired.inc();
+
         // Invoke runBoss with idempotent campaign lock.
+        // INVARIANT-RETRY enforcement: on success → mark claim completed.
+        // On failure/partial/exception → DELETE the claim so the next tick
+        // can re-claim and retry. This preserves the Track #1 invariant
+        // that failed/partial runs never block the next attempt.
         try {
           const result = await runBoss({
             accountId: plan.accountId,
             campaignId: plan.campaignId,
             trigger: "scheduled",
           });
+          // Fail-closed status read. NO `?? "completed"` D1 substitute —
+          // a missing/unknown status MUST NOT silently mark the claim
+          // completed (that would suppress the next tick's retry,
+          // violating INVARIANT-RETRY). If status is undefined or any
+          // non-"completed" value, we release the claim and the next
+          // tick re-claims and retries.
+          const rawStatus = (result as { status?: unknown }).status;
+          const isCompleted = typeof rawStatus === "string" && rawStatus === "completed";
+          if (isCompleted) {
+            await markClaimCompleted(plan, windowState.expectedWindowIndex, result.bossRunId, "ok", now);
+          } else {
+            // partial / unknown / missing → release for retry.
+            await releaseClaimForRetry(plan, windowState.expectedWindowIndex);
+            continuityMetrics.claimsReleasedOnFailure.inc();
+            if (typeof rawStatus !== "string") {
+              logger.warn(
+                {
+                  component: "continuity-scheduler",
+                  campaignId: plan.campaignId,
+                  bossRunId: result.bossRunId,
+                  rawStatusType: typeof rawStatus,
+                },
+                "[ContinuityScheduler] runBoss returned no status field — releasing claim for retry (fail-closed)",
+              );
+            }
+          }
           runsInvoked += 1;
           continuityMetrics.runsInvoked.inc();
           decisions.push({
@@ -524,8 +856,20 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
             deadCycleDays,
             bossRunId: result.bossRunId,
             reanchored,
+            claimedBy: REPLICA_ID,
           });
         } catch (err) {
+          // INVARIANT-RETRY: any throw releases the claim so the next
+          // tick can retry. This INCLUDES BossRunInFlightError —
+          // pre-revision we exempted it on the assumption that the
+          // in-flight caller would finalize the claim, but that caller
+          // (manual API trigger, prior boss invocation) does NOT know
+          // about our claim row and will not update it. Leaving the
+          // claim in `in_progress` would silently suppress this window
+          // forever (`claimed_by_other_replica` skip on every future
+          // tick). Architect-flagged finding #2 — release unconditionally.
+          await releaseClaimForRetry(plan, windowState.expectedWindowIndex);
+          continuityMetrics.claimsReleasedOnFailure.inc();
           if (err instanceof BossRunInFlightError) {
             runsSkipped += 1;
             continuityMetrics.runsSkipped.inc({ reason: "in_flight" });
