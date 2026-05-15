@@ -264,4 +264,24 @@ Each per-seal file contains the full implementation detail, code references, tes
 - [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md) — 9 closed silent-degradation findings, 4 deferred items, architect race-fix amendment, 6 behavioral tests.
 - [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md) — Track #3 follow-ups: F1 activeJobs Map watchdog in fetch-orchestrator, F2 Gemini AbortController.signal wired into GenerateContentConfig.abortSignal.
 - [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md) — Track #4: Grafana dashboard + in-app Continuity panel (6th Audit & Control panel) + admin endpoints + skip-reason badge on campaign cards.
+- [`.local/docs/seals/seal-18-track5-lifecycle-tests.md`](.local/docs/seals/seal-18-track5-lifecycle-tests.md) — Track #5: 18 deterministic behavioral lifecycle scenarios + harness + 100-iteration flake checker.
 - `.local/docs/seal-13-to-17-plan.md` — original Tracks #1–#7 design plan (pre-existing).
+
+---
+
+### Lifecycle behavioral simulation (Seal #18 / Track #5)
+
+**Doctrine: behavioral lifecycle tests must remain deterministic.** Track #5 adds 18 scenario tests (`server/tests/lifecycle/scenario-NN-*.test.ts`) that fake `Date.now()` and drive `runContinuityTick` through a real DB-state mock to simulate weeks of operation. Every scenario asserts on **DB rows + Prometheus counters + audit events + per-campaign decisions** — never on log strings, never on timing-dependent orderings.
+
+| # | Invariant | Enforcement |
+|---|---|---|
+| **HERMETIC** | Tests must not touch the network or a real DB. | All scheduler-touching modules (`db`, `boss`, `boss/concurrency`, `audit`, `logger`) are mocked via `vi.mock(...)` to `__*ModuleMock` exports of `server/tests/lifecycle/_harness.ts`. |
+| **DETERMINISTIC-CLOCK** | Tests must own the clock. | `runOneTick(now)` calls `setSimulatedNow(now)` then invokes `runContinuityTick({ now, persist: true })`. No scenario reads wall-clock time for a continuity decision. |
+| **NO-FLAKES** | A flaky lifecycle test is a doctrine violation, not "intermittent." | `scripts/lifecycle-flake-check.sh` (default 100 iterations) is the gate before merging changes that touch the continuity scheduler, the boss/concurrency lock, the audit pipeline, the metrics families, or `_harness.ts` itself. Any single failed iteration must be root-caused — do not retry. |
+| **STATE-NOT-LOGS** | Assertions go against persisted/observable state. | `dbState.bossRuns`, `dbState.evalWindows`, `dbState.claims`, `dbState.resets`, `getMetric(name, labels)`, `getAuditEvents(eventName)`, and per-campaign `decision` rows from the tick report. |
+
+**Cross-realm Date pitfall (documented for next harness change):** Vitest's module-realm boundary makes `instanceof Date` return `false` for `Date` objects created in the test file. The harness's `resolveEffectiveAnchorFor` must use structural duck-typing (truthy + `.getTime()`) instead of `instanceof Date`, otherwise every approval row is silently dropped inside the boss mock and `wIdx` collapses to 0.
+
+Smoke confirmation: 5 / 5 iterations green at ~9s/iter (full 100-run target ≈ 15min wall-clock; well under budget).
+
+> **Full Seal #18 detail (18 scenario table, harness contract, DB query mock shape switch, flake-checker usage):** [`.local/docs/seals/seal-18-track5-lifecycle-tests.md`](.local/docs/seals/seal-18-track5-lifecycle-tests.md)
