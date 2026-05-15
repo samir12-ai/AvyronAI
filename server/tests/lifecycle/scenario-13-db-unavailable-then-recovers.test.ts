@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -25,6 +26,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 13 — DB unavailable then recovers", () => {
   it("ticks during outage are no-ops; tick after recovery invokes runBoss", async () => {
@@ -53,5 +55,14 @@ describe("Scenario 13 — DB unavailable then recovers", () => {
     expect(dbState.bossRuns.length).toBe(1);
 
     assertMetric("continuity_runs_invoked_total", 1);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 1,
+      ticks: 1,
+      claims: 1,
+      auditEvents: { CONTINUITY_REANCHOR: 1 },
+    });
   });
 });

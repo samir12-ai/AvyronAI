@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -24,6 +25,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 17 — 100 campaigns × 4 weekly ticks completes in <60s", () => {
   it("each weekly tick invokes runBoss for all 100 campaigns", async () => {
@@ -53,5 +55,14 @@ describe("Scenario 17 — 100 campaigns × 4 weekly ticks completes in <60s", ()
     expect(dbState.evalWindows.length).toBe(400);
     assertMetric("continuity_runs_invoked_total", 400);
     expect(wallClockMs).toBeLessThan(60_000);
+
+    assertCanonicalSurfaces({
+      bossRuns: 400,
+      evalWindows: 400,
+      anchorResets: 0,
+      ticks: 4,
+      claims: 400,
+      auditEvents: {},
+    });
   }, 90_000);
 });

@@ -23,6 +23,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -33,6 +34,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 16 — re-anchor injected mid-flight is honored on next tick", () => {
   it("manual reset row written during tick A is picked up by tick B", async () => {
@@ -95,5 +97,12 @@ describe("Scenario 16 — re-anchor injected mid-flight is honored on next tick"
     expect(decB[0].expectedWindowIndex).toBe(0);
     expect(decB[0].decision).toBe("invoked");
     expect(dbState.bossRuns.length).toBe(2);
+
+    assertCanonicalSurfaces({
+      bossRuns: 2,
+      anchorResets: 0,
+      ticks: 2,
+      auditEvents: {},
+    });
   });
 });

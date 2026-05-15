@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -28,6 +29,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 6 — failed boss run releases claim and retries on next tick", () => {
   it("failure then success across two ticks yields 1 successful run, 0 leaked claims", async () => {
@@ -62,5 +64,14 @@ describe("Scenario 6 — failed boss run releases claim and retries on next tick
     assertMetric("continuity_runs_invoked_total", 1);
     assertMetric("continuity_window_claims_released_total", 1);
     expect(runBossMock).toHaveBeenCalledTimes(2);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 1,
+      ticks: 2,
+      claims: 1,
+      auditEvents: { CONTINUITY_REANCHOR: 1 },
+    });
   });
 });

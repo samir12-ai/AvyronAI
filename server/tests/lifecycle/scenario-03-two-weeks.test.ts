@@ -15,6 +15,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -23,6 +24,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 3 — single campaign, +2 weeks", () => {
   it("two ticks one week apart yield two boss runs and two eval windows", async () => {
@@ -37,5 +39,14 @@ describe("Scenario 3 — single campaign, +2 weeks", () => {
     expect(dbState.insertedTicks.length).toBe(2);
     assertMetric("continuity_runs_invoked_total", 2);
     assertMetric("continuity_window_claims_acquired_total", 2);
+
+    assertCanonicalSurfaces({
+      bossRuns: 2,
+      evalWindows: 2,
+      anchorResets: 0,
+      ticks: 2,
+      claims: 2,
+      auditEvents: {},
+    });
   });
 });

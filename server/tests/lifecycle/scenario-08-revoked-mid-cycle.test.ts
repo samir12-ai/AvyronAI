@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   revokePlan,
   runOneTick,
@@ -25,6 +26,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 8 — revoked plan stops further runs", () => {
   it("after revocation no new boss_runs or eval_windows are produced", async () => {
@@ -48,5 +50,14 @@ describe("Scenario 8 — revoked plan stops further runs", () => {
     expect(dbState.evalWindows.length).toBe(1);
     assertMetric("continuity_runs_invoked_total", 1);
     assertMetric("continuity_scheduler_ticks_total", 3);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 1,
+      ticks: 3,
+      claims: 1,
+      auditEvents: { CONTINUITY_REANCHOR: 1 },
+    });
   });
 });

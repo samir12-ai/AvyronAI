@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -24,6 +25,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 15 — anchor exactly 7d ago yields window_index=1, no reanchor", () => {
   it("invokes runBoss for window 1 and writes no anchor reset", async () => {
@@ -38,5 +40,14 @@ describe("Scenario 15 — anchor exactly 7d ago yields window_index=1, no reanch
     expect(report.reanchorsWritten).toBe(0);
     expect(dbState.insertedResets.length).toBe(0);
     expect(dbState.bossRuns.length).toBe(1);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 0,
+      ticks: 1,
+      claims: 1,
+      auditEvents: {},
+    });
   });
 });

@@ -16,6 +16,8 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 
 import {
   setupHarness,
+  teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runBossMock,
   dbState,
@@ -31,6 +33,7 @@ beforeEach(() => {
 afterEach(() => {
   if (PRIOR_ENV === undefined) delete process.env.CONTINUITY_SCHEDULER_DISABLED;
   else process.env.CONTINUITY_SCHEDULER_DISABLED = PRIOR_ENV;
+  teardownHarness();
 });
 
 describe("Scenario 18 — CONTINUITY_SCHEDULER_DISABLED short-circuits start", () => {
@@ -47,5 +50,14 @@ describe("Scenario 18 — CONTINUITY_SCHEDULER_DISABLED short-circuits start", (
     expect(runBossMock).not.toHaveBeenCalled();
     expect(dbState.bossRuns.length).toBe(0);
     expect(dbState.insertedTicks.length).toBe(0);
+
+    assertCanonicalSurfaces({
+      bossRuns: 0,
+      evalWindows: 0,
+      anchorResets: 0,
+      ticks: 0,
+      claims: 0,
+      auditEvents: {},
+    });
   });
 });

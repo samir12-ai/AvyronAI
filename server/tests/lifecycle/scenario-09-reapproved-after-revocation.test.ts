@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   revokePlan,
   runOneTick,
@@ -25,6 +26,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 9 — re-approved after revocation starts a fresh anchor", () => {
   it("the new plan_id runs at window_index=0", async () => {
@@ -61,5 +63,14 @@ describe("Scenario 9 — re-approved after revocation starts a fresh anchor", ()
         (c) => c.plan_id === "plan_new" && c.window_index === 0,
       ),
     ).toBeDefined();
+
+    assertCanonicalSurfaces({
+      bossRuns: 2,
+      evalWindows: 2,
+      anchorResets: 1,
+      ticks: 2,
+      claims: 2,
+      auditEvents: { CONTINUITY_REANCHOR: 1 },
+    });
   });
 });

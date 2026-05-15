@@ -18,6 +18,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -28,6 +29,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 5 — long-gap reactivation triggers reanchor + invoke", () => {
   it("4-week-idle plan with no opened windows reanchors and runs window 0", async () => {
@@ -54,5 +56,14 @@ describe("Scenario 5 — long-gap reactivation triggers reanchor + invoke", () =
 
     // Missed-window audit also fires (4 windows never opened).
     expect(getAuditEvents("CONTINUITY_MISSED_WINDOWS").length).toBeGreaterThanOrEqual(1);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 1,
+      ticks: 1,
+      claims: 1,
+      auditEvents: { CONTINUITY_MISSED_WINDOWS: 1, CONTINUITY_REANCHOR: 1 },
+    });
   });
 });

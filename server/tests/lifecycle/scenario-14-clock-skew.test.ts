@@ -17,12 +17,14 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   getDecisionsForCampaign,
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 14 — clock skew (now < anchor)", () => {
   it("clamps window_index to 0 and does not crash", async () => {
@@ -36,5 +38,13 @@ describe("Scenario 14 — clock skew (now < anchor)", () => {
     // Either invoked (single tick) or skipped — but no exception
     // thrown means the scheduler survived the skew.
     expect(["invoked", "reanchored_then_invoked"]).toContain(dec[0].decision);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      ticks: 1,
+      claims: 1,
+      auditEvents: {},
+    });
   });
 });

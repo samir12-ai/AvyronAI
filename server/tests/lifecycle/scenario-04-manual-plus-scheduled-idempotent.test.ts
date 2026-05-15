@@ -18,6 +18,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -28,6 +29,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 4 — manual + scheduled in same window is idempotent", () => {
   it("a prior manual boss run in the current window blocks the scheduled tick", async () => {
@@ -64,6 +66,15 @@ describe("Scenario 4 — manual + scheduled in same window is idempotent", () =>
     assertMetric("continuity_runs_invoked_total", 0);
     assertMetric("continuity_runs_skipped_total", 1, {
       reason: "current_window_already_evaluated",
+    });
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 0,
+      ticks: 1,
+      claims: 0,
+      auditEvents: {},
     });
   });
 });

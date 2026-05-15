@@ -17,6 +17,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -29,6 +30,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 12 — mid-tick crash (BossRunInFlightError) recovers next tick", () => {
   it("releases the in_progress claim on crash so the next tick re-claims and runs", async () => {
@@ -56,5 +58,14 @@ describe("Scenario 12 — mid-tick crash (BossRunInFlightError) recovers next ti
     assertMetric("continuity_runs_skipped_total", 1, { reason: "in_flight" });
     assertMetric("continuity_window_claims_released_total", 1);
     assertMetric("continuity_runs_invoked_total", 1);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 1,
+      ticks: 2,
+      claims: 1,
+      auditEvents: { CONTINUITY_REANCHOR: 1 },
+    });
   });
 });

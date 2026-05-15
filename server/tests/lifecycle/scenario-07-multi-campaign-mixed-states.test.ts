@@ -20,6 +20,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -29,6 +30,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 7 — three campaigns in mixed lifecycle states", () => {
   it("invokes A, skips B, reanchors+invokes C in the same tick", async () => {
@@ -87,6 +89,15 @@ describe("Scenario 7 — three campaigns in mixed lifecycle states", () => {
     assertMetric("continuity_reanchors_written_total", 1);
     assertMetric("continuity_runs_skipped_total", 1, {
       reason: "current_window_already_evaluated",
+    });
+
+    assertCanonicalSurfaces({
+      bossRuns: 3,
+      evalWindows: 3,
+      anchorResets: 1,
+      ticks: 1,
+      claims: 2,
+      auditEvents: { CONTINUITY_REANCHOR: 1 },
     });
   });
 });

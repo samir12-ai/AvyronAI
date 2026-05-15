@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   getAuditEvents,
@@ -23,6 +24,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 10 — DEAD_CYCLE_THRESHOLD crossing fires the audit", () => {
   it("a 9-day-old plan with no boss_runs fires CONTINUITY_DEAD_CYCLE", async () => {
@@ -39,5 +41,18 @@ describe("Scenario 10 — DEAD_CYCLE_THRESHOLD crossing fires the audit", () => 
     expect(events[0].payload.details.campaignId).toBe(plan.campaignId);
     expect(events[0].payload.details.sinceDays).toBe(9);
     assertMetric("continuity_dead_cycles_total", 1);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 1,
+      ticks: 1,
+      claims: 1,
+      auditEvents: {
+        CONTINUITY_DEAD_CYCLE: 1,
+        CONTINUITY_REANCHOR: 1,
+        CONTINUITY_MISSED_WINDOWS: 1,
+      },
+    });
   });
 });

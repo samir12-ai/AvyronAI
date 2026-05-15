@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -25,6 +26,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness(new Date("2026-05-01T00:00:00Z")));
+afterEach(() => teardownHarness());
 
 describe("Scenario 2 — single campaign, fresh approval, +1 week", () => {
   it("invokes runBoss exactly once and writes one eval window at index 1", async () => {
@@ -47,5 +49,14 @@ describe("Scenario 2 — single campaign, fresh approval, +1 week", () => {
 
     assertMetric("continuity_runs_invoked_total", 1);
     assertMetric("continuity_window_claims_acquired_total", 1);
+
+    assertCanonicalSurfaces({
+      bossRuns: 1,
+      evalWindows: 1,
+      anchorResets: 0,
+      ticks: 1,
+      claims: 1,
+      auditEvents: {},
+    });
   });
 });

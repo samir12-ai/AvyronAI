@@ -17,6 +17,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   runOneTick,
   advanceHours,
   dbState,
@@ -26,6 +27,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness(new Date("2026-05-01T00:00:00Z")));
+afterEach(() => teardownHarness());
 
 describe("Scenario 1 — empty world", () => {
   it("24 hourly ticks with zero campaigns produce 24 tick rows and 0 boss runs", async () => {
@@ -44,5 +46,14 @@ describe("Scenario 1 — empty world", () => {
     assertMetric("continuity_scheduler_ticks_total", 24);
     assertMetric("continuity_campaigns_scanned_total", 0);
     assertMetric("continuity_runs_invoked_total", 0);
+
+    assertCanonicalSurfaces({
+      bossRuns: 0,
+      evalWindows: 0,
+      anchorResets: 0,
+      ticks: 24,
+      claims: 0,
+      auditEvents: {},
+    });
   });
 });

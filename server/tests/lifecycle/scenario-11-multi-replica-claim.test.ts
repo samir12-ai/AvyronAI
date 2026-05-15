@@ -17,6 +17,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 import {
   setupHarness,
   teardownHarness,
+  assertCanonicalSurfaces,
   seedApprovedPlan,
   runOneTick,
   dbState,
@@ -28,6 +29,7 @@ import {
 } from "./_harness";
 
 beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
 
 describe("Scenario 11 — claim already owned by another replica", () => {
   it("scheduler skips with claimed_by_other_replica and emits the conflict audit", async () => {
@@ -62,6 +64,15 @@ describe("Scenario 11 — claim already owned by another replica", () => {
     assertMetric("continuity_window_claims_lost_other_replica_total", 1);
     assertMetric("continuity_runs_skipped_total", 1, {
       reason: "claimed_by_other_replica",
+    });
+
+    assertCanonicalSurfaces({
+      bossRuns: 0,
+      evalWindows: 0,
+      anchorResets: 0,
+      ticks: 1,
+      claims: 1,
+      auditEvents: { CONTINUITY_REPLICA_CONFLICT: 1 },
     });
   });
 });
