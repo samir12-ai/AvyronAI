@@ -182,6 +182,27 @@ Seal #16 follow-ups (closed May 2026): F1 — `activeJobs` Map watchdog in `fetc
 
 ---
 
+### 8-audit post-implementation doctrine (Seal #19 / Track #6)
+
+**Doctrine: every seal that lands a new chain, scheduler, lock, or in-flight Map MUST be followed by an 8-audit pass before the next seal opens.**
+
+| # | Audit | Acceptance |
+|---|---|---|
+| 1 | Architectural | Every new file in a conventional dir; no new top-level concept beyond doctrine. File-by-file table required. |
+| 2 | Runtime baseline | Boot + steady-state memory/CPU/DB-conn within ±10% of prior-seal baseline. 60-min steady-state sample. |
+| 3 | Scheduler / chain registry | Every chain in `chain-registry.ts` runs at its declared `expectedIntervalMs` (7d shadow OR accelerated test). Un-wired introspectors classified `UNKNOWN`, never `HEALTHY`. |
+| 4 | Orchestration silent-failure | Re-run prior outage prompt across all 20 categories. Zero new silent paths. |
+| 5 | Memory write-path regression | Diff `policyEnforcedMemoryCheck()` call sites + `strategy_memory` writers vs prior seal. Zero bypass. |
+| 6 | Degraded-state canonical flag | Every fallback/partial/degraded path emits `SynthesizedPlan.degraded` + typed `PlanSource`. Reachable in test. |
+| 7 | Fail-safe | Boot failure → `process.exit(1)`; `uncaughtException` + `unhandledRejection` → `process.exit(1)`; every `setTimeout`/`setInterval` handle reachable from `gracefulShutdown`. |
+| 8 | D1–D5 doctrine | ESLint `semantic/no-semantic-fallback` clean across new code. Zero new suppressions outside the H1–H7 archive allowlist. |
+
+Each audit returns **PASS** / **DOCUMENTED_EXCEPTION** (sunset date required) / **FIX_REQUIRED** (fix in seal OR follow-up filed before close). Report archived under `.local/docs/seals/seal-N-audits.md`; one-row-per-audit summary at `.local/docs/seal-N-audit-report.md`.
+
+Seal #19 result: **7 PASS + 1 DOCUMENTED_EXCEPTION** (Audit #2 runtime baseline — sunset = first 7d post-Seal-#20 deploy). 0 FIX_REQUIRED.
+
+> **Full Seal #19 detail (8-audit verdict matrix, evidence per audit, allowlist drift note folded into Seal #20):** [`.local/docs/seals/seal-19-track6-audits.md`](.local/docs/seals/seal-19-track6-audits.md)
+
 ## Required Replit Secrets (Seal #7 / F10.5)
 
 The env validator (`server/env-validator.ts`) refuses to boot if any of the following is missing. Set these via Replit Secrets — never via `.replit` `[userenv.shared]` (history-leak risk; F9.7).
