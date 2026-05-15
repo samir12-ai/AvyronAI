@@ -293,6 +293,7 @@ Each per-seal file contains the full implementation detail, code references, tes
 - [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md) — Track #4: Grafana dashboard + in-app Continuity panel (6th Audit & Control panel) + admin endpoints + skip-reason badge on campaign cards.
 - [`.local/docs/seals/seal-18-track5-lifecycle-tests.md`](.local/docs/seals/seal-18-track5-lifecycle-tests.md) — Track #5: 18 deterministic behavioral lifecycle scenarios + harness + 100-iteration flake checker.
 - [`.local/docs/seals/seal-19-track6-audits.md`](.local/docs/seals/seal-19-track6-audits.md) — Track #6: 8-audit verdict matrix (7 PASS + 1 DOCUMENTED_EXCEPTION on runtime baseline) + evidence per audit + allowlist drift note folded forward.
-- [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md) — Seal #20 / Track #7: operator handoff one-pager (dashboard URLs + alert thresholds + env-var reference + heartbeat-red decision tree).
+- [`.local/docs/seals/seal-20-track7-doctrine-lock.md`](.local/docs/seals/seal-20-track7-doctrine-lock.md) — Track #7: doctrine lock — consolidates Seals #13–#19 active doctrine into one `replit.md` section + parity checklist + ships the operator handoff one-pager.
+- [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md) — operator handoff one-pager (dashboard URLs + alert thresholds + env-var reference + heartbeat-red decision tree). Companion to Seal #20.
 - `.local/docs/seal-13-to-17-plan.md` — original Tracks #1–#7 design plan (pre-existing).
 
