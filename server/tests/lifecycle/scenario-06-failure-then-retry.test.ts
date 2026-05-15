@@ -5,7 +5,7 @@
  * window. The scheduler must DELETE the in_progress claim row so the
  * next tick can re-claim and successfully invoke runBoss.
  */
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../db", async () => (await import("./_harness")).__dbModuleMock);
 vi.mock("../../boss", async () => (await import("./_harness")).__bossModuleMock);
@@ -15,6 +15,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 
 import {
   setupHarness,
+  teardownHarness,
   seedApprovedPlan,
   runOneTick,
   dbState,

@@ -5,7 +5,7 @@
  * should invoke runBoss exactly once and the (mocked) boss invocation
  * creates one pipeline_eval_windows row at index=1.
  */
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../db", async () => (await import("./_harness")).__dbModuleMock);
 vi.mock("../../boss", async () => (await import("./_harness")).__bossModuleMock);
@@ -15,6 +15,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 
 import {
   setupHarness,
+  teardownHarness,
   seedApprovedPlan,
   runOneTick,
   dbState,

@@ -6,7 +6,7 @@
  * scheduler MUST release the claim, then a subsequent tick must
  * recover and successfully invoke runBoss. No double-run.
  */
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../db", async () => (await import("./_harness")).__dbModuleMock);
 vi.mock("../../boss", async () => (await import("./_harness")).__bossModuleMock);
@@ -16,6 +16,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 
 import {
   setupHarness,
+  teardownHarness,
   seedApprovedPlan,
   runOneTick,
   dbState,

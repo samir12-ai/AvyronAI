@@ -5,7 +5,7 @@
  * APPROVED). Subsequent ticks must observe zero campaigns — no orphan
  * eval_windows or boss_runs are created.
  */
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../db", async () => (await import("./_harness")).__dbModuleMock);
 vi.mock("../../boss", async () => (await import("./_harness")).__bossModuleMock);
@@ -15,6 +15,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 
 import {
   setupHarness,
+  teardownHarness,
   seedApprovedPlan,
   revokePlan,
   runOneTick,

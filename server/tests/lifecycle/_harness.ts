@@ -101,6 +101,17 @@ export const auditLogs: AuditEvent[] = [];
 let __simulatedNow: Date = new Date();
 export function setSimulatedNow(d: Date): void {
   __simulatedNow = d;
+  // Keep vitest fake timers in lock-step so any code path inside the
+  // scheduler / harness that reads Date.now() or `new Date()` (without
+  // the explicit `now` injection) sees the same simulated wall-clock.
+  // setupHarness() installs vi.useFakeTimers(); this call is a no-op
+  // before that runs.
+  try {
+    vi.setSystemTime(d);
+  } catch {
+    // vi.setSystemTime throws if fake timers are not installed yet.
+    // setupHarness() will install them and restamp the clock.
+  }
 }
 export function getSimulatedNow(): Date {
   return __simulatedNow;
@@ -629,6 +640,11 @@ export function setupHarness(initialDate?: Date): void {
   dbState.dbAvailable = true;
   auditLogs.length = 0;
   (globalThis as any)[__claimLookupKey] = null;
+  // Install vitest fake timers FIRST so setSimulatedNow's vi.setSystemTime
+  // call lands. Doctrine: every lifecycle scenario owns the clock end-to-end.
+  // Use `shouldAdvanceTime: false` — we never want vitest to auto-tick; only
+  // explicit setSimulatedNow / vi.setSystemTime should move the clock.
+  vi.useFakeTimers({ shouldAdvanceTime: false });
   setSimulatedNow(initialDate ?? new Date("2026-05-01T00:00:00Z"));
   resetMetrics();
   // Fire and forget — scheduler state reset is best-effort.
@@ -636,6 +652,73 @@ export function setupHarness(initialDate?: Date): void {
   runBossMock.mockClear();
   runBossMock.mockImplementation(defaultRunBossImpl);
   (__auditModuleMock.logAudit as any).mockClear?.();
+}
+
+/**
+ * Paired with setupHarness(). Restores real timers so vitest's per-file
+ * isolation isn't polluted across scenarios. Every scenario MUST call this
+ * in afterEach (the doctrine-required teardown for fake-timer scopes).
+ */
+export function teardownHarness(): void {
+  // vi.useRealTimers() is idempotent and safe even if fake timers were
+  // never installed in this scope.
+  vi.useRealTimers();
+}
+
+/**
+ * Canonical-surface assertion helper (Seal #18 acceptance contract).
+ *
+ * Every lifecycle scenario asserts the SAME six persisted/observable
+ * surfaces, so the contract is named here and reused. Each field is
+ * optional — pass only the surfaces you want to lock down for that
+ * scenario; surfaces not specified are intentionally not asserted.
+ *
+ * Surfaces:
+ *   - bossRuns        → dbState.bossRuns row count
+ *   - evalWindows     → dbState.evalWindows row count (pipeline_eval_windows)
+ *   - anchorResets    → dbState.insertedResets row count (plan_anchor_resets)
+ *   - ticks           → dbState.insertedTicks row count (continuity_ticks)
+ *   - claims          → dbState.claims row count (continuity_window_claims)
+ *   - auditEvents     → { eventType: minimum count } (audit_log_archive)
+ */
+export function assertCanonicalSurfaces(opts: {
+  bossRuns?: number;
+  evalWindows?: number;
+  anchorResets?: number;
+  ticks?: number;
+  claims?: number;
+  auditEvents?: Record<string, number>;
+}): void {
+  if (opts.bossRuns !== undefined) {
+    expect(dbState.bossRuns.length, "boss_runs").toBe(opts.bossRuns);
+  }
+  if (opts.evalWindows !== undefined) {
+    expect(dbState.evalWindows.length, "pipeline_eval_windows").toBe(
+      opts.evalWindows,
+    );
+  }
+  if (opts.anchorResets !== undefined) {
+    expect(dbState.insertedResets.length, "plan_anchor_resets").toBe(
+      opts.anchorResets,
+    );
+  }
+  if (opts.ticks !== undefined) {
+    expect(dbState.insertedTicks.length, "continuity_ticks").toBe(opts.ticks);
+  }
+  if (opts.claims !== undefined) {
+    expect(dbState.claims.length, "continuity_window_claims").toBe(
+      opts.claims,
+    );
+  }
+  if (opts.auditEvents) {
+    for (const [eventType, minCount] of Object.entries(opts.auditEvents)) {
+      const got = getAuditEvents(eventType).length;
+      expect(
+        got,
+        `audit_log_archive event ${eventType} >= ${minCount}`,
+      ).toBeGreaterThanOrEqual(minCount);
+    }
+  }
 }
 
 let __schedulerModulePromise: Promise<typeof import("../../continuity/scheduler")> | null = null;

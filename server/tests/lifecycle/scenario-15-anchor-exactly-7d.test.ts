@@ -5,7 +5,7 @@
  * yields window_index = 1. Long-gap reanchor uses STRICT > so no
  * reanchor row is written.
  */
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../db", async () => (await import("./_harness")).__dbModuleMock);
 vi.mock("../../boss", async () => (await import("./_harness")).__bossModuleMock);
@@ -15,6 +15,7 @@ vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleM
 
 import {
   setupHarness,
+  teardownHarness,
   seedApprovedPlan,
   runOneTick,
   dbState,
