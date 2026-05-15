@@ -24,6 +24,7 @@ import {
 } from "./continuity";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
+import { stopQueueProcessor as stopMiQueueProcessor } from "./market-intelligence-v3/fetch-orchestrator";
 import { runAllHealthChecks } from "./meta-token-manager";
 // changes are applied out-of-band via `npm run db:migrate`. Boot refuses
 // to start if the running code requires a version newer than what the DB
@@ -669,8 +670,20 @@ function setupErrorHandler(app: express.Application) {
 
   // Phase 4 (2026-04-30) — scheduler timers (assigned inside listen callback,
   // cleared in gracefulShutdown).
+  //
+  // Track #3 / Seal #15 — silent-degradation hardening.
+  // The previous implementation declared `userScrapeTimer` and
+  // `competitorFetchTimer` only, while THREE additional inline schedulers
+  // (tombstone reaper, meta-token health check, the reaper's outer
+  // setTimeout-then-setInterval cascade) were created without a stored
+  // handle, meaning SIGTERM could not stop them. We now declare a handle
+  // for every inline scheduler so gracefulShutdown can clear them all.
   let userScrapeTimer: ReturnType<typeof setInterval> | null = null;
   let competitorFetchTimer: ReturnType<typeof setInterval> | null = null;
+  let tombstoneReaperTimer: ReturnType<typeof setInterval> | null = null;
+  let tombstoneReaperBootTimer: ReturnType<typeof setTimeout> | null = null;
+  let metaHealthBootTimer: ReturnType<typeof setTimeout> | null = null;
+  let metaHealthIntervalTimer: ReturnType<typeof setInterval> | null = null;
 
   setupErrorHandler(app);
 
@@ -731,20 +744,25 @@ function setupErrorHandler(app: express.Application) {
 
       // boot is fast; subsequent ticks every 24h. cascadeDeleteAccount is
       // transactional, so a failed reap rolls back and retries next tick.
+      // Track #3 / Seal #15 — store every timer handle so SIGTERM clears
+      // them. The previous code created the inner setInterval inside an
+      // anonymous setTimeout closure with no handle stored, so the reaper
+      // and meta-token health interval kept ticking after gracefulShutdown
+      // cleared the workers above (zombie schedulers).
       const REAPER_INTERVAL_MS = 24 * 60 * 60 * 1000;
-      setTimeout(() => {
+      tombstoneReaperBootTimer = setTimeout(() => {
         runTombstoneReaper().catch(err => logger.error({ component: "reaper", err: String(err) }, "reaper tick failed"));
-        setInterval(() => {
+        tombstoneReaperTimer = setInterval(() => {
           runTombstoneReaper().catch(err => logger.error({ component: "reaper", err: String(err) }, "reaper tick failed"));
         }, REAPER_INTERVAL_MS);
       }, 60_000);
 
-      setTimeout(() => {
+      metaHealthBootTimer = setTimeout(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));
       }, 30000);
 
       const HEALTH_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-      setInterval(() => {
+      metaHealthIntervalTimer = setInterval(() => {
         runAllHealthChecks().catch(err => console.error("[MetaHealth] Scheduled health check error:", err));
       }, HEALTH_CHECK_INTERVAL_MS);
 
@@ -839,8 +857,21 @@ function setupErrorHandler(app: express.Application) {
     stopSnapshotCleanupWorker();
     await stopContinuityScheduler();
     await stopContinuitySupervisor();
+    // Track #3 / Seal #15 — the MI queue processor was started inline by
+    // server/market-intelligence-v3/index.ts on boot but never wired into
+    // shutdown. Without this stop, the 15s setInterval kept ticking
+    // through SIGTERM and could attempt to claim work after the rest of
+    // the process had begun tearing down.
+    try { stopMiQueueProcessor(); } catch (e) { console.error("[Server] stopMiQueueProcessor failed:", e); }
     if (userScrapeTimer) { clearInterval(userScrapeTimer); userScrapeTimer = null; }
     if (competitorFetchTimer) { clearInterval(competitorFetchTimer); competitorFetchTimer = null; }
+    // Track #3 / Seal #15 — clear every inline timer that previously had
+    // no handle stored. Without these clears the tombstone reaper +
+    // meta-token health check kept firing past SIGTERM.
+    if (tombstoneReaperBootTimer) { clearTimeout(tombstoneReaperBootTimer); tombstoneReaperBootTimer = null; }
+    if (tombstoneReaperTimer) { clearInterval(tombstoneReaperTimer); tombstoneReaperTimer = null; }
+    if (metaHealthBootTimer) { clearTimeout(metaHealthBootTimer); metaHealthBootTimer = null; }
+    if (metaHealthIntervalTimer) { clearInterval(metaHealthIntervalTimer); metaHealthIntervalTimer = null; }
     server.close(() => {
       log("[Server] HTTP server closed");
       process.exit(0);

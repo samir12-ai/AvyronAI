@@ -36,6 +36,36 @@ import { eq, and, desc, count, sql } from "drizzle-orm";
 import { getActiveRootBundle, detectStaleness } from "../root-bundle";
 import { getMemoryHealth, type MemoryHealthSummary } from "../memory-mutation/engine";
 import { readSnapshotStatus } from "../shared/canonical-snapshot-reader";
+import { logger } from "../bootstrap";
+
+/**
+ * Track #3 / Seal #15 — silent-degradation hardening.
+ *
+ * The agent context loader has 10 try/catch blocks that previously read
+ * `} catch {}` (no logging, no metric, no rethrow). When any of those DB
+ * loads failed (schema drift, transient DB hiccup, snapshot table missing),
+ * the agent silently ran with a missing context section and produced
+ * degraded reasoning that LOOKED healthy. The platform-wide doctrine for
+ * Track #3 is: a silent skip is a runtime degradation. Every silent catch
+ * now goes through this helper so operators see the failure in logs and
+ * the missing-section default value (null / [] / undefined) is intentional,
+ * not the result of an unobserved exception.
+ *
+ * The function never re-throws — the calling code already supplies a
+ * UI-safe default; we only surface the fact that the load did not run
+ * cleanly.
+ */
+export function _logSilentLoad(err: unknown): void {
+  try {
+    logger.warn(
+      { component: "agent-context", err: String(err) },
+      "agent_context_section_load_failed",
+    );
+  } catch {
+    // Logger itself failing is the only thing we cannot surface — fall
+    // through silently (this catch genuinely cannot do anything else).
+  }
+}
 
 export interface SystemContext {
   businessProfile: any;
@@ -255,7 +285,7 @@ export async function loadSystemContext(
         if (snap) {
           engineSnapshots[name] = { id: snap.id, status: readSnapshotStatus(snap), createdAt: snap.createdAt };
         }
-      } catch {}
+      } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
     }
 
     try {
@@ -267,7 +297,7 @@ export async function loadSystemContext(
       if (audSnap) {
         engineSnapshots["audience"] = { id: audSnap.id, status: "COMPLETE", createdAt: audSnap.createdAt };
       }
-    } catch {}
+    } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
   }
 
   let dnaData: any = null;
@@ -294,7 +324,7 @@ export async function loadSystemContext(
         executionRules: safeP(dnaRow.executionRules),
       };
     }
-  } catch {}
+  } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
 
   const safeP = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
 
@@ -319,7 +349,7 @@ export async function loadSystemContext(
         funnelMath: safeP(gd.funnelMath),
       };
     }
-  } catch {}
+  } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
 
   try {
     const { resolveRunId: _rR } = await import("./run-resolver");
@@ -339,7 +369,7 @@ export async function loadSystemContext(
         bottleneckAlerts: safeP(sim.bottleneckAlerts),
       };
     }
-  } catch {}
+  } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
 
   if (activePlan) {
     try {
@@ -353,7 +383,7 @@ export async function loadSystemContext(
           blocked: taskRows.filter(t => t.status === "blocked").length,
         };
       }
-    } catch {}
+    } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
 
     try {
       const assRows = await db.select().from(planAssumptions)
@@ -365,13 +395,13 @@ export async function loadSystemContext(
           lowConfidence: assRows.filter(a => a.confidence === "low").length,
         };
       }
-    } catch {}
+    } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
   }
 
   let memoryHealth: MemoryHealthSummary | null = null;
   try {
     memoryHealth = await getMemoryHealth(accountId, campaignId);
-  } catch {}
+  } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
 
   let recentDecisions: SystemContext["recentDecisions"] = [];
   try {
@@ -392,7 +422,7 @@ export async function loadSystemContext(
       .orderBy(desc(strategyDecisions.createdAt))
       .limit(5);
     recentDecisions = decisions;
-  } catch {}
+  } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
 
   let contentPerformanceSummary: SystemContext["contentPerformanceSummary"] = null;
   try {
@@ -424,7 +454,7 @@ export async function loadSystemContext(
     const avgScore = tracked.length > 0 ? tracked.reduce((acc, [, v]) => acc + v!.smoothedScore, 0) / tracked.length : 0;
     const underperformingFormats = tracked.filter(([, v]) => v!.smoothedScore < avgScore * 0.8).map(([k]) => k);
     contentPerformanceSummary = { dominantFormat: tracked[0]?.[0] || null, underperformingFormats, totalFormatsTracked, byFormat };
-  } catch {}
+  } catch (_silentLoadErr) { _logSilentLoad(_silentLoadErr); }
 
   return {
     businessProfile: bizData ? {
@@ -477,7 +507,7 @@ export async function loadSystemContext(
           .limit(1);
         if (!miSnap?.sourceAvailability) return null;
         return typeof miSnap.sourceAvailability === "string" ? JSON.parse(miSnap.sourceAvailability) : miSnap.sourceAvailability;
-      } catch { return null; }
+      } catch (sourceAvailErr) { _logSilentLoad(sourceAvailErr); return null; }
     })(),
     contentDnaSnapshot: dnaData,
     rootBundle: await (async () => {
@@ -494,7 +524,7 @@ export async function loadSystemContext(
           staleReason: staleness.reason,
           strategyHash: active.strategyHash,
         };
-      } catch { return null; }
+      } catch (rootBundleErr) { _logSilentLoad(rootBundleErr); return null; }
     })(),
     goalDecomposition,
     simulation,

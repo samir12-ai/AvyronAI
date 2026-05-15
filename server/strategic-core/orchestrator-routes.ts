@@ -858,8 +858,16 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
   } catch (error: any) {
     const durationMs = Date.now() - startMs;
     log("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs, stageTimes });
-    await updateJob({ status: "FAILED", error: error.message, errorCode: error.code || "INTERNAL_ERROR", stageTimes: JSON.stringify(stageTimes), durationMs, completedAt: new Date() }).catch(() => {});
-    await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: 0, event: "ORCHESTRATOR_FAILED", details: { jobId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes } }).catch(() => {});
+    // Track #3 / Seal #15 — these two writes were silently swallowed. If
+    // updateJob fails, the orchestrator job stays RUNNING in the UI forever
+    // (a "stuck claim"). If logAuditEvent fails, the crash leaves no audit
+    // trail. Surface both so operators see them in logs.
+    await updateJob({ status: "FAILED", error: error.message, errorCode: error.code || "INTERNAL_ERROR", stageTimes: JSON.stringify(stageTimes), durationMs, completedAt: new Date() }).catch((updateErr) => {
+      console.error(`[Orchestrator] STUCK_JOB_UPDATE_FAILED | jobId=${jobId} | err=${(updateErr as Error)?.message || updateErr}`);
+    });
+    await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: 0, event: "ORCHESTRATOR_FAILED", details: { jobId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes } }).catch((auditErr) => {
+      console.error(`[Orchestrator] AUDIT_WRITE_FAILED event=ORCHESTRATOR_FAILED | jobId=${jobId} | err=${(auditErr as Error)?.message || auditErr}`);
+    });
   }
 }
 

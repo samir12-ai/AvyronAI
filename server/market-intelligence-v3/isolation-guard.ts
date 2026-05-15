@@ -1,5 +1,28 @@
 import { logAudit } from "../audit";
 
+/**
+ * Track #3 / Seal #15 — silent-degradation hardening.
+ *
+ * Previously every logAudit() call in this file ended with `.catch(() => {})`.
+ * That meant a failure to record a CRITICAL isolation/security violation
+ * (e.g. an unauthorized engine attempting to write to MIv3 snapshots) was
+ * swallowed completely — the violation still threw to the caller, but the
+ * audit trail proving it happened was lost. Security-relevant audit writes
+ * MUST surface their own failure on stderr so a missing audit row is at
+ * least correlatable in logs. We deliberately do NOT re-throw because the
+ * caller is already throwing the original isolation error.
+ */
+function _noteAuditWriteFailure(err: unknown): void {
+  // No logger import here on purpose — this module is loaded very early in
+  // boot from many call sites, and we want zero indirect deps. console.error
+  // goes to the same stream pino writes to in dev/prod.
+  console.error(
+    `[MIv3] AUDIT_WRITE_FAILED component=isolation-guard err=${
+      (err as Error)?.message || String(err)
+    }`,
+  );
+}
+
 const ISOLATION_ALLOWED_CALLER = "MARKET_INTELLIGENCE_V3";
 
 const MIV3_PROTECTED_DOMAINS = [
@@ -53,7 +76,7 @@ export function validateEngineIsolation(caller: string): void {
     logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
       details: { type: "ENGINE_CALLER_VIOLATION", ...violation },
       riskLevel: "CRITICAL",
-    }).catch(() => {});
+    }).catch(_noteAuditWriteFailure);
     throw new Error(`Engine isolation violation: ${caller} is not allowed to invoke Market Intelligence V3. Only ${ISOLATION_ALLOWED_CALLER} is permitted.`);
   }
 }
@@ -64,7 +87,7 @@ export function validateDomainOwnership(caller: string, domain: string): void {
     logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
       details: { type: "DOMAIN_OWNERSHIP_VIOLATION", caller, domain, protectedDomains: [...MIV3_PROTECTED_DOMAINS] },
       riskLevel: "CRITICAL",
-    }).catch(() => {});
+    }).catch(_noteAuditWriteFailure);
     throw new Error(`Domain ownership violation: ${caller} cannot access ${domain}. MIv3 is the sole owner of: ${MIV3_PROTECTED_DOMAINS.join(", ")}.`);
   }
 }
@@ -76,7 +99,7 @@ export function rejectBlockedEngine(engineName: string, endpoint: string): void 
     logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
       details: { type: "BLOCKED_ENGINE_ATTEMPT", engineName, endpoint },
       riskLevel: "HIGH",
-    }).catch(() => {});
+    }).catch(_noteAuditWriteFailure);
     throw new Error(`ISOLATION VIOLATION: Engine '${engineName}' is not allowed in Market Intelligence V3 context.`);
   }
 }
@@ -89,7 +112,7 @@ export function assertSnapshotReadOnly(caller: string, operation: string): void 
     logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
       details: { type: "SNAPSHOT_WRITE_ATTEMPT", caller, operation },
       riskLevel: "CRITICAL",
-    }).catch(() => {});
+    }).catch(_noteAuditWriteFailure);
     throw new Error(`ISOLATION VIOLATION: ${caller} attempted write operation '${operation}' on MIv3 snapshots. Only reads are permitted for non-MIv3 engines.`);
   }
 }
@@ -98,7 +121,7 @@ export function assertNoPlanWrites(): void {
   logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
     details: { type: "PLAN_WRITE_ATTEMPT" },
     riskLevel: "CRITICAL",
-  }).catch(() => {});
+  }).catch(_noteAuditWriteFailure);
   throw new Error("ISOLATION VIOLATION: Market Intelligence V3 must NOT write to strategic_plans or plan_documents.");
 }
 
@@ -106,7 +129,7 @@ export function assertNoOrchestrator(): void {
   logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
     details: { type: "ORCHESTRATOR_INVOCATION_ATTEMPT" },
     riskLevel: "CRITICAL",
-  }).catch(() => {});
+  }).catch(_noteAuditWriteFailure);
   throw new Error("ISOLATION VIOLATION: Market Intelligence V3 must NOT invoke Build a Plan Orchestrator.");
 }
 
@@ -114,7 +137,7 @@ export function assertNoAutopilot(): void {
   logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
     details: { type: "AUTOPILOT_INVOCATION_ATTEMPT" },
     riskLevel: "CRITICAL",
-  }).catch(() => {});
+  }).catch(_noteAuditWriteFailure);
   throw new Error("ISOLATION VIOLATION: Market Intelligence V3 must NOT trigger Autopilot.");
 }
 
@@ -124,7 +147,7 @@ export function assertNoComputeFromExternal(caller: string, computeFunction: str
     logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
       details: { type: "EXTERNAL_COMPUTE_CALL", caller, computeFunction },
       riskLevel: "CRITICAL",
-    }).catch(() => {});
+    }).catch(_noteAuditWriteFailure);
     throw new Error(`ISOLATION VIOLATION: ${caller} attempted to call compute function '${computeFunction}'. Only MIv3 engine may run compute operations. External consumers must read snapshots only.`);
   }
 }
@@ -139,7 +162,7 @@ export function assertNoStrategyWrites(operation?: string): void {
       blockedDomains: [...STRATEGY_WRITE_DOMAINS],
     },
     riskLevel: "CRITICAL",
-  }).catch(() => {});
+  }).catch(_noteAuditWriteFailure);
   throw new Error(
     `ISOLATION VIOLATION: Market Intelligence V3 must NOT generate or modify strategy outputs. Blocked domains: ${STRATEGY_WRITE_DOMAINS.join(", ")}. MI is a pure intelligence layer — it produces data, not strategies.`
   );
@@ -152,7 +175,7 @@ export function validateNoStrategyWrite(caller: string, targetDomain: string): v
     logAudit("system", "CI_ENGINE_ISOLATION_VIOLATION", {
       details: { type: "MI_STRATEGY_WRITE_BLOCKED", caller, targetDomain },
       riskLevel: "CRITICAL",
-    }).catch(() => {});
+    }).catch(_noteAuditWriteFailure);
     throw new Error(
       `ISOLATION VIOLATION: MIv3 attempted to write to strategy domain '${targetDomain}'. MI must not generate positioning strategies, modify offer/pricing/funnel, or write audience/differentiation outputs.`
     );

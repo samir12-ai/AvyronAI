@@ -1587,7 +1587,12 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
       await db.update(ciCompetitors)
         .set({ enrichmentStatus: "ENRICHING", updatedAt: new Date() })
         .where(eq(ciCompetitors.id, comp.id));
-    } catch {}
+    } catch (markEnrichingErr) {
+      // Track #3 / Seal #15 — was silent. A failed pre-mark to ENRICHING
+      // means the row may stay PENDING while the enrichment runs, leaving
+      // observers confused about state. Surface so we can correlate.
+      console.error(`[FetchOrch] MARK_ENRICHING_FAILED | competitorId=${comp.id} | err=${(markEnrichingErr as Error)?.message || markEnrichingErr}`);
+    }
   }
 
   const startTime = Date.now();
@@ -1660,7 +1665,12 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
         await db.update(ciCompetitors)
           .set({ enrichmentStatus: "FAILED", updatedAt: new Date() })
           .where(eq(ciCompetitors.id, comp.id));
-      } catch {}
+      } catch (markFailedErr) {
+        // Track #3 / Seal #15 — same stuck-claim risk as the deep-pass
+        // recovery path: a failed mark-FAILED leaves the row stuck in
+        // ENRICHING forever and the next pass will skip it as in-flight.
+        console.error(`[FetchOrch] MARK_FAILED_AFTER_ERROR | competitorId=${comp.id} | err=${(markFailedErr as Error)?.message || markFailedErr}`);
+      }
     }
   }
 
@@ -1969,7 +1979,13 @@ async function recoverStuckDeepPass(): Promise<void> {
           console.log(`[DeepPassRecovery] DEEP_PASS_DIAGNOSTICS: ${row.name} | baselinePostCount=${baselinePostCount} | realCommentCount=${realComments} | totalCommentCount=${finalComments} | promotionDecision=${promotionDecision} | enrichmentResult=${result.status} | postExpansionAttempted=false | COMMENT_TEXT_OPTIONAL=true`);
         } catch (err: any) {
           console.error(`[DeepPassRecovery] Failed to enrich ${row.name}: ${err.message}`);
-          try { await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'FAILED', updated_at = NOW() WHERE id = ${row.id}`); } catch {}
+          try { await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'FAILED', updated_at = NOW() WHERE id = ${row.id}`); } catch (markFailedErr) {
+            // Track #3 / Seal #15 — was silent. If we cannot mark a stuck
+            // competitor as FAILED, the row stays RUNNING/PENDING forever
+            // (operator-visible "stuck claim"). Surface explicitly so the
+            // alarm bell rings instead of the row rotting silently.
+            console.error(`[FetchOrch] STUCK_COMPETITOR_MARK_FAILED | competitorId=${row.id} | err=${(markFailedErr as Error)?.message || markFailedErr}`);
+          }
         }
       }
     }

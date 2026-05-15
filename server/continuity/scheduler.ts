@@ -111,6 +111,39 @@ const LONG_GAP_THRESHOLD_MS = WINDOW_MS; // >1 window since anchor & no windows 
 let tickTimer: ReturnType<typeof setTimeout> | null = null;
 let isShuttingDown = false;
 let inFlightTick: Promise<TickReport> | null = null;
+/**
+ * Track #3 / Seal #15 — zombie in-flight watchdog.
+ *
+ * inFlightTick was a single bare Promise. If a tick hung (downstream DB
+ * deadlock, hung listActiveCampaigns query, runBoss hang), the variable
+ * stayed populated forever and every subsequent tick returned the dead
+ * promise instead of running. The hourly heartbeat would then silently
+ * stop — exactly the failure category Track #2 was designed to catch,
+ * but in the SCHEDULER itself rather than per-campaign. We now record
+ * the start time and force-clear on entry if the prior tick has been
+ * pending past MAX_TICK_AGE_MS.
+ */
+let inFlightTickStartedAt: number | null = null;
+/**
+ * Track #3 / Seal #15 — ownership token (architect HIGH-severity fix).
+ *
+ * The v1 watchdog set `inFlightTick = null` on stale eviction, but the
+ * stale tick's own `finally` block ALSO sets `inFlightTick = null`
+ * unconditionally. If the stale tick belatedly settled AFTER the
+ * watchdog had already installed a fresh tick, its finally would null
+ * the FRESH inFlightTick — silently letting two ticks run concurrently
+ * against the same shared in-process state. We now stamp every tick
+ * with a monotonic token; the finally block only nulls the shared
+ * reference if the live token still matches.
+ */
+let inFlightTickToken = 0;
+let nextTickToken = 1;
+const MAX_TICK_AGE_MS = (() => {
+  const raw = process.env.CONTINUITY_TICK_MAX_AGE_MS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
+})();
+let zombieTickEvictions = 0;
 let lastTickAt: Date | null = null;
 let lastTickReport: TickReport | null = null;
 
@@ -186,12 +219,29 @@ async function listActiveCampaigns(): Promise<ActiveCampaign[]> {
     updated_at: Date | null;
     created_at: Date | null;
   }>;
+  // db.execute<T> only annotates TS — Postgres timestamp columns come back
+  // as ISO strings from raw SQL (NOT Date objects, unlike drizzle's typed
+  // .select()). Coerce here so downstream `.getTime()` calls don't throw.
+  // Track #3 / Seal #14: silent-degradation hardening — without this
+  // coercion every per-campaign tick threw `planAgeBaseline.getTime is not
+  // a function`, which the outer try/catch caught + logged but left the
+  // INVARIANT-RETRY claim handshake completely bypassed (no campaign was
+  // ever evaluated). Classified as a "swallowed exception" hole.
+  const toDate = (v: unknown): Date | null => {
+    if (v === null || v === undefined) return null;
+    if (v instanceof Date) return v;
+    if (typeof v === "string" || typeof v === "number") {
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    return null;
+  };
   return rows.map((r) => ({
     accountId: r.account_id,
     campaignId: r.campaign_id,
     planId: r.plan_id,
-    planUpdatedAt: r.updated_at,
-    planCreatedAt: r.created_at,
+    planUpdatedAt: toDate(r.updated_at),
+    planCreatedAt: toDate(r.created_at),
   }));
 }
 
@@ -609,10 +659,40 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
   // Idempotency guard: only one tick may execute concurrently in this process.
   // If a previous tick is still running (e.g., long DB query, many campaigns),
   // we return its in-flight promise rather than starting a second.
-  if (inFlightTick) return inFlightTick;
+  //
+  // Track #3 / Seal #15 zombie sweep: if the previous tick has been
+  // pending longer than MAX_TICK_AGE_MS (default 15 min — far longer than
+  // any healthy tick), force-clear it so the heartbeat can resume.
+  if (inFlightTick && inFlightTickStartedAt !== null) {
+    const age = Date.now() - inFlightTickStartedAt;
+    if (age > MAX_TICK_AGE_MS) {
+      zombieTickEvictions += 1;
+      logger.error(
+        {
+          component: "continuity-scheduler",
+          ageMs: age,
+          maxAgeMs: MAX_TICK_AGE_MS,
+          totalEvictions: zombieTickEvictions,
+        },
+        "[ContinuityScheduler] ZOMBIE_INFLIGHT_TICK_EVICTED — prior tick exceeded watchdog ceiling",
+      );
+      inFlightTick = null;
+      inFlightTickStartedAt = null;
+      // Bump the live token so the stale tick's finally cannot null the
+      // fresh tick we are about to install (architect HIGH-severity race).
+      inFlightTickToken = 0;
+    } else {
+      return inFlightTick;
+    }
+  } else if (inFlightTick) {
+    return inFlightTick;
+  }
   const persist = opts.persist !== false;
   const now = opts.now ?? new Date();
   const tickStart = Date.now();
+  inFlightTickStartedAt = tickStart;
+  const myTickToken = nextTickToken++;
+  inFlightTickToken = myTickToken;
 
   inFlightTick = (async (): Promise<TickReport> => {
     const decisions: PerCampaignDecision[] = [];
@@ -977,7 +1057,15 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
   try {
     return await inFlightTick;
   } finally {
-    inFlightTick = null;
+    // Token-aware cleanup: only null the shared reference if it still
+    // points at OUR tick. A zombie eviction may have already nulled it
+    // and installed a fresh tick — clobbering that fresh tick would
+    // silently permit overlapping continuity ticks.
+    if (inFlightTickToken === myTickToken) {
+      inFlightTick = null;
+      inFlightTickStartedAt = null;
+      inFlightTickToken = 0;
+    }
   }
 }
 
@@ -1092,6 +1180,27 @@ export function _resetContinuityState(): void {
     tickTimer = null;
   }
   inFlightTick = null;
+  inFlightTickStartedAt = null;
+  zombieTickEvictions = 0;
   lastTickAt = null;
   lastTickReport = null;
+}
+
+/** Track #3 / Seal #15 — observability hook for the inFlightTick watchdog. */
+export function _continuityTickInflightStats(): {
+  inFlight: boolean;
+  startedAt: number | null;
+  ageMs: number | null;
+  zombieEvictions: number;
+  maxAgeMs: number;
+} {
+  const ageMs =
+    inFlightTickStartedAt !== null ? Date.now() - inFlightTickStartedAt : null;
+  return {
+    inFlight: inFlightTick !== null,
+    startedAt: inFlightTickStartedAt,
+    ageMs,
+    zombieEvictions: zombieTickEvictions,
+    maxAgeMs: MAX_TICK_AGE_MS,
+  };
 }

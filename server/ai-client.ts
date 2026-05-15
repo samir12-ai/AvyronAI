@@ -184,13 +184,44 @@ export async function aiGemini(options: AIGeminiOptions) {
 
   try {
     const gemini = getGemini();
-    const result = await gemini.models.generateContent({
-      model,
-      contents,
-      config: {
-        ...config,
-        maxOutputTokens: maxTokens,
-      },
+    // Track #3 / Seal #15 — Gemini call previously had NO wall-clock timeout.
+    // The OpenAI path uses HARD_TIMEOUT_MS (45s); Gemini was relying entirely
+    // on the underlying fetch defaults, which can hang indefinitely on a
+    // half-open socket. A hung Gemini call also holds the per-account
+    // pg_advisory_lock in checkAndReserveBudget, so a single hang blocks
+    // ALL subsequent AI calls for the same account. We now race against a
+    // wall-clock timer; on timeout we throw an AICallError so the outer
+    // catch + finally still run (lock release, budget reconciliation).
+    const GEMINI_HARD_TIMEOUT_MS = (() => {
+      const raw = process.env.AI_GEMINI_HARD_TIMEOUT_MS;
+      const parsed = raw ? Number(raw) : NaN;
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
+    })();
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(
+        () =>
+          reject(
+            new AICallError(
+              `Gemini call exceeded ${GEMINI_HARD_TIMEOUT_MS}ms wall-clock timeout`,
+              "AI_TIMEOUT",
+            ),
+          ),
+        GEMINI_HARD_TIMEOUT_MS,
+      );
+    });
+    const result = await Promise.race([
+      gemini.models.generateContent({
+        model,
+        contents,
+        config: {
+          ...config,
+          maxOutputTokens: maxTokens,
+        },
+      }),
+      timeoutPromise,
+    ]).finally(() => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
     });
 
     success = true;
