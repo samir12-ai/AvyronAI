@@ -41,8 +41,11 @@ import * as path from "path";
 import { timingSafeEqual } from "node:crypto";
 import pipelineRouter from "./pipeline/routes";
 import { db } from "./db";
-import { continuityTicks, planAnchorResets } from "@shared/schema";
+import { continuityTicks, planAnchorResets, continuityWindowClaims } from "@shared/schema";
 import { desc, sql as drizzleSql } from "drizzle-orm";
+import { _bossInFlightStats } from "./boss/concurrency";
+import { _continuityTickInflightStats } from "./continuity/scheduler";
+import { _activeJobsStats } from "./market-intelligence-v3/fetch-orchestrator";
 
 const app = express();
 const log = console.log;
@@ -704,6 +707,125 @@ function setupErrorHandler(app: express.Application) {
         tickAt: health.lastTickReport?.tickAt ?? null,
       },
     });
+  });
+
+  // ─── Task #52 / Priority #1 — Operator dashboards (operations panel) ──
+  //
+  // GET /api/admin/operations/panel
+  //
+  // Surfaces operational signals previously operator-grep-only:
+  //   - bossLocks / continuityTick / miActiveJobs : Seal #16 zombie-watchdog
+  //     Map stats (size, zombieEvictions, oldestAgeMs, maxAgeMs). A non-zero
+  //     zombieEvictions OR an oldestAgeMs approaching maxAgeMs is the
+  //     operator-visible signal of a leaked async path.
+  //   - retryLoopCampaigns : campaigns with ≥3 `failed` decisions in 24h
+  //     (G1 from observation-plan.md §B). Computed from continuity_ticks
+  //     notes via jsonb_array_elements + GROUP BY in PG.
+  //   - stuckClaims : continuity_window_claims rows with status='in_progress'
+  //     AND claimed_at < NOW() - 2h. A multi-replica boss_run normally
+  //     completes in seconds; a 2h stuck claim signals a leaked claim
+  //     row (would block the next-tick re-claim).
+  //
+  // Doctrine notes:
+  //   * D2/D3 — every counter has its own canonical field (no string status).
+  //   * D5 — when the in-memory stat is null, return null (not 0) for the
+  //     numeric `oldestAgeMs` field so callers can distinguish "no entry"
+  //     from "fresh entry".
+  //   * Same X-Admin-Token gate + fail-closed-when-unset pattern as the
+  //     Continuity panel + /metrics. NO-TENANT-LEAK does not apply (admin-
+  //     gated by construction).
+  app.get("/api/admin/operations/panel", async (req: Request, res: Response) => {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).json({ error: "operations_panel_disabled_no_admin_token" });
+    }
+    let isAdmin = false;
+    if (provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch {
+        isAdmin = false;
+      }
+    }
+    if (!isAdmin) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    try {
+      const bossLocks = _bossInFlightStats();
+      const continuityTick = _continuityTickInflightStats();
+      const miActiveJobs = _activeJobsStats();
+
+      // Retry-loop detection: campaigns with ≥3 `failed` decisions in 24h.
+      // Uses the same jsonb_array_elements + GROUP BY pattern as the
+      // continuity panel's skip-reason histogram. HAVING ≥3 keeps the
+      // panel signal-dense (1–2 retries are normal).
+      const retryRows = await db.execute(drizzleSql`
+        SELECT (note->>'campaignId') AS campaign_id, COUNT(*)::int AS count
+        FROM ${continuityTicks},
+             jsonb_array_elements(${continuityTicks.notes}) AS note
+        WHERE ${continuityTicks.tickAt} >= NOW() - INTERVAL '24 hours'
+          AND (note->>'decision') = 'failed'
+        GROUP BY (note->>'campaignId')
+        HAVING COUNT(*) >= 3
+        ORDER BY COUNT(*) DESC
+        LIMIT 25
+      `);
+      const retryRowsArr =
+        (retryRows as unknown as { rows: Array<{ campaign_id: string | null; count: number }> })
+          .rows ?? [];
+      const retryLoopCampaigns = retryRowsArr
+        .filter((r) => r.campaign_id)
+        .map((r) => ({
+          campaignId: r.campaign_id as string,
+          failedCount24h: Number(r.count) || 0,
+        }));
+
+      // Stuck claims: status='in_progress' AND claimed_at < NOW() - 2h.
+      // A leaked claim row blocks the next-tick re-claim because the
+      // ON CONFLICT DO NOTHING fails. Operators must DELETE the row
+      // manually (covered in the operator handoff one-pager).
+      const stuckRows = await db
+        .select({
+          campaignId: continuityWindowClaims.campaignId,
+          planId: continuityWindowClaims.planId,
+          windowIndex: continuityWindowClaims.windowIndex,
+          claimedBy: continuityWindowClaims.claimedBy,
+          claimedAt: continuityWindowClaims.claimedAt,
+        })
+        .from(continuityWindowClaims)
+        .where(
+          drizzleSql`${continuityWindowClaims.status} = 'in_progress' AND ${continuityWindowClaims.claimedAt} < NOW() - INTERVAL '2 hours'`,
+        )
+        .orderBy(continuityWindowClaims.claimedAt)
+        .limit(25);
+      const now = Date.now();
+      const stuckClaims = stuckRows.map((r) => ({
+        campaignId: r.campaignId,
+        planId: r.planId,
+        windowIndex: r.windowIndex,
+        claimedBy: r.claimedBy,
+        claimedAt:
+          r.claimedAt instanceof Date ? r.claimedAt.toISOString() : String(r.claimedAt),
+        ageMinutes: Math.round(
+          (now - (r.claimedAt instanceof Date ? r.claimedAt.getTime() : new Date(String(r.claimedAt)).getTime())) /
+            60000,
+        ),
+      }));
+
+      return res.status(200).json({
+        bossLocks,
+        continuityTick,
+        miActiveJobs,
+        retryLoopCampaigns,
+        stuckClaims,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("[OperationsPanel] PANEL_LOAD_FAILED", err);
+      return res.status(500).json({ error: "operations_panel_load_failed" });
+    }
   });
 
   // secret, NOT by the JWT-based admin account check used elsewhere. Two

@@ -14,6 +14,13 @@ import {
   DECISION_COLORS,
   type ContinuityDecision,
 } from "@/hooks/useContinuityPanel";
+import {
+  useOperationsPanel,
+  operationsPanelEnabled,
+  type OperationsPanelData,
+  type InFlightStats,
+  type ContinuityTickStats,
+} from "@/hooks/useOperationsPanel";
 
 // Per-check status colors (NOT verdict colors). These are operational check
 // states (PASS/FAIL/STALE/TIMEOUT/etc.) emitted by useRunTruthfulness — they
@@ -104,6 +111,8 @@ export default function AuditControlScreen() {
   const continuity = useContinuityPanel();
   const campaignDecision = useCampaignContinuityDecision(campaignId);
   const continuityEnabled = continuityPanelEnabled();
+  const operations = useOperationsPanel();
+  const operationsEnabled = operationsPanelEnabled();
 
   const bg = isDark ? "#080C10" : "#F4F7F5";
   const textPrimary = isDark ? "#E8EDF2" : "#1A2332";
@@ -295,6 +304,19 @@ export default function AuditControlScreen() {
             textSec={textSec}
           />
         )}
+
+        {/* Task #52 / Priority #1 — Operations (7th panel). Same admin-
+            token gate as the Continuity panel. */}
+        {operationsEnabled && (
+          <OperationsPanel
+            isDark={isDark}
+            panel={operations.data ?? null}
+            panelLoading={operations.isLoading}
+            panelError={operations.error ? (operations.error as Error).message : null}
+            textPrimary={textPrimary}
+            textSec={textSec}
+          />
+        )}
       </ScrollView>
     </View>
   );
@@ -463,6 +485,197 @@ function ContinuityPanel({
       )}
     </Section>
   );
+}
+
+// ─── Task #52 / Priority #1 — Operations panel ──────────────────────────
+//
+// Renders four operator-facing blocks:
+//   1. In-flight Maps (boss locks / continuity tick / MIv3 active jobs)
+//      — Seal #16 zombie-watchdog visibility.
+//   2. Retry-loop campaigns — campaigns with ≥3 `failed` decisions in 24h.
+//   3. Stuck claims — continuity_window_claims rows older than 2h.
+//
+// Strict-typed at the prop boundary (D2/D3): no string fallback, no
+// optional unions.
+function OperationsPanel({
+  isDark,
+  panel,
+  panelLoading,
+  panelError,
+  textPrimary,
+  textSec,
+}: {
+  isDark: boolean;
+  panel: OperationsPanelData | null;
+  panelLoading: boolean;
+  panelError: string | null;
+  textPrimary: string;
+  textSec: string;
+}) {
+  return (
+    <Section title="Operations" isDark={isDark}>
+      {panelLoading && !panel && (
+        <ActivityIndicator color="#7C3AED" style={{ marginVertical: 14 }} />
+      )}
+      {panelError && (
+        <Text style={[styles.errorText, { color: "#FF6B6B", marginTop: 0 }]}>
+          Failed to load operations: {panelError}
+        </Text>
+      )}
+      {panel && (
+        <>
+          {/* In-flight Maps */}
+          <Text style={[styles.sectionTitle, { color: textPrimary, marginTop: 0, marginBottom: 6, fontSize: 11 }]}>
+            In-flight (zombie watchdogs)
+          </Text>
+          <InFlightRow
+            label="Boss locks"
+            stats={panel.bossLocks}
+            isDark={isDark}
+            textSec={textSec}
+          />
+          <KV
+            label="Continuity tick"
+            value={
+              panel.continuityTick.inFlight
+                ? `running · ${formatAgeMs(panel.continuityTick.ageMs)}`
+                : "idle"
+            }
+            isDark={isDark}
+            valueColor={
+              panel.continuityTick.zombieEvictions > 0 ||
+              isAgeNearMax(panel.continuityTick.ageMs, panel.continuityTick.maxAgeMs)
+                ? "#FF6B6B"
+                : undefined
+            }
+          />
+          {panel.continuityTick.zombieEvictions > 0 && (
+            <KV
+              label="↳ tick zombie evictions"
+              value={String(panel.continuityTick.zombieEvictions)}
+              isDark={isDark}
+              valueColor="#FF6B6B"
+            />
+          )}
+          <InFlightRow
+            label="MIv3 active jobs"
+            stats={panel.miActiveJobs}
+            isDark={isDark}
+            textSec={textSec}
+          />
+
+          {/* Retry-loop campaigns */}
+          <Text
+            style={[styles.sectionTitle, { color: textPrimary, marginTop: 14, marginBottom: 6, fontSize: 11 }]}
+          >
+            Retry loops 24h ({panel.retryLoopCampaigns.length})
+          </Text>
+          {panel.retryLoopCampaigns.length === 0 ? (
+            <Text style={[styles.emptyText, { color: textSec, marginTop: 0 }]}>
+              No campaigns in a retry loop.
+            </Text>
+          ) : (
+            panel.retryLoopCampaigns.map((c) => (
+              <View
+                key={c.campaignId}
+                style={[styles.blockRow, { borderBottomColor: isDark ? "#1A2030" : "#E2E8E4" }]}
+              >
+                <View style={styles.blockHead}>
+                  <Text style={[styles.blockCode, { color: textPrimary }]}>
+                    {c.campaignId.slice(0, 12)}…
+                  </Text>
+                  <Text style={[styles.blockSev, { color: "#FF6B6B" }]}>
+                    {c.failedCount24h} failed
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+
+          {/* Stuck claims */}
+          <Text
+            style={[styles.sectionTitle, { color: textPrimary, marginTop: 14, marginBottom: 6, fontSize: 11 }]}
+          >
+            Stuck claims &gt;2h ({panel.stuckClaims.length})
+          </Text>
+          {panel.stuckClaims.length === 0 ? (
+            <Text style={[styles.emptyText, { color: textSec, marginTop: 0 }]}>
+              No stuck claim rows.
+            </Text>
+          ) : (
+            panel.stuckClaims.map((c) => (
+              <View
+                key={`${c.campaignId}:${c.planId}:${c.windowIndex}`}
+                style={[styles.blockRow, { borderBottomColor: isDark ? "#1A2030" : "#E2E8E4" }]}
+              >
+                <View style={styles.blockHead}>
+                  <Text style={[styles.blockCode, { color: textPrimary }]}>
+                    {c.campaignId.slice(0, 12)}… · w{c.windowIndex}
+                  </Text>
+                  <Text style={[styles.blockSev, { color: "#FF6B6B" }]}>
+                    {c.ageMinutes} min
+                  </Text>
+                </View>
+                <Text style={[styles.blockDesc, { color: textSec }]} numberOfLines={1}>
+                  claimed by {c.claimedBy.slice(0, 16)}…
+                </Text>
+              </View>
+            ))
+          )}
+
+          <Text style={[styles.detailsText, { color: textSec, marginTop: 10 }]}>
+            Generated {new Date(panel.generatedAt).toLocaleTimeString()}
+          </Text>
+        </>
+      )}
+    </Section>
+  );
+}
+
+function InFlightRow({
+  label,
+  stats,
+  isDark,
+  textSec,
+}: {
+  label: string;
+  stats: InFlightStats;
+  isDark: boolean;
+  textSec: string;
+}) {
+  const ageStr = stats.oldestAgeMs === null ? "—" : formatAgeMs(stats.oldestAgeMs);
+  const ageWarn = isAgeNearMax(stats.oldestAgeMs, stats.maxAgeMs);
+  return (
+    <>
+      <KV
+        label={label}
+        value={`size ${stats.size} · oldest ${ageStr}`}
+        isDark={isDark}
+        valueColor={ageWarn || stats.zombieEvictions > 0 ? "#FF6B6B" : undefined}
+      />
+      {stats.zombieEvictions > 0 && (
+        <KV
+          label={`↳ ${label} zombie evictions`}
+          value={String(stats.zombieEvictions)}
+          isDark={isDark}
+          valueColor="#FF6B6B"
+        />
+      )}
+    </>
+  );
+}
+
+function formatAgeMs(ms: number | null): string {
+  if (ms === null) return "—";
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  return `${Math.round(ms / 3_600_000)}h`;
+}
+
+function isAgeNearMax(ageMs: number | null, maxAgeMs: number): boolean {
+  if (ageMs === null) return false;
+  return ageMs > maxAgeMs * 0.8;
 }
 
 function ContinuityDecisionBadge({ decision }: { decision: ContinuityDecision }) {
