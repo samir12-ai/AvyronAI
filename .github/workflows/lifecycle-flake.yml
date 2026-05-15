@@ -24,8 +24,11 @@ on:
     paths:
       - "server/continuity/**"
       - "server/boss/**"
+      - "server/pipeline/**"
+      - "server/audit.ts"
       - "server/tests/lifecycle/**"
       - "scripts/lifecycle-flake-check.sh"
+      - ".github/workflows/lifecycle-flake.yml"
 
 jobs:
   flake-check:
