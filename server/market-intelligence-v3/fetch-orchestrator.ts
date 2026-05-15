@@ -158,7 +158,107 @@ export interface FetchJobStatus {
   diagnostics?: FetchJobDiagnostics;
 }
 
-const activeJobs = new Map<string, Promise<void>>();
+/**
+ * Seal #16 / F1 — activeJobs zombie-watchdog.
+ *
+ * Mirrors `server/boss/concurrency.ts`. Pre-Seal #16 the Map stored a bare
+ * Promise; if `executeFetchJob()` never settled (downstream scraper deadlock,
+ * SDK hang, missing AI timeout), the entry stayed forever AND the
+ * `snapshot-cleanup-worker` IN_FLIGHT_PROTECTION path read it as "still
+ * active" — a single hung job silently shielded its snapshot from reaping
+ * indefinitely. We now stamp every entry with `{promise, startedAt, token}`,
+ * evict entries older than `MI_ACTIVE_JOBS_MAX_AGE_MS` on every insert, and
+ * token-check the cleanup so a late-settling stale promise cannot delete a
+ * fresh successor entry installed under the same lockKey.
+ */
+interface ActiveJobEntry {
+  promise: Promise<void>;
+  startedAt: number;
+  /** Monotonic per-process token captured at install time. The `.finally()`
+   *  cleanup only deletes the Map entry if the live entry's token still
+   *  matches — closes the same race patched in boss/concurrency.ts. */
+  token: number;
+}
+
+const activeJobs = new Map<string, ActiveJobEntry>();
+let nextActiveJobToken = 1;
+let activeJobsZombieEvictions = 0;
+
+const MAX_ACTIVE_JOB_AGE_MS = (() => {
+  const raw = process.env.MI_ACTIVE_JOBS_MAX_AGE_MS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60 * 1000;
+})();
+
+function evictZombieActiveJobs(now: number): void {
+  for (const [k, entry] of activeJobs) {
+    if (now - entry.startedAt > MAX_ACTIVE_JOB_AGE_MS) {
+      activeJobs.delete(k);
+      activeJobsZombieEvictions += 1;
+      console.error(
+        `[FetchOrch] ZOMBIE_ACTIVE_JOB_EVICTED key=${k} ageMs=${
+          now - entry.startedAt
+        } maxAgeMs=${MAX_ACTIVE_JOB_AGE_MS} totalEvictions=${activeJobsZombieEvictions}`,
+      );
+    }
+  }
+}
+
+function trackActiveJob(lockKey: string, work: () => Promise<void>): Promise<void> {
+  const startedAt = Date.now();
+  evictZombieActiveJobs(startedAt);
+  const myToken = nextActiveJobToken++;
+  const promise = work().finally(() => {
+    const current = activeJobs.get(lockKey);
+    if (current && current.token === myToken) {
+      activeJobs.delete(lockKey);
+    }
+  });
+  activeJobs.set(lockKey, { promise, startedAt, token: myToken });
+  return promise;
+}
+
+/** Seal #16 / F1 — observability hook for the watchdog. Read by
+ *  snapshot-cleanup-worker indirectly via Map size; exported for tests
+ *  + future Prometheus metric exposition. */
+export function _activeJobsStats(): {
+  size: number;
+  zombieEvictions: number;
+  maxAgeMs: number;
+  oldestAgeMs: number | null;
+} {
+  const now = Date.now();
+  let oldest: number | null = null;
+  for (const e of activeJobs.values()) {
+    const age = now - e.startedAt;
+    if (oldest === null || age > oldest) oldest = age;
+  }
+  return {
+    size: activeJobs.size,
+    zombieEvictions: activeJobsZombieEvictions,
+    maxAgeMs: MAX_ACTIVE_JOB_AGE_MS,
+    oldestAgeMs: oldest,
+  };
+}
+
+/** Test-only: insert a synthetic stale entry to exercise the eviction path. */
+export function _injectStaleActiveJobForTest(lockKey: string, ageMs: number): void {
+  activeJobs.set(lockKey, {
+    promise: new Promise<void>(() => {
+      /* never resolves — that is the point */
+    }),
+    startedAt: Date.now() - ageMs,
+    token: nextActiveJobToken++,
+  });
+}
+
+/** Test-only: reset eviction counter + clear map between cases. */
+export function _resetActiveJobsCountersForTest(): void {
+  activeJobsZombieEvictions = 0;
+  activeJobs.clear();
+  nextActiveJobToken = 1;
+}
+
 const creationLocks = new Set<string>();
 
 export async function startFetchJob(accountId: string, campaignId: string): Promise<string> {
@@ -358,12 +458,11 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   lastJobStartByAccount.set(accountId, Date.now());
   console.log(`[FetchOrch] Job ${jobId} created for ${competitors.length} competitors`);
 
-  const promise = executeFetchJob(jobId, accountId, campaignId, competitors).catch(err => {
-    console.error(`[FetchOrch] Job ${jobId} fatal error:`, err.message);
-  }).finally(() => {
-    activeJobs.delete(lockKey);
-  });
-  activeJobs.set(lockKey, promise);
+  trackActiveJob(lockKey, () =>
+    executeFetchJob(jobId, accountId, campaignId, competitors).catch(err => {
+      console.error(`[FetchOrch] Job ${jobId} fatal error:`, err.message);
+    }),
+  );
 
   return jobId;
 }
@@ -1896,12 +1995,11 @@ async function processJobQueue(): Promise<void> {
       const lockKey = `${job.accountId}:${job.campaignId}`;
       console.log(`[QueueProcessor] Atomically promoted QUEUED→RUNNING job ${job.id} | priority=${job.priority} | account=${job.accountId} | globalSlots=${slotsAvailable}`);
 
-      const promise = executeFetchJob(job.id, job.accountId, job.campaignId, competitors).catch(err => {
-        console.error(`[QueueProcessor] Job ${job.id} fatal error:`, err.message);
-      }).finally(() => {
-        activeJobs.delete(lockKey);
-      });
-      activeJobs.set(lockKey, promise);
+      trackActiveJob(lockKey, () =>
+        executeFetchJob(job.id, job.accountId, job.campaignId, competitors).catch(err => {
+          console.error(`[QueueProcessor] Job ${job.id} fatal error:`, err.message);
+        }),
+      );
     }
   } catch (err: any) {
     console.error(`[QueueProcessor] Error processing queue:`, err.message);

@@ -145,11 +145,12 @@ Operator-visible signals (steady-state expectation = 0 / absent; appearance is t
 - `agent_context_section_load_failed` (pino warn)
 - `[MIv3] AUDIT_WRITE_FAILED`, `[Orchestrator] STUCK_JOB_UPDATE_FAILED`, `[FetchOrch] STUCK_COMPETITOR_MARK_FAILED` / `MARK_ENRICHING_FAILED` / `MARK_FAILED_AFTER_ERROR`
 
-Env knobs: `BOSS_INFLIGHT_MAX_AGE_MS` (30min), `CONTINUITY_TICK_MAX_AGE_MS` (15min), `AI_GEMINI_HARD_TIMEOUT_MS` (60s).
+Env knobs: `BOSS_INFLIGHT_MAX_AGE_MS` (30min), `CONTINUITY_TICK_MAX_AGE_MS` (15min), `AI_GEMINI_HARD_TIMEOUT_MS` (60s), `MI_ACTIVE_JOBS_MAX_AGE_MS` (30min).
 
-Open follow-ups (tracked as Seal #16): F1 — `activeJobs` Map watchdog in `fetch-orchestrator.ts`; F2 — Gemini `Promise.race` does not abort the underlying SDK call (add `AbortController.signal`).
+Seal #16 follow-ups (closed May 2026): F1 — `activeJobs` Map watchdog in `fetch-orchestrator.ts` mirrors boss/concurrency `{promise, startedAt, token}` + zombie-eviction + token-cleanup pattern; F2 — Gemini wall-clock timeout now wires `AbortController.signal` into `GenerateContentConfig.abortSignal` so the underlying SDK call is cancelled at the same instant `AI_TIMEOUT` surfaces (no more leaked sockets / background token spend).
 
 > **Full Seal #15 detail (9 closed findings table, 4 deferred items with rationale, architect race-fix amendment, 6 behavioral tests):** [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md)
+> **Seal #16 detail (F1 activeJobs watchdog + F2 Gemini abort, 3 behavioral tests):** [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md)
 
 ---
 
@@ -174,7 +175,8 @@ The env validator (`server/env-validator.ts`) refuses to boot if any of the foll
 | `AI_RATE_LIMIT_PER_HOUR` | optional | Override of 50 calls/hr/account/route on AI generation routes. |
 | `BOSS_INFLIGHT_MAX_AGE_MS` | optional | Boss in-flight zombie watchdog ceiling (default 30min). |
 | `CONTINUITY_TICK_MAX_AGE_MS` | optional | Continuity scheduler in-flight tick watchdog ceiling (default 15min). |
-| `AI_GEMINI_HARD_TIMEOUT_MS` | optional | Gemini wall-clock timeout (default 60s). |
+| `AI_GEMINI_HARD_TIMEOUT_MS` | optional | Gemini wall-clock timeout (default 60s). On timeout, the AbortController also cancels the underlying SDK fetch (Seal #16 / F2). |
+| `MI_ACTIVE_JOBS_MAX_AGE_MS` | optional | MIv3 fetch-orchestrator activeJobs Map zombie watchdog ceiling (default 30min). Seal #16 / F1. |
 
 ## Observability (Seal #7 / F9.5, F10.4, F10.6, F10.7, F10.8)
 
@@ -232,4 +234,5 @@ Each per-seal file contains the full implementation detail, code references, tes
 - [`.local/docs/seals/seal-13-track1-continuity.md`](.local/docs/seals/seal-13-track1-continuity.md) — Hourly scheduler, idempotent invocation, long-gap re-anchor, missed-window detection, schema migration 021.
 - [`.local/docs/seals/seal-14-track2-multireplica.md`](.local/docs/seals/seal-14-track2-multireplica.md) — DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema migration 022.
 - [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md) — 9 closed silent-degradation findings, 4 deferred items, architect race-fix amendment, 6 behavioral tests.
+- [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md) — Track #3 follow-ups: F1 activeJobs Map watchdog in fetch-orchestrator, F2 Gemini AbortController.signal wired into GenerateContentConfig.abortSignal.
 - `.local/docs/seal-13-to-17-plan.md` — original Tracks #1–#7 design plan (pre-existing).

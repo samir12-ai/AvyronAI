@@ -572,11 +572,16 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).not.toContain("pendingSnapshotIds.get");
     });
 
-    it("should cleanup activeJobs in-memory map in finally block", async () => {
+    it("should cleanup activeJobs in-memory map in finally block (Seal #16 / F1: token-checked)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain("activeJobs.delete(lockKey)");
+      // Seal #16 refactor: cleanup is centralized in `trackActiveJob()` and
+      // is token-checked (`current.token === myToken`) so a late-settling
+      // stale promise cannot delete a fresh successor entry.
+      expect(source).toContain("trackActiveJob");
+      expect(source).toContain("activeJobs.delete(lockKey)"); // inside trackActiveJob's finally
+      expect(source).toContain("current.token === myToken");
       expect(source).toContain(".finally(");
     });
 
