@@ -54,7 +54,7 @@ function getProfileScrapeInterval(channelKey: string): number {
  * Returns true if the last 3 snapshots for this profile are all FAILED.
  * Degraded profiles use the maximum 48h interval to reduce pressure.
  */
-async function isProfileDegraded(
+export async function isProfileDegraded(
   accountId: string,
   campaignId: string,
   platform: string,
@@ -68,7 +68,7 @@ async function isProfileDegraded(
   if (channelKey) conditions.push(eq(userChannelSnapshots.handle, channelKey));
 
   const recentSnaps = await db
-    .select({ snapshotData: userChannelSnapshots.snapshotData })
+    .select({ id: userChannelSnapshots.id, snapshotData: userChannelSnapshots.snapshotData })
     .from(userChannelSnapshots)
     .where(and(...conditions))
     .orderBy(desc(userChannelSnapshots.scrapedAt))
@@ -80,7 +80,13 @@ async function isProfileDegraded(
     try {
       const data = snap.snapshotData ? JSON.parse(snap.snapshotData) : null;
       return data?.scrapeStatus === "FAILED";
-    } catch {
+    } catch (err: any) {
+      // F-S1 (scraping audit 2026-05): no silent catches. A corrupt snapshot
+      // row would silently return "not degraded" and defeat the 3-consecutive-
+      // failure cooldown. Log explicitly so the operator sees the row.
+      console.warn(
+        `[UserChannelScraper] SNAPSHOT_PARSE_FAILED context=isProfileDegraded snapshotId=${snap.id ?? "unknown"} err=${err?.message ?? String(err)}`,
+      );
       return false;
     }
   });
@@ -138,7 +144,7 @@ function isBlockWarning(warnings: string[]): boolean {
  * Keying by channel identity prevents stale snapshots from a different handle/URL
  * from suppressing re-scrapes after the user updates their channel configuration.
  */
-async function getPreviousSnapshot(
+export async function getPreviousSnapshot(
   accountId: string,
   campaignId: string,
   platform: string,
@@ -165,7 +171,13 @@ async function getPreviousSnapshot(
   if (!row.snapshotData) return null;
   try {
     return JSON.parse(row.snapshotData) as UserChannelSnapshotData;
-  } catch {
+  } catch (err: any) {
+    // F-S1 (scraping audit 2026-05): no silent catches. A corrupt latest-
+    // snapshot row would silently return null and trigger an unwarranted
+    // "first scrape" treatment downstream. Log explicitly.
+    console.warn(
+      `[UserChannelScraper] SNAPSHOT_PARSE_FAILED context=getPreviousSnapshot snapshotId=${row.id ?? "unknown"} platform=${platform} channelKey=${channelKey ?? "null"} err=${err?.message ?? String(err)}`,
+    );
     return null;
   }
 }

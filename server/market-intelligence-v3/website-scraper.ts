@@ -399,7 +399,11 @@ export async function scrapeWebsite(
           results.push(extractPage(competitorId, competitorName, pageUrl, pageResult.html, now));
         }
       } catch (err: any) {
-        console.log(`[WebScraper] Sub-page fetch failed for ${pageUrl}: ${err.message}`);
+        // F-S2 (scraping audit 2026-05): upgraded from console.log to
+        // console.warn so operators grepping WARN|ERROR see sub-page
+        // failures at the same severity as the outer "critical failure"
+        // path. No behavioral change — log severity only.
+        console.warn(`[WebScraper] SUB_PAGE_FETCH_FAILED url=${pageUrl} err=${err?.message ?? String(err)}`);
       }
     }
 
