@@ -21,6 +21,14 @@ import {
   type InFlightStats,
   type ContinuityTickStats,
 } from "@/hooks/useOperationsPanel";
+import {
+  useOperatorNotices,
+  operatorNoticesEnabled,
+  SEVERITY_COLORS,
+  SEVERITY_LABELS,
+  CATEGORY_LABELS,
+  type OperatorNotice,
+} from "@/hooks/useOperatorNotices";
 
 // Per-check status colors (NOT verdict colors). These are operational check
 // states (PASS/FAIL/STALE/TIMEOUT/etc.) emitted by useRunTruthfulness — they
@@ -112,6 +120,7 @@ export default function AuditControlScreen() {
   const campaignDecision = useCampaignContinuityDecision(campaignId);
   const continuityEnabled = continuityPanelEnabled();
   const operations = useOperationsPanel();
+  const operatorNotices = useOperatorNotices();
   const operationsEnabled = operationsPanelEnabled();
 
   const bg = isDark ? "#080C10" : "#F4F7F5";
@@ -300,6 +309,23 @@ export default function AuditControlScreen() {
             panelLoading={continuity.isLoading}
             panelError={continuity.error ? (continuity.error as Error).message : null}
             campaignDecision={campaignDecision.data?.decision ?? null}
+            textPrimary={textPrimary}
+            textSec={textSec}
+          />
+        )}
+
+        {/* Operations Guardian — operator notices (interpreted layer).
+            Sits between Continuity and Operations: above the raw
+            internal-truth Operations panel, below the chain-state
+            Continuity panel. Observe-only phase: audience='operator'
+            only, no user-facing surfaces, no auto-recovery. Same admin-
+            token gate as the other operator panels. */}
+        {operatorNoticesEnabled() && (
+          <OperatorNoticesPanel
+            isDark={isDark}
+            notices={operatorNotices.data ?? null}
+            isLoading={operatorNotices.isLoading}
+            error={operatorNotices.error ? (operatorNotices.error as Error).message : null}
             textPrimary={textPrimary}
             textSec={textSec}
           />
@@ -630,6 +656,112 @@ function OperationsPanel({
       )}
     </Section>
   );
+}
+
+// ─── Operations Guardian — operator notices panel ───────────────────────
+//
+// Renders the interpreted notices written by the Guardian Interpreter
+// (server/operations-guardian/interpreter.ts). One row per OPEN notice,
+// severity-sorted by the server. Strict-typed at the prop boundary
+// (D2/D3): unknown enum values were dropped at the hook layer.
+//
+// Observe-only phase notes:
+//   * Only audience='operator' rows ever reach this panel.
+//   * No dismiss / acknowledge actions yet — the panel is informational
+//     until we have noise-floor data from production.
+//   * Empty-state copy is intentional: "no notices" is the desired
+//     steady state, not an error.
+function OperatorNoticesPanel({
+  isDark,
+  notices,
+  isLoading,
+  error,
+  textPrimary,
+  textSec,
+}: {
+  isDark: boolean;
+  notices: OperatorNotice[] | null;
+  isLoading: boolean;
+  error: string | null;
+  textPrimary: string;
+  textSec: string;
+}) {
+  const count = notices?.length ?? 0;
+  return (
+    <Section title={`Operator notices${count > 0 ? ` (${count})` : ""}`} isDark={isDark}>
+      {isLoading && !notices && (
+        <ActivityIndicator color="#7C3AED" style={{ marginVertical: 12 }} />
+      )}
+      {error && (
+        <Text style={[styles.errorText, { color: "#FF6B6B", marginTop: 0 }]}>
+          Failed to load notices: {error}
+        </Text>
+      )}
+      {notices && notices.length === 0 && (
+        <Text style={[styles.emptyText, { color: textSec, marginTop: 0 }]}>
+          No open operator notices. Steady state.
+        </Text>
+      )}
+      {notices && notices.length > 0 &&
+        notices.map((n) => (
+          <View
+            key={n.id}
+            style={[styles.blockRow, { borderBottomColor: isDark ? "#1A2030" : "#E2E8E4" }]}
+          >
+            <View style={styles.blockHead}>
+              <Text style={[styles.blockCode, { color: textPrimary }]}>
+                {CATEGORY_LABELS[n.category]}
+              </Text>
+              <Text style={[styles.blockSev, { color: SEVERITY_COLORS[n.severity] }]}>
+                {SEVERITY_LABELS[n.severity]}
+              </Text>
+            </View>
+            <Text style={[styles.blockDesc, { color: textSec }]} numberOfLines={2}>
+              {summarizeNotice(n)}
+            </Text>
+            <Text style={[styles.detailsText, { color: textSec, marginTop: 2 }]}>
+              seen {n.observationCount}× · last {formatRelativeTime(n.lastSeenAt)}
+              {n.campaignId ? ` · campaign ${n.campaignId.slice(0, 10)}…` : ""}
+            </Text>
+          </View>
+        ))}
+      {notices && (
+        <Text style={[styles.detailsText, { color: textSec, marginTop: 10 }]}>
+          Guardian observe-only mode — no auto-recovery, no user surfaces.
+        </Text>
+      )}
+    </Section>
+  );
+}
+
+function summarizeNotice(n: OperatorNotice): string {
+  const v = n.copyVars ?? {};
+  switch (n.category) {
+    case "WORKER_STUCK":
+      return `Window w${v.windowIndex ?? "?"} stuck for ${v.ageMinutes ?? "?"} min`;
+    case "RETRY_LOOP":
+      return `${v.failedCount24h ?? "?"} failed runs in last 24h`;
+    case "LEAKED_LOCK":
+      return `${v.zombieEvictions ?? "?"} zombie evictions on ${v.source ?? "unknown source"}`;
+    case "CHAIN_DEGRADED":
+    case "CHAIN_DEAD":
+      return `${v.chainId ?? "?"} · lag ${formatAgeMs(Number(v.lagMs) || 0)}`;
+    case "SCHEDULER_HEARTBEAT_DEAD":
+      return `Scheduler lag ${formatAgeMs(Number(v.lagMs) || 0)}`;
+    default:
+      return n.correlationKey;
+  }
+}
+
+function formatRelativeTime(iso: string): string {
+  if (!iso) return "—";
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "—";
+  const diffMs = Date.now() - then;
+  if (diffMs < 60_000) return "just now";
+  if (diffMs < 3_600_000) return `${Math.round(diffMs / 60_000)}m ago`;
+  if (diffMs < 86_400_000) return `${Math.round(diffMs / 3_600_000)}h ago`;
+  return `${Math.round(diffMs / 86_400_000)}d ago`;
 }
 
 function InFlightRow({

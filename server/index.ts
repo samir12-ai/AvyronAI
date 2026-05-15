@@ -41,8 +41,8 @@ import * as path from "path";
 import { timingSafeEqual } from "node:crypto";
 import pipelineRouter from "./pipeline/routes";
 import { db } from "./db";
-import { continuityTicks, planAnchorResets, continuityWindowClaims } from "@shared/schema";
-import { desc, sql as drizzleSql } from "drizzle-orm";
+import { continuityTicks, planAnchorResets, continuityWindowClaims, systemNotices } from "@shared/schema";
+import { desc, sql as drizzleSql, and, eq, isNull } from "drizzle-orm";
 import { _bossInFlightStats } from "./boss/concurrency";
 import { _continuityTickInflightStats } from "./continuity/scheduler";
 import { _activeJobsStats } from "./market-intelligence-v3/fetch-orchestrator";
@@ -707,6 +707,124 @@ function setupErrorHandler(app: express.Application) {
         tickAt: health.lastTickReport?.tickAt ?? null,
       },
     });
+  });
+
+  // ─── Operations Guardian — operator notices surface ──────────────────
+  //
+  // GET /api/admin/operator-notices
+  //
+  // Returns currently OPEN system_notices rows scoped to audience='operator'.
+  // The Guardian Interpreter (server/operations-guardian/interpreter.ts)
+  // runs inside the existing Continuity Supervisor tick (every ~5min) and
+  // UPSERTs into system_notices using the partial unique index on
+  // (correlation_key, audience) WHERE resolved_at IS NULL — so the same
+  // raw signal observed across multiple ticks collapses into ONE row with
+  // a bumped observation_count + last_seen_at.
+  //
+  // Doctrine notes:
+  //   * D2/D3 — every field is a strict enum (category, severity,
+  //     audience, recovery_outcome). No `?? "unknown"` fallback.
+  //   * D5 — never substitute a default. If the table is empty the
+  //     response is `notices: []`, not a synthetic placeholder.
+  //   * Same X-Admin-Token gate + fail-closed-when-unset pattern as the
+  //     existing continuity + operations panel endpoints.
+  //   * Observe-only phase: audience='user' rows do not exist (USER_COPY
+  //     firewall in operations-guardian/types.ts is intentionally empty).
+  app.get("/api/admin/operator-notices", async (req: Request, res: Response) => {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).json({ error: "operator_notices_disabled_no_admin_token" });
+    }
+    let isAdmin = false;
+    if (provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch (err) {
+        // Seal #15 — no silent catches. timingSafeEqual throws only on
+        // length mismatch (already pre-checked) or non-Buffer input;
+        // either way we fail closed, but log so the operator can spot
+        // misconfiguration of the admin-token header.
+        console.error("[OperatorNotices] TIMING_SAFE_COMPARE_FAILED", err);
+        isAdmin = false;
+      }
+    }
+    if (!isAdmin) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    try {
+      const rows = await db
+        .select({
+          id: systemNotices.id,
+          category: systemNotices.category,
+          severity: systemNotices.severity,
+          audience: systemNotices.audience,
+          correlationKey: systemNotices.correlationKey,
+          accountId: systemNotices.accountId,
+          campaignId: systemNotices.campaignId,
+          copyKey: systemNotices.copyKey,
+          copyVars: systemNotices.copyVars,
+          detail: systemNotices.detail,
+          firstSeenAt: systemNotices.firstSeenAt,
+          lastSeenAt: systemNotices.lastSeenAt,
+          observationCount: systemNotices.observationCount,
+          recoveryAttempted: systemNotices.recoveryAttempted,
+          recoveryOutcome: systemNotices.recoveryOutcome,
+        })
+        .from(systemNotices)
+        .where(
+          and(
+            eq(systemNotices.audience, "operator"),
+            isNull(systemNotices.resolvedAt),
+          ),
+        )
+        .orderBy(desc(systemNotices.lastSeenAt))
+        .limit(100);
+
+      // Severity rank for client-side sort: critical > degraded > warning > info.
+      // Returned alongside each row so the UI doesn't reimplement the order.
+      const severityRank: Record<string, number> = {
+        critical: 0,
+        degraded: 1,
+        warning: 2,
+        info: 3,
+      };
+      const sorted = [...rows].sort((a, b) => {
+        const sa = severityRank[a.severity] ?? 99;
+        const sb = severityRank[b.severity] ?? 99;
+        if (sa !== sb) return sa - sb;
+        const la = a.lastSeenAt instanceof Date ? a.lastSeenAt.getTime() : 0;
+        const lb = b.lastSeenAt instanceof Date ? b.lastSeenAt.getTime() : 0;
+        return lb - la;
+      });
+
+      return res.status(200).json({
+        notices: sorted.map((r) => ({
+          id: r.id,
+          category: r.category,
+          severity: r.severity,
+          audience: r.audience,
+          correlationKey: r.correlationKey,
+          accountId: r.accountId,
+          campaignId: r.campaignId,
+          copyKey: r.copyKey,
+          copyVars: r.copyVars,
+          detail: r.detail,
+          firstSeenAt:
+            r.firstSeenAt instanceof Date ? r.firstSeenAt.toISOString() : r.firstSeenAt,
+          lastSeenAt:
+            r.lastSeenAt instanceof Date ? r.lastSeenAt.toISOString() : r.lastSeenAt,
+          observationCount: r.observationCount,
+          recoveryAttempted: r.recoveryAttempted,
+          recoveryOutcome: r.recoveryOutcome,
+        })),
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("[OperatorNotices] LOAD_FAILED", err);
+      return res.status(500).json({ error: "operator_notices_load_failed" });
+    }
   });
 
   // ─── Task #52 / Priority #1 — Operator dashboards (operations panel) ──

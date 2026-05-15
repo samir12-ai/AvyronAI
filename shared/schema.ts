@@ -1416,6 +1416,53 @@ export const continuityWindowClaims = pgTable("continuity_window_claims", {
 export type ContinuityWindowClaim = typeof continuityWindowClaims.$inferSelect;
 export type InsertContinuityWindowClaim = typeof continuityWindowClaims.$inferInsert;
 
+// system_notices: Operations Guardian (Task #52 follow-up) — single
+// source of truth for "what should the operator/user see right now?"
+// Written by the Guardian Interpreter (server/operations-guardian/
+// interpreter.ts) which runs as a step inside the existing Continuity
+// Supervisor tick. NOT a per-event log — one row per (correlationKey,
+// audience) until resolved. The unique partial index below collapses
+// repeat observations into lastSeenAt bumps; resolution sets
+// resolved_at and frees the slot for the next occurrence.
+//
+// Audience is set ONCE AT WRITE TIME and never recomputed. It is the
+// firewall that prevents internal vocabulary (stuck claims, watchdog
+// zombies, retry loops) from leaking into customer-visible surfaces.
+// audience='user' rows MUST come from the USER_COPY firewall in
+// server/operations-guardian/types.ts.
+//
+// During the observe-only phase (Steps 1–7 of the Guardian rollout)
+// the interpreter only writes audience='operator' rows. audience='user'
+// stays empty until copy review unlocks each category individually.
+export const systemNotices = pgTable("system_notices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: varchar("category").notNull(),
+  severity: varchar("severity").notNull(),
+  audience: varchar("audience").notNull(),
+  correlationKey: varchar("correlation_key").notNull(),
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  copyKey: varchar("copy_key").notNull(),
+  copyVars: jsonb("copy_vars"),
+  detail: jsonb("detail"),
+  firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at"),
+  suppressedUntil: timestamp("suppressed_until"),
+  recoveryAttempted: boolean("recovery_attempted").notNull().default(false),
+  recoveryOutcome: varchar("recovery_outcome"),
+  observationCount: integer("observation_count").notNull().default(1),
+}, (t) => ({
+  // Partial unique index — at most ONE open notice per (correlationKey,
+  // audience). Re-emitting bumps lastSeenAt + observationCount via
+  // ON CONFLICT DO UPDATE; never inserts a duplicate.
+  openCorrelationUnique: uniqueIndex("system_notices_open_correlation_unique")
+    .on(t.correlationKey, t.audience)
+    .where(sql`resolved_at IS NULL`),
+}));
+export type SystemNotice = typeof systemNotices.$inferSelect;
+export type InsertSystemNotice = typeof systemNotices.$inferInsert;
+
 // chain_registry_state: observability state for the 10-chain operational
 // registry. Updated every supervisor tick (~5min). last_state ∈
 // {HEALTHY, DEGRADED, DEAD, UNKNOWN}; UNKNOWN means

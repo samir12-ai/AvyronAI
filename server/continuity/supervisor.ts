@@ -46,6 +46,7 @@ import { logger } from "../logger";
 import { continuityMetrics } from "./metrics";
 import { getChainRegistry, type ChainDescriptor } from "./chain-registry";
 import { classifyChainState, type ChainState, type ClassifyResult } from "./health-classifier";
+import { runGuardianInterpreterStep, type GuardianTickReport } from "../operations-guardian/interpreter";
 
 const DEFAULT_SUPERVISOR_INTERVAL_MS = 5 * 60 * 1000;
 const SUPERVISOR_JITTER_MS = 10 * 1000;
@@ -387,6 +388,37 @@ export async function runSupervisorTick(
           "[ContinuitySupervisor] failed to persist supervisor tick row",
         );
       }
+    }
+
+    // ─── Operations Guardian — extension layer (Task #52 follow-up) ──
+    //
+    // Runs AFTER the supervisor's own tick row is persisted so a guardian
+    // failure can NEVER prevent the supervisor's paper trail. Errors
+    // inside the interpreter are caught and logged inside the interpreter
+    // itself (silent-degradation doctrine — Seal #15); this outer try/catch
+    // is the final defensive layer so an unexpected throw can't break the
+    // supervisor's own return value.
+    let guardianReport: GuardianTickReport | null = null;
+    try {
+      guardianReport = await runGuardianInterpreterStep({
+        now,
+        chainObservations,
+        schedulerState: schedulerClassification.state,
+        schedulerLagMs: schedulerClassification.lagMs,
+      });
+      logger.info(
+        {
+          component: "operations-guardian",
+          collected: guardianReport.collected,
+          inserted: guardianReport.inserted,
+          updated: guardianReport.updated,
+          resolved: guardianReport.resolved,
+          durationMs: guardianReport.durationMs,
+        },
+        "[OperationsGuardian] tick complete",
+      );
+    } catch (err) {
+      console.error("[OperationsGuardian] TICK_FAILED", err);
     }
 
     lastSupervisorTickAt = now;
