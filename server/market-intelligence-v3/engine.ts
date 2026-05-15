@@ -800,7 +800,11 @@ export class MarketIntelligenceV3 {
       accountId,
       campaignId,
       caller: ISOLATION_ALLOWED_CALLER,
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error(
+        `[MIv3] AUDIT_WRITE_FAILED component=engine event=MARKET_OVERVIEW_DIAGNOSTIC_RUN err=${(err as Error)?.message || String(err)}`,
+      );
+    });
 
     const allCompetitors = await getCompetitorData(accountId, campaignId);
     const competitors = allCompetitors.filter(c => {

@@ -31,6 +31,14 @@ function safeParseJson(val: string | null | undefined, fallback: any): any {
   try { return JSON.parse(val); } catch { return fallback; }
 }
 
+function _noteAuditWriteFailure(eventName: string, err: unknown): void {
+  console.error(
+    `[MIv3] AUDIT_WRITE_FAILED component=fetch-orchestrator event=${eventName} err=${
+      (err as Error)?.message || String(err)
+    }`,
+  );
+}
+
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const MIN_POSTS_TARGET = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
 const MIN_COMMENTS_TARGET = 50;
@@ -1010,7 +1018,11 @@ async function executeFetchJob(
         if (latestSnap.length > 0) {
           snapshotIdCreated = latestSnap[0].id;
         }
-      } catch { }
+      } catch (latestSnapErr) {
+        console.error(
+          `[FetchOrch] LATEST_SNAPSHOT_LOOKUP_FAILED | jobId=${jobId} | accountId=${accountId} | campaignId=${campaignId} | err=${(latestSnapErr as Error)?.message || latestSnapErr}`,
+        );
+      }
     }
 
     const anyInsufficientData = stageValues.some(
@@ -1099,7 +1111,7 @@ async function executeFetchJob(
           concurrency: CONCURRENCY_FEATURE_FLAG ? 2 : MAX_CONCURRENT_COMPETITORS_PER_JOB,
         },
       },
-    }).catch(() => {});
+    }).catch((err) => _noteAuditWriteFailure("MI_FETCH_JOB_COMPLETE", err));
 
   } catch (err: any) {
     console.error(`[FetchOrch] Job ${jobId} fatal:`, err.message);
@@ -1494,7 +1506,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       marketState,
       confidence: confidence.overall,
     },
-  }).catch(() => {});
+  }).catch((err) => _noteAuditWriteFailure("MI_SNAPSHOT_PERSISTED_POST_FETCH", err));
 
   autoSignalCompletion(accountId, campaignId, signalResults, competitorInputs).catch(err => {
     console.error(`[FetchOrch] AUTO_SIGNAL_COMPLETION error: ${err.message}`);
