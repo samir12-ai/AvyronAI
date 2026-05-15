@@ -209,6 +209,22 @@ ESLint suppression count across Seals #13–#19: 0 added. Allowlist size remains
 > Seal #18 / Track #5 — [18 deterministic behavioral lifecycle scenarios + harness + 100-iteration flake checker](.local/docs/seals/seal-18-track5-lifecycle-tests.md).
 > Seal #19 / Track #6 — [8-audit verdict matrix + evidence per audit + allowlist drift note](.local/docs/seals/seal-19-track6-audits.md).
 
+### Beta Safety Doctrine (Task #50)
+
+**Founding principle:** beta safety is a system property — five non-negotiable values codify how every new piece of code, copy, and operator surface MUST behave during the controlled beta and beyond.
+
+| # | Value | Enforcement hook |
+|---|---|---|
+| **B1** | **Truthfulness over confidence.** Engine outputs MUST report their actual confidence + provenance. A fabricated-looking confident answer is worse than a tagged-degraded honest one. | D1–D5 contracts (`validationState` enum, `signalOriginType`, `synthesisVerification.degraded`, AEL `isPartial`). |
+| **B2** | **Visibility over silence.** Every silent path is a runtime degradation. No `} catch {}`, no bare `.catch(() => {})`, no untimed AI call, no anonymous timer handle. | Seal #15 silent-degradation rules (live in `replit.md` above) + Seal #16 AbortController wiring. Reviewer rejects PRs adding silent paths. |
+| **B3** | **Safe degradation over fake success.** Fallback / partial / degraded paths MUST tag `SynthesizedPlan.degraded=true` + canonical `PlanSource`. Outcomes from degraded plans MUST NOT feed memory reinforcement. | Seal #19 Audit #6; "Fallback Plan Isolation" + "Memory-to-Outcome Provenance" features. |
+| **B4** | **Explicit classification over hidden ambiguity.** Every meaning has its own canonical field with a strict enum; missing canonical → `CONTRACT_INCOMPLETE`, never silent substitution. | D1–D5 (canonical fields, strict enums, `requireContractField`, `classifyTrust`). |
+| **B5** | **Operational continuity over feature velocity.** A new feature MUST NOT land without (a) the relevant Seal #19 8-audit gate passing, (b) a corresponding entry in `must-monitor-metrics.md` if it adds runtime behavior, (c) a playbook entry in `playbooks.md` if it adds an alert. | Seal #19 8-audit gate; beta-readiness package ([`.local/docs/beta-readiness/`](.local/docs/beta-readiness/) — mirrored to [`docs/beta-readiness/`](docs/beta-readiness/)). |
+
+**The beta-readiness package is the launch governance reference.** 10 docs cover roadmap (phased rollout with explicit gates), observation plan (operator-surface inventory + gaps), stress-test plan (14 vectors mapped to Seal #18 lifecycle scenarios), rollout strategy (entry/exit criteria per stage), guardrails (toggleable runtime safety nets), risk register, operator-response playbooks, must-monitor metrics, launch constraints (account / AI / scrape caps), and unresolved-risks log with sunset conditions. Mirrored copy lives at `docs/beta-readiness/` (`.local/` is gitignored).
+
+> **Per-stage rollback authority:** any rollback trigger from `roadmap.md` §"Inter-phase rollback triggers" allows the on-call operator to enforce caps via env vars (GR19 `BETA_ADMISSIONS_FROZEN`, GR20 `BETA_ACCOUNT_CAP`) without code change. Lifting a freeze requires architect APPROVED.
+
 ## Required Replit Secrets (Seal #7 / F10.5)
 
 The env validator (`server/env-validator.ts`) refuses to boot if any of the following is missing. Set these via Replit Secrets — never via `.replit` `[userenv.shared]` (history-leak risk; F9.7).
