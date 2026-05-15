@@ -114,9 +114,11 @@ Canonical field names: `validationState` ∈ {validated|provisional|weak|rejecte
 
 > **Full H1–H7 detail + Seal #9 closures + suppression allowlist + transitional exceptions:** [`.local/docs/seals/semantic-contract-hardening-h1-h7.md`](.local/docs/seals/semantic-contract-hardening-h1-h7.md)
 
-### Operational Continuity (Seal #13/Track #1 + Seal #14/Track #2)
+### Continuity Architecture (Seals #13–#19)
 
-**Doctrine: operational silence is a system failure category.** Originated from a May 2026 audit where the User Agent pipeline silently produced zero output for ~4 weeks because no scheduler invoked `runBoss()`.
+**Founding doctrine: operational silence is a system failure category.** Originated from a May 2026 audit where the User Agent pipeline silently produced zero output for ~4 weeks because no scheduler invoked `runBoss()`. The seven-seal arc below builds the chain-of-custody from "no scheduler" → "deterministically tested operator-visible scheduler with multi-replica safety, silent-degradation hardening, and an 8-audit gate". **Operator handoff one-pager: [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md)** — printable decision tree for "what to do when heartbeat goes red".
+
+#### Core invariants (Seals #13/#14)
 
 | # | Invariant | Enforcement |
 |---|---|---|
@@ -125,26 +127,38 @@ Canonical field names: `validationState` ∈ {validated|provisional|weak|rejecte
 | **CHAIN-STATE-EXPLICIT** | A chain that lacks introspection wiring MUST be classified UNKNOWN, never silently HEALTHY. | `classifyChainState({ introspectionAvailable: false })` returns `state: "UNKNOWN"`. |
 | **NO-TENANT-LEAK** | Public `/healthz/continuity` MUST NOT expose per-tenant fields (campaignId, accountId, planId). | Admin-gated full report (timing-safe `METRICS_ADMIN_TOKEN` check) returns the unredacted health; public surface returns operational counters + per-chain state/lag only. |
 
-`ChainState` = `HEALTHY | DEGRADED | DEAD | UNKNOWN`. Operator alerts: `supervisor.schedulerState !== "HEALTHY"` for ≥10min; `supervisor.chainsDead > 0`; `lastSupervisorTickAt` older than `intervalMs * 1.2`; `continuity_dead_cycles_total > 0`.
+`ChainState` = `HEALTHY | DEGRADED | DEAD | UNKNOWN`. Per-chain thresholds: DEGRADED at lag > `expectedIntervalMs * degradedMultiplier` (default 2×); DEAD at lag > `expectedIntervalMs * deadMultiplier` (default 4×) OR `lastObservedRunAt === null` with introspection wired. Operator alerts: `supervisor.schedulerState !== "HEALTHY"` for ≥10min; `supervisor.chainsDead > 0`; `lastSupervisorTickAt` older than `intervalMs * 1.2`; `continuity_dead_cycles_total > 0`.
 
-> **Track #1 implementation detail (hourly scheduler, idempotent invocation, long-gap re-anchor, missed-window detection, schema migration 021):** [`.local/docs/seals/seal-13-track1-continuity.md`](.local/docs/seals/seal-13-track1-continuity.md)
-> **Track #2 implementation detail (DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema migration 022):** [`.local/docs/seals/seal-14-track2-multireplica.md`](.local/docs/seals/seal-14-track2-multireplica.md)
+#### Silent-degradation rules (Seals #15/#16)
 
-### Operator-visible continuity surface (Seal #17 / Track #4)
+**Doctrine: a silent skip is a runtime degradation.** Every silent path is logged, watched, or explicitly documented as deferred. No "probably fine" verdicts.
 
-**Doctrine: an unobserved metric is the same as a missing metric.** The Tracks #1–#3 Prometheus families and `continuity_ticks` audit rows are now exposed to operators on two surfaces so the question "why didn't my campaign run this week" is answerable in ≤30s without SSH.
+- **No silent catches.** `} catch {}` and `.catch(() => {})` are forbidden. Use the file-local `_logSilentLoad` / `_noteAuditWriteFailure` helper pattern (or equivalent `console.error("[Component] EVENT_TAG ...")`) so the operator sees the failure even when the code path returns a UI-safe default.
+- **No bare in-flight promises.** Any `Map<key, Promise>` or singleton `let inFlight: Promise | null` used as a concurrency lock MUST stamp each entry with `{ promise, startedAt, token }`, run a watchdog on entry that evicts entries older than a configured ceiling, AND token-check in the `.finally()` so a late-settling stale promise cannot delete a fresh successor entry.
+- **No bare AI calls.** Every external AI/LLM call MUST race against a wall-clock timeout. OpenAI uses `AI_OPENAI_HARD_TIMEOUT_MS`, Gemini uses `AI_GEMINI_HARD_TIMEOUT_MS` (default 60s). Timeout throws `AICallError("AI_TIMEOUT")` so the outer `finally` releases per-account locks. Seal #16 / F2 wires `AbortController.signal` into `GenerateContentConfig.abortSignal` so the underlying SDK fetch is cancelled at the same instant `AI_TIMEOUT` surfaces (no leaked sockets / background token spend).
+- **Every inline scheduler gets a stored timer handle.** Anonymous `setInterval`/`setTimeout` cascades inside boot closures are forbidden — the handle MUST be reachable from `gracefulShutdown` so SIGTERM clears it.
+
+Operator-visible signals (steady-state expectation = 0 / absent; appearance is the alarm): `_bossInFlightStats().zombieEvictions`, `_continuityTickInflightStats().zombieEvictions`, `_activeJobsStats().zombieEvictions` (Seal #16 / F1 — fetch-orchestrator activeJobs Map watchdog); `agent_context_section_load_failed` (pino warn); `[MIv3] AUDIT_WRITE_FAILED`, `[Orchestrator] STUCK_JOB_UPDATE_FAILED`, `[FetchOrch] STUCK_COMPETITOR_MARK_FAILED` / `MARK_ENRICHING_FAILED` / `MARK_FAILED_AFTER_ERROR`.
+
+Env knobs (full continuity surface): `CONTINUITY_SCHEDULER_DISABLED` (boolean — disables scheduler; tests / incident-response only), `CONTINUITY_TICK_INTERVAL_MS` (1h default — scheduler cadence override), `CONTINUITY_SUPERVISOR_DISABLED` (boolean — disables supervisor; tests only), `CONTINUITY_SUPERVISOR_INTERVAL_MS` (5min default — supervisor cadence override), `REPLICA_ID` (per-process UUID default — pod/instance ID stamped on `continuity_window_claims.claimed_by` and the boot log for multi-replica forensics), `BOSS_INFLIGHT_MAX_AGE_MS` (30min), `CONTINUITY_TICK_MAX_AGE_MS` (15min), `AI_GEMINI_HARD_TIMEOUT_MS` (60s), `MI_ACTIVE_JOBS_MAX_AGE_MS` (30min).
+
+Canonical operator-signal thresholds (steady-state expectation in parens): `continuity_scheduler_last_tick_epoch_seconds` — alarm if `(now - value) > 7200` (2h); `continuity_missed_windows_total` — non-zero accumulates the historical depth of silence even after re-anchor (read alongside `plan_anchor_resets` rows for context); `continuity_heartbeat_stale_total` — any rate > 0 means the supervisor classified the scheduler as DEAD; `continuity_dead_cycles_total` — strictly 0 (any positive value = a campaign with no boss_run for ≥8 days).
+
+#### Operator-visible surface (Seal #17)
+
+**Doctrine: an unobserved metric is the same as a missing metric.** The Tracks #1–#3 Prometheus families and `continuity_ticks` audit rows are exposed on two surfaces so the question "why didn't my campaign run this week" is answerable in ≤30s without SSH.
 
 | # | Surface | Gate |
 |---|---|---|
 | 1 | `.local/dashboards/continuity.json` — 16-panel Grafana dashboard (`avyron-continuity`) covering heartbeat, skip reasons + throughput, multi-replica claim handshake, and the 10-chain registry. Strictly an exposure layer over existing metrics — no net-new metric families. | Reads from the Prometheus scrape of `/metrics` (already admin-token-gated). |
 | 2 | In-app **Continuity** panel (6th panel of Audit & Control, `app/audit-control.tsx`). Renders last tick, selected-campaign decision badge, last 24h skip-reason histogram, per-campaign window-index gaps, last 10 plan-anchor resets. | `EXPO_PUBLIC_METRICS_ADMIN_TOKEN` set on the client (operator builds only) — `continuityPanelEnabled()` self-disables the section in customer builds. |
 
-Backend endpoints (mounted in `server/index.ts`, mirroring the same `X-Admin-Token` gate as `/metrics` and `/healthz/continuity`):
+Backend endpoints (mounted in `server/index.ts`, same `X-Admin-Token` gate as `/metrics` and `/healthz/continuity`):
 
 - `GET /api/admin/continuity/panel` — panel data. 401 when `METRICS_ADMIN_TOKEN` is unset OR header is wrong.
 - `GET /api/admin/continuity/campaign/:campaignId/last-decision` — lightweight per-campaign lookup powering the campaign-card skip-reason badge. Returns `{ decision: PerCampaignDecision | null }`. NOT a default decision when the latest tick had no entry — `null` is canonical (D5).
 
-The 24h skip-reason histogram is computed in a single PG round-trip:
+The 24h skip-reason histogram is a single PG round-trip:
 ```sql
 SELECT (note->>'decision') AS decision, COUNT(*)::int AS count
 FROM continuity_ticks, jsonb_array_elements(notes) AS note
@@ -152,37 +166,22 @@ WHERE tick_at >= NOW() - INTERVAL '24 hours'
 GROUP BY (note->>'decision')
 ```
 
-Strict-union enforcement on the client: `ContinuityDecision` in `hooks/useContinuityPanel.ts` is the same 8-value union as `PerCampaignDecision.decision`. `Record<ContinuityDecision, string>` exhaustiveness on `DECISION_LABELS` and `DECISION_COLORS` means TypeScript blocks any string fallback at the prop boundary (D2/D3). Corrupt notes rows from the histogram are bucketed under a SEPARATE `"unknown"` key — never silently coerced into a real decision.
+Strict-union enforcement on the client: `ContinuityDecision` in `hooks/useContinuityPanel.ts` is the same 8-value union as `PerCampaignDecision.decision`. `Record<ContinuityDecision, string>` exhaustiveness on `DECISION_LABELS` and `DECISION_COLORS` blocks any string fallback at the prop boundary (D2/D3). Corrupt notes rows from the histogram are bucketed under a SEPARATE `"unknown"` key — never silently coerced into a real decision.
 
-ESLint suppression count: 0 added in Seal #17. Allowlist size remains at 4.
+#### Lifecycle behavioral simulation (Seal #18)
 
-> **Full Seal #17 detail (panel layout, Grafana JSON structure, doctrine table, operator runbook for the ≤30s answer):** [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md)
+**Doctrine: behavioral lifecycle tests must remain deterministic.** 18 scenario tests (`server/tests/lifecycle/scenario-NN-*.test.ts`) fake `Date.now()` and drive `runContinuityTick` through a real DB-state mock to simulate weeks of operation. Every scenario asserts on **DB rows + Prometheus counters + audit events + per-campaign decisions** — never on log strings, never on timing-dependent orderings.
 
-### Silent runtime-degradation hardening (Seal #15 / Track #3)
+| # | Invariant | Enforcement |
+|---|---|---|
+| **HERMETIC** | Tests must not touch the network or a real DB. | All scheduler-touching modules (`db`, `boss`, `boss/concurrency`, `audit`, `logger`) are mocked via `vi.mock(...)` to `__*ModuleMock` exports of `server/tests/lifecycle/_harness.ts`. |
+| **DETERMINISTIC-CLOCK** | Tests must own the clock. | `runOneTick(now)` calls `setSimulatedNow(now)` then invokes `runContinuityTick({ now, persist: true })`. No scenario reads wall-clock time for a continuity decision. |
+| **NO-FLAKES** | A flaky lifecycle test is a doctrine violation, not "intermittent." | `scripts/lifecycle-flake-check.sh` (default 100 iterations) is the gate before merging changes that touch the continuity scheduler, the boss/concurrency lock, the audit pipeline, the metrics families, or `_harness.ts` itself. Any single failed iteration must be root-caused — do not retry. |
+| **STATE-NOT-LOGS** | Assertions go against persisted/observable state. | `dbState.bossRuns`, `dbState.evalWindows`, `dbState.claims`, `dbState.resets`, `getMetric(name, labels)`, `getAuditEvents(eventName)`, and per-campaign `decision` rows from the tick report. |
 
-**Doctrine: a silent skip is a runtime degradation.** Every silent path is now either logged, watched, or explicitly documented as deferred. No "probably fine" verdicts.
+**Cross-realm Date pitfall (documented for next harness change):** Vitest's module-realm boundary makes `instanceof Date` return `false` for `Date` objects created in the test file. The harness's `resolveEffectiveAnchorFor` must use structural duck-typing (truthy + `.getTime()`) instead of `instanceof Date`, otherwise every approval row is silently dropped inside the boss mock and `wIdx` collapses to 0.
 
-Active rules:
-- **No silent catches.** `} catch {}` and `.catch(() => {})` are forbidden. Use the file-local `_logSilentLoad` / `_noteAuditWriteFailure` helper pattern (or equivalent `console.error("[Component] EVENT_TAG ...")`) so the operator sees the failure even when the code path returns a UI-safe default.
-- **No bare in-flight promises.** Any `Map<key, Promise>` or singleton `let inFlight: Promise | null` used as a concurrency lock MUST stamp each entry with `{ promise, startedAt, token }`, run a watchdog on entry that evicts entries older than a configured ceiling, AND token-check in the `.finally()` so a late-settling stale promise cannot delete a fresh successor entry.
-- **No bare AI calls.** Every external AI/LLM call MUST race against a wall-clock timeout. OpenAI uses `AI_OPENAI_HARD_TIMEOUT_MS`, Gemini uses `AI_GEMINI_HARD_TIMEOUT_MS` (default 60s). Timeout throws `AICallError("AI_TIMEOUT")` so the outer `finally` releases per-account locks.
-- **Every inline scheduler gets a stored timer handle.** Anonymous `setInterval`/`setTimeout` cascades inside boot closures are forbidden — the handle MUST be reachable from `gracefulShutdown` so SIGTERM clears it.
-
-Operator-visible signals (steady-state expectation = 0 / absent; appearance is the alarm):
-- `_bossInFlightStats().zombieEvictions` and `_continuityTickInflightStats().zombieEvictions`
-- `agent_context_section_load_failed` (pino warn)
-- `[MIv3] AUDIT_WRITE_FAILED`, `[Orchestrator] STUCK_JOB_UPDATE_FAILED`, `[FetchOrch] STUCK_COMPETITOR_MARK_FAILED` / `MARK_ENRICHING_FAILED` / `MARK_FAILED_AFTER_ERROR`
-
-Env knobs: `BOSS_INFLIGHT_MAX_AGE_MS` (30min), `CONTINUITY_TICK_MAX_AGE_MS` (15min), `AI_GEMINI_HARD_TIMEOUT_MS` (60s), `MI_ACTIVE_JOBS_MAX_AGE_MS` (30min).
-
-Seal #16 follow-ups (closed May 2026): F1 — `activeJobs` Map watchdog in `fetch-orchestrator.ts` mirrors boss/concurrency `{promise, startedAt, token}` + zombie-eviction + token-cleanup pattern; F2 — Gemini wall-clock timeout now wires `AbortController.signal` into `GenerateContentConfig.abortSignal` so the underlying SDK call is cancelled at the same instant `AI_TIMEOUT` surfaces (no more leaked sockets / background token spend).
-
-> **Full Seal #15 detail (9 closed findings table, 4 deferred items with rationale, architect race-fix amendment, 6 behavioral tests):** [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md)
-> **Seal #16 detail (F1 activeJobs watchdog + F2 Gemini abort, 3 behavioral tests):** [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md)
-
----
-
-### 8-audit post-implementation doctrine (Seal #19 / Track #6)
+#### 8-audit post-implementation gate (Seal #19)
 
 **Doctrine: every seal that lands a new chain, scheduler, lock, or in-flight Map MUST be followed by an 8-audit pass before the next seal opens.**
 
@@ -197,11 +196,18 @@ Seal #16 follow-ups (closed May 2026): F1 — `activeJobs` Map watchdog in `fetc
 | 7 | Fail-safe | Boot failure → `process.exit(1)`; `uncaughtException` + `unhandledRejection` → `process.exit(1)`; every `setTimeout`/`setInterval` handle reachable from `gracefulShutdown`. |
 | 8 | D1–D5 doctrine | ESLint `semantic/no-semantic-fallback` clean across new code. Zero new suppressions outside the H1–H7 archive allowlist. |
 
-Each audit returns **PASS** / **DOCUMENTED_EXCEPTION** (sunset date required) / **FIX_REQUIRED** (fix in seal OR follow-up filed before close). Report archived under `.local/docs/seals/seal-N-audits.md`; one-row-per-audit summary at `.local/docs/seal-N-audit-report.md`.
+Each audit returns **PASS** / **DOCUMENTED_EXCEPTION** (sunset date required) / **FIX_REQUIRED** (fix in seal OR follow-up filed before close). Report archived under `.local/docs/seals/seal-N-audits.md`; one-row-per-audit summary at `.local/docs/seal-N-audit-report.md`. Seal #19 result: **7 PASS + 1 DOCUMENTED_EXCEPTION** (Audit #2 runtime baseline — sunset = first 7d post-Seal-#20 deploy). 0 FIX_REQUIRED.
 
-Seal #19 result: **7 PASS + 1 DOCUMENTED_EXCEPTION** (Audit #2 runtime baseline — sunset = first 7d post-Seal-#20 deploy). 0 FIX_REQUIRED.
+ESLint suppression count across Seals #13–#19: 0 added. Allowlist size remains at 4 (documentation-only drift to 11 actual sites — all pre-Seal-#13 origin, all D1-safe — is tracked under Seal #20 doctrine-lock follow-up; full allowlist sync lives in the H1–H7 archive).
 
-> **Full Seal #19 detail (8-audit verdict matrix, evidence per audit, allowlist drift note folded into Seal #20):** [`.local/docs/seals/seal-19-track6-audits.md`](.local/docs/seals/seal-19-track6-audits.md)
+> **Per-seal archive links (chronological):**
+> Seal #13 / Track #1 — [hourly scheduler, idempotent invocation, long-gap re-anchor, missed-window detection, schema migration 021](.local/docs/seals/seal-13-track1-continuity.md).
+> Seal #14 / Track #2 — [DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema migration 022](.local/docs/seals/seal-14-track2-multireplica.md).
+> Seal #15 / Track #3 — [9 closed silent-degradation findings, 4 deferred items, architect race-fix amendment, 6 behavioral tests](.local/docs/seals/seal-15-track3-silent-degradation.md).
+> Seal #16 — [F1 activeJobs Map watchdog in fetch-orchestrator + F2 Gemini AbortController.signal wired into GenerateContentConfig.abortSignal](.local/docs/seals/seal-16-followups.md).
+> Seal #17 / Track #4 — [Grafana dashboard + in-app Continuity panel + admin endpoints + skip-reason badge](.local/docs/seals/seal-17-track4-observability.md).
+> Seal #18 / Track #5 — [18 deterministic behavioral lifecycle scenarios + harness + 100-iteration flake checker](.local/docs/seals/seal-18-track5-lifecycle-tests.md).
+> Seal #19 / Track #6 — [8-audit verdict matrix + evidence per audit + allowlist drift note](.local/docs/seals/seal-19-track6-audits.md).
 
 ## Required Replit Secrets (Seal #7 / F10.5)
 
@@ -286,23 +292,7 @@ Each per-seal file contains the full implementation detail, code references, tes
 - [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md) — Track #3 follow-ups: F1 activeJobs Map watchdog in fetch-orchestrator, F2 Gemini AbortController.signal wired into GenerateContentConfig.abortSignal.
 - [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md) — Track #4: Grafana dashboard + in-app Continuity panel (6th Audit & Control panel) + admin endpoints + skip-reason badge on campaign cards.
 - [`.local/docs/seals/seal-18-track5-lifecycle-tests.md`](.local/docs/seals/seal-18-track5-lifecycle-tests.md) — Track #5: 18 deterministic behavioral lifecycle scenarios + harness + 100-iteration flake checker.
+- [`.local/docs/seals/seal-19-track6-audits.md`](.local/docs/seals/seal-19-track6-audits.md) — Track #6: 8-audit verdict matrix (7 PASS + 1 DOCUMENTED_EXCEPTION on runtime baseline) + evidence per audit + allowlist drift note folded forward.
+- [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md) — Seal #20 / Track #7: operator handoff one-pager (dashboard URLs + alert thresholds + env-var reference + heartbeat-red decision tree).
 - `.local/docs/seal-13-to-17-plan.md` — original Tracks #1–#7 design plan (pre-existing).
 
----
-
-### Lifecycle behavioral simulation (Seal #18 / Track #5)
-
-**Doctrine: behavioral lifecycle tests must remain deterministic.** Track #5 adds 18 scenario tests (`server/tests/lifecycle/scenario-NN-*.test.ts`) that fake `Date.now()` and drive `runContinuityTick` through a real DB-state mock to simulate weeks of operation. Every scenario asserts on **DB rows + Prometheus counters + audit events + per-campaign decisions** — never on log strings, never on timing-dependent orderings.
-
-| # | Invariant | Enforcement |
-|---|---|---|
-| **HERMETIC** | Tests must not touch the network or a real DB. | All scheduler-touching modules (`db`, `boss`, `boss/concurrency`, `audit`, `logger`) are mocked via `vi.mock(...)` to `__*ModuleMock` exports of `server/tests/lifecycle/_harness.ts`. |
-| **DETERMINISTIC-CLOCK** | Tests must own the clock. | `runOneTick(now)` calls `setSimulatedNow(now)` then invokes `runContinuityTick({ now, persist: true })`. No scenario reads wall-clock time for a continuity decision. |
-| **NO-FLAKES** | A flaky lifecycle test is a doctrine violation, not "intermittent." | `scripts/lifecycle-flake-check.sh` (default 100 iterations) is the gate before merging changes that touch the continuity scheduler, the boss/concurrency lock, the audit pipeline, the metrics families, or `_harness.ts` itself. Any single failed iteration must be root-caused — do not retry. |
-| **STATE-NOT-LOGS** | Assertions go against persisted/observable state. | `dbState.bossRuns`, `dbState.evalWindows`, `dbState.claims`, `dbState.resets`, `getMetric(name, labels)`, `getAuditEvents(eventName)`, and per-campaign `decision` rows from the tick report. |
-
-**Cross-realm Date pitfall (documented for next harness change):** Vitest's module-realm boundary makes `instanceof Date` return `false` for `Date` objects created in the test file. The harness's `resolveEffectiveAnchorFor` must use structural duck-typing (truthy + `.getTime()`) instead of `instanceof Date`, otherwise every approval row is silently dropped inside the boss mock and `wIdx` collapses to 0.
-
-Smoke confirmation: 5 / 5 iterations green at ~9s/iter (full 100-run target ≈ 15min wall-clock; well under budget).
-
-> **Full Seal #18 detail (18 scenario table, harness contract, DB query mock shape switch, flake-checker usage):** [`.local/docs/seals/seal-18-track5-lifecycle-tests.md`](.local/docs/seals/seal-18-track5-lifecycle-tests.md)
