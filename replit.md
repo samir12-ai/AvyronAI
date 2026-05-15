@@ -56,11 +56,9 @@ Client-side data is stored using AsyncStorage. Server-side data is managed in Po
 - **Evidence Integrity Filter (Audience Engine)**: Uses confidence downgrade (not binary erase) for low-evidence signals; infers pains from qualified objections and emotional drivers with quality guards (confidence≥0.25, evidenceCount≥1) and cardinality caps (max 5 objection-inferred, 3 driver-inferred).
 - **Tiered Signal Quality Gate (MI V3)**: Replaces binary 0.85 threshold with tiered system: high≥0.75, medium≥0.50, rejected<0.50. Medium signals are usable but tracked separately via `mediumQualitySignals` in `QualityGateResult`.
 - **Orphan Claim Penalty Cap (Positioning Engine)**: Orphan penalty remains 0.05/claim but is capped at 0.10 max per territory with a floor of 0.15 confidence, preventing score collapse from many orphaned claims.
-- **Signal-First Positioning (Positioning Engine)**: Complete logic correction to signal-first claim construction. `buildSignalClaimSeeds()` pre-builds enemy/contrast/narrative seeds deterministically from mapped signal labels per territory BEFORE LLM call. LLM role changed from "generator" to "refiner" — sharpens signal-derived seeds into professional positioning language. `validateClaimGrounding()` post-LLM gate checks every claim field (enemyDefinition, contrastAxis, narrativeDirection) against source signal labels; ungrounded LLM output falls back to the deterministic seed. Orphan audit is now preventive: territories with ALL claims orphaned are DROPPED entirely, not just penalized. `deterministicSignalMapping()` also validates all `mappedSignalIds` against the valid signal ID set. Result: signal coverage 0%→25%, orphans 8→0, engineConfidence 0.20→0.40, every claim traceable to upstream signals.
-- **Scoped Engine Context Hydration (Orchestrator)**: When `scopedEngines` is used, the orchestrator pre-loads the best available audience snapshot (first with non-empty structuredSignals) and latest COMPLETE MI snapshot from DB, initializes SGL from cached audience, and sets `ctx.mi`/`ctx.audience`/`ctx.sglState` before the engine loop. This enables selective re-runs (e.g., positioning-only) without re-executing upstream engines.
-- **SIV System Metadata Exemption**: The `detectLeakage` function in SystemIntegrityValidator now skips bracketed system metadata strings (matching `^\[.*(?:purified|mapped|system|sanitized|signal).*\]$`) to prevent false positive leakage alerts from internal bookkeeping annotations. SGL purification notes use "source input(s)" instead of "raw source(s)" to avoid triggering the `\b(raw|...)\b` leakage pattern.
-- **Deterministic Signal ID Validation**: The positioning engine's deterministic mapping now filters existing LLM-generated `mappedSignalIds` against the validated signal ID set from structured signals, purging any hallucinated IDs. Territories receive an explicit `_systemMapped` flag for precise orphan audit gating, replacing the over-broad `mappedSignalIds.length > 0` check. Coverage calculation also filters against valid IDs only.
-- **AEL Partial Degradation Flag**: `AnalyticalPackage` now includes optional `isPartial` and `partialReason` fields. All AEL fallback paths (parse failure, build error) set these flags so downstream engines know enrichment is degraded.
+- **Signal-First Positioning (Positioning Engine)**: Signal-first claim construction. `buildSignalClaimSeeds()` pre-builds enemy/contrast/narrative seeds deterministically from mapped signal labels per territory BEFORE LLM call. LLM role is "refiner", not "generator". `validateClaimGrounding()` post-LLM gate checks every claim field against source signal labels; ungrounded LLM output falls back to the deterministic seed. Orphan audit is preventive: territories with ALL claims orphaned are DROPPED. Result: signal coverage 0%→25%, orphans 8→0, every claim traceable to upstream signals.
+- **Scoped Engine Context Hydration (Orchestrator)**: When `scopedEngines` is used, the orchestrator pre-loads the best available audience snapshot and latest COMPLETE MI snapshot from DB, enabling selective re-runs (e.g., positioning-only) without re-executing upstream engines.
+- **AEL Partial Degradation Flag**: `AnalyticalPackage` includes optional `isPartial` and `partialReason` fields. All AEL fallback paths set these flags so downstream engines know enrichment is degraded.
 
 ## External Dependencies
 
@@ -76,8 +74,8 @@ Client-side data is stored using AsyncStorage. Server-side data is managed in Po
 - PostgreSQL
 
 ### User Authentication
-- JWT-based email/password authentication. Access tokens (**14d TTL**, held during the JWT_LEGACY grace window for client compat — sunset to 60m once the mobile client gains `/api/auth/refresh` wiring) carry `audience="avyron-ai"` + `issuer="avyron-auth"`; refresh tokens (30d) rotate on every `/api/auth/refresh` call and use the `auth_sessions` table with reuse detection (`SECURITY_REFRESH_REUSE` cascade fires only when the presented secret bcrypt-matches a revoked row's hash — sessionId knowledge alone cannot DoS the account). `/api/auth/logout` likewise verifies the refresh secret before revoking. Account lockout: 5 failed logins / 15min → 423 with 15min `Retry-After` (`auth_lockouts` table).
-- **JWT 7-day legacy grace window (Seal #2 / F9.2).** Pre-deploy tokens lacking `aud`/`iss` are still accepted for `JWT_LEGACY_GRACE_DAYS` (default 7d) so existing sessions don't all invalidate at once. The cutoff resolves with a **stable persisted stamp**: if `JWT_LEGACY_CUTOFF_ISO` is set + parseable → that wins; if set but malformed → cutoff=0 (fail-closed against operator typo); if unset → derive `now + 7d` ONCE and persist to `.local/state/jwt-legacy-cutoff` (override path with `JWT_LEGACY_STATE_FILE`). Subsequent restarts re-read the stamp → cutoff never slides AND a forgotten env var doesn't mass-invalidate sessions. Operator runbook: monitor the `[Auth] JWT_LEGACY_GRACE | hits=...` log line — when it stops appearing for ≥48h, set `JWT_LEGACY_CUTOFF_ISO` to a past timestamp to force-close the grace window.
+- JWT-based email/password authentication. Access tokens (**14d TTL**, held during the JWT_LEGACY grace window for client compat — sunset to 60m once the mobile client gains `/api/auth/refresh` wiring) carry `audience="avyron-ai"` + `issuer="avyron-auth"`; refresh tokens (30d) rotate on every `/api/auth/refresh` call and use the `auth_sessions` table with reuse detection (`SECURITY_REFRESH_REUSE` cascade fires only when the presented secret bcrypt-matches a revoked row's hash). `/api/auth/logout` likewise verifies the refresh secret before revoking. Account lockout: 5 failed logins / 15min → 423 with 15min `Retry-After` (`auth_lockouts` table).
+- **JWT 7-day legacy grace window (Seal #2 / F9.2).** Pre-deploy tokens lacking `aud`/`iss` are still accepted for `JWT_LEGACY_GRACE_DAYS` (default 7d). The cutoff resolves with a stable persisted stamp at `.local/state/jwt-legacy-cutoff` (override path with `JWT_LEGACY_STATE_FILE`); `JWT_LEGACY_CUTOFF_ISO` overrides if set + parseable. Operator runbook: monitor `[Auth] JWT_LEGACY_GRACE | hits=...` log line — when it stops appearing for ≥48h, set `JWT_LEGACY_CUTOFF_ISO` to a past timestamp to force-close the grace window.
 - Stripe webhook integration for subscription management
 - Per-account AI generation rate limit (Seal #2 / F1.8): 50 calls/hr/account/route on `/api/generate-content|ad|reel-script|calendar`. Override via `AI_RATE_LIMIT_PER_HOUR`. Returns `429 + Retry-After + AI_RATE_LIMIT_EXCEEDED`.
 
@@ -88,89 +86,72 @@ Client-side data is stored using AsyncStorage. Server-side data is managed in Po
 - Static landing and pricing pages served by the Express backend.
 
 ### Social Platforms
-- Instagram
-- Facebook
-- Twitter
-- LinkedIn
-- TikTok
-## Semantic Contract Hardening doctrine (May 2026 — H1–H7)
+- Instagram, Facebook, Twitter, LinkedIn, TikTok
 
-System-wide policy that governs every live-decision and live-reporting field across orchestrator, system-control, recovery, snapshot, agent stream, build-plan, and contract registry. The five non-negotiable rules:
+---
+
+## Active doctrine (live rules — non-negotiable)
+
+These are the rules every new piece of code must obey. Implementation detail and historical justification for each is archived in `.local/docs/seals/` (linked per section).
+
+### D1–D5 Semantic Contract Hardening
+
+System-wide policy that governs every live-decision and live-reporting field across orchestrator, system-control, recovery, snapshot, agent stream, build-plan, and contract registry.
 
 | # | Rule | Enforcement point |
 |---|---|---|
-| **D1** | **No semantic fallback.** `?? status`, `\|\| status`, `?? verdict`, `\|\| verdict`, `?? outcome`, `\|\| outcome` patterns are FORBIDDEN on any live decision path. | Custom ESLint rule `semantic/no-semantic-fallback` (`.local/eslint-rules/no-semantic-fallback.js`) scoped to `server/{agent,system-control,orchestrator,build-plan-layer,recovery-*}/**`. |
+| **D1** | **No semantic fallback.** `?? status`, `\|\| status`, `?? verdict`, `\|\| verdict`, `?? outcome`, `\|\| outcome` patterns are FORBIDDEN on any live decision path. | Custom ESLint rule `semantic/no-semantic-fallback` (`.local/eslint-rules/no-semantic-fallback.js`) scoped to `server/{agent,system-control,orchestrator,build-plan-layer,recovery-*,strategy}/**`. Detects RHS, LHS, ternary, alias-variable, AND destructured-default patterns. |
 | **D2** | **Every meaning has its own canonical field.** A generic `status` may carry execution semantics ONLY (F1). Verdict (F2/F6), validation (F3), trust (F4), action (F9), and gate-outcome (F10) each get a dedicated field name. | Contract registry — every verdict-shaped field declared with its own `id` + canonical `path`. |
-| **D3** | **Strict enums only.** Every verdict-shaped field uses `z.enum([...])`, never `z.string()`. | Contract registry — `validationState`, `decisionAction`, `decisionGateOutcome`, `overallStatus`, `integrityVerdict` all `z.enum`. |
-| **D4** | **Legacy fields are historical only.** May exist for display/migration; MAY NOT satisfy contracts, orchestration, verdict logic, recovery, budget/channel decisions, or trust evaluation. | `legacyPaths` removed for verdict-shaped fields. Deprecated alias fields (`overallStatus` on agent stream, `overallStatus` on integrity output) are JSDoc-`@deprecated`. |
+| **D3** | **Strict enums only.** Every verdict-shaped field uses `z.enum([...])`, never `z.string()`. | Contract registry — `validationState`, `decisionAction`, `decisionGateOutcome`, `overallStatus`, `integrityVerdict`, `marketState` all `z.enum`. |
+| **D4** | **Legacy fields are historical only.** May exist for display/migration; MAY NOT satisfy contracts, orchestration, verdict logic, recovery, budget/channel decisions, or trust evaluation. | `legacyPaths` removed for verdict-shaped fields. |
 | **D5** | **Missing canonical → CONTRACT_INCOMPLETE.** Never silently substitute another field. The boundary helper returns `INCOMPLETE` and live reasoning is blocked. | `requireContractField` + `classifyTrust`. |
 
-Reference implementation: `INTEGRITY_CONTRACT` in `server/orchestrator/contract-registry/registry.ts`. Proof suites: `server/tests/{integrity-contract,validation-contract,budget-action-contract,channel-decision-contract,agent-stream-semantic-separation}.test.ts`.
+Reference implementation: `INTEGRITY_CONTRACT` in `server/orchestrator/contract-registry/registry.ts`. Proof suites: `server/tests/{integrity-contract,validation-contract,budget-action-contract,channel-decision-contract,agent-stream-semantic-separation,doctrine-regression}.test.ts`.
 
-**Transitional D4/D5 exceptions (sunset: H8)** — explicitly documented per code review:
-- `integrity.integrityVerdict.legacyPaths=[["overallStatus"]]` — D4 exception. Resolves to legacy `overallStatus` so pre-H4 snapshots remain contract-COMPLETE. Same-semantic alias (verdict↔verdict, NOT status↔verdict), so D1 risk is zero. Sunset: drop legacyPaths once all persisted snapshots have been re-run with the H4 engine.
-- `channel_selection.decisionGateOutcome` placed in `optionalOutputs` — D5 exception at the pipeline gate. `validateContractCompleteness()` checks `requiredOutputs` only; pipeline-level INCOMPLETE-on-absence does NOT fire while the field is optional. Runtime D5 still enforced via `requireContractField()` on the consumer side. Strict-enum shape IS enforced when present. Sunset: promote to `requiredOutputs` once channel engine emits the field on 100% of new runs (≥7-day shadow window with zero `LEGACY_HIT` for this field id).
+**Inline ESLint suppression policy:** every `eslint-disable[-next-line] semantic/no-semantic-fallback` MUST appear in the allowlist in the H1–H7 archive. New suppressions require (a) same-line justification comment, (b) allowlist entry in same PR, (c) architect review note. Current allowlist size: 4.
 
-**H6 ESLint rule gaps — CLOSED in Seal #9 (Task #27, May 2026):**
-- ✅ Rule scope widened to include `server/strategy/**`. Engine *internals* (`server/*-engine/engine.ts` and the two strategy-engine F1 status-authoring sites) remain exempted via documented in-line `eslint-disable-next-line` comments — these are the AUTHORING site of the canonical status, not a D1-substitution of a missing canonical contract field. Rationale documented in `eslint.config.js` and at each disable site.
-- ✅ Rule extended with `checkVariableDeclarator` (alias-variable detection: `const status = a || b`) and `checkObjectPattern` (destructured-default detection: `const { status = "x" } = obj`). Two new messageIds (`semanticFallbackAlias`, `semanticFallbackDestructured`) added alongside the prior H6/H8 baseline. **Pass-4 final (architect-required)**: alias / destructured detectors use the un-anchored audit-spec regex `(status|verdict|outcome|state|action)/i` (no `$` anchor — closes the rename-to-evade loophole where `const statusLabel = a || b` or `const actionValue = a ?? b` would have silently substituted a generic canonical-field read). Adversarial fixtures in `server/tests/doctrine-regression.test.ts` now cover non-suffix names (`statusLabel`, `actionValue`, `outcomeText`, `verdictRecord`, `actionPlan`) AND benign clean cases (`description`, `displayLabel` — no verdict-shape token; rule stays silent). 20 offenders + 10 clean + 3 fixture-file proofs PASS. Pass-3's suffix regex `(status|verdict|outcome|state|action)$/i` to catch D1 substitutions on suffix-style canonical contract fields (validationState, decisionAction, budgetAction, decisionGateOutcome, marketState, ...). The 24 engine-internal authoring sites the widened regex initially flagged were resolved by **renaming the local variables to non-suffix names** (e.g. `marketState` → `marketStateLabel`, `budgetAction` → `budgetActionValue`, `controlVerdict` → `controlVerdictRecord`, `trustState` → `trustStateLabel`, `primaryOutcome`/`altOutcome`/`offerOutcome` → `*Text`, `painInOutcome` → `painInOutcomeFlag`, `validationState` → `validationStateValue`, `originalAction` → `originalActionValue`, `postRepairBudgetAction` → `postRepairBudgetActionValue`, `depthGateStatus` → `depthGateStatusInput`, `postGateOutcome` → `postGateOutcomeValue`) — NOT by adding eslint-disable comments. The local var name carries no canonical contract meaning, so renaming is a pure-naming fix that satisfies the alias/destructured detectors while preserving the underlying read of the canonical property (`obj.marketState`, `decision?.action`, etc.) at every call site. Object-shorthand uses (e.g. `{ trustState }`) were expanded to explicit `{ trustState: trustStateLabel }` so the property key on the emitted object remains the canonical contract name.
-- ✅ Adversarial fixture proof in `server/tests/doctrine-regression.test.ts` (24/24 PASS: 14 offenders + 7 clean + 3 fixture-file proofs): covers H6 RHS, H8 LHS/ternary, F10.3 alias + destructured patterns; clean shapes prove zero false-positives on canonical helper-extracted reads and on benign suffix-collision names like `myCounter`.
+Canonical field names: `validationState` ∈ {validated|provisional|weak|rejected}, `decision.action` ∈ {test|scale|hold|halt}, `primaryChannel.decisionGate.outcome` ∈ {recommended|support_channel|exploratory}, `integrityVerdict` ∈ {PASS|PARTIAL|FAIL}, `executionStatus` ∈ {COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT|BLOCKED_BY_INTEGRITY}.
 
-**Seal #9 / Task #27 audit-finding closures (May 12, 2026):**
-- **F2.2** (8 sites of semantic-fallback eslint-disables): ALL removed. Reads now go through helpers (`readSectionStatus`, `pickRunStatus`, `pickOfferCoreOutcome`, `pickConfidenceIntegrityVerdict`, `includeIfGatedPass`, `buildStructuralCheckDetail`) or guarded if-blocks. No ternary or logical-fallback expression reads a forbidden field name on a live decision path.
-- **F2.10**: `decisionGateOutcome` physically MOVED from `optionalOutputs` → `requiredOutputs` with `emptyIsMissing: true`. H3 transitional exception retired.
-- **F4.1**: registry enums tightened — `FunnelStageAssignment.assignedRole`, `FunnelStageObject.type`, MI `marketState` all `z.enum`. The `marketState` enum carries the actual emitted vocabulary from `deriveMarketState()` plus the `PARTIAL_DATA` / `INSUFFICIENT_DATA` / `PENDING` sentinels — verified against every emission site.
-- **F4.1 ACCEPTED EXCEPTION (pass-4, architect-recorded)**: positioning narrative fields `enemyDefinition`, `contrastAxis`, `narrativeDirection` intentionally remain `z.string().min(1)` (free-form prose authored by LLM, not verdict-shape — D3 strict-enum doctrine doesn't apply to open-vocabulary prose). This is a formally accepted deviation from the original "all six fields enum" wording in the audit closure criteria; the three prose fields have no closed vocabulary and forcing an enum would degrade authoring fidelity. Audit owner accepted this exception in pass-4 architect review (May 2026). Sunset condition: if the positioning engine ever emits these fields from a closed-vocabulary template, promote to `z.enum` at that time.
+> **Full H1–H7 detail + Seal #9 closures + suppression allowlist + transitional exceptions:** [`.local/docs/seals/semantic-contract-hardening-h1-h7.md`](.local/docs/seals/semantic-contract-hardening-h1-h7.md)
 
-**Inline `semantic/no-semantic-fallback` suppression allowlist (Seal #9 / pass-4 governance):**
-Every `eslint-disable[-next-line] semantic/no-semantic-fallback` in the codebase MUST appear in the table below. Any new suppression requires (a) a same-line justification comment, (b) addition to this table in the same PR, (c) an architect review note explaining why the offending construct is NOT a D1 substitution. Periodic audit: each row is re-evaluated at the next Seal review; rows whose justification no longer applies must be removed and the underlying construct refactored. Current allowlist (4 entries):
+### Operational Continuity (Seal #13/Track #1 + Seal #14/Track #2)
 
-| File | Line context | Type | Justification |
-|---|---|---|---|
-| `server/strategy/iteration-engine/engine.ts` | `let status = guardLayer.passed ? COMPLETE : PROVISIONAL` | F1 status authoring | First canonical write of the engine's `status` field — not a D1 substitute. |
-| `server/strategy/retention-engine/engine.ts` | `const status = guardResult.passed ? COMPLETE : PROVISIONAL` | F1 status authoring | First canonical write of the engine's `status` field — not a D1 substitute. |
-| `server/offer-engine/engine.ts` (~L2073, block) | `parsed.primary?.outcome \|\| "Core transformation"` and sibling LLM placeholders | LLM placeholder coalescing | Pre-existing F10.2 documented exemption — empty-string fallbacks coalesce omitted LLM prose into typed string fields, not a canonical contract verdict substitution. |
-| `server/offer-engine/engine.ts` (~L3017, block) | `celSourceTexts = [aiOffers.primary?.name \|\| "", ...]` | CEL source-text aggregation | Pre-existing F10.2 documented exemption — collects raw text fields (name/outcome/mechanism prose) for the Causal Enforcement Layer's depth-gate scan; empty fallbacks coalesce missing prose into the text pool. |
-- **F4.2**: `ChannelCandidateSchema` rewritten to match the actual TS interface (`channelName`/`channelType` (z.enum)/`fitScore`/`audienceDensityScore` REQUIRED). Bogus `channelKey`/`scalability` fields removed.
-- **F10.2**: ESLint scope widened to include `server/strategy/**`. Verified 0 errors across the widened scope.
-- **F10.3**: rule extended with alias-variable + destructured-default detectors (see above). Adversarial fixture proof: 16/16 PASS.
+**Doctrine: operational silence is a system failure category.** Originated from a May 2026 audit where the User Agent pipeline silently produced zero output for ~4 weeks because no scheduler invoked `runBoss()`.
 
-D1 in-line exemption sites (engine-internal F1 status authoring, NOT D1-substitutes — these are the AUTHORING site of the canonical `status` field, not a fallback substitution; pass-3 verified these are the only two remaining `eslint-disable-next-line semantic/no-semantic-fallback` comments in the codebase):
-- `server/strategy/iteration-engine/engine.ts` — `let status = guardLayer.passed ? COMPLETE : PROVISIONAL`
-- `server/strategy/retention-engine/engine.ts` — `const status = guardResult.passed ? COMPLETE : PROVISIONAL`
+| # | Invariant | Enforcement |
+|---|---|---|
+| **INVARIANT-RETRY** | Failed OR partial boss runs MUST NEVER be suppressed. | `SUCCESS_STATUSES = new Set(["completed"])` in `scheduler.ts`. `partial` and `failed` outcomes both DELETE the claim row via `releaseClaimForRetry()` so the next tick re-claims. Any change letting `partial`/`failed` short-circuit a window is a P0 defect. |
+| **MULTI-REPLICA-SAFE** | Two scheduler instances MUST NOT both invoke runBoss for the same (campaign, plan, window). | DB-level claim handshake via `tryClaimWindow()` → `INSERT INTO continuity_window_claims ... ON CONFLICT DO NOTHING RETURNING`. |
+| **CHAIN-STATE-EXPLICIT** | A chain that lacks introspection wiring MUST be classified UNKNOWN, never silently HEALTHY. | `classifyChainState({ introspectionAvailable: false })` returns `state: "UNKNOWN"`. |
+| **NO-TENANT-LEAK** | Public `/healthz/continuity` MUST NOT expose per-tenant fields (campaignId, accountId, planId). | Admin-gated full report (timing-safe `METRICS_ADMIN_TOKEN` check) returns the unredacted health; public surface returns operational counters + per-chain state/lag only. |
 
-Canonical field names introduced/hardened in H1–H7:
-- `validationState` ∈ {validated|provisional|weak|rejected} — F3 statistical-validation verdict
-- `decision.action` ∈ {test|scale|hold|halt} — F9 budget-governor action
-- `primaryChannel.decisionGate.outcome` ∈ {recommended|support_channel|exploratory} — F10 channel decision-gate outcome
-- `integrityVerdict` ∈ {PASS|PARTIAL|FAIL} — F2 integrity verdict (canonical replacement for `overallStatus`)
-- `executionStatus` ∈ {COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT|BLOCKED_BY_INTEGRITY} — F1 execution status on agent stream + full-report (canonical replacement for `overallStatus`)
+`ChainState` = `HEALTHY | DEGRADED | DEAD | UNKNOWN`. Operator alerts: `supervisor.schedulerState !== "HEALTHY"` for ≥10min; `supervisor.chainsDead > 0`; `lastSupervisorTickAt` older than `intervalMs * 1.2`; `continuity_dead_cycles_total > 0`.
 
-## Operational Continuity Layer (Seal #13 / Track #1, May 2026)
+> **Track #1 implementation detail (hourly scheduler, idempotent invocation, long-gap re-anchor, missed-window detection, schema migration 021):** [`.local/docs/seals/seal-13-track1-continuity.md`](.local/docs/seals/seal-13-track1-continuity.md)
+> **Track #2 implementation detail (DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema migration 022):** [`.local/docs/seals/seal-14-track2-multireplica.md`](.local/docs/seals/seal-14-track2-multireplica.md)
 
-**Doctrine: operational silence is now considered a system failure category.** Triggered by a May 2026 audit that found the weekly User Agent evaluation pipeline silently produced zero output for ~4 weeks because no scheduler invoked `runBoss()` — no errors, no alerts, just a quiet absence of work.
+### Silent runtime-degradation hardening (Seal #15 / Track #3)
 
-**Track #1 implementation (this seal):**
+**Doctrine: a silent skip is a runtime degradation.** Every silent path is now either logged, watched, or explicitly documented as deferred. No "probably fine" verdicts.
 
-- **Hourly continuity scheduler** (`server/continuity/scheduler.ts`). Self-rescheduling `setTimeout` with ±60s jitter (mirrors `autonomous-worker.ts` F6.4 pattern). First tick 60s post-listen. Disabled by `CONTINUITY_SCHEDULER_DISABLED=true`. Test override via `CONTINUITY_TICK_INTERVAL_MS`.
-- **Idempotent invocation.** Each tick lists every (account, campaign) with the latest APPROVED `strategic_plans` row, computes the expected `window_index` from the resolved anchor, and invokes `runBoss({ trigger: "scheduled" })` ONLY when the most-recent `boss_runs.started_at` is < the current window's `windowStart`. Wrapped in `withCampaignLock` so a manual API trigger racing the scheduler resolves to `BossRunInFlightError` → counted as `skipped_in_flight`. Single in-flight tick guard via in-process promise prevents overlapping ticks.
-- **Long-gap re-anchor policy.** When (gap from anchor > 1 `WINDOW_MS`) AND (zero `pipeline_eval_windows` rows for the active plan), the scheduler writes a `plan_anchor_resets` row with `reanchored_at = now`, `reason = "long_gap_no_windows_opened"`, `source = "continuity_scheduler"`. `evaluateWindowState()` in `server/pipeline/eval-windows.ts` reads `plan_anchor_resets` and treats the most-recent `reanchoredAt` strictly NEWER than the approval-derived anchor as the effective anchor (pushes `"anchor_reset_applied"` reason). **The no-backfill doctrine is preserved**: missed windows are NOT invented, the cycle simply restarts at `window_index=0` going forward. Re-anchor is gated to plans with zero opened windows so cluster-comparison baselines on plans with history are never corrupted.
-- **Missed-window detection.** Per-campaign `expected_window_index − max(pipeline_eval_windows.window_index)`. Counted on `continuity_missed_windows_total` and recorded on the `continuity_ticks.notes` row. Re-anchored campaigns reset to 0 going forward but the historical count remains visible on the tick row.
-- **Dead-cycle detection.** Campaign with no `boss_runs` for `DEAD_CYCLE_THRESHOLD_MS` (8 days) → `continuity_dead_cycles_total` increment + `CONTINUITY_DEAD_CYCLE` audit event with `sinceDays`, `lastBossRunAt`, `anchorSource`, `expectedWindowIndex` payload.
-- **Persistence.** Every tick writes one `continuity_ticks` row (campaigns scanned, runs invoked, runs skipped/failed/reanchored, missed windows, dead cycles, per-campaign decisions JSON). A missing row in this table for >2× `intervalMs` is the operator-visible signal that the scheduler itself has stalled (alarm bell deferred to Track #2 / Seal #14).
-- **Observability.** 11 Prometheus counters/gauges in `server/continuity/metrics.ts` concatenated to the existing `/metrics` exposition. New unauthenticated `GET /healthz/continuity` heartbeat probe returns the most-recent `TickReport` (operational counters only, no user data).
-- **Audit event types added** to `server/audit.ts`: `CONTINUITY_REANCHOR`, `CONTINUITY_DEAD_CYCLE`, `CONTINUITY_MISSED_WINDOWS`.
-- **Schema migration 021** (`plan_anchor_resets`, `continuity_ticks` tables). `REQUIRED_SCHEMA_VERSION` bumped 20 → 21.
-- **`BossTrigger` extended** to include `"scheduled"` (alongside `"manual" | "approval"`).
+Active rules:
+- **No silent catches.** `} catch {}` and `.catch(() => {})` are forbidden. Use the file-local `_logSilentLoad` / `_noteAuditWriteFailure` helper pattern (or equivalent `console.error("[Component] EVENT_TAG ...")`) so the operator sees the failure even when the code path returns a UI-safe default.
+- **No bare in-flight promises.** Any `Map<key, Promise>` or singleton `let inFlight: Promise | null` used as a concurrency lock MUST stamp each entry with `{ promise, startedAt, token }`, run a watchdog on entry that evicts entries older than a configured ceiling, AND token-check in the `.finally()` so a late-settling stale promise cannot delete a fresh successor entry.
+- **No bare AI calls.** Every external AI/LLM call MUST race against a wall-clock timeout. OpenAI uses `AI_OPENAI_HARD_TIMEOUT_MS`, Gemini uses `AI_GEMINI_HARD_TIMEOUT_MS` (default 60s). Timeout throws `AICallError("AI_TIMEOUT")` so the outer `finally` releases per-account locks.
+- **Every inline scheduler gets a stored timer handle.** Anonymous `setInterval`/`setTimeout` cascades inside boot closures are forbidden — the handle MUST be reachable from `gracefulShutdown` so SIGTERM clears it.
 
-**Operator runbook (Track #1 surface):**
-- `GET /healthz/continuity` returns `{ schedulerUp, lastTickAt, lastTickReport, intervalMs }`. `lastTickAt` should be within `intervalMs * 1.2` at all times.
-- `continuity_scheduler_last_tick_epoch_seconds` gauge — Prometheus alert if `(time() - value) > 7200`.
-- `continuity_dead_cycles_total > 0` indicates one or more active campaigns have stopped evaluating.
-- `continuity_missed_windows_total` accumulates the historical depth of silence even after re-anchor.
-- A re-anchor event is normal AFTER a long idle period; if it appears on a campaign that was actively running last week, that's a production incident — investigate `plan_anchor_resets.reason` and the surrounding boss_runs.
+Operator-visible signals (steady-state expectation = 0 / absent; appearance is the alarm):
+- `_bossInFlightStats().zombieEvictions` and `_continuityTickInflightStats().zombieEvictions`
+- `agent_context_section_load_failed` (pino warn)
+- `[MIv3] AUDIT_WRITE_FAILED`, `[Orchestrator] STUCK_JOB_UPDATE_FAILED`, `[FetchOrch] STUCK_COMPETITOR_MARK_FAILED` / `MARK_ENRICHING_FAILED` / `MARK_FAILED_AFTER_ERROR`
 
-**Tracks #2–#6 design** is locked in `.local/docs/seal-13-to-17-plan.md` and queued as separate project tasks: Track #2 (continuity supervisor + 10-chain registry + multi-replica advisory lock), Track #3 (silent-degradation hardening sweep, 20 categories), Track #4 (observability expansion + dashboards), Track #5 (18-scenario end-to-end lifecycle test suite), Track #6 (8 post-implementation audits).
+Env knobs: `BOSS_INFLIGHT_MAX_AGE_MS` (30min), `CONTINUITY_TICK_MAX_AGE_MS` (15min), `AI_GEMINI_HARD_TIMEOUT_MS` (60s).
+
+Open follow-ups (tracked as Seal #16): F1 — `activeJobs` Map watchdog in `fetch-orchestrator.ts`; F2 — Gemini `Promise.race` does not abort the underlying SDK call (add `AbortController.signal`).
+
+> **Full Seal #15 detail (9 closed findings table, 4 deferred items with rationale, architect race-fix amendment, 6 behavioral tests):** [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md)
+
+---
 
 ## Required Replit Secrets (Seal #7 / F10.5)
 
@@ -184,43 +165,45 @@ The env validator (`server/env-validator.ts`) refuses to boot if any of the foll
 | `BRIGHT_DATA_PROXY_USERNAME` | always | Residential proxy auth (Instagram/TikTok/Web/Reviews scrapers). |
 | `BRIGHT_DATA_PROXY_COUNTRY` | always | Proxy geo-targeting code. |
 | `STRIPE_WEBHOOK_SECRET` | production (dev: warn) | Stripe signature verification on `/api/stripe/webhook`. Dev boot allowed without it (Stripe gated behind webhook signature check; routes fail-closed when secret unset). Production boot REFUSED without it. |
-| `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL injected into landing/pricing HTML in place of host-header trust (F9.1). In `NODE_ENV !== production` it auto-derives from `REPLIT_DEV_DOMAIN`. **Validated**: must be a syntactically-valid absolute URL; `https://` enforced in production; hostname must end with `.replit.app` / `.replit.dev` / `.replit.co` OR appear (suffix or exact) in `ALLOWED_PUBLIC_HOSTS` (comma-separated). |
-| `ALLOWED_PUBLIC_HOSTS` | optional | Comma-separated list of additional hostnames whose suffix is accepted by the PUBLIC_BASE_URL validator (e.g. `app.avyron.io,staging.avyron.io`). |
-| `METRICS_ADMIN_TOKEN` | recommended | When set, gates `GET /metrics` via `X-Admin-Token`. Absent → endpoint is closed (401 to all). |
-| `SENTRY_DSN` | recommended | Server error reporting. Absent → Sentry shim is a no-op (logs `error reporting disabled`). |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | Reserved for upstream OpenTelemetry adoption (in-house registry serves `/metrics` directly today). |
+| `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL injected into landing/pricing HTML in place of host-header trust (F9.1). In `NODE_ENV !== production` it auto-derives from `REPLIT_DEV_DOMAIN`. **Validated**: must be a syntactically-valid absolute URL; `https://` enforced in production; hostname must end with `.replit.app` / `.replit.dev` / `.replit.co` OR appear in `ALLOWED_PUBLIC_HOSTS`. |
+| `ALLOWED_PUBLIC_HOSTS` | optional | Comma-separated list of additional hostnames whose suffix is accepted by the PUBLIC_BASE_URL validator. |
+| `METRICS_ADMIN_TOKEN` | recommended | When set, gates `GET /metrics` and the unredacted `/healthz/continuity` view via `X-Admin-Token`. Absent → endpoints are closed (401 to all). |
+| `SENTRY_DSN` | recommended | Server error reporting. Absent → Sentry shim is a no-op. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | Reserved for upstream OpenTelemetry adoption. |
 | `JWT_LEGACY_CUTOFF_ISO` | optional | Operator override of the auto-persisted JWT legacy-grace cutoff (Seal #2 / F9.2). |
-| `AI_RATE_LIMIT_PER_HOUR` | optional | Override of 50 calls/hr/account/route on AI generation routes (Seal #2 / F1.8). |
+| `AI_RATE_LIMIT_PER_HOUR` | optional | Override of 50 calls/hr/account/route on AI generation routes. |
+| `BOSS_INFLIGHT_MAX_AGE_MS` | optional | Boss in-flight zombie watchdog ceiling (default 30min). |
+| `CONTINUITY_TICK_MAX_AGE_MS` | optional | Continuity scheduler in-flight tick watchdog ceiling (default 15min). |
+| `AI_GEMINI_HARD_TIMEOUT_MS` | optional | Gemini wall-clock timeout (default 60s). |
 
 ## Observability (Seal #7 / F9.5, F10.4, F10.6, F10.7, F10.8)
 
-- **`GET /healthz`** — unauthenticated liveness probe mounted before the `/api` middleware gate. Returns `{ ok: true, ts }`.
-- **`GET /metrics`** — Prometheus text exposition from the in-house OTel registry (`server/observability/otel.ts`). Admin-gated via `X-Admin-Token` header against `METRICS_ADMIN_TOKEN`; mounted before the `/api` gate.
-- **Structured logger (`server/logger.ts`)** — pino-compatible JSON-line facade. Every request gets a `traceId` (AsyncLocalStorage via `server/trace-context.ts`) propagated to child loggers. `stripSecrets()` redacts keys matching `/^(token|refresh.*token|access.*token|secret|api.*key|authorization|cookie|password|jwt)$/i` AND scans string values for inline `Bearer …`, `sk-…`, `eyJ…` patterns — applied to every error captured by the global handler before it reaches Sentry or response.
-- **Sentry shim (`server/observability/sentry.ts`)** — dynamic-import wrapper; when `SENTRY_DSN` is unset, becomes a no-op so dev boot logs `error reporting disabled`. The global error handler captures all 5xx and masks `error.message` to `"Internal server error"` in production (response shape `{ error: code }` only).
+- **`GET /healthz`** — unauthenticated liveness probe. Returns `{ ok: true, ts }`.
+- **`GET /metrics`** — Prometheus text exposition. Admin-gated via `X-Admin-Token` against `METRICS_ADMIN_TOKEN`.
+- **`GET /healthz/continuity`** — public operational health (no tenant fields); admin token reveals replicaId + per-tenant decision log.
+- **Structured logger (`server/logger.ts`)** — pino-compatible JSON-line facade. Every request gets a `traceId` (AsyncLocalStorage via `server/trace-context.ts`). `stripSecrets()` redacts keys matching `/^(token|refresh.*token|access.*token|secret|api.*key|authorization|cookie|password|jwt)$/i` AND scans string values for inline `Bearer …`, `sk-…`, `eyJ…` patterns.
+- **Sentry shim (`server/observability/sentry.ts`)** — dynamic-import wrapper; when `SENTRY_DSN` is unset, becomes a no-op. The global error handler captures all 5xx and masks `error.message` to `"Internal server error"` in production (response shape `{ error: code }` only).
 - **Boot order** (`server/index.ts`): `validateEnv → initOTel → initSentry → ArtifactGuard → loggerMiddleware → /healthz → /metrics → /api → await runMigrations() → workers`.
 
 ## Migration runner (Seal #7 / F10.1, F10.10)
 
-- `server/migrations/runner.ts` is the single migration entry point. Acquires `pg_advisory_lock(8675309)` (blocking, bounded by a 5-minute `Promise.race` timeout that aborts boot) to serialize across instances, applies pending SQL files from `server/migrations/sql/`, then runs the legacy `002–014` programmatic migrations in order. Records each step in `schema_migrations`. (Pass-2 hardening swapped the spec-original `pg_try_advisory_lock` for the blocking variant — `try_*` would have returned false for the loser replica with no way to verify whether the winner was still mid-migration; blocking + timeout removes that ambiguity.)
-- **`REQUIRED_SCHEMA_VERSION = 16`** — boot refuses to start if the database last-applied version is lower than this AND migration application fails.
-- The 13 previously-inline migration calls in `server/index.ts` were deleted; a single `await runMigrations()` replaces them.
-- `npm run db:migrate` runs the runner standalone. `npm run db:generate` writes drizzle output to `server/migrations/sql/` (matches runtime).
+- `server/migrations/runner.ts` is the single migration entry point. Acquires `pg_advisory_lock(8675309)` (blocking, bounded by a 5-minute `Promise.race` timeout that aborts boot) to serialize across instances, applies pending SQL files from `server/migrations/sql/`, then runs the legacy `002–014` programmatic migrations in order. Records each step in `schema_migrations`.
+- **`REQUIRED_SCHEMA_VERSION = 22`** — boot refuses to start if the database last-applied version is lower AND migration application fails.
+- `npm run db:migrate` runs the runner standalone. `npm run db:generate` writes drizzle output to `server/migrations/sql/`.
 - `noTransaction` marker (first line `-- noTransaction`) is honored: the runner splits the SQL into individual statements so `CREATE INDEX CONCURRENTLY` can execute outside a transaction.
-- **SQL 015** rewrites Migration 012's tenant indexes as `CREATE INDEX CONCURRENTLY IF NOT EXISTS` and drops the old non-concurrent ones idempotently.
-- **SQL 016** creates `account_tombstones` (30-day quarantine) for the GDPR cascade. (Earlier draft also created an `account_delete_confirmations` table for a 10-minute bcrypt token issuer endpoint — both the table and the endpoint were dropped in pass-4 when the route switched to the literal-header guard + body-password re-auth. The migration now contains a `DROP TABLE IF EXISTS account_delete_confirmations` statement so a previously-applied snapshot self-heals.)
 
 ## GDPR account deletion (Seal #7 / F9.9)
 
 `server/account-lifecycle.ts` implements a two-phase, reversible-during-quarantine delete spanning **105 `accountId`-bearing tables**.
 
-- **Phase 1 (immediate):** `DELETE /api/account` requires three things: a valid Bearer token, the literal header `X-Account-Delete-Confirm: PERMANENTLY_DELETE`, and the user's current password in the JSON body (`{ "password": "..." }`) for fresh re-auth via `bcrypt.compare`. On success: masks PII on `users` immediately (`username`, `email`, `password`, `stripe_customer_id` → `'deleted-' || id` sentinels), inserts an `account_tombstones` row with `purgeAfter = now() + 30d`, and writes an audit entry to `audit_log_archive`. (Pass-4 simplification — earlier passes used a 10-minute bcrypt token issued by `POST /api/account/delete-confirm`; that token endpoint and the `account_delete_confirmations` table it backed are no longer wired. The body-password path replaced them as the re-auth proof.)
+- **Phase 1 (immediate):** `DELETE /api/account` requires three things: a valid Bearer token, the literal header `X-Account-Delete-Confirm: PERMANENTLY_DELETE`, and the user's current password in the JSON body for fresh re-auth via `bcrypt.compare`. On success: masks PII on `users` immediately, inserts an `account_tombstones` row with `purgeAfter = now() + 30d`, writes audit entry to `audit_log_archive`.
 - **Cancellation window:** `POST /api/account/delete-cancel` removes the tombstone any time before `purgeAfter` (PII mask is *not* reverted; user must contact support for restoration).
 - **Phase 2 (reaper):** `runTombstoneReaper()` runs daily (initial 60s after boot, 24h tick). For each expired tombstone, `cascadeDeleteAccount()` deletes from all 105 tables inside a single PG transaction — any error rolls back the whole account.
-- **`CASCADE_EXEMPT`:** `audit_log_archive`, `account_tombstones`, `schema_migrations`, `auth_lockouts`, `messages` (no `account_id` column on `messages`). `account_delete_confirmations` is no longer in this list — the table was dropped in pass-4.
+- **`CASCADE_EXEMPT`:** `audit_log_archive`, `account_tombstones`, `schema_migrations`, `auth_lockouts`, `messages`.
 - Doctrine: no fallback coalescing, no silent failure modes — every error logged with `traceId` and surfaced to Sentry when configured.
 
 ## Marketing-logic engine upgrade (Apr 2026)
+
 The 5 marketing engines were upgraded to reason like top marketers (not just relabel segments). Pipeline orchestration unchanged; outputs extended additively.
 
 Per-engine commercial-reasoning module (designer + LLM judge + 1 retry on REJECTED + safe `null` fallback to legacy output):
@@ -239,94 +222,14 @@ Validation: `.local/validation/marketing-logic-upgrade-proof.{ts,md,json}` prove
 
 If the AI judge returns final REJECTED in any module, the module returns `null` and the engine continues with its legacy output — pipeline never breaks.
 
-## Operational Continuity Layer — Seal #14 / Track #2 (May 2026)
+---
 
-**Doctrine extension: operational silence is now multi-replica safe AND observed across the full producer surface.** Track #2 closes the BLOCKER gaps surfaced by the post-Track-#1 audit:
+## Seal archive index
 
-- **T1-A3 (BLOCKER)** — Track #1's `inFlightTick` Map was process-local. Two scheduler replicas would each invoke `runBoss` for the same (campaign, window) concurrently. NOW: every window invocation is preceded by a DB-level claim handshake against `continuity_window_claims` (PRIMARY KEY = `(campaign_id, plan_id, window_index)`, INSERT ON CONFLICT DO NOTHING). Postgres guarantees exactly one of N concurrent INSERTs wins; the rest get an empty RETURNING set and skip with `decision="skipped_claimed_by_other_replica"`. No pg_advisory locks (connection-scoped, brittle under pool reuse).
-- **T1-A5 (BLOCKER)** — Pre-seal, only the continuity scheduler itself was observed. The other 9 scheduled producers (autonomous-worker, publish-worker, snapshot-cleanup, ci-shared-pool, mi-queue-processor, tombstone-reaper, meta-token-health, ael-cel-reruns, continuity-supervisor itself) could silently stall in exactly the same way. NOW: 10-chain operational registry in `server/continuity/chain-registry.ts` declares each chain's expected interval + `introspect()` query. The new continuity supervisor (`server/continuity/supervisor.ts`) classifies every chain every 5min using the shared `classifyChainState()` 4-state enum.
+Each per-seal file contains the full implementation detail, code references, test pointers, and historical justification. The `replit.md` rules above are the authoritative live doctrine; the archive files are read-only history.
 
-### Non-negotiable invariants
-
-| # | Invariant | Enforcement |
-|---|---|---|
-| **INVARIANT-RETRY** | Failed OR partial boss runs MUST NEVER be suppressed. | `SUCCESS_STATUSES = new Set(["completed"])` in `scheduler.ts`. `partial` and `failed` outcomes both DELETE the claim row via `releaseClaimForRetry()` so the next tick re-claims and retries. Operator directive May 2026 — any change letting `partial` or `failed` short-circuit a window is a P0 defect re-introducing the original outage. Test proof: `server/tests/continuity-multi-replica.test.ts` — "a failed runBoss DELETEs the claim row" + "a partial runBoss ALSO releases the claim". |
-| **MULTI-REPLICA-SAFE** | Two scheduler instances MUST NOT both invoke runBoss for the same (campaign, plan, window). | DB-level claim handshake via `tryClaimWindow()` → `INSERT INTO continuity_window_claims ... ON CONFLICT DO NOTHING RETURNING`. Test proof: `continuity-multi-replica.test.ts` — "two concurrent tryClaimWindow calls — only one wins". |
-| **CHAIN-STATE-EXPLICIT** | A chain that lacks introspection wiring MUST be classified UNKNOWN, never silently HEALTHY. | `classifyChainState({ introspectionAvailable: false })` returns `state: "UNKNOWN"`. Test proof: `continuity-supervisor.test.ts` — "returns UNKNOWN when introspection is not wired". The 3 chains currently UNKNOWN (`mi_queue_processor`, `tombstone_reaper`, `ael_cel_reruns`) will be promoted in Track #3. |
-| **NO-TENANT-LEAK** | Public `/healthz/continuity` MUST NOT expose per-tenant fields (campaignId, accountId, planId). | Admin-gated full report (timing-safe `METRICS_ADMIN_TOKEN` check) returns the unredacted health + supervisor + replicaId. Public surface returns operational counters + per-chain state/lag (no tenant identifiers — only `chainId`, `state` enum, `lagMs`). |
-
-### State enum (`ChainState`)
-
-| State | Meaning | Trigger |
-|---|---|---|
-| `HEALTHY` | Lag within 1× expected interval. | `lag <= expectedIntervalMs * degradedMultiplier` |
-| `DEGRADED` | Lag between 1× and dead threshold. Operator-actionable, not yet P1. | `degradedMultiplier * interval < lag <= deadMultiplier * interval` |
-| `DEAD` | Lag exceeds dead threshold (default 4×). P1 — `CONTINUITY_CHAIN_LAG` audit fires on transition; for the scheduler heartbeat, `CONTINUITY_HEARTBEAT_STALE` fires. | `lag > deadMultiplier * interval` OR `lastObservedRunAt === null` (with introspection wired) |
-| `UNKNOWN` | Introspection not wired (`introspect: null`). Surfaced explicitly so operators see the gap. | `introspectionAvailable === false` |
-
-### Track #2 surface (operator runbook)
-
-- `GET /healthz/continuity` (public) — adds `supervisor.{schedulerState, schedulerHeartbeatAgeMs, chainsHealthy/Degraded/Dead/Unknown, chains[]}`. Alarm if `supervisor.schedulerState !== "HEALTHY"` for ≥10min, or `supervisor.chainsDead > 0`, or `lastSupervisorTickAt` older than `intervalMs * 1.2`.
-- `GET /healthz/continuity` with `x-admin-token` — adds `replicaId` for forensic correlation when investigating which replica owned a window, and the unredacted per-tenant decision log.
-- `REPLICA_ID` env var — set to pod/instance ID in multi-replica deploys. Defaults to `replica_<uuid>` per process. Stored on every `continuity_window_claims.claimed_by` row + emitted in `[Server] Continuity layer up — replicaId=...` boot log.
-- `CONTINUITY_SUPERVISOR_DISABLED=true` — disables the supervisor (used by tests).
-- `CONTINUITY_SUPERVISOR_INTERVAL_MS` — overrides 5min cadence (tests only).
-
-### Prometheus metrics added (12)
-
-`continuity_window_claims_acquired_total`, `continuity_window_claims_lost_other_replica_total`, `continuity_window_claims_already_completed_total`, `continuity_window_claims_released_total` (INVARIANT-RETRY enforcement counter), `continuity_supervisor_up`, `continuity_supervisor_ticks_total`, `continuity_supervisor_last_tick_epoch_seconds`, `continuity_scheduler_heartbeat_age_ms`, `continuity_heartbeat_stale_total`, `continuity_chain_lag_ms{chain}`, `continuity_chain_state{chain,state}`, `continuity_chain_lag_events_total{chain,state}`.
-
-### Audit event types added (3)
-
-`CONTINUITY_HEARTBEAT_STALE` — supervisor classified scheduler as DEAD. `CONTINUITY_CHAIN_LAG` — fires ONLY on state transition into DEGRADED/DEAD (no spam for chains that have been DEAD for hours). `CONTINUITY_REPLICA_CONFLICT` — best-effort forensic event when our replica loses a claim race to another replica.
-
-### Schema migration 022 (`REQUIRED_SCHEMA_VERSION` 21 → 22)
-
-Three new tables:
-- `continuity_window_claims` — `(campaign_id, plan_id, window_index)` PRIMARY KEY + `claimed_by`/`claimed_at`/`status`/`outcome`/`outcome_at`/`boss_run_id`. The atomic primitive.
-- `chain_registry_state` — current `lastState` + `lastStateChangedAt` + `lastObservedLagMs` per chain. Drives the transition-only audit gate.
-- `continuity_supervisor_ticks` — paper-trail row written every supervisor tick. A missing row for >2× `intervalMs` IS itself the P1 signal that the supervisor has stalled.
-
-### Track #2 D1/D5 hygiene
-
-No new `eslint-disable semantic/no-semantic-fallback` suppressions added. The new code uses only canonical field reads + explicit if-blocks. New `decision` enum values (`skipped_claimed_by_other_replica`, `skipped_completed_claim_exists`) added to `PerCampaignDecision.decision` strict union. New `ChainState` is a `z.enum`-shape TypeScript union with no string fallbacks.
-
-### Tracks #3–#7 (deferred)
-
-Track #3 (silent-degradation sweep): wire `introspect()` for the 3 currently-UNKNOWN chains, add stale-claim sweeper (kill `in_progress` claims older than 2× WINDOW_MS), add per-worker run tables to replace audit_log heartbeat introspection. Track #4 (alerting bridge): wire Prometheus alert rules + PagerDuty/Opsgenie. Track #5 (cross-region replica coordination). Track #6 (compute-class budget rebalancer). Track #7 (autonomous remediation playbooks). All deferred to subsequent seals; design notes in `.local/docs/seal-13-to-17-plan.md`.
-
-## Track #3 / Seal #15 — Silent runtime-degradation hardening (May 2026)
-
-**Doctrine: a silent skip is a runtime degradation.** Track #3 audited 20 categories of silent-runtime failure (swallowed exceptions, dangling timers, zombie in-flight, queue starvation, lock persistence, stuck claims, unbounded memory, partial commits, retry amplification, false-healthy chains, scheduler drift, etc.). Each finding either ships with code+test in this seal or is explicitly listed below as "deferred / protected" with the reason. No "probably fine" verdicts — every silent path is now either logged, watched, or documented.
-
-**Closed in Seal #15 (code + behavioral test):**
-
-| # | Failure mode | Surface | Fix |
-|---|---|---|---|
-| F1 | Swallowed exceptions on agent context loaders (10 sites of `} catch {}`) | `server/orchestrator/agent-context.ts` | All 10 catches route through `_logSilentLoad(err)` → `logger.warn({component:"agent-context"}, "agent_context_section_load_failed")`. Function still returns UI-safe defaults; failure is now visible in logs. Test: `track3-silent-catch-logging.test.ts`. |
-| F2 | Swallowed audit writes on security violations (10 sites of `.catch(() => {})`) | `server/market-intelligence-v3/isolation-guard.ts` | All 10 audit writes route through `_noteAuditWriteFailure(err)` → `console.error("[MIv3] AUDIT_WRITE_FAILED ...")`. The original isolation error still throws; the fix surfaces the missing audit row. Test: `track3-silent-catch-logging.test.ts`. |
-| F3 | Stuck competitor mark-FAILED swallowed | `server/market-intelligence-v3/fetch-orchestrator.ts` (deep-pass recovery, ~L1972) | `console.error("[FetchOrch] STUCK_COMPETITOR_MARK_FAILED ...")` so stuck rows are operator-visible instead of rotting silently in PENDING. |
-| F4 | Stuck orchestrator job mark-FAILED + audit-write swallowed | `server/strategic-core/orchestrator-routes.ts` L861-862 | Both `.catch(() => {})` replaced with explicit `console.error("[Orchestrator] STUCK_JOB_UPDATE_FAILED ...")` and `AUDIT_WRITE_FAILED event=ORCHESTRATOR_FAILED`. |
-| F5 | Boss in-flight zombie lock (Promise never settles → all future runs blocked) | `server/boss/concurrency.ts` | Map now stores `{ promise, startedAt }`. `evictZombies(now)` runs on every `withCampaignLock` entry and removes entries older than `BOSS_INFLIGHT_MAX_AGE_MS` (default 30 min). Counter `_bossInFlightStats().zombieEvictions` exposed. Test: `track3-zombie-watchdogs.test.ts`. |
-| F6 | Continuity scheduler `inFlightTick` zombie (hung tick → heartbeat silently stops) | `server/continuity/scheduler.ts` | Added `inFlightTickStartedAt`. On every `runContinuityTick` entry, if prior tick is older than `CONTINUITY_TICK_MAX_AGE_MS` (default 15 min), force-clear and proceed. Counter exposed via `_continuityTickInflightStats()`. Test: `track3-zombie-watchdogs.test.ts`. |
-| F7 | Gemini AI call had NO wall-clock timeout (hang → holds per-account advisory lock indefinitely → blocks all AI calls for that account) | `server/ai-client.ts` | Wrapped in `Promise.race` against `AI_GEMINI_HARD_TIMEOUT_MS` (default 60s). On timeout throws `AICallError("AI_TIMEOUT")` so outer catch + finally still release the lock. Mirrors the existing OpenAI HARD_TIMEOUT_MS pattern. |
-| F8 | Inline schedulers had no stored timer handle → SIGTERM could not stop them (zombie schedulers ticking past shutdown) | `server/index.ts` (L735 reaper inner setInterval, L747 meta-token health setInterval, plus the boot `setTimeout` cascades) | Each inline scheduler now writes to a typed handle (`tombstoneReaperBootTimer`, `tombstoneReaperTimer`, `metaHealthBootTimer`, `metaHealthIntervalTimer`). `gracefulShutdown` clears every handle. |
-| F9 | MI queue processor (`startQueueProcessor` 15s tick) was started on boot but never wired into shutdown | `server/index.ts` | `gracefulShutdown` now calls `stopMiQueueProcessor()` before `server.close()`. |
-
-**Deferred / explicitly protected (no fix needed in this seal):**
-
-- **D1 — `setInterval` clock drift on hourly+ workers.** All long-period workers use the self-rescheduling `setTimeout` pattern (autonomous-worker F6.4, continuity F6.4) which is drift-free by construction. The two short-period `setInterval` schedulers (15s MI queue processor, 5min continuity supervisor) are too short for drift to accumulate meaningfully. **No action.**
-- **D2 — Proxy-pool telemetry unbounded growth.** Already bounded by per-pool LRU + global cap inside `proxy-telemetry.ts` (verified during exploration). **No action.**
-- **D3 — MI snapshot JSON.stringify memory pressure.** Transient — buffer is GC'd immediately after the DB write returns. Process RSS is bounded by Node heap defaults. **No action.**
-- **D4 — `activeJobs` Map in `fetch-orchestrator.ts` L161.** Same zombie-risk shape as boss/concurrency, but the consumer pattern differs (jobs are routinely cancelled by the queue processor itself, not held across an LLM call). Watchdog deferred to a follow-up seal pending a behavioral repro of the leak in production. Tracked as Seal #16/F1.
-
-**Observability & operator runbook (Seal #15 surface):**
-- `_bossInFlightStats().zombieEvictions` — Prometheus counter expected to be 0 at steady state. Any non-zero value is an alarm: a downstream call is hanging past 30 min.
-- `_continuityTickInflightStats().zombieEvictions` — same shape for the scheduler. Any non-zero value means an hourly tick hung past 15 min and the watchdog rescued the heartbeat.
-- `[Auth] AUDIT_WRITE_FAILED` / `[MIv3] AUDIT_WRITE_FAILED` / `[Orchestrator] STUCK_JOB_UPDATE_FAILED` / `[FetchOrch] STUCK_COMPETITOR_MARK_FAILED` — grep these tags in logs to confirm the audit/mark-FAILED writes are succeeding (absence at steady-state is HEALTHY; appearance is the explicit signal we previously lacked).
-- `agent_context_section_load_failed` — pino warn-level event. Steady-state expectation is zero. Any spike correlates with a snapshot-table schema drift or a transient DB issue.
-- New env knobs: `BOSS_INFLIGHT_MAX_AGE_MS` (default 30min), `CONTINUITY_TICK_MAX_AGE_MS` (default 15min), `AI_GEMINI_HARD_TIMEOUT_MS` (default 60s).
-
-**Architect HIGH-severity amendment (same seal):** v1 of F5/F6 watchdogs introduced a cleanup race — when a zombie was evicted and a fresh entry installed under the same key, the late-settling stale promise's `.finally(delete)` would erase the FRESH entry, silently permitting overlapping work. Fix: ownership tokens. `boss/concurrency.ts` stores `{promise, startedAt, token}` and the cleanup only deletes if `current.token === myToken`. `continuity/scheduler.ts` mirrors with `inFlightTickToken` + `myTickToken`. New regression test `track3-zombie-watchdogs.test.ts > token cleanup: late-settling stale promise must NOT delete a fresh successor entry`. Architect medium-severity follow-ups still open: (a) Gemini Promise.race does not abort the underlying SDK call (work continues in background until SDK timeout) — tracked as Seal #16/F2; (b) `activeJobs` Map watchdog tracked as Seal #16/F1.
-
-**Residual silent catches closed in same seal (architect-flagged):** `agent-context.ts` L513 `sourceAvailability` loader and L530 `rootBundle` loader both now route through `_logSilentLoad`. `fetch-orchestrator.ts` L1593 `MARK_ENRICHING_FAILED` and L1671 `MARK_FAILED_AFTER_ERROR` now `console.error` instead of swallowing. The two remaining `catch { return null; }` sites at L317/L329 are JSON.parse-on-malformed-DB-column safety guards (intentional null-coercion of bad data, not silent skips of work) — left as-is.
+- [`.local/docs/seals/semantic-contract-hardening-h1-h7.md`](.local/docs/seals/semantic-contract-hardening-h1-h7.md) — D1–D5 detail, Seal #9 closures, suppression allowlist, transitional exceptions, canonical field names.
+- [`.local/docs/seals/seal-13-track1-continuity.md`](.local/docs/seals/seal-13-track1-continuity.md) — Hourly scheduler, idempotent invocation, long-gap re-anchor, missed-window detection, schema migration 021.
+- [`.local/docs/seals/seal-14-track2-multireplica.md`](.local/docs/seals/seal-14-track2-multireplica.md) — DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema migration 022.
+- [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md) — 9 closed silent-degradation findings, 4 deferred items, architect race-fix amendment, 6 behavioral tests.
+- `.local/docs/seal-13-to-17-plan.md` — original Tracks #1–#7 design plan (pre-existing).
