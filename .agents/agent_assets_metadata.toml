@@ -233,3 +233,9 @@ id = "cs6z2lU9122Dt3JF21kFb"
 uri = "file://.local/validation/system-risk-matrix-v2.json"
 type = "unspecified"
 title = "Risk Matrix v2 (machine-readable)"
+
+[[outputs]]
+id = "w6wv50z1Gl242KK_xOkXb"
+uri = "file://docs/operations-guardian-design.md"
+type = "text"
+title = "Operations Guardian — Audit & Architecture Proposal"
