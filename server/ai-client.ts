@@ -197,31 +197,16 @@ export async function aiGemini(options: AIGeminiOptions) {
       const parsed = raw ? Number(raw) : NaN;
       return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
     })();
-    // Seal #16 / F2 — wall-clock timeout MUST also abort the underlying SDK
-    // call. Pre-Seal #16 the Promise.race only released our await; the
-    // @google/genai HTTP request kept running in the background until its
-    // own (much longer) network timeout, leaking sockets, holding a budget
-    // reservation that had already been "released" by reconcileBudgetReservation,
-    // and continuing to charge tokens against the account quota. We now
-    // wire an AbortController.signal into GenerateContentConfig.abortSignal
-    // (added to the SDK in @google/genai 0.x; verified in 1.40.0). On
-    // timeout we call controller.abort() BEFORE rejecting so the SDK's
-    // fetch is cancelled at the same instant the AICallError surfaces.
+    // Seal #16 / F2 — wall-clock timeout MUST also abort the underlying
+    // @google/genai SDK fetch via AbortController. Pre-Seal #16 the
+    // Promise.race only released our await; the SDK request kept running
+    // until its own (much longer) network timeout, leaking sockets and
+    // continuing to charge tokens against the account quota.
     const abortController = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => {
-        try {
-          abortController.abort();
-        } catch (abortErr) {
-          // AbortController.abort() is sync + cannot fail in Node, but a
-          // user-supplied AbortSignal in `config.abortSignal` could throw
-          // if it's already aborted. Log and continue to reject — we MUST
-          // still surface the AI_TIMEOUT to the caller.
-          console.error(
-            `[ai-client] gemini abort threw on timeout: ${(abortErr as Error)?.message}`,
-          );
-        }
+        abortController.abort();
         reject(
           new AICallError(
             `Gemini call exceeded ${GEMINI_HARD_TIMEOUT_MS}ms wall-clock timeout`,

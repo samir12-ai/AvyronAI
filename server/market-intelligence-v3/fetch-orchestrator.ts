@@ -204,7 +204,7 @@ function evictZombieActiveJobs(now: number): void {
   }
 }
 
-function trackActiveJob(lockKey: string, work: () => Promise<void>): Promise<void> {
+export function trackActiveJob(lockKey: string, work: () => Promise<void>): Promise<void> {
   const startedAt = Date.now();
   evictZombieActiveJobs(startedAt);
   const myToken = nextActiveJobToken++;

@@ -1,10 +1,12 @@
 /**
- * Seal #16 — Track #3 follow-ups regression suite.
+ * Seal #16 — Track #3 follow-ups behavioral regression suite.
  *
  *   F1 — fetch-orchestrator `activeJobs` Map zombie watchdog mirrors the
- *        boss/concurrency `{promise, startedAt, token}` pattern: eviction
- *        on entry past `MI_ACTIVE_JOBS_MAX_AGE_MS`, token-checked cleanup
- *        so a late-settling stale promise cannot delete a fresh successor.
+ *        boss/concurrency `{promise, startedAt, token}` pattern. Tests
+ *        drive `trackActiveJob` directly to prove (a) stale eviction on
+ *        entry past `MI_ACTIVE_JOBS_MAX_AGE_MS` and (b) token-checked
+ *        cleanup so a late-settling stale promise cannot delete a fresh
+ *        successor entry under the same lockKey.
  *
  *   F2 — `aiGemini()` wall-clock timeout MUST also abort the underlying
  *        @google/genai SDK call via `AbortController.signal` (passed in
@@ -19,56 +21,107 @@ describe("Seal #16 / F1 — fetch-orchestrator activeJobs zombie watchdog", () =
   beforeEach(async () => {
     process.env.MI_ACTIVE_JOBS_MAX_AGE_MS = "200";
     vi.resetModules();
-    // The fetch-orchestrator module imports a heavy dependency tree (db,
-    // scrapers, AI, etc.). The behavior we exercise here is purely the
-    // module-local Map + helpers; we do NOT call startFetchJob. Importing
-    // the module is enough — the helpers are the public surface.
+    vi.doMock("../db", () => ({
+      db: {
+        execute: vi.fn().mockResolvedValue({ rows: [] }),
+        select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => [] }) }) }) }),
+        insert: () => ({ values: vi.fn().mockResolvedValue([]) }),
+        update: () => ({ set: () => ({ where: vi.fn().mockResolvedValue([]) }) }),
+      },
+    }));
     mod = await import("../market-intelligence-v3/fetch-orchestrator");
     mod._resetActiveJobsCountersForTest();
   });
 
-  it("evicts a stale activeJob entry on the next trackActiveJob call (proxied via _activeJobsStats)", async () => {
-    const lockKey = "acc-1:camp-1";
+  it("evicts a stale activeJob entry on the next trackActiveJob call (production path)", async () => {
+    const staleKey = "acc-stale:camp-stale";
+    const freshKey = "acc-fresh:camp-fresh";
 
-    mod._injectStaleActiveJobForTest(lockKey, 500);
+    // Inject a synthetic stale entry whose age (500ms) exceeds the watchdog
+    // ceiling (200ms). Eviction MUST fire on the very next trackActiveJob
+    // call — without it the entry would linger indefinitely.
+    mod._injectStaleActiveJobForTest(staleKey, 500);
     expect(mod._activeJobsStats().size).toBe(1);
     expect(mod._activeJobsStats().zombieEvictions).toBe(0);
 
-    // We can't call `trackActiveJob` directly (it's not exported) but
-    // `_injectStaleActiveJobForTest` proves the eviction path: the next
-    // production call site (startFetchJob / queue processor) goes through
-    // `trackActiveJob` which calls `evictZombieActiveJobs(now)` on entry.
-    // We simulate that entry here by calling _activeJobsStats — no, that
-    // doesn't trigger eviction. Instead, inject a SECOND stale entry and
-    // then call _injectStaleActiveJobForTest under a different key with
-    // the production helper exposed as part of the watchdog. Cleanest
-    // path: re-import a small wrapper. Since the helper is private, we
-    // assert via a different vector: re-inject under the SAME key with
-    // a fresh age, which the module's evictZombieActiveJobs would have
-    // cleared on a real call. Here we just confirm the public stats
-    // surface the count correctly.
-    //
-    // Direct production-path coverage: see the queue-processor integration
-    // test in miv3-fetch-orchestrator.test.ts — it's the end-to-end path.
-    // This unit only proves the helper surface (size/eviction counter)
-    // is wired and the test-only inject works.
-    mod._injectStaleActiveJobForTest("acc-2:camp-2", 600);
-    expect(mod._activeJobsStats().size).toBe(2);
+    // Drive the production helper directly under a DIFFERENT key. The first
+    // line of trackActiveJob calls evictZombieActiveJobs(now), which must
+    // sweep the stale entry above before installing the fresh one.
+    await mod.trackActiveJob(freshKey, async () => {
+      // no-op work — we just want the entry/finally cycle
+    });
+
     const stats = mod._activeJobsStats();
-    expect(stats.maxAgeMs).toBe(200);
-    expect(stats.oldestAgeMs).toBeGreaterThanOrEqual(500);
+    expect(stats.zombieEvictions).toBe(1);
+    expect(stats.size).toBe(0); // stale evicted + fresh's finally already fired
   });
 
-  it("token + timestamp shape is enforced (entries are ActiveJobEntry, not bare Promise)", () => {
-    mod._injectStaleActiveJobForTest("acc-shape:camp-shape", 1);
-    const stats = mod._activeJobsStats();
-    expect(stats.size).toBe(1);
-    // The presence of `oldestAgeMs` (a number derived from `startedAt`) is
-    // the proof that entries carry timestamps. A bare-Promise Map could
-    // never compute this. zombieEvictions counter likewise can only exist
-    // when entries carry an age.
-    expect(typeof stats.oldestAgeMs).toBe("number");
-    expect(typeof stats.zombieEvictions).toBe("number");
+  it("token cleanup: late-settling stale promise must NOT delete a fresh successor (race fix)", async () => {
+    const lockKey = "acc-race:camp-race";
+
+    // Install a real in-flight job via the production path; we hold its
+    // work() open so it stays in the Map. We then backdate the entry past
+    // the watchdog ceiling by sleeping past 200ms so the next trackActiveJob
+    // call evicts and replaces it. After eviction we settle the original
+    // stale promise — its `.finally(delete-by-token)` MUST detect the token
+    // mismatch and leave the successor entry intact.
+    let releaseStale: () => void = () => {};
+    const stalePromise = new Promise<void>((resolve) => {
+      releaseStale = () => resolve();
+    });
+    const staleHandle = mod.trackActiveJob(lockKey, () => stalePromise);
+    expect(mod._activeJobsStats().size).toBe(1);
+
+    // Sleep past the watchdog ceiling so the stale entry's startedAt ages.
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Install a SECOND in-flight job under the SAME key. trackActiveJob
+    // evicts the stale entry on entry and installs a fresh one with a new
+    // token. We hold this second job open so we can observe its survival.
+    let releaseFresh: () => void = () => {};
+    const freshPromise = new Promise<void>((resolve) => {
+      releaseFresh = () => resolve();
+    });
+    const freshHandle = mod.trackActiveJob(lockKey, () => freshPromise);
+    expect(mod._activeJobsStats().zombieEvictions).toBe(1);
+    expect(mod._activeJobsStats().size).toBe(1); // fresh entry installed
+
+    // CRITICAL: settle the original stale promise. Its `.finally` fires
+    // now, AFTER a fresh entry exists under the same lockKey. With the
+    // token check, the fresh entry survives. Without it, size→0 and a
+    // third concurrent caller would silently bypass the lock.
+    releaseStale();
+    await staleHandle.catch(() => undefined);
+    await new Promise((r) => setImmediate(r)); // microtask flush
+
+    expect(mod._activeJobsStats().size).toBe(1); // fresh entry preserved
+
+    // Cleanup
+    releaseFresh();
+    await freshHandle;
+    expect(mod._activeJobsStats().size).toBe(0);
+  });
+
+  it("does NOT evict a fresh in-flight entry — eviction counter stays 0", async () => {
+    const lockKey = "acc-fresh-only:camp-fresh-only";
+
+    let release: () => void = () => {};
+    const heldWork = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    const handle = mod.trackActiveJob(lockKey, () => heldWork);
+    expect(mod._activeJobsStats().size).toBe(1);
+
+    // Trigger another trackActiveJob entry under a different key. The
+    // watchdog runs but must NOT evict the fresh entry (age = ~0ms).
+    await mod.trackActiveJob("acc-other:camp-other", async () => {});
+
+    expect(mod._activeJobsStats().zombieEvictions).toBe(0);
+    expect(mod._activeJobsStats().size).toBe(1); // original still in flight
+
+    release();
+    await handle;
+    expect(mod._activeJobsStats().size).toBe(0);
   });
 });
 
@@ -80,21 +133,17 @@ describe("Seal #16 / F2 — aiGemini AbortController wires SDK abort on timeout"
   });
 
   it("aborts the underlying SDK call when the wall-clock timeout fires", async () => {
-    // Capture the abortSignal that the production code passes to the SDK
-    // so we can assert .aborted === true after the timeout.
     let capturedSignal: AbortSignal | undefined;
 
-    // Stub the entire @google/genai module before ai-client is loaded.
-    // generateContent returns a promise that NEVER settles — the only way
-    // out is for our AbortController to fire (or the wall-clock timer to
-    // reject — both must happen for the test to prove the wiring).
+    // Stub @google/genai before ai-client loads. generateContent returns a
+    // promise that NEVER settles — only the abort signal can interrupt.
     vi.doMock("@google/genai", () => ({
       GoogleGenAI: class {
         models = {
           generateContent: (params: any) => {
             capturedSignal = params?.config?.abortSignal as AbortSignal;
             return new Promise(() => {
-              /* never resolves — only the abort signal can interrupt */
+              /* never resolves */
             });
           },
         };
@@ -102,16 +151,14 @@ describe("Seal #16 / F2 — aiGemini AbortController wires SDK abort on timeout"
       Modality: {},
     }));
 
-    // Avoid the heavy db budget reservation path entirely so the test stays
-    // hermetic. ai-client falls through to allowed:true when db.execute
-    // throws, matching its production fail-open behavior on infra errors.
+    // db.execute throws → ai-client's budget reservation falls open (matches
+    // production fail-open on infra errors). Keeps the test hermetic.
     vi.doMock("../db", () => ({
       db: {
         execute: vi.fn().mockRejectedValue(new Error("test-isolation: no db")),
       },
     }));
 
-    // observability/otel.recordAiCost + logger are no-op-safe at import time.
     const { aiGemini, AICallError } = await import("../ai-client");
 
     const startedAt = Date.now();
@@ -128,48 +175,12 @@ describe("Seal #16 / F2 — aiGemini AbortController wires SDK abort on timeout"
     });
 
     const elapsed = Date.now() - startedAt;
-    // Timeout is 50ms; allow generous CI jitter.
-    expect(elapsed).toBeLessThan(2000);
+    expect(elapsed).toBeLessThan(2000); // 50ms timeout + jitter
 
-    // The critical assertion: the SDK call received our AbortSignal AND
-    // it was aborted by the time the AICallError surfaced.
+    // Critical: the SDK call received our AbortSignal AND it was aborted
+    // by the time AICallError surfaced. This proves the wiring.
     expect(capturedSignal).toBeDefined();
     expect(capturedSignal!.aborted).toBe(true);
-
-    // Sanity: AICallError class is reachable (proves the import path).
     expect(AICallError).toBeDefined();
-  });
-
-  it("AbortController.abort() throwing does NOT prevent AI_TIMEOUT from surfacing (defensive guard)", async () => {
-    // If a caller passed a pre-aborted signal in config.abortSignal, the
-    // production code's try/catch around controller.abort() must still
-    // let the AICallError reject. We simulate by stubbing the SDK + db
-    // and passing a config object that gets merged into the call.
-    vi.doMock("@google/genai", () => ({
-      GoogleGenAI: class {
-        models = {
-          generateContent: () => new Promise(() => {}),
-        };
-      },
-      Modality: {},
-    }));
-    vi.doMock("../db", () => ({
-      db: { execute: vi.fn().mockRejectedValue(new Error("no-db")) },
-    }));
-
-    const { aiGemini } = await import("../ai-client");
-    await expect(
-      aiGemini({
-        model: "gemini-2.5-flash",
-        contents: "test",
-        accountId: "test-account",
-        // Pre-abort path: the spread in production code overrides this
-        // with our internal controller.signal, so even if user passed a
-        // pre-aborted signal, the timer's controller.abort() runs against
-        // OUR fresh controller — cannot throw. This test simply asserts
-        // the rejection still surfaces under any benign config.
-        config: { temperature: 0.1 },
-      }),
-    ).rejects.toMatchObject({ code: "AI_TIMEOUT" });
   });
 });
