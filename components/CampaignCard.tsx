@@ -4,11 +4,28 @@ import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import type { Campaign } from '@/lib/types';
 import * as Haptics from 'expo-haptics';
+import {
+  type ContinuityDecision,
+  DECISION_LABELS,
+  DECISION_COLORS,
+} from '@/hooks/useContinuityPanel';
 
 interface CampaignCardProps {
   campaign: Campaign;
   onPress: () => void;
   onToggle: () => void;
+  /**
+   * Seal #17 / Track #4 — operator-only continuity skip-reason badge.
+   * When the latest continuity tick recorded a non-`invoked` decision for
+   * this campaign, the caller passes it here to render an inline badge.
+   * Caller is responsible for fetching via useCampaignContinuityDecision
+   * (admin-token-gated) — this prop stays optional so customer builds
+   * never render the badge.
+   *
+   * Strict-typed (D2/D3): the `decision` field is the same enum used
+   * server-side; no string fallback is permitted at this boundary.
+   */
+  continuityDecision?: { decision: ContinuityDecision; reason?: string | null } | null;
 }
 
 const statusColors: Record<string, string> = {
@@ -27,7 +44,7 @@ const platformIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
   LinkedIn: 'logo-linkedin',
 };
 
-export function CampaignCard({ campaign, onPress, onToggle }: CampaignCardProps) {
+export function CampaignCard({ campaign, onPress, onToggle, continuityDecision }: CampaignCardProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
@@ -72,6 +89,25 @@ export function CampaignCard({ campaign, onPress, onToggle }: CampaignCardProps)
           </Text>
         </Pressable>
       </View>
+
+      {continuityDecision && continuityDecision.decision !== 'invoked' && continuityDecision.decision !== 'reanchored_then_invoked' && (
+        <View
+          style={[
+            styles.continuityBadge,
+            {
+              backgroundColor: DECISION_COLORS[continuityDecision.decision] + '22',
+              borderColor: DECISION_COLORS[continuityDecision.decision] + '60',
+            },
+          ]}
+          testID={`campaign-card-continuity-badge-${campaign.id}`}
+        >
+          <Ionicons name="time-outline" size={12} color={DECISION_COLORS[continuityDecision.decision]} />
+          <Text style={[styles.continuityBadgeText, { color: DECISION_COLORS[continuityDecision.decision] }]} numberOfLines={2}>
+            {DECISION_LABELS[continuityDecision.decision]}
+            {continuityDecision.reason ? ` · ${continuityDecision.reason}` : ''}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.budgetContainer}>
         <View style={styles.budgetHeader}>
@@ -210,5 +246,19 @@ const styles = StyleSheet.create({
   metricLabel: {
     fontSize: 10,
     fontFamily: 'Inter_400Regular',
+  },
+  continuityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  continuityBadgeText: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    flex: 1,
   },
 });

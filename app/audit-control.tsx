@@ -6,6 +6,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRunTruthfulness, type StructuralCheckLite, type TruthfulnessHeadline } from "@/hooks/useRunTruthfulness";
 import { useCampaign } from "@/context/CampaignContext";
 import { colorForIntegrityVerdict } from "@/lib/verdict-colors";
+import {
+  useContinuityPanel,
+  useCampaignContinuityDecision,
+  continuityPanelEnabled,
+  DECISION_LABELS,
+  DECISION_COLORS,
+  type ContinuityDecision,
+} from "@/hooks/useContinuityPanel";
 
 // Per-check status colors (NOT verdict colors). These are operational check
 // states (PASS/FAIL/STALE/TIMEOUT/etc.) emitted by useRunTruthfulness — they
@@ -89,6 +97,13 @@ export default function AuditControlScreen() {
   const campaignId = params.campaignId || selectedCampaignId || null;
 
   const { data, isLoading, error, refetch, isFetching } = useRunTruthfulness(campaignId);
+
+  // Seal #17 / Track #4 — operator-visible continuity surface. Hooks
+  // self-disable when EXPO_PUBLIC_METRICS_ADMIN_TOKEN is unset (customer
+  // builds), so the panel is invisible in non-operator builds.
+  const continuity = useContinuityPanel();
+  const campaignDecision = useCampaignContinuityDecision(campaignId);
+  const continuityEnabled = continuityPanelEnabled();
 
   const bg = isDark ? "#080C10" : "#F4F7F5";
   const textPrimary = isDark ? "#E8EDF2" : "#1A2332";
@@ -265,7 +280,197 @@ export default function AuditControlScreen() {
             )}
           </>
         )}
+
+        {/* Seal #17 / Track #4 — Continuity (6th panel). Visible only when
+            EXPO_PUBLIC_METRICS_ADMIN_TOKEN is set (operator builds). */}
+        {continuityEnabled && (
+          <ContinuityPanel
+            isDark={isDark}
+            campaignId={campaignId}
+            panel={continuity.data ?? null}
+            panelLoading={continuity.isLoading}
+            panelError={continuity.error ? (continuity.error as Error).message : null}
+            campaignDecision={campaignDecision.data?.decision ?? null}
+            textPrimary={textPrimary}
+            textSec={textSec}
+          />
+        )}
       </ScrollView>
+    </View>
+  );
+}
+
+// ─── Seal #17 / Track #4 — Continuity panel (6th panel) ─────────────────
+//
+// Renders three operator-facing blocks:
+//   1. Last tick header — when did the scheduler last fire, how long it took.
+//   2. Selected-campaign skip-reason badge — the latest decision for the
+//      currently-viewed campaign, using the strict PerCampaignDecision.decision
+//      union from useContinuityPanel (no string fallback).
+//   3. Window-gap rows + 24h skip-reason histogram + last 10 re-anchors.
+//
+function ContinuityPanel({
+  isDark,
+  campaignId,
+  panel,
+  panelLoading,
+  panelError,
+  campaignDecision,
+  textPrimary,
+  textSec,
+}: {
+  isDark: boolean;
+  campaignId: string | null;
+  panel: import("@/hooks/useContinuityPanel").ContinuityPanelData | null;
+  panelLoading: boolean;
+  panelError: string | null;
+  campaignDecision: import("@/hooks/useContinuityPanel").CampaignContinuityDecision | null;
+  textPrimary: string;
+  textSec: string;
+}) {
+  return (
+    <Section title="Continuity" isDark={isDark}>
+      {panelLoading && !panel && (
+        <ActivityIndicator color="#7C3AED" style={{ marginVertical: 12 }} />
+      )}
+      {panelError && (
+        <Text style={[styles.errorText, { color: "#FF6B6B", marginTop: 0 }]}>
+          Continuity panel: {panelError}
+        </Text>
+      )}
+
+      {panel && (
+        <>
+          {/* Last tick */}
+          {panel.lastTick ? (
+            <>
+              <KV
+                label="Last tick"
+                value={new Date(panel.lastTick.tickAt).toLocaleString()}
+                isDark={isDark}
+              />
+              <KV
+                label="Duration"
+                value={`${panel.lastTick.durationMs} ms`}
+                isDark={isDark}
+              />
+              <KV
+                label="Scanned / invoked / failed"
+                value={`${panel.lastTick.campaignsScanned} / ${panel.lastTick.runsInvoked} / ${panel.lastTick.runsFailed}`}
+                isDark={isDark}
+                valueColor={panel.lastTick.runsFailed > 0 ? "#FF6B6B" : undefined}
+              />
+              <KV
+                label="Re-anchors / missed / dead"
+                value={`${panel.lastTick.reanchorsWritten} / ${panel.lastTick.missedWindowsDetected} / ${panel.lastTick.deadCyclesDetected}`}
+                isDark={isDark}
+                valueColor={panel.lastTick.deadCyclesDetected > 0 ? "#FF6B6B" : undefined}
+              />
+            </>
+          ) : (
+            <Text style={[styles.emptyText, { color: textSec, marginTop: 0 }]}>
+              No tick recorded yet (scheduler may be cold-starting).
+            </Text>
+          )}
+
+          {/* Selected-campaign decision badge */}
+          {campaignId && (
+            <View style={[styles.shadowBox, { backgroundColor: isDark ? "#0B0F14" : "#F4F7F5", borderColor: isDark ? "#1A2030" : "#E2E8E4" }]}>
+              <Text style={[styles.shadowBoxTitle, { color: textSec }]}>This campaign — last decision</Text>
+              {campaignDecision ? (
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6, flexWrap: "wrap", gap: 8 }}>
+                  <ContinuityDecisionBadge decision={campaignDecision.decision} />
+                  <Text style={[styles.blockDesc, { color: textPrimary, flex: 1, minWidth: 120 }]} numberOfLines={3}>
+                    {campaignDecision.reason ?? DECISION_LABELS[campaignDecision.decision]}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={[styles.blockDesc, { color: textSec, marginTop: 6 }]}>
+                  No decision recorded for this campaign in the latest tick.
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* 24h skip-reason histogram */}
+          <Text style={[styles.sectionTitle, { color: textPrimary, marginTop: 14, marginBottom: 6, fontSize: 11 }]}>
+            Last 24h decisions
+          </Text>
+          {Object.entries(panel.skipReasonHistogram24h)
+            .filter(([, count]) => count > 0)
+            .sort(([, a], [, b]) => b - a)
+            .map(([key, count]) => {
+              const isKnown = (Object.keys(DECISION_LABELS) as ContinuityDecision[]).includes(key as ContinuityDecision);
+              const label = isKnown ? DECISION_LABELS[key as ContinuityDecision] : `Unknown (${key})`;
+              const color = isKnown ? DECISION_COLORS[key as ContinuityDecision] : "#FFB347";
+              return (
+                <View key={key} style={styles.kvRow}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+                    <Text style={[styles.kvLabel, { color: isDark ? "#E8EDF2" : "#1A2332" }]}>{label}</Text>
+                  </View>
+                  <Text style={[styles.kvValue, { color: textPrimary }]}>{count}</Text>
+                </View>
+              );
+            })}
+          {Object.values(panel.skipReasonHistogram24h).every((c) => c === 0) && (
+            <Text style={[styles.emptyText, { color: textSec, marginTop: 4 }]}>No decisions recorded in the last 24h.</Text>
+          )}
+
+          {/* Window gaps */}
+          {panel.perCampaignWindowGaps.length > 0 && (
+            <>
+              <Text style={[styles.sectionTitle, { color: textPrimary, marginTop: 14, marginBottom: 6, fontSize: 11 }]}>
+                Campaigns with window-index gaps ({panel.perCampaignWindowGaps.length})
+              </Text>
+              {panel.perCampaignWindowGaps.slice(0, 8).map((g, i) => (
+                <View key={`${g.campaignId}-${i}`} style={[styles.blockRow, { borderBottomColor: isDark ? "#1A2030" : "#E2E8E4" }]}>
+                  <View style={styles.blockHead}>
+                    <Text style={[styles.blockCode, { color: textPrimary }]}>{g.campaignId.slice(0, 12)}…</Text>
+                    <ContinuityDecisionBadge decision={g.decision} />
+                  </View>
+                  <Text style={[styles.blockDesc, { color: textSec }]} numberOfLines={3}>
+                    {g.reason ?? DECISION_LABELS[g.decision]}
+                    {typeof g.observedWindowIndex === "number" && typeof g.expectedWindowIndex === "number"
+                      ? ` · window ${g.observedWindowIndex}/${g.expectedWindowIndex} (gap ${g.missedWindows})`
+                      : ""}
+                  </Text>
+                </View>
+              ))}
+            </>
+          )}
+
+          {/* Recent re-anchors */}
+          {panel.recentReanchors.length > 0 && (
+            <>
+              <Text style={[styles.sectionTitle, { color: textPrimary, marginTop: 14, marginBottom: 6, fontSize: 11 }]}>
+                Recent re-anchors ({panel.recentReanchors.length})
+              </Text>
+              {panel.recentReanchors.map((r) => (
+                <View key={r.id} style={[styles.blockRow, { borderBottomColor: isDark ? "#1A2030" : "#E2E8E4" }]}>
+                  <View style={styles.blockHead}>
+                    <Text style={[styles.blockCode, { color: textPrimary }]}>{r.campaignId.slice(0, 12)}…</Text>
+                    <Text style={[styles.blockSev, { color: textSec }]}>{new Date(r.reanchoredAt).toLocaleString()}</Text>
+                  </View>
+                  <Text style={[styles.blockDesc, { color: textSec }]} numberOfLines={2}>
+                    {r.reason} · {r.source}
+                  </Text>
+                </View>
+              ))}
+            </>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
+
+function ContinuityDecisionBadge({ decision }: { decision: ContinuityDecision }) {
+  const color = DECISION_COLORS[decision];
+  const label = DECISION_LABELS[decision];
+  return (
+    <View style={[styles.pill, { backgroundColor: color + "22", borderColor: color + "60" }]}>
+      <Text style={[styles.pillText, { color }]} testID={`continuity-decision-${decision}`}>{label}</Text>
     </View>
   );
 }

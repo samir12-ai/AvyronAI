@@ -40,6 +40,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { timingSafeEqual } from "node:crypto";
 import pipelineRouter from "./pipeline/routes";
+import { db } from "./db";
+import { continuityTicks, planAnchorResets } from "@shared/schema";
+import { desc, sql as drizzleSql } from "drizzle-orm";
 
 const app = express();
 const log = console.log;
@@ -494,6 +497,213 @@ function setupErrorHandler(app: express.Application) {
           intervalMs: supervisor.intervalMs,
         };
     return res.status(200).json({ ...rest, lastTickReport: safeReport, supervisor: safeSupervisor });
+  });
+
+  // ─── Seal #17 / Track #4 — Operator-visible continuity surface ─────────
+  //
+  // GET /api/admin/continuity/panel
+  //
+  // Powers the in-app "Continuity" panel (6th panel of Audit & Control)
+  // and answers the operator question "why didn't my campaign run this
+  // week" in ≤30s. Admin-token-gated (same X-Admin-Token / METRICS_ADMIN_TOKEN
+  // pattern as /metrics + /healthz/continuity). When the token is unset
+  // the endpoint is CLOSED (401 to all callers) — fail-safe by default.
+  //
+  // Returns:
+  //   - lastTick           : { tickAt, durationMs } from the in-memory
+  //                          getContinuityHealth().lastTickReport (no DB hit)
+  //   - perCampaignWindowGaps : entries from the latest tick where the
+  //                          observed window_index lags the expected one
+  //                          (i.e. missed_windows > 0). Strict-typed
+  //                          decision enum — no string fallback (D2/D3).
+  //   - recentReanchors    : last 10 plan_anchor_resets rows
+  //   - skipReasonHistogram24h : aggregated counts per PerCampaignDecision
+  //                          .decision over continuity_ticks rows from the
+  //                          last 24h. Computed via jsonb_array_elements
+  //                          + GROUP BY in PG — no in-memory scan.
+  //   - deadCycles         : count from the latest tick.
+  //
+  // Doctrine notes:
+  //   * D2 — every meaning has its own canonical field. The histogram keys
+  //     are the 8 strict union values from PerCampaignDecision.decision;
+  //     unknown strings from corrupt notes rows are bucketed under the
+  //     literal "unknown" key (NOT silently coerced to a real decision).
+  //   * D5 — missing canonical → CONTRACT_INCOMPLETE. If lastTickReport
+  //     is null we return lastTick=null, NOT a synthetic placeholder.
+  //   * NO-TENANT-LEAK does NOT apply here — this surface is admin-gated
+  //     by construction (401 when token missing or wrong).
+  //
+  app.get("/api/admin/continuity/panel", async (req: Request, res: Response) => {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).json({ error: "continuity_panel_disabled_no_admin_token" });
+    }
+    let isAdmin = false;
+    if (provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch {
+        isAdmin = false;
+      }
+    }
+    if (!isAdmin) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    try {
+      const health = getContinuityHealth();
+      const lastReport = health.lastTickReport;
+
+      // Strict union — keep this in sync with PerCampaignDecision.decision
+      // in server/continuity/scheduler.ts. The histogram is initialized
+      // with all 8 keys at 0 so callers always see a complete shape (D5).
+      const DECISION_KEYS = [
+        "invoked",
+        "skipped_already_evaluated",
+        "skipped_in_flight",
+        "skipped_no_advance",
+        "skipped_claimed_by_other_replica",
+        "skipped_completed_claim_exists",
+        "reanchored_then_invoked",
+        "failed",
+      ] as const;
+      type DecisionKey = (typeof DECISION_KEYS)[number];
+      const skipReasonHistogram24h: Record<DecisionKey | "unknown", number> = {
+        invoked: 0,
+        skipped_already_evaluated: 0,
+        skipped_in_flight: 0,
+        skipped_no_advance: 0,
+        skipped_claimed_by_other_replica: 0,
+        skipped_completed_claim_exists: 0,
+        reanchored_then_invoked: 0,
+        failed: 0,
+        unknown: 0,
+      };
+
+      // 24h skip-reason histogram. jsonb_array_elements expands each tick's
+      // notes array; GROUP BY decision in PG keeps the round-trip to one
+      // query regardless of tick volume.
+      const histRows = await db.execute(drizzleSql`
+        SELECT (note->>'decision') AS decision, COUNT(*)::int AS count
+        FROM ${continuityTicks},
+             jsonb_array_elements(${continuityTicks.notes}) AS note
+        WHERE ${continuityTicks.tickAt} >= NOW() - INTERVAL '24 hours'
+        GROUP BY (note->>'decision')
+      `);
+      const histRowsArr = (histRows as unknown as { rows: Array<{ decision: string | null; count: number }> }).rows ?? [];
+      for (const row of histRowsArr) {
+        const d = row.decision;
+        if (d && (DECISION_KEYS as readonly string[]).includes(d)) {
+          skipReasonHistogram24h[d as DecisionKey] = Number(row.count) || 0;
+        } else {
+          skipReasonHistogram24h.unknown += Number(row.count) || 0;
+        }
+      }
+
+      // Recent re-anchors (last 10).
+      const recentReanchors = await db
+        .select()
+        .from(planAnchorResets)
+        .orderBy(desc(planAnchorResets.reanchoredAt))
+        .limit(10);
+
+      // Per-campaign window gaps from the LATEST tick. We surface only
+      // entries with an actual lag (missedWindows > 0 OR a non-`invoked`
+      // decision) to keep the operator panel signal-dense.
+      const perCampaignWindowGaps = (lastReport?.decisions ?? [])
+        .filter((d) => {
+          const isLagging = (d.missedWindows ?? 0) > 0;
+          const isNonInvoked = d.decision !== "invoked" && d.decision !== "reanchored_then_invoked";
+          return isLagging || isNonInvoked;
+        })
+        .map((d) => ({
+          accountId: d.accountId,
+          campaignId: d.campaignId,
+          planId: d.planId,
+          decision: d.decision,
+          reason: d.reason ?? null,
+          observedWindowIndex: d.observedWindowIndex ?? null,
+          expectedWindowIndex: d.expectedWindowIndex ?? null,
+          missedWindows: d.missedWindows ?? 0,
+          claimedBy: d.claimedBy ?? null,
+        }));
+
+      return res.status(200).json({
+        lastTick: lastReport
+          ? {
+              tickAt: lastReport.tickAt,
+              durationMs: lastReport.durationMs,
+              campaignsScanned: lastReport.campaignsScanned,
+              runsInvoked: lastReport.runsInvoked,
+              runsSkippedIdempotent: lastReport.runsSkippedIdempotent,
+              runsFailed: lastReport.runsFailed,
+              reanchorsWritten: lastReport.reanchorsWritten,
+              missedWindowsDetected: lastReport.missedWindowsDetected,
+              deadCyclesDetected: lastReport.deadCyclesDetected,
+            }
+          : null,
+        perCampaignWindowGaps,
+        recentReanchors: recentReanchors.map((r) => ({
+          id: r.id,
+          accountId: r.accountId,
+          campaignId: r.campaignId,
+          planId: r.planId,
+          reanchoredAt: r.reanchoredAt,
+          reason: r.reason,
+          source: r.source,
+        })),
+        skipReasonHistogram24h,
+        deadCycles: lastReport?.deadCyclesDetected ?? 0,
+      });
+    } catch (err) {
+      console.error("[ContinuityPanel] PANEL_LOAD_FAILED", err);
+      return res.status(500).json({ error: "continuity_panel_load_failed" });
+    }
+  });
+
+  // GET /api/admin/continuity/campaign/:campaignId/last-decision
+  //
+  // Lightweight per-campaign lookup used by the campaign-card skip-reason
+  // badge. Returns the latest PerCampaignDecision for the requested
+  // campaign from the in-memory lastTickReport (no DB hit). Returns
+  // `{ decision: null }` when the latest tick had no entry for this
+  // campaign — callers MUST treat null as "no badge", never substitute
+  // a default decision (D5).
+  app.get("/api/admin/continuity/campaign/:campaignId/last-decision", (req: Request, res: Response) => {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).json({ error: "continuity_panel_disabled_no_admin_token" });
+    }
+    let isAdmin = false;
+    if (provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch {
+        isAdmin = false;
+      }
+    }
+    if (!isAdmin) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    const campaignId = req.params.campaignId;
+    const health = getContinuityHealth();
+    const decisions = health.lastTickReport?.decisions ?? [];
+    const found = decisions.find((d) => d.campaignId === campaignId);
+    if (!found) {
+      return res.status(200).json({ decision: null });
+    }
+    return res.status(200).json({
+      decision: {
+        decision: found.decision,
+        reason: found.reason ?? null,
+        missedWindows: found.missedWindows ?? 0,
+        observedWindowIndex: found.observedWindowIndex ?? null,
+        expectedWindowIndex: found.expectedWindowIndex ?? null,
+        tickAt: health.lastTickReport?.tickAt ?? null,
+      },
+    });
   });
 
   // secret, NOT by the JWT-based admin account check used elsewhere. Two

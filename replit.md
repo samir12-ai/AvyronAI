@@ -130,6 +130,34 @@ Canonical field names: `validationState` ∈ {validated|provisional|weak|rejecte
 > **Track #1 implementation detail (hourly scheduler, idempotent invocation, long-gap re-anchor, missed-window detection, schema migration 021):** [`.local/docs/seals/seal-13-track1-continuity.md`](.local/docs/seals/seal-13-track1-continuity.md)
 > **Track #2 implementation detail (DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema migration 022):** [`.local/docs/seals/seal-14-track2-multireplica.md`](.local/docs/seals/seal-14-track2-multireplica.md)
 
+### Operator-visible continuity surface (Seal #17 / Track #4)
+
+**Doctrine: an unobserved metric is the same as a missing metric.** The Tracks #1–#3 Prometheus families and `continuity_ticks` audit rows are now exposed to operators on two surfaces so the question "why didn't my campaign run this week" is answerable in ≤30s without SSH.
+
+| # | Surface | Gate |
+|---|---|---|
+| 1 | `.local/dashboards/continuity.json` — 16-panel Grafana dashboard (`avyron-continuity`) covering heartbeat, skip reasons + throughput, multi-replica claim handshake, and the 10-chain registry. Strictly an exposure layer over existing metrics — no net-new metric families. | Reads from the Prometheus scrape of `/metrics` (already admin-token-gated). |
+| 2 | In-app **Continuity** panel (6th panel of Audit & Control, `app/audit-control.tsx`). Renders last tick, selected-campaign decision badge, last 24h skip-reason histogram, per-campaign window-index gaps, last 10 plan-anchor resets. | `EXPO_PUBLIC_METRICS_ADMIN_TOKEN` set on the client (operator builds only) — `continuityPanelEnabled()` self-disables the section in customer builds. |
+
+Backend endpoints (mounted in `server/index.ts`, mirroring the same `X-Admin-Token` gate as `/metrics` and `/healthz/continuity`):
+
+- `GET /api/admin/continuity/panel` — panel data. 401 when `METRICS_ADMIN_TOKEN` is unset OR header is wrong.
+- `GET /api/admin/continuity/campaign/:campaignId/last-decision` — lightweight per-campaign lookup powering the campaign-card skip-reason badge. Returns `{ decision: PerCampaignDecision | null }`. NOT a default decision when the latest tick had no entry — `null` is canonical (D5).
+
+The 24h skip-reason histogram is computed in a single PG round-trip:
+```sql
+SELECT (note->>'decision') AS decision, COUNT(*)::int AS count
+FROM continuity_ticks, jsonb_array_elements(notes) AS note
+WHERE tick_at >= NOW() - INTERVAL '24 hours'
+GROUP BY (note->>'decision')
+```
+
+Strict-union enforcement on the client: `ContinuityDecision` in `hooks/useContinuityPanel.ts` is the same 8-value union as `PerCampaignDecision.decision`. `Record<ContinuityDecision, string>` exhaustiveness on `DECISION_LABELS` and `DECISION_COLORS` means TypeScript blocks any string fallback at the prop boundary (D2/D3). Corrupt notes rows from the histogram are bucketed under a SEPARATE `"unknown"` key — never silently coerced into a real decision.
+
+ESLint suppression count: 0 added in Seal #17. Allowlist size remains at 4.
+
+> **Full Seal #17 detail (panel layout, Grafana JSON structure, doctrine table, operator runbook for the ≤30s answer):** [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md)
+
 ### Silent runtime-degradation hardening (Seal #15 / Track #3)
 
 **Doctrine: a silent skip is a runtime degradation.** Every silent path is now either logged, watched, or explicitly documented as deferred. No "probably fine" verdicts.
@@ -235,4 +263,5 @@ Each per-seal file contains the full implementation detail, code references, tes
 - [`.local/docs/seals/seal-14-track2-multireplica.md`](.local/docs/seals/seal-14-track2-multireplica.md) — DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema migration 022.
 - [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md) — 9 closed silent-degradation findings, 4 deferred items, architect race-fix amendment, 6 behavioral tests.
 - [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md) — Track #3 follow-ups: F1 activeJobs Map watchdog in fetch-orchestrator, F2 Gemini AbortController.signal wired into GenerateContentConfig.abortSignal.
+- [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md) — Track #4: Grafana dashboard + in-app Continuity panel (6th Audit & Control panel) + admin endpoints + skip-reason badge on campaign cards.
 - `.local/docs/seal-13-to-17-plan.md` — original Tracks #1–#7 design plan (pre-existing).
