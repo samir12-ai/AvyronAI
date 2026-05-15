@@ -15,7 +15,9 @@
     "db:migrate": "tsx server/migrations/runner.ts",
     "start": "npx expo start",
     "lint": "npx expo lint",
-    "lint:fix": "npx expo lint --fix"
+    "lint:fix": "npx expo lint --fix",
+    "lifecycle:test": "vitest run server/tests/lifecycle/",
+    "lifecycle:flake": "bash scripts/lifecycle-flake-check.sh"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

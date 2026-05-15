@@ -642,9 +642,13 @@ export function setupHarness(initialDate?: Date): void {
   (globalThis as any)[__claimLookupKey] = null;
   // Install vitest fake timers FIRST so setSimulatedNow's vi.setSystemTime
   // call lands. Doctrine: every lifecycle scenario owns the clock end-to-end.
-  // Use `shouldAdvanceTime: false` — we never want vitest to auto-tick; only
-  // explicit setSimulatedNow / vi.setSystemTime should move the clock.
-  vi.useFakeTimers({ shouldAdvanceTime: false });
+  //
+  // CRITICAL: only fake `Date` — leave setTimeout / setInterval /
+  // setImmediate / queueMicrotask / process.nextTick on the REAL event loop.
+  // The harness uses real-async controllable promises in mid-flight scenarios
+  // (e.g. scenario-16) and a large sequential loop in scenario-17 — freezing
+  // the event loop would deadlock the harness.
+  vi.useFakeTimers({ toFake: ["Date"] });
   setSimulatedNow(initialDate ?? new Date("2026-05-01T00:00:00Z"));
   resetMetrics();
   // Fire and forget — scheduler state reset is best-effort.

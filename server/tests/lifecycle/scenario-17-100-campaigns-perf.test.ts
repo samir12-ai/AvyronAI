@@ -37,14 +37,17 @@ describe("Scenario 17 — 100 campaigns × 4 weekly ticks completes in <60s", ()
       });
     }
 
-    const start = Date.now();
+    // performance.now() is intentionally NOT faked by the harness
+    // (vi.useFakeTimers({ toFake: ["Date"] }) only replaces Date) so it
+    // reports REAL wall-clock for this perf gate.
+    const start = performance.now();
     for (let week = 1; week <= 4; week++) {
       const tickAt = new Date(T0.getTime() + week * WEEK_MS);
       const r = await runOneTick(tickAt);
       expect(r.campaignsScanned).toBe(100);
       expect(r.runsInvoked).toBe(100);
     }
-    const wallClockMs = Date.now() - start;
+    const wallClockMs = performance.now() - start;
 
     expect(dbState.bossRuns.length).toBe(400);
     expect(dbState.evalWindows.length).toBe(400);

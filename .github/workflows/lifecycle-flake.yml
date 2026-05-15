@@ -1,0 +1,50 @@
+# Seal #18 / Track #5 — lifecycle suite flake gate.
+#
+# Runs the deterministic behavioral lifecycle suite N times to catch any
+# non-deterministic regression before merge. Required gate for changes to:
+#   - server/continuity/**
+#   - server/boss/**
+#   - server/tests/lifecycle/**
+#   - scripts/lifecycle-flake-check.sh
+#
+# Manual / nightly / PR-on-touched-paths only. Default N=100 (~15min wall).
+name: lifecycle-flake-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: "Iterations to run (default 100)"
+        required: false
+        default: "100"
+  schedule:
+    # 03:17 UTC nightly — off-peak.
+    - cron: "17 3 * * *"
+  pull_request:
+    paths:
+      - "server/continuity/**"
+      - "server/boss/**"
+      - "server/tests/lifecycle/**"
+      - "scripts/lifecycle-flake-check.sh"
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Lifecycle flake check
+        env:
+          N: ${{ github.event.inputs.iterations || '100' }}
+        run: npm run lifecycle:flake
+      - name: Upload per-iteration logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-flake-logs
+          path: /tmp/lifecycle-flake/
