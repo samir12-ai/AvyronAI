@@ -42,6 +42,11 @@ function describe(verdict: Verdict): string {
 }
 
 function baseOutput(overrides: Record<string, any> = {}) {
+  // Mirror server/strategy/statistical-validation/engine.ts:1458-1459 — the live
+  // engine ALWAYS emits unmappedSignals + lowConfidenceSignals (initialized as
+  // string[] arrays even when empty). The contract registry requires both
+  // (registry.ts:594-595, emptyIsMissing:false → empty array satisfies the
+  // contract). User Pipeline audit 2026-05 / Finding F-D2 — fixture sync.
   return {
     claimConfidenceScore: 0.7,
     evidenceStrength: 0.6,
@@ -51,6 +56,8 @@ function baseOutput(overrides: Record<string, any> = {}) {
     signalBackedClaimRatio: 0.5,
     originTypeDistribution: { real: 0.6, inferred: 0.4 },
     confidenceExplanation: { reason: "ok" },
+    unmappedSignals: [],
+    lowConfidenceSignals: [],
     ...overrides,
   };
 }
@@ -156,6 +163,11 @@ assert(
     statusMessage: "Validation complete",
     engineVersion: 4,
     executionTimeMs: 890,
+    // Live engine emits both arrays unconditionally (engine.ts:1458-1459);
+    // contract registry requires both (registry.ts:594-595, emptyIsMissing:false).
+    // User Pipeline audit 2026-05 / Finding F-D2 — fixture sync.
+    unmappedSignals: [],
+    lowConfidenceSignals: [],
   };
   const v = validateContractCompleteness("statistical_validation", liveShape);
   assert(
