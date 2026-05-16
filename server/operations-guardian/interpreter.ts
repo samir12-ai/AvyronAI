@@ -26,6 +26,8 @@ import {
   systemNotices,
   continuityWindowClaims,
   continuityTicks,
+  miFetchJobs,
+  miSnapshots,
 } from "@shared/schema";
 import { sql, and, eq, lt, isNull, inArray } from "drizzle-orm";
 import { _bossInFlightStats } from "../boss/concurrency";
@@ -249,6 +251,125 @@ async function collectRetryLoopSignals(): Promise<ClassifiedNotice[]> {
         detail: { failedCount24h: failedCount, windowHours: 24 },
       } satisfies ClassifiedNotice;
     });
+}
+
+async function collectScraperProviderSignals(
+  now: Date,
+): Promise<ClassifiedNotice[]> {
+  // Phase 1A (Task #58). Per architect decision documented in the audit
+  // report §5.1: aggregate from existing `mi_fetch_jobs` rather than
+  // standing up a new `scrape_attempts` telemetry table. Faster to ship,
+  // lower-fidelity (per-job not per-attempt) — acceptable for observe-
+  // only rollout. Severity reads the count of FAILED mi_fetch_jobs in
+  // the last 1h per (accountId).
+  //
+  // Severity bands per task spec:
+  //   ≥3   → warning
+  //   ≥10  → degraded
+  //   ≥25  → critical
+  const rows = await db.execute(sql`
+    SELECT ${miFetchJobs.accountId} AS account_id, COUNT(*)::int AS count
+    FROM ${miFetchJobs}
+    WHERE ${miFetchJobs.status} = 'FAILED'
+      AND ${miFetchJobs.createdAt} >= ${new Date(now.getTime() - 60 * 60 * 1000)}
+    GROUP BY ${miFetchJobs.accountId}
+    HAVING COUNT(*) >= 3
+    ORDER BY COUNT(*) DESC
+    LIMIT ${sql.raw(String(COLLECTOR_HARD_LIMIT))}
+  `);
+  const arr =
+    (rows as unknown as { rows: Array<{ account_id: string; count: number }> })
+      .rows ?? [];
+  return arr.map((r) => {
+    const failedCount = Number(r.count) || 0;
+    const severity: NoticeSeverity =
+      failedCount >= 25 ? "critical" : failedCount >= 10 ? "degraded" : "warning";
+    return {
+      category: "SCRAPER_PROVIDER_DEGRADED",
+      severity,
+      audience: "operator" as const,
+      correlationKey: `SCRAPER_PROVIDER_DEGRADED:${r.account_id}`,
+      accountId: r.account_id,
+      campaignId: null,
+      copyKey: "operator.scraper_provider_degraded",
+      copyVars: {
+        accountId: r.account_id,
+        failedCount1h: failedCount,
+      },
+      detail: {
+        failedCount1h: failedCount,
+        windowMinutes: 60,
+        source: "mi_fetch_jobs",
+      },
+    } satisfies ClassifiedNotice;
+  });
+}
+
+async function collectMarketDataDegradedSignals(
+  now: Date,
+): Promise<ClassifiedNotice[]> {
+  // Phase 1A (Task #58). Reads the most-recent COMPLETE/PARTIAL snapshot
+  // per (accountId, campaignId) and emits when its age exceeds the
+  // freshness budget. A campaign with NO successful snapshot ever is
+  // intentionally silent here — that is a "never bootstrapped" condition,
+  // not a degradation of an established refresh cadence.
+  //
+  // Severity bands per task spec:
+  //   age > 6h   → warning
+  //   age > 24h  → critical
+  // (Degraded band is omitted by design — only two thresholds in the
+  // brief, so the classifier is binary above the warning floor.)
+  const rows = await db.execute(sql`
+    SELECT ${miSnapshots.accountId} AS account_id,
+           ${miSnapshots.campaignId} AS campaign_id,
+           MAX(${miSnapshots.createdAt}) AS last_snapshot_at
+    FROM ${miSnapshots}
+    WHERE ${miSnapshots.status} IN ('COMPLETE', 'PARTIAL')
+    GROUP BY ${miSnapshots.accountId}, ${miSnapshots.campaignId}
+    HAVING MAX(${miSnapshots.createdAt}) < ${new Date(now.getTime() - 6 * 60 * 60 * 1000)}
+    ORDER BY MAX(${miSnapshots.createdAt}) ASC
+    LIMIT ${sql.raw(String(COLLECTOR_HARD_LIMIT))}
+  `);
+  const arr =
+    (rows as unknown as {
+      rows: Array<{
+        account_id: string;
+        campaign_id: string;
+        last_snapshot_at: Date | string;
+      }>;
+    }).rows ?? [];
+  return arr.map((r) => {
+    const lastTs =
+      r.last_snapshot_at instanceof Date
+        ? r.last_snapshot_at.getTime()
+        : new Date(String(r.last_snapshot_at)).getTime();
+    const ageMinutes = Math.max(0, Math.round((now.getTime() - lastTs) / 60_000));
+    const severity: NoticeSeverity =
+      ageMinutes > 24 * 60 ? "critical" : "warning";
+    return {
+      category: "MARKET_DATA_DEGRADED",
+      severity,
+      audience: "operator" as const,
+      correlationKey: `MARKET_DATA_DEGRADED:${r.campaign_id}`,
+      accountId: r.account_id,
+      campaignId: r.campaign_id,
+      copyKey: "operator.market_data_degraded",
+      copyVars: {
+        campaignId: r.campaign_id,
+        ageMinutes,
+      },
+      detail: {
+        accountId: r.account_id,
+        lastSnapshotAt:
+          r.last_snapshot_at instanceof Date
+            ? r.last_snapshot_at.toISOString()
+            : String(r.last_snapshot_at),
+        ageMinutes,
+        warningThresholdMinutes: 6 * 60,
+        criticalThresholdMinutes: 24 * 60,
+      },
+    } satisfies ClassifiedNotice;
+  });
 }
 
 function collectChainSignals(input: CollectInput): ClassifiedNotice[] {
@@ -477,10 +598,16 @@ export async function runGuardianInterpreterStep(
   // logged is OK, silent is not). Each collector returns ok=true|false +
   // capped=true|false so the resolver knows which categories are safe
   // to sweep.
-  const [leaked, stuck, retry] = await Promise.all([
+  const [leaked, stuck, retry, scraper, marketData] = await Promise.all([
     safeCollect("LEAKED_LOCK", () => Promise.resolve(collectLeakedLockSignals())),
     safeCollect("WORKER_STUCK", () => collectStuckClaimSignals(input.now)),
     safeCollect("RETRY_LOOP", () => collectRetryLoopSignals()),
+    safeCollect("SCRAPER_PROVIDER_DEGRADED", () =>
+      collectScraperProviderSignals(input.now),
+    ),
+    safeCollect("MARKET_DATA_DEGRADED", () =>
+      collectMarketDataDegradedSignals(input.now),
+    ),
   ]);
   const chain = safeCollectSync("CHAIN_OBSERVATIONS", () =>
     collectChainSignals(input),
@@ -490,6 +617,8 @@ export async function runGuardianInterpreterStep(
     ...leaked.notices,
     ...stuck.notices,
     ...retry.notices,
+    ...scraper.notices,
+    ...marketData.notices,
     ...chain.notices,
   ];
   const observedKeys = new Set(all.map((n) => n.correlationKey));
@@ -508,6 +637,12 @@ export async function runGuardianInterpreterStep(
   }
   if (retry.ok && !retry.capped) {
     fullyObserved.add("RETRY_LOOP");
+  }
+  if (scraper.ok && !scraper.capped) {
+    fullyObserved.add("SCRAPER_PROVIDER_DEGRADED");
+  }
+  if (marketData.ok && !marketData.capped) {
+    fullyObserved.add("MARKET_DATA_DEGRADED");
   }
   if (chain.ok) {
     fullyObserved.add("CHAIN_DEGRADED");

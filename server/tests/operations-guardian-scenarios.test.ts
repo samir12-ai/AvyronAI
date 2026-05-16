@@ -96,6 +96,8 @@ import {
   systemNotices,
   continuityWindowClaims,
   continuityTicks,
+  miFetchJobs,
+  miSnapshots,
 } from "@shared/schema";
 import { and, eq, like, sql } from "drizzle-orm";
 import {
@@ -138,11 +140,27 @@ const GLOBAL_TEST_CORRELATION_KEYS: readonly string[] = [
   "SCHEDULER_HEARTBEAT_DEAD:_continuity_scheduler",
 ];
 
+// Phase 1A categories: the new collectors (SCRAPER_PROVIDER_DEGRADED,
+// MARKET_DATA_DEGRADED) query global tables. When the dev DB carries
+// real prod failed-fetch-job or stale-snapshot rows, the collectors
+// will emit operator notices for those prod accounts/campaigns during
+// the test run. The cleanup pass deletes any such notice whose
+// first_seen_at is inside the test run window — bounded so it cannot
+// touch rows that pre-date this test execution.
+const PHASE_1A_CATEGORIES: readonly string[] = [
+  "SCRAPER_PROVIDER_DEGRADED",
+  "MARKET_DATA_DEGRADED",
+];
+
 async function wipeFixtures(): Promise<void> {
   // system_notices: delete (a) anything whose correlation key carries
   // TEST_PREFIX (per-test scoped: WORKER_STUCK, RETRY_LOOP, CHAIN_*),
   // OR (b) anything matching a global collector key AND first-seen
-  // after this test run started (LEAKED_LOCK + SCHEDULER_HEARTBEAT_DEAD).
+  // after this test run started (LEAKED_LOCK + SCHEDULER_HEARTBEAT_DEAD),
+  // OR (c) any Phase 1A category (SCRAPER_PROVIDER_DEGRADED /
+  // MARKET_DATA_DEGRADED) first-seen during this test run — those
+  // collectors query global tables and may emit notices for real prod
+  // accounts/campaigns; we must not leave those notices behind.
   await db.execute(sql`
     DELETE FROM ${systemNotices}
     WHERE correlation_key LIKE ${`%${TEST_PREFIX}%`}
@@ -153,6 +171,10 @@ async function wipeFixtures(): Promise<void> {
            ${GLOBAL_TEST_CORRELATION_KEYS[2]},
            ${GLOBAL_TEST_CORRELATION_KEYS[3]}
          )
+         AND first_seen_at >= ${TEST_RUN_START_TIME}
+       )
+       OR (
+         category IN (${PHASE_1A_CATEGORIES[0]}, ${PHASE_1A_CATEGORIES[1]})
          AND first_seen_at >= ${TEST_RUN_START_TIME}
        )
   `);
@@ -166,6 +188,49 @@ async function wipeFixtures(): Promise<void> {
     DELETE FROM ${continuityTicks}
     WHERE notes::text LIKE ${`%${TEST_PREFIX}%`}
   `);
+  // Phase 1A (Task #58) fixture tables. Both are scoped to TEST_PREFIX
+  // account/campaign IDs so the sweep cannot touch real production rows.
+  await db
+    .delete(miFetchJobs)
+    .where(like(miFetchJobs.accountId, `${ACCOUNT_PREFIX}%`));
+  await db
+    .delete(miSnapshots)
+    .where(like(miSnapshots.accountId, `${ACCOUNT_PREFIX}%`));
+}
+
+async function seedFailedFetchJobs(opts: {
+  account: string;
+  count: number;
+  minutesAgo?: number;
+}): Promise<void> {
+  const minutesAgo = opts.minutesAgo ?? 10;
+  const createdAt = new Date(NOW.getTime() - minutesAgo * 60_000);
+  const rows = Array.from({ length: opts.count }, (_, i) => ({
+    id: `${TEST_PREFIX}fj_${opts.account}_${i}_${Math.random().toString(36).slice(2, 8)}`,
+    accountId: opts.account,
+    campaignId: campaignId(`fj_${i}`),
+    status: "FAILED",
+    createdAt,
+    completedAt: createdAt,
+    error: `${TEST_PREFIX} synthetic failed fetch job`,
+  }));
+  await db.insert(miFetchJobs).values(rows);
+}
+
+async function seedSnapshot(opts: {
+  account: string;
+  campaign: string;
+  ageMinutes: number;
+  status?: "COMPLETE" | "PARTIAL" | "PENDING" | "STALE";
+}): Promise<void> {
+  const createdAt = new Date(NOW.getTime() - opts.ageMinutes * 60_000);
+  await db.insert(miSnapshots).values({
+    accountId: opts.account,
+    campaignId: opts.campaign,
+    jobId: `${TEST_PREFIX}snap_job_${Math.random().toString(36).slice(2, 8)}`,
+    status: opts.status ?? "COMPLETE",
+    createdAt,
+  });
 }
 
 // ─── Tick + assertion helpers ──────────────────────────────────────────
@@ -359,17 +424,22 @@ beforeEach(async () => {
 
 describe("Phase 1B / Continuity-Orchestration — LEAKED_LOCK", () => {
   it("[Scenario 1] No zombie evictions ⇒ no notice emitted", async () => {
-    const report = await runTick();
+    await runTick();
     const open = await findOpenNoticesByCategoryPrefix("LEAKED_LOCK");
     expect(open).toHaveLength(0);
-    expect(report.collected).toBe(0);
+    // NOTE: we do not assert report.collected === 0 because the Phase 1A
+    // collectors (SCRAPER_PROVIDER_DEGRADED, MARKET_DATA_DEGRADED) query
+    // global tables and may surface real prod-account signals here; per-
+    // category open-notice assertion above is the doctrinally correct
+    // check for this scenario.
   });
 
   it("[Scenario 2] Single boss-lock zombie eviction ⇒ exactly one operator notice (warning)", async () => {
     bossStats.zombieEvictions = 1;
     bossStats.oldestAgeMs = 2_000_000;
-    const report = await runTick();
-    expect(report.inserted).toBe(1);
+    await runTick();
+    const leaked = await findOpenNoticesByCategoryPrefix("LEAKED_LOCK");
+    expect(leaked).toHaveLength(1);
     const n = await findNotice("LEAKED_LOCK:boss");
     expect(n).toBeDefined();
     expect(n!.category).toBe("LEAKED_LOCK");
@@ -382,8 +452,7 @@ describe("Phase 1B / Continuity-Orchestration — LEAKED_LOCK", () => {
     bossStats.zombieEvictions = 1;
     miActiveStats.zombieEvictions = 2;
     continuityTickStats.zombieEvictions = 1;
-    const report = await runTick();
-    expect(report.inserted).toBe(3);
+    await runTick();
     const open = await findOpenNoticesByCategoryPrefix("LEAKED_LOCK");
     expect(open).toHaveLength(3);
     const keys = open.map((n) => n.correlationKey).sort();
@@ -543,16 +612,237 @@ describe("Phase 1B / Continuity-Orchestration — RETRY_LOOP", () => {
   });
 });
 
+// ─── Group D-A: SCRAPER_PROVIDER_DEGRADED (Phase 1A — Task #58) ───────
+
+describe("Phase 1A / Scraping — SCRAPER_PROVIDER_DEGRADED", () => {
+  it("[Scenario 24] No failed fetch jobs ⇒ no notice", async () => {
+    await runTick();
+    const open = await findOpenNoticesByCategoryPrefix(
+      "SCRAPER_PROVIDER_DEGRADED",
+    );
+    expect(open).toHaveLength(0);
+  });
+
+  it("[Scenario 25] 2 failed fetch jobs in 1h ⇒ NO notice (below 3-failure threshold)", async () => {
+    await seedFailedFetchJobs({ account: accountId("scr_below"), count: 2 });
+    await runTick();
+    const key = `SCRAPER_PROVIDER_DEGRADED:${accountId("scr_below")}`;
+    const n = await findNotice(key);
+    expect(n).toBeUndefined();
+  });
+
+  it("[Scenario 26] 3 failed fetch jobs ⇒ warning notice", async () => {
+    await seedFailedFetchJobs({ account: accountId("scr_warn"), count: 3 });
+    await runTick();
+    const key = `SCRAPER_PROVIDER_DEGRADED:${accountId("scr_warn")}`;
+    const n = await findNotice(key);
+    expect(n).toBeDefined();
+    expect(n!.severity).toBe("warning");
+    expect((n!.copyVars as { failedCount1h: number }).failedCount1h).toBe(3);
+  });
+
+  it("[Scenario 27] 12 failed fetch jobs ⇒ degraded severity (≥10 band)", async () => {
+    await seedFailedFetchJobs({ account: accountId("scr_deg"), count: 12 });
+    await runTick();
+    const n = await findNotice(
+      `SCRAPER_PROVIDER_DEGRADED:${accountId("scr_deg")}`,
+    );
+    expect(n!.severity).toBe("degraded");
+  });
+
+  it("[Scenario 28] 30 failed fetch jobs ⇒ critical severity (≥25 band)", async () => {
+    await seedFailedFetchJobs({ account: accountId("scr_crit"), count: 30 });
+    await runTick();
+    const n = await findNotice(
+      `SCRAPER_PROVIDER_DEGRADED:${accountId("scr_crit")}`,
+    );
+    expect(n!.severity).toBe("critical");
+  });
+
+  it("[Scenario 29] Old failures outside 1h window ⇒ no notice", async () => {
+    await seedFailedFetchJobs({
+      account: accountId("scr_old"),
+      count: 5,
+      minutesAgo: 120,
+    });
+    await runTick();
+    const n = await findNotice(
+      `SCRAPER_PROVIDER_DEGRADED:${accountId("scr_old")}`,
+    );
+    expect(n).toBeUndefined();
+  });
+
+  it("[Scenario 30] Failures stop between ticks ⇒ open notice resolved", async () => {
+    await seedFailedFetchJobs({ account: accountId("scr_resolves"), count: 5 });
+    await runTick();
+    const key = `SCRAPER_PROVIDER_DEGRADED:${accountId("scr_resolves")}`;
+    expect((await findNotice(key))!.resolvedAt).toBeNull();
+    // Simulate failures aging out by deleting them; next tick must
+    // resolve the open notice.
+    await db
+      .delete(miFetchJobs)
+      .where(eq(miFetchJobs.accountId, accountId("scr_resolves")));
+    await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+    expect((await findNotice(key))!.resolvedAt).not.toBeNull();
+  });
+
+  it("[Scenario 31] Recurrence ⇒ single row, observation_count increments", async () => {
+    await seedFailedFetchJobs({ account: accountId("scr_recur"), count: 4 });
+    await runTick();
+    await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+    const open = await findOpenNoticesByCategoryPrefix(
+      "SCRAPER_PROVIDER_DEGRADED",
+    );
+    const mine = open.filter(
+      (r) =>
+        r.correlationKey ===
+        `SCRAPER_PROVIDER_DEGRADED:${accountId("scr_recur")}`,
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.observationCount).toBe(2);
+  });
+});
+
+// ─── Group D-B: MARKET_DATA_DEGRADED (Phase 1A — Task #58) ────────────
+
+describe("Phase 1A / Scraping — MARKET_DATA_DEGRADED", () => {
+  it("[Scenario 32] No snapshots at all for a campaign ⇒ silent (never-bootstrapped)", async () => {
+    await runTick();
+    const open = await findOpenNoticesByCategoryPrefix("MARKET_DATA_DEGRADED");
+    expect(open).toHaveLength(0);
+  });
+
+  it("[Scenario 33] Fresh snapshot (1h old) ⇒ no notice", async () => {
+    await seedSnapshot({
+      account: accountId("md_fresh"),
+      campaign: campaignId("md_fresh"),
+      ageMinutes: 60,
+    });
+    await runTick();
+    const n = await findNotice(
+      `MARKET_DATA_DEGRADED:${campaignId("md_fresh")}`,
+    );
+    expect(n).toBeUndefined();
+  });
+
+  it("[Scenario 34] Snapshot 8h old ⇒ warning notice", async () => {
+    await seedSnapshot({
+      account: accountId("md_warn"),
+      campaign: campaignId("md_warn"),
+      ageMinutes: 8 * 60,
+    });
+    await runTick();
+    const n = await findNotice(
+      `MARKET_DATA_DEGRADED:${campaignId("md_warn")}`,
+    );
+    expect(n).toBeDefined();
+    expect(n!.severity).toBe("warning");
+    expect((n!.copyVars as { ageMinutes: number }).ageMinutes).toBeGreaterThanOrEqual(
+      8 * 60 - 1,
+    );
+  });
+
+  it("[Scenario 35] Snapshot 30h old ⇒ critical notice", async () => {
+    await seedSnapshot({
+      account: accountId("md_crit"),
+      campaign: campaignId("md_crit"),
+      ageMinutes: 30 * 60,
+    });
+    await runTick();
+    const n = await findNotice(
+      `MARKET_DATA_DEGRADED:${campaignId("md_crit")}`,
+    );
+    expect(n!.severity).toBe("critical");
+  });
+
+  it("[Scenario 36] Most-recent of multiple snapshots is fresh ⇒ no notice", async () => {
+    // A campaign that had a stale snapshot at 10h but also has a fresh
+    // one at 30min — most-recent rule must take the fresh one.
+    await seedSnapshot({
+      account: accountId("md_mixed"),
+      campaign: campaignId("md_mixed"),
+      ageMinutes: 10 * 60,
+    });
+    await seedSnapshot({
+      account: accountId("md_mixed"),
+      campaign: campaignId("md_mixed"),
+      ageMinutes: 30,
+    });
+    await runTick();
+    const n = await findNotice(
+      `MARKET_DATA_DEGRADED:${campaignId("md_mixed")}`,
+    );
+    expect(n).toBeUndefined();
+  });
+
+  it("[Scenario 37] PENDING/STALE snapshot does not count as successful ⇒ if it's the only one, silent", async () => {
+    // Only an unfinished snapshot exists; collector reads only
+    // COMPLETE/PARTIAL — should treat the campaign as never-bootstrapped.
+    await seedSnapshot({
+      account: accountId("md_pending"),
+      campaign: campaignId("md_pending"),
+      ageMinutes: 20 * 60,
+      status: "PENDING",
+    });
+    await runTick();
+    const n = await findNotice(
+      `MARKET_DATA_DEGRADED:${campaignId("md_pending")}`,
+    );
+    expect(n).toBeUndefined();
+  });
+
+  it("[Scenario 38] Fresh snapshot lands between ticks ⇒ open notice resolved", async () => {
+    await seedSnapshot({
+      account: accountId("md_recovers"),
+      campaign: campaignId("md_recovers"),
+      ageMinutes: 9 * 60,
+    });
+    await runTick();
+    const key = `MARKET_DATA_DEGRADED:${campaignId("md_recovers")}`;
+    expect((await findNotice(key))!.resolvedAt).toBeNull();
+    // A fresh successful snapshot lands → most-recent moves into the
+    // fresh window → next tick resolves.
+    await seedSnapshot({
+      account: accountId("md_recovers"),
+      campaign: campaignId("md_recovers"),
+      ageMinutes: 10,
+    });
+    await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+    expect((await findNotice(key))!.resolvedAt).not.toBeNull();
+  });
+
+  it("[Scenario 39] Firewall — SCRAPER_PROVIDER_DEGRADED + MARKET_DATA_DEGRADED never carry audience='user'", async () => {
+    await seedFailedFetchJobs({ account: accountId("fw_scr"), count: 30 });
+    await seedSnapshot({
+      account: accountId("fw_md"),
+      campaign: campaignId("fw_md"),
+      ageMinutes: 30 * 60,
+    });
+    await runTick();
+    const all = await db
+      .select({ category: systemNotices.category, audience: systemNotices.audience })
+      .from(systemNotices)
+      .where(
+        sql`category IN ('SCRAPER_PROVIDER_DEGRADED', 'MARKET_DATA_DEGRADED')
+            AND (correlation_key LIKE ${`%${TEST_PREFIX}%`})`,
+      );
+    expect(all.length).toBeGreaterThan(0);
+    for (const row of all) {
+      expect(row.audience).toBe("operator");
+    }
+  });
+});
+
 // ─── Group D: CHAIN_DEGRADED / CHAIN_DEAD / SCHEDULER_HEARTBEAT_DEAD ─
 
 describe("Phase 1B / Continuity-Orchestration — CHAIN_* + SCHEDULER", () => {
   it("[Scenario 15] All chains HEALTHY ⇒ no chain notice", async () => {
-    const report = await runTick({
+    await runTick({
       chains: [{ chainId: `${TEST_PREFIX}c1`, state: "HEALTHY" }],
     });
     const open = await findOpenNoticesByCategoryPrefix("CHAIN_DEGRADED");
     expect(open).toHaveLength(0);
-    expect(report.collected).toBe(0);
+    // report.collected omitted — see Scenario 1 note.
   });
 
   it("[Scenario 16] Chain DEGRADED ⇒ warning notice", async () => {

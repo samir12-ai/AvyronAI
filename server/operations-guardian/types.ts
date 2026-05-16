@@ -145,6 +145,11 @@ export function canPromoteToUser(category: NoticeCategory): boolean {
 // customer surface.
 export const INTERNAL_ONLY_CATEGORIES = new Set<NoticeCategory>([
   "LEAKED_LOCK",
+  // Phase 1A (Task #58) additions — both categories surface to the
+  // operator audit panel only; no USER_COPY entry. Promotion to
+  // audience='user' remains gated by separate copy review.
+  "SCRAPER_PROVIDER_DEGRADED",
+  "MARKET_DATA_DEGRADED",
   // The remaining internal categories ARE allowed at operator audience
   // (that's their primary surface). LEAKED_LOCK is the strictest — it
   // means a watchdog already cleaned up; nothing actionable for the
