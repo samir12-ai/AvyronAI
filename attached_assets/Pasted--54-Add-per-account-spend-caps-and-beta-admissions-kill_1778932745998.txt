@@ -1,0 +1,27 @@
+#54 - Add per-account spend caps and beta admissions kill-switch
+What & Why
+The beta rollout strategy (docs/beta-readiness/rollout-strategy.md) requires the on-call operator to enforce stage caps via env vars without a code deploy when a rollback trigger fires. Today, the existing rate limit (GR1, 50 calls/hr/account/route) bounds throughput but not USD spend, and there's no env-var kill-switch for beta admissions. The 5 missing guardrails are listed in docs/beta-readiness/guardrails.md GR19–GR23.
+
+Done looks like
+GR19 — BETA_ADMISSIONS_FROZEN=true env var: when set, the new-account admission endpoint returns 503 with BETA_ADMISSIONS_FROZEN code. Boot log entry on env validator.
+GR20 — BETA_ACCOUNT_CAP=N env var: hard ceiling on active beta-tier accounts. Gauge beta_accounts_active{tier} exposed.
+GR21 — AI_DAILY_SPEND_CAP_USD_PER_ACCOUNT env var: when an account's rolling-24h ai_spend_usd_per_account exceeds the cap, AI generation routes return 429 AI_DAILY_SPEND_CAP_EXCEEDED until midnight UTC. Depends on G4 metrics (other follow-up).
+GR22 — SCRAPE_DAILY_VOLUME_CAP_PER_ACCOUNT env var: equivalent for scraper requests. Depends on G2 metrics.
+GR23 — MI_QUEUE_DEPTH_DEFER_THRESHOLD env var: when global mi_queue_depth exceeds threshold for >5min, defer new jobs (existing jobs continue). Depends on G3 metrics.
+Acceptance gates
+Each guardrail togglable via env var + workflow restart in <60s (matches GR1–GR18 pattern).
+Each guardrail has an audit event when triggered.
+Each guardrail has a row in docs/beta-readiness/must-monitor-metrics.md and a playbook reference in docs/beta-readiness/playbooks.md.
+Env validator boot log surfaces every active cap value.
+No new ESLint suppressions.
+Relevant files
+server/env-validator.ts (env var registration + boot log)
+server/middleware/rate-limit.ts (GR21 enforcement point)
+server/market-intelligence-v3/fetch-orchestrator.ts (GR22, GR23 enforcement)
+server/auth/admission.ts or equivalent (GR19, GR20)
+docs/beta-readiness/guardrails.md GR19–GR23
+docs/beta-readiness/launch-constraints.md (cap values)
+docs/beta-readiness/playbooks.md P7, P8
+Dependencies
+
+Beta-Readiness Package

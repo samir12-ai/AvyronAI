@@ -1,0 +1,23 @@
+#53 - Make plan confidence and degraded-data status visible to end users
+What & Why
+Engine outputs already carry truthful confidence + provenance metadata (SynthesizedPlan.degraded, PlanSource, AEL isPartial, validationState enum) per the B1 doctrine — but none of it reaches the end user. A plan generated with reduced inputs renders identically to a clean plan, and end users have no way to ask "why didn't my plan run this week" without operator help. The beta-readiness observation plan (docs/beta-readiness/observation-plan.md §C) lists 5 UX clarifications required before Phase 3 (closed beta) entry.
+
+Done looks like
+U1 — Plan-detail screen: when synthesisVerification.degraded === true, render an inline banner at the top of the plan citing partialReason and recommending re-run.
+U2 — Empty-state for first-time campaign with no plan yet: replace generic copy with cadence explainer ("Your first plan will be ready within 1 hour after approval").
+U3 — Confidence badges on engine outputs: render validationState enum (validated/provisional/weak/rejected) as a 3-state visual badge.
+U4 — Public /status page (no tenant data): scheduler heartbeat color, last 24h boss-run success-rate aggregate, last incident timestamp.
+U5 — Friendly per-campaign skip-reason translation: render PerCampaignDecision.reason on the campaign card with a translation table (Failed → "We hit a temporary issue and will retry automatically", No advance → "Waiting on plan approval", etc.).
+Acceptance gates
+All 5 surfaces tied to canonical D1–D5 fields (no string fallbacks at the prop boundary; mirror the Continuity panel's strict-union pattern from hooks/useContinuityPanel.ts).
+No new ESLint suppressions.
+Relevant files
+app/plans/[id].tsx (U1, U3)
+app/campaigns/index.tsx (U2, U5)
+server/index.ts + new /status route (U4)
+hooks/useContinuityPanel.ts (strict-union pattern reference)
+docs/beta-readiness/observation-plan.md §C
+docs/beta-readiness/risk-register.md R-LD, R-COMMS
+Dependencies
+
+Beta-Readiness Package
