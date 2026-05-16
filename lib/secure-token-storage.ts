@@ -32,28 +32,56 @@ import { Platform } from "react-native";
 const SECURE_TOKEN_KEY = "avyron_auth_token_secure_v1";
 // Legacy AsyncStorage keys we migrate FROM (and then erase).
 const LEGACY_ASYNC_TOKEN_KEY = "avyron_auth_token";
+// Web localStorage key. The browser has no Keychain; localStorage is the only
+// persistent surface available to a web SPA. We intentionally bypass
+// expo-secure-store on web because its localStorage shim has thrown silently
+// in our environment, leaving users with `401 Authentication required` on
+// every request after login.
+const WEB_TOKEN_KEY = "avyron_auth_token_web_v1";
 
-let secureStoreAvailable: boolean | null = null;
-async function isSecureStoreUsable(): Promise<boolean> {
-  if (secureStoreAvailable !== null) return secureStoreAvailable;
-  if (Platform.OS === "web") {
-    // expo-secure-store on web is a thin localStorage shim. Treat as
-    // available so we use one consistent code path; web cannot offer a
-    // hardware-backed alternative anyway.
-    secureStoreAvailable = true;
-    return true;
-  }
+const isWeb = Platform.OS === "web";
+const webStorage: Storage | null =
+  isWeb && typeof window !== "undefined" && typeof window.localStorage !== "undefined"
+    ? window.localStorage
+    : null;
+
+let nativeSecureStoreAvailable: boolean | null = null;
+async function isNativeSecureStoreUsable(): Promise<boolean> {
+  if (isWeb) return false;
+  if (nativeSecureStoreAvailable !== null) return nativeSecureStoreAvailable;
   try {
-    secureStoreAvailable = await SecureStore.isAvailableAsync();
+    nativeSecureStoreAvailable = await SecureStore.isAvailableAsync();
   } catch {
-    secureStoreAvailable = false;
+    nativeSecureStoreAvailable = false;
   }
-  return secureStoreAvailable!;
+  return nativeSecureStoreAvailable!;
 }
 
 /** Read JWT. Migrates from legacy AsyncStorage key on first read. */
 export async function getAuthToken(): Promise<string | null> {
-  const usable = await isSecureStoreUsable();
+  if (isWeb) {
+    if (webStorage) {
+      try {
+        const t = webStorage.getItem(WEB_TOKEN_KEY);
+        if (t) return t;
+      } catch (e) {
+        console.warn("[SecureTokenStorage] localStorage.getItem failed:", e);
+      }
+      // Legacy migration on web — pre-fix tokens may have been written to the
+      // expo-secure-store web shim, which also keys into localStorage.
+      try {
+        const legacyWeb = webStorage.getItem(SECURE_TOKEN_KEY);
+        if (legacyWeb) {
+          try { webStorage.setItem(WEB_TOKEN_KEY, legacyWeb); } catch {}
+          try { webStorage.removeItem(SECURE_TOKEN_KEY); } catch {}
+          return legacyWeb;
+        }
+      } catch {}
+    }
+    return null;
+  }
+
+  const usable = await isNativeSecureStoreUsable();
   if (usable) {
     try {
       const t = await SecureStore.getItemAsync(SECURE_TOKEN_KEY);
@@ -62,7 +90,7 @@ export async function getAuthToken(): Promise<string | null> {
       // fall through to legacy migration
     }
   }
-  // One-shot migration from the unencrypted legacy key.
+  // One-shot migration from the unencrypted legacy key (native only).
   try {
     const legacy = await AsyncStorage.getItem(LEGACY_ASYNC_TOKEN_KEY);
     if (legacy) {
@@ -78,7 +106,20 @@ export async function getAuthToken(): Promise<string | null> {
 
 /** Persist JWT. Always wipes the legacy AsyncStorage copy. */
 export async function setAuthToken(token: string): Promise<void> {
-  const usable = await isSecureStoreUsable();
+  if (isWeb) {
+    if (webStorage) {
+      try {
+        webStorage.setItem(WEB_TOKEN_KEY, token);
+      } catch (e) {
+        console.warn("[SecureTokenStorage] localStorage.setItem failed; token kept in memory only:", e);
+      }
+    } else {
+      console.warn("[SecureTokenStorage] localStorage unavailable; token kept in memory only.");
+    }
+    return;
+  }
+
+  const usable = await isNativeSecureStoreUsable();
   if (usable) {
     try {
       await SecureStore.setItemAsync(SECURE_TOKEN_KEY, token);
@@ -96,7 +137,14 @@ export async function setAuthToken(token: string): Promise<void> {
 
 /** Wipe JWT from every backend. */
 export async function clearAuthToken(): Promise<void> {
-  const usable = await isSecureStoreUsable();
+  if (isWeb) {
+    if (webStorage) {
+      try { webStorage.removeItem(WEB_TOKEN_KEY); } catch {}
+      try { webStorage.removeItem(SECURE_TOKEN_KEY); } catch {}
+    }
+    return;
+  }
+  const usable = await isNativeSecureStoreUsable();
   if (usable) {
     try { await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY); } catch {}
   }
