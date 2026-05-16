@@ -27,6 +27,7 @@ import {
   beforeAll,
   beforeEach,
   afterAll,
+  afterEach,
 } from "vitest";
 
 // ─── In-memory stat mocks (must come BEFORE the interpreter import) ───
@@ -77,6 +78,11 @@ vi.mock("../continuity/scheduler", () => ({
   _continuityTickInflightStats: (): ContinuityTickStats => continuityTickStats,
 }));
 
+// Phase 1C aggregator — real module (no mock). Tests reset it between
+// scenarios via `_resetAIPressureStatsForTest` and seed it via the
+// public `recordAICallOutcome`/`recordAIRateLimit429`/`recordInferencePartial`
+// helpers, exactly as production code does.
+
 function resetInMemoryStats(): void {
   bossStats.size = 0;
   bossStats.zombieEvictions = 0;
@@ -87,6 +93,7 @@ function resetInMemoryStats(): void {
   continuityTickStats.size = 0;
   continuityTickStats.zombieEvictions = 0;
   continuityTickStats.ageMs = null;
+  _resetAIPressureStatsForTest();
 }
 
 // Now safe to import the interpreter — its module-level imports of the
@@ -105,6 +112,12 @@ import {
   type GuardianTickReport,
 } from "../operations-guardian/interpreter";
 import type { ChainObservation } from "../continuity/supervisor";
+import {
+  recordAICallOutcome,
+  recordAIRateLimit429,
+  recordInferencePartial,
+  _resetAIPressureStatsForTest,
+} from "../operations-guardian/ai-pressure-stats";
 
 // ─── Test fixture namespacing + cleanup ────────────────────────────────
 
@@ -138,6 +151,13 @@ const GLOBAL_TEST_CORRELATION_KEYS: readonly string[] = [
   "LEAKED_LOCK:miv3",
   "LEAKED_LOCK:continuity-tick",
   "SCHEDULER_HEARTBEAT_DEAD:_continuity_scheduler",
+  // Phase 1C — AI / inference pressure (hardcoded global keys)
+  "AI_QUOTA_PRESSURE:global",
+  "AI_TIMEOUT_BURST:global",
+  "AI_PROVIDER_FAILURE_BURST:global",
+  "AI_LATENCY_DEGRADED:openai",
+  "AI_LATENCY_DEGRADED:gemini",
+  "INFERENCE_CONFIDENCE_DEGRADED:ael",
 ];
 
 // Phase 1A categories: the new collectors (SCRAPER_PROVIDER_DEGRADED,
@@ -156,21 +176,21 @@ async function wipeFixtures(): Promise<void> {
   // system_notices: delete (a) anything whose correlation key carries
   // TEST_PREFIX (per-test scoped: WORKER_STUCK, RETRY_LOOP, CHAIN_*),
   // OR (b) anything matching a global collector key AND first-seen
-  // after this test run started (LEAKED_LOCK + SCHEDULER_HEARTBEAT_DEAD),
-  // OR (c) any Phase 1A category (SCRAPER_PROVIDER_DEGRADED /
-  // MARKET_DATA_DEGRADED) first-seen during this test run — those
-  // collectors query global tables and may emit notices for real prod
-  // accounts/campaigns; we must not leave those notices behind.
+  // after this test run started (LEAKED_LOCK + SCHEDULER_HEARTBEAT_DEAD
+  // + Phase 1C AI / inference pressure global keys), OR (c) any Phase 1A
+  // category (SCRAPER_PROVIDER_DEGRADED / MARKET_DATA_DEGRADED) first-seen
+  // during this test run — those collectors query global tables and may
+  // emit notices for real prod accounts/campaigns; we must not leave those
+  // notices behind.
+  const globalKeyList = sql.join(
+    GLOBAL_TEST_CORRELATION_KEYS.map((k) => sql`${k}`),
+    sql`, `,
+  );
   await db.execute(sql`
     DELETE FROM ${systemNotices}
     WHERE correlation_key LIKE ${`%${TEST_PREFIX}%`}
        OR (
-         correlation_key IN (
-           ${GLOBAL_TEST_CORRELATION_KEYS[0]},
-           ${GLOBAL_TEST_CORRELATION_KEYS[1]},
-           ${GLOBAL_TEST_CORRELATION_KEYS[2]},
-           ${GLOBAL_TEST_CORRELATION_KEYS[3]}
-         )
+         correlation_key IN (${globalKeyList})
          AND first_seen_at >= ${TEST_RUN_START_TIME}
        )
        OR (
@@ -315,6 +335,10 @@ async function findOpenNoticesByCategoryPrefix(
   // either carries TEST_PREFIX (per-test scoped categories) OR is a
   // known global key created during this test run (LEAKED_LOCK +
   // SCHEDULER_HEARTBEAT_DEAD have hardcoded global keys).
+  const globalKeyList = sql.join(
+    GLOBAL_TEST_CORRELATION_KEYS.map((k) => sql`${k}`),
+    sql`, `,
+  );
   const r = await db.execute(sql`
     SELECT id, category, severity, audience, correlation_key AS "correlationKey",
            campaign_id AS "campaignId", copy_vars AS "copyVars", detail,
@@ -324,12 +348,7 @@ async function findOpenNoticesByCategoryPrefix(
       AND (
         correlation_key LIKE ${`%${TEST_PREFIX}%`}
         OR (
-          correlation_key IN (
-            ${GLOBAL_TEST_CORRELATION_KEYS[0]},
-            ${GLOBAL_TEST_CORRELATION_KEYS[1]},
-            ${GLOBAL_TEST_CORRELATION_KEYS[2]},
-            ${GLOBAL_TEST_CORRELATION_KEYS[3]}
-          )
+          correlation_key IN (${globalKeyList})
           AND first_seen_at >= ${TEST_RUN_START_TIME}
         )
       )
@@ -416,8 +435,21 @@ beforeEach(async () => {
   // (e.g. a stuck claim from scenario 7 would inflate scenario 15's
   // report.collected count). Wipe is timestamp-bounded so it can
   // never delete rows that pre-date this test run.
+  //
+  // Phase 1C recorders use Date.now() internally to stamp aggregator
+  // entries. The test harness pins the clock to NOW so that seeded
+  // records and the `_aiPressureStats(now)` cutoff align. Only `Date`
+  // is faked — setTimeout/setInterval remain real so DB driver
+  // timing is unaffected. Phase 1B tests don't read Date.now() (all
+  // their ages are explicit `new Date(NOW.getTime() - …)` offsets),
+  // so faking Date is safe across the whole file.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   resetInMemoryStats();
   await wipeFixtures();
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─── Group A: LEAKED_LOCK collector (in-memory zombie evictions) ──────
@@ -1022,6 +1054,330 @@ describe("Phase 1B / Continuity-Orchestration — noise + correlation", () => {
         row.audience,
         `every notice must be operator-audience (no user leakage)`,
       ).toBe("operator");
+    }
+  });
+});
+
+// ─── Group F: Phase 1C — AI / inference pressure collectors ──────────
+//
+// The four wired categories (AI_QUOTA_PRESSURE, AI_TIMEOUT_BURST,
+// AI_LATENCY_DEGRADED, INFERENCE_CONFIDENCE_DEGRADED) all read from the
+// real `_aiPressureStats` aggregator. Tests drive it via the same
+// public recorders production code uses (recordAIRateLimit429,
+// recordAICallOutcome, recordInferencePartial), then run the
+// interpreter and assert against persisted notice rows.
+
+function seedTimeouts(count: number): void {
+  for (let i = 0; i < count; i++) {
+    recordAICallOutcome({ provider: "openai", outcome: "timeout", latencyMs: 60_000 });
+  }
+}
+function seedFailures(count: number): void {
+  for (let i = 0; i < count; i++) {
+    recordAICallOutcome({ provider: "openai", outcome: "failed", latencyMs: 1_200 });
+  }
+}
+function seedRateLimits(count: number): void {
+  for (let i = 0; i < count; i++) recordAIRateLimit429();
+}
+function seedPartials(count: number, reason = "AEL_PARSE_FAILURE"): void {
+  for (let i = 0; i < count; i++) recordInferencePartial(reason);
+}
+function seedLatencySamples(
+  provider: string,
+  sampleCount: number,
+  latencyMs: number,
+): void {
+  for (let i = 0; i < sampleCount; i++) {
+    recordAICallOutcome({ provider, outcome: "success", latencyMs });
+  }
+}
+
+describe("Phase 1C — AI_QUOTA_PRESSURE", () => {
+  it("[Scenario 24] No 429s ⇒ no notice", async () => {
+    await runTick();
+    expect(await findNotice("AI_QUOTA_PRESSURE:global")).toBeUndefined();
+  });
+
+  it("[Scenario 25] Below warning floor (9/hr) ⇒ no notice", async () => {
+    seedRateLimits(9);
+    await runTick();
+    expect(await findNotice("AI_QUOTA_PRESSURE:global")).toBeUndefined();
+  });
+
+  it("[Scenario 26] Severity bands: 10⇒warning, 50⇒degraded, 200⇒critical", async () => {
+    seedRateLimits(10);
+    await runTick();
+    expect((await findNotice("AI_QUOTA_PRESSURE:global"))!.severity).toBe("warning");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedRateLimits(50);
+    await runTick({ now: new Date(NOW.getTime() + 60_000) });
+    expect((await findNotice("AI_QUOTA_PRESSURE:global"))!.severity).toBe("degraded");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedRateLimits(200);
+    await runTick({ now: new Date(NOW.getTime() + 120_000) });
+    expect((await findNotice("AI_QUOTA_PRESSURE:global"))!.severity).toBe("critical");
+  });
+
+  it("[Scenario 27] Re-observed across ticks ⇒ ONE row, observation_count increments", async () => {
+    seedRateLimits(12);
+    await runTick();
+    seedRateLimits(5); // still in window
+    await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+    const n = await findNotice("AI_QUOTA_PRESSURE:global");
+    expect(n!.observationCount).toBe(2);
+  });
+
+  it("[Scenario 28] Pressure clears ⇒ next tick resolves notice", async () => {
+    seedRateLimits(15);
+    await runTick();
+    expect((await findNotice("AI_QUOTA_PRESSURE:global"))!.resolvedAt).toBeNull();
+    _resetAIPressureStatsForTest();
+    await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+    expect((await findNotice("AI_QUOTA_PRESSURE:global"))!.resolvedAt).not.toBeNull();
+  });
+
+  it("[Scenario 29] Internal-only firewall: never user-audience", async () => {
+    seedRateLimits(300);
+    await runTick();
+    const n = await findNotice("AI_QUOTA_PRESSURE:global");
+    expect(n!.audience).toBe("operator");
+  });
+});
+
+describe("Phase 1C — AI_TIMEOUT_BURST", () => {
+  it("[Scenario 30] No timeouts ⇒ no notice", async () => {
+    await runTick();
+    expect(await findNotice("AI_TIMEOUT_BURST:global")).toBeUndefined();
+  });
+
+  it("[Scenario 31] Below warning floor (2/15min) ⇒ no notice", async () => {
+    seedTimeouts(2);
+    await runTick();
+    expect(await findNotice("AI_TIMEOUT_BURST:global")).toBeUndefined();
+  });
+
+  it("[Scenario 32] Severity bands: 3⇒warning, 10⇒degraded, 25⇒critical", async () => {
+    seedTimeouts(3);
+    await runTick();
+    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.severity).toBe("warning");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedTimeouts(10);
+    await runTick({ now: new Date(NOW.getTime() + 60_000) });
+    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.severity).toBe("degraded");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedTimeouts(25);
+    await runTick({ now: new Date(NOW.getTime() + 120_000) });
+    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.severity).toBe("critical");
+  });
+
+  it("[Scenario 33] Burst clears (older than 15min window) ⇒ resolves", async () => {
+    seedTimeouts(5);
+    await runTick();
+    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.resolvedAt).toBeNull();
+    // Advance clock past the 15-min window; aggregator prunes-by-cutoff on read.
+    const future = new Date(NOW.getTime() + 16 * 60_000);
+    await runTick({ now: future });
+    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.resolvedAt).not.toBeNull();
+  });
+});
+
+describe("Phase 1C — AI_PROVIDER_FAILURE_BURST", () => {
+  it("[Scenario 33a] No failures ⇒ no notice", async () => {
+    await runTick();
+    expect(await findNotice("AI_PROVIDER_FAILURE_BURST:global")).toBeUndefined();
+  });
+
+  it("[Scenario 33b] Below warning floor (2/15min) ⇒ no notice", async () => {
+    seedFailures(2);
+    await runTick();
+    expect(await findNotice("AI_PROVIDER_FAILURE_BURST:global")).toBeUndefined();
+  });
+
+  it("[Scenario 33c] Severity bands: 3⇒warning, 10⇒degraded, 25⇒critical", async () => {
+    seedFailures(3);
+    await runTick();
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.severity).toBe("warning");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedFailures(10);
+    await runTick({ now: new Date(NOW.getTime() + 60_000) });
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.severity).toBe("degraded");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedFailures(25);
+    await runTick({ now: new Date(NOW.getTime() + 120_000) });
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.severity).toBe("critical");
+  });
+
+  it("[Scenario 33d] Burst clears (older than 15min window) ⇒ resolves", async () => {
+    seedFailures(5);
+    await runTick();
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.resolvedAt).toBeNull();
+    const future = new Date(NOW.getTime() + 16 * 60_000);
+    await runTick({ now: future });
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.resolvedAt).not.toBeNull();
+  });
+
+  it("[Scenario 33e] Failures and timeouts emit SEPARATE notices (D2 separation)", async () => {
+    seedFailures(5);
+    seedTimeouts(5);
+    await runTick();
+    const failureN = await findNotice("AI_PROVIDER_FAILURE_BURST:global");
+    const timeoutN = await findNotice("AI_TIMEOUT_BURST:global");
+    expect(failureN).toBeDefined();
+    expect(timeoutN).toBeDefined();
+    expect(failureN!.category).toBe("AI_PROVIDER_FAILURE_BURST");
+    expect(timeoutN!.category).toBe("AI_TIMEOUT_BURST");
+  });
+});
+
+describe("Phase 1C — AI_LATENCY_DEGRADED", () => {
+  it("[Scenario 34] Below 20-sample floor ⇒ never fires regardless of latency", async () => {
+    // Even at 10x baseline — under-sampled providers must NOT emit.
+    seedLatencySamples("openai", 19, 50_000);
+    await runTick();
+    expect(await findNotice("AI_LATENCY_DEGRADED:openai")).toBeUndefined();
+  });
+
+  it("[Scenario 35] Severity bands per provider: 2x⇒warning, 3x⇒degraded, 5x⇒critical (openai baseline=5000ms)", async () => {
+    seedLatencySamples("openai", 20, 10_000); // 2x
+    await runTick();
+    expect((await findNotice("AI_LATENCY_DEGRADED:openai"))!.severity).toBe("warning");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedLatencySamples("openai", 20, 15_000); // 3x
+    await runTick({ now: new Date(NOW.getTime() + 60_000) });
+    expect((await findNotice("AI_LATENCY_DEGRADED:openai"))!.severity).toBe("degraded");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedLatencySamples("openai", 20, 25_000); // 5x
+    await runTick({ now: new Date(NOW.getTime() + 120_000) });
+    expect((await findNotice("AI_LATENCY_DEGRADED:openai"))!.severity).toBe("critical");
+  });
+
+  it("[Scenario 36] Both providers degraded ⇒ two distinct notices (no cross-provider collapse)", async () => {
+    seedLatencySamples("openai", 25, 12_000); // openai baseline 5000 ⇒ ~2.4x ⇒ warning
+    seedLatencySamples("gemini", 25, 25_000); // gemini baseline 10000 ⇒ ~2.5x ⇒ warning
+    await runTick();
+    const open = await findOpenNoticesByCategoryPrefix("AI_LATENCY_DEGRADED");
+    expect(open).toHaveLength(2);
+    expect(open.map((n) => n.correlationKey).sort()).toEqual([
+      "AI_LATENCY_DEGRADED:gemini",
+      "AI_LATENCY_DEGRADED:openai",
+    ]);
+  });
+
+  it("[Scenario 37] Latency normalizes ⇒ resolves", async () => {
+    seedLatencySamples("openai", 25, 25_000);
+    await runTick();
+    expect((await findNotice("AI_LATENCY_DEGRADED:openai"))!.resolvedAt).toBeNull();
+    _resetAIPressureStatsForTest();
+    seedLatencySamples("openai", 25, 1_000);
+    await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+    expect((await findNotice("AI_LATENCY_DEGRADED:openai"))!.resolvedAt).not.toBeNull();
+  });
+});
+
+describe("Phase 1C — INFERENCE_CONFIDENCE_DEGRADED", () => {
+  it("[Scenario 38] No partials ⇒ no notice", async () => {
+    await runTick();
+    expect(await findNotice("INFERENCE_CONFIDENCE_DEGRADED:ael")).toBeUndefined();
+  });
+
+  it("[Scenario 39] Below warning floor (2/hr) ⇒ no notice", async () => {
+    seedPartials(2);
+    await runTick();
+    expect(await findNotice("INFERENCE_CONFIDENCE_DEGRADED:ael")).toBeUndefined();
+  });
+
+  it("[Scenario 40] Severity bands: 3⇒warning, 10⇒degraded, 25⇒critical; partialReasons captured", async () => {
+    seedPartials(3, "AEL_PARSE_FAILURE");
+    await runTick();
+    let n = await findNotice("INFERENCE_CONFIDENCE_DEGRADED:ael");
+    expect(n!.severity).toBe("warning");
+    expect((n!.detail as { partialReasons: Record<string, number> }).partialReasons.AEL_PARSE_FAILURE).toBe(3);
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedPartials(10, "AEL_BUILD_ERROR");
+    await runTick({ now: new Date(NOW.getTime() + 60_000) });
+    expect((await findNotice("INFERENCE_CONFIDENCE_DEGRADED:ael"))!.severity).toBe("degraded");
+
+    _resetAIPressureStatsForTest();
+    await wipeFixtures();
+    seedPartials(25, "EMPTY_ANALYTICAL_PACKAGE");
+    await runTick({ now: new Date(NOW.getTime() + 120_000) });
+    expect((await findNotice("INFERENCE_CONFIDENCE_DEGRADED:ael"))!.severity).toBe("critical");
+  });
+
+  it("[Scenario 41] Partials clear ⇒ resolves on next tick", async () => {
+    seedPartials(5);
+    await runTick();
+    expect((await findNotice("INFERENCE_CONFIDENCE_DEGRADED:ael"))!.resolvedAt).toBeNull();
+    _resetAIPressureStatsForTest();
+    await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+    expect((await findNotice("INFERENCE_CONFIDENCE_DEGRADED:ael"))!.resolvedAt).not.toBeNull();
+  });
+});
+
+describe("Phase 1C — collector failure isolation + firewall", () => {
+  it("[Scenario 42] AI collector failure does NOT sweep open AI notices (Task #56 P1 #2 invariant)", async () => {
+    // Open a real AI_QUOTA_PRESSURE notice.
+    seedRateLimits(15);
+    await runTick();
+    expect((await findNotice("AI_QUOTA_PRESSURE:global"))!.resolvedAt).toBeNull();
+
+    // Force the AI collector to throw on tick 2 by stubbing _aiPressureStats.
+    const aiMod = await import("../operations-guardian/ai-pressure-stats");
+    const spy = vi.spyOn(aiMod, "_aiPressureStats").mockImplementation(() => {
+      throw new Error("[test] forced AI_PRESSURE collector failure");
+    });
+    try {
+      await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Open AI_QUOTA_PRESSURE notice MUST still be open (collector failed ⇒
+    // category not fully observed ⇒ resolver MUST NOT sweep).
+    expect((await findNotice("AI_QUOTA_PRESSURE:global"))!.resolvedAt).toBeNull();
+  });
+
+  it("[Scenario 43] All 5 Phase 1C categories: every emitted row is operator-audience (firewall)", async () => {
+    seedRateLimits(15);
+    seedTimeouts(5);
+    seedFailures(5);
+    seedLatencySamples("openai", 20, 25_000);
+    seedPartials(5);
+    await runTick();
+    const r = await db.execute(sql`
+      SELECT audience FROM ${systemNotices}
+      WHERE correlation_key IN (
+        'AI_QUOTA_PRESSURE:global',
+        'AI_TIMEOUT_BURST:global',
+        'AI_PROVIDER_FAILURE_BURST:global',
+        'AI_LATENCY_DEGRADED:openai',
+        'INFERENCE_CONFIDENCE_DEGRADED:ael'
+      )
+        AND first_seen_at >= ${TEST_RUN_START_TIME}
+    `);
+    const rows = (r as unknown as { rows: { audience: string }[] }).rows ?? [];
+    expect(rows.length).toBe(5);
+    for (const row of rows) {
+      expect(row.audience).toBe("operator");
     }
   });
 });

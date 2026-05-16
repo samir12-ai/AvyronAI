@@ -33,6 +33,7 @@ import { sql, and, eq, lt, isNull, inArray } from "drizzle-orm";
 import { _bossInFlightStats } from "../boss/concurrency";
 import { _continuityTickInflightStats } from "../continuity/scheduler";
 import { _activeJobsStats } from "../market-intelligence-v3/fetch-orchestrator";
+import { _aiPressureStats } from "./ai-pressure-stats";
 import {
   type NoticeCategory,
   type NoticeSeverity,
@@ -372,6 +373,173 @@ async function collectMarketDataDegradedSignals(
   });
 }
 
+// ─── Phase 1C — AI / provider pressure collectors ──────────────────────
+//
+// Source-of-truth: server/operations-guardian/ai-pressure-stats.ts.
+// Severity bands per Task #59:
+//   AI_QUOTA_PRESSURE       warning ≥10/hr globally, degraded ≥50, critical ≥200
+//   AI_TIMEOUT_BURST        warning ≥3/15min,        degraded ≥10, critical ≥25
+//   AI_LATENCY_DEGRADED     warning p95 ≥2× baseline, degraded ≥3×, critical ≥5×
+//                           (per-provider; requires ≥20 samples in window)
+//   INFERENCE_CONFIDENCE_DEGRADED  warning ≥3/hr, degraded ≥10, critical ≥25
+//
+// Baselines per provider come from envs with sensible defaults, see
+// `providerLatencyBaselineMs`. Override via AI_*_LATENCY_BASELINE_MS.
+
+function providerLatencyBaselineMs(provider: string): number {
+  if (provider === "openai") {
+    const raw = Number(process.env.AI_OPENAI_LATENCY_BASELINE_MS);
+    return Number.isFinite(raw) && raw > 0 ? raw : 5_000;
+  }
+  if (provider === "gemini") {
+    const raw = Number(process.env.AI_GEMINI_LATENCY_BASELINE_MS);
+    return Number.isFinite(raw) && raw > 0 ? raw : 10_000;
+  }
+  return 10_000;
+}
+
+function collectAIPressureSignals(now: Date): ClassifiedNotice[] {
+  const stats = _aiPressureStats(now.getTime());
+  const out: ClassifiedNotice[] = [];
+  const isoNow = now.toISOString();
+
+  if (stats.rateLimit429Count >= 10) {
+    const sev: NoticeSeverity =
+      stats.rateLimit429Count >= 200
+        ? "critical"
+        : stats.rateLimit429Count >= 50
+          ? "degraded"
+          : "warning";
+    out.push({
+      category: "AI_QUOTA_PRESSURE",
+      severity: sev,
+      audience: "operator",
+      correlationKey: "AI_QUOTA_PRESSURE:global",
+      accountId: null,
+      campaignId: null,
+      copyKey: "operator.ai_quota_pressure",
+      copyVars: { count: stats.rateLimit429Count, windowHours: 1 },
+      detail: {
+        observedAt: isoNow,
+        count: stats.rateLimit429Count,
+        windowMs: 60 * 60 * 1000,
+      },
+    });
+  }
+
+  if (stats.timeoutCount >= 3) {
+    const sev: NoticeSeverity =
+      stats.timeoutCount >= 25
+        ? "critical"
+        : stats.timeoutCount >= 10
+          ? "degraded"
+          : "warning";
+    out.push({
+      category: "AI_TIMEOUT_BURST",
+      severity: sev,
+      audience: "operator",
+      correlationKey: "AI_TIMEOUT_BURST:global",
+      accountId: null,
+      campaignId: null,
+      copyKey: "operator.ai_timeout_burst",
+      copyVars: { count: stats.timeoutCount, windowMinutes: 15 },
+      detail: {
+        observedAt: isoNow,
+        count: stats.timeoutCount,
+        windowMs: 15 * 60 * 1000,
+      },
+    });
+  }
+
+  // AI_PROVIDER_FAILURE_BURST — non-timeout provider failures (5xx,
+  // network resets, AI_CALL_FAILED). Same 15-min window shape and
+  // severity bands as AI_TIMEOUT_BURST, but kept as its own canonical
+  // category per D2 ("every meaning has its own canonical field") so
+  // operators can distinguish "we hit the wall clock" from "the
+  // provider returned an error".
+  if (stats.failureCount >= 3) {
+    const sev: NoticeSeverity =
+      stats.failureCount >= 25
+        ? "critical"
+        : stats.failureCount >= 10
+          ? "degraded"
+          : "warning";
+    out.push({
+      category: "AI_PROVIDER_FAILURE_BURST",
+      severity: sev,
+      audience: "operator",
+      correlationKey: "AI_PROVIDER_FAILURE_BURST:global",
+      accountId: null,
+      campaignId: null,
+      copyKey: "operator.ai_provider_failure_burst",
+      copyVars: { count: stats.failureCount, windowMinutes: 15 },
+      detail: {
+        observedAt: isoNow,
+        count: stats.failureCount,
+        windowMs: 15 * 60 * 1000,
+      },
+    });
+  }
+
+  for (const [provider, l] of Object.entries(stats.latencyByProvider)) {
+    if (l.sampleCount < 20) continue;
+    const baselineMs = providerLatencyBaselineMs(provider);
+    const ratio = l.p95Ms / baselineMs;
+    if (ratio < 2) continue;
+    const sev: NoticeSeverity =
+      ratio >= 5 ? "critical" : ratio >= 3 ? "degraded" : "warning";
+    out.push({
+      category: "AI_LATENCY_DEGRADED",
+      severity: sev,
+      audience: "operator",
+      correlationKey: `AI_LATENCY_DEGRADED:${provider}`,
+      accountId: null,
+      campaignId: null,
+      copyKey: "operator.ai_latency_degraded",
+      copyVars: { provider, p95Ms: l.p95Ms, baselineMs },
+      detail: {
+        observedAt: isoNow,
+        provider,
+        p95Ms: l.p95Ms,
+        baselineMs,
+        sampleCount: l.sampleCount,
+        ratio: Number(ratio.toFixed(2)),
+      },
+    });
+  }
+
+  return out;
+}
+
+function collectInferenceConfidenceSignals(now: Date): ClassifiedNotice[] {
+  const stats = _aiPressureStats(now.getTime());
+  if (stats.partialCount < 3) return [];
+  const sev: NoticeSeverity =
+    stats.partialCount >= 25
+      ? "critical"
+      : stats.partialCount >= 10
+        ? "degraded"
+        : "warning";
+  return [
+    {
+      category: "INFERENCE_CONFIDENCE_DEGRADED",
+      severity: sev,
+      audience: "operator",
+      correlationKey: "INFERENCE_CONFIDENCE_DEGRADED:ael",
+      accountId: null,
+      campaignId: null,
+      copyKey: "operator.inference_confidence_degraded",
+      copyVars: { count: stats.partialCount, windowHours: 1 },
+      detail: {
+        observedAt: now.toISOString(),
+        count: stats.partialCount,
+        partialReasons: stats.partialReasons,
+        windowMs: 60 * 60 * 1000,
+      },
+    },
+  ];
+}
+
 function collectChainSignals(input: CollectInput): ClassifiedNotice[] {
   const out: ClassifiedNotice[] = [];
   for (const c of input.chainObservations) {
@@ -598,17 +766,24 @@ export async function runGuardianInterpreterStep(
   // logged is OK, silent is not). Each collector returns ok=true|false +
   // capped=true|false so the resolver knows which categories are safe
   // to sweep.
-  const [leaked, stuck, retry, scraper, marketData] = await Promise.all([
-    safeCollect("LEAKED_LOCK", () => Promise.resolve(collectLeakedLockSignals())),
-    safeCollect("WORKER_STUCK", () => collectStuckClaimSignals(input.now)),
-    safeCollect("RETRY_LOOP", () => collectRetryLoopSignals()),
-    safeCollect("SCRAPER_PROVIDER_DEGRADED", () =>
-      collectScraperProviderSignals(input.now),
-    ),
-    safeCollect("MARKET_DATA_DEGRADED", () =>
-      collectMarketDataDegradedSignals(input.now),
-    ),
-  ]);
+  const [leaked, stuck, retry, scraper, marketData, aiPressure, inference] =
+    await Promise.all([
+      safeCollect("LEAKED_LOCK", () => Promise.resolve(collectLeakedLockSignals())),
+      safeCollect("WORKER_STUCK", () => collectStuckClaimSignals(input.now)),
+      safeCollect("RETRY_LOOP", () => collectRetryLoopSignals()),
+      safeCollect("SCRAPER_PROVIDER_DEGRADED", () =>
+        collectScraperProviderSignals(input.now),
+      ),
+      safeCollect("MARKET_DATA_DEGRADED", () =>
+        collectMarketDataDegradedSignals(input.now),
+      ),
+      safeCollect("AI_PRESSURE", () =>
+        Promise.resolve(collectAIPressureSignals(input.now)),
+      ),
+      safeCollect("INFERENCE_CONFIDENCE", () =>
+        Promise.resolve(collectInferenceConfidenceSignals(input.now)),
+      ),
+    ]);
   const chain = safeCollectSync("CHAIN_OBSERVATIONS", () =>
     collectChainSignals(input),
   );
@@ -619,6 +794,8 @@ export async function runGuardianInterpreterStep(
     ...retry.notices,
     ...scraper.notices,
     ...marketData.notices,
+    ...aiPressure.notices,
+    ...inference.notices,
     ...chain.notices,
   ];
   const observedKeys = new Set(all.map((n) => n.correlationKey));
@@ -643,6 +820,15 @@ export async function runGuardianInterpreterStep(
   }
   if (marketData.ok && !marketData.capped) {
     fullyObserved.add("MARKET_DATA_DEGRADED");
+  }
+  if (aiPressure.ok && !aiPressure.capped) {
+    fullyObserved.add("AI_QUOTA_PRESSURE");
+    fullyObserved.add("AI_TIMEOUT_BURST");
+    fullyObserved.add("AI_PROVIDER_FAILURE_BURST");
+    fullyObserved.add("AI_LATENCY_DEGRADED");
+  }
+  if (inference.ok && !inference.capped) {
+    fullyObserved.add("INFERENCE_CONFIDENCE_DEGRADED");
   }
   if (chain.ok) {
     fullyObserved.add("CHAIN_DEGRADED");

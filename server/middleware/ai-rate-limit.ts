@@ -11,6 +11,7 @@
  */
 import type { Response, NextFunction } from "express";
 import type { AuthRequest } from "../auth";
+import { recordAIRateLimit429 } from "../operations-guardian/ai-pressure-stats";
 
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const DEFAULT_BUDGET = Number(process.env.AI_RATE_LIMIT_PER_HOUR) || 50;
@@ -34,6 +35,13 @@ export function aiRateLimitPerAccount(maxPerHour: number = DEFAULT_BUDGET) {
       const retryAfterSec = Math.max(1, Math.ceil((hits[0] + WINDOW_MS - now) / 1000));
       res.setHeader("Retry-After", String(retryAfterSec));
       console.warn(`[AIRateLimit] EXCEEDED | account=${accountId} | route=${route} | hits=${hits.length} | budget=${maxPerHour}`);
+      // Task #59 / Phase 1C — feed the Guardian aggregator. Wrapped because
+      // a recorder failure must NEVER prevent the 429 response.
+      try {
+        recordAIRateLimit429();
+      } catch (err) {
+        console.error("[OperationsGuardian] AI_RATE_LIMIT_RECORD_FAILED", err);
+      }
       return res.status(429).json({
         error: "AI_RATE_LIMIT_EXCEEDED",
         message: "Hourly AI generation budget exceeded for this account.",

@@ -35,6 +35,13 @@ export const NOTICE_CATEGORIES = [
   "PLAN_DEGRADED",
   "SCRAPER_PROVIDER_DEGRADED",
   "AI_QUOTA_PRESSURE",
+  // Phase 1C — AI / provider pressure (Task #59). All four wired
+  // collectors (AI_QUOTA_PRESSURE shares the category) are
+  // INTERNAL_ONLY pending separate copy review.
+  "AI_TIMEOUT_BURST",
+  "AI_PROVIDER_FAILURE_BURST",
+  "AI_LATENCY_DEGRADED",
+  "INFERENCE_CONFIDENCE_DEGRADED",
 ] as const;
 export type NoticeCategory = (typeof NOTICE_CATEGORIES)[number];
 
@@ -150,6 +157,15 @@ export const INTERNAL_ONLY_CATEGORIES = new Set<NoticeCategory>([
   // audience='user' remains gated by separate copy review.
   "SCRAPER_PROVIDER_DEGRADED",
   "MARKET_DATA_DEGRADED",
+  // Phase 1C AI-pressure categories (Task #59) start INTERNAL_ONLY.
+  // Promotion to user-facing copy requires the same review path as
+  // every other category: USER_COPY entry + no-tech-leak regex test +
+  // UI surface wired. None of those exist yet for these.
+  "AI_QUOTA_PRESSURE",
+  "AI_TIMEOUT_BURST",
+  "AI_PROVIDER_FAILURE_BURST",
+  "AI_LATENCY_DEGRADED",
+  "INFERENCE_CONFIDENCE_DEGRADED",
   // The remaining internal categories ARE allowed at operator audience
   // (that's their primary surface). LEAKED_LOCK is the strictest — it
   // means a watchdog already cleaned up; nothing actionable for the

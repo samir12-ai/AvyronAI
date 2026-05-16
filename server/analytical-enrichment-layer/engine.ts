@@ -1,5 +1,6 @@
 import { aiChat } from "../ai-client";
 import { logSafe } from "../log-redact";
+import { recordInferencePartial } from "../operations-guardian/ai-pressure-stats";
 import {
   AnalyticalPackage,
   AELInput,
@@ -8,6 +9,20 @@ import {
 
 const LOG_PREFIX = "[AEL-v2]";
 const AEL_VERSION = 2;
+
+// Task #59 / Phase 1C — feed the Guardian aggregator at every isPartial=true
+// return. Returning the same string keeps the pre-existing partialReason
+// value unchanged; the side-effect is the recorder call. Wrapped because
+// a recorder failure must NEVER break AEL output (Seal #15: logged is OK,
+// silent is not).
+function notePartialReason(reason: string): string {
+  try {
+    recordInferencePartial(reason);
+  } catch (err) {
+    console.error("[OperationsGuardian] AEL_PARTIAL_RECORD_FAILED", { reason, err });
+  }
+  return reason;
+}
 
 function buildInputSummary(input: AELInput) {
   // MI runtime shape (MIv3DiagnosticResult): top-level dominanceData/trajectoryData/threatSignals/opportunitySignals/narrativeObjectionMap,
@@ -132,7 +147,7 @@ export async function buildAnalyticalPackage(input: AELInput): Promise<Analytica
       generatedAt: new Date().toISOString(),
       inputSummary,
       isPartial: true,
-      partialReason: "EMPTY_ANALYTICAL_PACKAGE",
+      partialReason: notePartialReason("EMPTY_ANALYTICAL_PACKAGE"),
       partialDetail: "no MI or Audience input available",
     };
   }
@@ -284,7 +299,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.warn(logSafe(`${LOG_PREFIX} PARSE_FAIL | No JSON found in response`));
-      return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: "AEL_PARSE_FAILURE", partialDetail: "AEL response contained no parseable JSON" };
+      return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: notePartialReason("AEL_PARSE_FAILURE"), partialDetail: "AEL response contained no parseable JSON" };
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
@@ -313,7 +328,7 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
   } catch (err: any) {
     const elapsed = Date.now() - startTime;
     console.error(logSafe(`${LOG_PREFIX} BUILD_ERROR | campaign=${input.campaignId} | elapsed=${elapsed}ms | error=${err.message}`));
-    return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: "AEL_BUILD_ERROR", partialDetail: `AEL build failed: ${err.message}` };
+    return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: notePartialReason("AEL_BUILD_ERROR"), partialDetail: `AEL build failed: ${err.message}` };
   }
 }
 

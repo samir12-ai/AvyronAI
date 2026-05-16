@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { recordAiCost } from "./observability/otel";
 import { logger } from "./logger";
+import { recordAICallOutcome } from "./operations-guardian/ai-pressure-stats";
 
 /**
  * Seal #7 (F10.6/F10.7) — per-call USD cost estimation. Model rates are the
@@ -115,6 +116,7 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
   const startTime = Date.now();
   let success = false;
   let actualTokens = 0;
+  let outcomeKind: "success" | "timeout" | "failed" | null = null;
 
   try {
     const openai = getOpenAI();
@@ -153,9 +155,29 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
     });
     return result;
   } catch (err: any) {
+    const isTimeout =
+      (err instanceof AICallError && err.code === "AI_TIMEOUT") ||
+      (err && (err.name === "APITimeoutError" || /timeout/i.test(String(err.message ?? ""))));
+    outcomeKind = isTimeout ? "timeout" : "failed";
     if (err instanceof AICallError) throw err;
     throw new AICallError(err.message || "AI call failed", "AI_CALL_FAILED");
   } finally {
+    const latencyMs = Date.now() - startTime;
+    try {
+      if (success) {
+        recordAICallOutcome({ provider: "openai", outcome: "success", latencyMs });
+      } else if (outcomeKind) {
+        recordAICallOutcome({ provider: "openai", outcome: outcomeKind, latencyMs });
+      }
+    } catch (recordErr) {
+      // Seal #15 doctrine: no silent catches. The aggregator is best-effort
+      // observability — a recorder failure must never break the AI call,
+      // but it MUST be visible in logs.
+      console.error("[OperationsGuardian] AI_OUTCOME_RECORD_FAILED", {
+        provider: "openai",
+        recordErr,
+      });
+    }
     await reconcileBudgetReservation({
       accountId,
       endpoint,
@@ -163,7 +185,7 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
       maxTokens: rest.max_tokens,
       actualTokens,
       success,
-      durationMs: Date.now() - startTime,
+      durationMs: latencyMs,
     }).catch(() => {});
   }
 }
@@ -181,6 +203,7 @@ export async function aiGemini(options: AIGeminiOptions) {
   const startTime = Date.now();
   let success = false;
   let actualTokens = 0;
+  let outcomeKind: "success" | "timeout" | "failed" | null = null;
 
   try {
     const gemini = getGemini();
@@ -246,9 +269,26 @@ export async function aiGemini(options: AIGeminiOptions) {
     });
     return result;
   } catch (err: any) {
+    const isTimeout =
+      (err instanceof AICallError && err.code === "AI_TIMEOUT") ||
+      (err && /timeout|aborted/i.test(String(err.message ?? "")));
+    outcomeKind = isTimeout ? "timeout" : "failed";
     if (err instanceof AICallError) throw err;
     throw new AICallError(err.message || "Gemini call failed", "AI_CALL_FAILED");
   } finally {
+    const latencyMs = Date.now() - startTime;
+    try {
+      if (success) {
+        recordAICallOutcome({ provider: "gemini", outcome: "success", latencyMs });
+      } else if (outcomeKind) {
+        recordAICallOutcome({ provider: "gemini", outcome: outcomeKind, latencyMs });
+      }
+    } catch (recordErr) {
+      console.error("[OperationsGuardian] AI_OUTCOME_RECORD_FAILED", {
+        provider: "gemini",
+        recordErr,
+      });
+    }
     await reconcileBudgetReservation({
       accountId,
       endpoint,
@@ -256,7 +296,7 @@ export async function aiGemini(options: AIGeminiOptions) {
       maxTokens,
       actualTokens,
       success,
-      durationMs: Date.now() - startTime,
+      durationMs: latencyMs,
     }).catch(() => {});
   }
 }
