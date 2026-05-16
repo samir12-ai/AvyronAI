@@ -1,0 +1,209 @@
+Hi team,
+
+The Operations Guardian observe-only layer is now live and operationally stable enough to begin structured validation testing.
+
+I do NOT want to proceed to Step 7 or any customer-visible rollout yet.
+
+Before any user-facing exposure, we need behavioral/runtime validation under controlled operational failure scenarios.
+
+==================================================
+IMPORTANT
+=========
+
+Do NOT run the long-duration observation test yet.
+
+The 7-day passive observation phase will happen separately over real runtime conditions.
+
+For now, execute all active/runtime validation tests EXCEPT the long-term observation phase.
+
+==================================================
+OBJECTIVE
+=========
+
+Validate that the Guardian behaves correctly under real operational stress and failure conditions.
+
+The goal is NOT:
+
+* unit correctness only
+* passing tests only
+* infrastructure correctness only
+
+The goal is:
+
+* operational interpretation quality
+* notice usefulness
+* severity accuracy
+* suppression quality
+* false-positive resistance
+* correlation quality
+* resolve correctness
+* operator usefulness
+
+==================================================
+PHASE 1 — CONTROLLED FAILURE INJECTION
+======================================
+
+Please execute controlled failure simulations and verify Guardian behavior.
+
+==================================================
+A. SCRAPING FAILURE TESTS
+=========================
+
+Simulate:
+
+* Bright Data timeout
+* Bright Data 429/rate limit
+* Apify failover
+* empty scrape result
+* stale snapshot reuse
+* delayed provider response
+* partial scrape success
+* repeated consecutive scrape failures
+* blocked proxy session
+* proxy rotation exhaustion
+* scrape retry exhaustion
+
+Verify:
+
+* correct notice classification
+* severity accuracy
+* suppression behavior
+* retry visibility
+* no spam/repeat flood
+* proper resolution after recovery
+* no false resolve
+* no user-facing leakage
+
+==================================================
+B. CONTINUITY / ORCHESTRATION TESTS
+===================================
+
+Simulate:
+
+* stuck continuity claim
+* delayed heartbeat
+* scheduler pause
+* dead chain
+* zombie watchdog eviction
+* repeated failed decisions
+* queue buildup
+* partial orchestration completion
+* retry-heavy campaign state
+
+Verify:
+
+* Guardian interpretation correctness
+* notice deduplication
+* escalation accuracy
+* correct resolve timing
+* no noisy spam
+* no accidental auto-recovery actions
+* no category misclassification
+
+==================================================
+C. AI / PROVIDER PRESSURE TESTS
+===============================
+
+Simulate:
+
+* provider timeout
+* slow completion latency
+* quota pressure
+* temporary model unavailability
+* retry amplification
+* degraded inference confidence
+
+Verify:
+
+* calm operational wording internally
+* accurate classification
+* no infrastructure leakage
+* no false critical severity
+
+==================================================
+PHASE 2 — HUMAN REVIEW VALIDATION
+=================================
+
+For every generated notice, evaluate manually:
+
+* was the incident real?
+* was the classification correct?
+* was severity appropriate?
+* was timing appropriate?
+* was resolution appropriate?
+* was suppression correct?
+* was the notice actionable?
+* was the notice too noisy?
+* was important context missing?
+* would this improve or hurt operator trust?
+
+==================================================
+PHASE 3 — SHADOW USER-COPY PREVIEW
+==================================
+
+DO NOT expose notices to users.
+
+However, I want hidden/shadow customer-copy generation enabled internally for review purposes only.
+
+Generate:
+
+* customer-safe wording
+* confidence/degradation messaging
+* reassurance phrasing
+* impact-language versions
+
+But:
+
+* do not display to users
+* do not send externally
+* do not activate Step 7
+
+This is strictly for semantic/UX review.
+
+==================================================
+IMPORTANT WORDING RULES
+=======================
+
+Customer-facing language must:
+
+* avoid technical/runtime terminology
+* avoid incident-report tone
+* avoid alarming wording
+* avoid infrastructure details
+* focus on recommendation impact/confidence
+* remain calm and professional
+
+Never expose:
+
+* retry loops
+* stuck claims
+* zombie watchdogs
+* provider internals
+* worker/runtime terminology
+* database state
+* infrastructure language
+
+==================================================
+DELIVERABLES
+============
+
+Please provide:
+
+* failure-injection results
+* notice classification results
+* false-positive analysis
+* suppression-behavior analysis
+* severity-analysis report
+* resolve-behavior analysis
+* operator usefulness analysis
+* noise-frequency analysis
+* unresolved weaknesses
+* recommended threshold tuning
+* sample shadow customer copy
+* architect review after validation
+
+Again:
+do NOT start the 7-day observation phase yet.
+That phase will happen separately under live runtime conditions.
+
+Thanks.
