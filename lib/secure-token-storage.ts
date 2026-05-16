@@ -45,6 +45,12 @@ const webStorage: Storage | null =
     ? window.localStorage
     : null;
 
+// In-memory cache. Survives within the JS runtime (including across HMR
+// hot-reloads on web) and shields the request layer from any persistent-
+// storage hiccup. AuthContext keeps this in lockstep with React state via
+// `setAuthToken` / `clearAuthToken`.
+let cachedToken: string | null = null;
+
 let nativeSecureStoreAvailable: boolean | null = null;
 async function isNativeSecureStoreUsable(): Promise<boolean> {
   if (isWeb) return false;
@@ -59,6 +65,11 @@ async function isNativeSecureStoreUsable(): Promise<boolean> {
 
 /** Read JWT. Migrates from legacy AsyncStorage key on first read. */
 export async function getAuthToken(): Promise<string | null> {
+  // In-memory cache wins: it is the source-of-truth for the live session and
+  // bridges any window where persisted storage is empty (e.g. immediately
+  // after a fresh login on web while localStorage write is still settling, or
+  // during an HMR reload where storage was previously broken).
+  if (cachedToken) return cachedToken;
   if (isWeb) {
     if (webStorage) {
       try {
@@ -106,6 +117,7 @@ export async function getAuthToken(): Promise<string | null> {
 
 /** Persist JWT. Always wipes the legacy AsyncStorage copy. */
 export async function setAuthToken(token: string): Promise<void> {
+  cachedToken = token;
   if (isWeb) {
     if (webStorage) {
       try {
@@ -137,6 +149,7 @@ export async function setAuthToken(token: string): Promise<void> {
 
 /** Wipe JWT from every backend. */
 export async function clearAuthToken(): Promise<void> {
+  cachedToken = null;
   if (isWeb) {
     if (webStorage) {
       try { webStorage.removeItem(WEB_TOKEN_KEY); } catch {}

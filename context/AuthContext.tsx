@@ -110,6 +110,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadStoredAuth();
   }, []);
 
+  // Mirror React-state token into the storage layer's in-memory cache +
+  // persisted slot whenever it changes. This is the safety net for sessions
+  // that started before persistent storage worked on web (where the JWT
+  // briefly lived only in React state and HMR preserved it across the fix
+  // landing). Idempotent — fresh logins also flow through here.
+  useEffect(() => {
+    if (token) {
+      setAuthToken(token).catch((e) => {
+        console.warn('[Auth] re-persist token failed:', e);
+      });
+    }
+  }, [token]);
+
   // P0-3: SavedAccount roster is stored token-less in AsyncStorage
   // (`SAVED_ACCOUNTS_KEY` v2). The actual token for each saved account lives
   // in SecureStore under `SAVED_ACCOUNT_TOKEN_PREFIX + userId`. On read we
