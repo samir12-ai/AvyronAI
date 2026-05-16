@@ -252,10 +252,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: data.error || 'Login failed' };
       }
 
-      setToken(data.token);
-      setUser(data.user);
+      // SECURITY: persist identity to AsyncStorage BEFORE flipping React
+      // state so `lib/storage.ts` nsKey reads always resolve to the new uid.
       await setAuthToken(data.token);
       await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
+      setToken(data.token);
+      setUser(data.user);
       await upsertSavedAccount(userToSavedAccount(data.user, data.token));
       return { success: true };
     } catch (error) {
@@ -277,10 +279,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: data.error || 'Registration failed' };
       }
 
-      setToken(data.token);
-      setUser(data.user);
+      // SECURITY: persist identity to AsyncStorage BEFORE flipping React
+      // state so `lib/storage.ts` nsKey reads always resolve to the new uid.
       await setAuthToken(data.token);
       await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
+      setToken(data.token);
+      setUser(data.user);
       await upsertSavedAccount(userToSavedAccount(data.user, data.token));
       return { success: true };
     } catch (error) {
@@ -333,10 +337,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         console.warn('[Auth] queryClient.clear failed during switchToAccount:', e);
       }
-      setToken(account.token);
-      setUser(resolvedUser);
+      // SECURITY: persist the new identity to AsyncStorage BEFORE flipping
+      // React state. `lib/storage.ts` namespaces every per-user key by the uid
+      // it reads from AUTH_USER_KEY — if state flipped first, any storage read
+      // triggered by the re-render would resolve to the previous user's
+      // namespace and leak/clobber data across accounts.
       await setAuthToken(account.token);
       await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(resolvedUser));
+      setToken(account.token);
+      setUser(resolvedUser);
       setShowAccountSwitcher(false);
     } catch (error) {
       console.error('[Auth] Switch account error:', error);

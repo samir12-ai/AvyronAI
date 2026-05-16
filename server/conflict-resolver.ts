@@ -81,7 +81,22 @@ export async function logAssumptions(
   console.log(`[ConflictResolver] Logged ${values.length} assumptions for plan ${planId}`);
 }
 
-export async function getAssumptionsForPlan(planId: string) {
+// SECURITY: every caller MUST supply the requesting accountId so this query
+// is scoped to plans the caller owns. Without it the endpoint was a direct
+// IDOR — any authenticated user could read strategic assumptions for any
+// plan ID in the system.
+export async function getAssumptionsForPlan(planId: string, accountId?: string) {
+  if (!accountId) {
+    // Hard refuse: callers from request handlers MUST pass accountId.
+    throw new Error("getAssumptionsForPlan requires accountId for ownership scoping");
+  }
+  // Validate ownership: the plan must belong to the requesting account.
+  const [owner] = await db.select({ id: strategicPlans.id })
+    .from(strategicPlans)
+    .where(and(eq(strategicPlans.id, planId), eq(strategicPlans.accountId, accountId)))
+    .limit(1);
+  if (!owner) return [];
+
   const rows = await db.select().from(planAssumptions)
     .where(eq(planAssumptions.planId, planId));
 
@@ -140,7 +155,9 @@ function detectImplicitAssumptions(planData: any, bizData: any): AssumptionEntry
 export function registerConflictResolverRoutes(app: Express) {
   app.get("/api/plan-assumptions/:planId", async (req: Request, res: Response) => {
     try {
-      const assumptions = await getAssumptionsForPlan(req.params.planId);
+      const accountId = resolveAccountId(req);
+      if (!accountId) return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
+      const assumptions = await getAssumptionsForPlan(req.params.planId, accountId);
       const highImpact = assumptions.filter(a => a.impactSeverity === "high");
       const lowConfidence = assumptions.filter(a => a.confidence === "low");
 
@@ -168,7 +185,12 @@ export function registerConflictResolverRoutes(app: Express) {
         .where(and(eq(businessDataLayer.campaignId, campaignId), eq(businessDataLayer.accountId, accountId)))
         .orderBy(desc(businessDataLayer.createdAt)).limit(1);
 
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      // SECURITY: scope plan lookup to the requesting account so a caller
+      // cannot probe foreign plan IDs through this endpoint.
+      const [plan] = await db.select().from(strategicPlans)
+        .where(and(eq(strategicPlans.id, planId), eq(strategicPlans.accountId, accountId)))
+        .limit(1);
+      if (!plan) return res.status(404).json({ success: false, error: "PLAN_NOT_FOUND" });
       const planData = plan?.planJson ? JSON.parse(plan.planJson) : null;
 
       const detected = detectImplicitAssumptions(planData, bizData);

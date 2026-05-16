@@ -877,8 +877,10 @@ export function registerOrchestratorRoutes(app: Express) {
     const { id } = req.params;
 
     try {
+      const callerAccountId = resolveAccountId(req);
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 (not 403) on accountId mismatch to avoid leaking blueprint existence across tenants.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found", requestId });
       }
 
@@ -951,8 +953,12 @@ export function registerOrchestratorRoutes(app: Express) {
   app.get("/api/strategic/orchestrate-status/:jobId", async (req: Request, res: Response) => {
     try {
       const { jobId } = req.params;
+      const callerAccountId = resolveAccountId(req);
       const [job] = await db.select().from(orchestratorJobs).where(eq(orchestratorJobs.id, jobId)).limit(1);
-      if (!job) {
+      // SECURITY: 404 on accountId mismatch — orchestratorPlan payload is
+      // tenant-private (contains strategic plan output). Avoid existence leak
+      // by returning JOB_NOT_FOUND rather than 403 across tenants.
+      if (!job || job.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "JOB_NOT_FOUND", message: "Job not found" });
       }
 
@@ -1031,9 +1037,11 @@ export function registerOrchestratorRoutes(app: Express) {
     const requestId = crypto.randomUUID();
     try {
       const { id } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
       }
 
@@ -1162,9 +1170,11 @@ export function registerOrchestratorRoutes(app: Express) {
     const requestId = crypto.randomUUID();
     try {
       const { id } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
       }
 
@@ -1236,9 +1246,11 @@ export function registerOrchestratorRoutes(app: Express) {
     const requestId = crypto.randomUUID();
     try {
       const { blueprintId } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
       }
 
@@ -1318,9 +1330,11 @@ export function registerOrchestratorRoutes(app: Express) {
   app.get("/api/strategic/blueprint/:blueprintId/plan-pdf", async (req: Request, res: Response) => {
     try {
       const { blueprintId } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND" });
       }
 
@@ -1362,9 +1376,11 @@ export function registerOrchestratorRoutes(app: Express) {
   app.get("/api/strategic/blueprint/:id/plan-status", async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND" });
       }
 
@@ -1449,8 +1465,20 @@ export function registerOrchestratorRoutes(app: Express) {
     try {
       const { id: blueprintId } = req.params;
 
+      // SECURITY: enforce ownership. Previously this route only checked that
+      // the blueprint existed, allowing any authenticated user to read the
+      // strategy document of any other account by blueprint ID (IDOR).
+      const accountId = resolveAccountId(req);
+      if (!accountId) {
+        return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
+      }
+
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
       if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found." });
+      }
+      if (blueprint.accountId !== accountId) {
+        // Return 404 (not 403) to avoid leaking blueprint-ID existence across accounts.
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found." });
       }
 

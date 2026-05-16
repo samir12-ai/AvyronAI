@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApiUrl, authFetch, queryClient } from '@/lib/query-client';
 import { useAuth } from './AuthContext';
@@ -59,43 +59,61 @@ interface CampaignContextValue {
 const CampaignContext = createContext<CampaignContextValue | null>(null);
 
 export function CampaignProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const userId = user?.id ?? null;
   const [campaigns, setCampaigns] = useState<CampaignInfo[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignSelection | null>(null);
   const [warning, setWarning] = useState<CampaignWarning | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // SECURITY: the LIVE auth identity is mirrored into a ref so async
+  // fetchers can compare their captured-at-dispatch userId against the
+  // CURRENT identity at commit time. Comparing closure-captured userId to
+  // itself (`issuedFor !== userId` where both come from the same closure)
+  // is meaningless — only a ref reflects the post-switch value.
+  const currentUserIdRef = useRef<string | null>(userId);
+  useEffect(() => {
+    currentUserIdRef.current = userId;
+  }, [userId]);
+
   const refreshCampaigns = useCallback(async () => {
+    const issuedFor = userId;
     try {
       const res = await authFetch(getApiUrl('/api/campaigns'));
-      if (res.ok) {
-        const data = await res.json();
-        setCampaigns(data.campaigns || []);
-      }
+      if (!res.ok) return;
+      const data = await res.json();
+      if (currentUserIdRef.current !== issuedFor) return;
+      setCampaigns(data.campaigns || []);
     } catch (err) {
       console.error('[CampaignContext] Failed to fetch campaigns:', err);
     }
-  }, []);
+  }, [userId]);
 
   const refreshSelection = useCallback(async () => {
+    const issuedFor = userId;
     try {
       const res = await authFetch(getApiUrl('/api/campaigns/selected'));
-      if (res.ok) {
-        const data = await res.json();
-        if (data.selected && data.selection) {
-          setSelectedCampaign(data.selection);
-          setWarning(data.warning || null);
-        } else {
-          setSelectedCampaign(null);
-          setWarning(null);
-        }
+      if (!res.ok) return;
+      const data = await res.json();
+      if (currentUserIdRef.current !== issuedFor) return;
+      if (data.selected && data.selection) {
+        setSelectedCampaign(data.selection);
+        setWarning(data.warning || null);
+      } else {
+        setSelectedCampaign(null);
+        setWarning(null);
       }
     } catch (err) {
       console.error('[CampaignContext] Failed to fetch selection:', err);
     }
-  }, []);
+  }, [userId]);
 
+  // SECURITY: every mutation handler — like the loaders above — captures the
+  // userId at dispatch and gates its setState commits on the LIVE ref. If the
+  // user switches accounts mid-flight, the response cannot paint into the
+  // new account's context.
   const selectCampaign = useCallback(async (campaign: CampaignInfo) => {
+    const issuedFor = userId;
     try {
       const res = await authFetch(getApiUrl('/api/campaigns/select'), {
         method: 'POST',
@@ -111,6 +129,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
       if (res.ok) {
         const data = await res.json();
+        if (currentUserIdRef.current !== issuedFor) return;
         setSelectedCampaign(data.selection);
         setWarning(null);
         // P1 isolation seal: invalidate every campaign-scoped cache entry so
@@ -130,9 +149,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       console.error('[CampaignContext] Failed to select campaign:', err);
       throw err;
     }
-  }, []);
+  }, [userId]);
 
   const createCampaign = useCallback(async (input: CreateCampaignInput) => {
+    const issuedFor = userId;
     try {
       const res = await authFetch(getApiUrl('/api/campaigns/create'), {
         method: 'POST',
@@ -142,6 +162,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
       if (res.ok) {
         const data = await res.json();
+        if (currentUserIdRef.current !== issuedFor) return;
         setSelectedCampaign(data.selection);
         setWarning(null);
         const newCampaign: CampaignInfo = data.campaign;
@@ -154,15 +175,17 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       console.error('[CampaignContext] Failed to create campaign:', err);
       throw err;
     }
-  }, []);
+  }, [userId]);
 
   const deleteCampaign = useCallback(async (campaignId: string) => {
+    const issuedFor = userId;
     try {
       const res = await authFetch(getApiUrl(`/api/campaigns/${campaignId}`), {
         method: 'DELETE',
       });
 
       if (res.ok) {
+        if (currentUserIdRef.current !== issuedFor) return;
         setCampaigns(prev => prev.filter(c => c.id !== campaignId));
         if (selectedCampaign?.selectedCampaignId === campaignId) {
           setSelectedCampaign(null);
@@ -176,11 +199,13 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       console.error('[CampaignContext] Failed to delete campaign:', err);
       throw err;
     }
-  }, [selectedCampaign]);
+  }, [selectedCampaign, userId]);
 
   const clearSelection = useCallback(async () => {
+    const issuedFor = userId;
     try {
       await authFetch(getApiUrl('/api/campaigns/selected'), { method: 'DELETE' });
+      if (currentUserIdRef.current !== issuedFor) return;
       setSelectedCampaign(null);
       setWarning(null);
       // P1 isolation seal: drop all campaign-scoped cached data on
@@ -195,23 +220,34 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('[CampaignContext] Failed to clear selection:', err);
     }
-  }, []);
+  }, [userId]);
 
+  // SECURITY: keyed on `userId` (not just `isAuthenticated`) so account
+  // switches re-run the effect. Before this fix, switching from User A to
+  // User B left `selectedCampaign` and `campaigns` populated with User A's
+  // data because `isAuthenticated` stayed `true` across the swap, causing a
+  // cross-account leak visible to the user.
   useEffect(() => {
     if (authLoading) return;
-    if (!isAuthenticated) {
-      setCampaigns([]);
-      setSelectedCampaign(null);
+    // Reset to a clean slate FIRST so React paints empty state for one frame
+    // instead of flashing the previous account's data while the fetch is in
+    // flight.
+    setCampaigns([]);
+    setSelectedCampaign(null);
+    setWarning(null);
+    if (!isAuthenticated || !userId) {
       setIsLoading(false);
       return;
     }
+    let cancelled = false;
     async function init() {
       setIsLoading(true);
       await Promise.all([refreshCampaigns(), refreshSelection()]);
-      setIsLoading(false);
+      if (!cancelled) setIsLoading(false);
     }
     init();
-  }, [refreshCampaigns, refreshSelection, isAuthenticated, authLoading]);
+    return () => { cancelled = true; };
+  }, [refreshCampaigns, refreshSelection, isAuthenticated, authLoading, userId]);
 
   const isCampaignSelected = !!selectedCampaign && !warning;
   const selectedCampaignId = selectedCampaign?.selectedCampaignId ?? null;

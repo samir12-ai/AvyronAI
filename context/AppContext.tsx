@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { BrandProfile, ContentItem, Campaign, Ad, AnalyticsData, DailyMetric, PlatformConnection, PostingSchedule, MediaItem, ScheduledPost, MetaConnection } from '@/lib/types';
 import * as storage from '@/lib/storage';
+import { useAuth } from './AuthContext';
 
 interface AppContextValue {
   brandProfile: BrandProfile;
@@ -82,6 +83,8 @@ function generateMockWeeklyMetrics(): DailyMetric[] {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const authUserId = user?.id ?? null;
   const [brandProfile, setBrandProfileState] = useState<BrandProfile>({
     name: '',
     industry: '',
@@ -101,7 +104,80 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [weeklyMetrics] = useState<DailyMetric[]>(generateMockWeeklyMetrics());
   const [advancedMode, setAdvancedModeState] = useState(false);
 
+  // SECURITY: live auth identity is mirrored into a ref so async loads
+  // compare their captured-at-dispatch authUserId against the CURRENT
+  // identity at commit time. Comparing closure-captured authUserId to
+  // itself (same closure) is meaningless — only a ref reflects the
+  // post-switch value during an in-flight load.
+  const currentAuthUserIdRef = useRef<string | null>(authUserId);
+  useEffect(() => {
+    currentAuthUserIdRef.current = authUserId;
+  }, [authUserId]);
+
+  // SECURITY: on user-id change, IMMEDIATELY reset every piece of in-memory
+  // state to empty defaults so the UI cannot render User A's brand /
+  // campaigns / ads / media for a single frame while the new namespace is
+  // fetched. Then load the new account's data behind an epoch guard so a
+  // late-arriving response from a previous account cannot overwrite the
+  // current account's state.
+  useEffect(() => {
+    const issuedFor = authUserId;
+    setBrandProfileState({
+      name: '',
+      industry: '',
+      tone: 'Professional',
+      targetAudience: '',
+      platforms: ['Instagram', 'Facebook'],
+    });
+    setContentItems([]);
+    setCampaigns([]);
+    setAds([]);
+    setPlatformConnections([]);
+    setPostingSchedules([]);
+    setMediaItems([]);
+    setScheduledPosts([]);
+    setMetaConnectionState({ isConnected: false });
+    setAdvancedModeState(false);
+    setIsLoading(true);
+
+    (async () => {
+      try {
+        const [profile, items, campaignList, adList, connections, schedules, media, scheduled, meta] = await Promise.all([
+          storage.getBrandProfile(),
+          storage.getContentItems(),
+          storage.getCampaigns(),
+          storage.getAds(),
+          storage.getPlatformConnections(),
+          storage.getPostingSchedules(),
+          storage.getMediaItems(),
+          storage.getScheduledPosts(),
+          storage.getMetaConnection(),
+        ]);
+        if (currentAuthUserIdRef.current !== issuedFor) return; // account swapped mid-load
+        setBrandProfileState(profile);
+        setContentItems(items);
+        setCampaigns(campaignList);
+        setAds(adList);
+        setPlatformConnections(connections);
+        setPostingSchedules(schedules);
+        setMediaItems(media);
+        setScheduledPosts(scheduled);
+        setMetaConnectionState(meta);
+        const savedMode = await AsyncStorage.getItem('advancedMode');
+        if (currentAuthUserIdRef.current !== issuedFor) return;
+        if (savedMode === 'true') setAdvancedModeState(true);
+      } catch (error) {
+        console.error('Error loading data:', error);
+      } finally {
+        if (currentAuthUserIdRef.current === issuedFor) setIsLoading(false);
+      }
+    })();
+  }, [authUserId]);
+
   const loadData = async () => {
+    // Backwards-compat shim for `refreshData` callers. Re-runs the same
+    // epoch-guarded load against the current auth identity.
+    const issuedFor = authUserId;
     setIsLoading(true);
     try {
       const [profile, items, campaignList, adList, connections, schedules, media, scheduled, meta] = await Promise.all([
@@ -115,6 +191,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         storage.getScheduledPosts(),
         storage.getMetaConnection(),
       ]);
+      if (currentAuthUserIdRef.current !== issuedFor) return;
       setBrandProfileState(profile);
       setContentItems(items);
       setCampaigns(campaignList);
@@ -125,17 +202,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setScheduledPosts(scheduled);
       setMetaConnectionState(meta);
       const savedMode = await AsyncStorage.getItem('advancedMode');
+      if (currentAuthUserIdRef.current !== issuedFor) return;
       if (savedMode === 'true') setAdvancedModeState(true);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
-      setIsLoading(false);
+      if (currentAuthUserIdRef.current === issuedFor) setIsLoading(false);
     }
   };
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   const setBrandProfile = async (profile: BrandProfile) => {
     setBrandProfileState(profile);
