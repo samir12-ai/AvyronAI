@@ -1,0 +1,109 @@
+I want a new frontend/UX layer focused on making the product understandable, polished, and market-friendly before beta.
+
+Goal:
+translate technical system language into simple customer language across the entire frontend.
+
+This is NOT only for the control panel.
+
+Today, language/settings mode seems to apply mostly to controls/admin areas. I want the selected user language to apply globally across the customer experience.
+
+Scope:
+
+1. Global language application
+
+* Apply selected language across the whole app
+* Dashboard
+* Plans
+* Recommendations
+* Strategy outputs
+* Alerts/notices
+* Onboarding
+* Settings
+* Empty states
+* Error states
+* Degraded/confidence messages
+* Operational notices that become user-facing later
+
+2. Simplify terminology
+   Replace technical/internal terms with market-friendly language.
+
+Avoid exposing:
+
+* pipeline
+* orchestration
+* degraded
+* watchdog
+* retry loop
+* snapshot
+* claims
+* workers
+* confidence engine
+* validation state
+* raw system/control terminology
+
+Use simpler concepts:
+
+* market signals
+* recommendation confidence
+* data freshness
+* strategy update
+* content performance
+* competitor activity
+* growth signals
+* waiting for updated data
+* plan quality
+* source strength
+
+3. Language quality
+   For every supported language:
+
+* simple wording
+* non-technical phrasing
+* professional tone
+* no literal machine translation
+* no confusing AI/system words
+* clear business language
+* short sentences
+* user-friendly explanations
+
+4. UX copy registry
+   Create or audit a central copy/translation layer so we do not scatter strings across screens.
+
+I want:
+
+* copy keys
+* language files
+* fallback language behavior
+* missing-translation detection
+* no raw internal strings leaking to users
+
+5. Customer-facing trust language
+   Rewrite confidence/degraded states into calm market language.
+
+Example:
+BAD:
+“Plan degraded due to incomplete input.”
+
+GOOD:
+“Some market data is still updating, so this plan is marked as lower confidence.”
+
+BAD:
+“Scheduler retry loop detected.”
+
+GOOD:
+“Updates are taking longer than usual. We’re still monitoring your campaign.”
+
+6. Deliverables
+   Please provide:
+
+* frontend language audit
+* list of raw/technical terms found
+* proposed replacements
+* translation architecture plan
+* implementation of global language application
+* simplified copy pass across customer screens
+* tests or checks for missing translations
+* architect review after implementation
+
+Important:
+This should make Avyron feel simple, premium, and understandable to non-technical business users in every supported language.
