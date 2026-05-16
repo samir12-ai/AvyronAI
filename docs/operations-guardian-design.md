@@ -286,6 +286,22 @@ export const USER_COPY: Record<UserVisibleCategory, UserCopyTemplate> = {
 
 This is the **firewall**. The Guardian classifier looks up `USER_COPY[category]` before it can write `audience='user'`. If the lookup misses, audience stays at `operator`. New user-visible categories require explicit copy review before they can leak.
 
+### 6.1 Copy doctrine (operator-approved, May 16 2026)
+
+Every entry added to `USER_COPY` MUST satisfy all seven rules below. The PR reviewer checks line-by-line; failing any rule blocks the PR. The canonical machine-checkable copy of these rules lives as a comment block above `USER_COPY` in `server/operations-guardian/types.ts` — keep both in sync.
+
+1. **Calm reassurance, not incident language.** Reads like a confident operational update, not an outage page or status-incident report.
+2. **Never make the system sound unstable or broken.** Customer's mental model after reading must be "the system is mature and pacing itself", not "the system is having problems".
+3. **No technical or runtime terminology.** No infrastructure words. No third-party provider names unless explicitly approved per-category. No internal taxonomy leak.
+4. **Frame as impact on recommendations / confidence — not as infrastructure behavior.**
+   - GOOD: *"We're waiting for updated market signals before generating a high-confidence recommendation."*
+   - BAD: *"Instagram scraping is degraded and retrying."*
+5. **Preferred phrasing:** *temporary pacing, refresh delay, waiting for updated signals, reduced confidence, refining, automatically resume/refresh.*
+6. **Forbidden words** (case-insensitive) in any `defaultTitle` / `defaultBody`: `failure, failed, crashed, broken, blocked, stuck, degraded, retry loop, provider issue, infrastructure issue, outage, incident, error, exception, timeout, queue, worker, scraper, pipeline`. (These remain fully allowed in operator/internal copy paths.)
+7. **Tone targets.** Aim for: *calm, professional, transparent, confidence-preserving, operationally mature.* Avoid: *alarming, defensive, overly technical, incident-report style, apologetic, hedging.*
+
+The §8 step #8 unlock checklist for any category requires a same-PR test asserting **every word in rule 6 is absent** from every `defaultTitle` and `defaultBody` for the unlocked category — a regex test, not a manual review (manual review is rule 1–5/7, the regex covers rule 6 mechanically).
+
 ---
 
 ## 7. What stays internal-only (forever)

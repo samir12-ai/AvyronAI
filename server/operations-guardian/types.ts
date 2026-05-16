@@ -68,6 +68,56 @@ export function isNoticeCategory(v: string): v is NoticeCategory {
 //   2. Same-PR test that the rendered string passes the no-tech-leak
 //      regex check.
 //   3. UI surface (banner / footnote) wired to read it.
+//
+// ── COPY DOCTRINE (operator-approved, May 16 2026) ───────────────────
+// Any entry added to USER_COPY MUST satisfy ALL of the following.
+// Reviewer of the PR is responsible for line-by-line check. Failing
+// any rule = block the PR, do not negotiate.
+//
+//   1. CALM REASSURANCE, NOT INCIDENT LANGUAGE.
+//      The notice must read like a confident operational update, not
+//      like an outage page or status-incident report.
+//
+//   2. NEVER MAKE THE SYSTEM SOUND UNSTABLE OR BROKEN.
+//      The customer's mental model after reading must be "the system
+//      is mature and pacing itself", not "the system is having
+//      problems".
+//
+//   3. NO TECHNICAL OR RUNTIME TERMINOLOGY.
+//      No infrastructure words. No third-party provider names unless
+//      explicitly approved per-category. No internal taxonomy leak.
+//
+//   4. FRAME AS IMPACT ON RECOMMENDATIONS / CONFIDENCE — NOT AS
+//      INFRASTRUCTURE BEHAVIOR.
+//      GOOD: "We're waiting for updated market signals before
+//             generating a high-confidence recommendation."
+//      BAD:  "Instagram scraping is degraded and retrying."
+//
+//   5. PREFERRED PHRASING:
+//      - "temporary pacing"
+//      - "refresh delay"
+//      - "waiting for updated signals"
+//      - "reduced confidence"
+//      - "refining"
+//      - "automatically resume / refresh"
+//
+//   6. FORBIDDEN WORDS in user-facing copy (case-insensitive):
+//      failure, failed, crashed, broken, blocked, stuck, degraded,
+//      retry loop, provider issue, infrastructure issue, outage,
+//      incident, error, exception, timeout, queue, worker, scraper,
+//      pipeline.
+//      (These remain fully allowed in operator/internal copy paths.)
+//
+//   7. TONE TARGETS:
+//      Aim for: calm, professional, transparent, confidence-preserving,
+//               operationally mature.
+//      Avoid:   alarming, defensive, overly technical, incident-report
+//               style, apologetic, hedging.
+//
+// The no-tech-leak regex test (rule 2 of the unlock checklist) MUST
+// assert all forbidden words from rule 6 above are absent from every
+// `defaultTitle` and `defaultBody` in this map.
+// ─────────────────────────────────────────────────────────────────────
 export interface UserCopyTemplate {
   titleKey: string;
   bodyKey: string;
