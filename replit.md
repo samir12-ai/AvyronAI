@@ -295,6 +295,10 @@ Validation: `.local/validation/marketing-logic-upgrade-proof.{ts,md,json}` prove
 
 If the AI judge returns final REJECTED in any module, the module returns `null` and the engine continues with its legacy output — pipeline never breaks.
 
+### Operations Guardian — OBS-C (Task #60)
+
+Per-provider keying for AI burst collectors: `AI_TIMEOUT_BURST:<provider>` and `AI_PROVIDER_FAILURE_BURST:<provider>` (was `:global`). New `PROVIDER_INSTABILITY:<provider>` cross-signal correlator emits ONE rollup notice (operator-audience only, no USER_COPY promotion, no auto-recovery) when ≥2 of {timeout-burst, failure-burst, latency-degraded} fire for the same provider in the same tick; severity = max via explicit `severityRank()` integer mapping (D1-safe). 69/69 deterministic scenarios pass. Full report: [`.local/docs/audits/operations-guardian-obs-c-2026-05.md`](.local/docs/audits/operations-guardian-obs-c-2026-05.md).
+
 ---
 
 ## Seal archive index

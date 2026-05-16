@@ -427,25 +427,29 @@ function collectAIPressureSignals(now: Date): ClassifiedNotice[] {
     });
   }
 
-  if (stats.timeoutCount >= 3) {
+  // OBS-C (Task #60): per-provider keying for AI_TIMEOUT_BURST. The
+  // aggregator's `timeoutsByProvider` map carries one entry per provider
+  // observed in the 15-min window. We emit one notice per provider whose
+  // count crosses the warning floor (≥3) — `:openai`, `:gemini`, etc.
+  // — instead of a single `:global` row that collapses providers
+  // together. Severity bands unchanged from Task #59.
+  for (const [provider, count] of Object.entries(stats.timeoutsByProvider)) {
+    if (count < 3) continue;
     const sev: NoticeSeverity =
-      stats.timeoutCount >= 25
-        ? "critical"
-        : stats.timeoutCount >= 10
-          ? "degraded"
-          : "warning";
+      count >= 25 ? "critical" : count >= 10 ? "degraded" : "warning";
     out.push({
       category: "AI_TIMEOUT_BURST",
       severity: sev,
       audience: "operator",
-      correlationKey: "AI_TIMEOUT_BURST:global",
+      correlationKey: `AI_TIMEOUT_BURST:${provider}`,
       accountId: null,
       campaignId: null,
       copyKey: "operator.ai_timeout_burst",
-      copyVars: { count: stats.timeoutCount, windowMinutes: 15 },
+      copyVars: { provider, count, windowMinutes: 15 },
       detail: {
         observedAt: isoNow,
-        count: stats.timeoutCount,
+        provider,
+        count,
         windowMs: 15 * 60 * 1000,
       },
     });
@@ -456,26 +460,25 @@ function collectAIPressureSignals(now: Date): ClassifiedNotice[] {
   // severity bands as AI_TIMEOUT_BURST, but kept as its own canonical
   // category per D2 ("every meaning has its own canonical field") so
   // operators can distinguish "we hit the wall clock" from "the
-  // provider returned an error".
-  if (stats.failureCount >= 3) {
+  // provider returned an error". OBS-C: per-provider keying — see the
+  // AI_TIMEOUT_BURST loop above for rationale.
+  for (const [provider, count] of Object.entries(stats.failuresByProvider)) {
+    if (count < 3) continue;
     const sev: NoticeSeverity =
-      stats.failureCount >= 25
-        ? "critical"
-        : stats.failureCount >= 10
-          ? "degraded"
-          : "warning";
+      count >= 25 ? "critical" : count >= 10 ? "degraded" : "warning";
     out.push({
       category: "AI_PROVIDER_FAILURE_BURST",
       severity: sev,
       audience: "operator",
-      correlationKey: "AI_PROVIDER_FAILURE_BURST:global",
+      correlationKey: `AI_PROVIDER_FAILURE_BURST:${provider}`,
       accountId: null,
       campaignId: null,
       copyKey: "operator.ai_provider_failure_burst",
-      copyVars: { count: stats.failureCount, windowMinutes: 15 },
+      copyVars: { provider, count, windowMinutes: 15 },
       detail: {
         observedAt: isoNow,
-        count: stats.failureCount,
+        provider,
+        count,
         windowMs: 15 * 60 * 1000,
       },
     });
@@ -508,6 +511,102 @@ function collectAIPressureSignals(now: Date): ClassifiedNotice[] {
     });
   }
 
+  return out;
+}
+
+// OBS-C (Task #60) — cross-signal correlator.
+//
+// When ≥2 of {timeout burst, failure burst, latency degraded} fire for
+// the SAME provider in the SAME tick, surface a single rollup notice
+// `PROVIDER_INSTABILITY:<provider>` instead of leaving the operator to
+// re-correlate three sibling rows by eye. AI_QUOTA_PRESSURE (middleware
+// self-throttle, global) and INFERENCE_CONFIDENCE_DEGRADED (AEL-scoped,
+// not per-provider) are intentionally NOT components — they observe
+// different surfaces and rolling them into a provider instability
+// verdict would be semantically wrong (D2 separation of meanings).
+//
+// Doctrine compliance:
+//   * D1: no `??`/`||` semantic fallback. severityRank() maps each
+//     enum value to a numeric rank explicitly; the rollup severity is
+//     the component max via direct comparison.
+//   * D2: PROVIDER_INSTABILITY is its own canonical category — does NOT
+//     overload AI_TIMEOUT_BURST/AI_PROVIDER_FAILURE_BURST/AI_LATENCY_DEGRADED
+//     semantics. The component notices ALSO remain in `out`; the rollup
+//     is additive.
+//   * D5: caller MUST observe AI collector before correlator runs; the
+//     correlator over an unobserved AI collector returns []. Wired in
+//     `runGuardianInterpreterStep` below.
+
+const COMPONENT_CATEGORIES = new Set<NoticeCategory>([
+  "AI_TIMEOUT_BURST",
+  "AI_PROVIDER_FAILURE_BURST",
+  "AI_LATENCY_DEGRADED",
+]);
+
+function severityRank(s: NoticeSeverity): number {
+  if (s === "info") return 0;
+  if (s === "warning") return 1;
+  if (s === "degraded") return 2;
+  return 3; // "critical"
+}
+
+function buildProviderInstabilityCorrelations(
+  aiNotices: readonly ClassifiedNotice[],
+  now: Date,
+): ClassifiedNotice[] {
+  interface PerProvider {
+    components: { category: NoticeCategory; severity: NoticeSeverity }[];
+    maxSeverity: NoticeSeverity;
+  }
+  const byProvider = new Map<string, PerProvider>();
+
+  for (const n of aiNotices) {
+    if (!COMPONENT_CATEGORIES.has(n.category)) continue;
+    const provider = typeof n.detail.provider === "string" ? n.detail.provider : null;
+    if (provider === null) continue;
+    const existing = byProvider.get(provider);
+    if (existing === undefined) {
+      byProvider.set(provider, {
+        components: [{ category: n.category, severity: n.severity }],
+        maxSeverity: n.severity,
+      });
+      continue;
+    }
+    existing.components.push({ category: n.category, severity: n.severity });
+    if (severityRank(n.severity) > severityRank(existing.maxSeverity)) {
+      existing.maxSeverity = n.severity;
+    }
+  }
+
+  const out: ClassifiedNotice[] = [];
+  const isoNow = now.toISOString();
+  for (const [provider, agg] of byProvider.entries()) {
+    if (agg.components.length < 2) continue;
+    out.push({
+      category: "PROVIDER_INSTABILITY",
+      severity: agg.maxSeverity,
+      audience: "operator",
+      correlationKey: `PROVIDER_INSTABILITY:${provider}`,
+      accountId: null,
+      campaignId: null,
+      copyKey: "operator.provider_instability",
+      copyVars: {
+        provider,
+        componentCount: agg.components.length,
+        maxSeverity: agg.maxSeverity,
+      },
+      detail: {
+        observedAt: isoNow,
+        provider,
+        // Sorted for stable detail ordering — operators reading the JSON
+        // see a deterministic list regardless of which collector pushed
+        // its component first.
+        components: agg.components
+          .map((c) => ({ category: c.category, severity: c.severity }))
+          .sort((a, b) => a.category.localeCompare(b.category)),
+      },
+    });
+  }
   return out;
 }
 
@@ -788,6 +887,16 @@ export async function runGuardianInterpreterStep(
     collectChainSignals(input),
   );
 
+  // OBS-C (Task #60): correlator runs over the AI collector's output
+  // only — no new side-channel data. Failure of the AI collector means
+  // no rollup notices are produced this tick (the component categories
+  // are not "fully observed" so the resolver also skips them, leaving
+  // any open PROVIDER_INSTABILITY row intact until the next successful
+  // observation cycle).
+  const correlations = aiPressure.ok
+    ? buildProviderInstabilityCorrelations(aiPressure.notices, input.now)
+    : [];
+
   const all: ClassifiedNotice[] = [
     ...leaked.notices,
     ...stuck.notices,
@@ -795,6 +904,7 @@ export async function runGuardianInterpreterStep(
     ...scraper.notices,
     ...marketData.notices,
     ...aiPressure.notices,
+    ...correlations,
     ...inference.notices,
     ...chain.notices,
   ];
@@ -826,6 +936,12 @@ export async function runGuardianInterpreterStep(
     fullyObserved.add("AI_TIMEOUT_BURST");
     fullyObserved.add("AI_PROVIDER_FAILURE_BURST");
     fullyObserved.add("AI_LATENCY_DEGRADED");
+    // OBS-C: correlator is a pure function of the AI collector's output,
+    // so it is fully observed iff its inputs are fully observed. Sweep
+    // semantics: if no component fires for a provider this tick, any
+    // open PROVIDER_INSTABILITY row for that provider correctly
+    // resolves.
+    fullyObserved.add("PROVIDER_INSTABILITY");
   }
   if (inference.ok && !inference.capped) {
     fullyObserved.add("INFERENCE_CONFIDENCE_DEGRADED");

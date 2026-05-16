@@ -16,7 +16,9 @@
 //     captures observations about calls that already happened.
 //   * D1–D5 — outcome enum is a strict union (`success | timeout |
 //     failed`); collector reads return strict-typed numbers + a
-//     dedicated `partialReasons` map. No `??`/`||` semantic fallback.
+//     dedicated `partialReasons` map. Per-provider buckets are exposed
+//     as explicit `timeoutsByProvider` / `failuresByProvider` maps —
+//     NOT a polysemous "events" field. No `??`/`||` semantic fallback.
 //
 // Memory bounds:
 //   * Per-window arrays are HARD-CAPPED at MAX_SAMPLES entries. When the
@@ -34,8 +36,14 @@ const MAX_LATENCY_SAMPLES_PER_PROVIDER = 500;
 
 export type AICallOutcome = "success" | "timeout" | "failed";
 
+// OBS-C (Task #60): timeouts and failures now carry `provider` so the
+// burst collectors can emit per-provider correlation keys. Callers that
+// do not know the provider (none today — both ai-client paths know it)
+// would pass the literal string "unknown"; the collector then falls
+// back to the legacy `:global` key for that bucket only.
 interface OutcomeStamp {
   at: number;
+  provider: string;
 }
 
 interface LatencySample {
@@ -50,7 +58,7 @@ interface PartialStamp {
 
 const timeouts: OutcomeStamp[] = [];
 const failures: OutcomeStamp[] = [];
-const rateLimits: OutcomeStamp[] = [];
+const rateLimits: { at: number }[] = [];
 const partials: PartialStamp[] = [];
 const latencyByProvider = new Map<string, LatencySample[]>();
 
@@ -80,7 +88,7 @@ export function recordAICallOutcome(args: {
     return;
   }
   if (args.outcome === "timeout") {
-    timeouts.push({ at: now });
+    timeouts.push({ at: now, provider: args.provider });
     trimToCap(timeouts, MAX_SAMPLES);
     return;
   }
@@ -88,7 +96,7 @@ export function recordAICallOutcome(args: {
   // resets, AI_CALL_FAILED). Surfaced as its own Guardian category
   // AI_PROVIDER_FAILURE_BURST per D2 doctrine ("every meaning has its
   // own canonical field"). Same 15-min window shape as timeouts.
-  failures.push({ at: now });
+  failures.push({ at: now, provider: args.provider });
   trimToCap(failures, MAX_SAMPLES);
 }
 
@@ -106,6 +114,12 @@ export interface AIPressureStats {
   rateLimit429Count: number;
   timeoutCount: number;
   failureCount: number;
+  // OBS-C: per-provider breakdowns. Keys are provider names exactly as
+  // recorded by callers; values are counts within the same 15-min
+  // window as the global total. Sum of values may be ≤ total when the
+  // FIFO cap evicted entries (the same caveat applies to the total).
+  timeoutsByProvider: Record<string, number>;
+  failuresByProvider: Record<string, number>;
   partialCount: number;
   partialReasons: Record<string, number>;
   latencyByProvider: Record<
@@ -119,6 +133,14 @@ function p95(samples: number[]): number {
   const sorted = [...samples].sort((a, b) => a - b);
   const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));
   return sorted[idx]!;
+}
+
+function tallyByProvider(stamps: OutcomeStamp[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const s of stamps) {
+    out[s.provider] = (out[s.provider] ?? 0) + 1;
+  }
+  return out;
 }
 
 export function _aiPressureStats(now: number = Date.now()): AIPressureStats {
@@ -150,6 +172,8 @@ export function _aiPressureStats(now: number = Date.now()): AIPressureStats {
     rateLimit429Count: rateLimits.length,
     timeoutCount: timeouts.length,
     failureCount: failures.length,
+    timeoutsByProvider: tallyByProvider(timeouts),
+    failuresByProvider: tallyByProvider(failures),
     partialCount: partials.length,
     partialReasons,
     latencyByProvider: latency,

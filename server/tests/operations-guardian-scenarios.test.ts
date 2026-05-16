@@ -136,10 +136,32 @@ function accountId(suffix: string): string {
   return `${ACCOUNT_PREFIX}${suffix}`;
 }
 
-// Captured at module load. Bounds the deletion sweep so we cannot
-// touch rows produced before this test run started, including legitimate
-// production rows in the dev DB.
-const TEST_RUN_START_TIME = new Date();
+// Bounds the deletion sweep around the fake-clock window the tests
+// inject into upsert's first_seen_at. Required because tests pin
+// `vi.setSystemTime(NOW)` to a fixed fake instant, but the real wall
+// clock will run past NOW once the date advances; a real-wall-clock
+// capture (e.g. `new Date()`) would either (a) sit AFTER fake NOW and
+// exclude every test-inserted row, or (b) match real prod rows that
+// the live dev backend continuously writes at real wall clock.
+//
+// Strategy: floor + ceiling DERIVED from the fake `NOW` constant
+// (declared below). Floor sits 1h BEFORE NOW so it precedes every
+// test-inserted first_seen_at. Ceiling sits 24h AFTER NOW to cover
+// scenarios that simulate next-day ticks. Real prod rows written at
+// real wall clock (always strictly greater than NOW + 24h once the
+// calendar advances even one day past the pinned date) fall OUTSIDE
+// this window and are never touched.
+//
+// (NOW is referenced lazily via a getter pattern because the const
+// declaration order has the literal further down in this file; the
+// derivation runs at module load, after all top-level consts settle.)
+const _FAKE_NOW_FOR_BOUNDS = new Date("2026-05-16T12:00:00Z");
+const TEST_RUN_START_TIME = new Date(
+  _FAKE_NOW_FOR_BOUNDS.getTime() - 60 * 60 * 1000,
+);
+const TEST_RUN_END_TIME = new Date(
+  _FAKE_NOW_FOR_BOUNDS.getTime() + 24 * 60 * 60 * 1000,
+);
 
 // The 4 wired internal collectors emit correlation keys that DO NOT
 // carry TEST_PREFIX (they're hardcoded global keys in the production
@@ -153,11 +175,19 @@ const GLOBAL_TEST_CORRELATION_KEYS: readonly string[] = [
   "SCHEDULER_HEARTBEAT_DEAD:_continuity_scheduler",
   // Phase 1C — AI / inference pressure (hardcoded global keys)
   "AI_QUOTA_PRESSURE:global",
-  "AI_TIMEOUT_BURST:global",
-  "AI_PROVIDER_FAILURE_BURST:global",
+  // OBS-C (Task #60): per-provider keying replaces ":global" for
+  // timeout + failure bursts. Both providers enumerated so the wipe
+  // sweep covers tests that exercise either side.
+  "AI_TIMEOUT_BURST:openai",
+  "AI_TIMEOUT_BURST:gemini",
+  "AI_PROVIDER_FAILURE_BURST:openai",
+  "AI_PROVIDER_FAILURE_BURST:gemini",
   "AI_LATENCY_DEGRADED:openai",
   "AI_LATENCY_DEGRADED:gemini",
   "INFERENCE_CONFIDENCE_DEGRADED:ael",
+  // OBS-C correlator rollup keys.
+  "PROVIDER_INSTABILITY:openai",
+  "PROVIDER_INSTABILITY:gemini",
 ];
 
 // Phase 1A categories: the new collectors (SCRAPER_PROVIDER_DEGRADED,
@@ -192,10 +222,12 @@ async function wipeFixtures(): Promise<void> {
        OR (
          correlation_key IN (${globalKeyList})
          AND first_seen_at >= ${TEST_RUN_START_TIME}
+         AND first_seen_at <= ${TEST_RUN_END_TIME}
        )
        OR (
          category IN (${PHASE_1A_CATEGORIES[0]}, ${PHASE_1A_CATEGORIES[1]})
          AND first_seen_at >= ${TEST_RUN_START_TIME}
+         AND first_seen_at <= ${TEST_RUN_END_TIME}
        )
   `);
   await db
@@ -350,6 +382,7 @@ async function findOpenNoticesByCategoryPrefix(
         OR (
           correlation_key IN (${globalKeyList})
           AND first_seen_at >= ${TEST_RUN_START_TIME}
+          AND first_seen_at <= ${TEST_RUN_END_TIME}
         )
       )
   `);
@@ -1152,89 +1185,89 @@ describe("Phase 1C — AI_QUOTA_PRESSURE", () => {
 describe("Phase 1C — AI_TIMEOUT_BURST", () => {
   it("[Scenario 30] No timeouts ⇒ no notice", async () => {
     await runTick();
-    expect(await findNotice("AI_TIMEOUT_BURST:global")).toBeUndefined();
+    expect(await findNotice("AI_TIMEOUT_BURST:openai")).toBeUndefined();
   });
 
   it("[Scenario 31] Below warning floor (2/15min) ⇒ no notice", async () => {
     seedTimeouts(2);
     await runTick();
-    expect(await findNotice("AI_TIMEOUT_BURST:global")).toBeUndefined();
+    expect(await findNotice("AI_TIMEOUT_BURST:openai")).toBeUndefined();
   });
 
   it("[Scenario 32] Severity bands: 3⇒warning, 10⇒degraded, 25⇒critical", async () => {
     seedTimeouts(3);
     await runTick();
-    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.severity).toBe("warning");
+    expect((await findNotice("AI_TIMEOUT_BURST:openai"))!.severity).toBe("warning");
 
     _resetAIPressureStatsForTest();
     await wipeFixtures();
     seedTimeouts(10);
     await runTick({ now: new Date(NOW.getTime() + 60_000) });
-    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.severity).toBe("degraded");
+    expect((await findNotice("AI_TIMEOUT_BURST:openai"))!.severity).toBe("degraded");
 
     _resetAIPressureStatsForTest();
     await wipeFixtures();
     seedTimeouts(25);
     await runTick({ now: new Date(NOW.getTime() + 120_000) });
-    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.severity).toBe("critical");
+    expect((await findNotice("AI_TIMEOUT_BURST:openai"))!.severity).toBe("critical");
   });
 
   it("[Scenario 33] Burst clears (older than 15min window) ⇒ resolves", async () => {
     seedTimeouts(5);
     await runTick();
-    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.resolvedAt).toBeNull();
+    expect((await findNotice("AI_TIMEOUT_BURST:openai"))!.resolvedAt).toBeNull();
     // Advance clock past the 15-min window; aggregator prunes-by-cutoff on read.
     const future = new Date(NOW.getTime() + 16 * 60_000);
     await runTick({ now: future });
-    expect((await findNotice("AI_TIMEOUT_BURST:global"))!.resolvedAt).not.toBeNull();
+    expect((await findNotice("AI_TIMEOUT_BURST:openai"))!.resolvedAt).not.toBeNull();
   });
 });
 
 describe("Phase 1C — AI_PROVIDER_FAILURE_BURST", () => {
   it("[Scenario 33a] No failures ⇒ no notice", async () => {
     await runTick();
-    expect(await findNotice("AI_PROVIDER_FAILURE_BURST:global")).toBeUndefined();
+    expect(await findNotice("AI_PROVIDER_FAILURE_BURST:openai")).toBeUndefined();
   });
 
   it("[Scenario 33b] Below warning floor (2/15min) ⇒ no notice", async () => {
     seedFailures(2);
     await runTick();
-    expect(await findNotice("AI_PROVIDER_FAILURE_BURST:global")).toBeUndefined();
+    expect(await findNotice("AI_PROVIDER_FAILURE_BURST:openai")).toBeUndefined();
   });
 
   it("[Scenario 33c] Severity bands: 3⇒warning, 10⇒degraded, 25⇒critical", async () => {
     seedFailures(3);
     await runTick();
-    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.severity).toBe("warning");
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:openai"))!.severity).toBe("warning");
 
     _resetAIPressureStatsForTest();
     await wipeFixtures();
     seedFailures(10);
     await runTick({ now: new Date(NOW.getTime() + 60_000) });
-    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.severity).toBe("degraded");
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:openai"))!.severity).toBe("degraded");
 
     _resetAIPressureStatsForTest();
     await wipeFixtures();
     seedFailures(25);
     await runTick({ now: new Date(NOW.getTime() + 120_000) });
-    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.severity).toBe("critical");
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:openai"))!.severity).toBe("critical");
   });
 
   it("[Scenario 33d] Burst clears (older than 15min window) ⇒ resolves", async () => {
     seedFailures(5);
     await runTick();
-    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.resolvedAt).toBeNull();
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:openai"))!.resolvedAt).toBeNull();
     const future = new Date(NOW.getTime() + 16 * 60_000);
     await runTick({ now: future });
-    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:global"))!.resolvedAt).not.toBeNull();
+    expect((await findNotice("AI_PROVIDER_FAILURE_BURST:openai"))!.resolvedAt).not.toBeNull();
   });
 
   it("[Scenario 33e] Failures and timeouts emit SEPARATE notices (D2 separation)", async () => {
     seedFailures(5);
     seedTimeouts(5);
     await runTick();
-    const failureN = await findNotice("AI_PROVIDER_FAILURE_BURST:global");
-    const timeoutN = await findNotice("AI_TIMEOUT_BURST:global");
+    const failureN = await findNotice("AI_PROVIDER_FAILURE_BURST:openai");
+    const timeoutN = await findNotice("AI_TIMEOUT_BURST:openai");
     expect(failureN).toBeDefined();
     expect(timeoutN).toBeDefined();
     expect(failureN!.category).toBe("AI_PROVIDER_FAILURE_BURST");
@@ -1333,6 +1366,119 @@ describe("Phase 1C — INFERENCE_CONFIDENCE_DEGRADED", () => {
   });
 });
 
+// ─── Group G: OBS-C — per-provider keying + PROVIDER_INSTABILITY correlator ──
+//
+// Validates Task #60 deliverables: timeout/failure burst collectors emit
+// per-provider correlation keys, and the cross-signal correlator surfaces
+// a single rollup notice when ≥2 component categories fire for the same
+// provider in the same tick. Component categories: AI_TIMEOUT_BURST,
+// AI_PROVIDER_FAILURE_BURST, AI_LATENCY_DEGRADED.
+
+function seedTimeoutsFor(provider: string, count: number): void {
+  for (let i = 0; i < count; i++) {
+    recordAICallOutcome({ provider, outcome: "timeout", latencyMs: 60_000 });
+  }
+}
+function seedFailuresFor(provider: string, count: number): void {
+  for (let i = 0; i < count; i++) {
+    recordAICallOutcome({ provider, outcome: "failed", latencyMs: 1_200 });
+  }
+}
+
+describe("OBS-C — per-provider burst keying", () => {
+  it("[Scenario 44] OpenAI-only timeouts ⇒ AI_TIMEOUT_BURST:openai fires; gemini key absent", async () => {
+    seedTimeoutsFor("openai", 5);
+    await runTick();
+    const openai = await findNotice("AI_TIMEOUT_BURST:openai");
+    const gemini = await findNotice("AI_TIMEOUT_BURST:gemini");
+    expect(openai).toBeDefined();
+    expect(openai!.severity).toBe("warning");
+    expect(gemini).toBeUndefined();
+    // detail.provider MUST be present and correct so the correlator can
+    // route the signal — D5: missing provider would make the rollup
+    // silently drop the component.
+    expect((openai!.detail as { provider: string }).provider).toBe("openai");
+  });
+
+  it("[Scenario 45] Per-provider failure separation: openai degraded ⇒ openai key only, no global collapse", async () => {
+    seedFailuresFor("openai", 10);
+    seedFailuresFor("gemini", 1); // below warning floor of 3
+    await runTick();
+    const openai = await findNotice("AI_PROVIDER_FAILURE_BURST:openai");
+    const gemini = await findNotice("AI_PROVIDER_FAILURE_BURST:gemini");
+    expect(openai).toBeDefined();
+    expect(openai!.severity).toBe("degraded");
+    expect(gemini).toBeUndefined();
+  });
+});
+
+describe("OBS-C — PROVIDER_INSTABILITY correlator", () => {
+  it("[Scenario 46] Single component for a provider ⇒ correlator silent", async () => {
+    seedTimeoutsFor("openai", 5);
+    await runTick();
+    expect(await findNotice("AI_TIMEOUT_BURST:openai")).toBeDefined();
+    expect(
+      await findNotice("PROVIDER_INSTABILITY:openai"),
+      "correlator must NOT fire with only 1 component (D5 — minimum threshold is 2)",
+    ).toBeUndefined();
+  });
+
+  it("[Scenario 47] Two components for openai ⇒ rollup fires; severity = max; detail.components lists both", async () => {
+    // openai: timeouts (warning) + failures (critical) → rollup severity critical
+    seedTimeoutsFor("openai", 5);     // warning
+    seedFailuresFor("openai", 25);    // critical
+    // gemini gets only 1 component → correlator stays silent for gemini
+    seedFailuresFor("gemini", 5);
+    await runTick();
+
+    const rollup = await findNotice("PROVIDER_INSTABILITY:openai");
+    expect(rollup).toBeDefined();
+    expect(rollup!.severity).toBe("critical");
+    expect(rollup!.audience).toBe("operator");
+
+    const detail = rollup!.detail as {
+      provider: string;
+      components: { category: string; severity: string }[];
+    };
+    expect(detail.provider).toBe("openai");
+    expect(detail.components).toHaveLength(2);
+    const cats = detail.components.map((c) => c.category).sort();
+    expect(cats).toEqual(["AI_PROVIDER_FAILURE_BURST", "AI_TIMEOUT_BURST"]);
+
+    // Gemini's single failure component MUST NOT trigger a rollup.
+    expect(await findNotice("PROVIDER_INSTABILITY:gemini")).toBeUndefined();
+  });
+
+  it("[Scenario 48] Rollup stays open while components persist; resolves when only 1 component remains", async () => {
+    // Tick 1: openai has 3 components (timeout + failure + latency degraded).
+    seedTimeoutsFor("openai", 5);
+    seedFailuresFor("openai", 5);
+    seedLatencySamples("openai", 25, 25_000); // 5x baseline ⇒ critical latency
+    await runTick();
+    let rollup = await findNotice("PROVIDER_INSTABILITY:openai");
+    expect(rollup).toBeDefined();
+    expect(rollup!.resolvedAt).toBeNull();
+
+    // Tick 2: only latency persists (1 component). Reset aggregator and
+    // re-seed latency only — timeouts and failures pruned from the
+    // 15-min window.
+    _resetAIPressureStatsForTest();
+    seedLatencySamples("openai", 25, 25_000);
+    await runTick({ now: new Date(NOW.getTime() + 5 * 60_000) });
+
+    rollup = await findNotice("PROVIDER_INSTABILITY:openai");
+    expect(rollup).toBeDefined();
+    expect(
+      rollup!.resolvedAt,
+      "correlator must resolve when component count drops below 2 (sweep eligibility wired via fullyObserved)",
+    ).not.toBeNull();
+
+    // The single remaining latency notice should still be open.
+    const latency = await findNotice("AI_LATENCY_DEGRADED:openai");
+    expect(latency!.resolvedAt).toBeNull();
+  });
+});
+
 describe("Phase 1C — collector failure isolation + firewall", () => {
   it("[Scenario 42] AI collector failure does NOT sweep open AI notices (Task #56 P1 #2 invariant)", async () => {
     // Open a real AI_QUOTA_PRESSURE notice.
@@ -1367,12 +1513,15 @@ describe("Phase 1C — collector failure isolation + firewall", () => {
       SELECT audience FROM ${systemNotices}
       WHERE correlation_key IN (
         'AI_QUOTA_PRESSURE:global',
-        'AI_TIMEOUT_BURST:global',
-        'AI_PROVIDER_FAILURE_BURST:global',
+        'AI_TIMEOUT_BURST:openai',
+        'AI_TIMEOUT_BURST:gemini',
+        'AI_PROVIDER_FAILURE_BURST:openai',
+        'AI_PROVIDER_FAILURE_BURST:gemini',
         'AI_LATENCY_DEGRADED:openai',
         'INFERENCE_CONFIDENCE_DEGRADED:ael'
       )
         AND first_seen_at >= ${TEST_RUN_START_TIME}
+        AND first_seen_at <= ${TEST_RUN_END_TIME}
     `);
     const rows = (r as unknown as { rows: { audience: string }[] }).rows ?? [];
     expect(rows.length).toBe(5);

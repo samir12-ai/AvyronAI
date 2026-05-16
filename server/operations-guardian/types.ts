@@ -42,6 +42,12 @@ export const NOTICE_CATEGORIES = [
   "AI_PROVIDER_FAILURE_BURST",
   "AI_LATENCY_DEGRADED",
   "INFERENCE_CONFIDENCE_DEGRADED",
+  // OBS-C (Task #60) — cross-signal correlator. Fires when ≥2 of
+  // {timeout burst, failure burst, latency degraded} are observed for
+  // the same provider in the same tick. Surfaces a single rollup
+  // notice so operators don't have to read three sibling rows to
+  // diagnose what is really one incident.
+  "PROVIDER_INSTABILITY",
 ] as const;
 export type NoticeCategory = (typeof NOTICE_CATEGORIES)[number];
 
@@ -166,6 +172,8 @@ export const INTERNAL_ONLY_CATEGORIES = new Set<NoticeCategory>([
   "AI_PROVIDER_FAILURE_BURST",
   "AI_LATENCY_DEGRADED",
   "INFERENCE_CONFIDENCE_DEGRADED",
+  // OBS-C (Task #60) — correlator. Operator-only; never user-facing.
+  "PROVIDER_INSTABILITY",
   // The remaining internal categories ARE allowed at operator audience
   // (that's their primary surface). LEAKED_LOCK is the strictest — it
   // means a watchdog already cleaned up; nothing actionable for the
