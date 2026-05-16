@@ -13,10 +13,12 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import AvyronLogo from '@/components/AvyronLogo';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function IntroScreen() {
   const insets = useSafeAreaInsets();
   const { markIntroSeen, trialDaysRemaining } = useAuth();
+  const { t } = useLanguage();
 
   const handleContinue = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -52,15 +54,13 @@ export default function IntroScreen() {
 
           <View style={styles.trialBadge}>
             <Ionicons name="gift-outline" size={14} color="#8B5CF6" />
-            <Text style={styles.trialBadgeText}>{trialDaysRemaining}-day free trial active</Text>
+            <Text style={styles.trialBadgeText}>{t('intro.trialActive', { days: trialDaysRemaining })}</Text>
           </View>
         </View>
 
         <View style={styles.heroSection}>
-          <Text style={styles.headline}>See the market{'\n'}before it moves.</Text>
-          <Text style={styles.subline}>
-            Avyron analyzes your market, competitors, and signals — and turns them into strategy, content, and growth.
-          </Text>
+          <Text style={styles.headline}>{t('intro.headline')}</Text>
+          <Text style={styles.subline}>{t('intro.subline')}</Text>
         </View>
 
         <View style={styles.bottomSection}>
@@ -75,14 +75,12 @@ export default function IntroScreen() {
               end={{ x: 1, y: 0 }}
               style={styles.ctaButton}
             >
-              <Text style={styles.ctaText}>Let's Go</Text>
+              <Text style={styles.ctaText}>{t('intro.cta')}</Text>
               <Ionicons name="arrow-forward" size={20} color="#fff" />
             </LinearGradient>
           </Pressable>
 
-          <Text style={styles.footnote}>
-            Full access during your trial · No credit card needed
-          </Text>
+          <Text style={styles.footnote}>{t('intro.footnote')}</Text>
         </View>
       </View>
     </View>

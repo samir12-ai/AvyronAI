@@ -3,95 +3,74 @@ import { View, Text, StyleSheet, Pressable } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useRunTruthfulness, type TruthfulnessHeadline } from "@/hooks/useRunTruthfulness";
+import { useTrustCopy, trustToneColor, type TrustState, type TrustCopy } from "@/lib/copy-helpers";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface Props {
   campaignId: string | null | undefined;
   isDark: boolean;
 }
 
-interface HeadlineMeta {
-  title: string;
-  subtitle: string;
-  color: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}
+const ICON_FOR_STATE: Record<TrustState, keyof typeof Ionicons.glyphMap> = {
+  ok: "checkmark-circle",
+  validated: "checkmark-circle",
+  provisional: "warning",
+  weak: "warning",
+  partial: "warning",
+  degraded: "warning",
+  lower_confidence: "warning",
+  data_refreshing: "refresh",
+  unknown: "help-circle",
+  shadowed: "warning",
+  system_untrusted: "alert-circle",
+  needs_reconciliation: "git-pull-request",
+  review_required: "person",
+  blocked: "ban",
+  downgrade: "arrow-down-circle",
+  repair: "build",
+  no_run: "play-circle",
+};
 
-function metaFor(h: TruthfulnessHeadline, t: any): HeadlineMeta {
+function headlineToState(h: TruthfulnessHeadline): TrustState {
   switch (h) {
-    case "shadowed":
-      return {
-        title: "Newer run failed",
-        subtitle: `Showing older completed run. Newest attempt status: ${t.newerNonResolvableRun?.status || "unknown"}.`,
-        color: "#FFB347",
-        icon: "warning",
-      };
-    case "system_untrusted":
-      return {
-        title: "Verdict unverified",
-        subtitle: t.freshness.hasStaleSnapshots
-          ? `Stale snapshot evidence (${t.freshness.staleEngines.join(", ") || "1+ engines"}).`
-          : "Pipeline incomplete — engine outputs missing or timed out.",
-        color: "#FF6B6B",
-        icon: "alert-circle",
-      };
-    case "needs_reconciliation":
-      return {
-        title: "Cross-engine contradiction",
-        subtitle: "Engines disagree — manual reconciliation required.",
-        color: "#FF6B6B",
-        icon: "git-pull-request",
-      };
-    case "review_required":
-      return {
-        title: "Human review required",
-        subtitle: "Verdict exceeds the automation envelope.",
-        color: "#FFB347",
-        icon: "person",
-      };
-    case "blocked":
-      return {
-        title: "Execution blocked",
-        subtitle: t.verdict?.blockReasons?.[0]?.description || "One or more critical blocks active.",
-        color: "#FF6B6B",
-        icon: "ban",
-      };
-    case "downgrade":
-      return {
-        title: "Execution downgraded",
-        subtitle: t.verdict?.executionMode || "Restricted execution mode.",
-        color: "#FFB347",
-        icon: "arrow-down-circle",
-      };
-    case "repair":
-      return {
-        title: "Auto-repair active",
-        subtitle: "System Control attempting to recover.",
-        color: "#4C9AFF",
-        icon: "build",
-      };
-    case "no_run":
-      return {
-        title: "No completed run yet",
-        subtitle: "Run the strategic engines to generate a verdict.",
-        color: "#8892A4",
-        icon: "play-circle",
-      };
-    default:
-      return {
-        title: "OK",
-        subtitle: "",
-        color: "#85BB65",
-        icon: "checkmark-circle",
-      };
+    case "shadowed":             return "shadowed";
+    case "system_untrusted":     return "system_untrusted";
+    case "needs_reconciliation": return "needs_reconciliation";
+    case "review_required":      return "review_required";
+    case "blocked":              return "blocked";
+    case "downgrade":            return "downgrade";
+    case "repair":               return "repair";
+    case "no_run":               return "no_run";
+    default:                     return "ok";
   }
 }
 
 export function RunTruthfulnessBanner({ campaignId, isDark }: Props) {
   const { data } = useRunTruthfulness(campaignId);
+  const trustCopy = useTrustCopy();
+  const { t } = useLanguage();
 
   if (!data || !data.shouldShowBanner) return null;
 
-  const meta = metaFor(data.headline, data);
+  const state = headlineToState(data.headline);
+
+  // Tailor description for nuanced cases the helper can't see.
+  let descOverride: string | undefined;
+  if (state === "system_untrusted") {
+    descOverride = data.freshness.hasStaleSnapshots
+      ? t("trust.awaitingVerificationStale")
+      : t("trust.awaitingVerificationDesc");
+  } else if (state === "shadowed") {
+    descOverride = t("trust.newerFailedDesc");
+  } else if (state === "blocked" && data.verdict?.blockReasons?.[0]?.description) {
+    // Keep technical reason text suppressed; lean on friendly default.
+    descOverride = t("trust.pausedDesc");
+  }
+
+  const copy: TrustCopy = trustCopy(state, { description: descOverride });
+  const color = trustToneColor(copy.tone);
+  const icon = ICON_FOR_STATE[state];
+
   const bg = isDark ? "#0F1419" : "#FFFFFF";
   const border = isDark ? "#1A2030" : "#E2E8E4";
   const textPrimary = isDark ? "#E8EDF2" : "#1A2332";
@@ -106,22 +85,21 @@ export function RunTruthfulnessBanner({ campaignId, isDark }: Props) {
         })
       }
       testID="run-truthfulness-banner"
-      style={[styles.container, { backgroundColor: bg, borderColor: border, borderLeftColor: meta.color }]}
+      style={[styles.container, { backgroundColor: bg, borderColor: border, borderLeftColor: color }]}
     >
-      <View style={[styles.iconWrap, { backgroundColor: meta.color + "20" }]}>
-        <Ionicons name={meta.icon} size={20} color={meta.color} />
+      <View style={[styles.iconWrap, { backgroundColor: color + "20" }]}>
+        <Ionicons name={icon} size={20} color={color} />
       </View>
       <View style={styles.body}>
         <Text style={[styles.title, { color: textPrimary }]} numberOfLines={1}>
-          {meta.title}
+          {copy.title}
         </Text>
         <Text style={[styles.subtitle, { color: textSec }]} numberOfLines={2}>
-          {meta.subtitle}
+          {copy.description}
         </Text>
         {data.verdict && (
           <Text style={[styles.meta, { color: textSec }]} numberOfLines={1}>
-            {data.verdict.checksPassed}/{data.verdict.checksTotal} checks · mode {data.verdict.executionMode}
-            {data.runId ? ` · run ${data.runId.slice(0, 8)}` : ""}
+            {t("trust.checksPassed", { passed: data.verdict.checksPassed, total: data.verdict.checksTotal })}
           </Text>
         )}
       </View>

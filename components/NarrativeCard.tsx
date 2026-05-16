@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, useColorScheme } from 'react-native'
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getApiUrl , authFetch } from '@/lib/query-client';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface NarrativeStep {
   key: string;
@@ -22,16 +23,16 @@ interface NarrativeData {
 
 const STEP_COLORS = ['#FF6B6B', '#F59E0B', '#8B5CF6', '#3B82F6', '#10B981'];
 
-const SOURCE_LABELS: Record<string, string> = {
-  positioning: 'Positioning',
-  ael: 'AEL',
-  mechanism: 'Mechanism',
-  differentiation: 'Differentiation',
-  'offer+funnel': 'Offer + Funnel',
-  none: 'Pending',
-};
-
 export default function NarrativeCard({ campaignId, isDark, refreshKey, runId }: { campaignId: string | null; isDark: boolean; refreshKey?: number; runId?: string | null }) {
+  const { t } = useLanguage();
+  const SOURCE_LABELS: Record<string, string> = {
+    positioning: t('narrative.sourcePositioning'),
+    ael: t('narrative.sourceAnalysis'),
+    mechanism: t('narrative.sourceMechanism'),
+    differentiation: t('narrative.sourceDifferentiation'),
+    'offer+funnel': t('narrative.sourceOffer'),
+    none: t('narrative.pending'),
+  };
   const [data, setData] = useState<NarrativeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
@@ -72,9 +73,9 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey, runId }:
             <Ionicons name="link-outline" size={16} color="#FFF" />
           </LinearGradient>
           <View style={{ flex: 1 }}>
-            <Text style={[s.headerTitle, { color: textPrimary }]}>Strategic Narrative</Text>
+            <Text style={[s.headerTitle, { color: textPrimary }]}>{t('narrative.title')}</Text>
             <Text style={[s.headerSub, { color: textSecondary }]} numberOfLines={1}>
-              {data.engineCount} engines · simplified
+              {t('narrative.insightsSimplified', { count: data.engineCount })}
             </Text>
           </View>
         </View>
@@ -117,7 +118,7 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey, runId }:
                       onPress={() => setExpandedSteps(prev => ({ ...prev, [step.key]: !prev[step.key] }))}
                       hitSlop={8}
                     >
-                      <Text style={[s.readMore, { color }]}>{isStepExpanded ? 'Show less' : 'Read more'}</Text>
+                      <Text style={[s.readMore, { color }]}>{isStepExpanded ? t('narrative.showLess') : t('narrative.readMore')}</Text>
                     </Pressable>
                   )}
                 </View>

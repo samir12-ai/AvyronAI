@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, useColorScheme } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
+import { useLanguage } from '@/context/LanguageContext';
 
 export type ProvenanceKind = 'verified' | 'projected' | 'benchmark' | 'manual' | 'unverified';
 
@@ -10,18 +11,12 @@ interface DataProvenanceProps {
   compact?: boolean;
 }
 
-// P1-6 (launch-closure W3): visible watermark distinguishing real measured
-// data ("verified" — META/published-post-driven) from forward-looking
-// estimates ("projected" — plan/forecast), peer benchmarks ("benchmark"),
-// user-entered ("manual"), and untrusted runs ("unverified" —
-// integrityVerdict !== PASS). Replaces the old single-text-label pattern that
-// let users misread projected revenue as actual revenue.
-const META: Record<ProvenanceKind, { label: string; icon: keyof typeof Ionicons.glyphMap; tone: 'success' | 'warning' | 'neutral' | 'error' }> = {
-  verified:   { label: 'Verified',   icon: 'shield-checkmark', tone: 'success' },
-  projected:  { label: 'Projected',  icon: 'trending-up',      tone: 'warning' },
-  benchmark:  { label: 'Benchmark',  icon: 'bar-chart',        tone: 'neutral' },
-  manual:     { label: 'Manual',     icon: 'create',           tone: 'neutral' },
-  unverified: { label: 'Unverified', icon: 'alert-circle',     tone: 'error'   },
+const META: Record<ProvenanceKind, { labelKey: string; icon: keyof typeof Ionicons.glyphMap; tone: 'success' | 'warning' | 'neutral' | 'error' }> = {
+  verified:   { labelKey: 'trust.provenanceVerified',   icon: 'shield-checkmark', tone: 'success' },
+  projected:  { labelKey: 'trust.provenanceProjected',  icon: 'trending-up',      tone: 'warning' },
+  benchmark:  { labelKey: 'trust.provenanceBenchmark',  icon: 'bar-chart',        tone: 'neutral' },
+  manual:     { labelKey: 'trust.provenanceManual',     icon: 'create',           tone: 'neutral' },
+  unverified: { labelKey: 'trust.provenanceUnverified', icon: 'alert-circle',     tone: 'error'   },
 };
 
 export function DataProvenance({ kind, compact }: DataProvenanceProps) {
@@ -29,6 +24,8 @@ export function DataProvenance({ kind, compact }: DataProvenanceProps) {
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const meta = META[kind];
+  const { t } = useLanguage();
+  const label = t(meta.labelKey);
 
   const toneColor =
     meta.tone === 'success' ? colors.success :
@@ -39,7 +36,7 @@ export function DataProvenance({ kind, compact }: DataProvenanceProps) {
   return (
     <View style={[styles.container, compact && styles.compact, { borderColor: toneColor + '40', backgroundColor: toneColor + '14' }]}>
       <Ionicons name={meta.icon} size={compact ? 10 : 12} color={toneColor} />
-      <Text style={[styles.label, compact && styles.labelCompact, { color: toneColor }]}>{meta.label}</Text>
+      <Text style={[styles.label, compact && styles.labelCompact, { color: toneColor }]}>{label}</Text>
     </View>
   );
 }

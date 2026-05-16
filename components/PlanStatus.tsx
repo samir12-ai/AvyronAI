@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { getApiUrl , authFetch } from '@/lib/query-client';
+import { useLanguage } from '@/context/LanguageContext';
 
 const P = {
   mint: '#8B5CF6',
@@ -23,6 +24,7 @@ interface PlanStatusProps {
 }
 
 export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onViewPlan, isApproving, runId }: PlanStatusProps) {
+  const { t } = useLanguage();
   const baseUrl = getApiUrl();
   const textPrimary = isDark ? '#E8EDF2' : '#1A2332';
   const textSecondary = isDark ? '#8892A4' : '#546478';
@@ -77,13 +79,8 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
             <Ionicons name="warning-outline" size={16} color={P.gold} />
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 12, fontWeight: '600' as const, color: P.gold }}>
-                Pipeline {noPlanBlocked ? 'Blocked' : 'Failed'}
+                {noPlanBlocked ? t('planStatus.planPaused') : t('planStatus.planFailed')}
               </Text>
-              {noPlanBlockReason && (
-                <Text style={{ fontSize: 11, color: isDark ? '#8892A4' : '#546478', marginTop: 2 }} numberOfLines={2}>
-                  {noPlanBlockReason}
-                </Text>
-              )}
             </View>
           </View>
         )}
@@ -98,18 +95,18 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
             />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[s.title, { color: textPrimary }]}>No Active Plan</Text>
+            <Text style={[s.title, { color: textPrimary }]}>{t('planStatus.noPlanTitle')}</Text>
             <Text style={[s.subtitle, { color: textSecondary }]}>
               {(noPlanBlocked || noPlanFailed)
-                ? 'The pipeline could not generate a plan. Resolve the issues and re-run.'
-                : 'Tap below to build your first plan. After approval, plans regenerate automatically every hour as new signals come in.'}
+                ? t('planStatus.noPlanBlockedDesc')
+                : t('planStatus.noPlanDesc')}
             </Text>
           </View>
         </View>
         <Pressable style={[s.actionBtn, { backgroundColor: P.mint }]} onPress={onBuildPlan}>
           <Ionicons name="flash" size={16} color="#fff" />
           <Text style={s.actionBtnText}>
-            {(noPlanBlocked || noPlanFailed) ? 'Re-run Pipeline' : 'Build The Plan'}
+            {(noPlanBlocked || noPlanFailed) ? t('planStatus.tryAgain') : t('planStatus.buildPlan')}
           </Text>
         </Pressable>
       </View>
@@ -129,10 +126,10 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
     P.gold;
 
   const statusLabel =
-    isPlanStale ? 'Previous Run' :
-    plan.status === 'APPROVED' ? 'Approved' :
-    plan.status === 'REJECTED' ? 'Rejected' :
-    'Awaiting Approval';
+    isPlanStale ? t('planStatus.previousPlan') :
+    plan.status === 'APPROVED' ? t('planStatus.approved') :
+    plan.status === 'REJECTED' ? t('planStatus.rejected') :
+    t('planStatus.awaitingApproval');
 
   return (
     <View style={[s.card, { backgroundColor: cardBg, borderColor: isPlanStale ? (P.gold + '40') : cardBorder }]}>
@@ -149,15 +146,10 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
           <Ionicons name="warning-outline" size={16} color={P.gold} />
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 12, fontWeight: '600' as const, color: P.gold }}>
-              Current pipeline is {isPipelineBlocked ? 'blocked' : 'failed'}
+              {isPipelineBlocked ? t('planStatus.planPaused') : t('planStatus.planFailed')}
             </Text>
-            {pipelineState?.blockReason && (
-              <Text style={{ fontSize: 11, color: isDark ? '#8892A4' : '#546478', marginTop: 2 }} numberOfLines={2}>
-                {pipelineState.blockReason}
-              </Text>
-            )}
             <Text style={{ fontSize: 11, color: isDark ? '#4A5568' : '#8A96A8', marginTop: 2 }}>
-              This plan is from a previous successful run
+              {t('planStatus.previousPlanDesc')}
             </Text>
           </View>
         </View>
@@ -172,7 +164,7 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={[s.title, { color: textPrimary }]}>{isPlanStale ? 'Previous Plan' : 'The Plan'}</Text>
+            <Text style={[s.title, { color: textPrimary }]}>{isPlanStale ? t('planStatus.previousPlan') : t('planStatus.yourPlan')}</Text>
             <View style={[s.badge, { backgroundColor: statusColor + '20' }]}>
               <Text style={[s.badgeText, { color: statusColor }]}>{statusLabel}</Text>
             </View>
@@ -186,7 +178,7 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
       {work && (
         <View style={s.progressSection}>
           <View style={s.progressHeader}>
-            <Text style={[s.progressLabel, { color: textSecondary }]}>Plan Progress</Text>
+            <Text style={[s.progressLabel, { color: textSecondary }]}>{t('planStatus.progress')}</Text>
             <Text style={[s.progressValue, { color: P.mint }]}>{progress}%</Text>
           </View>
           <View style={[s.progressTrack, { backgroundColor: isDark ? '#1A2030' : '#E5EBE7' }]}>
@@ -195,19 +187,19 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
           <View style={s.statsRow}>
             <View style={s.statItem}>
               <Text style={[s.statValue, { color: textPrimary }]}>{work.totalPieces}</Text>
-              <Text style={[s.statLabel, { color: textSecondary }]}>Required</Text>
+              <Text style={[s.statLabel, { color: textSecondary }]}>{t('planStatus.planned')}</Text>
             </View>
             <View style={s.statItem}>
               <Text style={[s.statValue, { color: P.blue }]}>{work.generated + work.ready}</Text>
-              <Text style={[s.statLabel, { color: textSecondary }]}>Created</Text>
+              <Text style={[s.statLabel, { color: textSecondary }]}>{t('planStatus.created')}</Text>
             </View>
             <View style={s.statItem}>
               <Text style={[s.statValue, { color: P.neon }]}>{work.published}</Text>
-              <Text style={[s.statLabel, { color: textSecondary }]}>Published</Text>
+              <Text style={[s.statLabel, { color: textSecondary }]}>{t('planStatus.published')}</Text>
             </View>
             <View style={s.statItem}>
               <Text style={[s.statValue, { color: P.coral }]}>{work.remaining}</Text>
-              <Text style={[s.statLabel, { color: textSecondary }]}>Remaining</Text>
+              <Text style={[s.statLabel, { color: textSecondary }]}>{t('planStatus.remaining')}</Text>
             </View>
           </View>
         </View>
@@ -224,7 +216,7 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
               ? <ActivityIndicator size="small" color="#000" />
               : <Ionicons name="checkmark" size={16} color="#000" />
             }
-            <Text style={[s.actionBtnText, { color: '#000' }]}>{isApproving ? 'Approving...' : 'Approve'}</Text>
+            <Text style={[s.actionBtnText, { color: '#000' }]}>{isApproving ? t('planStatus.approving') : t('planStatus.approve')}</Text>
           </Pressable>
         )}
         {onViewPlan && (
@@ -232,7 +224,7 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
             style={[s.outlineBtn, { borderColor: P.mint + '40', flex: (plan.status === 'DRAFT' || plan.status === 'READY_FOR_REVIEW') ? 1 : undefined }]}
             onPress={() => onViewPlan(plan.id)}
           >
-            <Text style={[s.outlineBtnText, { color: P.mint }]}>View Plan</Text>
+            <Text style={[s.outlineBtnText, { color: P.mint }]}>{t('planStatus.viewPlan')}</Text>
           </Pressable>
         )}
       </View>

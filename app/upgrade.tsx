@@ -14,12 +14,14 @@ import AvyronLogo from '@/components/AvyronLogo';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 const STRIPE_PAYMENT_LINK = process.env.EXPO_PUBLIC_STRIPE_PAYMENT_LINK || '';
 
 export default function UpgradeScreen() {
   const insets = useSafeAreaInsets();
   const { logout, user, refreshUser } = useAuth();
+  const { t } = useLanguage();
   const [refreshState, setRefreshState] = useState<'idle' | 'loading' | 'no_change'>('idle');
 
   const handleUpgrade = async () => {
@@ -53,10 +55,10 @@ export default function UpgradeScreen() {
   };
 
   const features = [
-    { icon: 'analytics-outline' as const, label: '15-engine strategic pipeline' },
-    { icon: 'bulb-outline' as const, label: 'AI content creation & strategy' },
-    { icon: 'people-outline' as const, label: 'Audience intelligence engine' },
-    { icon: 'shield-checkmark-outline' as const, label: 'Full control center access' },
+    { icon: 'analytics-outline' as const, label: t('upgrade.feature1') },
+    { icon: 'bulb-outline' as const, label: t('upgrade.feature2') },
+    { icon: 'people-outline' as const, label: t('upgrade.feature3') },
+    { icon: 'shield-checkmark-outline' as const, label: t('upgrade.feature4') },
   ];
 
   return (
@@ -78,15 +80,13 @@ export default function UpgradeScreen() {
           </View>
           <View style={styles.expiredBadge}>
             <Ionicons name="time-outline" size={14} color="#F59E0B" />
-            <Text style={styles.expiredText}>Trial ended</Text>
+            <Text style={styles.expiredText}>{t('upgrade.trialEnded')}</Text>
           </View>
         </View>
 
         <View style={styles.mainSection}>
-          <Text style={styles.headline}>Your system is ready.{'\n'}Activate it.</Text>
-          <Text style={styles.subline}>
-            Your marketing engine is built and waiting. Unlock full access to keep everything running.
-          </Text>
+          <Text style={styles.headline}>{t('upgrade.headline')}</Text>
+          <Text style={styles.subline}>{t('upgrade.subline')}</Text>
 
           <View style={styles.featureList}>
             {features.map((f, i) => (
@@ -114,15 +114,13 @@ export default function UpgradeScreen() {
                 style={styles.upgradeBtn}
               >
                 <Ionicons name="diamond-outline" size={20} color="#fff" />
-                <Text style={styles.upgradeBtnText}>Activate Full Access</Text>
+                <Text style={styles.upgradeBtnText}>{t('upgrade.cta')}</Text>
               </LinearGradient>
             </Pressable>
           ) : (
             <View style={styles.setupNote}>
               <Ionicons name="information-circle-outline" size={18} color="#8B5CF6" />
-              <Text style={styles.setupNoteText}>
-                Payment setup in progress. Contact support for access.
-              </Text>
+              <Text style={styles.setupNoteText}>{t('upgrade.setupNote')}</Text>
             </View>
           )}
 
@@ -139,15 +137,15 @@ export default function UpgradeScreen() {
             )}
             <Text style={styles.refreshText}>
               {refreshState === 'loading'
-                ? 'Checking payment status...'
+                ? t('upgrade.checking')
                 : refreshState === 'no_change'
-                ? 'Payment not yet received — try again shortly'
-                : 'Already paid? Refresh status'}
+                ? t('upgrade.notReceived')
+                : t('upgrade.alreadyPaid')}
             </Text>
           </Pressable>
 
           <Pressable onPress={handleLogout} style={styles.logoutBtn} testID="upgrade-logout">
-            <Text style={styles.logoutText}>Sign out</Text>
+            <Text style={styles.logoutText}>{t('upgrade.signOut')}</Text>
           </Pressable>
         </View>
       </View>

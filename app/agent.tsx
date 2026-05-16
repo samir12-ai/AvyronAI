@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
+import { useLanguage } from '@/context/LanguageContext';
 import * as Haptics from 'expo-haptics';
 import { WEB_TOP_INSET, WEB_BOTTOM_INSET } from '@/lib/insets';
 
@@ -98,7 +99,15 @@ export default function AgentScreen() {
   const router = useRouter();
   const baseUrl = getApiUrl();
   const { selectedCampaignId } = useCampaign();
+  const { t } = useLanguage();
   const isWeb = Platform.OS === 'web';
+
+  const INSIGHT_ACTION_LABELS: Record<string, string> = {
+    user_execution: t('agent.actionUpdateRhythm'),
+    market_shift: t('agent.actionRefreshStrategy'),
+    strategy_gap: t('agent.actionRebuildPlan'),
+    measurement_gap: t('agent.actionAssessSignals'),
+  };
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
@@ -292,7 +301,7 @@ export default function AgentScreen() {
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.',
+        content: t('agent.errorMessage'),
       };
       setMessages(prev => [...prev, errorMsg]);
       setStreamingContent('');
@@ -362,7 +371,11 @@ export default function AgentScreen() {
           <View style={s.insightMeta}>
             <View style={[s.priorityBadge, { backgroundColor: pColor + '20' }]}>
               <Text style={[s.priorityText, { color: pColor }]}>
-                {insight.priority.toUpperCase()} PRIORITY
+                {insight.priority === 'high'
+                  ? t('agent.priorityHigh')
+                  : insight.priority === 'medium'
+                  ? t('agent.priorityMedium')
+                  : t('agent.priorityLow')}
               </Text>
             </View>
             <Text style={[s.insightTime, { color: textMuted }]}>
@@ -394,7 +407,7 @@ export default function AgentScreen() {
         >
           <Ionicons name={insightAction.icon} size={13} color={insightAction.color} />
           <Text style={[s.insightActionBtnText, { color: insightAction.color }]}>
-            {insightAction.label}
+            {INSIGHT_ACTION_LABELS[iType] || insightAction.label}
           </Text>
         </Pressable>
       </View>
@@ -406,7 +419,7 @@ export default function AgentScreen() {
       return (
         <View style={s.insightsLoadingWrap}>
           <ActivityIndicator size="small" color={P.mint} />
-          <Text style={[s.insightsLoadingText, { color: textMuted }]}>Scanning your campaign...</Text>
+          <Text style={[s.insightsLoadingText, { color: textMuted }]}>{t('agent.scanning')}</Text>
         </View>
       );
     }
@@ -418,13 +431,15 @@ export default function AgentScreen() {
             <Ionicons name="sparkles" size={14} color={P.mint} />
           </View>
           <Text style={[s.insightsFeedTitle, { color: textPrimary }]}>
-            {proactiveInsights.length} insight{proactiveInsights.length > 1 ? 's' : ''} from the monitoring agent
+            {proactiveInsights.length > 1
+              ? t('agent.insightsTitlePlural', { count: proactiveInsights.length })
+              : t('agent.insightsTitle', { count: proactiveInsights.length })}
           </Text>
         </View>
         {proactiveInsights.map((insight, i) => renderInsightCard(insight, i))}
         <View style={s.insightsFooterNote}>
           <Text style={[s.insightsFooterText, { color: textMuted }]}>
-            The agent monitors your campaign 24/7 and surfaces insights automatically.
+            {t('agent.insightsFooter')}
           </Text>
         </View>
       </View>
@@ -446,19 +461,19 @@ export default function AgentScreen() {
             <View style={[s.emptyIcon, { backgroundColor: P.mint + '15' }]}>
               <Ionicons name="sparkles" size={32} color={P.mint} />
             </View>
-            <Text style={[s.emptyTitle, { color: textPrimary }]}>Avyron Agent</Text>
+            <Text style={[s.emptyTitle, { color: textPrimary }]}>{t('agent.emptyTitle')}</Text>
             <Text style={[s.emptySubtitle, { color: textMuted }]}>
-              Your strategic operations manager. Ask about your plan, execution status, or what to create next.
+              {t('agent.emptySubtitle')}
             </Text>
           </View>
         )}
 
         <View style={s.suggestionsGrid}>
           {[
-            "What has the agent decided recently?",
-            "What should I create today?",
-            "Explain my current plan",
-            "What's my execution progress?",
+            t('agent.suggest1'),
+            t('agent.suggest2'),
+            t('agent.suggest3'),
+            t('agent.suggest4'),
           ].map((suggestion, i) => (
             <Pressable
               key={i}
@@ -486,11 +501,11 @@ export default function AgentScreen() {
           <Ionicons name="chevron-back" size={24} color={textPrimary} />
         </Pressable>
         <View style={s.headerCenter}>
-          <Text style={[s.headerTitle, { color: textPrimary }]}>Agent</Text>
+          <Text style={[s.headerTitle, { color: textPrimary }]}>{t('agent.title')}</Text>
           {selectedCampaignId && (
             <View style={[s.connectedBadge, { backgroundColor: P.neon + '20' }]}>
               <View style={[s.connectedDot, { backgroundColor: P.neon }]} />
-              <Text style={[s.connectedText, { color: P.neon }]}>Monitoring Active</Text>
+              <Text style={[s.connectedText, { color: P.neon }]}>{t('agent.monitoring')}</Text>
             </View>
           )}
         </View>
@@ -507,7 +522,7 @@ export default function AgentScreen() {
       {showSidebar && (
         <View style={[s.sidebar, { backgroundColor: cardBg, borderRightColor: borderColor }]}>
           <View style={s.sidebarHeader}>
-            <Text style={[s.sidebarTitle, { color: textPrimary }]}>History</Text>
+            <Text style={[s.sidebarTitle, { color: textPrimary }]}>{t('agent.history')}</Text>
             <Pressable onPress={() => setShowSidebar(false)}>
               <Ionicons name="close" size={20} color={textMuted} />
             </Pressable>
@@ -539,7 +554,7 @@ export default function AgentScreen() {
               </Pressable>
             )}
             ListEmptyComponent={
-              <Text style={[s.emptyConvs, { color: textMuted }]}>No conversations yet</Text>
+              <Text style={[s.emptyConvs, { color: textMuted }]}>{t('agent.noConvs')}</Text>
             }
           />
         </View>
@@ -579,7 +594,7 @@ export default function AgentScreen() {
               backgroundColor: isDark ? '#151B24' : '#F0F3F1',
               color: textPrimary,
             }]}
-            placeholder="Ask your marketing agent..."
+            placeholder={t('agent.placeholder')}
             placeholderTextColor={textMuted}
             value={input}
             onChangeText={setInput}
