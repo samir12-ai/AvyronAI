@@ -29,16 +29,15 @@ Every guardrail listed here MUST be:
 | GR16 | PII redaction in logger | `stripSecrets()` redacts on key match + inline `Bearer …` / `sk-…` / `eyJ…` patterns | hardcoded | n/a (defensive) | Seal #7 / F10.4 |
 | GR17 | `SynthesizedPlan.degraded` + `PlanSource` flag | Fallback / partial / degraded plans tagged; outcomes from degraded plans excluded from memory reinforcement | doctrine | `degraded=true` plans visible in audit | Seal #19 Audit #6 |
 | GR18 | AEL `isPartial` propagation | Downstream engines see degraded enrichment | doctrine | `partialReason` in plan trace | replit.md "AEL Partial Degradation Flag" |
+| GR19 | Beta admissions freeze | When `BETA_ADMISSIONS_FROZEN=true`, `/api/auth/register` returns `503 + BETA_ADMISSIONS_FROZEN + Retry-After: 3600` BEFORE bcrypt+DB insert | `BETA_ADMISSIONS_FROZEN=true` env | env validator boot log shows knob value; `BETA_ADMISSIONS_FROZEN` audit rows on denial; HTTP 503 count | Task #54 |
+| GR20 | Per-account beta cap | When active `users` row count ≥ `BETA_ACCOUNT_CAP`, registration returns `503 + BETA_ACCOUNT_CAP_REACHED + Retry-After: 3600`. Existing accounts unaffected. | `BETA_ACCOUNT_CAP=N` env (unset = disabled) | env validator boot log; `BETA_ACCOUNT_CAP_REACHED` audit rows with `activeAccounts`+`cap` details | Task #54 |
+| GR21 | Per-account daily AI spend cap | Generate-* routes carry `aiSpendCapPerAccount()`. Estimates 24h spend from `ai_usage_log.estimated_tokens` × blended per-model USD/1K rate. When estimate ≥ cap → `429 + AI_DAILY_SPEND_CAP_EXCEEDED + Retry-After: 3600`. | `AI_DAILY_SPEND_CAP_USD_PER_ACCOUNT=50` env (unset = disabled) | `AI_SPEND_CAP_EXCEEDED` audit rows with `estimatedSpendUsd`+`byModel`; HTTP 429 count. Cost-from-tokens proxy is conservative (trips before real invoice); G4 true-cost metric will replace the estimate when shipped. | Task #54 |
+| GR22 | Per-account daily scrape volume cap | `_createAndStartJob` evaluates `evaluateScrapeAdmission()` BEFORE inserting a new `mi_fetch_jobs` row. Proxy = sum(`competitor_count`) over last 24h. When `used + newJob > cap` → admission denied. | `SCRAPE_DAILY_VOLUME_CAP_PER_ACCOUNT=200` env (unset = disabled) | `SCRAPE_VOLUME_CAP_EXCEEDED` audit rows; `[ScrapeVolumeCap] EXCEEDED` log. Proxy will be replaced by `scraper_requests_total` (G2) when shipped. | Task #54 |
+| GR23 | Global MI queue depth circuit-breaker | `_createAndStartJob` defers new claims when global `mi_fetch_jobs.status='QUEUED'` count > threshold sustained ≥5min (hysteresis avoids single-tick spikes). Existing in-flight jobs continue. | `MI_QUEUE_DEPTH_DEFER_THRESHOLD=N` env (unset = disabled) | `MI_QUEUE_DEPTH_DEFERRED` audit rows with `queueDepth`+`sustainedSec`; `[QueueDepthDefer] DEFERRING` log. Complements the existing `BACKPRESSURE_QUEUE_THRESHOLD` per-cycle throttle. | Task #54 |
 
 ## To add for beta (Phase 1 follow-up)
 
-| # | Guardrail | Why | Toggle | Observable signal |
-|---|---|---|---|---|
-| GR19 | Beta admissions freeze | Halt new account onboarding without code deploy when a stage hits a rollback trigger. | `BETA_ADMISSIONS_FROZEN=true` | env validator boot log + admission endpoint 503 count |
-| GR20 | Per-account beta cap | Hard ceiling on active beta accounts so a stage-rollback can be enforced via env. | `BETA_ACCOUNT_CAP=N` | gauge: `beta_accounts_active{tier}` |
-| GR21 | Per-account daily AI spend cap | Stop runaway spend if a single account hits an AI loop. Complements GR1 (rate limit) with a USD ceiling. | `AI_DAILY_SPEND_CAP_USD_PER_ACCOUNT` | counter: `ai_spend_usd_per_account{account}` (requires Phase 1 metric — see [`observation-plan.md`](./observation-plan.md) G4) |
-| GR22 | Per-account daily scrape volume cap | Stop runaway scraping if a single account hits a refresh loop. | `SCRAPE_DAILY_VOLUME_CAP_PER_ACCOUNT` | counter: `scraper_requests_total{account}` (requires Phase 1 metric — G2) |
-| GR23 | Global queue depth circuit-breaker | If global MI queue depth exceeds threshold for >5min, defer new jobs (existing jobs continue). | `MI_QUEUE_DEPTH_DEFER_THRESHOLD` | gauge: `mi_queue_depth` (requires Phase 1 metric — G3) |
+(none — GR19–GR23 shipped via Task #54)
 
 ## Doctrine: a guardrail that can't be turned off in <60s is not a guardrail
 

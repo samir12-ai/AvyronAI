@@ -41,7 +41,7 @@ import * as path from "path";
 import { timingSafeEqual } from "node:crypto";
 import pipelineRouter from "./pipeline/routes";
 import { db } from "./db";
-import { continuityTicks, planAnchorResets, continuityWindowClaims, systemNotices } from "@shared/schema";
+import { continuityTicks, planAnchorResets, continuityWindowClaims, systemNotices, bossRuns } from "@shared/schema";
 import { desc, sql as drizzleSql, and, eq, isNull } from "drizzle-orm";
 import { _bossInFlightStats } from "./boss/concurrency";
 import { _continuityTickInflightStats } from "./continuity/scheduler";
@@ -500,6 +500,270 @@ function setupErrorHandler(app: express.Application) {
           intervalMs: supervisor.intervalMs,
         };
     return res.status(200).json({ ...rest, lastTickReport: safeReport, supervisor: safeSupervisor });
+  });
+
+  // ─── Task #53 / U4 — Public /status page ───────────────────────────────
+  //
+  // GET /status
+  //
+  // A small, human-readable status page modeled after public status pages
+  // (status.openai.com, status.stripe.com). NO tenant data — strictly the
+  // same aggregate counters the public /healthz/continuity surface already
+  // exposes, plus a 24h boss-run success rate and the timestamp of the
+  // last incident (failed or partial run).
+  //
+  // Doctrine notes:
+  //   * B1 (Beta Safety) — truthful confidence over confident-looking
+  //     fabrication. When the DB query for boss_runs counters fails, we
+  //     render an "unknown" state rather than green.
+  //   * NO-TENANT-LEAK — campaignId / accountId / planId are never read.
+  //   * D2/D5 — the scheduler heartbeat colour is derived from the strict
+  //     `supervisor.schedulerState` enum (HEALTHY|DEGRADED|UNHEALTHY|
+  //     UNKNOWN). Unknown values render as "unknown", not "healthy".
+  //   * Content-negotiated: `Accept: application/json` returns the JSON
+  //     shape that powers the page; the default response is HTML.
+  //
+  app.get("/status", async (req: Request, res: Response) => {
+    const health = getContinuityHealth();
+    const supervisor = getSupervisorHealth();
+
+    // Compute 24h boss-run counters + last-incident timestamp.
+    // Strictly aggregate — no per-tenant rows are read.
+    type Bucket = { total: number; completed: number; partial: number; failed: number; lastIncidentAt: Date | null };
+    let bucket: Bucket | null = null;
+    let bossQueryFailed = false;
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const rows = await db
+        .select({
+          status: bossRuns.status,
+          count: drizzleSql<number>`count(*)::int`,
+          maxFinished: drizzleSql<Date | null>`max(${bossRuns.finishedAt})`,
+        })
+        .from(bossRuns)
+        .where(drizzleSql`${bossRuns.createdAt} >= ${since}`)
+        .groupBy(bossRuns.status);
+      const init: Bucket = { total: 0, completed: 0, partial: 0, failed: 0, lastIncidentAt: null };
+      bucket = rows.reduce<Bucket>((acc, r) => {
+        const c = Number(r.count) || 0;
+        acc.total += c;
+        if (r.status === "completed") acc.completed += c;
+        else if (r.status === "partial") {
+          acc.partial += c;
+          if (r.maxFinished && (!acc.lastIncidentAt || r.maxFinished > acc.lastIncidentAt)) {
+            acc.lastIncidentAt = r.maxFinished;
+          }
+        } else if (r.status === "failed") {
+          acc.failed += c;
+          if (r.maxFinished && (!acc.lastIncidentAt || r.maxFinished > acc.lastIncidentAt)) {
+            acc.lastIncidentAt = r.maxFinished;
+          }
+        }
+        return acc;
+      }, init);
+    } catch (err) {
+      bossQueryFailed = true;
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[Status] boss_runs query failed");
+    }
+
+    // Canonical scheduler state enum is HEALTHY|DEGRADED|DEAD|UNKNOWN
+    // (server/continuity/health-classifier.ts ChainState). DEAD = scheduler
+    // has stopped ticking and a campaign-wide outage is in progress, which
+    // is the strongest public "down" signal we have. D2/D5 — no string
+    // fallback: anything outside the strict union renders as "unknown".
+    const schedulerStateRaw = supervisor.lastReport?.schedulerState;
+    type StatusBand = "operational" | "degraded" | "down" | "unknown";
+    let schedulerBand: StatusBand;
+    if (schedulerStateRaw === "HEALTHY") schedulerBand = "operational";
+    else if (schedulerStateRaw === "DEGRADED") schedulerBand = "degraded";
+    else if (schedulerStateRaw === "DEAD") schedulerBand = "down";
+    else schedulerBand = "unknown";
+
+    // Architect fix — success-rate denominator is TERMINAL runs only
+    // (completed|partial|failed). In-flight `running` rows must NOT count
+    // against the rate, otherwise a healthy burst of new work depresses
+    // the rate and falsely flags degradation.
+    const terminalRuns = bucket
+      ? bucket.completed + bucket.partial + bucket.failed
+      : 0;
+    let pipelineBand: StatusBand;
+    if (bossQueryFailed || bucket === null) pipelineBand = "unknown";
+    else if (terminalRuns === 0) pipelineBand = "unknown";
+    else {
+      const successRate = bucket.completed / terminalRuns;
+      if (bucket.failed > 0 && successRate < 0.5) pipelineBand = "down";
+      else if (successRate < 0.95 || bucket.partial > 0) pipelineBand = "degraded";
+      else pipelineBand = "operational";
+    }
+
+    const overallBand: StatusBand =
+      schedulerBand === "down" || pipelineBand === "down" ? "down" :
+      schedulerBand === "degraded" || pipelineBand === "degraded" ? "degraded" :
+      schedulerBand === "unknown" || pipelineBand === "unknown" ? "unknown" :
+      "operational";
+
+    const successRate24h = terminalRuns > 0 && bucket
+      ? Math.round((bucket.completed / terminalRuns) * 1000) / 10
+      : null;
+
+    const payload = {
+      overall: overallBand,
+      generatedAt: new Date().toISOString(),
+      components: {
+        scheduler: {
+          state: schedulerBand,
+          lastTickAt: health.lastTickAt ?? null,
+          intervalMs: supervisor.intervalMs,
+        },
+        pipeline: {
+          state: pipelineBand,
+          window: "24h",
+          totalRuns: bucket?.total ?? null,
+          terminalRuns,
+          successRate: successRate24h,
+          partialRuns: bucket?.partial ?? null,
+          failedRuns: bucket?.failed ?? null,
+          lastIncidentAt: bucket?.lastIncidentAt?.toISOString() ?? null,
+          queryFailed: bossQueryFailed,
+        },
+      },
+    };
+
+    const wantsJson = (req.header("accept") ?? "").toLowerCase().includes("application/json");
+    if (wantsJson) {
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json(payload);
+    }
+
+    const bandColor: Record<StatusBand, string> = {
+      operational: "#10B981",
+      degraded: "#F59E0B",
+      down: "#EF4444",
+      unknown: "#8892A4",
+    };
+    const bandLabel: Record<StatusBand, string> = {
+      operational: "All systems operational",
+      degraded: "Partial degradation",
+      down: "Major outage",
+      unknown: "Status unknown",
+    };
+    const escapeHtml = (s: string): string =>
+      s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+
+    const fmtTime = (iso: string | Date | null): string => {
+      if (!iso) return "—";
+      const d = iso instanceof Date ? iso : new Date(iso);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toUTCString();
+    };
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Avyron AI — System Status</title>
+  <meta name="robots" content="noindex" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #080C10; color: #E8EDF2; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 48px 24px; }
+    h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px 0; }
+    .muted { color: #8892A4; font-size: 13px; }
+    .overall { display: flex; align-items: center; gap: 12px; padding: 20px; border-radius: 14px; background: #0F1419; border: 1px solid #1A2030; margin: 24px 0; }
+    .dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+    .overall-label { font-size: 18px; font-weight: 600; }
+    .card { padding: 16px; border-radius: 12px; background: #0F1419; border: 1px solid #1A2030; margin-bottom: 12px; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .card-title { font-size: 15px; font-weight: 600; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .stat { background: #151B24; border-radius: 8px; padding: 10px 12px; }
+    .stat-label { font-size: 11px; color: #8892A4; text-transform: uppercase; letter-spacing: 0.4px; }
+    .stat-value { font-size: 16px; font-weight: 700; margin-top: 2px; }
+    footer { color: #4A5568; font-size: 11px; text-align: center; margin-top: 32px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Avyron AI — System Status</h1>
+    <div class="muted">Real-time operational status of the Avyron AI platform.</div>
+
+    <div class="overall">
+      <div class="dot" style="background:${bandColor[overallBand]}"></div>
+      <div>
+        <div class="overall-label">${escapeHtml(bandLabel[overallBand])}</div>
+        <div class="muted">Last updated ${escapeHtml(fmtTime(payload.generatedAt))}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Continuity scheduler</div>
+        <span class="badge" style="background:${bandColor[schedulerBand]}22;color:${bandColor[schedulerBand]}">
+          <span class="dot" style="width:8px;height:8px;background:${bandColor[schedulerBand]}"></span>
+          ${escapeHtml(schedulerBand)}
+        </span>
+      </div>
+      <div class="muted" style="margin-top:6px">
+        Drives hourly plan re-evaluation. A healthy scheduler tick is required for new plans to generate.
+      </div>
+      <div class="grid">
+        <div class="stat">
+          <div class="stat-label">Last tick</div>
+          <div class="stat-value">${escapeHtml(fmtTime(health.lastTickAt))}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Tick interval</div>
+          <div class="stat-value">${Math.round(supervisor.intervalMs / 1000)}s</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Plan generation pipeline (24h)</div>
+        <span class="badge" style="background:${bandColor[pipelineBand]}22;color:${bandColor[pipelineBand]}">
+          <span class="dot" style="width:8px;height:8px;background:${bandColor[pipelineBand]}"></span>
+          ${escapeHtml(pipelineBand)}
+        </span>
+      </div>
+      <div class="muted" style="margin-top:6px">
+        Aggregate success rate of all strategic plan runs over the last 24 hours. No per-customer data is shown.
+      </div>
+      <div class="grid">
+        <div class="stat">
+          <div class="stat-label">Total runs</div>
+          <div class="stat-value">${bucket?.total ?? "—"}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Success rate</div>
+          <div class="stat-value">${successRate24h !== null ? `${successRate24h}%` : "—"}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Partial runs</div>
+          <div class="stat-value">${bucket?.partial ?? "—"}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Failed runs</div>
+          <div class="stat-value">${bucket?.failed ?? "—"}</div>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:10px">
+        Last incident: <strong>${escapeHtml(fmtTime(bucket?.lastIncidentAt ?? null))}</strong>
+      </div>
+    </div>
+
+    <footer>
+      No customer data is exposed on this page. For machine-readable status, request <code>Accept: application/json</code>.
+    </footer>
+  </div>
+</body>
+</html>`;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).send(html);
   });
 
   // ─── Seal #17 / Track #4 — Operator-visible continuity surface ─────────

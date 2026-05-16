@@ -527,6 +527,20 @@ export function registerAuthRoutes(app: Router) {
 
       const emailLower = email.toLowerCase().trim();
 
+      // Task #54 / GR19 + GR20 — admission gates run BEFORE bcrypt + DB
+      // insert so a frozen window can't burn CPU on hash attempts.
+      const { evaluateBetaAdmission, recordAdmissionDenied } = await import("./middleware/beta-admission");
+      const admission = await evaluateBetaAdmission();
+      if (admission.outcome !== "admit") {
+        if (admission.retryAfterSec) res.setHeader("Retry-After", String(admission.retryAfterSec));
+        await recordAdmissionDenied(admission, emailLower, req.ip);
+        return res.status(admission.status).json({
+          error: admission.errorCode,
+          message: admission.message,
+          retryAfterSec: admission.retryAfterSec,
+        });
+      }
+
       const existing = await db.select().from(users).where(eq(users.email, emailLower)).limit(1);
       if (existing.length > 0) {
         return res.status(409).json({ error: "An account with this email already exists" });

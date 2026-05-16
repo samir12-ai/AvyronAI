@@ -198,6 +198,26 @@ export function validateEnv(opts: { exitOnFailure?: boolean } = {}): EnvValidati
     for (const w of warnings) console.warn(`[EnvValidator] WARN missing recommended: ${w}`);
   }
 
+  // Task #54 — log active values of the GR19–GR23 beta operator knobs so the
+  // operator can confirm the cap layer is wired correctly at boot.
+  // Unset values are reported as "disabled" rather than warnings — these
+  // caps are intentionally off in dev.
+  const betaKnobs: Array<{ key: string; description: string }> = [
+    { key: "BETA_ADMISSIONS_FROZEN", description: "GR19 — freeze new account signups (503)" },
+    { key: "BETA_ACCOUNT_CAP", description: "GR20 — max active beta accounts" },
+    { key: "AI_DAILY_SPEND_CAP_USD_PER_ACCOUNT", description: "GR21 — per-account daily AI spend cap (USD)" },
+    { key: "SCRAPE_DAILY_VOLUME_CAP_PER_ACCOUNT", description: "GR22 — per-account daily scrape volume cap" },
+    { key: "MI_QUEUE_DEPTH_DEFER_THRESHOLD", description: "GR23 — global MI queue depth defer threshold" },
+  ];
+  for (const k of betaKnobs) {
+    const v = process.env[k.key];
+    if (v && v.trim()) {
+      console.log(`[EnvValidator] beta-knob ${k.key}=${v} (${k.description})`);
+    } else {
+      console.log(`[EnvValidator] beta-knob ${k.key}=<unset> — disabled (${k.description})`);
+    }
+  }
+
   if (!result.ok) {
     console.error("[EnvValidator] FATAL — required environment variables missing or invalid:");
     for (const m of missing) console.error(`  • ${m}`);

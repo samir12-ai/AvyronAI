@@ -8,6 +8,7 @@ import {
   type ContinuityDecision,
   DECISION_LABELS,
   DECISION_COLORS,
+  friendlyContinuityReason,
 } from '@/hooks/useContinuityPanel';
 
 interface CampaignCardProps {
@@ -104,7 +105,10 @@ export function CampaignCard({ campaign, onPress, onToggle, continuityDecision }
           <Ionicons name="time-outline" size={12} color={DECISION_COLORS[continuityDecision.decision]} />
           <Text style={[styles.continuityBadgeText, { color: DECISION_COLORS[continuityDecision.decision] }]} numberOfLines={2}>
             {DECISION_LABELS[continuityDecision.decision]}
-            {continuityDecision.reason ? ` · ${continuityDecision.reason}` : ''}
+            {(() => {
+              const friendly = friendlyContinuityReason(continuityDecision.decision, continuityDecision.reason);
+              return friendly ? ` · ${friendly}` : '';
+            })()}
           </Text>
         </View>
       )}

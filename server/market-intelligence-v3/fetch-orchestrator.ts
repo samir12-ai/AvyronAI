@@ -23,6 +23,7 @@ import { applyQualityGate, filterClustersByQuality } from "../shared/signal-qual
 import { logAudit } from "../audit";
 import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
 import { acquireToken, getBucketState } from "../competitive-intelligence/rate-limiter";
+import { evaluateScrapeAdmission } from "./scrape-volume-cap";
 
 const INCREMENTAL_WINDOW_DAYS = 7;
 
@@ -373,6 +374,22 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   if (existingDupHash.length > 0) {
     console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash} for account ${accountId} (per-account scope)`);
     return existingDupHash[0].id;
+  }
+
+  // Task #54 / GR22 + GR23 — operator-toggleable scrape volume cap +
+  // global queue depth circuit-breaker. Evaluated BEFORE inserting a new
+  // job row so a tripped cap doesn't add queue weight.
+  const admission = await evaluateScrapeAdmission(accountId, competitors.length);
+  if (admission.outcome !== "admit") {
+    console.warn(
+      `[FetchOrch] ADMISSION_DENIED | account=${accountId} | outcome=${admission.outcome} | reason=${admission.reason || ""}`,
+    );
+    const err: any = new Error(admission.reason || "Scrape job admission denied");
+    err.code = admission.outcome === "volume_cap_exceeded"
+      ? "SCRAPE_VOLUME_CAP_EXCEEDED"
+      : "MI_QUEUE_DEPTH_DEFERRED";
+    err.admission = admission;
+    throw err;
   }
 
   const runningCount = await getRunningJobCountForAccount(accountId);

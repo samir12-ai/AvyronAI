@@ -361,6 +361,25 @@ export function registerMIv3Routes(app: Express) {
       if (err.message.includes("already in progress") || err.message.includes("DEDUP")) {
         return res.status(409).json({ error: err.message });
       }
+      // Task #54 / GR22+GR23 — surface admission denials as typed,
+      // actionable responses instead of generic 500s. Operators (and the
+      // client UI) need to distinguish "we deliberately blocked this"
+      // from "the server crashed". B1 doctrine — truthful guardrail
+      // signal beats opaque error.
+      if (err?.code === "SCRAPE_VOLUME_CAP_EXCEEDED") {
+        return res.status(429).json({
+          error: err.message,
+          code: "SCRAPE_VOLUME_CAP_EXCEEDED",
+          admission: err.admission ?? null,
+        });
+      }
+      if (err?.code === "MI_QUEUE_DEPTH_DEFERRED") {
+        return res.status(503).json({
+          error: err.message,
+          code: "MI_QUEUE_DEPTH_DEFERRED",
+          admission: err.admission ?? null,
+        });
+      }
       return res.status(500).json({ error: err.message });
     }
   });

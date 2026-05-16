@@ -102,7 +102,7 @@ export function PlanStatus({ campaignId, isDark, onBuildPlan, onApprovePlan, onV
             <Text style={[s.subtitle, { color: textSecondary }]}>
               {(noPlanBlocked || noPlanFailed)
                 ? 'The pipeline could not generate a plan. Resolve the issues and re-run.'
-                : 'Run the orchestrator to generate your strategic plan'}
+                : 'Tap below to build your first plan. After approval, plans regenerate automatically every hour as new signals come in.'}
             </Text>
           </View>
         </View>

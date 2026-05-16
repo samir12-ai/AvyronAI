@@ -59,6 +59,7 @@ import { initMetaMetrics } from "./meta-metrics";
 import { registerAuthRoutes, resolveAccountId, isAdminAccount } from "./auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
 import { aiRateLimitPerAccount } from "./middleware/ai-rate-limit";
+import { aiSpendCapPerAccount } from "./middleware/ai-spend-cap";
 import { registerStagingAdminRoutes } from "./staging-admin-routes";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
@@ -185,7 +186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/generate-content", aiRateLimitPerAccount(), async (req, res) => {
+  app.post("/api/generate-content", aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req, res) => {
     try {
       const { topic, contentType, platform, brandName, tone, targetAudience, industry, aiEngine, campaignId } = req.body;
 
@@ -304,7 +305,7 @@ Requirements:
     });
   });
 
-  app.post("/api/generate-ad", aiRateLimitPerAccount(), async (req, res) => {
+  app.post("/api/generate-ad", aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req, res) => {
     try {
       const { brandName, industry, tone, targetAudience, platforms, aiEngine } = req.body;
 
@@ -386,7 +387,7 @@ Make sure the content works well across all the specified platforms.`;
     }
   });
 
-  app.post("/api/generate-reel-script", aiRateLimitPerAccount(), async (req, res) => {
+  app.post("/api/generate-reel-script", aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req, res) => {
     try {
       const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal, ciContext, campaignId } = req.body;
 
@@ -1236,7 +1237,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     }
   });
 
-  app.post("/api/generate-calendar", aiRateLimitPerAccount(), async (req, res) => {
+  app.post("/api/generate-calendar", aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req, res) => {
     try {
       const { brandName, industry, tone, targetAudience, platforms, goals, products, month, year } = req.body;
 
