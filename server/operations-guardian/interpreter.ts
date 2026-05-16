@@ -48,6 +48,11 @@ import type { ChainObservation } from "../continuity/supervisor";
 // when load spikes.
 const COLLECTOR_HARD_LIMIT = 1000;
 
+// Internal exports for regression tests (Task #56). Underscore-prefixed
+// per the existing convention (_bossInFlightStats, _activeJobsStats).
+// NOT for production use outside this module.
+export const _COLLECTOR_HARD_LIMIT = COLLECTOR_HARD_LIMIT;
+
 // ─── Shape of a classified notice ready to UPSERT ───────────────────────
 
 interface ClassifiedNotice {
@@ -300,6 +305,12 @@ function collectChainSignals(input: CollectInput): ClassifiedNotice[] {
 // rejects the write at the boundary. There is no other write path to
 // system_notices in the codebase — adding one MUST go through this
 // guard or the doctrine breaks.
+export function _audienceFirewallOk(n: ClassifiedNotice): boolean {
+  return audienceFirewallOk(n);
+}
+
+export type _ClassifiedNoticeForTest = ClassifiedNotice;
+
 function audienceFirewallOk(n: ClassifiedNotice): boolean {
   if (n.audience === "user") {
     if (!canPromoteToUser(n.category)) {
@@ -383,6 +394,14 @@ async function upsertNotices(
     else updated++;
   }
   return { inserted, updated };
+}
+
+export async function _resolveStaleNoticesForTest(
+  observedKeys: ReadonlySet<string>,
+  fullyObservedCategories: ReadonlySet<NoticeCategory>,
+  now: Date,
+): Promise<number> {
+  return resolveStaleNotices(observedKeys, fullyObservedCategories, now);
 }
 
 async function resolveStaleNotices(
