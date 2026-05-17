@@ -19,6 +19,7 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useLanguage } from '@/context/LanguageContext';
 import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
 
 type StrategyView = 'overview' | 'insights' | 'decisions' | 'memory' | 'growth' | 'reports' | 'sniper' | 'moat';
 
@@ -64,6 +65,7 @@ export default function StrategyHub() {
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const { t } = useLanguage();
+  const { enabled: isOperatorView } = useOperatorSurface();
 
   const [activeView, setActiveView] = useState<StrategyView>('overview');
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -417,7 +419,9 @@ export default function StrategyHub() {
               <MetricPill label="Avg CPA" value={`$${(dashboard?.averages?.avgCpa || 0).toFixed(0)}`} icon="cash-outline" color="#F59E0B" />
               <MetricPill label="Avg ROAS" value={`${(dashboard?.averages?.avgRoas || 0).toFixed(1)}x`} icon="trending-up-outline" color="#8B5CF6" />
               <MetricPill label="Posts" value={formatNum(dashboard?.averages?.totalPosts)} icon="layers-outline" color="#EC4899" />
-              <MetricPill label="Retention" value={`${(dashboard?.averages?.avgRetention || 0).toFixed(0)}%`} icon="timer-outline" color="#06B6D4" />
+              {isOperatorView ? (
+                <MetricPill label="Retention" value={`${(dashboard?.averages?.avgRetention || 0).toFixed(0)}%`} icon="timer-outline" color="#06B6D4" />
+              ) : null}
             </View>
 
             <View style={s.row}>

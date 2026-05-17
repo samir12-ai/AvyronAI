@@ -27,7 +27,7 @@ export function translateQ2Verdict(q2: string | null | undefined): WatchtowerLin
     case "STABLE":
       return { tone: "stable", headline: "Market is steady", detail: "Nothing has shifted since your last plan." };
     case "SHIFTED":
-      return { tone: "shift", headline: "Market shift detected", detail: "Recent signals look different from when this plan was made. A review is queued." };
+      return { tone: "shift", headline: "Market shift since last check", detail: "Recent signals look different from when this plan was made. A review is queued." };
     case "UNCERTAIN":
       return { tone: "watching", headline: "Watching the market", detail: "Building baseline before flagging shifts. Monitoring is active." };
     default:

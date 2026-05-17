@@ -29,10 +29,6 @@ import { CampaignBar } from '@/components/CampaignSelector';
 import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfile';
-import { PlanStatus } from '@/components/PlanStatus';
-import ExecutionPlan from '@/components/ExecutionPlan';
-import { RequiredWorkCard } from '@/components/RequiredWorkCard';
-import DashboardChat from '@/components/DashboardChat';
 import NarrativeCard from '@/components/NarrativeCard';
 import { useRunAnchor } from '@/hooks/useRunAnchor';
 import { useRunTruthfulness } from '@/hooks/useRunTruthfulness';
@@ -40,11 +36,12 @@ import { presentRunTruthfulness } from '@/lib/run-truthfulness-presentation';
 import type { MetricCardVerdict } from '@/components/MetricCard';
 import type { ProvenanceKind } from '@/components/DataProvenance';
 import { useAuth } from '@/context/AuthContext';
-import OnboardingAgent from '@/components/OnboardingAgent';
 import { RunTruthfulnessBanner } from '@/components/RunTruthfulnessBanner';
 import WatchtowerStrip from '@/components/WatchtowerStrip';
 import ActivityTimeline from '@/components/ActivityTimeline';
-import MonitoringCard from '@/components/MonitoringCard';
+import { MarketMindAgent } from '@/components/MarketMindAgent';
+import InitializationExperience from '@/components/InitializationExperience';
+import { useWatchtower } from '@/hooks/usePerception';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -143,25 +140,55 @@ type DashboardMetrics = {
 
 type PanelState = 'loading' | 'empty' | 'error' | 'success' | 'no_data';
 
-function DashboardRunBound({ campaignId, isDark, onBuildPlan, onApprovePlan, isApproving, narrativeRefreshKey, setNarrativeRefreshKey }: {
-  campaignId: string; isDark: boolean; onBuildPlan: () => void; onApprovePlan: (planId: string) => void; isApproving: boolean; narrativeRefreshKey: number; setNarrativeRefreshKey: (fn: (k: number) => number) => void;
+function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
+  campaignId: string; isDark: boolean; narrativeRefreshKey: number;
 }) {
+  // Sprint cleanup (post-audit): the dashboard is now strategy-focused.
+  // PlanStatus / ExecutionPlan / RequiredWorkCard moved off the dashboard
+  // (live on the roadmap surface). DashboardChat removed — MarketMindAgent
+  // is the single conversational entry point. WatchtowerStrip is folded
+  // in here as a slim status pill above the strategic content.
+  // When the watchtower reports no_data (no boss_runs yet for this
+  // campaign) we render the InitializationExperience instead of the
+  // empty-state cards so the first-run feel is alive, not blank.
   const { data: anchor } = useRunAnchor(campaignId);
   const runId = anchor?.runId || null;
+  const { data: watchtower, isLoading: isWatchtowerLoading } = useWatchtower(campaignId);
+
+  // Stabilize the first-render path so we don't flicker from the "active"
+  // shell into the initialization card the moment the watchtower query
+  // resolves to `no_data`. Reserve a fixed-height neutral placeholder
+  // (matching the rough first-card stack) until the watchtower response
+  // arrives, then commit to whichever branch is real — this prevents
+  // both branch flicker AND structural reflow / hero jump.
+  if (isWatchtowerLoading && !watchtower) {
+    const placeholderBg = isDark ? '#0F1419' : '#FFFFFF';
+    const placeholderBorder = isDark ? '#1A2030' : '#E2E8E4';
+    return (
+      <View
+        testID="dashboard-loading-placeholder"
+        style={{
+          minHeight: 260,
+          borderRadius: 18,
+          borderWidth: 1,
+          backgroundColor: placeholderBg,
+          borderColor: placeholderBorder,
+          marginBottom: 14,
+        }}
+      />
+    );
+  }
+
+  if (watchtower?.state === 'no_data') {
+    return <InitializationExperience campaignId={campaignId} isDark={isDark} />;
+  }
+
   return (
     <>
+      <WatchtowerStrip campaignId={campaignId} isDark={isDark} />
       <RunTruthfulnessBanner campaignId={campaignId} isDark={isDark} />
-      <PlanStatus
-        campaignId={campaignId}
-        isDark={isDark}
-        onBuildPlan={onBuildPlan}
-        onApprovePlan={onApprovePlan}
-        isApproving={isApproving}
-        runId={runId}
-      />
+      <MarketMindAgent campaignId={campaignId} isDark={isDark} />
       <NarrativeCard campaignId={campaignId} isDark={isDark} refreshKey={narrativeRefreshKey} runId={runId} />
-      <ExecutionPlan onPlanGenerated={() => setNarrativeRefreshKey(k => k + 1)} />
-      <RequiredWorkCard campaignId={campaignId} isDark={isDark} />
     </>
   );
 }
@@ -663,31 +690,15 @@ export default function DashboardScreen() {
 
         <CampaignBar />
 
-        {selectedCampaignId ? (
-          <WatchtowerStrip campaignId={selectedCampaignId} isDark={isDark} />
-        ) : null}
-
-        {selectedCampaignId ? (
-          <MonitoringCard campaignId={selectedCampaignId} isDark={isDark} />
-        ) : null}
-
         <RNAnimated.View style={{ opacity: headerFade, transform: [{ translateY: cardSlide }] }}>
           {renderMetricsPanel()}
         </RNAnimated.View>
 
-        <OnboardingAgent />
-
-        <DashboardChat />
-
         {selectedCampaignId ? (
-          <DashboardRunBound
+          <DashboardActive
             campaignId={selectedCampaignId}
             isDark={isDark}
-            onBuildPlan={handleBuildPlan}
-            onApprovePlan={handleApprovePlan}
-            isApproving={isApproving}
             narrativeRefreshKey={narrativeRefreshKey}
-            setNarrativeRefreshKey={setNarrativeRefreshKey}
           />
         ) : null}
 

@@ -211,8 +211,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             await clearAuth();
           }
-        } catch {
-          // offline or timeout - use cached user
+        } catch (err) {
+          // Offline or timeout — keep cached user but surface the failure.
+          // Seal #15/#16 silent-failure doctrine: this used to be a silent
+          // `} catch {}` which masked a misconfigured EXPO_PUBLIC_DOMAIN
+          // (manifests as the dashboard hanging on the splash screen).
+          const message = err instanceof Error ? err.message : String(err);
+          // eslint-disable-next-line no-console
+          console.error(`[Auth] ME_VERIFY_FAILED_USING_CACHED ${message}`);
         }
       }
     } catch (error) {
@@ -392,7 +398,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
         await upsertSavedAccount(userToSavedAccount(data.user, token));
       }
-    } catch {}
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.error(`[Auth] REFRESH_USER_FAILED ${message}`);
+    }
   }, [token]);
 
   const openAccountSwitcher = useCallback(() => setShowAccountSwitcher(true), []);

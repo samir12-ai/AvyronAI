@@ -1,6 +1,22 @@
+import { useEffect, useState } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { getApiUrl, authFetch } from "@/lib/query-client";
 import type { WatchtowerLine, ActivityEvent } from "@shared/perception-translator";
+
+// Battery doctrine — pause polling when the app is backgrounded. React
+// Query will resume on next foreground (refetch fires immediately if the
+// data is stale). Used by all perception hooks below.
+function useIsAppActive(): boolean {
+  const [active, setActive] = useState(() => AppState.currentState === "active");
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
+      setActive(state === "active");
+    });
+    return () => sub.remove();
+  }, []);
+  return active;
+}
 
 export interface WatchtowerResponse {
   success: true;
@@ -40,31 +56,34 @@ async function fetchJson<T>(path: string): Promise<T> {
 }
 
 export function useWatchtower(campaignId: string | null | undefined) {
+  const active = useIsAppActive();
   return useQuery<WatchtowerResponse>({
     queryKey: ["/api/perception/watchtower", campaignId],
     queryFn: () => fetchJson<WatchtowerResponse>(`/api/perception/watchtower?campaignId=${campaignId}`),
     enabled: !!campaignId,
     staleTime: 5 * 60_000,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: active ? 5 * 60_000 : false,
   });
 }
 
 export function useActivityTimeline(campaignId: string | null | undefined, sinceHours = 168) {
+  const active = useIsAppActive();
   return useQuery<ActivityResponse>({
     queryKey: ["/api/perception/activity", campaignId, sinceHours],
     queryFn: () => fetchJson<ActivityResponse>(`/api/perception/activity?campaignId=${campaignId}&sinceHours=${sinceHours}`),
     enabled: !!campaignId,
     staleTime: 5 * 60_000,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: active ? 5 * 60_000 : false,
   });
 }
 
 export function useMonitoring(campaignId: string | null | undefined) {
+  const active = useIsAppActive();
   return useQuery<MonitoringResponse>({
     queryKey: ["/api/perception/monitoring", campaignId],
     queryFn: () => fetchJson<MonitoringResponse>(`/api/perception/monitoring?campaignId=${campaignId}`),
     enabled: !!campaignId,
     staleTime: 5 * 60_000,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: active ? 5 * 60_000 : false,
   });
 }

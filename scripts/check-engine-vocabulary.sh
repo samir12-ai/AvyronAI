@@ -57,6 +57,21 @@ RAW_TOKENS=(
   "AI_QUOTA_PRESSURE"
   "GPT-5.2"
   "Gemini 3 Pro"
+  # Post-audit vocabulary sweep (sprint cleanup) — phrases the audit flagged
+  # as operator vocabulary leaking into customer copy. Each was replaced
+  # with outcome-framed phrasing; this denylist prevents reintroduction.
+  "Drift detected"
+  "drift detected"
+  "trusted signal"
+  "fallback isolated"
+  "Contract incomplete"
+  "Live evidence"
+  "Reused snapshot"
+  # Note: "system_untrusted" is an internal truthfulness enum value used
+  # in switch cases — it never reaches the user; the presenter layer maps
+  # it to "Limited confidence". Kept off this denylist to avoid false
+  # positives on internal contract code paths.
+  "Plan Binding"
 )
 
 # Files in this customer-build set are scanned. Operator-only files where

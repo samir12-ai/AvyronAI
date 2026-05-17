@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useCampaign } from "@/context/CampaignContext";
 import Colors from "@/constants/colors";
+import { useOperatorSurface } from "@/hooks/useOperatorSurface";
 
 type SignalOrigin = "real" | "competitor" | "inferred" | "fallback" | "unknown";
 type ValidationState = "validated" | "provisional" | "weak" | "rejected" | "unknown";
@@ -86,6 +87,7 @@ export default function DiagnoseScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { selectedCampaignId } = useCampaign();
+  const { enabled: isOperator } = useOperatorSurface();
 
   const { data, isLoading, isError, error, refetch } = useQuery<DiagnoseProjection>({
     queryKey: ["/api/diagnose/projection", selectedCampaignId],
@@ -126,12 +128,14 @@ export default function DiagnoseScreen() {
               {VALIDATION_LABEL[data.validationState]}
             </Text>
             <Text style={[styles.narrativeSummary, { color: colors.text }]}>{data.narrative.summary}</Text>
-            <Text style={[styles.metaLine, { color: colors.textMuted }]}>
-              {data.planSource === "unknown" ? "no plan yet" : `plan: ${data.planSource.replace(/_/g, " ")}`}
-              {data.fallbackPlanIsolated ? " · fallback isolated" : ""}
-              {" · "}
-              {Math.round((data.signalOrigin.real + data.signalOrigin.competitor) * 100)}% trusted signal
-            </Text>
+            {isOperator ? (
+              <Text style={[styles.metaLine, { color: colors.textMuted }]}>
+                {data.planSource === "unknown" ? "no plan yet" : `plan: ${data.planSource.replace(/_/g, " ")}`}
+                {data.fallbackPlanIsolated ? " · fallback isolated" : ""}
+                {" · "}
+                {Math.round((data.signalOrigin.real + data.signalOrigin.competitor) * 100)}% trusted signal
+              </Text>
+            ) : null}
           </View>
 
           {data.narrative.blockers.length > 0 && (
@@ -181,7 +185,7 @@ export default function DiagnoseScreen() {
               data.layers.positioning.primaryTerritory ? `Territory: ${data.layers.positioning.primaryTerritory}` : "No primary territory",
               data.layers.positioning.differentiationStatement ? `Differentiation: ${data.layers.positioning.differentiationStatement}` : null,
               data.layers.positioning.territoryCount > 0 ? `${data.layers.positioning.territoryCount} territories mapped` : null,
-              data.layers.positioning.driftDetected ? "Drift detected vs prior baseline" : null,
+              data.layers.positioning.driftDetected ? "Shift since last baseline check" : null,
               data.layers.positioning.confidenceScore !== null ? `Confidence ${Math.round(data.layers.positioning.confidenceScore * 100)}%` : null,
             ].filter((x): x is string => !!x)}
           />
@@ -230,18 +234,25 @@ function LayerCard({ title, origin, degraded, colors, lines }: {
   colors: LayerColors;
   lines: string[];
 }) {
+  const { enabled: isOperator } = useOperatorSurface();
   return (
     <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
       <Text style={[styles.cardTitle, { color: colors.text }]}>{title}</Text>
       {lines.map((line, i) => (
         <Text key={i} style={[styles.layerLine, { color: colors.textSecondary }]}>{line}</Text>
       ))}
-      <Text style={[styles.originLine, { color: colors.textMuted }]}>
-        origin: {origin}{degraded ? ` · degraded (${degraded.source})` : ""}
-      </Text>
-      {degraded && (
-        <Text style={[styles.degradedReason, { color: colors.warning }]}>{degraded.reason}</Text>
-      )}
+      {isOperator ? (
+        <>
+          <Text style={[styles.originLine, { color: colors.textMuted }]}>
+            origin: {origin}{degraded ? ` · degraded (${degraded.source})` : ""}
+          </Text>
+          {degraded && (
+            <Text style={[styles.degradedReason, { color: colors.warning }]}>{degraded.reason}</Text>
+          )}
+        </>
+      ) : degraded ? (
+        <Text style={[styles.degradedReason, { color: colors.warning }]}>Still gathering more evidence here.</Text>
+      ) : null}
     </View>
   );
 }

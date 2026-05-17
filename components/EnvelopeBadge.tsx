@@ -5,6 +5,7 @@ import {
   classifyEnvelopeBadge,
   type LiveSnapshotEnvelope,
 } from "@/lib/envelope";
+import { useOperatorSurface } from "@/hooks/useOperatorSurface";
 
 interface Props {
   envelope: LiveSnapshotEnvelope | null | undefined;
@@ -21,9 +22,33 @@ const ICON_BY_KIND: Record<string, keyof typeof Ionicons.glyphMap> = {
   unknown: "help-circle",
 };
 
+// Post-audit vocabulary sweep — customer mode hides the badge entirely for
+// healthy/reused/unknown states (operational silence is fine when the
+// underlying snapshot is fine) and rewrites the labels for the remaining
+// surfaces. Operator builds still see the raw classifier output.
+const CUSTOMER_LABEL_BY_KIND: Record<string, { label: string; detail: string } | null> = {
+  live: null,
+  reused: null,
+  unknown: null,
+  stale: { label: "Updating", detail: "Refreshing this view with the latest data." },
+  incomplete: { label: "Still gathering", detail: "More evidence is being collected before this view is final." },
+};
+
 export function EnvelopeBadge({ envelope, onRerun, compact, testID }: Props) {
+  const { enabled: isOperator } = useOperatorSurface();
   const meta = classifyEnvelopeBadge(envelope);
   if (!meta) return null;
+
+  let label = meta.label;
+  let detail = meta.detail;
+  if (!isOperator) {
+    const override = CUSTOMER_LABEL_BY_KIND[meta.kind];
+    if (override === null) return null;
+    if (override) {
+      label = override.label;
+      detail = override.detail;
+    }
+  }
 
   const icon = ICON_BY_KIND[meta.kind] || "information-circle";
   const showRerun = !!onRerun && (meta.kind === "stale" || meta.kind === "incomplete");
@@ -36,7 +61,7 @@ export function EnvelopeBadge({ envelope, onRerun, compact, testID }: Props) {
       >
         <Ionicons name={icon} size={11} color={meta.color} />
         <Text style={[styles.compactText, { color: meta.color }]} numberOfLines={1}>
-          {meta.label}
+          {label}
         </Text>
       </View>
     );
@@ -50,10 +75,10 @@ export function EnvelopeBadge({ envelope, onRerun, compact, testID }: Props) {
       <Ionicons name={icon} size={14} color={meta.color} />
       <View style={styles.body}>
         <Text style={[styles.label, { color: meta.color }]} numberOfLines={1}>
-          {meta.label}
+          {label}
         </Text>
         <Text style={[styles.detail, { color: meta.color + "CC" }]} numberOfLines={2}>
-          {meta.detail}
+          {detail}
         </Text>
       </View>
       {showRerun && (

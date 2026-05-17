@@ -11,7 +11,14 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
     if (token) {
       return { Authorization: `Bearer ${token}` };
     }
-  } catch {}
+  } catch (err) {
+    // Seal #15/#16: surface secure-store read failures explicitly so
+    // request paths missing an auth header are diagnosable rather than
+    // silently degrading to anonymous calls.
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console
+    console.error(`[QueryClient] AUTH_TOKEN_READ_FAILED ${message}`);
+  }
   return {};
 }
 
