@@ -1,0 +1,183 @@
+I want to lock the direction clearly before we continue adding anything else to the system.
+
+At this stage, I do NOT want us to continue building new runtime surfaces, new orchestration paths, or new product compositions until we complete a full structural consolidation audit across the entire system.
+
+Important clarification:
+
+We already implemented many of the foundations discussed previously:
+
+* engine contracts
+* orchestration layers
+* adaptive runtime foundations
+* market intelligence flows
+* validation layers
+* memory foundations
+* comparison logic
+* user scraping/runtime
+* synthesis paths
+
+The issue is no longer missing capability.
+
+The issue is structural organization, overlap, runtime entropy, and fragmented authority boundaries.
+
+Right now the biggest risk is:
+continuing to build on top of partially overlapping systems before the architecture is normalized.
+
+That would eventually create:
+
+* hidden authority conflicts
+* duplicated truth layers
+* unstable orchestration paths
+* enforcement ambiguity
+* runtime unpredictability
+* growing maintenance complexity
+* fragile feature composition
+
+So before we add or expose additional product capabilities, I want a COMPLETE audit of everything that needs normalization, consolidation, clarification, or boundary cleanup.
+
+The goal of this audit is NOT:
+
+* rewriting the system
+* deleting existing foundations
+* replacing engines
+* rebuilding architecture from scratch
+
+The goal IS:
+
+* organize
+* normalize
+* unify
+* simplify runtime composition
+* clarify ownership
+* reduce entropy
+* stabilize orchestration
+
+I want the audit to cover ALL structural layers end-to-end and not leave blind spots or partially reviewed surfaces.
+
+Specifically, I want a deep audit of:
+
+1. Canonical Fact Ownership
+
+* every fact type
+* every authority source
+* duplicate ownership
+* projection vs authority separation
+* immutable vs mutable paths
+* read/write boundaries
+
+2. Runtime Boundaries
+
+* what generates facts
+* what transforms facts
+* what performs reasoning
+* what is deterministic
+* what is adaptive
+* where AI is allowed
+* where AI must be prohibited
+* which layers are read-only
+* which layers can write memory/state
+
+3. Engine Contracts
+   We already have contract foundations implemented.
+   Audit:
+
+* completeness
+* consistency
+* overlap
+* missing typed boundaries
+* invalid runtime handoffs
+* hidden implicit dependencies
+
+4. Enforcement / Control Layers
+   Audit overlap and responsibilities between:
+
+* CEL
+* System Control
+* Policy layers
+* validation systems
+* retry systems
+* degradation propagation
+* integrity verification
+
+Goal:
+understand where responsibilities overlap, conflict, duplicate, or leak.
+
+5. Orchestration Flow
+   Audit:
+
+* runtime sequencing
+* dependency direction
+* retry amplification risks
+* backward-write risks
+* inconsistent execution paths
+* unstable synthesis flows
+* state mutation risks
+
+6. Memory System
+   Audit:
+
+* provenance
+* decay logic
+* revalidation paths
+* ownership
+* mutation safety
+* stale memory risks
+* memory vs fact separation
+* contradiction handling
+
+7. Domain Organization
+   Without deleting engines:
+
+* identify natural reasoning domains
+* map current engines into domains
+* identify overlap zones
+* identify orchestration complexity hotspots
+* identify unnecessary reconciliation layers
+
+8. UX vs Runtime Separation
+   Audit where:
+
+* architecture leaks into UX
+* operator surfaces leak into user surfaces
+* runtime complexity leaks into product flows
+* composition opportunities exist
+
+9. Runtime Safety / Stability
+   Audit:
+
+* degraded propagation consistency
+* failure containment
+* replayability
+* auditability
+* deterministic guarantees
+* signal provenance consistency
+* stale evidence inflation risks
+* hallucination exposure surfaces
+
+10. Expansion Readiness
+    Before adding ANY new user-facing flow:
+    audit whether:
+
+* the required base already exists
+* the capability is actually composition-only
+* new runtime surfaces are truly necessary
+* existing orchestration can support it safely
+
+Most important instruction:
+
+I do NOT want partial audits or isolated fixes.
+
+I want a COMPLETE structural map of:
+
+* what exists
+* what overlaps
+* what conflicts
+* what must be consolidated
+* what must remain isolated
+* what must become canonical
+* what can become composable safely
+
+Only AFTER this audit is complete should we create the actual consolidation + execution plan.
+
+Right now the priority is:
+understanding the full architecture clearly before we continue building on top of it.
