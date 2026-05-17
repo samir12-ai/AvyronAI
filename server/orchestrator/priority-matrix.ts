@@ -12,6 +12,17 @@
  * transitive closure. `validateScopedHydration()` walks the closure when
  * deciding whether a scoped rerun has the inputs it needs.
  */
+// Task #70 / Phase 7 — Domain Composition Cleanup.
+//   - integrity retiered MESSAGING → VALIDATION (it is a cross-engine
+//     consistency verdict, not a messaging output).
+//   - statistical_validation retiered FINANCIAL → VALIDATION (joins
+//     integrity as the second VALIDATION-tier engine; budget_governor
+//     consumes the merged validation verdict).
+//   - channel_selection retiered CHANNEL → ALLOCATION (CHANNEL folded
+//     into ALLOCATION — a single tier covering "where spend goes").
+//   - iteration + retention retiered CREATIVE → OPTIMIZATION (CREATIVE
+//     renamed — these engines optimize the live system, they do not
+//     produce creative).
 export const ENGINE_PRIORITY_ORDER = [
   { id: "market_intelligence", name: "Market Intelligence", priority: 1, tier: "MARKET_REALITY", dependencies: [] as readonly string[] },
   { id: "audience", name: "Audience Engine", priority: 2, tier: "MARKET_REALITY", dependencies: ["market_intelligence"] as readonly string[] },
@@ -22,27 +33,65 @@ export const ENGINE_PRIORITY_ORDER = [
   { id: "awareness", name: "Awareness Engine", priority: 7, tier: "MESSAGING", dependencies: ["audience", "positioning", "offer"] as readonly string[] },
   { id: "funnel", name: "Funnel Engine", priority: 8, tier: "MESSAGING", dependencies: ["audience", "offer", "awareness"] as readonly string[] },
   { id: "persuasion", name: "Persuasion Engine", priority: 9, tier: "MESSAGING", dependencies: ["audience", "offer", "awareness", "funnel"] as readonly string[] },
-  { id: "integrity", name: "Integrity Engine", priority: 10, tier: "MESSAGING", dependencies: ["positioning", "offer", "awareness", "funnel", "persuasion"] as readonly string[] },
-  { id: "statistical_validation", name: "Statistical Validation", priority: 11, tier: "FINANCIAL", dependencies: ["market_intelligence", "audience", "integrity"] as readonly string[] },
+  { id: "integrity", name: "Integrity Engine", priority: 10, tier: "VALIDATION", dependencies: ["positioning", "offer", "awareness", "funnel", "persuasion"] as readonly string[] },
+  { id: "statistical_validation", name: "Statistical Validation", priority: 11, tier: "VALIDATION", dependencies: ["market_intelligence", "audience", "integrity"] as readonly string[] },
   { id: "budget_governor", name: "Budget Governor", priority: 12, tier: "FINANCIAL", dependencies: ["statistical_validation", "integrity"] as readonly string[] },
-  { id: "channel_selection", name: "Channel Selection", priority: 13, tier: "CHANNEL", dependencies: ["audience", "funnel", "budget_governor"] as readonly string[] },
-  { id: "iteration", name: "Iteration Engine", priority: 14, tier: "CREATIVE", dependencies: ["funnel", "persuasion", "budget_governor", "channel_selection"] as readonly string[] },
-  { id: "retention", name: "Retention Engine", priority: 15, tier: "CREATIVE", dependencies: ["audience", "offer", "funnel"] as readonly string[] },
+  { id: "channel_selection", name: "Channel Selection", priority: 13, tier: "ALLOCATION", dependencies: ["audience", "funnel", "budget_governor"] as readonly string[] },
+  { id: "iteration", name: "Iteration Engine", priority: 14, tier: "OPTIMIZATION", dependencies: ["funnel", "persuasion", "budget_governor", "channel_selection"] as readonly string[] },
+  { id: "retention", name: "Retention Engine", priority: 15, tier: "OPTIMIZATION", dependencies: ["audience", "offer", "funnel"] as readonly string[] },
 ] as const;
 
 export type EngineId = typeof ENGINE_PRIORITY_ORDER[number]["id"];
 
-export type PriorityTier = "MARKET_REALITY" | "POSITIONING" | "OFFER" | "MESSAGING" | "FINANCIAL" | "CHANNEL" | "CREATIVE";
+export type PriorityTier =
+  | "MARKET_REALITY"
+  | "POSITIONING"
+  | "OFFER"
+  | "MESSAGING"
+  | "VALIDATION"
+  | "FINANCIAL"
+  | "ALLOCATION"
+  | "OPTIMIZATION";
 
 const TIER_RANK: Record<PriorityTier, number> = {
   MARKET_REALITY: 1,
   POSITIONING: 2,
   OFFER: 3,
   MESSAGING: 4,
-  FINANCIAL: 5,
-  CHANNEL: 6,
-  CREATIVE: 7,
+  VALIDATION: 5,
+  FINANCIAL: 6,
+  ALLOCATION: 7,
+  OPTIMIZATION: 8,
 };
+
+// Task #70 / Phase 7 — CV-03 (tier-rank consistency check).
+//
+// Catches authoring drift at module-load time: every engine in
+// ENGINE_PRIORITY_ORDER must carry a tier declared in TIER_RANK, every
+// tier value used must be in the PriorityTier union, and the priority
+// numbers must move monotonically through non-decreasing tier ranks
+// (lower-tier engines never run after a higher-tier engine). A failure
+// here is a build-time defect and aborts process boot rather than
+// silently re-ordering the pipeline.
+function assertTierRankConsistency(): void {
+  let lastTierRank = 0;
+  for (const eng of ENGINE_PRIORITY_ORDER) {
+    const tier = eng.tier as PriorityTier;
+    const rank = TIER_RANK[tier];
+    if (rank === undefined) {
+      throw new Error(
+        `[priority-matrix] CV-03 tier-rank inconsistency: engine "${eng.id}" declares tier "${eng.tier}" which is not registered in TIER_RANK`,
+      );
+    }
+    if (rank < lastTierRank) {
+      throw new Error(
+        `[priority-matrix] CV-03 tier-rank inconsistency: engine "${eng.id}" tier=${tier} (rank=${rank}) appears after a tier with rank=${lastTierRank} — priority order MUST flow non-decreasing through tier ranks`,
+      );
+    }
+    lastTierRank = rank;
+  }
+}
+assertTierRankConsistency();
 
 export interface PriorityViolation {
   engine: string;
@@ -119,9 +168,21 @@ export function shouldBlockDownstream(result: EngineStepResult): boolean {
   );
 }
 
+/**
+ * Task #70 / Phase 7 — strict mode.
+ *
+ * Pre-Task-#70 this returned a "CREATIVE" sentinel for any unknown engine
+ * id, which silently classified mistyped or removed engines into the
+ * lowest-priority tier instead of surfacing the bug. We now fail-loud:
+ * an unknown engineId is a contract violation and the caller's bug must
+ * be visible at the call site, not laundered into a tier default.
+ */
 export function getEngineTier(engineId: EngineId): PriorityTier {
   const engine = ENGINE_PRIORITY_ORDER.find(e => e.id === engineId);
-  return engine?.tier || "CREATIVE";
+  if (!engine) {
+    throw new Error(`[priority-matrix] getEngineTier: unknown engineId "${engineId}" — not registered in ENGINE_PRIORITY_ORDER`);
+  }
+  return engine.tier as PriorityTier;
 }
 
 /**

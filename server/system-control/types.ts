@@ -335,6 +335,16 @@ export interface SystemControlVerdict {
   shadowMode: boolean;
   commercialJudgement?: import("./system-judgement").SystemJudgement | null;
   recoveryPlan?: RecoveryPlan | null;
+  /**
+   * Task #70 / Phase 7 — canonical merged validation verdict.
+   *
+   * Pre-Task-#70, downstream consumers (budget_governor gating, plan
+   * synthesis safeToExecute) read `integrityVerdict` and `validationState`
+   * separately and applied ad-hoc precedence. `validationVerdict` is the
+   * single projection that merges them (worse-of) — D2 canonical field.
+   * Underlying engine emissions remain on their own rows for D4 readers.
+   */
+  validationVerdict?: import("./validation-verdict").ValidationVerdict | null;
 }
 
 /**

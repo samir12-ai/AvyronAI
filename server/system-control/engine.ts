@@ -40,6 +40,7 @@ import {
   collectBlockReasons,
 } from "./structural-checks";
 import { requireIntegrityVerdict } from "./integrity-verdict";
+import { composeValidationVerdict } from "./validation-verdict";
 import { auditCv05DegradedPropagation } from "./cv05-degraded-propagation";
 import { detectContradictions } from "./contradiction-detector";
 import { assessRepairability, executeRepairActions } from "./repair-actions";
@@ -485,6 +486,37 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
 
   const durationMs = Date.now() - startTime;
 
+  // Task #70 / Phase 7 — canonical merged validation verdict.
+  // Reads the upstream Integrity Engine verdict + Statistical Validation
+  // state directly from the results map and projects them through
+  // `composeValidationVerdict` (worse-of merge, D5 unknown+incomplete on
+  // missing-both). Downstream consumers (budget_governor gating, plan
+  // synthesis safeToExecute) should read this canonical field; legacy
+  // `integrityVerdict` and `validationState` remain on their engines for
+  // D4 back-compat readers only.
+  let validationVerdict: SystemControlVerdict["validationVerdict"] | null = null;
+  try {
+    const integrityOut = input.results.get("integrity")?.output;
+    const statVOut = input.results.get("statistical_validation")?.output;
+    const rawIntegrity = integrityOut?.integrityVerdict;
+    const rawStat = statVOut?.validationState;
+    const integrityVerdictIn: "PASS" | "PARTIAL" | "FAIL" | null =
+      rawIntegrity === "PASS" || rawIntegrity === "PARTIAL" || rawIntegrity === "FAIL"
+        ? rawIntegrity
+        : null;
+    const statStateIn: "validated" | "provisional" | "weak" | "rejected" | null =
+      rawStat === "validated" || rawStat === "provisional" || rawStat === "weak" || rawStat === "rejected"
+        ? rawStat
+        : null;
+    validationVerdict = composeValidationVerdict({
+      integrityVerdict: integrityVerdictIn,
+      statisticalValidationState: statStateIn,
+    });
+  } catch (vvErr: any) {
+    console.warn(`[SystemControl] VALIDATION_VERDICT_COMPOSE_FAILED | ${vvErr?.message ?? String(vvErr)}`);
+    validationVerdict = null;
+  }
+
   const result: SystemControlVerdict = {
     verdict,
     executionMode,
@@ -498,6 +530,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     durationMs,
     controlVersion: CONTROL_VERSION,
     shadowMode,
+    validationVerdict,
   };
 
   logVerdict(result, input.config);

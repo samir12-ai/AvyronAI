@@ -95,11 +95,14 @@ import {
   createInFlightCleanupTracker,
 } from "./in-flight-lifecycle";
 // Task #67 / T-S5-C9: pure ledger entry for system-control budget downgrades.
+// Task #70 / Phase 7: BudgetDecisionLedger three-writer view (B1 fix).
 import {
   computeBudgetDecisionLedgerEntry,
   type BudgetAction,
+  type BudgetDecisionLedger,
   type BudgetDecisionLedgerEntry,
   type BudgetDowngradeSource,
+  type SynthesisHaltOverrideEntry,
 } from "./budget-decision-ledger";
 // U5c (May 2026) — Unified Weighted Reliability Doctrine: gate-retry
 // policy lives in decision-policy/retry-policy.ts. Cutover proven by
@@ -220,6 +223,17 @@ export interface OrchestratorRunResult {
    * the canonical record for auditors.
    */
   budgetDecisionLedger?: BudgetDecisionLedgerEntry[];
+  /**
+   * Task #70 / Phase 7 — three-writer structured ledger view.
+   *
+   * Distinct slots for the three legitimate writers stop the pre-Task-#70
+   * B1 silent collision where "system-control downgraded test→hold" and
+   * "plan-synthesis forced halt" both touched the same fields with no
+   * discriminator. The flat `budgetDecisionLedger` array is preserved
+   * for D4 back-compat readers; this structured view is the canonical
+   * surface for new auditors.
+   */
+  budgetDecisionLedgerView?: BudgetDecisionLedger;
 }
 
 interface EngineContext {
@@ -4286,15 +4300,20 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           // Strategist overlay: designer + judge + 1 retry + null fallback to
           // deterministic plan. Never weakens enforcement. See
           // server/system-control/recovery-intelligence.ts.
-          try {
-            const { enrichRecoveryPlan } = await import("../system-control/recovery-intelligence");
-            plan = await enrichRecoveryPlan(plan, {
+          // Task #70 / Phase 7 — recovery enrichment is owned by the
+          // post-run-projections module (the unified seam for all three
+          // post-run projections). The orchestrator invokes it here while
+          // the controlVerdict is still mutable; the freeze step below
+          // makes the recoveryPlan immutable thereafter.
+          {
+            const { runRecoveryEnrichment } = await import("./post-run-projections");
+            const recRes = await runRecoveryEnrichment({
               campaignId: config.campaignId,
               accountId: config.accountId,
+              recoveryPlan: plan,
               results,
             });
-          } catch (enrErr: any) {
-            console.warn(`[Orchestrator] RECOVERY_INTELLIGENCE_FAILED | ${enrErr.message} | shipping deterministic plan`);
+            plan = recRes.plan;
           }
           controlVerdict.recoveryPlan = plan;
           console.log(`[Orchestrator] RECOVERY_PLAN_BUILT | issues=${plan.issues.length} | humanReview=${plan.humanReviewNeeded} | source=${plan.source} | intelligence=${plan.intelligence ? plan.intelligence.commercialDisease : "none"}`);
@@ -4380,12 +4399,20 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       }
       if (ledgerEntry) {
         budgetDecisionLedger.push(ledgerEntry);
+        // Task #70 / Phase 7 — the ledger entry is the AUTHORITATIVE record
+        // of the system-control downgrade. We stamp it onto the budget
+        // output so downstream consumers (plan-synthesis) resolve the
+        // current action via `resolveBudgetActionFromLedger()` rather
+        // than reading the mutable back-compat mirror.
+        budgetResult.output._ledgerEntry = ledgerEntry;
         if (ledgerEntry.actionMutated) {
+          // Back-compat mirror (D4 — legacy readers only). Authoritative
+          // resolution lives on `_ledgerEntry` above.
           budgetResult.output.decision.action = ledgerEntry.finalAction;
           budgetResult.output.decision.originalAction = ledgerEntry.originalAction;
           budgetResult.output.decision.downgradedBy = ledgerEntry.downgradeSource;
           budgetResult.output.decision.downgradeReasons = ledgerEntry.downgradeReasons;
-          console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE | event=${ledgerEntry.eventId} | budget action ${ledgerEntry.originalAction}→${ledgerEntry.finalAction} | reasons=${ledgerEntry.downgradeReasons.join(", ")}`);
+          console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE | event=${ledgerEntry.eventId} | budget action ${ledgerEntry.originalAction}→${ledgerEntry.finalAction} | reasons=${ledgerEntry.downgradeReasons.join(", ")} | authoritative=ledger_entry mirror=updated`);
         } else {
           console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE_NOOP | event=${ledgerEntry.eventId} | repair already attributed (source=${ledgerEntry.downgradeSource}) | proposed=${controlVerdict.downgrades.map(d => d.code).join(", ")}`);
         }
@@ -4395,10 +4422,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   let planId: string | undefined;
 
+  // Task #70 / Phase 7 — third writer slot for the BudgetDecisionLedger.
+  // Populated by synthesizePlan when the BUDGET_HALT branch fires.
+  let synthesisHaltOverrideEntry: SynthesisHaltOverrideEntry | null = null;
+
   if (overallStatus !== "BLOCKED") {
     try {
       const planResult = await synthesizePlan(config, ctx, results, memoryContextBlock || undefined, loadedMemoryBlock);
       planId = planResult.planId;
+      if (planResult.synthesisHaltOverride) {
+        synthesisHaltOverrideEntry = planResult.synthesisHaltOverride;
+        console.log(`[Orchestrator] SYNTHESIS_HALT_OVERRIDE | event=${planResult.synthesisHaltOverride.eventId} | observed=${planResult.synthesisHaltOverride.observedAction} → enforced=halt | reason=${planResult.synthesisHaltOverride.reason}`);
+      }
 
       // and AEL partial-degradation onto the synthesized plan. The pipeline
       // already fell through to legacy output when modules rejected; this
@@ -4516,58 +4551,25 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   console.log(`[Orchestrator] Complete in ${durationMs}ms | Status: ${overallStatus} | Engines: ${completedEngines.length}/${ENGINE_PRIORITY_ORDER.length}`);
 
-  // ── PHASE 6: Compose Commercial DNA from all engine signals ──
-  // Pure projection — no AI, no I/O. Exposed on the run result so downstream
-  // consumers get the unified strategic backbone in one read.
-  let commercialDna: any = null;
-  try {
-    const { composeCommercialDNA } = await import("../../shared/commercial-dna");
-    commercialDna = composeCommercialDNA(config.campaignId, ctx.ssc?.commercialSignals || null);
-    console.log(`[Orchestrator] COMMERCIAL_DNA_COMPOSED | engines=${commercialDna.consistency.contributingEngineCount}/5 | full=${commercialDna.consistency.hasFullDna} | contradictions=${commercialDna.consistency.contradictions.length}`);
-    if (commercialDna.consistency.contradictions.length > 0) {
-      for (const c of commercialDna.consistency.contradictions) {
-        console.warn(`[Orchestrator] DNA_CONTRADICTION | ${c}`);
-      }
-    }
-  } catch (dnaErr: any) {
-    console.warn(`[Orchestrator] COMMERCIAL_DNA_COMPOSE_FAILED | ${dnaErr.message}`);
-  }
-
-  // T3.A — Runtime Truth Track: compute the run's confidence integrity
-  // verdict from the per-engine provenance log. COMPLETE = every engine
-  // emitted direct-evidence confidence on both data + engine-logic axes;
-  // DEGRADED = at least one inferred_synthesis or default_floor or absent
-  // engine but no critical engine missing; INCOMPLETE = at least one
-  // critical engine (MI, audience, positioning, offer, funnel, integrity)
-  // returned no confidence at all. This is the canonical D5 surface for
-  // the confidence axis — System Control and build-plan-layer must gate
-  // on `confidenceIntegrity.verdict`, not on raw numerics that pre-T3.A
-  // collapsed absent → 0.5.
-  // T3.A v2: prefer the pre-evaluateSystemControl computation when present
-  // (it was used as the hard-gate input). Recompute only if the earlier
-  // attempt failed.
-  let confidenceIntegrity: ConfidenceIntegritySummary | null = confidenceIntegritySummary;
-  try {
-    if (!confidenceIntegrity) confidenceIntegrity = summarizeConfidenceIntegrity(runConfidenceProvenanceLog);
-    console.log(
-      `[Orchestrator] CONFIDENCE_INTEGRITY | verdict=${confidenceIntegrity.verdict} | ` +
-      `engines=${confidenceIntegrity.totalEngines} | ` +
-      `direct=${confidenceIntegrity.byProvenance.direct_evidence} | ` +
-      `inferred=${confidenceIntegrity.byProvenance.inferred_synthesis} | ` +
-      `defaultFloor=${confidenceIntegrity.byProvenance.default_floor} | ` +
-      `absent=${confidenceIntegrity.byProvenance.absent} | ` +
-      `criticalAbsent=[${confidenceIntegrity.criticalAbsentEngines.join(",")}]`
-    );
-    if (confidenceIntegrity.verdict === "INCOMPLETE") {
-      console.warn(
-        `[Orchestrator] CONFIDENCE_INCOMPLETE | jobId=${jobId} | ` +
-        `criticalAbsentEngines=${confidenceIntegrity.criticalAbsentEngines.join(",")} | ` +
-        `reason=critical_engine_emitted_no_confidence_field — pre-T3.A this run would have been treated as 0.5-confidence`
-      );
-    }
-  } catch (ciErr: any) {
-    console.warn(`[Orchestrator] CONFIDENCE_INTEGRITY_FAILED | ${ciErr.message}`);
-  }
+  // ── Task #70 / Phase 7 — Single post-run projection seam. ──
+  // Replaces three separately-guarded inline blocks (commercial DNA,
+  // confidence integrity, recovery enrichment surfacing). Each projection
+  // returns a typed envelope (`ok | failed | skipped`) so the run-result
+  // surface is structurally identical across all degradation paths.
+  // Recovery enrichment itself still runs upstream (before the verdict
+  // freeze); this module records its observable status.
+  const { computePostRunProjections } = await import("./post-run-projections");
+  const projections = await computePostRunProjections({
+    campaignId: config.campaignId,
+    accountId: config.accountId,
+    ssc: ctx.ssc || null,
+    confidenceProvenanceLog: runConfidenceProvenanceLog,
+    prevConfidenceSummary: confidenceIntegritySummary,
+    results,
+    controlVerdict: controlVerdict || null,
+  });
+  const commercialDna = projections.commercialDna.value;
+  const confidenceIntegrity: ConfidenceIntegritySummary | null = projections.confidenceIntegrity.value;
 
   // Prevents unbounded growth of the ALS-keyed rejection map across many runs.
   // end-of-run registry cleanup — clear under the active ALS scope (resolves
@@ -4577,6 +4579,29 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     const { clearCommercialRejections } = await import("../../shared/commercial-dna");
     clearCommercialRejections(jobId);
   } catch { /* registry never blocks pipeline */ }
+
+  // Task #70 / Phase 7 — assemble the three-writer structured ledger view.
+  // `original` is sourced from budget_governor's emit (pre any downgrade).
+  // `systemControlDowngrade` is the last entry pushed by the SC branch.
+  // `synthesisHaltOverride` is captured from synthesizePlan's return.
+  const budgetGovernorEmit = results.get("budget_governor")?.output?.decision;
+  const originalActionEmit: BudgetAction | null =
+    (budgetGovernorEmit?.originalAction as BudgetAction)
+    || (budgetGovernorEmit?.action as BudgetAction)
+    || null;
+  const ledgerView: BudgetDecisionLedger | undefined =
+    (budgetGovernorEmit || synthesisHaltOverrideEntry || budgetDecisionLedger.length > 0)
+      ? {
+          original: originalActionEmit
+            ? { action: originalActionEmit, jobId, decidedAt: Date.now() }
+            : null,
+          systemControlDowngrade:
+            budgetDecisionLedger.length > 0
+              ? budgetDecisionLedger[budgetDecisionLedger.length - 1]
+              : null,
+          synthesisHaltOverride: synthesisHaltOverrideEntry,
+        }
+      : undefined;
 
   return {
     jobId,
@@ -4591,6 +4616,8 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     // Task #67 / T-S5-C9: append-only ledger. Empty array when no
     // system-control downgrade fired this run.
     budgetDecisionLedger: budgetDecisionLedger.length > 0 ? budgetDecisionLedger : undefined,
+    // Task #70 / Phase 7: three-writer structured view (B1 fix).
+    budgetDecisionLedgerView: ledgerView,
     ssc: ctx.ssc || null,
     commercialDna,
     confidenceIntegrity,

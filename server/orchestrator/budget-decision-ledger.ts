@@ -25,7 +25,62 @@
  */
 
 export type BudgetAction = "halt" | "hold" | "test" | "scale";
+
+/**
+ * Task #70 / Phase 7 — authoritative resolver for the current budget action.
+ *
+ * Replaces direct reads of `budgetResult.output.decision.action` (the
+ * mutable back-compat mirror) with a single ledger-aware resolver. When
+ * the orchestrator stamped a `_ledgerEntry` onto the budget output, the
+ * ledger entry's `finalAction` is the canonical resolved action (it is
+ * the value the system-control downgrade branch authoritatively
+ * recorded). When no ledger entry was stamped, the budget governor's
+ * emitted action is the source of truth.
+ *
+ * Callers MUST use this resolver instead of reading the mirror field
+ * directly — that's how the B1 silent-collision protection (the whole
+ * point of the ledger) actually takes effect downstream.
+ */
+export interface BudgetOutputView {
+  decision?: { action?: string; [k: string]: any } | null;
+  _ledgerEntry?: BudgetDecisionLedgerEntry | null;
+  [k: string]: any;
+}
+export function resolveBudgetActionFromLedger(
+  budgetOutput: BudgetOutputView | null | undefined,
+): { action: BudgetAction | null; source: "ledger_entry" | "budget_governor_emit" | "absent" } {
+  if (!budgetOutput) return { action: null, source: "absent" };
+  const stamped = budgetOutput._ledgerEntry;
+  if (stamped && isBudgetAction(stamped.finalAction)) {
+    return { action: stamped.finalAction, source: "ledger_entry" };
+  }
+  const raw = budgetOutput.decision?.action;
+  if (typeof raw === "string" && isBudgetAction(raw)) {
+    return { action: raw, source: "budget_governor_emit" };
+  }
+  return { action: null, source: "absent" };
+}
 export type BudgetDowngradeSource = "system_control" | "system_control_repair";
+
+/**
+ * Task #70 / Phase 7 — three-writer ledger layout.
+ *
+ * Pre-Task-#70 the orchestrator's system-control downgrade branch and
+ * plan-synthesis halt branch both touched the budget decision shape
+ * without a discriminator. A "system-control downgraded test→hold" and
+ * a "plan-synthesis forced halt because budget_governor itself said halt"
+ * collided silently — readers could not tell which writer last touched
+ * the action field (the B1 silent collision).
+ *
+ * `BudgetDecisionLedgerWriter` distinguishes the three legitimate writers.
+ * `BudgetDecisionLedger` is the structured ledger view exposed on the run
+ * result — `original` is always the budget governor's emit, and the two
+ * override slots are independently observable.
+ */
+export type BudgetDecisionLedgerWriter =
+  | "budget_governor"
+  | "system_control_downgrade"
+  | "synthesis_halt_override";
 
 export interface BudgetDecisionLedgerEntry {
   /** Stable per-event id so auditors can correlate logs to ledger rows. */
@@ -44,6 +99,68 @@ export interface BudgetDecisionLedgerEntry {
   downgradeReasons: string[];
   /** Whether the action was actually mutated (false = idempotent no-op). */
   actionMutated: boolean;
+  /** Writer that authored this entry (Task #70 / Phase 7). */
+  writer: BudgetDecisionLedgerWriter;
+}
+
+/**
+ * Three-slot ledger view (Task #70 / Phase 7).
+ *
+ * Each slot is independently nullable — the run result carries the
+ * structured surface so auditors can ask "what did budget governor say?"
+ * vs "did system-control override it?" vs "did plan-synthesis force a
+ * halt?" without parsing free-text reasons.
+ */
+export interface BudgetDecisionLedger {
+  /** Always present once budget governor has emitted — the as-decided budget action. */
+  original: { action: BudgetAction; jobId: string; decidedAt: number } | null;
+  /** Populated when system-control's verdict downgraded the action. */
+  systemControlDowngrade: BudgetDecisionLedgerEntry | null;
+  /** Populated when plan-synthesis forced a halt plan, overriding whatever budget said. */
+  synthesisHaltOverride: SynthesisHaltOverrideEntry | null;
+}
+
+export interface SynthesisHaltOverrideEntry {
+  eventId: string;
+  jobId: string;
+  decidedAt: number;
+  /** Budget action seen by plan-synthesis (post any system_control downgrade). */
+  observedAction: BudgetAction;
+  /** Final action enforced by synthesis (always "halt" today; widen if needed). */
+  enforcedAction: "halt";
+  /** Free-text reason emitted by plan-synthesis (e.g. "budgetKillFlag=true"). */
+  reason: string;
+  writer: "synthesis_halt_override";
+}
+
+export interface SynthesisHaltOverrideInput {
+  jobId: string;
+  observedAction: BudgetAction;
+  reason: string;
+  now?: number;
+}
+
+/**
+ * Pure recorder for the third writer (plan-synthesis halt branch).
+ * Mirrors the contract of `computeBudgetDecisionLedgerEntry`: no
+ * mutation, fails loud on bad input.
+ */
+export function recordSynthesisHaltOverride(
+  input: SynthesisHaltOverrideInput,
+): SynthesisHaltOverrideEntry {
+  if (!isBudgetAction(input.observedAction)) {
+    throw new InvalidBudgetDowngradeError(input.observedAction);
+  }
+  const now = input.now ?? Date.now();
+  return {
+    eventId: `bsh_${now}_${Math.random().toString(36).slice(2, 8)}`,
+    jobId: input.jobId,
+    decidedAt: now,
+    observedAction: input.observedAction,
+    enforcedAction: "halt",
+    reason: input.reason,
+    writer: "synthesis_halt_override",
+  };
 }
 
 const DOWNGRADE_SEVERITY: Record<BudgetAction, number> = {
@@ -142,5 +259,6 @@ export function computeBudgetDecisionLedgerEntry(
     downgradeSource,
     downgradeReasons,
     actionMutated,
+    writer: "system_control_downgrade",
   };
 }

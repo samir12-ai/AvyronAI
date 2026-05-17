@@ -337,6 +337,28 @@ function safeArr(val: any): any[] {
 function buildEngineContext(snapshots: EngineSnapshot[]): string {
   const parts: string[] = [];
 
+  // Task #70 / Phase 7 / Step 4 — Awareness → Funnel authority precedence.
+  // Compute the declarative overlap-region resolution BEFORE any [Awareness]
+  // / [Funnel] lines are emitted, then inject the deterministic precedence
+  // summary so the LLM cannot re-decide which engine wins on overlap fields.
+  const awarenessData = snapshots.find(s => s.engineId === "awareness")?.data;
+  const funnelData = snapshots.find(s => s.engineId === "funnel")?.data;
+  if (awarenessData || funnelData) {
+    const { summarizeAuthorityPrecedence } = require("./awareness-funnel-authority") as
+      typeof import("./awareness-funnel-authority");
+    const awarenessResult = awarenessData ? (safeParse(awarenessData.result) || awarenessData) : null;
+    const funnelResult = funnelData ? (safeParse(funnelData.result) || funnelData) : null;
+    const { text, resolutions } = summarizeAuthorityPrecedence({
+      awareness: awarenessResult ? { ...awarenessResult, ...(awarenessResult.primaryRoute ?? {}) } : null,
+      funnel: funnelResult,
+    });
+    const contended = Object.values(resolutions).filter(
+      r => r.state === "awareness_wins" || r.state === "funnel_wins",
+    ).length;
+    console.log(`[BuildPlanLayer] AWARENESS_FUNNEL_AUTHORITY | overlapFields=${Object.keys(resolutions).length} | contended=${contended}`);
+    parts.push(text);
+  }
+
   for (const snap of snapshots) {
     const data = snap.data;
     switch (snap.engineId) {

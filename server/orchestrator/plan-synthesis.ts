@@ -1059,7 +1059,15 @@ export async function synthesizePlan(
   results: Map<EngineId, EngineStepResult>,
   memoryContextBlock?: string,
   memoryBlock?: import("../memory-system/types").MemoryBlock | null,
-): Promise<{ planId: string; plan: SynthesizedPlan }> {
+): Promise<{
+  planId: string;
+  plan: SynthesizedPlan;
+  // Task #70 / Phase 7 — third writer to the BudgetDecisionLedger
+  // (B1 silent collision fix). Populated only when plan-synthesis took
+  // the BUDGET_HALT branch — the orchestrator pushes this into the
+  // structured ledger view returned on OrchestratorRunResult.
+  synthesisHaltOverride?: import("./budget-decision-ledger").SynthesisHaltOverrideEntry;
+}> {
   const [bizData] = await db
     .select()
     .from(businessDataLayer)
@@ -1112,14 +1120,52 @@ export async function synthesizePlan(
   }
 
   const budgetGovResult = results.get("budget_governor");
-  const budgetDecision = budgetGovResult?.output?.decision?.action || null;
+  // Task #70 / Phase 7 — read the authoritative budget action from the
+  // BudgetDecisionLedger entry the orchestrator stamped onto the budget
+  // output (NOT the mutable `decision.action` mirror). When no ledger
+  // entry was stamped (no system-control downgrade fired), the resolver
+  // falls back to the budget governor's emitted action and tags the
+  // source as `budget_governor_emit` so this read is fully attributable.
+  const { resolveBudgetActionFromLedger } = await import("./budget-decision-ledger");
+  const _resolved = resolveBudgetActionFromLedger(budgetGovResult?.output);
+  const budgetDecision = _resolved.action;
   const budgetKillFlag = budgetGovResult?.output?.killFlag === true;
+  if (budgetGovResult) {
+    console.log(`[PlanSynthesis] BUDGET_ACTION_RESOLVED | action=${budgetDecision ?? "null"} | source=${_resolved.source}`);
+  }
 
   if (budgetDecision === "halt" || budgetKillFlag) {
     console.warn(`[PlanSynthesis] BUDGET_HALT_ENFORCED | decision=${budgetDecision} killFlag=${budgetKillFlag} — skipping full plan synthesis, producing halt plan`);
     const haltPlan = buildHaltPlan(budgetGovResult?.output, bizData, campaign);
     const planId = await persistPlan(haltPlan, config, rootBundle, []);
-    return { planId, plan: haltPlan };
+    // Task #70 / Phase 7 — third ledger writer. Records that plan-synthesis
+    // forced a halt distinctly from any prior system-control downgrade, so
+    // the structured BudgetDecisionLedger view exposes a separate slot.
+    //
+    // Fail-loud contract (code-review round 3): the recorder is a pure
+    // builder. The ONLY failure mode is InvalidBudgetDowngradeError on a
+    // bad observedAction enum (D3 violation upstream) — that MUST surface
+    // loud, not silently drop the writer slot. We pre-coerce to a valid
+    // BudgetAction so the call cannot legitimately throw under normal
+    // operation; any thrown error is therefore a real contract violation
+    // and we re-throw after audit-logging.
+    const { recordSynthesisHaltOverride } = await import("./budget-decision-ledger");
+    const observed: import("./budget-decision-ledger").BudgetAction =
+      budgetDecision === "hold" || budgetDecision === "test" || budgetDecision === "scale"
+        ? budgetDecision
+        : "halt";
+    let synthesisHaltOverride: import("./budget-decision-ledger").SynthesisHaltOverrideEntry;
+    try {
+      synthesisHaltOverride = recordSynthesisHaltOverride({
+        jobId: config.jobId || "unknown",
+        observedAction: observed,
+        reason: budgetKillFlag ? "budgetKillFlag=true" : `budgetDecision=${budgetDecision}`,
+      });
+    } catch (shErr: any) {
+      console.error(`[PlanSynthesis] SYNTHESIS_HALT_LEDGER_FAILED | jobId=${config.jobId || "unknown"} | observed=${observed} | error=${shErr?.message ?? String(shErr)} | re-throwing to preserve writer attribution`);
+      throw shErr;
+    }
+    return { planId, plan: haltPlan, synthesisHaltOverride };
   }
 
   const integrityResult = results.get("integrity");
