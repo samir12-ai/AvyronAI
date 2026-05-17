@@ -1,15 +1,15 @@
 /**
- * Task #91 / Phase 4-C — CV-15 OrchestratorParityGate metrics.
+ * Task #91 / Phase 4-C — CV-15 metrics (reclassified Task #93 / Phase 4-E).
  *
- * Families:
- *   - cv15_parity_ready{ready="true"|"false"}      gauge (0|1)
+ * Families retained:
  *   - cv15_parity_block_age_hours                  gauge
  *   - orch_parity_run_total{outcome}               counter
  *   - orch_parity_divergence_total{class,module}   counter
- *   - orch_module_auto_revert_total{module}        counter
  *   - orch_cassette_path_coverage{path_shape,covered} gauge (0|1)
  *
- * Mounted on /metrics via server/index.ts (renderCv15Metrics()).
+ * Removed (cutover-era):
+ *   - cv15_parity_ready{ready}
+ *   - orch_module_auto_revert_total{module}
  */
 
 type Labels = Record<string, string>;
@@ -50,17 +50,10 @@ function labelKey(labels: Labels): string {
     .join("|");
 }
 
-const parityReady = new InMemoryGaugeVec();
 let blockAgeHours = 0;
 const runTotal = new InMemoryCounter();
 const divergenceTotal = new InMemoryCounter();
-const autoRevertTotal = new InMemoryCounter();
 const pathCoverage = new InMemoryGaugeVec();
-
-export function setParityReady(ready: boolean): void {
-  parityReady.set({ ready: "true" }, ready ? 1 : 0);
-  parityReady.set({ ready: "false" }, ready ? 0 : 1);
-}
 
 export function setParityBlockAgeHours(h: number): void {
   blockAgeHours = h;
@@ -74,30 +67,22 @@ export function recordParityDivergence(divergenceClass: string, moduleId: string
   divergenceTotal.inc({ class: divergenceClass, module: moduleId ?? "unknown" });
 }
 
-export function recordAutoRevert(moduleId: string): void {
-  autoRevertTotal.inc({ module: moduleId });
-}
-
 export function setPathCoverage(pathShape: string, covered: boolean): void {
   pathCoverage.set({ path_shape: pathShape, covered: covered ? "true" : "false" }, covered ? 1 : 0);
 }
 
 export function _resetCv15MetricsForTests(): void {
-  parityReady.reset();
   blockAgeHours = 0;
   runTotal.reset();
   divergenceTotal.reset();
-  autoRevertTotal.reset();
   pathCoverage.reset();
 }
 
 export function _readCv15Counters() {
   return {
-    parityReady: parityReady.collect(),
     blockAgeHours,
     runTotal: runTotal.collect(),
     divergenceTotal: divergenceTotal.collect(),
-    autoRevertTotal: autoRevertTotal.collect(),
     pathCoverage: pathCoverage.collect(),
   };
 }
@@ -113,12 +98,7 @@ function renderLabels(labels: Labels): string {
 
 export function renderCv15Metrics(): string {
   const lines: string[] = [];
-  lines.push(`# HELP cv15_parity_ready CV-15: 1 if the parity gate is green (ready for Phase 4-D cutover), else 0.`);
-  lines.push(`# TYPE cv15_parity_ready gauge`);
-  for (const { labels, value } of parityReady.collect()) {
-    lines.push(`cv15_parity_ready${renderLabels(labels)} ${value}`);
-  }
-  lines.push(`# HELP cv15_parity_block_age_hours CV-15: hours since the most recent BLOCK-classed divergence (large value when no recent BLOCK).`);
+  lines.push(`# HELP cv15_parity_block_age_hours CV-15: hours since the most recent BLOCK-classed divergence (informational regression observer signal).`);
   lines.push(`# TYPE cv15_parity_block_age_hours gauge`);
   lines.push(`cv15_parity_block_age_hours ${blockAgeHours}`);
   lines.push(`# HELP orch_parity_run_total CV-15: parity replay runs by outcome.`);
@@ -130,11 +110,6 @@ export function renderCv15Metrics(): string {
   lines.push(`# TYPE orch_parity_divergence_total counter`);
   for (const { labels, value } of divergenceTotal.collect()) {
     lines.push(`orch_parity_divergence_total${renderLabels(labels)} ${value}`);
-  }
-  lines.push(`# HELP orch_module_auto_revert_total CV-15: per-module auto-revert events fired by the parity gate.`);
-  lines.push(`# TYPE orch_module_auto_revert_total counter`);
-  for (const { labels, value } of autoRevertTotal.collect()) {
-    lines.push(`orch_module_auto_revert_total${renderLabels(labels)} ${value}`);
   }
   lines.push(`# HELP orch_cassette_path_coverage CV-15: 1 if the path-shape has ≥ minPerPathShape cassettes within the freshness window.`);
   lines.push(`# TYPE orch_cassette_path_coverage gauge`);

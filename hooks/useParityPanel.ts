@@ -3,12 +3,11 @@ import { fetch } from "expo/fetch";
 import { getApiUrl } from "@/lib/query-client";
 import { isOperatorSurfaceEnabled } from "@/hooks/useOperatorSurface";
 
-// Task #91 / Phase 4-C — Operator-visible Parity Gate surface (client).
+// Task #91 / Phase 4-C — Operator-visible Replay Regression Suite (client).
 //
-// Mirrors the canonical shape of `/healthz/orchestrator-parity`. Strict
-// types — every field is required at the type boundary so the panel can
-// render a deterministic badge row without `?? false` substitutions
-// (D2/D3 doctrine).
+// Reclassified by Task #93 / Phase 4-E: the cutover-era fields
+// (readyForCutover, modules*, autoReverts, candidateWiringDeferred) have
+// been removed. The panel now reports CORPUS regression health only.
 
 export type ParityPathShape =
   | "clean"
@@ -19,14 +18,6 @@ export type ParityPathShape =
   | "needs_input"
   | "error";
 
-export interface ParityAutoRevertRow {
-  at: string;
-  moduleId: string;
-  moduleFlag: string;
-  reason: string;
-  suppressed: boolean;
-}
-
 export interface ParityDivergencePathRow {
   divergenceClass: string;
   path: string;
@@ -34,20 +25,14 @@ export interface ParityDivergencePathRow {
 }
 
 export interface ParityHealthData {
-  readyForCutover: boolean;
   blockers: string[];
   cassetteCount: number;
   oldestCassetteAgeH: number;
   divergencesByClassLast24h: Record<string, number>;
   divergencePathsByClassLast24h: ParityDivergencePathRow[];
-  autoRevertsLast24h: ParityAutoRevertRow[];
-  modulesAtCandidate: string[];
-  modulesAwaitingBurnIn: Array<{ moduleId: string; daysAtCandidate: number | null }>;
-  modulesBlocked: string[];
-  modulesShadowOnly: string[];
   pathShapeCoverage: Record<string, { count: number; covered: boolean }>;
   lastTickAt: string | null;
-  candidateWiringDeferred: boolean;
+  shadowMode: boolean;
   scheduler?: {
     lastTickAt: string | null;
     lastTickDurationMs: number | null;

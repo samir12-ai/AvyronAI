@@ -182,16 +182,8 @@ function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any): Synthesi
 }
 
 async function persistPlan(plan: SynthesizedPlan, config: OrchestratorConfig, rootBundle: any, explorationSlots: any[]): Promise<string> {
-  // Task #92 / Phase 4-D — OD-1 invariant proof counter. Every initial
-  // persistPlan call increments {site="initial"}; the CAS re-persist
-  // increments {site="cas_re_persist"}. The single-persist enforce
-  // mode brings cas_re_persist permanently to 0.
-  try {
-    const { recordPersistCall } = require("./cutover") as typeof import("./cutover");
-    recordPersistCall("initial");
-  } catch (metricErr: any) {
-    console.warn(`[PlanSynthesis] CUTOVER_METRIC_RECORD_FAILED | site=initial | ${metricErr?.message ?? metricErr}`);
-  }
+  // Task #93 / Phase 4-E — cutover counter removed. Single-persist
+  // discipline lives in `synthesisDegradationBuilder` (OD-1).
   const [dbPlan] = await db.insert(strategicPlans).values({
     accountId: config.accountId,
     blueprintId: "orchestrator-v2",

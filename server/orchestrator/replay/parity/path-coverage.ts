@@ -6,12 +6,11 @@
  * Missing shapes auto-generate a synthetic filler cassette via the
  * Phase 4-A capture script and tag it `source=synthetic`. The synthetic
  * filler is a LAST-RESORT signal — operator panel surfaces a "synthetic
- * filler" warning so the gap is visible even though `readyForCutover`
- * remains attainable.
+ * filler" warning so the gap is visible to the regression observer.
  *
- * Per task spec: "Cassette-corpus health monitor MUST refuse to mark
- * `readyForCutover=true` if any path-shape is uncovered — no override
- * env flag (operator must capture the missing cassette via P4-A)."
+ * Task #93 / Phase 4-E: `readyForCutover` was deleted. Uncovered shapes
+ * are still surfaced as corpus shortfalls in the parity health blockers
+ * list, but they no longer gate any cutover decision.
  *
  * Coverage in this module COUNTS synthetic fillers because they exercise
  * the player against the candidate even when production never produced

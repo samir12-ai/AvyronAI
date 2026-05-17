@@ -3200,21 +3200,10 @@ export const orchestratorReplayCassettes = pgTable("orchestrator_replay_cassette
   purpose: text("purpose").notNull().default("parity"),
 });
 
-// Task #92 / Phase 4-D — `cutover_state` singleton (id=1) tracks the
-// traffic-percent rollout. Doctrine OD-4: traffic_percent ∈ {0,1,5,25,50,100},
-// 24h-increment guard enforced by a Postgres BEFORE-UPDATE trigger.
-export const cutoverState = pgTable("cutover_state", {
-  id: integer("id").primaryKey().default(1),
-  trafficPercent: integer("traffic_percent").notNull().default(0),
-  lastIncrementAt: timestamp("last_increment_at", { withTimezone: true }),
-  lastRevertAt: timestamp("last_revert_at", { withTimezone: true }),
-  lastDivergenceAt: timestamp("last_divergence_at", { withTimezone: true }),
-  lockedUntil: timestamp("locked_until", { withTimezone: true }),
-  lastActor: text("last_actor"),
-  lastReason: text("last_reason"),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-export type CutoverStateRow = typeof cutoverState.$inferSelect;
+// Task #93 / Phase 4-E — `cutover_state` table archived by migration 032
+// (renamed to `cutover_state_archive`, no code reads/writes it). The
+// pgTable export is intentionally removed. Operators may DROP the
+// archive table after the 30d retention window.
 
 export type OrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferSelect;
 export type InsertOrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferInsert;

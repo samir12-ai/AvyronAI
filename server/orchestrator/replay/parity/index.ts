@@ -1,24 +1,21 @@
 /**
- * Task #91 / Phase 4-C — Parity Validation + Divergence Tracking.
+ * Task #91 / Phase 4-C — Replay Regression Suite (reclassified Task #93 / Phase 4-E).
  *
- * Public surface for the parity gate. See per-file docstrings for
- * doctrine references.
+ * Public surface for the regression observer. The cutover-era exports
+ * (`revertModuleFlag`, `RevertEvent`, `setParityReady`, `recordAutoRevert`)
+ * have been removed.
  */
 export * from "./types";
 export { classifyDivergences, RoutingTableIncompleteError } from "./classifier";
 export { loadRoutingTable, DEFAULT_ROUTING_TABLE } from "./routes";
 export { runParityTick, type ParityTickReport } from "./parity-job";
 export { computeParityHealth } from "./health";
+export { attributeDivergenceToModule, type ModuleAttribution } from "./divergence-attribution";
 export {
   evaluatePathShapeCoverage,
   missingShapes,
   type PathShapeCoverageReport,
 } from "./path-coverage";
-export {
-  revertModuleFlag,
-  attributeDivergenceToModule,
-  type RevertEvent,
-} from "./auto-revert";
 export {
   startParityScheduler,
   stopParityScheduler,
@@ -29,11 +26,9 @@ export {
 } from "./scheduler";
 export {
   renderCv15Metrics,
-  setParityReady,
   setParityBlockAgeHours,
   recordParityRun,
   recordParityDivergence,
-  recordAutoRevert,
   setPathCoverage,
   _resetCv15MetricsForTests,
   _readCv15Counters,

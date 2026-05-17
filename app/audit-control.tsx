@@ -897,7 +897,9 @@ function ParityDivergenceSection({
   );
 }
 
-// ─── Task #91 / Phase 4-C — Parity Gate operator panel ─────────────────
+// ─── Task #91 / Phase 4-C → reclassified Task #93 / Phase 4-E ──────────
+// Replay Regression Suite panel — corpus + divergence histogram only.
+// Cutover-era surfaces (readiness badge, modules*, auto-reverts) removed.
 function ParityPanel({
   isDark,
   data,
@@ -914,41 +916,19 @@ function ParityPanel({
   textSec: string;
 }) {
   return (
-    <Section title="Parity gate (Phase 4-C)" isDark={isDark}>
+    <Section title="Replay Regression Suite" isDark={isDark}>
       {isLoading && !data && (
         <ActivityIndicator color="#7C3AED" style={{ marginVertical: 12 }} />
       )}
       {error && (
         <Text style={[styles.errorText, { color: "#FF6B6B", marginTop: 0 }]}>
-          Failed to load parity health: {error}
+          Failed to load regression health: {error}
         </Text>
       )}
       {data && (
         <>
-          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
-            <View
-              style={[
-                styles.pill,
-                {
-                  backgroundColor: data.readyForCutover ? "#85BB6522" : "#FF6B6B22",
-                  borderColor: data.readyForCutover ? "#85BB6560" : "#FF6B6B60",
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.pillText,
-                  { color: data.readyForCutover ? "#85BB65" : "#FF6B6B" },
-                ]}
-                testID="parity-ready-badge"
-              >
-                {data.readyForCutover ? "READY FOR CUTOVER" : "NOT READY"}
-              </Text>
-            </View>
-          </View>
-
           <KV
-            label="Cassettes (last)"
+            label="Cassettes (parity)"
             value={`${data.cassetteCount} · oldest ${data.oldestCassetteAgeH.toFixed(1)}h`}
             isDark={isDark}
           />
@@ -957,16 +937,21 @@ function ParityPanel({
             value={data.lastTickAt ? formatRelativeTime(data.lastTickAt) : "—"}
             isDark={isDark}
           />
+          <KV
+            label="Mode"
+            value={data.shadowMode ? "shadow" : "observe"}
+            isDark={isDark}
+          />
 
           {data.blockers.length > 0 && (
             <View style={{ marginTop: 10 }}>
               <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
-                Blockers ({data.blockers.length})
+                Corpus shortfalls ({data.blockers.length})
               </Text>
               {data.blockers.map((b, i) => (
                 <Text
                   key={`${b}-${i}`}
-                  style={[styles.blockDesc, { color: "#FF6B6B" }]}
+                  style={[styles.blockDesc, { color: "#FFB347" }]}
                   testID={`parity-blocker-${i}`}
                 >
                   • {b}
@@ -985,41 +970,6 @@ function ParityPanel({
             />
           )}
 
-          {data.autoRevertsLast24h.length > 0 && (
-            <View style={{ marginTop: 10 }}>
-              <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
-                Auto-reverts (24h) — {data.autoRevertsLast24h.length}
-              </Text>
-              {data.autoRevertsLast24h.map((r, i) => (
-                <View
-                  key={`${r.at}-${r.moduleId}-${i}`}
-                  style={[styles.blockRow, { borderBottomColor: isDark ? "#1A2030" : "#E2E8E4" }]}
-                  testID={`parity-autorevert-${i}`}
-                >
-                  <View style={styles.blockHead}>
-                    <Text style={[styles.blockCode, { color: textPrimary }]}>
-                      {r.moduleId}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.blockSev,
-                        { color: r.suppressed ? "#8892A4" : "#FF6B6B" },
-                      ]}
-                    >
-                      {r.suppressed ? "SUPPRESSED" : "REVERTED"}
-                    </Text>
-                  </View>
-                  <Text style={[styles.blockDesc, { color: textSec }]} numberOfLines={2}>
-                    {r.reason}
-                  </Text>
-                  <Text style={[styles.detailsText, { color: textSec, marginTop: 2 }]}>
-                    {formatRelativeTime(r.at)} · flag {r.moduleFlag}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
-
           {Object.keys(data.pathShapeCoverage).length > 0 && (
             <View style={{ marginTop: 10 }}>
               <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
@@ -1034,51 +984,6 @@ function ParityPanel({
                   valueColor={info.covered ? "#85BB65" : "#FFB347"}
                 />
               ))}
-            </View>
-          )}
-
-          {(data.modulesAtCandidate.length > 0 ||
-            data.modulesShadowOnly.length > 0 ||
-            data.modulesBlocked.length > 0) && (
-            <View style={{ marginTop: 10 }}>
-              <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
-                Modules
-              </Text>
-              {data.modulesAtCandidate.length > 0 && (
-                <KV
-                  label="At candidate"
-                  value={data.modulesAtCandidate.join(", ")}
-                  isDark={isDark}
-                />
-              )}
-              {data.modulesShadowOnly.length > 0 && (
-                <KV
-                  label="Shadow only"
-                  value={data.modulesShadowOnly.join(", ")}
-                  isDark={isDark}
-                />
-              )}
-              {data.modulesBlocked.length > 0 && (
-                <KV
-                  label="Blocked"
-                  value={data.modulesBlocked.join(", ")}
-                  isDark={isDark}
-                  valueColor="#FF6B6B"
-                />
-              )}
-              {data.modulesAwaitingBurnIn.length > 0 && (
-                <KV
-                  label="Awaiting burn-in"
-                  value={data.modulesAwaitingBurnIn
-                    .map((m) =>
-                      m.daysAtCandidate === null
-                        ? m.moduleId
-                        : `${m.moduleId} (${m.daysAtCandidate.toFixed(1)}d)`,
-                    )
-                    .join(", ")}
-                  isDark={isDark}
-                />
-              )}
             </View>
           )}
         </>

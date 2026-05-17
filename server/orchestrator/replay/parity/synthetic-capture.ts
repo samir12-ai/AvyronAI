@@ -7,8 +7,8 @@
  * (any shape) and re-tagging it to the missing shape. The filler is a
  * LAST-RESORT signal — the canonical capture path remains
  * `npm run replay:capture-synthetic` (task #102 follow-up). Until that
- * ships, this handler is what actually closes the gap so
- * `readyForCutover` can converge.
+ * ships, this handler is what actually closes the gap so the regression
+ * observer reports full path-shape coverage.
  *
  * Idempotency: each call generates a fresh content-address by appending
  * `synthetic_filler:<shape>:<timestamp>` to the source-cassette hash

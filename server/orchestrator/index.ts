@@ -4614,14 +4614,11 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
                 .where(eq(strategicPlans.id, planId))
                 .limit(1);
               const currentVersion = currentRow?.version ?? 1;
-              // Task #92 / Phase 4-D OD-1 transitional path. Sunset:
-              // remove once ORCH_SINGLE_PERSIST_MODE='enforce' is the
-              // default AND traffic_percent=100 has held for ≥7d. The
-              // single-persist overlay computed in
-              // `synthesisDegradationBuilder` pre-empts this write in
-              // shadow/enforce mode. Allowlisted: this is the legacy
-              // CAS site, NOT a new call.
-              // eslint-disable-next-line orchestrator/no-cas-re-persist
+              // Task #93 / Phase 4-E — cutover counter + dispatch removed.
+              // The single-persist overlay computed in
+              // `synthesisDegradationBuilder` is the canonical path for
+              // PLAN_DEGRADED. This legacy CAS re-persist remains as the
+              // optimistic-concurrency safety net for concurrent writers.
               const updated = await db.update(strategicPlans)
                 .set({ planJson: JSON.stringify(planResult.plan), version: currentVersion + 1 })
                 .where(and(
@@ -4629,16 +4626,6 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
                   eq(strategicPlans.version, currentVersion),
                 ))
                 .returning({ id: strategicPlans.id });
-              // Task #92 / Phase 4-D — count every legacy CAS re-persist
-              // so the single-persist invariant has a quantitative proof:
-              // when ORCH_SINGLE_PERSIST_MODE='enforce' lands, this
-              // counter must trend to 0.
-              try {
-                const { recordPersistCall } = require("./cutover") as typeof import("./cutover");
-                recordPersistCall("cas_re_persist");
-              } catch (metricErr: any) {
-                console.warn(`[Orchestrator/Cutover] METRIC_RECORD_FAILED | site=cas_re_persist | ${metricErr?.message ?? metricErr}`);
-              }
               if (updated.length === 0) {
                 console.warn(`[Orchestrator] PLAN_DEGRADE_CONCURRENT_MODIFICATION | planId=${planId} | expectedVersion=${currentVersion} — degradation surface dropped (another writer won)`);
               }

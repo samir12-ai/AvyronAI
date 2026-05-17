@@ -1044,11 +1044,11 @@ function setupErrorHandler(app: express.Application) {
   //
   // GET /healthz/orchestrator-parity
   //
-  // Admin-token-gated. Returns the canonical `readyForCutover` boolean
-  // alongside the blockers list, per-class divergence histogram (24h),
-  // module classifications, and path-shape coverage. This endpoint is
-  // the Phase 4-D cutover gate — orchestrator decomposition cannot
-  // proceed while `readyForCutover=false`.
+  // Admin-token-gated. Task #93 / Phase 4-E reclassified this endpoint
+  // as a "replay regression observer": it returns corpus health (cassette
+  // count + freshness), divergence histogram (24h), path-shape coverage,
+  // and last-tick metadata. The `readyForCutover` boolean was removed
+  // along with the cutover system.
   //
   // NO-TENANT-LEAK: the surface carries zero per-tenant identifiers.
   // Same fail-closed-when-unset behaviour as /metrics + /healthz/continuity.
@@ -1115,149 +1115,13 @@ function setupErrorHandler(app: express.Application) {
     }
   });
 
-  // ─── Task #92 / Phase 4-D — Cutover operator panel ──────────────────
+  // ─── Task #93 / Phase 4-E — Cutover operator panel REMOVED ──────────
   //
-  // GET  /api/admin/cutover            — read singleton state + decision context.
-  // POST /api/admin/cutover/revert     — atomically set traffic_percent=0.
-  // POST /api/admin/cutover/unlock     — clear locked_until.
-  // POST /api/admin/cutover/increment  — step to next ladder rung (OD-4).
-  //
-  // Admin-token gated (timingSafeEqual). All writes go through
-  // server/orchestrator/cutover/state-store.ts so the
-  // `[Orchestrator/Cutover] PERCENT_CHANGE` audit log and the
-  // in-process metrics gauge are kept in sync.
-  function cutoverAdminOk(req: Request): boolean {
-    const expected = process.env.METRICS_ADMIN_TOKEN;
-    const provided = req.header("x-admin-token") ?? "";
-    if (!expected) return false;
-    if (provided.length !== expected.length) return false;
-    try {
-      return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-    } catch {
-      return false;
-    }
-  }
-
-  app.get("/api/admin/cutover", async (req: Request, res: Response) => {
-    if (!process.env.METRICS_ADMIN_TOKEN) {
-      return res.status(401).json({ error: "cutover_panel_disabled_no_admin_token" });
-    }
-    if (!cutoverAdminOk(req)) return res.status(401).json({ error: "unauthorized" });
-    try {
-      const cutover = require("./orchestrator/cutover") as typeof import("./orchestrator/cutover");
-      const parity = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
-      const [state, health] = await Promise.all([
-        cutover.readCutoverState(),
-        parity.computeParityHealth(),
-      ]);
-      const nowMs = Date.now();
-      const hoursSinceLast = state.lastIncrementAt
-        ? (nowMs - state.lastIncrementAt.getTime()) / 3_600_000
-        : null;
-      const nextStep = cutover.nextLadderStep(state.trafficPercent);
-      const lockedNow = state.lockedUntil ? state.lockedUntil.getTime() > nowMs : false;
-      const canIncrement =
-        nextStep !== null &&
-        health.readyForCutover &&
-        !lockedNow &&
-        (hoursSinceLast === null || hoursSinceLast >= 24);
-      const snapshot = cutover.snapshotCutoverMetrics();
-      return res.status(200).json({
-        trafficPercent: state.trafficPercent,
-        lastIncrementAt: state.lastIncrementAt?.toISOString() ?? null,
-        lastRevertAt: state.lastRevertAt?.toISOString() ?? null,
-        lastDivergenceAt: state.lastDivergenceAt?.toISOString() ?? null,
-        lockedUntil: state.lockedUntil?.toISOString() ?? null,
-        lockedNow,
-        lastActor: state.lastActor,
-        lastReason: state.lastReason,
-        hoursSinceLast,
-        nextStep,
-        canIncrement,
-        readyForCutover: health.readyForCutover,
-        blockers: health.blockers,
-        divergenceHistogram24h: snapshot.divergenceAtTraffic,
-        persistCallTotal: snapshot.persistCallTotal,
-        autoRevertTotal: snapshot.autoRevertTotal,
-        runsTotal: snapshot.runsTotal,
-      });
-    } catch (err: any) {
-      console.error("[CutoverPanel] READ_FAILED", err);
-      return res.status(500).json({ error: "cutover_panel_read_failed", message: err?.message ?? String(err) });
-    }
-  });
-
-  app.post("/api/admin/cutover/revert", async (req: Request, res: Response) => {
-    if (!process.env.METRICS_ADMIN_TOKEN) {
-      return res.status(401).json({ error: "cutover_panel_disabled_no_admin_token" });
-    }
-    if (!cutoverAdminOk(req)) return res.status(401).json({ error: "unauthorized" });
-    const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 200) : "operator_revert";
-    try {
-      const cutover = require("./orchestrator/cutover") as typeof import("./orchestrator/cutover");
-      const written = await cutover.writeCutoverPercent(0, "operator", reason, null);
-      return res.status(200).json({ ok: true, trafficPercent: written.trafficPercent });
-    } catch (err: any) {
-      console.error("[CutoverPanel] REVERT_FAILED", err);
-      return res.status(500).json({ error: "cutover_revert_failed", message: err?.message ?? String(err) });
-    }
-  });
-
-  app.post("/api/admin/cutover/unlock", async (req: Request, res: Response) => {
-    if (!process.env.METRICS_ADMIN_TOKEN) {
-      return res.status(401).json({ error: "cutover_panel_disabled_no_admin_token" });
-    }
-    if (!cutoverAdminOk(req)) return res.status(401).json({ error: "unauthorized" });
-    try {
-      const { pool } = require("./db") as typeof import("./db");
-      await pool.query(`UPDATE cutover_state SET locked_until = NULL WHERE id = 1`);
-      console.log(`[Orchestrator/Cutover] UNLOCK | actor=operator`);
-      return res.status(200).json({ ok: true });
-    } catch (err: any) {
-      console.error("[CutoverPanel] UNLOCK_FAILED", err);
-      return res.status(500).json({ error: "cutover_unlock_failed", message: err?.message ?? String(err) });
-    }
-  });
-
-  app.post("/api/admin/cutover/increment", async (req: Request, res: Response) => {
-    if (!process.env.METRICS_ADMIN_TOKEN) {
-      return res.status(401).json({ error: "cutover_panel_disabled_no_admin_token" });
-    }
-    if (!cutoverAdminOk(req)) return res.status(401).json({ error: "unauthorized" });
-    const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 200) : "operator_promotion";
-    try {
-      const cutover = require("./orchestrator/cutover") as typeof import("./orchestrator/cutover");
-      const parity = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
-      const [state, health] = await Promise.all([
-        cutover.readCutoverState(),
-        parity.computeParityHealth(),
-      ]);
-      const next = cutover.nextLadderStep(state.trafficPercent);
-      if (next === null) return res.status(409).json({ error: "already_at_max", trafficPercent: state.trafficPercent });
-      if (!health.readyForCutover) {
-        return res.status(409).json({ error: "parity_not_ready", blockers: health.blockers });
-      }
-      const nowMs = Date.now();
-      if (state.lockedUntil && state.lockedUntil.getTime() > nowMs) {
-        return res.status(409).json({ error: "locked", lockedUntil: state.lockedUntil.toISOString() });
-      }
-      if (state.lastIncrementAt && nowMs - state.lastIncrementAt.getTime() < 24 * 3_600_000) {
-        return res.status(409).json({
-          error: "cadence_violation",
-          message: "24h since last increment required",
-          lastIncrementAt: state.lastIncrementAt.toISOString(),
-        });
-      }
-      const written = await cutover.writeCutoverPercent(next, "operator", reason, null);
-      return res.status(200).json({ ok: true, trafficPercent: written.trafficPercent });
-    } catch (err: any) {
-      if (err?.name === "CutoverIncrementBlockedError") {
-        return res.status(409).json({ error: "increment_blocked", message: err.message });
-      }
-      console.error("[CutoverPanel] INCREMENT_FAILED", err);
-      return res.status(500).json({ error: "cutover_increment_failed", message: err?.message ?? String(err) });
-    }
-  });
+  // The cutover system (admin routes + state singleton + dispatch +
+  // auto-revert) was deleted. The `cutover_state` table is archived
+  // by migration 032 and may be dropped after the 30d retention window.
+  // The parity gate continues to run as a regression observer (see
+  // GET /healthz/orchestrator-parity).
 
   // ─── Operations Guardian — operator notices surface ──────────────────
   //
@@ -1539,18 +1403,10 @@ function setupErrorHandler(app: express.Application) {
     await refreshCassetteAgeFromDb((sql) => metricsPool.query(sql));
     // Task #91 / Phase 4-C — CV-15 OrchestratorParityGate family.
     const { renderCv15Metrics } = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
-    // Task #92 / Phase 4-D — Cutover traffic-percent + persist-call family.
-    const { renderCutoverMetrics, readCutoverState } = require("./orchestrator/cutover") as typeof import("./orchestrator/cutover");
-    // Best-effort refresh of the traffic-percent gauge from DB so the
-    // exposition cannot drift from the singleton row even if no
-    // dispatch decision ran in this scrape window.
-    try { await readCutoverState(); } catch (err) {
-      console.warn("[Cutover] METRICS_GAUGE_REFRESH_FAILED", err);
-    }
+    // Task #93 / Phase 4-E — cutover metrics family removed.
     return res.status(200).send(
       renderMetrics() + "\n" + renderContinuityMetrics() + "\n" + renderCv06Metrics() + "\n" +
-      renderCv04Metrics() + "\n" + renderCv13Metrics() + "\n" + renderCv15Metrics() + "\n" +
-      renderCutoverMetrics()
+      renderCv04Metrics() + "\n" + renderCv13Metrics() + "\n" + renderCv15Metrics()
     );
   });
 
@@ -1807,7 +1663,7 @@ function setupErrorHandler(app: express.Application) {
           console.warn(
             "[Server] PARITY_CANDIDATE_DEFERRED=1 — parity scheduler will run " +
               "but every tick records HARNESS_ERROR until Phase 4-B wires a real " +
-              "candidate orchestrator. readyForCutover stays false by design.",
+              "candidate orchestrator. Parity gate runs as a regression observer only (Task #93 / P4-E).",
           );
         }
         // Wire the synthetic-filler capture handler so uncovered
