@@ -83,10 +83,24 @@ import {
   ENGINE_PRIORITY_ORDER,
   checkPriorityViolation,
   shouldBlockDownstream,
+  validateScopedHydration,
   type EngineId,
   type EngineStepResult,
   type NeedsInputPayload,
 } from "./priority-matrix";
+// Task #67 / T-S5-C4 + T-S5-C6: single owner of in-flight registry
+// lifecycle + retry-aware expectedCompleteBy.
+import {
+  computeExpectedCompleteBy,
+  createInFlightCleanupTracker,
+} from "./in-flight-lifecycle";
+// Task #67 / T-S5-C9: pure ledger entry for system-control budget downgrades.
+import {
+  computeBudgetDecisionLedgerEntry,
+  type BudgetAction,
+  type BudgetDecisionLedgerEntry,
+  type BudgetDowngradeSource,
+} from "./budget-decision-ledger";
 // U5c (May 2026) — Unified Weighted Reliability Doctrine: gate-retry
 // policy lives in decision-policy/retry-policy.ts. Cutover proven by
 // .local/validation/retry-policy-shadow.ts (180/180 parity, 0 drift).
@@ -198,6 +212,14 @@ export interface OrchestratorRunResult {
   durationMs: number;
   needsInput?: NeedsInputPayload;
   controlVerdict?: SystemControlVerdict;
+  /**
+   * Task #67 / T-S5-C9: append-only ledger of system-control budget
+   * downgrades applied during this run. The legacy in-place fields on
+   * `budgetResult.output.decision` are still populated for back-compat
+   * (`repair-actions.ts`, `system-control-proof.ts`), but this ledger is
+   * the canonical record for auditors.
+   */
+  budgetDecisionLedger?: BudgetDecisionLedgerEntry[];
 }
 
 interface EngineContext {
@@ -3595,7 +3617,12 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         jobId,
         accountId: config.accountId,
         campaignId: config.campaignId,
-        expectedCompleteBy: new Date(Date.now() + 30 * 60 * 1000),
+        // Task #67 / T-S5-C6: realistic retry-amplification budget derived
+        // from per-engine timeout * 15 + retry slack + synthesis budget.
+        // The prior 30min flat ceiling was shorter than the legitimate
+        // worst-case wall-clock for a run with two mid-pipeline gate
+        // retries, so stale-recovery would re-claim a still-running job.
+        expectedCompleteBy: computeExpectedCompleteBy(),
       }).onConflictDoNothing();
     });
   }
@@ -3607,10 +3634,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // get the right jobId via the local variable — leaving plans non-run-bound.
   config.jobId = jobId;
 
-  // guaranteed in_flight_jobs cleanup. Set true once the explicit
-  // terminal-state delete (or the NEEDS_INPUT preserve-row branch) runs;
-  // otherwise the finally below deregisters on throw/abort.
-  let inFlightCleanupHandled = false;
+  // Task #67 / T-S5-C4: single owner of in-flight cleanup. Previously this
+  // was a manual boolean (`inFlightCleanupHandled`) coordinated across three
+  // separate `db.delete(inFlightJobs)` call sites; the helper collapses that
+  // into one path with consistent error logging.
+  const inFlightCleanup = createInFlightCleanupTracker(jobId);
+  // Task #67 / T-S5-C9: per-run ledger of budget-action downgrades.
+  const budgetDecisionLedger: BudgetDecisionLedgerEntry[] = [];
 
   try {
 
@@ -3772,6 +3802,48 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       }
     } catch (miHydErr: any) {
       console.warn(`[Orchestrator] SCOPED_MI_HYDRATE_FAILED | ${miHydErr.message}`);
+    }
+  }
+
+  // Task #67 / T-S5-C2 — fail-closed scoped-rerun hydration check.
+  //
+  // Walk the transitive dependency closure of every engine in
+  // `scopedEngines`. For each upstream engine that will NOT execute this run
+  // (i.e. not in scope), require the EngineContext slot to be populated by
+  // the hydration pass above. If any required input is missing, abort with
+  // overallStatus=BLOCKED + a structured blockReason — running the scoped
+  // engines on empty inputs would emit a "completed" plan with degraded
+  // confidence, which is the silent-failure category founding doctrine
+  // (Seal #15) forbids.
+  if (scopedEngineSet) {
+    const gaps = validateScopedHydration(
+      Array.from(scopedEngineSet),
+      ctx as unknown as Record<string, unknown>,
+    );
+    if (gaps.length > 0) {
+      const missing = gaps.map(g => `${g.missingDependency}(ctx.${g.ctxKey})`).join(", ");
+      overallStatus = "BLOCKED";
+      failedEngine = "scoped_hydration";
+      blockReason = `Scoped rerun missing hydrated upstream inputs: ${missing}`;
+      console.warn(`[Orchestrator] SCOPED_HYDRATION_FAIL_CLOSED | scoped=[${Array.from(scopedEngineSet).join(",")}] | missing=${missing} | aborting before engine loop`);
+      await db.update(orchestratorJobs)
+        .set({
+          status: "BLOCKED",
+          error: `Blocked at scoped_hydration: ${blockReason}`,
+          completedAt: new Date(),
+        })
+        .where(eq(orchestratorJobs.id, jobId));
+      await inFlightCleanup.handleTerminal();
+      const durationMs = Date.now() - startTime;
+      return {
+        jobId,
+        status: "BLOCKED",
+        completedEngines,
+        failedEngine,
+        blockReason,
+        results,
+        durationMs,
+      };
     }
   }
 
@@ -4008,7 +4080,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     // NEEDS_INPUT intentionally preserves the in_flight_jobs row until the
     // run resumes-and-finishes (or the reaper expires it). Mark handled so
     // the finally block does NOT deregister.
-    inFlightCleanupHandled = true;
+    inFlightCleanup.preserveRow();
     return { jobId, status: "NEEDS_INPUT", completedEngines, durationMs, results, needsInput: needsInputPayload };
   }
 
@@ -4232,6 +4304,23 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       console.warn(`[Orchestrator] RECOVERY_PLAN_FAILED | ${rpErr.message}`);
     }
 
+    // Task #67 / T-S5-C5: freeze the verdict AFTER commercialJudgement and
+    // recoveryPlan have been attached. Any later code path that attempts to
+    // mutate `controlVerdict.*` will now throw in strict mode (dev) or
+    // silently fail (prod) — either way, post-composition mutation is
+    // structurally impossible. The two siblings (`commercialJudgement`,
+    // `recoveryPlan`) live on the verdict because their consumers
+    // (`system-control/routes.ts:36-37`, `boss/eval-hierarchy.ts`) already
+    // read them off the verdict shape; promoting them to a parallel
+    // bundle would break those readers without parity testing.
+    if (controlVerdict) {
+      try {
+        Object.freeze(controlVerdict);
+      } catch (frzErr: any) {
+        console.warn(`[Orchestrator] CONTROL_VERDICT_FREEZE_FAILED | ${frzErr?.message ?? String(frzErr)}`);
+      }
+    }
+
     storeControlVerdict(config.accountId, config.campaignId, jobId, controlVerdict)
       .then(id => console.log(`[Orchestrator] CONTROL_VERDICT_STORED | id=${id} | verdict=${controlVerdict!.verdict}`))
       .catch(err => console.warn(`[Orchestrator] CONTROL_VERDICT_STORE_FAILED | error=${err.message}`));
@@ -4257,18 +4346,49 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   if (controlVerdict && (controlVerdict.verdict === "DOWNGRADE" || controlVerdict.verdict === "REPAIR") && controlVerdict.downgrades.length > 0) {
     const budgetResult = results.get("budget_governor");
     if (budgetResult?.output?.decision) {
-      const originalActionValue = budgetResult.output.decision.originalAction || budgetResult.output.decision.action;
-      const DOWNGRADE_SEVERITY: Record<string, number> = { hold: 0, test: 1, scale: 2 };
-      const targetAction = controlVerdict.downgrades.reduce((most, d) =>
-        (DOWNGRADE_SEVERITY[d.to] ?? 99) < (DOWNGRADE_SEVERITY[most] ?? 99) ? d.to : most,
-        controlVerdict.downgrades[0].to
-      );
-      if (budgetResult.output.decision.downgradedBy !== "system_control_repair") {
-        budgetResult.output.decision.action = targetAction;
-        budgetResult.output.decision.originalAction = originalActionValue;
-        budgetResult.output.decision.downgradedBy = "system_control";
-        budgetResult.output.decision.downgradeReasons = controlVerdict.downgrades.map(d => d.code);
-        console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE | budget action ${originalActionValue}→${targetAction} | reasons=${controlVerdict.downgrades.map(d => d.code).join(", ")}`);
+      // Task #67 / T-S5-C9: compute the ledger entry FIRST (pure, no
+      // mutation), then write back-compat fields onto
+      // `budgetResult.output.decision` so existing readers
+      // (`repair-actions.ts`, `system-control-proof.ts`, plan-synthesis
+      // budget inspection) keep working. The ledger is the canonical
+      // record and is surfaced on `OrchestratorRunResult.budgetDecisionLedger`.
+      const originalActionValue: BudgetAction =
+        (budgetResult.output.decision.originalAction as BudgetAction)
+        || (budgetResult.output.decision.action as BudgetAction);
+      const alreadyAttributedTo: BudgetDowngradeSource | null =
+        budgetResult.output.decision.downgradedBy === "system_control_repair"
+          ? "system_control_repair"
+          : budgetResult.output.decision.downgradedBy === "system_control"
+            ? "system_control"
+            : null;
+      // Task #67 / T-S5-C9: contain ledger validation failures so an
+      // upstream contract violation (system-control emitted a downgrade
+      // `to` outside the BudgetAction enum) cannot abort the orchestrator
+      // run completion path. The ledger throws `InvalidBudgetDowngradeError`
+      // fail-closed; we log and skip the downgrade here instead of letting
+      // the throw propagate past final-status update + cleanup.
+      let ledgerEntry: BudgetDecisionLedgerEntry | null = null;
+      try {
+        ledgerEntry = computeBudgetDecisionLedgerEntry({
+          jobId,
+          originalAction: originalActionValue,
+          proposedDowngrades: controlVerdict.downgrades.map(d => ({ to: d.to, code: d.code })),
+          alreadyAttributedTo,
+        });
+      } catch (ledgerErr: any) {
+        console.warn(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE_LEDGER_FAILED | jobId=${jobId} | error=${ledgerErr?.message ?? String(ledgerErr)} | proposed=${controlVerdict.downgrades.map(d => d.to).join(",")}`);
+      }
+      if (ledgerEntry) {
+        budgetDecisionLedger.push(ledgerEntry);
+        if (ledgerEntry.actionMutated) {
+          budgetResult.output.decision.action = ledgerEntry.finalAction;
+          budgetResult.output.decision.originalAction = ledgerEntry.originalAction;
+          budgetResult.output.decision.downgradedBy = ledgerEntry.downgradeSource;
+          budgetResult.output.decision.downgradeReasons = ledgerEntry.downgradeReasons;
+          console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE | event=${ledgerEntry.eventId} | budget action ${ledgerEntry.originalAction}→${ledgerEntry.finalAction} | reasons=${ledgerEntry.downgradeReasons.join(", ")}`);
+        } else {
+          console.log(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE_NOOP | event=${ledgerEntry.eventId} | repair already attributed (source=${ledgerEntry.downgradeSource}) | proposed=${controlVerdict.downgrades.map(d => d.code).join(", ")}`);
+        }
       }
     }
   }
@@ -4379,13 +4499,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     })
     .where(eq(orchestratorJobs.id, jobId));
 
-  // terminal-state deregistration (COMPLETED/PARTIAL/BLOCKED/ERROR).
-  try {
-    await db.delete(inFlightJobs).where(eq(inFlightJobs.jobId, jobId));
-    inFlightCleanupHandled = true;
-  } catch (delErr: any) {
-    console.warn(`[Orchestrator] IN_FLIGHT_DEREGISTRATION_FAILED | jobId=${jobId} | error=${delErr.message}`);
-  }
+  // terminal-state deregistration (COMPLETED/PARTIAL/BLOCKED/ERROR). Task
+  // #67 / T-S5-C4: routed through the single cleanup tracker.
+  await inFlightCleanup.handleTerminal();
 
   if (ctx.celResults && ctx.celResults.length > 0) {
     const celReport = buildCELReport(config.campaignId, 2, ctx.celResults);
@@ -4472,22 +4588,19 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     results,
     durationMs,
     controlVerdict: controlVerdict || undefined,
+    // Task #67 / T-S5-C9: append-only ledger. Empty array when no
+    // system-control downgrade fired this run.
+    budgetDecisionLedger: budgetDecisionLedger.length > 0 ? budgetDecisionLedger : undefined,
     ssc: ctx.ssc || null,
     commercialDna,
     confidenceIntegrity,
     confidenceProvenanceLog: runConfidenceProvenanceLog,
   };
   } finally {
-    // guaranteed deregistration on throw/abort. Skipped when the
-    // explicit terminal-state delete already ran or NEEDS_INPUT preserved
-    // the row deliberately.
-    if (!inFlightCleanupHandled) {
-      try {
-        await db.delete(inFlightJobs).where(eq(inFlightJobs.jobId, jobId));
-      } catch (delErr: any) {
-        console.warn(`[Orchestrator] IN_FLIGHT_DEREGISTRATION_FAILED_IN_FINALLY | jobId=${jobId} | error=${delErr?.message}`);
-      }
-    }
+    // Task #67 / T-S5-C4: safety net for throw/abort. The tracker no-ops
+    // when a terminal-state branch (handleTerminal) or NEEDS_INPUT branch
+    // (preserveRow) already ran.
+    await inFlightCleanup.handleSafetyNet();
   }
 }
 

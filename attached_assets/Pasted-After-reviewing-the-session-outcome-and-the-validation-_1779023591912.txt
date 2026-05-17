@@ -1,0 +1,96 @@
+After reviewing the session outcome and the validation feedback, I agree with the scope reality assessment.
+
+The important point is:
+the current session successfully delivered the high-leverage doctrine and runtime-safety fixes without attempting unsafe structural decomposition before the required replay/shadow infrastructure exists.
+
+That was the correct engineering decision.
+
+I do NOT want forced “full Phase 4 completion” if doing so requires blind decomposition of the orchestrator/runtime without deterministic replay validation.
+
+The current surgical fixes already provide meaningful doctrine value:
+
+* fail-closed validation improvements
+* freeze protections
+* scoped hydration validation
+* cleanup tracking
+* budget ledger hardening
+* mutation safety improvements
+* runtime integrity tightening
+
+Those are legitimate stabilization gains and should be treated as valid progress, not ignored because the larger structural epic remains open.
+
+More importantly:
+the session exposed a critical process truth:
+
+We cannot safely execute the deeper structural refactors until replay/shadow infrastructure exists.
+
+So I want to formalize this moving forward:
+
+“No major runtime decomposition or orchestration restructuring should happen without deterministic replay + parity validation infrastructure first.”
+
+Please treat this as a hard architectural prerequisite going forward.
+
+Next direction should be:
+
+1. Accept the current surgical stabilization scope as valid completion for this session.
+
+2. Split the original Phase 4 work into separate execution tracks instead of treating it as one atomic task.
+
+Suggested breakdown:
+
+* P4-A — Deterministic Replay / Shadow Harness
+* P4-B — Orchestrator Decomposition
+* P4-C — Parity Validation + Divergence Analysis
+* P4-D — Staged Runtime Cutover
+* P4-E — Legacy Cleanup / Removal
+
+3. Prioritize building the replay/shadow infrastructure next.
+
+This should include:
+
+* deterministic replay
+* dual-run parity comparison
+* divergence metrics
+* shadow-mode orchestration
+* replay snapshots
+* AI input/output capture
+* degradation parity validation
+* mutation diffing
+* runtime sequencing verification
+
+4. Treat replayability as a first-class runtime doctrine layer.
+
+The system is now too structurally complex for blind refactors.
+Future runtime evolution must become:
+
+* measurable
+* diffable
+* reversible
+* observable
+* replayable
+
+before major restructuring proceeds.
+
+5. Adjust validation expectations accordingly.
+
+The validator currently appears to evaluate against the literal full Phase 4 specification rather than the negotiated execution scope for the session.
+
+Going forward:
+
+* large epics should distinguish
+
+  * doctrine stabilization
+  * infrastructure prerequisites
+  * structural decomposition
+  * parity rollout
+  * cleanup/cutover
+
+so validation aligns with actual scoped execution goals.
+
+Most important:
+I do NOT want fake completion pressure to push unsafe architectural refactors prematurely.
+
+The current outcome was actually a positive sign of system maturity:
+the process correctly identified that replay infrastructure is a prerequisite before deeper decomposition can safely proceed.
+
+That is the right direction.

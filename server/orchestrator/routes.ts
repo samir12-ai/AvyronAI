@@ -88,12 +88,15 @@ export function registerOrchestratorV2Routes(app: Express) {
           accountId,
           campaignId: String(campaignId),
           status: "RUNNING",
+          // Task #67 / T-S5-C3: seed from the canonical 15-engine priority
+          // matrix. The prior literal 11-id seed contained fictional engine
+          // ids ("sgl","pricing","creative","messaging") that did not match
+          // any actual engine — so the initial sectionStatuses row diverged
+          // from the orchestrator's own `ENGINE_PRIORITY_ORDER`-driven
+          // updates seconds later, leaving the UI flickering between two
+          // disjoint shapes.
           sectionStatuses: JSON.stringify(
-            Array.from({ length: 11 }, (_, i) => {
-              const ids = ["market_intelligence","sgl","audience","offer","mechanism","pricing","messaging","funnel","creative","iteration","retention"];
-              const names = ["Market Intelligence","Signal Governor","Audience","Offer","Mechanism","Pricing","Messaging","Funnel","Creative","Iteration","Retention"];
-              return { id: ids[i], name: names[i], status: "PENDING" };
-            })
+            ENGINE_PRIORITY_ORDER.map(e => ({ id: e.id, name: e.name, status: "PENDING" }))
           ),
         });
       }
