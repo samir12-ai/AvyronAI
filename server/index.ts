@@ -1040,6 +1040,48 @@ function setupErrorHandler(app: express.Application) {
     }
   });
 
+  // ─── Task #91 / Phase 4-C — Orchestrator parity gate health ──────────
+  //
+  // GET /healthz/orchestrator-parity
+  //
+  // Admin-token-gated. Returns the canonical `readyForCutover` boolean
+  // alongside the blockers list, per-class divergence histogram (24h),
+  // module classifications, and path-shape coverage. This endpoint is
+  // the Phase 4-D cutover gate — orchestrator decomposition cannot
+  // proceed while `readyForCutover=false`.
+  //
+  // NO-TENANT-LEAK: the surface carries zero per-tenant identifiers.
+  // Same fail-closed-when-unset behaviour as /metrics + /healthz/continuity.
+  app.get("/healthz/orchestrator-parity", async (req: Request, res: Response) => {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).json({ error: "parity_endpoint_disabled_no_admin_token" });
+    }
+    let isAdmin = false;
+    if (provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch {
+        isAdmin = false;
+      }
+    }
+    if (!isAdmin) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    try {
+      const { computeParityHealth, getParitySchedulerHealth } = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
+      const [health, schedulerHealth] = await Promise.all([
+        computeParityHealth(),
+        Promise.resolve(getParitySchedulerHealth()),
+      ]);
+      return res.status(200).json({ ...health, scheduler: schedulerHealth });
+    } catch (err) {
+      console.error("[ParityHealth] COMPUTE_FAILED", err);
+      return res.status(500).json({ error: "parity_health_failed" });
+    }
+  });
+
   app.get("/api/admin/replay/cassette/:hash", async (req: Request, res: Response) => {
     const expected = process.env.METRICS_ADMIN_TOKEN;
     const provided = req.header("x-admin-token") ?? "";
@@ -1351,7 +1393,9 @@ function setupErrorHandler(app: express.Application) {
     // Refresh cv13_replay_age_max_hours intrinsically at scrape time so the
     // gauge is accurate without depending on the admin panel being exercised.
     await refreshCassetteAgeFromDb((sql) => metricsPool.query(sql));
-    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics() + "\n" + renderCv06Metrics() + "\n" + renderCv04Metrics() + "\n" + renderCv13Metrics());
+    // Task #91 / Phase 4-C — CV-15 OrchestratorParityGate family.
+    const { renderCv15Metrics } = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
+    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics() + "\n" + renderCv06Metrics() + "\n" + renderCv04Metrics() + "\n" + renderCv13Metrics() + "\n" + renderCv15Metrics());
   });
 
   const PUBLIC_PATH_PREFIXES = [
@@ -1566,6 +1610,61 @@ function setupErrorHandler(app: express.Application) {
       startContinuitySupervisor();
       log(`[Server] Continuity layer up — replicaId=${getReplicaId()}`);
 
+      // Task #91 / Phase 4-C — Parity gate hourly scheduler. Disabled
+      // when PARITY_GATE_DISABLED=1 (tests / incident response) or when
+      // the global continuity scheduler is disabled. The candidate
+      // orchestrator factory is registered lazily so this boot path
+      // does NOT require the heavy orchestrator module to load early.
+      try {
+        const parityMod = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
+        // The candidate factory deliberately defers requiring the
+        // orchestrator until first replay tick. The factory must return
+        // a fresh closure per call (no shared mutable state).
+        // Shadow burn-in default: the candidate factory throws a
+        // documented "not yet wired" error so every replay records as
+        // HARNESS_ERROR and the gate STAYS RED until Phase 4-B finishes
+        // extracting modules and registers a real candidate. This is the
+        // safe default — the gate can never go green by accident.
+        // Code-review #7 finding #1: the throwing stub is the SAFE
+        // default until Phase 4-B llm-injection plumbing wires a real
+        // candidate. We make the deferred state EXPLICIT in three ways:
+        //   (a) Set PARITY_CANDIDATE_DEFERRED=1 so computeParityHealth()
+        //       emits a `candidate_orchestrator_not_wired_phase4b_pending`
+        //       blocker — gate cannot accidentally go green.
+        //   (b) Log a loud boot warning so the operator sees the state.
+        //   (c) Operators who DO wire a real candidate must call
+        //       setParityCandidateFactory(real) AND clear
+        //       PARITY_CANDIDATE_DEFERRED in the same change.
+        if (!process.env.PARITY_CANDIDATE_DEFERRED) {
+          process.env.PARITY_CANDIDATE_DEFERRED = "1";
+        }
+        parityMod.setParityCandidateFactory(() => ({
+          async run() {
+            throw new Error(
+              "PARITY_CANDIDATE_NOT_WIRED: no candidate orchestrator registered " +
+              "(Task #91 / Phase 4-C shadow default). Phase 4-B extraction must " +
+              "call setParityCandidateFactory(...) before the parity gate can pass.",
+            );
+          },
+        }));
+        if (process.env.PARITY_CANDIDATE_DEFERRED === "1") {
+          console.warn(
+            "[Server] PARITY_CANDIDATE_DEFERRED=1 — parity scheduler will run " +
+              "but every tick records HARNESS_ERROR until Phase 4-B wires a real " +
+              "candidate orchestrator. readyForCutover stays false by design.",
+          );
+        }
+        // Wire the synthetic-filler capture handler so uncovered
+        // path-shapes auto-generate a `source='synthetic_filler'`
+        // cassette (cloned from the most recent production seed).
+        const pathCoverageMod = require("./orchestrator/replay/parity/path-coverage") as typeof import("./orchestrator/replay/parity/path-coverage");
+        const syntheticCaptureMod = require("./orchestrator/replay/parity/synthetic-capture") as typeof import("./orchestrator/replay/parity/synthetic-capture");
+        pathCoverageMod.setSyntheticFillerCaptureHandler(syntheticCaptureMod.captureSyntheticFiller);
+        parityMod.startParityScheduler();
+      } catch (err) {
+        console.error("[Server] Parity scheduler start failed:", err);
+      }
+
       invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
 
       // boot is fast; subsequent ticks every 24h. cascadeDeleteAccount is
@@ -1683,6 +1782,13 @@ function setupErrorHandler(app: express.Application) {
     stopSnapshotCleanupWorker();
     await stopContinuityScheduler();
     await stopContinuitySupervisor();
+    // Task #91 / Phase 4-C — clear parity scheduler timers.
+    try {
+      const { stopParityScheduler } = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
+      await stopParityScheduler();
+    } catch (e) {
+      console.error("[Server] stopParityScheduler failed:", e);
+    }
     // Track #3 / Seal #15 — the MI queue processor was started inline by
     // server/market-intelligence-v3/index.ts on boot but never wired into
     // shutdown. Without this stop, the 15s setInterval kept ticking

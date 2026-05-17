@@ -3197,3 +3197,42 @@ export const orchestratorReplayCassettes = pgTable("orchestrator_replay_cassette
 
 export type OrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferSelect;
 export type InsertOrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferInsert;
+
+// Task #91 / Phase 4-C — Orchestrator parity replay surface.
+export const orchestratorReplayRuns = pgTable("orchestrator_replay_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ranAt: timestamp("ran_at", { withTimezone: true }).notNull().defaultNow(),
+  cassetteHash: text("cassette_hash").notNull(),
+  pathShape: text("path_shape"),
+  outcome: text("outcome").notNull(),
+  divergenceCount: integer("divergence_count").notNull().default(0),
+  highestClass: text("highest_class"),
+  routedAction: text("routed_action").notNull(),
+  engineWallclockMs: integer("engine_wallclock_ms").notNull().default(0),
+  finalPlanHash: text("final_plan_hash"),
+  finalVerdictHash: text("final_verdict_hash"),
+  candidateError: text("candidate_error"),
+  shadowMode: boolean("shadow_mode").notNull().default(true),
+});
+
+export const orchestratorReplayDivergences = pgTable("orchestrator_replay_divergences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull(),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+  divergenceClass: text("divergence_class").notNull(),
+  path: text("path").notNull(),
+  moduleId: text("module_id"),
+  expected: jsonb("expected"),
+  actual: jsonb("actual"),
+});
+
+export const divergenceClassRoutes = pgTable("divergence_class_routes", {
+  divergenceClass: text("divergence_class").primaryKey(),
+  action: text("action").notNull(),
+  description: text("description").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type OrchestratorReplayRun = typeof orchestratorReplayRuns.$inferSelect;
+export type OrchestratorReplayDivergence = typeof orchestratorReplayDivergences.$inferSelect;
+export type DivergenceClassRoute = typeof divergenceClassRoutes.$inferSelect;

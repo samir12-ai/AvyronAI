@@ -6,6 +6,10 @@ const noValidateDecisionMemoryWriteImport = require('./.local/eslint-rules/no-va
 const noBareLlmCallInReplay = require('./.local/eslint-rules/no-bare-llm-call-in-replay.js');
 const orchestratorModuleBoundary = require('./.local/eslint-rules/orchestrator-module-boundary.js');
 const orchestratorNoNewLargeFile = require('./.local/eslint-rules/orchestrator-no-new-large-file.js');
+// Task #91 / Phase 4-C — Parity gate: only the auto-revert helper may flip
+// ORCH_USE_<X> back to `current`. Forbids direct env mutation +
+// setModeOverride calls outside the allowlist.
+const parityNoDirectRevert = require('./.local/eslint-rules/parity-no-direct-revert.js');
 
 module.exports = defineConfig([
   expoConfig,
@@ -149,6 +153,16 @@ module.exports = defineConfig([
         "error",
         { maxModuleLines: 200, orchestratorIndexMaxLines: 5000 },
       ],
+    },
+  },
+  // Task #91 / Phase 4-C — Parity auto-revert authorisation gate.
+  {
+    files: ["server/**/*.ts"],
+    plugins: {
+      parity: { rules: { "no-direct-revert": parityNoDirectRevert } },
+    },
+    rules: {
+      "parity/no-direct-revert": "error",
     },
   },
 ]);

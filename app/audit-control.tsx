@@ -1,5 +1,5 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, useColorScheme, ActivityIndicator } from "react-native";
+import React, { useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Pressable, TouchableOpacity, useColorScheme, ActivityIndicator } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -30,6 +30,12 @@ import {
   CATEGORY_LABELS,
   type OperatorNotice,
 } from "@/hooks/useOperatorNotices";
+import {
+  useParityPanel,
+  parityPanelEnabled,
+  type ParityHealthData,
+  type ParityDivergencePathRow,
+} from "@/hooks/useParityPanel";
 
 // Per-check status colors (NOT verdict colors). These are operational check
 // states (PASS/FAIL/STALE/TIMEOUT/etc.) emitted by useRunTruthfulness — they
@@ -123,6 +129,10 @@ export default function AuditControlScreen() {
   const operations = useOperationsPanel();
   const operatorNotices = useOperatorNotices();
   const operationsEnabled = operationsPanelEnabled();
+  // Task #91 / Phase 4-C — Parity Gate operator panel. Same admin-token
+  // gate as continuity/operations; invisible in customer builds.
+  const parity = useParityPanel();
+  const parityEnabled = parityPanelEnabled();
 
   const bg = isDark ? "#080C10" : "#F4F7F5";
   const textPrimary = isDark ? "#E8EDF2" : "#1A2332";
@@ -326,6 +336,20 @@ export default function AuditControlScreen() {
             panel={operations.data ?? null}
             panelLoading={operations.isLoading}
             panelError={operations.error ? (operations.error as Error).message : null}
+            textPrimary={textPrimary}
+            textSec={textSec}
+          />
+        )}
+
+        {/* Task #91 / Phase 4-C — Parity Gate (8th panel). Ready badge,
+            blockers list, path-shape coverage grid, module/auto-revert
+            classifications. Same admin-token gate. */}
+        {parityEnabled && (
+          <ParityPanel
+            isDark={isDark}
+            data={parity.data ?? null}
+            isLoading={parity.isLoading}
+            error={parity.error ? (parity.error as Error).message : null}
             textPrimary={textPrimary}
             textSec={textSec}
           />
@@ -804,6 +828,262 @@ function ContinuityDecisionBadge({ decision }: { decision: ContinuityDecision })
     <View style={[styles.pill, { backgroundColor: color + "22", borderColor: color + "60" }]}>
       <Text style={[styles.pillText, { color }]} testID={`continuity-decision-${decision}`}>{label}</Text>
     </View>
+  );
+}
+
+// ─── Task #91 / Phase 4-C — Parity divergence-detail expandable section ─
+function ParityDivergenceSection({
+  isDark,
+  counts,
+  paths,
+  textSec,
+  textPrimary,
+}: {
+  isDark: boolean;
+  counts: Record<string, number>;
+  paths: ParityDivergencePathRow[];
+  textSec: string;
+  textPrimary: string;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const pathsByClass = paths.reduce<Record<string, ParityDivergencePathRow[]>>((acc, p) => {
+    (acc[p.divergenceClass] ??= []).push(p);
+    return acc;
+  }, {});
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
+        Divergences (24h) — tap class to expand
+      </Text>
+      {Object.entries(counts).map(([cls, n]) => {
+        const isOpen = expanded === cls;
+        const detail = pathsByClass[cls] ?? [];
+        return (
+          <View key={cls}>
+            <TouchableOpacity
+              onPress={() => setExpanded(isOpen ? null : cls)}
+              activeOpacity={0.6}
+              testID={`parity-divergence-row-${cls}`}
+              accessibilityRole="button"
+            >
+              <KV
+                label={`${cls}  ${isOpen ? "▾" : "▸"}`}
+                value={String(n)}
+                isDark={isDark}
+              />
+            </TouchableOpacity>
+            {isOpen && (
+              <View style={{ paddingLeft: 12, marginBottom: 4 }}>
+                {detail.length === 0 && (
+                  <Text style={[styles.detailsText, { color: textSec }]}>
+                    No path detail in last 24h.
+                  </Text>
+                )}
+                {detail.map((p, i) => (
+                  <Text
+                    key={`${p.path}-${i}`}
+                    style={[styles.detailsText, { color: textPrimary }]}
+                    testID={`parity-divergence-path-${cls}-${i}`}
+                  >
+                    {p.count}× {p.path}
+                  </Text>
+                ))}
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ─── Task #91 / Phase 4-C — Parity Gate operator panel ─────────────────
+function ParityPanel({
+  isDark,
+  data,
+  isLoading,
+  error,
+  textPrimary,
+  textSec,
+}: {
+  isDark: boolean;
+  data: ParityHealthData | null;
+  isLoading: boolean;
+  error: string | null;
+  textPrimary: string;
+  textSec: string;
+}) {
+  return (
+    <Section title="Parity gate (Phase 4-C)" isDark={isDark}>
+      {isLoading && !data && (
+        <ActivityIndicator color="#7C3AED" style={{ marginVertical: 12 }} />
+      )}
+      {error && (
+        <Text style={[styles.errorText, { color: "#FF6B6B", marginTop: 0 }]}>
+          Failed to load parity health: {error}
+        </Text>
+      )}
+      {data && (
+        <>
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
+            <View
+              style={[
+                styles.pill,
+                {
+                  backgroundColor: data.readyForCutover ? "#85BB6522" : "#FF6B6B22",
+                  borderColor: data.readyForCutover ? "#85BB6560" : "#FF6B6B60",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.pillText,
+                  { color: data.readyForCutover ? "#85BB65" : "#FF6B6B" },
+                ]}
+                testID="parity-ready-badge"
+              >
+                {data.readyForCutover ? "READY FOR CUTOVER" : "NOT READY"}
+              </Text>
+            </View>
+          </View>
+
+          <KV
+            label="Cassettes (last)"
+            value={`${data.cassetteCount} · oldest ${data.oldestCassetteAgeH.toFixed(1)}h`}
+            isDark={isDark}
+          />
+          <KV
+            label="Last tick"
+            value={data.lastTickAt ? formatRelativeTime(data.lastTickAt) : "—"}
+            isDark={isDark}
+          />
+
+          {data.blockers.length > 0 && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
+                Blockers ({data.blockers.length})
+              </Text>
+              {data.blockers.map((b, i) => (
+                <Text
+                  key={`${b}-${i}`}
+                  style={[styles.blockDesc, { color: "#FF6B6B" }]}
+                  testID={`parity-blocker-${i}`}
+                >
+                  • {b}
+                </Text>
+              ))}
+            </View>
+          )}
+
+          {Object.keys(data.divergencesByClassLast24h).length > 0 && (
+            <ParityDivergenceSection
+              isDark={isDark}
+              counts={data.divergencesByClassLast24h}
+              paths={data.divergencePathsByClassLast24h}
+              textSec={textSec}
+              textPrimary={textPrimary}
+            />
+          )}
+
+          {data.autoRevertsLast24h.length > 0 && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
+                Auto-reverts (24h) — {data.autoRevertsLast24h.length}
+              </Text>
+              {data.autoRevertsLast24h.map((r, i) => (
+                <View
+                  key={`${r.at}-${r.moduleId}-${i}`}
+                  style={[styles.blockRow, { borderBottomColor: isDark ? "#1A2030" : "#E2E8E4" }]}
+                  testID={`parity-autorevert-${i}`}
+                >
+                  <View style={styles.blockHead}>
+                    <Text style={[styles.blockCode, { color: textPrimary }]}>
+                      {r.moduleId}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.blockSev,
+                        { color: r.suppressed ? "#8892A4" : "#FF6B6B" },
+                      ]}
+                    >
+                      {r.suppressed ? "SUPPRESSED" : "REVERTED"}
+                    </Text>
+                  </View>
+                  <Text style={[styles.blockDesc, { color: textSec }]} numberOfLines={2}>
+                    {r.reason}
+                  </Text>
+                  <Text style={[styles.detailsText, { color: textSec, marginTop: 2 }]}>
+                    {formatRelativeTime(r.at)} · flag {r.moduleFlag}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {Object.keys(data.pathShapeCoverage).length > 0 && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
+                Path-shape coverage
+              </Text>
+              {Object.entries(data.pathShapeCoverage).map(([shape, info]) => (
+                <KV
+                  key={shape}
+                  label={shape}
+                  value={`${info.count}× ${info.covered ? "✓" : "✗"}`}
+                  isDark={isDark}
+                  valueColor={info.covered ? "#85BB65" : "#FFB347"}
+                />
+              ))}
+            </View>
+          )}
+
+          {(data.modulesAtCandidate.length > 0 ||
+            data.modulesShadowOnly.length > 0 ||
+            data.modulesBlocked.length > 0) && (
+            <View style={{ marginTop: 10 }}>
+              <Text style={[styles.sectionTitle, { color: textSec, marginBottom: 6 }]}>
+                Modules
+              </Text>
+              {data.modulesAtCandidate.length > 0 && (
+                <KV
+                  label="At candidate"
+                  value={data.modulesAtCandidate.join(", ")}
+                  isDark={isDark}
+                />
+              )}
+              {data.modulesShadowOnly.length > 0 && (
+                <KV
+                  label="Shadow only"
+                  value={data.modulesShadowOnly.join(", ")}
+                  isDark={isDark}
+                />
+              )}
+              {data.modulesBlocked.length > 0 && (
+                <KV
+                  label="Blocked"
+                  value={data.modulesBlocked.join(", ")}
+                  isDark={isDark}
+                  valueColor="#FF6B6B"
+                />
+              )}
+              {data.modulesAwaitingBurnIn.length > 0 && (
+                <KV
+                  label="Awaiting burn-in"
+                  value={data.modulesAwaitingBurnIn
+                    .map((m) =>
+                      m.daysAtCandidate === null
+                        ? m.moduleId
+                        : `${m.moduleId} (${m.daysAtCandidate.toFixed(1)}d)`,
+                    )
+                    .join(", ")}
+                  isDark={isDark}
+                />
+              )}
+            </View>
+          )}
+        </>
+      )}
+    </Section>
   );
 }
 

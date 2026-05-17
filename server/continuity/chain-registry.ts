@@ -162,6 +162,13 @@ export function buildChainRegistry(): ChainDescriptor[] {
         `),
     },
     {
+      chainId: "orchestrator_parity_replay",
+      description: "Hourly orchestrator parity replay (Task #91 / Phase 4-C)",
+      expectedIntervalMs: MS_PER_HOUR,
+      introspect: () =>
+        maxTimestamp(sql`SELECT MAX(ran_at) AS max_ts FROM orchestrator_replay_runs`),
+    },
+    {
       chainId: "ael_cel_reruns",
       description: "AEL/CEL re-enrichment lane",
       expectedIntervalMs: 24 * MS_PER_HOUR,
