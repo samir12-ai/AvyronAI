@@ -138,9 +138,28 @@ export default function CompetitiveIntelligence() {
   });
 
   useEffect(() => {
-    if (cachedSnapshot) {
-      setMiv3Override(null);
-    }
+    if (!cachedSnapshot) return;
+    setMiv3Override((prev: any) => {
+      if (!prev) return prev;
+      const parseTs = (v: any): number => {
+        if (!v) return NaN;
+        const t = new Date(v).getTime();
+        return Number.isFinite(t) ? t : NaN;
+      };
+      const prevTs = parseTs(prev?.snapshot?.createdAt || prev?.timestamp);
+      const cachedTs = parseTs(
+        (cachedSnapshot as any)?.snapshot?.createdAt ||
+          (cachedSnapshot as any)?.timestamp,
+      );
+      // Drop the override only when the server refetch is STRICTLY newer
+      // than the override. Otherwise the freshly-computed re-run result
+      // would be replaced by the older orchestrator-tied snapshot and the
+      // stale "Re-run Analysis" badge would flash and reappear.
+      if (Number.isFinite(prevTs) && Number.isFinite(cachedTs) && cachedTs > prevTs) {
+        return null;
+      }
+      return prev;
+    });
   }, [cachedSnapshot]);
 
   useEffect(() => {
@@ -242,7 +261,6 @@ export default function CompetitiveIntelligence() {
     },
     onSuccess: (data: any) => {
       setMiv3Override(data);
-      queryClient.setQueryData(['mi-v3-snapshot', activeCampaignId], data);
       queryClient.invalidateQueries({ queryKey: ['ci-miv3-history', activeCampaignId] });
       queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot', activeCampaignId] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
