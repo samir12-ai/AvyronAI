@@ -400,22 +400,20 @@ Return ONLY valid JSON with this structure:
       }
 
       if (analysis.memoryUpdates?.length) {
+        const { upsertByFingerprint } = await import("./memory-system/store");
         for (const mem of analysis.memoryUpdates) {
           const direction = mem.isWinner ? "reinforce" as const : "neutral" as const;
           const confidenceScore = mem.isWinner ? 0.85 : 0.5;
-          const check = policyEnforcedMemoryCheck(confidenceScore, direction, "performance-analysis", mem.memoryType || "analysis");
-          if (!check.allowed) continue;
-          await db.insert(strategyMemory).values({
+          await upsertByFingerprint({
             accountId,
             campaignId,
             memoryType: mem.memoryType,
+            engineName: "performance-analysis",
             label: mem.label,
             details: mem.details,
             score: mem.score || 0,
             direction,
-            isWinner: mem.isWinner ? true : false,
             confidenceScore,
-            lastValidatedAt: new Date(),
           });
         }
       }
@@ -627,25 +625,24 @@ Return JSON:
       }).returning();
 
       if (report.selfImprovements?.length) {
-        for (const improvement of report.selfImprovements) {
-          const check = policyEnforcedMemoryCheck(0.5, "neutral", "weekly-report", "self_improvement");
-          if (!check.allowed) {
-            console.log(`[Strategy] SELF_IMPROVEMENT_BLOCKED | label="${improvement.slice(0, 80)}" — below memory write threshold`);
-            continue;
-          }
-          await db.insert(strategyMemory).values({
-            accountId,
-            campaignId,
-            memoryType: "self_improvement",
-            label: improvement,
-            details: `Auto-generated improvement from weekly report on ${now.toISOString().split('T')[0]}`,
-            score: 0.5,
-            direction: "neutral",
-            isWinner: false,
-            confidenceScore: 0.5,
-            lastValidatedAt: new Date(),
-          });
-        }
+        // Task #64 / Phase 1 — self_improvement is in NON_STRATEGIC_MEMORY_TYPES
+        // (operational/audit telemetry, not strategy signal). Route to the
+        // operational store under its own stateType so each weekly run captures
+        // the latest improvement set without polluting strategy_memory.
+        const { upsertOperationalState } = await import("./memory-system/operational-state-store");
+        await upsertOperationalState({
+          accountId,
+          campaignId,
+          stateType: "self_improvement",
+          engineName: "weekly-report",
+          label: `Weekly improvements — ${now.toISOString().split('T')[0]}`,
+          payload: {
+            improvements: report.selfImprovements,
+            generatedAt: now.toISOString(),
+          },
+          rationale: `Auto-generated improvement set from weekly report on ${now.toISOString().split('T')[0]} (${report.selfImprovements.length} item(s))`,
+          confidenceScore: 0.5,
+        });
       }
 
       await logAuditEvent({

@@ -207,17 +207,20 @@ export function buildDecisionEnforcementReport(
   };
 }
 
+/**
+ * @deprecated Task #64 / Phase 1 step 5 — merged into `policyEnforcedMemoryCheck`.
+ * Thin shim retained only for callers still in transition; new code MUST use
+ * the type-aware variant. The shim now delegates with memoryType="(legacy)"
+ * which never matches the (now removed) OPERATIONAL bypass, so behaviour is
+ * identical to the strict path.
+ */
 export function validateDecisionForMemoryWrite(
   confidenceScore: number,
   direction: "reinforce" | "avoid" | "neutral",
   engineName: string,
 ): { allowed: boolean; reason: string } {
-  if (confidenceScore < DECISION_CONFIDENCE_THRESHOLDS.MEMORY_WRITE_MIN) {
-    const reason = `Memory write BLOCKED for engine="${engineName}" direction="${direction}": confidence ${confidenceScore.toFixed(3)} below minimum ${DECISION_CONFIDENCE_THRESHOLDS.MEMORY_WRITE_MIN}`;
-    console.log(`[DecisionPolicy] MEMORY_WRITE_BLOCKED | ${reason}`);
-    return { allowed: false, reason };
-  }
-  return { allowed: true, reason: "Confidence meets memory write threshold" };
+  const result = policyEnforcedMemoryCheck(confidenceScore, direction, engineName, "(legacy)");
+  return { allowed: result.allowed, reason: result.reason };
 }
 
 export function applyFallbackSourcePenalty(
@@ -245,16 +248,24 @@ export function validateAgentDecisionBinding(
   return { bound: true, reason: `Bound to plan ${planId}` };
 }
 
-const OPERATIONAL_MEMORY_TYPES = new Set([
-  "content_rhythm",
-  "exploration_budget",
-]);
+// Task #64 / Phase 1 step 2 — the OPERATIONAL_MEMORY_TYPES bypass that
+// previously let content_rhythm / exploration_budget skip the gate has been
+// removed. Those rows now persist to the engine_operational_state table
+// via operationalStateStore.upsertOperationalState(), which intentionally
+// does not run through policyEnforcedMemoryCheck (an operational singleton
+// is the authoritative source — confidence-thresholding it is meaningless).
+//
+// NON_STRATEGIC_MEMORY_TYPES below is retained as a read-time filter for
+// legacy rows that may still exist on strategy_memory until the historical
+// sweep runs. New writes of those types to strategy_memory are rejected by
+// memoryStore.assertStrategicType() at the helper boundary.
 
 export const NON_STRATEGIC_MEMORY_TYPES = [
   "content_rhythm",
   "exploration_budget",
   "mutation_log",
   "agent_action",
+  "agent_rhythm",
   "self_improvement",
 ] as const;
 
@@ -290,20 +301,11 @@ export function policyEnforcedMemoryCheck(
   engineName: string,
   memoryType: string,
 ): { allowed: boolean; reason: string; policyBypassed: boolean } {
-  const isOperational = OPERATIONAL_MEMORY_TYPES.has(memoryType);
-
   if (confidenceScore < DECISION_CONFIDENCE_THRESHOLDS.MEMORY_WRITE_MIN) {
-    if (isOperational) {
-      const reason = `POLICY_BYPASS_OPERATIONAL | engine="${engineName}" memoryType="${memoryType}" confidence=${confidenceScore.toFixed(3)} — operational state, write allowed below threshold`;
-      console.log(`[DecisionPolicy] ${reason}`);
-      return { allowed: true, reason, policyBypassed: true };
-    }
-
     const reason = `Memory write BLOCKED for engine="${engineName}" memoryType="${memoryType}" direction="${direction}": confidence ${confidenceScore.toFixed(3)} below minimum ${DECISION_CONFIDENCE_THRESHOLDS.MEMORY_WRITE_MIN}`;
     console.log(`[DecisionPolicy] MEMORY_WRITE_BLOCKED | ${reason}`);
     return { allowed: false, reason, policyBypassed: false };
   }
-
   return { allowed: true, reason: "Confidence meets memory write threshold", policyBypassed: false };
 }
 

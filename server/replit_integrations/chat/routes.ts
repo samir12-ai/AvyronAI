@@ -5,6 +5,7 @@ import { loadSystemContext, buildSystemPrompt } from "../../orchestrator/agent-c
 import { resolveAccountId, AuthRequest } from "../../auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "../../auth-helpers";
 import { computeAdaptiveRhythm } from "../../adaptive-rhythm/engine";
+import { upsertOperationalState, getOperationalState } from "../../memory-system/operational-state-store";
 import { getLatestGoalDecomposition, getLatestSimulation } from "../../goal-math";
 import { getOpenAI, PRIMARY_CHAT_MODEL } from "../../ai-client";
 import { getStoredIntegrityReport } from "../../system-integrity/routes";
@@ -298,44 +299,28 @@ async function handleToolCall(
           updatedAt: new Date().toISOString(),
         });
 
-        const existing = await db
-          .select({ id: strategyMemory.id })
-          .from(strategyMemory)
-          .where(
-            and(
-              eq(strategyMemory.accountId, accountId),
-              eq(strategyMemory.campaignId, campaignId),
-              eq(strategyMemory.memoryType, "content_rhythm"),
-            ),
-          )
-          .limit(1);
-
-        const rhythmCheck = policyEnforcedMemoryCheck(rhythm.confidenceScore, "neutral", "agent-rhythm", "content_rhythm");
-        if (rhythmCheck.allowed) {
-          if (existing[0]) {
-            await db
-              .update(strategyMemory)
-              .set({
-                label: rhythmLabel,
-                details: rhythmDetails,
-                score: rhythm.confidenceScore,
-                confidenceScore: rhythm.confidenceScore,
-                updatedAt: new Date(),
-              })
-              .where(eq(strategyMemory.id, existing[0].id));
-          } else {
-            await db.insert(strategyMemory).values({
-              accountId,
-              campaignId,
-              memoryType: "content_rhythm",
-              label: rhythmLabel,
-              details: rhythmDetails,
-              score: rhythm.confidenceScore,
-              confidenceScore: rhythm.confidenceScore,
-              direction: "neutral",
-            });
-          }
-        }
+        // Task #64 / Phase 1 — operational singleton upsert via dedicated store.
+        await upsertOperationalState({
+          accountId,
+          campaignId,
+          stateType: "content_rhythm",
+          engineName: "agent-rhythm",
+          label: rhythmLabel,
+          payload: {
+            reelsPerWeek: rhythm.reelsPerWeek,
+            carouselsPerWeek: rhythm.carouselsPerWeek,
+            storiesPerDay: rhythm.storiesPerDay,
+            postsPerWeek: rhythm.postsPerWeek,
+            performanceBasis: rhythm.performanceBasis,
+            confidenceScore: rhythm.confidenceScore,
+            reasoning: rhythm.reasoning,
+            deltaFromPrevious: rhythm.deltaFromPrevious,
+            updatedByAgent: true,
+            updatedAt: new Date().toISOString(),
+          },
+          rationale: rhythm.reasoning,
+          confidenceScore: rhythm.confidenceScore,
+        });
 
         return {
           success: true,
@@ -363,18 +348,12 @@ async function handleToolCall(
           ? `Last run: ${lastRun.status} (${lastRun.completedAt ? new Date(lastRun.completedAt).toLocaleDateString() : "in progress"})`
           : "No orchestrator run found";
 
-        const rhythmMemory = await db
-          .select()
-          .from(strategyMemory)
-          .where(
-            and(
-              eq(strategyMemory.accountId, accountId),
-              eq(strategyMemory.campaignId, campaignId),
-              eq(strategyMemory.memoryType, "content_rhythm"),
-            ),
-          )
-          .orderBy(desc(strategyMemory.updatedAt))
-          .limit(1);
+        // Task #64 / Phase 1 — read from operational store; keep variable
+        // shape so downstream summary lines need no rewrite.
+        const rhythmState = await getOperationalState(accountId, campaignId, "content_rhythm");
+        const rhythmMemory = rhythmState
+          ? [{ label: rhythmState.label, details: JSON.stringify(rhythmState.payload), updatedAt: rhythmState.updatedAt }]
+          : [];
 
         const memoryCount = await db
           .select()
@@ -619,28 +598,28 @@ async function writeAgentActionMemory(
   result: ToolCallResult,
 ): Promise<void> {
   try {
-    const direction = result.success ? "reinforce" as const : "avoid" as const;
+    // Task #64 / Phase 1 — agent_action is operational/audit telemetry,
+    // not strategic memory. Persist via the engine_operational_state store
+    // (agent_rhythm bucket) so it lives outside strategy_memory entirely.
+    // Phase 2 may give agent actions their own dedicated audit table.
+    const direction = result.success ? "reinforce" : "avoid";
     const confidenceScore = result.success ? 0.85 : 0.15;
-    const check = policyEnforcedMemoryCheck(confidenceScore, direction, "agent", "agent_action");
-    if (!check.allowed) {
-      console.log(`[AgentTool] MEMORY_WRITE_BLOCKED | tool="${toolName}" success=${result.success} confidence=${confidenceScore}`);
-      return;
-    }
-    const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    await db.insert(strategyMemory).values({
-      id: memId,
+    await upsertOperationalState({
       accountId,
       campaignId,
-      memoryType: "agent_action",
+      stateType: "agent_rhythm",
       engineName: "agent",
       label: toolName,
-      details: `${justification} | Result: ${result.summary}`,
-      performance: result.success ? "success" : "failure",
-      score: confidenceScore,
-      isWinner: result.success,
+      payload: {
+        toolName,
+        justification,
+        resultSummary: result.summary,
+        success: result.success,
+        direction,
+        timestamp: new Date().toISOString(),
+      },
+      rationale: `${justification} | Result: ${result.summary}`,
       confidenceScore,
-      direction,
-      lastValidatedAt: new Date(),
     });
   } catch (err: any) {
     console.warn(`[AgentTool] Memory write failed (non-blocking):`, err.message);

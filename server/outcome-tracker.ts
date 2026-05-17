@@ -353,19 +353,24 @@ export async function evaluatePendingOutcomes(accountId: string) {
           : baseConfidence;
         const confidenceScore = Math.max(0, Math.min(1, weightedConfidence));
 
-        const validation = validateDecisionForMemoryWrite(confidenceScore, direction, "outcome-tracker");
-        if (!validation.allowed) {
+        // Task #64 / Phase 1 — gated update via memoryStore (single writer).
+        const baseScore = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
+        const weightedScore = measurementScope === "action" ? baseScore * attributionWeight : baseScore;
+        const { updateById } = await import("./memory-system/store");
+        const result = await updateById(p.decisionId, {
+          confidenceScore,
+          direction,
+          score: weightedScore,
+          engineName: "outcome-tracker",
+          memoryType: p.decisionType || "decision",
+          sourceOutcomeId: p.id,
+        });
+        if (!result.allowed) {
           console.log(
             `[OutcomeTracker] MEMORY_UPDATE_BLOCKED | decision=${p.decisionId} outcome=${outcome} ` +
-            `confidence=${confidenceScore.toFixed(3)} weight=${attributionWeight.toFixed(3)} reason="${validation.reason}"`,
+            `confidence=${confidenceScore.toFixed(3)} weight=${attributionWeight.toFixed(3)} reason="${result.reason}"`,
           );
         } else {
-          const baseScore = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
-          const weightedScore = measurementScope === "action" ? baseScore * attributionWeight : baseScore;
-          const isWinner = outcome === "success" && attributionWeight >= 0.5;
-          await db.update(strategyMemory)
-            .set({ score: weightedScore, isWinner, confidenceScore, direction, lastValidatedAt: new Date(), updatedAt: new Date(), sourceOutcomeId: p.id })
-            .where(eq(strategyMemory.id, p.decisionId));
           console.log(
             `[OutcomeTracker] MEMORY_UPDATED | decision=${p.decisionId} outcomeId=${p.id} direction=${direction} ` +
             `confidence=${confidenceScore.toFixed(3)} score=${weightedScore.toFixed(3)} sourceOutcomeId=${p.id}`,

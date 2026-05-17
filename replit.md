@@ -209,6 +209,24 @@ ESLint suppression count across Seals #13–#19: 0 added. Allowlist size remains
 > Seal #18 / Track #5 — [18 deterministic behavioral lifecycle scenarios + harness + 100-iteration flake checker](.local/docs/seals/seal-18-track5-lifecycle-tests.md).
 > Seal #19 / Track #6 — [8-audit verdict matrix + evidence per audit + allowlist drift note](.local/docs/seals/seal-19-track6-audits.md).
 
+### Canonical Fact Ownership — Phase 1 (Task #64)
+
+**Founding principle:** every persisted fact has exactly one authoritative writer. Drift between writers, demoted columns, and bypass paths through legacy gates were producing contradictory state across the strategy layer. Phase 1 establishes the single-writer doctrine for `strategy_memory` + two new operational tables, merges the dual memory-write gates into one, and wires a CV-06 provenance metric so any future drift is observable.
+
+| # | Rule | Enforcement |
+|---|---|---|
+| **CFO-1** | **Single writer per fact.** `strategy_memory` is written ONLY through `memoryStore` (`server/memory-system/store.ts`) via `upsertByFingerprint`, `updateById`, or `applyDecayUpdate`. | Custom ESLint rule `canonical-fact/no-direct-strategy-memory-write` (`.local/eslint-rules/no-direct-strategy-memory-write.js`) bans `db.insert(strategyMemory)` / `db.update(strategyMemory)` outside the store. Allowlist: `server/memory-system/store.ts`, `server/tests/**`, `server/migrations/**`. Steady-state violation count: 0. |
+| **CFO-2** | **Operational state is not strategy.** `content_rhythm` and `exploration_budget` live in `engine_operational_state` (singleton per `accountId,campaignId,stateType`) — never `strategy_memory`. Mutation runs live in `mutation_log`. Agent tool actions live in the operational store under `stateType=agent_rhythm`. | Dedicated stores: `operational-state-store.ts`, `mutation-log-store.ts`. All 6 legacy writers (adaptive-rhythm, exploration-budget, chat/routes ×2, autonomous-worker, memory-mutation/engine) refactored. Readers in `manager.ts`, `system-control/full-report.ts`, `autonomous-worker.ts` updated to use the operational store. |
+| **CFO-3** | **One gate, not two.** The old `validateDecisionForMemoryWrite` shim now delegates to `policyEnforcedMemoryCheck`. The `OPERATIONAL_MEMORY_TYPES` bypass that let operational writes skip the threshold is REMOVED — operational types are now banned from `strategy_memory` outright by CFO-2 and have no policy gate to skip. | `server/decision-policy/index.ts`. Shim retained for backward-compat call sites; new code MUST call `policyEnforcedMemoryCheck` directly. |
+| **CFO-4** | **Every write is observable.** Every attempt through `memoryStore` records to `cv06_memory_writes_total{outcome,memoryType,engine}` (Counter). | `server/memory-system/cv06-metrics.ts` exposed via `renderCv06Metrics()` appended to `/metrics`. Outcomes: `inserted \| updated \| blocked \| decay`. Steady-state observation: non-zero `outcome="blocked"` is healthy (gate working); any non-memoryStore engine label means the ESLint rule has been suppressed. |
+| **CFO-5** | **Demoted columns are display-only.** `strategy_memory.is_winner` and `confidence_score_normalized` retained for backfill compat; MAY NOT be read by orchestration, gate, or scoring logic. Replacement: `confidence_score` (canonical) + `direction ∈ {reinforce|avoid|neutral}`. | Migration `024_canonical_fact_ownership.sql` (REQUIRED_SCHEMA_VERSION=24) creates `mutation_log`, `engine_operational_state`, and adds the unique index on `(account_id, campaign_id, state_type)` enforcing the operational singleton. |
+
+**Documented drift (Phase 1 scope deferral):**
+- **Step 4 (snapshot ID column drops)** deferred — 6 downstream consumers across plan synthesis, system-control, recovery, agent-stream make this risky to land alongside the writer consolidation. Tracked as Phase 2 follow-up.
+- **Step 3 AEL ephemeral doctrine** — provenance guard note only; no code changes this phase. Tracked as Phase 2 follow-up.
+
+Reference implementation: `upsertByFingerprint` in `server/memory-system/store.ts`. Stores: `operational-state-store.ts`, `mutation-log-store.ts`. Migration: `server/migrations/sql/024_canonical_fact_ownership.sql`.
+
 ### Beta Safety Doctrine (Task #50)
 
 **Founding principle:** beta safety is a system property — five non-negotiable values codify how every new piece of code, copy, and operator surface MUST behave during the controlled beta and beyond.

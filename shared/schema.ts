@@ -227,6 +227,49 @@ export const strategyMemory = pgTable("strategy_memory", {
   sourceOutcomeId: varchar("source_outcome_id"),
 });
 
+// Task #64 / Phase 1 — Canonical Fact Ownership.
+// mutation_log was previously persisted as a strategy_memory row with
+// memoryType='mutation_log'. That collapsed two distinct concerns onto one
+// table: strategic facts (winners/avoids/insights — readable as AI context)
+// and operational audit logs (mutation runs — strictly internal). Splitting
+// removes the need for every fact reader to filter out the audit row.
+export const mutationLog = pgTable("mutation_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  label: text("label").notNull(),
+  confirmedCount: integer("confirmed_count").default(0),
+  challengedCount: integer("challenged_count").default(0),
+  flippedCount: integer("flipped_count").default(0),
+  decayedCount: integer("decayed_count").default(0),
+  totalProcessed: integer("total_processed").default(0),
+  challengedIds: jsonb("challenged_ids").$type<string[]>().default(sql`'[]'::jsonb`),
+  flipped: jsonb("flipped").$type<Array<{ label: string; from: string; to: string }>>().default(sql`'[]'::jsonb`),
+  runAt: timestamp("run_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Task #64 / Phase 1 — Canonical Fact Ownership.
+// content_rhythm, exploration_budget, and agent rhythm rows are operational
+// state, not strategic memory. Co-locating them on strategy_memory required
+// the OPERATIONAL_MEMORY_TYPES bypass in decision-policy and a NON_STRATEGIC
+// filter on every read path. Demoting them to a dedicated table removes both.
+// Singleton-per-(account, campaign, stateType): writers upsert.
+export const engineOperationalState = pgTable("engine_operational_state", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  // 'content_rhythm' | 'exploration_budget' | 'agent_rhythm'
+  stateType: text("state_type").notNull(),
+  engineName: text("engine_name").notNull(),
+  label: text("label").notNull(),
+  payload: jsonb("payload").default(sql`'{}'::jsonb`),
+  rationale: text("rationale"),
+  confidenceScore: doublePrecision("confidence_score").default(0.5),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const contentPerformanceSnapshots = pgTable("content_performance_snapshots", {
   id: varchar("id")
     .primaryKey()

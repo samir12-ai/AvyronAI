@@ -1062,7 +1062,9 @@ async function computeExecutionCompliance(
 ): Promise<ExecutionCompliance> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const [recentPublished, rhythmMem] = await Promise.all([
+  // Task #64 / Phase 1 — content_rhythm moved out of strategy_memory.
+  const { getOperationalState } = await import("./memory-system/operational-state-store");
+  const [recentPublished, rhythmState] = await Promise.all([
     db
       .select({ id: publishedPosts.id })
       .from(publishedPosts)
@@ -1070,33 +1072,23 @@ async function computeExecutionCompliance(
         sql`${publishedPosts.accountId} = ${accountId} AND ${publishedPosts.status} = 'published' AND ${publishedPosts.publishedAt} >= ${sevenDaysAgo}`,
       )
       .limit(50),
-    db
-      .select({ details: strategyMemory.details })
-      .from(strategyMemory)
-      .where(
-        and(
-          eq(strategyMemory.accountId, accountId),
-          eq(strategyMemory.campaignId, campaignId),
-          eq(strategyMemory.memoryType, "content_rhythm"),
-        ),
-      )
-      .orderBy(desc(strategyMemory.updatedAt))
-      .limit(1),
+    getOperationalState(accountId, campaignId, "content_rhythm"),
   ]);
 
   const publishedCount7d = recentPublished.length;
 
   let cadenceFloor = 3;
-  if (rhythmMem[0]?.details) {
+  if (rhythmState?.payload && typeof rhythmState.payload === "object" && rhythmState.payload !== null) {
     try {
-      const rhythm =
-        typeof rhythmMem[0].details === "string"
-          ? JSON.parse(rhythmMem[0].details)
-          : rhythmMem[0].details;
+      const rhythm = rhythmState.payload as Record<string, unknown>;
+      const num = (k: string): number => {
+        const v = rhythm[k];
+        return typeof v === "number" && Number.isFinite(v) ? v : 0;
+      };
       const weeklyTarget =
-        (rhythm.reelsPerWeek || 0) +
-        (rhythm.carouselsPerWeek || 0) +
-        (rhythm.postsPerWeek || 0);
+        (num("reelsPerWeek") || num("reels")) +
+        (num("carouselsPerWeek") || num("carousels")) +
+        (num("postsPerWeek") || num("posts"));
       if (weeklyTarget > 0) {
         cadenceFloor = Math.max(1, Math.floor(weeklyTarget * 0.4));
       }

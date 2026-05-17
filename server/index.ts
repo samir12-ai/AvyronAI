@@ -1239,7 +1239,10 @@ function setupErrorHandler(app: express.Application) {
     res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
     // Seal #13 / Track #1 — continuity metrics are concatenated to the
     // primary registry's exposition. Same Prometheus 0.0.4 text format.
-    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics());
+    // Task #64 / Phase 1 — CV-06 (Memory Provenance Verification) family
+    // appended to the same exposition.
+    const { renderCv06Metrics } = require("./memory-system/cv06-metrics") as typeof import("./memory-system/cv06-metrics");
+    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics() + "\n" + renderCv06Metrics());
   });
 
   const PUBLIC_PATH_PREFIXES = [

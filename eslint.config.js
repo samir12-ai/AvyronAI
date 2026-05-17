@@ -1,6 +1,7 @@
 const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
 const noSemanticFallback = require('./.local/eslint-rules/no-semantic-fallback.js');
+const noDirectStrategyMemoryWrite = require('./.local/eslint-rules/no-direct-strategy-memory-write.js');
 
 module.exports = defineConfig([
   expoConfig,
@@ -65,6 +66,25 @@ module.exports = defineConfig([
     },
     rules: {
       "semantic/no-semantic-fallback": "error",
+    },
+  },
+  // Task #64 / Phase 1 — Canonical Fact Ownership.
+  // Forbids direct db.insert/db.update(strategyMemory) outside the
+  // authoritative writer module. memoryStore is the single writer.
+  {
+    files: ["server/**/*.ts"],
+    ignores: [
+      // The store module is the authoritative writer.
+      "server/memory-system/store.ts",
+      // Tests may construct fixture rows directly.
+      "server/tests/**/*.ts",
+      "server/migrations/**/*.ts",
+    ],
+    plugins: {
+      "canonical-fact": { rules: { "no-direct-strategy-memory-write": noDirectStrategyMemoryWrite } },
+    },
+    rules: {
+      "canonical-fact/no-direct-strategy-memory-write": "error",
     },
   },
 ]);
