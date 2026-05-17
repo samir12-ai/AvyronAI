@@ -3555,6 +3555,54 @@ async function writeStrategyMemoryEntries(
 export async function runOrchestrator(config: OrchestratorConfig): Promise<OrchestratorRunResult> {
   const startTime = Date.now();
 
+  // Task #89 / Phase 4-A — replay recorder hook. ALL recorder writes from
+  // within this function MUST go through this `__recorder` variable —
+  // ESLint rule `orchestrator-replay/no-bare-llm-call-in-replay` enforces
+  // it (any direct `recorder.record*(...)` call against another receiver
+  // is a build break). When ORCH_REPLAY_RECORD is unset (default), this
+  // resolves to a no-op recorder and every boundary call is a function-
+  // call no-op. Sampled-in invocations get a LiveRecorder that captures
+  // PII-redacted snapshots and persists a content-addressed cassette at
+  // run end via the `finalize()` call in the function's `finally` block.
+  // All 8 declared boundaries are wired below (input, ctx-resolved,
+  // per-engine-output, synthesis-input, plan-persist, system-control-
+  // verdict, budget-ledger, in-flight-lifecycle, final-result).
+  const { withReplayRecorder, enterRecorderScope } = await import("./replay/recorder");
+  const __recorder = withReplayRecorder(config.preassignedJobId ?? "pending");
+  // Task #89 / P4-A — bind the recorder to the current async context so
+  // every awaited callee (engine adapters → ai-client.aiChat/aiGemini)
+  // can resolve it via `getCurrentRecorder()` and feed
+  // recordLlmCall(). No-op when the recorder is the gated-off NoOp,
+  // so production pays nothing.
+  // ALS context binding notes: `enterRecorderScope` calls
+  // `AsyncLocalStorage.enterWith(recorder)` which binds for the REMAINDER
+  // of this async chain. Node's ALS semantics guarantee the binding is
+  // local to this invocation's async context — when the caller awaits
+  // `runOrchestrator(...)` and resumes, the caller's own context is
+  // restored automatically (no cross-invocation bleed). The HOF form
+  // `withRecorderScope(rec, () => ...)` would require wrapping the
+  // entire 1200-line orchestrator body in a callback; we opted for
+  // `enterWith` to keep the imperative body readable. NoOpRecorder
+  // bypasses enterWith entirely, so the production hot path (gate
+  // OFF) never pushes an ALS frame.
+  enterRecorderScope(__recorder);
+  let __recorderFinalResultCaptured = false;
+  // Task #89 / P4-A — gate_retry path-shape latch. Set true the first
+  // time the orchestrator decides to retry an engine after a gate failure
+  // (see the planRetry branch below). Read by the final-result selector
+  // so a COMPLETED run that hit a mid-pipeline retry is classified
+  // `gate_retry` instead of `clean`.
+  let __gateRetryFired = false;
+  __recorder.recordInput({
+    campaignId: config.campaignId,
+    accountId: config.accountId,
+    forceRefresh: !!config.forceRefresh,
+    resumeFromEngine: config.resumeFromEngine,
+    pausedJobId: config.pausedJobId,
+    preassignedJobId: config.preassignedJobId,
+    scopedEngines: config.scopedEngines,
+  });
+
   let jobId: string;
   let ctx: EngineContext = { inputHashes: {} };
   let previousSectionStatuses: any[] = [];
@@ -3647,6 +3695,19 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // inserts NULL into strategic_plans.job_id even though engine snapshots
   // get the right jobId via the local variable — leaving plans non-run-bound.
   config.jobId = jobId;
+
+  // Task #89 / P4-A boundary #2 (ctx-resolved) + #8 (in-flight register).
+  __recorder.recordContextResolved({
+    sscPresent: !!ctx.ssc,
+    contextKeys: Object.keys(ctx).filter((k) => k !== "inputHashes"),
+    inputHashes: ctx.inputHashes ?? {},
+  });
+  __recorder.recordInFlightEvent({
+    jobId,
+    event: "register",
+    at: Date.now() - startTime,
+    status: "RUNNING",
+  });
 
   // Task #67 / T-S5-C4: single owner of in-flight cleanup. Previously this
   // was a manual boolean (`inFlightCleanupHandled`) coordinated across three
@@ -3849,6 +3910,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         .where(eq(orchestratorJobs.id, jobId));
       await inFlightCleanup.handleTerminal();
       const durationMs = Date.now() - startTime;
+      // Task #89 / P4-A boundary #9 — final-result (early BLOCKED return).
+      __recorder.setPathShape("blocked_by_integrity");
+      __recorder.recordFinalResult({
+        jobId,
+        status: "BLOCKED",
+        completedEngines,
+        failedEngine,
+        blockReason,
+        durationMs,
+        ledgerEntryCount: budgetDecisionLedger.length,
+      });
+      __recorderFinalResultCaptured = true;
       return {
         jobId,
         status: "BLOCKED",
@@ -3955,6 +4028,12 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         }
 
         if (retryDecision.retry) {
+          // Task #89 / P4-A — flag gate_retry occurred. The final-result
+          // shape selector honors this flag for COMPLETED runs (a clean
+          // run that needed a mid-pipeline retry is still a `gate_retry`
+          // shape from the corpus-coverage standpoint). Terminal failure
+          // shapes (blocked_by_integrity, error) still take precedence.
+          __gateRetryFired = true;
           console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason} | policy=${retryDecision.rationale}`);
           const retryResult = await Promise.race([
             executeEngine(engineDef.id, ctx, config, results, jobId),
@@ -4005,6 +4084,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     }
 
     results.set(engineDef.id, stepResult);
+
+    // Task #89 / P4-A boundary #3 — per-engine-output.
+    __recorder.recordEngineOutput({
+      order: i,
+      engineId: engineDef.id,
+      engineName: engineDef.name,
+      tier: engineDef.tier,
+      status: stepResult.status,
+      durationMs: stepResult.durationMs,
+      output: stepResult.output,
+      blockReason: stepResult.blockReason,
+    });
 
     // Phase C2 (May 2026) — shadow contract audit. Logs `[ContractAudit]`
     // violations behind the ENFORCE_ENGINE_CONTRACTS env flag. Today the
@@ -4095,6 +4186,18 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     // run resumes-and-finishes (or the reaper expires it). Mark handled so
     // the finally block does NOT deregister.
     inFlightCleanup.preserveRow();
+    // Task #89 / P4-A boundary #9 — final-result (NEEDS_INPUT return).
+    __recorder.setPathShape("needs_input");
+    __recorder.recordFinalResult({
+      jobId,
+      status: "NEEDS_INPUT",
+      completedEngines,
+      failedEngine,
+      blockReason: needsInputPayload?.missingFields?.join(",") ?? null,
+      durationMs,
+      ledgerEntryCount: budgetDecisionLedger.length,
+    });
+    __recorderFinalResultCaptured = true;
     return { jobId, status: "NEEDS_INPUT", completedEngines, durationMs, results, needsInput: needsInputPayload };
   }
 
@@ -4187,6 +4290,9 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   let controlVerdict: SystemControlVerdict | null = null;
   try {
     const sglSummaryData = ctx.sglState ? getGovernanceSummary(ctx.sglState) : null;
+    // Task #89 / P4-A boundary #6 — system-control-verdict (capture
+    // happens AFTER assignment below; this comment marks the boundary
+    // site so the recorder hook is visually colocated).
     controlVerdict = evaluateSystemControl({
       results,
       integrityReport: ctx.integrityReport || null,
@@ -4399,6 +4505,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       }
       if (ledgerEntry) {
         budgetDecisionLedger.push(ledgerEntry);
+        // Task #89 / P4-A boundary #7 — budget-ledger.
+        __recorder.recordBudgetLedgerEntry({
+          engineId: "budget_governor",
+          decisionAction: ledgerEntry.finalAction,
+          downgradeReason: ledgerEntry.downgradeReasons.join(",") || null,
+          appliedAt: Date.now() - startTime,
+        });
         // Task #70 / Phase 7 — the ledger entry is the AUTHORITATIVE record
         // of the system-control downgrade. We stamp it onto the budget
         // output so downstream consumers (plan-synthesis) resolve the
@@ -4428,8 +4541,29 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
   if (overallStatus !== "BLOCKED") {
     try {
+      // Task #89 / P4-A boundary #4 — synthesis-input.
+      __recorder.recordSynthesisInput({
+        engineCount: results.size,
+        controlVerdictPresent: !!controlVerdict,
+        ledgerEntryCount: budgetDecisionLedger.length,
+        fingerprint: `${results.size}|${budgetDecisionLedger.length}|${controlVerdict?.integrityVerdict ?? "none"}`,
+      });
       const planResult = await synthesizePlan(config, ctx, results, memoryContextBlock || undefined, loadedMemoryBlock);
       planId = planResult.planId;
+      // Task #89 / P4-A boundary #5 — plan-persist.
+      // Task #89 / P4-A — typed projection of the planSource + degraded
+      // fields. SynthesizedPlan exposes both at the top level; the prior
+      // `(planResult.plan as any)?._provenance?.planSource` reach was
+      // looking at a back-compat mirror and is no longer needed.
+      const __replayPlanProjection = planResult.plan as {
+        planSource?: string;
+        degraded?: boolean;
+      } | undefined;
+      __recorder.recordPlanPersist({
+        planId: planResult.planId,
+        source: __replayPlanProjection?.planSource ?? "primary",
+        degraded: __replayPlanProjection?.degraded === true,
+      });
       if (planResult.synthesisHaltOverride) {
         synthesisHaltOverrideEntry = planResult.synthesisHaltOverride;
         console.log(`[Orchestrator] SYNTHESIS_HALT_OVERRIDE | event=${planResult.synthesisHaltOverride.eventId} | observed=${planResult.synthesisHaltOverride.observedAction} → enforced=halt | reason=${planResult.synthesisHaltOverride.reason}`);
@@ -4538,6 +4672,25 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // #67 / T-S5-C4: routed through the single cleanup tracker.
   await inFlightCleanup.handleTerminal();
 
+  // Task #89 / P4-A boundary #8 — in-flight settle. Records the terminal
+  // status for the cassette's in-flight timeline.
+  __recorder.recordInFlightEvent({
+    jobId,
+    event: "settle",
+    at: Date.now() - startTime,
+    status: overallStatus,
+  });
+  // Boundary #6 capture point — system-control-verdict is now stable.
+  if (controlVerdict) {
+    // SystemControlVerdict (server/system-control/types.ts) typed surface —
+    // no `as any` needed. executionMode/blockReasons are required fields.
+    __recorder.recordSystemControlVerdict({
+      integrityVerdict: controlVerdict.integrityVerdict,
+      executionMode: controlVerdict.executionMode,
+      blockReasons: controlVerdict.blockReasons.map((r) => String(r)),
+    });
+  }
+
   if (ctx.celResults && ctx.celResults.length > 0) {
     const celReport = buildCELReport(config.campaignId, 2, ctx.celResults);
     storeCELReport(config.campaignId, config.accountId, celReport);
@@ -4603,6 +4756,48 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         }
       : undefined;
 
+  // Task #89 / P4-A boundary #9 — final-result (main success return).
+  // Precedence (highest first):
+  //   error → blocked_by_integrity → budget_downgrade → gate_retry
+  //     → scoped_rerun → clean
+  // budget_downgrade outranks gate_retry because a downgrade is the
+  // more consequential corpus shape; gate_retry outranks scoped_rerun
+  // because a retry is rarer than a scoped re-run.
+  __recorder.setPathShape(
+    overallStatus === "ERROR"
+      ? "error"
+      : overallStatus === "BLOCKED" || overallStatus === "BLOCKED_BY_INTEGRITY"
+        ? "blocked_by_integrity"
+        : overallStatus === "PARTIAL"
+          ? "budget_downgrade"
+          : overallStatus === "COMPLETED"
+            ? (budgetDecisionLedger.length > 0
+                ? "budget_downgrade"
+                : __gateRetryFired
+                  ? "gate_retry"
+                  : config.scopedEngines
+                    ? "scoped_rerun"
+                    : "clean")
+            : "error",
+  );
+  __recorder.recordFinalResult({
+    jobId,
+    status: overallStatus,
+    completedEngines,
+    failedEngine,
+    blockReason,
+    planId,
+    durationMs,
+    controlVerdict: controlVerdict
+      ? {
+          integrityVerdict: controlVerdict.integrityVerdict,
+          executionMode: controlVerdict.executionMode,
+          blockReasons: controlVerdict.blockReasons.map((r) => String(r)),
+        }
+      : undefined,
+    ledgerEntryCount: budgetDecisionLedger.length,
+  });
+  __recorderFinalResultCaptured = true;
   return {
     jobId,
     status: overallStatus,
@@ -4628,6 +4823,28 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     // when a terminal-state branch (handleTerminal) or NEEDS_INPUT branch
     // (preserveRow) already ran.
     await inFlightCleanup.handleSafetyNet();
+
+    // Task #89 / P4-A — single finalize() call site. Runs on every exit
+    // (success, early return, throw). When the recorder is gated off
+    // (production default) this is a no-op. When the function aborted
+    // before recordFinalResult was called, the recorder's incomplete-
+    // body guard skips persistence and logs FINALIZE_SKIPPED_INCOMPLETE
+    // instead of writing a half-cassette.
+    try {
+      if (!__recorderFinalResultCaptured) {
+        __recorder.recordFinalResult({
+          jobId: jobId!,
+          status: "ERROR",
+          completedEngines: [],
+          blockReason: "orchestrator_threw_before_final_result",
+          durationMs: Date.now() - startTime,
+          ledgerEntryCount: 0,
+        });
+      }
+      await __recorder.finalize();
+    } catch (replayErr) {
+      console.error("[Orchestrator] REPLAY_FINALIZE_FAILED |", replayErr instanceof Error ? replayErr.message : String(replayErr));
+    }
   }
 }
 

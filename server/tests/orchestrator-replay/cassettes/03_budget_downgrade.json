@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic",
+  "pathShape": "budget_downgrade",
+  "capturedAt": "2026-05-17T00:00:00.000Z",
+  "input": { "campaignId": "syn-camp-03", "accountId": "syn-acct-03", "forceRefresh": false },
+  "contextResolved": {
+    "sscPresent": true,
+    "contextKeys": ["mi", "audience", "budget-governor"],
+    "inputHashes": { "mi": "h-mi-03" }
+  },
+  "engineOutputs": [
+    { "order": 0, "engineId": "mi", "engineName": "MI", "tier": "T0", "status": "COMPLETED", "durationMs": 200, "output": {} },
+    { "order": 1, "engineId": "budget-governor", "engineName": "Budget Governor", "tier": "T2", "status": "COMPLETED", "durationMs": 180, "output": { "decision": { "action": "hold" } } }
+  ],
+  "synthesisInput": { "engineCount": 2, "controlVerdictPresent": true, "ledgerEntryCount": 1, "fingerprint": "fp-03" },
+  "planPersist": { "planId": "plan-03", "source": "primary", "degraded": false },
+  "systemControlVerdict": { "integrityVerdict": "PARTIAL", "executionMode": "DOWNGRADED", "blockReasons": [] },
+  "budgetLedger": [
+    { "engineId": "budget-governor", "decisionAction": "hold", "downgradeReason": "low_statistical_validity", "appliedAt": 1 }
+  ],
+  "inFlightEvents": [],
+  "llmCalls": [],
+  "finalResult": {
+    "jobId": "syn-job-03",
+    "status": "PARTIAL",
+    "completedEngines": ["mi", "budget-governor"],
+    "planId": "plan-03",
+    "durationMs": 600,
+    "controlVerdict": { "integrityVerdict": "PARTIAL", "executionMode": "DOWNGRADED", "blockReasons": [] },
+    "ledgerEntryCount": 1
+  }
+}

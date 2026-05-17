@@ -3,6 +3,7 @@ const expoConfig = require('eslint-config-expo/flat');
 const noSemanticFallback = require('./.local/eslint-rules/no-semantic-fallback.js');
 const noDirectStrategyMemoryWrite = require('./.local/eslint-rules/no-direct-strategy-memory-write.js');
 const noValidateDecisionMemoryWriteImport = require('./.local/eslint-rules/no-validate-decision-memory-write-import.js');
+const noBareLlmCallInReplay = require('./.local/eslint-rules/no-bare-llm-call-in-replay.js');
 
 module.exports = defineConfig([
   expoConfig,
@@ -106,6 +107,21 @@ module.exports = defineConfig([
     },
     rules: {
       "decision-policy/no-validate-decision-memory-write-import": "error",
+    },
+  },
+  // Task #89 / Phase 4-A — Replay / Shadow Harness.
+  // (A) Inside server/orchestrator/replay/**: forbid direct LLM imports —
+  //     replay code MUST route through StrictLlmMock.
+  // (B) Inside server/orchestrator/** (excluding replay/): forbid bare
+  //     recorder.record*() calls — every boundary MUST go through the
+  //     variable returned by withReplayRecorder(...) (named `__recorder`).
+  {
+    files: ["server/orchestrator/**/*.ts"],
+    plugins: {
+      "orchestrator-replay": { rules: { "no-bare-llm-call-in-replay": noBareLlmCallInReplay } },
+    },
+    rules: {
+      "orchestrator-replay/no-bare-llm-call-in-replay": "error",
     },
   },
 ]);

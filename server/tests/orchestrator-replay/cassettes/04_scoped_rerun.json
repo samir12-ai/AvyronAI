@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic",
+  "pathShape": "scoped_rerun",
+  "capturedAt": "2026-05-17T00:00:00.000Z",
+  "input": {
+    "campaignId": "syn-camp-04",
+    "accountId": "syn-acct-04",
+    "forceRefresh": false,
+    "scopedEngines": ["positioning"]
+  },
+  "contextResolved": {
+    "sscPresent": true,
+    "contextKeys": ["mi", "audience", "positioning"],
+    "inputHashes": { "mi": "h-mi-04", "audience": "h-aud-04" }
+  },
+  "engineOutputs": [
+    { "order": 0, "engineId": "positioning", "engineName": "Positioning", "tier": "T1", "status": "COMPLETED", "durationMs": 300, "output": { "claims": [] } }
+  ],
+  "synthesisInput": { "engineCount": 1, "controlVerdictPresent": true, "ledgerEntryCount": 0, "fingerprint": "fp-04" },
+  "planPersist": { "planId": "plan-04", "source": "primary", "degraded": false },
+  "systemControlVerdict": { "integrityVerdict": "PASS", "executionMode": "FULL", "blockReasons": [] },
+  "budgetLedger": [],
+  "inFlightEvents": [],
+  "llmCalls": [],
+  "finalResult": {
+    "jobId": "syn-job-04",
+    "status": "COMPLETED",
+    "completedEngines": ["positioning"],
+    "planId": "plan-04",
+    "durationMs": 320,
+    "ledgerEntryCount": 0
+  }
+}

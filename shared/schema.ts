@@ -3174,3 +3174,26 @@ export type AuthLockout = typeof authLockouts.$inferSelect;
 export type AuthSession = typeof authSessions.$inferSelect;
 
 
+
+// =============================================
+// Task #89 / Phase 4-A — Orchestrator Replay / Shadow Harness.
+// Migration 027 creates this table. Body holds the full ReplayCassetteBody;
+// cassette_hash is the SHA-256 content-address (UNIQUE). Source is one of
+// 'production' | 'synthetic'. Schema version is CHECK-constrained > 0 so
+// the player can reject unknown versions before deserialising.
+// =============================================
+export const orchestratorReplayCassettes = pgTable("orchestrator_replay_cassettes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  cassetteHash: text("cassette_hash").notNull().unique(),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  source: text("source").notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  redactionApplied: boolean("redaction_applied").notNull().default(true),
+  pathShape: text("path_shape"),
+  campaignId: varchar("campaign_id"),
+  accountId: varchar("account_id"),
+  body: jsonb("body").notNull(),
+});
+
+export type OrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferSelect;
+export type InsertOrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferInsert;

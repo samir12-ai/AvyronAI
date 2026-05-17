@@ -18,6 +18,11 @@
     "lint:fix": "npx expo lint --fix",
     "lifecycle:test": "vitest run server/tests/lifecycle/",
     "lifecycle:flake": "bash scripts/lifecycle-flake-check.sh",
+    "replay:run": "tsx scripts/replay-cli.ts run",
+    "replay:list": "tsx scripts/replay-cli.ts list",
+    "replay:capture-synthetic": "tsx scripts/replay-cli.ts capture-synthetic",
+    "replay:test": "vitest run server/tests/orchestrator-replay/",
+    "replay:flake": "bash scripts/replay-flake-check.sh",
     "lint:vocab": "bash scripts/check-engine-vocabulary.sh",
     "lint:all": "npm run lint && npm run lint:vocab"
   },

@@ -973,6 +973,106 @@ function setupErrorHandler(app: express.Application) {
     });
   });
 
+  // ─── Task #89 / Phase 4-A — Replay corpus operator panel endpoints ──
+  //
+  // GET /api/admin/replay/cassettes  → corpus summary + last 50 cassettes
+  // GET /api/admin/replay/cassette/:hash → one cassette body
+  //
+  // Same X-Admin-Token gate as /metrics + /healthz/continuity. Production
+  // cassettes are NOT committed to repo — download only via this surface.
+  app.get("/api/admin/replay/cassettes", async (req: Request, res: Response) => {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).json({ error: "replay_panel_disabled_no_admin_token" });
+    }
+    let isAdmin = false;
+    if (provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch {
+        isAdmin = false;
+      }
+    }
+    if (!isAdmin) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    try {
+      const { pool } = require("./db") as typeof import("./db");
+      const { setCassetteAgeMaxHours } = require("./orchestrator/replay/cv13-metrics") as typeof import("./orchestrator/replay/cv13-metrics");
+      const summary = await pool.query<{ source: string; path_shape: string | null; cnt: string; oldest: Date | null }>(
+        `SELECT source, path_shape, COUNT(*)::text AS cnt, MIN(captured_at) AS oldest
+         FROM orchestrator_replay_cassettes GROUP BY source, path_shape`,
+      );
+      const recent = await pool.query<{ cassette_hash: string; source: string; path_shape: string | null; captured_at: Date; campaign_id: string | null }>(
+        `SELECT cassette_hash, source, path_shape, captured_at, campaign_id
+         FROM orchestrator_replay_cassettes ORDER BY captured_at DESC LIMIT 50`,
+      );
+      let oldestMs: number | null = null;
+      for (const r of summary.rows) {
+        if (r.oldest) {
+          const t = new Date(r.oldest).getTime();
+          if (oldestMs === null || t < oldestMs) oldestMs = t;
+        }
+      }
+      const oldestHours = oldestMs === null ? 0 : Math.max(0, (Date.now() - oldestMs) / 3_600_000);
+      setCassetteAgeMaxHours(oldestHours);
+      return res.status(200).json({
+        summary: summary.rows.map((r) => ({
+          source: r.source,
+          pathShape: r.path_shape,
+          count: parseInt(r.cnt, 10),
+          oldestCapturedAt: r.oldest ? new Date(r.oldest).toISOString() : null,
+        })),
+        oldestAgeHours: oldestHours,
+        recent: recent.rows.map((r) => ({
+          cassetteHash: r.cassette_hash,
+          source: r.source,
+          pathShape: r.path_shape,
+          capturedAt: new Date(r.captured_at).toISOString(),
+          campaignId: r.campaign_id,
+        })),
+      });
+    } catch (err) {
+      // Seal #15 — no silent catches.
+      console.error("[ReplayPanel] CORPUS_QUERY_FAILED", err);
+      return res.status(500).json({ error: "corpus_query_failed" });
+    }
+  });
+
+  app.get("/api/admin/replay/cassette/:hash", async (req: Request, res: Response) => {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).json({ error: "replay_panel_disabled_no_admin_token" });
+    }
+    let isAdmin = false;
+    if (provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch {
+        isAdmin = false;
+      }
+    }
+    if (!isAdmin) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    try {
+      const { pool } = require("./db") as typeof import("./db");
+      const row = await pool.query<{ body: unknown; cassette_hash: string }>(
+        `SELECT cassette_hash, body FROM orchestrator_replay_cassettes WHERE cassette_hash = $1 LIMIT 1`,
+        [req.params.hash],
+      );
+      if (row.rows.length === 0) {
+        return res.status(404).json({ error: "cassette_not_found" });
+      }
+      return res.status(200).json({ cassetteHash: row.rows[0].cassette_hash, body: row.rows[0].body });
+    } catch (err) {
+      console.error("[ReplayPanel] CASSETTE_FETCH_FAILED", err);
+      return res.status(500).json({ error: "cassette_fetch_failed" });
+    }
+  });
+
   // ─── Operations Guardian — operator notices surface ──────────────────
   //
   // GET /api/admin/operator-notices
@@ -1216,7 +1316,7 @@ function setupErrorHandler(app: express.Application) {
   // infrastructure, separate from product admin. When METRICS_ADMIN_TOKEN
   // is unset the endpoint is closed (401 to all callers) — fail-safe by
   // default. Constant-time compare prevents timing oracles on the secret.
-  app.get("/metrics", (req: Request, res: Response) => {
+  app.get("/metrics", async (req: Request, res: Response) => {
     const expected = process.env.METRICS_ADMIN_TOKEN;
     const provided = req.header("x-admin-token") ?? "";
     if (!expected) {
@@ -1245,7 +1345,13 @@ function setupErrorHandler(app: express.Application) {
     // Task #68 / Phase 5 Step 7 — CV-04 (Contract Completeness Verification)
     // family appended to the same exposition.
     const { renderCv04Metrics } = require("./orchestrator/contract-registry/cv04-metrics") as typeof import("./orchestrator/contract-registry/cv04-metrics");
-    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics() + "\n" + renderCv06Metrics() + "\n" + renderCv04Metrics());
+    // Task #89 / Phase 4-A — CV-13 ReplayCorpusFreshness family.
+    const { renderCv13Metrics, refreshCassetteAgeFromDb } = require("./orchestrator/replay/cv13-metrics") as typeof import("./orchestrator/replay/cv13-metrics");
+    const { pool: metricsPool } = require("./db") as typeof import("./db");
+    // Refresh cv13_replay_age_max_hours intrinsically at scrape time so the
+    // gauge is accurate without depending on the admin panel being exercised.
+    await refreshCassetteAgeFromDb((sql) => metricsPool.query(sql));
+    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics() + "\n" + renderCv06Metrics() + "\n" + renderCv04Metrics() + "\n" + renderCv13Metrics());
   });
 
   const PUBLIC_PATH_PREFIXES = [
