@@ -49,6 +49,11 @@ import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import AELDebugPanel from '@/components/AELDebugPanel';
 import SignalFlowPanel from '@/components/SignalFlowPanel';
 import SystemIntegrityPanel from '@/components/SystemIntegrityPanel';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
+// Task #71 / Phase 8 — operator engine labels live in a separate module
+// so the vocab CI gate can scan this file itself for customer-surface
+// regressions without flagging the operator-only branch.
+import { OPERATOR_STRATEGY_BRANCHES } from './_ai-management-operator-labels';
 
 interface AIAudience {
   name: string;
@@ -119,6 +124,10 @@ export default function AIManagementScreen() {
   const { t } = useLanguage();
 
   const { selectedCampaignId, isCampaignSelected, dataSourceMode } = useCampaign();
+  // Task #71 / Phase 8 / Step 1 — gate 5 operator panels behind the unified
+  // operator-surface predicate. In customer builds (no EXPO_PUBLIC_METRICS_
+  // ADMIN_TOKEN), `operator.enabled === false` and the panels self-disable.
+  const operator = useOperatorSurface();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
   const validTabs: Set<string> = new Set(['buildplan', 'pipeline', 'intelligence', 'strategies', 'positioning', 'differentiation', 'mechanism', 'offers', 'funnels', 'integrity', 'awareness', 'persuasion', 'statistical_validation', 'budget_governor', 'channel_selection', 'iteration', 'retention', 'control', 'marketdb', 'publisher', 'audience']);
@@ -310,20 +319,27 @@ export default function AIManagementScreen() {
     loadControlData();
   }, []);
 
-  const strategyBranches: { key: TabView; icon: keyof typeof Ionicons.glyphMap; label: string; color: string; description: string }[] = [
-    { key: 'positioning', icon: 'compass-outline', label: 'Positioning', color: '#10B981', description: 'Strategic territory discovery and narrative positioning' },
-    { key: 'differentiation', icon: 'layers-outline', label: 'Differentiation', color: '#8B5CF6', description: '12-layer proof-backed differentiation analysis' },
-    { key: 'mechanism', icon: 'construct-outline', label: 'Mechanism Engine', color: '#D946EF', description: 'Axis-aligned mechanism generation from positioning and differentiation' },
-    { key: 'offers', icon: 'pricetag-outline', label: 'Offer Engine', color: '#F97316', description: '5-layer structured offer construction' },
-    { key: 'awareness', icon: 'eye-outline', label: 'Awareness Engine', color: '#F97316', description: '8-layer awareness architecture — entry routes, readiness mapping, and trigger classes' },
-    { key: 'funnels', icon: 'funnel-outline', label: 'Funnel Engine', color: '#14B8A6', description: '8-layer funnel decision with trust path and proof placement' },
-    { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Integrity Engine', color: '#6366F1', description: 'Final validation gate — 8-layer strategic consistency check before execution' },
-    { key: 'persuasion', icon: 'megaphone-outline', label: 'Persuasion Engine', color: '#EC4899', description: '8-layer persuasion logic — influence drivers, objection mapping, and trust sequencing' },
-    { key: 'statistical_validation', icon: 'stats-chart-outline', label: 'Statistical Validation', color: '#06B6D4', description: 'Evidence density evaluation — validates claims against real MI signals' },
-    { key: 'budget_governor', icon: 'wallet-outline', label: 'Budget Governor', color: '#F59E0B', description: 'Multi-factor risk scoring — test/scale/hold/halt budget decisions' },
-    { key: 'channel_selection', icon: 'git-branch-outline', label: 'Channel Selection', color: '#3B82F6', description: '16-channel scoring across 8 layers — audience density and mode compatibility' },
-    { key: 'iteration', icon: 'repeat-outline', label: 'Iteration Engine', color: '#F43F5E', description: 'Optimization opportunities — test hypotheses and controlled experimentation' },
-    { key: 'retention', icon: 'heart-outline', label: 'Retention Engine', color: '#059669', description: 'Retention leverage points — churn risks, LTV expansion, and upsell triggers' },
+  // Task #71 / Phase 8 / Step 3 + 7 — engine names DEMOTED from customer
+  // surface. The customer-facing labels here are outcome-framed
+  // ("Where you stand", "Why you'll win") so the 13 internal engine names
+  // are no longer the navigation vocabulary. Keys retain canonical engine
+  // identifiers (D2 — canonical fields preserved for routing/persistence).
+  // Operator builds (operator.enabled) get the original engine names
+  // restored so dev work isn't disrupted.
+  const strategyBranches: { key: TabView; icon: keyof typeof Ionicons.glyphMap; label: string; color: string; description: string }[] = operator.enabled ? OPERATOR_STRATEGY_BRANCHES.map(b => ({ ...b, key: b.key as TabView })) : [
+    { key: 'positioning', icon: 'compass-outline', label: 'Where you stand', color: '#10B981', description: 'Your place in the market and how customers will find you' },
+    { key: 'differentiation', icon: 'layers-outline', label: 'Why you’re different', color: '#8B5CF6', description: 'What makes you stand apart from competitors — backed by proof' },
+    { key: 'mechanism', icon: 'construct-outline', label: 'How it works', color: '#D946EF', description: 'The simple way your product solves the problem' },
+    { key: 'offers', icon: 'pricetag-outline', label: 'What you offer', color: '#F97316', description: 'How your offer is packaged and presented to buyers' },
+    { key: 'awareness', icon: 'eye-outline', label: 'How buyers find you', color: '#F97316', description: 'Where attention comes from and how ready buyers are to act' },
+    { key: 'funnels', icon: 'funnel-outline', label: 'The buying path', color: '#14B8A6', description: 'How a stranger becomes a paying customer step by step' },
+    { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Plan check', color: '#6366F1', description: 'Final sanity check before we put the plan into action' },
+    { key: 'persuasion', icon: 'megaphone-outline', label: 'What convinces buyers', color: '#EC4899', description: 'The reasons buyers say yes — and how to handle objections' },
+    { key: 'statistical_validation', icon: 'stats-chart-outline', label: 'Evidence strength', color: '#06B6D4', description: 'How confident we are that the plan is backed by real data' },
+    { key: 'budget_governor', icon: 'wallet-outline', label: 'Spending guardrails', color: '#F59E0B', description: 'When to test, scale, hold, or pause spend based on risk' },
+    { key: 'channel_selection', icon: 'git-branch-outline', label: 'Where to run ads', color: '#3B82F6', description: 'Which channels fit your audience and how to prioritize them' },
+    { key: 'iteration', icon: 'repeat-outline', label: 'What to test next', color: '#F43F5E', description: 'Concrete experiments to keep improving results' },
+    { key: 'retention', icon: 'heart-outline', label: 'Keeping customers', color: '#059669', description: 'Where customers churn and how to grow lifetime value' },
   ];
 
   const renderStrategiesBranch = () => (
@@ -1005,7 +1021,7 @@ export default function AIManagementScreen() {
           style={[styles.tabBar, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
           contentContainerStyle={styles.tabBarContent}
         >
-          {([
+          {((operator.enabled ? [
             { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
             { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
@@ -1014,7 +1030,20 @@ export default function AIManagementScreen() {
             { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: false },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
             { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: false },
-          ] as const)
+          ] : [
+            // Task #71 / Phase 8 — customer-facing 4-screen pivot.
+            // Connect → publisher (where the work goes out)
+            // Diagnose → intelligence (what the market looks like)
+            // Roadmap → buildplan (live plan + execution)
+            // Monitor → control (live health + audit trail)
+            // Each pillar maps to an existing TabView destination so the
+            // underlying routing, persistence, and content code paths are
+            // unchanged (D2 — canonical activeTab values preserved).
+            { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Connect', color: colors.primary, advanced: false },
+            { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Diagnose', color: '#3B82F6', advanced: false },
+            { key: 'buildplan' as TabView, icon: 'map-outline' as const, label: 'Roadmap', color: '#EC4899', advanced: false },
+            { key: 'control' as TabView, icon: 'pulse-outline' as const, label: 'Monitor', color: '#8B5CF6', advanced: false },
+          ]) as const)
             .filter(t => !t.advanced)
             .map(t => {
               const isActive = activeTab === t.key;
@@ -1033,7 +1062,7 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'buildplan' && <OrchestratorPanel />}
+        {activeTab === 'buildplan' && (operator.enabled ? <OrchestratorPanel /> : <ExecutionPlan />)}
         {activeTab === 'pipeline' && (
           <>
             <ExecutionPlan />
@@ -1043,13 +1072,17 @@ export default function AIManagementScreen() {
         {activeTab === 'strategies' && (
           <>
             {renderStrategiesBranch()}
-            <CampaignGuard><SystemIntegrityPanel /></CampaignGuard>
-            <CampaignGuard><SignalFlowPanel /></CampaignGuard>
-            <CampaignGuard><AELDebugPanel /></CampaignGuard>
+            {operator.enabled && (
+              <>
+                <CampaignGuard><SystemIntegrityPanel /></CampaignGuard>
+                <CampaignGuard><SignalFlowPanel /></CampaignGuard>
+                <CampaignGuard><AELDebugPanel /></CampaignGuard>
+              </>
+            )}
           </>
         )}
         {activeTab === 'control' && renderControlCenter()}
-        {activeTab === 'marketdb' && <MarketDatabaseAdmin />}
+        {activeTab === 'marketdb' && (operator.enabled ? <MarketDatabaseAdmin /> : renderIntelligence())}
         {activeTab === 'publisher' && renderPublisher()}
         {activeTab === 'audience' && <CampaignGuard>{renderAudienceManager()}</CampaignGuard>}
 

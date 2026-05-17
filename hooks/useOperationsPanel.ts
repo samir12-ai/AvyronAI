@@ -54,13 +54,20 @@ export interface OperationsPanelData {
   generatedAt: string;
 }
 
+import { isOperatorSurfaceEnabled } from "@/hooks/useOperatorSurface";
+
 function getAdminToken(): string | null {
   const t = process.env.EXPO_PUBLIC_METRICS_ADMIN_TOKEN;
   return t && t.length > 0 ? t : null;
 }
 
+/**
+ * Task #71 — Delegates to the unified operator-surface gate. The local
+ * `getAdminToken()` is retained because the React Query hook still needs
+ * the raw token value for the `X-Admin-Token` request header.
+ */
 export function operationsPanelEnabled(): boolean {
-  return getAdminToken() !== null;
+  return isOperatorSurfaceEnabled();
 }
 
 export function useOperationsPanel() {

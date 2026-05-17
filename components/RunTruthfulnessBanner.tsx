@@ -5,6 +5,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRunTruthfulness, type TruthfulnessHeadline } from "@/hooks/useRunTruthfulness";
 import { useTrustCopy, trustToneColor, type TrustState, type TrustCopy } from "@/lib/copy-helpers";
 import { useLanguage } from "@/context/LanguageContext";
+// Task #71 / Phase 8 / Step 5 — unified presenter consumed here so the
+// banner, audit-control screen, and dashboard all derive headline color
+// from a single helper. Banner still owns its own copy via trustCopy()
+// (richer, descriptions vary by state); the presenter is used for the
+// authoritative color so a verdict change updates all three surfaces.
+import { presentRunTruthfulness } from "@/lib/run-truthfulness-presentation";
 
 interface Props {
   campaignId: string | null | undefined;
@@ -68,7 +74,20 @@ export function RunTruthfulnessBanner({ campaignId, isDark }: Props) {
   }
 
   const copy: TrustCopy = trustCopy(state, { description: descOverride });
-  const color = trustToneColor(copy.tone);
+  // Map the system-control verdict enum to the canonical IntegrityVerdict
+  // (PASS|BLOCK → PASS|FAIL; DOWNGRADE|REPAIR → PARTIAL). Mirrors the
+  // identical mapping in audit-control.tsx.
+  const verdictRaw = data.verdict?.verdict ?? null;
+  const canonicalVerdict: 'PASS' | 'PARTIAL' | 'FAIL' | null =
+    verdictRaw === 'PASS' ? 'PASS'
+    : verdictRaw === 'BLOCK' ? 'FAIL'
+    : verdictRaw === 'DOWNGRADE' || verdictRaw === 'REPAIR' ? 'PARTIAL'
+    : null;
+  const presented = presentRunTruthfulness(canonicalVerdict, data.headline);
+  // Presenter color is the canonical source; trustToneColor remains the
+  // tone-based fallback if presentRunTruthfulness returned null (both
+  // inputs missing — defensive, should never trigger on real data).
+  const color = presented?.color ?? trustToneColor(copy.tone);
   const icon = ICON_FOR_STATE[state];
 
   const bg = isDark ? "#0F1419" : "#FFFFFF";

@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRunTruthfulness, type StructuralCheckLite, type TruthfulnessHeadline } from "@/hooks/useRunTruthfulness";
 import { useCampaign } from "@/context/CampaignContext";
 import { colorForIntegrityVerdict } from "@/lib/verdict-colors";
+import { presentRunTruthfulness } from "@/lib/run-truthfulness-presentation";
 import {
   useContinuityPanel,
   useCampaignContinuityDecision,
@@ -127,33 +128,19 @@ export default function AuditControlScreen() {
   const textPrimary = isDark ? "#E8EDF2" : "#1A2332";
   const textSec = isDark ? "#8892A4" : "#546478";
 
-  // Seal #6: derive the headline color from the canonical integrity verdict
-  // (`data.verdict.verdict`) when present, mapping the headline to a verdict
-  // shape only as a fall-through. This keeps the audit screen consistent
-  // with every other verdict-rendering surface and prevents a green pixel
-  // for any non-PASS verdict.
-  const headlineToVerdict: Record<string, 'PASS' | 'PARTIAL' | 'FAIL'> = {
-    ok: 'PASS',
-    shadowed: 'PARTIAL',
-    downgrade: 'PARTIAL',
-    review_required: 'PARTIAL',
-    no_run: 'PARTIAL',
-    needs_reconciliation: 'PARTIAL',
-    repair: 'PARTIAL',
-    system_untrusted: 'FAIL',
-    blocked: 'FAIL',
-  };
-  // Map the system-control verdict enum (PASS|DOWNGRADE|REPAIR|BLOCK) to the
-  // canonical IntegrityVerdict enum (PASS|PARTIAL|FAIL). Typed: `data` is
-  // `RunTruthfulness | undefined` so no `as any` cast is needed (Seal #6 / D3).
+  // Task #71 / Phase 8 / Step 5 — consolidated via presentRunTruthfulness().
+  // The verdict-enum → IntegrityVerdict mapping (PASS|BLOCK|DOWNGRADE|REPAIR
+  // → PASS|FAIL|PARTIAL) stays here because it is system-control-specific.
+  // Headline-to-color mapping is delegated to the unified presenter so this
+  // screen, RunTruthfulnessBanner, and the dashboard all share one source.
   const verdictRaw = data?.verdict?.verdict ?? null;
   const canonicalVerdict: 'PASS' | 'PARTIAL' | 'FAIL' | null =
     verdictRaw === 'PASS' ? 'PASS'
     : verdictRaw === 'BLOCK' ? 'FAIL'
     : verdictRaw === 'DOWNGRADE' || verdictRaw === 'REPAIR' ? 'PARTIAL'
     : null;
-  const legacyVerdict = data?.headline ? headlineToVerdict[data.headline] ?? null : null;
-  const headlineColor = colorForIntegrityVerdict(canonicalVerdict, legacyVerdict);
+  const presented = presentRunTruthfulness(canonicalVerdict, data?.headline ?? null);
+  const headlineColor = presented?.color ?? colorForIntegrityVerdict(canonicalVerdict, null);
 
   return (
     <View style={{ flex: 1, backgroundColor: bg }}>

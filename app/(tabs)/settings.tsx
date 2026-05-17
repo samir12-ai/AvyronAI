@@ -901,7 +901,7 @@ export default function SettingsScreen() {
             </View>
           </View>
           <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Enter your real campaign numbers. The system uses these in the Iteration Engine, Budget Governor, Channel Selection, Statistical Validation, and Build Plan layer.
+            Enter your real campaign numbers. We use them to tune what to test next, your spending guardrails, channel mix, evidence strength, and your live plan.
           </Text>
 
           {!selectedCampaignId ? (

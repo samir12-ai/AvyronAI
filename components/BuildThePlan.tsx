@@ -1435,16 +1435,20 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     </View>
   );
 
+  // Task #71 / Phase 8 — engine source labels demoted to outcome-framed
+  // copy on the customer surface. Keys are canonical engine identifiers
+  // (D2) so the data binding is unchanged; only the display string is
+  // softened to remove operator vocabulary.
   const ENGINE_SOURCE_LABELS: Record<string, string> = {
-    offer_engine: 'Offer Engine',
-    positioning_engine: 'Positioning Engine',
-    persuasion_engine: 'Persuasion Engine',
-    audience_engine: 'Audience Engine',
-    funnel_engine: 'Funnel Engine',
-    differentiation_engine: 'Differentiation Engine',
-    awareness_engine: 'Awareness Engine',
-    channel_selection: 'Channel Selection',
-    market_intelligence: 'Market Intelligence',
+    offer_engine: 'Offer & pricing',
+    positioning_engine: 'Market position',
+    persuasion_engine: 'Buying triggers',
+    audience_engine: 'Audience intel',
+    funnel_engine: 'Buying path',
+    differentiation_engine: 'What sets you apart',
+    awareness_engine: 'Discovery routes',
+    channel_selection: 'Channel mix',
+    market_intelligence: 'Market intel',
   };
 
   const renderExtractionField = (label: string, fieldKey: string, fieldData: FieldWithConfidence | any, icon: string) => {
@@ -2050,18 +2054,20 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     );
 
     if (loading) {
+      // Task #71 / Phase 8 — outcome-framed section labels (engine names
+      // removed from customer surface). Keys remain canonical (D2).
       const sectionLabels: Record<string, string> = {
-        market_intelligence: 'Market Intelligence',
-        sgl: 'Signal Governor',
-        audience: 'Audience Engine',
-        offer: 'Offer Engine',
-        mechanism: 'Mechanism Engine',
-        pricing: 'Pricing Engine',
-        messaging: 'Messaging Engine',
-        funnel: 'Funnel Engine',
-        creative: 'Creative Engine',
-        iteration: 'Iteration Engine',
-        retention: 'Retention Engine',
+        market_intelligence: 'Market intel',
+        sgl: 'Signal review',
+        audience: 'Audience intel',
+        offer: 'Offer & pricing',
+        mechanism: 'How it works',
+        pricing: 'Pricing',
+        messaging: 'Messaging',
+        funnel: 'Buying path',
+        creative: 'Creative',
+        iteration: 'What to test next',
+        retention: 'Keeping customers',
       };
       // Seal #6 / Task #24 (validator-#3): colors now sourced from the
       // canonical helper `colorForExecutionStatus()`. Legacy SUCCESS / COMPLETE

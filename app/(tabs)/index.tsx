@@ -36,6 +36,7 @@ import DashboardChat from '@/components/DashboardChat';
 import NarrativeCard from '@/components/NarrativeCard';
 import { useRunAnchor } from '@/hooks/useRunAnchor';
 import { useRunTruthfulness } from '@/hooks/useRunTruthfulness';
+import { presentRunTruthfulness } from '@/lib/run-truthfulness-presentation';
 import type { MetricCardVerdict } from '@/components/MetricCard';
 import type { ProvenanceKind } from '@/components/DataProvenance';
 import { useAuth } from '@/context/AuthContext';
@@ -215,15 +216,28 @@ export default function DashboardScreen() {
   // hidden when the run is shadowed/untrusted/blocked, and so users can tell
   // META-measured data apart from PLAN projections at a glance.
   const { data: truthfulness } = useRunTruthfulness(selectedCampaignId);
+  // Task #71 / Phase 8 / Step 5 — verdict resolution routed through the
+  // unified presenter so dashboard / banner / audit-control are aligned.
+  // The MetricCardVerdict mapping (SHADOWED/UNTRUSTED/STALE) remains
+  // dashboard-specific because those states drive a different visual
+  // affordance (delta hiding) than the banner/screen color. The verdict
+  // → IntegrityVerdict mapping itself is now produced by the presenter.
   const metricVerdict: MetricCardVerdict = (() => {
     if (!truthfulness) return 'UNKNOWN';
     if (truthfulness.isStale) return 'STALE';
     if (truthfulness.headline === 'shadowed') return 'SHADOWED';
     if (truthfulness.headline === 'system_untrusted') return 'UNTRUSTED';
-    const v = truthfulness.verdict?.verdict;
-    if (v === 'PASS') return 'PASS';
-    if (v === 'BLOCK') return 'FAIL';
-    if (v === 'DOWNGRADE' || v === 'REPAIR') return 'PARTIAL';
+    const verdictRaw = truthfulness.verdict?.verdict;
+    const canonicalVerdict: 'PASS' | 'PARTIAL' | 'FAIL' | null =
+      verdictRaw === 'PASS' ? 'PASS'
+      : verdictRaw === 'BLOCK' ? 'FAIL'
+      : verdictRaw === 'DOWNGRADE' || verdictRaw === 'REPAIR' ? 'PARTIAL'
+      : null;
+    const presented = presentRunTruthfulness(canonicalVerdict, truthfulness.headline);
+    if (!presented?.isCanonical) return 'UNKNOWN';
+    if (canonicalVerdict === 'PASS') return 'PASS';
+    if (canonicalVerdict === 'FAIL') return 'FAIL';
+    if (canonicalVerdict === 'PARTIAL') return 'PARTIAL';
     return 'UNKNOWN';
   })();
   const metricProvenance: ProvenanceKind | undefined = (() => {

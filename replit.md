@@ -209,6 +209,37 @@ ESLint suppression count across Seals #13–#19: 0 added. Allowlist size remains
 > Seal #18 / Track #5 — [18 deterministic behavioral lifecycle scenarios + harness + 100-iteration flake checker](.local/docs/seals/seal-18-track5-lifecycle-tests.md).
 > Seal #19 / Track #6 — [8-audit verdict matrix + evidence per audit + allowlist drift note](.local/docs/seals/seal-19-track6-audits.md).
 
+### UX Projection Cleanup — Phase 8 (Task #71)
+
+**Founding principle: customer surface speaks outcomes, code surface speaks canonical.** The 13 internal engine names + raw doctrinal tokens (`degraded`, `CHAIN_DEGRADED`, `validationState`, `planSource`, model SKUs like "GPT-5.2" / "Gemini 3 Pro") were leaking into customer-build JSX. Phase 8 introduces a single operator-surface gate, demotes engine names to outcome-framed labels, consolidates verdict rendering, and adds a CI gate that blocks reintroduction.
+
+| # | Rule | Enforcement |
+|---|---|---|
+| **P8-GATE** | Operator-grade panels (`AELDebugPanel`, `OrchestratorPanel`, `SignalFlowPanel`, `SystemIntegrityPanel`, `MarketDatabaseAdmin`) MUST be gated behind `useOperatorSurface()`. Customer builds (no `EXPO_PUBLIC_METRICS_ADMIN_TOKEN`) self-disable them. | `hooks/useOperatorSurface.ts` — `isOperatorSurfaceEnabled()` is the single canonical predicate. `continuityPanelEnabled()`, `operationsPanelEnabled()`, `operatorNoticesEnabled()` all now delegate to it. |
+| **P8-VOCAB** | Customer-build JSX MUST NOT contain the 13 internal engine names ("Positioning Engine", "Differentiation Engine", …) OR raw doctrinal tokens (`CHAIN_DEGRADED`, `MARKET_DATA_DEGRADED`, `PLAN_DEGRADED`, etc.) as user-visible text. Canonical fields stay in code (D2/D3). | `scripts/check-engine-vocabulary.sh` — ripgrep regex over `app/(tabs)/**`, customer components. Operator-only files explicitly allowlisted. Exit-1 on hit. |
+| **P8-PRESENT** | Verdict + headline rendering goes through ONE presenter (`lib/run-truthfulness-presentation.ts`). `audit-control.tsx`, `RunTruthfulnessBanner`, dashboard consume the same `presentRunTruthfulness()` helper. | `presentRunTruthfulness(canonicalVerdict, headline)` returns `{ customerLabel, color, isCanonical }`. Returns `null` when both inputs missing (D5 — no silent default). |
+| **P8-MODEL-LABEL** | Customer-facing model picker MUST NOT name SKUs ("GPT-5.2", "Gemini 3 Pro"). Internal `aiEngine` state field (`openai`/`gemini`) is preserved (D2). | `app/(tabs)/create.tsx` — labels demoted to outcome copy ("Punchy" / "Polished"). |
+
+Operator builds (`EXPO_PUBLIC_METRICS_ADMIN_TOKEN` set) RESTORE the original engine names + admin panels so dev work isn't disrupted. The strategy-branch label table AND the top-level tab strip in `ai-management.tsx` are both runtime ternaries on `operator.enabled`.
+
+**Customer-facing 4-screen pivot (`ai-management.tsx`):** customer builds collapse the 8-tab operator surface into four outcome-framed pillars. Each pillar routes to the existing canonical `TabView` destination so persistence, routing, and content code paths are unchanged (D2):
+
+| Pillar | Routes to | Surface owner |
+|---|---|---|
+| **Connect** | `publisher` | Where outbound work goes (Meta connection, schedule, queue) |
+| **Diagnose** | `intelligence` | What the market looks like (Competitive Intel, signals) |
+| **Roadmap** | `buildplan` → falls back to `ExecutionPlan` (operator mode shows `OrchestratorPanel`) | The live plan + the next moves |
+| **Monitor** | `control` | Live health, audit feed, run truthfulness |
+
+**Presenter consolidation (P8-PRESENT):** `presentRunTruthfulness(canonicalVerdict, headline)` is the sole color derivation path consumed by `app/audit-control.tsx`, `components/RunTruthfulnessBanner.tsx`, AND `app/(tabs)/index.tsx`. All three sites perform the same verdict-enum → IntegrityVerdict mapping (`PASS|BLOCK|DOWNGRADE|REPAIR → PASS|FAIL|PARTIAL`) and feed the result into the presenter; the `isCanonical` flag is the contract for "did we source from the canonical field?" (D5 — never silently substituted).
+
+**CI wiring:** `npm run lint:vocab` invokes `scripts/check-engine-vocabulary.sh`. `npm run lint:all` runs the standard lint AND the vocab gate. Wire `lint:all` into your CI pipeline to block reintroduction.
+
+**Drift note (close before Phase 9):**
+- 32-locale i18n migration (`lib/translations/*.ts`) for the engine→outcome map deferred — strings live inline in `ai-management.tsx`/`BuildThePlan.tsx`/`settings.tsx`/`create.tsx`. Follow-up task should fold them into the `t()` map.
+- `PlanDocumentView` + `ExecutionPlan` + `NarrativeCard` swept clean of the 12 doctrinal tokens (`CHAIN_DEGRADED`, `MARKET_DATA_DEGRADED`, `PLAN_DEGRADED`, etc.) — current scan finds zero hits, but they remain in the CI gate's `SCAN_PATHS` so any future reintroduction blocks the merge.
+- Seal #19 8-audit gate not run — no new chains/schedulers/locks landed; gate applies to continuity-architecture seals, not UX projection seals. Re-evaluate at Phase 9 when Monitor aggregator lands.
+
 ### Canonical Fact Ownership — Phase 1 (Task #64)
 
 **Founding principle:** every persisted fact has exactly one authoritative writer. Drift between writers, demoted columns, and bypass paths through legacy gates were producing contradictory state across the strategy layer. Phase 1 establishes the single-writer doctrine for `strategy_memory` + two new operational tables, merges the dual memory-write gates into one, and wires a CV-06 provenance metric so any future drift is observable.
