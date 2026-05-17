@@ -486,7 +486,7 @@ const lang: TranslationKeys = {
     step1Title: 'I-upload ang mga Clip',
     step1Desc: 'Piliin ang iyong mga raw video clip mula sa iyong device',
     step2Title: 'Ine-edit ng AI ang Iyong Video',
-    step2Desc: 'Sinusuri ng GPT-5.2 ang mga clip at gumagawa ng mga propesyonal na desisyon sa pag-edit',
+    step2Desc: 'Sinusuri ng Avyron AI ang mga clip at gumagawa ng mga propesyonal na desisyon sa pag-edit',
     step3Title: 'Kunin ang Iyong Video',
     step3Desc: 'I-download ang pinal na na-edit na video na may mga transition at effect',
     clip: 'Clip',

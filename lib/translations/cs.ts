@@ -486,7 +486,7 @@ const lang: TranslationKeys = {
     step1Title: 'Nahrajte klipy',
     step1Desc: 'Vyberte své surové video klipy ze zařízení',
     step2Title: 'AI edituje vaše video',
-    step2Desc: 'GPT-5.2 analyzuje klipy a vytvoří profesionální rozhodnutí o střihu',
+    step2Desc: 'Avyron AI analyzuje klipy a vytvoří profesionální rozhodnutí o střihu',
     step3Title: 'Získejte své video',
     step3Desc: 'Stáhněte finální upravené video s přechody a efekty',
     clip: 'Klip',

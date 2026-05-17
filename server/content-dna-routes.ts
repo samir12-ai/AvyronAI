@@ -196,7 +196,14 @@ async function gatherEngineContext(campaignId: string, accountId: string) {
           parts.push(section);
         }
       }
-    } catch {}
+    } catch (sectionErr) {
+      // Seal #15: any failure assembling the DNA section blob silently
+      // produces a thinner prompt — surface it so prompt-quality regressions
+      // are visible in logs.
+      console.error("[ContentDnaRoutes] DNA_SECTION_ASSEMBLY_FAILED", {
+        error: (sectionErr as Error)?.message,
+      });
+    }
   }
 
   return { contextString: parts.join("\n\n---\n\n"), businessProfile: biz || null };

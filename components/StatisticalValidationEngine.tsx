@@ -21,6 +21,7 @@ import {
 import type { LiveSnapshotEnvelope } from '@/lib/envelope';
 import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
 
 interface LayerResult {
   layerName: string;
@@ -141,13 +142,23 @@ const EVIDENCE_TYPE_COLORS: Record<string, string> = {
   inferred: '#8B5CF6',
 };
 
-const PROVENANCE_ENGINE_LABELS: Record<string, string> = {
+// Phase 8: two label maps — the operator one keeps internal engine names so
+// architecture is debuggable; the customer one speaks outcomes.
+const PROVENANCE_ENGINE_LABELS_OPERATOR: Record<string, string> = {
   market_intelligence: "Market Intelligence",
   audience: "Audience Engine",
   offer: "Offer Engine",
   persuasion: "Persuasion Engine",
   awareness: "Awareness Engine",
   funnel: "Funnel Engine",
+};
+const PROVENANCE_ENGINE_LABELS_CUSTOMER: Record<string, string> = {
+  market_intelligence: "Market signals",
+  audience: "Audience research",
+  offer: "Offer analysis",
+  persuasion: "What convinces buyers",
+  awareness: "How buyers find you",
+  funnel: "Buyer journey",
 };
 
 const PROVENANCE_SOURCE_LABELS: Record<string, string> = {
@@ -167,6 +178,12 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
+  // Phase 8 defense-in-depth: mounted by the customer-pivot "Evidence
+  // strength" tab AND by the operator strategies branch.
+  const operator = useOperatorSurface();
+  const PROVENANCE_ENGINE_LABELS = operator.enabled
+    ? PROVENANCE_ENGINE_LABELS_OPERATOR
+    : PROVENANCE_ENGINE_LABELS_CUSTOMER;
   const [data, setData] = useState<StatisticalValidationData | null>(null);
   const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [loading, setLoading] = useState(false);

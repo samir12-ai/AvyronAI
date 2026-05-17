@@ -486,7 +486,7 @@ const lang: TranslationKeys = {
     step1Title: 'Last Opp Klipp',
     step1Desc: 'Velg dine råvideoklipp fra enheten din',
     step2Title: 'AI Redigerer Videoen Din',
-    step2Desc: 'GPT-5.2 analyserer klipp og tar profesjonelle redigeringsbeslutninger',
+    step2Desc: 'Avyron AI analyserer klipp og tar profesjonelle redigeringsbeslutninger',
     step3Title: 'Få Videoen Din',
     step3Desc: 'Last ned den ferdige redigerte videoen med overganger og effekter',
     clip: 'Klipp',

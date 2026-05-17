@@ -123,7 +123,14 @@ export function initMetaMetrics(): void {
       reason: "Server restart — in-memory metrics cleared",
       timestamp: new Date().toISOString(),
     },
-  }).catch(() => {});
+  }).catch((auditErr) => {
+    // Seal #15: best-effort audit-write at startup. Failure must still be
+    // observable — silent .catch(() => {}) used to mask DB connectivity
+    // issues at boot.
+    console.error("[MetaMetrics] STARTUP_RESET_AUDIT_FAILED", {
+      error: (auditErr as Error)?.message,
+    });
+  });
 
   console.log("[MetaMetrics] Initialized — in-memory metrics reset logged");
 

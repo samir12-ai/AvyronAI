@@ -486,7 +486,7 @@ const lang: TranslationKeys = {
     step1Title: 'Klipek feltöltése',
     step1Desc: 'Válassza ki a nyers videoklipeket az eszközéről',
     step2Title: 'AI szerkeszti a videóját',
-    step2Desc: 'A GPT-5.2 elemzi a klipeket és professzionális vágási döntéseket hoz',
+    step2Desc: 'A Avyron AI elemzi a klipeket és professzionális vágási döntéseket hoz',
     step3Title: 'Kapja meg a videóját',
     step3Desc: 'Töltse le a kész szerkesztett videót átmenetekkel és effektekkel',
     clip: 'Klip',

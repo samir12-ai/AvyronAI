@@ -486,7 +486,7 @@ const lang: TranslationKeys = {
     step1Title: 'Lataa Leikkeet',
     step1Desc: 'Valitse raakatiedostot laitteeltasi',
     step2Title: 'Tekoäly Editoi Videosi',
-    step2Desc: 'GPT-5.2 analysoi leikkeet ja luo ammattimaiset editointipäätökset',
+    step2Desc: 'Avyron AI analysoi leikkeet ja luo ammattimaiset editointipäätökset',
     step3Title: 'Saat Videosi',
     step3Desc: 'Lataa valmis editoitu video siirtymineen ja tehostein',
     clip: 'Leike',

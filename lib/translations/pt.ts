@@ -486,7 +486,7 @@ const pt: TranslationKeys = {
     step1Title: 'Envie Clipes',
     step1Desc: 'Selecione seus clipes de vídeo brutos do seu dispositivo',
     step2Title: 'AI Edita Seu Vídeo',
-    step2Desc: 'GPT-5.2 analisa clipes e cria decisões de edição profissionais',
+    step2Desc: 'Avyron AI analisa clipes e cria decisões de edição profissionais',
     step3Title: 'Receba Seu Vídeo',
     step3Desc: 'Baixe o vídeo final editado com transições e efeitos',
     clip: 'Clipe',

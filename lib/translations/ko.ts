@@ -486,7 +486,7 @@ const ko: TranslationKeys = {
     step1Title: '클립 업로드',
     step1Desc: '기기에서 원본 비디오 클립을 선택하세요',
     step2Title: 'AI가 동영상 편집',
-    step2Desc: 'GPT-5.2가 클립을 분석하고 전문적인 편집 결정을 내립니다',
+    step2Desc: 'Avyron AI가 클립을 분석하고 전문적인 편집 결정을 내립니다',
     step3Title: '동영상 받기',
     step3Desc: '트랜지션과 효과가 포함된 최종 편집 동영상을 다운로드하세요',
     clip: '클립',

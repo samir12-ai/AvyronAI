@@ -48,7 +48,12 @@ export function registerAgentRoutes(app: Express) {
           res.write(`data: ${JSON.stringify({ type: "error", error: error.message })}\n\n`);
           res.end();
         }
-      } catch {}
+      } catch (writeErr) {
+        // Seal #15: surface write-after-end failures on the SSE channel. The
+        // client has already disconnected — we cannot recover, but operators
+        // must see this rather than have it vanish into the void.
+        console.error("[AgentRoutes] SSE_ERROR_WRITE_FAILED", { error: (writeErr as Error)?.message });
+      }
     }
   });
 

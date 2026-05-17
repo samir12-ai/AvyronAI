@@ -367,7 +367,8 @@ export function VideoEditorContent({ colors, isDark }: Props) {
               style={styles.briefBadge}
             >
               <MaterialCommunityIcons name="robot-excited-outline" size={16} color="#fff" />
-              <Text style={styles.briefBadgeText}>GPT-5.2 Powered</Text>
+              {/* Phase 8 — customer surface MUST NOT name model SKUs. */}
+              <Text style={styles.briefBadgeText}>AI-Powered</Text>
             </LinearGradient>
             <Text style={[styles.briefTitle, { color: colors.text }]}>
               {t('videoEditor.briefTitle')}

@@ -17,6 +17,7 @@ import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import type { LiveSnapshotEnvelope } from '@/lib/envelope';
 import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
 
 interface Territory {
   name: string;
@@ -100,6 +101,10 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const { selectedCampaignId } = useCampaign();
+  // Phase 8 defense-in-depth: this component is mounted by the customer-pivot
+  // "Where you stand" tab AND by the operator strategies branch. Engine-named
+  // copy MUST be gated.
+  const operator = useOperatorSurface();
 
   const [snapshot, setSnapshot] = useState<PositioningSnapshot | null>(null);
   const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
@@ -208,7 +213,11 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
             <Ionicons name="compass" size={18} color="#FFFFFF" />
           )}
           <Text style={s.analyzeText}>
-            {analyzing ? 'Analyzing...' : snapshot ? 'Re-analyze Positioning' : 'Run Positioning Engine'}
+            {analyzing
+              ? 'Analyzing...'
+              : snapshot
+                ? (operator.enabled ? 'Re-analyze Positioning' : 'Re-analyze')
+                : (operator.enabled ? 'Run Positioning Engine' : 'Analyze where you stand')}
           </Text>
         </LinearGradient>
       </Pressable>

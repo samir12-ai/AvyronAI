@@ -235,7 +235,14 @@ export function registerAwarenessEngineRoutes(app: Express) {
           const objMap = JSON.parse(miSnapshot.objectionMapData as string);
           miNarrativeObjectionCount = objMap?.totalObjectionsDetected || 0;
           miNarrativeObjectionDensity = objMap?.objectionDensity || 0;
-        } catch {}
+        } catch (parseErr) {
+          // Seal #15: malformed objectionMapData JSON degrades the awareness
+          // narrative inputs. Surface it so a data-quality issue can be traced.
+          console.error("[AwarenessRoutes] OBJECTION_MAP_PARSE_FAILED", {
+            campaignId: campaign?.id,
+            error: (parseErr as Error)?.message,
+          });
+        }
       }
 
       const selectedOfferKey = activeOfferSnapshot.selectedOption || "primary";

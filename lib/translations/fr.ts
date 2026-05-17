@@ -486,7 +486,7 @@ const fr: TranslationKeys = {
     step1Title: 'Téléchargez des Clips',
     step1Desc: 'Sélectionnez vos clips vidéo bruts depuis votre appareil',
     step2Title: 'L\'IA Monte Votre Vidéo',
-    step2Desc: 'GPT-5.2 analyse les clips et crée des décisions de montage professionnelles',
+    step2Desc: 'Avyron AI analyse les clips et crée des décisions de montage professionnelles',
     step3Title: 'Obtenez Votre Vidéo',
     step3Desc: 'Téléchargez la vidéo finale montée avec transitions et effets',
     clip: 'Clip',

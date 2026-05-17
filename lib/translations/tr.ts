@@ -486,7 +486,7 @@ const tr: TranslationKeys = {
     step1Title: 'Klipleri Yükle',
     step1Desc: 'Cihazınızdan ham video klipleri seçin',
     step2Title: 'AI Videonuzu Düzenler',
-    step2Desc: 'GPT-5.2 klipleri analiz eder ve profesyonel düzenleme kararları oluşturur',
+    step2Desc: 'Avyron AI klipleri analiz eder ve profesyonel düzenleme kararları oluşturur',
     step3Title: 'Videonuzu Alın',
     step3Desc: 'Geçişler ve efektlerle son düzenlenmiş videoyu indirin',
     clip: 'Klip',

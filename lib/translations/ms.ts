@@ -486,7 +486,7 @@ const ms: TranslationKeys = {
     step1Title: 'Muat Naik Klip',
     step1Desc: 'Pilih klip video mentah dari peranti anda',
     step2Title: 'AI Sunting Video Anda',
-    step2Desc: 'GPT-5.2 menganalisis klip dan membuat keputusan suntingan profesional',
+    step2Desc: 'Avyron AI menganalisis klip dan membuat keputusan suntingan profesional',
     step3Title: 'Dapatkan Video Anda',
     step3Desc: 'Muat turun video akhir yang disunting dengan peralihan dan kesan',
     clip: 'Klip',

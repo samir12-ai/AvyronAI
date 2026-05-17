@@ -486,7 +486,7 @@ const ro: TranslationKeys = {
     step1Title: 'Încarcă Clipuri',
     step1Desc: 'Selectează clipurile video brute de pe dispozitivul tău',
     step2Title: 'AI Editează Videoul Tău',
-    step2Desc: 'GPT-5.2 analizează clipurile și creează decizii profesionale de editare',
+    step2Desc: 'Avyron AI analizează clipurile și creează decizii profesionale de editare',
     step3Title: 'Primește Videoul Tău',
     step3Desc: 'Descarcă videoul final editat cu tranziții și efecte',
     clip: 'Clip',

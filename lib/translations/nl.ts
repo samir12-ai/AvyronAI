@@ -486,7 +486,7 @@ const nl: TranslationKeys = {
     step1Title: 'Upload Clips',
     step1Desc: 'Selecteer je ruwe videoclips van je apparaat',
     step2Title: 'AI Bewerkt je Video',
-    step2Desc: 'GPT-5.2 analyseert clips en maakt professionele montagebeslissingen',
+    step2Desc: 'Avyron AI analyseert clips en maakt professionele montagebeslissingen',
     step3Title: 'Ontvang je Video',
     step3Desc: 'Download de uiteindelijke bewerkte video met overgangen en effecten',
     clip: 'Clip',

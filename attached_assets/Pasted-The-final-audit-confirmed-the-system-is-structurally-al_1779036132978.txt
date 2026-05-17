@@ -1,0 +1,86 @@
+The final audit confirmed the system is structurally aligned and operationally close to controlled beta readiness.
+
+Before moving into S0/S1 beta usage, I want the remaining high-priority issues resolved immediately.
+
+These are no longer architecture improvements.
+
+They are:
+
+* trust
+* operational visibility
+* customer-surface safety
+* production reliability
+  issues.
+
+Please prioritize the following 3 items immediately.
+
+1. Remove All Silent Catch Paths (Mandatory)
+   The audit identified 5 live production paths still swallowing errors silently:
+
+* server/agent/routes.ts
+* server/awareness-engine/routes.ts
+* server/content-dna-routes.ts
+* server/meta-token-manager.ts
+* server/meta-metrics.ts
+
+This directly violates the continuity doctrine and recreates the exact class of invisible operational failures that previously caused major debugging and trust issues.
+
+I want:
+
+* every silent catch replaced
+* explicit logging added
+* structured event tags added
+* failure visibility restored
+* no hidden runtime failures remaining
+
+No production path should fail invisibly.
+
+2. Remove Customer-Facing Model SKU Leakage
+   The “GPT-5.2 Powered” badge in VideoEditorContent.tsx must be removed immediately.
+
+This violates the customer-surface doctrine and breaks the abstraction layer we intentionally built around:
+
+* outcomes
+* intelligence
+* monitoring
+* reasoning
+
+The product should communicate:
+
+* strategic intelligence
+* operational awareness
+* adaptive monitoring
+
+—not raw model branding or internal AI provider details.
+
+Remove all customer-visible model SKU exposure completely.
+
+3. Verify Operator Surface Isolation
+   The audit flagged possible engine-name leakage risk inside:
+
+* PositioningStrategy.tsx
+* AwarenessEngine.tsx
+* PersuasionEngine.tsx
+* StatisticalValidationEngine.tsx
+
+I need a full verification that:
+
+* customer mode cannot reach these operator-only surfaces
+* no internal engine terminology leaks into customer UX
+* no engine-tab routing accidentally exposes operator architecture
+* 4-pillar abstraction remains intact
+
+If needed:
+add explicit useOperatorSurface() guards inside the components themselves as defense-in-depth.
+
+Most important:
+customers should experience:
+
+* Diagnose
+* Roadmap
+* Monitor
+* Connect
+
+—not internal engine architecture.
+
+Please treat these three items as immediate pre-beta stabilization tasks and verify completion carefully once done.

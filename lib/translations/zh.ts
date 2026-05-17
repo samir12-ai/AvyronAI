@@ -486,7 +486,7 @@ const zh: TranslationKeys = {
     step1Title: '上传片段',
     step1Desc: '从设备中选择原始视频片段',
     step2Title: 'AI剪辑视频',
-    step2Desc: 'GPT-5.2分析片段并创建专业剪辑方案',
+    step2Desc: 'Avyron AI分析片段并创建专业剪辑方案',
     step3Title: '获取视频',
     step3Desc: '下载带有转场和特效的最终视频',
     clip: '片段',
