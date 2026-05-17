@@ -18,19 +18,31 @@ interface Props {
   onPress?: () => void;
 }
 
-function Cell({ line, isDark }: { line: { id: string; line: WatchtowerLine }; isDark: boolean }) {
+const LINE_LABELS: Record<string, string> = {
+  market: 'Market',
+  plan: 'Plan',
+  freshness: 'Data',
+};
+
+function Row({ line, isDark }: { line: { id: string; line: WatchtowerLine }; isDark: boolean }) {
   const c = TONE_COLORS[line.line.tone];
   const textPrimary = isDark ? '#E8EDF2' : '#1A2332';
   const textSec = isDark ? '#8892A4' : '#546478';
+  const label = LINE_LABELS[line.id] ?? line.id;
   return (
-    <View style={[styles.cell, { backgroundColor: c.bg, borderColor: c.border }]}>
-      <View style={styles.cellHeader}>
+    <View style={[styles.row, { backgroundColor: c.bg, borderColor: c.border }]}>
+      <View style={[styles.iconWrap, { backgroundColor: c.accent + '22' }]}>
         <Feather name={c.icon} size={14} color={c.accent} />
-        <Text style={[styles.cellHeadline, { color: textPrimary }]} numberOfLines={1}>{line.line.headline}</Text>
       </View>
-      {line.line.detail ? (
-        <Text style={[styles.cellDetail, { color: textSec }]} numberOfLines={2}>{line.line.detail}</Text>
-      ) : null}
+      <View style={styles.rowBody}>
+        <View style={styles.rowHeader}>
+          <Text style={[styles.rowLabel, { color: c.accent }]}>{label.toUpperCase()}</Text>
+          <Text style={[styles.rowHeadline, { color: textPrimary }]}>{line.line.headline}</Text>
+        </View>
+        {line.line.detail ? (
+          <Text style={[styles.rowDetail, { color: textSec }]}>{line.line.detail}</Text>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -63,9 +75,9 @@ export default function WatchtowerStrip({ campaignId, isDark = true, onPress }: 
       ) : error ? (
         <Text style={[styles.errorText, { color: textSec }]}>Watchtower unavailable</Text>
       ) : (
-        <View style={styles.row}>
+        <View style={styles.stack}>
           {data?.lines.map((l) => (
-            <Cell key={l.id} line={l} isDark={isDark} />
+            <Row key={l.id} line={l} isDark={isDark} />
           ))}
         </View>
       )}
@@ -97,17 +109,29 @@ const styles = StyleSheet.create({
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   title: { fontSize: 11, fontWeight: '700', letterSpacing: 1 },
   timestamp: { fontSize: 11, fontWeight: '500' },
-  row: { flexDirection: 'row', gap: 8 },
-  cell: {
-    flex: 1,
+  stack: { gap: 8 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
     borderRadius: 10,
     borderWidth: 1,
-    padding: 10,
-    minHeight: 64,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
-  cellHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  cellHeadline: { fontSize: 12, fontWeight: '700', flex: 1 },
-  cellDetail: { fontSize: 11, lineHeight: 14 },
+  iconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowHeader: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 },
+  rowLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  rowHeadline: { flex: 1, fontSize: 13, fontWeight: '600', lineHeight: 17 },
+  rowDetail: { fontSize: 11, lineHeight: 15, marginTop: 3 },
   loadingRow: { alignItems: 'center', paddingVertical: 16 },
   errorText: { fontSize: 12, textAlign: 'center', paddingVertical: 12 },
 });
