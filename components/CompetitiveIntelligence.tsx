@@ -227,10 +227,14 @@ export default function CompetitiveIntelligence() {
   }, []);
 
   const analyzeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts?: { forceRefresh?: boolean }) => {
       const res = await authFetch(new URL('/api/ci/mi-v3/analyze', baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({  campaignId: activeCampaignId || 'default', mode: 'overview' }),
+        body: JSON.stringify({
+          campaignId: activeCampaignId || 'default',
+          mode: 'overview',
+          forceRefresh: opts?.forceRefresh === true,
+        }),
       });
       const data = await safeApiJson(res);
       if (!res.ok) throw new Error(data.message || data.error);
@@ -945,7 +949,7 @@ export default function CompetitiveIntelligence() {
 
             <DataFreshnessWarning
               freshnessMetadata={miv3Result?.freshnessMetadata}
-              onRefresh={() => analyzeMutation.mutate()}
+              onRefresh={() => analyzeMutation.mutate({ forceRefresh: true })}
             />
 
             <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
