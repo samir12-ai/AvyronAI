@@ -163,12 +163,13 @@ export function isUnverified(c: StructuralCheck): boolean {
   return UNVERIFIED_STATUSES.includes(c.status);
 }
 
-export interface Contradiction {
-  engineA: string;
-  engineB: string;
-  description: string;
-  resolution: string;
-}
+/**
+ * Phase 3 (Task #66) — Contradiction is now defined in the shared
+ * taxonomy module so that integrity-engine and system-control emit and
+ * dedupe through the same canonical shape. `ContradictionKind` tags the
+ * underlying disagreement so duplicate detections collapse into one row.
+ */
+export type { Contradiction, ContradictionKind } from "../shared/contradictions";
 
 export type RepairActionCode =
   | "INJECT_FALLBACK_CONVERSION"

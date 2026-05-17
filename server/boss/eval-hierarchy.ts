@@ -7,6 +7,22 @@
  *   - Late truth is valid input: counts as "submitted" for hierarchy purposes,
  *     but reduces evaluation_confidence one level.
  *
+ * Phase 3 (Task #66) doctrine — descriptive only / non-authoritative:
+ *   - This module is a CONSUMER of (truth, rhythm) inputs. It does NOT
+ *     emit a verdict, execution-mode, or any downstream-actionable
+ *     decision. Verdict authority is reserved for `server/system-control/`.
+ *   - The returned shape is structurally branded `__evaluationLabel`
+ *     (TypeScript private brand symbol) so it CANNOT be passed where a
+ *     `SystemControlVerdict.executionMode` is expected — the type
+ *     checker now refuses to confuse the two surfaces. The only caller,
+ *     `server/boss/run.ts:280-301`, uses these labels exclusively to
+ *     populate display warning strings (`"evaluation_blocked"`,
+ *     `"evaluation_degraded"`) and the descriptive `execution.evaluation_status`
+ *     field — it does NOT take any branch on them as a verdict.
+ *   - Branch authority for "what does the system do next" lives ONLY in
+ *     `server/system-control/engine.ts::evaluateSystemControl()`.
+ *
+
  * Hierarchy table (T-5.D.2):
  *
  *   truth=submitted + rhythm=compliant     -> complete  + high

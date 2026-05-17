@@ -26,6 +26,7 @@ import { NON_STRATEGIC_MEMORY_TYPES_ARR } from "../decision-policy";
 import { authMiddleware, resolveAccountId, type AuthRequest } from "../auth";
 import { getStoredIntegrityReport } from "../system-integrity/routes";
 import { getCachedCELReport } from "../causal-enforcement-layer/engine";
+import { requireIntegrityVerdict } from "./integrity-verdict";
 
 function computeEffectiveConfidenceFromRow(row: any): number {
   const now = new Date();
@@ -540,7 +541,14 @@ function buildConfidenceSection(
   const svEngine = engines.find(e => e.id === "statistical_validation");
 
   return {
-    integrityStatus: integrityReport?.overallStatus || "N/A",
+    // Phase 3 (Task #66) — canonical integrity-verdict read. INCOMPLETE
+    // surfaces as "INCOMPLETE" (not "N/A") so the display correctly
+    // distinguishes "no report" from "report with missing canonical field".
+    integrityStatus: (() => {
+      const v = requireIntegrityVerdict(integrityReport);
+      // eslint-disable-next-line semantic/no-semantic-fallback -- display-only string; INCOMPLETE is explicitly mapped, not coerced.
+      return v.status === "OK" ? v.value : (integrityReport ? "INCOMPLETE" : "N/A");
+    })(),
     integrityFailures: integrityReport?.failureReasons || [],
     zeroLeakage: integrityReport?.zeroLeakage ?? null,
     fullTraceability: integrityReport?.fullTraceability ?? null,

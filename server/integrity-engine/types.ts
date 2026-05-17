@@ -74,6 +74,14 @@ export interface LayerResult {
   score: number;
   findings: string[];
   warnings: string[];
+  /**
+   * Phase 3 (Task #66) — typed cross-engine contradictions emitted by
+   * this layer. Consumed by system-control via the shared dedupe
+   * pipeline (`server/shared/contradictions.ts::dedupeContradictions`).
+   * Optional during the migration window — layers that have not yet
+   * been converted from string warnings emit `undefined`.
+   */
+  contradictions?: import("../shared/contradictions").Contradiction[];
 }
 
 export interface IntegrityResult {

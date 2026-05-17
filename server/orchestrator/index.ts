@@ -19,6 +19,7 @@ import { summarizeEngine } from "../agent/summarizers";
 import type { IntegrityReport } from "../system-integrity/types";
 import { storeIntegrityReport } from "../system-integrity/routes";
 import { evaluateSystemControl } from "../system-control/engine";
+import { requireIntegrityVerdict } from "../system-control/integrity-verdict";
 import { auditEngineContract } from "./contract-registry";
 import type { SystemControlVerdict } from "../system-control/types";
 import { storeControlVerdict } from "../system-control/routes";
@@ -3821,6 +3822,12 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         // U5c cutover — single source of truth for gate-retry policy.
         // Bit-for-bit equivalent to the prior inline policy (proven by
         // .local/validation/retry-policy-shadow.ts, 180/180 parity).
+        //
+        // Phase 3 (Task #66) acceptance — this is the canonical retry
+        // call site. No inline retry policy remains in the orchestrator;
+        // every mid-pipeline gate retry MUST flow through `planRetry`.
+        // Any future branch that re-introduces inline retry math here
+        // re-opens the dual-owner seam Phase 3 closed.
         const retryDecision = planRetry({
           engineId: engineDef.id,
           gateShouldRetry: gateResult.shouldRetry,
@@ -4073,7 +4080,15 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     }
     ctx.integrityReport = runSystemIntegrityValidation(engineOutputs, ctx.sglState || null);
     storeIntegrityReport(config.campaignId, config.accountId, ctx.integrityReport);
-    console.log(`[Orchestrator] INTEGRITY_REPORT | status=${ctx.integrityReport.overallStatus} | failures=${ctx.integrityReport.failureReasons.length}`);
+    // Phase 3 (Task #66) — canonical integrity-verdict read. INCOMPLETE
+    // surfaces explicitly so a missing-canonical-field run is visible in
+    // the log line, never silently coerced to a PASS/PARTIAL/FAIL value.
+    {
+      const ivr = requireIntegrityVerdict(ctx.integrityReport);
+      // eslint-disable-next-line semantic/no-semantic-fallback -- log line; INCOMPLETE branch is explicitly mapped, not coerced into a verdict value.
+      const verdictForLog = ivr.status === "OK" ? ivr.value : `INCOMPLETE:${ivr.reason}`;
+      console.log(`[Orchestrator] INTEGRITY_REPORT | status=${verdictForLog} | failures=${ctx.integrityReport.failureReasons.length}`);
+    }
   } catch (sivErr: any) {
     console.warn(`[Orchestrator] SIV_FAILED | error=${sivErr.message}`);
   }

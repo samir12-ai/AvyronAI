@@ -38,6 +38,8 @@ import {
   checkConfidenceIntegrity,
   collectBlockReasons,
 } from "./structural-checks";
+import { requireIntegrityVerdict } from "./integrity-verdict";
+import { auditCv05DegradedPropagation } from "./cv05-degraded-propagation";
 import { detectContradictions } from "./contradiction-detector";
 import { assessRepairability, executeRepairActions } from "./repair-actions";
 import { CONTROL_VERSION, INTEGRITY_RESTRICT_THRESHOLD } from "./constants";
@@ -167,8 +169,13 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     downgrades.push(cacCheck.downgrade);
   }
 
+  // Phase 3 (Task #66) — integrity verdict read via canonical helper.
+  // INCOMPLETE branch does NOT silently substitute PARTIAL; the downgrade
+  // is only triggered on a verified PARTIAL verdict.
+  const integrityVerdictPre = requireIntegrityVerdict(input.integrityReport);
   if (
-    input.integrityReport?.overallStatus === "PARTIAL" &&
+    integrityVerdictPre.status === "OK" &&
+    integrityVerdictPre.value === "PARTIAL" &&
     budgetActionValue === "test"
   ) {
     downgrades.push({
@@ -316,8 +323,11 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
             downgrades.push(postCacCheck.downgrade);
           }
 
+          // Phase 3 (Task #66) — canonical integrity-verdict read (post-repair).
+          const integrityVerdictPost = requireIntegrityVerdict(input.integrityReport);
           if (
-            input.integrityReport?.overallStatus === "PARTIAL" &&
+            integrityVerdictPost.status === "OK" &&
+            integrityVerdictPost.value === "PARTIAL" &&
             postRepairBudgetActionValue === "test"
           ) {
             downgrades.push({
@@ -355,7 +365,9 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
       try {
         const partialRepairs = executeRepairActions(
           assessment.recommendedActions,
-          input,
+          input.results,
+          input.integrityReport,
+          input.ssc ?? null,
         );
         repairActions = partialRepairs.map(r => ({
           ...r,
@@ -468,6 +480,14 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   };
 
   logVerdict(result, input.config);
+
+  // Phase 3 (Task #66) — CV-05 degraded-propagation audit. Emits a
+  // `[CV-05] DEGRADED_NOT_PROPAGATED` warn line whenever a known
+  // degraded source upstream of system-control failed to surface as
+  // either a downgrade or a block on the produced verdict. Observation
+  // only — does not mutate the verdict. The auditor is pure (no I/O, no
+  // network); any exception is a programming bug and MUST surface.
+  auditCv05DegradedPropagation(input, result);
 
   return result;
 }

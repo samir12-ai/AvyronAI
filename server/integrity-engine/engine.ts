@@ -213,6 +213,7 @@ export function layer2_audienceOfferAlignment(
   return { layerName: "audience_offer_alignment", passed: score >= 0.5, score: clamp(score), findings, warnings };
 }
 
+// Phase 3 (Task #66) — layer3 emits typed contradictions; see body.
 export function layer3_positioningDifferentiationCompatibility(
   positioning: IntegrityPositioningInput,
   differentiation: IntegrityDifferentiationInput,
@@ -227,8 +228,21 @@ export function layer3_positioningDifferentiationCompatibility(
   const authorityMode = (differentiation.authorityMode || "").toLowerCase();
   const mechanism = differentiation.mechanismFraming?.description || differentiation.mechanismFraming?.name || "";
 
+  // Phase 3 (Task #66) — typed cross-engine contradictions. The string
+  // warnings below now ALSO emit a structured Contradiction entry so
+  // system-control's `dedupeContradictions` can collapse this layer's
+  // findings against any equivalent detection from contradiction-detector.
+  const contradictions: import("../shared/contradictions").Contradiction[] = [];
+
   if (authorityMode.includes("price") && narrative.includes("authority")) {
     warnings.push("Positioning claims authority but differentiation relies on price competition — contradiction");
+    contradictions.push({
+      kind: "positioning_orphan_vs_signal_grounding",
+      engineA: "positioning",
+      engineB: "differentiation",
+      description: "Positioning claims authority but differentiation relies on price competition",
+      resolution: "Reconcile authority claim with a non-price differentiation pillar, or downgrade authority narrative",
+    });
     score -= 0.2;
   }
 
@@ -237,6 +251,13 @@ export function layer3_positioningDifferentiationCompatibility(
     return name.includes("tactical") || name.includes("basic") || name.includes("simple");
   }) && pillars.length > 0) {
     warnings.push("Positioning claims strategic expertise but differentiation pillars are purely tactical");
+    contradictions.push({
+      kind: "positioning_orphan_vs_signal_grounding",
+      engineA: "positioning",
+      engineB: "differentiation",
+      description: "Positioning claims strategic expertise but differentiation pillars are purely tactical",
+      resolution: "Add at least one strategic-level differentiation pillar, or revise positioning narrative",
+    });
     score -= 0.15;
   }
 
@@ -246,6 +267,13 @@ export function layer3_positioningDifferentiationCompatibility(
     const enemyInMechanism = enemyWords.some((w: string) => mechLower.includes(w));
     if (enemyInMechanism) {
       warnings.push("Enemy narrative language appears in differentiation mechanism — potential narrative contradiction");
+      contradictions.push({
+        kind: "positioning_orphan_vs_signal_grounding",
+        engineA: "positioning",
+        engineB: "differentiation",
+        description: "Enemy narrative language appears in differentiation mechanism — potential narrative contradiction",
+        resolution: "Reframe mechanism description to avoid enemy vocabulary, OR strengthen the framing as a deliberate counter-mechanism",
+      });
       score -= 0.1;
     }
   }
@@ -268,7 +296,7 @@ export function layer3_positioningDifferentiationCompatibility(
     findings.push("Positioning and differentiation are structurally compatible");
   }
 
-  return { layerName: "positioning_differentiation_compatibility", passed: score >= 0.5, score: clamp(score), findings, warnings };
+  return { layerName: "positioning_differentiation_compatibility", passed: score >= 0.5, score: clamp(score), findings, warnings, contradictions };
 }
 
 export function layer4_offerFunnelCompatibility(

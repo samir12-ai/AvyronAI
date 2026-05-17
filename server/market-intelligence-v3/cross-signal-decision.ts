@@ -796,6 +796,17 @@ export function runCrossSignalDecisionLayer(
   const validatedHooks = decisions.filter(d => d.type === "VALIDATED_HOOK");
   const confirmedObjections = decisions.filter(d => d.type === "CONFIRMED_OBJECTION");
   const weakSignals = decisions.filter(d => d.type === "WEAK_SIGNAL");
+  // Phase 3 (Task #66) — taxonomy scoping note. `conflictedSignals`
+  // describes disagreements BETWEEN data SOURCES for the same audience
+  // signal (e.g., Instagram says pain X, reviews say pain Y). This is a
+  // different domain from the cross-engine Contradiction taxonomy in
+  // `server/shared/contradictions.ts`, which describes disagreements
+  // BETWEEN STRATEGIC ENGINES on the same plan. Both surfaces are kept
+  // intentionally separate: the cross-source conflicts here flow into
+  // MI's own `dataReliability` / `disagreementRate` outputs, which the
+  // cross-engine `validation_state_vs_decision_action` contradiction in
+  // contradiction-detector.ts already consumes via the
+  // `iteration.dataReliability.isWeak` short-circuit at the engine seam.
   const conflictedSignals = decisions.filter(d => d.type === "CONFLICTED_SIGNAL");
 
   const aggregateConfidence = decisions.length > 0

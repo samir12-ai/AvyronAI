@@ -11,7 +11,13 @@ import * as crypto from "crypto";
 import { buildStrategicContext, type StrategicContext } from "../output-projection/context-kernel";
 import { wrapEngineOutput, type EngineOutput } from "../output-projection/engine-contract";
 import { validateSectionConsumption, type OutputType } from "../output-projection/output-types";
-import { evaluateUncertainty, type UncertaintyResult } from "../output-projection/uncertainty-guard";
+// Phase 3 (Task #66) — pre-plan gate verdict is owned by system-control.
+// `uncertainty-guard` is now metrics-only; the BLOCK/DOWNGRADE/PROCEED
+// decision flows through `decidePrePlanGate` so a single directory owns
+// verdict emission. (Task #68 renamed engine-contracts → output-projection;
+// imports updated accordingly during rebase.)
+import { analyzeUncertaintyMetrics } from "../output-projection/uncertainty-guard";
+import { decidePrePlanGate, type PrePlanGateResult } from "../system-control/pre-plan-gate";
 import { validateExecutionRoute } from "../output-projection/execution-map";
 import { enforceOutputType } from "../output-projection/type-enforcement";
 import { globalRegistry } from "../output-projection/engine-registry";
@@ -713,9 +719,9 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       }
     }
 
-    let uncertaintyResult: UncertaintyResult | null = null;
+    let uncertaintyResult: PrePlanGateResult | null = null;
     if (engineOutputs.length > 0) {
-      uncertaintyResult = evaluateUncertainty(engineOutputs);
+      uncertaintyResult = decidePrePlanGate(analyzeUncertaintyMetrics(engineOutputs));
       log("UNCERTAINTY_GUARD", {
         decision: uncertaintyResult.decision,
         confidence: uncertaintyResult.aggregatedConfidence,

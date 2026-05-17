@@ -48,16 +48,22 @@ export {
   getValidRoutesForOutput,
 } from './execution-map';
 
+// Phase 3 (Task #66) — uncertainty-guard is now metrics-only; the
+// PROCEED/DOWNGRADE/BLOCK verdict was relocated to
+// `server/system-control/pre-plan-gate.ts::decidePrePlanGate()` so
+// verdict-emission authority lives in one directory. The removed
+// exports (UNCERTAINTY_DECISIONS, UncertaintyDecision, UncertaintyResult,
+// DEFAULT_THRESHOLDS, evaluateUncertainty) are intentionally not
+// re-exported — callers must compose `analyzeUncertaintyMetrics` with
+// `decidePrePlanGate`.
 export {
-  UNCERTAINTY_DECISIONS,
-  type UncertaintyDecision,
   type UncertaintyThresholds,
-  DEFAULT_THRESHOLDS,
-  type UncertaintyResult,
+  type UncertaintyMetrics,
+  DEFAULT_UNCERTAINTY_THRESHOLDS,
   aggregateConfidence,
   aggregateCompleteness,
   collectRiskFlags,
-  evaluateUncertainty,
+  analyzeUncertaintyMetrics,
 } from './uncertainty-guard';
 
 export {

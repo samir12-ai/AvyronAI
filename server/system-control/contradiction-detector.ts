@@ -1,8 +1,10 @@
 import type { EngineId, EngineStepResult } from "../orchestrator/priority-matrix";
 import type { IntegrityReport } from "../system-integrity/types";
 import type { Contradiction } from "./types";
+import { dedupeContradictions } from "../shared/contradictions";
 import { INTEGRITY_RESTRICT_THRESHOLD } from "./constants";
 import { requireContractField } from "../orchestrator/contract-registry";
+import { requireIntegrityVerdict } from "./integrity-verdict";
 
 // Phase C1: same `funnelStages` cutover as in structural-checks.ts. Both
 // detectors below previously read `channelResult.output.funnelStages`
@@ -41,7 +43,32 @@ export function detectContradictions(
   detectChannelSelectionPersuasionMismatch(results, contradictions);
   detectFunnelIterationConflict(results, contradictions);
 
-  return contradictions;
+  // Phase 3 (Task #66) — ingest integrity-engine LayerResult contradictions
+  // into the same dedupe pool. The integrity-engine emits typed
+  // Contradiction entries on `layerResult.contradictions` (see
+  // server/integrity-engine/engine.ts layer3); shared taxonomy + dedupe
+  // collapses any equivalent row already produced by the system-control
+  // detectors above. Behavior on missing/legacy shapes is INCOMPLETE-safe:
+  // an integrity engine result that lacks layerResults or contradictions
+  // simply contributes nothing.
+  const integrityEngineOutput = (results.get("integrity") as EngineStepResult | undefined)?.output as
+    | { layerResults?: Array<{ contradictions?: Contradiction[] }> }
+    | undefined;
+  const integrityLayers = integrityEngineOutput?.layerResults;
+  if (Array.isArray(integrityLayers)) {
+    for (const layer of integrityLayers) {
+      if (layer && Array.isArray(layer.contradictions)) {
+        for (const c of layer.contradictions) {
+          if (c && typeof c === "object") contradictions.push(c);
+        }
+      }
+    }
+  }
+
+  // Shared dedupe: same (kind|engineA|engineB) reported by two detectors
+  // collapses to the first occurrence — system-control detectors run
+  // before integrity-engine entries, so the verdict-owner voice wins.
+  return dedupeContradictions(contradictions);
 }
 
 /**
@@ -104,6 +131,7 @@ function detectFunnelIterationConflict(
   const cur = conversionGap.currentValue;
   const tgt = conversionGap.targetValue;
   contradictions.push({
+    kind: "validation_state_vs_decision_action",
     engineA: "funnel",
     engineB: "iteration",
     description:
@@ -133,6 +161,7 @@ function detectBudgetScaleNoConversion(
 
   if (action === "scale" && (!conversionChannels || conversionChannels.length === 0)) {
     contradictions.push({
+      kind: "budget_scaling_vs_unverified_cac",
       engineA: "budget_governor",
       engineB: "channel_selection",
       description: "Budget governor recommends scaling but no conversion channel exists in the funnel",
@@ -151,8 +180,14 @@ function detectBudgetScaleWeakIntegrity(
 
   const action = budgetResult.output.decision?.action;
 
-  if (action === "scale" && integrityReport.overallStatus === "PARTIAL") {
+  // Phase 3 (Task #66) — canonical integrity-verdict read. INCOMPLETE
+  // skips the contradiction (cannot prove disagreement without a
+  // verified verdict); FAIL is handled by checkIntegrityStatus + the
+  // budget-governor block path, not here.
+  const verdict = requireIntegrityVerdict(integrityReport);
+  if (action === "scale" && verdict.status === "OK" && verdict.value === "PARTIAL") {
     contradictions.push({
+      kind: "budget_scaling_vs_integrity_partial",
       engineA: "budget_governor",
       engineB: "system_integrity",
       description: "Budget governor recommends scaling but system integrity is only PARTIAL",
@@ -180,6 +215,7 @@ function detectApprovedPlanIncompleteContext(
     const action = budgetResult?.output?.decision?.action;
     if (action && action !== "halt") {
       contradictions.push({
+        kind: "approved_plan_vs_incomplete_context",
         engineA: "orchestrator",
         engineB: missing.join(", "),
         description: `Plan proceeding with budget action "${action}" but critical engines are missing/failed: ${missing.join(", ")}`,
@@ -209,6 +245,7 @@ function detectFunnelPassStructuralWeakness(
 
       if (awarenessCount === 0 || nurtureCount === 0 || conversionCount === 0) {
         contradictions.push({
+          kind: "validation_state_vs_decision_action",
           engineA: "funnel",
           engineB: "channel_selection",
           description: `Funnel engine passed (SUCCESS) but channel selection has incomplete stage coverage: awareness=${awarenessCount}, nurture=${nurtureCount}, conversion=${conversionCount}`,
@@ -233,6 +270,7 @@ function detectChannelSelectionPersuasionMismatch(
 
   if (persuasionMismatch) {
     contradictions.push({
+      kind: "channel_recommendation_vs_low_confidence",
       engineA: "channel_selection",
       engineB: "persuasion",
       description: "Channel selection detected persuasion mode incompatibility with assigned channels",

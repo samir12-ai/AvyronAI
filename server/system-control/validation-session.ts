@@ -1,5 +1,6 @@
 /**
- * Validation-session loop guard — Task #68 / Phase 5 Step 6.
+ * Validation-session loop guard — Task #68 / Phase 5 Step 6
+ * (also targeted by Task #66 Phase 3; merged into Task #68 ownership).
  *
  * Owner: System Control (the verdict-and-loop authority layer). Prior to
  * Task #68 this lived in `server/engine-hardening/index.ts` next to
@@ -16,6 +17,9 @@
  * Doctrine alignment:
  *   - D2: validation-session ownership is now a single canonical concern.
  *   - D5: `allowed=false` returns a typed warning, never a silent block.
+ *
+ * Behavior is preserved bit-for-bit (5-minute TTL, 2-call ceiling per
+ * engine per session) — ownership change only, no policy change.
  */
 
 import type { ValidationSession } from "../engine-hardening/types";
@@ -23,7 +27,7 @@ import type { ValidationSession } from "../engine-hardening/types";
 const activeSessions = new Map<string, ValidationSession>();
 const SESSION_TTL_MS = 5 * 60 * 1000;
 
-function cleanExpiredSessions() {
+function cleanExpiredSessions(): void {
   const now = Date.now();
   for (const [key, session] of activeSessions.entries()) {
     if (now - session.createdAt > SESSION_TTL_MS) {
@@ -32,6 +36,14 @@ function cleanExpiredSessions() {
   }
 }
 
+/**
+ * Returns `{ allowed: true }` when the engine may safely run inside the
+ * validation session, or `{ allowed: false, warning }` when the per-session
+ * per-engine ceiling has been reached (revalidation loop guard).
+ *
+ * `sessionId === undefined` is treated as "not inside a validation session"
+ * and always returns `allowed: true`.
+ */
 export function checkValidationSession(
   sessionId: string | undefined,
   engineName: string,

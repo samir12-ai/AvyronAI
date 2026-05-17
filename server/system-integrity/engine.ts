@@ -342,6 +342,11 @@ export function runSystemIntegrityValidation(
     reportId,
     timestamp: new Date().toISOString(),
     overallStatus,
+    // Phase 3 (Task #66) — canonical integrity VERDICT field. Mirrors
+    // overallStatus during the transition window so the live
+    // requireIntegrityVerdict() boundary resolves OK on every report
+    // emitted from this validator. See system-control/integrity-verdict.ts.
+    integrityVerdict: overallStatus,
     engineChecks,
     crossEngineAlignment: crossAlignments,
     signalFlowVerified,

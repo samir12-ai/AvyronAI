@@ -12,6 +12,7 @@ import {
   CHANNEL_CONFIDENCE_MINIMUM,
 } from "./constants";
 import { requireContractField } from "../orchestrator/contract-registry";
+import { requireIntegrityVerdict } from "./integrity-verdict";
 
 // Phase C1 (May 2026) — funnelStages cutover. The 5 historical readers of
 // `channel_selection.output.funnelStages` (which the engine actually writes
@@ -213,17 +214,22 @@ export function checkSignalGrounding(
 }
 
 export function checkIntegrityStatus(integrityReport: IntegrityReport | null): StructuralCheck {
-  if (!integrityReport) {
-    return unknown("integrity_status", "no integrity report available — cannot verify integrity");
+  // Phase 3 (Task #66) — canonical integrity-verdict read. INCOMPLETE
+  // surfaces as UNKNOWN, never silently coerced to PASS (D5: no
+  // substitution).
+  const verdict = requireIntegrityVerdict(integrityReport);
+  if (verdict.status === "INCOMPLETE") {
+    return unknown("integrity_status", `integrity verdict CONTRACT_INCOMPLETE — ${verdict.reason}`);
   }
 
-  if (integrityReport.overallStatus === "FAIL") {
-    return fail("integrity_status", `Integrity FAIL: ${integrityReport.failureReasons.join("; ")}`);
+  if (verdict.value === "FAIL") {
+    const reasons = integrityReport?.failureReasons?.join("; ") || "unspecified";
+    return fail("integrity_status", `Integrity FAIL: ${reasons}`);
   }
 
   return pass(
     "integrity_status",
-    `Integrity ${integrityReport.overallStatus} — leakage=${integrityReport.zeroLeakage ? "none" : "detected"} traceability=${integrityReport.traceabilityComplete ? "complete" : "incomplete"}`,
+    `Integrity ${verdict.value} — leakage=${integrityReport?.zeroLeakage ? "none" : "detected"} traceability=${integrityReport?.traceabilityComplete ? "complete" : "incomplete"}`,
   );
 }
 
@@ -232,7 +238,20 @@ export function checkCELCompliance(celResults: ComplianceResult[]): StructuralCh
     return unknown("cel_compliance", "no CEL results available — cannot verify causal compliance");
   }
 
-  const failed = celResults.filter((c: any) => c.passed === false || c.overallPassed === false);
+  // Phase 3 (Task #66) — dedupe by engineId before counting. Positioning's
+  // CEL compliance is evaluated twice in some pipelines (base evaluation +
+  // depth-compliance evaluation); pre-Phase 3 that produced two structural
+  // FAIL rows for one underlying violation. checkPositioningHardGate
+  // already surfaces the positioning-specific block; we keep the CEL
+  // structural check at one row per engine.
+  const failedByEngine = new Map<string, ComplianceResult>();
+  for (const c of celResults) {
+    const isFailed = (c as any).passed === false || (c as any).overallPassed === false;
+    if (!isFailed) continue;
+    const key = c.engineId || "unknown_engine";
+    if (!failedByEngine.has(key)) failedByEngine.set(key, c);
+  }
+  const failed = Array.from(failedByEngine.values());
   if (failed.length > 0) {
     return fail("cel_compliance", `${failed.length} CEL check(s) failed`);
   }

@@ -2,6 +2,7 @@ const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
 const noSemanticFallback = require('./.local/eslint-rules/no-semantic-fallback.js');
 const noDirectStrategyMemoryWrite = require('./.local/eslint-rules/no-direct-strategy-memory-write.js');
+const noValidateDecisionMemoryWriteImport = require('./.local/eslint-rules/no-validate-decision-memory-write-import.js');
 
 module.exports = defineConfig([
   expoConfig,
@@ -85,6 +86,26 @@ module.exports = defineConfig([
     },
     rules: {
       "canonical-fact/no-direct-strategy-memory-write": "error",
+    },
+  },
+  // Task #66 / Phase 3 — Enforcement Consolidation.
+  // Forbids importing `validateDecisionForMemoryWrite` outside the
+  // decision-policy module + the approved consumer list. Re-opening the
+  // dual-gate seam (a second consumer of the gate function) would
+  // re-introduce the divergence Phase 1 closed.
+  {
+    files: ["server/**/*.ts"],
+    ignores: [
+      "server/tests/**/*.ts",
+      "server/migrations/**/*.ts",
+    ],
+    plugins: {
+      "decision-policy": {
+        rules: { "no-validate-decision-memory-write-import": noValidateDecisionMemoryWriteImport },
+      },
+    },
+    rules: {
+      "decision-policy/no-validate-decision-memory-write-import": "error",
     },
   },
 ]);

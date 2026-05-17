@@ -3,6 +3,7 @@ import type { IntegrityReport } from "../system-integrity/types";
 import type { SharedStrategicContext } from "../orchestrator/shared-strategic-context";
 import type { BlockReason, RepairAction, RepairActionCode, BlockCode } from "./types";
 import { getContractFieldRaw } from "../orchestrator/contract-registry";
+import { requireIntegrityVerdict } from "./integrity-verdict";
 
 // v1 Actionable Block Recovery (May 2026). Confidence-clamp delta — caps a
 // repaired engine's combinedConfidence at `inheritedFloor + DELTA` (the same
@@ -249,8 +250,12 @@ function executeScaleDowngrade(results: Map<EngineId, EngineStepResult>): boolea
 }
 
 function executeIntegrityRevalidation(integrityReport: IntegrityReport | null): boolean {
-  if (!integrityReport) return false;
-  return integrityReport.overallStatus !== "FAIL";
+  // Phase 3 (Task #66) — canonical integrity-verdict read. INCOMPLETE
+  // returns false (cannot claim revalidation succeeded without a verified
+  // verdict). PASS or PARTIAL counts as "not FAIL" → success.
+  const verdict = requireIntegrityVerdict(integrityReport);
+  if (verdict.status === "INCOMPLETE") return false;
+  return verdict.value !== "FAIL";
 }
 
 function getRepairDescription(code: RepairActionCode, block: BlockReason): string {

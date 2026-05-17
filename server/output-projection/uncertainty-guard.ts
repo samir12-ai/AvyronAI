@@ -1,7 +1,23 @@
-import type { EngineOutput } from './engine-contract';
+/**
+ * Phase 3 (Task #66) — uncertainty-guard is now METRICS-ONLY.
+ *
+ * Verdict authority (PROCEED/DOWNGRADE/BLOCK) was relocated to
+ * `server/system-control/pre-plan-gate.ts::decidePrePlanGate()` so the
+ * pre-plan and post-engine verdicts share a single owning directory.
+ *
+ * This module exposes:
+ *   - the metric aggregations (`aggregateConfidence`, `aggregateCompleteness`,
+ *     `collectRiskFlags`)
+ *   - `analyzeUncertaintyMetrics()` — a pure aggregator that returns a
+ *     numeric/flags snapshot, no decision enum.
+ *
+ * The decision-emitting `evaluateUncertainty()` was removed. Callers
+ * MUST compose `analyzeUncertaintyMetrics()` with `decidePrePlanGate()`
+ * (or another system-control-owned decision function) — this prevents a
+ * future caller from re-introducing a parallel verdict producer.
+ */
 
-export const UNCERTAINTY_DECISIONS = ['PROCEED', 'DOWNGRADE', 'BLOCK'] as const;
-export type UncertaintyDecision = (typeof UNCERTAINTY_DECISIONS)[number];
+import type { EngineOutput } from './engine-contract';
 
 export interface UncertaintyThresholds {
   confidenceProceed: number;
@@ -11,7 +27,7 @@ export interface UncertaintyThresholds {
   maxCriticalRiskFlags: number;
 }
 
-export const DEFAULT_THRESHOLDS: UncertaintyThresholds = {
+export const DEFAULT_UNCERTAINTY_THRESHOLDS: UncertaintyThresholds = {
   confidenceProceed: 60,
   confidenceDowngrade: 40,
   completenessProceed: 60,
@@ -19,12 +35,16 @@ export const DEFAULT_THRESHOLDS: UncertaintyThresholds = {
   maxCriticalRiskFlags: 2,
 };
 
-export interface UncertaintyResult {
-  decision: UncertaintyDecision;
+/**
+ * Phase 3 (Task #66) — metrics-only snapshot. NO verdict enum. Callers
+ * route this through `decidePrePlanGate` (system-control) to obtain a
+ * PROCEED/DOWNGRADE/BLOCK decision.
+ */
+export interface UncertaintyMetrics {
   aggregatedConfidence: number;
   aggregatedCompleteness: number;
   riskFlags: string[];
-  reasoning: string;
+  sampleSize: number;
 }
 
 export function aggregateConfidence(outputs: EngineOutput[]): number {
@@ -48,64 +68,19 @@ export function collectRiskFlags(outputs: EngineOutput[]): string[] {
   return flags;
 }
 
-export function evaluateUncertainty(
-  outputs: EngineOutput[],
-  thresholds: UncertaintyThresholds = DEFAULT_THRESHOLDS
-): UncertaintyResult {
-  if (outputs.length === 0) {
-    return {
-      decision: 'BLOCK',
-      aggregatedConfidence: 0,
-      aggregatedCompleteness: 0,
-      riskFlags: [],
-      reasoning: 'No engine outputs to evaluate — cannot proceed with empty data.',
-    };
-  }
-
-  const confidence = aggregateConfidence(outputs);
-  const completeness = aggregateCompleteness(outputs);
-  const riskFlags = collectRiskFlags(outputs);
-  const criticalFlagCount = riskFlags.length;
-
-  if (criticalFlagCount > thresholds.maxCriticalRiskFlags) {
-    return {
-      decision: 'BLOCK',
-      aggregatedConfidence: confidence,
-      aggregatedCompleteness: completeness,
-      riskFlags,
-      reasoning: `Too many risk flags (${criticalFlagCount}/${thresholds.maxCriticalRiskFlags} max). ` +
-        `Flags: [${riskFlags.join('; ')}]. Plan generation halted.`,
-    };
-  }
-
-  if (confidence < thresholds.confidenceDowngrade || completeness < thresholds.completenessDowngrade) {
-    return {
-      decision: 'BLOCK',
-      aggregatedConfidence: confidence,
-      aggregatedCompleteness: completeness,
-      riskFlags,
-      reasoning: `Confidence (${confidence}%) or completeness (${completeness}%) below minimum threshold ` +
-        `(${thresholds.confidenceDowngrade}%). Insufficient data for reliable plan.`,
-    };
-  }
-
-  if (confidence < thresholds.confidenceProceed || completeness < thresholds.completenessProceed) {
-    return {
-      decision: 'DOWNGRADE',
-      aggregatedConfidence: confidence,
-      aggregatedCompleteness: completeness,
-      riskFlags,
-      reasoning: `Confidence (${confidence}%) or completeness (${completeness}%) below proceed threshold ` +
-        `(${thresholds.confidenceProceed}%). Recommendations marked as low-confidence.`,
-    };
-  }
-
+/**
+ * Pure metric aggregator. Returns the numeric snapshot the
+ * `decidePrePlanGate` (system-control) owner uses to emit a verdict.
+ *
+ * Phase 3 doctrine guard: do NOT add `decision: PROCEED|...` here.
+ * If a future change wants to re-introduce a decision enum, it MUST
+ * live in `server/system-control/`.
+ */
+export function analyzeUncertaintyMetrics(outputs: EngineOutput[]): UncertaintyMetrics {
   return {
-    decision: 'PROCEED',
-    aggregatedConfidence: confidence,
-    aggregatedCompleteness: completeness,
-    riskFlags,
-    reasoning: `All thresholds met. Confidence: ${confidence}%, Completeness: ${completeness}%, ` +
-      `Risk flags: ${criticalFlagCount}.`,
+    aggregatedConfidence: aggregateConfidence(outputs),
+    aggregatedCompleteness: aggregateCompleteness(outputs),
+    riskFlags: collectRiskFlags(outputs),
+    sampleSize: outputs.length,
   };
 }

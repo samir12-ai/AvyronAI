@@ -103,6 +103,19 @@ export function applySoftSanitization(text: string, softPatterns: SoftPattern[])
   return result;
 }
 
+/**
+ * Phase 3 (Task #66) — `normalizeConfidence` is a numeric CAP-ONLY
+ * helper. It MUST NOT emit a verdict (PASS/PARTIAL/FAIL), an execution
+ * mode, or any other categorical decision; verdict authority is reserved
+ * for `server/system-control/`. The caps below downgrade the magnitude
+ * of an engine-emitted confidence number when upstream reliability is
+ * weak; system-control is the sole consumer that translates the
+ * resulting integrity verdict into a downgrade.
+ *
+ * Doctrine guard: do not add `if (reliability.isWeak) return "FAIL"`
+ * (or analogous string returns) here — that would re-open the
+ * dual-owner seam that Phase 3 closed.
+ */
 export function normalizeConfidence(
   rawScore: number,
   reliability: DataReliabilityDiagnostics
@@ -194,6 +207,8 @@ export function detectGenericOutput(text: string): GenericOutputResult {
 // keep building without churn. New code MUST import from
 // `@/system-control/validation-session`. This shim is sunset-tracked
 // under follow-up #79 and removed once all callers have migrated.
+// (Phase 3 / Task #66 also targeted this relocation — same destination,
+// merged into the Task #68 ownership doctrine.)
 export { checkValidationSession } from "../system-control/validation-session";
 
 export function detectNarrativeOverlap(
