@@ -225,6 +225,16 @@ export const strategyMemory = pgTable("strategy_memory", {
   campaignType: text("campaign_type"),
   funnelObjective: text("funnel_objective"),
   sourceOutcomeId: varchar("source_outcome_id"),
+  // Task #65 / Phase 2 — DEC-B FK on strategy_decisions.id. Nullable for
+  // legacy/backfilled rows; new reinforcement-path writes populate this
+  // so updates can target by the decision that triggered them.
+  decisionId: varchar("decision_id"),
+  // Task #65 / Phase 2 — explicit provenance tag for every write.
+  // Canonical values: 'outcome' | 'mutation' | 'engine_seed' |
+  // 'exploration' | 'decay' | 'unknown'. Non-outcome writes that lack a
+  // sourceOutcomeId set this to a non-'unknown' value so audits can
+  // distinguish "never had a source" from "writer didn't declare one".
+  provenanceOrigin: text("provenance_origin").default("unknown"),
 });
 
 // Task #64 / Phase 1 — Canonical Fact Ownership.

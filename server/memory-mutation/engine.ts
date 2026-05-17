@@ -1,14 +1,25 @@
 import { db } from "../db";
 import { strategyMemory, contentPerformanceSnapshots, calendarEntries, userChannelSnapshots } from "@shared/schema";
-import { eq, and, lt, gt, desc, isNotNull } from "drizzle-orm";
+import { eq, and, gt, desc, isNotNull } from "drizzle-orm";
 import { checkResultsOverrideMemory } from "../orchestrator/memory-context";
 import type { MemoryClass, MemoryDirection, MemorySlot, PerformanceSnapshot } from "../memory-system/types";
 import { applyFallbackSourcePenalty, DECISION_CONFIDENCE_THRESHOLDS, NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
-import { upsertByFingerprint, applyDecayUpdate, applyTimeDecayUpdate, applyMutationUpdate } from "../memory-system/store";
+import { upsertByFingerprint, applyMutationUpdate } from "../memory-system/store";
 import { recordMutationRun, getLatestMutationRun } from "../memory-system/mutation-log-store";
 
-const DECAY_HALF_LIFE_DAYS = 30;
-const DECAY_THRESHOLD = 0.05;
+// Task #65 / Phase 2 step 5 — DECAY UNIFICATION.
+// Pre-#65 there were two decay implementations:
+//   (a) write-time half-life (computeDecay + applyConfidenceDecay here, plus
+//       a per-format decay loop at the tail of runMemoryMutation), and
+//   (b) read-time multiplicative decay (computeEffectiveConfidence in
+//       manager.ts and store.ts).
+// They drifted in semantics — (a) compounded with elapsed days, (b)
+// compounded with elapsed read-periods — so the same row could be reported
+// as "confident" by a write path and "decayed" by a read path on the same
+// tick. Phase 2 removes (a) entirely; (b) is now the canonical decay layer.
+// The `decayed` counter on MutationSummary is retained at 0 for the
+// MemoryMutationResult schema; mutation_log keeps a "decayedCount" column
+// for historical inspection.
 
 interface MemoryMutationEntry {
   engineName: string;
@@ -19,11 +30,6 @@ interface MemoryMutationEntry {
   direction?: "reinforce" | "avoid" | "neutral";
   isWinner?: boolean;
   planId?: string | null;
-}
-
-function computeDecay(score: number, daysSinceUpdate: number): number {
-  const halfLifeFactor = Math.pow(0.5, daysSinceUpdate / DECAY_HALF_LIFE_DAYS);
-  return score * halfLifeFactor;
 }
 
 export async function applyMemoryMutation(
@@ -55,6 +61,7 @@ export async function applyMemoryMutation(
       confidenceScore: confidence,
       direction,
       planId,
+      provenanceOrigin: "mutation",
     });
     if (!result.allowed) {
       console.log(`[MemoryMutation] WRITE_BLOCKED | label="${entry.label.slice(0, 60)}" confidence=${confidence} engine=${entry.engineName} reason="${result.reason}"`);
@@ -64,46 +71,10 @@ export async function applyMemoryMutation(
     else updated++;
   }
 
-  decayed = await applyConfidenceDecay(campaignId, accountId);
-
+  // Task #65 / Phase 2 step 5 — write-time decay removed; read-time
+  // multiplicative decay (manager.computeEffectiveConfidence) is canonical.
   console.log(`[MemoryMutation] written=${written} updated=${updated} decayed=${decayed} | campaign=${campaignId}`);
   return { written, updated, decayed };
-}
-
-async function applyConfidenceDecay(campaignId: string, accountId: string): Promise<number> {
-  const staleThreshold = new Date(Date.now() - DECAY_HALF_LIFE_DAYS * 24 * 60 * 60 * 1000);
-
-  const staleRows = await db
-    .select()
-    .from(strategyMemory)
-    .where(
-      and(
-        eq(strategyMemory.accountId, accountId),
-        eq(strategyMemory.campaignId, campaignId),
-        lt(strategyMemory.updatedAt, staleThreshold),
-      )
-    );
-
-  let decayed = 0;
-  for (const row of staleRows) {
-    if (!row.updatedAt || (row.score ?? 0) < DECAY_THRESHOLD) continue;
-    const daysSince = (Date.now() - row.updatedAt.getTime()) / (1000 * 60 * 60 * 24);
-    const newScore = computeDecay(row.score ?? 0, daysSince);
-
-    if (newScore < DECAY_THRESHOLD) {
-      await applyTimeDecayUpdate(row.id, { kind: "neutralize" });
-    } else {
-      const decayedConfidence = Math.max(0, Math.min(1, newScore));
-      await applyTimeDecayUpdate(row.id, {
-        kind: "decline",
-        score: newScore,
-        confidenceScore: decayedConfidence,
-      });
-    }
-    decayed++;
-  }
-
-  return decayed;
 }
 
 export async function recordWinnerMemory(
@@ -136,7 +107,6 @@ const MIN_PERIODS_FOR_FLIP = 3;
 const BELOW_BASELINE_THRESHOLD = 0.15;
 const CONFIDENCE_INCREMENT = 0.05;
 const FLIP_RESET_CONFIDENCE = 0.35;
-const DECAY_NEUTRAL_THRESHOLD = 0.1;
 const INDUSTRY_BASELINE_DEFAULT = 0.5;
 const MAX_SNAPSHOTS = 4;
 
@@ -301,6 +271,7 @@ async function processExplorationResults(
             details,
             confidenceScore: PROVISIONAL_CONFIDENCE,
             direction: "reinforce",
+            provenanceOrigin: "exploration",
           });
           if (!result.allowed) {
             console.log(`[MemoryMutation] MEMORY_WRITE_BLOCKED | format=${fmt} reason="${result.reason}"`);
@@ -325,7 +296,13 @@ async function resolveIndustryBaseline(accountId: string, campaignId: string): P
         (bl.reelsPerWeek + bl.postsPerWeek + bl.storiesPerDay + bl.carouselsPerWeek) / 4;
       return avg > 0 ? Math.min(1.0, avg / 10) : INDUSTRY_BASELINE_DEFAULT;
     }
-  } catch {}
+  } catch (err: any) {
+    // Seal #15 silent-degradation rules — no bare catch on a trusted read.
+    console.error(
+      `[MemoryMutation] INDUSTRY_BASELINE_READ_FAILED | account=${accountId} campaign=${campaignId} ` +
+      `err="${err?.message ?? String(err)}" — falling back to INDUSTRY_BASELINE_DEFAULT=${INDUSTRY_BASELINE_DEFAULT}`,
+    );
+  }
   return INDUSTRY_BASELINE_DEFAULT;
 }
 
@@ -357,7 +334,12 @@ async function checkScrapeHealthForAccount(
       } else {
         break;
       }
-    } catch {
+    } catch (err: any) {
+      // Seal #15 — corrupt snapshot rows shouldn't be silently squelched.
+      console.error(
+        `[MemoryMutation] SNAPSHOT_PARSE_FAILED | account=${accountId} ` +
+        `err="${err?.message ?? String(err)}" — treating as non-FAILED and ending degradation scan.`,
+      );
       break;
     }
   }
@@ -585,22 +567,14 @@ export async function runMemoryMutation(
     }
   }
 
-  for (const row of eligible) {
-    if (validatedIds.has(row.id)) continue;
-    const fmt = detectContentFormat({ label: row.label, details: row.details ?? null });
-    if (!fmt) continue;
-
-    const currentConfidence = row.confidenceScore ?? 0.5;
-    const decayRate = row.decayRate ?? 0.95;
-    const effectiveConfidence = currentConfidence * decayRate;
-
-    if (effectiveConfidence < DECAY_NEUTRAL_THRESHOLD) {
-      await applyDecayUpdate(row.id, effectiveConfidence, /* flipToNeutral */ true);
-      summary.decayed++;
-    } else {
-      await applyDecayUpdate(row.id, effectiveConfidence, /* flipToNeutral */ false);
-    }
-  }
+  // Task #65 / Phase 2 step 5 — the per-row write-time decay loop that used
+  // to live here is removed. Read-time multiplicative decay in
+  // computeEffectiveConfidence is the single canonical decay layer; writing
+  // a decayed value back to the row corrupted the provenance audit (decay
+  // writes appeared in CV-06 as ordinary "updated" events from
+  // engine="memory-mutation" with no source outcome).
+  // summary.decayed stays at 0; mutation_log's decayed_count column is kept
+  // for historical schema compat.
 
   await processExplorationResults(accountId, campaignId, industryBaseline);
 

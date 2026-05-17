@@ -84,6 +84,14 @@ async function validatePlanIdOrReason(
   return null;
 }
 
+export type ProvenanceOrigin =
+  | "outcome"
+  | "mutation"
+  | "engine_seed"
+  | "exploration"
+  | "decay"
+  | "unknown";
+
 export interface MemoryWriteInput {
   accountId: string;
   campaignId: string;
@@ -97,6 +105,15 @@ export interface MemoryWriteInput {
   direction: MemoryDirection;
   planId?: string | null;
   sourceOutcomeId?: string | null;
+  // Task #65 / Phase 2 — DEC-B reinforcement key. When set, the row binds
+  // to strategy_decisions(id) so outcome-tracker can target by FK instead
+  // of the broken id-space-mismatched primary-key path.
+  decisionId?: string | null;
+  // Task #65 / Phase 2 — provenance tag. Defaults to "engine_seed" when
+  // omitted so first-time writers without an outcome still declare an
+  // explicit origin (the "unknown" default on the column is reserved for
+  // pre-#65 legacy rows).
+  provenanceOrigin?: ProvenanceOrigin;
   industry?: string | null;
   platform?: string | null;
   campaignType?: string | null;
@@ -141,7 +158,11 @@ export async function upsertByFingerprint(input: MemoryWriteInput): Promise<Memo
   const fingerprint = makeStrategyFingerprint(input.engineName, input.label, input.details ?? null);
 
   const existing = await db
-    .select({ id: strategyMemory.id })
+    .select({
+      id: strategyMemory.id,
+      direction: strategyMemory.direction,
+      confidenceScore: strategyMemory.confidenceScore,
+    })
     .from(strategyMemory)
     .where(
       and(
@@ -152,7 +173,35 @@ export async function upsertByFingerprint(input: MemoryWriteInput): Promise<Memo
     )
     .limit(1);
 
+  const provenanceOrigin: ProvenanceOrigin =
+    input.provenanceOrigin ?? (input.sourceOutcomeId ? "outcome" : "engine_seed");
+
   if (existing.length > 0) {
+    // Task #65 / Phase 2 step 6 — write-time fingerprint conflict resolver.
+    // If the existing row has a *contradictory* direction (reinforce<->avoid)
+    // and the incoming write does not carry strictly greater confidence, we
+    // REFUSE the flip. This blocks the "engine A reinforces, engine B avoids,
+    // last-writer wins" race that lets two contradictory verdicts coexist
+    // for a single fingerprint until the next mutation run resolves them.
+    const existingDir = (existing[0].direction ?? "neutral") as MemoryDirection;
+    const existingConf = existing[0].confidenceScore ?? 0;
+    const contradicts =
+      (existingDir === "reinforce" && input.direction === "avoid") ||
+      (existingDir === "avoid" && input.direction === "reinforce");
+    if (contradicts && input.confidenceScore <= existingConf) {
+      const reason =
+        `CONTRADICTION_REJECTED — fingerprint=${fingerprint} existing direction="${existingDir}" ` +
+        `confidence=${existingConf.toFixed(3)} incoming direction="${input.direction}" ` +
+        `confidence=${input.confidenceScore.toFixed(3)}; incoming must exceed existing confidence to flip.`;
+      recordMemoryWriteOutcome("blocked", input.memoryType, input.engineName);
+      return { allowed: false, rowId: existing[0].id, reason, bypassedPolicy: false };
+    }
+    if (contradicts) {
+      console.log(
+        `[memoryStore] CONTRADICTION_RESOLVED | fingerprint=${fingerprint} engine="${input.engineName}" ` +
+        `flip ${existingDir}@${existingConf.toFixed(3)} → ${input.direction}@${input.confidenceScore.toFixed(3)}`,
+      );
+    }
     await db
       .update(strategyMemory)
       .set({
@@ -166,6 +215,8 @@ export async function upsertByFingerprint(input: MemoryWriteInput): Promise<Memo
         memoryType: input.memoryType,
         planId: input.planId ?? null,
         sourceOutcomeId: input.sourceOutcomeId ?? null,
+        decisionId: input.decisionId ?? null,
+        provenanceOrigin,
         lastValidatedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -189,6 +240,8 @@ export async function upsertByFingerprint(input: MemoryWriteInput): Promise<Memo
     direction: input.direction,
     planId: input.planId ?? null,
     sourceOutcomeId: input.sourceOutcomeId ?? null,
+    decisionId: input.decisionId ?? null,
+    provenanceOrigin,
     industry: input.industry ?? null,
     platform: input.platform ?? null,
     campaignType: input.campaignType ?? null,
@@ -215,6 +268,8 @@ export async function updateById(
     engineName: string;
     memoryType: string;
     sourceOutcomeId?: string | null;
+    decisionId?: string | null;
+    provenanceOrigin?: ProvenanceOrigin;
   },
 ): Promise<MemoryWriteResult> {
   assertStrategicType(patch.memoryType, patch.engineName);
@@ -236,6 +291,9 @@ export async function updateById(
     return { allowed: false, rowId: null, reason: gate.reason, bypassedPolicy: gate.policyBypassed };
   }
 
+  const provenanceOrigin: ProvenanceOrigin =
+    patch.provenanceOrigin ?? (patch.sourceOutcomeId ? "outcome" : "unknown");
+
   await db
     .update(strategyMemory)
     .set({
@@ -243,6 +301,8 @@ export async function updateById(
       confidenceScore: patch.confidenceScore,
       direction: patch.direction,
       sourceOutcomeId: patch.sourceOutcomeId ?? null,
+      decisionId: patch.decisionId ?? null,
+      provenanceOrigin,
       lastValidatedAt: new Date(),
       updatedAt: new Date(),
     })
@@ -250,6 +310,86 @@ export async function updateById(
 
   recordMemoryWriteOutcome("updated", patch.memoryType, patch.engineName);
   return { allowed: true, rowId, reason: "updated", bypassedPolicy: false };
+}
+
+/**
+ * Task #65 / Phase 2 — DEC-B reinforcement-by-FK helper.
+ *
+ * Replaces the broken `updateById(p.decisionId, ...)` call in outcome-tracker
+ * that issued `WHERE id = decisionId` (id-space mismatch — `id` is the
+ * strategy_memory PK, `decisionId` is a strategy_decisions PK). The new path:
+ *
+ *   1. Look up the strategy_memory row whose `decision_id` FK equals the
+ *      strategy_decisions.id that triggered the outcome.
+ *   2. If a row exists → apply the reinforcement verdict via the normal
+ *      gate-checked update path.
+ *   3. If no row exists → return { allowed: false, reason: "NO_BOUND_ROW" }
+ *      so the caller logs it. The outcome is still persisted on
+ *      decision_outcomes; memory simply has no fact to reinforce yet.
+ *
+ * The natural fallback (Phase 2 step 2) of "find rows by (planId,
+ * strategyFingerprint)" is intentionally NOT implemented: without a real
+ * decision_id binding there is nothing to reinforce safely. The Phase 1
+ * memory-mutation engine seeds rows with decisionId at insert time once
+ * upstream writers populate it; until then this returns NO_BOUND_ROW
+ * cleanly rather than silently updating zero rows.
+ */
+export async function reinforceByDecisionId(
+  accountId: string,
+  campaignId: string,
+  decisionId: string,
+  patch: {
+    confidenceScore: number;
+    direction: MemoryDirection;
+    score: number;
+    engineName: string;
+    memoryType: string;
+    sourceOutcomeId: string;
+  },
+): Promise<MemoryWriteResult & { boundRowCount: number }> {
+  const rows = await db
+    .select({ id: strategyMemory.id })
+    .from(strategyMemory)
+    .where(
+      and(
+        eq(strategyMemory.accountId, accountId),
+        eq(strategyMemory.campaignId, campaignId),
+        eq(strategyMemory.decisionId, decisionId),
+      ),
+    );
+
+  if (rows.length === 0) {
+    return {
+      allowed: false,
+      rowId: null,
+      reason: `NO_BOUND_ROW — no strategy_memory row has decision_id="${decisionId}" for (account=${accountId}, campaign=${campaignId})`,
+      bypassedPolicy: false,
+      boundRowCount: 0,
+    };
+  }
+
+  // Apply to every bound row (typically 1; cap at 8 to avoid runaway updates
+  // if the FK relationship grows unexpectedly).
+  const targets = rows.slice(0, 8);
+  let lastResult: MemoryWriteResult = {
+    allowed: false,
+    rowId: null,
+    reason: "no_op",
+    bypassedPolicy: false,
+  };
+  for (const row of targets) {
+    lastResult = await updateById(row.id, {
+      confidenceScore: patch.confidenceScore,
+      direction: patch.direction,
+      score: patch.score,
+      engineName: patch.engineName,
+      memoryType: patch.memoryType,
+      sourceOutcomeId: patch.sourceOutcomeId,
+      decisionId,
+      provenanceOrigin: "outcome",
+    });
+  }
+  return { ...lastResult, boundRowCount: targets.length };
 }
 
 /**

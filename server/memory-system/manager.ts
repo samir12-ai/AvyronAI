@@ -122,6 +122,12 @@ export async function loadMemoryBlock(
   bizData?: { funnelObjective?: string; businessType?: string; monthlyBudget?: string } | null,
   memoryContext?: MemoryContext | null,
 ): Promise<MemoryBlock> {
+  // Task #65 / Phase 2 step 7 — confidence-banded reader. Pre-#65 the query
+  // was `ORDER BY updated_at DESC LIMIT 100`, which let a flurry of recent
+  // low-confidence writes displace older high-confidence facts (the
+  // strategic memory equivalent of cache pollution). The new ordering pulls
+  // by confidence first (high → low) so high-conf facts are never evicted
+  // by recency alone; updated_at remains a deterministic tiebreaker.
   const rows = await db
     .select()
     .from(strategyMemory)
@@ -131,7 +137,7 @@ export async function loadMemoryBlock(
         eq(strategyMemory.campaignId, campaignId),
       )
     )
-    .orderBy(desc(strategyMemory.updatedAt))
+    .orderBy(desc(strategyMemory.confidenceScore), desc(strategyMemory.updatedAt))
     .limit(100);
 
   const ctx: MemoryContext = memoryContext ?? {

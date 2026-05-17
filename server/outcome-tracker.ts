@@ -2,7 +2,7 @@ import { db } from "./db";
 import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory, calendarEntries, studioItems, publishedPosts, decisionAttributions, strategicPlans } from "@shared/schema";
 import { eq, sql, gte, isNull, isNotNull, lte, desc, and, inArray } from "drizzle-orm";
 import { logAudit } from "./audit";
-import { validateDecisionForMemoryWrite } from "./decision-policy";
+import { recordHallucinationExposure } from "./memory-system/cv06-metrics";
 
 export interface ActionMetrics {
   avgCpa: number;
@@ -299,7 +299,13 @@ export async function evaluatePendingOutcomes(accountId: string) {
       outcome = "neutral";
     }
 
-    await db.update(decisionOutcomes)
+    // Task #65 / Phase 2 step 1 — gate the post-evaluation UPDATE with an
+    // `outcome IS NULL` predicate so we never re-write a row that another
+    // worker (or a retry) already evaluated. The DB-level immutability
+    // trigger added by migration 025 is the defence-in-depth backstop; this
+    // predicate keeps the happy-path silent (no thrown trigger) and lets
+    // us count contended-row updates explicitly.
+    const updated = await db.update(decisionOutcomes)
       .set({
         postMetricsCpa: postCpa,
         postMetricsRoas: postRoas,
@@ -308,7 +314,19 @@ export async function evaluatePendingOutcomes(accountId: string) {
         outcome,
         evaluatedAt: new Date(),
       })
-      .where(eq(decisionOutcomes.id, p.id));
+      .where(and(
+        eq(decisionOutcomes.id, p.id),
+        isNull(decisionOutcomes.outcome),
+      ))
+      .returning({ id: decisionOutcomes.id });
+
+    if (updated.length === 0) {
+      console.warn(
+        `[OutcomeTracker] EVAL_RACE_SKIPPED | outcomeId=${p.id} decision=${p.decisionId} ` +
+        `— another worker evaluated this row first (outcome already non-null). Skipping memory write.`,
+      );
+      continue;
+    }
 
     await db.update(strategyDecisions)
       .set({ outcomeStatus: outcome })
@@ -353,11 +371,16 @@ export async function evaluatePendingOutcomes(accountId: string) {
           : baseConfidence;
         const confidenceScore = Math.max(0, Math.min(1, weightedConfidence));
 
-        // Task #64 / Phase 1 — gated update via memoryStore (single writer).
+        // Task #65 / Phase 2 step 2 — reinforce by FK on strategy_decisions.id
+        // rather than the broken `WHERE strategy_memory.id = p.decisionId`
+        // path (id-space mismatch produced silent zero-row updates). The
+        // bound-row lookup happens inside memoryStore.reinforceByDecisionId;
+        // a NO_BOUND_ROW result is counted by CV-11 so unbound reinforcement
+        // attempts become observable.
         const baseScore = outcome === "success" ? 1.0 : outcome === "failure" ? -1.0 : 0.0;
         const weightedScore = measurementScope === "action" ? baseScore * attributionWeight : baseScore;
-        const { updateById } = await import("./memory-system/store");
-        const result = await updateById(p.decisionId, {
+        const { reinforceByDecisionId } = await import("./memory-system/store");
+        const result = await reinforceByDecisionId(accountId, p.campaignId ?? "", p.decisionId, {
           confidenceScore,
           direction,
           score: weightedScore,
@@ -365,19 +388,35 @@ export async function evaluatePendingOutcomes(accountId: string) {
           memoryType: p.decisionType || "decision",
           sourceOutcomeId: p.id,
         });
-        if (!result.allowed) {
-          console.log(
+        if (result.boundRowCount === 0) {
+          recordHallucinationExposure("no_bound_row", "outcome-tracker");
+          console.warn(
+            `[OutcomeTracker] MEMORY_UNBOUND | decision=${p.decisionId} outcomeId=${p.id} outcome=${outcome} ` +
+            `confidence=${confidenceScore.toFixed(3)} — no strategy_memory row has decision_id="${p.decisionId}". ` +
+            `Outcome persisted; memory left unchanged (CV-11 incremented).`,
+          );
+        } else if (!result.allowed) {
+          console.warn(
             `[OutcomeTracker] MEMORY_UPDATE_BLOCKED | decision=${p.decisionId} outcome=${outcome} ` +
-            `confidence=${confidenceScore.toFixed(3)} weight=${attributionWeight.toFixed(3)} reason="${result.reason}"`,
+            `confidence=${confidenceScore.toFixed(3)} weight=${attributionWeight.toFixed(3)} reason="${result.reason}" ` +
+            `boundRowCount=${result.boundRowCount}`,
           );
         } else {
           console.log(
             `[OutcomeTracker] MEMORY_UPDATED | decision=${p.decisionId} outcomeId=${p.id} direction=${direction} ` +
-            `confidence=${confidenceScore.toFixed(3)} score=${weightedScore.toFixed(3)} sourceOutcomeId=${p.id}`,
+            `confidence=${confidenceScore.toFixed(3)} score=${weightedScore.toFixed(3)} sourceOutcomeId=${p.id} ` +
+            `boundRowCount=${result.boundRowCount}`,
           );
         }
       }
-    } catch {
+    } catch (memoryWriteErr: any) {
+      // Task #65 / Phase 2 step 4 — replaces the bare `try {} catch {}` that
+      // hid every reinforcement failure (including the silent-zero-row bug
+      // DEC-B was introduced to fix). System-control reads this log line.
+      console.error(
+        `[OutcomeTracker] REINFORCE_FAILED | decision=${p.decisionId} outcomeId=${p.id} outcome=${outcome} ` +
+        `err="${memoryWriteErr?.message ?? String(memoryWriteErr)}" — outcome row was persisted, but memory write threw.`,
+      );
     }
 
     await logAudit(accountId, "OUTCOME_EVALUATED", {

@@ -207,21 +207,11 @@ export function buildDecisionEnforcementReport(
   };
 }
 
-/**
- * @deprecated Task #64 / Phase 1 step 5 — merged into `policyEnforcedMemoryCheck`.
- * Thin shim retained only for callers still in transition; new code MUST use
- * the type-aware variant. The shim now delegates with memoryType="(legacy)"
- * which never matches the (now removed) OPERATIONAL bypass, so behaviour is
- * identical to the strict path.
- */
-export function validateDecisionForMemoryWrite(
-  confidenceScore: number,
-  direction: "reinforce" | "avoid" | "neutral",
-  engineName: string,
-): { allowed: boolean; reason: string } {
-  const result = policyEnforcedMemoryCheck(confidenceScore, direction, engineName, "(legacy)");
-  return { allowed: result.allowed, reason: result.reason };
-}
+// Task #65 / Phase 2 step 8 — `validateDecisionForMemoryWrite` deprecated
+// shim removed. The single canonical gate is `policyEnforcedMemoryCheck`,
+// invoked from inside memoryStore at write time. The only pre-#65 caller
+// (outcome-tracker) now goes through memoryStore.reinforceByDecisionId
+// which gate-checks via updateById → policyEnforcedMemoryCheck internally.
 
 export function applyFallbackSourcePenalty(
   confidenceScore: number,

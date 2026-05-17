@@ -61,6 +61,48 @@ export function recordMemoryWriteOutcome(outcome: Outcome, memoryType: string, e
 /** Test helper. Not for production use. */
 export function _resetCv06MetricsForTests(): void {
   cv06MemoryWritesTotal.reset();
+  cv11HallucinationExposureTotal.reset();
+}
+
+// ── CV-11 (Hallucination Exposure) ───────────────────────────────────────────
+//
+// Task #65 / Phase 2 step 9 — baseline hallucination-exposure metric. Counts
+// every reinforcement attempt that targeted a decision_id with NO bound
+// strategy_memory row (the silent-zero-row class of bug DEC-B fixes). A
+// non-zero rate after Phase 2 deploy indicates either (a) the upstream
+// writers are still not populating strategy_memory.decision_id, or (b) the
+// outcome path is firing for decisions that produced no strategic facts.
+
+type HallucinationKind = "no_bound_row" | "stale_plan" | "missing_source_outcome";
+
+interface HallucinationCounter {
+  inc(labels: { kind: HallucinationKind; engine: string }): void;
+  collect(): Array<{ kind: HallucinationKind; engine: string; value: number }>;
+  reset(): void;
+}
+
+class InMemoryHallucinationCounter implements HallucinationCounter {
+  private readonly counts = new Map<string, number>();
+  inc(labels: { kind: HallucinationKind; engine: string }): void {
+    const k = `${labels.kind}|${labels.engine}`;
+    this.counts.set(k, (this.counts.get(k) ?? 0) + 1);
+  }
+  collect(): Array<{ kind: HallucinationKind; engine: string; value: number }> {
+    return Array.from(this.counts.entries()).map(([k, value]) => {
+      const [kind, engine] = k.split("|");
+      return { kind: kind as HallucinationKind, engine, value };
+    });
+  }
+  reset(): void {
+    this.counts.clear();
+  }
+}
+
+export const cv11HallucinationExposureTotal: HallucinationCounter =
+  new InMemoryHallucinationCounter();
+
+export function recordHallucinationExposure(kind: HallucinationKind, engine: string): void {
+  cv11HallucinationExposureTotal.inc({ kind, engine });
 }
 
 /**
@@ -79,6 +121,13 @@ export function renderCv06Metrics(): string {
   for (const s of samples) {
     const labels = `outcome="${s.outcome}",memoryType="${s.memoryType.replace(/"/g, "\\\"")}",engine="${s.engine.replace(/"/g, "\\\"")}"`;
     lines.push(`cv06_memory_writes_total{${labels}} ${s.value}`);
+  }
+  const cv11 = cv11HallucinationExposureTotal.collect();
+  lines.push(`# HELP cv11_hallucination_exposure_total CV-11: reinforcement attempts that referenced a non-existent or stale binding (steady-state expectation = 0).`);
+  lines.push(`# TYPE cv11_hallucination_exposure_total counter`);
+  for (const s of cv11) {
+    const labels = `kind="${s.kind}",engine="${s.engine.replace(/"/g, "\\\"")}"`;
+    lines.push(`cv11_hallucination_exposure_total{${labels}} ${s.value}`);
   }
   return lines.join("\n");
 }
