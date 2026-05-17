@@ -275,3 +275,9 @@ id = "O9rBTdVxQipoIrKLNMhkX"
 uri = "file://.local/docs/phases-6-9-execution-plan.md"
 type = "text"
 title = "4 — Phases 6–9: Runtime Safety + Domain Composition + UX Projection + Monitor/Pivot Readiness"
+
+[[outputs]]
+id = "dJCPWKJVqf2HQy0LYKd7Z"
+uri = "file://docs/beta-readiness/frontend-ux-audit.md"
+type = "text"
+title = "Frontend & UX Audit — Pre-Beta"

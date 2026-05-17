@@ -1,0 +1,210 @@
+Now that the stabilization, perception layer, runtime consolidation, and pre-beta fixes are complete, I want to move into a FULL frontend + UX audit phase.
+
+This is not a cosmetic review.
+
+I want a deep architectural and operational audit of:
+
+* the frontend structure
+* UX logic
+* customer surfaces
+* data flow
+* component responsibility
+* signal provenance
+* runtime → UI mapping
+* perception consistency
+* information hierarchy
+* decision visibility
+* feature usefulness
+* cognitive load
+* operator leakage
+* unnecessary complexity
+
+The goal is:
+understand EXACTLY:
+
+* what the frontend currently exposes
+* where every visible signal comes from
+* what logic powers each surface
+* what users actually experience
+* what should remain
+* what should be simplified
+* what should be removed
+* what should be merged
+* what should become more intelligent
+* what is overcomplicated
+* what still feels weak/confusing
+
+I do NOT want generic UX opinions.
+
+I want a system-level frontend/UX audit.
+
+Audit Scope
+
+1. Full Frontend Surface Inventory
+   Create a complete map of:
+
+* all customer-facing screens
+* all dashboard surfaces
+* all cards/components
+* all tabs
+* all modals
+* all timelines
+* all monitoring surfaces
+* all perception surfaces
+* all onboarding flows
+* all runtime status surfaces
+* all agent interaction surfaces
+
+For each:
+
+* component name
+* screen location
+* customer-visible purpose
+* actual backend source
+* API/endpoint source
+* underlying tables/signals
+* orchestration dependencies
+* runtime logic
+* refresh behavior
+* stale behavior
+* fallback behavior
+* degraded behavior
+
+I want FULL traceability.
+
+2. UX Logic Audit
+   For every visible UX surface:
+   explain:
+
+* why it exists
+* what user question it answers
+* whether users will understand it
+* whether it creates confusion
+* whether it leaks architecture
+* whether it duplicates another surface
+* whether it adds cognitive load
+* whether it creates perceived intelligence
+* whether it creates trust
+* whether it weakens clarity
+
+I want brutally honest analysis.
+
+3. Source-of-Truth Mapping
+   For every visible number/message/verdict:
+   trace:
+
+* where it originates
+* how it is computed
+* which engine/system owns it
+* whether it is canonical
+* whether it is projected
+* whether it is synthesized
+* whether it is stale-sensitive
+* whether it is confidence-sensitive
+
+Examples:
+
+* Watchtower states
+* confidence levels
+* market shift messages
+* strategy recommendations
+* monitoring lines
+* roadmap suggestions
+* narrative cards
+* activity timeline entries
+* agent actions
+* trend indicators
+* risk indicators
+* freshness states
+
+I want complete runtime→UI lineage mapping.
+
+4. Customer Perception Audit
+   I want analysis of:
+
+* what users FEEL when they use the product
+* where the system feels intelligent
+* where it feels dead/static
+* where it feels overwhelming
+* where it feels magical
+* where it feels fake
+* where it feels too technical
+* where it feels unclear
+* where trust breaks
+* where confidence communication fails
+* where onboarding confusion happens
+
+Most important:
+audit the product as if you were:
+
+* an agency owner
+* a founder
+* a small marketing team
+
+not as the system architect.
+
+5. UX Complexity Reduction Audit
+   I want identification of:
+
+* unnecessary surfaces
+* duplicate cards
+* weak cards
+* low-value complexity
+* overengineered UX
+* unused information
+* hidden information that should surface
+* surfaces that should merge
+* surfaces that should split
+* places where simpler wording would improve trust
+* places where more operational transparency is needed
+
+Goal:
+reduce entropy in the product experience itself.
+
+6. Frontend Architecture Audit
+   Audit:
+
+* component organization
+* shared state complexity
+* frontend orchestration
+* duplicated hooks
+* stale-query risks
+* polling logic
+* refresh logic
+* loading/error states
+* auth/session handling
+* customer/operator separation
+* perception-layer consistency
+* translation consistency
+* feature-flag complexity
+* dead components
+* legacy surfaces
+
+Identify:
+
+* cleanup opportunities
+* simplification opportunities
+* dangerous frontend coupling
+* runtime/UX mismatch risks
+
+7. Beta UX Readiness
+   At the end:
+   give a brutally honest beta UX assessment:
+
+* what feels polished
+* what still feels internal
+* what still feels prototype-level
+* what users will likely misunderstand
+* what users will love
+* what creates the strongest perceived intelligence
+* what creates the strongest trust
+* what most hurts clarity
+* what most hurts retention
+* what most needs redesign before broader beta
+
+Most important:
+I want a complete understanding of the frontend and UX as a system —
+not isolated UI comments.
+
+The goal is:
+understand exactly what product experience we currently have before final UX cleanup and broader beta rollout.
