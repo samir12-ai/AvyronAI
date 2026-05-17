@@ -1013,6 +1013,16 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
       case "budget_override_zero_confidence":
         blocks.push({ code: "BUDGET_OVERRIDE_ZERO_CONFIDENCE", description: check.details, source: "ssc_budget_guard", severity: "critical" });
         break;
+      // Phase 6 / Task #69 step 4 — hallucination matrix block-mapping.
+      // A scale-action violation is a HARD BLOCK (scaling on hallucinated
+      // signals is the worst-case outage). A test-action violation stays in
+      // the downgrade lane (handled in engine.ts) — surfacing as a structural
+      // FAIL but not halting the run.
+      case "hallucination_exposure":
+        if (budgetAction === "scale") {
+          blocks.push({ code: "LOW_SIGNAL_TRUST", description: check.details, source: "structural_check", severity: "critical" });
+        }
+        break;
       // Runtime Truth Track (May 2026)
       // NOTE: AEL_PARTIAL and SIGNAL_LINEAGE_UNKNOWN_DOMINANT are NOT mapped
       // to blockReasons here. Per session-plan acceptance ("downgrade to
@@ -1204,6 +1214,153 @@ export function checkConfidenceIntegrity(
   return fail(
     "confidence_integrity",
     `DEGRADED: ${(degradedEngines ?? []).length} engine(s) carry default_floor/inferred_synthesis provenance — [${(degradedEngines ?? []).join(", ")}]`,
+  );
+}
+
+// Phase 6 / Task #69 step 4 — Hallucination-Exposure Threshold Table.
+//
+// Replaces the single hardcoded `trustedRatio < 0.30 ⇒ downgrade test→hold`
+// rule that previously lived in `system-control/engine.ts` at the budget-
+// action evaluation. That check conflated two distinct risks (zero real
+// data vs low trust ratio) and used one threshold for every execution mode.
+//
+// Phase 6 / Task #69 step 4 — 7-row signalOrigin × severity matrix. Each row
+// is one signal-origin constraint expressed as either:
+//   - `kind: "min"` — origin's share of total signals must be ≥ ratio
+//     (used by the trusted-aggregate row to demand a floor of grounded data).
+//   - `kind: "max"` — origin's share must stay ≤ ratio (used by the six
+//     hallucination-prone origins to cap how much of the chain may be
+//     LLM-derived / unverified).
+// Thresholds are declared per execution mode (scale/test/hold/halt) and an
+// `nMin` floor below which the row returns SKIPPED — there is no statistical
+// right to evaluate a ratio over a tiny sample.
+//
+// `inferred_synthesis` rolls into the aggregate `inferredRatio` today because
+// `getSignalComposition()` only buckets five origins. The row is kept distinct
+// here so when signal-lineage is extended to subdivide synthesis from
+// inferred, the matrix gains a real signal without a code-shape change. Until
+// then the synthesis row reads from `inferredRatio` and is annotated as
+// "proxy" in the failure detail.
+//
+// Doctrine alignment:
+//   - D1: no `?? threshold` fallback — missing budget action ⇒ UNKNOWN.
+//   - D3: budget actions are an enum, not a free string.
+//   - D5: missing signalComposition ⇒ UNKNOWN, never silent PASS.
+type HallucinationOrigin =
+  | "trusted"
+  | "competitor"
+  | "inferred"
+  | "inferred_synthesis"
+  | "fallback"
+  | "unknown"
+  | "real";
+
+interface HallucinationRow {
+  origin: HallucinationOrigin;
+  kind: "min" | "max";
+  // Per-mode ratio threshold. For `kind:"min"`, the actual ratio must be ≥ value.
+  // For `kind:"max"`, the actual ratio must be ≤ value.
+  thresholds: Record<"scale" | "test" | "hold" | "halt", number>;
+  // Minimum total signal count before this row is evaluated. Below = SKIPPED.
+  nMin: number;
+  // Proxy note (shown in failure detail) when the row reads from a different
+  // SignalComposition field than its declared origin (see inferred_synthesis).
+  proxyNote?: string;
+}
+
+export const HALLUCINATION_EXPOSURE_MATRIX: HallucinationRow[] = [
+  // 1) Trusted floor — strictest gate, mirrors the old single-threshold rule.
+  { origin: "trusted",            kind: "min", thresholds: { scale: 0.70, test: 0.50, hold: 0.30, halt: 0.00 }, nMin: 4 },
+  // 2) Real floor — scale demands at least *some* real-performance evidence;
+  //    historical bug was scaling on 100% competitor signals.
+  { origin: "real",               kind: "min", thresholds: { scale: 0.10, test: 0.00, hold: 0.00, halt: 0.00 }, nMin: 4 },
+  // 3) Competitor cap — competitor signals are trusted but not first-party.
+  { origin: "competitor",         kind: "max", thresholds: { scale: 0.70, test: 0.85, hold: 1.00, halt: 1.00 }, nMin: 4 },
+  // 4) Inferred cap — LLM-derived aggregate.
+  { origin: "inferred",           kind: "max", thresholds: { scale: 0.40, test: 0.60, hold: 0.80, halt: 1.00 }, nMin: 4 },
+  // 5) Inferred-synthesis cap — single-evidence rows are most fabrication-
+  //    prone; proxied through inferredRatio until lineage subdivides.
+  { origin: "inferred_synthesis", kind: "max", thresholds: { scale: 0.20, test: 0.40, hold: 0.60, halt: 1.00 }, nMin: 2,
+    proxyNote: "proxied through inferredRatio (lineage does not yet subdivide synthesis)" },
+  // 6) Fallback cap — fallback signals appear when an upstream source fails.
+  { origin: "fallback",           kind: "max", thresholds: { scale: 0.15, test: 0.30, hold: 0.50, halt: 1.00 }, nMin: 2 },
+  // 7) Unknown cap — untagged/legacy signals; cannot be trusted at scale.
+  { origin: "unknown",            kind: "max", thresholds: { scale: 0.10, test: 0.25, hold: 0.40, halt: 1.00 }, nMin: 2 },
+];
+
+// Back-compat export so callers/tests that referenced the prior 4-row table
+// still resolve to the canonical trusted-floor row.
+export const HALLUCINATION_EXPOSURE_THRESHOLDS: Record<string, { minTrustedRatio: number; nMin: number }> = {
+  scale: { minTrustedRatio: 0.70, nMin: 8 },
+  test:  { minTrustedRatio: 0.50, nMin: 4 },
+  hold:  { minTrustedRatio: 0.30, nMin: 2 },
+  halt:  { minTrustedRatio: 0.00, nMin: 0 },
+};
+
+function readOriginRatio(
+  signalComposition: SignalComposition,
+  origin: HallucinationOrigin,
+): number {
+  // Typed access — no `as any`. `inferred_synthesis` proxies through
+  // inferredRatio (see matrix comment).
+  switch (origin) {
+    case "trusted": return signalComposition.trustedRatio;
+    case "real": return signalComposition.realRatio;
+    case "competitor": return signalComposition.competitorRatio;
+    case "inferred": return signalComposition.inferredRatio;
+    case "inferred_synthesis": return signalComposition.inferredRatio;
+    case "fallback": return signalComposition.fallbackRatio;
+    case "unknown": return signalComposition.unknownRatio;
+  }
+}
+
+export function checkHallucinationExposure(
+  signalComposition: SignalComposition | null,
+  budgetAction: string | null,
+): StructuralCheck {
+  if (!signalComposition) {
+    return unknown("hallucination_exposure", "no signal composition data — cannot evaluate hallucination exposure");
+  }
+  if (!budgetAction) {
+    return unknown("hallucination_exposure", "no budget action — cannot evaluate hallucination exposure for an unspecified execution mode");
+  }
+  if (budgetAction !== "scale" && budgetAction !== "test" && budgetAction !== "hold" && budgetAction !== "halt") {
+    // D5: a budget action outside the enum is INCOMPLETE, never silently PASS.
+    return unknown("hallucination_exposure", `budget action "${budgetAction}" outside the {scale,test,hold,halt} enum — matrix must be extended before this mode is supported`);
+  }
+  const total = signalComposition.total;
+
+  const violations: string[] = [];
+  let evaluatedRows = 0;
+  let skippedRows = 0;
+  for (const row of HALLUCINATION_EXPOSURE_MATRIX) {
+    if (total < row.nMin) {
+      skippedRows++;
+      continue;
+    }
+    evaluatedRows++;
+    const ratio = readOriginRatio(signalComposition, row.origin);
+    const threshold = row.thresholds[budgetAction];
+    const violated = row.kind === "min" ? ratio < threshold : ratio > threshold;
+    if (!violated) continue;
+    const op = row.kind === "min" ? "<" : ">";
+    const label = row.kind === "min" ? "min" : "max";
+    const proxy = row.proxyNote ? ` [${row.proxyNote}]` : "";
+    violations.push(`${row.origin}Ratio=${ratio.toFixed(2)} ${op} ${label}=${threshold.toFixed(2)}${proxy}`);
+  }
+
+  if (evaluatedRows === 0) {
+    return skipped("hallucination_exposure", `total signals=${total} below N_MIN of every matrix row — insufficient sample`);
+  }
+  if (violations.length > 0) {
+    return fail(
+      "hallucination_exposure",
+      `${violations.length} matrix row(s) violated for budget action "${budgetAction}" (n=${total}, evaluated=${evaluatedRows}, skipped=${skippedRows}): ${violations.join("; ")}`,
+    );
+  }
+  return pass(
+    "hallucination_exposure",
+    `all ${evaluatedRows} evaluated matrix row(s) within threshold for action="${budgetAction}" (n=${total}, skipped=${skippedRows})`,
   );
 }
 

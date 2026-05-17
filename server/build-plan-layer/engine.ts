@@ -90,13 +90,41 @@ const ACTIONABILITY_RULES = [
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
 type SnapshotRow = { data: unknown };
 
-function safeParseSnapshot(raw: SnapshotRow | { data: Json } | null | undefined): Json | null {
+type SafeParseResult =
+  | { ok: true; value: Json | null }
+  | { ok: false; reason: string };
+
+const _snapshotParseFailures = { count: 0, lastReason: null as string | null };
+export function _getSnapshotParseFailureStats(): { count: number; lastReason: string | null } {
+  return { count: _snapshotParseFailures.count, lastReason: _snapshotParseFailures.lastReason };
+}
+
+/**
+ * Phase 6 / Task #69 step 7 — typed-error replacement of the silent
+ * `} catch { return null; }` swallow. Parse failures are now logged AND
+ * counted in a process-local counter so the operator surface (and the
+ * eventual /metrics scrape) can detect a wave of corrupt snapshot rows
+ * instead of a silent fallback to null. Callers that only need the
+ * legacy `Json | null` shape can use `safeParseSnapshot()` (which
+ * unwraps via `tryParseSnapshot()`); new code SHOULD prefer the
+ * Result-shaped variant so the failure reason is preserved.
+ */
+function tryParseSnapshot(raw: SnapshotRow | { data: Json } | null | undefined): SafeParseResult {
   try {
-    if (typeof raw === "string") return JSON.parse(raw);
-    return raw;
-  } catch {
-    return null;
+    if (typeof raw === "string") return { ok: true, value: JSON.parse(raw) };
+    return { ok: true, value: (raw ?? null) as Json | null };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    _snapshotParseFailures.count++;
+    _snapshotParseFailures.lastReason = reason;
+    console.error(logSafe(`[BuildPlanLayer] SNAPSHOT_PARSE_FAILED | reason=${reason.slice(0, 200)}`));
+    return { ok: false, reason };
   }
+}
+
+function safeParseSnapshot(raw: SnapshotRow | { data: Json } | null | undefined): Json | null {
+  const r = tryParseSnapshot(raw);
+  return r.ok ? r.value : null;
 }
 
 function enforceActionability(output: BuildPlanOutput): { passed: boolean; score: number; failedBlocks: string[] } {
@@ -188,19 +216,42 @@ async function getLatestSnapshot(
     if (!snap && sourceJobId) {
       console.warn(logSafe(`[BuildPlanLayer] SNAPSHOT_MISS_FOR_RUN | account=${accountId} campaign=${campaignId} jobId=${sourceJobId} table=${tableName(table)}`));
     } else if (!sourceJobId) {
-      // Phase 4 hardening (May 2026): elevated from console.warn to a structured
-      // signal. The caller still receives the snapshot (D4 backwards compat —
-      // not every legacy reader passes sourceJobId yet), but the fact that we
-      // had to fall back to a latest-row read is captured on stderr at WARN
-      // level for log-based alerting. System Control consumes the upstream
-      // sourceJobId-presence flag separately via ctx wiring; this branch is
-      // the last-resort breadcrumb when that wiring is bypassed.
-      console.warn(logSafe(`[BuildPlanLayer] STALE_LINEAGE_READ | severity=high | account=${accountId} campaign=${campaignId} table=${tableName(table)} — no sourceJobId provided; latest snapshot may belong to a different run. Caller MUST pass sourceJobId for runtime-truth correctness.`));
+      // Phase 6 / Task #69 step 6 — BPL-001 fix. Previously a warn-only
+      // breadcrumb; now also recorded in a process-local counter so
+      // /metrics and the Continuity panel can detect a wave of
+      // sourceJobId-less reads (which indicates an upstream caller has
+      // bypassed the run-id wiring entirely). The snapshot is still
+      // returned for D4 back-compat with legacy readers; the new counter
+      // makes the silent-bypass surface non-silent.
+      _staleLineageReads.count++;
+      _staleLineageReads.lastTable = tableName(table);
+      _staleLineageReads.lastAccountId = accountId;
+      console.warn(logSafe(`[BuildPlanLayer] STALE_LINEAGE_READ | severity=high | account=${accountId} campaign=${campaignId} table=${tableName(table)} totalSinceBoot=${_staleLineageReads.count} — no sourceJobId provided; latest snapshot may belong to a different run. Caller MUST pass sourceJobId for runtime-truth correctness.`));
     }
     return snap || null;
-  } catch {
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    _snapshotReadErrors.count++;
+    _snapshotReadErrors.lastReason = reason;
+    console.error(logSafe(`[BuildPlanLayer] SNAPSHOT_READ_ERROR | account=${accountId} campaign=${campaignId} table=${tableName(table)} | reason=${reason.slice(0, 200)}`));
     return null;
   }
+}
+
+// Phase 6 / Task #69 steps 6 + 7 — operator-visible counters.
+const _staleLineageReads = { count: 0, lastTable: null as string | null, lastAccountId: null as string | null };
+const _snapshotReadErrors = { count: 0, lastReason: null as string | null };
+
+export function _getBuildPlanLayerStats(): {
+  staleLineageReads: { count: number; lastTable: string | null; lastAccountId: string | null };
+  snapshotReadErrors: { count: number; lastReason: string | null };
+  snapshotParseFailures: { count: number; lastReason: string | null };
+} {
+  return {
+    staleLineageReads: { ..._staleLineageReads },
+    snapshotReadErrors: { ..._snapshotReadErrors },
+    snapshotParseFailures: { ..._snapshotParseFailures },
+  };
 }
 
 async function collectValidatedEngineOutputs(

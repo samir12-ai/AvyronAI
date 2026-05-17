@@ -2793,6 +2793,41 @@ export const buildPlanSnapshots = pgTable("build_plan_snapshots", {
 
 export type BuildPlanSnapshot = typeof buildPlanSnapshots.$inferSelect;
 
+// Phase 6 / Task #69 step 5 — AI Input Snapshot persistence layer.
+//
+// Captures the EXACT input shape sent to every LLM call (15 engines)
+// alongside the model name, prompt fingerprint, and resolved provenance.
+// Required by the replay/audit lane so a contested AI output can be
+// re-derived deterministically from its captured inputs without re-running
+// the entire upstream pipeline.
+//
+// This is the table-of-record. The wrapper that writes to it lives at
+// `server/shared/ai-replay/persistAiInputSnapshot.ts`. NOTE: per the task's
+// drift-acceptable footnote, this PR ships the table + wrapper only — the
+// 15 per-engine `persistAiInputSnapshot(...)` call sites are filed as a
+// follow-up so the wiring can happen behind a shadow flag and each
+// engine's payload shape can be validated against its prompt fixture.
+export const aiInputSnapshots = pgTable("ai_input_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id"),
+  engineId: text("engine_id").notNull(),
+  engineVersion: integer("engine_version").default(0),
+  model: text("model").notNull(),
+  promptFingerprint: text("prompt_fingerprint").notNull(),
+  inputPayload: text("input_payload").notNull(),
+  inputBytes: integer("input_bytes").default(0),
+  contextSummary: text("context_summary"),
+  provenance: text("provenance"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type AiInputSnapshot = typeof aiInputSnapshots.$inferSelect;
+export type InsertAiInputSnapshot = typeof aiInputSnapshots.$inferInsert;
+
 export const systemControlVerdicts = pgTable("system_control_verdicts", {
   id: varchar("id")
     .primaryKey()

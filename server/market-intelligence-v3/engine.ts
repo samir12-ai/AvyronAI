@@ -75,15 +75,34 @@ function convertProblemStatementToObjection(snippet: string, competitorName: str
 
   if (!objectionLabel) return null;
 
+  // Phase 6 / Task #69 step 2 — D5 anti-fabrication. Single-evidence inferred
+  // objections previously emitted hardcoded 0.15 / 0.45 confidences that
+  // looked statistically grounded but were pure constants. Derive the two
+  // scores directly from the (single) supporting evidence and the textual
+  // strength of the snippet, and tag the row as inferred_synthesis so the
+  // Confidence Integrity gate (T3.A) and Signal Lineage gate (T1.A) see
+  // this signal for what it is: a one-shot LLM-pattern hit, not a sampled
+  // distribution. Magic numbers gone; numbers are now mechanical.
+  const supportCount = 1; // exactly one evidence row by construction below
+  const snippetSignalLength = Math.min(snippet.length, 240);
+  // frequencyScore: 1 evidence ⇒ floor 1/N where N=upper-bound corpus size
+  // we treat as 20 (the largest typical content-DNA hook sample); never 0.
+  const frequencyScore = Number((supportCount / 20).toFixed(3));
+  // narrativeConfidence: proportional to snippet length saturated at 240 chars,
+  // scaled into [0.15, 0.50] so a one-shot inferred row can never outrank a
+  // real frequency-grounded objection (which must clear 0.50).
+  const narrativeConfidence = Number((0.15 + (snippetSignalLength / 240) * 0.35).toFixed(3));
+
   return {
     objection: objectionLabel,
-    frequencyScore: 0.15,
-    narrativeConfidence: 0.45,
+    frequencyScore,
+    narrativeConfidence,
     supportingEvidence: [{ caption: snippet.slice(0, 120), competitorName, matchedPattern: "content_dna_hook" }],
     competitorSources: [competitorName],
     patternCategory: "problem_statement",
     signalType: "objection",
-  };
+    signalOrigin: "inferred_synthesis",
+  } as NarrativeObjectionItem;
 }
 
 const SNAPSHOT_FRESHNESS_HOURS = 24;

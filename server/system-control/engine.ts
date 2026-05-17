@@ -36,6 +36,7 @@ import {
   checkMiGateRejections,
   checkSignalLineageUnknown,
   checkConfidenceIntegrity,
+  checkHallucinationExposure,
   collectBlockReasons,
 } from "./structural-checks";
 import { requireIntegrityVerdict } from "./integrity-verdict";
@@ -107,6 +108,13 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     input.confidenceIntegrityCriticalAbsent,
     input.confidenceIntegrityDegradedEngines,
   ));
+  // Phase 6 / Task #69 step 4 — hallucination-exposure matrix gate. Pushed
+  // BEFORE collectBlockReasons so a FAIL is eligible for block-mapping (a
+  // scale-action violation of the trusted-floor / real-floor rows is a hard
+  // block via the LOW_SIGNAL_TRUST code), and so re-runs after repair re-use
+  // the same code path instead of the legacy single-threshold ad-hoc rule.
+  const hallucinationCheck = checkHallucinationExposure(input.signalComposition, budgetActionValue);
+  structuralChecks.push(hallucinationCheck);
 
   const contradictions = detectContradictions(
     input.results,
@@ -187,15 +195,18 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     });
   }
 
-  if (
-    input.signalComposition &&
-    input.signalComposition.trustedRatio < 0.3 &&
-    budgetActionValue === "test"
-  ) {
+  // Phase 6 / Task #69 step 4 — Hallucination-Exposure Matrix downgrade lane.
+  // The structural check itself was pushed BEFORE collectBlockReasons (above)
+  // so any FAIL is eligible for block-mapping via the LOW_SIGNAL_TRUST code.
+  // Here we additionally surface the FAIL as a downgrade so a non-blocking
+  // matrix violation (e.g. test action with weak trust) ladders down rather
+  // than reaching FULL_EXECUTION. Block + downgrade coexist by design — the
+  // verdict synthesis below treats blocks as authoritative when present.
+  if (hallucinationCheck.status === "FAIL" && (budgetActionValue === "test" || budgetActionValue === "scale")) {
     downgrades.push({
-      from: "test",
-      to: "hold",
-      reason: `Trusted signal ratio ${input.signalComposition.trustedRatio.toFixed(2)} is below 0.30 — downgrade from test to hold`,
+      from: budgetActionValue,
+      to: budgetActionValue === "scale" ? "test" : "hold",
+      reason: hallucinationCheck.details,
       code: "LOW_SIGNAL_TRUST",
       affectedEngine: "budget_governor",
     });
@@ -339,15 +350,25 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
             });
           }
 
+          // Phase 6 / Task #69 step 4 — post-repair hallucination re-evaluation.
+          // Replaces the legacy `trustedRatio < 0.30` ad-hoc rule with a fresh
+          // pass of the same matrix used pre-repair, against the post-repair
+          // budget action. Keeps governance logic identical pre/post repair.
+          const postHallucinationCheck = checkHallucinationExposure(
+            input.signalComposition,
+            postRepairBudgetActionValue,
+          );
+          const postIdx = structuralChecks.findIndex(c => c.check === "hallucination_exposure");
+          if (postIdx >= 0) structuralChecks[postIdx] = postHallucinationCheck;
+          else structuralChecks.push(postHallucinationCheck);
           if (
-            input.signalComposition &&
-            input.signalComposition.trustedRatio < 0.3 &&
-            postRepairBudgetActionValue === "test"
+            postHallucinationCheck.status === "FAIL" &&
+            (postRepairBudgetActionValue === "test" || postRepairBudgetActionValue === "scale")
           ) {
             downgrades.push({
-              from: "test",
-              to: "hold",
-              reason: `Trusted signal ratio ${input.signalComposition.trustedRatio.toFixed(2)} is below 0.30 — downgrade from test to hold`,
+              from: postRepairBudgetActionValue,
+              to: postRepairBudgetActionValue === "scale" ? "test" : "hold",
+              reason: postHallucinationCheck.details,
               code: "LOW_SIGNAL_TRUST",
               affectedEngine: "budget_governor",
             });

@@ -28,6 +28,16 @@ const celReportCache = new Map<string, { report: CELReport; storedAt: number }>(
 const CEL_REPORT_TTL = 30 * 60 * 1000;
 const CEL_REPORT_MAX_ENTRIES = 500;
 
+// Phase 6 / Task #69 step 8 — cache eviction telemetry. Counts size-cap and
+// TTL evictions separately so an operator can detect (a) cache thrash (size
+// evictions climbing fast on a small tenant set = key collision bug) and
+// (b) stale-read avoidance (ttl evictions = healthy churn). Exposed via
+// `_getCelCacheStats()` for /metrics integration.
+const _celCacheEvictions = { size: 0, ttl: 0 };
+export function _getCelCacheStats(): { size: number; ttl: number; entries: number; maxEntries: number; ttlMs: number } {
+  return { size: _celCacheEvictions.size, ttl: _celCacheEvictions.ttl, entries: celReportCache.size, maxEntries: CEL_REPORT_MAX_ENTRIES, ttlMs: CEL_REPORT_TTL };
+}
+
 function celCacheTouch(key: string, value: { report: CELReport; storedAt: number }): void {
   // Re-insertion at the end of the Map = LRU touch (Map preserves
   // insertion order on iteration; the oldest key is the first one out).
@@ -37,7 +47,8 @@ function celCacheTouch(key: string, value: { report: CELReport; storedAt: number
     const oldest = celReportCache.keys().next().value;
     if (oldest === undefined) break;
     celReportCache.delete(oldest);
-    console.warn(`${LOG_PREFIX} CACHE_LRU_EVICT | key=${oldest} | reason=size_cap`);
+    _celCacheEvictions.size++;
+    console.warn(`${LOG_PREFIX} CACHE_LRU_EVICT | key=${oldest} | reason=size_cap | totalSizeEvicts=${_celCacheEvictions.size}`);
   }
 }
 
@@ -53,6 +64,7 @@ export function getCachedCELReport(campaignId: string, accountId: string): CELRe
   if (!entry) return null;
   if (Date.now() - entry.storedAt > CEL_REPORT_TTL) {
     celReportCache.delete(key);
+    _celCacheEvictions.ttl++;
     return null;
   }
   // LRU touch on read so hot keys survive eviction longer.

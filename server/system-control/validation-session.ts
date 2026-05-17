@@ -27,11 +27,22 @@ import type { ValidationSession } from "../engine-hardening/types";
 const activeSessions = new Map<string, ValidationSession>();
 const SESSION_TTL_MS = 5 * 60 * 1000;
 
+// Phase 6 / Task #69 step 8 — eviction telemetry. Operator-visible counter
+// for TTL-evicted validation sessions. A sustained zero with non-zero
+// session creates indicates sessions never reach TTL (they finish first =
+// healthy); a sustained spike indicates orchestrator runs are exceeding the
+// 5-minute ceiling and silently being torn down mid-flight.
+const _validationSessionEvictions = { ttl: 0 };
+export function _getValidationSessionStats(): { active: number; ttlEvictions: number; ttlMs: number } {
+  return { active: activeSessions.size, ttlEvictions: _validationSessionEvictions.ttl, ttlMs: SESSION_TTL_MS };
+}
+
 function cleanExpiredSessions(): void {
   const now = Date.now();
   for (const [key, session] of activeSessions.entries()) {
     if (now - session.createdAt > SESSION_TTL_MS) {
       activeSessions.delete(key);
+      _validationSessionEvictions.ttl++;
     }
   }
 }

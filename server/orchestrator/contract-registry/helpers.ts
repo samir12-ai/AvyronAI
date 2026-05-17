@@ -222,10 +222,25 @@ export function validateContractCompleteness(
   return { status: "COMPLETE", missingRequiredOutputs: [], invalidFields: [] };
 }
 
+// Phase 6 / Task #69 step 9 — legacyPath hit counter. Per-(engine,field,legacyIndex)
+// counter so the operator surface can prove a legacy fallback is dead (counter==0
+// over a 7-day shadow) before D4 sunsets it. Map key: `${engineId}.${fieldId}.${legacyIndex}`.
+const _legacyPathHits = new Map<string, number>();
+export function _getLegacyPathHitCounters(): Array<{ key: string; hits: number }> {
+  return Array.from(_legacyPathHits.entries())
+    .map(([key, hits]) => ({ key, hits }))
+    .sort((a, b) => b.hits - a.hits);
+}
+export function _resetLegacyPathHitCountersForTest(): void {
+  _legacyPathHits.clear();
+}
+
 /**
  * Resolve via `path` first, then walk `legacyPaths` in order.
  * Logs `[ContractAudit] LEGACY_HIT` when the canonical path misses but a
  * legacy fallback resolves — surfaces dead-vs-live legacyPaths for C5 audits.
+ * Phase 6 / Task #69 step 9 — also increments a per-(engine,field,index)
+ * counter consumable via `_getLegacyPathHitCounters()`.
  */
 function resolveFromAllPaths(output: unknown, field: ContractField, engineId?: string): unknown {
   const primary = resolvePath(output, field.path);
@@ -236,8 +251,10 @@ function resolveFromAllPaths(output: unknown, field: ContractField, engineId?: s
     const v = resolvePath(output, lp);
     if (v !== undefined) {
       const tag = engineId ? `${engineId}.${field.id}` : field.id;
+      const counterKey = `${tag}.${i}`;
+      _legacyPathHits.set(counterKey, (_legacyPathHits.get(counterKey) ?? 0) + 1);
       console.warn(
-        `[ContractAudit] LEGACY_HIT | ${tag} | canonicalPath=${JSON.stringify(field.path)} | legacyPathHit=${JSON.stringify(lp)} | legacyIndex=${i}`
+        `[ContractAudit] LEGACY_HIT | ${tag} | canonicalPath=${JSON.stringify(field.path)} | legacyPathHit=${JSON.stringify(lp)} | legacyIndex=${i} | hits=${_legacyPathHits.get(counterKey)}`
       );
       return v;
     }

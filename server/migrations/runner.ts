@@ -182,6 +182,7 @@ async function runLegacyTsMigrations(): Promise<void> {
   const { migrateTenantIsolationAccountId } = await import("./012-tenant-isolation-accountid");
   const { migrateAuthHardening } = await import("./013-auth-hardening");
   const { migrateScrapeSecurity } = await import("./014-scrape-security");
+  const { migrateAiInputSnapshots } = await import("./015-ai-input-snapshots");
 
   const steps: Array<[string, () => Promise<void>]> = [
     ["002-strategy-memory-columns", migrateStrategyMemoryColumns],
@@ -197,6 +198,7 @@ async function runLegacyTsMigrations(): Promise<void> {
     ["012-tenant-isolation-accountid", migrateTenantIsolationAccountId],
     ["013-auth-hardening", migrateAuthHardening],
     ["014-scrape-security", migrateScrapeSecurity],
+    ["015-ai-input-snapshots", migrateAiInputSnapshots],
   ];
 
   for (const [name, fn] of steps) {
