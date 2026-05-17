@@ -5,6 +5,7 @@ import { buildCausalNarrative } from "../narrative-layer";
 import { db } from "../db";
 import { buildPlanSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { resolveRunId } from "../orchestrator/run-resolver";
 
 export function registerBuildPlanLayerRoutes(app: Express) {
   app.post("/api/build-plan-layer/generate", async (req, res) => {
@@ -16,7 +17,45 @@ export function registerBuildPlanLayerRoutes(app: Express) {
       }
 
       const depthGateStatusInput = req.body.depthGateStatus || undefined;
-      const result = await runBuildPlanLayer(accountId, campaignId, depthGateStatusInput);
+
+      // Resolve the most recent completed orchestrator run for this campaign
+      // so build-plan synthesis is bound to a single coherent run (the
+      // engine hard-blocks with STALE_LINEAGE when sourceJobId is missing).
+      // Body-supplied `sourceJobId` wins (operator path); otherwise resolve.
+      let sourceJobId: string | null = (req.body?.sourceJobId as string) || null;
+      if (!sourceJobId) {
+        try {
+          const resolved = await resolveRunId(campaignId, accountId, null);
+          sourceJobId = resolved.runId ?? null;
+        } catch (resolveErr: any) {
+          console.warn(
+            `[BuildPlanLayer] Run resolve failed for campaign ${campaignId}: ${resolveErr?.message ?? resolveErr}`,
+          );
+          sourceJobId = null;
+        }
+      }
+
+      if (!sourceJobId) {
+        // Customer-safe: no completed strategy run yet, so we cannot build a
+        // plan. Return a NEEDS_STRATEGY_RUN status the UI knows how to render
+        // instead of leaking the raw STALE_LINEAGE engine block.
+        return res.json({
+          status: "NEEDS_STRATEGY_RUN",
+          plan: null,
+          actionabilityScore: 0,
+          failedBlocks: [],
+          attempts: 0,
+          message:
+            "We need a completed strategy run before we can build a plan. Run the strategy engines, then try again.",
+        });
+      }
+
+      const result = await runBuildPlanLayer(
+        accountId,
+        campaignId,
+        depthGateStatusInput,
+        sourceJobId,
+      );
 
       if (result.status === "SUCCESS" || result.status === "ACTIONABILITY_FAILED") {
         try {
@@ -47,7 +86,11 @@ export function registerBuildPlanLayerRoutes(app: Express) {
       res.json({ ...result, narrative });
     } catch (err: any) {
       console.error("[BuildPlanLayer] Route error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({
+        status: "ERROR",
+        error: "PLAN_BUILD_FAILED",
+        message: "We couldn't build your plan right now. Please try again in a moment.",
+      });
     }
   });
 
@@ -80,11 +123,35 @@ export function registerBuildPlanLayerRoutes(app: Express) {
       }
 
       console.log("[BuildPlanLayer] No stored snapshot found, generating fresh...");
-      const result = await runBuildPlanLayer(accountId, campaignId);
+      let sourceJobId: string | null = null;
+      try {
+        const resolved = await resolveRunId(campaignId, accountId, null);
+        sourceJobId = resolved.runId ?? null;
+      } catch (resolveErr: any) {
+        console.warn(
+          `[BuildPlanLayer] Run resolve failed for campaign ${campaignId}: ${resolveErr?.message ?? resolveErr}`,
+        );
+      }
+      if (!sourceJobId) {
+        return res.json({
+          status: "NEEDS_STRATEGY_RUN",
+          plan: null,
+          actionabilityScore: 0,
+          failedBlocks: [],
+          attempts: 0,
+          message:
+            "We need a completed strategy run before we can build a plan. Run the strategy engines, then try again.",
+        });
+      }
+      const result = await runBuildPlanLayer(accountId, campaignId, undefined, sourceJobId);
       res.json(result);
     } catch (err: any) {
       console.error("[BuildPlanLayer] Latest route error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({
+        status: "ERROR",
+        error: "PLAN_LOAD_FAILED",
+        message: "We couldn't load your latest plan right now. Please try again.",
+      });
     }
   });
 }

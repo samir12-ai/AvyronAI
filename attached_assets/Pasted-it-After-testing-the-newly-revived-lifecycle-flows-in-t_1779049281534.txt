@@ -1,0 +1,175 @@
+it"}
+After testing the newly revived lifecycle flows in the live dashboard, I found several customer-surface problems, architectural leaks, and UX inconsistencies that need cleanup before broader beta usage.
+
+Some of these are bugs.
+Some are customer/operator boundary leaks.
+Some are UX/navigation problems.
+Some are execution-state exposures that should never be customer-visible.
+
+I want a focused cleanup + verification pass on all of the following.
+
+1. Internal Execution / Architecture Leaks Still Visible
+There are still customer-visible surfaces exposing internal execution concepts that should NOT appear in customer mode.
+
+Examples currently visible:
+- STALE_LINEAGE error
+- sourceJobId wording
+- “refusing to synthesize build plan”
+- Plan Binding
+- System Gates
+- internal execution statuses
+- PASS / FAIL gate rows
+- SAFE_MODE wording
+- execution progress internals
+- generated/draft/failed counters
+- internal IDs visible in cards
+
+These feel like:
+- internal operator tooling
+- orchestration console output
+- runtime diagnostics
+
+—not customer product UX.
+
+This is a Phase-8 boundary violation.
+
+Customers should never see:
+- lineage terminology
+- orchestration terminology
+- gate mechanics
+- execution contracts
+- internal lifecycle semantics
+- raw runtime failure language
+
+Please audit ALL customer-visible surfaces again for:
+- operator leakage
+- execution leakage
+- runtime terminology leakage
+- orchestration exposure
+- internal IDs
+- diagnostic wording
+- system-state jargon
+
+2. Re-Run Plan Bug
+I triggered “Re-run Plan” and received:
+
+“STALE_LINEAGE: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots”
+
+This should NEVER surface raw to customers.
+
+Please investigate:
+- why re-run failed
+- whether snapshot lineage binding is broken
+- whether rerun orchestration is missing required lineage state
+- whether stale snapshots are incorrectly referenced
+- whether the rerun flow is using invalid provenance assumptions
+
+Most important:
+even if rerun legitimately fails,
+customers should NEVER receive raw orchestration/runtime errors.
+
+Need:
+- proper fallback handling
+- customer-safe translation
+- retry-state handling
+- graceful rerun failure UX
+
+3. Bottom Navigation / Routing Problems
+The bottom dashboard navigation currently feels wrong.
+
+Specifically:
+the first two tabs/routes unexpectedly redirect into Marketing Intelligence flows in ways that feel confusing and structurally inconsistent.
+
+The navigation hierarchy no longer feels coherent.
+
+Please audit:
+- bottom-tab routing
+- nested navigation ownership
+- tab destination consistency
+- screen hierarchy
+- customer mental model
+- duplicated entry paths
+- overlapping route ownership
+
+I want the navigation to feel:
+simple,
+predictable,
+and product-oriented.
+
+Not:
+like multiple overlapping internal systems stitched together.
+
+4. Dashboard / Monitor Area Still Feels Partially Internal
+The Monitor/Execution area still contains:
+- operator energy
+- infrastructure energy
+- orchestration energy
+- system-console feeling
+
+Instead of:
+- strategic intelligence
+- market awareness
+- monitoring clarity
+- business-level understanding
+
+Examples:
+- “Plan Binding”
+- “Execution Progress”
+- “System Gates”
+- PASS/FAIL infrastructure rows
+- SAFE_MODE wording
+- benchmark mode presentation
+
+These may be technically correct —
+but they do not feel customer-facing.
+
+Please audit:
+- which monitor surfaces should remain customer-visible
+- which should move to operator/admin mode only
+- which should become simplified business-language summaries
+- which should become hidden entirely
+
+5. UX Consistency / Product Feel Audit
+Overall there are still moments where the product suddenly shifts from:
+“AI strategic system”
+to:
+“internal infrastructure console.”
+
+This breaks immersion and trust.
+
+Please do another consistency pass focused specifically on:
+- product tone consistency
+- customer-safe abstraction
+- routing consistency
+- execution abstraction
+- orchestration hiding
+- customer mental model continuity
+- operational clarity without infrastructure leakage
+
+Most important:
+the customer experience should feel:
+- strategic
+- intelligent
+- alive
+- trustworthy
+- simple
+- outcome-focused
+
+—not:
+like exposed backend machinery.
+
+6. Verify Lifecycle Reality vs Surface Again
+Now that the scheduler/lifecycle is alive again:
+verify:
+- watchtower states update correctly
+- blocked reasons disappear correctly
+- benchmark windows mature correctly
+- rerun flows work correctly
+- timelines populate correctly
+- monitor states evolve correctly
+- no stale/no_data states persist incorrectly
+- no internal lifecycle errors leak to customer surfaces
+
+Goal:
+make sure the newly revived intelligence lifecycle now behaves like a polished customer product —
+not a visible orchestration eng

@@ -90,6 +90,43 @@ interface BuildPlanResponse {
   failedBlocks: string[];
   attempts: number;
   error?: string;
+  message?: string;
+}
+
+// Last-mile safety net: scrub any raw orchestration / lineage / gate jargon
+// that escapes the server. Customers must never see tokens like
+// STALE_LINEAGE, sourceJobId, "refusing to synthesize", SAFE_MODE, etc.
+const RAW_JARGON_PATTERNS: { pattern: RegExp; replacement: string }[] = [
+  { pattern: /STALE[_ ]LINEAGE[^.]*\.?/gi, replacement: '' },
+  { pattern: /\bno sourceJobId provided[^.]*\.?/gi, replacement: '' },
+  { pattern: /\brefusing to synthesize[^.]*\.?/gi, replacement: '' },
+  { pattern: /\bunbound snapshots\b/gi, replacement: 'incomplete data' },
+  { pattern: /\bsourceJobId\b/gi, replacement: 'run id' },
+  { pattern: /\bSAFE[_ ]MODE\b/gi, replacement: 'safe mode' },
+  { pattern: /\bsnapshot lineage\b/gi, replacement: 'data lineage' },
+  { pattern: /\bjobId=[\w-]+/gi, replacement: '' },
+  { pattern: /\bdepthGateStatus\b/gi, replacement: 'gate status' },
+];
+
+function toCustomerSafeMessage(raw: string | null | undefined, fallback: string): string {
+  if (!raw) return fallback;
+  let cleaned = raw;
+  for (const { pattern, replacement } of RAW_JARGON_PATTERNS) {
+    cleaned = cleaned.replace(pattern, replacement);
+  }
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').replace(/\s+([.,;:])/g, '$1').trim();
+  if (!cleaned || cleaned.length < 4) return fallback;
+  return cleaned;
+}
+
+// Friendly summary instead of leaking raw block identifiers
+// (e.g. "STALE_LINEAGE_BLOCK", "MARKET_DIAGNOSIS_BLOCK"). We translate the
+// count into a single business-language sentence.
+function summarizeFailedBlocks(failedBlocks: string[] | null | undefined): string {
+  const n = Array.isArray(failedBlocks) ? failedBlocks.length : 0;
+  if (n === 0) return 'Some parts of your plan need a bit more detail.';
+  if (n === 1) return 'One part of your plan needs a bit more specificity.';
+  return `A few parts of your plan need a bit more specificity (${n}).`;
 }
 
 interface CardConfig {
@@ -370,8 +407,16 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
         setPlan(data.plan);
         setStatus(data.status);
         if (data.status === 'ACTIONABILITY_FAILED') {
-          setError(`Some decisions need more specificity (${data.failedBlocks?.join(', ') || 'unknown'})`);
+          setError(summarizeFailedBlocks(data.failedBlocks));
         }
+      } else if (data.status === 'NEEDS_STRATEGY_RUN') {
+        setStatus(data.status);
+        setError(
+          toCustomerSafeMessage(
+            data.message,
+            'Run the strategy engines first, then we can build your plan.',
+          ),
+        );
       }
     } catch {}
   }, [selectedCampaignId]);
@@ -412,15 +457,42 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
         onPlanGenerated?.();
       } else if (data.status === 'ACTIONABILITY_FAILED' && data.plan) {
         setPlan(data.plan);
-        setError(`Some decisions need more specificity (${data.failedBlocks.join(', ')})`);
+        setError(summarizeFailedBlocks(data.failedBlocks));
         onPlanGenerated?.();
+      } else if (data.status === 'NEEDS_STRATEGY_RUN') {
+        setError(
+          toCustomerSafeMessage(
+            data.message,
+            'Run the strategy engines first, then we can build your plan.',
+          ),
+        );
+      } else if (data.status === 'BLOCKED') {
+        // Engine-level block (e.g. STALE_LINEAGE) — translate, never leak.
+        // Prefer customer-safe `message`; never render internal `error` codes.
+        setError(
+          toCustomerSafeMessage(
+            data.message,
+            "We couldn't build a plan from this run. Run a fresh strategy analysis and try again.",
+          ),
+        );
       } else if (data.status === 'INSUFFICIENT_DATA') {
-        setError(data.error || 'Not enough engine data. Run the strategy engines first.');
+        setError(
+          toCustomerSafeMessage(
+            data.message,
+            'Not enough strategy data yet. Run the strategy engines first.',
+          ),
+        );
       } else {
-        setError(data.error || 'Failed to generate execution plan');
+        setError(
+          toCustomerSafeMessage(
+            data.message,
+            "We couldn't build your plan right now. Please try again.",
+          ),
+        );
       }
     } catch (err: any) {
-      setError(err.message || 'Network error');
+      // Network/parse failure — never echo raw err.message; use a safe fallback.
+      setError('Network error. Please try again.');
     } finally {
       setLoading(false);
     }
