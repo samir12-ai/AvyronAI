@@ -2838,7 +2838,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 20 }]}>
                 <Ionicons name="analytics-outline" size={32} color={colors.textMuted} />
                 <Text style={[s.execItemDesc, { color: colors.textSecondary, marginTop: 8, textAlign: 'center' }]}>
-                  No performance data available.
+                  Performance tuning activates once posts are published and Meta is connected. Market scans and insights are still running in the background.
                 </Text>
               </View>
             )}
