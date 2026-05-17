@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { getApiUrl, authFetch } from "@/lib/query-client";
-import type { WatchtowerLine, ActivityEvent } from "@shared/perception-translator";
+import type { WatchtowerLine, ActivityEvent, BlockedReason } from "@shared/perception-translator";
 
 // Battery doctrine — pause polling when the app is backgrounded. React
 // Query will resume on next foreground (refetch fires immediately if the
@@ -74,6 +74,25 @@ export function useActivityTimeline(campaignId: string | null | undefined, since
     enabled: !!campaignId,
     staleTime: 5 * 60_000,
     refetchInterval: active ? 5 * 60_000 : false,
+  });
+}
+
+export interface BlockedReasonsResponse {
+  success: true;
+  state: "ready" | "no_data";
+  lastCheckedAt: string | null;
+  reasons: BlockedReason[];
+  truthDue: { windowId: string; windowEndsAt: string; isLate: boolean } | null;
+}
+
+export function useBlockedReasons(campaignId: string | null | undefined) {
+  const active = useIsAppActive();
+  return useQuery<BlockedReasonsResponse>({
+    queryKey: ["/api/perception/blocked-reasons", campaignId],
+    queryFn: () => fetchJson<BlockedReasonsResponse>(`/api/perception/blocked-reasons?campaignId=${campaignId}`),
+    enabled: !!campaignId,
+    staleTime: 2 * 60_000,
+    refetchInterval: active ? 2 * 60_000 : false,
   });
 }
 

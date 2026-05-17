@@ -26,6 +26,9 @@ import {
   pipelineEvalWindows,
   strategyMemory,
 } from "@shared/schema";
+import { acceptUserTruth } from "./pipeline/lanes/user/user-truth";
+import { evaluateWindowState } from "./pipeline/eval-windows";
+import { PipelineValidationError } from "./pipeline/errors";
 import { eq, and, desc, gte, sql, count, ne, max, inArray } from "drizzle-orm";
 import {
   translateQ1Verdict,
@@ -34,6 +37,7 @@ import {
   translateBossRunStatus,
   translateReanchorReason,
   translateContinuityDecision,
+  translateBlockedReasons,
   buildMonitoringLines,
   Q1_PENDING_FIRST_RUN,
   Q2_PENDING_FIRST_RUN,
@@ -42,6 +46,7 @@ import {
   type WatchtowerLine,
   type ActivityEvent,
   type MonitoringFacts,
+  type BlockedReason,
 } from "@shared/perception-translator";
 
 const LOG_PREFIX = "[Perception]";
@@ -119,6 +124,167 @@ export function registerPerceptionRoutes(app: Express) {
   // Each row passes through the perception-translator allowlist. Unknown
   // statuses are DROPPED (not coerced into "all good").
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // GET /api/perception/blocked-reasons?campaignId=...
+  //
+  // Lifecycle C-package (May 2026). Returns the customer-facing CTA list
+  // built from the most-recent boss_run's `warnings` array. Also reports
+  // whether a user-truth submission is currently due so the dashboard can
+  // surface the inline form even when the boss hasn't run yet (e.g. the
+  // window opened but the first run hasn't been kicked).
+  //
+  // Fail-closed: unknown warning codes are dropped (perception translator).
+  // Customer payload contains NO internal warning codes — only the
+  // translated headline/detail/cta + a stable `action` enum.
+  // -------------------------------------------------------------------------
+  app.get("/api/perception/blocked-reasons", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+
+      const [latest] = await db
+        .select({
+          id: bossRuns.id,
+          status: bossRuns.status,
+          warnings: bossRuns.warnings,
+          createdAt: bossRuns.createdAt,
+          finishedAt: bossRuns.finishedAt,
+        })
+        .from(bossRuns)
+        .where(and(eq(bossRuns.accountId, accountId), eq(bossRuns.campaignId, campaignId)))
+        .orderBy(desc(bossRuns.createdAt))
+        .limit(1);
+
+      // Parse warnings JSON. Persisted as JSONB text in bossRuns.warnings
+      // (see server/boss/run.ts:281–299). May be array, string-encoded
+      // array, null, or absent.
+      let warnings: string[] = [];
+      if (latest?.warnings) {
+        const raw = latest.warnings as unknown;
+        if (Array.isArray(raw)) warnings = raw.filter((w): w is string => typeof w === "string");
+        else if (typeof raw === "string") {
+          try { const p = JSON.parse(raw); if (Array.isArray(p)) warnings = p.filter((w) => typeof w === "string"); }
+          catch { /* swallow — translator handles empty */ }
+        }
+      }
+      const reasons: BlockedReason[] = translateBlockedReasons(warnings);
+
+      // Truth-due signal: independent of warnings. If an eval window is
+      // currently open AND no user_truth row exists for it, surface the
+      // truth submission CTA even if no boss_run has emitted a warning
+      // yet (covers the gap between window-open and first run).
+      let truthDue: { windowId: string; windowEndsAt: string; isLate: boolean } | null = null;
+      try {
+        // Open window = state='open' AND no linked truth_id. Per
+        // shared/schema.ts:3058 pipeline_eval_windows.state ∈
+        // {open, closed_with_truth, closed_missing_truth, late_filled}
+        // and the truth link lives on the WINDOW row (truthId), not on
+        // the truth row.
+        const [openWindow] = await db
+          .select({
+            id: pipelineEvalWindows.id,
+            windowEnd: pipelineEvalWindows.windowEnd,
+            truthId: pipelineEvalWindows.truthId,
+          })
+          .from(pipelineEvalWindows)
+          .where(and(
+            eq(pipelineEvalWindows.accountId, accountId),
+            eq(pipelineEvalWindows.campaignId, campaignId),
+            eq(pipelineEvalWindows.state, "open"),
+          ))
+          .orderBy(desc(pipelineEvalWindows.windowEnd))
+          .limit(1);
+
+        if (openWindow && !openWindow.truthId) {
+          const endsAt = openWindow.windowEnd instanceof Date
+            ? openWindow.windowEnd
+            : new Date(openWindow.windowEnd as any);
+          truthDue = {
+            windowId: openWindow.id,
+            windowEndsAt: endsAt.toISOString(),
+            isLate: endsAt.getTime() < Date.now(),
+          };
+        }
+      } catch (e) {
+        // Fail-open on the truth-due probe — never block the reasons list.
+        console.error(`${LOG_PREFIX} blocked-reasons truth-due probe failed:`, (e as any)?.message ?? e);
+      }
+
+      // Strip internal operator fields from the customer payload:
+      //   - reasons[].code is the internal warning enum (e.g.
+      //     "bridge_skipped:user_lane_no_signals_extracted"). Customers
+      //     get only the translated headline/detail/cta/action/tone.
+      //   - truthDue.windowId is an internal UUID. Customers only need
+      //     the timing signal (isLate + windowEndsAt) — submission goes
+      //     through the server which re-derives the window itself.
+      const sanitizedReasons = reasons.map(({ code: _code, ...rest }) => rest);
+      const sanitizedTruthDue = truthDue
+        ? { windowEndsAt: truthDue.windowEndsAt, isLate: truthDue.isLate }
+        : null;
+      return res.json({
+        success: true,
+        state: sanitizedReasons.length > 0 || sanitizedTruthDue ? "ready" : "no_data",
+        lastCheckedAt: (latest?.finishedAt ?? latest?.createdAt) instanceof Date
+          ? (latest!.finishedAt ?? latest!.createdAt!).toISOString()
+          : null,
+        reasons: sanitizedReasons,
+        truthDue: sanitizedTruthDue,
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} blocked-reasons failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "BLOCKED_REASONS_FAILED" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/perception/user-truth
+  //
+  // Customer-grade truth intake (lifecycle C-package). Mirrors the existing
+  // admin-gated `/api/pipeline/user-truth` but runs under `requireCampaign`
+  // so the dashboard form on the customer surface can submit. Server is the
+  // sole authority on windowId — derived from evaluateWindowState() at
+  // submit time; the client cannot pick the window.
+  //
+  // Wrapper rule (Phase 8 customer-surface gate): the response contains
+  // ONLY the customer-safe shape — { ok, superseded, wasLate }. Internal
+  // identifiers (truthId/windowId) never reach the customer payload.
+  // -------------------------------------------------------------------------
+  app.post("/api/perception/user-truth", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const submittedBy = (req as any).user?.id ?? null;
+      const body = req.body ?? {};
+      const ws = await evaluateWindowState(accountId, campaignId, new Date());
+      if (!ws.window) {
+        return res.status(409).json({
+          success: false,
+          code: "NO_ACTIVE_APPROVED_PLAN",
+          message: "Your weekly review window isn't open yet — approve a plan first.",
+        });
+      }
+      const result = await acceptUserTruth({
+        accountId,
+        campaignId,
+        windowId: ws.window.id,
+        totalLeads: Number(body.totalLeads),
+        qualifiedLeads: Number(body.qualifiedLeads),
+        bookedCalls: Number(body.bookedCalls),
+        paidActive: body.paidActive === true,
+        submittedBy,
+      });
+      return res.status(201).json({
+        success: true,
+        superseded: result.superseded,
+        wasLate: result.truth.wasLate,
+      });
+    } catch (err: any) {
+      if (err instanceof PipelineValidationError) {
+        return res.status(400).json({ success: false, code: err.code, message: err.message });
+      }
+      console.error(`${LOG_PREFIX} user-truth submit failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, code: "TRUTH_SUBMIT_FAILED" });
+    }
+  });
+
   app.get("/api/perception/activity", requireCampaign, async (req: Request, res: Response) => {
     try {
       const { accountId, campaignId } = (req as any).campaignContext;

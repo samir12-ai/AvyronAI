@@ -161,6 +161,199 @@ export function translateReanchorReason(reason: string | null | undefined): { to
 }
 
 // ---------------------------------------------------------------------------
+// Blocked-reason translator (lifecycle C-package, May 2026).
+//
+// When boss_runs.warnings contains evaluation-blocking codes, the system
+// KNOWS exactly what it needs from the user but never used to surface those
+// asks. Each code below maps to a single customer-facing CTA describing
+// what the user should do (or what's already in flight) to unblock the
+// weekly review. The dashboard renders the items in priority order.
+//
+// Fail-closed: unknown warning codes return null and are silently dropped
+// — never coerced into a generic "something is wrong" line.
+// ---------------------------------------------------------------------------
+
+export type BlockedReasonAction =
+  | "submit_user_truth"     // user must click into the truth form
+  | "configure_rhythm"      // user must set/repair the content rhythm
+  | "connect_accounts"      // user must link social accounts for signal extraction
+  | "approve_plan"          // user must approve a plan first
+  | "wait_for_system";      // nothing the user can do — system is recovering
+
+export interface BlockedReason {
+  code: string;             // original warning code (operator-grade, not shown)
+  action: BlockedReasonAction;
+  tone: WatchtowerTone;
+  headline: string;         // short, < 60 chars
+  detail: string;           // 1 sentence, < 160 chars
+  cta: string | null;       // button label, null if no action
+}
+
+// Priority order — first match wins when multiple warnings collide on the
+// same action surface. Higher = more important to show first.
+const BLOCKED_REASON_PRIORITY: Record<BlockedReasonAction, number> = {
+  approve_plan: 100,
+  configure_rhythm: 80,
+  connect_accounts: 60,
+  submit_user_truth: 40,
+  wait_for_system: 0,
+};
+
+export function translateBlockedReason(code: string): BlockedReason | null {
+  switch (code) {
+    case "user_truth_missing":
+      return {
+        code,
+        action: "submit_user_truth",
+        tone: "watching",
+        headline: "Tell me how last week went",
+        detail: "Enter the 4 numbers from last week — leads, qualified, booked, paying — so I can score the plan.",
+        cta: "Submit weekly numbers",
+      };
+    case "user_truth_late":
+      return {
+        code,
+        action: "submit_user_truth",
+        tone: "watching",
+        headline: "Last week's numbers are late",
+        detail: "Still accepting last week's numbers — submit now and I'll back-fill the review.",
+        cta: "Submit late numbers",
+      };
+    case "rhythm_invalid":
+      return {
+        code,
+        action: "configure_rhythm",
+        tone: "issue",
+        headline: "Posting rhythm needs setup",
+        detail: "Your weekly posting rhythm config is missing or malformed — pick how many posts per week so I can measure compliance.",
+        cta: "Set posting rhythm",
+      };
+    case "rhythm_non_compliant":
+      return {
+        code,
+        action: "configure_rhythm",
+        tone: "watching",
+        headline: "Posting cadence drifted",
+        detail: "You're publishing less than your approved rhythm. Adjust the plan or get back on cadence.",
+        cta: "Review rhythm",
+      };
+    case "rhythm_partial":
+      return {
+        code,
+        action: "configure_rhythm",
+        tone: "watching",
+        headline: "Partial week of posts",
+        detail: "Not every day was covered. Catch up or adjust the plan so reviews stay accurate.",
+        cta: "Review rhythm",
+      };
+    case "bridge_skipped:user_lane_no_signals_extracted":
+      return {
+        code,
+        action: "connect_accounts",
+        tone: "watching",
+        headline: "No signals from your accounts yet",
+        detail: "I couldn't extract any posts from your connected accounts — re-check the connection so I can read your content.",
+        cta: "Check connections",
+      };
+    case "bridge_skipped:missing_validated_user_or_competitor_run":
+      return {
+        code,
+        action: "connect_accounts",
+        tone: "watching",
+        headline: "Connect more sources",
+        detail: "I need at least one validated user post or competitor profile to bridge signals. Add one in Market DB.",
+        cta: "Open Market DB",
+      };
+    case "no_active_approved_plan":
+      return {
+        code,
+        action: "approve_plan",
+        tone: "issue",
+        headline: "No approved plan yet",
+        detail: "Reviews only start after you approve a strategic plan. Open the roadmap to approve one.",
+        cta: "Open roadmap",
+      };
+    case "anchor_fallback_used":
+      return {
+        code,
+        action: "wait_for_system",
+        tone: "watching",
+        headline: "Using a fallback review anchor",
+        detail: "Plan approval timestamp was missing; I'm using the plan's creation time instead. Reviews still run normally.",
+        cta: null,
+      };
+    case "evaluation_blocked":
+      // Umbrella code — only surface if NO other more-specific code is present.
+      // Caller dedups by action; the consolidator at the bottom of this file
+      // demotes this entry when a higher-priority sibling already covers the
+      // same action.
+      return {
+        code,
+        action: "wait_for_system",
+        tone: "issue",
+        headline: "Review is blocked",
+        detail: "One or more inputs are missing — see the action items above.",
+        cta: null,
+      };
+    case "evaluation_degraded":
+      return {
+        code,
+        action: "wait_for_system",
+        tone: "watching",
+        headline: "Review running with limited confidence",
+        detail: "Some inputs were partial. The review still ran but the verdict carries lower confidence.",
+        cta: null,
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Translate the full warnings[] array from a boss_run into a deduplicated,
+ * priority-ordered list of customer-facing actions. Multiple warnings that
+ * map to the same `action` collapse to the highest-tone instance. The
+ * "evaluation_blocked" umbrella is dropped when any concrete cause is
+ * present (because then the concrete cause already explains the block).
+ */
+export function translateBlockedReasons(warnings: string[] | null | undefined): BlockedReason[] {
+  if (!Array.isArray(warnings) || warnings.length === 0) return [];
+  const translated: BlockedReason[] = [];
+  for (const w of warnings) {
+    const t = translateBlockedReason(w);
+    if (t) translated.push(t);
+  }
+  if (translated.length === 0) return [];
+
+  // Dedup by action; keep the most-severe tone (issue > shift > watching > stable > unknown).
+  const toneRank: Record<WatchtowerTone, number> = { issue: 4, shift: 3, watching: 2, stable: 1, unknown: 0 };
+  const byAction = new Map<BlockedReasonAction, BlockedReason>();
+  for (const r of translated) {
+    const existing = byAction.get(r.action);
+    if (!existing || toneRank[r.tone] > toneRank[existing.tone]) {
+      byAction.set(r.action, r);
+    }
+  }
+
+  // Drop the umbrella "evaluation_blocked" (action: wait_for_system, code: evaluation_blocked)
+  // when any actionable cause is present — concrete causes already explain it.
+  const hasActionable = Array.from(byAction.values()).some(
+    (r) => r.action !== "wait_for_system",
+  );
+  if (hasActionable) {
+    const waiter = byAction.get("wait_for_system");
+    if (waiter && waiter.code === "evaluation_blocked") {
+      byAction.delete("wait_for_system");
+    }
+  }
+
+  // Sort by priority descending.
+  return Array.from(byAction.values()).sort(
+    (a, b) => BLOCKED_REASON_PRIORITY[b.action] - BLOCKED_REASON_PRIORITY[a.action],
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Monitoring snapshot — evidence-first translator. Turns RAW COUNTS the
 // system has actually observed (competitors watched, posts scanned, insights
 // validated, etc.) into customer-safe English lines that emphasize what the

@@ -38,6 +38,8 @@ import type { ProvenanceKind } from '@/components/DataProvenance';
 import { useAuth } from '@/context/AuthContext';
 import { RunTruthfulnessBanner } from '@/components/RunTruthfulnessBanner';
 import WatchtowerStrip from '@/components/WatchtowerStrip';
+import BlockedReasonsCard from '@/components/BlockedReasonsCard';
+import TruthSubmissionCard from '@/components/TruthSubmissionCard';
 import ActivityTimeline from '@/components/ActivityTimeline';
 import { MarketMindAgent } from '@/components/MarketMindAgent';
 import InitializationExperience from '@/components/InitializationExperience';
@@ -154,6 +156,10 @@ function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
   const { data: anchor } = useRunAnchor(campaignId);
   const runId = anchor?.runId || null;
   const { data: watchtower, isLoading: isWatchtowerLoading } = useWatchtower(campaignId);
+  // CTA bridge: BlockedReasonsCard's `submit_user_truth` action sets this
+  // true, which forces TruthSubmissionCard open even if the close window
+  // is more than 36h away. Cleared once the truth post succeeds.
+  const [truthForceOpen, setTruthForceOpen] = useState(false);
 
   // Stabilize the first-render path so we don't flicker from the "active"
   // shell into the initialization card the moment the watchtower query
@@ -186,6 +192,17 @@ function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
   return (
     <>
       <WatchtowerStrip campaignId={campaignId} isDark={isDark} />
+      <BlockedReasonsCard
+        campaignId={campaignId}
+        isDark={isDark}
+        onSubmitTruth={() => setTruthForceOpen(true)}
+      />
+      <TruthSubmissionCard
+        campaignId={campaignId}
+        isDark={isDark}
+        forceOpen={truthForceOpen}
+        onClose={() => setTruthForceOpen(false)}
+      />
       <RunTruthfulnessBanner campaignId={campaignId} isDark={isDark} />
       <MarketMindAgent campaignId={campaignId} isDark={isDark} />
       <NarrativeCard campaignId={campaignId} isDark={isDark} refreshKey={narrativeRefreshKey} runId={runId} />

@@ -76,8 +76,10 @@ import {
   continuityTicks,
   bossRuns,
   continuityWindowClaims,
+  miSnapshots,
+  strategyDecisions,
 } from "@shared/schema";
-import { and, desc, eq, sql, max as drizzleMax } from "drizzle-orm";
+import { and, desc, eq, sql, gte, max as drizzleMax } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { runBoss } from "../boss";
 import { BossRunInFlightError } from "../boss/concurrency";
@@ -622,6 +624,87 @@ function shouldReanchor(
   return true;
 }
 
+/**
+ * Track #4 / lifecycle C-package (May 2026): evidence-aware reanchor guard.
+ *
+ * The original `shouldReanchor` (above) fires whenever NO eval windows
+ * exist AND the gap exceeds LONG_GAP_THRESHOLD_MS. In May 2026 this
+ * doctrine hard-reset healthy 2-month-old campaigns to Day 0 because the
+ * lifecycle had silently crashed on `planAgeBaseline.getTime is not a
+ * function` for ~12 hours — so even though MI scans, strategy decisions,
+ * and competitor scrapes were all healthy, no `pipeline_eval_windows` row
+ * had ever been opened. The scheduler interpreted "no window" as "long
+ * silence" and Day-0'd the timeline, throwing away every accumulated
+ * signal.
+ *
+ * Real fix: before firing the reset, look for ANY system evidence that
+ * the account is alive — even a single MI snapshot, boss run, or strategy
+ * decision in the last 60 days. If we find anything, the lifecycle has
+ * been working at some layer and we MUST NOT Day-0 it; the missing
+ * window is a contained scheduler bug, not abandonment. The audit row
+ * makes the suppression observable so the operator can see and unblock
+ * the real upstream cause.
+ */
+const REANCHOR_EVIDENCE_WINDOW_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+
+interface EvidenceCheck {
+  hasEvidence: boolean;
+  miSnapshots: number;
+  bossRuns: number;
+  strategyDecisions: number;
+}
+
+async function checkRecentEvidence(plan: ActiveCampaign, now: Date): Promise<EvidenceCheck> {
+  const since = new Date(now.getTime() - REANCHOR_EVIDENCE_WINDOW_MS);
+  try {
+    const [miRows, bossRows, decRows] = await Promise.all([
+      db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(miSnapshots)
+        .where(and(
+          eq(miSnapshots.accountId, plan.accountId),
+          eq(miSnapshots.campaignId, plan.campaignId),
+          gte(miSnapshots.createdAt, since),
+        )),
+      db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(bossRuns)
+        .where(and(
+          eq(bossRuns.accountId, plan.accountId),
+          eq(bossRuns.campaignId, plan.campaignId),
+          gte(bossRuns.createdAt, since),
+        )),
+      db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(strategyDecisions)
+        .where(and(
+          eq(strategyDecisions.accountId, plan.accountId),
+          eq(strategyDecisions.campaignId, plan.campaignId),
+          gte(strategyDecisions.createdAt, since),
+        )),
+    ]);
+    const miSnapshotsN = Number(miRows[0]?.c ?? 0);
+    const bossRunsN = Number(bossRows[0]?.c ?? 0);
+    const decisionsN = Number(decRows[0]?.c ?? 0);
+    return {
+      hasEvidence: miSnapshotsN > 0 || bossRunsN > 0 || decisionsN > 0,
+      miSnapshots: miSnapshotsN,
+      bossRuns: bossRunsN,
+      strategyDecisions: decisionsN,
+    };
+  } catch (err) {
+    // Fail-CLOSED on the evidence read: if we can't prove the account is
+    // healthy we MUST NOT Day-0 it. Log loudly so operators see the read
+    // failed; return hasEvidence=true to suppress the destructive reset.
+    console.error("[ContinuityScheduler] REANCHOR_EVIDENCE_CHECK_FAILED", {
+      campaignId: plan.campaignId,
+      planId: plan.planId,
+      err: String(err),
+    });
+    return { hasEvidence: true, miSnapshots: -1, bossRuns: -1, strategyDecisions: -1 };
+  }
+}
+
 async function writeReanchor(
   plan: ActiveCampaign,
   now: Date,
@@ -724,7 +807,29 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
         // Dead-cycle baseline: prefer plan.updatedAt; gracefully degrade to
         // createdAt and finally to anchorAt if both are null (parity with
         // listActiveCampaigns nullable plan timestamps).
-        const planAgeBaseline = (plan.planUpdatedAt ?? plan.planCreatedAt ?? anchorAt) as Date;
+        // Defensive coercion (Track #4 / lifecycle C-package): even though
+        // listActiveCampaigns now toDate()s its raw SQL output and
+        // resolveAnchor returns a real Date, a future code path or a bad
+        // upstream cast could still hand us a string. Coerce explicitly +
+        // log loudly so we trip a metric instead of throwing.
+        let planAgeBaseline: Date;
+        const _rawBaseline = plan.planUpdatedAt ?? plan.planCreatedAt ?? anchorAt;
+        if (_rawBaseline instanceof Date) {
+          planAgeBaseline = _rawBaseline;
+        } else if (typeof _rawBaseline === "string" || typeof _rawBaseline === "number") {
+          const coerced = new Date(_rawBaseline);
+          planAgeBaseline = Number.isNaN(coerced.getTime()) ? now : coerced;
+          console.error(
+            "[ContinuityScheduler] PLAN_AGE_BASELINE_COERCED_FROM_NON_DATE",
+            { campaignId: plan.campaignId, planId: plan.planId, rawType: typeof _rawBaseline },
+          );
+        } else {
+          planAgeBaseline = now;
+          console.error(
+            "[ContinuityScheduler] PLAN_AGE_BASELINE_UNRESOLVABLE_FALLBACK_TO_NOW",
+            { campaignId: plan.campaignId, planId: plan.planId },
+          );
+        }
         const deadCycleDays = lastRunAt
           ? null
           : Math.floor((now.getTime() - planAgeBaseline.getTime()) / MS_PER_DAY);
@@ -773,6 +878,11 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
         }
 
         // Long-gap re-anchor (writes a new anchor; recompute window state).
+        // Track #4 / lifecycle C-package: evidence-aware suppression. The
+        // structural "no windows opened in N days" test alone hard-reset
+        // healthy campaigns to Day 0 in May 2026. We now also require an
+        // affirmative "no evidence anywhere" check via checkRecentEvidence
+        // before firing the destructive reset.
         let reanchored = false;
         if (
           shouldReanchor(
@@ -782,15 +892,46 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
             now,
           )
         ) {
-          await writeReanchor(plan, now, "long_gap_no_windows_opened");
-          reanchored = true;
-          reanchorsWritten += 1;
-          // After re-anchor, the effective windowIndex is 0 going forward.
-          windowState = {
-            expectedWindowIndex: 0,
-            maxObservedWindowIndex: null,
-            missedWindows: 0,
-          };
+          const evidence = await checkRecentEvidence(plan, now);
+          if (evidence.hasEvidence) {
+            // Suppress: lifecycle is alive at some layer; opening windows
+            // is the contained bug. Audit so the operator can chase the
+            // real upstream cause.
+            console.error("[ContinuityScheduler] REANCHOR_SUPPRESSED_EVIDENCE_PRESENT", {
+              campaignId: plan.campaignId,
+              planId: plan.planId,
+              miSnapshots: evidence.miSnapshots,
+              bossRuns: evidence.bossRuns,
+              strategyDecisions: evidence.strategyDecisions,
+              expectedWindowIndex: windowState.expectedWindowIndex,
+              anchorAgeDays: Math.floor((now.getTime() - anchorAt.getTime()) / MS_PER_DAY),
+            });
+            await logAudit(plan.accountId, "CONTINUITY_REANCHOR_SUPPRESSED", {
+              details: {
+                campaignId: plan.campaignId,
+                planId: plan.planId,
+                reason: "evidence_present_in_last_60d",
+                miSnapshots: evidence.miSnapshots,
+                bossRuns: evidence.bossRuns,
+                strategyDecisions: evidence.strategyDecisions,
+                expectedWindowIndex: windowState.expectedWindowIndex,
+              },
+            }).catch(() => undefined);
+            // Leave anchorAt alone and proceed with the original window
+            // state. The boss run that follows will lazy-create the
+            // missing pipeline_eval_windows row via evaluateWindowState,
+            // and the lifecycle resumes without losing history.
+          } else {
+            await writeReanchor(plan, now, "long_gap_no_windows_opened");
+            reanchored = true;
+            reanchorsWritten += 1;
+            // After re-anchor, the effective windowIndex is 0 going forward.
+            windowState = {
+              expectedWindowIndex: 0,
+              maxObservedWindowIndex: null,
+              missedWindows: 0,
+            };
+          }
         }
 
         // Idempotency: if the most recent boss_run STARTED in the current
@@ -1047,6 +1188,30 @@ export async function runContinuityTick(opts: TickOptions = {}): Promise<TickRep
           "[ContinuityScheduler] failed to persist tick row",
         );
       }
+    }
+
+    // Track #4 / lifecycle C-package — explicit silent-failure escalation.
+    // Per Seal #13/#14 doctrine, runs_failed and dead_cycles_detected MUST
+    // be 0 in steady state. The metrics counters above already record the
+    // increments, but Prometheus alerts may not be wired in this
+    // environment. Emit a loud, structured console.error per tick so the
+    // operator sees the lifecycle degradation in their app logs even if
+    // no external alerting stack is configured.
+    if (runsFailed > 0 || deadCyclesTotal > 0 || missedWindowsTotal > 0) {
+      const failedDecisions = decisions
+        .filter((d) => d.decision === "failed")
+        .slice(0, 5)
+        .map((d) => ({ campaignId: d.campaignId, reason: d.reason }));
+      console.error("[ContinuityScheduler] LIFECYCLE_SILENT_FAILURE_TICK_SUMMARY", {
+        tickAt: now.toISOString(),
+        runsFailed,
+        deadCyclesDetected: deadCyclesTotal,
+        missedWindowsDetected: missedWindowsTotal,
+        reanchorsWritten,
+        campaignsScanned: campaigns.length,
+        failedDecisionsSample: failedDecisions,
+        note: "These counts must be 0 in steady state. See per-campaign audit rows for detail.",
+      });
     }
 
     lastTickAt = now;
