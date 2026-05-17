@@ -4,6 +4,8 @@ const noSemanticFallback = require('./.local/eslint-rules/no-semantic-fallback.j
 const noDirectStrategyMemoryWrite = require('./.local/eslint-rules/no-direct-strategy-memory-write.js');
 const noValidateDecisionMemoryWriteImport = require('./.local/eslint-rules/no-validate-decision-memory-write-import.js');
 const noBareLlmCallInReplay = require('./.local/eslint-rules/no-bare-llm-call-in-replay.js');
+const orchestratorModuleBoundary = require('./.local/eslint-rules/orchestrator-module-boundary.js');
+const orchestratorNoNewLargeFile = require('./.local/eslint-rules/orchestrator-no-new-large-file.js');
 
 module.exports = defineConfig([
   expoConfig,
@@ -122,6 +124,31 @@ module.exports = defineConfig([
     },
     rules: {
       "orchestrator-replay/no-bare-llm-call-in-replay": "error",
+    },
+  },
+  // Task #90 / Phase 4-B — Orchestrator responsibility extraction boundary.
+  // (A) Extracted modules MUST NOT reach back into ../index.ts.
+  // (B) External code MUST NOT import module internals (go through
+  //     server/orchestrator/index.ts re-exports).
+  // (C) Extracted module index.ts ≤ 200 lines.
+  // (D) server/orchestrator/index.ts ≤ orchestratorIndexMaxLines (ratchet
+  //     down with every Phase-4 extraction; current ceiling = 5000).
+  {
+    files: ["server/**/*.ts"],
+    plugins: {
+      orchestrator: {
+        rules: {
+          "module-boundary": orchestratorModuleBoundary,
+          "no-new-large-file": orchestratorNoNewLargeFile,
+        },
+      },
+    },
+    rules: {
+      "orchestrator/module-boundary": "error",
+      "orchestrator/no-new-large-file": [
+        "error",
+        { maxModuleLines: 200, orchestratorIndexMaxLines: 5000 },
+      ],
     },
   },
 ]);
