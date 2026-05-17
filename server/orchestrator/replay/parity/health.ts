@@ -71,8 +71,11 @@ export async function computeParityHealth(
   const shadowMode = process.env.PARITY_SHADOW === "1";
 
   // Corpus cardinality.
+  // Task #92 / Phase 4-D — restrict the parity-gate corpus to cassettes
+  // tagged `purpose='parity'`. `behavioral_change_proof` cassettes are
+  // hand-crafted for new path behavior and are EXPECTED to diverge.
   const corpus = await pool.query<{ cnt: string }>(
-    `SELECT COUNT(*)::text AS cnt FROM orchestrator_replay_cassettes`,
+    `SELECT COUNT(*)::text AS cnt FROM orchestrator_replay_cassettes WHERE purpose = 'parity'`,
   );
   const cassetteCount = parseInt(corpus.rows[0]?.cnt ?? "0", 10);
   // Freshness window (code-review #5 fix): the cassettes table is
@@ -87,6 +90,7 @@ export async function computeParityHealth(
     `SELECT MIN(captured_at) AS oldest_in_window
        FROM (
          SELECT captured_at FROM orchestrator_replay_cassettes
+         WHERE purpose = 'parity'
          ORDER BY captured_at DESC LIMIT $1
        ) w`,
     [windowSize],

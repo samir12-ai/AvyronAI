@@ -3193,7 +3193,28 @@ export const orchestratorReplayCassettes = pgTable("orchestrator_replay_cassette
   campaignId: varchar("campaign_id"),
   accountId: varchar("account_id"),
   body: jsonb("body").notNull(),
+  // Task #92 / Phase 4-D — 'parity' (default) vs 'behavioral_change_proof'.
+  // The parity health gate filters its BLOCK-divergence histogram to
+  // 'parity' cassettes only; 'behavioral_change_proof' cassettes are
+  // expected to diverge (the divergence proves the behavioral change).
+  purpose: text("purpose").notNull().default("parity"),
 });
+
+// Task #92 / Phase 4-D — `cutover_state` singleton (id=1) tracks the
+// traffic-percent rollout. Doctrine OD-4: traffic_percent ∈ {0,1,5,25,50,100},
+// 24h-increment guard enforced by a Postgres BEFORE-UPDATE trigger.
+export const cutoverState = pgTable("cutover_state", {
+  id: integer("id").primaryKey().default(1),
+  trafficPercent: integer("traffic_percent").notNull().default(0),
+  lastIncrementAt: timestamp("last_increment_at", { withTimezone: true }),
+  lastRevertAt: timestamp("last_revert_at", { withTimezone: true }),
+  lastDivergenceAt: timestamp("last_divergence_at", { withTimezone: true }),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  lastActor: text("last_actor"),
+  lastReason: text("last_reason"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export type CutoverStateRow = typeof cutoverState.$inferSelect;
 
 export type OrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferSelect;
 export type InsertOrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferInsert;

@@ -24,7 +24,20 @@ export type ReplayPathShape =
   | "needs_input"
   | "error";
 
-export type ReplayCassetteSource = "production" | "synthetic";
+export type ReplayCassetteSource = "production" | "synthetic" | "synthetic_filler";
+
+/**
+ * Task #92 / Phase 4-D — cassette purpose tag.
+ *
+ *   - 'parity'                  — historical default; expected to match
+ *                                  current ≡ candidate byte-for-byte.
+ *   - 'behavioral_change_proof' — hand-crafted for a Phase 4-D
+ *                                  behavioral change; expected to
+ *                                  diverge under the new path. The
+ *                                  parity health gate EXCLUDES these
+ *                                  from its BLOCK-divergence histogram.
+ */
+export type ReplayCassettePurpose = "parity" | "behavioral_change_proof";
 
 /** The frozen orchestrator input — feeds the run-id hash. */
 export interface CassetteInput {

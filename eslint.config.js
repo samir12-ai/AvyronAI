@@ -6,6 +6,8 @@ const noValidateDecisionMemoryWriteImport = require('./.local/eslint-rules/no-va
 const noBareLlmCallInReplay = require('./.local/eslint-rules/no-bare-llm-call-in-replay.js');
 const orchestratorModuleBoundary = require('./.local/eslint-rules/orchestrator-module-boundary.js');
 const orchestratorNoNewLargeFile = require('./.local/eslint-rules/orchestrator-no-new-large-file.js');
+// Task #92 / Phase 4-D — OD-1 single-persist guard.
+const orchestratorNoCasRePersist = require('./.local/eslint-rules/no-cas-re-persist.js');
 // Task #91 / Phase 4-C — Parity gate: only the auto-revert helper may flip
 // ORCH_USE_<X> back to `current`. Forbids direct env mutation +
 // setModeOverride calls outside the allowlist.
@@ -153,6 +155,7 @@ module.exports = defineConfig([
         "error",
         { maxModuleLines: 200, orchestratorIndexMaxLines: 5000 },
       ],
+      "orchestrator/no-cas-re-persist": "error",
     },
   },
   // Task #91 / Phase 4-C — Parity auto-revert authorisation gate.
