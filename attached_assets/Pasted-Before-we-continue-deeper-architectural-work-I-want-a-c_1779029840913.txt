@@ -1,0 +1,163 @@
+Before we continue deeper architectural work, I want a complete operational verification audit of the CURRENT live system state and runtime behavior.
+
+Right now the priority is no longer adding major new capabilities.
+
+The priority is:
+
+* stabilization
+* correctness
+* runtime consistency
+* scrape continuity
+* feature reality verification
+* beta launch readiness
+
+I need a FULL verification pass across the existing system to confirm what is actually working correctly end-to-end versus what only partially exists architecturally.
+
+Please audit and verify the following carefully and exhaustively.
+
+1. Agent Scraping Continuity
+   I want to verify exactly how ongoing scraping behaves over time.
+
+Specifically:
+
+* Does the agent continue scraping properly after initial onboarding?
+* Are recurring scrape cycles functioning correctly?
+* Is the backend runtime remaining active and healthy continuously?
+* Are scrape workers/jobs persisting correctly?
+* Are collectors silently dying or degrading?
+* Are retries behaving safely?
+* Are stale snapshots being reused accidentally?
+* Are scrape schedules/time windows functioning correctly?
+* Are freshness boundaries enforced correctly?
+
+2. Monthly / Re-Run Pipeline Correctness
+   Critical verification needed:
+
+If a user completes Month 1 and later requests:
+
+* a new strategy
+* a new roadmap
+* a rerun
+* a refreshed diagnosis
+
+does the system correctly operate on NEW market/user data?
+
+Or is old data leaking into the new run?
+
+I want a deep audit of:
+
+* stale snapshot reuse risks
+* memory contamination
+* previous-run leakage
+* time-window correctness
+* snapshot invalidation
+* rerun freshness guarantees
+* cache invalidation behavior
+* historical vs current separation
+* canonical snapshot refresh logic
+
+We MUST guarantee:
+new cycles are based on fresh evidence, not hidden historical carry-over.
+
+3. Competitor Scraping Reliability
+   Verify:
+
+* competitor discovery continuity
+* competitor refresh behavior
+* scrape consistency over time
+* stale competitor retention risks
+* competitor replacement/update logic
+* failed scrape handling
+* degraded propagation
+* missing competitor recovery
+* competitor signal quality consistency
+
+Need to ensure competitor intelligence remains reliable after long-running usage.
+
+4. Runtime Consistency Audit
+   I want verification that the runtime behaves consistently over repeated runs.
+
+Check:
+
+* orchestration stability
+* engine sequencing consistency
+* deterministic behavior where expected
+* degradation propagation correctness
+* replay consistency where available
+* AI grounding consistency
+* signal provenance consistency
+* runtime mutation risks
+* hidden state leakage
+* partial-run corruption risks
+
+5. Full Feature Reality Audit
+   Most important:
+   I want a COMPLETE audit of every major feature currently claimed or partially implemented inside the system.
+
+Do NOT assume features are production-ready just because foundations exist.
+
+For every feature:
+
+* verify whether it actually works end-to-end
+* verify runtime stability
+* verify UX exposure
+* verify data quality
+* verify orchestration completeness
+* verify real usability
+* verify failure behavior
+* verify degraded behavior
+* verify observability
+
+Specifically audit all Campaign / MarketMind / AI flows including:
+
+* onboarding
+* page connection
+* user scraping
+* competitor scraping
+* comparison systems
+* diagnosis flows
+* roadmap generation
+* market intelligence
+* audience analysis
+* positioning analysis
+* adaptive recommendations
+* monitoring flows
+* memory behavior
+* rerun behavior
+* refresh behavior
+* orchestration
+* alerts/signals
+* runtime continuity
+
+6. Feature Classification
+   For EACH feature classify clearly:
+
+* fully operational
+* partially operational
+* foundation exists but incomplete
+* unstable
+* hidden behind internal tooling
+* UX incomplete
+* blocked by runtime issues
+* blocked by orchestration issues
+* blocked by stale-data risks
+* blocked by missing enforcement
+* not beta-ready
+
+7. Beta Readiness Assessment
+   At the end I want a realistic beta-readiness assessment:
+
+* what is stable enough for controlled beta
+* what must be fixed before launch
+* what can wait until post-beta
+* what is architectural improvement only
+* what is an actual user-facing risk
+* what could cause user trust failure
+* what could silently corrupt outputs
+* what could create false intelligence/confidence
+
+Most important:
+I want REAL operational truth, not optimistic interpretation.
+
+The goal is:
+understand the actual current runtime/product state clearly before launch decisions are made.
