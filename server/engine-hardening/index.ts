@@ -188,53 +188,13 @@ export function detectGenericOutput(text: string): GenericOutputResult {
   };
 }
 
-const activeSessions = new Map<string, ValidationSession>();
-const SESSION_TTL_MS = 5 * 60 * 1000;
-
-function cleanExpiredSessions() {
-  const now = Date.now();
-  for (const [key, session] of activeSessions.entries()) {
-    if (now - session.createdAt > SESSION_TTL_MS) {
-      activeSessions.delete(key);
-    }
-  }
-}
-
-export function checkValidationSession(
-  sessionId: string | undefined,
-  engineName: string,
-  campaignId: string,
-  maxCallsPerEngine: number = 2
-): { allowed: boolean; warning: string | null } {
-  if (!sessionId) {
-    return { allowed: true, warning: null };
-  }
-
-  cleanExpiredSessions();
-
-  const key = `${sessionId}_${campaignId}`;
-  let session = activeSessions.get(key);
-  if (!session) {
-    session = {
-      sessionId,
-      campaignId,
-      engineCalls: {},
-      createdAt: Date.now(),
-    };
-    activeSessions.set(key, session);
-  }
-
-  const currentCalls = session.engineCalls[engineName] || 0;
-  if (currentCalls >= maxCallsPerEngine) {
-    return {
-      allowed: false,
-      warning: `Revalidation loop detected: ${engineName} already called ${currentCalls} time(s) in session ${sessionId} — blocking to prevent infinite loop`,
-    };
-  }
-
-  session.engineCalls[engineName] = currentCalls + 1;
-  return { allowed: true, warning: null };
-}
+// Task #68 / Phase 5 Step 6 — validation-session loop guard moved to its
+// new canonical owner, `server/system-control/validation-session.ts`.
+// Re-exported here for back-compat so the 20+ engine-routes call sites
+// keep building without churn. New code MUST import from
+// `@/system-control/validation-session`. This shim is sunset-tracked
+// under follow-up #79 and removed once all callers have migrated.
+export { checkValidationSession } from "../system-control/validation-session";
 
 export function detectNarrativeOverlap(
   competitorNarratives: string[]

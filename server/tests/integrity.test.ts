@@ -447,7 +447,7 @@ describe("Campaign Isolation - Competitors", () => {
       "competitive-intelligence/data-acquisition.ts",
       "market-intelligence-v3/engine.ts",
       "market-intelligence-v3/fetch-orchestrator.ts",
-      "engine-contracts/context-kernel.ts",
+      "output-projection/context-kernel.ts",
     ];
 
     for (const file of filesToScan) {

@@ -1242,7 +1242,10 @@ function setupErrorHandler(app: express.Application) {
     // Task #64 / Phase 1 — CV-06 (Memory Provenance Verification) family
     // appended to the same exposition.
     const { renderCv06Metrics } = require("./memory-system/cv06-metrics") as typeof import("./memory-system/cv06-metrics");
-    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics() + "\n" + renderCv06Metrics());
+    // Task #68 / Phase 5 Step 7 — CV-04 (Contract Completeness Verification)
+    // family appended to the same exposition.
+    const { renderCv04Metrics } = require("./orchestrator/contract-registry/cv04-metrics") as typeof import("./orchestrator/contract-registry/cv04-metrics");
+    return res.status(200).send(renderMetrics() + "\n" + renderContinuityMetrics() + "\n" + renderCv06Metrics() + "\n" + renderCv04Metrics());
   });
 
   const PUBLIC_PATH_PREFIXES = [

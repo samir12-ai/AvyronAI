@@ -143,6 +143,22 @@ import { ENGINE_VERSION as PERSUASION_ENGINE_VERSION } from "../../persuasion-en
 import { ENGINE_VERSION as ITERATION_ENGINE_VERSION } from "../../strategy/iteration-engine/constants";
 import { ENGINE_VERSION as RETENTION_ENGINE_VERSION } from "../../strategy/retention-engine/constants";
 
+// Task #68 / Phase 5 / Step 1 — strict-enum taxonomies imported from the
+// engine constants that actually emit the values. Doctrine D3: every
+// verdict-shaped categorical field uses z.enum, never z.string(). These six
+// are the cleanly-bounded vocabularies; the two remaining "free-form
+// categorical" fields (trustRequirement, funnelCompatibility) are documented
+// inline at their declaration site because the engine currently emits a
+// human-readable rationale prefixed with the category. Refactoring those
+// emissions to `{ level: enum, rationale: string }` is a follow-up.
+import {
+  ENTRY_ROUTES as AWARENESS_ENTRY_ROUTES,
+  READINESS_STAGES as AWARENESS_READINESS_STAGES,
+  TRIGGER_CLASSES as AWARENESS_TRIGGER_CLASSES,
+} from "../../awareness-engine/constants";
+import { AUTHORITY_MODES } from "../../differentiation-engine/constants";
+import { PERSUASION_MODES } from "../../persuasion-engine/constants";
+
 // ────────────────────────────────────────────────────────────────────────────
 // C2 shared schemas — kept loose on purpose. The shadow-audit goal is
 // presence + non-empty + obvious-shape detection. We do NOT want false
@@ -514,11 +530,32 @@ const AWARENESS_CONTRACT: EngineContract = {
   livenessRule: "current_run_only",
   requiredOutputs: [
     { id: "primaryRoute",                       path: ["primaryRoute"],                                shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["persuasion", "integrity", "funnel", "channel_selection", "statistical_validation", "build_plan_layer.awareness_block"] },
-    { id: "primaryRouteEntryMechanismType",     path: ["primaryRoute", "entryMechanismType"],          shape: z.string(),            emptyIsMissing: true,  consumers: ["funnel.entry_trigger", "persuasion", "channel_selection"] },
-    { id: "primaryRouteTargetReadinessStage",   path: ["primaryRoute", "targetReadinessStage"],        shape: z.string(),            emptyIsMissing: true,  consumers: ["funnel", "persuasion", "channel_selection", "statistical_validation"] },
-    { id: "primaryRouteTriggerClass",           path: ["primaryRoute", "triggerClass"],                shape: z.string(),            emptyIsMissing: true,  consumers: ["funnel", "persuasion", "channel_selection"] },
-    { id: "primaryRouteTrustRequirement",       path: ["primaryRoute", "trustRequirement"],            shape: z.string(),            emptyIsMissing: true,  consumers: ["persuasion", "channel_selection"] },
-    { id: "primaryRouteFunnelCompatibility",    path: ["primaryRoute", "funnelCompatibility"],         shape: z.string(),            emptyIsMissing: true,  consumers: ["funnel", "channel_selection"] },
+    // Task #68 / Phase 5 Step 1 — D3 strict-enum tightening. Vocabularies
+    // imported from awareness-engine/constants.ts (the only writer). The
+    // engine's signal-insufficient fallback path (engine.ts:739) emits
+    // `triggerClass: "signal_insufficient"` on rejected routes — included
+    // here so that branch does not trip CONTRACT_INCOMPLETE during the
+    // 14-day shadow window. ENFORCE_ENGINE_CONTRACTS=false keeps these
+    // shadow-only until the cutover; CV-04 metric surfaces any INVALID hit.
+    { id: "primaryRouteEntryMechanismType",     path: ["primaryRoute", "entryMechanismType"],          shape: z.enum(AWARENESS_ENTRY_ROUTES),     emptyIsMissing: true,  consumers: ["funnel.entry_trigger", "persuasion", "channel_selection"] },
+    { id: "primaryRouteTargetReadinessStage",   path: ["primaryRoute", "targetReadinessStage"],        shape: z.enum(AWARENESS_READINESS_STAGES), emptyIsMissing: true,  consumers: ["funnel", "persuasion", "channel_selection", "statistical_validation"] },
+    { id: "primaryRouteTriggerClass",           path: ["primaryRoute", "triggerClass"],                shape: z.enum([...AWARENESS_TRIGGER_CLASSES, "signal_insufficient"] as [string, ...string[]]), emptyIsMissing: true, consumers: ["funnel", "persuasion", "channel_selection"] },
+    // Task #68 / Phase 5 Step 1 — D3: trustRequirement + funnelCompatibility
+    // are categorical-prefix + free-text rationale strings emitted by
+    // awareness-engine/engine.ts:742-761 in the shape
+    // "<level> — <rationale>" (e.g. "high — proof and authority signals
+    // required before engagement"). The enum vocabulary is locked at the
+    // PREFIX via regex; the rationale tail is free-form so downstream
+    // narrative renderers keep working. This satisfies D3 (no
+    // unconstrained string for the verdict-shaped prefix) without
+    // requiring an engine-shape refactor to split them into
+    // { level: enum, rationale: string }.
+    //
+    // trustRequirement prefixes (from buildTrustRequirement): low | moderate | high
+    // funnelCompatibility prefixes (from buildFunnelCompatibility +
+    // rejected-route emit): strong | adequate | incompatible
+    { id: "primaryRouteTrustRequirement",       path: ["primaryRoute", "trustRequirement"],            shape: z.string().regex(/^(low|moderate|high)( — .+)?$/i, { message: "trustRequirement must begin with 'low|moderate|high' followed by optional ' — <rationale>'" }), emptyIsMissing: true,  consumers: ["persuasion", "channel_selection"] },
+    { id: "primaryRouteFunnelCompatibility",    path: ["primaryRoute", "funnelCompatibility"],         shape: z.string().regex(/^(strong|adequate|incompatible)( — .+)?$/i, { message: "funnelCompatibility must begin with 'strong|adequate|incompatible' followed by optional ' — <rationale>'" }), emptyIsMissing: true,  consumers: ["funnel", "channel_selection"] },
     { id: "primaryRouteAwarenessStrengthScore", path: ["primaryRoute", "awarenessStrengthScore"],      shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["persuasion", "channel_selection", "statistical_validation", "system_control.confidence_chain_integrity"] },
     { id: "dataReliability",                    path: ["dataReliability"],                             shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["statistical_validation", "system_control.signal_grounding"] },
   ],
@@ -535,25 +572,18 @@ const INTEGRITY_CONTRACT: EngineContract = {
   requiredOutputs: [
     { id: "overallIntegrityScore", path: ["overallIntegrityScore"], shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["awareness", "persuasion", "system_control.integrity_status"] },
     { id: "safeToExecute",         path: ["safeToExecute"],         shape: z.boolean(),           emptyIsMissing: false, consumers: ["awareness", "persuasion", "build_plan_layer", "system_control.integrity_status"] },
-    // Canonical integrity VERDICT: 'PASS' | 'PARTIAL' | 'FAIL'.
-    // Distinct from the engine-execution `status` field (COMPLETE | INTEGRITY_FAILED).
-    // NO LEGACY FALLBACK — per Integrity contract hardening (May 2026):
-    // engines that fail to emit `overallStatus` must trip CONTRACT_INCOMPLETE.
-    // Reading the engine-execution `status` field as a verdict is forbidden,
-    // because COMPLETE/INTEGRITY_FAILED do not equal PASS/PARTIAL/FAIL.
-    { id: "overallStatus",         path: ["overallStatus"],         shape: z.enum(["PASS", "PARTIAL", "FAIL"]), emptyIsMissing: true, consumers: ["system_control.integrity_status", "system_control.contradiction_detector.budget_scale_weak_integrity"] },
-    // H4 (2026-05-10): canonical integrity VERDICT under a semantically-explicit
-    // name. `overallStatus` is retained for back-compat (FE SystemIntegrityPanel
-    // reads it); new consumers MUST prefer `integrityVerdict`. Engine emits
-    // both with identical values; agent-stream-semantic-separation.test.ts
-    // proves the field name no longer collides with execution-status semantics.
-    // H4 back-compat (May 2026): during the transition window, `integrityVerdict`
-    // is the canonical field for the F2 integrity verdict, but the engine also
-    // emits the legacy `overallStatus` with the same value. Snapshots persisted
-    // before the H4 rollout (and reliability test fixtures) only set
-    // `overallStatus` — the registry resolves to that legacy path so contract
-    // completeness is preserved. New code should write/read `integrityVerdict`
-    // and the legacy path will be removed once all consumers have migrated.
+    // Task #68 / Phase 5 Step 3 — overallStatus + integrityVerdict merged
+    // into the single canonical `integrityVerdict` contract field.
+    // The standalone `overallStatus` entry has been removed; per D2/D5 a
+    // single canonical field carries the F2 integrity-verdict semantics
+    // and the engine still dual-writes both shapes for one release window
+    // (integrity-engine/engine.ts:741-742) so legacy snapshots resolve.
+    // `legacyPaths: [["overallStatus"]]` keeps pre-merge persisted snapshots
+    // contract-complete without re-introducing a duplicate canonical field.
+    // The FE `SystemIntegrityPanel` already reads from the dual-write site
+    // and will be migrated to read `integrityVerdict` exclusively in the
+    // follow-up cutover task (#79). Doctrine: D1 (no semantic fallback),
+    // D3 (strict enum), D4 (legacy paths historical-only).
     { id: "integrityVerdict",      path: ["integrityVerdict"],      shape: z.enum(["PASS", "PARTIAL", "FAIL"]), emptyIsMissing: true, legacyPaths: [["overallStatus"]], consumers: ["system_control.integrity_status", "system_control.contradiction_detector.budget_scale_weak_integrity"] },
     { id: "zeroLeakage",           path: ["zeroLeakage"],           shape: z.boolean(),           emptyIsMissing: false, consumers: ["system_control.integrity_status"] },
     { id: "traceabilityComplete",  path: ["traceabilityComplete"],  shape: z.boolean(),           emptyIsMissing: false, consumers: ["system_control.integrity_status"] },
@@ -655,7 +685,10 @@ const DIFFERENTIATION_CONTRACT: EngineContract = {
     { id: "mechanismCore",      path: ["mechanismCore"],      shape: LooseObjectSchema,     emptyIsMissing: true,  consumers: ["mechanism", "offer", "persuasion"] },
     { id: "claimStructures",    path: ["claimStructures"],    shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["mechanism", "offer", "persuasion", "integrity"] },
     { id: "proofArchitecture",  path: ["proofArchitecture"],  shape: z.array(z.any()),      emptyIsMissing: true,  consumers: ["mechanism", "offer", "persuasion", "integrity"] },
-    { id: "authorityMode",      path: ["authorityMode"],      shape: z.string(),            emptyIsMissing: true,  consumers: ["persuasion", "integrity"] },
+    // Task #68 / Phase 5 Step 1 — D3: imported from differentiation-engine
+    // /constants.ts AUTHORITY_MODES (5 values). Engine writes the typed
+    // `AuthorityMode` union so the enum is a structural mirror.
+    { id: "authorityMode",      path: ["authorityMode"],      shape: z.enum(AUTHORITY_MODES), emptyIsMissing: true,  consumers: ["persuasion", "integrity"] },
     { id: "confidenceScore",    path: ["confidenceScore"],    shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["mechanism", "system_control.confidence_chain_integrity"] },
   ],
   optionalOutputs: [
@@ -674,7 +707,13 @@ const MECHANISM_CONTRACT: EngineContract = {
   requiredOutputs: [
     { id: "primaryMechanism",       path: ["primaryMechanism"],                     shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["offer", "persuasion", "awareness", "integrity", "build_plan_layer.mechanism_block"] },
     { id: "mechanismName",          path: ["primaryMechanism", "mechanismName"],    shape: z.string(),        emptyIsMissing: true,  consumers: ["offer", "persuasion", "awareness", "integrity"] },
-    { id: "mechanismType",          path: ["primaryMechanism", "mechanismType"],    shape: z.string(),        emptyIsMissing: true,  consumers: ["offer", "persuasion", "awareness"] },
+    // Task #68 / Phase 5 Step 1 — D3: vocabulary derived from the
+    // mechanismCore TS union in differentiation-engine/types.ts:147
+    // ("method" | "system" | "protocol" | "framework" | "none"). The
+    // mechanism engine's LLM-extraction fallback (engine.ts:610) defaults
+    // to "system" when the raw type is empty; "none" is the
+    // differentiation-engine fallback for missing mechanism core.
+    { id: "mechanismType",          path: ["primaryMechanism", "mechanismType"],    shape: z.enum(["method", "system", "protocol", "framework", "none"]), emptyIsMissing: true, consumers: ["offer", "persuasion", "awareness"] },
     { id: "mechanismSteps",         path: ["primaryMechanism", "mechanismSteps"],   shape: StringArraySchema, emptyIsMissing: true,  consumers: ["offer", "persuasion", "build_plan_layer.mechanism_block"] },
     { id: "mechanismPromise",       path: ["primaryMechanism", "mechanismPromise"], shape: z.string(),        emptyIsMissing: true,  consumers: ["offer", "persuasion", "awareness"] },
     { id: "axisConsistency",        path: ["axisConsistency"],                      shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["system_control.axis_consistency", "integrity"] },
@@ -695,7 +734,11 @@ const PERSUASION_CONTRACT: EngineContract = {
   livenessRule: "current_run_only",
   requiredOutputs: [
     { id: "primaryRoute",                  path: ["primaryRoute"],                                shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["integrity", "build_plan_layer.persuasion_block", "system_control.persuasion_strength"] },
-    { id: "persuasionMode",                path: ["primaryRoute", "persuasionMode"],              shape: z.string(),        emptyIsMissing: true,  consumers: ["integrity", "system_control.contradiction_detector.awareness_persuasion_mismatch"] },
+    // Task #68 / Phase 5 Step 1 — D3: imported from persuasion-engine
+    // /constants.ts PERSUASION_MODES (11 values). Engine's fallback path
+    // (engine.ts:2491) emits "none" when no influence drivers are
+    // detected; included so the fallback survives shadow validation.
+    { id: "persuasionMode",                path: ["primaryRoute", "persuasionMode"],              shape: z.enum([...PERSUASION_MODES, "none"] as [string, ...string[]]), emptyIsMissing: true, consumers: ["integrity", "system_control.contradiction_detector.awareness_persuasion_mismatch"] },
     { id: "primaryInfluenceDrivers",       path: ["primaryRoute", "primaryInfluenceDrivers"],     shape: StringArraySchema, emptyIsMissing: true,  consumers: ["integrity", "build_plan_layer.persuasion_block"] },
     { id: "objectionPriorities",           path: ["primaryRoute", "objectionPriorities"],         shape: z.array(z.any()),  emptyIsMissing: true,  consumers: ["integrity", "system_control.zero_objection_coverage"] },
     { id: "trustSequence",                 path: ["primaryRoute", "trustSequence"],               shape: StringArraySchema, emptyIsMissing: true,  consumers: ["integrity", "build_plan_layer.persuasion_block"] },

@@ -44,7 +44,7 @@ Budget Governor → Channel Selection → Iteration → Retention
 - SGL (Signal Governance Layer) — validates signal coverage pre-engine
 - System Control — evaluates full system state post-pipeline
 
-### Engine Contracts (`server/engine-contracts/`)
+### Engine Contracts (`server/output-projection/`)
 
 Two parallel contract systems exist:
 

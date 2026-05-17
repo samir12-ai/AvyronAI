@@ -2321,7 +2321,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     });
 
     it("FP-31) Context kernel uses enrichmentStatus for data quality weighting", () => {
-      const ckSource = require("fs").readFileSync("server/engine-contracts/context-kernel.ts", "utf-8");
+      const ckSource = require("fs").readFileSync("server/output-projection/context-kernel.ts", "utf-8");
       expect(ckSource).toContain('enrichmentStatus === "ENRICHED"');
       expect(ckSource).toContain("enrichmentRatio");
     });

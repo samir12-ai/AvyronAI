@@ -33,6 +33,7 @@
 import type { EngineId, EngineStepResult } from "../priority-matrix";
 import { getContract, validateContractCompleteness } from "./index";
 import { ENFORCE_ENGINE_CONTRACTS } from "./feature-flags";
+import { recordContractAuditOutcome } from "./cv04-metrics";
 
 export { ENFORCE_ENGINE_CONTRACTS };
 
@@ -65,6 +66,7 @@ export function auditEngineContract(
   // nothing to validate.
   const auditableStatuses = new Set(["SUCCESS", "PARTIAL"]);
   if (!auditableStatuses.has(stepResult.status)) {
+    recordContractAuditOutcome("SKIPPED", engineId, ENFORCE_ENGINE_CONTRACTS);
     return {
       engineId,
       audited: false,
@@ -78,6 +80,7 @@ export function auditEngineContract(
   const contract = getContract(engineId);
   if (!contract) {
     // Pre-registry engine — silent until the registry is populated.
+    recordContractAuditOutcome("LEGACY_NONE", engineId, ENFORCE_ENGINE_CONTRACTS);
     return {
       engineId,
       audited: false,
@@ -96,6 +99,7 @@ export function auditEngineContract(
       `[ContractAudit] AUDIT_INTERNAL_ERROR | engine=${engineId} | jobId=${ctx.jobId ?? "n/a"} | ` +
       `err=${err instanceof Error ? err.message : String(err)}`,
     );
+    recordContractAuditOutcome("ERROR", engineId, ENFORCE_ENGINE_CONTRACTS);
     return {
       engineId,
       audited: true,
@@ -114,6 +118,8 @@ export function auditEngineContract(
     invalidFields: completeness.invalidFields,
     enforced: ENFORCE_ENGINE_CONTRACTS,
   };
+
+  recordContractAuditOutcome(outcome.status, engineId, ENFORCE_ENGINE_CONTRACTS);
 
   // Shadow logging — emitted only on a problem so healthy runs stay quiet.
   if (completeness.status === "INCOMPLETE" || completeness.status === "INVALID") {
