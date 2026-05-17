@@ -89,10 +89,30 @@ export function registerPositioningEngineRoutes(app: Express) {
         console.log(`[ContractEnvelope] BUILD_FAILED engine=positioning snap=${(snapshot as any).id} err=${e?.message ?? String(e)}`);
       }
 
-      res.json({ ...snapshot, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt, envelope });
-    } catch (err: any) {
-      console.error("[PositioningEngine-V3] Latest route error:", err.message);
-      res.status(500).json({ error: err.message });
+      // D2/D3 — additive projection fields for Diagnose/Monitor consumers.
+      const snapAny = snapshot as Record<string, unknown>;
+      const snapStatus = typeof snapAny.snapshotStatus === "string" ? snapAny.snapshotStatus : null;
+      let stability: { driftDetected?: unknown } | null = null;
+      try {
+        const sr = snapAny.stabilityResult;
+        stability = typeof sr === "string" ? JSON.parse(sr) : (sr as { driftDetected?: unknown } | null);
+      } catch { stability = null; }
+      const drift = stability?.driftDetected === true;
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown" = "unknown";
+      if (snapStatus === "COMPLETE" && !drift) validationState = "validated";
+      else if (snapStatus === "PARTIAL" || drift) validationState = "provisional";
+      else if (snapStatus === "INSUFFICIENT" || snapStatus === "WEAK") validationState = "weak";
+      else if (snapStatus === "FAILED" || snapStatus === "REJECTED") validationState = "rejected";
+      const signalOrigin: "real" | "inferred" | "unknown" = snapStatus === "PARTIAL" || drift ? "inferred" : snapStatus ? "real" : "unknown";
+      const degraded = (snapStatus === "PARTIAL" || drift)
+        ? { flag: true as const, reason: drift ? "Positioning drift detected" : "Positioning snapshot is PARTIAL", source: "data_quality", signalOrigin }
+        : null;
+
+      res.json({ ...snapshot, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt, envelope, validationState, signalOrigin, degraded });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[PositioningEngine-V3] Latest route error:", msg);
+      res.status(500).json({ error: msg });
     }
   });
 }

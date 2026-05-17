@@ -38,6 +38,14 @@ function NativeTabLayout() {
         <Icon sf={{ default: "camera", selected: "camera.fill" }} />
         <Label>{t('tabs.photography')}</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="monitor">
+        <Icon sf={{ default: "waveform.path.ecg", selected: "waveform.path.ecg" }} />
+        <Label>Monitor</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="pivot">
+        <Icon sf={{ default: "arrow.triangle.branch", selected: "arrow.triangle.branch" }} />
+        <Label>Pivot</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
         <Label>{t('tabs.settings')}</Label>
@@ -137,6 +145,24 @@ function ClassicTabLayout() {
           title: t('tabs.photography'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "camera" : "camera-outline"} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="monitor"
+        options={{
+          title: "Monitor",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "pulse" : "pulse-outline"} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="pivot"
+        options={{
+          title: "Pivot",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "git-branch" : "git-branch-outline"} size={22} color={color} />
           ),
         }}
       />

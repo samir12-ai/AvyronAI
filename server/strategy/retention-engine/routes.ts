@@ -218,12 +218,29 @@ export function registerRetentionEngineRoutes(app: Express) {
         return res.json({ found: false, snapshot: null, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
+      // D2/D3 — additive validationState + degraded for Diagnose/Monitor consumers.
+      const reliability = safeJsonParse(latest.dataReliability) as { confidenceBand?: string; reliable?: boolean } | null;
+      const boundary = safeJsonParse(latest.boundaryCheck) as { passed?: boolean; status?: string } | null;
+      const band = (reliability?.confidenceBand || "").toString().toLowerCase();
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown" = "unknown";
+      if (band === "strong" && boundary?.passed !== false) validationState = "validated";
+      else if (band === "moderate") validationState = "provisional";
+      else if (band === "low" || band === "weak") validationState = "weak";
+      else if (boundary?.passed === false) validationState = "rejected";
+      const signalOrigin: "real" | "inferred" | "unknown" = band === "strong" || band === "moderate" ? "real" : band ? "inferred" : "unknown";
+      const degraded = (band === "low" || band === "weak" || boundary?.passed === false)
+        ? { flag: true as const, reason: boundary?.passed === false ? "Retention boundary check failed" : `Retention reliability=${band}`, source: "data_quality", signalOrigin }
+        : null;
+
       return res.json({
         found: true,
         runId: __resolved.runId,
         isLatest: __resolved.isLatest,
         isStale: __resolved.isStale,
         completedAt: __resolved.completedAt,
+        validationState,
+        signalOrigin,
+        degraded,
         snapshot: {
           ...latest,
           result: safeJsonParse(latest.result),

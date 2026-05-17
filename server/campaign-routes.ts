@@ -314,7 +314,24 @@ export function registerCampaignRoutes(app: Express) {
       const campaignContext = (req as any).campaignContext;
       const accountId = resolveAccountId(req);
       const dashboardMetrics = await getDashboardMetrics(campaignContext.campaignId, accountId);
-      res.json({ success: true, ...dashboardMetrics, campaign: campaignContext });
+
+      // D2/D3 — additive projection fields for Diagnose/Monitor consumers.
+      // dataSource ∈ {META|MANUAL|PLAN|NONE} is the canonical truth — derive validationState from it.
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown" = "unknown";
+      if (dashboardMetrics.dataSource === "META") validationState = "validated";
+      else if (dashboardMetrics.dataSource === "MANUAL") validationState = "provisional";
+      else if (dashboardMetrics.dataSource === "PLAN") validationState = "provisional";
+      else if (dashboardMetrics.dataSource === "NONE") validationState = "weak";
+      const signalOrigin: "real" | "inferred" | "fallback" | "unknown" =
+        dashboardMetrics.dataSource === "META" ? "real" :
+        dashboardMetrics.dataSource === "MANUAL" ? "real" :
+        dashboardMetrics.dataSource === "PLAN" ? "inferred" :
+        dashboardMetrics.dataSource === "NONE" ? "unknown" : "unknown";
+      const degraded = (dashboardMetrics.dataSource === "NONE" || dashboardMetrics.dataSource === "PLAN")
+        ? { flag: true as const, reason: dashboardMetrics.dataSource === "NONE" ? "No revenue data connected" : "Metrics derived from plan, not measured outcomes", source: "data_quality", signalOrigin }
+        : null;
+
+      res.json({ success: true, ...dashboardMetrics, validationState, signalOrigin, degraded, campaign: campaignContext });
     } catch (error: any) {
       console.error("[Dashboard] Metrics error:", error);
       res.status(500).json({ code: "DASHBOARD_FAILED", message: "Failed to fetch dashboard metrics", requestId: `dash_${Date.now()}` });

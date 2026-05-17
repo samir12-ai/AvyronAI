@@ -93,10 +93,26 @@ export function registerAudienceEngineRoutes(app: Express) {
         console.log(`[ContractEnvelope] BUILD_FAILED engine=audience snap=${(snapshot as any).id} err=${e?.message ?? String(e)}`);
       }
 
-      return res.json({ ...snapshot, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt, envelope });
-    } catch (err: any) {
-      console.error("[AudienceEngine-Route] Latest error:", err.message);
-      return res.status(500).json({ error: err.message });
+      // D2/D3 — additive projection fields for Diagnose/Monitor consumers.
+      // validationState ∈ {validated|provisional|weak|rejected|unknown} ; degraded keyed by signalOrigin tag.
+      const snapAny = snapshot as Record<string, unknown>;
+      const status = typeof snapAny.status === "string" ? snapAny.status : null;
+      const defensiveMode = snapAny.defensiveMode === true;
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown" = "unknown";
+      if (status === "COMPLETE" && !defensiveMode) validationState = "validated";
+      else if (status === "PARTIAL" || defensiveMode) validationState = "provisional";
+      else if (status === "DATASET_TOO_SMALL" || status === "INSUFFICIENT_SIGNALS") validationState = "weak";
+      else if (status === "FAILED" || status === "REJECTED") validationState = "rejected";
+      const signalOrigin: "real" | "inferred" | "unknown" = defensiveMode || status === "PARTIAL" ? "inferred" : status ? "real" : "unknown";
+      const degraded = (defensiveMode || status === "PARTIAL" || status === "DATASET_TOO_SMALL")
+        ? { flag: true as const, reason: defensiveMode ? "Audience engine in defensive mode" : `Audience status=${status}`, source: "data_quality", signalOrigin }
+        : null;
+
+      return res.json({ ...snapshot, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt, envelope, validationState, signalOrigin, degraded });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[AudienceEngine-Route] Latest error:", msg);
+      return res.status(500).json({ error: msg });
     }
   });
 }

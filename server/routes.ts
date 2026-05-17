@@ -25,6 +25,8 @@ import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from
 import { registerAuditRoutes } from "./audit-routes";
 import { registerBusinessDataRoutes } from "./business-data-routes";
 import { registerDashboardRoutes } from "./dashboard-routes";
+import { registerMonitorEarlyWarningRoutes } from "./monitor/early-warning/routes";
+import { registerDiagnoseRoutes } from "./diagnose/routes";
 import { registerUIStateRoutes } from "./ui-state-routes";
 import { registerDifferentiationRoutes } from "./differentiation-engine/routes";
 import { registerMechanismEngineRoutes } from "./mechanism-engine/routes";
@@ -1566,6 +1568,8 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerAuditRoutes(app);
   registerBusinessDataRoutes(app);
   registerDashboardRoutes(app);
+  registerMonitorEarlyWarningRoutes(app);
+  registerDiagnoseRoutes(app);
   registerUIStateRoutes(app);
   registerDifferentiationRoutes(app);
   registerMechanismEngineRoutes(app);

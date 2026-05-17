@@ -176,7 +176,26 @@ export function registerStrategyRoutes(app: Express) {
         .where(and(eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId)))
         .orderBy(desc(performanceSnapshots.fetchedAt)).limit(100);
       const averages = await getAccountAverages(accountId, campaignId);
-      res.json({ data, averages });
+
+      // Phase 9 — D2/D3 additive projection. Empty → weak/unknown/degraded; <14 rows → provisional; ≥14 → validated.
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown";
+      let signalOrigin: "real" | "inferred" | "fallback" | "unknown";
+      let degraded: { flag: true; reason: string; source: string; signalOrigin: "real" | "inferred" | "fallback" | "unknown" } | null;
+      if (data.length === 0) {
+        validationState = "weak";
+        signalOrigin = "unknown";
+        degraded = { flag: true, reason: "No performance snapshots for this campaign", source: "missing_dependency", signalOrigin };
+      } else if (data.length < 14) {
+        validationState = "provisional";
+        signalOrigin = "real";
+        degraded = { flag: true, reason: `Only ${data.length} snapshots — below 14-day validation window`, source: "data_quality", signalOrigin };
+      } else {
+        validationState = "validated";
+        signalOrigin = "real";
+        degraded = null;
+      }
+
+      res.json({ data, averages, validationState, signalOrigin, degraded, sourceEndpoint: "/api/strategy/performance" });
     } catch (error) {
       console.error("[Strategy] Performance fetch error:", error);
       res.status(500).json({ error: "Failed to fetch performance data" });

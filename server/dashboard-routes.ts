@@ -135,12 +135,17 @@ export function registerDashboardRoutes(app: Express) {
         const manualOnly = await getManualMetrics(campaignId, accountId);
         if (manualOnly && (manualOnly.spend > 0 || manualOnly.revenue > 0 || manualOnly.impressions > 0 || manualOnly.clicks > 0 || manualOnly.leads > 0)) {
           const actions = buildManualOnlyActions(manualOnly, campaignId);
+          // Phase 9 — manual-only path: real user-entered metrics, but no approved strategic plan.
           return res.json({
             success: true,
             gated: false,
             planId: null,
             mode,
             actions,
+            validationState: "provisional",
+            signalOrigin: "real",
+            degraded: { flag: true, reason: "Actions derived from manual metrics only (no approved plan)", source: "missing_dependency", signalOrigin: "real" },
+            sourceEndpoint: "/api/dashboard/ai-actions",
           });
         }
         return res.json({
@@ -149,6 +154,10 @@ export function registerDashboardRoutes(app: Express) {
           gateReason: "NO_APPROVED_PLAN",
           mode,
           actions: [],
+          validationState: "weak",
+          signalOrigin: "unknown",
+          degraded: { flag: true, reason: "No approved plan and no manual metrics", source: "missing_dependency", signalOrigin: "unknown" },
+          sourceEndpoint: "/api/dashboard/ai-actions",
         });
       }
 
@@ -420,12 +429,38 @@ export function registerDashboardRoutes(app: Express) {
 
       console.log(`${LOG_PREFIX} AI Actions for ${campaignId}: ${actions.length} actions (mode=${mode}, manual=${!!hasManualData}, plan=${!!hasPlanProgress})`);
 
+      // Phase 9 — D2/D3 additive projection. Strength is a function of evidence depth:
+      //   real perf snapshots ≥7 + manual + plan progress → validated
+      //   plan + (manual OR ≥1 snapshot) → provisional
+      //   plan only, no perf data, no manual → weak
+      const realSnapshotCount = recentSnapshots.length;
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown";
+      let signalOrigin: "real" | "inferred" | "fallback" | "unknown";
+      let degraded: { flag: true; reason: string; source: string; signalOrigin: "real" | "inferred" | "fallback" | "unknown" } | null;
+      if (realSnapshotCount >= 7 && (hasManualData || hasPlanProgress)) {
+        validationState = "validated";
+        signalOrigin = "real";
+        degraded = null;
+      } else if (hasManualData || realSnapshotCount >= 1) {
+        validationState = "provisional";
+        signalOrigin = "real";
+        degraded = { flag: true, reason: `Only ${realSnapshotCount} perf snapshot(s) — below 7-day validation window`, source: "data_quality", signalOrigin: "real" };
+      } else {
+        validationState = "weak";
+        signalOrigin = "inferred";
+        degraded = { flag: true, reason: "Actions derived from plan structure with no measured outcomes", source: "data_quality", signalOrigin: "inferred" };
+      }
+
       res.json({
         success: true,
         gated: false,
         planId: plan.id,
         mode,
         actions: actions.slice(0, 8),
+        validationState,
+        signalOrigin,
+        degraded,
+        sourceEndpoint: "/api/dashboard/ai-actions",
       });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} AI Actions error:`, error);
