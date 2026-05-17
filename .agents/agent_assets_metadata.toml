@@ -239,3 +239,9 @@ id = "w6wv50z1Gl242KK_xOkXb"
 uri = "file://docs/operations-guardian-design.md"
 type = "text"
 title = "Operations Guardian — Audit & Architecture Proposal"
+
+[[outputs]]
+id = "ZgfEbRPcAtSJU_eMwo_z2"
+uri = "file://.local/docs/structural-consolidation-audit.md"
+type = "text"
+title = "Structural Consolidation Audit — All 10 Sections"
