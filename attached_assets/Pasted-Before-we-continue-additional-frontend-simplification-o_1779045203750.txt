@@ -1,0 +1,168 @@
+Before we continue additional frontend simplification or UX polish work, I want us to stop and fix the maturity/baseline lifecycle from the ROOT.
+
+The latest audit strongly suggests the issue is no longer just wording or perception.
+
+There may be a real lifecycle/orchestration problem underneath:
+
+* benchmark windows
+* continuity cadence
+* maturity transitions
+* baseline accumulation
+* anchor resets
+* timeline visibility
+* readiness thresholds
+
+Most important:
+a campaign that has existed for nearly a month should NOT still feel permanently stuck in:
+
+* “building baseline”
+* “not enough signal”
+* “first benchmark window still forming”
+
+unless the runtime truly lacks evidence.
+
+Right now we do not know whether:
+
+* the backend is genuinely starved
+  OR
+* the maturity lifecycle is stuck/resetting
+  OR
+* the perception layer is under-reporting readiness
+  OR
+* benchmark windows are never resolving correctly
+  OR
+* continuity cadence is repeatedly re-anchoring the campaign
+  OR
+* timeline filtering is hiding valid system activity
+  OR
+* thresholds are unrealistically strict
+  OR
+* maturity logic paths disagree with each other
+
+We need to solve this from the foundation level first.
+
+1. Full Production-State Diagnostic
+   I want a REAL production-state audit against the actual database.
+
+Please inspect:
+
+* boss_runs count/history
+* pipeline_eval_windows
+* closed_reason values
+* plan_anchor_resets
+* continuity ticks
+* market snapshots
+* competitor scan counts
+* ci_competitor_posts
+* benchmark maturity state
+* freshness classes
+* baseline transitions
+* Q1/Q2 maturity states
+* timeline events generated vs filtered
+* manual metric ingestion history
+
+I want the REAL runtime truth from production data.
+
+2. Benchmark / Window Lifecycle Audit
+   Audit the entire lifecycle of:
+
+* weekly windows
+* maturity transitions
+* closure logic
+* baseline formation
+* benchmark advancement
+* re-anchor behavior
+* cadence resets
+* continuity scheduling
+
+The current behavior strongly suggests accounts may become trapped in “forming” indefinitely.
+
+Specifically investigate:
+
+* windows never closing
+* closed_missing_truth behavior
+* manual truth dependency
+* repeated Day-0 re-anchors
+* skipped maturity promotion
+* invalid threshold assumptions
+
+3. Maturity-State Logic Consistency
+   The audit identified a dangerous possibility:
+
+Different maturity readers may interpret the same account state differently.
+
+Example:
+
+* evaluateQ1 returns UNKNOWN
+* interpretQ1Maturity may return MATURE
+
+This is a critical architectural risk.
+
+I want:
+
+* a full consistency audit of all maturity evaluators/readers
+* one canonical interpretation path
+* no contradictory maturity states
+* no dual truth systems
+* no conflicting readiness evaluation
+
+4. Timeline / Activity Visibility Audit
+   The activity timeline currently filters skipped decisions/events.
+
+This may create a false perception:
+“the system is inactive”
+while the scheduler and boss are actually running normally.
+
+Audit:
+
+* which events are hidden
+* why they are hidden
+* whether hidden events are suppressing perceived intelligence
+* whether timeline filtering is now too aggressive
+
+We may need:
+
+* “No major changes detected”
+* “Monitoring complete”
+* “No strategic shift identified”
+
+instead of silence.
+
+5. Manual Watchtower Refresh (Only After Lifecycle Validation)
+   I still want:
+   a manual “Refresh Market Scan” action.
+
+But:
+ONLY after we verify the lifecycle architecture is healthy.
+
+The implementation must:
+
+* use the same campaign lock system
+* avoid consuming continuity windows
+* avoid advancing cadence state
+* avoid resetting anchors
+* avoid duplicate benchmark progression
+* avoid corrupting maturity timelines
+
+I want:
+manual intelligence refresh,
+not lifecycle mutation.
+
+6. Root-Cause Resolution First
+   Most important:
+   I do NOT want superficial UX patches if the lifecycle underneath is structurally unhealthy.
+
+We must determine:
+
+* whether the system is actually stuck
+* whether maturity is silently resetting
+* whether thresholds are wrong
+* whether continuity cadence is behaving incorrectly
+* whether baseline accumulation is broken
+* whether readiness transitions are incomplete
+
+Only after we know the true runtime state should we continue polishing the perception layer.
+
+Goal:
+fix the intelligence lifecycle itself —
+not just the wording around it.
