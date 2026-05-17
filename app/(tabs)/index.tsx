@@ -42,6 +42,8 @@ import type { ProvenanceKind } from '@/components/DataProvenance';
 import { useAuth } from '@/context/AuthContext';
 import OnboardingAgent from '@/components/OnboardingAgent';
 import { RunTruthfulnessBanner } from '@/components/RunTruthfulnessBanner';
+import WatchtowerStrip from '@/components/WatchtowerStrip';
+import ActivityTimeline from '@/components/ActivityTimeline';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -660,6 +662,10 @@ export default function DashboardScreen() {
 
         <CampaignBar />
 
+        {selectedCampaignId ? (
+          <WatchtowerStrip campaignId={selectedCampaignId} isDark={isDark} />
+        ) : null}
+
         <RNAnimated.View style={{ opacity: headerFade, transform: [{ translateY: cardSlide }] }}>
           {renderMetricsPanel()}
         </RNAnimated.View>
@@ -701,6 +707,10 @@ export default function DashboardScreen() {
             </Pressable>
           )}
         </View>
+
+        {selectedCampaignId ? (
+          <ActivityTimeline campaignId={selectedCampaignId} isDark={isDark} />
+        ) : null}
 
         {metricsState === 'success' && metrics ? (
           <>

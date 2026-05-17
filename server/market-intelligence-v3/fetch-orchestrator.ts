@@ -1415,6 +1415,11 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const snapshotPayload = {
     accountId,
     campaignId,
+    // persistSnapshotAfterFetch runs after multiple fetch jobs land, so it has
+    // no single fetch-job id in scope. We reuse `snapshotJobKey` (the same
+    // stable key used for the token-budget read-through above) as the snapshot
+    // jobId. Stable across worker crash/restart for the SAME persistence cycle.
+    jobId: snapshotJobKey,
     competitorHash,
     version: newVersion,
     competitorData: JSON.stringify(competitorInputs.map(c => ({ id: c.id, name: c.name }))),
