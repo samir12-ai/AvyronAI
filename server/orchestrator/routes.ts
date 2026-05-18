@@ -1253,11 +1253,19 @@ export function registerOrchestratorV2Routes(app: Express) {
             integrity?.safeToExecute != null
               ? `Safe to execute: ${integrity.safeToExecute ? "YES" : "NO"}`
               : null,
-            integrity?.layerResults?.filter((l: any) => l.passed === false)?.length
-              ? `${integrity.layerResults.filter((l: any) => !l.passed).length} layer(s) failed`
-              : integrity?.layerResults?.length
-                ? `All ${integrity.layerResults.length} layers passed`
-                : null,
+            // CLP-15: compound check — passed===false on an EVALUATED layer is
+            // a real failure. INSUFFICIENT_EVIDENCE is reported separately.
+            (() => {
+              const rows: any[] = integrity?.layerResults ?? [];
+              if (!rows.length) return null;
+              const failed = rows.filter((l: any) => l?.evaluationState === "EVALUATED" && l?.passed === false).length;
+              const insufficient = rows.filter((l: any) => l?.evaluationState && l.evaluationState !== "EVALUATED").length;
+              const evaluated = rows.length - insufficient;
+              if (failed > 0 || insufficient > 0) {
+                return `${failed} failed, ${insufficient} insufficient (of ${rows.length} layers)`;
+              }
+              return `All ${evaluated} layers passed`;
+            })(),
           ].filter(Boolean).join(" | ") || "No data",
           score: integrity?.overallIntegrityScore != null ? score(integrity.overallIntegrityScore) : "—",
           notes: integrity?.statusMessage ?? "",

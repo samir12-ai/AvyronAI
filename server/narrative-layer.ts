@@ -8,6 +8,7 @@ import {
   funnelSnapshots,
 } from "@shared/schema";
 import { eq, and, or, desc } from "drizzle-orm";
+import { aiChat } from "./ai-client";
 
 interface NarrativeStep {
   key: string;
@@ -23,6 +24,16 @@ interface CausalNarrative {
   oneLiner: string;
   engineCount: number;
   completedAt: string | null;
+  /**
+   * T106 / CLP-02 — surfaces which narrative engine produced this run:
+   *   - "template" : deterministic template-fill (default).
+   *   - "llm_v2"   : grounded LLM rewrite (gate EXPO_PUBLIC_NARRATIVE_LLM_V2).
+   *   - "llm_v2_failed_template_fallback" : LLM v2 was attempted but rejected
+   *                                         (timeout/parse/grounding); we
+   *                                         returned the template steps and
+   *                                         logged the reason. NEVER silent.
+   */
+  narrativeMode?: "template" | "llm_v2" | "llm_v2_failed_template_fallback";
 }
 
 function safeP(v: any): any {
@@ -345,12 +356,145 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
 
   const oneLiner = `${humanize(problemText)} → ${humanize(whatWeDoText)} → ${humanize(executeText)}`;
 
+  // -------------------------------------------------------------------------
+  // T106 / CLP-02 — narrative LLM v2 (gated).
+  //
+  // When EXPO_PUBLIC_NARRATIVE_LLM_V2 is truthy and we have enough grounded
+  // evidence (≥3 completed engines, problem + position not "none"), ask the
+  // LLM to *refine* — not invent — each of the 5 steps. The prompt locks the
+  // model to the evidence we already extracted; outputs that hallucinate
+  // names/territories not present are rejected (template steps stand).
+  //
+  // The call goes through `aiChat` which auto-flows into the replay recorder
+  // via AsyncLocalStorage (`getCurrentRecorder()?.recordLlmCall`) when the
+  // narrative builder runs inside a `runOrchestrator` scope. No extra
+  // withReplayRecorder wrapping is needed at this seam.
+  // -------------------------------------------------------------------------
+  let llmSteps: NarrativeStep[] | null = null;
+  let llmOneLiner: string | null = null;
+  let narrativeMode: "template" | "llm_v2" | "llm_v2_failed_template_fallback" = "template";
+
+  const llmGateOn = ["1", "true", "on", "yes"].includes(
+    String(process.env.EXPO_PUBLIC_NARRATIVE_LLM_V2 ?? "").trim().toLowerCase(),
+  );
+  const hasEnoughEvidence =
+    completed.length >= 3 && problemSource !== "none" && positionSource !== "none";
+
+  if (llmGateOn && hasEnoughEvidence) {
+    try {
+      const evidence = {
+        territoryName, enemy, contrastAxis, narrativeDirection,
+        mechanismName: mechName, mechanismType: mechType, topPillar, authorityMode,
+        offerName, coreOutcome, funnelType,
+        rootCause: aelData?.rootCauses?.[0] ?? null,
+        causalChain: aelData?.causalChains?.[0] ?? null,
+        templateSteps: steps.map(s => ({ key: s.key, label: s.label, text: s.text })),
+      };
+      const sys = "You are a brand strategist. Rewrite each of the 5 causal narrative steps into ONE short sentence (≤16 words) using plain language. Use ONLY the provided evidence — do NOT invent territories, mechanisms, or claims that are not in the evidence. If a step's evidence is 'Pending' or empty, copy the template text verbatim. Return STRICT JSON: { steps: [{key, text}], oneLiner }.";
+      const user = JSON.stringify({ evidence });
+      const completion = await aiChat({
+        accountId,
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: user },
+        ],
+        max_tokens: 600,
+        temperature: 0.4,
+        response_format: { type: "json_object" } as any,
+      } as any);
+      const raw = completion?.choices?.[0]?.message?.content ?? "";
+      const parsed = JSON.parse(raw);
+      const stepArr: Array<{ key: string; text: string }> = Array.isArray(parsed?.steps) ? parsed.steps : [];
+      const byKey: Record<string, string> = {};
+      for (const s of stepArr) {
+        if (typeof s?.key === "string" && typeof s?.text === "string" && s.text.trim()) {
+          byKey[s.key] = s.text.trim();
+        }
+      }
+      // Grounding gate (CLP-02 / P1 fail-closed):
+      //   1. all 5 keys present
+      //   2. every quoted "..." substring is in the evidence-anchored allowlist
+      //   3. every Capitalized multi-word ProperNoun chunk is either a single
+      //      common word (allowed) OR appears in the evidence allowlist. This
+      //      catches unquoted invented brand/territory names that the prior
+      //      gate let through.
+      //   4. the model's oneLiner is DISCARDED — we always synthesize it
+      //      from the validated steps so an unchecked free-text headline
+      //      can't smuggle hallucinations past the per-step gate.
+      const allKeysCovered = ["problem","why","position","mechanism","execute"].every(k => byKey[k]);
+      const anchorTerms = [territoryName, mechName, offerName, topPillar, enemy, contrastAxis]
+        .filter(Boolean).map(s => String(s).toLowerCase());
+      const allowedQuoted = new Set(anchorTerms);
+      // Tokenize each anchor term into individual words so multi-word
+      // anchors like "Forecast Accuracy Engine" allow each component word.
+      const allowedTokens = new Set<string>();
+      for (const t of anchorTerms) {
+        for (const w of t.split(/\s+/)) {
+          if (w.length >= 2) allowedTokens.add(w.toLowerCase());
+        }
+      }
+      const QUOTED_RE = /"([^"]{2,60})"/g;
+      // Match runs of ≥2 consecutive Capitalized words (likely proper nouns)
+      // — single capitalized words at sentence-start are not flagged.
+      const CAP_RUN_RE = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g;
+      let groundingOk = allKeysCovered;
+      let rejectReason: string | null = null;
+      if (groundingOk) {
+        for (const k of Object.keys(byKey)) {
+          const txt = byKey[k];
+          // Check 2: quoted strings
+          let qm: RegExpExecArray | null;
+          QUOTED_RE.lastIndex = 0;
+          while ((qm = QUOTED_RE.exec(txt)) !== null) {
+            if (!allowedQuoted.has(qm[1].trim().toLowerCase())) {
+              groundingOk = false; rejectReason = `quoted_unanchored:${qm[1].slice(0, 40)}`; break;
+            }
+          }
+          if (!groundingOk) break;
+          // Check 3: capitalized-word runs (proper nouns)
+          let cm: RegExpExecArray | null;
+          CAP_RUN_RE.lastIndex = 0;
+          while ((cm = CAP_RUN_RE.exec(txt)) !== null) {
+            const phrase = cm[1].toLowerCase();
+            if (allowedQuoted.has(phrase)) continue;
+            // Every word in the capitalized run must appear in the anchor
+            // token set (i.e. evidence-grounded). Even one unknown word
+            // rejects the entire run — and the entire LLM attempt.
+            const words = phrase.split(/\s+/);
+            const allKnown = words.every(w => allowedTokens.has(w));
+            if (!allKnown) {
+              groundingOk = false;
+              rejectReason = `unanchored_proper_noun:${cm[1].slice(0, 40)}`;
+              break;
+            }
+          }
+          if (!groundingOk) break;
+        }
+      }
+      if (groundingOk) {
+        llmSteps = steps.map(s => ({ ...s, text: humanize(byKey[s.key] ?? s.text) }));
+        // oneLiner is ALWAYS synthesized from validated steps (model's
+        // free-text oneLiner is discarded — see gate doc above).
+        llmOneLiner = `${llmSteps[0].text} → ${llmSteps[2].text} → ${llmSteps[4].text}`;
+        narrativeMode = "llm_v2";
+      } else {
+        narrativeMode = "llm_v2_failed_template_fallback";
+        console.warn(`[Narrative] LLM_V2_GROUNDING_REJECTED | runId=${runId} keysCovered=${allKeysCovered} reason=${rejectReason ?? "unknown"}`);
+      }
+    } catch (err: any) {
+      narrativeMode = "llm_v2_failed_template_fallback";
+      console.warn(`[Narrative] LLM_V2_CALL_FAILED | runId=${runId} reason=${err?.message ?? err}`);
+    }
+  }
+
   return {
     hasNarrative: true,
-    steps,
-    oneLiner,
+    steps: llmSteps ?? steps,
+    oneLiner: llmOneLiner ?? oneLiner,
     engineCount: completed.length,
     completedAt: job.completed_at ? String(job.completed_at) : null,
+    narrativeMode,
     runId,
     isLatest: resolved.isLatest,
     isStale: resolved.isStale,

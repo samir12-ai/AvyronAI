@@ -102,6 +102,7 @@ export const STATUS = {
   MISSING_DEPENDENCY: "MISSING_DEPENDENCY",
   INSUFFICIENT_SIGNALS: "INSUFFICIENT_SIGNALS",
   INTEGRITY_FAILED: "INTEGRITY_FAILED",
+  AI_DEGRADED: "AI_DEGRADED",
 } as const;
 
 export const ENTRY_ROUTE_TO_FUNNEL_FAMILIES: Record<string, { allowed: string[]; blocked: string[] }> = {

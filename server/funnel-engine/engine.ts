@@ -1165,28 +1165,41 @@ Return JSON:
     const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
     const parsed = JSON.parse(cleanedResponse);
 
+    // CLP-03 / CLP-05: NO baked-English `||` fallbacks. If the AI omitted a
+    // required field, the response is malformed — throw and let the outer
+    // catch surface STATUS.AI_DEGRADED rather than substituting fake names.
+    const missing: string[] = [];
+    if (!parsed.primary?.name) missing.push("primary.name");
+    if (!parsed.primary?.type) missing.push("primary.type");
+    if (!parsed.alternative?.name) missing.push("alternative.name");
+    if (!parsed.alternative?.type) missing.push("alternative.type");
+    if (!parsed.rejected?.name) missing.push("rejected.name");
+    if (!parsed.rejected?.type) missing.push("rejected.type");
+    if (!parsed.rejected?.rejectionReason) missing.push("rejected.rejectionReason");
+    if (missing.length > 0) {
+      throw new Error(`AI response missing required fields: ${missing.join(", ")}`);
+    }
+
     return {
-      primary: {
-        name: parsed.primary?.name || "Primary Conversion Funnel",
-        type: parsed.primary?.type || "webinar",
-      },
-      alternative: {
-        name: parsed.alternative?.name || "Alternative Engagement Funnel",
-        type: parsed.alternative?.type || "challenge",
-      },
+      primary: { name: parsed.primary.name, type: parsed.primary.type },
+      alternative: { name: parsed.alternative.name, type: parsed.alternative.type },
       rejected: {
-        name: parsed.rejected?.name || "Rejected Generic Funnel",
-        type: parsed.rejected?.type || "direct",
-        rejectionReason: parsed.rejected?.rejectionReason || "Does not match audience readiness level",
+        name: parsed.rejected.name,
+        type: parsed.rejected.type,
+        rejectionReason: parsed.rejected.rejectionReason,
       },
     };
   } catch (err: any) {
-    console.error(`[FunnelEngine] AI generation failed: ${err.message}`);
-    return {
-      primary: { name: "Structured Conversion Journey", type: "webinar" },
-      alternative: { name: "Progressive Engagement Path", type: "challenge" },
-      rejected: { name: "Generic Direct Funnel", type: "direct", rejectionReason: "Generic funnel — no audience-specific journey design" },
-    };
+    // CLP-03 / Phase 1 (May 2026): NO baked English fallback. The prior
+    // implementation returned hand-written funnel names from this catch
+    // block, which were then surfaced to customers as if they were
+    // AI-derived strategy. Re-throw so the outer `runFunnelEngine` catch
+    // surfaces STATUS.AI_DEGRADED with an explicit reason.
+    console.error(`[FunnelEngine] AI_FUNNEL_GENERATION_FAILED: ${err.message}`);
+    const wrapped = new Error(`AI_FUNNEL_GENERATION_FAILED: ${err.message}`);
+    (wrapped as any).code = "AI_FUNNEL_GENERATION_FAILED";
+    (wrapped as any).originalMessage = err.message;
+    throw wrapped;
   }
 }
 
@@ -1301,11 +1314,35 @@ export async function runFunnelEngine(
     aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
-    diagnostics.aiGeneration = { success: false, error: err.message };
-    aiFunnels = {
-      primary: { name: "Structured Conversion Journey", type: l2Fit.funnelType },
-      alternative: { name: "Progressive Engagement Path", type: "challenge" },
-      rejected: { name: "Generic Direct Funnel", type: "direct", rejectionReason: "Generic — no audience-specific design" },
+    // CLP-03 / Phase 1: AI generation failed. Bail out with STATUS.AI_DEGRADED
+    // and an empty funnel rather than fabricating English funnel names. The
+    // caller (orchestrator + system-control) is responsible for honouring
+    // AI_DEGRADED and refusing to surface the funnel as executable strategy.
+    const reason = (err && (err.originalMessage || err.message)) || "unknown AI failure";
+    diagnostics.aiGeneration = { success: false, error: reason };
+    const emptyFunnel = buildEmptyFunnel();
+    const acceptability = assessStrategyAcceptability(0, 0, 8, false, [`AI funnel generation failed: ${reason}`]);
+    console.log(`[FunnelEngine-V3] AI_DEGRADED | reason="${reason}" | returning empty funnel + structuralWarning`);
+    return {
+      status: STATUS.AI_DEGRADED,
+      statusMessage: `AI funnel generation failed: ${reason}`,
+      primaryFunnel: emptyFunnel,
+      alternativeFunnel: emptyFunnel,
+      rejectedFunnel: { funnel: emptyFunnel, rejectionReason: "AI generation failed — no candidates produced" },
+      funnelStrengthScore: 0,
+      trustPathAnalysis: { score: 0, steps: 0, gaps: ["AI generation failed — trust path not constructed"] },
+      proofPlacementLogic: { score: 0, placements: 0, missingPlacements: ["AI generation failed — proof placements not computed"] },
+      frictionMap: { totalFriction: 1, criticalPoints: 0, mitigations: 0 },
+      boundaryCheck: { passed: true, violations: [] },
+      structuralWarnings: [
+        `AI_FUNNEL_GENERATION_FAILED: ${reason}`,
+        "Funnel result is empty — downstream consumers MUST treat status=AI_DEGRADED as non-executable.",
+      ],
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      layerDiagnostics: diagnostics,
+      strategyAcceptability: acceptability,
     };
   }
 

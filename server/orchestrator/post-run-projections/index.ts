@@ -30,8 +30,8 @@
  *   - "skipped"   — preconditions unmet (e.g. no recovery plan to enrich)
  */
 
-import type { ConfidenceProvenanceLog, ConfidenceIntegritySummary } from "../shared/confidence-provenance";
-import { summarizeConfidenceIntegrity } from "../shared/confidence-provenance";
+import type { ConfidenceProvenanceLog, ConfidenceIntegritySummary } from "../../shared/confidence-provenance";
+import { summarizeConfidenceIntegrity } from "../../shared/confidence-provenance";
 import { composeCommercialDNA, type CommercialDNA } from "../../shared/commercial-dna";
 import type { SharedStrategicContext } from "./shared-strategic-context";
 import type { EngineId, EngineStepResult } from "./priority-matrix";

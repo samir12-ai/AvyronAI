@@ -44,6 +44,7 @@ import ActivityTimeline from '@/components/ActivityTimeline';
 import { MarketMindAgent } from '@/components/MarketMindAgent';
 import InitializationExperience from '@/components/InitializationExperience';
 import { useWatchtower } from '@/hooks/usePerception';
+import ReasoningPanel from '@/components/ReasoningPanel';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -717,6 +718,10 @@ export default function DashboardScreen() {
             isDark={isDark}
             narrativeRefreshKey={narrativeRefreshKey}
           />
+        ) : null}
+
+        {selectedCampaignId ? (
+          <ReasoningPanel campaignId={selectedCampaignId} />
         ) : null}
 
         <View style={[s.metaStrip, { 

@@ -25,6 +25,13 @@ import {
   publishedPosts,
   pipelineEvalWindows,
   strategyMemory,
+  miSnapshots,
+  audienceSnapshots,
+  positioningSnapshots,
+  offerSnapshots,
+  funnelSnapshots,
+  awarenessSnapshots,
+  integritySnapshots,
 } from "@shared/schema";
 import { acceptUserTruth } from "./pipeline/lanes/user/user-truth";
 import { evaluateWindowState } from "./pipeline/eval-windows";
@@ -282,6 +289,228 @@ export function registerPerceptionRoutes(app: Express) {
       }
       console.error(`${LOG_PREFIX} user-truth submit failed:`, err?.message ?? err);
       return res.status(500).json({ success: false, code: "TRUTH_SUBMIT_FAILED" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /api/perception/reasoning?campaignId=...
+  //
+  // CLP-07 / T107 — customer-facing read-only reasoning surface. Returns one
+  // card per engine pillar from the latest snapshot in this campaign, using
+  // ONLY the customer-safe vocabulary allowlist (see Phase 8 lint:vocab):
+  //   audience insights / market position / offer logic / story arc /
+  //   competitor scan / reasoning checks.
+  //
+  // Each card carries:
+  //   - state: "ok" | "degraded" | "insufficient" | "missing"
+  //   - confidence (0..1) when applicable
+  //   - degradedReason (customer-safe short string) when state != "ok"
+  //   - provenance: "live" | "benchmark" | "mixed" | null
+  //   - lastUpdatedAt (ISO)
+  //
+  // Doctrine: NO internal engine names ("Positioning Engine", etc.) ever
+  // reach the payload. NO raw doctrinal tokens. Unknown statuses → "missing"
+  // (fail-closed, never coerced to "ok").
+  // -------------------------------------------------------------------------
+  app.get("/api/perception/reasoning", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const where = (t: any) => and(eq(t.accountId, accountId), eq(t.campaignId, campaignId));
+
+      const latest = async <T>(rows: Promise<T[]>): Promise<T | null> => {
+        const r = await rows;
+        return r[0] ?? null;
+      };
+
+      const [mi, audience, positioning, offer, funnel, awareness, integrity] = await Promise.all([
+        latest(db.select({
+          createdAt: miSnapshots.createdAt,
+          status: miSnapshots.status,
+          overallConfidence: miSnapshots.overallConfidence,
+          competitorsFound: miSnapshots.competitorsFound,
+        }).from(miSnapshots).where(where(miSnapshots)).orderBy(desc(miSnapshots.createdAt)).limit(1)),
+
+        latest(db.select({
+          createdAt: audienceSnapshots.createdAt,
+          inputSummary: audienceSnapshots.inputSummary,
+          signalLineage: audienceSnapshots.signalLineage,
+        }).from(audienceSnapshots).where(where(audienceSnapshots)).orderBy(desc(audienceSnapshots.createdAt)).limit(1)),
+
+        latest(db.select({
+          createdAt: positioningSnapshots.createdAt,
+          status: positioningSnapshots.status,
+          statusMessage: positioningSnapshots.statusMessage,
+          confidenceScore: positioningSnapshots.confidenceScore,
+        }).from(positioningSnapshots).where(where(positioningSnapshots)).orderBy(desc(positioningSnapshots.createdAt)).limit(1)),
+
+        latest(db.select({
+          createdAt: offerSnapshots.createdAt,
+          status: offerSnapshots.status,
+          statusMessage: offerSnapshots.statusMessage,
+          confidenceScore: offerSnapshots.confidenceScore,
+        }).from(offerSnapshots).where(where(offerSnapshots)).orderBy(desc(offerSnapshots.createdAt)).limit(1)),
+
+        latest(db.select({
+          createdAt: funnelSnapshots.createdAt,
+          status: funnelSnapshots.status,
+          statusMessage: funnelSnapshots.statusMessage,
+          confidenceScore: funnelSnapshots.confidenceScore,
+        }).from(funnelSnapshots).where(where(funnelSnapshots)).orderBy(desc(funnelSnapshots.createdAt)).limit(1)),
+
+        latest(db.select({
+          createdAt: awarenessSnapshots.createdAt,
+          status: awarenessSnapshots.status,
+          statusMessage: awarenessSnapshots.statusMessage,
+          dataReliability: awarenessSnapshots.dataReliability,
+          awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore,
+        }).from(awarenessSnapshots).where(where(awarenessSnapshots)).orderBy(desc(awarenessSnapshots.createdAt)).limit(1)),
+
+        latest(db.select({
+          createdAt: integritySnapshots.createdAt,
+          status: integritySnapshots.status,
+          statusMessage: integritySnapshots.statusMessage,
+          overallIntegrityScore: integritySnapshots.overallIntegrityScore,
+          safeToExecute: integritySnapshots.safeToExecute,
+          layerResults: integritySnapshots.layerResults,
+        }).from(integritySnapshots).where(where(integritySnapshots)).orderBy(desc(integritySnapshots.createdAt)).limit(1)),
+      ]);
+
+      // Customer-safe degraded-reason mapper. Maps internal status enums to
+      // short user-facing English. Unknown statuses return null (fail-closed)
+      // and the card renders as "missing".
+      type CardState = "ok" | "degraded" | "insufficient" | "missing";
+      const projectStatus = (status: string | null | undefined, message: string | null | undefined): { state: CardState; reason: string | null } => {
+        if (!status) return { state: "missing", reason: null };
+        const s = String(status).toUpperCase();
+        if (s === "COMPLETE" || s === "OK" || s === "SUCCESS") return { state: "ok", reason: null };
+        if (s.includes("INSUFFICIENT")) return { state: "insufficient", reason: "Not enough evidence yet" };
+        if (s.includes("DEGRADED") || s.includes("PARTIAL") || s.includes("INCOMPLETE")) return { state: "degraded", reason: "Limited evidence in this run" };
+        if (s.includes("INTEGRITY_FAILED")) return { state: "degraded", reason: "Reasoning checks flagged a gap" };
+        if (s.includes("FAILED") || s.includes("ERROR")) return { state: "degraded", reason: "Last attempt couldn't complete" };
+        return { state: "missing", reason: null };
+      };
+
+      const safeNumberOrNull = (n: unknown): number | null => {
+        if (typeof n !== "number" || !Number.isFinite(n)) return null;
+        return Math.max(0, Math.min(1, n));
+      };
+      const tsIso = (d: unknown): string | null => (d instanceof Date ? d.toISOString() : (typeof d === "string" ? d : null));
+
+      // MI provenance: "live" if competitorsFound > 0 (direct scrape this run),
+      // else "benchmark" (system fell back to baseline). Other engines have
+      // no per-engine provenance signal yet — left null.
+      const miCompetitors = typeof mi?.competitorsFound === "number" ? mi.competitorsFound : null;
+      const miProvenance: "live" | "benchmark" | null = mi
+        ? ((miCompetitors ?? 0) > 0 ? "live" : "benchmark")
+        : null;
+
+      // Reasoning-checks (integrity) — surface layer-coverage honestly.
+      let integrityCoverage: { evaluated: number; insufficient: number; total: number } | null = null;
+      try {
+        if (integrity?.layerResults) {
+          const raw = typeof integrity.layerResults === "string" ? JSON.parse(integrity.layerResults) : integrity.layerResults;
+          if (Array.isArray(raw)) {
+            const evaluated = raw.filter((l: any) => l?.evaluationState === "EVALUATED").length;
+            const insufficient = raw.filter((l: any) => l?.evaluationState && l.evaluationState !== "EVALUATED").length;
+            integrityCoverage = { evaluated, insufficient, total: raw.length };
+          }
+        }
+      } catch { /* swallow parse error; surface degrades to missing */ }
+
+      const cards = [
+        {
+          id: "competitor_scan",
+          label: "Competitor scan",
+          ...projectStatus(mi?.status, null),
+          confidence: safeNumberOrNull(mi?.overallConfidence),
+          provenance: miProvenance,
+          lastUpdatedAt: tsIso(mi?.createdAt),
+          evidence: typeof miCompetitors === "number" ? `${miCompetitors} competitor${miCompetitors === 1 ? "" : "s"} observed` : null,
+        },
+        (() => {
+          // CLP-02 / P1: fail-closed. audience_snapshots has no `status`
+          // column, so we project from evidence presence instead of
+          // existence-of-row. A bare row with no signal lineage and no
+          // input summary is "insufficient" — NEVER silently "ok".
+          let aState: CardState = "missing";
+          let aReason: string | null = null;
+          if (audience) {
+            const hasSummary = typeof audience.inputSummary === "string" && audience.inputSummary.trim().length > 0;
+            const hasLineage = typeof audience.signalLineage === "string" && audience.signalLineage.trim().length > 0;
+            if (hasSummary && hasLineage) {
+              aState = "ok";
+            } else if (hasSummary || hasLineage) {
+              aState = "insufficient";
+              aReason = "Audience read is partial — still gathering signals.";
+            } else {
+              aState = "insufficient";
+              aReason = "Audience read recorded but no signals captured.";
+            }
+          }
+          return {
+            id: "audience_insights",
+            label: "Audience insights",
+            state: aState,
+            reason: aReason,
+            confidence: null,
+            provenance: null,
+            lastUpdatedAt: tsIso(audience?.createdAt),
+            evidence: aState === "ok" ? "Reading recent audience signals" : null,
+          };
+        })(),
+        {
+          id: "market_position",
+          label: "Market position",
+          ...projectStatus(positioning?.status, positioning?.statusMessage),
+          confidence: safeNumberOrNull(positioning?.confidenceScore),
+          provenance: null,
+          lastUpdatedAt: tsIso(positioning?.createdAt),
+          evidence: null,
+        },
+        {
+          id: "offer_logic",
+          label: "Offer logic",
+          ...projectStatus(offer?.status, offer?.statusMessage),
+          confidence: safeNumberOrNull(offer?.confidenceScore),
+          provenance: null,
+          lastUpdatedAt: tsIso(offer?.createdAt),
+          evidence: null,
+        },
+        {
+          id: "story_arc",
+          label: "Story arc",
+          ...projectStatus(
+            (funnel?.status ?? awareness?.status) as string | null,
+            (funnel?.statusMessage ?? awareness?.statusMessage) as string | null,
+          ),
+          confidence: safeNumberOrNull(funnel?.confidenceScore ?? awareness?.awarenessStrengthScore),
+          provenance: null,
+          lastUpdatedAt: tsIso(funnel?.createdAt ?? awareness?.createdAt),
+          evidence: null,
+        },
+        {
+          id: "reasoning_checks",
+          label: "Reasoning checks",
+          ...projectStatus(integrity?.status, integrity?.statusMessage),
+          confidence: safeNumberOrNull(integrity?.overallIntegrityScore),
+          provenance: null,
+          lastUpdatedAt: tsIso(integrity?.createdAt),
+          evidence: integrityCoverage
+            ? `${integrityCoverage.evaluated} of ${integrityCoverage.total} checks ran (${integrityCoverage.insufficient} skipped for lack of evidence)`
+            : null,
+          safe: typeof integrity?.safeToExecute === "boolean" ? integrity.safeToExecute : null,
+        },
+      ];
+
+      const anyReady = cards.some((c) => c.state !== "missing");
+      return res.json({
+        success: true,
+        state: anyReady ? "ready" : "no_data",
+        cards,
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} reasoning failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "REASONING_FAILED" });
     }
   });
 
@@ -574,5 +803,5 @@ export function registerPerceptionRoutes(app: Express) {
     }
   });
 
-  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring");
+  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning");
 }
