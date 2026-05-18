@@ -52,6 +52,11 @@ import {
 } from "./integrity-gates";
 import { persistCommercialReasoningSnapshot } from "./persist";
 import { recordCv11HallucinationExposure } from "./metrics";
+import {
+  loadBusinessProfileFor,
+  renderBusinessProfileForPrompt,
+  type BusinessProfile,
+} from "./business-context-layer";
 
 const ENGINE_ID = "awareness_reasoner";
 /**
@@ -85,6 +90,17 @@ export interface InterpretAwarenessDepthInput {
    * doesn't supply it — used by the audit pipeline per-industry runs.
    */
   industry?: string | null;
+  /**
+   * Phase 4-B-prep — Business Context Layer (BCL) injection.
+   *
+   * Optional pre-built profile. When omitted, the interpreter loads the
+   * profile from `business_data_layer` via `loadBusinessProfileFor`. When
+   * loading also fails (e.g. no manual user data), the layer emits a
+   * slug-only profile with populated `unknownFields[]` rather than
+   * blocking. The profile is rendered into the prompt BEFORE the evidence
+   * corpus so the LLM reasons through the business's commercial lens.
+   */
+  businessProfile?: BusinessProfile | null;
 }
 
 export interface InterpretAwarenessDepthResult {
@@ -135,7 +151,11 @@ export function isAllowedForIndustry(industry: string | null): boolean {
 function buildSystemPrompt(): string {
   return [
     "You are the awareness commercial-depth interpreter for a marketing AI system.",
-    "You produce a STRUCTURED JSON commercial assessment grounded strictly in the supplied analytical-enrichment-layer (AEL) evidence.",
+    "The user prompt begins with a BUSINESS PROFILE block (industry, sub-industry, business model, buyer type, pricing complexity, funnel type, commercial lens, reasoning framework).",
+    "READ THE BUSINESS PROFILE FIRST. Use its commercial_lens.primaryLevers / marketDynamics / buyerPsychology as the FRAMING for how you read the evidence corpus that follows.",
+    "If reasoning_framework.deprioritizeSignals lists a signal category, do NOT weight that category in your assessment for this business.",
+    "If profile_confidence is low or unknown_fields is non-empty, REDUCE your own confidence and explicitly list those gaps in uncertainty.knownUnknowns.",
+    "You produce a STRUCTURED JSON commercial assessment grounded strictly in the supplied analytical-enrichment-layer (AEL) evidence — never invent business facts beyond what the profile states.",
     "Every claim you make MUST be backed by at least one evidence_refs entry that quotes a real fragment from the AEL.",
     "NEVER invent evidence. NEVER use template phrases like 'transparency proof', 'best-in-class', 'industry-leading', 'strategic alignment'.",
     "If evidence is insufficient, set reasoner_self_assessment='insufficient_evidence' and the system will fall back to the deterministic floor.",
@@ -161,7 +181,11 @@ function buildPromptCorpus(ael: AnalyticalPackage | null): PromptCorpus {
   };
 }
 
-function buildUserPrompt(input: InterpretAwarenessDepthInput, corpus: PromptCorpus): string {
+function buildUserPrompt(
+  input: InterpretAwarenessDepthInput,
+  corpus: PromptCorpus,
+  profile: BusinessProfile,
+): string {
   const rcs = corpus.rootCauses.map((rc, i) => ({
     refId: `rc:${i}`,
     surfaceSignal: rc.surfaceSignal,
@@ -228,7 +252,10 @@ function buildUserPrompt(input: InterpretAwarenessDepthInput, corpus: PromptCorp
   };
 
   return [
-    "EVIDENCE CORPUS:",
+    "BUSINESS PROFILE (read this FIRST — it tells you what this business is and which commercial lens to apply):",
+    renderBusinessProfileForPrompt(profile),
+    "",
+    "EVIDENCE CORPUS (interpret through the lens above):",
     JSON.stringify(evidenceCorpus, null, 2),
     "",
     "REQUIRED OUTPUT SHAPE:",
@@ -238,6 +265,7 @@ function buildUserPrompt(input: InterpretAwarenessDepthInput, corpus: PromptCorp
     "- evidence_refs MUST have at least 2 entries with distinct refIds.",
     "- Every enumerated state (depthAssessment/buyer_state/saturation_state/trust_state) and every commercial_pressures.<pressure> MUST appear in at least one evidence_refs[].appliesTo.",
     "- quotedFragment MUST be a real verbatim substring of the matching evidence row above.",
+    "- Your assessment MUST reflect the BUSINESS PROFILE's commercial_lens.primaryLevers — emphasise those levers; do NOT weight signals listed in reasoning_framework.deprioritizeSignals.",
     "- If you cannot meet these constraints honestly, set reasoner_self_assessment='insufficient_evidence' and the system will use the deterministic floor.",
   ].join("\n");
 }
@@ -275,13 +303,30 @@ export async function interpretAwarenessDepth(
   }
 
   const promptCorpus = buildPromptCorpus(input.ael);
+  // Phase 4-B-prep — Business Context Layer. Profile is deterministic.
+  // When caller supplies one (tests, future orchestrator override) we use
+  // it as-is; otherwise we load from `business_data_layer` for this
+  // (accountId, campaignId). Missing data → slug-only profile with
+  // explicit `unknownFields[]` — never blocks.
+  const businessProfile =
+    input.businessProfile ??
+    (await loadBusinessProfileFor({
+      accountId: input.accountId,
+      campaignId: input.campaignId,
+      industry: resolvedIndustry,
+      productDnaSummary: input.productDnaSummary ?? null,
+    }));
+  console.log(
+    `[CommercialReasoning] BUSINESS_PROFILE model=${businessProfile.businessModel} lens=${businessProfile.reasoningFramework.name} confidence=${businessProfile.confidence.toFixed(2)} unknown=${businessProfile.unknownFields.length}`,
+  );
+
   let llmResult;
   try {
     llmResult = await callCommercialReasoner({
       accountId: input.accountId,
       endpoint: "commercial_reasoning.awareness",
       systemPrompt: buildSystemPrompt(),
-      userPrompt: buildUserPrompt(input, promptCorpus),
+      userPrompt: buildUserPrompt(input, promptCorpus, businessProfile),
     });
   } catch (err) {
     const reason: GateDecisionReason =
