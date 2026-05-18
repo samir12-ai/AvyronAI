@@ -483,3 +483,65 @@ export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
 export function getAELVersion(): number {
   return AEL_VERSION;
 }
+
+/**
+ * Phase 3 fix — persist the AnalyticalPackage to `ael_snapshots`.
+ *
+ * Previously the orchestrator built the package and stashed it on
+ * `ctx.analyticalEnrichment` (in-memory only). The narrative layer
+ * issues a raw SQL read against `ael_snapshots` to ground its WHY/HOW
+ * steps, which silently returned zero rows because nothing ever wrote.
+ * Migration 033 created the table; this helper is the single write
+ * site. Called from runOrchestrator right after buildAnalyticalPackage.
+ *
+ * Idempotent: UNIQUE(account, campaign, job) so orchestrator re-runs
+ * with the same jobId UPSERT instead of stacking duplicates.
+ *
+ * Fail-loud-but-don't-block: a persistence failure is logged with the
+ * AEL_PERSIST_FAILED tag (operator-visible signal per Seal #15/#16)
+ * but does not throw — the in-memory `ctx.analyticalEnrichment` keeps
+ * downstream CEL working even if the DB write fails.
+ */
+export async function persistAELSnapshot(args: {
+  accountId: string;
+  campaignId: string;
+  jobId: string;
+  pkg: AnalyticalPackage;
+}): Promise<void> {
+  const { accountId, campaignId, jobId, pkg } = args;
+  if (!accountId || !campaignId || !jobId || !pkg) {
+    console.error(`${LOG_PREFIX} AEL_PERSIST_SKIPPED | missing required args | hasAccount=${!!accountId} hasCampaign=${!!campaignId} hasJob=${!!jobId} hasPkg=${!!pkg}`);
+    return;
+  }
+  try {
+    const { db } = await import("../db");
+    const { sql } = await import("drizzle-orm");
+    const id = `ael_${jobId}`;
+    await db.execute(sql`
+      INSERT INTO ael_snapshots (
+        id, account_id, campaign_id, job_id,
+        root_causes, causal_chains, buying_barriers,
+        package, is_partial, partial_reason
+      ) VALUES (
+        ${id}, ${accountId}, ${campaignId}, ${jobId},
+        ${JSON.stringify(pkg.rootCauses || [])}::jsonb,
+        ${JSON.stringify(pkg.causalChains || [])}::jsonb,
+        ${JSON.stringify(pkg.buyingBarriers || [])}::jsonb,
+        ${JSON.stringify(pkg)}::jsonb,
+        ${!!pkg.isPartial},
+        ${pkg.partialReason || null}
+      )
+      ON CONFLICT (account_id, campaign_id, job_id) DO UPDATE SET
+        root_causes = EXCLUDED.root_causes,
+        causal_chains = EXCLUDED.causal_chains,
+        buying_barriers = EXCLUDED.buying_barriers,
+        package = EXCLUDED.package,
+        is_partial = EXCLUDED.is_partial,
+        partial_reason = EXCLUDED.partial_reason,
+        created_at = now()
+    `);
+    console.log(`${LOG_PREFIX} AEL_PERSISTED | id=${id} | campaign=${campaignId} | job=${jobId} | rootCauses=${pkg.rootCauses?.length || 0} | causalChains=${pkg.causalChains?.length || 0} | buyingBarriers=${pkg.buyingBarriers?.length || 0} | partial=${!!pkg.isPartial}`);
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} AEL_PERSIST_FAILED | campaign=${campaignId} | job=${jobId} | err=${err?.message || err}`);
+  }
+}

@@ -1022,3 +1022,60 @@ export function applyDepthPenalty(
 }
 
 export { CAUSAL_CONSTRAINT_RULES };
+
+/**
+ * Phase 3 fix — persist a per-engine ComplianceResult to `cel_reports`.
+ *
+ * The orchestrator calls `enforceGenericEngineCompliance` five times
+ * per run (positioning, differentiation, offer, funnel, persuasion);
+ * each call's result is used inline and then discarded. The narrative
+ * layer + future audit tooling expects to read these from `cel_reports`,
+ * which migration 033 created. This helper is the single write site;
+ * called inline at each of the 5 sites in runOrchestrator.
+ *
+ * Idempotent: UNIQUE(account, campaign, job, engineId) so re-runs
+ * UPSERT instead of stacking. Fail-loud-but-don't-block per Seal #15.
+ */
+export async function persistCELComplianceResult(args: {
+  accountId: string;
+  campaignId: string;
+  jobId: string;
+  result: ComplianceResult;
+}): Promise<void> {
+  const { accountId, campaignId, jobId, result } = args;
+  if (!accountId || !campaignId || !jobId || !result?.engineId) {
+    console.error(`${LOG_PREFIX} CEL_PERSIST_SKIPPED | missing required args | hasAccount=${!!accountId} hasCampaign=${!!campaignId} hasJob=${!!jobId} engineId=${result?.engineId || "missing"}`);
+    return;
+  }
+  try {
+    const { db } = await import("../db");
+    const { sql } = await import("drizzle-orm");
+    const id = `cel_${jobId}_${result.engineId}`;
+    const verdict = result.verdict || (result.passed ? "PASS" : "FAIL");
+    await db.execute(sql`
+      INSERT INTO cel_reports (
+        id, account_id, campaign_id, job_id, engine_id,
+        passed, verdict, reason, score, root_causes_evaluated, report
+      ) VALUES (
+        ${id}, ${accountId}, ${campaignId}, ${jobId}, ${result.engineId},
+        ${!!result.passed},
+        ${verdict},
+        ${result.reason || null},
+        ${Number(result.score) || 0},
+        ${Number(result.rootCausesEvaluated) || 0},
+        ${JSON.stringify(result)}::jsonb
+      )
+      ON CONFLICT (account_id, campaign_id, job_id, engine_id) DO UPDATE SET
+        passed = EXCLUDED.passed,
+        verdict = EXCLUDED.verdict,
+        reason = EXCLUDED.reason,
+        score = EXCLUDED.score,
+        root_causes_evaluated = EXCLUDED.root_causes_evaluated,
+        report = EXCLUDED.report,
+        created_at = now()
+    `);
+    console.log(`${LOG_PREFIX} CEL_PERSISTED | engine=${result.engineId} | verdict=${verdict} | score=${result.score} | violations=${result.violations?.length || 0} | campaign=${campaignId} | job=${jobId}`);
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} CEL_PERSIST_FAILED | engine=${result.engineId} | campaign=${campaignId} | job=${jobId} | err=${err?.message || err}`);
+  }
+}

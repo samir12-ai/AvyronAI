@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { db } from "../db";
-import { buildAnalyticalPackage } from "../analytical-enrichment-layer/engine";
+import { buildAnalyticalPackage, persistAELSnapshot } from "../analytical-enrichment-layer/engine";
 import { inFlightJobs } from "@shared/schema";
 import {
   enforceGenericEngineCompliance,
   buildCELReport,
   storeCELReport,
+  persistCELComplianceResult,
   type ComplianceResult,
 } from "../causal-enforcement-layer/engine";
 import {
@@ -708,8 +709,52 @@ function extractAudienceInput(audienceResult: any): any {
     segments,
     audienceSegments: segments,
     awarenessLevel,
-    maturityIndex: audienceResult.maturityIndex || null,
+    maturityIndex: coerceMaturityIndexScalar(audienceResult.maturityIndex),
   };
+}
+
+/**
+ * Phase 3 fix — audience-engine emits `maturityIndex` as a structured
+ * MaturityResult object `{ level, distribution, indicators, ... }`, but
+ * every downstream consumer (awareness zod `z.number().finite()`, offer
+ * `audience.maturityIndex ?? 0.5`, funnel `> 0.3` comparisons,
+ * differentiation `?? 0.5`) expects a number. The HTTP route adapter
+ * `safeNumber(audSnapshot.maturityIndex, 0.5)` covered this for direct
+ * engine routes; the orchestrator path silently passed the object,
+ * causing awareness to fail input validation with
+ *   "Input validation failed: audience.maturityIndex"
+ * which then cascaded to funnel + persuasion + blocked build-plan with
+ * "Only 2 validated engine outputs available. Need at least 3."
+ *
+ * Mapping: insufficient_signals/null → null (canonical "missing");
+ * Beginner→0.25, Intermediate→0.5, Advanced→0.75, Mature→1.0.
+ * If the input is already a number, pass through. If it's an object
+ * with a numeric `.score`, prefer that.
+ */
+function coerceMaturityIndexScalar(input: any): number | null {
+  if (input == null) return null;
+  if (typeof input === "number" && Number.isFinite(input)) return input;
+  if (typeof input === "string") {
+    const n = Number(input);
+    if (Number.isFinite(n)) return n;
+    return mapMaturityLevel(input);
+  }
+  if (typeof input === "object") {
+    if (typeof input.score === "number" && Number.isFinite(input.score)) return input.score;
+    if (typeof input.value === "number" && Number.isFinite(input.value)) return input.value;
+    if (typeof input.level === "string") return mapMaturityLevel(input.level);
+  }
+  return null;
+}
+
+function mapMaturityLevel(level: string): number | null {
+  const normalized = level.trim().toLowerCase();
+  if (normalized === "insufficient_signals" || normalized === "unknown") return null;
+  if (normalized === "beginner") return 0.25;
+  if (normalized === "intermediate") return 0.5;
+  if (normalized === "advanced") return 0.75;
+  if (normalized === "mature") return 1.0;
+  return null;
 }
 
 function extractPositioningInput(positioningResult: any): any {
@@ -1595,6 +1640,18 @@ async function executeEngine(
               console.warn(`[Orchestrator] AEL_PARTIAL | reason=${aelPkg.partialReason} — downstream engines will receive degraded enrichment`);
             }
             console.log(`[Orchestrator] AEL_BUILT | duration=${Date.now() - aelStart}ms | dimensions=${aelPkg ? Object.keys(aelPkg).length : 0} | partial=${aelPkg?.isPartial || false} | campaignId=${config.campaignId}`);
+            // Phase 3 fix — persist AEL snapshot so narrative-layer's
+            // SQL read against `ael_snapshots` finds the row. Without
+            // this, narrative silently degrades to template-only WHY/HOW.
+            const aelJobId = config.preassignedJobId || (ctx.config as any)?.currentJobId || "";
+            if (aelPkg && aelJobId) {
+              await persistAELSnapshot({
+                accountId: config.accountId,
+                campaignId: config.campaignId,
+                jobId: aelJobId,
+                pkg: aelPkg,
+              });
+            }
           } catch (aelErr: any) {
             // PRE-LAUNCH HARDENING (G.1): AEL is a hard dependency for every
             // downstream engine (Positioning, Mechanism, Differentiation,
@@ -1762,6 +1819,8 @@ async function executeEngine(
         if (ctx.analyticalEnrichment && result.territories) {
           const posTexts = result.territories.map((t: any) => `${t.name} ${t.contrastAxis} ${t.narrativeDirection}`);
           const celResult = enforceGenericEngineCompliance("positioning", posTexts, ctx.analyticalEnrichment);
+          // Phase 3 fix — persist per-engine CEL ComplianceResult.
+          { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(celResult);
           if (celResult.violations.length > 0) {
@@ -1850,6 +1909,7 @@ async function executeEngine(
         if (!diffReused && ctx.analyticalEnrichment) {
           const diffTexts = (result.claims || result.claimStructures || []).map((c: any) => typeof c === "string" ? c : c.claim || c.title || JSON.stringify(c));
           const celResult = enforceGenericEngineCompliance("differentiation", diffTexts, ctx.analyticalEnrichment);
+          { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(celResult);
           if (celResult.violations.length > 0) {
@@ -2159,6 +2219,7 @@ async function executeEngine(
         if (ctx.analyticalEnrichment) {
           const offerTexts = [result.offerName, result.coreOutcome, result.mechanismDescription, result.headline].filter(Boolean);
           const celResult = enforceGenericEngineCompliance("offer", offerTexts, ctx.analyticalEnrichment);
+          { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(celResult);
           if (celResult.violations.length > 0) {
@@ -2392,6 +2453,7 @@ async function executeEngine(
         if (ctx.analyticalEnrichment) {
           const funnelTexts = (result.stages || []).map((s: any) => `${s.name || ""} ${s.objective || ""} ${s.contentStrategy || ""}`);
           const celResult = enforceGenericEngineCompliance("funnel", funnelTexts, ctx.analyticalEnrichment);
+          { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(celResult);
           if (celResult.violations.length > 0) {
@@ -2604,6 +2666,7 @@ async function executeEngine(
             ...(pr.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""} ${o.causalChainAlignment || ""}`),
           ].filter(t => t && t.trim().length > 0);
           const celResult = enforceGenericEngineCompliance("persuasion", persTexts, ctx.analyticalEnrichment);
+          { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(celResult);
           if (celResult.violations.length > 0) {
