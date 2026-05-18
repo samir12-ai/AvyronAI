@@ -281,3 +281,21 @@ id = "dJCPWKJVqf2HQy0LYKd7Z"
 uri = "file://docs/beta-readiness/frontend-ux-audit.md"
 type = "text"
 title = "Frontend & UX Audit — Pre-Beta"
+
+[[outputs]]
+id = "tWctRJGSZAdvDWHyPmisA"
+uri = "file://.local/validation/bcl-progressive-audit.md"
+type = "text"
+title = "Progressive BCL — Data Availability & Engine Dependency Audit"
+
+[[outputs]]
+id = "fQN9-hqL-8u5XbpL6k2J7"
+uri = "file://.local/validation/phase-4a-result.md"
+type = "text"
+title = "Phase 4-A Result (with v3 post-BCL addendum)"
+
+[[outputs]]
+id = "xVghK-CxtSjlFPJ2up4Vz"
+uri = "file://.local/validation/compare-output-v3.md"
+type = "text"
+title = "v3 Control-vs-Treatment Comparator"
