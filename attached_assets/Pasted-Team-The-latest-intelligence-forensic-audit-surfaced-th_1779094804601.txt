@@ -1,0 +1,220 @@
+Team,
+
+The latest intelligence forensic audit surfaced the next major phase of the platform.
+
+The infrastructure is no longer the main concern.
+
+The focus now is:
+
+* intelligence quality
+* reasoning honesty
+* UX transparency
+* anti-template enforcement
+* real strategic adaptability
+
+We now need to harden the “mind” of the system the same way we hardened runtime truth and tenant isolation.
+
+==================================================
+
+1. FIX ALL INTELLIGENCE-AUDIT FINDINGS
+   ==================================================
+
+Priority:
+Close every finding from:
+
+* intelligence-forensic-audit.md
+* intelligence-closure-plan.md
+* intelligence-diff-matrix.json
+
+Especially:
+
+* orchestrator crash paths
+* hidden failure surfaces
+* integrity permissiveness
+* template reasoning
+* benchmark over-reliance
+* repeated strategic structures
+* generic diagnosis wording
+* fake strategic certainty
+* deterministic recommendation ordering
+
+No fake-green intelligence.
+No optimistic PASS on missing data.
+No “sounds smart” without evidence grounding.
+
+==================================================
+2. RESTORE ENGINE VISIBILITY IN UX
+==================================
+
+Hiding all engines from the user was a mistake.
+
+The system’s intelligence becomes less trustworthy when the user cannot see:
+
+* what each engine analyzed
+* what evidence it used
+* what confidence it had
+* what it inferred
+* what was benchmark-derived
+* what was blocked
+* where engines disagreed
+* where uncertainty exists
+
+I want layered intelligence visibility restored.
+
+Not debug-mode complexity,
+but operator-visible reasoning transparency.
+
+The user should be able to inspect:
+
+* Audience analysis
+* Positioning logic
+* Offer reasoning
+* Narrative reasoning
+* MI findings
+* CEL/AEL conclusions
+* confidence states
+* integrity states
+* recovery states
+* benchmark vs direct evidence
+
+Goal:
+The system should feel:
+
+* transparent
+* inspectable
+* strategically explainable
+  —not magical or hidden.
+
+==================================================
+3. ELIMINATE TEMPLATE THINKING
+==============================
+
+This is now a top priority.
+
+The forensic audit confirmed:
+
+* repeated wording
+* repeated strategic structures
+* deterministic diagnosis patterns
+* generic consultant-style language
+* weak cross-industry differentiation
+
+We need stronger anti-template enforcement.
+
+Add enforcement/tripwires for:
+
+* repeated narrative skeletons
+* repeated CTA structures
+* repeated positioning arcs
+* repeated recommendation ordering
+* repeated pain framing
+* repeated benchmark language
+* repeated “MBA filler” phrasing
+* deterministic strategic sequencing
+
+I want:
+
+* adaptive reasoning
+* industry-sensitive thinking
+* evidence-driven variation
+* commercially realistic strategy
+* differentiated outputs
+* truthful uncertainty
+
+The system must not:
+“sound strategic.”
+
+It must:
+reason strategically.
+
+==================================================
+4. HARDEN INTEGRITY HONESTY
+===========================
+
+Critical:
+The integrity engine must NEVER PASS missing upstream intelligence again.
+
+If:
+
+* positioning missing
+* differentiation missing
+* offer missing
+* upstream engines crashed
+* snapshots unavailable
+
+Then:
+
+* degraded
+* incomplete
+* blocked
+  or
+* low-confidence
+
+But never:
+PASS with 0.8–1.0 confidence.
+
+Truthfulness doctrine must remain absolute.
+
+==================================================
+5. IMPROVE COMMERCIAL REALISM
+=============================
+
+Focus on:
+
+* operator usefulness
+* strategic sharpness
+* actionable reasoning
+* business realism
+* differentiated recommendations
+* contextual adaptation
+
+Reduce:
+
+* generic business language
+* startup clichés
+* consultant filler
+* fake precision
+* benchmark hallucination
+
+==================================================
+6. REQUIRED OUTPUTS
+===================
+
+Update:
+
+* intelligence-forensic-audit.md
+* intelligence-closure-plan.md
+* intelligence-diff-matrix.json
+
+And create:
+.local/plans/intelligence-hardening-seal.md
+
+Include:
+
+* every template-risk fixed
+* every integrity gap sealed
+* every UX transparency improvement
+* before/after diff evidence
+* empirical rerun comparisons
+* cross-industry validation
+* architect review verdict
+
+==================================================
+7. FINAL GOAL
+=============
+
+The goal is no longer:
+“AI that generates strategic-sounding outputs.”
+
+The goal is:
+a system that produces genuinely adaptive,
+commercially useful,
+transparent,
+evidence-grounded strategic intelligence.
+
+We hardened the infrastructure.
+
+Now harden the intelligence itself.
+
+Best,
+[Your Name]
