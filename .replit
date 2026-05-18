@@ -106,7 +106,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "SYNTHETIC_AUDIT_MODE=1 ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REASONER_ENABLED=1 COMMERCIAL_REASONER_ALLOWED_INDUSTRIES=b2b_saas,dtc_ecom,local_services npx tsx .local/scripts/run-audit-pipelines.ts && npx tsx .local/scripts/judge-engine-outputs.ts --out .local/validation/judge-scores__treatment_v3.json && npx tsx .local/scripts/compare-control-vs-treatment.ts --control .local/validation/judge-scores__control.json --treatment .local/validation/judge-scores__treatment_v3.json > .local/validation/compare-output-v3.md && echo '=== V3 AUDIT COMPLETE ==='"
+args = "SYNTHETIC_AUDIT_MODE=1 ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REASONER_ENABLED=1 COMMERCIAL_REASONER_ALLOWED_INDUSTRIES=b2b_saas,dtc_ecom,local_services npx tsx .local/scripts/run-audit-pipelines.ts && npx tsx .local/scripts/judge-engine-outputs.ts --out .local/validation/judge-scores__treatment_v4.json && npx tsx .local/scripts/compare-control-vs-treatment.ts --control .local/validation/judge-scores__control.json --treatment .local/validation/judge-scores__treatment_v4.json > .local/validation/compare-output-v4.md && echo '=== V4 AUDIT COMPLETE ==='"
 
 [userenv]
 

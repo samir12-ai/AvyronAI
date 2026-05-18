@@ -1,0 +1,106 @@
+Hi,
+
+The latest audit clarified the core issue very clearly:
+
+The problem was not that the LLM could not reason.
+The problem was that the Business Context Layer was too shallow and was not consuming the rich business intelligence already produced by the system.
+
+The audit confirms that most of the required commercial/business understanding already exists inside the orchestration pipeline and engine snapshots.
+The BCL simply was not reading and progressively enriching itself from those sources.
+
+Most importantly:
+the first real BCL-influenced run on b2b_saas produced a measurable +5 awareness lift.
+That is the strongest signal we have seen so far that “business-first reasoning” is the correct direction.
+
+I want the next phase to focus on fully implementing the progressive BCL architecture across the orchestration lifecycle before we continue expanding commercial reasoning.
+
+Direction:
+
+Stage 1 — Foundational profile
+At orchestrator start:
+
+* website scrape
+* social bios
+* industry slug
+* ProductDNA
+* existing persisted context
+* available campaign/account metadata
+
+Build an initial business identity without hallucinating unknown fields.
+
+Stage 2 — Mid-pipeline enrichment
+Before awareness/commercial reasoning:
+fold in:
+
+* audience snapshots
+* positioning snapshots
+* differentiation snapshots
+* mechanism snapshots
+* offer snapshots
+* MI outputs
+
+The goal is:
+the LLM should receive a rich business profile BEFORE analyzing awareness evidence.
+
+Stage 3 — Late-pipeline enrichment
+Before synthesis/agents/build-plan:
+fold in:
+
+* funnel snapshots
+* persuasion snapshots
+* integrity outputs
+* friction maps
+* trust gaps
+* bottlenecks
+
+This should become the system’s final commercial/business understanding layer.
+
+Important constraints:
+
+* No hallucinated business assumptions
+* Unknown fields remain explicitly unknown
+* Deterministic infrastructure remains authoritative
+* No hard engine dependencies
+* Progressive enrichment only
+* LLM never becomes the source of truth
+
+Next implementation request:
+
+1. Implement the progressive staged BCL architecture
+2. Ensure enrichment uses existing engine snapshots rather than new mandatory manual inputs
+3. Apply the BCL progressively across the relevant engine reasoning paths
+4. Add observability for:
+
+   * BCL stage
+   * injected fields
+   * unknown counts
+   * enrichment provenance
+   * BCL injection counts per run
+5. Add tests for:
+
+   * staged enrichment
+   * contradiction handling
+   * missing snapshot tolerance
+   * deterministic fallback behavior
+   * no hallucinated enrichment
+   * multi-engine BCL propagation
+
+After implementation:
+run a full intelligence re-audit across the system.
+
+I want a fresh measurement focused on:
+
+* reasoning quality
+* cross-engine intelligence consistency
+* commercial depth
+* strategic coherence
+* business-context understanding
+* reduction of generic outputs
+* stability under sparse data
+* engine-to-engine propagation quality
+
+Do not make rollout claims yet.
+First prove the progressive BCL architecture works consistently across multiple industries and multiple engine paths.
+
+The audit strongly suggests this is the correct direction.
+Now we need to fully operationalize it across the orchestration lifecycle and then re-measure the system intelligence quality end-to-end.

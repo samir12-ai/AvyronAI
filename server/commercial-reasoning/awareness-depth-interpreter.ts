@@ -54,6 +54,8 @@ import { persistCommercialReasoningSnapshot } from "./persist";
 import { recordCv11HallucinationExposure } from "./metrics";
 import {
   loadBusinessProfileFor,
+  loadStage2SnapshotsFor,
+  enrichStage2Profile,
   renderBusinessProfileForPrompt,
   type BusinessProfile,
 } from "./business-context-layer";
@@ -308,7 +310,12 @@ export async function interpretAwarenessDepth(
   // it as-is; otherwise we load from `business_data_layer` for this
   // (accountId, campaignId). Missing data → slug-only profile with
   // explicit `unknownFields[]` — never blocks.
-  const businessProfile =
+  // Phase 4-B Progressive BCL — Stage 2 enrichment.
+  // Stage 1 profile is preferred from caller (orchestrator sets
+  // `ctx.businessProfile` at boot); fall back to a fresh Stage-1 load.
+  // Then enrich from engines 1-6 snapshots (latest per engine for this
+  // account+campaign, preferring `jobId` (input.runId) when present).
+  const stage1 =
     input.businessProfile ??
     (await loadBusinessProfileFor({
       accountId: input.accountId,
@@ -316,9 +323,22 @@ export async function interpretAwarenessDepth(
       industry: resolvedIndustry,
       productDnaSummary: input.productDnaSummary ?? null,
     }));
+  const stage2Snapshots = await loadStage2SnapshotsFor({
+    accountId: input.accountId,
+    campaignId: input.campaignId,
+    jobId: input.runId ?? null,
+  });
+  const businessProfile = enrichStage2Profile(stage1, stage2Snapshots);
   console.log(
-    `[CommercialReasoning] BUSINESS_PROFILE model=${businessProfile.businessModel} lens=${businessProfile.reasoningFramework.name} confidence=${businessProfile.confidence.toFixed(2)} unknown=${businessProfile.unknownFields.length}`,
+    `[CommercialReasoning] BUSINESS_PROFILE stage=${businessProfile.stage} model=${businessProfile.businessModel} lens=${businessProfile.reasoningFramework.name} confidence=${businessProfile.confidence.toFixed(2)} unknown=${businessProfile.unknownFields.length} engineDerived=${businessProfile.engineDerivedFields.length} contradictions=${businessProfile.contradictions.length}`,
   );
+  if (businessProfile.contradictions.length > 0) {
+    for (const c of businessProfile.contradictions) {
+      console.warn(
+        `[BCL] BCL_CONTRADICTION field=${c.field} userValue=${JSON.stringify(c.userValue)} engineValue=${JSON.stringify(c.engineValue)} source=${c.engineSource} | user_input_wins`,
+      );
+    }
+  }
 
   let llmResult;
   try {

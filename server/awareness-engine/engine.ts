@@ -780,7 +780,17 @@ export async function runAwarenessEngine(
   // supplied, the LLM reasoner's snapshot is UPSERT'd into
   // commercial_reasoning_snapshots. When absent, the gate logic still
   // runs but persistence is skipped (best-effort).
-  commercialReasoningCtx?: { campaignId: string; runId: string } | null,
+  commercialReasoningCtx?: {
+    campaignId: string;
+    runId: string;
+    // Phase 4-B Progressive BCL — caller (orchestrator) supplies the
+    // pre-built Stage-1 profile + resolved industry slug so the
+    // interpreter doesn't redundantly re-load `business_data_layer` and
+    // ContentDNA, and so industry-allowlist resolution matches the
+    // orchestrator's intent.
+    industry?: string | null;
+    businessProfile?: import("../commercial-reasoning/business-context-layer").BusinessProfile | null;
+  } | null,
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
@@ -1057,6 +1067,8 @@ export async function runAwarenessEngine(
     runId: commercialReasoningCtx?.runId ?? `awareness-standalone:${Date.now()}`,
     ael: analyticalEnrichment ?? null,
     awarenessRouteSourceTexts: celSourceTexts,
+    industry: commercialReasoningCtx?.industry ?? null,
+    businessProfile: commercialReasoningCtx?.businessProfile ?? null,
   });
   const celDepth = commercialReasoning.deterministicFloor;
   const reasonerLifted =

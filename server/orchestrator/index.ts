@@ -280,6 +280,15 @@ interface EngineContext {
   // System Control's `miGateRejections` input so the structural check can
   // BLOCK execution rather than silently coercing to empty MI.
   miGateRejections?: { engineId: string; reason: string; detail: string }[];
+  // Phase 4-B Progressive BCL. Stage 1 built at orchestrator boot
+  // (pre-engine evidence: business_data_layer + industry + ProductDNA).
+  // Stage 3 built after engine 10 (integrity) and before plan synthesis
+  // — folds in funnel/persuasion/integrity. Stage 2 is computed on
+  // demand inside `awareness-depth-interpreter` (NOT cached on ctx —
+  // it would conflict with re-runs that scope to a different engine
+  // subset).
+  businessProfile?: import("../commercial-reasoning/business-context-layer").BusinessProfile;
+  businessProfileStage3?: import("../commercial-reasoning/business-context-layer").BusinessProfile;
 }
 
 // list of strategic engines whose runtime
@@ -2275,7 +2284,17 @@ async function executeEngine(
         const result = await runAwarenessEngine(
           miInput, audInput, posInput, diffInput, offerInput,
           config.accountId, upstreamLineage,
-          undefined,
+          // Phase 4-B Progressive BCL — pass real run scope so the
+          // awareness interpreter's Stage-2 loader queries this run's
+          // snapshots (NOT the awareness-standalone fallback IDs that
+          // would return zero rows). Pre-built Stage-1 profile is
+          // forwarded so the interpreter doesn't have to re-read DB.
+          {
+            campaignId: config.campaignId,
+            runId: jobId,
+            industry: (config as any).industry ?? process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY ?? null,
+            businessProfile: ctx.businessProfile ?? null,
+          } as any,
           ctx.analyticalEnrichment,
           ctx.ssc?.commercialSignals || null,
         );
@@ -3826,6 +3845,28 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     console.warn(`[Orchestrator] MEMORY_CONTEXT_LOAD_FAILED | error=${memLoadErr.message}`);
   }
 
+  // Phase 4-B Progressive BCL — Stage 1. Pre-engine foundational profile
+  // assembled from manual `business_data_layer` + industry slug +
+  // ProductDNA summary (latest `content_dna` if present). Cached on
+  // ctx so engines + interpreter + plan synthesis can read the same
+  // base profile. Failure is non-fatal — engines proceed with whatever
+  // they can read.
+  try {
+    const { loadStage1ProfileFor } = await import("../commercial-reasoning/business-context-layer");
+    const industryHint =
+      (config as any).industry ??
+      (process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY ?? null);
+    const stage1 = await loadStage1ProfileFor({
+      accountId: config.accountId,
+      campaignId: config.campaignId,
+      industry: industryHint,
+      productDnaSummary: null,
+    });
+    ctx.businessProfile = stage1;
+  } catch (bclErr: any) {
+    console.warn(`[BCL] STAGE1_LOAD_FAILED_NONFATAL | error=${bclErr?.message ?? String(bclErr)}`);
+  }
+
   try {
     const [metricsRow] = await db
       .select()
@@ -4621,6 +4662,48 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   let synthesisHaltOverrideEntry: SynthesisHaltOverrideEntry | null = null;
 
   if (overallStatus !== "BLOCKED") {
+    // Phase 4-B Progressive BCL — Stage 3. Engines 1–10 have run; fold
+    // funnel/persuasion/integrity into the profile that plan synthesis
+    // (and any downstream agent / build-plan consumer) reads. Caches on
+    // `ctx.businessProfileStage3` so downstream consumers can opt in via
+    // `ctx.businessProfileStage3 ?? ctx.businessProfile`. Stage 3 never
+    // weakens Stage 1; tolerates missing snapshots (e.g. when synthesis
+    // is reached via a PARTIAL run that skipped a late engine).
+    try {
+      const stage1 = ctx.businessProfile;
+      if (stage1) {
+        // Re-enrich Stage 2 here so Stage 3 truly builds on the
+        // engines-1–6 profile (the awareness interpreter's Stage-2
+        // result lives in its own closure — not cached on ctx, by
+        // design: subsequent re-runs may scope to a different engine
+        // subset and the cache would lie). Then layer Stage 3 on top.
+        const {
+          loadStage2SnapshotsFor,
+          enrichStage2Profile,
+          loadStage3SnapshotsFor,
+          enrichStage3Profile,
+        } = await import("../commercial-reasoning/business-context-layer");
+        const [stage2Snapshots, stage3Snapshots] = await Promise.all([
+          loadStage2SnapshotsFor({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            jobId,
+          }),
+          loadStage3SnapshotsFor({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            jobId,
+          }),
+        ]);
+        const stage2 = enrichStage2Profile(stage1, stage2Snapshots);
+        ctx.businessProfileStage3 = enrichStage3Profile(stage2, stage3Snapshots);
+      } else {
+        console.warn(`[BCL] STAGE3_SKIPPED_NO_STAGE1 | job=${jobId}`);
+      }
+    } catch (bclErr: any) {
+      console.warn(`[BCL] STAGE3_LOAD_FAILED_NONFATAL | error=${bclErr?.message ?? String(bclErr)}`);
+    }
+
     try {
       // Task #89 / P4-A boundary #4 — synthesis-input.
       __recorder.recordSynthesisInput({
