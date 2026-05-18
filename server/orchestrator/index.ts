@@ -3853,7 +3853,16 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     ? ENGINE_PRIORITY_ORDER.findIndex(e => e.id === config.resumeFromEngine)
     : 0;
 
-  const ENGINE_TIMEOUT_MS = 180_000; // 3-minute hard ceiling per engine (CLP-01 follow-up: 120s was too tight for MI/Audience under contention)
+  // 3-minute hard ceiling per engine (CLP-01 follow-up: 120s was too tight for MI/Audience under contention).
+  // `ENGINE_TIMEOUT_MS_OVERRIDE` env knob lets the synthetic audit harness raise the ceiling without
+  // affecting production wiring. Honored ONLY when NODE_ENV !== "production" so prod stays at 180s.
+  const ENGINE_TIMEOUT_MS = (() => {
+    if (process.env.NODE_ENV === "production") return 180_000;
+    const raw = process.env.ENGINE_TIMEOUT_MS_OVERRIDE;
+    if (!raw) return 180_000;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 60_000 && n <= 1_800_000 ? n : 180_000;
+  })();
 
   // When scopedEngines is provided, execute ONLY those engines (selective rerun).
   // Loop starts at the earliest requested engine; per-loop check skips any engine NOT in the set.
