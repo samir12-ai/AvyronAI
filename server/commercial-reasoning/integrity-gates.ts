@@ -231,6 +231,192 @@ export function checkTemplatePhraseLeak(
   return { result: PASS, matches };
 }
 
+/**
+ * AT4 — language-style grounding (Phase 4-A post-audit, 2026-05-18).
+ *
+ * The 3-industry treatment audit revealed that an LLM can pass every
+ * existing gate (refIds exist, quotes verbatim, fields linked, no
+ * filler phrases, no anti-template hits) and STILL produce reasoning
+ * whose *vocabulary* is wrong for the vertical — e.g. importing
+ * SaaS-shaped operator jargon into a dental practice context. This
+ * gate measures vocabulary anchoring: how much of the distinctive
+ * content vocabulary in `output.reasoning` actually traces back to
+ * the prompt corpus the model was given.
+ *
+ * Heuristic — kept deliberately simple so behaviour is predictable
+ * and tunable, and so it has zero LLM dependency:
+ *
+ *   1. Extract distinctive tokens (≥5 chars, alpha, not in stopword
+ *      set) from the prompt corpus → `corpusVocab`.
+ *   2. Extract distinctive tokens from `output.reasoning` → `outputVocab`.
+ *   3. For each output token, mark "anchored" if it shares a ≥4-char
+ *      prefix with any corpus token (catches singular/plural and
+ *      common morphological variants without a real stemmer).
+ *   4. Compute `overlap = anchored / |outputVocab|`.
+ *   5. Reject if `overlap < threshold` (env-tunable, default 0.30) AND
+ *      `|outputVocab| >= 8` (don't penalise terse outputs where the
+ *      ratio is statistically meaningless).
+ *
+ * Threshold envelope rationale: 0.30 is loose enough that legitimate
+ * abstractive reasoning passes (a grounded summary will share roughly
+ * half its content vocabulary with the source on inspection of the
+ * 3-industry dataset), but tight enough that wholesale jargon import
+ * fails. Operators can override via
+ * `COMMERCIAL_REASONER_VOCAB_OVERLAP_THRESHOLD` if real-world rollout
+ * shows the heuristic is too strict or too loose.
+ */
+
+const VOCAB_STOPWORDS = new Set<string>([
+  "about", "above", "after", "again", "against", "their", "there", "these",
+  "those", "where", "which", "while", "would", "could", "should", "shall",
+  "being", "because", "before", "below", "between", "during", "further",
+  "having", "since", "through", "under", "until", "other", "another",
+  "thing", "things", "something", "anything", "everything", "nothing",
+  "really", "actually", "always", "never", "often", "sometimes", "usually",
+  "needs", "needed", "needing", "makes", "making", "doing", "going",
+  // Commercial-noise tokens that show up in nearly every corpus and
+  // therefore cannot discriminate genuine grounding from jargon import:
+  "customer", "customers", "market", "markets", "product", "products",
+  "business", "brand", "brands", "value", "growth", "strategy", "strategic",
+  "company", "companies", "audience", "buyer", "buyers", "people", "users",
+]);
+
+function extractDistinctiveTokens(text: string): Set<string> {
+  const tokens = new Set<string>();
+  const lower = (text || "").toLowerCase();
+  // Alpha sequences only; ignores numbers, hyphens, slashes, punctuation.
+  const re = /[a-z]{5,}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(lower)) !== null) {
+    const t = m[0];
+    if (!VOCAB_STOPWORDS.has(t)) tokens.add(t);
+  }
+  return tokens;
+}
+
+function buildCorpusVocab(
+  rootCauses: AnalyticalPackage["root_causes"],
+  causalChains: AnalyticalPackage["causal_chains"],
+  routeSourceTexts: string[],
+  productDnaSummary: string | null | undefined,
+): Set<string> {
+  const buf: string[] = [];
+  for (const rc of rootCauses) {
+    buf.push(rc.surfaceSignal || "", rc.deepCause || "", rc.causalReasoning || "", rc.sourceData || "");
+  }
+  for (const c of causalChains) {
+    buf.push(c.pain || "", c.cause || "", c.impact || "", c.behavior || "", c.conversionEffect || "");
+  }
+  for (const r of routeSourceTexts) buf.push(r || "");
+  if (productDnaSummary) buf.push(productDnaSummary);
+  return extractDistinctiveTokens(buf.join(" "));
+}
+
+function isAnchored(outputToken: string, corpusVocab: Set<string>): boolean {
+  if (corpusVocab.has(outputToken)) return true;
+  // Prefix-stem match (≥4 chars). Catches "patient" vs "patients",
+  // "anxiety" vs "anxious", "intake" vs "intakes" without a real stemmer.
+  const stem = outputToken.slice(0, 4);
+  for (const c of corpusVocab) {
+    if (c.startsWith(stem)) return true;
+  }
+  return false;
+}
+
+function getVocabOverlapThreshold(): number {
+  const raw = process.env.COMMERCIAL_REASONER_VOCAB_OVERLAP_THRESHOLD;
+  if (!raw) return 0.3;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) return 0.3;
+  return parsed;
+}
+
+const MIN_OUTPUT_TOKENS_FOR_GATE = 8;
+
+export interface LanguageGroundingDetail {
+  outputTokens: number;
+  anchoredTokens: number;
+  overlapRatio: number;
+  threshold: number;
+  unanchoredSample: string[];
+}
+
+export function checkLanguageStyleGrounding(
+  output: CommercialReasoningOutput,
+  corpus: {
+    rootCauses: AnalyticalPackage["root_causes"];
+    causalChains: AnalyticalPackage["causal_chains"];
+    routeSourceTexts: string[];
+    productDnaSummary?: string | null;
+  },
+): { result: GateResult; detail: LanguageGroundingDetail } {
+  const corpusVocab = buildCorpusVocab(
+    corpus.rootCauses,
+    corpus.causalChains,
+    corpus.routeSourceTexts,
+    corpus.productDnaSummary ?? null,
+  );
+  const outputVocab = extractDistinctiveTokens(output.reasoning);
+  const threshold = getVocabOverlapThreshold();
+
+  if (outputVocab.size < MIN_OUTPUT_TOKENS_FOR_GATE) {
+    // Too few distinctive tokens to measure overlap meaningfully.
+    return {
+      result: PASS,
+      detail: {
+        outputTokens: outputVocab.size,
+        anchoredTokens: outputVocab.size,
+        overlapRatio: 1,
+        threshold,
+        unanchoredSample: [],
+      },
+    };
+  }
+
+  // Empty corpus (no AEL + no routes + no DNA) → can't measure anchoring.
+  // Don't penalise the reasoner for the upstream lack of evidence; this is
+  // already covered by `reasoner_self_assessment=insufficient_evidence`.
+  if (corpusVocab.size === 0) {
+    return {
+      result: PASS,
+      detail: {
+        outputTokens: outputVocab.size,
+        anchoredTokens: 0,
+        overlapRatio: 1,
+        threshold,
+        unanchoredSample: [],
+      },
+    };
+  }
+
+  let anchored = 0;
+  const unanchored: string[] = [];
+  for (const t of outputVocab) {
+    if (isAnchored(t, corpusVocab)) anchored++;
+    else if (unanchored.length < 10) unanchored.push(t);
+  }
+  const overlap = anchored / outputVocab.size;
+  const detail: LanguageGroundingDetail = {
+    outputTokens: outputVocab.size,
+    anchoredTokens: anchored,
+    overlapRatio: Number(overlap.toFixed(3)),
+    threshold,
+    unanchoredSample: unanchored,
+  };
+
+  if (overlap < threshold) {
+    return {
+      result: {
+        passed: false,
+        reason: "commercial_reasoner_language_ungrounded",
+        detail: `overlap=${detail.overlapRatio} < threshold=${threshold} | outputTokens=${outputVocab.size} anchored=${anchored} | sample=${unanchored.slice(0, 5).join(",")}`,
+      },
+      detail,
+    };
+  }
+  return { result: PASS, detail };
+}
+
 /** Gate 5 — contradiction-triggered confidence downgrade (mutating helper). */
 export function applyContradictionDowngrade(
   output: CommercialReasoningOutput,

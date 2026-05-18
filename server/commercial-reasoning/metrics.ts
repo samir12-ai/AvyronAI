@@ -45,6 +45,19 @@ const REASON_TO_KIND: Partial<Record<GateDecisionReason, string>> = {
   commercial_reasoner_anti_template_at1: "evidence_linkage_missing",
   commercial_reasoner_anti_template_at2: "evidence_diversity_insufficient",
   commercial_reasoner_signal_origin_overreach: "signal_origin_overreach",
+  // Phase 4-A post-audit (2026-05-18) — AT4 language-style grounding.
+  // Counts as a hallucination-exposure event: the model produced
+  // structurally-grounded output whose vocabulary did not trace back to
+  // the prompt corpus (e.g. SaaS-jargon-into-dentistry). Visible alongside
+  // the other CV-11 kinds so operators can see when AT4 is the active
+  // rejection class.
+  commercial_reasoner_language_ungrounded: "language_ungrounded",
+  // Intentionally NOT mapped: commercial_reasoner_industry_not_allowed.
+  // That reason is an operator policy decision (allowlist), not a model
+  // hallucination — recording it under CV-11 would conflate policy
+  // gating with model behaviour and inflate the hallucination counter
+  // for every disabled-vertical campaign. Operators see it via
+  // `gate_decision.reason` on the snapshot row instead.
 };
 
 export function recordCv11HallucinationExposure(

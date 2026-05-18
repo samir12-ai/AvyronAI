@@ -103,3 +103,80 @@ describe("awareness depth-gate fallback parity (kill-switch off)", () => {
     expect(interpreted.deterministicFloor.causalDepthScore).toBe(0);
   });
 });
+
+// ── Phase 4-A post-audit (2026-05-18): industry-allowlist fallback path ──
+//
+// When the kill-switch IS on (reasoner enabled) but the operator has
+// restricted the reasoner to a subset of industries via
+// `COMMERCIAL_REASONER_ALLOWED_INDUSTRIES`, calls for industries outside
+// that allowlist MUST fail-closed to the deterministic floor with the
+// canonical reason `commercial_reasoner_industry_not_allowed`. This is
+// the integration-level proof that the allowlist short-circuits the
+// LLM call entirely (no network mock needed — if the LLM were invoked,
+// the test would either need to stub the model or it would time out).
+
+describe("awareness depth-gate — industry allowlist fail-closed (reasoner enabled)", () => {
+  const origEnabled = process.env.COMMERCIAL_REASONER_ENABLED;
+  const origAllowed = process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES;
+  const origCurrent = process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY;
+
+  beforeEach(() => {
+    process.env.COMMERCIAL_REASONER_ENABLED = "1";
+    process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES = "dtc_ecom";
+    delete process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY;
+  });
+
+  afterEach(() => {
+    if (origEnabled === undefined) delete process.env.COMMERCIAL_REASONER_ENABLED;
+    else process.env.COMMERCIAL_REASONER_ENABLED = origEnabled;
+    if (origAllowed === undefined) delete process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES;
+    else process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES = origAllowed;
+    if (origCurrent === undefined) delete process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY;
+    else process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY = origCurrent;
+  });
+
+  it("industry not in allowlist (explicit) → fallback to floor with canonical reason", async () => {
+    const ael = makeAel();
+    const r = await interpretAwarenessDepth({
+      accountId: "test-acct",
+      campaignId: "test-camp",
+      runId: "test-run",
+      ael,
+      awarenessRouteSourceTexts: ["route", "trigger"],
+      industry: "local_services",
+    });
+    expect(r.fellBackTo).toBe("deterministic_floor");
+    expect(r.gateDecision.reason).toBe("commercial_reasoner_industry_not_allowed");
+    expect(r.gateDecision.allow).toBe(r.deterministicFloor.passed);
+    expect(r.reasoning).toBeNull();
+  });
+
+  it("allowlist set + industry missing entirely → fail-closed to floor", async () => {
+    const ael = makeAel();
+    const r = await interpretAwarenessDepth({
+      accountId: "test-acct",
+      campaignId: "test-camp",
+      runId: "test-run",
+      ael,
+      awarenessRouteSourceTexts: ["route", "trigger"],
+      // industry intentionally omitted
+    });
+    expect(r.fellBackTo).toBe("deterministic_floor");
+    expect(r.gateDecision.reason).toBe("commercial_reasoner_industry_not_allowed");
+  });
+
+  it("industry resolved via COMMERCIAL_REASONER_CURRENT_INDUSTRY env (audit-pipeline path)", async () => {
+    process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY = "local_services";
+    const ael = makeAel();
+    const r = await interpretAwarenessDepth({
+      accountId: "test-acct",
+      campaignId: "test-camp",
+      runId: "test-run",
+      ael,
+      awarenessRouteSourceTexts: ["route", "trigger"],
+    });
+    expect(r.fellBackTo).toBe("deterministic_floor");
+    expect(r.gateDecision.reason).toBe("commercial_reasoner_industry_not_allowed");
+    expect((r.gateDecision.detail ?? "")).toContain("local_services");
+  });
+});

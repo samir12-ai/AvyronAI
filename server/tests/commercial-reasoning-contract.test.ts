@@ -12,7 +12,7 @@
  *   - signalOrigin overreach (fallback + substantive) → REJECT.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   CommercialReasoningOutputSchema,
   type CommercialReasoningOutput,
@@ -23,11 +23,13 @@ import {
   buildAelEvidenceIndexFromSubset,
   checkEvidenceDiversity,
   checkEvidenceRefExistence,
+  checkLanguageStyleGrounding,
   checkPerFieldEvidenceLinkage,
   checkQuotedFragments,
   checkSignalOriginOverreach,
   checkTemplatePhraseLeak,
 } from "../commercial-reasoning/integrity-gates";
+import { isAllowedForIndustry } from "../commercial-reasoning/awareness-depth-interpreter";
 import {
   EMPTY_ANALYTICAL_PACKAGE,
   type AnalyticalPackage,
@@ -251,5 +253,208 @@ describe("integrity gates", () => {
     expect(checkPerFieldEvidenceLinkage(out).passed).toBe(true);
     expect(checkEvidenceDiversity(out).passed).toBe(true);
     expect(checkTemplatePhraseLeak(out).result.passed).toBe(true);
+  });
+});
+
+// ── Phase 4-A post-audit (2026-05-18): industry allowlist + language gate ─
+
+describe("isAllowedForIndustry (industry allowlist)", () => {
+  const original = process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES;
+  afterEach(() => {
+    if (original === undefined) delete process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES;
+    else process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES = original;
+  });
+
+  it("unset env → all industries allowed (back-compat default)", () => {
+    delete process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES;
+    expect(isAllowedForIndustry("dtc_ecom")).toBe(true);
+    expect(isAllowedForIndustry("local_services")).toBe(true);
+    expect(isAllowedForIndustry(null)).toBe(true);
+  });
+
+  it("empty env → all industries allowed", () => {
+    process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES = "";
+    expect(isAllowedForIndustry("dtc_ecom")).toBe(true);
+    expect(isAllowedForIndustry(null)).toBe(true);
+  });
+
+  it("set to dtc_ecom only → only dtc_ecom passes", () => {
+    process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES = "dtc_ecom";
+    expect(isAllowedForIndustry("dtc_ecom")).toBe(true);
+    expect(isAllowedForIndustry("local_services")).toBe(false);
+    expect(isAllowedForIndustry("b2b_saas")).toBe(false);
+  });
+
+  it("comma-separated list works + case-insensitive + trims", () => {
+    process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES = " DTC_ECOM, B2B_SaaS ";
+    expect(isAllowedForIndustry("dtc_ecom")).toBe(true);
+    expect(isAllowedForIndustry("b2b_saas")).toBe(true);
+    expect(isAllowedForIndustry("local_services")).toBe(false);
+  });
+
+  it("allowlist set + industry missing → fail-closed", () => {
+    process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES = "dtc_ecom";
+    expect(isAllowedForIndustry(null)).toBe(false);
+  });
+});
+
+describe("AT4 — language-style grounding", () => {
+  const dentistryCorpus = {
+    rootCauses: [
+      {
+        surfaceSignal: "patients postpone routine cleanings",
+        deepCause: "anxiety about discomfort and unknown costs at the visit",
+        causalReasoning: "fear of pain and surprise bills outweighs perceived benefit",
+        sourceData: "google reviews + intake form free-text",
+        confidenceLevel: "high" as const,
+      },
+    ],
+    causalChains: [
+      {
+        pain: "dental anxiety",
+        cause: "fear of pain during procedures and surprise charges at checkout",
+        impact: "deferred appointments and missed prevention windows",
+        behavior: "patients book and cancel within 48 hours of the appointment",
+        conversionEffect: "appointment-completion rate below industry average",
+      },
+    ],
+    routeSourceTexts: [
+      "anxiety-reassurance entry route",
+      "transparent-pricing trigger",
+      "first-visit walkthrough video",
+    ],
+    productDnaSummary: "family dental practice focused on anxiety-free cleanings",
+  };
+
+  function makeOutputWithReasoning(reasoning: string): CommercialReasoningOutput {
+    return { ...makeValidOutput(), reasoning };
+  }
+
+  it("passes when reasoning vocabulary is anchored in the corpus", () => {
+    const grounded = makeOutputWithReasoning(
+      "Patients postpone cleanings because anxiety about discomfort during procedures and surprise charges at checkout outweighs the perceived benefit; the intake free-text confirms appointments are booked and cancelled within 48 hours, so transparent pricing combined with a first-visit walkthrough video addresses both fears at the entry point.",
+    );
+    const r = checkLanguageStyleGrounding(grounded, dentistryCorpus);
+    expect(r.result.passed).toBe(true);
+    expect(r.detail.overlapRatio).toBeGreaterThanOrEqual(0.3);
+  });
+
+  it("rejects SaaS-flavoured jargon imported into a dentistry context (local_services regression case)", () => {
+    const ungrounded = makeOutputWithReasoning(
+      "The platform purchase-ready framework deficit creates mechanism-comprehension friction that blocks transformation validation; differentiated purchase-ready framework transparency would activate flywheel effect across the operational scalability layer, unlocking category leadership through go-to-market motion refinement.",
+    );
+    const r = checkLanguageStyleGrounding(ungrounded, dentistryCorpus);
+    expect(r.result.passed).toBe(false);
+    expect(r.result.reason).toBe("commercial_reasoner_language_ungrounded");
+    expect(r.detail.overlapRatio).toBeLessThan(0.3);
+  });
+
+  it("does not penalise terse output (below minimum-tokens floor)", () => {
+    const terse = makeOutputWithReasoning(
+      "Anxiety blocks bookings; transparent pricing helps; first-visit video reduces fear; mechanism is reassurance plus clarity for nervous patients overall here.",
+    );
+    const r = checkLanguageStyleGrounding(terse, {
+      rootCauses: [],
+      causalChains: [],
+      routeSourceTexts: [],
+      productDnaSummary: null,
+    });
+    expect(r.result.passed).toBe(true);
+  });
+
+  it("passes when corpus is empty (don't penalise upstream evidence gap)", () => {
+    const out = makeValidOutput();
+    const r = checkLanguageStyleGrounding(out, {
+      rootCauses: [],
+      causalChains: [],
+      routeSourceTexts: [],
+      productDnaSummary: null,
+    });
+    expect(r.result.passed).toBe(true);
+  });
+
+  it("does not over-flag legitimate dtc_ecom reasoning (corpus regression)", () => {
+    const dtcCorpus = {
+      rootCauses: [
+        {
+          surfaceSignal: "first-time visitors abandon the product detail page after the size guide",
+          deepCause: "size guide forces conversion of waist-hip-bust measurements without showing real bodies",
+          causalReasoning: "buyers cannot visually map abstract measurements to a garment on a body that looks like theirs",
+          sourceData: "instagram dm replies + return reason codes",
+          confidenceLevel: "high" as const,
+        },
+      ],
+      causalChains: [
+        {
+          pain: "size uncertainty",
+          cause: "size guide shows numbers, not bodies",
+          impact: "first-purchase return rate above category average",
+          behavior: "visitors open the size guide twice then leave without adding to cart",
+          conversionEffect: "add-to-cart rate below benchmark on detail pages",
+        },
+      ],
+      routeSourceTexts: [
+        "size-confidence entry route",
+        "real-customer try-on visuals trigger",
+        "community-driven try-before-you-decide loop",
+      ],
+      productDnaSummary: "DTC heirloom sleepwear with size-inclusive fit guarantee",
+    };
+    const grounded = makeOutputWithReasoning(
+      "First-time visitors abandon the detail page after consulting the size guide because the guide shows abstract measurements rather than real bodies, so buyers cannot visually map waist-hip-bust numbers onto a garment on someone who looks like them; real-customer try-on visuals at the size-confidence entry route would close that gap and reduce the first-purchase return rate the data shows.",
+    );
+    const r = checkLanguageStyleGrounding(grounded, dtcCorpus);
+    expect(r.result.passed).toBe(true);
+  });
+
+  it("does not over-flag legitimate b2b_saas reasoning (corpus regression)", () => {
+    const saasCorpus = {
+      rootCauses: [
+        {
+          surfaceSignal: "trial accounts hit activation milestones but never invite teammates",
+          deepCause: "the workspace setup flow buries multiplayer invitations behind a billing wall",
+          causalReasoning: "a single-seat trial never demonstrates the collaboration loop that drives expansion",
+          sourceData: "product analytics funnel + customer success call notes",
+          confidenceLevel: "high" as const,
+        },
+      ],
+      causalChains: [
+        {
+          pain: "trial isolation",
+          cause: "invitation step is gated behind plan selection",
+          impact: "single-seat trials convert at half the rate of multi-seat trials",
+          behavior: "admins complete onboarding alone and lapse before the multiplayer moment",
+          conversionEffect: "trial-to-paid conversion well below cohort benchmark",
+        },
+      ],
+      routeSourceTexts: [
+        "multiplayer-activation entry route",
+        "teammate-invitation unblock trigger",
+        "first-collaboration aha moment",
+      ],
+      productDnaSummary: "B2B revenue-ops automation requiring multi-seat workflows",
+    };
+    const grounded = makeOutputWithReasoning(
+      "Trial admins complete activation milestones in isolation because the teammate-invitation step sits behind plan selection, which prevents the multiplayer moment the workflow depends on; unblocking invitations at the multiplayer-activation entry route would let the first-collaboration aha moment land before the trial lapses, addressing the conversion gap the funnel data shows.",
+    );
+    const r = checkLanguageStyleGrounding(grounded, saasCorpus);
+    expect(r.result.passed).toBe(true);
+  });
+
+  it("respects env-tunable threshold override", () => {
+    const original = process.env.COMMERCIAL_REASONER_VOCAB_OVERLAP_THRESHOLD;
+    try {
+      // Force an unreachable threshold; even the grounded case should now fail.
+      process.env.COMMERCIAL_REASONER_VOCAB_OVERLAP_THRESHOLD = "0.99";
+      const grounded = makeOutputWithReasoning(
+        "Patients postpone cleanings because anxiety about discomfort during procedures and surprise charges at checkout outweighs the perceived benefit; the intake free-text confirms appointments are booked and cancelled within 48 hours.",
+      );
+      const r = checkLanguageStyleGrounding(grounded, dentistryCorpus);
+      expect(r.result.passed).toBe(false);
+      expect(r.result.reason).toBe("commercial_reasoner_language_ungrounded");
+    } finally {
+      if (original === undefined) delete process.env.COMMERCIAL_REASONER_VOCAB_OVERLAP_THRESHOLD;
+      else process.env.COMMERCIAL_REASONER_VOCAB_OVERLAP_THRESHOLD = original;
+    }
   });
 });

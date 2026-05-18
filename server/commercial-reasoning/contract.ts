@@ -139,6 +139,15 @@ export const GATE_DECISION_REASONS = [
   "commercial_reasoner_anti_template_at1",
   "commercial_reasoner_anti_template_at2",
   "commercial_reasoner_signal_origin_overreach",
+  // Phase 4-A post-audit additions (2026-05-18).
+  // industry_not_allowed: operator allowlisted only a subset of industries
+  // for reasoner enablement; the current industry is not in that subset.
+  "commercial_reasoner_industry_not_allowed",
+  // language_ungrounded: reasoning vocabulary did not anchor to the prompt
+  // corpus (distinctive-token overlap below threshold). Catches the
+  // local_services regression where SaaS-flavoured jargon was introduced
+  // into a dentistry context despite passing every other integrity gate.
+  "commercial_reasoner_language_ungrounded",
   "commercial_reasoner_disabled",
   "deterministic_floor_passed",
   "deterministic_floor_failed",

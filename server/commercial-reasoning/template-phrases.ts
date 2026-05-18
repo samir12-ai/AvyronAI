@@ -47,6 +47,37 @@ export const TEMPLATE_PHRASE_REGISTRY: TemplatePhrase[] = [
   { phrase: "leverage synergies", source: "phase4a-pre-seed" },
   { phrase: "holistic approach", source: "phase4a-pre-seed" },
   { phrase: "move the needle", source: "phase4a-pre-seed" },
+  // ── Phase 4-A treatment regression (2026-05-18) ──────────────────────
+  // These appeared verbatim in local_services *treatment* runs when the
+  // reasoner imported SaaS-shaped commercial vocabulary into a dental
+  // (local-services) context. The regression was: AT3 didn't catch them
+  // (they're not "best-in-class"-style cliches, they're abstract operator
+  // jargon that happens to be wrong for the vertical). Flagging them
+  // verbatim is necessary backup until language-style grounding (Gate AT4)
+  // catches the broader pattern. See `.local/validation/phase-4a-result.md`
+  // "Required before Phase 4-B advances" #1.
+  { phrase: "platform purchase-ready framework", source: "phase4a-treatment-regression-2026-05-18" },
+  { phrase: "purchase-ready framework deficit", source: "phase4a-treatment-regression-2026-05-18" },
+  { phrase: "mechanism-comprehension enabling transformation", source: "phase4a-treatment-regression-2026-05-18" },
+  { phrase: "differentiated purchase-ready framework", source: "phase4a-treatment-regression-2026-05-18" },
+  { phrase: "transformation validation", source: "phase4a-treatment-regression-2026-05-18" },
+  // ── Non-SaaS pre-seed (healthcare / brick-and-mortar / services) ─────
+  // Generic operator-deck jargon that tends to displace concrete,
+  // human, practical language in healthcare/local-services verticals.
+  // Sourced from operator-deck phrasebooks the reasoner's pretraining
+  // corpus is heavy on. Goal: bias the gate toward concrete domain
+  // language ("patient anxiety", "step-by-step intake", "fluoride
+  // protocol") rather than abstract commercial framing.
+  { phrase: "value proposition framework", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "customer journey optimization", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "patient acquisition funnel", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "service delivery excellence", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "operational scalability", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "go-to-market motion", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "category leadership", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "north star metric", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "flywheel effect", source: "phase4a-pre-seed-non-saas" },
+  { phrase: "growth lever", source: "phase4a-pre-seed-non-saas" },
 ];
 
 export interface TemplatePhraseMatch {

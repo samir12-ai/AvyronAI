@@ -43,6 +43,7 @@ import {
   buildAelEvidenceIndexFromSubset,
   checkEvidenceDiversity,
   checkEvidenceRefExistence,
+  checkLanguageStyleGrounding,
   checkPerFieldEvidenceLinkage,
   checkQuotedFragments,
   checkSignalOriginOverreach,
@@ -74,6 +75,16 @@ export interface InterpretAwarenessDepthInput {
   productDnaSummary?: string | null;
   /** Caller-provided id→text map for any non-AEL evidence references. */
   signalEvidence?: Map<string, string>;
+  /**
+   * Optional industry slug (e.g. "b2b_saas", "dtc_ecom", "local_services").
+   * Used by the industry-allowlist check; when missing AND the operator
+   * has set `COMMERCIAL_REASONER_ALLOWED_INDUSTRIES`, the interpreter
+   * falls back to the deterministic floor (fail-closed). When the env is
+   * unset OR empty, industry is ignored (default-permissive, back-compat).
+   * Falls back to `COMMERCIAL_REASONER_CURRENT_INDUSTRY` env if call-site
+   * doesn't supply it — used by the audit pipeline per-industry runs.
+   */
+  industry?: string | null;
 }
 
 export interface InterpretAwarenessDepthResult {
@@ -87,6 +98,38 @@ export interface InterpretAwarenessDepthResult {
 function isEnabled(): boolean {
   const raw = (process.env.COMMERCIAL_REASONER_ENABLED ?? "").trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+}
+
+/**
+ * Industry allowlist (Phase 4-A post-audit, 2026-05-18).
+ *
+ * Semantics:
+ *   - `COMMERCIAL_REASONER_ALLOWED_INDUSTRIES` unset or empty → return
+ *     true (no restriction, default-permissive back-compat).
+ *   - Set to a comma-separated list of slugs → only those industries are
+ *     allowed. Industry not in the list (including missing/unknown) →
+ *     return false.
+ *
+ * Industry resolution order: explicit input.industry → process env
+ * `COMMERCIAL_REASONER_CURRENT_INDUSTRY` (set by audit pipeline). If
+ * neither is present AND the allowlist IS set, the call is rejected
+ * (fail-closed — operator's allowlist means "ONLY these industries").
+ */
+function resolveIndustry(explicit: string | null | undefined): string | null {
+  if (explicit && explicit.trim()) return explicit.trim().toLowerCase();
+  const fromEnv = (process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY ?? "").trim().toLowerCase();
+  return fromEnv.length > 0 ? fromEnv : null;
+}
+
+export function isAllowedForIndustry(industry: string | null): boolean {
+  const raw = (process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES ?? "").trim();
+  if (raw.length === 0) return true; // no restriction
+  const allowed = new Set(
+    raw.split(",").map((s) => s.trim().toLowerCase()).filter((s) => s.length > 0),
+  );
+  if (allowed.size === 0) return true;
+  if (!industry) return false; // allowlist set but caller didn't say which industry → fail-closed
+  return allowed.has(industry);
 }
 
 function buildSystemPrompt(): string {
@@ -217,6 +260,20 @@ export async function interpretAwarenessDepth(
     });
   }
 
+  const resolvedIndustry = resolveIndustry(input.industry);
+  if (!isAllowedForIndustry(resolvedIndustry)) {
+    console.log(
+      `[CommercialReasoning] INDUSTRY_NOT_ALLOWED industry=${resolvedIndustry ?? "<unset>"} allowlist=${process.env.COMMERCIAL_REASONER_ALLOWED_INDUSTRIES ?? "<unset>"} runId=${input.runId}`,
+    );
+    return finalizeFallback({
+      input,
+      deterministicFloor,
+      reasoning: null,
+      reason: "commercial_reasoner_industry_not_allowed",
+      detail: `industry=${resolvedIndustry ?? "<unset>"} not in allowlist`,
+    });
+  }
+
   const promptCorpus = buildPromptCorpus(input.ael);
   let llmResult;
   try {
@@ -311,6 +368,34 @@ export async function interpretAwarenessDepth(
       reasoning: output,
       reason: tpl.result.reason!,
       detail: tpl.result.detail,
+    });
+  }
+
+  // AT4 — language-style grounding (post-audit gate, see integrity-gates.ts).
+  // Runs LAST among integrity gates because it's the broadest and most
+  // heuristic — every other gate is a structural contract check; this one
+  // is a vocabulary-anchoring check. Substrate is the SAME prompt corpus
+  // shown to the model (architect P4-A alignment rule).
+  const langGate = checkLanguageStyleGrounding(output, {
+    rootCauses: promptCorpus.rootCauses,
+    causalChains: promptCorpus.causalChains,
+    routeSourceTexts: input.awarenessRouteSourceTexts,
+    productDnaSummary: input.productDnaSummary,
+  });
+  if (!langGate.result.passed) {
+    recordCv11HallucinationExposure(langGate.result.reason!, ENGINE_ID);
+    console.error("[CommercialReasoning] GATE_FAILED", {
+      runId: input.runId,
+      reason: langGate.result.reason,
+      detail: langGate.result.detail,
+      grounding: langGate.detail,
+    });
+    return finalizeFallback({
+      input,
+      deterministicFloor,
+      reasoning: output,
+      reason: langGate.result.reason!,
+      detail: langGate.result.detail,
     });
   }
 
