@@ -2284,6 +2284,11 @@ async function executeEngine(
         const result = await runAwarenessEngine(
           miInput, audInput, posInput, diffInput, offerInput,
           config.accountId, upstreamLineage,
+          // Funnel input (positional slot 8) — awareness runs BEFORE
+          // funnel, so engine default (EMPTY_FUNNEL) is correct here.
+          undefined,
+          ctx.analyticalEnrichment,
+          ctx.ssc?.commercialSignals || null,
           // Phase 4-B Progressive BCL — pass real run scope so the
           // awareness interpreter's Stage-2 loader queries this run's
           // snapshots (NOT the awareness-standalone fallback IDs that
@@ -2295,8 +2300,6 @@ async function executeEngine(
             industry: (config as any).industry ?? process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY ?? null,
             businessProfile: ctx.businessProfile ?? null,
           } as any,
-          ctx.analyticalEnrichment,
-          ctx.ssc?.commercialSignals || null,
         );
         output = result;
         ctx.awareness = result;
