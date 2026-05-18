@@ -1,0 +1,222 @@
+Team,
+
+Your reading of the Phase 3 data is correct.
+
+The pattern is now consistent enough that we should treat it as architectural evidence, not coincidence:
+
+* the strongest-scoring engine is the one already using grounded LLM reasoning over structured evidence
+* the weakest-scoring layers are the deterministic/template-heavy paths
+* the awareness depth gate is acting as the dominant commercial ceiling across the entire downstream chain
+
+The system is telling us very clearly where the leverage is.
+
+==================================================
+
+1. PROTOTYPE SCOPE
+   ==================================================
+
+Start with:
+AWARENESS DEPTH-GATE ONLY
+
+Do NOT fold funnel reasoning into the first prototype.
+
+Reason:
+
+We now finally have:
+
+* a measurable audit pipeline
+* cross-industry empirical runs
+* judge scoring
+* grounding harnesses
+* before/after comparability
+
+We should use that advantage properly.
+
+If we modify:
+
+* awareness
+  AND
+* funnel
+
+at the same time,
+we lose attribution clarity.
+
+I want one isolated architectural experiment first.
+
+==================================================
+2. TARGET OF THE FIRST PROTOTYPE
+================================
+
+Replace:
+heuristic commercial-depth scoring
+
+with:
+grounded LLM commercial interpretation.
+
+The new awareness interpreter should reason about:
+
+* market sophistication
+* buyer awareness
+* trust barriers
+* differentiation pressure
+* urgency weakness
+* conversion friction
+* proof requirements
+* category saturation
+* offer clarity
+* perceived risk
+* commercial tension
+
+But:
+ALL outputs must remain structured and verifiable.
+
+==================================================
+3. REQUIRED OUTPUT CONTRACT
+===========================
+
+The LLM layer must return something like:
+
+{
+depthAssessment,
+reasoning,
+evidence_refs[],
+confidence,
+uncertainty,
+contradictions[],
+commercial_pressures[],
+buyer_state,
+saturation_state,
+trust_state
+}
+
+Then:
+existing integrity/grounding layers verify it.
+
+==================================================
+4. DOCTRINE MUST REMAIN INTACT
+==============================
+
+Very important:
+
+The existing system layers are NOT being replaced.
+
+Keep:
+
+* D1–D5 semantic contracts
+* provenance tracking
+* lineage
+* replayability
+* grounding validation
+* contradiction detection
+* continuity
+* integrity verdicts
+* evidence-origin typing
+* run-truthfulness presenter
+* hallucination exposure controls
+
+The LLM reasoner becomes:
+the cognition layer,
+not
+the truth layer.
+
+==================================================
+5. SAFETY MODEL
+===============
+
+The old deterministic depth-gate should remain as:
+
+* fallback floor
+* failure safety
+* grounding-failure protection
+
+Meaning:
+if the LLM reasoning:
+
+* fails grounding
+* fails validation
+* returns insufficient evidence
+* becomes contradictory
+* becomes low-confidence
+
+the old gate still prevents fake progression.
+
+==================================================
+6. FORMAL PLAN DOCUMENT
+=======================
+
+Yes — write the formal architecture document FIRST.
+
+Create:
+
+.local/plans/phase-4-commercial-reasoning-core.md
+
+Include:
+
+* hybrid architecture doctrine
+* target engines for conversion
+* rollout order
+* grounding contracts
+* integrity expectations
+* structured output schemas
+* evidence requirements
+* contradiction handling
+* uncertainty semantics
+* replay expectations
+* fallback semantics
+* evaluation methodology
+* regression methodology
+* before/after scoring process
+* judge-pipeline integration
+* success criteria
+
+==================================================
+7. ROLLOUT ORDER
+================
+
+Recommended order:
+
+1. Awareness depth interpreter
+2. Funnel reasoning
+3. Persuasion reasoning
+4. Mechanism diagnosis
+5. Budget/channel adaptation
+6. Commercial bottleneck synthesis
+
+One layer at a time.
+Empirically validated after each conversion.
+
+==================================================
+8. SUCCESS METRIC
+=================
+
+The goal is NOT:
+“more sophisticated wording.”
+
+The goal is:
+
+* deeper commercial realism
+* materially better owner usefulness
+* stronger cross-industry differentiation
+* better contradiction handling
+* adaptive strategic reasoning
+* grounded uncertainty
+* fewer template patterns
+* higher judge usefulness scores
+
+Measured on the SAME audit harness we already built.
+
+==================================================
+FINAL DIRECTION
+===============
+
+We are no longer trying to:
+simulate strategic intelligence with deterministic scoring trees.
+
+We are building:
+a grounded commercial reasoning system
+where LLM cognition operates inside a strict truthfulness and evidence architecture.
+
+That is the correct direction.
+
+Best,
+[Your Name]
