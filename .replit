@@ -57,6 +57,10 @@ args = "Start App"
 task = "workflow.run"
 args = "Start Frontend"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Audit Runner"
+
 [[workflows.workflow]]
 name = "Start App"
 author = "agent"
@@ -92,6 +96,17 @@ outputType = "console"
 task = "shell.exec"
 args = "npm run expo:dev"
 waitForPort = 8081
+
+[[workflows.workflow]]
+name = "Audit Runner"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "EXPO_PUBLIC_NARRATIVE_LLM_V2=1 npx tsx .local/scripts/run-audit-pipelines.ts b2b_saas && EXPO_PUBLIC_NARRATIVE_LLM_V2=1 npx tsx .local/scripts/run-audit-pipelines.ts dtc_ecom"
 
 [userenv]
 

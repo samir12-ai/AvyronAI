@@ -83,6 +83,8 @@ SCAN_PATHS=(
   "components/RunTruthfulnessBanner.tsx"
   "components/PlanDocumentView.tsx"
   "components/BuildThePlan.tsx"
+  "components/ReasoningPanel.tsx"
+  "components/ReasoningCard.tsx"
 )
 EXCLUDE_FILES=(
   "app/audit-control.tsx"

@@ -106,7 +106,7 @@ export default function ReasoningPanel({ campaignId }: { campaignId: string | nu
           <Text style={[styles.loadingText, { color: textMuted }]}>Reading the latest run…</Text>
         </View>
       ) : isError ? (
-        <Text style={[styles.loadingText, { color: textMuted }]}>Reasoning view will appear after the next run.</Text>
+        <Text style={[styles.loadingText, { color: textMuted }]}>Couldn't load reasoning right now — connection issue. Pull to refresh.</Text>
       ) : !data?.cards?.length || data.state === "no_data" ? (
         <Text style={[styles.loadingText, { color: textMuted }]}>The first run is still gathering signals.</Text>
       ) : (

@@ -3782,7 +3782,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     ? ENGINE_PRIORITY_ORDER.findIndex(e => e.id === config.resumeFromEngine)
     : 0;
 
-  const ENGINE_TIMEOUT_MS = 120_000; // 2-minute hard ceiling per engine
+  const ENGINE_TIMEOUT_MS = 180_000; // 3-minute hard ceiling per engine (CLP-01 follow-up: 120s was too tight for MI/Audience under contention)
 
   // When scopedEngines is provided, execute ONLY those engines (selective rerun).
   // Loop starts at the earliest requested engine; per-loop check skips any engine NOT in the set.

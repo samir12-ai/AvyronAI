@@ -438,6 +438,19 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
       // Match runs of ≥2 consecutive Capitalized words (likely proper nouns)
       // — single capitalized words at sentence-start are not flagged.
       const CAP_RUN_RE = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g;
+      // Tighter check (architect P1 follow-up): single Capitalized words that
+      // do NOT sit at sentence-start. Catches "Clari", "Gong"-style invented
+      // brand tokens that the multi-word run regex misses. We allow a small
+      // set of always-acceptable single-word common nouns/prepositions that
+      // legitimately start mid-sentence (e.g., months, weekdays, "I"). The
+      // anchor allowlist already covers real brand names from evidence.
+      const SINGLE_CAP_MID_RE = /(?<=[a-z0-9,;:)\]"'\s])\s([A-Z][a-z]{2,})\b/g;
+      const SINGLE_CAP_ALLOWED = new Set<string>([
+        "i","a","january","february","march","april","may","june","july","august",
+        "september","october","november","december","monday","tuesday","wednesday",
+        "thursday","friday","saturday","sunday","instagram","facebook","tiktok",
+        "linkedin","twitter","x","youtube","google",
+      ]);
       let groundingOk = allKeysCovered;
       let rejectReason: string | null = null;
       if (groundingOk) {
@@ -468,6 +481,19 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
               rejectReason = `unanchored_proper_noun:${cm[1].slice(0, 40)}`;
               break;
             }
+          }
+          if (!groundingOk) break;
+          // Check 4 (architect P1 follow-up): single Capitalized mid-sentence
+          // tokens that are not in the evidence anchor set.
+          let sm: RegExpExecArray | null;
+          SINGLE_CAP_MID_RE.lastIndex = 0;
+          while ((sm = SINGLE_CAP_MID_RE.exec(txt)) !== null) {
+            const tok = sm[1].toLowerCase();
+            if (allowedTokens.has(tok)) continue;
+            if (SINGLE_CAP_ALLOWED.has(tok)) continue;
+            groundingOk = false;
+            rejectReason = `unanchored_single_proper_noun:${sm[1].slice(0, 40)}`;
+            break;
           }
           if (!groundingOk) break;
         }
