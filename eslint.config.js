@@ -121,7 +121,8 @@ module.exports = defineConfig([
   //     recorder.record*() calls — every boundary MUST go through the
   //     variable returned by withReplayRecorder(...) (named `__recorder`).
   {
-    files: ["server/orchestrator/**/*.ts"],
+    files: ["server/orchestrator/**/*.ts", "server/commercial-reasoning/**/*.ts"],
+    ignores: ["server/commercial-reasoning/llm-call.ts"],
     plugins: {
       "orchestrator-replay": { rules: { "no-bare-llm-call-in-replay": noBareLlmCallInReplay } },
     },

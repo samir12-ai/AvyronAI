@@ -25,6 +25,11 @@ import {
   buildDepthGateResult,
   type DepthGateResult,
 } from "../causal-enforcement-layer/engine";
+// Phase 4-A — Commercial Reasoning Core (awareness depth interpreter).
+// See `.local/plans/phase-4-commercial-reasoning-core.md` §8a + §5.
+// Default-off via COMMERCIAL_REASONER_ENABLED — when off, interpretAwarenessDepth
+// short-circuits to the deterministic floor (byte-identical legacy behavior).
+import { interpretAwarenessDepth } from "../commercial-reasoning/awareness-depth-interpreter";
 import type {
   AwarenessPositioningInput,
   AwarenessDifferentiationInput,
@@ -771,6 +776,11 @@ export async function runAwarenessEngine(
   funnel: AwarenessFunnelInput = EMPTY_FUNNEL,
   analyticalEnrichment?: any,
   upstreamSignals?: { buyerPsychology?: any; trustMechanism?: any; gameDimension?: any; valueArchitecture?: any } | null,
+  // Phase 4-A — optional commercial-reasoning persistence context. When
+  // supplied, the LLM reasoner's snapshot is UPSERT'd into
+  // commercial_reasoning_snapshots. When absent, the gate logic still
+  // runs but persistence is skipped (best-effort).
+  commercialReasoningCtx?: { campaignId: string; runId: string } | null,
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
@@ -1036,15 +1046,39 @@ export async function runAwarenessEngine(
     primaryRoute.funnelCompatibility || "",
     ...primaryRoute.frictionNotes,
   ];
-  const celDepth = enforceEngineDepthCompliance(
-    "awareness",
-    celSourceTexts,
-    analyticalEnrichment || null,
-  );
+  // Phase 4-A — route the depth gate through the commercial reasoner.
+  // The reasoner ALWAYS computes the deterministic floor first (returned
+  // as result.deterministicFloor); when the env kill-switch is off OR any
+  // integrity gate fails, the reasoner falls back to that floor and
+  // behaviour is byte-identical to pre-Phase-4.
+  const commercialReasoning = await interpretAwarenessDepth({
+    accountId,
+    campaignId: commercialReasoningCtx?.campaignId ?? `awareness-standalone:${accountId}`,
+    runId: commercialReasoningCtx?.runId ?? `awareness-standalone:${Date.now()}`,
+    ael: analyticalEnrichment ?? null,
+    awarenessRouteSourceTexts: celSourceTexts,
+  });
+  const celDepth = commercialReasoning.deterministicFloor;
+  const reasonerLifted =
+    commercialReasoning.fellBackTo === "none" &&
+    commercialReasoning.gateDecision.allow === true;
+  if (commercialReasoning.fellBackTo === "none") {
+    console.log(
+      `[AwarenessEngine-V3] COMMERCIAL_REASONER: verdict=${commercialReasoning.integrityVerdict} reason=${commercialReasoning.gateDecision.reason} allow=${commercialReasoning.gateDecision.allow}`,
+    );
+  } else {
+    console.log(
+      `[AwarenessEngine-V3] COMMERCIAL_REASONER_FALLBACK: reason=${commercialReasoning.gateDecision.reason} floorAllow=${celDepth.passed}`,
+    );
+  }
 
   let depthGateResult: DepthGateResult | null = null;
 
-  if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
+  if (
+    analyticalEnrichment &&
+    isDepthBlocking(celDepth, celSourceTexts) &&
+    !reasonerLifted
+  ) {
     depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`], celSourceTexts);
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[AwarenessEngine-V3] CEL_DEPTH: ${logEntry}`);
