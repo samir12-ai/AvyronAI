@@ -121,69 +121,19 @@ Canonical field names: `validationState` ∈ {validated|provisional|weak|rejecte
 
 > Per-seal archive index lives at the bottom of this file.
 
-### Replay / Shadow Harness — Phase 4-A (Task #89)
+### Orchestrator / Replay / UX / Memory — live invariants (full detail archived)
 
-Every orchestrator decomposition step must be replay-verifiable BEFORE it lands. A `ReplayCassette` is a content-addressed, deterministic recording of one `runOrchestrator(...)` invocation. The player consumes a cassette and runs a candidate orchestrator with all LLM calls STRICTLY mocked from the recorded outputs (NO re-rolls). Divergences are classified into a 7-class taxonomy: `STRUCTURAL` > `CANONICAL_FIELD` (D2-tracked) > `DEGRADATION_SURFACE` > `BUDGET_LEDGER` > `PROVENANCE` > `ORDER` > `TIMING_ONLY` (whitelist).
+Five doctrinal sections (Replay Harness P4-A, Orchestrator Decomposition P4-E, UX Projection P8, Canonical Fact Ownership P1, Memory Unification P2) rotated to [`.local/docs/seals/intelligence-architecture-archive.md`](.local/docs/seals/intelligence-architecture-archive.md). Live invariants that remain authoritative:
 
-Key rules: all recorder boundaries in `server/orchestrator/**` funnel through `withReplayRecorder(...)` (ESLint `orchestrator-replay/no-bare-llm-call-in-replay`); direct `aiChat`/`aiGemini`/`getOpenAI`/`getGemini` imports forbidden inside `server/orchestrator/replay/**`; production recording OFF by default (`ORCH_REPLAY_RECORD` ∈ unset|`0`|`false`|`1`|`true`|`sample:N`); cassette body carries `schemaVersion` and player throws `ReplayCassetteVersionError` on unknown; PII redacted before persistence (same-input → same hash-token); `cassetteHash` is SHA-256 of INPUT envelope only; identical-prompt repeats handed back FIFO by `callOrder`; deep diff walk after boutique checks; recorder/CLI hash parity required; dedupe metric only on actual INSERT.
-
-CV-13 metrics on `/metrics`: `cv13_replay_cassettes_total{source}`, `cv13_replay_age_max_hours`, `cv13_replay_recorder_overhead_ratio` (rolling 5-min p50), `cv13_replay_player_runs_total{outcome}`. Operator endpoints: `GET /api/admin/replay/cassettes`, `GET /api/admin/replay/cassette/:hash`. CLI: `npm run replay:list`, `npm run replay:run -- --cassette <hash> [--against current|candidate]`, `npm run replay:capture-synthetic`. Tests: `npm run replay:test` (34 tests); flake: `npm run replay:flake` (100-iter).
-
-P4-A limitation: `runOrchestrator` does not yet accept an injected LLM adapter, so `--against current` is NON-HERMETIC (real LLM calls); CLI prints a banner warning. Hermetic `--against current` lands in P4-B.
-
-### Orchestrator Decomposition — Phase 4-E Legacy Surface Cleanup (Task #93)
-
-Phase 4-E retired the Phase 4-D cutover system after the doctrinal review confirmed that Phase 4-B/C/D never actually extracted production code — only the dispatch/cutover/parity SCAFFOLDING landed. The candidate orchestrator (`engine-invocation-loop/`, `result-assembly/`, plus 4 README-only scaffolds) throws `SCAFFOLD_NOT_WIRED`; the legacy ~4900-line `runOrchestrator` body remains the only working execution path. Task #93 deleted the cutover ladder, dispatcher, auto-revert helper, pager, and module flags. The remaining doctrine:
-
-- **OD-1 — Single-persist degradation surface (load-bearing legacy).** The PLAN_DEGRADED surface is still computed by `synthesisDegradationBuilder` BEFORE the first `persistPlan` call. The legacy optimistic-CAS re-persist at `server/orchestrator/index.ts:~4628` is now classified as **load-bearing legacy** rather than "transitional with sunset" — its sunset is deferred until a real Phase-4 redo actually extracts `runOrchestrator`. The `orch_persist_call_total{site}` family is removed. Mitigation: only one execution path exists, and ESLint `orchestrator/no-dispatch-flags` prevents a second from being introduced silently.
-
-- **OD-2 — Retry-amplification budget design intent.** Untested in production (never reached non-zero traffic). Retained as a design constraint for the future real extraction: a maximally-retried run must not exceed its in-flight lock window (T-S5-C6 ceiling).
-
-- **OD-3 — `runOrchestrator` line-count ceiling.** Current size ~4900; ESLint `orchestrator/no-new-large-file` ceiling stays at 5000 until real extraction lands. Per-sibling-module ceiling 200. New inline logic ≥10 lines still requires an architect note OR extraction into a sibling module.
-
-- **OD-4, OD-5 — DELETED.** Cutover ladder, auto-revert, traffic-percent rollout, pager, `ORCH_USE_<MODULE>` env flags are gone. The cutover_state table is archived by migration 032 (renamed to `cutover_state_archive`, DROP-eligible after 30d).
-
-**Replay regression observer (formerly the parity gate).** `/healthz/orchestrator-parity` is now a regression observer: corpus health (cassette count + freshness), per-class divergence histogram (24h), per-class top-5 paths, path-shape coverage, last-tick metadata. The `readyForCutover` boolean, `modulesAt*` fields, and `autoRevertsLast24h` are removed. Operator panel renamed to "Replay Regression Suite".
-
-**Operator-visible metrics (steady state = 0 except the gauge):** `cv15_parity_block_age_hours` (gauge — hours since most recent BLOCK), `orch_parity_run_total{outcome}` (counter), `orch_parity_divergence_total{class,module}` (counter), `orch_cassette_path_coverage{path_shape,covered}` (gauge 0|1).
-
-**ESLint guards added in P4-E:** `orchestrator/no-dispatch-flags` (bans `ORCH_USE_*` env reads), `orchestrator/no-cutover-state-reference` (bans `cutover_state` SQL/imports). Removed: `orchestrator/no-cas-re-persist`, `parity/no-direct-revert` (rule files never existed on disk — only registrations were removed).
-
-**Required schema floor:** `REQUIRED_SCHEMA_VERSION = 32`. Migration `032_cutover_state_archive.sql` drops the BEFORE-UPDATE trigger and renames the cutover singleton to `cutover_state_archive`.
-
-**Recording defaults:** production `ORCH_REPLAY_RECORD` OFF by default (verified — `parseRecorderGate(undefined)` returns disabled). Staging recommendation: `ORCH_REPLAY_RECORD=sample:10`. Cassette retention: 30 days.
-
-> Full deletion inventory, attestation, and 8-audit gate: [`.local/docs/p4e-pre-cleanup-attestation.md`](.local/docs/p4e-pre-cleanup-attestation.md), [`.local/docs/orchestrator-final-architecture.md`](.local/docs/orchestrator-final-architecture.md), [`.local/docs/seals/seal-19-audits-p4e.md`](.local/docs/seals/seal-19-audits-p4e.md).
-
-### UX Projection Cleanup — Phase 8 (Task #71)
-
-Customer surface speaks outcomes, code surface speaks canonical. Operator-grade panels (`AELDebugPanel`, `OrchestratorPanel`, `SignalFlowPanel`, `SystemIntegrityPanel`, `MarketDatabaseAdmin`) MUST be gated behind `useOperatorSurface()` (`hooks/useOperatorSurface.ts`). Customer-build JSX MUST NOT contain internal engine names ("Positioning Engine", …) OR raw doctrinal tokens (`CHAIN_DEGRADED`, `MARKET_DATA_DEGRADED`, `PLAN_DEGRADED`, etc.). Verdict + headline rendering goes through ONE presenter (`lib/run-truthfulness-presentation.ts` → `presentRunTruthfulness()` returning `{ customerLabel, color, isCanonical }`; returns `null` when both inputs missing — D5). Customer-facing model picker MUST NOT name SKUs ("GPT-5.2", "Gemini 3 Pro").
-
-CI wiring: `scripts/check-engine-vocabulary.sh` (ripgrep regex over `app/(tabs)/**` + customer components, operator-only files allowlisted, exit-1 on hit). `npm run lint:vocab`, `npm run lint:all`.
-
-Customer-facing 4-screen pivot (`ai-management.tsx`): customer builds collapse the 8-tab operator surface into four outcome-framed pillars (Connect → `publisher`, Diagnose → `intelligence`, Roadmap → `buildplan`/`ExecutionPlan`, Monitor → `control`). Persistence, routing, and content code paths unchanged (D2).
+- **Replay harness (P4-A).** All `server/orchestrator/**` LLM calls funnel through `withReplayRecorder(...)`; direct `aiChat`/`aiGemini`/`getOpenAI`/`getGemini` imports forbidden inside `server/orchestrator/replay/**` (ESLint `orchestrator-replay/no-bare-llm-call-in-replay`). Production recording OFF by default. CLI `npm run replay:run -- --cassette <hash> [--against current|candidate]`. `--against current` is non-hermetic until P4-B wires an injected LLM adapter.
+- **Orchestrator decomposition (P4-E).** Legacy ~4900-line `runOrchestrator` is the ONLY working execution path (candidate scaffold throws `SCAFFOLD_NOT_WIRED`). PLAN_DEGRADED surface computed by `synthesisDegradationBuilder` BEFORE first `persistPlan`. `runOrchestrator` line ceiling 5000 (ESLint `orchestrator/no-new-large-file`); per-sibling-module ceiling 200. `ORCH_USE_<MODULE>` env reads banned (ESLint `orchestrator/no-dispatch-flags`); `cutover_state` table archived by migration 032 (ESLint `orchestrator/no-cutover-state-reference`). `/healthz/orchestrator-parity` is a regression observer; no `readyForCutover` field. Metrics: `cv15_parity_block_age_hours`, `orch_parity_run_total{outcome}`, `orch_parity_divergence_total{class,module}`, `orch_cassette_path_coverage{path_shape,covered}`. Schema floor `REQUIRED_SCHEMA_VERSION = 32`.
+- **UX projection (P8).** Customer surface speaks outcomes; code surface speaks canonical. Operator-grade panels gated behind `useOperatorSurface()` (`hooks/useOperatorSurface.ts`). Customer JSX MUST NOT contain internal engine names or raw doctrinal tokens. Verdict rendering goes through `lib/run-truthfulness-presentation.ts → presentRunTruthfulness()` (returns `null` when inputs missing — D5). CI: `scripts/check-engine-vocabulary.sh` / `npm run lint:vocab`. Customer 4-screen pivot in `ai-management.tsx`: Connect → publisher, Diagnose → intelligence, Roadmap → buildplan/ExecutionPlan, Monitor → control.
+- **Canonical fact ownership (P1).** `strategy_memory` written ONLY through `memoryStore` (`server/memory-system/store.ts`) via `upsertByFingerprint` / `updateById` / `applyDecayUpdate` (ESLint `canonical-fact/no-direct-strategy-memory-write`, allowlist: store + tests + migrations). Operational state (`content_rhythm`, `exploration_budget`, agent rhythm) lives in `engine_operational_state` singleton — never `strategy_memory`. One write gate: `validateDecisionForMemoryWrite → policyEnforcedMemoryCheck` (no OPERATIONAL_MEMORY_TYPES bypass). Writes recorded to `cv06_memory_writes_total{outcome,memoryType,engine}`. Live confidence fields: `confidence_score` + `direction ∈ {reinforce|avoid|neutral}` (legacy `is_winner` / `confidence_score_normalized` display-only).
+- **Memory unification (P2).** Reinforce by FK: `memoryStore.reinforceByDecisionId(accountId, campaignId, decisionId, patch)` looks up `strategy_memory.decision_id = decisionId`; `boundRowCount=0` triggers `MEMORY_UNBOUND` + CV-11. Outcome rows immutable once evaluated (`WHERE outcome IS NULL` + DB trigger `decision_outcomes_immutability_check`). Single read-time multiplicative decay (`computeEffectiveConfidence` in `memory-system/manager.ts`); write-time decay REMOVED. Same-fingerprint flip rejected unless incoming confidence strictly greater. Reader orders by `confidence_score DESC, updated_at DESC` (index `strategy_memory_account_campaign_confidence_idx`). Every write carries `provenance_origin ∈ {outcome|mutation|engine_seed|exploration|decay|unknown}`. CV-11 hallucination-exposure counter `cv11_hallucination_exposure_total{kind,engine}` — steady-state 0.
 
 ### Perception Layer (Slices 1+2, May 2026)
 
 Customer-facing read-only surface that exposes hidden runtime intelligence (continuity, boss verdicts, scheduler decisions) in safe English. Allowlist-translator architecture: `shared/perception-translator.ts` maps internal verdicts (Q1=WORKING/DEGRADED/UNKNOWN, Q2=STABLE/SHIFTED/UNCERTAIN, lowercase continuity decision enum, boss_run status, reanchor reason) to customer-safe `{tone, headline, detail}`. **Fail-closed:** unknown inputs return `null` and are dropped — never coerced. Endpoints (under `requireCampaign` auth, mounted in `server/perception-routes.ts`): `GET /api/perception/watchtower` (3 lines: market, plan, freshness), `GET /api/perception/activity?sinceHours=N` (unified timeline from `boss_runs` + `plan_anchor_resets` + `continuity_ticks.notes` filtered by BOTH `accountId` AND `campaignId` inside JSONB). Customer payload contains NO internal UUIDs/status strings — event ids are opaque `${kind}:${timestamp}`. Frontend: `hooks/usePerception.ts` (React Query, 5min stale + refetch), `components/WatchtowerStrip.tsx`, `components/ActivityTimeline.tsx`, mounted in `app/(tabs)/index.tsx`.
-
-### Canonical Fact Ownership — Phase 1 (Task #64)
-
-Every persisted fact has exactly one authoritative writer. `strategy_memory` is written ONLY through `memoryStore` (`server/memory-system/store.ts`) via `upsertByFingerprint` / `updateById` / `applyDecayUpdate` (ESLint `canonical-fact/no-direct-strategy-memory-write` bans direct `db.insert(strategyMemory)` outside the store; allowlist: store + tests + migrations). Operational state (`content_rhythm`, `exploration_budget`, agent rhythm) lives in `engine_operational_state` singleton — never `strategy_memory`. Mutation runs live in `mutation_log`. One gate: `validateDecisionForMemoryWrite` delegates to `policyEnforcedMemoryCheck`; the OPERATIONAL_MEMORY_TYPES bypass is REMOVED. Every write recorded to `cv06_memory_writes_total{outcome,memoryType,engine}` (outcomes: `inserted|updated|blocked|decay`). Demoted columns (`is_winner`, `confidence_score_normalized`) display-only; replacements: `confidence_score` + `direction ∈ {reinforce|avoid|neutral}`. Migration 024 creates `mutation_log`, `engine_operational_state`, unique index on `(account_id, campaign_id, state_type)`.
-
-### Memory Unification — Phase 2 (Task #65)
-
-The chain "decision made → outcome observed → memory reinforced" MUST be FK-bound, single-source-of-truth, and silent-zero-row-proof. Closes the DEC-B bug (outcome-tracker silently updated zero rows because `WHERE strategy_memory.id = strategy_decisions.id` is an id-space mismatch).
-
-- Reinforce by FK, never PK collision: `memoryStore.reinforceByDecisionId(accountId, campaignId, decisionId, patch)` looks up `strategy_memory.decision_id = decisionId`. `boundRowCount=0` triggers `MEMORY_UNBOUND` log + CV-11 increment.
-- Outcome rows immutable once evaluated: UPDATE carries `WHERE outcome IS NULL` + `.returning()`; DB-level `BEFORE UPDATE` trigger `decision_outcomes_immutability_check` RAISES on re-evaluation (allows administrative metadata patches).
-- Single decay layer: read-time multiplicative decay (`computeEffectiveConfidence` in `memory-system/manager.ts`) is canonical. Write-time half-life decay REMOVED.
-- Write-time fingerprint contradiction resolver: same-fingerprint flip (`reinforce`↔`avoid`) REJECTED unless incoming confidence is strictly greater.
-- Confidence-banded reader: orders by `confidence_score DESC, updated_at DESC` (not pure recency). Index `strategy_memory_account_campaign_confidence_idx`.
-- Explicit provenance per write: `provenance_origin ∈ {outcome|mutation|engine_seed|exploration|decay|unknown}`.
-- CV-11 hallucination-exposure counter: `cv11_hallucination_exposure_total{kind,engine}` — steady-state 0.
-
-Schema floor: REQUIRED_SCHEMA_VERSION = 25 (Migration `025_memory_unification.sql`).
 
 ### Narrative LLM v2 default-on + v1 sunset (P204, May 2026)
 
