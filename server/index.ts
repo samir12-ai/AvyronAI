@@ -316,6 +316,17 @@ function configureExpoAndLanding(app: express.Application) {
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
 
+  // P204 hardening — refuse to boot in production with the synthetic-audit
+  // escape hatch enabled. SGL coverage forgiveness must never reach a
+  // production verdict surface, even via misconfiguration. The env gate in
+  // signal-governance/engine.ts and system-control/engine.ts ALSO checks
+  // NODE_ENV !== "production" (defense in depth), but this boot-time fail
+  // surfaces the misconfiguration loudly instead of silently ignoring it.
+  if (process.env.NODE_ENV === "production" && process.env.SYNTHETIC_AUDIT_MODE === "1") {
+    console.error("[Boot] FATAL — SYNTHETIC_AUDIT_MODE=1 is forbidden in production. Unset it before deploying.");
+    process.exit(2);
+  }
+
   if (process.env.NODE_ENV === "production") {
     const webBuildDir = path.resolve(process.cwd(), "static-build", "web");
     if (fs.existsSync(webBuildDir)) {

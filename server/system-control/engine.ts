@@ -517,6 +517,40 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     validationVerdict = null;
   }
 
+  // P203 — stamp synthetic-audit-mode honestly. Non-production-only env
+  // flag (SYNTHETIC_AUDIT_MODE=1) downgrades SGL coverage from BLOCK to
+  // ADVISORY in server/signal-governance/engine.ts; the verdict surface
+  // records this so downstream consumers cannot mistake a synthetic-seed
+  // run for production-grade authorization. B4 / B3.
+  const syntheticAuditMode =
+    process.env.SYNTHETIC_AUDIT_MODE === "1" && process.env.NODE_ENV !== "production";
+
+  // P204 hardening (architect review) — honesty-only stamps are not enough.
+  // When the SGL coverage gate was forgiven, we MUST also force the verdict
+  // surface itself to a non-executable mode so downstream automation that
+  // forgets to check `syntheticAuditMode` cannot accidentally authorize a
+  // production decision off a synthetic-seed run. We add a Downgrade
+  // (rather than a Block) so the verdict still reflects what the engines
+  // structurally produced; the downgrade ladder above will turn
+  // verdict=PASS into verdict=DOWNGRADE/executionMode=REVIEW_REQUIRED.
+  // B3 (safe degradation over fake success) + B4 (explicit classification).
+  if (syntheticAuditMode) {
+    downgrades.push({
+      from: "scale",
+      to: "review_required",
+      reason: "SYNTHETIC_AUDIT_MODE=1 was honored — SGL coverage gate was forgiven on synthetic seeds; this verdict MUST NOT be used to authorize a production decision.",
+      code: "SYNTHETIC_AUDIT_MODE_ACTIVE",
+      affectedEngine: "system_control",
+    });
+    // Re-derive verdict/executionMode if we were heading to PASS so the
+    // downgrade is reflected. We only mutate the no-block / no-prior-downgrade
+    // happy path; any existing BLOCK or HALTED state still wins.
+    if (verdict === "PASS") {
+      verdict = "DOWNGRADE";
+      executionMode = "REVIEW_REQUIRED";
+    }
+  }
+
   const result: SystemControlVerdict = {
     verdict,
     executionMode,
@@ -531,6 +565,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     controlVersion: CONTROL_VERSION,
     shadowMode,
     validationVerdict,
+    syntheticAuditMode,
   };
 
   logVerdict(result, input.config);

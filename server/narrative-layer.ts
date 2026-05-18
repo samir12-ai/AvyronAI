@@ -374,9 +374,16 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
   let llmOneLiner: string | null = null;
   let narrativeMode: "template" | "llm_v2" | "llm_v2_failed_template_fallback" = "template";
 
-  const llmGateOn = ["1", "true", "on", "yes"].includes(
-    String(process.env.EXPO_PUBLIC_NARRATIVE_LLM_V2 ?? "").trim().toLowerCase(),
-  );
+  // P204 — narrative LLM v2 default-on (May 2026). The v1 template-only
+  // path stays as the on-the-fly fallback when v2 rejects the LLM output
+  // (low grounding, malformed JSON, missing evidence). Env still wins if
+  // explicitly set: any of {0,false,off,no} → force-off (escape hatch for
+  // ops if v2 misbehaves); unset / any truthy → on. v1 sunset target is
+  // tracked in replit.md Active doctrine.
+  const rawV2Flag = String(process.env.EXPO_PUBLIC_NARRATIVE_LLM_V2 ?? "").trim().toLowerCase();
+  const llmGateOn = rawV2Flag === ""
+    ? true
+    : !["0", "false", "off", "no"].includes(rawV2Flag);
   const hasEnoughEvidence =
     completed.length >= 3 && problemSource !== "none" && positionSource !== "none";
 

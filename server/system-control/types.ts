@@ -67,7 +67,8 @@ export type DowngradeCode =
   // Runtime Truth Track (May 2026)
   | "ANALYTICAL_ENRICHMENT_DEGRADED" // T3.B downgrade companion when AEL partial but other gates pass
   | "LINEAGE_UNTRUSTED"               // T1.A downgrade companion when unknownRatio > threshold but composition still has some real ratio
-  | "CONFIDENCE_INTEGRITY_DEGRADED";  // T3.A v2 downgrade when default_floor / inferred_synthesis present on the chain (no critical absence)
+  | "CONFIDENCE_INTEGRITY_DEGRADED"   // T3.A v2 downgrade when default_floor / inferred_synthesis present on the chain (no critical absence)
+  | "SYNTHETIC_AUDIT_MODE_ACTIVE";    // P204 — forces non-executable mode whenever SYNTHETIC_AUDIT_MODE=1 was honored. B3.
 
 export type ReviewCode =
   | "SYNTHESIS_DRIFT"
@@ -345,6 +346,16 @@ export interface SystemControlVerdict {
    * Underlying engine emissions remain on their own rows for D4 readers.
    */
   validationVerdict?: import("./validation-verdict").ValidationVerdict | null;
+  /**
+   * P203 — set true when the run executed under `SYNTHETIC_AUDIT_MODE=1`
+   * (non-production only). In this mode the SGL coverage gate is
+   * downgraded from BLOCK to ADVISORY so deep engines can be exercised on
+   * synthetic seeds. Any verdict carrying this flag MUST NOT be used to
+   * authorize a production decision — the verdict reflects intelligence
+   * structure on synthetic data, not production-quality grounding. B4
+   * (explicit classification over hidden ambiguity).
+   */
+  syntheticAuditMode?: boolean;
 }
 
 /**

@@ -185,6 +185,15 @@ The chain "decision made → outcome observed → memory reinforced" MUST be FK-
 
 Schema floor: REQUIRED_SCHEMA_VERSION = 25 (Migration `025_memory_unification.sql`).
 
+### Narrative LLM v2 default-on + v1 sunset (P204, May 2026)
+
+The Causal Narrative Layer's v2 grounded-LLM rewrite path (`server/narrative-layer.ts:~376`) is now **default-on**. Behaviour:
+
+- **Default-on.** Unset `EXPO_PUBLIC_NARRATIVE_LLM_V2` (or any value not in `{0,false,off,no}`) → v2 runs. Only an explicit truthy-falsy escape (`EXPO_PUBLIC_NARRATIVE_LLM_V2=0`) reverts to v1 template-only — kept as an ops escape hatch during the sunset window.
+- **Fallback honesty.** When v2 LLM output fails grounding (low evidence, malformed JSON, hallucinated entity), `narrativeMode` flips to `llm_v2_failed_template_fallback` — v1 template text is served but the mode tag tells operators what happened (B4 — explicit classification over hidden ambiguity).
+- **Pre-sunset safety net.** `npx tsx .local/scripts/narrative-v1-v2-cassette.ts <campaignId> <accountId>` captures one prod-shaped input through both paths and writes `v1.json` / `v2.json` / `diff.json` to `.local/validation/narrative-cassettes/<ts>__<campaign>/` for human review. Run for a representative campaign per industry before deleting v1 code.
+- **Sunset target: 2026-07-01** (≥6 weeks of v2-default observation). Sunset is gated on: (a) zero unexplained `LLM_V2_GROUNDING_REJECTED` rate spikes for ≥4 consecutive weeks, (b) cassette review for ≥3 industries with no v1-only-better cases, (c) `narrativeMode=llm_v2_failed_template_fallback` rate < 5% rolling 14d. Once met, remove the v1 template-only branch and the escape-hatch env read.
+
 ### Beta Safety Doctrine (Task #50)
 
 Beta safety is a system property — five non-negotiable values codify how every new piece of code, copy, and operator surface MUST behave: **B1** Truthfulness over confidence. **B2** Visibility over silence. **B3** Safe degradation over fake success. **B4** Explicit classification over hidden ambiguity. **B5** Operational continuity over feature velocity.

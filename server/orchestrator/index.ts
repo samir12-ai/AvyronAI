@@ -1049,12 +1049,14 @@ function resolveSglOrBlock(
   if (!ctx.sglState) return null;
   const sglRes = resolveSignalsForEngine(ctx.sglState, engineId);
   if (sglRes.blocked) {
+    const reason = `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`;
+    console.log(`[Orchestrator] ENGINE_SKIPPED | engine=${engineId} | gate=sgl_coverage | reason=${reason}`);
     return {
       engineId,
       status: "SKIPPED",
       output: null,
       durationMs: Date.now() - startTime,
-      blockReason: `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`,
+      blockReason: reason,
     };
   }
   return null;
@@ -1391,6 +1393,7 @@ async function executeEngine(
 
   const violation = checkPriorityViolation(engineId, results);
   if (violation) {
+    console.log(`[Orchestrator] ENGINE_SKIPPED | engine=${engineId} | gate=priority_violation | reason=${violation.violation}`);
     return {
       engineId,
       status: "SKIPPED",
@@ -1402,12 +1405,14 @@ async function executeEngine(
 
   for (const [, result] of results) {
     if (shouldBlockDownstream(result)) {
+      const reason = `Blocked by upstream failure in ${result.engineId}`;
+      console.log(`[Orchestrator] ENGINE_SKIPPED | engine=${engineId} | gate=upstream_block | reason=${reason}`);
       return {
         engineId,
         status: "SKIPPED",
         output: null,
         durationMs: Date.now() - startTime,
-        blockReason: `Blocked by upstream failure in ${result.engineId}`,
+        blockReason: reason,
       };
     }
   }
@@ -1676,12 +1681,14 @@ async function executeEngine(
 
       case "positioning": {
         if (!ctx.miSnapshotId || !ctx.audienceSnapshotId) {
+          const reason = `Missing MI or Audience snapshot (miSnapshotId=${ctx.miSnapshotId ?? "null"} audienceSnapshotId=${ctx.audienceSnapshotId ?? "null"})`;
+          console.log(`[Orchestrator] ENGINE_SKIPPED | engine=${engineId} | gate=missing_upstream_snapshot | reason=${reason}`);
           return {
             engineId,
             status: "SKIPPED",
             output: null,
             durationMs: Date.now() - startTime,
-            blockReason: "Missing MI or Audience snapshot",
+            blockReason: reason,
           };
         }
         { const sglBlock = resolveSglOrBlock("positioning", ctx, startTime); if (sglBlock) return sglBlock; }
@@ -3353,6 +3360,7 @@ async function executeEngine(
       }
 
       default:
+        console.log(`[Orchestrator] ENGINE_SKIPPED | engine=${engineId} | gate=unknown_engine | reason=engine_id_not_in_switch`);
         return {
           engineId,
           status: "SKIPPED",
@@ -3940,6 +3948,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     // When scopedEngines is provided, skip any engine NOT in the requested scope
     if (scopedEngineSet && !scopedEngineSet.has(engineDef.id)) {
       console.log(`[Orchestrator] SCOPED_SKIP | Skipping ${engineDef.name} (not in scopedEngines)`);
+      console.log(`[Orchestrator] ENGINE_SKIPPED | engine=${engineDef.id} | gate=scoped_engine_set | reason=not_in_requested_scope`);
       results.set(engineDef.id as EngineId, { engineId: engineDef.id as EngineId, status: "SKIPPED", output: null, durationMs: 0 });
       continue;
     }

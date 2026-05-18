@@ -106,7 +106,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "EXPO_PUBLIC_NARRATIVE_LLM_V2=1 npx tsx .local/scripts/run-audit-pipelines.ts b2b_saas && EXPO_PUBLIC_NARRATIVE_LLM_V2=1 npx tsx .local/scripts/run-audit-pipelines.ts dtc_ecom"
+args = "SYNTHETIC_AUDIT_MODE=1 EXPO_PUBLIC_NARRATIVE_LLM_V2=1 npx tsx .local/scripts/run-audit-pipelines.ts b2b_saas && SYNTHETIC_AUDIT_MODE=1 EXPO_PUBLIC_NARRATIVE_LLM_V2=1 npx tsx .local/scripts/run-audit-pipelines.ts dtc_ecom && SYNTHETIC_AUDIT_MODE=1 EXPO_PUBLIC_NARRATIVE_LLM_V2=1 npx tsx .local/scripts/run-audit-pipelines.ts local_services"
 
 [userenv]
 
