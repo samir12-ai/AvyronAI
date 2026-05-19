@@ -1,0 +1,38 @@
+Subject: PBCL Workstream — Honest Status Post PBCL-12 Fix + Corrected Proposal for Next Steps
+
+Hi team,
+
+Wanted to share an honest status update on the PBCL workstream and a corrected proposal for next steps.
+
+**What actually landed (PBCL-12)**
+
+While tracing the Awareness engine failure, I identified a positional-argument bug at the orchestrator → Awareness call boundary. The BCL context object was being passed into the wrong argument slot, which meant BCL Stage 2 was never firing — and the resulting crash was masking itself as a DEPTH_FAILED signal.
+
+The fix was a single-line correction in server/orchestrator/index.ts (~L2287). No changes were made to the Awareness engine itself or to awareness-depth-interpreter.ts.
+
+Verified outcome (Fifth Measurement):
+- BCL_INJECTIONS: 0 → 2
+- Stage 2 calls: 0 → 2 of 3 (dtc_ecom blocked earlier on a separate, pre-existing AEL JSON-parse bug — unrelated to BCL)
+- Awareness output: json_null → 13/30 (b2b_saas), 12/30 (local_services)
+
+**What is still failing**
+
+The depthScore gate is not yet passing. Post-fix, Awareness runs without crashing, but still hits DEPTH_FAILED at depthScore=0.1 against a threshold of ≥0.5. This is because the synthetic seeds do not produce enough AEL evidence to lift the score. As a result, Funnel, Persuasion, and Integrity are still returning json_null — meaning we have no judge scores for those engines yet, only nulls.
+
+**Proposed next steps**
+
+Given that engines 7–10 have not produced scoreable output yet, propagating BCL to those engines now would be propagating on a guess. The data-driven propagation priority the team wants does not exist until those engines actually run.
+
+The correct sequence is:
+
+1. PBCL-13: Strengthen synthetic seed coverage so AEL produces sufficient evidence to lift depthScore above the 0.5 gate.
+2. PBCL-15: Run the full 3-industry v5 audit. If PBCL-13 successfully lifts depthScore, this will be the Sixth Measurement and the first point where Funnel/Persuasion/Integrity have real judge scores. If seeds prove insufficient on the first attempt, the v5 run will still show nulls and we will iterate on PBCL-13 before re-measuring.
+3. PBCL-18: Use those scores to identify which engines most need BCL grounding, then propagate engine-by-engine with a measurement pass between each.
+
+Running the audit again now would reproduce the Fifth Measurement unchanged. The next meaningful run is after PBCL-13 lands.
+
+This sequencing is consistent with B1 doctrine (Truthfulness over confidence) and the §13-criterion-2 acceptance threshold (≥+2 score lift on at least 2 of 3 industries, with no industry regressing by ≥2 points) — no rollout claim will be made until that bar is met.
+
+Happy to discuss if the team sees it differently.
+
+Best regards
