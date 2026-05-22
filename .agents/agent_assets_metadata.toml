@@ -305,3 +305,15 @@ id = "-5PkM4WbKge7xCYmPoCX_"
 uri = "file://.local/exports/avyron-file-tree.txt"
 type = "text"
 title = "Avyron AI — complete file tree, sizes, and active/unused notes"
+
+[[outputs]]
+id = "YITscaj15UjkBNbguzSn0"
+uri = "file://replit.md"
+type = "text"
+title = "replit.md (cleaned — 201 lines, ~4,800 tokens)"
+
+[[outputs]]
+id = "ILF0kFexfqrYqUDS5G2_u"
+uri = "file://.local/docs/seals/replit-md-prune-2026-05-22.md"
+type = "text"
+title = "replit-md-prune-2026-05-22.md (new archive — 178 lines, §12 sections)"
