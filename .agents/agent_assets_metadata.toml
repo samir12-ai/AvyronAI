@@ -299,3 +299,9 @@ id = "xVghK-CxtSjlFPJ2up4Vz"
 uri = "file://.local/validation/compare-output-v3.md"
 type = "text"
 title = "v3 Control-vs-Treatment Comparator"
+
+[[outputs]]
+id = "-5PkM4WbKge7xCYmPoCX_"
+uri = "file://.local/exports/avyron-file-tree.txt"
+type = "text"
+title = "Avyron AI — complete file tree, sizes, and active/unused notes"
