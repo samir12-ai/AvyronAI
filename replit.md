@@ -8,223 +8,194 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Core Design Principles
-The project uses a monorepo structure, TypeScript for type safety, and platform abstraction for cross-platform compatibility (iOS, Android, Web). It features dynamic theming, extensive indexing, Zod-based request validation, self-healing snapshot resolution, system-wide fail-safe enforcement, and guarantees non-empty outputs from all engines. Cross-engine isolation validation prevents prohibited write targets.
+**Frontend** — Expo SDK + React Native, Expo Router for navigation, React Context for global state, TanStack React Query for server state, React Native Reanimated for animations, i18n-js for i18n.
 
-### Frontend
-The frontend is built with Expo SDK, React Native, Expo Router for navigation, React Context API for global state management, and TanStack React Query for server state. It includes a custom component library, React Native Reanimated for animations, and i18n-js for internationalization.
+**Backend** — Express.js + Node.js + TypeScript, RESTful APIs. Dual AI engine (OpenAI GPT + Google Gemini), specialized models for image/design, autonomous engine with guardrails and a decision feedback loop.
 
-### Backend
-The backend employs Express.js with Node.js and TypeScript, exposing RESTful APIs. It integrates a dual-AI engine (OpenAI GPT and Google Gemini) for content and strategy, specialized models for AI image/design, and an autonomous engine for marketing decisions with guardrails and a decision feedback loop.
+**Data Storage** — Client-side via AsyncStorage. Server-side PostgreSQL with Drizzle ORM.
 
-### Data Storage
-Client-side data is stored using AsyncStorage. Server-side data is managed in PostgreSQL with Drizzle ORM.
+**Core principles** — Monorepo, TypeScript everywhere, platform abstraction (iOS/Android/Web), dynamic theming, Zod request validation, self-healing snapshot resolution, system-wide fail-safe enforcement, guaranteed non-empty engine outputs, cross-engine isolation validation.
 
-### Key Features
-- **Dashboard**: Revenue-focused KPIs, campaign metrics, Strategic Narrative causal chain card, inline AI chat, **Perception Layer** (Watchtower 3-line market/plan/freshness strip + Activity Timeline).
-- **Causal Narrative Layer**: Transforms engine outputs into a 5-step causal chain (Market Problem → Why It Happens → What We Do → How We Fix It → What To Execute).
-- **Content Creation**: AI Writer (text) and AI Designer (image generation).
-- **AI Management**: AI Audience Engine, Auto Publish, Market DB, Performance Intelligence Layer.
-- **Strategic Engines**: Positioning, Differentiation, Mechanism, Offer, Funnel, Integrity, Awareness, Persuasion — unified under Strategy Root System (single enforced root hash) and Product DNA identity layer.
-- **Competitive Intelligence (MIv3)**: 8-engine pipeline for real-data competitor analysis across Instagram, Website, Blog, TikTok, Google Reviews. Tiered signal quality gate (high≥0.75, medium≥0.50, rejected<0.50).
-- **Authority Hierarchy**: Strict Awareness → Funnel → Persuasion with cross-engine validation.
-- **Analytical Enrichment Layer (AEL v2)** + **Causal Enforcement Layer (CEL)**: AEL produces WHY-level root causes; CEL programmatically enforces alignment between root causes and downstream engine outputs. `AnalyticalPackage` carries `isPartial`/`partialReason` flags.
-- **AI Orchestrator**: Single-entry runner of 15 engines in priority order with checkpoint persistence; generates 9-section strategic plans via AI synthesis. `scopedEngines` selective re-runs pre-load best-available audience + latest COMPLETE MI snapshot.
-- **BuildPlanLayer** + **Execution Activation Layer**: Convert engine analysis into daily/weekly instructions; auto-trigger content production on plan approval.
-- **Fortress Completion Engines (V3)**: Statistical Validation, Budget Governor, Channel Selection, Iteration, Retention.
-- **Adaptive Data Source System**: `campaign_metrics` ↔ `benchmark` modes with adaptive switching + Statistical Validity Layer.
-- **Concurrency & Scalability Hardening**: Lock timeouts, batched dedup, stale recovery, atomic plan approval, global job queue, per-account job budgets, shared market data cache, request dedup, rate gating.
-- **Audit & Control System**: 5-panel dashboard (feeds, AI usage, gate status, decisions, publish history) + Continuity panel (Seal #17).
-- **Decision Policy Layer** + **Decision Attribution Layer**: Confidence thresholds across plan synthesis / memory mutation / outcome tracking / autonomous worker. Campaign-scoped `strategy_decisions` and `decision_outcomes`. Weighted multi-decision attribution links calendar entries to multiple decisions.
-- **Unified Memory Policy Enforcement**: All `strategy_memory` writes pass through `policyEnforcedMemoryCheck()`. Operational vs strategic memory separated.
-- **Plan Synthesis Hardening**: `SynthesizedPlan` includes `PlanSource`, `degraded` flag, `synthesisVerification`. Fallback plans isolated from memory reinforcement. Memory writes linked to triggering `decision_outcomes` for provenance.
-- **Signal Origin Type System**: Every signal tagged `real | competitor | inferred | fallback | unknown` and propagated for risk-aware planning.
-- **Cross-Engine Integrity Enforcement**: `safeToExecute` cross-references critical engine statuses and CEL results.
-- **System Control Layer**: Final authority layer running after all engines; produces `SystemControlVerdict` with execution mode, block reasons, downgrades, repair actions.
-- **Evidence Integrity Filter (Audience Engine)**: Confidence downgrade (not binary erase) for low-evidence signals; inferred pains capped (5 objection-inferred, 3 driver-inferred).
-- **Signal-First Positioning**: `buildSignalClaimSeeds()` pre-builds enemy/contrast/narrative seeds from signal labels BEFORE LLM call; LLM is refiner not generator. `validateClaimGrounding()` post-LLM gate. Orphaned claims dropped at the territory level. Result: signal coverage 0%→25%, orphans 8→0.
-- **Text Sanitizer Layer**: Platform-aware text cleaning at the earliest point in each pipeline.
+**Key feature surfaces** (full inventory archived in [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §10):
+
+- Dashboard (revenue KPIs, Strategic Narrative card, inline chat, Perception Layer)
+- Causal Narrative Layer (5-step chain)
+- Content Creation (AI Writer + AI Designer)
+- 15-engine AI Orchestrator (Positioning, Differentiation, Mechanism, Offer, Funnel, Integrity, Awareness, Persuasion, + Fortress Completion engines)
+- Strategy Root System + Product DNA identity layer
+- Competitive Intelligence (MIv3, 8-engine pipeline, tiered quality gates)
+- AEL v2 + CEL (causal enforcement)
+- BuildPlanLayer + Execution Activation Layer
+- Adaptive Data Source System (`campaign_metrics` ↔ `benchmark`)
+- Concurrency & Scalability Hardening
+- Audit & Control System (5-panel + Continuity panel)
+- Decision Policy + Attribution Layers (campaign-scoped `strategy_decisions`/`decision_outcomes`)
+- Unified Memory Policy Enforcement (`policyEnforcedMemoryCheck()`)
+- Plan Synthesis Hardening (`SynthesizedPlan` with `PlanSource`/`degraded`/`synthesisVerification`)
+- Signal Origin Type System (`real|competitor|inferred|fallback|unknown`)
+- System Control Layer (`SystemControlVerdict`)
+- Evidence Integrity Filter (Audience)
+- Signal-First Positioning + Text Sanitizer Layer
 
 ## External Dependencies
 
-### AI Services
-- OpenAI API, Google Gemini
-
-### Data Acquisition & Proxy
-- Bright Data residential proxy pool (Instagram, TikTok, Website/Blog, Google Reviews)
-- Apify (fallback for TikTok scraping)
-
-### Database
-- PostgreSQL (Drizzle ORM, schema floor enforced on boot)
-
-### User Authentication
-- JWT-based email/password. Access tokens (**14d TTL** during the JWT_LEGACY grace window for client compat — sunset to 60m once mobile gains `/api/auth/refresh` wiring) carry `audience="avyron-ai"` + `issuer="avyron-auth"`. Refresh tokens (30d) rotate on every `/api/auth/refresh`, use `auth_sessions` table, reuse detection cascade fires only when presented secret bcrypt-matches a revoked row. `/api/auth/logout` verifies the refresh secret before revoking. Account lockout: 5 failed logins / 15min → 423 with 15min `Retry-After` (`auth_lockouts` table).
-- **JWT 7-day legacy grace window (Seal #2 / F9.2).** Pre-deploy tokens lacking `aud`/`iss` accepted for `JWT_LEGACY_GRACE_DAYS` (default 7d). Cutoff resolves with a stable persisted stamp at `.local/state/jwt-legacy-cutoff` (override path via `JWT_LEGACY_STATE_FILE`); `JWT_LEGACY_CUTOFF_ISO` overrides if set. Monitor `[Auth] JWT_LEGACY_GRACE | hits=...` — when it stops appearing for ≥48h, set `JWT_LEGACY_CUTOFF_ISO` to a past timestamp to force-close.
-- Stripe webhook integration for subscription management.
-- Per-account AI rate limit (Seal #2 / F1.8): 50 calls/hr/account/route on `/api/generate-content|ad|reel-script|calendar`. Override via `AI_RATE_LIMIT_PER_HOUR`. Returns `429 + Retry-After + AI_RATE_LIMIT_EXCEEDED`.
-
-### Other
-- Video Credits System (per-user generation credits).
-- Static landing/pricing pages served by Express.
-- Social Platforms: Instagram, Facebook, Twitter, LinkedIn, TikTok.
+- **AI**: OpenAI API, Google Gemini.
+- **Data acquisition**: Bright Data residential proxy pool (Instagram, TikTok, Website/Blog, Google Reviews); Apify (TikTok fallback).
+- **Database**: PostgreSQL via Drizzle ORM (schema floor enforced on boot).
+- **Auth**: JWT email/password (access 14d during legacy grace; refresh 30d with rotation). Account lockout 5/15min. Stripe webhook for subscriptions. Per-account AI rate limit 50/hr/route. Full prose archived in [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §1.
+- **Other**: Video Credits System, static landing/pricing served by Express, social platforms (IG/FB/Twitter/LinkedIn/TikTok).
 
 ---
 
 ## Active doctrine (live rules — non-negotiable)
 
-Implementation detail, full per-rule tables, evidence, and historical justification live in `.local/docs/seals/`. The summaries below are authoritative; the archive files are read-only history.
+Authoritative summaries follow. Full per-rule prose, evidence, and history archived in `.local/docs/seals/`.
 
 ### D1–D5 Semantic Contract Hardening
 
 System-wide policy governing every live-decision and live-reporting field across orchestrator, system-control, recovery, snapshot, agent stream, build-plan, and contract registry.
 
-- **D1** — **No semantic fallback.** `?? status`, `|| status`, `?? verdict`, `|| verdict`, `?? outcome`, `|| outcome` patterns are FORBIDDEN on any live decision path. Enforced by ESLint rule `semantic/no-semantic-fallback` (`.local/eslint-rules/no-semantic-fallback.js`) scoped to `server/{agent,system-control,orchestrator,build-plan-layer,recovery-*,strategy}/**`. Detects RHS, LHS, ternary, alias-variable, AND destructured-default patterns.
-- **D2** — **Every meaning has its own canonical field.** Generic `status` carries execution semantics ONLY (F1). Verdict, validation, trust, action, and gate-outcome each get a dedicated field name. Enforced via contract registry.
-- **D3** — **Strict enums only.** Every verdict-shaped field uses `z.enum([...])`, never `z.string()`.
-- **D4** — **Legacy fields are historical only.** May exist for display/migration; MAY NOT satisfy contracts, orchestration, verdict, recovery, budget/channel decisions, or trust evaluation.
-- **D5** — **Missing canonical → CONTRACT_INCOMPLETE.** Never silently substitute. The boundary helper returns `INCOMPLETE` and live reasoning is blocked.
-
-Reference: `INTEGRITY_CONTRACT` in `server/orchestrator/contract-registry/registry.ts`. Proof suites: `server/tests/{integrity-contract,validation-contract,budget-action-contract,channel-decision-contract,agent-stream-semantic-separation,doctrine-regression}.test.ts`.
+- **D1** — No semantic fallback. `?? status`, `|| verdict`, `?? outcome` etc. are FORBIDDEN on any live decision path. Enforced by ESLint rule `semantic/no-semantic-fallback`.
+- **D2** — Every meaning has its own canonical field. Generic `status` carries execution semantics ONLY.
+- **D3** — Strict `z.enum([...])` for every verdict-shaped field, never `z.string()`.
+- **D4** — Legacy fields are display/migration only; MAY NOT satisfy contracts.
+- **D5** — Missing canonical → `CONTRACT_INCOMPLETE`. Never silently substitute.
 
 Canonical field names: `validationState` ∈ {validated|provisional|weak|rejected}, `decision.action` ∈ {test|scale|hold|halt}, `primaryChannel.decisionGate.outcome` ∈ {recommended|support_channel|exploratory}, `integrityVerdict` ∈ {PASS|PARTIAL|FAIL}, `executionStatus` ∈ {COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT|BLOCKED_BY_INTEGRITY}.
 
-**Inline ESLint suppression policy:** every `eslint-disable[-next-line] semantic/no-semantic-fallback` MUST appear in the H1–H7 archive allowlist. New suppressions require (a) same-line justification comment, (b) allowlist entry in the same PR, (c) architect review note. Current allowlist size: 4.
+Reference: `INTEGRITY_CONTRACT` in `server/orchestrator/contract-registry/registry.ts`. Inline ESLint suppression allowlist size: 4.
 
-> Full detail, Seal #9 closures, suppression allowlist, transitional exceptions: [`.local/docs/seals/semantic-contract-hardening-h1-h7.md`](.local/docs/seals/semantic-contract-hardening-h1-h7.md).
+> Expanded prose + suppression policy: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §2. Detailed history: [`.local/docs/seals/semantic-contract-hardening-h1-h7.md`](.local/docs/seals/semantic-contract-hardening-h1-h7.md).
 
 ### Continuity Architecture (Seals #13–#19)
 
-**Founding doctrine: operational silence is a system failure category.** Originated from a May 2026 audit where the User Agent pipeline silently produced zero output for ~4 weeks because no scheduler invoked `runBoss()`. Operator handoff one-pager: [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md).
+**Founding doctrine: operational silence is a system failure category.**
 
 **Core invariants:**
 
-- **INVARIANT-RETRY** — Failed OR partial boss runs MUST NEVER be suppressed. `SUCCESS_STATUSES = new Set(["completed"])` in `scheduler.ts`; `partial` and `failed` outcomes both DELETE the claim row via `releaseClaimForRetry()`. Any change letting `partial`/`failed` short-circuit a window is a P0 defect.
-- **MULTI-REPLICA-SAFE** — Two scheduler instances MUST NOT both invoke runBoss for the same `(campaign, plan, window)`. DB-level claim handshake via `tryClaimWindow()` → `INSERT INTO continuity_window_claims ... ON CONFLICT DO NOTHING RETURNING`.
-- **CHAIN-STATE-EXPLICIT** — A chain that lacks introspection wiring MUST be classified `UNKNOWN`, never silently `HEALTHY`. `ChainState` = `HEALTHY | DEGRADED | DEAD | UNKNOWN`. Per-chain thresholds: DEGRADED at lag > `expectedIntervalMs * degradedMultiplier` (default 2×); DEAD at lag > `expectedIntervalMs * deadMultiplier` (default 4×) OR `lastObservedRunAt === null` with introspection wired.
-- **NO-TENANT-LEAK** — Public `/healthz/continuity` MUST NOT expose per-tenant fields. Admin-gated full report (timing-safe `METRICS_ADMIN_TOKEN` check) returns the unredacted health; public surface returns operational counters + per-chain state/lag only.
+- **INVARIANT-RETRY** — Failed OR partial boss runs MUST NEVER be suppressed. `SUCCESS_STATUSES = new Set(["completed"])`; `partial`/`failed` both DELETE the claim row.
+- **MULTI-REPLICA-SAFE** — DB claim handshake via `tryClaimWindow()` `ON CONFLICT DO NOTHING RETURNING` — two scheduler instances MUST NOT both invoke runBoss for the same `(campaign, plan, window)`.
+- **CHAIN-STATE-EXPLICIT** — Chains lacking introspection wiring MUST be classified `UNKNOWN`, never silently `HEALTHY`. `ChainState` = `HEALTHY|DEGRADED|DEAD|UNKNOWN`.
+- **NO-TENANT-LEAK** — Public `/healthz/continuity` MUST NOT expose per-tenant fields; admin-gated full report requires timing-safe `METRICS_ADMIN_TOKEN`.
+- **NO SILENT CATCHES** — `} catch {}` / `.catch(() => {})` forbidden. Use `_logSilentLoad` / `_noteAuditWriteFailure` or `console.error("[Component] EVENT_TAG ...")`.
+- **NO BARE LLM CALLS** — every AI call MUST race against a wall-clock timeout (`AI_OPENAI_HARD_TIMEOUT_MS`, `AI_GEMINI_HARD_TIMEOUT_MS`, default 60s).
+- **8-AUDIT GATE (Seal #19)** — every new chain/scheduler/lock/in-flight Map MUST pass an 8-audit pass before the next seal opens.
 
-**Operator alerts:** `supervisor.schedulerState !== "HEALTHY"` for ≥10min; `supervisor.chainsDead > 0`; `lastSupervisorTickAt` older than `intervalMs * 1.2`; `continuity_dead_cycles_total > 0`.
+**Steady-state expectation = 0**: `_bossInFlightStats().zombieEvictions`, `_continuityTickInflightStats().zombieEvictions`, `_activeJobsStats().zombieEvictions`, `agent_context_section_load_failed`, `[MIv3] AUDIT_WRITE_FAILED`, `[Orchestrator] STUCK_JOB_UPDATE_FAILED`, `continuity_dead_cycles_total`.
 
-**Silent-degradation rules (Seals #15/#16):** No silent catches (`} catch {}`, `.catch(() => {})` forbidden — use `_logSilentLoad` / `_noteAuditWriteFailure` or `console.error("[Component] EVENT_TAG ...")`). No bare in-flight promise maps — each entry stamped with `{ promise, startedAt, token }`, watchdog evicts older than ceiling, token-check in `.finally()`. No bare AI calls — every external AI/LLM call MUST race against a wall-clock timeout (`AI_OPENAI_HARD_TIMEOUT_MS`, `AI_GEMINI_HARD_TIMEOUT_MS`, default 60s; Gemini's `AbortController.signal` wired to `GenerateContentConfig.abortSignal` so SDK fetch is cancelled). Every inline scheduler gets a stored timer handle reachable from `gracefulShutdown`.
+**Operator-visible surface (Seal #17)**: Grafana dashboard `.local/dashboards/continuity.json` + in-app Continuity panel in `app/audit-control.tsx`. Admin endpoints `GET /api/admin/continuity/panel` and `/campaign/:campaignId/last-decision` (same `X-Admin-Token` gate as `/metrics`).
 
-**Operator-visible signals (steady-state expectation = 0 / absent):** `_bossInFlightStats().zombieEvictions`, `_continuityTickInflightStats().zombieEvictions`, `_activeJobsStats().zombieEvictions`, `agent_context_section_load_failed`, `[MIv3] AUDIT_WRITE_FAILED`, `[Orchestrator] STUCK_JOB_UPDATE_FAILED`, `[FetchOrch] STUCK_COMPETITOR_MARK_FAILED` / `MARK_ENRICHING_FAILED` / `MARK_FAILED_AFTER_ERROR`.
+**Lifecycle behavioural simulation (Seal #18)**: 18 scenario tests in `server/tests/lifecycle/scenario-NN-*.test.ts` with deterministic clock, fully hermetic, 100-iter flake checker.
 
-**Canonical operator-signal thresholds:** `continuity_scheduler_last_tick_epoch_seconds` — alarm if `(now - value) > 7200` (2h); `continuity_missed_windows_total` — non-zero accumulates historical depth of silence (read alongside `plan_anchor_resets` for context); `continuity_heartbeat_stale_total` — any rate > 0 means supervisor classified scheduler as DEAD; `continuity_dead_cycles_total` — strictly 0 (any positive value = a campaign with no boss_run for ≥8 days).
+> Expanded prose (alerts, env knobs, thresholds, all signal lists): [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §3. Per-seal history: `seal-13` through `seal-20-*.md`. Operator handoff: [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md).
 
-**Env knobs:** `CONTINUITY_SCHEDULER_DISABLED`, `CONTINUITY_TICK_INTERVAL_MS` (1h default), `CONTINUITY_SUPERVISOR_DISABLED`, `CONTINUITY_SUPERVISOR_INTERVAL_MS` (5min default), `REPLICA_ID`, `BOSS_INFLIGHT_MAX_AGE_MS` (30min), `CONTINUITY_TICK_MAX_AGE_MS` (15min), `AI_GEMINI_HARD_TIMEOUT_MS` (60s), `MI_ACTIVE_JOBS_MAX_AGE_MS` (30min).
+### Orchestrator / Replay / UX / Memory — live invariants
 
-**Operator-visible surface (Seal #17):** Grafana dashboard (`.local/dashboards/continuity.json`, 16 panels, `avyron-continuity`) + in-app Continuity panel (6th panel of Audit & Control, `app/audit-control.tsx`) gated on `EXPO_PUBLIC_METRICS_ADMIN_TOKEN`. Backend endpoints (mounted in `server/index.ts`, same `X-Admin-Token` gate as `/metrics` and `/healthz/continuity`): `GET /api/admin/continuity/panel`, `GET /api/admin/continuity/campaign/:campaignId/last-decision`. Per-campaign skip-reason badge powered by 24h `continuity_ticks` JSONB histogram (single round-trip).
+Five doctrinal sections (Replay Harness P4-A, Orchestrator Decomposition P4-E, UX Projection P8, Canonical Fact Ownership P1, Memory Unification P2) archived in [`.local/docs/seals/intelligence-architecture-archive.md`](.local/docs/seals/intelligence-architecture-archive.md). Live invariants that remain authoritative:
 
-**Lifecycle behavioral simulation (Seal #18):** 18 scenario tests (`server/tests/lifecycle/scenario-NN-*.test.ts`) fake `Date.now()` and drive `runContinuityTick` through a real DB-state mock. Hermetic (all scheduler-touching modules `vi.mock`'d via `_harness.ts`), deterministic clock, no-flakes (`scripts/lifecycle-flake-check.sh` 100-iter gate), state-not-logs assertions. Cross-realm `Date` pitfall: harness's `resolveEffectiveAnchorFor` uses structural duck-typing (truthy + `.getTime()`) instead of `instanceof Date`.
-
-**8-audit post-implementation gate (Seal #19):** every seal landing a new chain, scheduler, lock, or in-flight Map MUST be followed by an 8-audit pass before the next seal opens (Architectural, Runtime baseline, Scheduler/chain registry, Orchestration silent-failure, Memory write-path regression, Degraded-state canonical flag, Fail-safe, D1–D5 doctrine). Each returns PASS / DOCUMENTED_EXCEPTION (sunset date required) / FIX_REQUIRED. Report archived under `.local/docs/seals/seal-N-audits.md`.
-
-> Per-seal archive index lives at the bottom of this file.
-
-### Orchestrator / Replay / UX / Memory — live invariants (full detail archived)
-
-Five doctrinal sections (Replay Harness P4-A, Orchestrator Decomposition P4-E, UX Projection P8, Canonical Fact Ownership P1, Memory Unification P2) rotated to [`.local/docs/seals/intelligence-architecture-archive.md`](.local/docs/seals/intelligence-architecture-archive.md). Live invariants that remain authoritative:
-
-- **Replay harness (P4-A).** All `server/orchestrator/**` LLM calls funnel through `withReplayRecorder(...)`; direct `aiChat`/`aiGemini`/`getOpenAI`/`getGemini` imports forbidden inside `server/orchestrator/replay/**` (ESLint `orchestrator-replay/no-bare-llm-call-in-replay`). Production recording OFF by default. CLI `npm run replay:run -- --cassette <hash> [--against current|candidate]`. `--against current` is non-hermetic until P4-B wires an injected LLM adapter.
-- **Orchestrator decomposition (P4-E).** Legacy ~4900-line `runOrchestrator` is the ONLY working execution path (candidate scaffold throws `SCAFFOLD_NOT_WIRED`). PLAN_DEGRADED surface computed by `synthesisDegradationBuilder` BEFORE first `persistPlan`. `runOrchestrator` line ceiling 5000 (ESLint `orchestrator/no-new-large-file`); per-sibling-module ceiling 200. `ORCH_USE_<MODULE>` env reads banned (ESLint `orchestrator/no-dispatch-flags`); `cutover_state` table archived by migration 032 (ESLint `orchestrator/no-cutover-state-reference`). `/healthz/orchestrator-parity` is a regression observer; no `readyForCutover` field. Metrics: `cv15_parity_block_age_hours`, `orch_parity_run_total{outcome}`, `orch_parity_divergence_total{class,module}`, `orch_cassette_path_coverage{path_shape,covered}`. Schema floor `REQUIRED_SCHEMA_VERSION = 32`.
-- **UX projection (P8).** Customer surface speaks outcomes; code surface speaks canonical. Operator-grade panels gated behind `useOperatorSurface()` (`hooks/useOperatorSurface.ts`). Customer JSX MUST NOT contain internal engine names or raw doctrinal tokens. Verdict rendering goes through `lib/run-truthfulness-presentation.ts → presentRunTruthfulness()` (returns `null` when inputs missing — D5). CI: `scripts/check-engine-vocabulary.sh` / `npm run lint:vocab`. Customer 4-screen pivot in `ai-management.tsx`: Connect → publisher, Diagnose → intelligence, Roadmap → buildplan/ExecutionPlan, Monitor → control.
-- **Canonical fact ownership (P1).** `strategy_memory` written ONLY through `memoryStore` (`server/memory-system/store.ts`) via `upsertByFingerprint` / `updateById` / `applyDecayUpdate` (ESLint `canonical-fact/no-direct-strategy-memory-write`, allowlist: store + tests + migrations). Operational state (`content_rhythm`, `exploration_budget`, agent rhythm) lives in `engine_operational_state` singleton — never `strategy_memory`. One write gate: `validateDecisionForMemoryWrite → policyEnforcedMemoryCheck` (no OPERATIONAL_MEMORY_TYPES bypass). Writes recorded to `cv06_memory_writes_total{outcome,memoryType,engine}`. Live confidence fields: `confidence_score` + `direction ∈ {reinforce|avoid|neutral}` (legacy `is_winner` / `confidence_score_normalized` display-only).
-- **Memory unification (P2).** Reinforce by FK: `memoryStore.reinforceByDecisionId(accountId, campaignId, decisionId, patch)` looks up `strategy_memory.decision_id = decisionId`; `boundRowCount=0` triggers `MEMORY_UNBOUND` + CV-11. Outcome rows immutable once evaluated (`WHERE outcome IS NULL` + DB trigger `decision_outcomes_immutability_check`). Single read-time multiplicative decay (`computeEffectiveConfidence` in `memory-system/manager.ts`); write-time decay REMOVED. Same-fingerprint flip rejected unless incoming confidence strictly greater. Reader orders by `confidence_score DESC, updated_at DESC` (index `strategy_memory_account_campaign_confidence_idx`). Every write carries `provenance_origin ∈ {outcome|mutation|engine_seed|exploration|decay|unknown}`. CV-11 hallucination-exposure counter `cv11_hallucination_exposure_total{kind,engine}` — steady-state 0.
+- **Replay harness (P4-A).** All `server/orchestrator/**` LLM calls funnel through `withReplayRecorder(...)`. ESLint `orchestrator-replay/no-bare-llm-call-in-replay` blocks direct `aiChat`/`aiGemini`/`getOpenAI`/`getGemini` imports inside `server/orchestrator/replay/**`. Production recording OFF by default.
+- **Orchestrator decomposition (P4-E).** Legacy ~4900-line `runOrchestrator` is the ONLY working path (candidate scaffold throws `SCAFFOLD_NOT_WIRED`). `runOrchestrator` line ceiling 5000 (ESLint `orchestrator/no-new-large-file`). Per-sibling-module ceiling 200. `ORCH_USE_<MODULE>` env reads banned. `cutover_state` table archived by migration 032. `/healthz/orchestrator-parity` is a regression observer (no `readyForCutover` field). Schema floor `REQUIRED_SCHEMA_VERSION = 32`.
+- **UX projection (P8).** Customer surface speaks outcomes; code surface speaks canonical. Operator-grade panels gated behind `useOperatorSurface()` (`hooks/useOperatorSurface.ts`). Customer JSX MUST NOT contain internal engine names or raw doctrinal tokens. Verdict rendering goes through `lib/run-truthfulness-presentation.ts → presentRunTruthfulness()` (returns `null` when inputs missing — D5). CI: `npm run lint:vocab`.
+- **Canonical fact ownership (P1).** `strategy_memory` written ONLY through `memoryStore` (`server/memory-system/store.ts`). ESLint `canonical-fact/no-direct-strategy-memory-write` (allowlist: store + tests + migrations). Operational state lives in `engine_operational_state` singleton — never `strategy_memory`. One write gate: `validateDecisionForMemoryWrite → policyEnforcedMemoryCheck`.
+- **Memory unification (P2).** Reinforce by FK via `memoryStore.reinforceByDecisionId()` — `boundRowCount=0` triggers `MEMORY_UNBOUND` + CV-11. Outcome rows immutable once evaluated. Single read-time multiplicative decay (`computeEffectiveConfidence`); write-time decay REMOVED. Same-fingerprint flip rejected unless incoming confidence strictly greater. Every write carries `provenance_origin ∈ {outcome|mutation|engine_seed|exploration|decay|unknown}`. CV-11 `cv11_hallucination_exposure_total` — steady-state 0.
 
 ### Perception Layer (Slices 1+2, May 2026)
 
-Customer-facing read-only surface that exposes hidden runtime intelligence (continuity, boss verdicts, scheduler decisions) in safe English. Allowlist-translator architecture: `shared/perception-translator.ts` maps internal verdicts (Q1=WORKING/DEGRADED/UNKNOWN, Q2=STABLE/SHIFTED/UNCERTAIN, lowercase continuity decision enum, boss_run status, reanchor reason) to customer-safe `{tone, headline, detail}`. **Fail-closed:** unknown inputs return `null` and are dropped — never coerced. Endpoints (under `requireCampaign` auth, mounted in `server/perception-routes.ts`): `GET /api/perception/watchtower` (3 lines: market, plan, freshness), `GET /api/perception/activity?sinceHours=N` (unified timeline from `boss_runs` + `plan_anchor_resets` + `continuity_ticks.notes` filtered by BOTH `accountId` AND `campaignId` inside JSONB). Customer payload contains NO internal UUIDs/status strings — event ids are opaque `${kind}:${timestamp}`. Frontend: `hooks/usePerception.ts` (React Query, 5min stale + refetch), `components/WatchtowerStrip.tsx`, `components/ActivityTimeline.tsx`, mounted in `app/(tabs)/index.tsx`.
+Customer-facing read-only surface that exposes hidden runtime intelligence in safe English. Allowlist-translator in `shared/perception-translator.ts` — **fail-closed**, unknown inputs return `null`. Endpoints (under `requireCampaign`): `GET /api/perception/watchtower`, `GET /api/perception/activity?sinceHours=N`. Customer payload contains NO internal UUIDs/status strings. Frontend: `hooks/usePerception.ts`, `components/WatchtowerStrip.tsx`, `components/ActivityTimeline.tsx`, mounted in `app/(tabs)/index.tsx`.
 
-### Narrative LLM v2 default-on + v1 sunset (P204, May 2026)
+> Expanded prose: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §4.
 
-The Causal Narrative Layer's v2 grounded-LLM rewrite path (`server/narrative-layer.ts:~376`) is now **default-on**. Behaviour:
+### Narrative LLM v2 default-on + v1 sunset (P204)
 
-- **Default-on.** Unset `EXPO_PUBLIC_NARRATIVE_LLM_V2` (or any value not in `{0,false,off,no}`) → v2 runs. Only an explicit truthy-falsy escape (`EXPO_PUBLIC_NARRATIVE_LLM_V2=0`) reverts to v1 template-only — kept as an ops escape hatch during the sunset window.
-- **Fallback honesty.** When v2 LLM output fails grounding (low evidence, malformed JSON, hallucinated entity), `narrativeMode` flips to `llm_v2_failed_template_fallback` — v1 template text is served but the mode tag tells operators what happened (B4 — explicit classification over hidden ambiguity).
-- **Pre-sunset safety net.** `npx tsx .local/scripts/narrative-v1-v2-cassette.ts <campaignId> <accountId>` captures one prod-shaped input through both paths and writes `v1.json` / `v2.json` / `diff.json` to `.local/validation/narrative-cassettes/<ts>__<campaign>/` for human review. Run for a representative campaign per industry before deleting v1 code.
-- **Sunset target: 2026-07-01** (≥6 weeks of v2-default observation). Sunset is gated on: (a) zero unexplained `LLM_V2_GROUNDING_REJECTED` rate spikes for ≥4 consecutive weeks, (b) cassette review for ≥3 industries with no v1-only-better cases, (c) `narrativeMode=llm_v2_failed_template_fallback` rate < 5% rolling 14d. Once met, remove the v1 template-only branch and the escape-hatch env read.
+v2 grounded-LLM rewrite (`server/narrative-layer.ts:~376`) is **default-on**. `EXPO_PUBLIC_NARRATIVE_LLM_V2=0` reverts to v1 template (ops escape hatch). When v2 grounding fails → `narrativeMode = llm_v2_failed_template_fallback`. Pre-sunset cassette tool at `.local/scripts/narrative-v1-v2-cassette.ts`. **Sunset target: 2026-07-01** gated on grounding-rejected rate stability + cassette review for ≥3 industries + fallback-mode rate < 5% rolling 14d.
+
+> Expanded prose + sunset criteria detail: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §5.
 
 ### Beta Safety Doctrine (Task #50)
 
-Beta safety is a system property — five non-negotiable values codify how every new piece of code, copy, and operator surface MUST behave: **B1** Truthfulness over confidence. **B2** Visibility over silence. **B3** Safe degradation over fake success. **B4** Explicit classification over hidden ambiguity. **B5** Operational continuity over feature velocity.
+Five non-negotiable axioms for every new piece of code, copy, and operator surface:
 
-The beta-readiness package is the launch governance reference: [`.local/docs/beta-readiness/`](.local/docs/beta-readiness/) (mirrored to [`docs/beta-readiness/`](docs/beta-readiness/) since `.local/` is gitignored). 10 docs cover roadmap, observation plan, stress-test plan, rollout strategy, guardrails, risk register, operator-response playbooks, must-monitor metrics, launch constraints, unresolved-risks log.
+- **B1** Truthfulness over confidence.
+- **B2** Visibility over silence.
+- **B3** Safe degradation over fake success.
+- **B4** Explicit classification over hidden ambiguity.
+- **B5** Operational continuity over feature velocity.
 
-**Per-stage rollback authority:** any rollback trigger from `roadmap.md` §"Inter-phase rollback triggers" allows the on-call operator to enforce caps via env vars (GR19 `BETA_ADMISSIONS_FROZEN`, GR20 `BETA_ACCOUNT_CAP`) without code change. Lifting a freeze requires architect APPROVED.
+Beta-readiness package: [`.local/docs/beta-readiness/`](.local/docs/beta-readiness/) (mirrored to [`docs/beta-readiness/`](docs/beta-readiness/) since `.local/` is gitignored). Per-stage rollback authority + cap env vars (`BETA_ADMISSIONS_FROZEN`, `BETA_ACCOUNT_CAP`).
+
+> Expanded prose: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §6.
+
+---
 
 ## Required Replit Secrets (Seal #7 / F10.5)
 
-The env validator (`server/env-validator.ts`) refuses to boot if any of the following is missing. Set these via Replit Secrets — never via `.replit` `[userenv.shared]` (history-leak risk; F9.7).
+The env validator (`server/env-validator.ts`) refuses to boot if any required secret is missing. Set via Replit Secrets — never via `.replit` `[userenv.shared]` (history-leak risk).
 
 | Secret | Required | Purpose |
 |--------|----------|---------|
 | `DATABASE_URL` | always | Postgres connection string. |
-| `JWT_SECRET` | production (dev: warn) | Auth token signing key. Dev container falls back to a deterministic JWT_SECRET (logged at boot). |
+| `JWT_SECRET` | production (dev: warn) | Auth token signing key. |
 | `OPENAI_API_KEY` | always | OpenAI client. `AI_INTEGRATIONS_OPENAI_API_KEY` accepted as alias. |
 | `BRIGHT_DATA_PROXY_USERNAME` | always | Residential proxy auth (scrapers). |
 | `BRIGHT_DATA_PROXY_COUNTRY` | always | Proxy geo-targeting code. |
-| `STRIPE_WEBHOOK_SECRET` | production (dev: warn) | Stripe signature verification on `/api/stripe/webhook`. Routes fail-closed when secret unset. |
-| `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL injected into landing/pricing HTML in place of host-header trust. Dev auto-derives from `REPLIT_DEV_DOMAIN`. Validated: absolute URL; `https://` in production; hostname must end with `.replit.app` / `.replit.dev` / `.replit.co` OR appear in `ALLOWED_PUBLIC_HOSTS`. |
+| `STRIPE_WEBHOOK_SECRET` | production (dev: warn) | Stripe signature verification; routes fail-closed when unset. |
+| `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL. Validated: absolute URL, `https://` in prod, hostname suffix in allowlist or `ALLOWED_PUBLIC_HOSTS`. |
 | `ALLOWED_PUBLIC_HOSTS` | optional | Comma-separated additional hostname suffixes. |
-| `METRICS_ADMIN_TOKEN` | recommended | Gates `GET /metrics` and unredacted `/healthz/continuity` via `X-Admin-Token`. Absent → 401. |
+| `METRICS_ADMIN_TOKEN` | recommended | Gates `/metrics` and unredacted `/healthz/continuity` via `X-Admin-Token`. |
 | `SENTRY_DSN` | recommended | Server error reporting. Absent → no-op. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | Reserved for upstream OpenTelemetry adoption. |
-| `JWT_LEGACY_CUTOFF_ISO` | optional | Override of auto-persisted JWT legacy-grace cutoff. |
-| `AI_RATE_LIMIT_PER_HOUR` | optional | Override of 50/hr/account/route AI rate limit. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | Reserved for upstream OpenTelemetry. |
+| `JWT_LEGACY_CUTOFF_ISO` | optional | Override auto-persisted JWT legacy-grace cutoff. |
+| `AI_RATE_LIMIT_PER_HOUR` | optional | Override 50/hr/account/route AI rate limit. |
 | `BOSS_INFLIGHT_MAX_AGE_MS` | optional | Boss in-flight watchdog ceiling (default 30min). |
-| `CONTINUITY_TICK_MAX_AGE_MS` | optional | Continuity tick watchdog ceiling (default 15min). |
+| `CONTINUITY_TICK_MAX_AGE_MS` | optional | Continuity tick watchdog (default 15min). |
 | `AI_GEMINI_HARD_TIMEOUT_MS` | optional | Gemini wall-clock timeout (default 60s). |
-| `MI_ACTIVE_JOBS_MAX_AGE_MS` | optional | MIv3 activeJobs Map watchdog (default 30min). |
+| `MI_ACTIVE_JOBS_MAX_AGE_MS` | optional | MIv3 activeJobs watchdog (default 30min). |
 
 ## Observability
 
-- **`GET /healthz`** — unauthenticated liveness probe (`{ ok: true, ts }`).
-- **`GET /metrics`** — Prometheus text exposition. Admin-gated via `X-Admin-Token`.
-- **`GET /healthz/continuity`** — public operational health (no tenant fields); admin token reveals replicaId + per-tenant decision log.
-- **Structured logger (`server/logger.ts`)** — pino-compatible JSON-line facade. Every request gets a `traceId` (AsyncLocalStorage via `server/trace-context.ts`). `stripSecrets()` redacts keys matching `/^(token|refresh.*token|access.*token|secret|api.*key|authorization|cookie|password|jwt)$/i` and scans string values for inline `Bearer …`, `sk-…`, `eyJ…`.
-- **Sentry shim (`server/observability/sentry.ts`)** — dynamic-import wrapper; no-op when `SENTRY_DSN` unset. Global error handler masks `error.message` to `"Internal server error"` in production.
-- **Boot order** (`server/index.ts`): `validateEnv → initOTel → initSentry → ArtifactGuard → loggerMiddleware → /healthz → /metrics → /api → await runMigrations() → workers`.
+- `GET /healthz` — unauth liveness (`{ok, ts}`).
+- `GET /metrics` — Prometheus, admin-gated.
+- `GET /healthz/continuity` — public counters; admin token reveals per-tenant.
+- Structured logger (`server/logger.ts`) — pino-compatible, `traceId` via AsyncLocalStorage, `stripSecrets()` redacts auth keys + inline `Bearer …`/`sk-…`/`eyJ…`.
+- Sentry shim — dynamic-import, no-op when `SENTRY_DSN` unset; prod masks `error.message` to `"Internal server error"`.
+- Boot order: `validateEnv → initOTel → initSentry → ArtifactGuard → loggerMiddleware → /healthz → /metrics → /api → await runMigrations() → workers`.
+
+> Expanded prose: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §12.
 
 ## Migration runner
 
-- `server/migrations/runner.ts` is the single entry point. Acquires `pg_advisory_lock(8675309)` (blocking, bounded by a 5-min `Promise.race` timeout) to serialize across instances, applies pending SQL from `server/migrations/sql/`, then runs legacy `002–014` programmatic migrations. Records each step in `schema_migrations`.
-- **`REQUIRED_SCHEMA_VERSION`** is enforced at boot; boot refuses to start if the database last-applied version is lower AND migration application fails. Current floor: 27.
-- `npm run db:migrate` runs standalone. `npm run db:generate` writes drizzle output to `server/migrations/sql/`.
-- `noTransaction` marker (first line `-- noTransaction`) is honored so `CREATE INDEX CONCURRENTLY` can run outside a transaction.
+`server/migrations/runner.ts` is the single entry point. Acquires `pg_advisory_lock(8675309)` (5-min timeout), applies pending SQL from `server/migrations/sql/`, then runs legacy `002–014` programmatic migrations. `REQUIRED_SCHEMA_VERSION` enforced at boot. `npm run db:migrate` runs standalone. `npm run db:generate` writes drizzle output. First-line `-- noTransaction` marker honoured for `CREATE INDEX CONCURRENTLY`.
+
+> Expanded prose: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §11.
 
 ## GDPR account deletion
 
-`server/account-lifecycle.ts` implements a two-phase, reversible-during-quarantine delete spanning **105 `accountId`-bearing tables**.
+`server/account-lifecycle.ts` — two-phase reversible-during-quarantine delete spanning 105 `accountId`-bearing tables. Phase 1 (`DELETE /api/account`) requires Bearer + `X-Account-Delete-Confirm: PERMANENTLY_DELETE` + current password; masks PII, inserts `account_tombstones` (`purgeAfter = now() + 30d`). Phase 2 reaper runs daily; `cascadeDeleteAccount()` is one PG transaction. `CASCADE_EXEMPT`: `audit_log_archive`, `account_tombstones`, `schema_migrations`, `auth_lockouts`, `messages`.
 
-- **Phase 1 (immediate):** `DELETE /api/account` requires Bearer token, header `X-Account-Delete-Confirm: PERMANENTLY_DELETE`, and current password in JSON body for fresh re-auth via `bcrypt.compare`. On success: masks PII on `users`, inserts `account_tombstones` row with `purgeAfter = now() + 30d`, writes to `audit_log_archive`.
-- **Cancellation window:** `POST /api/account/delete-cancel` removes the tombstone any time before `purgeAfter` (PII mask is not reverted).
-- **Phase 2 (reaper):** `runTombstoneReaper()` runs daily (initial 60s, 24h tick). `cascadeDeleteAccount()` deletes from all 105 tables inside a single PG transaction — any error rolls back the whole account.
-- **`CASCADE_EXEMPT`:** `audit_log_archive`, `account_tombstones`, `schema_migrations`, `auth_lockouts`, `messages`.
+> Full prose: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §7.
 
-## Marketing-logic engine upgrade (Apr 2026)
+## Other archived doctrine
 
-The 5 marketing engines were upgraded to reason like top marketers (not just relabel segments). Pipeline orchestration unchanged; outputs extended additively.
-
-Per-engine commercial-reasoning module (designer + LLM judge + 1 retry on REJECTED + safe `null` fallback): P1 Persuasion (`trust-transfer.ts`), P2 Positioning (`category-game.ts`), P3 Offer (`value-architect.ts`), P4 Audience (`buyer-psychology.ts`), P5 Awareness (`narrative-reframe.ts`). Shared cross-engine commercial DNA: `shared/commercial-dna.ts` (`composeCommercialDNA()` + contradiction detector `IDENTITY_DRIFT`, `GAME_TRUST_MISMATCH`); `server/orchestrator/shared-strategic-context.ts` new `commercialSignals` registry (5 signal types). If the AI judge returns final REJECTED, the module returns `null` and the engine continues with its legacy output.
-
-### Operations Guardian — OBS-C (Task #60)
-
-Per-provider keying for AI burst collectors: `AI_TIMEOUT_BURST:<provider>` and `AI_PROVIDER_FAILURE_BURST:<provider>` (was `:global`). New `PROVIDER_INSTABILITY:<provider>` cross-signal correlator emits ONE rollup notice (operator-audience only, no USER_COPY promotion, no auto-recovery) when ≥2 of {timeout-burst, failure-burst, latency-degraded} fire for the same provider in the same tick; severity = max via explicit `severityRank()` integer mapping (D1-safe). 69/69 deterministic scenarios pass. Full report: [`.local/docs/audits/operations-guardian-obs-c-2026-05.md`](.local/docs/audits/operations-guardian-obs-c-2026-05.md).
+- Marketing-logic engine upgrade (Apr 2026, 5-engine commercial-reasoning modules + `shared/commercial-dna.ts`) — [`replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §8.
+- Operations Guardian OBS-C (per-provider AI burst keying, `PROVIDER_INSTABILITY` correlator, Task #60) — [`replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §9. Full audit: [`.local/docs/audits/operations-guardian-obs-c-2026-05.md`](.local/docs/audits/operations-guardian-obs-c-2026-05.md).
 
 ---
 
 ## Seal archive index
 
-Each per-seal file contains the full implementation detail, code references, test pointers, and historical justification. The `replit.md` rules above are the authoritative live doctrine; the archive files are read-only history.
+Each per-seal file contains the full implementation detail, code references, test pointers, and historical justification. The `replit.md` rules above are the authoritative live doctrine; archive files are read-only history.
 
+- [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) — **2026-05-22 prune archive** (verbatim prose lifted from replit.md during cleanup; numbered §1–§12).
 - [`.local/docs/seals/semantic-contract-hardening-h1-h7.md`](.local/docs/seals/semantic-contract-hardening-h1-h7.md) — D1–D5 detail, Seal #9 closures, suppression allowlist.
-- [`.local/docs/seals/seal-13-track1-continuity.md`](.local/docs/seals/seal-13-track1-continuity.md) — Hourly scheduler, idempotent invocation, long-gap re-anchor, missed-window detection, schema 021.
+- [`.local/docs/seals/intelligence-architecture-archive.md`](.local/docs/seals/intelligence-architecture-archive.md) — Replay/Decomposition/UX/Memory full prose.
+- [`.local/docs/seals/intelligence-hardening-seal.md`](.local/docs/seals/intelligence-hardening-seal.md) — historical hardening seal.
+- [`.local/docs/seals/seal-13-track1-continuity.md`](.local/docs/seals/seal-13-track1-continuity.md) — Hourly scheduler, idempotent invocation, long-gap re-anchor, schema 021.
 - [`.local/docs/seals/seal-14-track2-multireplica.md`](.local/docs/seals/seal-14-track2-multireplica.md) — DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema 022.
-- [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md) — 9 closed silent-degradation findings, 4 deferred items, architect race-fix amendment, 6 behavioral tests.
-- [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md) — F1 activeJobs Map watchdog + F2 Gemini AbortController.signal wiring.
-- [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md) — Grafana dashboard + in-app Continuity panel + admin endpoints + skip-reason badge.
-- [`.local/docs/seals/seal-18-track5-lifecycle-tests.md`](.local/docs/seals/seal-18-track5-lifecycle-tests.md) — 18 deterministic behavioral lifecycle scenarios + harness + 100-iteration flake checker.
-- [`.local/docs/seals/seal-19-track6-audits.md`](.local/docs/seals/seal-19-track6-audits.md) — 8-audit verdict matrix + evidence + allowlist drift note.
-- [`.local/docs/seals/seal-20-track7-doctrine-lock.md`](.local/docs/seals/seal-20-track7-doctrine-lock.md) — Doctrine lock consolidating Seals #13–#19 + operator handoff one-pager.
-- [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md) — operator handoff one-pager (dashboard URLs + alert thresholds + env-var reference + heartbeat-red decision tree).
-- `.local/docs/seal-13-to-17-plan.md` — original Tracks #1–#7 design plan (pre-existing).
+- [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md) — 9 closed silent-degradation findings + 4 deferred + 6 behavioural tests.
+- [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md) — F1 activeJobs watchdog + F2 Gemini AbortController.signal.
+- [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md) — Grafana dashboard + in-app Continuity panel + admin endpoints.
+- [`.local/docs/seals/seal-18-track5-lifecycle-tests.md`](.local/docs/seals/seal-18-track5-lifecycle-tests.md) — 18 lifecycle scenarios + harness + flake checker.
+- [`.local/docs/seals/seal-19-track6-audits.md`](.local/docs/seals/seal-19-track6-audits.md) — 8-audit verdict matrix + evidence.
+- [`.local/docs/seals/seal-20-track7-doctrine-lock.md`](.local/docs/seals/seal-20-track7-doctrine-lock.md) — Doctrine lock + operator handoff.
+- [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md) — operator one-pager (dashboard URLs, alerts, env-var reference, heartbeat-red decision tree).
+- [`.local/docs/seal-13-to-17-plan.md`](.local/docs/seal-13-to-17-plan.md) — original Tracks #1–#7 design plan.
