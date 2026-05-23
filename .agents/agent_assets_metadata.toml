@@ -317,3 +317,9 @@ id = "ILF0kFexfqrYqUDS5G2_u"
 uri = "file://.local/docs/seals/replit-md-prune-2026-05-22.md"
 type = "text"
 title = "replit-md-prune-2026-05-22.md (new archive — 178 lines, §12 sections)"
+
+[[outputs]]
+id = "-QTOw8lXRo41ydF5ivZ3i"
+uri = "file://.local/exports/avyron-files-export.tar.gz"
+type = "unspecified"
+title = "Avyron AI — 5 requested files (env-validator, index, migrations/runner, schema, orchestrator/index) — 113 KB compressed"
