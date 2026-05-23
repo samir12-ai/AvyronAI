@@ -323,3 +323,9 @@ id = "-QTOw8lXRo41ydF5ivZ3i"
 uri = "file://.local/exports/avyron-files-export.tar.gz"
 type = "unspecified"
 title = "Avyron AI — 5 requested files (env-validator, index, migrations/runner, schema, orchestrator/index) — 113 KB compressed"
+
+[[outputs]]
+id = "zQwzV2xnoyfY5C4-tH1_u"
+uri = "file://.local/exports/avyron-files-export-2.tar.gz"
+type = "unspecified"
+title = "Avyron AI — 6 requested files (narrative-layer, continuity/scheduler, perception-translator, commercial-dna, audience-engine, positioning-engine) — 89 KB compressed"
