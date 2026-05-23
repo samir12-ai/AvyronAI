@@ -347,3 +347,9 @@ id = "L-HoqH7sJRJ-3lR7-FsyE"
 uri = "file://.local/exports/avyron-files-export-5.tar.gz"
 type = "unspecified"
 title = "Avyron AI — 5 requested boss files (plan, policy/market-shift, policy/dna-working, eval-hierarchy, types) — 13 KB compressed"
+
+[[outputs]]
+id = "u6xj9D-VRu00yJvP37Tnu"
+uri = "file://.local/exports/file-map-delta-2026-05-23.md"
+type = "text"
+title = "File-map verification — delta report (171 working files missing from map)"
