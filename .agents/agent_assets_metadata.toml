@@ -341,3 +341,9 @@ id = "7WThoS-2plP5OzluFQCi7"
 uri = "file://.local/exports/avyron-files-export-4.tar.gz"
 type = "unspecified"
 title = "Avyron AI — 3 requested files (user-channel-scraper, market-intelligence-v3/fetch-orchestrator, boss/run) — 37 KB compressed"
+
+[[outputs]]
+id = "L-HoqH7sJRJ-3lR7-FsyE"
+uri = "file://.local/exports/avyron-files-export-5.tar.gz"
+type = "unspecified"
+title = "Avyron AI — 5 requested boss files (plan, policy/market-shift, policy/dna-working, eval-hierarchy, types) — 13 KB compressed"
