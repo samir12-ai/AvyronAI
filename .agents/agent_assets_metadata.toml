@@ -371,3 +371,9 @@ id = "H1vvpEcnjmP8nOyN_2HPu"
 uri = "file://audience_engine_files.zip"
 type = "unspecified"
 title = "audience-engine (6 files)"
+
+[[outputs]]
+id = "d-lrwQEjs3vykiplJNxrF"
+uri = "file://boss_files.zip"
+type = "unspecified"
+title = "Boss module (12 files)"
