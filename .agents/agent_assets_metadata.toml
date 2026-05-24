@@ -377,3 +377,9 @@ id = "d-lrwQEjs3vykiplJNxrF"
 uri = "file://boss_files.zip"
 type = "unspecified"
 title = "Boss module (12 files)"
+
+[[outputs]]
+id = "lcoey0qfs7JB0anL-UFL4"
+uri = "file://audit_report.md"
+type = "text"
+title = "Full Audit Report — Audience Engine + Boss"
