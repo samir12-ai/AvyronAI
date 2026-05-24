@@ -359,3 +359,9 @@ id = "C2nivWZ2IvRsPu6yLWURu"
 uri = "file://.local/exports/boss-audit-12files.tar.gz"
 type = "unspecified"
 title = "Boss audit — 12 files (tar.gz, 26 KB)"
+
+[[outputs]]
+id = "5SsY6NZa29MFpxeZfgga_"
+uri = "file://cluster_files.zip"
+type = "unspecified"
+title = "cluster-producer.ts + cluster-comparator.ts"
