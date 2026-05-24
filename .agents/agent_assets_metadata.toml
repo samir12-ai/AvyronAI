@@ -353,3 +353,9 @@ id = "u6xj9D-VRu00yJvP37Tnu"
 uri = "file://.local/exports/file-map-delta-2026-05-23.md"
 type = "text"
 title = "File-map verification — delta report (171 working files missing from map)"
+
+[[outputs]]
+id = "C2nivWZ2IvRsPu6yLWURu"
+uri = "file://.local/exports/boss-audit-12files.tar.gz"
+type = "unspecified"
+title = "Boss audit — 12 files (tar.gz, 26 KB)"
