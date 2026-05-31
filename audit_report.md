@@ -1,7 +1,7 @@
-# Audit Report — Audience Engine + Boss Modules
+# Audit Report — Six Engine Modules
 
 Date: 2026-05-24
-Scope: 18 files across Audience Engine (6 files) and Boss (12 files)
+Scope: 37 files across Audience Engine (6 files), Boss (12 files), Positioning Engine (5 files), Differentiation Engine (4 files), Mechanism Engine (4 files), and Offer Engine (7 files)
 Auditor: Architect subagent + manual verification
 
 ---
@@ -396,10 +396,594 @@ console.warn(`[q2] corpus read failed (${code}), falling back to severity bucket
 
 ---
 
+---
+
+## Part C — Positioning Engine Audit
+
+### Files Audited
+- `server/positioning-engine/engine.ts` (3084 lines)
+- `server/positioning-engine/category-game.ts` (341 lines)
+- `server/positioning-engine/semantic-collision.ts` (176 lines)
+- `server/positioning-engine/routes.ts` (119 lines)
+- `server/positioning-engine/constants.ts` (142 lines)
+
+### Overall Verdict: FAIL
+The module has solid signal-grounding logic and compression quality scoring, but it has high-severity issues around internal error disclosure, D3/D5 semantic contract violations, and a permissive `validationState` mapping.
+
+---
+
+### Finding C1 — HIGH: Internal error disclosure to API clients
+**Severity:** HIGH
+**Files:**
+- `server/positioning-engine/routes.ts:39`
+- `server/positioning-engine/routes.ts:58`
+- `server/positioning-engine/routes.ts:115`
+
+**Description:** Error handlers return raw `err.message` directly in the JSON response body:
+```ts
+res.status(500).json({ error: err.message });
+```
+This leaks internal error strings (which may contain resolver/DB/provider internals) to API consumers.
+
+**Impact:** Information disclosure. Malicious or accidental callers learn server internals.
+
+**Fix:** Return a generic message (`"Internal server error"`) and log the real `err.message` server-side with a structured trace ID.
+
+---
+
+### Finding C2 — HIGH: D3/D5 semantic contract violation — `validationState` includes "unknown"
+**Severity:** HIGH
+**File:** `server/positioning-engine/routes.ts:101-106`
+
+**Description:** The `validationState` field is declared as `"validated" | "provisional" | "weak" | "rejected" | "unknown"`. Per doctrine D3, verdict-shaped fields must be strict `z.enum([...])` with NO catch-all. The canonical contract from `replit.md` declares `validationState ∈ {validated|provisional|weak|rejected}` — "unknown" is not a canonical value. Per D5, a missing canonical must produce `CONTRACT_INCOMPLETE`, not a silently tolerated extra enum value.
+
+**Impact:** Semantic drift. A downstream consumer sees `"unknown"` for data that should be explicitly marked as contract-incomplete.
+
+**Fix:** Remove `"unknown"` from the union. Map unmappable states to `null` or an explicit `CONTRACT_INCOMPLETE` flag.
+
+---
+
+### Finding C3 — MEDIUM: Unguarded `JSON.parse` on LLM output
+**Severity:** MEDIUM
+**File:** `server/positioning-engine/engine.ts:1803`
+
+**Description:** The LLM response parsing does `JSON.parse(cleaned) as any[]` with no schema validation. The parse is inside a surrounding `try/catch` at line 1871, so it degrades gracefully instead of crashing the entire engine run. However, the failure is not tagged with a structured error, and no schema validation is performed on the parsed array.
+
+**Impact:** Degraded statement generation. Malformed LLM output silently falls back to seed values.
+
+**Fix:** Validate the parsed shape with Zod before iterating. Tag parse failures with `console.error("[PositioningEngine] LLM_PARSE_INVALID", err)`.
+
+---
+
+### Finding C4 — MEDIUM: Silent catch on snapshot parsing
+**Severity:** MEDIUM
+**File:** `server/positioning-engine/routes.ts:96-99`
+
+**Description:**
+```ts
+try {
+  const sr = snapAny.stabilityResult;
+  stability = typeof sr === "string" ? JSON.parse(sr) : (sr as { driftDetected?: unknown } | null);
+} catch { stability = null; }
+```
+The bare `catch` silently swallows parse failures on the `stabilityResult` column. A malformed DB row will silently show `null` instead of surfacing a parse error.
+
+**Impact:** Hidden data corruption. A bad `stabilityResult` row will silently display as `null` without alerting operators.
+
+**Fix:** Replace bare catch with `console.error("[PositioningEngine] STABILITY_PARSE_FAILED", err)` and continue with `null`.
+
+---
+
+### Finding C5 — MEDIUM: `as any` casts on multi-source data
+**Severity:** MEDIUM
+**Files:**
+- `server/positioning-engine/engine.ts:109`
+- `server/positioning-engine/engine.ts:1654`
+
+**Description:** `Object.values(multiSourceData) as any[]` suppresses TypeScript checks on competitor data. A malformed `multiSourceData` blob (wrong shape, missing fields) will pass through silently and crash later at the first property access.
+
+**Impact:** Hidden type mismatch leading to downstream crashes.
+
+**Fix:** Add a Zod schema for `multiSourceData` and validate before casting. Reject non-conforming shapes.
+
+---
+
+### Finding C6 — MEDIUM: `as any` cast on category-game judge verdict
+**Severity:** MEDIUM
+**File:** `server/positioning-engine/category-game.ts:247`
+
+**Description:** `judgeVerdict = judged.verdict as any;` suppresses type safety on the judge verdict.
+
+**Impact:** An invalid verdict string can be assigned without compile-time detection.
+
+**Fix:** Remove the cast. Use a strict type for the judge verdict.
+
+---
+
+### Finding C7 — MEDIUM: No route input schema validation
+**Severity:** MEDIUM
+**File:** `server/positioning-engine/routes.ts:13-14, 46-47`
+
+**Description:** Request fields are cast, not validated:
+```ts
+const { campaignId, miSnapshotId, audienceSnapshotId, validationSessionId } = req.body;
+const campaignId = req.query.campaignId as string;
+```
+No Zod or runtime validation. IDs could be numbers, null, or objects.
+
+**Impact:** Runtime type errors downstream, potential injection vectors.
+
+**Fix:** Add Zod schema validation at the route entry. Return 400 with explicit validation errors.
+
+---
+
+### Finding C8 — [REMOVED — Duplicate of C4]
+
+This finding was removed because it is a duplicate of Finding C4 (same parse site at `routes.ts:98`).
+
+---
+
+### Doctrine Check Summary (Positioning Engine)
+
+| Rule | Status |
+|---|---|
+| D1 (no semantic fallback) | OK |
+| D2/D3 (canonical fields, strict enums) | **FAIL** (#C2 — `validationState` includes "unknown") |
+| D5 (CONTRACT_INCOMPLETE) | **FAIL** (#C2 — missing canonical → "unknown" instead of `CONTRACT_INCOMPLETE`) |
+| No silent catches | **FAIL** (#C4 — bare catch on stabilityResult) |
+| No bare LLM calls | OK — calls go through `aiChat` |
+| Evidence Integrity Filter | OK — signals mapped, grounding validated |
+| B1-B5 beta safety | **FAIL** — truthfulness/visibility weakened by #C1, #C2, #C4 |
+
+---
+
+## Part D — Differentiation Engine Audit
+
+### Files Audited
+- `server/differentiation-engine/engine.ts` (1657 lines)
+- `server/differentiation-engine/routes.ts` (310 lines)
+- `server/differentiation-engine/constants.ts` (89 lines)
+- `server/differentiation-engine/types.ts` (165 lines)
+
+### Overall Verdict: FAIL
+The module has a well-structured 12-layer pipeline, but it has high-severity issues around semantic contract violations, D1/D3 violations via `as any` casts, and internal error disclosure.
+
+---
+
+### Finding D1 — HIGH: Internal error disclosure to API clients
+**Severity:** HIGH
+**File:** `server/differentiation-engine/routes.ts:261`
+
+**Description:** The `resolveRunId` catch returns `e.message` directly:
+```ts
+catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+```
+
+**Impact:** Information disclosure. Resolver internals (run IDs, DB connection strings) may leak to API consumers.
+
+**Fix:** Return generic error code. Log the real `e.message` server-side.
+
+---
+
+### Finding D2 — MEDIUM: Unnecessary `as any` on canonical path inputs
+**Severity:** MEDIUM
+**Files:**
+- `server/differentiation-engine/engine.ts:1413`
+- `server/differentiation-engine/engine.ts:1525`
+
+**Description:** `domainCtx` is built with unnecessary `as any` casts:
+```ts
+domainFailures: (positioning as any).domainFailures || [],
+operationalProblems: (positioning as any).operationalProblems || [],
+proofRequirements: (positioning as any).proofRequirements || [],
+```
+These fields already exist on the `PositioningInput` interface (`types.ts:59-61`). The casts are unnecessary and suppress the type system without reason.
+
+**Impact:** Type safety degradation. If the field is renamed or removed, the cast will silently produce an empty array instead of a compile-time error.
+
+**Fix:** Remove the `as any` casts. The type system already validates these fields.
+
+---
+
+### Finding D3 — MEDIUM: `as any` on business data fields
+**Severity:** MEDIUM
+**File:** `server/differentiation-engine/routes.ts:174-178`
+
+**Description:** `profileInput` is built with `as any` casts:
+```ts
+productCategory: (bizData as any).productCategory || null,
+coreProblemSolved: (bizData as any).coreProblemSolved || null,
+```
+
+**Impact:** The `businessDataLayer` schema may not have these columns. The cast suppresses the type error and will silently produce `null` at runtime.
+
+**Fix:** Add these columns to the `businessDataLayer` schema if they exist, or remove the casts and handle the absence properly.
+
+---
+
+### Finding D4 — MEDIUM: Unguarded `JSON.parse` on refinement response
+**Severity:** MEDIUM
+**File:** `server/differentiation-engine/engine.ts:1119`
+
+**Description:** The LLM refinement response is parsed with `JSON.parse(jsonMatch[0])` with no Zod validation. A malformed JSON structure (e.g. missing `pillars` or `claims` arrays) will produce runtime errors later.
+
+**Impact:** Silent degradation of pillars/claims.
+
+**Fix:** Add a Zod schema for the refinement response and validate before use.
+
+---
+
+### Finding D5 — MEDIUM: No route input schema validation
+**Severity:** MEDIUM
+**File:** `server/differentiation-engine/routes.ts:24, 250`
+
+**Description:** Request fields are cast, not validated. Same pattern as other engines.
+
+**Impact:** Runtime type errors downstream.
+
+**Fix:** Add Zod schema validation at the route entry.
+
+---
+
+### Finding D6 — [REMOVED — Invalid]
+
+This finding was removed because `celDepthCompliance` and `depthGateResult` are already declared on `DifferentiationResult` (`types.ts:172-173`). The `as any` casts are unnecessary but not a type-safety violation.
+
+---
+
+### Finding D7 — LOW: `safeJsonParse` helper returns `any` without validation
+**Severity:** LOW
+**File:** `server/differentiation-engine/routes.ts:15-19`
+
+**Description:** The `safeJsonParse` helper returns `any`:
+```ts
+function safeJsonParse(text: any): any {
+  try { return JSON.parse(text); } catch { return null; }
+}
+```
+
+**Impact:** The caller receives untyped data. No validation is performed.
+
+**Fix:** Add a Zod schema parameter to `safeJsonParse` and validate the parsed shape.
+
+---
+
+### Doctrine Check Summary (Differentiation Engine)
+
+| Rule | Status |
+|---|---|
+| D1 (no semantic fallback) | **FAIL** (#D2, #D3 — `as any` on canonical paths) |
+| D2/D3 (canonical fields, strict enums) | **FAIL** (#D2, #D3) |
+| D5 (CONTRACT_INCOMPLETE) | OK — no direct fallback on canonical fields |
+| No silent catches | **FAIL** (#D7 — `safeJsonParse` bare catch) |
+| No bare LLM calls | OK — calls go through `aiChat` |
+| Evidence Integrity Filter | OK — territory evidence density validated |
+| B1-B5 beta safety | **FAIL** — truthfulness/visibility weakened by #D1, #D2, #D3 |
+
+---
+
+## Part E — Mechanism Engine Audit
+
+### Files Audited
+- `server/mechanism-engine/engine.ts` (732 lines)
+- `server/mechanism-engine/routes.ts` (272 lines)
+- `server/mechanism-engine/constants.ts` (53 lines)
+- `server/mechanism-engine/types.ts` (111 lines)
+
+### Overall Verdict: FAIL
+The module has a clean axis-consistency validator and a depth gate, but it has a critical D3/D5 violation on the status enum, silent catches, and a non-canonical status string.
+
+---
+
+### Finding E1 — HIGH: D3/D5 — Non-canonical status `"DEPTH_FAILED"` emitted
+**Severity:** HIGH
+**File:** `server/mechanism-engine/engine.ts:450`
+
+**Description:** The mechanism engine returns `status: "DEPTH_FAILED"` when the depth gate fails. This is NOT declared in the `STATUS` constant:
+```ts
+const STATUS = {
+  COMPLETE: "COMPLETE",
+  FAILED: "FAILED",
+  INSUFFICIENT_INPUT: "INSUFFICIENT_INPUT",
+  AXIS_REJECTED: "AXIS_REJECTED",
+};
+```
+Per D3, verdict-shaped fields must be strict enums. Per D5, a missing canonical status must produce `CONTRACT_INCOMPLETE`. The `status: string` type in `MechanismEngineResult` allows any string.
+
+**Impact:** Semantic drift. The downstream consumer receives a status string that is not in the canonical registry. The `routes.ts` does not validate this string before persisting.
+
+**Fix:** Either add `DEPTH_FAILED` to the canonical `STATUS` enum, or map it to `FAILED` with a structured `depthGateResult` reason.
+
+---
+
+### Finding E2 — HIGH: Internal error disclosure to API clients
+**Severity:** HIGH
+**File:** `server/mechanism-engine/routes.ts:231`
+
+**Description:** The `resolveRunId` catch returns `e.message` directly.
+
+**Impact:** Information disclosure.
+
+**Fix:** Return generic error code. Log the real `e.message` server-side.
+
+---
+
+### Finding E3 — HIGH: `status: string` is not a strict enum
+**Severity:** HIGH
+**File:** `server/mechanism-engine/types.ts:85`
+
+**Description:** The `MechanismEngineResult.status` field is typed as `string`, not a strict enum.
+
+**Impact:** Any string can be assigned. The D3 strict enum rule is violated.
+
+**Fix:** Replace with `status: "COMPLETE" | "FAILED" | "INSUFFICIENT_INPUT" | "AXIS_REJECTED" | "DEPTH_FAILED"` (or whatever the canonical set is).
+
+---
+
+### Finding E4 — HIGH: `mechanismType: string` is not a strict enum
+**Severity:** HIGH
+**Files:**
+- `server/mechanism-engine/types.ts:17`
+- `server/mechanism-engine/types.ts:52`
+
+**Description:** The `mechanismType` field is typed as `string`. The `MECHANISM_STRUCTURAL_TYPES` array exists but is not used as the type.
+
+**Impact:** Any string can be assigned. D3 strict enum rule is violated.
+
+**Fix:** Replace with `MechanismStructuralType` from `constants.ts`.
+
+---
+
+### Finding E5 — MEDIUM: Silent catches on JSON parse
+**Severity:** MEDIUM
+**Files:**
+- `server/mechanism-engine/engine.ts:41,47,53`
+- `server/mechanism-engine/routes.ts:15-18`
+
+**Description:**
+```ts
+try { return JSON.parse(text); } catch {}
+```
+The bare `catch` in `engine.ts` silently swallows JSON parse failures. The `routes.ts` helper `safeJsonParse` also has a bare catch that returns `null` without logging.
+
+**Impact:** Hidden parse failures. A malformed JSON string will silently return `null` without alerting operators.
+
+**Fix:** Replace bare catch with `console.error("[MechanismEngine] JSON_PARSE_FAILED", err)` in `engine.ts`. Add logging to `safeJsonParse` in `routes.ts`.
+
+---
+
+### Finding E6 — MEDIUM: `as any` on route snapshot fields
+**Severity:** MEDIUM
+**File:** `server/mechanism-engine/routes.ts:108`
+
+**Description:** `mechanismCore` is parsed via `as any`:
+```ts
+mechanismCore: safeJsonParse((activeDiffSnapshot as any).mechanismCore) || null,
+```
+
+**Impact:** The field is not typed on the snapshot row.
+
+**Fix:** Add `mechanismCore` to the `differentiationSnapshots` schema and type it properly.
+
+---
+
+### Finding E7 — MEDIUM: No route input schema validation
+**Severity:** MEDIUM
+**File:** `server/mechanism-engine/routes.ts:24, 220`
+
+**Description:** Same pattern as other engines.
+
+**Fix:** Add Zod schema validation.
+
+---
+
+### Doctrine Check Summary (Mechanism Engine)
+
+| Rule | Status |
+|---|---|
+| D1 (no semantic fallback) | OK |
+| D2/D3 (canonical fields, strict enums) | **FAIL** (#E1, #E3, #E4) |
+| D5 (CONTRACT_INCOMPLETE) | **FAIL** (#E1 — non-canonical status emitted) |
+| No silent catches | **FAIL** (#E5 — bare catches on JSON parse) |
+| No bare LLM calls | OK — calls go through `aiChat` |
+| Evidence Integrity Filter | OK — axis consistency validated |
+| B1-B5 beta safety | **FAIL** — truthfulness/visibility weakened by #E1, #E2, #E5 |
+
+
+---
+
+## Part F — Offer Engine Audit
+
+### Files Audited
+- `server/offer-engine/engine.ts` (3240 lines)
+- `server/offer-engine/value-architect.ts` (403 lines)
+- `server/offer-engine/identity-llm.ts` (180 lines)
+- `server/offer-engine/normalize.ts` (200 lines)
+- `server/offer-engine/routes.ts` (445 lines)
+- `server/offer-engine/constants.ts` (155 lines)
+- `server/offer-engine/types.ts` (179 lines)
+
+### Overall Verdict: FAIL
+The module has a strong contract violation recording system and a normalization layer, but it has a critical module-global mutable diagnostics array, a D3 violation on the `mechanismType` cast, and a non-canonical status in the fallback path.
+
+---
+
+### Finding F1 — CRITICAL: Module-global mutable contract violations array
+**Severity:** CRITICAL
+**File:** `server/offer-engine/engine.ts:12-19`
+
+**Description:**
+```ts
+type OfferContractViolation = { field: string; reason: string; raw?: unknown };
+const __offerContractViolations: OfferContractViolation[] = [];
+function recordContractViolation(field: string, reason: string, raw?: unknown) {
+  __offerContractViolations.push({ field, reason, raw });
+}
+function drainContractViolations(): OfferContractViolation[] {
+  const out = __offerContractViolations.slice();
+  __offerContractViolations.length = 0;
+  return out;
+}
+```
+This is a module-global mutable array. In a concurrent server handling multiple requests, contract violations from one request can leak into another's diagnostics. The `drainContractViolations` call at the end of a run may drain violations from a concurrent run.
+
+**Impact:** Cross-tenant diagnostics leakage. Violations from one account may be reported in another's response.
+
+**Fix:** Make the violations array per-request or per-run. Pass it as a parameter through the helper functions instead of using a module-global.
+
+---
+
+### Finding F2 — HIGH: Internal error disclosure to API clients
+**Severity:** HIGH
+**File:** `server/offer-engine/routes.ts:339`
+
+**Description:** The `resolveRunId` catch returns `e.message` directly.
+
+**Impact:** Information disclosure.
+
+**Fix:** Return generic error code. Log the real `e.message` server-side.
+
+---
+
+### Finding F3 — MEDIUM: D1/D3 — `as any` on mechanismType
+**Severity:** MEDIUM
+**File:** `server/offer-engine/engine.ts:2135`
+
+**Description:**
+```ts
+mechanismType: mechOut.mechanismType as any || "system",
+```
+The `mechanismType` is cast to `any`. The `MechanismCore` type declares it as a strict union (`"method" | "system" | "protocol" | "framework" | "none"`). The cast bypasses this.
+
+**Impact:** Invalid mechanismType strings can be assigned and persisted.
+
+**Fix:** Remove the cast. Use a strict enum check before assignment.
+
+---
+
+### Finding F4 — MEDIUM: Unguarded `JSON.parse` on LLM output
+**Severity:** MEDIUM
+**Files:**
+- `server/offer-engine/engine.ts:1891`
+- `server/offer-engine/engine.ts:2064`
+
+**Description:** The LLM response is parsed with `JSON.parse(cleanedResponse)` with no schema validation. The refinement path (line 1891) does per-field coercion after parsing, which is good. The fallback path (line 2064) does not.
+
+**Impact:** The fallback path can produce malformed objects if the LLM response is invalid.
+
+**Fix:** Add Zod schema validation for the fallback path. The refinement path already has good per-field coercion.
+
+---
+
+### Finding F5 — MEDIUM: `as any` on route snapshot fields
+**Severity:** MEDIUM
+**Files:**
+- `server/offer-engine/routes.ts:155`
+- `server/offer-engine/routes.ts:163-164`
+
+**Description:** `mechanismCore` and `signalLineage` are parsed via `as any`:
+```ts
+mechanismCore: safeJsonParse((activeDiffSnapshot as any).mechanismCore) || null,
+parseLineageFromSnapshot((miSnapshot as any).signalLineage),
+```
+
+**Impact:** The fields are not typed on the snapshot rows.
+
+**Fix:** Add these fields to the schema and type them properly.
+
+---
+
+### Finding F6 — MEDIUM: No route input schema validation
+**Severity:** MEDIUM
+**File:** `server/offer-engine/routes.ts:29, 328`
+
+**Description:** Same pattern as other engines.
+
+**Fix:** Add Zod schema validation.
+
+---
+
+### Finding F7 — MEDIUM: `as any` on offer object mutation
+**Severity:** MEDIUM
+**Files:**
+- `server/offer-engine/engine.ts:3184`
+- `server/offer-engine/engine.ts:3196`
+
+**Description:** The `offer` object is mutated via `as any`:
+```ts
+const v = (offer as any)[f];
+(offer.outcomeLayer as any)[k] = v.replace(OBJ_LIT, "<unresolved>").replace(/\s+/g, " ").trim();
+```
+
+**Impact:** The type system cannot catch misuses.
+
+**Fix:** Remove the cast. Use the typed interface.
+
+---
+
+### Finding F8 — MEDIUM: `as any` on strategy root fields
+**Severity:** MEDIUM
+**File:** `server/offer-engine/engine.ts:2540-2560`
+
+**Description:** Multiple `as any` casts on strategy root fields:
+```ts
+const competitorEquivalentClaim = ((positioning as any)?.semanticCollisions || [])[0]?.competitorEquivalentClaim;
+const cialdiniPrinciple = (positioning as any)?.cialdiniReasoning?.primaryCialdiniPrinciple;
+```
+
+**Impact:** The `positioning` interface should declare these fields. The cast suppresses the type error.
+
+**Fix:** Add `semanticCollisions`, `cialdiniReasoning`, etc. to the `OfferPositioningInput` interface.
+
+---
+
+### Finding F9 — LOW: `safeJsonParse` helper returns `any` without validation
+**Severity:** LOW
+**File:** `server/offer-engine/routes.ts:20-24`
+
+**Description:** Same pattern as other engines.
+
+**Fix:** Add a Zod schema parameter to `safeJsonParse`.
+
+---
+
+### Finding F10 — LOW: `as any` on result object
+**Severity:** LOW
+**File:** `server/offer-engine/engine.ts:1940, 1943`
+
+**Description:** The result object is returned as `any`:
+```ts
+return result as any;
+return { ...skeletons, sourceContext: skeletonResult.sourceContext } as any;
+```
+
+**Impact:** The type system cannot catch misuses.
+
+**Fix:** Remove the cast. Use the typed interface.
+
+---
+
+### Doctrine Check Summary (Offer Engine)
+
+| Rule | Status |
+|---|---|
+| D1 (no semantic fallback) | **FAIL** (#F3 — `as any` on mechanismType) |
+| D2/D3 (canonical fields, strict enums) | **FAIL** (#F3, #F5, #F7, #F8, #F10) |
+| D5 (CONTRACT_INCOMPLETE) | OK — no direct fallback on canonical fields |
+| No silent catches | **FAIL** (#F9 — `safeJsonParse` bare catch) |
+| No bare LLM calls | OK — calls go through `aiChat` |
+| Evidence Integrity Filter | OK — contract violations recorded, lineage preserved |
+| B1-B5 beta safety | **FAIL** — truthfulness/visibility weakened by #F1, #F2 |
+
+---
+
 ## Cross-Cutting Recommendations
 
-1. **Add Zod at every boundary** — route inputs, LLM outputs, persisted JSON blobs, and canonical field assignments. This is the single highest-ROI fix for both modules.
-2. **Fail-safe state finalization** — every long-running stateful operation (boss run, audience engine run) must have a `try/catch/finally` that finalizes the DB row, even on unhandled exceptions.
+1. **Add Zod at every boundary** — route inputs, LLM outputs, persisted JSON blobs, and canonical field assignments. This is the single highest-ROI fix for all four modules.
+2. **Fail-safe state finalization** — every long-running stateful operation (boss run, engine run) must have a `try/catch/finally` that finalizes the DB row, even on unhandled exceptions.
 3. **Remove all `as any` and `as unknown as` casts** on canonical/decision paths. If the types don't line up, fix the types, don't suppress them.
 4. **Clamp all unbounded parameters** — `limit`, `inArray` sizes, prompt token limits.
 5. **Structured logging** — replace `console.warn/error` with the project's structured logger (`server/logger.ts`) and include trace IDs.
+6. **Fix the offer engine module-global mutable contract violations array** — this is a critical cross-tenant data leakage risk.
+7. **Enforce canonical enums for status/validationState fields** — register `DEPTH_FAILED` in the canonical status registry or map it to `FAILED` with a structured reason.
+8. **Fix internal error disclosure in all four engine routes** — return generic error codes to clients, keep raw details in server logs.
