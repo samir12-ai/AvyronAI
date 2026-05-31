@@ -240,7 +240,8 @@ Judge this candidate. Return ONLY the JSON verdict.`;
     if (!parsed) {
       return { status: "JUDGE_ERROR", reason: "judge response unparseable" };
     }
-    const v = (parsed.verdict || "").toUpperCase().includes("REJECT") ? "REJECTED" : "ACCEPTED";
+    const verdict = parsed.verdict;
+    const v = (verdict ? verdict.toUpperCase() : "").includes("REJECT") ? "REJECTED" : "ACCEPTED";
     return { status: v as "ACCEPTED" | "REJECTED", reason: parsed.reason || "" };
   } catch (e: any) {
     console.warn(`[NarrativeReframe] judge call failed: ${e.message} — treating as JUDGE_ERROR`);
@@ -312,7 +313,9 @@ export async function engineerNarrativeReframe(input: DesignerInput): Promise<Na
         reason: status === "JUDGE_ERROR" ? "JUDGE_ERROR" : "FINAL_REJECTED",
         detail: reason || "",
       });
-    } catch { /* registry never blocks pipeline */ }
+    } catch (regErr: any) {
+      console.error(`[NarrativeReframe] REGISTRY_WRITE_FAILED | ${regErr.message}`);
+    }
     return null;
   }
   return profile;

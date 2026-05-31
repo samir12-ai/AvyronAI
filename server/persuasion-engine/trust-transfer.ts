@@ -385,7 +385,9 @@ export async function designTrustTransfer(args: {
         reason: isJudgeErr ? "JUDGE_ERROR" : "FINAL_REJECTED",
         detail: String(reason),
       });
-    } catch { /* registry never blocks pipeline */ }
+    } catch (regErr: any) {
+      console.error(`[TrustTransfer] REGISTRY_WRITE_FAILED | ${regErr.message}`);
+    }
     return null;
   }
   return design;

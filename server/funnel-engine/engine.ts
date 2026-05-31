@@ -1559,7 +1559,7 @@ export async function runFunnelEngine(
           strategyAcceptability: { grade: "F", acceptable: false, reasons: ["DEPTH_FAILED"] },
           celDepthCompliance: celDepth,
           depthGateResult,
-        } as any;
+        } as FunnelResult;
       }
     }
   }
