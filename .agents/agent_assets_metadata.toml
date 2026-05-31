@@ -383,3 +383,9 @@ id = "lcoey0qfs7JB0anL-UFL4"
 uri = "file://audit_report.md"
 type = "text"
 title = "Full Audit Report - Seven Engine Modules"
+
+[[outputs]]
+id = "kc5RgBT8OsZuD5eZOWZo4"
+uri = "file://ai_audit_report.md"
+type = "text"
+title = "AI Layer Audit Report"
