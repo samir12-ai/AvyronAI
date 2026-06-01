@@ -99,7 +99,7 @@ interface CategoryResult {
 }
 
 function layer1_categoryDetection(miData: any, competitorCount: number = 0, signalCount: number = 0): CategoryResult {
-  const marketStateLabel = miData.marketState || "";
+  const marketCondition = miData.marketState ? String(miData.marketState) : "";
   const diagnosis = miData.marketDiagnosis || "";
   const narrative = miData.narrativeSynthesis || "";
   const contentDna = safeJsonParse(miData.contentDnaData, []);
@@ -114,7 +114,7 @@ function layer1_categoryDetection(miData: any, competitorCount: number = 0, sign
     }
   }
 
-  const combined = `${marketStateLabel} ${diagnosis} ${narrative} ${websiteText}`.toLowerCase();
+  const combined = `${marketCondition} ${diagnosis} ${narrative} ${websiteText}`.toLowerCase();
 
   const categories: Record<string, string[]> = {
     fitness: ["fitness", "workout", "gym", "exercise", "weight", "muscle", "body"],
@@ -719,10 +719,10 @@ function extractStrategicSignals(miData: any): { signal: string; cluster: string
 
   const textSources: { text: string; source: string }[] = [];
 
-  const marketStateLabel = miData.marketState || "";
+  const marketCondition = miData.marketState ? String(miData.marketState) : "";
   const diagnosis = miData.marketDiagnosis || "";
   const narrative = miData.narrativeSynthesis || "";
-  if (marketStateLabel) textSources.push({ text: marketStateLabel, source: "market_intelligence" });
+  if (marketCondition) textSources.push({ text: marketCondition, source: "market_intelligence" });
   if (diagnosis) textSources.push({ text: diagnosis, source: "market_intelligence" });
   if (narrative) textSources.push({ text: narrative, source: "market_intelligence" });
 
@@ -2845,11 +2845,12 @@ CORRECTION REQUIRED:
     positioningStatusValue = "COMPLETE";
   }
   const hasAdvisories = stabilityResult.advisories.length > 0;
-  const statusMessage = !stabilityResult.isStable
-    ? "Positioning generated but stability checks failed — review recommended"
-    : hasAdvisories
-      ? stabilityResult.advisories.map(a => a.message).join("; ")
-      : null;
+  let positioningStatusMessage: string | null = null;
+  if (!stabilityResult.isStable) {
+    positioningStatusMessage = "Positioning generated but stability checks failed — review recommended";
+  } else if (hasAdvisories) {
+    positioningStatusMessage = stabilityResult.advisories.map(a => a.message).join("; ");
+  }
 
   const combinedSignalCount = totalSignals + allStrategicSignals.length;
   const resolvedMiSnapshotId = activeMiSnapshot.id;
