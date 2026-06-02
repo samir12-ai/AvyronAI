@@ -1,0 +1,61 @@
+Subject: Intelligence Audit — Contract Registry + System Control + Memory System (34 files)
+
+Please audit the following files:
+
+**Contract Registry (7 files)**
+- server/orchestrator/contract-registry/index.ts
+- server/orchestrator/contract-registry/registry.ts
+- server/orchestrator/contract-registry/audit.ts
+- server/orchestrator/contract-registry/cv04-metrics.ts
+- server/orchestrator/contract-registry/feature-flags.ts
+- server/orchestrator/contract-registry/helpers.ts
+- server/orchestrator/contract-registry/types.ts
+
+**System Control (18 files)**
+- server/system-control/engine.ts
+- server/system-control/structural-checks.ts
+- server/system-control/recovery-intelligence.ts
+- server/system-control/contradiction-detector.ts
+- server/system-control/system-judgement.ts
+- server/system-control/constants.ts
+- server/system-control/cv05-degraded-propagation.ts
+- server/system-control/full-report.ts
+- server/system-control/integrity-verdict.ts
+- server/system-control/pre-plan-gate.ts
+- server/system-control/recovery-map.ts
+- server/system-control/recovery-planner.ts
+- server/system-control/repair-actions.ts
+- server/system-control/routes.ts
+- server/system-control/types.ts
+- server/system-control/validation-session.ts
+- server/system-control/validation-verdict.ts
+- server/system-integrity/engine.ts
+- server/system-integrity/routes.ts
+- server/system-integrity/types.ts
+
+**Memory System (9 files)**
+- server/memory-system/store.ts
+- server/memory-system/manager.ts
+- server/memory-system/types.ts
+- server/memory-system/index.ts
+- server/memory-system/industry-baseline.ts
+- server/memory-system/mutation-log-store.ts
+- server/memory-system/cv06-metrics.ts
+- server/memory-system/operational-state-store.ts
+- server/memory-mutation/engine.ts
+
+Same checks as before:
+1. Silent catches
+2. Internal error disclosure in routes
+3. Unguarded JSON.parse
+4. Doctrine D1/D3/D5 violations
+5. Input validation on routes
+6. Unbounded queries or parameters
+7. as any casts on canonical paths
+8. State finalization on long-running operations
+
+Report findings only — no fixes for now.
+
+Same report format (severity + file:line).
+
+Thank you
