@@ -53,7 +53,7 @@ import { useOperatorSurface } from '@/hooks/useOperatorSurface';
 // Task #71 / Phase 8 — operator engine labels live in a separate module
 // so the vocab CI gate can scan this file itself for customer-surface
 // regressions without flagging the operator-only branch.
-import { OPERATOR_STRATEGY_BRANCHES } from './_ai-management-operator-labels';
+import { OPERATOR_STRATEGY_BRANCHES } from '@/lib/operator-labels';
 
 interface AIAudience {
   name: string;
