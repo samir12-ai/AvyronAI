@@ -1,0 +1,111 @@
+Subject: Security Module Audit — Please Export 20 Files as ZIP
+
+Hi,
+
+I need a full security audit of the Avyron AI project. Please export the following 20 files as a single ZIP archive so I can run a line-by-line audit.
+
+The audit will cover: authentication, authorization, API protection, secrets handling, rate limiting, input validation, and any potential security vulnerabilities.
+
+---
+
+FILES TO EXPORT (20 files):
+
+Server:
+1. server/auth.ts
+2. server/auth-helpers.ts
+3. server/routes.ts
+4. server/guardrails.ts
+5. server/log-redact.ts
+6. server/account-lifecycle.ts
+7. server/middleware/ai-rate-limit.ts
+8. server/middleware/ai-spend-cap.ts
+9. server/middleware/beta-admission.ts
+10. server/lib/stripe-signature.ts
+11. server/lib/version-handler.ts
+12. server/competitive-intelligence/scrape-safety.ts
+13. server/competitive-intelligence/rate-limiter.ts
+14. server/meta-crypto.ts
+15. server/startup-artifact-guard.ts
+16. server/staging-admin-routes.ts
+
+Frontend:
+17. lib/secure-token-storage.ts
+18. context/AuthContext.tsx
+19. app/login.tsx
+
+Already audited (do NOT include):
+20. server/env-validator.ts ✅
+
+---
+
+AUDIT INSTRUCTIONS:
+
+For each file, please do a thorough line-by-line review and report on the following — do NOT do a keyword/grep scan, read every line:
+
+1. AUTHENTICATION & AUTHORIZATION
+   - Is bcrypt used correctly before saving passwords?
+   - Is JWT signing and verification done properly?
+   - Are all protected routes actually gated behind auth middleware?
+   - Is there account lockout after failed login attempts?
+   - Are there any routes accessible without authentication that shouldn't be?
+
+2. INPUT VALIDATION
+   - Is every route input validated (type, shape, length)?
+   - Are there any raw casts like `req.body.x as string` without validation?
+   - Is Zod or equivalent used consistently?
+
+3. ERROR DISCLOSURE
+   - Does any route return `err.message` or internal error details to the client?
+   - Are stack traces or DB details ever leaked in responses?
+
+4. SECRETS & CRYPTO
+   - Are secrets handled safely (no hardcoding, no logging)?
+   - Is meta-crypto using secure algorithms?
+   - Is the Stripe signature verification correct and tamper-proof?
+
+5. RATE LIMITING
+   - Are rate limits enforced correctly?
+   - Can they be bypassed?
+   - Is there per-account or per-IP limiting?
+
+6. ADMIN & STAGING ROUTES
+   - Are staging/admin routes fully locked down in production?
+   - Is there any risk of these being accessible in a production environment?
+
+7. FRONTEND SECURITY
+   - Is token storage safe (no localStorage for sensitive tokens)?
+   - Is AuthContext handling expiry and logout correctly?
+   - Is the login screen protected against brute force?
+
+---
+
+OUTPUT FORMAT:
+
+For each file, produce a structured report in this exact format:
+
+## [Filename]
+**Verdict:** PASS / FAIL
+**Lines reviewed:** [total lines]
+
+### Issues found:
+| ID | Severity | Line | Description | Fix |
+|----|----------|------|-------------|-----|
+
+(If no issues: "No issues found.")
+
+Severity levels:
+- 🔴 CRITICAL — blocks launch or enables attack
+- 🟠 HIGH — important before launch
+- 🟡 MEDIUM — fix after launch
+- ⚪ LOW — minor / future note
+
+---
+
+After all files, produce a SUMMARY TABLE:
+
+| File | Verdict | Critical | High | Medium | Low |
+|------|---------|----------|------|--------|-----|
+
+And list the top 3 most urgent fixes across all files.
+
+Thank you.
