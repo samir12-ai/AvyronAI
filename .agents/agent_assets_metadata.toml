@@ -389,3 +389,9 @@ id = "kc5RgBT8OsZuD5eZOWZo4"
 uri = "file://ai_audit_report.md"
 type = "text"
 title = "Batch 2 Core Engines Security & Doctrine Audit Report"
+
+[[outputs]]
+id = "6n8Gl35Lbf7R8l20ymOUc"
+uri = "file://ai_audit_report_final_batch.md"
+type = "text"
+title = "Intelligence Audit Report - Final Batch"
