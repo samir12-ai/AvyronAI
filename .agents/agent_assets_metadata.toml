@@ -401,3 +401,9 @@ id = "gj1ldouloWj3MDp2sr7KE"
 uri = "file://ai_audit_report_replay_causal_batch.md"
 type = "text"
 title = "Intelligence Audit Report - Replay Harness + Analytical & Causal Layers"
+
+[[outputs]]
+id = "_KlgRZ7GIJohHbbtJw0JW"
+uri = "file://SECURITY_AUDIT_REPORT.md"
+type = "text"
+title = "Avyron AI Security Audit Report"
