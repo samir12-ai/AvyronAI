@@ -395,3 +395,9 @@ id = "6n8Gl35Lbf7R8l20ymOUc"
 uri = "file://ai_audit_report_final_batch.md"
 type = "text"
 title = "Intelligence Audit Report - Final Batch"
+
+[[outputs]]
+id = "gj1ldouloWj3MDp2sr7KE"
+uri = "file://ai_audit_report_replay_causal_batch.md"
+type = "text"
+title = "Intelligence Audit Report - Replay Harness + Analytical & Causal Layers"
