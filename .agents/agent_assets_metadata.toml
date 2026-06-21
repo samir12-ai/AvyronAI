@@ -413,3 +413,9 @@ id = "DxtfOOxiq7d4VSDrrgo7J"
 uri = "file://CONTINUITY_AUDIT_REPORT.md"
 type = "text"
 title = "Continuity Module Audit Report"
+
+[[outputs]]
+id = "e2WQDJCRUsvD3ndCb_Wtd"
+uri = "file://docs/audits/miv3-data-audit-batch-1.md"
+type = "text"
+title = "Market Intelligence v3 — Data Audit Batch 1/4"
