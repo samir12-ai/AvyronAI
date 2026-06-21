@@ -407,3 +407,9 @@ id = "_KlgRZ7GIJohHbbtJw0JW"
 uri = "file://SECURITY_AUDIT_REPORT.md"
 type = "text"
 title = "Avyron AI Security Audit Report"
+
+[[outputs]]
+id = "DxtfOOxiq7d4VSDrrgo7J"
+uri = "file://CONTINUITY_AUDIT_REPORT.md"
+type = "text"
+title = "Continuity Module Audit Report"
