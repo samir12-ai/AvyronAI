@@ -437,3 +437,9 @@ id = "XxSvY81HQCtLZtfS1Eb7U"
 uri = "file://docs/audits/pipeline-lanes-ai-overlay-data-quality-frontend-batch-4.md"
 type = "text"
 title = "Batch 4 Audit Report — Pipeline Lanes + AI Overlay + Data Quality + Frontend"
+
+[[outputs]]
+id = "jIxj-m3OypKcXfnAgv2Lk"
+uri = "file://docs/audits/ux-watchtower-perception-dashboard-patch-1.md"
+type = "text"
+title = "Patch 1/3 Audit — Watchtower, Perception Layer, and Dashboard Routes"

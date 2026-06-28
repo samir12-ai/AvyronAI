@@ -1,0 +1,59 @@
+UX Audit — Patch 1/3
+Scope: Watchtower, Perception layer, and Dashboard routes
+Note: shared/perception-translator.ts (pre-audited clean, ok.md) and components/NarrativeCard.tsx (audited in Intelligence M-01) are excluded.
+
+Files to audit (13 files):
+- server/perception-routes.ts
+- server/dashboard-routes.ts
+- hooks/usePerception.ts
+- hooks/useRunTruthfulness.ts
+- lib/run-truthfulness-presentation.ts
+- lib/verdict-colors.ts
+- components/WatchtowerStrip.tsx
+- components/ActivityTimeline.tsx
+- components/BlockedReasonsCard.tsx
+- components/RunTruthfulnessBanner.tsx
+- components/DataFreshnessWarning.tsx
+- components/DataProvenance.tsx
+- components/MonitoringCard.tsx
+
+Risk categories to check (in priority order):
+
+1. AUTH & ROUTE PROTECTION on server files
+   - Does perception-routes.ts require authentication on all endpoints?
+   - Does dashboard-routes.ts require authentication on all endpoints?
+   - Can any Watchtower or dashboard data be fetched without a valid session?
+   - Is campaign ownership verified before returning perception/dashboard data?
+
+2. ERROR DISCLOSURE
+   - Do perception-routes.ts or dashboard-routes.ts catch blocks return err.message to the client?
+   - Do any frontend components display raw error messages from API responses to the user?
+
+3. DATA ACCURACY — Watchtower display logic
+   - Does WatchtowerStrip.tsx correctly handle null, undefined, or malformed API responses without crashing?
+   - Does DataFreshnessWarning.tsx handle invalid or missing timestamps without showing false warnings? (Related to known issue U-02 in ux.md)
+   - Does RunTruthfulnessBanner.tsx display correct states for all possible verdict values, or does it have unhandled cases?
+   - Does ActivityTimeline.tsx handle empty arrays or missing events gracefully?
+
+4. SILENT FAILURES on hooks
+   - Does usePerception.ts handle API failures gracefully (show error state, not blank screen)?
+   - Does useRunTruthfulness.ts handle missing or malformed data without crashing?
+   - If the perception API is slow or unavailable, what does the user see?
+
+5. PRESENTATION LOGIC
+   - Does lib/run-truthfulness-presentation.ts have any hardcoded or missing cases that could show wrong status to the user?
+   - Does lib/verdict-colors.ts have a safe fallback for unknown verdict values, or does it return undefined/null?
+   - Does components/DataProvenance.tsx correctly display the data source chain, or can it show misleading provenance?
+
+6. CROSS-TENANT on dashboard
+   - Does dashboard-routes.ts scope all queries by accountId?
+   - Can a user see another account's dashboard data by manipulating request parameters?
+
+Please provide:
+A) A per-file verdict table: File | Verdict (CLEAN/NEEDS_FIX/ACCEPTABLE) | Severity | Issue (line) | Category | Notes
+B) A summary table by category
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Can any Watchtower or dashboard data be accessed without authentication?
+   Q2: Does the Watchtower display layer handle all edge cases (null data, bad timestamps, unknown verdicts) or can it show misleading information to the user?
+   Q3: What does the user see if the perception API fails completely?
