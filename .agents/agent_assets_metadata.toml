@@ -419,3 +419,9 @@ id = "e2WQDJCRUsvD3ndCb_Wtd"
 uri = "file://docs/audits/miv3-data-audit-batch-1.md"
 type = "text"
 title = "Market Intelligence v3 — Data Audit Batch 1/4"
+
+[[outputs]]
+id = "NXHAge0ulvT3V4GGOpLL9"
+uri = "file://docs/audits/competitive-intelligence-data-audit-batch-2.md"
+type = "text"
+title = "Competitive Intelligence — Data Audit Batch 2/4"

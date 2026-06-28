@@ -1,0 +1,65 @@
+Competitive Intelligence — Data Audit Patch 2/4
+Scope: server/competitive-intelligence/ — 13 files
+Note: scrape-safety.ts and rate-limiter.ts were already audited under the Security section and are considered clean. Focus on the remaining 11 files below.
+
+Files to audit:
+- server/competitive-intelligence/profile-scraper.ts
+- server/competitive-intelligence/data-acquisition.ts
+- server/competitive-intelligence/tiktok-scraper.ts
+- server/competitive-intelligence/tiktok-apify-scraper.ts
+- server/competitive-intelligence/reviews-scraper.ts
+- server/competitive-intelligence/proxy-pool-manager.ts
+- server/competitive-intelligence/shared-profile-store.ts
+- server/competitive-intelligence/index.ts
+- server/competitive-intelligence/analysis-routes.ts
+- server/competitive-intelligence/competitor-routes.ts
+- server/competitive-intelligence/data-acquisition-routes.ts
+- server/competitive-intelligence/dominance-routes.ts
+- server/competitive-intelligence/reviews-tiktok-routes.ts
+
+Risk categories to check (in priority order):
+
+1. TENANT ISOLATION — Most critical for scraping modules
+   - Can competitor data from account A ever appear for account B?
+   - Are all DB queries scoped by accountId AND campaignId?
+   - Does shared-profile-store.ts enforce per-account isolation on reads and writes?
+   - Are any in-memory caches or Maps shared across accounts?
+
+2. AUTH & ROUTE PROTECTION
+   - Do all routes in analysis-routes, competitor-routes, data-acquisition-routes, dominance-routes, reviews-tiktok-routes have authMiddleware?
+   - Is requireCampaign (or equivalent) applied before any data is returned?
+   - Any endpoints accessible without authentication?
+
+3. ERROR DISCLOSURE
+   - Do any catch blocks return err.message directly to the client?
+   - Are internal DB errors, proxy details, or scraper stack traces visible in responses?
+
+4. PROXY CREDENTIAL SAFETY
+   - Does proxy-pool-manager.ts ever log proxy usernames or passwords?
+   - Are credentials redacted before appearing in logs or error responses?
+   - If a proxy fails, does the error message contain credential details?
+
+5. SILENT FAILURES in scraping pipeline
+   - Do profile-scraper, tiktok-scraper, tiktok-apify-scraper, reviews-scraper have bare catch{} blocks that silently discard failures?
+   - If a scrape fails, is the failure surfaced (logged, flagged, or returned as degraded) rather than silently returning empty data?
+
+6. UNBOUNDED QUERIES
+   - Are all DB queries in shared-profile-store.ts and data-acquisition.ts bounded with .limit()?
+   - Can any query return an unlimited number of rows based on account data volume?
+
+7. INPUT VALIDATION on routes
+   - Are competitorId, campaignId, accountId validated (type, format, ownership) before use?
+   - Can a caller pass arbitrary IDs to access data they don't own?
+
+8. RATE LIMITING on scraping
+   - Beyond the rate-limiter.ts (already clean), do the scrapers themselves enforce per-account scrape frequency?
+   - Can a single account trigger unlimited scrape jobs?
+
+Please provide:
+A) A per-file verdict table: File | Verdict (CLEAN/NEEDS_FIX/ACCEPTABLE) | Severity | Issue (line) | Category | Notes
+B) A summary table by category
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Can competitor data leak between accounts via shared-profile-store.ts or any in-memory structure?
+   Q2: Are proxy credentials safe from appearing in logs or error responses?
+   Q3: Do scraping failures surface as degraded data or disappear silently?
