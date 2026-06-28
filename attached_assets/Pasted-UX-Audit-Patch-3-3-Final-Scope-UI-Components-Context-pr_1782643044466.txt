@@ -1,0 +1,84 @@
+UX Audit — Patch 3/3 (Final)
+Scope: UI Components, Context providers, and shared libs (39 files)
+
+Files to audit:
+- components/DashboardChat.tsx
+- components/CampaignCard.tsx
+- components/CampaignSelector.tsx
+- components/PlanStatus.tsx
+- components/MetricCard.tsx
+- components/MiniChart.tsx
+- components/RequiredWorkCard.tsx
+- components/TruthSubmissionCard.tsx
+- components/EnvelopeBadge.tsx
+- components/InitializationExperience.tsx
+- components/OnboardingAgent.tsx
+- components/MarketMindAgent.tsx
+- components/ErrorBoundary.tsx
+- components/ErrorFallback.tsx
+- components/LoadingSpinner.tsx
+- components/BusinessProfile.tsx
+- components/BusinessDataForm.tsx
+- components/ControlCenter.tsx
+- components/PlatformConnection.tsx
+- components/PlatformPicker.tsx
+- components/ExecutionPlan.tsx
+- components/AccountSwitcherModal.tsx
+- components/AvyronLogo.tsx
+- components/CalendarDay.tsx
+- components/ContentCard.tsx
+- components/KeyboardAwareScrollViewCompat.tsx
+- components/LeadControlPanel.tsx
+- components/QuickAction.tsx
+- components/VideoEditorContent.tsx
+- context/AppContext.tsx
+- context/CampaignContext.tsx
+- context/OnboardingContext.tsx
+- lib/storage.ts
+- lib/envelope.ts
+- lib/copy-helpers.ts
+- lib/engine-snapshot.ts
+- lib/insets.ts
+- lib/media-types.ts
+- lib/studio-save-service.ts
+
+Risk categories to check:
+
+1. ERROR DISPLAY
+   - Do any components display raw err.message to the user?
+   - Do DashboardChat, OnboardingAgent, or MarketMindAgent show raw API errors in chat UI?
+
+2. SENSITIVE DATA HANDLING
+   - Does lib/storage.ts store any sensitive data (tokens, business data) in plain AsyncStorage?
+   - Does context/AppContext.tsx or CampaignContext.tsx log sensitive business data to console?
+   - Does BusinessProfile.tsx or BusinessDataForm.tsx expose submitted data in logs?
+
+3. FORM SAFETY
+   - Does BusinessDataForm.tsx validate inputs before submission?
+   - Does TruthSubmissionCard.tsx validate user inputs?
+   - Can any form submit empty or malformed data to the API?
+
+4. CONTEXT PROVIDERS
+   - Does AppContext.tsx expose sensitive state globally that should be scoped?
+   - Does CampaignContext.tsx correctly reset state when switching campaigns?
+   - Does OnboardingContext.tsx persist sensitive onboarding data insecurely?
+
+5. ERROR BOUNDARY
+   - Does ErrorBoundary.tsx catch errors properly and show safe fallback UI?
+   - Does ErrorFallback.tsx expose technical error details to the user?
+
+6. CHAT COMPONENTS
+   - Does DashboardChat.tsx, OnboardingAgent.tsx, or MarketMindAgent.tsx send user input to AI without sanitization?
+   - Do chat responses get displayed safely (no XSS risk via dangerouslySetInnerHTML)?
+
+7. PURE/STATIC COMPONENTS (fast check)
+   - AvyronLogo, CalendarDay, MiniChart, MetricCard, LoadingSpinner, EnvelopeBadge — are these pure display with no data access or error exposure?
+
+Please provide:
+A) A per-file verdict table grouped by risk level
+B) A summary by category
+C) Top fixes only (skip LOW if none)
+D) Explicit answer to:
+   Q1: Does lib/storage.ts store anything sensitive without encryption?
+   Q2: Do chat components (DashboardChat, OnboardingAgent, MarketMindAgent) expose raw errors or unsanitized AI responses?
+   Q3: Does ErrorFallback.tsx show technical error details to the user?
