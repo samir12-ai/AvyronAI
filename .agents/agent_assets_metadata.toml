@@ -431,3 +431,9 @@ id = "EvFOaPI1OwyzRrICwV9Eh"
 uri = "file://docs/audits/pipeline-data-audit-batch-3.md"
 type = "text"
 title = "Pipeline — Data Audit Batch 3/4"
+
+[[outputs]]
+id = "XxSvY81HQCtLZtfS1Eb7U"
+uri = "file://docs/audits/pipeline-lanes-ai-overlay-data-quality-frontend-batch-4.md"
+type = "text"
+title = "Batch 4 Audit Report — Pipeline Lanes + AI Overlay + Data Quality + Frontend"
