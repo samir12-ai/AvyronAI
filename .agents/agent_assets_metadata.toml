@@ -443,3 +443,9 @@ id = "jIxj-m3OypKcXfnAgv2Lk"
 uri = "file://docs/audits/ux-watchtower-perception-dashboard-patch-1.md"
 type = "text"
 title = "Patch 1/3 Audit — Watchtower, Perception Layer, and Dashboard Routes"
+
+[[outputs]]
+id = "pLp5FRHQ4BZ_cOgrwfOLo"
+uri = "file://docs/audits/ux-security-audit-patch-2-3.md"
+type = "text"
+title = "UX Security Audit Patch 2/3 Report"
