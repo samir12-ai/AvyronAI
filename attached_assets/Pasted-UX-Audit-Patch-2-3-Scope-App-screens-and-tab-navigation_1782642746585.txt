@@ -1,0 +1,60 @@
+UX Audit — Patch 2/3
+Scope: App screens and tab navigation (17 files)
+Note: app/(tabs)/monitor.tsx was pre-audited clean (Data Patch 4).
+
+Files to audit:
+- server/dashboard-routes.ts is excluded (audited in Patch 1)
+- app/(tabs)/index.tsx
+- app/(tabs)/calendar.tsx
+- app/(tabs)/create.tsx
+- app/(tabs)/settings.tsx
+- app/(tabs)/studio.tsx
+- app/(tabs)/ai-management.tsx
+- app/(tabs)/_ai-management-operator-labels.ts
+- app/(tabs)/photography.tsx
+- app/agent.tsx
+- app/diagnose.tsx
+- app/upgrade.tsx
+- app/intro.tsx
+- app/connect.tsx
+- app/studio/[id].tsx
+- app/+native-intent.tsx
+- app/+not-found.tsx
+
+Risk categories to check:
+
+1. AUTH & NAVIGATION
+   - Do protected screens (index, calendar, create, studio, ai-management) verify auth before rendering?
+   - Can an unauthenticated user reach any screen that shows account data?
+   - Does connect.tsx handle OAuth callback errors safely (no raw error in URL/display)?
+
+2. ERROR DISPLAY
+   - Do any screens display raw err.message from API calls directly to the user?
+   - Do error states show safe copy or technical details?
+
+3. SENSITIVE DATA IN LOGS
+   - Do any screens console.log sensitive user data (emails, tokens, business data)?
+
+4. ONBOARDING & INTRO FLOW
+   - Does intro.tsx guard against showing if user is already authenticated?
+   - Does upgrade.tsx handle failed payment states gracefully?
+   - Does connect.tsx handle OAuth failures without exposing error details?
+
+5. NAVIGATION SAFETY
+   - Does +native-intent.tsx safely handle unknown deep link schemes?
+   - Does +not-found.tsx handle gracefully without exposing route details?
+   - Does studio/[id].tsx validate the id param before making API calls?
+
+6. PERFORMANCE / UX
+   - Do any screens make API calls without loading states?
+   - Do calendar.tsx or create.tsx handle empty data states gracefully?
+   - Does ai-management.tsx handle slow AI responses without freezing the UI?
+
+Please provide:
+A) A per-file verdict table: File | Verdict | Severity | Issue (line) | Category | Notes
+B) A summary table by category
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Can an unauthenticated user see any account data on any screen?
+   Q2: Do any screens expose raw error details (API errors, stack traces) to the user?
+   Q3: Does connect.tsx handle OAuth failures safely?
