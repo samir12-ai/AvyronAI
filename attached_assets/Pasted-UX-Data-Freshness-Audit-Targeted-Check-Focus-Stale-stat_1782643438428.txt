@@ -1,0 +1,50 @@
+UX Data Freshness Audit — Targeted Check
+Focus: Stale state, cache TTLs, polling intervals, and re-validation strategy
+
+Check the following files specifically:
+- hooks/usePerception.ts
+- hooks/useRunTruthfulness.ts
+- hooks/useContinuityPanel.ts
+- hooks/useOperationsPanel.ts
+- hooks/useOperatorNotices.ts
+- hooks/useParityPanel.ts
+- hooks/useReasoning.ts
+- hooks/useRunAnchor.ts
+- lib/query-client.ts
+- components/WatchtowerStrip.tsx
+- components/ActivityTimeline.tsx
+
+Questions to answer per file:
+
+1. POLLING INTERVALS
+   - What is the refetchInterval for each hook?
+   - Does it pause when the app is in the background?
+   - When the user returns to the app (AppState active), does data refetch immediately?
+
+2. CACHE TTLs (staleTime / gcTime in React Query)
+   - What is the staleTime for Watchtower, ActivityTimeline, and Pipeline data?
+   - Can a user see data that is more than X minutes old without knowing it?
+   - Is there a "last updated at" timestamp shown to the user for the Watchtower?
+
+3. INVALIDATION ON MUTATIONS
+   - When the user submits a truth entry (TruthSubmissionCard), does it invalidate and refetch the Watchtower?
+   - When a Boss run completes, does the Watchtower data automatically refresh?
+   - When competitive intelligence scraping finishes, does the relevant UI refresh?
+
+4. BACKGROUND → FOREGROUND
+   - What happens when the app comes back to foreground after 30+ minutes?
+   - Does the Watchtower refetch immediately or wait for the next polling cycle?
+   - Is the user shown stale data without any indication it may be old?
+
+5. ERROR STATE CACHING
+   - If the Watchtower API fails once, does the UI show the old cached data or an error state?
+   - Can a failed fetch cause the UI to show outdated "positive" data?
+
+6. lib/query-client.ts
+   - What are the global defaultOptions for staleTime and gcTime?
+   - Are these appropriate for a strategy dashboard where data freshness matters?
+
+Please provide:
+A) Per-hook table: Hook | refetchInterval | staleTime | AppState refresh | Background pause
+B) List of any mutation that does NOT invalidate related queries
+C) Explicit answer: Can a user see Watchtower data that is more than 10 minutes old without any staleness indicator?

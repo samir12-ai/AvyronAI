@@ -455,3 +455,9 @@ id = "_ucMZ-Tus-xXquYE2Wg3J"
 uri = "file://docs/audits/ux-security-audit-patch-3-3.md"
 type = "text"
 title = "UX Security Audit Patch 3/3 Report"
+
+[[outputs]]
+id = "wOxpuucJdgyRe-gaabSM0"
+uri = "file://docs/audits/ux-data-freshness-audit.md"
+type = "text"
+title = "UX Data Freshness Audit Report"
