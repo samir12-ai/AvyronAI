@@ -425,3 +425,9 @@ id = "NXHAge0ulvT3V4GGOpLL9"
 uri = "file://docs/audits/competitive-intelligence-data-audit-batch-2.md"
 type = "text"
 title = "Competitive Intelligence — Data Audit Batch 2/4"
+
+[[outputs]]
+id = "EvFOaPI1OwyzRrICwV9Eh"
+uri = "file://docs/audits/pipeline-data-audit-batch-3.md"
+type = "text"
+title = "Pipeline — Data Audit Batch 3/4"
