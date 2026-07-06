@@ -3023,7 +3023,7 @@ export const bossRuns = pgTable("boss_runs", {
   execution: text("execution"),                     // JSON — acquisitions + lane run ids + bridge run id
   q1Verdict: text("q1_verdict").notNull().default("UNKNOWN"),    // "WORKING" | "DEGRADED" | "UNKNOWN"
   q1Reasons: text("q1_reasons"),                    // JSON array
-  q2Verdict: text("q2_verdict").notNull().default("UNCERTAIN"),  // "STABLE" | "SHIFTED" | "UNCERTAIN"
+  q2Verdict: text("q2_verdict").notNull().default("UNCERTAIN"),  // "STABLE" | "SHIFTED" | "UNCERTAIN" | "INSUFFICIENT_DATA"
   q2Reasons: text("q2_reasons"),                    // JSON array
   warnings: text("warnings"),                       // JSON array
   startedAt: timestamp("started_at"),

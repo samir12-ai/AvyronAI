@@ -30,6 +30,8 @@ export function translateQ2Verdict(q2: string | null | undefined): WatchtowerLin
       return { tone: "shift", headline: "Market shift since last check", detail: "Recent signals look different from when this plan was made. A review is queued." };
     case "UNCERTAIN":
       return { tone: "watching", headline: "Watching the market", detail: "Building baseline before flagging shifts. Monitoring is active." };
+    case "INSUFFICIENT_DATA":
+      return { tone: "watching", headline: "Building market baseline", detail: "Not enough competitor or performance signal yet to judge market movement." };
     default:
       return null;
   }
