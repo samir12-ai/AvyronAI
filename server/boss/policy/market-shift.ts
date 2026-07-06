@@ -249,47 +249,55 @@ export function decideQ2(
   // I-rules — real Phase 7.3 interpretation (preferred path)
   // ──────────────────────────────────────────────────────────────────
   if (interpretation) {
-    // I0 — corpus too thin for any pattern claim.
-    if (interpretation.corpusStatus === "insufficient_data") {
-      return {
-        verdict: "INSUFFICIENT_DATA",
-        ruleCode: "rule:insufficient_corpus_too_few_competitors",
-        ruleReason: `insufficient_data:competitor_corpus:${interpretation.corpusReason}`,
-      };
-    }
+    // I0 — corpus too thin for any pattern claim *within the lookback
+    // window*. This does NOT mean the account lacks competitors overall —
+    // `ci_competitor_posts` is windowed to Q2_LOOKBACK_DAYS, so an account
+    // with plenty of configured competitors but a scraping cadence slower
+    // than the window (or a temporarily stalled scrape) will legitimately
+    // show 0-1 distinct competitors *in-window* while still having rich,
+    // fresher legacy severity-bucket data (pipeline_signals/change_events).
+    // Bug (2026-07-06): this used to return INSUFFICIENT_DATA immediately,
+    // which shadowed real R-rule signal even when recentRunsCount/signalCount
+    // showed an actively-running, data-rich account. Now we fall through to
+    // R-rules just like the "no IG strategy signals" case below, so legacy
+    // data gets a chance to produce a real verdict before we give up.
+    if (interpretation.corpusStatus !== "insufficient_data") {
+      const sigs = interpretation.signals;
+      const hasValidated = sigs.some((s) => s.status === "pattern_validated");
+      const hasWeak = sigs.some((s) => s.status === "weak_validation");
+      const hasDetected = sigs.some((s) => s.status === "pattern_detected");
 
-    const sigs = interpretation.signals;
-    const hasValidated = sigs.some((s) => s.status === "pattern_validated");
-    const hasWeak = sigs.some((s) => s.status === "weak_validation");
-    const hasDetected = sigs.some((s) => s.status === "pattern_detected");
-
-    // I1 — at least one IG pattern strongly validated on TikTok.
-    if (hasValidated) {
-      return {
-        verdict: "SHIFTED",
-        ruleCode: "rule:shifted_pattern_validated",
-        ruleReason: "rule:shifted_pattern_validated_ig+tiktok",
-      };
+      // I1 — at least one IG pattern strongly validated on TikTok.
+      if (hasValidated) {
+        return {
+          verdict: "SHIFTED",
+          ruleCode: "rule:shifted_pattern_validated",
+          ruleReason: "rule:shifted_pattern_validated_ig+tiktok",
+        };
+      }
+      // I2 — IG patterns with weak TikTok validation only.
+      if (hasWeak) {
+        return {
+          verdict: "UNCERTAIN",
+          ruleCode: "rule:uncertain_weak_validation",
+          ruleReason: "rule:uncertain_pattern_ig_weak_tiktok",
+        };
+      }
+      // I3 — IG patterns detected but no TikTok validation. Don't overreact.
+      if (hasDetected) {
+        return {
+          verdict: "STABLE",
+          ruleCode: "rule:stable_pattern_detected_no_validation",
+          ruleReason: "rule:stable_ig_patterns_no_tiktok_validation",
+        };
+      }
+      // No IG strategy signals at all (only diagnostics). Severity buckets may
+      // still drive the verdict — fall through to R-rules so back-compat data
+      // (legacy lane runs without ci_competitor_posts coverage) is honored.
     }
-    // I2 — IG patterns with weak TikTok validation only.
-    if (hasWeak) {
-      return {
-        verdict: "UNCERTAIN",
-        ruleCode: "rule:uncertain_weak_validation",
-        ruleReason: "rule:uncertain_pattern_ig_weak_tiktok",
-      };
-    }
-    // I3 — IG patterns detected but no TikTok validation. Don't overreact.
-    if (hasDetected) {
-      return {
-        verdict: "STABLE",
-        ruleCode: "rule:stable_pattern_detected_no_validation",
-        ruleReason: "rule:stable_ig_patterns_no_tiktok_validation",
-      };
-    }
-    // No IG strategy signals at all (only diagnostics). Severity buckets may
-    // still drive the verdict — fall through to R-rules so back-compat data
-    // (legacy lane runs without ci_competitor_posts coverage) is honored.
+    // else: corpusStatus === "insufficient_data" (thin/stale in-window corpus)
+    // — also fall through to R-rules below so legacy severity-bucket data
+    // gets a real chance before we ever report INSUFFICIENT_DATA.
   }
 
   // ──────────────────────────────────────────────────────────────────
