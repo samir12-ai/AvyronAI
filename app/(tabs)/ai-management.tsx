@@ -1021,7 +1021,12 @@ export default function AIManagementScreen() {
           style={[styles.tabBar, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
           contentContainerStyle={styles.tabBarContent}
         >
-          {((operator.enabled ? [
+          {([
+            // Restored (per user request) — Build Plan and Strategies are
+            // shown again as their own dedicated, clearly-labeled tabs
+            // instead of being folded into the "Roadmap"/"Diagnose"
+            // 4-screen pivot naming. Content rendering per tab is
+            // unchanged (still gated by operator.enabled where applicable).
             { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
             { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
@@ -1030,20 +1035,7 @@ export default function AIManagementScreen() {
             { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: false },
             { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Publish', color: colors.primary, advanced: false },
             { key: 'audience' as TabView, icon: 'people-outline' as const, label: 'Audience', color: colors.primary, advanced: false },
-          ] : [
-            // Task #71 / Phase 8 — customer-facing 4-screen pivot.
-            // Connect → publisher (where the work goes out)
-            // Diagnose → intelligence (what the market looks like)
-            // Roadmap → buildplan (live plan + execution)
-            // Monitor → control (live health + audit trail)
-            // Each pillar maps to an existing TabView destination so the
-            // underlying routing, persistence, and content code paths are
-            // unchanged (D2 — canonical activeTab values preserved).
-            { key: 'publisher' as TabView, icon: 'send-outline' as const, label: 'Connect', color: colors.primary, advanced: false },
-            { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Diagnose', color: '#3B82F6', advanced: false },
-            { key: 'buildplan' as TabView, icon: 'map-outline' as const, label: 'Roadmap', color: '#EC4899', advanced: false },
-            { key: 'control' as TabView, icon: 'pulse-outline' as const, label: 'Monitor', color: '#8B5CF6', advanced: false },
-          ]) as const)
+          ] as const)
             .filter(t => !t.advanced)
             .map(t => {
               const isActive = activeTab === t.key;

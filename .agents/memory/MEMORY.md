@@ -1,0 +1,1 @@
+- [AI Control Center tab pivot](ai-management-tab-pivot.md) — a "4-screen pivot" once collapsed Build Plan/Strategies into Roadmap/Diagnose/Monitor labels; user reverted to explicit named tabs.
