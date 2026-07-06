@@ -1,0 +1,70 @@
+Infrastructure Audit — Patch 4/5
+Scope: DB Migrations + Frontend Config + Translations (45 files)
+Note: Translations (lib/translations/ — 32 files) are static JSON — 
+verify they contain no hardcoded secrets, API keys, or internal URLs, 
+then mark PASS with a single batch verdict. No need to audit each file 
+individually.
+
+Files to audit:
+
+GROUP 1 — DB Migrations TypeScript (14 files):
+- server/migrations/001.ts through server/migrations/015.ts
+  (list each that has logic beyond pure SQL — focus on any that 
+  contain data transforms, seed data, or programmatic logic)
+
+GROUP 2 — Frontend Config (13 files):
+- app/_layout.tsx
+- app/(tabs)/_layout.tsx
+- lib/query-client.ts
+- lib/i18n.ts
+- lib/types.ts
+- constants/colors.ts
+- context/LanguageContext.tsx
+- context/CreativeContext.tsx
+- hooks/useFeatureFlags.ts
+- hooks/usePersistedState.ts
+- hooks/useRunAnchor.ts
+- hooks/useOperatorSurface.ts
+- hooks/useReasoning.ts
+
+GROUP 3 — Translations (32 files):
+- lib/translations/ (all files — batch audit)
+
+Risk categories to check:
+
+GROUP 1 — DB Migrations:
+1. Do any migrations contain hardcoded seed data with 
+   real emails, passwords, or API keys?
+2. Do any migrations have irreversible operations without 
+   a clear rollback strategy?
+3. Do any migrations run raw SQL that could be injection-vulnerable 
+   if migration input were user-controlled?
+4. Do any migrations contain programmatic logic that could fail 
+   silently (bare catch{})?
+
+GROUP 2 — Frontend Config:
+1. AUTH GATE — does app/_layout.tsx correctly gate all 
+   authenticated routes?
+2. SENSITIVE DATA — does lib/types.ts expose internal type 
+   structures that hint at security-sensitive fields?
+3. HOOKS — do useRunAnchor, useOperatorSurface, useReasoning 
+   correctly gate operator-only data?
+4. STORAGE — does usePersistedState store anything sensitive 
+   without encryption?
+5. ERROR DISCLOSURE — do any hooks expose raw API errors?
+6. CONTEXT — does CreativeContext expose any sensitive creative 
+   data without auth?
+
+GROUP 3 — Translations:
+1. Do any translation files contain hardcoded API endpoints, 
+   internal URLs, or secrets?
+2. Do any translation keys expose internal feature names or 
+   security-sensitive terminology that could aid an attacker?
+
+Please provide:
+A) Per-file verdict table for Groups 1 and 2
+B) Single batch verdict for Group 3 (translations)
+C) Top fixes prioritized by severity
+D) Explicit answer:
+   Q1: Does app/_layout.tsx correctly prevent unauthenticated 
+       access to all protected routes?
