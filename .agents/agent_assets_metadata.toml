@@ -461,3 +461,9 @@ id = "wOxpuucJdgyRe-gaabSM0"
 uri = "file://docs/audits/ux-data-freshness-audit.md"
 type = "text"
 title = "UX Data Freshness Audit Report"
+
+[[outputs]]
+id = "OTS4QuzTjneknJZKBVAHQ"
+uri = "file://docs/audits/infrastructure-audit-patch-1-5.md"
+type = "text"
+title = "Infrastructure Audit Patch 1/5 Report"
