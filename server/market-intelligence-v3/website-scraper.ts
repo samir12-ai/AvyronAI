@@ -1,4 +1,4 @@
-import { getProxyConfig } from "../competitive-intelligence/proxy-pool-manager";
+import { getProxyConfig, resolveProxyCountry } from "../competitive-intelligence/proxy-pool-manager";
 import { resolveSafeUrl, pinnedLookup, isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } from "../competitive-intelligence/scrape-safety";
 import type { WebsiteExtraction, BlogExtraction } from "./source-types";
 
@@ -22,7 +22,7 @@ interface FetchOptions {
 async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; status: number; ok: boolean }> {
   const proxy = getProxyConfig();
   const timeout = opts.timeoutMs || SCRAPE_TIMEOUT_MS;
-  const country = (process.env.BRIGHT_DATA_PROXY_COUNTRY || "us").toLowerCase();
+  const country = resolveProxyCountry();
 
   // Seal #5 / F6.12 — breaker gate before any outbound attempt.
   const cb = isBreakerOpen("website", country);
@@ -48,11 +48,12 @@ async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; statu
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
       const { ProxyAgent } = await import("undici");
-      const country = process.env.BRIGHT_DATA_PROXY_COUNTRY || "us";
-      const isWebUnlocker = proxy.port === "33335";
-      const proxyUsername = isWebUnlocker
-        ? proxy.username
-        : `${proxy.username}-country-${country}`;
+      const sessionId = `s${Math.random().toString(36).slice(2, 10)}`;
+      // Web Unlocker (port 33335) supports `-country-`/`-session-` suffixes
+      // too; previously both were dropped on this port, which silently
+      // ignored BRIGHT_DATA_PROXY_COUNTRY and reused one bare identity for
+      // every request.
+      const proxyUsername = `${proxy.username}-country-${country}-session-${sessionId}`;
       const proxyUrl = `http://${proxyUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
       const res = await fetch(opts.url, {
         headers: baseHeaders,

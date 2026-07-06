@@ -26,6 +26,32 @@ async function getChromium(): Promise<any> {
 
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
 
+// Bright Data proxy diversification alone doesn't help if every request still
+// carries the exact same static User-Agent — that's a stronger, session-
+// independent fingerprint than IP. Rotate across a small pool of realistic
+// desktop + Instagram-app UAs (matches the pattern already used in
+// reviews-scraper.ts / tiktok-scraper.ts).
+const DESKTOP_UAS = [
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+];
+
+const IG_APP_UAS = [
+  "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
+  "Instagram 274.0.0.24.113 Android (31/12; 440dpi; 1080x2340; Pixel 6; oriole; oriole; qcom)",
+  "Instagram 276.1.0.27.104 Android (34/14; 420dpi; 1080x2400; samsung; SM-S918B; dm3q; qcom)",
+];
+
+function pickDesktopUA(): string {
+  return DESKTOP_UAS[Math.floor(Math.random() * DESKTOP_UAS.length)];
+}
+
+function pickIgAppUA(): string {
+  return IG_APP_UAS[Math.floor(Math.random() * IG_APP_UAS.length)];
+}
+
 function randomDelay(): Promise<void> {
   const ms = 3000 + Math.random() * 2000;
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -264,7 +290,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
   const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "User-Agent": pickDesktopUA(),
     "X-IG-App-ID": "936619743392459",
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "*/*",
@@ -304,7 +330,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   };
 
   const iHeaders: Record<string, string> = {
-    "User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
+    "User-Agent": pickIgAppUA(),
     "X-IG-App-ID": "936619743392459",
     "X-IG-WWW-Claim": "0",
     "Accept": "*/*",
@@ -447,7 +473,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     const maxId = `${lastPostId}_${userId}`;
     const feedUrl = `https://i.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${maxId}`;
     const feedHeaders: Record<string, string> = {
-      "User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
+      "User-Agent": pickIgAppUA(),
       "X-IG-App-ID": "936619743392459",
       "X-IG-WWW-Claim": "0",
       "Accept": "*/*",
@@ -598,7 +624,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
       const gqlUrl = `https://www.instagram.com/graphql/query/?query_hash=${queryHash}&variables=${encodeURIComponent(gqlVars)}`;
 
       const gqlHeaders: Record<string, string> = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "User-Agent": pickDesktopUA(),
         "X-IG-App-ID": "936619743392459",
         "X-Requested-With": "XMLHttpRequest",
         "Accept": "*/*",
@@ -722,7 +748,7 @@ function parsePostFromV1Feed(item: any, handle: string): ScrapedPost {
 
 async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
   const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": pickDesktopUA(),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Cache-Control": "no-cache",
@@ -963,7 +989,7 @@ export async function scrapePostComments(
   const url = `https://www.instagram.com/graphql/query/?query_hash=${COMMENT_QUERY_HASH}&variables=${encodeURIComponent(variables)}`;
 
   const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "User-Agent": pickDesktopUA(),
     "X-IG-App-ID": "936619743392459",
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "*/*",
@@ -1038,7 +1064,7 @@ async function scrapePostCommentsFromHTML(
   const postPageUrl = `https://www.instagram.com/p/${shortcode}/`;
 
   const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "User-Agent": pickDesktopUA(),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Sec-Fetch-Dest": "document",
@@ -1158,7 +1184,7 @@ async function scrapePostCommentsV1(
   const mediaInfoUrl = `https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`;
 
   const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "User-Agent": pickDesktopUA(),
     "X-IG-App-ID": "936619743392459",
     "Accept": "*/*",
     "Sec-Fetch-Dest": "empty",

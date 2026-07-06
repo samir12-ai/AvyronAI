@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { ciCompetitorReviews, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { getProxyConfig } from "./proxy-pool-manager";
+import { getProxyConfig, resolveProxyCountry } from "./proxy-pool-manager";
 
 // Seal #5 / F6.7 — outbound HTTP timeout aligned at 15s across all scrapers
 // (validator-#4 closure). 40s previously allowed slow proxies to hold worker
@@ -32,11 +32,12 @@ async function fetchViaProxy(url: string): Promise<{ html: string; status: numbe
   if (!proxy) throw new Error("Bright Data proxy not configured");
 
   const { ProxyAgent } = await import("undici");
-  const country = process.env.BRIGHT_DATA_PROXY_COUNTRY || "us";
-  const isWebUnlocker = proxy.port === "33335";
-  const proxyUsername = isWebUnlocker
-    ? proxy.username
-    : `${proxy.username}-country-${country}`;
+  const country = resolveProxyCountry();
+  const sessionId = `s${Math.random().toString(36).slice(2, 10)}`;
+  // Web Unlocker (port 33335) supports `-country-`/`-session-` suffixes too;
+  // previously both were dropped on this port, which silently ignored
+  // BRIGHT_DATA_PROXY_COUNTRY and reused one bare identity for every request.
+  const proxyUsername = `${proxy.username}-country-${country}-session-${sessionId}`;
   const proxyUrl = `http://${proxyUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
 
   const controller = new AbortController();

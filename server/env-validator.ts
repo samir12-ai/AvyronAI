@@ -180,6 +180,17 @@ export function validateEnv(opts: { exitOnFailure?: boolean } = {}): EnvValidati
     missing.push(...validatePublicBaseUrl(process.env.PUBLIC_BASE_URL, isProd));
   }
 
+  // BRIGHT_DATA_PROXY_COUNTRY — must be an ISO-3166 alpha-2 code (e.g. "ae"),
+  // not a full country name. Bright Data's `-country-<cc>` proxy-username
+  // suffix silently no-ops on anything else, which means geo-targeting quietly
+  // stops working instead of failing loudly. Warn only (not fatal) — the
+  // scraper layer falls back to "us" via resolveProxyCountry().
+  if (process.env.BRIGHT_DATA_PROXY_COUNTRY && !/^[a-zA-Z]{2}$/.test(process.env.BRIGHT_DATA_PROXY_COUNTRY.trim())) {
+    warnings.push(
+      `BRIGHT_DATA_PROXY_COUNTRY — "${process.env.BRIGHT_DATA_PROXY_COUNTRY}" is not a 2-letter ISO-3166 code (e.g. "ae", "us"). Geo-targeting will silently fall back to "us" until corrected.`,
+    );
+  }
+
   // JWT_SECRET length sanity — soft floor in dev, hard floor in prod.
   if (process.env.JWT_SECRET) {
     const minLen = isProd ? 32 : 16;

@@ -1,1 +1,2 @@
 - [AI Control Center tab pivot](ai-management-tab-pivot.md) — a "4-screen pivot" once collapsed Build Plan/Strategies into Roadmap/Diagnose/Monitor labels; user reverted to explicit named tabs.
+- [Bright Data Web Unlocker proxy syntax](bright-data-web-unlocker-syntax.md) — port 33335 DOES support `-country-`/`-session-` username suffixes; don't assume "Web Unlocker" means bare username only.

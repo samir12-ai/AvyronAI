@@ -78,6 +78,44 @@ export function getProxyConfig(): { host: string; port: string; username: string
   return { host, port, username, password };
 }
 
+const COUNTRY_NAME_TO_ISO2: Record<string, string> = {
+  "united arab emirates": "ae",
+  "united states": "us",
+  "united kingdom": "gb",
+  "saudi arabia": "sa",
+  "egypt": "eg",
+  "canada": "ca",
+  "germany": "de",
+  "france": "fr",
+  "india": "in",
+};
+
+let warnedInvalidCountry = false;
+
+/**
+ * Normalizes BRIGHT_DATA_PROXY_COUNTRY into the ISO-3166 alpha-2 code Bright
+ * Data's username syntax requires (`-country-<cc>`). Operators sometimes set
+ * the full country name (e.g. "United Arab Emirates") instead of "ae" — that
+ * value silently fails to geo-target once fed into the proxy username, so we
+ * map known full names to their code and otherwise fall back to a safe
+ * lowercase 2-letter slice with a one-time startup warning.
+ */
+export function resolveProxyCountry(): string {
+  const raw = (process.env.BRIGHT_DATA_PROXY_COUNTRY || "us").trim();
+  if (/^[a-zA-Z]{2}$/.test(raw)) return raw.toLowerCase();
+
+  const mapped = COUNTRY_NAME_TO_ISO2[raw.toLowerCase()];
+  if (mapped) return mapped;
+
+  if (!warnedInvalidCountry) {
+    warnedInvalidCountry = true;
+    console.error(
+      `[ProxyPool] INVALID_COUNTRY_FORMAT | BRIGHT_DATA_PROXY_COUNTRY="${raw}" is not a recognized ISO-3166 alpha-2 code (e.g. "ae", "us"). Falling back to "us". Geo-targeting will be wrong until this is corrected.`,
+    );
+  }
+  return "us";
+}
+
 function computeIpHash(sessionId: string): string {
   return crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 12);
 }
@@ -126,12 +164,16 @@ function createSession(accountId: string): ProxySession | null {
   const ts = (Date.now() % 1000000).toString(36);
   const rand = Math.random().toString(36).substr(2, 4);
   const sessionId = `s${shortAccount}${ts}${rand}`;
-  const isWebUnlocker = proxy.port === "33335";
-  const country = process.env.BRIGHT_DATA_PROXY_COUNTRY || "us";
+  const country = resolveProxyCountry();
   const countrySegment = `-country-${country}`;
-  const sessionUsername = isWebUnlocker
-    ? proxy.username
-    : `${proxy.username}${countrySegment}-session-${sessionId}`;
+  // Bright Data's Web Unlocker (port 33335) DOES support both `-country-`
+  // and `-session-` suffixes on the username — it was previously treated as
+  // an all-or-nothing product mode and both were dropped, which silently
+  // ignored BRIGHT_DATA_PROXY_COUNTRY and made our own sticky-session /
+  // rotate-on-block bookkeeping a no-op against the real network path
+  // (every "rotated" session sent the identical bare username to Bright
+  // Data). Including both restores real per-competitor IP diversification.
+  const sessionUsername = `${proxy.username}${countrySegment}-session-${sessionId}`;
   const sessionUrl = `http://${sessionUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
 
   const session: ProxySession = {
