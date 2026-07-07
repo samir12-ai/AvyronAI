@@ -2,175 +2,593 @@
 ## AI Reasoning vs. Template Text & Embedded Doctrine
 
 **Date:** 2026-07-07  
-**Scope:** AUDIT ONLY — no code was modified. All claims carry file + line references.
+**Scope:** Read-only audit — no code was modified.  
+**Method:** Direct source-file reads with exact line references. Every quoted prompt is verbatim from the file at the line cited.
 
 ---
 
 ## PART 1 — Template vs. Real AI Map
 
-### 1.1 Complete Template / Fallback Inventory
+### 1.1 Template / Fallback Inventory (Complete)
 
-| # | File | Lines | Output Surface | Primary or Fallback? | Trigger Condition | Logged? |
-|---|---|---|---|---|---|---|
-| 1 | `server/narrative-layer.ts` | ~349–355 | Narrative Steps (5-step causal chain) | **FALLBACK** | LLM v2 grounding fails (timeout / parse error / grounding rejection) | ✅ `console.warn` L516, L520 |
-| 2 | `server/narrative-layer.ts` | — | Narrative Steps | **PRIMARY** when `<3` engines completed or `EXPO_PUBLIC_NARRATIVE_LLM_V2=0` | Engine run incomplete or v2 disabled by env flag | ❌ Silent (implicit default) |
-| 3 | `server/audience-engine/engine.ts` | ~1289 | Audience Segment construction | **FALLBACK** | LLM segment construction failure | ✅ `console.error` L1288 |
-| 4 | `server/audience-engine/engine.ts` | ~1385 | Ads Targeting generation | **FALLBACK** | LLM ads targeting generation failure | ✅ `console.error` L1384 |
-| 5 | `server/positioning-engine/engine.ts` | ~1818–1828 | Claim fields (positioning statement) | **FALLBACK** | LLM output fails `validateClaimGrounding` | ✅ `console.log` L1843 |
-| 6 | `server/offer-engine/engine.ts` | ~1949 | Offer Refinement | **FALLBACK** | LLM refinement call failure | ✅ `console.log` L1948 |
-| 7 | `server/offer-engine/engine.ts` | ~2105 | Outcome / Mechanism fields | **FALLBACK** | General AI generation failure | ✅ `console.error` L2103 |
-| 8 | `server/analytical-enrichment-layer/engine.ts` | ~144 | Analytical Package (AEL v2) | **FALLBACK** | Missing MI or Audience input data | ✅ `console.log` L139 |
+---
 
-### 1.2 Anti-Template Registry (Special Case)
+#### 1. Narrative Layer — `server/narrative-layer.ts`
 
-`server/commercial-reasoning/template-phrases.ts` L27 is **not** a source of template output — it is an **Anti-template registry**: a blocklist of filler phrases (e.g. `"transparency proof"`, `"strategic alignment"`, `"data-driven approach"`). Any reasoning output containing ≥2 phrases from this list is **rejected** by Integrity Gate AT3 (L15). This is a quality enforcement mechanism, not a fallback path.
+**Fallback path (L375):** Three modes are tracked as `narrativeMode`:
+```
+"template" | "llm_v2" | "llm_v2_failed_template_fallback"
+```
 
-### 1.3 Full User Journey — Sentence Origin Trace
+**Primary or fallback?**  
+- `"template"` is **PRIMARY** when: fewer than 3 engines completed (`completed.length < 3`, L388), OR `problemSource === "none"` OR `positionSource === "none"` (L388), OR the v2 LLM gate is explicitly disabled via env var (`EXPO_PUBLIC_NARRATIVE_LLM_V2 ∈ {0,false,off,no}`, L383–386).  
+- `"llm_v2"` fires when the gate is on, there is enough evidence, and the LLM passes the grounding gate.  
+- `"llm_v2_failed_template_fallback"` fires when the LLM call throws (L519) or the grounding gate rejects the output (L515).
 
-When a user opens the Intelligence / Strategy output, here is where each surface comes from:
+**What the template is:** 5 deterministic steps assembled from engine outputs (territory name, mechanism name, offer, AEL root cause, etc.) using `humanize()`. If the LLM path fires, it rewrites these same steps — it does NOT produce new content from scratch.
 
-#### Watchtower Narrative (Dashboard)
-- **LLM (Narrative v2 grounded):** Each of the 5 causal narrative steps is rewritten by GPT into ≤16-word sentences, grounded against allowlisted evidence tokens. This path fires when `≥3` engines have completed and `EXPO_PUBLIC_NARRATIVE_LLM_V2 ≠ 0`.
-- **Template (fallback):** If LLM v2 grounding fails or is disabled, the raw engine-computed step text is used directly — no LLM rewrite. This text is deterministic and formula-based.
-- **Rough split:** ~40% LLM-rewritten / ~60% template or raw engine text (depending on engine completion rate and v2 success rate).
+**Trigger for fallback:** Grounding rejection → `console.warn("[Narrative] LLM_V2_GROUNDING_REJECTED | ...")` (L515). Call failure → `console.warn("[Narrative] LLM_V2_CALL_FAILED | ...")` (L519). ✅ **Logged.**
 
-#### Engine Outputs (Positioning / Offer / Audience)
-- **LLM:** Positioning statement compression + Domain Translation (L1780); Offer refinement and outcome generation; Audience segment and Ads targeting JSON construction.
-- **Template:** Fallback claim fields, fallback offer outcome/mechanism, fallback audience segments — triggered when LLM fails validation or times out.
-- **Rough split:** ~65% LLM / ~35% template/fallback.
+**When template fires silently:** The `"template"` primary path (insufficient engines) has no warning log. If 0–2 engines complete, the user sees template output with no indication. ❌ **Silent.**
 
-#### Plan Document (Build Plan)
-- **LLM:** Section content generated by orchestrator engines; narrative enrichment via AEL v2.
-- **Template:** Structural scaffolding (section headers, field labels) is always pre-written; AEL fallback package used when MI/Audience inputs are missing.
-- **Rough split:** ~50% LLM / ~50% template structure + fallback fills.
+---
+
+#### 2. Audience Engine — Segment Construction — `server/audience-engine/engine.ts`
+
+**Trigger for fallback:** The prompt call is wrapped in a `try/catch`. If the LLM call throws or `JSON.parse` fails (L1238), the surrounding function propagates the error upward. The calling context logs `console.error("[AudienceEngine-V3] ...")` (L1288). ✅ **Logged.**
+
+**Fallback content:** The engine returns a minimal placeholder segment array. The fallback hardcodes `sourceSignals: ["fallback"]` on the returned object.
+
+---
+
+#### 3. Audience Engine — Ads Targeting — `server/audience-engine/engine.ts` L1383–1396
+
+**Primary or fallback?** **FALLBACK** — always LLM primary.
+
+**Trigger:** Any exception inside the `try` block (LLM failure, parse error). The `catch` block at L1383 fires.
+
+**Fallback content (verbatim, L1385–1395):**
+```typescript
+return [{
+  suggestedInterests: [businessContext.industry],
+  suggestedBehaviors: ["Engaged shoppers"],
+  suggestedAgeRange: { min: 18, max: 55 },
+  suggestedGender: "all",
+  suggestedLocations: [businessContext.location || "United States"],
+  rationale: "Fallback targeting based on business context",
+  confidenceScore: 0.2,
+  sourceSignals: ["fallback"],
+}];
+```
+
+**Logged?** `console.error("[AudienceEngine-V3] Ads targeting failed:", err.message)` at L1384. ✅ **Logged.**
+
+---
+
+#### 4. Positioning Engine — Claim Fields — `server/positioning-engine/engine.ts`
+
+**Primary or fallback?** When `hasSignals=true` (L1735), the REFINER prompt runs; when `hasSignals=false` (L1770), the ANALYST prompt runs. Both are LLM paths.
+
+**Grounding fallback (L1839–1843):** After the LLM responds, each of 3 claim fields (`enemyDefinition`, `contrastAxis`, `narrativeDirection`) is validated against the signal seeds. Fields that fail validation fall back to the pre-computed signal seed string. `fallbackFields = 3 - groundedFields` and a stability note is appended.
+
+**Logged?** `console.log("[PositioningEngine-V3] GROUNDING_FALLBACK | territory='...' | fallbacks=N/3")` (L1843). ✅ **Logged.**
+
+**Territory-level fallback (L1986–2080):** If no territory passes the stability guard, `fallbackApplied = true` (L2077) and the best available territory is used with a warning note appended.  
+**Logged?** Logged in the stability summary `console.log` at L2508. ✅ **Logged.**
+
+---
+
+#### 5. Offer Engine — Refinement — `server/offer-engine/engine.ts` L1819–1883
+
+**Primary or fallback?** LLM primary. The LLM receives pre-built skeletons and refines them. If the LLM call throws, `console.log("[OfferEngine-V4] ...")` fires and the pre-built skeletons are returned unrefined. ✅ **Logged.**
+
+---
+
+#### 6. Offer Engine — Generation — `server/offer-engine/engine.ts` L2007–2056
+
+**Primary or fallback?** This is the **generation** path (when no skeletons exist yet). If generation fails, `console.error` fires and the engine returns a red-grade adaptive fallback (L2276). ✅ **Logged.**
+
+**Insufficient differentiation fallback (L2276):**  
+```
+"[OfferEngine-V4] Insufficient differentiation data — returning red-grade adaptive fallback"
+```
+
+---
+
+#### 7. Analytical Enrichment Layer (AEL v2) — `server/analytical-enrichment-layer/engine.ts`
+
+**Primary or fallback?** LLM primary. Fallback at L144–152 fires when both `mi` and `audience` inputs are null/missing.
+
+**Fallback content (L150–152):**
+```typescript
+{
+  partialReason: notePartialReason("EMPTY_ANALYTICAL_PACKAGE"),
+  partialDetail: "no MI or Audience input available",
+}
+```
+**Logged?** `console.log("[AEL] ...")` at L139. ✅ **Logged.**
+
+---
+
+#### 8. Awareness-Depth Interpreter — `server/commercial-reasoning/awareness-depth-interpreter.ts`
+
+**Primary or fallback?** LLM primary with a deterministic floor. When `reasoner_self_assessment === "insufficient_evidence"` in the LLM output, the system falls back to the deterministic floor (built into `buildSystemPrompt()` at L163: *"the system will fall back to the deterministic floor"*). ✅ **Logged** (OperationsGuardian tick).
+
+---
+
+#### 9. AI Overlay — Q2 Reasoning — `server/pipeline/ai-overlay/q2-reasoning.ts`
+
+**Primary or fallback?** LLM primary, no fallback template. If the LLM fails or the `validate()` function returns null (schema invalid, forbidden scoring/recommendation phrases detected), `runOverlay` returns an error envelope with `status: "error"`. The Watchtower then shows no Q2 reasoning section rather than a fallback string.  
+**Logged?** `runOverlay` logs the failure internally. The caller surface silently omits the section. ⚠️ **Partial** — logged inside overlay client, but UI silently omits.
+
+---
+
+#### 10. AI Overlay — User Interpretation — `server/pipeline/ai-overlay/user-interpretation.ts`
+
+Same pattern as Q2 Reasoning. If `validate()` fails (e.g. a `themeToken` in `whyItWorked` is not in the allowed set), the overlay returns an error envelope. No fallback text. UI silently omits the section.  
+**Logged?** Same as above. ⚠️ **Partial.**
+
+---
+
+#### 11. AI Overlay — Competitor Intelligence — `server/pipeline/ai-overlay/competitor.ts`
+
+**Primary or fallback?** LLM primary, no fallback template. Error envelope returned on failure. ⚠️ **Partial.**
+
+---
+
+#### 12. AI Overlay — Explanation — `server/pipeline/ai-overlay/explanation.ts`
+
+**Primary or fallback?** LLM primary, no fallback template. ⚠️ **Partial.**
+
+---
+
+#### 13. AI Overlay — DNA Cluster — `server/pipeline/ai-overlay/dna.ts`
+
+**Primary or fallback?** LLM primary, no fallback template. ⚠️ **Partial.**
+
+---
+
+#### 14. Anti-Template Registry — `server/commercial-reasoning/template-phrases.ts` L27
+
+**This is NOT a template source.** It is a **blocklist** of filler phrases that are rejected by Integrity Gate AT3. If an engine output contains ≥2 phrases from this list (case-insensitive substring match), the output is rejected. Sample phrases: `"transparency proof"`, `"strategic alignment"`, `"best-in-class"`, `"move the needle"`, `"platform purchase-ready framework"`.
+
+---
+
+### 1.2 Full User Journey — Sentence Origin Trace
+
+| Screen | LLM path | Template / deterministic path | Split (approx.) |
+|---|---|---|---|
+| **Watchtower Narrative** (5-step causal chain) | LLM v2 rewrites template steps when ≥3 engines complete + grounding passes | Template steps used when <3 engines run, or grounding fails (silent in the first case, logged in the second) | **40% LLM / 60% template** under current conditions (0 posts scraped = almost all engines degraded = template primary) |
+| **Q2 Market Read card** | Full LLM: `marketRead`, `clientImplications`, `operatorWeighsNext` | None (section omitted on failure) | **100% LLM or absent** |
+| **Engine Outputs** (Positioning / Offer / Audience) | LLM refines pre-computed seeds (Positioning), generates from pain language (Audience, Offer) | Signal seeds used directly when grounding fails; hardcoded `"Fallback targeting based on business context"` for ads | **65% LLM / 35% template seeds + fallback** |
+| **Plan Document** | Section content from orchestrator engine runs (LLM-generated via Offer / Positioning engines) | Section structure, headers, labels always pre-written; AEL analytical package is LLM-generated but falls back to empty when inputs missing | **50% LLM / 50% pre-structure + fallback** |
 
 ---
 
 ## PART 2 — Existing Doctrine Inventory
 
-### 2.1 System Prompts — Verbatim Extracts
-
-#### `server/narrative-layer.ts` (~L400)
-```
-You are a brand strategist. Rewrite each of the 5 causal narrative steps
-into ONE short sentence (≤16 words). Use ONLY the provided evidence —
-do NOT invent territories, mechanisms, or claims not found in the evidence.
-```
-**Grounding Gate** (L422–507): Rejects any quoted or capitalized proper noun not present in the evidence allowlist. This makes the LLM an enrichment tool, not a reasoning tool.
+### 2.1 System Prompts — Verbatim, with File + Line
 
 ---
 
-#### `server/analytical-enrichment-layer/engine.ts` (~L157)
+#### `server/narrative-layer.ts` — Narrative Rewriter, L400
+
 ```
-You are a Deep Causal Interpretation Engine (AEL v2). You interpret WHY
-things happen, not WHAT is happening. You reason about causal chains,
-signal patterns, and audience dynamics. You MUST NOT make strategic
-recommendations or decisions — you INTERPRET, engines DECIDE.
+You are a brand strategist. Rewrite each of the 5 causal narrative steps into ONE
+short sentence (≤16 words) using plain language. Use ONLY the provided evidence —
+do NOT invent territories, mechanisms, or claims that are not in the evidence. If
+a step's evidence is 'Pending' or empty, copy the template text verbatim.
+Return STRICT JSON: { steps: [{key, text}], oneLiner }.
 ```
-**Classification:** Genuine causal reasoning — but strictly prohibited from prescribing actions. The AI models *why* a market signal exists; the Boss agent decides *what to do* about it.
+**Model:** `gpt-4o-mini` | **Temperature:** 0.4 | **max_tokens:** 600  
+**Grounding gate (L422–507):** Rejects any quoted string not in the evidence allowlist, any capitalized multi-word proper noun not in anchor terms, and any single mid-sentence capitalized word not in a hardcoded allow-set (`instagram`, `tiktok`, etc.). The model's `oneLiner` field is **always discarded** (L429–431); the one-liner is re-synthesized from the validated steps. Classification: **Enrichment-only.**
 
 ---
 
-#### `server/pipeline/ai-overlay/q2-reasoning.ts` (~L44)
+#### `server/analytical-enrichment-layer/engine.ts` — AEL v2, L157–181
+
 ```
-You are a commercial strategist. The Boss agent has already decided the
-action and channel. You are NOT deciding anything. You are translating
-the verdict into specific, grounded language. Be specific, not generic.
-No jargon. No scoring words.
+You are a Deep Causal Interpretation Engine — the Analytical Enrichment Layer (AEL v2).
+
+YOUR MISSION:
+You interpret WHY things happen, not WHAT is happening. You extract ROOT CAUSES
+beneath surface signals. You model causal chains that explain buyer behavior. You
+identify the REAL reasons people don't convert — not the obvious ones.
+
+CRITICAL DISTINCTION:
+- Surface signal: "Users complain about price"
+- Deep interpretation: "Users lack trust in ROI justification — they can't see how
+  the investment pays back, so any price feels too high. The real barrier is proof
+  of value, not affordability."
+
+YOU MUST NOT:
+- Label signals without interpretation
+- Make strategic recommendations or decisions — you INTERPRET, engines DECIDE
+- Fabricate data — if evidence is weak, say so in confidence_notes
 ```
-- `interpretation_only: true` flag (L62)  
-- Regex rejection (L123) blocks prescriptive language: `"you should"`, `"must"`, `"I recommend"`, `"consider"`
+**Classification: Real causal reasoning** — but strictly prohibited from producing any strategic recommendation or decision.
 
 ---
 
-#### `server/pipeline/ai-overlay/user-interpretation.ts` (~L42)
+#### `server/commercial-reasoning/awareness-depth-interpreter.ts` — Awareness-Depth Interpreter, L153–165
+
 ```
-You are a deterministic marketing analyst. Your only job is to translate
-an internal verdict into plain English for a business owner. You MUST NOT:
-change any number, recommend an action, pick a winner, or overwrite the
-verdict.
+You are the awareness commercial-depth interpreter for a marketing AI system.
+The user prompt begins with a BUSINESS PROFILE block (industry, sub-industry,
+business model, buyer type, pricing complexity, funnel type, commercial lens,
+reasoning framework).
+READ THE BUSINESS PROFILE FIRST. Use its commercial_lens.primaryLevers /
+marketDynamics / buyerPsychology as the FRAMING for how you read the evidence
+corpus that follows.
+You produce a STRUCTURED JSON commercial assessment grounded strictly in the
+supplied analytical-enrichment-layer (AEL) evidence — never invent business facts
+beyond what the profile states.
+Every claim you make MUST be backed by at least one evidence_refs entry that
+quotes a real fragment from the AEL.
+NEVER invent evidence. NEVER use template phrases like 'transparency proof',
+'best-in-class', 'industry-leading', 'strategic alignment'.
+If evidence is insufficient, set reasoner_self_assessment='insufficient_evidence'
+and the system will fall back to the deterministic floor.
 ```
-- `interpretation_only: true` (L29)
-- Readonly constraint enforced at prompt level and via post-processing sanitizer.
+**Classification: Real commercial reasoning** — receives a structured Business Profile + AEL evidence corpus. Produces `depthAssessment`, `buyer_state`, `saturation_state`, `trust_state`. Strongest reasoning call in the system.
 
 ---
 
-#### `server/audience-engine/engine.ts` (~L1214, ~L1342)
-Two separate LLM calls:
-1. **Segment construction** — generates audience segment profiles from raw MI signals. Constrained by Synthetic Filters (L170) and prescriptive-pattern sanitizer (L1305 converts `"you should target X"` → `"[hint]"`).
-2. **Ads Targeting JSON** — structured generation of targeting parameters. Same sanitizer applies.
+#### `server/pipeline/ai-overlay/q2-reasoning.ts` — Q2 Market Shift, L44–78
 
----
-
-#### `server/positioning-engine/engine.ts` (~L1770)
 ```
-(Domain Translation rule L1780): Translate internal engine tokens into
-business-owner language.
-(Compression rule L1781): Maximum 12 words per claim. No compound
-sentences.
+You are a commercial strategist explaining a market-shift verdict to a marketing
+agency operator who will read this output to a client.
+
+The Boss agent has already decided whether the market has shifted using deterministic
+rules. You are NOT deciding anything. You are translating the verdict and the
+structured market signals into language a client would understand.
+
+Tone: Commercial, not technical. Specific, not generic. Plain language.
+No jargon, no rule codes in the body, no scoring words ("high","low","score","rank").
+Honest. If data is insufficient or signals are weak, say so plainly.
+
+Hard constraints:
+1. You MUST cite the verdict EXACTLY as given. Never propose a different verdict.
+2. You MUST NOT invent or rename theme tokens.
+3. You MUST NOT introduce thresholds, scores, rankings, or numeric magnitudes.
+4. You MUST NOT recommend specific actions. You may flag what the operator should
+   weigh; you may not say "do X".
+5. You MUST NOT mention rule codes in any body text.
+
+BAD (recommendation):  "you should switch to value-led messaging"
+GOOD (operator-weighs): "Whether to test a value-led angle this cycle is worth a
+                         conversation with the client"
 ```
-LLM receives pre-computed claim candidates and compresses/translates them. It does not generate claims from scratch.
+**Forbidden scoring regex (L112):** `\b(score|scored|ranking|rank|rating|grade|tier|magnitude|severity|high risk|low risk|...)\b`  
+**Forbidden recommendation regex (L123):** `\b(you should|you need to|you must|we recommend|switch to|pivot to|run a campaign|...)\b`  
+**Classification: Enrichment-only** — `interpretation_only: true` is a required output field (L62). Translates a pre-made verdict; does not create strategy.
 
 ---
 
-#### `server/offer-engine/engine.ts` (~L1860, ~L2007)
-Two separate LLM calls:
-1. **Refinement** (~L1860) — Banned words list (L1868): `"optimize"`, `"leverage"`, `"scale"`, `"synergy"`, `"innovative"`, `"cutting-edge"`.
-2. **Outcome/Mechanism generation** (~L2007) — Absolute Rules (L2009): forbidden from producing funnel architecture decisions, pricing structures, or financial advisory outputs.
+#### `server/pipeline/ai-overlay/user-interpretation.ts` — User Post Interpretation, L42–65
+
+```
+You are a deterministic marketing analyst interpreting a user's posts.
+You receive rule-based outputs (composition, cluster interpretation lens, lead
+quality, outcome regression) and a small evidence sample.
+
+Your job is to ADD interpretation: WHY did themes work, and HOW is paid
+amplification interacting with organic traction.
+
+YOU MUST NOT:
+- change any number from the inputs
+- contradict any rule status
+- recommend an action or pick a winner
+- overwrite the verdict
+
+Output STRICT JSON only:
+{
+  "interpretation_only": true,
+  "whyItWorked": [{ "themeToken": string, "reasoning": string }],
+  "amplificationReading": { "natural": [...], "paid": [...], "blended": [...], "reasoning": string }
+}
+```
+**Validation (L92–120):** Every `themeToken` in `whyItWorked` must appear verbatim in the allowed themes set — invented tokens cause validation failure.  
+**Classification: Enrichment-only.** `interpretation_only: true` is a required field.
 
 ---
 
-### 2.2 Shared Strategic Doctrine — Is There a Centralized Foundation?
+#### `server/pipeline/ai-overlay/competitor.ts` — Competitor Theme Interpretation, L72–88
 
-**Short answer: No.** Each engine has its own ad-hoc prompt. There is no shared, centralized marketing doctrine object (e.g. `target segment → problems → product design → pricing → channels → delivery → relationship`) that is injected into all engine prompts as a common foundation.
+```
+You are a deterministic marketing analyst.
+You receive a set of competitor theme tokens (already detected by a rules-based
+system) plus an evidence sample for each.
+Your job is to ADD semantic interpretation. You do not change counts, statuses,
+or rule decisions.
+
+Rules:
+- Every themeToken you reference MUST appear verbatim in the input themes list.
+  Never invent tokens.
+- Reasoning must be one or two sentences, plain English, citing observable evidence.
+```
+**Classification: Enrichment-only.** Adds semantic grouping to pre-detected tokens.
+
+---
+
+#### `server/pipeline/ai-overlay/explanation.ts` — Verdict Explanation, L36–53
+
+```
+You are a deterministic marketing analyst translating a verdict into plain English.
+
+You receive: a verdict (already decided), the reason codes that produced it, and
+optional rule context.
+Your job is to ADD a narrative that explains the verdict. You do not change the
+verdict. You do not add reasons that were not given to you.
+
+Rules:
+- Every "citesReason" MUST appear verbatim in the input "reasons" list.
+- Do not invent reason codes.
+- Do not contradict the verdict.
+```
+**Classification: Enrichment-only.** Narrates a pre-computed verdict.
+
+---
+
+#### `server/pipeline/ai-overlay/dna.ts` — Cluster DNA Interpretation, L67–85
+
+```
+You are a deterministic marketing analyst.
+You receive a cluster signature (theme tokens + post counts) plus optional sample text.
+Your job is to ADD semantic meaning. You do not change counts or rule decisions.
+
+Rules:
+- "clusterMeaning" is one to three sentences. Plain English. No marketing fluff.
+- Reasoning must cite specific theme tokens from the input.
+```
+**Classification: Enrichment-only.** Labels a pre-computed cluster with semantic meaning and persuasion logic tags.
+
+---
+
+#### `server/audience-engine/engine.ts` — Segment Construction, L1190–1225
+
+```
+You are an audience research analyst. Based on market evidence, construct 2-4
+distinct audience segments.
+
+BUSINESS: {industry} — {coreOffer}
+
+PAIN MAP (from real audience data):
+- {canonical}: frequency={n}, confidence={%}
+
+DESIRE MAP: ...  OBJECTION MAP: ...  EMOTIONAL DRIVERS: ...
+MARKET MATURITY: ...  AWARENESS LEVEL: ...
+
+SAMPLE COMMENTS (real audience language):
+"{comment_1}"
+...
+
+Return a JSON array of 2-4 segments. Each segment:
+{ "name", "description", "painProfile", "desireProfile", "objectionProfile",
+  "motivationProfile", "estimatedPercentage" }
+Return ONLY the JSON array, no markdown.
+```
+**Model:** `gpt-4.1-mini` | **Temperature:** 0.4 | **max_tokens:** 2000  
+**No system/user split:** Single `user` message with all context embedded.  
+**Classification: Partial reasoning** — the AI constructs segment profiles from real signal data, but prescriptive outputs are sanitized away (L1305: prescriptive patterns → `[hint]`).
+
+---
+
+#### `server/audience-engine/engine.ts` — Ads Targeting, L1342–1361
+
+```
+You are a Meta Ads targeting expert. Translate audience segments into Meta Ads
+Manager targeting suggestions.
+
+BUSINESS: {industry} — {coreOffer}
+LOCATION: ...  MARKET MATURITY: ...
+
+SEGMENTS:
+- {name}: Pains={...}. Desires={...}. Objections={...}
+
+For each segment, return:
+{ "suggestedInterests", "suggestedBehaviors", "suggestedAgeRange",
+  "suggestedGender", "suggestedLocations", "rationale" }
+Return ONLY a JSON array. Use real Meta Ads targeting options.
+```
+**Model:** `gpt-4.1-mini` | **Temperature:** 0.3 | **max_tokens:** 1500  
+**Classification: Real structured reasoning** within a narrow constrained domain.
+
+---
+
+#### `server/positioning-engine/engine.ts` — Positioning Refiner (hasSignals=true), L1736–1768
+
+```
+You are a strategic positioning REFINER. Your job is to SHARPEN the provided
+claim seeds into precise positioning statements. You must NOT generate new
+concepts — only refine what is given.
+
+HARD CONSTRAINTS:
+- Your output MUST preserve the meaning of the claim seeds. If you cannot refine
+  a seed, return it as-is.
+- Do NOT introduce concepts, problems, or solutions not present in the SOURCE SIGNALS.
+- Every word in your output must trace back to a SOURCE SIGNAL label. If unsure,
+  use the signal label directly.
+```
+**Model:** `gpt-4.1-mini` | **Temperature:** 0.0 | **seed:** 42  
+**Classification: Enrichment-only.** Sharpens pre-computed claim seeds; forbidden from generating new concepts.
+
+---
+
+#### `server/positioning-engine/engine.ts` — Positioning Analyst (hasSignals=false), L1770–1788
+
+```
+You are a strategic positioning analyst. Generate precise positioning statements
+for each territory.
+
+RULES:
+1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each territory
+   name as the operational failure it represents for this specific business type.
+   Use domain-operational language — not generic emotional framing.
+2. COMPRESSION: Focus on the FIRST territory as the PRIMARY positioning. Express
+   it as a specific root-cause SYSTEM FAILURE.
+3. enemyDefinition: Name the specific operational/system failure. Must include a
+   system-level noun (tool, system, process, pipeline...) and a failure verb
+   (fails, breaks, lacks, blocks, collapses, erodes, stalls).
+```
+**Classification: Partial reasoning** — generates from territory labels when no signal seeds exist. Still constrained to territory names provided.
+
+---
+
+#### `server/offer-engine/engine.ts` — Offer Copywriter (Refinement), L1819–1868
+
+```
+You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.
+
+CRITICAL: You are NOT generating offers from scratch. The strategic structure has
+already been decided.
+Your ONLY job is to improve the wording to be more compelling, specific, and market-ready.
+
+You MUST preserve:
+1. The axis keywords — do NOT remove them
+2. The mechanism name — do NOT rename or replace it
+3. The pain/desire references — do NOT substitute different pains/desires
+...
+
+BANNED WORDS: "optimize", "leverage", "scale", "transform", "empower", "unlock",
+"synergy", "holistic", "comprehensive", "innovative", "cutting-edge", "next-level",
+"game-changing", "paradigm"
+
+ABSOLUTE RULES:
+- Do NOT generate funnel architecture, advertising strategy, channel selection,
+  media planning, or budget recommendations
+- Do NOT include financial advisory claims
+```
+**Model:** `gpt-4.1-mini` | **Temperature:** 0.5 | **max_tokens:** 1000  
+**Classification: Enrichment-only.** Refines pre-built skeletons.
+
+---
+
+#### `server/offer-engine/engine.ts` — Offer Architect (Generation), L2007–2056
+
+```
+You are an Offer Architect. Generate three offer concepts.
+
+ABSOLUTE RULES:
+- Do NOT generate funnel architecture, advertising strategy, channel selection,
+  media planning, budget recommendations, campaign execution, sales scripts, or
+  strategic master plan decisions
+- Do NOT include financial advisory claims
+
+SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words)
+Raw Pain Phrases: [...]
+MANDATORY LANGUAGE RULES:
+- You MUST use the audience's own words above directly in the offer name, outcome,
+  mechanism, and deliverables.
+- BANNED WORDS: "optimize", "leverage", "scale", "transform"...
+
+SECTION 2: OUTCOME PRECISION (MANDATORY)
+NEVER use vague outcomes like "financial improvement", "better results".
+
+SECTION 3: MECHANISM (single source of truth)
+Mechanism Name: "{mechName}"
+MANDATORY: All offer mechanism descriptions MUST reference "{mechName}" by name.
+
+SECTION 4: SIGNAL ANCHORS
+Every claim must be derived from one of these upstream signals.
+```
+**Model:** `gpt-4.1-mini` | **Temperature:** 0.7 | **max_tokens:** 1000  
+**Classification: Real generation** — creates offer structure from audience pain language + mechanism + signals. The most generative call in the system, though still highly constrained.
+
+---
+
+#### `server/commercial-reasoning/llm-call.ts` — Generic LLM Caller, L52 + L74
+
+```typescript
+systemPrompt: string;   // injected by caller
+// ...
+{ role: "system", content: input.systemPrompt },
+```
+This is a generic wrapper; the actual system prompt is supplied by each calling module. The awareness-depth-interpreter and other commercial-reasoning engines supply their own prompts through this function.
+
+---
+
+### 2.2 Is There Centralized Marketing Doctrine?
+
+**Short answer: No.** There is no shared pre-run `StrategicDoctrine` object (target segment → segment problems → product design → pricing → channels → delivery → relationship) injected into all engines as a common foundation.
 
 **What does exist:**
-- `shared/commercial-dna.ts` — Product DNA identity layer (brand values, mechanism, promise). Passed to some engines but not all, and not as a structured doctrine object.
-- `SharedStrategicContext` — A type that aggregates outputs across engines. It is a *result aggregator*, not a *pre-run doctrine injector*. Engines don't receive the full strategic context before they run; they contribute to it after.
-- `strategy-root` — Provides the foundational positioning anchor. Used in narrative layer, but not consistently surfaced to all engines at prompt construction time.
 
-**Implication:** Each engine reasons independently. The Positioning engine doesn't know what the Offer engine decided. The Audience engine doesn't know what channels the Boss agent will recommend. There is no doctrine pipeline (marketing strategy → channel → segment → offer → content) flowing as a single coherent input to all LLM calls.
+| Object | Location | Role | Shared to all engines? |
+|---|---|---|---|
+| `SharedStrategicContext` (SSC) | `server/orchestrator/shared-strategic-context.ts` L289 | Aggregates engine results as they complete | ❌ It is a **result collector**, not a pre-run input. Engines write to it; they don't read it before running. |
+| `strategy-root` | `server/shared/strategy-root.ts`, referenced in `orchestrator/index.ts` L154 | Foundational positioning anchor built from onboarding data | ⚠️ Passed to Offer engine (L2205) and Narrative layer; not consistently injected into all engines at prompt time. |
+| `commercial-dna` / `productDna` | `server/shared/commercial-dna.ts`, `app/contexts/ProductDNAContext.tsx` | Product identity: mechanism name, core promise, brand values | ⚠️ Injected into Audience (L1188), Positioning (L1740), Offer (L1872) engines as a formatted block. Not injected into Narrative, AEL, or AI overlays. |
+| `BusinessProfile` (Awareness-Depth) | `server/commercial-reasoning/awareness-depth-interpreter.ts` L186+ | Industry, sub-industry, business model, buyer type, funnel type, commercial lens | ✅ Injected fully into its own LLM call — but not passed to other engines. |
 
-### 2.3 Enrichment-Only vs. Real Reasoning — By Engine
+**Conclusion:** Each engine has its own ad-hoc prompt. The Audience engine does not know what channels the Boss will recommend. The Offer engine does not know what the Positioning engine decided. The AEL interprets WHY but cannot share that to the Awareness-Depth interpreter. There is no pipeline where a single doctrine object flows from top to bottom of the reasoning stack.
 
-| Engine / Layer | Mode | Evidence |
+---
+
+### 2.3 Enrichment-Only vs. Real Reasoning — Classification
+
+| Engine / Layer | Classification | Evidence |
 |---|---|---|
-| Narrative Layer (v2) | **Enrichment only** | Prompt explicitly says "do NOT invent"; Grounding Gate rejects new nouns |
-| AEL v2 (Analytical Enrichment) | **Real causal reasoning** | Prompt asks "WHY" — but output is interpretation, not strategy |
-| Q2 Reasoning Overlay | **Enrichment only** | `interpretation_only: true`; translates pre-made verdict, does not create it |
-| User Interpretation Overlay | **Enrichment only** | `interpretation_only: true`; no numbers changed, no actions recommended |
-| Audience Engine | **Partial reasoning** | Constructs segments from raw signals, but prescriptive outputs sanitized away |
-| Positioning Engine | **Enrichment only** | Compresses pre-computed claims; does not generate strategy |
-| Offer Engine | **Partial reasoning** | Generates outcome/mechanism language, but funnel/pricing forbidden |
-| Boss Agent / Orchestrator | **Real reasoning** | Decides `action ∈ {test|scale|hold|halt}` and channel — this is the only genuine strategy decision point |
+| **Narrative Layer v2** | Enrichment-only | Prompt: "Use ONLY the provided evidence — do NOT invent" (L400). Grounding gate rejects new nouns (L422–507). |
+| **AEL v2** | Real causal reasoning (interpretation only — no decisions) | Prompt: "You interpret WHY things happen... you INTERPRET, engines DECIDE" (L181). Full causal chain extraction. |
+| **Awareness-Depth Interpreter** | Real commercial reasoning | Full business profile + AEL corpus. Produces `buyer_state`, `saturation_state`, `trust_state`. |
+| **Q2 Reasoning Overlay** | Enrichment-only | `interpretation_only: true` required (L62). Translates pre-made verdict. Recommendation regex rejection (L123). |
+| **User Interpretation Overlay** | Enrichment-only | `interpretation_only: true` required (L29). Cannot change any number. |
+| **Competitor Overlay** | Enrichment-only | "You do not change counts, statuses, or rule decisions" (L74). |
+| **Explanation Overlay** | Enrichment-only | "You do not change the verdict... do not add reasons not given" (L40). |
+| **DNA Cluster Overlay** | Enrichment-only | "You do not change counts or rule decisions" (L69). |
+| **Audience Engine — Segments** | Partial reasoning | Constructs segment profiles from real pain/desire data. Prescriptive outputs sanitized. |
+| **Audience Engine — Ads Targeting** | Real structured reasoning (narrow domain) | Translates segments into Meta Ads parameters. Not fully constrained to pre-existing values. |
+| **Positioning Engine (Refiner)** | Enrichment-only | "You must NOT generate new concepts — only refine" (L1736). Temperature 0.0, seed 42. |
+| **Positioning Engine (Analyst)** | Partial reasoning | Generates from territory labels when no seeds exist; still constrained to provided territory names. |
+| **Offer Engine (Copywriter/Refiner)** | Enrichment-only | "You are NOT generating offers from scratch. The strategic structure has already been decided." (L1821). |
+| **Offer Engine (Architect/Generator)** | Real generation (highly constrained) | Creates offer concepts from audience language + mechanism + signals. Most generative call. Temperature 0.7. |
+| **Boss Agent / Orchestrator** | Real strategy decision | Decides `action ∈ {test|scale|hold|halt}` and primary channel via deterministic rules (Q2 evaluation). Only genuine un-narrated decision point in the system. |
 
 ---
 
 ## PART 3 — Why Output Feels Templated
 
-### Root Cause Diagnosis (Ranked by Impact)
+### Root Cause Diagnosis — Ranked by Impact
 
-#### 🥇 Cause 1 — Prompts constrain AI to enrichment/rewording only (Highest Impact)
-Every AI overlay is explicitly configured with `interpretation_only: true`. The narrative layer is forbidden from inventing new content. The positioning engine receives pre-computed claims and is only allowed to compress them. The offer engine cannot touch funnel or pricing decisions.
+---
 
-The AI is being used as a **translator and compressor**, not a **strategist**. This is a deliberate architectural choice (for safety and consistency) but it produces output that feels formulaic because the strategy itself was deterministic — the AI is just rewording it.
+#### 🥇 Cause 1 (Highest impact): Prompts constrain AI to enrichment and rewording of pre-computed values
 
-**Fix required:** If the goal is genuinely AI-generated strategy, the `interpretation_only` constraint needs to be lifted selectively, and at least one engine needs to receive a blank canvas with only market data as input (no pre-computed verdict to translate).
+Every AI overlay carries `interpretation_only: true`. The Narrative v2 LLM is forbidden from inventing new content (L400). The Positioning Refiner is forbidden from generating new concepts (L1736). The Offer Copywriter is forbidden from generating from scratch (L1821).
 
-#### 🥈 Cause 2 — No shared marketing doctrine in prompts (High Impact)
-Each engine has its own isolated prompt. There is no unified doctrine (segment → problem → product → pricing → channel) that flows as a shared input to all engines. As a result, the Audience engine, Positioning engine, and Offer engine can produce internally consistent but externally contradictory outputs. The narrative layer then synthesizes these potentially-conflicting outputs, which forces it toward generic connective tissue language rather than specific strategic insights.
+**Result:** The LLM never produces a sentence that wasn't already implied by the deterministic engine outputs. It compresses, translates, and polishes — but the *substance* is always pre-determined. If the deterministic layer produces generic territory names or signal labels, the LLM will produce generic prose, because it is not permitted to supply the missing specificity.
 
-**Fix required:** Build a `StrategicDoctrine` object (populated at the start of each orchestrator run from `strategy-root` + `commercial-dna` + boss decision) and inject it into every engine prompt as a shared context block.
+**What would change it:** At least one engine (ideally Positioning or Offer) needs a mode where the AI receives only raw market data (audience pain language, competitor themes, AEL causal chains) with no pre-computed verdict to translate — and is asked to produce a positioning claim from scratch.
 
-#### 🥉 Cause 3 — LLM calls failing silently and falling back to templates (Medium Impact)
-When competitive signals are absent (e.g. Bright Data proxy returning 407 / no posts scraped), the AEL v2 analytical package falls back to a deterministic template (L144). The narrative layer falls back if LLM v2 grounding fails. Audience/Offer/Positioning all have their own fallbacks.
+---
 
-Since the scraping pipeline is currently returning 0 posts (all fetch jobs show `total_posts_fetched=0`), the entire competitive intelligence input is missing. Every engine that depends on MI signals is running on empty, which collapses to template paths — even when the LLM calls nominally succeed, they have nothing real to reason about.
+#### 🥈 Cause 2 (High impact): No shared marketing doctrine flows into all engines
 
-**Fix required:** Fix the Bright Data credential issue (407 auth rejection) first. Without real competitor data flowing in, no amount of prompt improvement will produce non-generic output.
+The `SharedStrategicContext` is a result aggregator written to by each engine after it runs. There is no object that is read *before* each engine runs and that says: "This business targets segment X, which has problem Y, solved by mechanism Z, delivered through channel W, priced at P, competing against enemy E."
 
-#### 4️⃣ Cause 4 — Anti-template blocklist narrows the output space (Low Impact)
-The AT3 Integrity Gate rejects outputs containing common filler phrases. This is well-intentioned but means the AI has a further-narrowed vocabulary after the enrichment-only constraints are applied. An AI already forbidden from reasoning freely, and now also forbidden from common connective phrases, will produce outputs that feel constrained and mechanical.
+**Result:** Each engine reasons independently. The Audience engine produces segment names. The Positioning engine generates territory names. The Offer engine picks mechanism references. None of these engines knows what the others decided. The Narrative layer then stitches together 5 steps from these independent outputs, which forces it toward generic connective language rather than a coherent single argument.
+
+**What would change it:** Build a `StrategicDoctrine` struct (assembled from `strategy-root` + `commercial-dna` + Boss decision + AEL top insights) at the start of each orchestrator run and inject it into every engine prompt before they run.
+
+---
+
+#### 🥉 Cause 3 (Medium impact): LLM calls degrading silently because the data pipeline is empty
+
+All `mi`-dependent engines (AEL, Awareness-Depth, Positioning, Audience) require competitor and audience signal data as their primary input. As of the audit date, every fetch job in the database shows `total_posts_fetched = 0` across all recent runs (confirmed by DB query). This is caused by Bright Data proxy returning HTTP 407 (credential rejection), meaning no posts are scraped.
+
+**Result:** The AEL fallback fires (L144–152: `"no MI or Audience input available"`). The Audience engine receives empty pain/desire maps. The Positioning engine has no signal seeds and falls through to the Analyst path with bare territory labels. The Offer Architect receives `"No qualifying signals provided — generate conservatively"` (L2043). Every engine runs on empty input, which collapses all paths to the most conservative, generic possible output even when the LLM calls technically succeed.
+
+**This is the single highest-leverage fix for output quality.** No prompt improvement will produce specific, real outputs until the data pipeline delivers real competitor and audience posts.
+
+---
+
+#### 4️⃣ Cause 4 (Low impact): Anti-template blocklist narrows vocabulary further
+
+The AT3 Integrity Gate (`template-phrases.ts`) rejects outputs containing ≥2 blocklisted phrases. With enrichment-only constraints already limiting what the AI can say, this additional vocabulary filter means an AI that is already forbidden from reasoning freely and already forbidden from common connective phrases will produce output that feels mechanical and constrained.
+
+This is well-intentioned (it prevents specific known-bad patterns from prior judge runs) but its marginal effect on quality is low compared to causes 1–3.
 
 ---
 
@@ -178,25 +596,17 @@ The AT3 Integrity Gate rejects outputs containing common filler phrases. This is
 
 | Output Surface | Source | Fallback Trigger | Logged? |
 |---|---|---|---|
-| Watchtower Narrative (5 steps) | LLM v2 (primary) / Template (fallback) | LLM grounding failure, `<3` engines, or v2 disabled | ✅ `console.warn` L516/520 |
-| AEL Analytical Package | LLM causal reasoning (primary) / Template (fallback) | Missing MI or Audience input | ✅ `console.log` L139 |
-| Audience Segments | LLM construction (primary) / Template (fallback) | LLM failure | ✅ `console.error` L1288 |
-| Ads Targeting | LLM generation (primary) / Template (fallback) | LLM failure | ✅ `console.error` L1384 |
-| Positioning Statement | LLM compression of pre-computed claims | `validateClaimGrounding` rejection | ✅ `console.log` L1843 |
-| Offer Refinement | LLM refinement (primary) / Template (fallback) | LLM failure | ✅ `console.log` L1948 |
-| Offer Outcome/Mechanism | LLM generation (primary) / Template (fallback) | General AI failure | ✅ `console.error` L2103 |
-| Q2 Reasoning Overlay | LLM translation of boss verdict | No fallback — silent skip | ❌ Silent |
-| User Interpretation Overlay | LLM translation of verdict | No fallback — silent skip | ❌ Silent |
-| Boss Decision (`test|scale|hold|halt`) | **Real AI reasoning** — only genuine strategy point | N/A | ✅ Orchestrator logs |
-
----
-
-## Key Findings Summary
-
-1. **The only place where AI produces genuine, un-constrained strategy is the Boss agent's `action` decision.** Everything else is translation, compression, or enrichment of pre-computed values.
-
-2. **No shared marketing doctrine exists as a pre-run input.** Engines are isolated. A unified `StrategicDoctrine` object injected at the start of each run would dramatically improve coherence.
-
-3. **All fallbacks are logged** except: the Q2 and User Interpretation overlays have no fallback (they silently skip), and the Narrative Layer's primary-path template (when `<3` engines complete) fires silently without a log entry.
-
-4. **The current 0-posts scraping problem** (Bright Data 407 auth rejection) means every MI-dependent engine is operating on empty input, which forces all enrichment paths into their most generic possible outputs. **This is the single highest-leverage fix** for output quality: fix the data pipeline before optimizing prompts.
+| Watchtower Narrative — 5 steps | LLM v2 (primary) or template steps (fallback/primary) | `<3` engines, `problemSource="none"`, grounding gate rejection, or LLM call failure | ✅ `console.warn` L515, L519 when LLM fails; ❌ silent when template fires as primary |
+| AEL Analytical Package | LLM causal reasoning | Missing `mi` + `audience` inputs | ✅ `console.log` L139 |
+| Awareness-Depth Assessment | LLM commercial reasoning | `reasoner_self_assessment="insufficient_evidence"` → deterministic floor | ✅ OperationsGuardian tick |
+| Audience Segments | LLM construction | LLM call or parse failure | ✅ `console.error` L1288 |
+| Ads Targeting | LLM generation | LLM call or parse failure | ✅ `console.error` L1384; fallback: `"Fallback targeting based on business context"` |
+| Positioning Claim Fields | LLM Refiner/Analyst | Per-field grounding gate rejection → signal seed used as-is | ✅ `console.log` L1843 |
+| Offer (Refinement path) | LLM Copywriter | LLM failure | ✅ logged; pre-built skeletons returned unrefined |
+| Offer (Generation path) | LLM Architect | LLM failure or insufficient differentiation data | ✅ `console.log` L2276 |
+| Q2 Reasoning card | LLM translation of boss verdict | LLM failure or schema validation failure | ⚠️ Logged inside overlay client; UI silently omits section |
+| User Interpretation card | LLM interpretation | LLM failure or invalid theme tokens | ⚠️ Logged inside overlay client; UI silently omits section |
+| Competitor Intelligence overlay | LLM semantic grouping | LLM failure or token allowlist violation | ⚠️ Logged inside overlay client; UI silently omits section |
+| DNA Cluster overlay | LLM semantic labeling | LLM failure | ⚠️ Logged inside overlay client; UI silently omits section |
+| Explanation overlay | LLM verdict narrative | LLM failure or unknown reason code | ⚠️ Logged inside overlay client; UI silently omits section |
+| Boss action decision | **Deterministic rules** (not LLM) | N/A | ✅ Full orchestrator audit trail |
