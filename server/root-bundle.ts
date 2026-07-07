@@ -26,6 +26,7 @@ import {
   contentDna,
 } from "../shared/schema";
 import { resolveAccountId } from "./auth";
+import { assertCampaignBelongsTo, assertPlanBelongsTo, handleOwnershipError } from "./auth-helpers";
 
 const safeJson = (v: any) => {
   try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; }
@@ -486,9 +487,14 @@ export function registerRootBundleRoutes(app: Express) {
 
   app.get("/api/root-bundle/:campaignId/integrity/:planId", async (req: Request, res: Response) => {
     try {
-      const integrity = await validateRootIntegrity(req.params.planId);
+      const { campaignId, planId } = req.params;
+      const accountId = resolveAccountId(req);
+      await assertCampaignBelongsTo(accountId, campaignId);
+      await assertPlanBelongsTo(accountId, planId);
+      const integrity = await validateRootIntegrity(planId);
       res.json({ success: true, integrity });
     } catch (err: any) {
+      if (handleOwnershipError(err, res)) return;
       console.error("[RootBundle] Integrity check error:", err.message);
       res.status(500).json({ success: false, error: err.message });
     }

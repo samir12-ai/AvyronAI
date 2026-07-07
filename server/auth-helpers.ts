@@ -11,8 +11,44 @@
  * request lifecycle (workers, internal triggers, body-level campaignId).
  */
 import { db } from "./db";
-import { campaignSelections, orchestratorJobs, miFetchJobs } from "@shared/schema";
+import { campaignSelections, orchestratorJobs, miFetchJobs, strategicPlans } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
+
+export class PlanOwnershipError extends Error {
+  status = 404;
+  code = "PLAN_NOT_FOUND";
+  constructor(public accountId: string, public planId: string) {
+    super(`Plan ${planId} not found for account ${accountId}`);
+    this.name = "PlanOwnershipError";
+  }
+}
+
+/**
+ * Assert that `planId` belongs to `accountId`. Throws PlanOwnershipError (404)
+ * if not. Use BEFORE any read/write that uses the planId.
+ *
+ * Returns the plan's campaignId so callers can avoid a second lookup.
+ */
+export async function assertPlanBelongsTo(
+  accountId: string,
+  planId: string,
+): Promise<string> {
+  if (!accountId || !planId) {
+    throw new PlanOwnershipError(accountId, planId);
+  }
+  const [row] = await db
+    .select({ campaignId: strategicPlans.campaignId })
+    .from(strategicPlans)
+    .where(and(
+      eq(strategicPlans.id, planId),
+      eq(strategicPlans.accountId, accountId),
+    ))
+    .limit(1);
+  if (!row) {
+    throw new PlanOwnershipError(accountId, planId);
+  }
+  return row.campaignId;
+}
 
 export class CampaignOwnershipError extends Error {
   status = 404; // 404 not 403 — never confirm existence to a non-owner.
@@ -111,6 +147,10 @@ export function handleOwnershipError(err: unknown, res: any): boolean {
   }
   if (err instanceof JobOwnershipError) {
     res.status(err.status).json({ error: err.code, message: "Job not found" });
+    return true;
+  }
+  if (err instanceof PlanOwnershipError) {
+    res.status(err.status).json({ error: err.code, message: "Plan not found" });
     return true;
   }
   return false;
