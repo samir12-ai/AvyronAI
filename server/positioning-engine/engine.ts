@@ -7,6 +7,7 @@ import {
 } from "@shared/schema";
 import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import { emissionFromBattery, type BatteryAttemptLike } from "../shared/ai-path-telemetry";
 import { buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
@@ -54,6 +55,8 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 interface PositioningEngineResult {
   status: PositioningStatus;
   statusMessage: string | null;
+  /** Phase 4 — AI-proposal path telemetry emitted by the engine this run. */
+  aiPathTelemetry?: import("../shared/ai-path-telemetry").EngineAiPathEmission;
   territory: Territory | null;
   territories: Territory[];
   strategyCards: StrategyCard[];
@@ -2477,6 +2480,11 @@ export async function runPositioningEngine(
   let strategyCards: ReturnType<typeof generateStrategyCards> = [];
   let signalTraceability: PositioningEngineResult["signalTraceability"] = undefined;
 
+  // Phase 4: one battery attempt recorded per generation that reached the
+  // doctrine battery (specificity is a pre-gate, not part of the battery).
+  const positioningBatteryAttempts: BatteryAttemptLike[] = [];
+  let positioningBatteryPassed = false;
+
   {
     // Item 6: 3 total attempts (SPECIFICITY_MAX_RETRIES 1 → 2), env-overridable.
     // Clamp retries to 0–2 so total attempts never exceeds the doctrine cap of 3
@@ -2533,7 +2541,13 @@ export async function runPositioningEngine(
             break;
           }
         }
+        positioningBatteryAttempts.push({
+          passed: batteryFeedback.length === 0,
+          failedGate: failedGate,
+          rejectionFeedback: batteryFeedback,
+        });
         if (!batteryFeedback) {
+          positioningBatteryPassed = true;
           console.log(`[PositioningEngine-V3] BATTERY_GATE: PASSED | territories=${generatedTerritories.length} | gates=breadth+interchangeability+contradiction | attempt=${specificityAttempt + 1}`);
           break;
         }
@@ -3045,6 +3059,7 @@ CORRECTION REQUIRED:
   const __positioningResult = {
     status: positioningStatusValue,
     statusMessage,
+    aiPathTelemetry: emissionFromBattery(positioningBatteryPassed, positioningBatteryAttempts),
     territory: primaryTerritory,
     territories: finalTerritories,
     strategyCards,

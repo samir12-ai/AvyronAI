@@ -1880,6 +1880,7 @@ export const orchestratorJobs = pgTable("orchestrator_jobs", {
   pausedContext: text("paused_context"),
   pausedEngine: varchar("paused_engine", { length: 50 }),
   needsInputFields: text("needs_input_fields"),
+  aiPathReport: text("ai_path_report"),              // Phase 4 — JSON per-run AI-path telemetry (authoritative source)
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

@@ -182,6 +182,7 @@ import {
 } from "../causal-enforcement-layer/engine";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import { emissionFromBattery, type BatteryAttemptLike } from "../shared/ai-path-telemetry";
 import { buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
@@ -2902,6 +2903,7 @@ export async function runOfferEngine(
   // We judge ONLY primaryOffer — never the intentionally-weak `rejected` concept,
   // and not `alternative`. The battery shares the alignment loop below (no new
   // retry loop), so total generations stay bounded at ≤3.
+  const offerBatteryAttempts: BatteryAttemptLike[] = [];
   let offerBattery = await runCandidateGateBattery({
     kind: "offer",
     candidateText: `${primaryOffer.offerName}: ${primaryOffer.coreOutcome} — ${primaryOffer.mechanismDescription}`,
@@ -2910,6 +2912,7 @@ export async function runOfferEngine(
     accountId,
   });
   diagnostics.offerBattery = { passed: offerBattery.passed, failedGate: offerBattery.failedGate };
+  offerBatteryAttempts.push(offerBattery);
   if (!offerBattery.passed) {
     console.log(`[OfferEngine-V4] BATTERY_GATE: FAILED | gate=${offerBattery.failedGate ? offerBattery.failedGate : ""} | ${offerBattery.rejectionFeedback}`);
   }
@@ -2988,6 +2991,7 @@ export async function runOfferEngine(
         priorDecisions: strategic ? strategic.priorDecisions : [],
         accountId,
       });
+      offerBatteryAttempts.push(retryBattery);
 
       const alignmentImproved = retryValidation.aligned || retryValidation.failures.length < offerAlignmentValidation.failures.length;
       const alignmentRegressed = !retryValidation.aligned && retryValidation.failures.length > offerAlignmentValidation.failures.length;
@@ -3251,6 +3255,7 @@ export async function runOfferEngine(
   const __offerResult = {
     status,
     statusMessage,
+    aiPathTelemetry: emissionFromBattery(offerBattery.passed, offerBatteryAttempts),
     primaryOffer: scrubOfferObjectLiterals(primaryOffer, structuralWarnings, contractViolations, "primary"),
     alternativeOffer: scrubOfferObjectLiterals(alternativeOffer, structuralWarnings, contractViolations, "alternative"),
     rejectedOffer: { offer: scrubOfferObjectLiterals(rejectedOffer, structuralWarnings, contractViolations, "rejected"), rejectionReason: aiOffers.rejected.rejectionReason },

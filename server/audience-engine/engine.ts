@@ -33,6 +33,7 @@ import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/sig
 import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity, type SemanticBridgeResult } from "./semantic-bridge";
 import { scoreAudienceSophistication, type AudienceSophisticationOutput } from "./sophistication-llm";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import { emissionFromBattery, type BatteryAttemptLike, type EngineAiPathEmission } from "../shared/ai-path-telemetry";
 import { safeJsonParse, buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
 import { z } from "zod";
 
@@ -128,6 +129,8 @@ export type EngineStatus = "COMPLETE" | "PARTIAL" | "DATASET_TOO_SMALL" | "INSUF
 export interface AudienceEngineV3Result {
   status: EngineStatus;
   statusMessage: string | null;
+  /** Phase 4 — AI-proposal path telemetry emitted by the engine this run. */
+  aiPathTelemetry?: EngineAiPathEmission;
   defensiveMode: boolean;
   languageSignals: LanguageSignals;
   painMap: SignalItem[];
@@ -1199,6 +1202,7 @@ async function constructSegments(
   accountId: string,
   inputSnapshotId: string | null,
   strategic?: RunStrategicContext,
+  aiPathSink?: { emission: EngineAiPathEmission | null },
 ): Promise<AudienceSegment[]> {
   // Deterministic last-resort segment — shared by the retry-exhaustion path and
   // the outer catch so a failure is NEVER silent (mode=fallback, always logged).
@@ -1215,6 +1219,10 @@ async function constructSegments(
     sourceSignals: ["painMap", "desireMap"],
     inputSnapshotId,
   }];
+  // Phase 4: one battery attempt recorded per generation that reached the
+  // doctrine battery (the structural pre-gate is NOT part of the battery).
+  // Declared before the try so the catch fallback can emit telemetry too.
+  const segmentBatteryAttempts: BatteryAttemptLike[] = [];
   try {
     let multiSourceSection = "";
     try {
@@ -1334,6 +1342,11 @@ Return ONLY the JSON array, no markdown.`;
             break;
           }
         }
+        segmentBatteryAttempts.push({
+          passed: batteryFeedback.length === 0,
+          failedGate: failedGate,
+          rejectionFeedback: batteryFeedback,
+        });
         if (batteryFeedback) {
           segmentRejectionFeedback = `Rejected by gate battery:\n${batteryFeedback}\nFix exactly this and return a fresh JSON array of 2-4 segments, each a specific group defined by a shared, verifiable, situation-specific problem tied to the product.`;
           console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: BATTERY_REJECT | gate=${failedGate} | segment="${failedSegName}"`);
@@ -1350,10 +1363,12 @@ Return ONLY the JSON array, no markdown.`;
 
     if (!acceptedSegments) {
       console.error(`[AudienceEngine-V3] SEGMENT_GATE: EXHAUSTED after ${SEGMENT_MAX_ATTEMPTS} attempts — using deterministic fallback (mode=fallback, never silent)`);
+      if (aiPathSink) aiPathSink.emission = emissionFromBattery(false, segmentBatteryAttempts);
       return deterministicFallback();
     }
 
     const finalSegments = acceptedSegments;
+    if (aiPathSink) aiPathSink.emission = emissionFromBattery(true, segmentBatteryAttempts);
     return finalSegments.map(seg => {
       const segPains = (seg.painProfile || []) as string[];
       const segDesires = (seg.desireProfile || []) as string[];
@@ -1403,6 +1418,7 @@ Return ONLY the JSON array, no markdown.`;
     });
   } catch (err: any) {
     console.error("[AudienceEngine-V3] Segment construction failed:", err.message);
+    if (aiPathSink) aiPathSink.emission = emissionFromBattery(false, segmentBatteryAttempts);
     return deterministicFallback();
   }
 }
@@ -2029,6 +2045,10 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
 
   let audienceSegments: AudienceSegment[] = [];
   let adsTargetingHints: AdsTargetingHint[] = [];
+  // Phase 4: constructSegments (the doctrine-battery path) writes its emission
+  // here so the main return can surface it. Ads targeting is structural-only
+  // (breadth gate N/A) and is intentionally excluded from AI-path telemetry.
+  const audienceAiPathSink: { emission: EngineAiPathEmission | null } = { emission: null };
 
   if (totalSignalMatches < AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI) {
     console.log(`[AudienceEngine-V3] INSUFFICIENT SIGNALS for AI layers — ${totalSignalMatches} signal matches (need ≥${AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI})`);
@@ -2039,6 +2059,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
       painMap, desireMap, objectionMap, emotionalDrivers,
       maturityIndex, awarenessLevel,
       businessContext, commentTexts, accountId, miSnapshotId, strategic,
+      audienceAiPathSink,
     );
 
     audienceSegments = canonicalizeSegments(rawSegments);
@@ -2274,6 +2295,9 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   return {
     status,
     statusMessage,
+    aiPathTelemetry: audienceAiPathSink.emission
+      ? audienceAiPathSink.emission
+      : { mode: "fallback", attempts: 0, failedGates: [], fallbackReason: "segments_not_constructed" },
     defensiveMode: isDefensiveMode,
     languageSignals,
     painMap,

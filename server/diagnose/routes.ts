@@ -1,15 +1,19 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
+import { timingSafeEqual } from "node:crypto";
 import { db } from "../db";
 import {
   audienceSnapshots,
   positioningSnapshots,
   miSnapshots,
   strategicPlans,
+  orchestratorJobs,
+  bossRuns,
 } from "@shared/schema";
 import { requireCampaign } from "../campaign-routes";
 import { resolveAccountId } from "../auth";
+import { AiPathReportSchema, BossAiPathEnvelopeSchema } from "../shared/ai-path-telemetry";
 
 const LOG = "[Diagnose/Projection]";
 
@@ -520,6 +524,159 @@ function composeNarrative(args: {
   return { summary, blockers, nextLooks };
 }
 
+// ── Phase 4 — AI Proposes / Code Validates: operator AI-path report ─────────
+// Admin/operator-gated (X-Admin-Token / METRICS_ADMIN_TOKEN, same fail-closed
+// model as /metrics + /healthz/continuity + /api/admin/continuity/panel). Reads
+// the per-run AI-path report from either an orchestrator job (raw AiPathReport)
+// or a boss run (a BossAiPathEnvelope that already records copy provenance).
+// Absence is a CLASSIFIED 200 (available:false + explicit reason), never a 404 —
+// B2/B4: visibility + explicit classification over silence. NO-TENANT-LEAK does
+// not apply: this surface is admin-gated by construction and the report body is
+// tenant-neutral (coverage/mode/gate telemetry only, no PII).
+const LOG_AIPATH = "[Diagnose/AiPathReport]";
+
+const AiPathRunSourceEnum = z.enum(["orchestrator", "boss", "unknown"]);
+const AiPathUnavailableReasonEnum = z.enum([
+  "run_not_found",
+  "no_report_on_run",
+  "report_parse_failed",
+  "envelope_unavailable",
+]);
+const BossEnvelopeReasonEnum = z.enum(["no_orchestrator_run", "copy_failed"]);
+
+const AiPathReportResponseSchema = z.object({
+  runId: z.string(),
+  source: AiPathRunSourceEnum,
+  available: z.boolean(),
+  unavailableReason: AiPathUnavailableReasonEnum.nullable(),
+  bossEnvelopeReason: BossEnvelopeReasonEnum.nullable(),
+  provenance: z
+    .object({
+      sourceOrchestratorJobId: z.string(),
+      generatedAt: z.string(),
+      copiedAt: z.string(),
+    })
+    .nullable(),
+  report: AiPathReportSchema.nullable(),
+  generatedAt: z.string(),
+});
+type AiPathReportResponse = z.infer<typeof AiPathReportResponseSchema>;
+
+function baseUnavailableAiPath(
+  runId: string,
+  source: z.infer<typeof AiPathRunSourceEnum>,
+  reason: z.infer<typeof AiPathUnavailableReasonEnum>,
+  generatedAt: string,
+): AiPathReportResponse {
+  return {
+    runId,
+    source,
+    available: false,
+    unavailableReason: reason,
+    bossEnvelopeReason: null,
+    provenance: null,
+    report: null,
+    generatedAt,
+  };
+}
+
+async function loadOrchestratorAiPath(runId: string, generatedAt: string): Promise<AiPathReportResponse | null> {
+  const [job] = await db
+    .select({ id: orchestratorJobs.id, aiPathReport: orchestratorJobs.aiPathReport })
+    .from(orchestratorJobs)
+    .where(eq(orchestratorJobs.id, runId))
+    .limit(1);
+  if (!job) return null;
+
+  if (!job.aiPathReport) {
+    return baseUnavailableAiPath(runId, "orchestrator", "no_report_on_run", generatedAt);
+  }
+  const parsed = AiPathReportSchema.safeParse(safeJsonParse(job.aiPathReport));
+  if (!parsed.success) {
+    console.error(`${LOG_AIPATH} REPORT_PARSE_FAILED source=orchestrator runId=${runId}`, parsed.error.flatten());
+    return baseUnavailableAiPath(runId, "orchestrator", "report_parse_failed", generatedAt);
+  }
+  return {
+    runId,
+    source: "orchestrator",
+    available: true,
+    unavailableReason: null,
+    bossEnvelopeReason: null,
+    provenance: null,
+    report: parsed.data,
+    generatedAt,
+  };
+}
+
+async function loadBossAiPath(runId: string, generatedAt: string): Promise<AiPathReportResponse | null> {
+  const [run] = await db
+    .select({ id: bossRuns.id, aiPathReport: bossRuns.aiPathReport })
+    .from(bossRuns)
+    .where(eq(bossRuns.id, runId))
+    .limit(1);
+  if (!run) return null;
+
+  if (!run.aiPathReport) {
+    return baseUnavailableAiPath(runId, "boss", "no_report_on_run", generatedAt);
+  }
+  const parsed = BossAiPathEnvelopeSchema.safeParse(safeJsonParse(run.aiPathReport));
+  if (!parsed.success) {
+    console.error(`${LOG_AIPATH} REPORT_PARSE_FAILED source=boss runId=${runId}`, parsed.error.flatten());
+    return baseUnavailableAiPath(runId, "boss", "report_parse_failed", generatedAt);
+  }
+  const envelope = parsed.data;
+  if (envelope.available) {
+    return {
+      runId,
+      source: "boss",
+      available: true,
+      unavailableReason: null,
+      bossEnvelopeReason: null,
+      provenance: {
+        sourceOrchestratorJobId: envelope.sourceOrchestratorJobId,
+        generatedAt: envelope.generatedAt,
+        copiedAt: envelope.copiedAt,
+      },
+      report: envelope.report,
+      generatedAt,
+    };
+  }
+  // Boss envelope explicitly recorded its own unavailability sub-reason (D5).
+  return {
+    runId,
+    source: "boss",
+    available: false,
+    unavailableReason: "envelope_unavailable",
+    bossEnvelopeReason: envelope.reason,
+    provenance: null,
+    report: null,
+    generatedAt,
+  };
+}
+
+async function resolveAiPathReport(
+  runId: string,
+  sourceHint: "orchestrator" | "boss" | null,
+  generatedAt: string,
+): Promise<AiPathReportResponse> {
+  if (sourceHint === "orchestrator") {
+    const r = await loadOrchestratorAiPath(runId, generatedAt);
+    if (r) return r;
+    return baseUnavailableAiPath(runId, "orchestrator", "run_not_found", generatedAt);
+  }
+  if (sourceHint === "boss") {
+    const r = await loadBossAiPath(runId, generatedAt);
+    if (r) return r;
+    return baseUnavailableAiPath(runId, "boss", "run_not_found", generatedAt);
+  }
+  // No source hint: try orchestrator (raw source of truth) first, then boss.
+  const orch = await loadOrchestratorAiPath(runId, generatedAt);
+  if (orch) return orch;
+  const boss = await loadBossAiPath(runId, generatedAt);
+  if (boss) return boss;
+  return baseUnavailableAiPath(runId, "unknown", "run_not_found", generatedAt);
+}
+
 export function registerDiagnoseRoutes(app: Express) {
   app.get(
     "/api/diagnose/projection/:campaignId",
@@ -604,4 +761,61 @@ export function registerDiagnoseRoutes(app: Express) {
       }
     },
   );
+
+  // Phase 4 — operator-only AI-path report. Admin gate mirrors /metrics +
+  // /api/admin/continuity/panel (fail-closed when METRICS_ADMIN_TOKEN unset).
+  app.get("/api/diagnose/ai-path-report", async (req: Request, res: Response) => {
+    const expected = process.env.METRICS_ADMIN_TOKEN;
+    const provided = req.header("x-admin-token") ?? "";
+    if (!expected) {
+      return res.status(401).json({ error: "ai_path_report_disabled_no_admin_token" });
+    }
+    let isAdmin = false;
+    if (provided.length === expected.length) {
+      try {
+        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+      } catch {
+        isAdmin = false;
+      }
+    }
+    if (!isAdmin) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    const runId = typeof req.query.runId === "string" ? req.query.runId.trim() : "";
+    if (!runId) {
+      return res.status(400).json({ error: "runId query parameter is required" });
+    }
+
+    // Optional source hint. Invalid values are rejected (D3 strict enum).
+    let sourceHint: "orchestrator" | "boss" | null = null;
+    const sourceRaw = typeof req.query.source === "string" ? req.query.source.trim() : "";
+    if (sourceRaw) {
+      const parsedSource = z.enum(["orchestrator", "boss"]).safeParse(sourceRaw);
+      if (!parsedSource.success) {
+        return res.status(400).json({ error: "source must be 'orchestrator' or 'boss'" });
+      }
+      sourceHint = parsedSource.data;
+    }
+
+    const generatedAt = new Date().toISOString();
+    try {
+      const response = await resolveAiPathReport(runId, sourceHint, generatedAt);
+      const validated = AiPathReportResponseSchema.safeParse(response);
+      if (!validated.success) {
+        console.error(`${LOG_AIPATH} RESPONSE_SCHEMA_INVALID runId=${runId}`, validated.error.flatten());
+        return res.status(500).json({ error: "AI_PATH_REPORT_SCHEMA_FAILED", details: validated.error.flatten() });
+      }
+      if (validated.data.available) {
+        console.log(`${LOG_AIPATH} available runId=${runId} source=${validated.data.source}`);
+      } else {
+        console.error(`${LOG_AIPATH} UNAVAILABLE runId=${runId} source=${validated.data.source} reason=${validated.data.unavailableReason} bossReason=${validated.data.bossEnvelopeReason}`);
+      }
+      return res.status(200).json(validated.data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`${LOG_AIPATH} composer_failed runId=${runId}`, err);
+      return res.status(500).json({ error: "AI_PATH_REPORT_FAILED", details: msg });
+    }
+  });
 }

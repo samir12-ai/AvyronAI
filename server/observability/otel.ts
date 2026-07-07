@@ -131,6 +131,15 @@ export const metrics = {
   aiCostUsd: new Counter("ai_cost_usd_total", "Total AI provider cost in USD"),
   workerTick: new Counter("worker_tick_total", "Total worker tick executions"),
   workerQueueDepth: new Gauge("worker_queue_depth", "Current worker queue depth"),
+  // Phase 4 (AI Proposes / Code Validates) — label-less run-completion gauges.
+  aiPathEngineCoverage: new Gauge(
+    "ai_path_engine_coverage",
+    "Fraction of executed AI-path engines whose output came from the AI proposal (vs deterministic fallback) on the last completed run",
+  ),
+  aiPathAttemptSuccessRate: new Gauge(
+    "ai_path_attempt_success_rate",
+    "Validated AI outputs / total AI attempts across executed engines on the last completed run",
+  ),
 };
 
 let initialized = false;
@@ -149,6 +158,8 @@ export function renderMetrics(): string {
     metrics.aiCostUsd.render(),
     metrics.workerTick.render(),
     metrics.workerQueueDepth.render(),
+    metrics.aiPathEngineCoverage.render(),
+    metrics.aiPathAttemptSuccessRate.render(),
     "",
   ].join("\n\n");
 }

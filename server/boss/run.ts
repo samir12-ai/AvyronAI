@@ -41,8 +41,9 @@ import { produceClustersForWindow, getBaselineCluster, type ClusterSignature } f
 import { compareClusters } from "../pipeline/cluster-comparator";
 import { checkOutcomeRegression } from "../pipeline/lanes/user/outcome-regression";
 import { db } from "../db";
-import { pipelineUserTruth, pipelineEvalWindows } from "@shared/schema";
-import { and, eq, isNull, desc, lt } from "drizzle-orm";
+import { pipelineUserTruth, pipelineEvalWindows, orchestratorJobs } from "@shared/schema";
+import { and, eq, isNull, isNotNull, desc, lt } from "drizzle-orm";
+import { AiPathReportSchema, type BossAiPathEnvelope } from "../shared/ai-path-telemetry";
 import type {
   BossExecution,
   BossExecutionAcquisition,
@@ -561,6 +562,57 @@ export async function runBoss(input: BossRunInput): Promise<BossRunResult> {
 
     const finishedAt = new Date();
 
+    // ── Phase 4 — AI Proposes / Code Validates: copy AI-path envelope ──
+    // runBoss does NOT run the proposal engines (they run in runOrchestrator),
+    // so the boss run COPIES the most recent COMPLETED orchestrator job's
+    // report and records its provenance. Absence is written explicitly
+    // (B2/B4: never null-silent) so operators can distinguish "no run yet"
+    // from "copy failed".
+    const copiedAt = new Date().toISOString();
+    let aiPathEnvelope: BossAiPathEnvelope;
+    const [latestOrchJob] = await db
+      .select({ id: orchestratorJobs.id, aiPathReport: orchestratorJobs.aiPathReport })
+      .from(orchestratorJobs)
+      .where(
+        and(
+          eq(orchestratorJobs.accountId, input.accountId),
+          eq(orchestratorJobs.campaignId, input.campaignId),
+          eq(orchestratorJobs.status, "COMPLETED"),
+          isNotNull(orchestratorJobs.aiPathReport),
+        ),
+      )
+      .orderBy(desc(orchestratorJobs.completedAt))
+      .limit(1);
+
+    if (latestOrchJob?.aiPathReport) {
+      let reportObj: unknown = null;
+      let parseThrew = false;
+      try {
+        reportObj = JSON.parse(latestOrchJob.aiPathReport);
+      } catch (err) {
+        parseThrew = true;
+        console.error("[Boss] AI_PATH_REPORT_UNAVAILABLE copy_failed json_parse", err);
+      }
+      const parsed = parseThrew ? null : AiPathReportSchema.safeParse(reportObj);
+      if (parsed && parsed.success) {
+        aiPathEnvelope = {
+          available: true,
+          sourceOrchestratorJobId: latestOrchJob.id,
+          generatedAt: parsed.data.generatedAt,
+          copiedAt,
+          report: parsed.data,
+        };
+      } else {
+        if (parsed && !parsed.success) {
+          console.error("[Boss] AI_PATH_REPORT_UNAVAILABLE copy_failed schema", parsed.error.flatten());
+        }
+        aiPathEnvelope = { available: false, reason: "copy_failed", copiedAt };
+      }
+    } else {
+      console.error("[Boss] AI_PATH_REPORT_UNAVAILABLE no_orchestrator_run");
+      aiPathEnvelope = { available: false, reason: "no_orchestrator_run", copiedAt };
+    }
+
     await updateBossRun(bossRunId, {
       status,
       execution: JSON.stringify(execution),
@@ -569,6 +621,7 @@ export async function runBoss(input: BossRunInput): Promise<BossRunResult> {
       q2Verdict: q2.verdict,
       q2Reasons: JSON.stringify(q2.reasons),
       warnings: JSON.stringify(warnings),
+      aiPathReport: JSON.stringify(aiPathEnvelope),
       finishedAt,
     });
 

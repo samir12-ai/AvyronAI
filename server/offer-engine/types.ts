@@ -1,3 +1,5 @@
+import type { EngineAiPathEmission } from "../shared/ai-path-telemetry";
+
 export interface MarketLanguageMap {
   rawPainPhrases: string[];
   rawDesirePhrases: string[];
@@ -156,6 +158,8 @@ export interface OfferDepthScores {
 export interface OfferResult {
   status: string;
   statusMessage: string | null;
+  /** Phase 4 — AI-proposal path telemetry emitted by the engine this run. */
+  aiPathTelemetry?: EngineAiPathEmission;
   primaryOffer: OfferCandidate;
   alternativeOffer: OfferCandidate;
   rejectedOffer: { offer: OfferCandidate; rejectionReason: string };

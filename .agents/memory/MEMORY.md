@@ -1,2 +1,1 @@
-- [AI-proposes reuse trap](ai-proposes-reuse-trap.md) — adding a gate-validated AI layer to a strategy engine needs a reuse-hash bump + decision-summary append on BOTH fresh and reuse paths, else cache hits silently skip the AI/break downstream gates.
-- [Orchestrator tsc is slow](orchestrator-tsc-slow.md) — full `tsc --noEmit` on this repo runs ~90s+ and often exceeds the 2-min tool timeout; run it detached with a done-marker and compare against the ~713-error baseline (baseline is non-zero).
+- [Avyron verification & tsc workflow](avyron-verification-workflow.md) — run tsc alone (chained greps time out & truncate it); judge by net-new errors vs the large baseline; verify orchestrator behaviour with focused tsx harnesses driving the real units, not a full DB+proxy run.

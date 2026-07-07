@@ -143,6 +143,7 @@ import {
   tryReuseIteration,
   tryReuseRetention,
 } from "./snapshot-reuse";
+import { buildAndRecordAiPathReport, markEngineReused } from "./ai-path-report";
 import {
   audienceSnapshots as audienceSnapshotsTbl,
   positioningSnapshots as positioningSnapshotsTbl,
@@ -1577,6 +1578,7 @@ async function executeEngine(
           if (reused) {
             logReuseHit("audience", reused.snap.id, audInputHash);
             result = reused.hydrated;
+            markEngineReused(result);
           } else {
             logReuseMiss("audience", audInputHash);
           }
@@ -1777,6 +1779,7 @@ async function executeEngine(
           if (reused) {
             logReuseHit("positioning", reused.snap.id, posInputHash);
             result = reused.hydrated;
+            markEngineReused(result);
           } else {
             logReuseMiss("positioning", posInputHash);
           }
@@ -2143,6 +2146,7 @@ async function executeEngine(
           if (reused) {
             logReuseHit("offer", reused.snap.id, offerInputHash);
             output = reused.hydrated;
+            markEngineReused(output);
             ctx.offer = reused.hydrated;
             snapshotId = reused.snap.id;
             ctx.depthGateStatus!.offer = "DEPTH_PASSED";
@@ -3036,6 +3040,7 @@ async function executeEngine(
           if (reused) {
             logReuseHit("channel_selection", reused.snap.id, csInputHash);
             output = reused.hydrated;
+            markEngineReused(output);
             ctx.channelSelection = reused.hydrated;
             ctx.channelSelectionSnapshotId = reused.snap.id;
             snapshotId = reused.snap.id;
@@ -4868,6 +4873,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       pausedContext: null,
       pausedEngine: null,
       needsInputFields: null,
+      aiPathReport: buildAndRecordAiPathReport(results, ctx.ssc?.doctrine?.resolution),
       sectionStatuses: JSON.stringify(
         ENGINE_PRIORITY_ORDER.map(e => {
           const r = results.get(e.id);
