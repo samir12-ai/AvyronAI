@@ -25,6 +25,8 @@ import path from "path";
 import { aiChat } from "./ai-client";
 import { normalizeMediaType } from "../lib/media-types";
 import { authMiddleware, resolveAccountId, type AuthRequest } from "./auth";
+import { aiRateLimitPerAccount } from "./middleware/ai-rate-limit";
+import { aiSpendCapPerAccount } from "./middleware/ai-spend-cap";
 // Seal #3 (Task #21) F1.10/F1.11/F9.6: replace shell-form `execAsync(\`ffmpeg ...\`)`
 // with arg-array `spawn("ffmpeg", [...], { shell: false })` to eliminate shell
 // injection entirely, and validate AI-derived filter strings against a
@@ -201,7 +203,7 @@ export function registerVideoRoutes(app: Express) {
     },
   );
 
-  app.post("/api/video/ai-edit", authMiddleware, async (req: AuthRequest, res) => {
+  app.post("/api/video/ai-edit", authMiddleware, aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req: AuthRequest, res) => {
     try {
       const accountId = resolveAccountId(req);
       const { projectId, clips, style, mood, pace, addMusic, addTransitions, addText, textOverlay, creativeBrief, videoType, targetAudience, keyMessage } = req.body;
@@ -546,7 +548,7 @@ Based on the creative brief above, create an edit plan that fulfills the client'
     }
   });
 
-  app.post("/api/studio/video-analyze", authMiddleware, async (req: AuthRequest, res) => {
+  app.post("/api/studio/video-analyze", authMiddleware, aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req: AuthRequest, res) => {
     try {
       const accountId = resolveAccountId(req);
       const { title, platform, goal, audience, cta, series, offer, mediaType: rawMediaType, duration } = req.body;
@@ -666,7 +668,7 @@ Generate a full production-ready script with scene-by-scene breakdown, exact spo
     }
   });
 
-  app.post("/api/studio/ai-metadata", authMiddleware, async (req: AuthRequest, res) => {
+  app.post("/api/studio/ai-metadata", authMiddleware, aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req: AuthRequest, res) => {
     try {
       const accountId = resolveAccountId(req);
       const { title, mediaType, platform } = req.body;

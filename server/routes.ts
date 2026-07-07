@@ -559,7 +559,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     }
   });
 
-  app.post("/api/generate-poster", upload.array('photos', 3), async (req, res) => {
+  app.post("/api/generate-poster", authMiddleware, aiRateLimitPerAccount(), aiSpendCapPerAccount(), upload.array('photos', 3), async (req, res) => {
     try {
       const { topic, style, text, brandName, industry, aspectRatio, mood, mode } = req.body;
 
@@ -1546,9 +1546,19 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
     }
   });
 
-  app.use("/uploads/photography", express.static(path.join(process.cwd(), "uploads", "photography")));
-  app.use("/uploads/videos", express.static(path.join(process.cwd(), "uploads", "videos")));
-  app.use("/uploads/video-output", express.static(path.join(process.cwd(), "uploads", "video-output")));
+  // Hardening: force-download disposition and deny content-sniffing on all
+  // user-uploaded files. This prevents any file that slipped through (e.g. a
+  // pre-existing SVG) from executing as a script on the avyronai.com origin.
+  const uploadStaticOpts: Parameters<typeof express.static>[1] = {
+    setHeaders(res) {
+      res.setHeader("Content-Disposition", "attachment");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'none'");
+    },
+  };
+  app.use("/uploads/photography", express.static(path.join(process.cwd(), "uploads", "photography"), uploadStaticOpts));
+  app.use("/uploads/videos", express.static(path.join(process.cwd(), "uploads", "videos"), uploadStaticOpts));
+  app.use("/uploads/video-output", express.static(path.join(process.cwd(), "uploads", "video-output"), uploadStaticOpts));
 
   registerPhotographyRoutes(app);
   registerVideoRoutes(app);

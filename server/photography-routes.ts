@@ -37,15 +37,27 @@ const photoUpload = multer({
     filename: (_req, file, cb) => {
       // P0-2: server-controlled filename. Sanitised extension only.
       const rawExt = path.extname(file.originalname || "").toLowerCase();
-      const safeExt = /^\.[a-z0-9]{1,8}$/.test(rawExt) ? rawExt : ".jpg";
+      // Block scriptable extensions regardless of MIME type reported by the client.
+      const blockedExts = new Set([".svg", ".svgz", ".xml", ".html", ".htm", ".xhtml"]);
+      const safeExt =
+        /^\.[a-z0-9]{1,8}$/.test(rawExt) && !blockedExts.has(rawExt) ? rawExt : ".jpg";
       const uniqueName = Date.now() + "-" + Math.random().toString(36).substr(2, 9) + safeExt;
       cb(null, uniqueName);
     },
   }),
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) cb(null, true);
-    else cb(new Error("Only image files are allowed"));
+    // Block SVG and other scriptable types even if the MIME starts with image/.
+    // SVG is active HTML/XML content that executes JavaScript in-origin and
+    // must never be served from the same origin as the web app.
+    const blocked = ["image/svg+xml", "image/svg", "image/x-svg"];
+    if (blocked.includes(file.mimetype.toLowerCase())) {
+      cb(new Error("SVG uploads are not allowed"));
+    } else if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
+    }
   },
 });
 
