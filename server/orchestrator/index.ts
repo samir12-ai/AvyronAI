@@ -152,7 +152,7 @@ import { runDifferentiationEngine } from "../differentiation-engine/engine";
 import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
 import { getActiveRoot, buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
-import { seedDoctrine, doctrineSalt } from "./doctrine-seed";
+import { seedDoctrine, doctrineSalt, runStrategicContextOf, appendAudienceDecision, appendPositioningDecision, appendOfferDecision } from "./doctrine-seed";
 import { assembleStrategyRootInput, canonicalizeAudienceShape } from "../shared/strategy-root-assembler";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
@@ -1582,7 +1582,7 @@ async function executeEngine(
           }
         }
         if (!result) {
-          result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId, jobId);
+          result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId, jobId, runStrategicContextOf(ctx));
           if (result?.snapshotId) {
             try {
               await db.update(audienceSnapshotsTbl).set({ inputHash: audInputHash }).where(eq(audienceSnapshotsTbl.id, result.snapshotId));
@@ -1598,6 +1598,10 @@ async function executeEngine(
         // shape the audience engine happened to emit on this run.
         ctx.audience = canonicalizeAudienceShape(result);
         ctx.audienceSnapshotId = result.snapshotId;
+        // Phase 2: record the audience decision for the contradiction gate — on
+        // BOTH the fresh AND snapshot-reuse paths (a cache hit skips the engine,
+        // so without this later engines would have no prior to defend).
+        appendAudienceDecision(ctx, (result as any)?.audienceSegments);
 
         // ── COMMERCIAL SIGNAL EMISSION: buyerPsychology (Phase 4 marketing-logic upgrade) ──
         // Audience runs first in pipeline, so this signal is available to ALL downstream
@@ -1785,6 +1789,7 @@ async function executeEngine(
             ctx.audienceSnapshotId,
             ctx.analyticalEnrichment,
             jobId,
+            runStrategicContextOf(ctx),
           );
           if (result?.snapshotId) {
             try {
@@ -1798,6 +1803,9 @@ async function executeEngine(
         snapshotId = result.snapshotId;
         ctx.positioning = result;
         ctx.positioningSnapshotId = result.snapshotId;
+        // Phase 2: record the positioning decision for the contradiction gate —
+        // fresh AND snapshot-reuse paths both converge here.
+        appendPositioningDecision(ctx, (result as any)?.territories);
 
         // ── COMMERCIAL SIGNAL EMISSION: gameDimension (Phase 2 marketing-logic upgrade) ──
         // Emit the positioning engine's category-game design so downstream Offer / Awareness / Persuasion
@@ -2138,6 +2146,9 @@ async function executeEngine(
             ctx.offer = reused.hydrated;
             snapshotId = reused.snap.id;
             ctx.depthGateStatus!.offer = "DEPTH_PASSED";
+            // Reuse trap: engine skipped, so append the offer decision here too
+            // (the offer case does NOT converge with the fresh path).
+            appendOfferDecision(ctx, (reused.hydrated as any)?.primaryOffer);
             break;
           }
           logReuseMiss("offer", offerInputHash);
@@ -2173,9 +2184,13 @@ async function executeEngine(
           activeRoot,
           ctx.analyticalEnrichment,
           ctx.ssc?.commercialSignals || null,
+          runStrategicContextOf(ctx),
         );
         output = result;
         ctx.offer = result;
+        // Phase 2: append the offer decision for the contradiction gate. The offer
+        // reuse branch appends separately (paths do NOT converge here).
+        appendOfferDecision(ctx, (result as any)?.primaryOffer);
 
         // ── COMMERCIAL SIGNAL EMISSION: valueArchitecture (Phase 3 marketing-logic upgrade) ──
         // Emit so downstream (awareness, persuasion) can extend the wedge / leverage point.

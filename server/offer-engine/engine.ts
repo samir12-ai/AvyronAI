@@ -181,6 +181,8 @@ import {
   type DepthComplianceResult,
 } from "../causal-enforcement-layer/engine";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
+import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import { buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
 const STOP_WORDS = new Set([
@@ -1804,7 +1806,15 @@ export async function aiOfferGeneration(
   // generation paths keep their original baselines (0.5 skeleton / 0.7 free) so
   // the first-generation and depth-gate call sites are unaffected.
   temperature?: number,
+  strategic?: RunStrategicContext,
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
+
+  // T13 (AI Proposes / Code Validates): doctrine block (product anchor + prior
+  // validated decisions) injected into BOTH generation prompts so the model
+  // proposes offers pre-aligned to the locked anchor. Omitted cleanly when no
+  // doctrine was threaded — never a synthesized/fake doctrine (D5).
+  const doctrineBlock = strategic ? buildDoctrineBlock(strategic) : "";
+  if (!strategic) console.log("[OfferEngine-V4] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
 
   if (strategyRoot) {
     const skeletonResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
@@ -1873,7 +1883,7 @@ REJECTED OFFER (anti-pattern):
 ${painPhrases.length > 0 ? `9. Use audience language where possible: ${JSON.stringify(painPhrases.slice(0, 5))}` : ""}
 ${desirePhrases.length > 0 ? `10. Use desire language where possible: ${JSON.stringify(desirePhrases.slice(0, 5))}` : ""}
 
-${productDna ? `═══ PRODUCT IDENTITY ═══\n${formatProductDNAForPrompt(productDna)}\n` : ""}
+${productDna ? `═══ PRODUCT IDENTITY ═══\n${formatProductDNAForPrompt(productDna)}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}
 ABSOLUTE RULES:
 - Do NOT generate funnel architecture, advertising strategy, channel selection, media planning, or budget recommendations
 - Do NOT include financial advisory claims
@@ -2016,7 +2026,7 @@ ABSOLUTE RULES:
 - Respond with ONLY valid JSON, no markdown${mechLockInstruction}
 ${lockSection}${correctionSection}
 
-${productDna ? `═══ PRODUCT IDENTITY (Source of Truth) ═══\n${formatProductDNAForPrompt(productDna)}\n\n` : ""}═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
+${productDna ? `═══ PRODUCT IDENTITY (Source of Truth) ═══\n${formatProductDNAForPrompt(productDna)}\n\n` : ""}${doctrineBlock ? `${doctrineBlock}\n\n` : ""}═══ SECTION 1: AUDIENCE PAIN LANGUAGE (use these exact words) ═══
 ${painPhrases.length > 0 ? `Raw Pain Phrases: ${JSON.stringify(painPhrases)}` : "No raw pain phrases available"}
 ${desirePhrases.length > 0 ? `Raw Desire Phrases: ${JSON.stringify(desirePhrases)}` : "No raw desire phrases available"}
 ${emotionalPhrases.length > 0 ? `Emotional Language: ${JSON.stringify(emotionalPhrases)}` : ""}
@@ -2124,6 +2134,7 @@ export async function runOfferEngine(
   strategyRoot?: any,
   analyticalEnrichment?: any,
   upstreamSignals?: { trustMechanism?: any; gameDimension?: any } | null,
+  strategic?: RunStrategicContext,
 ): Promise<OfferResult> {
   const startTime = Date.now();
   const aelAck = acknowledgeAelInput("OfferEngine-V4", analyticalEnrichment, accountId);
@@ -2886,6 +2897,23 @@ export async function runOfferEngine(
   let offerAlignmentValidation = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
   diagnostics.offerAlignmentValidation = offerAlignmentValidation;
 
+  // T13 (AI Proposes / Code Validates): the offer's PRIMARY candidate must also
+  // clear the full doctrine battery (breadth → interchangeability → contradiction).
+  // We judge ONLY primaryOffer — never the intentionally-weak `rejected` concept,
+  // and not `alternative`. The battery shares the alignment loop below (no new
+  // retry loop), so total generations stay bounded at ≤3.
+  let offerBattery = await runCandidateGateBattery({
+    kind: "offer",
+    candidateText: `${primaryOffer.offerName}: ${primaryOffer.coreOutcome} — ${primaryOffer.mechanismDescription}`,
+    productAnchor: strategic ? strategic.doctrine.productAnchor : null,
+    priorDecisions: strategic ? strategic.priorDecisions : [],
+    accountId,
+  });
+  diagnostics.offerBattery = { passed: offerBattery.passed, failedGate: offerBattery.failedGate };
+  if (!offerBattery.passed) {
+    console.log(`[OfferEngine-V4] BATTERY_GATE: FAILED | gate=${offerBattery.failedGate ? offerBattery.failedGate : ""} | ${offerBattery.rejectionFeedback}`);
+  }
+
   // Item 6 (3 attempts everywhere): the alignment retry is a per-gate loop of up
   // to 3 TOTAL attempts (the first generation above is attempt 1; this loop runs
   // attempts 2–3), with temperature escalation (0.3 → 0.4 → 0.5) and structured
@@ -2901,16 +2929,21 @@ export async function runOfferEngine(
   const ALIGNMENT_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
   for (
     let alignmentAttempt = 2;
-    alignmentAttempt <= ALIGNMENT_MAX_ATTEMPTS && !offerAlignmentValidation.aligned && status === STATUS.COMPLETE;
+    alignmentAttempt <= ALIGNMENT_MAX_ATTEMPTS && (!offerAlignmentValidation.aligned || !offerBattery.passed) && status === STATUS.COMPLETE;
     alignmentAttempt++
   ) {
     const alignmentTemp = ALIGNMENT_TEMPERATURE_LADDER[Math.min(alignmentAttempt - 1, ALIGNMENT_TEMPERATURE_LADDER.length - 1)];
-    console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | Attempt ${alignmentAttempt}/${ALIGNMENT_MAX_ATTEMPTS} — Rejected by alignment gate: ${offerAlignmentValidation.failures.join("; ")}. Fix exactly this. | temp=${alignmentTemp}`);
+    // Combine the deterministic alignment failures with the doctrine battery's
+    // rejection feedback so ONE retry generation addresses BOTH gates at once.
+    const combinedFailures = offerBattery.passed
+      ? offerAlignmentValidation.failures
+      : [...offerAlignmentValidation.failures, `Rejected by ${offerBattery.failedGate ? offerBattery.failedGate : "battery"} gate: ${offerBattery.rejectionFeedback}`];
+    console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | Attempt ${alignmentAttempt}/${ALIGNMENT_MAX_ATTEMPTS} — alignment=${offerAlignmentValidation.aligned ? "ok" : offerAlignmentValidation.failures.join("; ")} | battery=${offerBattery.passed ? "ok" : (offerBattery.failedGate ? offerBattery.failedGate : "failed")}. Fix exactly this. | temp=${alignmentTemp}`);
     try {
       const retryOffers = await aiOfferGeneration(
         audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock,
-        { previousFailures: offerAlignmentValidation.failures, attempt: alignmentAttempt },
-        strategyRoot, productDna, analyticalEnrichment, undefined, alignmentTemp,
+        { previousFailures: combinedFailures, attempt: alignmentAttempt },
+        strategyRoot, productDna, analyticalEnrichment, undefined, alignmentTemp, strategic,
       );
       diagnostics.aiGenerationRetry = { success: true, attempt: alignmentAttempt };
 
@@ -2947,12 +2980,41 @@ export async function runOfferEngine(
       const retryValidation = validateOfferAlignment(retryPrimary, differentiation, audience, marketLanguage);
       diagnostics.offerAlignmentRetryValidation = retryValidation;
 
-      if (retryValidation.aligned || retryValidation.failures.length < offerAlignmentValidation.failures.length) {
-        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_SUCCESS | Attempt ${alignmentAttempt} ${retryValidation.aligned ? "passed" : "improved"} validation`);
+      // Re-judge the retry candidate through the full doctrine battery (primary only).
+      const retryBattery = await runCandidateGateBattery({
+        kind: "offer",
+        candidateText: `${retryPrimary.offerName}: ${retryPrimary.coreOutcome} — ${retryPrimary.mechanismDescription}`,
+        productAnchor: strategic ? strategic.doctrine.productAnchor : null,
+        priorDecisions: strategic ? strategic.priorDecisions : [],
+        accountId,
+      });
+
+      const alignmentImproved = retryValidation.aligned || retryValidation.failures.length < offerAlignmentValidation.failures.length;
+      const alignmentRegressed = !retryValidation.aligned && retryValidation.failures.length > offerAlignmentValidation.failures.length;
+      // Gate authority is SYMMETRIC: an accept must never REGRESS the other gate.
+      // A retry that would flip the doctrine battery passed→failed is refused even
+      // when alignment improves (the battery is the sole accept/reject judge — we
+      // never trade a battery-passing offer for a battery-failing one). If the
+      // current battery already failed, adopting another failing candidate is not
+      // a regression, so the alignment improvement is still allowed through.
+      const batteryRegressed = offerBattery.passed && !retryBattery.passed;
+      const alignmentAccept = alignmentImproved && !batteryRegressed;
+      const batteryOnlyImproved = retryBattery.passed && !offerBattery.passed && !alignmentRegressed;
+
+      if (alignmentAccept) {
+        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_SUCCESS | Attempt ${alignmentAttempt} ${retryValidation.aligned ? "passed" : "improved"} validation | battery=${retryBattery.passed ? "passed" : "failed"}`);
         Object.assign(primaryOffer, retryPrimary);
         offerAlignmentValidation = retryValidation;
+        offerBattery = retryBattery;
+      } else if (batteryOnlyImproved) {
+        console.log(`[OfferEngine-V4] BATTERY_RETRY_SUCCESS | Attempt ${alignmentAttempt} cleared the doctrine battery without alignment regression`);
+        Object.assign(primaryOffer, retryPrimary);
+        offerAlignmentValidation = retryValidation;
+        offerBattery = retryBattery;
+      } else if (alignmentImproved && batteryRegressed) {
+        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_REJECTED | Attempt ${alignmentAttempt} improved alignment but regressed the doctrine battery (passed→failed) — kept prior battery-passing offer`);
       } else {
-        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_NO_IMPROVEMENT | Attempt ${alignmentAttempt} kept prior offer`);
+        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_NO_IMPROVEMENT | Attempt ${alignmentAttempt} kept prior offer | battery=${retryBattery.passed ? "passed" : "failed"}`);
       }
     } catch (retryErr: any) {
       console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_FAILED | Attempt ${alignmentAttempt}: ${retryErr.message} — keeping current offer`);
@@ -2967,6 +3029,16 @@ export async function runOfferEngine(
       status = STATUS.INTEGRITY_FAILED;
       statusMessage = `Pre-save alignment validation failed: ${offerAlignmentValidation.failures.join("; ")}`;
     }
+  }
+
+  if (!offerBattery.passed) {
+    // Advisory (Beta axiom B3 — safe degradation over fake success): the doctrine
+    // battery could not be satisfied within the attempt budget. Record it on the
+    // surface (structuralWarnings) and apply a strength penalty — NEVER hard-fail.
+    const batteryWarn = `Offer failed ${offerBattery.failedGate ? offerBattery.failedGate : "battery"} gate: ${offerBattery.rejectionFeedback}`;
+    structuralWarnings.push(batteryWarn);
+    primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
+    console.log(`[OfferEngine-V4] BATTERY_GATE: EXHAUSTED | ${batteryWarn}`);
   }
 
     const mechanism = differentiation.mechanismFraming || {};

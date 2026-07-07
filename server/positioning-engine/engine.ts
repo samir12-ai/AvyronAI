@@ -6,6 +6,8 @@ import {
   ciCompetitors,
 } from "@shared/schema";
 import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
+import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import { buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
@@ -1689,6 +1691,7 @@ async function layer11_positioningStatementGeneration(
   // Item 6: temperature escalation across retry attempts (0.3 → 0.4 → 0.5).
   // Defaults to the first-attempt temperature so any other caller is unaffected.
   temperature: number = 0.3,
+  strategic?: RunStrategicContext,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1719,6 +1722,12 @@ async function layer11_positioningStatementGeneration(
     }
 
     const productDnaBlock = productDna ? formatProductDNAForPrompt(productDna) : "";
+    // T13 (AI Proposes / Code Validates): inject the strategic doctrine (product
+    // anchor + prior validated decisions) so the model proposes claims already
+    // aligned to the locked anchor. Omitted cleanly when no doctrine was threaded
+    // — never a synthesized/fake doctrine (D5).
+    const doctrineBlock = strategic ? buildDoctrineBlock(strategic) : "";
+    if (!strategic) console.log("[PositioningEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
     const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
     const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
     if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
@@ -1786,7 +1795,7 @@ Also return three additional fields per territory:
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
 TERRITORIES WITH CLAIM SEEDS AND SOURCE SIGNALS:
 ${territoriesBlock}
 ${websitePositioningContext}
@@ -1820,7 +1829,7 @@ Return ONLY the JSON array.`
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
 TERRITORIES:
 ${territoriesBlock}
 ${websitePositioningContext}
@@ -2172,6 +2181,7 @@ export async function runPositioningEngine(
   audienceSnapshotId: string,
   analyticalEnrichment?: any,
   jobId?: string,
+  strategic?: RunStrategicContext,
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
   const aelAck = acknowledgeAelInput("PositioningEngine-V3", analyticalEnrichment, accountId);
@@ -2491,13 +2501,57 @@ export async function runPositioningEngine(
         console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: Retry attempt ${specificityAttempt + 1}/${SPECIFICITY_MAX_RETRIES + 1} — re-generating with rejection context | temp=${attemptTemperature}`);
       }
 
-      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined, attemptTemperature);
+      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined, attemptTemperature, strategic);
       console.log(`[PositioningEngine-V3] L11 SIGNAL_DIRECT_COMPOSITION | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}${specificityAttempt > 0 ? " | retryAttempt=" + (specificityAttempt + 1) : ""}`);
 
       const specificityCheck = validateTerritorySpecificity(generatedTerritories);
 
       if (specificityCheck.passed) {
         console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: PASSED | system=${specificityCheck.systemCount} | audience=${specificityCheck.audienceCount} | attempt=${specificityAttempt + 1}`);
+        // T13 FULL GATE BATTERY: specificity held (system-level) — now every
+        // territory must clear breadth + interchangeability + contradiction as a
+        // positioning claim. Short-circuit at the first failing territory; retry
+        // the whole generation with focused feedback (bounded by the SAME
+        // SPECIFICITY_MAX_RETRIES cap, so total attempts never exceed 3). The
+        // judges log every verdict — including NOT_RUN abstentions — so nothing
+        // is silent. Battery failure DEGRADES (never hard-fails) on exhaustion.
+        let batteryFeedback = "";
+        let failedTerritoryName = "";
+        let failedGate = "";
+        for (const t of generatedTerritories) {
+          const battery = await runCandidateGateBattery({
+            kind: "positioning_claim",
+            candidateText: `${t.name}: ${t.enemyDefinition} | ${t.contrastAxis} | ${t.narrativeDirection}`,
+            productAnchor: strategic ? strategic.doctrine.productAnchor : null,
+            priorDecisions: strategic ? strategic.priorDecisions : [],
+            accountId,
+          });
+          if (!battery.passed) {
+            failedTerritoryName = t.name;
+            failedGate = battery.failedGate ? battery.failedGate : "";
+            batteryFeedback = battery.rejectionFeedback;
+            break;
+          }
+        }
+        if (!batteryFeedback) {
+          console.log(`[PositioningEngine-V3] BATTERY_GATE: PASSED | territories=${generatedTerritories.length} | gates=breadth+interchangeability+contradiction | attempt=${specificityAttempt + 1}`);
+          break;
+        }
+        console.log(`[PositioningEngine-V3] BATTERY_GATE: FAILED | gate=${failedGate} | territory="${failedTerritoryName}" | attempt=${specificityAttempt + 1}`);
+        if (specificityAttempt < SPECIFICITY_MAX_RETRIES) {
+          specificityRejectionContext = `
+PREVIOUS OUTPUT REJECTED — Rejected by ${failedGate} gate: ${batteryFeedback}
+Fix exactly this and regenerate ALL territories as system-level positioning claims that (a) name a specific enemy system/process/tool that fails, (b) are NOT interchangeable with a generic competitor claim, and (c) do NOT contradict the locked product anchor or prior engine decisions.`;
+          continue;
+        }
+        // Exhausted: degrade rather than hard-fail (Beta axiom B3 — safe
+        // degradation over fake success). Record the battery failure on each
+        // territory so the surface stays truthful about the weakened output.
+        for (const t of generatedTerritories) {
+          t.confidenceScore = Math.max(0, t.confidenceScore - 0.15);
+          t.stabilityNotes.push(`[BATTERY_FAILED] Positioning claim failed ${failedGate} gate after ${specificityAttempt + 1} attempts: ${batteryFeedback}`);
+        }
+        console.log(`[PositioningEngine-V3] BATTERY_GATE: EXHAUSTED | proceeding with degraded output after ${specificityAttempt + 1} attempts`);
         break;
       }
 
@@ -2531,8 +2585,15 @@ CORRECTION REQUIRED:
             t.confidenceScore = Math.max(0, t.confidenceScore - 0.15);
             t.stabilityNotes.push(`[SPECIFICITY_FAILED] Territory remains audience-level after retry: ${classification.reasons.join("; ")}`);
           }
+          // Gate-authority truthfulness: the full battery (breadth /
+          // interchangeability / contradiction) only runs once specificity
+          // clears. On this exhaustion path specificity NEVER cleared, so the
+          // battery NEVER evaluated this output. Record the NOT_RUN explicitly
+          // rather than shipping a silently un-batteried territory (NOT_RUN
+          // verdicts must be RECORDED, never swallowed).
+          t.stabilityNotes.push(`[BATTERY_NOT_RUN] specificity gate exhausted before battery evaluation after ${specificityAttempt + 1} attempts`);
         }
-        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: EXHAUSTED | proceeding with best available output after ${specificityAttempt + 1} attempts`);
+        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: EXHAUSTED | proceeding with best available output after ${specificityAttempt + 1} attempts | battery=NOT_RUN`);
       }
     }
 

@@ -3,6 +3,10 @@ import type { CollectorEntityType, CollectorLane } from "../collector/envelope";
 // the same structured market interpretation that drove Q2's verdict (see L497
 // of run.ts). Bundle author added the field to the writer but missed the type.
 import type { CompetitorInterpretation } from "../pipeline/lanes/competitor/interpret";
+// Phase 2 (AI Proposes / Code Validates) — optional validated strategic context
+// threaded from an orchestrator run. Additive + type-only; Q1/Q2 derivation
+// never reads it (independent dimensions).
+import type { RunStrategicContext } from "../shared/strategic-doctrine";
 
 export type BossTrigger = "manual" | "approval" | "scheduled";
 
@@ -56,6 +60,15 @@ export interface BossRunInput {
   campaignId: string;
   trigger: BossTrigger;
   scope?: BossScope;
+  /**
+   * Phase 2 (AI Proposes / Code Validates): OPTIONAL validated strategic context
+   * (product anchor + prior gate-passed engine decisions) from the orchestrator
+   * run that triggered this Boss run. Purely additive lineage/grounding — Q1/Q2
+   * verdict derivation MUST NOT read this field (Samir-locked independent
+   * dimensions). Used only as grounding evidence for reporting surfaces; Q2/User
+   * overlays stay interpretation-only.
+   */
+  enrichedStrategicContext?: RunStrategicContext;
 }
 
 export interface BossExecutionAcquisition {

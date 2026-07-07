@@ -32,8 +32,8 @@ import { aiChat } from "../ai-client";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity, type SemanticBridgeResult } from "./semantic-bridge";
 import { scoreAudienceSophistication, type AudienceSophisticationOutput } from "./sophistication-llm";
-import { checkBreadth, breadthRejectionFeedback } from "../shared/breadth-gate";
-import { safeJsonParse } from "../shared/strategic-doctrine";
+import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import { safeJsonParse, buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
 import { z } from "zod";
 
 interface EvidenceMeta {
@@ -1198,6 +1198,7 @@ async function constructSegments(
   commentSamples: string[],
   accountId: string,
   inputSnapshotId: string | null,
+  strategic?: RunStrategicContext,
 ): Promise<AudienceSegment[]> {
   // Deterministic last-resort segment — shared by the retry-exhaustion path and
   // the outer catch so a failure is NEVER silent (mode=fallback, always logged).
@@ -1231,8 +1232,20 @@ async function constructSegments(
 
     const productDnaBlock = (businessContext as any).productDna ? formatProductDNAForPrompt((businessContext as any).productDna) : "";
 
-    const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
+    // T11: inject the strategic doctrine (product anchor + prior validated
+    // decisions) so the AI proposes segments grounded in THIS product. Omitted
+    // cleanly when no strategic context was threaded — never a fake doctrine (D5).
+    let doctrineBlock = "";
+    if (strategic) {
+      doctrineBlock = buildDoctrineBlock(strategic);
+    } else {
+      console.log("[AudienceEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+    }
+    const productAnchor = strategic ? strategic.doctrine.productAnchor : null;
+    const priorDecisions = strategic ? strategic.priorDecisions : [];
 
+    const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}
 BUSINESS: ${businessContext.industry} — ${businessContext.coreOffer}
 ${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
 
@@ -1297,25 +1310,37 @@ Return ONLY the JSON array, no markdown.`;
           console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: STRUCTURAL_REJECT`);
           continue;
         }
-        const breadthFailures: string[] = [];
+        // FULL GATE BATTERY (T12): structural Zod already held above; each
+        // segment must now clear breadth + interchangeability + contradiction.
+        // A single failing segment rejects the whole batch and retries with
+        // focused feedback. Short-circuiting at the first failing segment caps
+        // judge-call fan-out (bounded by SEGMENT_MAX_ATTEMPTS). The judges log
+        // every verdict — including NOT_RUN abstentions — so nothing is silent.
+        let batteryFeedback = "";
+        let failedSegName = "";
+        let failedGate = "";
         for (const seg of candidate) {
-          const nameCheck = checkBreadth(seg.name);
-          if (!nameCheck.passed) {
-            breadthFailures.push(`segment "${seg.name}" — ${breadthRejectionFeedback(nameCheck)}`);
-            continue;
-          }
-          const descCheck = checkBreadth(seg.description);
-          if (!descCheck.passed) {
-            breadthFailures.push(`segment "${seg.name}" description — ${breadthRejectionFeedback(descCheck)}`);
+          const battery = await runCandidateGateBattery({
+            kind: "segment",
+            candidateText: `${seg.name}: ${seg.description}`,
+            productAnchor,
+            priorDecisions,
+            accountId,
+          });
+          if (!battery.passed) {
+            failedSegName = seg.name;
+            failedGate = battery.failedGate ? battery.failedGate : "";
+            batteryFeedback = `segment "${seg.name}" — ${battery.rejectionFeedback}`;
+            break;
           }
         }
-        if (breadthFailures.length > 0) {
-          segmentRejectionFeedback = `Rejected by breadth gate:\n${breadthFailures.join("\n")}\nFix exactly this: replace each catch-all with a specific group defined by a shared, verifiable, situation-specific problem.`;
-          console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: BREADTH_REJECT | ${breadthFailures.length} segment(s) too broad`);
+        if (batteryFeedback) {
+          segmentRejectionFeedback = `Rejected by gate battery:\n${batteryFeedback}\nFix exactly this and return a fresh JSON array of 2-4 segments, each a specific group defined by a shared, verifiable, situation-specific problem tied to the product.`;
+          console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: BATTERY_REJECT | gate=${failedGate} | segment="${failedSegName}"`);
           continue;
         }
         acceptedSegments = candidate;
-        console.log(`[AudienceEngine-V3] SEGMENT_GATE: PASSED | attempt=${attempt + 1}/${SEGMENT_MAX_ATTEMPTS} | segments=${candidate.length} | temp=${attemptTemp}`);
+        console.log(`[AudienceEngine-V3] SEGMENT_GATE: PASSED | attempt=${attempt + 1}/${SEGMENT_MAX_ATTEMPTS} | segments=${candidate.length} | temp=${attemptTemp} | gates=breadth+interchangeability+contradiction`);
         break;
       } catch (attemptErr: any) {
         segmentRejectionFeedback = `Rejected by parser: previous output could not be processed (${attemptErr.message}). Return ONLY a valid JSON array. Fix exactly this.`;
@@ -1660,7 +1685,7 @@ function buildEmptyResult(
   };
 }
 
-export async function runAudienceEngine(accountId: string, campaignId: string, miSnapshotIdParam?: string, jobId?: string): Promise<AudienceEngineV3Result> {
+export async function runAudienceEngine(accountId: string, campaignId: string, miSnapshotIdParam?: string, jobId?: string, strategic?: RunStrategicContext): Promise<AudienceEngineV3Result> {
   const startTime = Date.now();
   console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}${miSnapshotIdParam ? ` | run-scoped MI=${miSnapshotIdParam}` : " | unscoped (will resolve latest)"}`);
 
@@ -2013,7 +2038,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     const rawSegments = await constructSegments(
       painMap, desireMap, objectionMap, emotionalDrivers,
       maturityIndex, awarenessLevel,
-      businessContext, commentTexts, accountId, miSnapshotId,
+      businessContext, commentTexts, accountId, miSnapshotId, strategic,
     );
 
     audienceSegments = canonicalizeSegments(rawSegments);

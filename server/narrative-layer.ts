@@ -9,6 +9,8 @@ import {
 } from "@shared/schema";
 import { eq, and, or, desc } from "drizzle-orm";
 import { aiChat } from "./ai-client";
+import { loadCampaignProductAnchor } from "./orchestrator/doctrine-seed";
+import type { RunStrategicContext } from "./shared/strategic-doctrine";
 
 interface NarrativeStep {
   key: string;
@@ -107,7 +109,7 @@ function humanize(text: string): string {
   return out;
 }
 
-export async function buildCausalNarrative(campaignId: string, accountId: string, requestedRunId: string | null = null): Promise<CausalNarrative & { runId?: string | null; isLatest?: boolean; isStale?: boolean }> {
+export async function buildCausalNarrative(campaignId: string, accountId: string, requestedRunId: string | null = null, enrichedStrategicContext?: RunStrategicContext | null): Promise<CausalNarrative & { runId?: string | null; isLatest?: boolean; isStale?: boolean }> {
   const empty: CausalNarrative = { hasNarrative: false, steps: [], oneLiner: "", engineCount: 0, completedAt: null };
 
   const { resolveRunId } = await import("./orchestrator/run-resolver");
@@ -430,7 +432,36 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
       //      from the validated steps so an unchecked free-text headline
       //      can't smuggle hallucinations past the per-step gate.
       const allKeysCovered = ["problem","why","position","mechanism","execute"].every(k => byKey[k]);
-      const anchorTerms = [territoryName, mechName, offerName, topPillar, enemy, contrastAxis]
+      // T14 (AI Proposes / Code Validates): resolve the CODE-VALIDATED strategic
+      // outputs that widen the grounding allowlist. Prefer a caller-supplied
+      // RunStrategicContext (carries the live prior-decision list); otherwise load
+      // the campaign's persisted product anchor (tenant-scoped). Q2/User overlays
+      // are deliberately NOT consulted — they stay interpretation-only and never
+      // widen the hard grounding allowlist.
+      let strategicProductAnchor = enrichedStrategicContext?.doctrine?.productAnchor ?? null;
+      const strategicPriorDecisions = enrichedStrategicContext?.priorDecisions ?? [];
+      if (!strategicProductAnchor) {
+        try {
+          strategicProductAnchor = await loadCampaignProductAnchor(campaignId, accountId);
+        } catch (e) {
+          console.error(`[NarrativeLayer] PRODUCT_ANCHOR_LOAD_FAILED campaign=${campaignId}: ${(e as Error)?.message}`);
+        }
+      }
+      // Product-anchor identity terms already cleared upstream gates, so quoting
+      // them in the narrative is grounded, not hallucinated.
+      const strategicAnchorTerms: string[] = [];
+      if (strategicProductAnchor) {
+        for (const v of [
+          strategicProductAnchor.name,
+          strategicProductAnchor.type,
+          strategicProductAnchor.coreProblemSolved,
+          strategicProductAnchor.differentiatingFeature,
+          ...(strategicProductAnchor.keyAttributes || []),
+        ]) {
+          if (typeof v === "string" && v.trim()) strategicAnchorTerms.push(v.trim());
+        }
+      }
+      const anchorTerms = [territoryName, mechName, offerName, topPillar, enemy, contrastAxis, ...strategicAnchorTerms]
         .filter(Boolean).map(s => String(s).toLowerCase());
       const allowedQuoted = new Set(anchorTerms);
       // Tokenize each anchor term into individual words so multi-word
@@ -439,6 +470,18 @@ export async function buildCausalNarrative(campaignId: string, accountId: string
       for (const t of anchorTerms) {
         for (const w of t.split(/\s+/)) {
           if (w.length >= 2) allowedTokens.add(w.toLowerCase());
+        }
+      }
+      // Prior gate-validated engine decisions contribute WORD-LEVEL grounding
+      // only (their summaries are prose, not quotable brand anchors), so the token
+      // gate won't falsely reject words that already appear in a validated
+      // decision. Q2/User overlays are excluded (interpretation-only).
+      for (const d of strategicPriorDecisions) {
+        if (d && typeof d.summary === "string") {
+          for (const w of d.summary.split(/\s+/)) {
+            const clean = w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+            if (clean.length >= 2) allowedTokens.add(clean);
+          }
         }
       }
       const QUOTED_RE = /"([^"]{2,60})"/g;

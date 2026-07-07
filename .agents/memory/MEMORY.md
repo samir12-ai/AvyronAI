@@ -1,6 +1,4 @@
-- [AI Control Center tab pivot](ai-management-tab-pivot.md) — a "4-screen pivot" once collapsed Build Plan/Strategies into Roadmap/Diagnose/Monitor labels; user reverted to explicit named tabs.
-- [Bright Data Web Unlocker proxy syntax](bright-data-web-unlocker-syntax.md) — port 33335 DOES support `-country-`/`-session-` username suffixes; don't assume "Web Unlocker" means bare username only.
-- [Bright Data 407 auth failures](bright-data-407-credential-check.md) — before assuming code is broken, isolate proxy 407s with a raw undici ProxyAgent test using bare credentials; rules out app code as the cause.
-- [growth_campaigns vs campaign_selections](growth-campaigns-vs-campaign-selections.md) — user campaigns live only in campaign_selections; growth_campaigns is legacy/no-accountId; tenant-scope campaignId reads by joining through campaign_selections.
-- [Full-project tsc is unusable in this env](repo-typecheck-and-lint-gaps.md) — no skipLibCheck → tsc >120s and background procs get reaped; use getLatestLspDiagnostics per-file. Custom eslint rules in gitignored .local/eslint-rules are partly missing → lint config load fails.
-- [Interchangeability judge tuning](interchangeability-judge-tuning.md) — the segment judge must test broadness, not audience-exclusivity, or it false-rejects niche segments.
+# Memory Index
+
+- [AI Proposes / Code Validates](ai-proposes-code-validates.md) — deterministic gate battery is the SOLE accept/reject judge; accepts must be gate-symmetric and every bypass/NOT_RUN must be RECORDED.
+- [Avyron typecheck baseline](avyron-tsc-baseline.md) — `npx tsc --noEmit` has a large pre-existing error baseline; measure deltas, and run tsc ONCE to a file (double-run times out).
