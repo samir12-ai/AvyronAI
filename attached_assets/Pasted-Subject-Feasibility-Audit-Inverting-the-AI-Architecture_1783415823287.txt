@@ -1,0 +1,59 @@
+Subject: Feasibility Audit — Inverting the AI Architecture: "AI Proposes, Code Validates"
+
+DO NOT MODIFY ANY CODE YET. This is a feasibility assessment. Read the full vision below, then answer the audit questions at the end with file/line evidence. Based on your report, we will decide the implementation plan.
+
+=== THE VISION ===
+
+Today, the system computes strategy deterministically (rule-based) and uses AI only to reword/compress the output (interpretation_only everywhere). We are inverting this: AI generates strategic thinking, and the code validates it. Full design:
+
+1. STRATEGIC DOCTRINE (new shared foundation)
+A new file server/shared/strategic-doctrine.ts with 6 sequential marketing principles injected into every engine's LLM prompt:
+  P1. Identify the exact target segment
+  P2. Study that segment's problems in this specific market
+  P3. Design/fit the product or service around those problems
+  P4. Define sales locations and channels where this segment actually is
+  P5. Deliver/communicate the offering to this segment
+  P6. Build a long-term relationship with this segment
+NOTE: Pricing is deliberately EXCLUDED. The existing offer-engine prohibition on pricing/financial advisory stays untouched.
+
+2. RESOLUTION RULE (cross-cutting, applies to every principle)
+All answers must be at the level of the SPECIFIC product/offer of the current campaign, never the business category. Example: a shoe store running a campaign on classic leather shoes — the segment is NOT "people who want shoes"; it is the specific buyer of classic leather shoes, their specific problem, the specific channel where THEY are. Any claim that would hold unchanged for a generic competitor in the same category is invalid.
+
+3. FORWARD-FLOWING SHARED CONTEXT
+RunStrategicContext seeded at run start from strategy-root + commercial-dna + business profile + the campaign's specific product anchor. After each engine completes, its validated output summary is appended. Every subsequent engine reads it before reasoning — so Positioning knows what Audience decided, Offer knows both, and the Boss agent receives the same context so its action decision is consistent with the engines. Boss verdict rules (Q1/Q2) remain rule-based and unchanged — only its input context is enriched.
+
+4. AI GENERATES, GATES VALIDATE
+For audience-engine, positioning-engine, offer-engine, channel-selection: prompts change from "compress this pre-computed value" to "generate 2-3 candidate outputs from market data + doctrine + prior engine context." Every candidate passes through the EXISTING gates (validateClaimGrounding, AT3 integrity gate, grounding allowlists, sanitizers) PLUS a new Specificity Gate:
+  a) Product anchor check — output must reference the campaign's specific product
+  b) Interchangeability test — LLM-judge (temp 0, YES/NO): "could this statement apply unchanged to any generic competitor?" YES = reject
+  c) Breadth check — reject patterns like "anyone who...", "people who want [category]"
+Q2 and User Interpretation overlays stay interpretation_only. Narrative grounding gate stays, with its evidence allowlist expanded to include validated RunStrategicContext outputs.
+
+5. RETRY WITH FEEDBACK (no immediate fallback)
+When candidates fail validation: retry up to 3 total attempts. Each retry includes the specific rejection reason (which gate, which ungrounded token, which prior decision was contradicted, or "too generic — regenerate at product level"). Temperature rises slightly on retries (0.3 → 0.5). Only after all 3 attempts fail does the current deterministic path fire as a last-resort safety net — logged as degraded, never silent.
+
+6. AI-PATH TELEMETRY
+Per-run record per engine: { engine, mode: "ai" | "fallback", attempts, failedGates, durationMs }. Persisted with the run, exposed via an operator-only endpoint (GET /api/diagnose/ai-path-report?runId=), with an overall aiCoverage % on the run summary. Fallbacks log at console.error.
+
+=== FEASIBILITY AUDIT QUESTIONS — ANSWER WITH FILE/LINE EVIDENCE ===
+
+A. CONTEXT PLUMBING
+1. Can RunStrategicContext be threaded through the orchestrator's engine sequence without restructuring? Map the current orchestrator flow: where each engine is invoked, in what order, and whether a shared object can be passed/mutated between invocations today.
+2. Does the campaign data model already carry a specific product/offer anchor (name, type, attributes), or only a business-level description? If missing, what schema change is needed?
+3. Can the Boss agent's input assembly accept the enriched context without touching Q1/Q2 verdict logic?
+
+B. GATES & VALIDATION
+4. List the existing validation gates per engine (grounding, AT3, sanitizers) and confirm each can accept AI-generated candidates instead of pre-computed values, or what adaptation each needs.
+5. Is there existing infrastructure for an LLM-judge call (temp 0, structured YES/NO) we can reuse for the Specificity Gate — e.g., the judge-retry patterns in channel-selection/budget-governor/retention — or does it need to be built?
+
+C. RETRY & TELEMETRY
+6. Do the engines' LLM call sites support a retry loop with modified prompts today, or is each call single-shot? Show the call structure in audience/positioning/offer/channel-selection.
+7. Where would aiPathStatus persist — is there an existing per-run record (boss run / orchestrator run row) it can attach to, or does it need a new table/column?
+8. Estimate added cost/latency per full run: extra LLM calls from candidates (2-3 per engine) + judge calls + retries worst-case.
+
+D. GAPS & RISKS
+9. List anything in this design that the current architecture CANNOT support without restructuring, with the specific blocker.
+10. List what you consider missing from this design — anything we should add before implementation.
+11. Given the current Bright Data 407 / zero-posts issue, which parts of this design can be built and verified NOW with business-profile data only, and which parts only show their value after competitor data flows again?
+
+OUTPUT: Answer each question with evidence, end with a readiness verdict per component (READY / NEEDS ADAPTATION / BLOCKED) and a recommended implementation order. No code changes in this task.

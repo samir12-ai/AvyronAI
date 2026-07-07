@@ -473,3 +473,9 @@ id = "00AedkKwyMiPGtXbzZu51"
 uri = "file://docs/audit-ai-vs-template-report.md"
 type = "text"
 title = "Avyron AI — AI vs Template Audit Report (Final, verbatim)"
+
+[[outputs]]
+id = "r1NOHsYVsP4RKlsNXPjri"
+uri = "file://docs/feasibility-audit-ai-inversion.md"
+type = "text"
+title = "Feasibility Audit — AI Architecture Inversion"
