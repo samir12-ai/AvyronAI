@@ -59,6 +59,8 @@ interface CampaignContextValue {
   isCampaignSelected: boolean;
   selectCampaign: (campaign: CampaignInfo) => Promise<void>;
   createCampaign: (input: CreateCampaignInput) => Promise<void>;
+  getProductAnchor: (campaignId: string) => Promise<ProductAnchorInput | null>;
+  updateProductAnchor: (campaignId: string, anchor: ProductAnchorInput | null) => Promise<void>;
   deleteCampaign: (campaignId: string) => Promise<void>;
   clearSelection: () => Promise<void>;
   refreshCampaigns: () => Promise<void>;
@@ -186,6 +188,30 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }, [userId]);
 
+  // Product anchor (Phase 0) read/write. These do not paint into context state,
+  // so no account-switch guard is needed — they return/throw to the caller.
+  const getProductAnchor = useCallback(async (campaignId: string): Promise<ProductAnchorInput | null> => {
+    const res = await authFetch(getApiUrl(`/api/campaigns/${campaignId}/product-anchor`));
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message || 'Failed to load product identity');
+    }
+    const data = await res.json();
+    return data.productAnchor ?? null;
+  }, []);
+
+  const updateProductAnchor = useCallback(async (campaignId: string, anchor: ProductAnchorInput | null) => {
+    const res = await authFetch(getApiUrl(`/api/campaigns/${campaignId}/product-anchor`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productAnchor: anchor }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message || 'Failed to update product identity');
+    }
+  }, []);
+
   const deleteCampaign = useCallback(async (campaignId: string) => {
     const issuedFor = userId;
     try {
@@ -274,6 +300,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         isCampaignSelected,
         selectCampaign,
         createCampaign,
+        getProductAnchor,
+        updateProductAnchor,
         deleteCampaign,
         clearSelection,
         refreshCampaigns,

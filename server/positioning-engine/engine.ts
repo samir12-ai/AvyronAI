@@ -1580,9 +1580,31 @@ function buildSignalClaimSeeds(
   };
 }
 
+/**
+ * Item 7 (AI Proposes / Code Validates): anchor-term allowlist for the grounding
+ * gate. When the LLM generates freely, a claim grounded in the product anchor,
+ * the territory name, or the product's mechanism is legitimately grounded even
+ * if it does not echo a raw audience-signal label. These terms count toward
+ * `grounded`/`score` but are NEVER recorded as matched SIGNAL ids.
+ * Phase 1 source = productDna (coreOffer ≈ anchor name; uniqueMechanism =
+ * mechanism) + the territory name. Phase 2 (item 11) also folds in
+ * doctrine.productAnchor (name / keyAttributes / differentiatingFeature); a null
+ * anchor (business_level_degraded) simply omits those — never placeholder text.
+ */
+function buildAnchorAllowlistTerms(territory: Territory, productDna?: any): string[] {
+  const terms: string[] = [];
+  if (territory?.name) terms.push(territory.name);
+  if (productDna) {
+    if (productDna.uniqueMechanism) terms.push(String(productDna.uniqueMechanism));
+    if (productDna.coreOffer) terms.push(String(productDna.coreOffer));
+  }
+  return terms.filter((t) => t && t.trim().length > 2);
+}
+
 function validateClaimGrounding(
   claimText: string,
   seed: ClaimSeed,
+  extraAllowedTerms: string[] = [],
 ): { grounded: boolean; matchedSignals: string[]; score: number } {
   if (!claimText || claimText.trim().length < 5) return { grounded: false, matchedSignals: [], score: 0 };
 
@@ -1623,8 +1645,32 @@ function validateClaimGrounding(
     }
   }
 
+  // Item 7: anchor-term allowlist. Anchor / mechanism / territory terms count
+  // toward grounding (grounded + score) but are deliberately NOT pushed into
+  // matchedSignals — they are not audience signals and must not leak synthetic
+  // ids into signal traceability. Empty extraAllowedTerms → byte-identical to
+  // the prior behaviour (existing callers unaffected).
+  let anchorGrounded = false;
+  for (const term of extraAllowedTerms) {
+    const t = term.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+    if (t.length < 3) continue;
+    if (claimLower.includes(t)) {
+      anchorGrounded = true;
+      totalScore += 1.5;
+      continue;
+    }
+    const termWords = t.split(/\s+/).filter((w) => w.length > 2);
+    if (termWords.length === 0) continue;
+    let overlap = 0;
+    for (const tw of termWords) if (claimWords.has(tw)) overlap++;
+    if (overlap / termWords.length >= 0.5) {
+      anchorGrounded = true;
+      totalScore += (overlap / termWords.length) * 1.0;
+    }
+  }
+
   return {
-    grounded: matchedSignals.length > 0,
+    grounded: matchedSignals.length > 0 || anchorGrounded,
     matchedSignals: [...new Set(matchedSignals)],
     score: totalScore,
   };
@@ -1640,6 +1686,9 @@ async function layer11_positioningStatementGeneration(
   analyticalEnrichment?: any,
   structuredSignals?: StructuredSignals | null,
   specificityRejectionContext?: string,
+  // Item 6: temperature escalation across retry attempts (0.3 → 0.4 → 0.5).
+  // Defaults to the first-attempt temperature so any other caller is unaffected.
+  temperature: number = 0.3,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1791,7 +1840,7 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
     const response = await aiChat({
       model: "gpt-4.1-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.0,
+      temperature,
       max_tokens: 1500,
       seed: 42,
       endpoint: "positioning-engine-v3-statements",
@@ -1819,9 +1868,10 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
           const contrastText = (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) ? item.contrastAxis : seed.contrastSeed;
           const narrativeText = (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) ? item.narrativeDirection : seed.narrativeSeed;
 
-          const enemyGrounding = validateClaimGrounding(enemyText, seed);
-          const contrastGrounding = validateClaimGrounding(contrastText, seed);
-          const narrativeGrounding = validateClaimGrounding(narrativeText, seed);
+          const anchorAllowTerms = buildAnchorAllowlistTerms(territories[idx], productDna);
+          const enemyGrounding = validateClaimGrounding(enemyText, seed, anchorAllowTerms);
+          const contrastGrounding = validateClaimGrounding(contrastText, seed, anchorAllowTerms);
+          const narrativeGrounding = validateClaimGrounding(narrativeText, seed, anchorAllowTerms);
 
           territories[idx].enemyDefinition = enemyGrounding.grounded ? enemyText : seed.enemySeed;
           territories[idx].contrastAxis = contrastGrounding.grounded ? contrastText : seed.contrastSeed;
@@ -2418,19 +2468,30 @@ export async function runPositioningEngine(
   let signalTraceability: PositioningEngineResult["signalTraceability"] = undefined;
 
   {
-    const SPECIFICITY_MAX_RETRIES = 1;
+    // Item 6: 3 total attempts (SPECIFICITY_MAX_RETRIES 1 → 2), env-overridable.
+    // Clamp retries to 0–2 so total attempts never exceeds the doctrine cap of 3
+    // per engine even under an operator override; NaN falls back to the default.
+    const SPECIFICITY_MAX_RETRIES = (() => {
+      const raw = process.env.POSITIONING_SPECIFICITY_MAX_RETRIES;
+      const n = raw !== undefined ? parseInt(raw, 10) : NaN;
+      if (Number.isNaN(n)) return 2;
+      return Math.max(0, Math.min(2, n));
+    })();
+    // Item 6: temperature escalation ladder across attempts (0.3 → 0.4 → 0.5).
+    const SPECIFICITY_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
     let specificityAttempt = 0;
     let specificityRejectionContext = "";
     let generatedTerritories: Territory[] = [];
 
     for (specificityAttempt = 0; specificityAttempt <= SPECIFICITY_MAX_RETRIES; specificityAttempt++) {
       const territoriesSnapshot = JSON.parse(JSON.stringify(territories)) as Territory[];
+      const attemptTemperature = SPECIFICITY_TEMPERATURE_LADDER[Math.min(specificityAttempt, SPECIFICITY_TEMPERATURE_LADDER.length - 1)];
 
       if (specificityAttempt > 0) {
-        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: Retry attempt ${specificityAttempt + 1}/${SPECIFICITY_MAX_RETRIES + 1} — re-generating with rejection context`);
+        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: Retry attempt ${specificityAttempt + 1}/${SPECIFICITY_MAX_RETRIES + 1} — re-generating with rejection context | temp=${attemptTemperature}`);
       }
 
-      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined);
+      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined, attemptTemperature);
       console.log(`[PositioningEngine-V3] L11 SIGNAL_DIRECT_COMPOSITION | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}${specificityAttempt > 0 ? " | retryAttempt=" + (specificityAttempt + 1) : ""}`);
 
       const specificityCheck = validateTerritorySpecificity(generatedTerritories);
@@ -2447,10 +2508,14 @@ export async function runPositioningEngine(
 
       if (specificityAttempt < SPECIFICITY_MAX_RETRIES) {
         const rejectionLines = specificityCheck.rejections.map(r =>
-          `REJECTED: "${r.name}" — ${r.reasons.join("; ")}`
+          `"${r.name}" — ${r.reasons.join("; ")}`
         ).join("\n");
+        // Item 6 rejection-feedback format (multi-gate ready): "Rejected by
+        // [gate]: [specific reason]. Fix exactly this." Phase 1 = specificity
+        // gate only; Phase 2 appends breadth / interchangeability / contradiction
+        // rejection lines to this same block for drop-in assembly.
         specificityRejectionContext = `
-PREVIOUS OUTPUT REJECTED — TERRITORIES WERE AUDIENCE-LEVEL, NOT SYSTEM-LEVEL:
+PREVIOUS OUTPUT REJECTED — Rejected by specificity gate: territories were audience-level (too generic), not system-level. Fix exactly this:
 ${rejectionLines}
 
 CORRECTION REQUIRED:

@@ -512,6 +512,205 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
   );
 }
 
+function EditProductIdentityForm({
+  campaignId,
+  campaignName,
+  onDone,
+}: {
+  campaignId: string;
+  campaignName: string;
+  onDone: () => void;
+}) {
+  const { getProductAnchor, updateProductAnchor } = useCampaign();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [paName, setPaName] = useState('');
+  const [paType, setPaType] = useState('');
+  const [paKeyAttrs, setPaKeyAttrs] = useState('');
+  const [paCoreProblem, setPaCoreProblem] = useState('');
+  const [paDiffFeature, setPaDiffFeature] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    setLoading(true);
+    getProductAnchor(campaignId)
+      .then((anchor) => {
+        if (cancelled) return;
+        setPaName(anchor?.name ?? '');
+        setPaType(anchor?.type ?? '');
+        setPaKeyAttrs(anchor?.keyAttributes?.join(', ') ?? '');
+        setPaCoreProblem(anchor?.coreProblemSolved ?? '');
+        setPaDiffFeature(anchor?.differentiatingFeature ?? '');
+      })
+      .catch((err: any) => {
+        if (!cancelled) setError(err.message || 'Failed to load product identity');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [campaignId, getProductAnchor]);
+
+  const hasAnyField = !!(paName.trim() || paType.trim() || paKeyAttrs.trim() || paCoreProblem.trim() || paDiffFeature.trim());
+
+  const handleSave = async () => {
+    setError(null);
+    // All-or-nothing: a product anchor must carry name, type, core problem, and
+    // differentiating feature — or be cleared entirely (business-level doctrine).
+    if (!paName.trim() || !paType.trim() || !paCoreProblem.trim() || !paDiffFeature.trim()) {
+      setError('Fill product name, type, core problem, and differentiating feature — or use Clear to remove product identity.');
+      return;
+    }
+    const anchor: ProductAnchorInput = {
+      name: paName.trim(),
+      type: paType.trim(),
+      keyAttributes: paKeyAttrs.split(',').map(s => s.trim()).filter(Boolean),
+      coreProblemSolved: paCoreProblem.trim(),
+      differentiatingFeature: paDiffFeature.trim(),
+    };
+    setSaving(true);
+    try {
+      await updateProductAnchor(campaignId, anchor);
+      onDone();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save product identity');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      await updateProductAnchor(campaignId, null);
+      onDone();
+    } catch (err: any) {
+      setError(err.message || 'Failed to clear product identity');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={{ paddingVertical: 48, alignItems: 'center' }}>
+        <ActivityIndicator color="#8B5CF6" />
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+              <ScrollView style={formStyles.container} keyboardShouldPersistTaps="handled">
+                <Text style={{ color: '#6B7280', fontSize: 11, lineHeight: 15, marginBottom: 12, paddingHorizontal: 16 }}>
+                  {campaignName
+                    ? `Pin the product "${campaignName}" promotes so the AI reasons at product level. Clear it to reason at business level.`
+                    : 'Pin the product this campaign promotes so the AI reasons at product level.'}
+                </Text>
+                <View style={formStyles.field}>
+                  <Text style={formStyles.label}>Product Name</Text>
+                  <TextInput
+                    style={formStyles.input}
+                    value={paName}
+                    onChangeText={setPaName}
+                    placeholder="e.g. AcmeFlow Pro"
+                    placeholderTextColor="#4B5563"
+                    testID="edit-pa-name-input"
+                  />
+                </View>
+                <View style={formStyles.field}>
+                  <Text style={formStyles.label}>Product Type</Text>
+                  <TextInput
+                    style={formStyles.input}
+                    value={paType}
+                    onChangeText={setPaType}
+                    placeholder="e.g. Project management SaaS"
+                    placeholderTextColor="#4B5563"
+                    testID="edit-pa-type-input"
+                  />
+                </View>
+                <View style={formStyles.field}>
+                  <Text style={formStyles.label}>Key Attributes (comma-separated)</Text>
+                  <TextInput
+                    style={formStyles.input}
+                    value={paKeyAttrs}
+                    onChangeText={setPaKeyAttrs}
+                    placeholder="e.g. real-time sync, offline mode"
+                    placeholderTextColor="#4B5563"
+                    testID="edit-pa-attributes-input"
+                  />
+                </View>
+                <View style={formStyles.field}>
+                  <Text style={formStyles.label}>Core Problem Solved</Text>
+                  <TextInput
+                    style={[formStyles.input, { height: 64, textAlignVertical: 'top' }]}
+                    value={paCoreProblem}
+                    onChangeText={setPaCoreProblem}
+                    placeholder="What specific problem does it solve?"
+                    placeholderTextColor="#4B5563"
+                    multiline
+                    testID="edit-pa-problem-input"
+                  />
+                </View>
+                <View style={formStyles.field}>
+                  <Text style={formStyles.label}>Differentiating Feature</Text>
+                  <TextInput
+                    style={[formStyles.input, { height: 64, textAlignVertical: 'top' }]}
+                    value={paDiffFeature}
+                    onChangeText={setPaDiffFeature}
+                    placeholder="What makes it different from alternatives?"
+                    placeholderTextColor="#4B5563"
+                    multiline
+                    testID="edit-pa-diff-input"
+                  />
+                </View>
+
+                {error && (
+                  <View style={formStyles.errorBox}>
+                    <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                    <Text style={formStyles.errorText}>{error}</Text>
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={[formStyles.saveButton, saving && { opacity: 0.6 }]}
+                  onPress={handleSave}
+                  disabled={saving}
+                  testID="save-product-identity-button"
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                      <Text style={formStyles.saveButtonText}>Save Product Identity</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {hasAnyField && (
+                  <TouchableOpacity
+                    style={[formStyles.clearButton, saving && { opacity: 0.6 }]}
+                    onPress={handleClear}
+                    disabled={saving}
+                    testID="clear-product-identity-button"
+                  >
+                    <Ionicons name="trash-outline" size={16} color="#F59E0B" />
+                    <Text style={formStyles.clearButtonText}>Clear (reason at business level)</Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity style={formStyles.cancelButton} onPress={onDone} disabled={saving}>
+                  <Text style={formStyles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
 function CampaignListModal({
   visible,
   campaigns,
@@ -539,15 +738,19 @@ function CampaignListModal({
     }
     if (!visible) {
       setShowCreateForm(false);
+      setEditAnchorId(null);
     }
   }, [visible, initialCreate]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmDeleteName, setConfirmDeleteName] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [editAnchorId, setEditAnchorId] = useState<string | null>(null);
+  const [editAnchorName, setEditAnchorName] = useState('');
 
   const handleClose = () => {
     setShowCreateForm(false);
     setConfirmDeleteId(null);
+    setEditAnchorId(null);
     onClose();
   };
 
@@ -572,7 +775,7 @@ function CampaignListModal({
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>{showCreateForm ? 'New Campaign' : 'Select Campaign'}</Text>
+            <Text style={styles.modalTitle}>{showCreateForm ? 'New Campaign' : editAnchorId ? 'Product Identity' : 'Select Campaign'}</Text>
             <TouchableOpacity onPress={handleClose} style={styles.modalClose}>
               <Ionicons name="close" size={22} color="#9CA3AF" />
             </TouchableOpacity>
@@ -580,6 +783,12 @@ function CampaignListModal({
 
           {showCreateForm ? (
             <NewCampaignForm onCreated={handleCreated} onCancel={() => setShowCreateForm(false)} />
+          ) : editAnchorId ? (
+            <EditProductIdentityForm
+              campaignId={editAnchorId}
+              campaignName={editAnchorName}
+              onDone={() => setEditAnchorId(null)}
+            />
           ) : (
             <>
               <Text style={styles.modalSubtitle}>
@@ -664,6 +873,17 @@ function CampaignListModal({
                         {isSelected && (
                           <Ionicons name="checkmark-circle" size={20} color="#8B5CF6" />
                         )}
+                        <TouchableOpacity
+                          onPress={() => {
+                            setEditAnchorId(item.id);
+                            setEditAnchorName(item.name);
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          style={styles.deleteButton}
+                          testID={`edit-anchor-${item.id}`}
+                        >
+                          <Ionicons name="cube-outline" size={16} color="#8B5CF6" />
+                        </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => {
                             setConfirmDeleteId(item.id);
@@ -1118,6 +1338,23 @@ const formStyles = StyleSheet.create({
   cancelButtonText: {
     color: '#6B7280',
     fontSize: 14,
+  },
+  clearButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#F59E0B40',
+    backgroundColor: '#F59E0B12',
+  },
+  clearButtonText: {
+    color: '#F59E0B',
+    fontSize: 14,
+    fontWeight: '600',
   },
   newCampaignButton: {
     flexDirection: 'row',

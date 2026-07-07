@@ -1800,6 +1800,10 @@ export async function aiOfferGeneration(
   productDna?: ProductDNA | null,
   analyticalEnrichment?: any,
   depthRejectionContext?: string,
+  // Item 6: temperature escalation across retry attempts. When omitted the two
+  // generation paths keep their original baselines (0.5 skeleton / 0.7 free) so
+  // the first-generation and depth-gate call sites are unaffected.
+  temperature?: number,
 ): Promise<{ primary: { name: string; outcome: string; mechanism: string; deliverables: string[] }; alternative: { name: string; outcome: string; mechanism: string; deliverables: string[] }; rejected: { name: string; outcome: string; mechanism: string; deliverables: string[]; rejectionReason: string } }> {
 
   if (strategyRoot) {
@@ -1888,7 +1892,7 @@ Return JSON:
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: fullPrompt }],
         max_tokens: 1000,
-        temperature: 0.5,
+        temperature: typeof temperature === "number" ? temperature : 0.5,
         accountId,
         endpoint: "offer-engine",
       });
@@ -2061,7 +2065,7 @@ Return JSON:
       model: "gpt-4.1-mini",
       messages: [{ role: "user", content: freePrompt }],
       max_tokens: 1000,
-      temperature: 0.7,
+      temperature: typeof temperature === "number" ? temperature : 0.7,
       accountId,
       endpoint: "offer-engine",
     });
@@ -2882,11 +2886,33 @@ export async function runOfferEngine(
   let offerAlignmentValidation = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
   diagnostics.offerAlignmentValidation = offerAlignmentValidation;
 
-  if (!offerAlignmentValidation.aligned && status === STATUS.COMPLETE) {
-    console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | First attempt failed: ${offerAlignmentValidation.failures.join("; ")} — regenerating with positioning lock`);
+  // Item 6 (3 attempts everywhere): the alignment retry is a per-gate loop of up
+  // to 3 TOTAL attempts (the first generation above is attempt 1; this loop runs
+  // attempts 2–3), with temperature escalation (0.3 → 0.4 → 0.5) and structured
+  // rejection feedback injected via axisCorrection on every pass.
+  //
+  // Per-loop attempt accounting (doctrine "max 3 attempts per engine"): the offer
+  // engine has TWO independent per-gate loops — this alignment loop and the causal
+  // depth-gate loop below (bounded by DEPTH_GATE_MAX_RETRIES). They validate
+  // different gates and are not redundant retries of the same failure, so the
+  // 3-attempt cap is applied PER GATE. Total generations per run stay bounded:
+  // 1 first-gen + ≤2 alignment + ≤DEPTH_GATE_MAX_RETRIES depth (no runaway).
+  const ALIGNMENT_MAX_ATTEMPTS = 3;
+  const ALIGNMENT_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
+  for (
+    let alignmentAttempt = 2;
+    alignmentAttempt <= ALIGNMENT_MAX_ATTEMPTS && !offerAlignmentValidation.aligned && status === STATUS.COMPLETE;
+    alignmentAttempt++
+  ) {
+    const alignmentTemp = ALIGNMENT_TEMPERATURE_LADDER[Math.min(alignmentAttempt - 1, ALIGNMENT_TEMPERATURE_LADDER.length - 1)];
+    console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | Attempt ${alignmentAttempt}/${ALIGNMENT_MAX_ATTEMPTS} — Rejected by alignment gate: ${offerAlignmentValidation.failures.join("; ")}. Fix exactly this. | temp=${alignmentTemp}`);
     try {
-      const retryOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
-      diagnostics.aiGenerationRetry = { success: true, attempt: 2 };
+      const retryOffers = await aiOfferGeneration(
+        audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock,
+        { previousFailures: offerAlignmentValidation.failures, attempt: alignmentAttempt },
+        strategyRoot, productDna, analyticalEnrichment, undefined, alignmentTemp,
+      );
+      diagnostics.aiGenerationRetry = { success: true, attempt: alignmentAttempt };
 
       let retryAiOutcomeText: string;
       if (typeof retryOffers.primary.outcome === "string" && retryOffers.primary.outcome.length > 0) {
@@ -2922,14 +2948,14 @@ export async function runOfferEngine(
       diagnostics.offerAlignmentRetryValidation = retryValidation;
 
       if (retryValidation.aligned || retryValidation.failures.length < offerAlignmentValidation.failures.length) {
-        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_SUCCESS | Retry ${retryValidation.aligned ? "passed" : "improved"} validation`);
+        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_SUCCESS | Attempt ${alignmentAttempt} ${retryValidation.aligned ? "passed" : "improved"} validation`);
         Object.assign(primaryOffer, retryPrimary);
         offerAlignmentValidation = retryValidation;
       } else {
-        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_NO_IMPROVEMENT | Keeping original offer`);
+        console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_NO_IMPROVEMENT | Attempt ${alignmentAttempt} kept prior offer`);
       }
     } catch (retryErr: any) {
-      console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_FAILED | ${retryErr.message} — keeping original`);
+      console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_FAILED | Attempt ${alignmentAttempt}: ${retryErr.message} — keeping current offer`);
       diagnostics.aiGenerationRetry = { success: false, error: retryErr.message };
     }
   }

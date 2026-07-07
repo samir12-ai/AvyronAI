@@ -30,6 +30,11 @@ export type ContradictionKind =
   | "positioning_orphan_vs_signal_grounding"
   | "validation_state_vs_decision_action"
   | "memory_decision_vs_policy_threshold"
+  // Phase 1 (AI Proposes / Code Validates) — a freshly-generated engine
+  // candidate contradicts a validated prior-engine decision recorded in
+  // SharedStrategicContext.priorDecisions. Emitted by the contradiction judge
+  // at the engine's candidate-validation step.
+  | "candidate_contradicts_prior_decision"
   | "legacy_untagged";
 
 export interface Contradiction {

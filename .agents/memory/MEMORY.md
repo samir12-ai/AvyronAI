@@ -3,3 +3,4 @@
 - [Bright Data 407 auth failures](bright-data-407-credential-check.md) — before assuming code is broken, isolate proxy 407s with a raw undici ProxyAgent test using bare credentials; rules out app code as the cause.
 - [growth_campaigns vs campaign_selections](growth-campaigns-vs-campaign-selections.md) — user campaigns live only in campaign_selections; growth_campaigns is legacy/no-accountId; tenant-scope campaignId reads by joining through campaign_selections.
 - [Full-project tsc is unusable in this env](repo-typecheck-and-lint-gaps.md) — no skipLibCheck → tsc >120s and background procs get reaped; use getLatestLspDiagnostics per-file. Custom eslint rules in gitignored .local/eslint-rules are partly missing → lint config load fails.
+- [Interchangeability judge tuning](interchangeability-judge-tuning.md) — the segment judge must test broadness, not audience-exclusivity, or it false-rejects niche segments.

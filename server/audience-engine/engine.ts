@@ -32,6 +32,9 @@ import { aiChat } from "../ai-client";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity, type SemanticBridgeResult } from "./semantic-bridge";
 import { scoreAudienceSophistication, type AudienceSophisticationOutput } from "./sophistication-llm";
+import { checkBreadth, breadthRejectionFeedback } from "../shared/breadth-gate";
+import { safeJsonParse } from "../shared/strategic-doctrine";
+import { z } from "zod";
 
 interface EvidenceMeta {
   evidenceCount: number;
@@ -1158,6 +1161,32 @@ function computeSegmentDensity(
   }));
 }
 
+// T8 (item 6, constraint "all LLM outputs through safeJsonParse + Zod"): schema
+// shapes for the audience LLM candidates. Data-field defaults (never decision/
+// verdict/outcome fields) keep parsing resilient without a semantic fallback.
+const SegmentCandidateSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  painProfile: z.array(z.string()).default([]),
+  desireProfile: z.array(z.string()).default([]),
+  objectionProfile: z.array(z.string()).default([]),
+  motivationProfile: z.array(z.string()).default([]),
+  estimatedPercentage: z.coerce.number().catch(0),
+});
+const SegmentArraySchema = z.array(SegmentCandidateSchema);
+
+const AdsTargetingCandidateSchema = z.object({
+  suggestedInterests: z.array(z.string()).default([]),
+  suggestedBehaviors: z.array(z.string()).default([]),
+  suggestedAgeRange: z
+    .object({ min: z.coerce.number().catch(18), max: z.coerce.number().catch(55) })
+    .default({ min: 18, max: 55 }),
+  suggestedGender: z.string().default("all"),
+  suggestedLocations: z.array(z.string()).default([]),
+  rationale: z.string().default(""),
+});
+const AdsTargetingArraySchema = z.array(AdsTargetingCandidateSchema);
+
 async function constructSegments(
   painMap: SignalItem[],
   desireMap: SignalItem[],
@@ -1170,6 +1199,21 @@ async function constructSegments(
   accountId: string,
   inputSnapshotId: string | null,
 ): Promise<AudienceSegment[]> {
+  // Deterministic last-resort segment — shared by the retry-exhaustion path and
+  // the outer catch so a failure is NEVER silent (mode=fallback, always logged).
+  const deterministicFallback = (): AudienceSegment[] => [{
+    name: "Primary Audience",
+    description: "Main audience segment based on available data",
+    painProfile: painMap.slice(0, 3).map(p => p.canonical),
+    desireProfile: desireMap.slice(0, 3).map(d => d.canonical),
+    objectionProfile: objectionMap.slice(0, 2).map(o => o.canonical),
+    motivationProfile: emotionalDrivers.slice(0, 2).map(e => e.canonical),
+    estimatedPercentage: 100,
+    evidenceCount: painMap.length + desireMap.length,
+    confidenceScore: 0.3,
+    sourceSignals: ["painMap", "desireMap"],
+    inputSnapshotId,
+  }];
   try {
     let multiSourceSection = "";
     try {
@@ -1224,20 +1268,68 @@ Return a JSON array of 2-4 segments. Each segment:
 
 Return ONLY the JSON array, no markdown.`;
 
-    const response = await aiChat({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
-      max_tokens: 2000,
-      endpoint: "audience-engine-v3-segments",
-      accountId,
-    });
+    // T8 (item 6): retry loop built from scratch around the segment call —
+    // 3 total attempts, temperature escalation 0.3 → 0.4 → 0.5, structured
+    // rejection feedback injected each pass. Gates: Zod structural + breadth
+    // gate (item 9) on name+description. Code is the sole judge; the AI proposes.
+    const SEGMENT_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
+    const SEGMENT_MAX_ATTEMPTS = 3;
+    let acceptedSegments: z.infer<typeof SegmentArraySchema> | null = null;
+    let segmentRejectionFeedback = "";
+    for (let attempt = 0; attempt < SEGMENT_MAX_ATTEMPTS; attempt++) {
+      const attemptTemp = SEGMENT_TEMPERATURE_LADDER[Math.min(attempt, SEGMENT_TEMPERATURE_LADDER.length - 1)];
+      const attemptPrompt = segmentRejectionFeedback
+        ? `${prompt}\n\n--- RETRY DIRECTIVE ---\n${segmentRejectionFeedback}`
+        : prompt;
+      try {
+        const response = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: attemptPrompt }],
+          temperature: attemptTemp,
+          max_tokens: 2000,
+          endpoint: "audience-engine-v3-segments",
+          accountId,
+        });
+        const content = response.choices[0]?.message?.content?.trim() || "[]";
+        const candidate = safeJsonParse<z.infer<typeof SegmentArraySchema>>(content, SegmentArraySchema);
+        if (!candidate || candidate.length < 2) {
+          segmentRejectionFeedback = `Rejected by structural gate: ${!candidate ? "output was not valid JSON or failed schema validation" : `only ${candidate.length} segment(s) returned`}. Return a JSON array of 2-4 well-formed segments. Fix exactly this.`;
+          console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: STRUCTURAL_REJECT`);
+          continue;
+        }
+        const breadthFailures: string[] = [];
+        for (const seg of candidate) {
+          const nameCheck = checkBreadth(seg.name);
+          if (!nameCheck.passed) {
+            breadthFailures.push(`segment "${seg.name}" — ${breadthRejectionFeedback(nameCheck)}`);
+            continue;
+          }
+          const descCheck = checkBreadth(seg.description);
+          if (!descCheck.passed) {
+            breadthFailures.push(`segment "${seg.name}" description — ${breadthRejectionFeedback(descCheck)}`);
+          }
+        }
+        if (breadthFailures.length > 0) {
+          segmentRejectionFeedback = `Rejected by breadth gate:\n${breadthFailures.join("\n")}\nFix exactly this: replace each catch-all with a specific group defined by a shared, verifiable, situation-specific problem.`;
+          console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: BREADTH_REJECT | ${breadthFailures.length} segment(s) too broad`);
+          continue;
+        }
+        acceptedSegments = candidate;
+        console.log(`[AudienceEngine-V3] SEGMENT_GATE: PASSED | attempt=${attempt + 1}/${SEGMENT_MAX_ATTEMPTS} | segments=${candidate.length} | temp=${attemptTemp}`);
+        break;
+      } catch (attemptErr: any) {
+        segmentRejectionFeedback = `Rejected by parser: previous output could not be processed (${attemptErr.message}). Return ONLY a valid JSON array. Fix exactly this.`;
+        console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: AI_ERROR | ${attemptErr.message}`);
+      }
+    }
 
-    const content = response.choices[0]?.message?.content?.trim() || "[]";
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned) as any[];
+    if (!acceptedSegments) {
+      console.error(`[AudienceEngine-V3] SEGMENT_GATE: EXHAUSTED after ${SEGMENT_MAX_ATTEMPTS} attempts — using deterministic fallback (mode=fallback, never silent)`);
+      return deterministicFallback();
+    }
 
-    return parsed.map(seg => {
+    const finalSegments = acceptedSegments;
+    return finalSegments.map(seg => {
       const segPains = (seg.painProfile || []) as string[];
       const segDesires = (seg.desireProfile || []) as string[];
       const segObjections = (seg.objectionProfile || []) as string[];
@@ -1253,7 +1345,7 @@ Return ONLY the JSON array, no markdown.`;
       const signalCoverage = totalProfileItems > 0 ? Math.min(1, painDesireMatchCount / totalProfileItems) : 0;
       const painDesireDensity = Math.min(1, (painMap.length + desireMap.length) / 10);
 
-      const allOtherSegments = parsed.filter((s: any) => s.name !== seg.name);
+      const allOtherSegments = finalSegments.filter((s: any) => s.name !== seg.name);
       let avgSim = 0;
       if (allOtherSegments.length > 0) {
         let simSum = 0;
@@ -1286,19 +1378,7 @@ Return ONLY the JSON array, no markdown.`;
     });
   } catch (err: any) {
     console.error("[AudienceEngine-V3] Segment construction failed:", err.message);
-    return [{
-      name: "Primary Audience",
-      description: "Main audience segment based on available data",
-      painProfile: painMap.slice(0, 3).map(p => p.canonical),
-      desireProfile: desireMap.slice(0, 3).map(d => d.canonical),
-      objectionProfile: objectionMap.slice(0, 2).map(o => o.canonical),
-      motivationProfile: emotionalDrivers.slice(0, 2).map(e => e.canonical),
-      estimatedPercentage: 100,
-      evidenceCount: painMap.length + desireMap.length,
-      confidenceScore: 0.3,
-      sourceSignals: ["painMap", "desireMap"],
-      inputSnapshotId,
-    }];
+    return deterministicFallback();
   }
 }
 
@@ -1338,6 +1418,20 @@ async function translateToAdsTargeting(
   accountId: string,
   inputSnapshotId: string | null,
 ): Promise<AdsTargetingHint[]> {
+  // Deterministic last-resort targeting — shared by the retry-exhaustion path
+  // and the outer catch so a failure is NEVER silent (mode=fallback, logged).
+  const adsFallback = (): AdsTargetingHint[] => [{
+    suggestedInterests: [businessContext.industry],
+    suggestedBehaviors: ["Engaged shoppers"],
+    suggestedAgeRange: { min: 18, max: 55 },
+    suggestedGender: "all",
+    suggestedLocations: [businessContext.location || "United States"],
+    rationale: "Fallback targeting based on business context",
+    evidenceCount: 0,
+    confidenceScore: 0.2,
+    sourceSignals: ["fallback"],
+    inputSnapshotId,
+  }];
   try {
     const prompt = `You are a Meta Ads targeting expert. Translate audience segments into Meta Ads Manager targeting suggestions.
 
@@ -1360,40 +1454,64 @@ For each segment, return:
 
 Return ONLY a JSON array matching the segments count. Use real Meta Ads targeting options.`;
 
-    const response = await aiChat({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-      max_tokens: 1500,
-      endpoint: "audience-engine-v3-ads-targeting",
-      accountId,
-    });
-
-    const content = response.choices[0]?.message?.content?.trim() || "[]";
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned) as any[];
-
-    return parsed.map(hint => sanitizeAdsTargetingHint({
-      ...hint,
-      evidenceCount: segments.length,
-      confidenceScore: 0.6,
-      sourceSignals: ["audienceSegments", "maturityIndex"],
-      inputSnapshotId,
-    }));
+    // T8 (item 6): retry loop around the ads-targeting call — 3 total attempts,
+    // temperature escalation 0.3 → 0.4 → 0.5, structured rejection feedback each
+    // pass. Validation is STRUCTURAL ONLY (Zod schema + one-object-per-segment +
+    // non-empty interests) — the breadth gate does NOT apply because Meta targeting
+    // language (broad interests/behaviors/locations) is legitimately non-specific.
+    const ADS_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
+    const ADS_MAX_ATTEMPTS = 3;
+    let adsRejectionFeedback = "";
+    for (let attempt = 0; attempt < ADS_MAX_ATTEMPTS; attempt++) {
+      const attemptTemp = ADS_TEMPERATURE_LADDER[Math.min(attempt, ADS_TEMPERATURE_LADDER.length - 1)];
+      const attemptPrompt = adsRejectionFeedback
+        ? `${prompt}\n\n--- RETRY DIRECTIVE ---\n${adsRejectionFeedback}`
+        : prompt;
+      try {
+        const response = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: attemptPrompt }],
+          temperature: attemptTemp,
+          max_tokens: 1500,
+          endpoint: "audience-engine-v3-ads-targeting",
+          accountId,
+        });
+        const content = response.choices[0]?.message?.content?.trim() || "[]";
+        const parsed = safeJsonParse<z.infer<typeof AdsTargetingArraySchema>>(content, AdsTargetingArraySchema);
+        if (!parsed) {
+          adsRejectionFeedback = `Rejected by structural gate: output was not valid JSON or failed schema validation. Return a JSON array with one targeting object per segment. Fix exactly this.`;
+          console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE attempt ${attempt + 1}/${ADS_MAX_ATTEMPTS}: SCHEMA_REJECT`);
+          continue;
+        }
+        if (parsed.length !== segments.length) {
+          adsRejectionFeedback = `Rejected by structural gate: returned ${parsed.length} targeting object(s) but there are ${segments.length} segment(s). Return exactly one object per segment, in the same order. Fix exactly this.`;
+          console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE attempt ${attempt + 1}/${ADS_MAX_ATTEMPTS}: COUNT_MISMATCH | got=${parsed.length} expected=${segments.length}`);
+          continue;
+        }
+        const emptyInterestIdx = parsed.findIndex(h => h.suggestedInterests.length === 0);
+        if (emptyInterestIdx !== -1) {
+          adsRejectionFeedback = `Rejected by structural gate: targeting object #${emptyInterestIdx + 1} has no suggestedInterests. Every segment needs at least one real Meta interest category. Fix exactly this.`;
+          console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE attempt ${attempt + 1}/${ADS_MAX_ATTEMPTS}: EMPTY_INTERESTS | idx=${emptyInterestIdx}`);
+          continue;
+        }
+        console.log(`[AudienceEngine-V3] ADS_TARGETING_GATE: PASSED | attempt=${attempt + 1}/${ADS_MAX_ATTEMPTS} | hints=${parsed.length} | temp=${attemptTemp}`);
+        return parsed.map(hint => sanitizeAdsTargetingHint({
+          ...hint,
+          evidenceCount: segments.length,
+          confidenceScore: 0.6,
+          sourceSignals: ["audienceSegments", "maturityIndex"],
+          inputSnapshotId,
+        }));
+      } catch (attemptErr: any) {
+        adsRejectionFeedback = `Rejected by parser: previous output could not be processed (${attemptErr.message}). Return ONLY a valid JSON array. Fix exactly this.`;
+        console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE attempt ${attempt + 1}/${ADS_MAX_ATTEMPTS}: AI_ERROR | ${attemptErr.message}`);
+      }
+    }
+    console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE: EXHAUSTED after ${ADS_MAX_ATTEMPTS} attempts — using deterministic fallback (mode=fallback, never silent)`);
+    return adsFallback();
   } catch (err: any) {
     console.error("[AudienceEngine-V3] Ads targeting failed:", err.message);
-    return [{
-      suggestedInterests: [businessContext.industry],
-      suggestedBehaviors: ["Engaged shoppers"],
-      suggestedAgeRange: { min: 18, max: 55 },
-      suggestedGender: "all",
-      suggestedLocations: [businessContext.location || "United States"],
-      rationale: "Fallback targeting based on business context",
-      evidenceCount: 0,
-      confidenceScore: 0.2,
-      sourceSignals: ["fallback"],
-      inputSnapshotId,
-    }];
+    return adsFallback();
   }
 }
 
