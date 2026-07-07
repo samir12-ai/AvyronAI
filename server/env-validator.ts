@@ -64,7 +64,11 @@ const RECOMMENDED: Array<{ key: string; description: string }> = [
   { key: "OTEL_EXPORTER_OTLP_ENDPOINT", description: "OpenTelemetry OTLP collector endpoint" },
   {
     key: "METRICS_ADMIN_TOKEN",
-    description: "Static admin secret gating GET /metrics. Absent → endpoint returns 401 to all callers.",
+    description: "Static admin secret gating GET /metrics and /healthz/* infrastructure endpoints. Infrastructure-only; does NOT grant access to product-admin /api/admin/* routes.",
+  },
+  {
+    key: "OPERATOR_ADMIN_TOKEN",
+    description: "Static admin secret gating /api/admin/* product-operator endpoints (continuity panel, replay cassettes, operator notices, operations panel). Separate from METRICS_ADMIN_TOKEN — infrastructure callers must NOT hold this token.",
   },
 ];
 

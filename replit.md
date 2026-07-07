@@ -141,7 +141,8 @@ The env validator (`server/env-validator.ts`) refuses to boot if any required se
 | `STRIPE_WEBHOOK_SECRET` | production (dev: warn) | Stripe signature verification; routes fail-closed when unset. |
 | `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL. Validated: absolute URL, `https://` in prod, hostname suffix in allowlist or `ALLOWED_PUBLIC_HOSTS`. |
 | `ALLOWED_PUBLIC_HOSTS` | optional | Comma-separated additional hostname suffixes. |
-| `METRICS_ADMIN_TOKEN` | recommended | Gates `/metrics` and unredacted `/healthz/continuity` via `X-Admin-Token`. |
+| `METRICS_ADMIN_TOKEN` | recommended | Infrastructure-only: gates `/metrics` and `/healthz/*` endpoints via `X-Admin-Token`. Does NOT grant access to product-admin `/api/admin/*` routes. |
+| `OPERATOR_ADMIN_TOKEN` | recommended | Product-admin: gates all `/api/admin/*` operator endpoints (continuity panel, replay cassettes, operator notices, operations panel). Must be a separate secret from `METRICS_ADMIN_TOKEN`; infrastructure callers (Prometheus scrapers, uptime probes) must NOT hold this token. |
 | `SENTRY_DSN` | recommended | Server error reporting. Absent → no-op. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | Reserved for upstream OpenTelemetry. |
 | `JWT_LEGACY_CUTOFF_ISO` | optional | Override auto-persisted JWT legacy-grace cutoff. |

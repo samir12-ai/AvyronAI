@@ -50,6 +50,28 @@ import { _activeJobsStats } from "./market-intelligence-v3/fetch-orchestrator";
 const app = express();
 const log = console.log;
 
+// ─── Operator token helper ─────────────────────────────────────────────────
+//
+// OPERATOR_ADMIN_TOKEN gates product-admin endpoints that return per-tenant
+// data (accountId, campaignId, cassette bodies, operator notices, etc.).
+// It is a separate credential from METRICS_ADMIN_TOKEN so that infrastructure
+// scrapers (Prometheus, uptime probes) that legitimately hold the metrics
+// token cannot escalate to reading sensitive tenant data.
+//
+// Fail-closed: when the env var is unset every request is rejected (401).
+// Constant-time comparison prevents timing oracles on the secret.
+function checkOperatorToken(req: Request): boolean {
+  const expected = process.env.OPERATOR_ADMIN_TOKEN;
+  if (!expected) return false;
+  const provided = req.header("x-admin-token") ?? "";
+  if (provided.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+  } catch {
+    return false;
+  }
+}
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -812,20 +834,10 @@ function setupErrorHandler(app: express.Application) {
   //     by construction (401 when token missing or wrong).
   //
   app.get("/api/admin/continuity/panel", async (req: Request, res: Response) => {
-    const expected = process.env.METRICS_ADMIN_TOKEN;
-    const provided = req.header("x-admin-token") ?? "";
-    if (!expected) {
-      return res.status(401).json({ error: "continuity_panel_disabled_no_admin_token" });
+    if (!process.env.OPERATOR_ADMIN_TOKEN) {
+      return res.status(401).json({ error: "continuity_panel_disabled_no_operator_token" });
     }
-    let isAdmin = false;
-    if (provided.length === expected.length) {
-      try {
-        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-      } catch {
-        isAdmin = false;
-      }
-    }
-    if (!isAdmin) {
+    if (!checkOperatorToken(req)) {
       return res.status(401).json({ error: "unauthorized" });
     }
 
@@ -949,20 +961,10 @@ function setupErrorHandler(app: express.Application) {
   // campaign — callers MUST treat null as "no badge", never substitute
   // a default decision (D5).
   app.get("/api/admin/continuity/campaign/:campaignId/last-decision", (req: Request, res: Response) => {
-    const expected = process.env.METRICS_ADMIN_TOKEN;
-    const provided = req.header("x-admin-token") ?? "";
-    if (!expected) {
-      return res.status(401).json({ error: "continuity_panel_disabled_no_admin_token" });
+    if (!process.env.OPERATOR_ADMIN_TOKEN) {
+      return res.status(401).json({ error: "continuity_panel_disabled_no_operator_token" });
     }
-    let isAdmin = false;
-    if (provided.length === expected.length) {
-      try {
-        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-      } catch {
-        isAdmin = false;
-      }
-    }
-    if (!isAdmin) {
+    if (!checkOperatorToken(req)) {
       return res.status(401).json({ error: "unauthorized" });
     }
     const campaignId = req.params.campaignId;
@@ -989,23 +991,14 @@ function setupErrorHandler(app: express.Application) {
   // GET /api/admin/replay/cassettes  → corpus summary + last 50 cassettes
   // GET /api/admin/replay/cassette/:hash → one cassette body
   //
-  // Same X-Admin-Token gate as /metrics + /healthz/continuity. Production
-  // cassettes are NOT committed to repo — download only via this surface.
+  // Gated by OPERATOR_ADMIN_TOKEN (separate from the infrastructure-only
+  // METRICS_ADMIN_TOKEN). Production cassettes are NOT committed to repo —
+  // download only via this surface.
   app.get("/api/admin/replay/cassettes", async (req: Request, res: Response) => {
-    const expected = process.env.METRICS_ADMIN_TOKEN;
-    const provided = req.header("x-admin-token") ?? "";
-    if (!expected) {
-      return res.status(401).json({ error: "replay_panel_disabled_no_admin_token" });
+    if (!process.env.OPERATOR_ADMIN_TOKEN) {
+      return res.status(401).json({ error: "replay_panel_disabled_no_operator_token" });
     }
-    let isAdmin = false;
-    if (provided.length === expected.length) {
-      try {
-        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-      } catch {
-        isAdmin = false;
-      }
-    }
-    if (!isAdmin) {
+    if (!checkOperatorToken(req)) {
       return res.status(401).json({ error: "unauthorized" });
     }
     try {
@@ -1094,20 +1087,10 @@ function setupErrorHandler(app: express.Application) {
   });
 
   app.get("/api/admin/replay/cassette/:hash", async (req: Request, res: Response) => {
-    const expected = process.env.METRICS_ADMIN_TOKEN;
-    const provided = req.header("x-admin-token") ?? "";
-    if (!expected) {
-      return res.status(401).json({ error: "replay_panel_disabled_no_admin_token" });
+    if (!process.env.OPERATOR_ADMIN_TOKEN) {
+      return res.status(401).json({ error: "replay_panel_disabled_no_operator_token" });
     }
-    let isAdmin = false;
-    if (provided.length === expected.length) {
-      try {
-        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-      } catch {
-        isAdmin = false;
-      }
-    }
-    if (!isAdmin) {
+    if (!checkOperatorToken(req)) {
       return res.status(401).json({ error: "unauthorized" });
     }
     try {
@@ -1151,30 +1134,15 @@ function setupErrorHandler(app: express.Application) {
   //     audience, recovery_outcome). No `?? "unknown"` fallback.
   //   * D5 — never substitute a default. If the table is empty the
   //     response is `notices: []`, not a synthetic placeholder.
-  //   * Same X-Admin-Token gate + fail-closed-when-unset pattern as the
-  //     existing continuity + operations panel endpoints.
+  //   * Gated by OPERATOR_ADMIN_TOKEN (separate from the infrastructure-only
+  //     METRICS_ADMIN_TOKEN). Fail-closed when unset.
   //   * Observe-only phase: audience='user' rows do not exist (USER_COPY
   //     firewall in operations-guardian/types.ts is intentionally empty).
   app.get("/api/admin/operator-notices", async (req: Request, res: Response) => {
-    const expected = process.env.METRICS_ADMIN_TOKEN;
-    const provided = req.header("x-admin-token") ?? "";
-    if (!expected) {
-      return res.status(401).json({ error: "operator_notices_disabled_no_admin_token" });
+    if (!process.env.OPERATOR_ADMIN_TOKEN) {
+      return res.status(401).json({ error: "operator_notices_disabled_no_operator_token" });
     }
-    let isAdmin = false;
-    if (provided.length === expected.length) {
-      try {
-        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-      } catch (err) {
-        // Seal #15 — no silent catches. timingSafeEqual throws only on
-        // length mismatch (already pre-checked) or non-Buffer input;
-        // either way we fail closed, but log so the operator can spot
-        // misconfiguration of the admin-token header.
-        console.error("[OperatorNotices] TIMING_SAFE_COMPARE_FAILED", err);
-        isAdmin = false;
-      }
-    }
-    if (!isAdmin) {
+    if (!checkOperatorToken(req)) {
       return res.status(401).json({ error: "unauthorized" });
     }
 
@@ -1274,24 +1242,14 @@ function setupErrorHandler(app: express.Application) {
   //   * D5 — when the in-memory stat is null, return null (not 0) for the
   //     numeric `oldestAgeMs` field so callers can distinguish "no entry"
   //     from "fresh entry".
-  //   * Same X-Admin-Token gate + fail-closed-when-unset pattern as the
-  //     Continuity panel + /metrics. NO-TENANT-LEAK does not apply (admin-
-  //     gated by construction).
+  //   * Gated by OPERATOR_ADMIN_TOKEN (separate from the infrastructure-only
+  //     METRICS_ADMIN_TOKEN). NO-TENANT-LEAK does not apply (admin-gated
+  //     by construction).
   app.get("/api/admin/operations/panel", async (req: Request, res: Response) => {
-    const expected = process.env.METRICS_ADMIN_TOKEN;
-    const provided = req.header("x-admin-token") ?? "";
-    if (!expected) {
-      return res.status(401).json({ error: "operations_panel_disabled_no_admin_token" });
+    if (!process.env.OPERATOR_ADMIN_TOKEN) {
+      return res.status(401).json({ error: "operations_panel_disabled_no_operator_token" });
     }
-    let isAdmin = false;
-    if (provided.length === expected.length) {
-      try {
-        isAdmin = timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-      } catch {
-        isAdmin = false;
-      }
-    }
-    if (!isAdmin) {
+    if (!checkOperatorToken(req)) {
       return res.status(401).json({ error: "unauthorized" });
     }
 
