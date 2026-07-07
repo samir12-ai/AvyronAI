@@ -715,6 +715,15 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     return `${forwardedProto}://${forwardedHost || req.get('host')}`;
   }
 
+  function htmlEscape(s: string): string {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;');
+  }
+
   app.get("/api/auth/facebook", (req, res) => {
     const META_APP_ID = process.env.META_APP_ID || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/facebook/callback`;
@@ -738,7 +747,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <div class="success">Login Successful!</div>
           <p class="info">Welcome! You can close this window.</p>
           <script>
-            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, '*');
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 2000);
           </script>
         </body>
@@ -761,7 +770,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, '*');
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login successful! You can close this window.</p>
@@ -788,13 +797,8 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <script>
             window.opener?.postMessage({ 
               type: 'FACEBOOK_AUTH_SUCCESS', 
-              user: { 
-                id: '${userData.id}', 
-                name: '${userData.name}',
-                email: '${userData.email || ''}',
-                picture: '${userData.picture?.data?.url || ''}'
-              } 
-            }, '*');
+              user: ${JSON.stringify({ id: userData.id, name: userData.name, email: userData.email || '', picture: userData.picture?.data?.url || '' })}
+            }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login successful! You can close this window.</p>
@@ -806,7 +810,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_ERROR' }, '*');
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_ERROR' }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login failed. Please try again.</p>
@@ -839,7 +843,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <div class="success">Login Successful!</div>
           <p class="info">Welcome! You can close this window.</p>
           <script>
-            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, '*');
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 2000);
           </script>
         </body>
@@ -862,7 +866,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, '*');
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login successful! You can close this window.</p>
@@ -905,11 +909,8 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <script>
             window.opener?.postMessage({ 
               type: 'INSTAGRAM_AUTH_SUCCESS', 
-              user: { 
-                id: '${accountsData.data?.[0]?.id || 'ig_user'}', 
-                name: '${igUsername}'
-              } 
-            }, '*');
+              user: ${JSON.stringify({ id: accountsData.data?.[0]?.id || 'ig_user', name: igUsername })}
+            }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login successful! You can close this window.</p>
@@ -921,7 +922,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_ERROR' }, '*');
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_ERROR' }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login failed. Please try again.</p>
@@ -999,7 +1000,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           </div>
           <script>
             setTimeout(() => {
-              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'APP_NOT_CONFIGURED' }, '*');
+              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'APP_NOT_CONFIGURED' }, ${JSON.stringify(getPublicBaseUrl(req))});
               window.close();
             }, 5000);
           </script>
@@ -1026,17 +1027,17 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .err{color:#FF6B6B;font-size:20px;margin-bottom:12px;} .desc{color:#666;margin-bottom:20px;} .hint{background:#FFF3CD;padding:16px;border-radius:10px;color:#856404;text-align:left;font-size:14px;}</style></head>
         <body>
           <div class="err">Connection Failed</div>
-          <p class="desc">${error_description || fbError}</p>
+          <p class="desc">${htmlEscape(String(error_description || fbError))}</p>
           <div class="hint">
             <strong>Common fixes:</strong><br/>
             1. Make sure your Meta app is set to <strong>Live</strong> mode (not Development)<br/>
             2. In your Meta app settings, add this domain to <strong>Valid OAuth Redirect URIs</strong>:<br/>
-            <code>${REDIRECT_URI}</code><br/>
+            <code>${htmlEscape(REDIRECT_URI)}</code><br/>
             3. Make sure "Facebook Login" product is added to your Meta app<br/>
             4. Check that the App ID and App Secret match your Meta app
           </div>
           <script>
-            setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: '${String(fbError).replace(/'/g, "\\'")}' }, '*'); }, 3000);
+            setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: ${JSON.stringify(String(fbError))} }, ${JSON.stringify(getPublicBaseUrl(req))}); }, 3000);
           </script>
         </body>
         </html>
@@ -1049,7 +1050,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'MISSING_CREDENTIALS' }, '*');
+            window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'MISSING_CREDENTIALS' }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 2000);
           </script>
           <p>Configuration error. Please check META_APP_ID and META_APP_SECRET.</p>
@@ -1073,9 +1074,9 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .err{color:#FF6B6B;font-size:20px;margin-bottom:12px;} .desc{color:#666;}</style></head>
           <body>
             <div class="err">Authentication Error</div>
-            <p class="desc">${tokenData.error.message || 'Failed to get access token'}</p>
+            <p class="desc">${htmlEscape(String(tokenData.error.message || 'Failed to get access token'))}</p>
             <script>
-              setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, '*'); window.close(); }, 4000);
+              setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, ${JSON.stringify(getPublicBaseUrl(req))}); window.close(); }, 4000);
             </script>
           </body>
           </html>
@@ -1088,7 +1089,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <html><body>
             <p>No access token received. Please try again.</p>
             <script>
-              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'NO_TOKEN' }, '*');
+              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'NO_TOKEN' }, ${JSON.stringify(getPublicBaseUrl(req))});
               setTimeout(() => window.close(), 3000);
             </script>
           </body></html>
@@ -1107,7 +1108,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
             <div class="ok">Meta Business Suite Connected</div>
             <p>Tokens stored securely on the server. You can close this window.</p>
             <script>
-              window.opener?.postMessage({ type: 'META_AUTH_SUCCESS', status: '${storeResult.status}' }, '*');
+              window.opener?.postMessage({ type: 'META_AUTH_SUCCESS', status: ${JSON.stringify(storeResult.status)} }, ${JSON.stringify(getPublicBaseUrl(req))});
               setTimeout(() => window.close(), 2000);
             </script>
           </body>
@@ -1120,9 +1121,9 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .warn{color:#F59E0B;font-size:20px;margin-bottom:12px;}</style></head>
           <body>
             <div class="warn">Partial Connection</div>
-            <p>${storeResult.status === 'NO_PAGES' ? 'No Facebook Pages found. You need admin access to at least one Facebook Page.' : (storeResult.error || 'Token processing failed.')}</p>
+            <p>${htmlEscape(storeResult.status === 'NO_PAGES' ? 'No Facebook Pages found. You need admin access to at least one Facebook Page.' : (storeResult.error || 'Token processing failed.'))}</p>
             <script>
-              window.opener?.postMessage({ type: 'META_AUTH_PARTIAL', status: '${storeResult.status}', error: '${(storeResult.error || '').replace(/'/g, "\\'")}' }, '*');
+              window.opener?.postMessage({ type: 'META_AUTH_PARTIAL', status: ${JSON.stringify(storeResult.status)}, error: ${JSON.stringify(storeResult.error || '')} }, ${JSON.stringify(getPublicBaseUrl(req))});
               setTimeout(() => window.close(), 5000);
             </script>
           </body>
@@ -1135,7 +1136,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, '*');
+            window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 2000);
           </script>
           <p>Connection failed. Please try again.</p>
