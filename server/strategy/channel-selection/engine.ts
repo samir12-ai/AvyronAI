@@ -1448,6 +1448,7 @@ export function runChannelSelectionEngine(
     decisionGateScoring: gateScoring,
     structurallyRepaired,
     correctionAuditTrail,
+    secondaryLayerResults: viable[1]?.layers || [],
   };
 }
 

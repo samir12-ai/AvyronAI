@@ -1,4 +1,2 @@
-# Memory Index
-
-- [AI Proposes / Code Validates](ai-proposes-code-validates.md) — deterministic gate battery is the SOLE accept/reject judge; accepts must be gate-symmetric and every bypass/NOT_RUN must be RECORDED.
-- [Avyron typecheck baseline](avyron-tsc-baseline.md) — `npx tsc --noEmit` has a large pre-existing error baseline; measure deltas, and run tsc ONCE to a file (double-run times out).
+- [AI-proposes reuse trap](ai-proposes-reuse-trap.md) — adding a gate-validated AI layer to a strategy engine needs a reuse-hash bump + decision-summary append on BOTH fresh and reuse paths, else cache hits silently skip the AI/break downstream gates.
+- [Orchestrator tsc is slow](orchestrator-tsc-slow.md) — full `tsc --noEmit` on this repo runs ~90s+ and often exceeds the 2-min tool timeout; run it detached with a done-marker and compare against the ~713-error baseline (baseline is non-zero).

@@ -152,7 +152,7 @@ import { runDifferentiationEngine } from "../differentiation-engine/engine";
 import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
 import { getActiveRoot, buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
-import { seedDoctrine, doctrineSalt, runStrategicContextOf, appendAudienceDecision, appendPositioningDecision, appendOfferDecision } from "./doctrine-seed";
+import { seedDoctrine, doctrineSalt, runStrategicContextOf, appendAudienceDecision, appendPositioningDecision, appendOfferDecision, appendPriorDecision } from "./doctrine-seed";
 import { assembleStrategyRootInput, canonicalizeAudienceShape } from "../shared/strategy-root-assembler";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
@@ -170,7 +170,7 @@ import {
 } from "../shared/signal-lineage";
 import { runStatisticalValidationEngine } from "../strategy/statistical-validation/engine";
 import { runBudgetGovernorEngine } from "../strategy/budget-governor/engine";
-import { runChannelSelectionEngine } from "../strategy/channel-selection/engine";
+import { runChannelSelectionWithAIProposal } from "../strategy/channel-selection/ai-channel-proposal";
 import { runIterationEngine } from "../strategy/iteration-engine/engine";
 import { runRetentionEngine } from "../strategy/retention-engine/engine";
 // ── Phase 2 (May 2026) downstream commercial-reasoning modules ──
@@ -3021,7 +3021,7 @@ async function executeEngine(
 
       case "channel_selection": {
         const csInputHash = computeInputHash(
-          "channel-selection-v1",
+          "channel-selection-v2",
           doctrineSalt(ctx),
           ctx.inputHashes!.audience || "",
           ctx.inputHashes!.awareness || "",
@@ -3039,6 +3039,8 @@ async function executeEngine(
             ctx.channelSelection = reused.hydrated;
             ctx.channelSelectionSnapshotId = reused.snap.id;
             snapshotId = reused.snap.id;
+            const reusedChannelSummary = (reused.hydrated as any)?.channelDecisionSummary;
+            if (reusedChannelSummary) appendPriorDecision(ctx, reusedChannelSummary);
             break;
           }
           logReuseMiss("channel_selection", csInputHash);
@@ -3073,13 +3075,15 @@ async function executeEngine(
         };
         const validationInput = ctx.statisticalValidation || {};
         console.log(`[Orchestrator] CHANNEL_BUDGET_MAPPED | testMax=${budgetInput.testBudgetMax} scaleMax=${budgetInput.scaleBudgetMax} killFlag=${budgetInput.killFlag} expansion=${budgetInput.expansionPermission} | awarenessStage=${awarenessInput.primaryRoute?.targetReadinessStage || "unknown"}`);
-        const result = runChannelSelectionEngine(
+        const result = await runChannelSelectionWithAIProposal(
           audInput, awarenessInput, persuasionInput, offerInput,
           budgetInput, validationInput, "INTELLIGENT",
-          ctx.memoryContext || undefined
+          ctx.memoryContext || undefined,
+          runStrategicContextOf(ctx), config.accountId
         );
         output = result;
         ctx.channelSelection = result;
+        if (result.channelDecisionSummary) appendPriorDecision(ctx, result.channelDecisionSummary);
 
         // ── COMMERCIAL REASONING: channelOrchestration (Phase 2 May 2026) ──
         try {
