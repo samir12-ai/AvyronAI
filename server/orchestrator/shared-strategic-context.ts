@@ -1,3 +1,8 @@
+import type {
+  StrategicDoctrine,
+  EngineDecisionSummary,
+} from "../shared/strategic-doctrine";
+
 type EngineId =
   | "market_intelligence"
   | "audience"
@@ -303,6 +308,13 @@ export interface SharedStrategicContext {
   downstreamRequirements: DownstreamRequirement[];
   reasonTrace: ReasonTraceEntry[];
   commercialSignals: CommercialSignals;
+
+  // Phase 0 (AI Proposes / Code Validates). `doctrine` is seeded at run start
+  // (before market_intelligence) by server/orchestrator/doctrine-seed.ts.
+  // `priorDecisions` is appended by each engine after it produces a validated
+  // output, so downstream engines can be gated against upstream decisions.
+  doctrine?: StrategicDoctrine;
+  priorDecisions: EngineDecisionSummary[];
 }
 
 export function createEmptySSC(
@@ -330,6 +342,7 @@ export function createEmptySSC(
     downstreamRequirements: [],
     reasonTrace: [],
     commercialSignals: {},
+    priorDecisions: [],
   };
 }
 

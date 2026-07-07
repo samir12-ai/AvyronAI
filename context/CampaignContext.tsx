@@ -31,6 +31,14 @@ interface CampaignWarning {
   campaignStatus: string;
 }
 
+export interface ProductAnchorInput {
+  name: string;
+  type: string;
+  keyAttributes: string[];
+  coreProblemSolved: string;
+  differentiatingFeature: string;
+}
+
 interface CreateCampaignInput {
   name: string;
   objective: string;
@@ -38,6 +46,7 @@ interface CreateCampaignInput {
   platform?: string;
   notes?: string;
   dataSourceMode?: string;
+  productAnchor?: ProductAnchorInput | null;
 }
 
 interface CampaignContextValue {

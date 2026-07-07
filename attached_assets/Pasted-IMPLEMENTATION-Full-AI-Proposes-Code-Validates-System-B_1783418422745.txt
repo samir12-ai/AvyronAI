@@ -1,0 +1,52 @@
+IMPLEMENTATION — Full "AI Proposes, Code Validates" System
+Based on your feasibility audit (2026-07-07). Implement all phases below. Follow your own recommended order. After each phase, report what changed before moving to the next.
+
+=== PHASE 0 — Schema & Doctrine Foundation ===
+1. Migration: add product_anchor (nullable JSON) to growth_campaigns with the structure:
+   { name, type, keyAttributes[], coreProblemSolved, differentiatingFeature }
+   Existing rows default to null. Add the onboarding/campaign-setup UI field so users can set it.
+2. Migration: add aiPathReport (nullable text/JSON) to boss_runs (your Option B).
+3. Create server/shared/strategic-doctrine.ts:
+   - STRATEGIC_DOCTRINE with 6 principles: P1 exact target segment → P2 segment problems in this specific market → P3 product-problem fit → P4 channels where this segment actually is → P5 delivery/communication → P6 long-term relationship.
+   - Cross-cutting RESOLUTION RULE embedded in the doctrine text: every answer must be at the level of the campaign's specific product (the product_anchor), never the business category. A claim that would hold unchanged for a generic competitor in the same category is invalid.
+   - PRICING EXCLUSION: doctrine explicitly instructs engines NOT to derive pricing from P1-P6. If campaignSelections.pricingAnchors exists, it is user-provided context only — never generate pricing recommendations.
+   - buildDoctrineBlock(runContext) renders doctrine + product anchor + prior decisions into a prompt-ready block.
+   - PARTIAL-DOCTRINE POLICY: if product_anchor is null, fall back to strategy_root.coreOffer at business level AND mark the run context doctrineResolution: "business_level_degraded". This flag must propagate to aiPathReport and be visible in the operator report. Never inject placeholder text like "[not set]" into prompts — omit the missing principle's data cleanly and note the degradation.
+4. Extend SharedStrategicContext (shared-strategic-context.ts L289) with:
+   - doctrine?: StrategicDoctrine (seeded once at run start, before market_intelligence)
+   - priorDecisions: EngineDecisionSummary[] (each engine appends a one-paragraph validated summary after it completes)
+5. DOCTRINE VERSIONING: add a doctrineVersion token to strategic-doctrine.ts and include it in every engine input hash so cached snapshots invalidate when doctrine changes.
+
+=== PHASE 1 — Gates, Retry, Judge ===
+6. Retry loops — 3 total attempts everywhere, with temperature escalation (0.3 → 0.4 → 0.5) and structured rejection feedback injected on each retry ("Rejected by [gate]: [specific reason — ungrounded tokens / blocked phrases / contradicted prior decision / too generic]. Fix exactly this."):
+   - Positioning: SPECIFICITY_MAX_RETRIES 1 → 2 (3 attempts), make it env-overridable
+   - Offer: extend the existing alignment retry branch to 3 attempts
+   - Audience: build the retry loop from scratch around the segment call (L1227) and ads-targeting call (L1363)
+7. Per-field grounding gate (positioning L1822): update the CALLER to pass RunStrategicContext anchor terms (product anchor, territory names, mechanism) as the allowlist when AI generates freely. Gate function itself unchanged.
+8. Interchangeability Judge: create server/shared/interchangeability-judge.ts reusing the category-game.ts designer/hostile-judge pattern (temp ≤0.1, verdict + reason struct, safe logged fallback). Write FOUR separate, output-shape-specific judge prompts:
+   a) Segment judge — "could this segment definition apply unchanged to any generic competitor in this category?"
+   b) Positioning-claim judge — same test for claims/territories
+   c) Offer judge — same test for outcome/mechanism language
+   d) Channel-rationale judge — same test for channel reasoning
+   Each judge receives the product_anchor as its reference point. Validate each prompt against 3 synthetic examples (one obviously generic → must reject, one product-specific → must accept, one borderline) and include the results in your report.
+9. Breadth check: regex gate rejecting "anyone who...", "people who want [category]", "all [demographic]" patterns.
+10. Cross-engine doctrine contradiction check: extend the existing SSC contradictions mechanism — if a candidate contradicts a validated prior decision (e.g., different target segment than Audience validated), reject at validation with the prior decision named in the feedback.
+
+=== PHASE 2 — AI Generation Mode ===
+11. Inject buildDoctrineBlock into the prompt builders of audience-engine (L1190), positioning-engine (L1735), offer-engine (L1819) — add the doctrine? parameter to the 4 builder signatures you identified.
+12. Flip prompts in Audience, Positioning, Offer from "compress/reword pre-computed values" to "generate 2-3 candidate outputs from market data + doctrine + product anchor + prior decisions." All candidates go through: existing gates (grounding, AT3, sanitizers, stability) + breadth check + interchangeability judge + contradiction check. Gates decide, never the AI.
+13. After all 3 attempts fail: current deterministic path fires as last-resort safety net, recorded as mode: "fallback" — never silent.
+14. Keep interpretation_only on Q2 and User Interpretation overlays. Keep the narrative grounding gate, expanding its evidence allowlist with validated RunStrategicContext outputs. No changes to Boss Q1/Q2 verdict logic — only add the optional enrichedStrategicContext field to BossRunInput for its summary assembly.
+
+=== PHASE 3 — Channel Selection Engine (build it, do not defer) ===
+15. Extract channel selection from the channelOrchestration commercial-reasoning module into a proper engine: server/channel-selection-engine/ with engine.ts, routes.ts, types.ts following the same structure as the other engines.
+16. It runs in the orchestrator sequence AFTER offer (so it reads segment + positioning + offer from priorDecisions), generates 2-3 channel recommendations with product-specific rationale ("where does the buyer of THIS product actually spend attention"), validated through the same pipeline: doctrine grounding + breadth check + channel-rationale judge + contradiction check + 3-attempt retry.
+17. The existing channelOrchestration logic becomes this engine's deterministic fallback path. Budget governor logic stays where it is — this engine recommends channels, it does not allocate budget.
+
+=== PHASE 4 — Telemetry & Verification ===
+18. aiPathStatus per engine: { engine, mode: "ai"|"fallback", attempts, failedGates[], durationMs }, persisted to boss_runs.aiPathReport.
+19. TWO coverage metrics, tracked separately: engineCoverage = engines completing via AI path / engines run; attemptSuccessRate = validated LLM outputs / total LLM attempts. Include doctrineResolution flag in the report.
+20. Operator-only endpoint GET /api/diagnose/ai-path-report?runId= (admin/operator middleware). Fallbacks log at console.error with structured tags.
+21. VERIFICATION RUN: execute a full orchestrator run in SYNTHETIC_AUDIT_MODE with a test campaign that HAS a product_anchor set (e.g., shoe store / classic leather Oxford). Paste the full ai-path-report: every engine, mode, attempts, failedGates. Then run once WITHOUT product_anchor to confirm the business_level_degraded path works and is flagged. Include one example of a generic candidate being rejected by the interchangeability judge and corrected on retry.
+
+CONSTRAINTS: max 3 attempts per engine; all LLM outputs through safeJsonParse + Zod; no pricing generation anywhere; Q1/Q2 untouched; all existing gates remain the sole judges; nothing fails silently.

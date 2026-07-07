@@ -1,10 +1,11 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs, strategyMemory, userPublicProfiles, userChannelSnapshots } from "@shared/schema";
+import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs, strategyMemory, userPublicProfiles, userChannelSnapshots, growthCampaigns } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode, getManualMetrics } from "./campaign-data-layer";
 
 import { resolveAccountId } from "./auth";
+import { ProductAnchorSchema } from "./shared/strategic-doctrine";
 const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING"] as const;
 
 export function registerCampaignRoutes(app: Express) {
@@ -41,7 +42,7 @@ export function registerCampaignRoutes(app: Express) {
 
   app.post("/api/campaigns/create", async (req, res) => {
     try {
-      const { name, objective, location, platform, notes, dataSourceMode } = req.body;
+      const { name, objective, location, platform, notes, dataSourceMode, productAnchor } = req.body;
       const accountId = resolveAccountId(req);
       const requestId = `crt_${Date.now()}`;
 
@@ -60,6 +61,23 @@ export function registerCampaignRoutes(app: Express) {
       }
       if (!location || !location.trim()) {
         return res.status(400).json({ code: "MISSING_LOCATION", message: "Campaign location is required", requestId });
+      }
+
+      // Phase 0 (AI Proposes / Code Validates): optional per-campaign product
+      // anchor. Validated by the same Zod contract the doctrine layer reads. A
+      // null/absent anchor leaves the run to degrade to business-level doctrine
+      // (never a silent placeholder). An invalid anchor fails loud (D5).
+      let resolvedAnchor: import("./shared/strategic-doctrine").ProductAnchor | null = null;
+      if (productAnchor != null && typeof productAnchor === "object") {
+        const anchorResult = ProductAnchorSchema.safeParse(productAnchor);
+        if (!anchorResult.success) {
+          return res.status(400).json({
+            code: "INVALID_PRODUCT_ANCHOR",
+            message: `Product anchor validation failed: ${anchorResult.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
+            requestId,
+          });
+        }
+        resolvedAnchor = anchorResult.data;
       }
 
       const validModes = ["campaign_metrics", "benchmark"];
@@ -84,6 +102,22 @@ export function registerCampaignRoutes(app: Express) {
         .returning();
 
       const selection = inserted[0];
+
+      // Persist the product anchor onto growth_campaigns keyed by campaignId so
+      // the orchestrator's doctrine-seed can read it (growth_campaigns is the
+      // canonical table every engine keys off `eq(id, campaignId)`; a row is
+      // created here only when an anchor is set). Tenant-safe: the campaignId was
+      // just minted for this account's campaignSelections row above.
+      if (resolvedAnchor) {
+        await db
+          .insert(growthCampaigns)
+          .values({ id: campaignId, name: campaignName, productAnchor: resolvedAnchor })
+          .onConflictDoUpdate({
+            target: growthCampaigns.id,
+            set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
+          });
+        console.log(`[Campaigns] Product anchor set: campaign=${campaignId} product="${resolvedAnchor.name}"`);
+      }
 
       console.log(`[Campaigns] Campaign created: ${campaignName} (${objective}) id=${campaignId} account=${accountId}`);
 

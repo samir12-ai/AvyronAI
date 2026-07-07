@@ -152,6 +152,7 @@ import { runDifferentiationEngine } from "../differentiation-engine/engine";
 import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
 import { getActiveRoot, buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
+import { seedDoctrine, doctrineSalt } from "./doctrine-seed";
 import { assembleStrategyRootInput, canonicalizeAudienceShape } from "../shared/strategy-root-assembler";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
@@ -1568,7 +1569,7 @@ async function executeEngine(
       }
 
       case "audience": {
-        const audInputHash = computeInputHash("audience-v1", ctx.inputHashes!.mi || "");
+        const audInputHash = computeInputHash("audience-v1", doctrineSalt(ctx), ctx.inputHashes!.mi || "");
         ctx.inputHashes!.audience = audInputHash;
         let result: any = null;
         if (!config.forceRefresh) {
@@ -1760,6 +1761,7 @@ async function executeEngine(
         { const sglBlock = resolveSglOrBlock("positioning", ctx, startTime); if (sglBlock) return sglBlock; }
         const posInputHash = computeInputHash(
           "positioning-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.mi || "",
           ctx.inputHashes!.audience || "",
           ctx.analyticalEnrichment?.isPartial ? "ael-partial" : "ael-full",
@@ -1843,6 +1845,7 @@ async function executeEngine(
         { const sglBlock = resolveSglOrBlock("differentiation", ctx, startTime); if (sglBlock) return sglBlock; }
         const diffInputHash = computeInputHash(
           "differentiation-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.mi || "",
           ctx.inputHashes!.audience || "",
           ctx.inputHashes!.positioning || "",
@@ -1949,6 +1952,7 @@ async function executeEngine(
         { const sglBlock = resolveSglOrBlock("mechanism", ctx, startTime); if (sglBlock) return sglBlock; }
         const mechInputHash = computeInputHash(
           "mechanism-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.positioning || "",
           ctx.inputHashes!.differentiation || "",
           ctx.analyticalEnrichment?.isPartial ? "ael-partial" : "ael-full",
@@ -2118,6 +2122,7 @@ async function executeEngine(
         { const sglBlock = resolveSglOrBlock("offer", ctx, startTime); if (sglBlock) return sglBlock; }
         const offerInputHash = computeInputHash(
           "offer-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.mi || "",
           ctx.inputHashes!.audience || "",
           ctx.inputHashes!.positioning || "",
@@ -2256,6 +2261,7 @@ async function executeEngine(
         { const sglBlock = resolveSglOrBlock("awareness", ctx, startTime); if (sglBlock) return sglBlock; }
         const awarenessInputHash = computeInputHash(
           "awareness-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.audience || "",
           ctx.inputHashes!.positioning || "",
           ctx.inputHashes!.differentiation || "",
@@ -2388,6 +2394,7 @@ async function executeEngine(
         }
         const funnelInputHash = computeInputHash(
           "funnel-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.offer || "",
           ctx.inputHashes!.awareness || "",
           ctx.inputHashes!.mi || "",
@@ -2502,6 +2509,7 @@ async function executeEngine(
       case "integrity": {
         const integrityInputHash = computeInputHash(
           "integrity-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.mi || "",
           ctx.inputHashes!.audience || "",
           ctx.inputHashes!.positioning || "",
@@ -2570,6 +2578,7 @@ async function executeEngine(
         { const sglBlock = resolveSglOrBlock("persuasion", ctx, startTime); if (sglBlock) return sglBlock; }
         const persuasionInputHash = computeInputHash(
           "persuasion-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.awareness || "",
           ctx.inputHashes!.integrity || "",
           ctx.inputHashes!.funnel || "",
@@ -2715,6 +2724,7 @@ async function executeEngine(
       case "statistical_validation": {
         const svInputHash = computeInputHash(
           "statval-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.persuasion || "",
           ctx.inputHashes!.awareness || "",
           ctx.inputHashes!.funnel || "",
@@ -2835,6 +2845,7 @@ async function executeEngine(
         const campaignData = await getCampaignData(config.campaignId);
         const bgInputHash = computeInputHash(
           "budget-governor-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.offer || "",
           ctx.inputHashes!.funnel || "",
           ctx.inputHashes!.statistical_validation || "",
@@ -2996,6 +3007,7 @@ async function executeEngine(
       case "channel_selection": {
         const csInputHash = computeInputHash(
           "channel-selection-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.audience || "",
           ctx.inputHashes!.awareness || "",
           ctx.inputHashes!.persuasion || "",
@@ -3134,6 +3146,7 @@ async function executeEngine(
         const iterGate = await getIterationGateData(config.accountId, config.campaignId);
         const iterInputHash = computeInputHash(
           "iteration-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.funnel || "",
           ctx.inputHashes!.persuasion || "",
           { metrics: iterGate.campaignMetrics || null, gateInputs: iterGate.gateInputs || null },
@@ -3268,6 +3281,7 @@ async function executeEngine(
         const retGate = await getRetentionGateData(config.accountId, config.campaignId);
         const retInputHash = computeInputHash(
           "retention-v1",
+          doctrineSalt(ctx),
           ctx.inputHashes!.funnel || "",
           ctx.inputHashes!.offer || "",
           ctx.inputHashes!.audience || "",
@@ -3788,6 +3802,16 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // inserts NULL into strategic_plans.job_id even though engine snapshots
   // get the right jobId via the local variable — leaving plans non-run-bound.
   config.jobId = jobId;
+
+  // Phase 0 (AI Proposes / Code Validates) — seed the strategic doctrine into
+  // the SSC before any engine runs. Idempotent: covers fresh runs and paused
+  // resumes whose serialized SSC predates the doctrine/priorDecisions fields.
+  if (ctx.ssc) {
+    if (!Array.isArray(ctx.ssc.priorDecisions)) ctx.ssc.priorDecisions = [];
+    if (!ctx.ssc.doctrine) {
+      await seedDoctrine(ctx, config.campaignId, config.accountId);
+    }
+  }
 
   // Task #89 / P4-A boundary #2 (ctx-resolved) + #8 (in-flight register).
   __recorder.recordContextResolved({

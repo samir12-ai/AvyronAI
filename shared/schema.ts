@@ -326,6 +326,11 @@ export const growthCampaigns = pgTable("growth_campaigns", {
   isActive: boolean("is_active").default(true),
   goalMode: text("goal_mode").default("STRATEGY_MODE"),
   explorationBudgetPercent: doublePrecision("exploration_budget_percent"),
+  // Phase 0 (AI Proposes / Code Validates): nullable per-campaign product
+  // identity { name, type, keyAttributes[], coreProblemSolved,
+  // differentiatingFeature } validated by ProductAnchorSchema. NULL → doctrine
+  // degrades to business_level. Editing invalidates cached engine snapshots.
+  productAnchor: jsonb("product_anchor"),
   startedAt: timestamp("started_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -3026,6 +3031,7 @@ export const bossRuns = pgTable("boss_runs", {
   q2Verdict: text("q2_verdict").notNull().default("UNCERTAIN"),  // "STABLE" | "SHIFTED" | "UNCERTAIN" | "INSUFFICIENT_DATA"
   q2Reasons: text("q2_reasons"),                    // JSON array
   warnings: text("warnings"),                       // JSON array
+  aiPathReport: text("ai_path_report"),             // Phase 4 — JSON per-engine AI-path telemetry
   startedAt: timestamp("started_at"),
   finishedAt: timestamp("finished_at"),
   createdAt: timestamp("created_at").defaultNow(),
