@@ -479,3 +479,9 @@ id = "r1NOHsYVsP4RKlsNXPjri"
 uri = "file://docs/feasibility-audit-ai-inversion.md"
 type = "text"
 title = "Feasibility Audit — AI Architecture Inversion (Full Report)"
+
+[[outputs]]
+id = "isewvGiFidHqx5XhnAUJo"
+uri = "file://docs/ai-proposes-code-validates-full-report.md"
+type = "text"
+title = "AI Proposes, Code Validates — Full Report (Phases 0–4)"
