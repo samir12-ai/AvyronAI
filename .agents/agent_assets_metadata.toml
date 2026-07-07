@@ -467,3 +467,9 @@ id = "OTS4QuzTjneknJZKBVAHQ"
 uri = "file://docs/audits/infrastructure-audit-patch-1-5.md"
 type = "text"
 title = "Infrastructure Audit Patch 1/5 Report"
+
+[[outputs]]
+id = "00AedkKwyMiPGtXbzZu51"
+uri = "file://docs/audit-ai-vs-template-report.md"
+type = "text"
+title = "Avyron AI — AI vs Template Audit Report"
