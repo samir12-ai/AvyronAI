@@ -25,7 +25,10 @@ export async function migrateScrapeSecurity() {
       ADD CONSTRAINT ci_competitors_tier_check CHECK (tier IN ('A', 'B'))
   `).catch((e: any) => {
     // Idempotent re-run: constraint already present.
-    if (!String(e.message || "").includes("already exists")) throw e;
+    // Drizzle wraps the pg error, so the "already exists" text may live in
+    // e.cause.message rather than e.message — inspect both.
+    const msg = `${e?.message ?? ""} ${e?.cause?.message ?? ""}`;
+    if (!msg.includes("already exists")) throw e;
   });
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_ci_competitors_tier ON ci_competitors (tier)`);
 

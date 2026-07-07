@@ -1,1 +1,3 @@
 - [Avyron verification & tsc workflow](avyron-verification-workflow.md) — run tsc alone (chained greps time out & truncate it); judge by net-new errors vs the large baseline; verify orchestrator behaviour with focused tsx harnesses driving the real units, not a full DB+proxy run.
+- [Avyron deploy/boot failure modes](avyron-deploy-boot.md) — esbuild bundles unimported identifiers (crash at boot, not build); global /api authMiddleware gate means no per-route auth; prod is verify-only so prod DB must be migrated to REQUIRED_SCHEMA_VERSION independently.
+- [DrizzleQueryError .cause shape](drizzle-error-cause-shape.md) — pg detail lives in e.cause.message not e.message; catch/idempotency guards matching e.message silently break after a Drizzle bump.

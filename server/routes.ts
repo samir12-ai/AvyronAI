@@ -559,7 +559,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     }
   });
 
-  app.post("/api/generate-poster", authMiddleware, aiRateLimitPerAccount(), aiSpendCapPerAccount(), upload.array('photos', 3), async (req, res) => {
+  app.post("/api/generate-poster", aiRateLimitPerAccount(), aiSpendCapPerAccount(), upload.array('photos', 3), async (req, res) => {
     try {
       const { topic, style, text, brandName, industry, aspectRatio, mood, mode } = req.body;
 
