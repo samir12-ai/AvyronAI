@@ -32,15 +32,24 @@
  * does not need to function:
  *   - JWT_SECRET: server/auth.ts ships a deterministic DEV fallback (logged
  *     loudly at boot). In production we MUST refuse to boot without an
- *     operator-set secret.
+ *     operator-set secret. SESSION_SECRET (a Replit-provisioned random
+ *     secret) is accepted as an alias signing key — it satisfies the same
+ *     unforgeability requirement (random, operator-scoped, never derived
+ *     from public identifiers like REPL_ID).
  *   - STRIPE_WEBHOOK_SECRET: webhook handler refuses signed events when the
  *     secret is unset, so the only route that depends on it is closed-by-
- *     default. Required in production. Dev is allowed to boot without it
- *     (per user direction — Stripe is not yet activated for this account).
+ *     default (fail-closed). Downgraded from production-fatal to RECOMMENDED
+ *     (2026-07-08, per user direction — Stripe is not yet activated for this
+ *     account; subscriptions stay disabled until the secret is set).
  */
 const REQUIRED: Array<{ key: string; description: string; accepts?: string[]; productionOnly?: boolean }> = [
   { key: "DATABASE_URL", description: "PostgreSQL connection URL" },
-  { key: "JWT_SECRET", description: "JWT signing secret (≥32 chars in prod)", productionOnly: true },
+  {
+    key: "JWT_SECRET",
+    description: "JWT signing secret (≥32 chars in prod)",
+    accepts: ["SESSION_SECRET"],
+    productionOnly: true,
+  },
   {
     key: "OPENAI_API_KEY",
     description: "OpenAI API key — content/strategy engines hard-depend on it",
@@ -54,11 +63,15 @@ const REQUIRED: Array<{ key: string; description: string; accepts?: string[]; pr
     description:
       "Canonical public base URL (https://app.example.com) — substituted into landing/pricing HTML; replaces trust in Host/X-Forwarded-Host (F9.1)",
   },
-  { key: "STRIPE_WEBHOOK_SECRET", description: "Stripe webhook signing secret", productionOnly: true },
 ];
 
 // Optional but RECOMMENDED — surfaced as warnings, never fatal.
 const RECOMMENDED: Array<{ key: string; description: string }> = [
+  {
+    key: "STRIPE_WEBHOOK_SECRET",
+    description:
+      "Stripe webhook signing secret — until set, incoming Stripe webhook events are rejected (fail-closed) and subscription sync stays disabled",
+  },
   { key: "AI_INTEGRATIONS_GEMINI_API_KEY", description: "Gemini API key (dual-AI engine fallback)" },
   { key: "SENTRY_DSN", description: "Sentry DSN — when absent, error reporting is no-op" },
   { key: "OTEL_EXPORTER_OTLP_ENDPOINT", description: "OpenTelemetry OTLP collector endpoint" },
@@ -155,6 +168,9 @@ export function validateEnv(opts: { exitOnFailure?: boolean } = {}): EnvValidati
     console.log(`[EnvValidator] dev: derived PUBLIC_BASE_URL=${process.env.PUBLIC_BASE_URL} from REPLIT_DEV_DOMAIN`);
   }
 
+  // Captured BEFORE the alias-mirror loop below overwrites JWT_SECRET.
+  const jwtSecretWasAliased = !process.env.JWT_SECRET?.trim() && !!process.env.SESSION_SECRET?.trim();
+
   for (const r of REQUIRED) {
     const v = resolveValue(r, process.env);
     if (!v) {
@@ -195,11 +211,27 @@ export function validateEnv(opts: { exitOnFailure?: boolean } = {}): EnvValidati
     );
   }
 
-  // JWT_SECRET length sanity — soft floor in dev, hard floor in prod.
-  if (process.env.JWT_SECRET) {
+  // JWT signing secret length sanity — soft floor in dev, hard floor in prod.
+  // Checks whichever source will actually sign tokens (JWT_SECRET, falling
+  // back to the SESSION_SECRET alias — same order as server/auth.ts).
+  // NOTE: by this point the alias-mirror loop above may have copied
+  // SESSION_SECRET into JWT_SECRET, so `jwtSecretWasAliased` (captured before
+  // the loop) is the source of truth for operator visibility — the auth.ts
+  // warning never fires in a real boot because the mirror runs first (B2:
+  // visibility over silence).
+  if (jwtSecretWasAliased) {
+    console.warn(
+      "[EnvValidator] JWT_SECRET not set — SESSION_SECRET is being used as the JWT signing key (accepted alias). Set a dedicated JWT_SECRET when possible; changing either value invalidates existing sessions.",
+    );
+  }
+  const jwtSigningSource = process.env.JWT_SECRET ? "JWT_SECRET" : process.env.SESSION_SECRET ? "SESSION_SECRET" : null;
+  const jwtSigningValue = process.env.JWT_SECRET || process.env.SESSION_SECRET;
+  if (jwtSigningSource && jwtSigningValue) {
     const minLen = isProd ? 32 : 16;
-    if (process.env.JWT_SECRET.length < minLen) {
-      missing.push(`JWT_SECRET — must be ≥${minLen} characters (got ${process.env.JWT_SECRET.length})`);
+    if (jwtSigningValue.length < minLen) {
+      missing.push(
+        `${jwtSigningSource} (JWT signing secret) — must be ≥${minLen} characters (got ${jwtSigningValue.length})`,
+      );
     }
   }
 

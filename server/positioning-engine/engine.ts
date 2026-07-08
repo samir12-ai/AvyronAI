@@ -3022,7 +3022,7 @@ CORRECTION REQUIRED:
     audienceSnapshotId,
     engineVersion: POSITIONING_ENGINE_VERSION,
     status: positioningStatusValue,
-    statusMessage,
+    statusMessage: positioningStatusMessage,
     territory: JSON.stringify(primaryTerritory),
     enemyDefinition: primaryTerritory?.enemyDefinition || "",
     contrastAxis: primaryTerritory?.contrastAxis || "",
@@ -3058,7 +3058,7 @@ CORRECTION REQUIRED:
 
   const __positioningResult = {
     status: positioningStatusValue,
-    statusMessage,
+    statusMessage: positioningStatusMessage,
     aiPathTelemetry: emissionFromBattery(positioningBatteryPassed, positioningBatteryAttempts),
     territory: primaryTerritory,
     territories: finalTerritories,

@@ -16547,12 +16547,16 @@ var init_auth = __esm({
     init_feature_flags();
     init_account_lifecycle();
     init_stripe_signature();
-    if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
-      console.error("[Auth] FATAL: JWT_SECRET is required in production. Refusing to start.");
-      throw new Error("JWT_SECRET environment variable is required in production");
+    if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET && !process.env.SESSION_SECRET) {
+      console.error("[Auth] FATAL: JWT_SECRET (or SESSION_SECRET) is required in production. Refusing to start.");
+      throw new Error("JWT_SECRET (or SESSION_SECRET) environment variable is required in production");
     }
-    JWT_SECRET = process.env.JWT_SECRET || "avyron_jwt_secret_" + (process.env.REPL_ID || "dev");
-    if (!process.env.JWT_SECRET) {
+    JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "avyron_jwt_secret_" + (process.env.REPL_ID || "dev");
+    if (!process.env.JWT_SECRET && process.env.SESSION_SECRET) {
+      console.warn(
+        "[Auth] WARNING: JWT_SECRET not set \u2014 signing tokens with SESSION_SECRET. Set a dedicated JWT_SECRET when possible; changing either value invalidates existing sessions."
+      );
+    } else if (!process.env.JWT_SECRET) {
       console.warn("[Auth] WARNING: JWT_SECRET not set \u2014 using DEV fallback. This will hard-fail in production.");
     }
     TRIAL_DAYS = 7;
@@ -16580,8 +16584,9 @@ var init_auth = __esm({
       }
     };
     if (process.env.NODE_ENV === "production" && !process.env.STRIPE_WEBHOOK_SECRET) {
-      console.error("[Auth] FATAL: STRIPE_WEBHOOK_SECRET is required in production. Refusing to start.");
-      throw new Error("STRIPE_WEBHOOK_SECRET environment variable is required in production");
+      console.warn(
+        "[Auth] WARNING: STRIPE_WEBHOOK_SECRET not set \u2014 Stripe webhook events will be rejected (503) and subscription sync stays disabled until it is configured."
+      );
     }
     STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
     AUTH_RATE_WINDOW_MS = 6e4;
@@ -31425,11 +31430,11 @@ function buildStructuredSignals(painMap, desireMap, objectionMap, transformation
   );
   return { pain_clusters, desire_clusters, pattern_clusters, root_causes, psychological_drivers };
 }
-function buildEmptyResult(status, statusMessage2, inputSummary, executionTimeMs, snapshotId) {
+function buildEmptyResult(status, statusMessage, inputSummary, executionTimeMs, snapshotId) {
   const emptyMeta = { evidenceCount: 0, confidenceScore: 0, sourceSignals: [], inputSnapshotId: inputSummary.miSnapshotId };
   return {
     status,
-    statusMessage: statusMessage2,
+    statusMessage,
     defensiveMode: status === "DEFENSIVE_MODE",
     languageSignals: { ...emptyMeta, problemExpressions: { count: 0, samples: [] }, questionPatterns: { count: 0, samples: [] }, goalExpressions: { count: 0, samples: [] }, totalAnalyzed: 0 },
     painMap: [],
@@ -31849,16 +31854,16 @@ async function runAudienceEngine(accountId, campaignId, miSnapshotIdParam, jobId
   const segmentDensity = computeSegmentDensity(painMap, desireMap, audienceSegments, miSnapshotId);
   const executionTimeMs = Date.now() - startTime;
   let status = "COMPLETE";
-  let statusMessage2 = null;
+  let statusMessage = null;
   if (totalSignalMatches < AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI) {
     status = "INSUFFICIENT_SIGNALS";
-    statusMessage2 = "INSUFFICIENT DATA FOR RELIABLE AUDIENCE INTELLIGENCE \u2014 AI layers skipped due to weak signal coverage";
+    statusMessage = "INSUFFICIENT DATA FOR RELIABLE AUDIENCE INTELLIGENCE \u2014 AI layers skipped due to weak signal coverage";
   } else if (awarenessLevel?.level === "insufficient_signals" && intentDistribution?.totalClassified === 0) {
     status = "INSUFFICIENT_SIGNALS";
-    statusMessage2 = "Key classifiers returned insufficient signals \u2014 awareness and intent data unreliable";
+    statusMessage = "Key classifiers returned insufficient signals \u2014 awareness and intent data unreliable";
   } else if (isDefensiveMode) {
     status = "DEFENSIVE_MODE";
-    statusMessage2 = "Low signal environment detected \u2014 Audience intelligence limited \u2014 More market data required";
+    statusMessage = "Low signal environment detected \u2014 Audience intelligence limited \u2014 More market data required";
   } else {
     const richSignalFloor = AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI * 2;
     const coreMaps = [painMap, desireMap, objectionMap];
@@ -31872,7 +31877,7 @@ async function runAudienceEngine(accountId, campaignId, miSnapshotIdParam, jobId
         reasons.push("core_map_empty");
       if ((audienceSegments?.length ?? 0) === 0)
         reasons.push("no_segments");
-      statusMessage2 = `PARTIAL audience output \u2014 coverage incomplete (${reasons.join("; ")}); downstream engines must treat as low-confidence`;
+      statusMessage = `PARTIAL audience output \u2014 coverage incomplete (${reasons.join("; ")}); downstream engines must treat as low-confidence`;
     }
   }
   const inputSummary = {
@@ -31964,7 +31969,7 @@ async function runAudienceEngine(accountId, campaignId, miSnapshotIdParam, jobId
   console.log(`[AudienceEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | signals=${totalSignalMatches} | freq=${totalSignalFrequency} | segments=${audienceSegments.length} | defensive=${isDefensiveMode}`);
   return {
     status,
-    statusMessage: statusMessage2,
+    statusMessage,
     aiPathTelemetry: audienceAiPathSink.emission ? audienceAiPathSink.emission : { mode: "fallback", attempts: 0, failedGates: [], fallbackReason: "segments_not_constructed" },
     defensiveMode: isDefensiveMode,
     languageSignals,
@@ -37625,7 +37630,7 @@ CORRECTION REQUIRED:
     audienceSnapshotId,
     engineVersion: POSITIONING_ENGINE_VERSION,
     status: positioningStatusValue,
-    statusMessage,
+    statusMessage: positioningStatusMessage,
     territory: JSON.stringify(primaryTerritory),
     enemyDefinition: primaryTerritory?.enemyDefinition || "",
     contrastAxis: primaryTerritory?.contrastAxis || "",
@@ -37657,7 +37662,7 @@ CORRECTION REQUIRED:
   console.log(`[PositioningEngine-V3] ${positioningStatusValue} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence} | engineConfidence=${positioningEngineConfidence} | dataConfidence=${positioningDataConfidence}`);
   const __positioningResult = {
     status: positioningStatusValue,
-    statusMessage,
+    statusMessage: positioningStatusMessage,
     aiPathTelemetry: emissionFromBattery(positioningBatteryPassed, positioningBatteryAttempts),
     territory: primaryTerritory,
     territories: finalTerritories,
@@ -48838,13 +48843,13 @@ You MUST fix these issues:
   const allHighCollision = l3Collisions.every((c) => c.collisionRisk >= COLLISION_THRESHOLD) && l3Collisions.length > 0;
   const highCollisionCount = l3Collisions.filter((c) => c.collisionRisk >= COLLISION_THRESHOLD).length;
   let status = STATUS8.COMPLETE;
-  let statusMessage2 = null;
+  let statusMessage = null;
   if (allHighCollision && l3Collisions.length >= l1.territories.length) {
     status = STATUS8.COLLISION_RISK;
-    statusMessage2 = `All differentiation claims have high collision risk with competitor claims`;
+    statusMessage = `All differentiation claims have high collision risk with competitor claims`;
   } else if (!l12Stability.stable) {
     status = STATUS8.UNSTABLE;
-    statusMessage2 = `Stability check failed: ${l12Stability.failures.join("; ")}`;
+    statusMessage = `Stability check failed: ${l12Stability.failures.join("; ")}`;
   }
   const avgClaimScore = finalClaims.length > 0 ? finalClaims.reduce((s, c) => s + c.overallScore, 0) / finalClaims.length : 0;
   const objectionDensityFactor = lowObjectionDensity ? 0.85 : 1;
@@ -48861,7 +48866,7 @@ You MUST fix these issues:
   console.log(`[DifferentiationEngine-V3] Complete | status=${status} | pillars=${finalPillars.length} | claims=${finalClaims.length} | confidence=${confidenceScore.toFixed(2)} | stable=${l12Stability.stable} | collisions=${highCollisionCount} | profileSignals=${profileSignals.hasProfile} | groundingAttempts=${signalGroundingLog.length}`);
   return {
     status,
-    statusMessage: statusMessage2,
+    statusMessage,
     pillars: finalPillars,
     proofArchitecture: l7ProofAssets,
     claimStructures: finalClaims,
@@ -52507,14 +52512,14 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
     }
   }
   let status = STATUS3.COMPLETE;
-  let statusMessage2 = null;
+  let statusMessage = null;
   const structuralWarnings = [];
   if (!diffStrength.sufficient) {
     structuralWarnings.push(...diffStrength.gaps);
   }
   if (!hookMechAlignment.aligned && !strategyRoot) {
     status = STATUS3.POSITIONING_MISMATCH;
-    statusMessage2 = `Positioning axis mismatch \u2014 hook and mechanism do not share the same strategic axis: ${hookMechAlignment.failures.join("; ")}`;
+    statusMessage = `Positioning axis mismatch \u2014 hook and mechanism do not share the same strategic axis: ${hookMechAlignment.failures.join("; ")}`;
     structuralWarnings.push(...hookMechAlignment.failures);
     console.log(`[OfferEngine-V4] POSITIONING_MISMATCH | ${hookMechAlignment.failures.join("; ")}`);
   } else if (!hookMechAlignment.aligned && strategyRoot) {
@@ -52524,14 +52529,14 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
     structuralWarnings.push(...posConsistency.contradictions);
     if (status === STATUS3.COMPLETE) {
       status = STATUS3.POSITIONING_MISMATCH;
-      statusMessage2 = `Positioning inconsistency \u2014 ${posConsistency.contradictions.join("; ")}`;
+      statusMessage = `Positioning inconsistency \u2014 ${posConsistency.contradictions.join("; ")}`;
     }
   } else if (!posConsistency.consistent && strategyRoot) {
     console.log(`[OfferEngine-V4] POS_CONSISTENCY_ADVISORY_ONLY | skeleton-based \u2014 validator advisory: ${posConsistency.contradictions.join("; ")}`);
   }
   if (!boundaryCheck.clean) {
     status = STATUS3.INTEGRITY_FAILED;
-    statusMessage2 = `Boundary violation \u2014 cross-engine output detected: ${boundaryCheck.violations.join("; ")}`;
+    statusMessage = `Boundary violation \u2014 cross-engine output detected: ${boundaryCheck.violations.join("; ")}`;
     console.log(`[OfferEngine-V4] BOUNDARY_VIOLATION | ${boundaryCheck.violations.join("; ")}`);
   }
   if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
@@ -52551,11 +52556,11 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
   }
   if (status === STATUS3.COMPLETE && !primaryOffer.completeness.complete) {
     status = STATUS3.INTEGRITY_FAILED;
-    statusMessage2 = `Offer incomplete: ${primaryOffer.completeness.missingLayers.join("; ")}`;
+    statusMessage = `Offer incomplete: ${primaryOffer.completeness.missingLayers.join("; ")}`;
   }
   if (status === STATUS3.COMPLETE && !primaryOffer.integrityResult.passed) {
     status = STATUS3.INTEGRITY_FAILED;
-    statusMessage2 = `Integrity check failed: ${primaryOffer.integrityResult.failures.join("; ")}`;
+    statusMessage = `Integrity check failed: ${primaryOffer.integrityResult.failures.join("; ")}`;
   }
   let offerAlignmentValidation = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
   diagnostics.offerAlignmentValidation = offerAlignmentValidation;
@@ -52671,7 +52676,7 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
     console.log(`[OfferEngine-V4] ALIGNMENT_VALIDATION_FAILED | ${offerAlignmentValidation.failures.join("; ")}`);
     if (status === STATUS3.COMPLETE) {
       status = STATUS3.INTEGRITY_FAILED;
-      statusMessage2 = `Pre-save alignment validation failed: ${offerAlignmentValidation.failures.join("; ")}`;
+      statusMessage = `Pre-save alignment validation failed: ${offerAlignmentValidation.failures.join("; ")}`;
     }
   }
   if (!offerBattery.passed) {
@@ -52718,7 +52723,7 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
   const noPainAlignment = painsExist && !hasPainAlignment && !hasDesireAlignment;
   if (noPainAlignment && status === STATUS3.COMPLETE) {
     status = STATUS3.AUDIENCE_MISALIGNMENT;
-    statusMessage2 = `Offer outcome does not reference any of the ${pains.length} identified audience pain points or ${desires.length} desire signals \u2014 offer is signal-detached from audience`;
+    statusMessage = `Offer outcome does not reference any of the ${pains.length} identified audience pain points or ${desires.length} desire signals \u2014 offer is signal-detached from audience`;
     console.log(`[OfferEngine-V4] AUDIENCE_PAIN_GATE_FAILED | pains=${pains.length} desires=${desires.length} | demoting status COMPLETE \u2192 AUDIENCE_MISALIGNMENT`);
   }
   let celSourceTexts = [
@@ -52852,7 +52857,7 @@ async function runOfferEngine(mi, audience, positioning, differentiation, accoun
   }
   const __offerResult = {
     status,
-    statusMessage: statusMessage2,
+    statusMessage,
     aiPathTelemetry: emissionFromBattery(offerBattery.passed, offerBatteryAttempts),
     primaryOffer: scrubOfferObjectLiterals(primaryOffer, structuralWarnings, contractViolations, "primary"),
     alternativeOffer: scrubOfferObjectLiterals(alternativeOffer, structuralWarnings, contractViolations, "alternative"),
@@ -54471,16 +54476,16 @@ async function runFunnelEngine(mi, audience, offer, positioning, differentiation
     console.log(`[FunnelEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
   }
   let status = STATUS2.COMPLETE;
-  let statusMessage2 = null;
+  let statusMessage = null;
   const structuralWarnings = [];
   if (!boundaryCheck.passed) {
     status = STATUS2.INTEGRITY_FAILED;
-    statusMessage2 = `Boundary violation \u2014 cross-engine output detected: ${boundaryCheck.violations.join("; ")}`;
+    statusMessage = `Boundary violation \u2014 cross-engine output detected: ${boundaryCheck.violations.join("; ")}`;
     console.log(`[FunnelEngine-V3] BOUNDARY_VIOLATION | ${boundaryCheck.violations.join("; ")}`);
   }
   if (status === STATUS2.COMPLETE && !primaryFunnel.integrityResult.passed) {
     status = STATUS2.INTEGRITY_FAILED;
-    statusMessage2 = `Integrity check failed: ${primaryFunnel.integrityResult.failures.join("; ")}`;
+    statusMessage = `Integrity check failed: ${primaryFunnel.integrityResult.failures.join("; ")}`;
   }
   const funnelCommitmentMap = {
     direct: "high",
@@ -54648,7 +54653,7 @@ async function runFunnelEngine(mi, audience, offer, positioning, differentiation
   console.log(`[FunnelEngine-V3] Complete | status=${status} | type=${primaryFunnel.funnelType} | strength=${primaryFunnel.funnelStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryFunnel.genericFlag} | boundary=${boundaryCheck.passed} | alignmentWarnings=${structuralWarnings.length} | priorityMatrix=${pmDecision ? `P${pmDecision.decidingPriority}(${pmDecision.decidingPriorityName})` : "none"} | overridden=${pmDecision?.wasOverridden ?? false} | blocked=${pmDecision?.blockedFunnels?.length ?? 0}`);
   return {
     status,
-    statusMessage: statusMessage2,
+    statusMessage,
     primaryFunnel,
     alternativeFunnel,
     rejectedFunnel: { funnel: rejectedFunnel, rejectionReason: aiFunnels.rejected.rejectionReason },
@@ -55307,15 +55312,15 @@ function runIntegrityEngine(mi, audience, positioning, differentiation, offer, f
     console.log(`[IntegrityEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
   }
   let status = STATUS5.COMPLETE;
-  let statusMessage2 = null;
+  let statusMessage = null;
   const insufficientCoverage = evaluatedBaseLayers.length < MIN_EVALUATED_BASE_LAYERS;
   if (insufficientCoverage) {
     status = "INSUFFICIENT_LAYER_COVERAGE";
-    statusMessage2 = `Only ${evaluatedBaseLayers.length}/${firstSevenLayers.length} base layers evaluable; missing upstream inputs: ${missingPrerequisites.join(", ")}`;
+    statusMessage = `Only ${evaluatedBaseLayers.length}/${firstSevenLayers.length} base layers evaluable; missing upstream inputs: ${missingPrerequisites.join(", ")}`;
   }
   if (!boundaryCheck.passed) {
     status = STATUS5.INTEGRITY_FAILED;
-    statusMessage2 = `Boundary violation in integrity output: ${boundaryCheck.violations.join("; ")}`;
+    statusMessage = `Boundary violation in integrity output: ${boundaryCheck.violations.join("; ")}`;
   }
   const failedCount = evaluatedLayers.filter((l) => l.passed === false).length;
   const audienceOfferLayer = l2;
@@ -55370,7 +55375,7 @@ function runIntegrityEngine(mi, audience, positioning, differentiation, offer, f
     missingPrerequisites,
     overallStatus,
     integrityVerdict: overallStatus,
-    statusMessage: statusMessage2,
+    statusMessage,
     overallIntegrityScore,
     safeToExecute,
     failureReasons,
@@ -64170,13 +64175,13 @@ function runChannelSelectionEngine(audience, awareness, persuasion, offer, budge
   } else {
     status = STATUS.COMPLETE;
   }
-  let statusMessage2;
+  let statusMessage;
   if (viable.length === 0) {
-    statusMessage2 = "All channels blocked by guard layer or decision gate \u2014 review inputs";
+    statusMessage = "All channels blocked by guard layer or decision gate \u2014 review inputs";
   } else if (hasFunnelReconstruction) {
-    statusMessage2 = `Funnel-oriented channel orchestration \u2014 ${rescuedChannels.size} channel(s) reassigned to funnel stages, ${viable.length} total viable channel(s)`;
+    statusMessage = `Funnel-oriented channel orchestration \u2014 ${rescuedChannels.size} channel(s) reassigned to funnel stages, ${viable.length} total viable channel(s)`;
   } else {
-    statusMessage2 = `Channel selection complete \u2014 ${viable.length} viable channel(s) identified${hasGateDowngrades ? " (some channels downgraded by decision gate)" : ""}`;
+    statusMessage = `Channel selection complete \u2014 ${viable.length} viable channel(s) identified${hasGateDowngrades ? " (some channels downgraded by decision gate)" : ""}`;
   }
   let channelModeReasoning = modeReasoning;
   if (channelMode === "automatic") {
@@ -64186,7 +64191,7 @@ function runChannelSelectionEngine(audience, awareness, persuasion, offer, budge
   }
   return {
     status,
-    statusMessage: statusMessage2,
+    statusMessage,
     primaryChannel: primary,
     secondaryChannel: secondary,
     rejectedChannels,
@@ -65344,10 +65349,10 @@ async function runIterationEngine(performance, funnel, creative, persuasion, mem
   }
   const confidenceScore = clamp14(rawConfidence);
   let status = guardLayer.passed ? STATUS11.COMPLETE : STATUS11.PROVISIONAL;
-  let statusMessage2 = status === STATUS11.PROVISIONAL ? "Iteration plan generated with guard warnings \u2014 operating in conservative mode" : `Iteration analysis complete: ${filteredHypotheses.length} test hypotheses, ${targets.length} optimization targets`;
+  let statusMessage = status === STATUS11.PROVISIONAL ? "Iteration plan generated with guard warnings \u2014 operating in conservative mode" : `Iteration analysis complete: ${filteredHypotheses.length} test hypotheses, ${targets.length} optimization targets`;
   if (syntheticFallbackUsed && status === STATUS11.COMPLETE) {
     status = STATUS11.PROVISIONAL;
-    statusMessage2 = `Iteration in synthetic fallback mode \u2014 no data-driven hypotheses available, ${filteredHypotheses.length} baseline exploration hypotheses injected`;
+    statusMessage = `Iteration in synthetic fallback mode \u2014 no data-driven hypotheses available, ${filteredHypotheses.length} baseline exploration hypotheses injected`;
     console.log(`[IterationEngine] SYNTHETIC_FALLBACK_STATUS | demoting COMPLETE \u2192 PROVISIONAL | hypotheses=${filteredHypotheses.length} (synthetic)`);
   }
   const acceptability = assessStrategyAcceptability(
@@ -65359,7 +65364,7 @@ async function runIterationEngine(performance, funnel, creative, persuasion, mem
   );
   return {
     status,
-    statusMessage: statusMessage2,
+    statusMessage,
     nextTestHypotheses: filteredHypotheses,
     optimizationTargets: targets,
     failedStrategyFlags: failedFlags,
@@ -79538,7 +79543,12 @@ var init_synthetic_capture = __esm({
 // server/env-validator.ts
 var REQUIRED = [
   { key: "DATABASE_URL", description: "PostgreSQL connection URL" },
-  { key: "JWT_SECRET", description: "JWT signing secret (\u226532 chars in prod)", productionOnly: true },
+  {
+    key: "JWT_SECRET",
+    description: "JWT signing secret (\u226532 chars in prod)",
+    accepts: ["SESSION_SECRET"],
+    productionOnly: true
+  },
   {
     key: "OPENAI_API_KEY",
     description: "OpenAI API key \u2014 content/strategy engines hard-depend on it",
@@ -79550,10 +79560,13 @@ var REQUIRED = [
   {
     key: "PUBLIC_BASE_URL",
     description: "Canonical public base URL (https://app.example.com) \u2014 substituted into landing/pricing HTML; replaces trust in Host/X-Forwarded-Host (F9.1)"
-  },
-  { key: "STRIPE_WEBHOOK_SECRET", description: "Stripe webhook signing secret", productionOnly: true }
+  }
 ];
 var RECOMMENDED = [
+  {
+    key: "STRIPE_WEBHOOK_SECRET",
+    description: "Stripe webhook signing secret \u2014 until set, incoming Stripe webhook events are rejected (fail-closed) and subscription sync stays disabled"
+  },
   { key: "AI_INTEGRATIONS_GEMINI_API_KEY", description: "Gemini API key (dual-AI engine fallback)" },
   { key: "SENTRY_DSN", description: "Sentry DSN \u2014 when absent, error reporting is no-op" },
   { key: "OTEL_EXPORTER_OTLP_ENDPOINT", description: "OpenTelemetry OTLP collector endpoint" },
@@ -79612,6 +79625,7 @@ function validateEnv(opts = {}) {
     process.env.PUBLIC_BASE_URL = `https://${process.env.REPLIT_DEV_DOMAIN}`;
     console.log(`[EnvValidator] dev: derived PUBLIC_BASE_URL=${process.env.PUBLIC_BASE_URL} from REPLIT_DEV_DOMAIN`);
   }
+  const jwtSecretWasAliased = !process.env.JWT_SECRET?.trim() && !!process.env.SESSION_SECRET?.trim();
   for (const r of REQUIRED) {
     const v = resolveValue(r, process.env);
     if (!v) {
@@ -79637,10 +79651,19 @@ function validateEnv(opts = {}) {
       `BRIGHT_DATA_PROXY_COUNTRY \u2014 "${process.env.BRIGHT_DATA_PROXY_COUNTRY}" is not a 2-letter ISO-3166 code (e.g. "ae", "us"). Geo-targeting will silently fall back to "us" until corrected.`
     );
   }
-  if (process.env.JWT_SECRET) {
+  if (jwtSecretWasAliased) {
+    console.warn(
+      "[EnvValidator] JWT_SECRET not set \u2014 SESSION_SECRET is being used as the JWT signing key (accepted alias). Set a dedicated JWT_SECRET when possible; changing either value invalidates existing sessions."
+    );
+  }
+  const jwtSigningSource = process.env.JWT_SECRET ? "JWT_SECRET" : process.env.SESSION_SECRET ? "SESSION_SECRET" : null;
+  const jwtSigningValue = process.env.JWT_SECRET || process.env.SESSION_SECRET;
+  if (jwtSigningSource && jwtSigningValue) {
     const minLen = isProd ? 32 : 16;
-    if (process.env.JWT_SECRET.length < minLen) {
-      missing.push(`JWT_SECRET \u2014 must be \u2265${minLen} characters (got ${process.env.JWT_SECRET.length})`);
+    if (jwtSigningValue.length < minLen) {
+      missing.push(
+        `${jwtSigningSource} (JWT signing secret) \u2014 must be \u2265${minLen} characters (got ${jwtSigningValue.length})`
+      );
     }
   }
   for (const r of RECOMMENDED) {

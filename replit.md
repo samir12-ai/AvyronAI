@@ -134,11 +134,11 @@ The env validator (`server/env-validator.ts`) refuses to boot if any required se
 | Secret | Required | Purpose |
 |--------|----------|---------|
 | `DATABASE_URL` | always | Postgres connection string. |
-| `JWT_SECRET` | production (dev: warn) | Auth token signing key. |
+| `JWT_SECRET` | production (dev: warn) | Auth token signing key. `SESSION_SECRET` accepted as alias signing key (2026-07-08) — prod boots if either is set; changing either invalidates sessions. |
 | `OPENAI_API_KEY` | always | OpenAI client. `AI_INTEGRATIONS_OPENAI_API_KEY` accepted as alias. |
 | `BRIGHT_DATA_PROXY_USERNAME` | always | Residential proxy auth (scrapers). |
 | `BRIGHT_DATA_PROXY_COUNTRY` | always | Proxy geo-targeting code. |
-| `STRIPE_WEBHOOK_SECRET` | production (dev: warn) | Stripe signature verification; routes fail-closed when unset. |
+| `STRIPE_WEBHOOK_SECRET` | recommended (2026-07-08: no longer boot-fatal) | Stripe signature verification; webhook route rejects all events (503, fail-closed) and subscription sync stays disabled until set. |
 | `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL. Validated: absolute URL, `https://` in prod, hostname suffix in allowlist or `ALLOWED_PUBLIC_HOSTS`. |
 | `ALLOWED_PUBLIC_HOSTS` | optional | Comma-separated additional hostname suffixes. |
 | `METRICS_ADMIN_TOKEN` | recommended | Infrastructure-only: gates `/metrics` and `/healthz/*` endpoints via `X-Admin-Token`. Does NOT grant access to product-admin `/api/admin/*` routes. |

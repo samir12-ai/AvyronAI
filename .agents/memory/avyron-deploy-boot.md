@@ -40,6 +40,20 @@ deploy will crash-loop at boot exactly like an unimported identifier. Dev and pr
 are separate; a green dev boot does not prove prod schema is current.
 
 ## Prod-only secret crashes
-`server/auth.ts` throws at module load when `NODE_ENV=production && !JWT_SECRET`.
-Missing JWT_SECRET / STRIPE_WEBHOOK_SECRET (warn-only in dev) crash-loop the deploy the
-same way. Confirm deploy secrets before publishing.
+`server/auth.ts` throws at module load in production only when NEITHER JWT_SECRET nor
+SESSION_SECRET is set (2026-07-08: SESSION_SECRET accepted as JWT signing alias; the
+env-validator mirrors it into JWT_SECRET and logs the aliasing — the auth.ts warning
+never fires in a real boot because the mirror runs first). STRIPE_WEBHOOK_SECRET is no
+longer boot-fatal: the webhook route fails closed (503) until it is set.
+**How to apply:** confirm deploy secrets before publishing; a dedicated JWT_SECRET is
+still preferred — changing either value invalidates existing sessions.
+
+## Promote-failure symptom = boot crash with no logs
+A publish that fails ~2 min AFTER "Creating Autoscale service" (build phase green) is a
+server boot crash. `fetch_deployment_logs` retains NOTHING from a failed promote — debug
+by simulating a prod boot locally (NODE_ENV=production + prod-shaped env, import
+env-validator/auth via a tsx harness) rather than hunting for runtime logs.
+**Why:** the avyronai.com publish failure showed zero runtime logs; the root cause
+(boot-fatal secret checks + empty prod schema_migrations) was only provable via local
+prod simulation. BOOT_AUTO_MIGRATE=true is the sanctioned prod schema path since the
+publish flow never populates schema_migrations rows itself.

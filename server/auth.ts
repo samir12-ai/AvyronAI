@@ -9,18 +9,26 @@ import { featureFlagService } from "./feature-flags";
 import { requestAccountDeletion, cancelAccountDeletion } from "./account-lifecycle";
 import { verifyStripeWebhookSignature } from "./lib/stripe-signature";
 
-// P0-3 (runtime-truth-isolation-seal): production must hard-fail if JWT_SECRET
-// missing. The previous fallback ("avyron_jwt_secret_" + REPL_ID) silently
-// produced predictable secrets in production environments where REPL_ID is
-// stable, allowing token forgery. Dev fallback retained for local DX only.
-if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
+// P0-3 (runtime-truth-isolation-seal): production must hard-fail if no
+// operator-set signing secret exists. The previous fallback
+// ("avyron_jwt_secret_" + REPL_ID) silently produced predictable secrets in
+// production environments where REPL_ID is stable, allowing token forgery.
+// SESSION_SECRET is accepted as an alias signing key (2026-07-08): it is a
+// Replit-provisioned random secret, so it satisfies the same unforgeability
+// bar — unlike the REPL_ID-derived string, which stays dev-only.
+if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET && !process.env.SESSION_SECRET) {
   // Fatal — refuse to boot. Better to crash visibly than to serve forgeable tokens.
   // eslint-disable-next-line no-console
-  console.error("[Auth] FATAL: JWT_SECRET is required in production. Refusing to start.");
-  throw new Error("JWT_SECRET environment variable is required in production");
+  console.error("[Auth] FATAL: JWT_SECRET (or SESSION_SECRET) is required in production. Refusing to start.");
+  throw new Error("JWT_SECRET (or SESSION_SECRET) environment variable is required in production");
 }
-const JWT_SECRET = process.env.JWT_SECRET || "avyron_jwt_secret_" + (process.env.REPL_ID || "dev");
-if (!process.env.JWT_SECRET) {
+const JWT_SECRET =
+  process.env.JWT_SECRET || process.env.SESSION_SECRET || "avyron_jwt_secret_" + (process.env.REPL_ID || "dev");
+if (!process.env.JWT_SECRET && process.env.SESSION_SECRET) {
+  console.warn(
+    "[Auth] WARNING: JWT_SECRET not set — signing tokens with SESSION_SECRET. Set a dedicated JWT_SECRET when possible; changing either value invalidates existing sessions.",
+  );
+} else if (!process.env.JWT_SECRET) {
   console.warn("[Auth] WARNING: JWT_SECRET not set — using DEV fallback. This will hard-fail in production.");
 }
 const TRIAL_DAYS = 7;
@@ -158,15 +166,18 @@ export class AuthConfigurationError extends Error {
     this.status = 401;
   }
 }
-// P1-3 (launch-closure W4): in production, refuse to boot if
-// STRIPE_WEBHOOK_SECRET is missing. The previous fallback to the
-// "x-internal-key === JWT_SECRET" branch let any holder of the JWT secret
-// forge a Stripe webhook and arbitrarily mutate `subscriptionStatus`,
-// `planType`, `videoCredits` for any user. JWT_SECRET is a session-signing
+// P1-3 (launch-closure W4), amended 2026-07-08: STRIPE_WEBHOOK_SECRET is no
+// longer boot-fatal in production (Stripe is not yet activated for this
+// account). The security property is preserved by the webhook handler, which
+// rejects ALL incoming Stripe events with 503 while the secret is unset
+// (fail-closed — see the `if (!STRIPE_WEBHOOK_SECRET)` guard in the webhook
+// route). The original P1-3 rule stands: there is NO fallback to the
+// "x-internal-key === JWT_SECRET" branch. JWT_SECRET is a session-signing
 // secret, not a payments secret — they must NOT share trust scope.
 if (process.env.NODE_ENV === "production" && !process.env.STRIPE_WEBHOOK_SECRET) {
-  console.error("[Auth] FATAL: STRIPE_WEBHOOK_SECRET is required in production. Refusing to start.");
-  throw new Error("STRIPE_WEBHOOK_SECRET environment variable is required in production");
+  console.warn(
+    "[Auth] WARNING: STRIPE_WEBHOOK_SECRET not set — Stripe webhook events will be rejected (503) and subscription sync stays disabled until it is configured.",
+  );
 }
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
 
