@@ -112,6 +112,11 @@ args = "SYNTHETIC_AUDIT_MODE=1 ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REAS
 
 [userenv.shared]
 
+[userenv.production]
+PUBLIC_BASE_URL = "https://avyronai.com"
+ALLOWED_PUBLIC_HOSTS = "avyronai.com"
+BOOT_AUTO_MIGRATE = "true"
+
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 180000
