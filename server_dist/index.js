@@ -101601,10 +101601,11 @@ init_schema();
 init_root_bundle();
 init_engine12();
 init_canonical_snapshot_reader();
+init_logger();
 import { eq as eq105, and as and92, desc as desc73, count as count3, sql as sql47 } from "drizzle-orm";
 function _logSilentLoad(err) {
   try {
-    (void 0).warn(
+    logger.warn(
       { component: "agent-context", err: String(err) },
       "agent_context_section_load_failed"
     );

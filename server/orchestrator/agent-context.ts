@@ -36,7 +36,7 @@ import { eq, and, desc, count, sql } from "drizzle-orm";
 import { getActiveRootBundle, detectStaleness } from "../root-bundle";
 import { getMemoryHealth, type MemoryHealthSummary } from "../memory-mutation/engine";
 import { readSnapshotStatus } from "../shared/canonical-snapshot-reader";
-import { logger } from "../bootstrap";
+import { logger } from "../logger";
 
 /**
  * Track #3 / Seal #15 — silent-degradation hardening.
