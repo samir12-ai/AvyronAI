@@ -3,6 +3,7 @@ import { runPositioningEngine, getLatestPositioningSnapshot } from "./engine";
 import { checkValidationSession } from "../engine-hardening";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 import { resolveOrManualJobId } from "../orchestrator/job-id";
 import { wrapAsEnvelope } from "../orchestrator/contract-registry";
 import { computeStalenessCoefficient } from "../shared/snapshot-trust";
@@ -50,6 +51,10 @@ export function registerPositioningEngineRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
       }
 
+      // P0-4: query-level campaignId must belong to the authed account.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+
       const { resolveRunId } = await import("../orchestrator/run-resolver");
       let resolved;
       try {
@@ -57,11 +62,16 @@ export function registerPositioningEngineRoutes(app: Express) {
       } catch (e: any) {
         return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
       }
-      if (!resolved.runId) {
-        return res.json({ runId: null, isLatest: true, isStale: false, snapshot: null });
-      }
 
-      const snapshot = await getLatestPositioningSnapshot(accountId, campaignId, resolved.runId);
+      // Run-coherence is enforced only when the caller explicitly pins a run
+      // via ?runId=. The default path serves the newest campaign-scoped
+      // snapshot (manual re-analyze runs included) so fresh manual work is
+      // never shadowed by an older orchestrator run. The substitution is
+      // explicit, not silent: envelope.provenance.wasReused flags any served
+      // snapshot whose jobId differs from the resolved orchestrator run.
+      const snapshot = requestedRunId
+        ? await getLatestPositioningSnapshot(accountId, campaignId, resolved.runId)
+        : await getLatestPositioningSnapshot(accountId, campaignId, null);
       if (!snapshot) {
         return res.json({ runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, snapshot: null });
       }

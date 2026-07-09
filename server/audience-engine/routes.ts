@@ -59,12 +59,19 @@ export function registerAudienceEngineRoutes(app: Express) {
       } catch (e: any) {
         return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
       }
-      if (!resolved.runId) {
-        return res.status(404).json({ error: "No completed orchestrator run for this campaign yet.", runId: null, isLatest: true, isStale: false });
-      }
-
-      const snapshot = await getLatestAudienceSnapshot(accountId, campaignId, resolved.runId);
+      // Run-coherence is enforced only when the caller explicitly pins a run
+      // via ?runId=. The default path serves the newest campaign-scoped
+      // snapshot (manual re-analyze runs included) so fresh manual work is
+      // never shadowed by an older orchestrator run. The substitution is
+      // explicit, not silent: envelope.provenance.wasReused flags any served
+      // snapshot whose jobId differs from the resolved orchestrator run.
+      const snapshot = requestedRunId
+        ? await getLatestAudienceSnapshot(accountId, campaignId, resolved.runId)
+        : await getLatestAudienceSnapshot(accountId, campaignId, null);
       if (!snapshot) {
+        if (!resolved.runId) {
+          return res.status(404).json({ error: "No completed orchestrator run and no audience snapshot for this campaign yet.", runId: null, isLatest: true, isStale: false });
+        }
         return res.status(404).json({ error: "No audience snapshot for this run", runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale });
       }
 

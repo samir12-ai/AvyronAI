@@ -109,6 +109,24 @@ export function classifyEnvelopeBadge(
     };
   }
 
+  // Fresh manual re-analysis: newer than the last full-analysis run, so it
+  // isn't bound to the current verdict (WRONG_RUN), but telling the user to
+  // "re-run" would be a self-contradicting instruction — a manual re-run can
+  // never rebind it; only a full analysis does. Presentation-only branch;
+  // trust classification untouched.
+  if (
+    envelope.trustState === "WRONG_RUN" &&
+    envelope.wasReused &&
+    envelope.freshnessClass === "FRESH"
+  ) {
+    return {
+      kind: "reused",
+      label: "Latest analysis",
+      detail: "Newer than your last full analysis — run a full analysis to apply it everywhere",
+      color: "#3B82F6",
+    };
+  }
+
   if (
     envelope.trustState === "STALE" ||
     envelope.trustState === "WRONG_RUN" ||
