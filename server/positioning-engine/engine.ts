@@ -2628,10 +2628,12 @@ export async function runPositioningEngine(
             dnaDifferentiator = productDna.uniqueMechanism.trim();
           }
           const dnaProblem = productDna.coreProblemSolved ? productDna.coreProblemSolved.trim() : "";
-          if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && productDna.coreOffer && productDna.businessType) {
+          const dnaName = productDna.coreOffer ? String(productDna.coreOffer).trim() : "";
+          const dnaType = productDna.businessType ? String(productDna.businessType).trim() : "";
+          if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && dnaName.length > 0 && dnaType.length > 0) {
             batteryAnchor = {
-              name: productDna.coreOffer,
-              type: productDna.businessType,
+              name: dnaName,
+              type: dnaType,
               keyAttributes: productDna.productCategory ? [productDna.productCategory] : [],
               coreProblemSolved: dnaProblem,
               differentiatingFeature: dnaDifferentiator,

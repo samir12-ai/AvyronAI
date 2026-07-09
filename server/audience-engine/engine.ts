@@ -1249,7 +1249,37 @@ async function constructSegments(
     } else {
       console.log("[AudienceEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
     }
-    const productAnchor = strategic ? strategic.doctrine.productAnchor : null;
+    // F5a (parity with positioning engine): when strategic doctrine is absent,
+    // derive the judge's product anchor from Product DNA so the
+    // interchangeability judge tests segments against THIS product's real
+    // differentiator instead of the weaker anchor-free test. Guard: only when
+    // a genuine differentiator + core problem exist — an anchor fabricated
+    // from empty strings would flip the judge to the strict test with hollow
+    // context (worse than the weak test). Explicit if/else selection — no
+    // semantic-fallback chains (D1).
+    let productAnchor = strategic ? strategic.doctrine.productAnchor : null;
+    const dnaForAnchor = (businessContext as any).productDna;
+    if (!productAnchor && dnaForAnchor) {
+      let dnaDifferentiator = "";
+      if (dnaForAnchor.strategicAdvantage && String(dnaForAnchor.strategicAdvantage).trim().length > 0) {
+        dnaDifferentiator = String(dnaForAnchor.strategicAdvantage).trim();
+      } else if (dnaForAnchor.uniqueMechanism && String(dnaForAnchor.uniqueMechanism).trim().length > 0) {
+        dnaDifferentiator = String(dnaForAnchor.uniqueMechanism).trim();
+      }
+      const dnaProblem = dnaForAnchor.coreProblemSolved ? String(dnaForAnchor.coreProblemSolved).trim() : "";
+      const dnaName = dnaForAnchor.coreOffer ? String(dnaForAnchor.coreOffer).trim() : "";
+      const dnaType = dnaForAnchor.businessType ? String(dnaForAnchor.businessType).trim() : "";
+      if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && dnaName.length > 0 && dnaType.length > 0) {
+        productAnchor = {
+          name: dnaName,
+          type: dnaType,
+          keyAttributes: dnaForAnchor.productCategory ? [dnaForAnchor.productCategory] : [],
+          coreProblemSolved: dnaProblem,
+          differentiatingFeature: dnaDifferentiator,
+        };
+        console.log(`[AudienceEngine-V3] SEGMENT_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from Product DNA`);
+      }
+    }
     const priorDecisions = strategic ? strategic.priorDecisions : [];
 
     const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
@@ -1327,6 +1357,15 @@ Return ONLY the JSON array, no markdown.`;
         let batteryFeedback = "";
         let failedSegName = "";
         let failedGate = "";
+        // Partial-keep (B1/B3): on the FINAL attempt only, judge ALL segments
+        // instead of short-circuiting at the first failure (bounded fan-out:
+        // ≤4 segments). A segment that individually passed the FULL battery is
+        // strictly more truthful than the deterministic template — on
+        // exhaustion we keep passed segments and discard rejected ones,
+        // visibly. Earlier attempts keep the short-circuit to cap judge calls.
+        const isFinalAttempt = attempt === SEGMENT_MAX_ATTEMPTS - 1;
+        const passedSegments: typeof candidate = [];
+        const discardedInfo: string[] = [];
         for (const seg of candidate) {
           const battery = await runCandidateGateBattery({
             kind: "segment",
@@ -1336,10 +1375,15 @@ Return ONLY the JSON array, no markdown.`;
             accountId,
           });
           if (!battery.passed) {
-            failedSegName = seg.name;
-            failedGate = battery.failedGate ? battery.failedGate : "";
-            batteryFeedback = `segment "${seg.name}" — ${battery.rejectionFeedback}`;
-            break;
+            if (batteryFeedback.length === 0) {
+              failedSegName = seg.name;
+              failedGate = battery.failedGate ? battery.failedGate : "";
+              batteryFeedback = `segment "${seg.name}" — ${battery.rejectionFeedback}`;
+            }
+            discardedInfo.push(`"${seg.name}" gate=${battery.failedGate ? battery.failedGate : "unknown"}`);
+            if (!isFinalAttempt) break;
+          } else {
+            passedSegments.push(seg);
           }
         }
         segmentBatteryAttempts.push({
@@ -1347,6 +1391,20 @@ Return ONLY the JSON array, no markdown.`;
           failedGate: failedGate,
           rejectionFeedback: batteryFeedback,
         });
+        if (batteryFeedback && isFinalAttempt && passedSegments.length >= 1) {
+          // Renormalize estimatedPercentage: the prompt demands ~100 across
+          // the batch; discarding siblings breaks the share-of-market
+          // semantic that canonicalizeSegments and display consumers assume.
+          const totalPct = passedSegments.reduce((s, seg) => s + (Number(seg.estimatedPercentage) || 0), 0);
+          acceptedSegments = passedSegments.map(seg => ({
+            ...seg,
+            estimatedPercentage: totalPct > 0
+              ? Math.round(((Number(seg.estimatedPercentage) || 0) / totalPct) * 100)
+              : Math.round(100 / passedSegments.length),
+          }));
+          console.log(`[AudienceEngine-V3] SEGMENT_GATE_PARTIAL_KEEP | kept=${passedSegments.length} discarded=${discardedInfo.length} | discarded: ${discardedInfo.join(", ")} | first rejection: ${batteryFeedback.slice(0, 300)}`);
+          break;
+        }
         if (batteryFeedback) {
           segmentRejectionFeedback = `Rejected by gate battery:\n${batteryFeedback}\nFix exactly this and return a fresh JSON array of 2-4 segments, each a specific group defined by a shared, verifiable, situation-specific problem tied to the product.`;
           console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: BATTERY_REJECT | gate=${failedGate} | segment="${failedSegName}"`);
