@@ -1558,15 +1558,36 @@ function buildSignalClaimSeeds(
 
   const domainNoun = inferDomainNoun(productDna);
 
-  const enemyParts = enemySources.slice(0, 3).map(s => s.label);
+  // Seed strings are DISPLAY/fallback text (and get judged by the gate
+  // battery when grounding falls back) — strip machine taxonomy prefixes like
+  // "Problem behind objection: " so the fallback reads as a claim, not a raw
+  // signal dump. sourceLabels/painLabels/etc. below keep the RAW labels —
+  // grounding keyword matching is unaffected.
+  const stripTaxonomyPrefix = (label: string): string => {
+    const stripped = label.replace(/^[a-z][a-z0-9 _\/-]{2,40}:\s*/i, "").trim();
+    return stripped.length >= 3 ? stripped : label.trim();
+  };
+
+  const enemyParts = [...new Set(enemySources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))];
   const enemySeed = enemyParts.length > 0
     ? `${domainNoun} failure: ${enemyParts.join(" + ")}`
     : `${domainNoun} system breakdown`;
 
-  const contrastParts = contrastSources.slice(0, 3).map(s => s.label);
-  const contrastSeed = contrastParts.length > 0
-    ? `${contrastParts.join(", ")} vs current ${enemyParts[0] || "breakdown"}`
-    : "operational improvement vs current failure";
+  // Degenerate-contrast guard: when desires are empty, contrastSources can
+  // collapse onto the same labels as enemySources, historically producing
+  // "X vs current X". Exclude the enemy's lead label from the contrast side;
+  // if nothing distinct remains, phrase the gain from Product DNA instead.
+  const contrastParts = [...new Set(contrastSources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))]
+    .filter(p => p.toLowerCase() !== (enemyParts[0] || "").toLowerCase());
+  const dnaGain = (productDna?.coreProblemSolved || productDna?.coreOffer || "").toString().trim();
+  let contrastSeed: string;
+  if (contrastParts.length > 0) {
+    contrastSeed = `${contrastParts.join(", ")} vs current ${enemyParts[0] || "breakdown"}`;
+  } else if (dnaGain.length >= 3 && enemyParts.length > 0) {
+    contrastSeed = `${dnaGain} vs current ${enemyParts[0]}`;
+  } else {
+    contrastSeed = "operational improvement vs current failure";
+  }
 
   const allParts = [...new Set([...enemyParts, ...contrastParts])];
   const narrativeSeed = allParts.length > 0
@@ -1602,9 +1623,27 @@ function buildAnchorAllowlistTerms(territory: Territory, productDna?: any): stri
   if (productDna) {
     if (productDna.uniqueMechanism) terms.push(String(productDna.uniqueMechanism));
     if (productDna.coreOffer) terms.push(String(productDna.coreOffer));
+    // F5: the composer prompt now steers claims toward the strategic
+    // advantage — the grounding allowlist must accept that same language or
+    // advantage-anchored claims can never ground (partial doom-loop).
+    if (productDna.strategicAdvantage) terms.push(String(productDna.strategicAdvantage));
   }
   return terms.filter((t) => t && t.trim().length > 2);
 }
+
+// Item 7 hallucination guard: filler words that appear in almost every
+// marketing-domain mechanism/offer sentence. A sentence-length anchor term is
+// matched only on tokens OUTSIDE this set, so a generic claim cannot count as
+// anchor-grounded by echoing ubiquitous domain vocabulary.
+const GENERIC_ANCHOR_TOKENS = new Set([
+  "marketing", "market", "markets", "platform", "system", "systems",
+  "business", "businesses", "content", "audience", "audiences", "strategy",
+  "strategies", "analysis", "tools", "users", "customers", "brands", "media",
+  "social", "digital", "online", "solution", "solutions", "product",
+  "products", "service", "services", "their", "about", "other", "every",
+  "helps", "using", "based", "focused", "focuses", "rather", "which",
+  "through", "provide", "provides", "providing", "better", "growth",
+]);
 
 function validateClaimGrounding(
   claimText: string,
@@ -1666,6 +1705,53 @@ function validateClaimGrounding(
     }
     const termWords = t.split(/\s+/).filter((w) => w.length > 2);
     if (termWords.length === 0) continue;
+
+    if (termWords.length > 6) {
+      // Sentence-length anchor (e.g. a full uniqueMechanism sentence). The
+      // whole-string / 50%-overlap rule can never match a concise claim against
+      // a ~30-word sentence, which silently defeats Item 7's documented intent
+      // ("a claim grounded in the product's mechanism is legitimately
+      // grounded"). Match on DISTINCTIVE tokens only (length >= 5, stopwords
+      // and generic domain nouns excluded) so hallucinated claims can't ride
+      // in on filler words like "marketing" or "platform". Grounded when a
+      // distinctive bigram from the anchor appears verbatim in the claim, or
+      // >= 3 distinctive tokens match.
+      const distinctive = termWords.filter(
+        (w) => w.length >= 5 && !GENERIC_ANCHOR_TOKENS.has(w),
+      );
+      if (distinctive.length === 0) continue;
+      let distinctiveMatches = 0;
+      for (const dw of distinctive) {
+        if (claimWords.has(dw)) {
+          distinctiveMatches++;
+          continue;
+        }
+        for (const cw of claimWords) {
+          if (cw.length >= 5 && (cw.includes(dw) || dw.includes(cw))) {
+            distinctiveMatches++;
+            break;
+          }
+        }
+      }
+      let bigramMatch = false;
+      for (let bi = 0; bi < termWords.length - 1; bi++) {
+        const w1 = termWords[bi];
+        const w2 = termWords[bi + 1];
+        const eitherDistinctive =
+          (w1.length >= 5 && !GENERIC_ANCHOR_TOKENS.has(w1)) ||
+          (w2.length >= 5 && !GENERIC_ANCHOR_TOKENS.has(w2));
+        if (eitherDistinctive && claimLower.includes(`${w1} ${w2}`)) {
+          bigramMatch = true;
+          break;
+        }
+      }
+      if (bigramMatch || distinctiveMatches >= 3) {
+        anchorGrounded = true;
+        totalScore += 1.0;
+      }
+      continue;
+    }
+
     let overlap = 0;
     for (const tw of termWords) if (claimWords.has(tw)) overlap++;
     if (overlap / termWords.length >= 0.5) {
@@ -1781,7 +1867,7 @@ async function layer11_positioningStatementGeneration(
 
     const domainTranslationInstruction = productDna ? `
 DOMAIN TRANSLATION REQUIREMENT (apply before composing any field):
-This campaign is for a "${productDna.businessType}" offering "${productDna.coreOffer}".${productDna.coreProblemSolved ? ` Core problem it solves: "${productDna.coreProblemSolved}".` : ""}${productDna.uniqueMechanism ? ` Unique mechanism: "${productDna.uniqueMechanism}".` : ""}
+This campaign is for a "${productDna.businessType}" offering "${productDna.coreOffer}".${productDna.coreProblemSolved ? ` Core problem it solves: "${productDna.coreProblemSolved}".` : ""}${productDna.uniqueMechanism ? ` Unique mechanism: "${productDna.uniqueMechanism}".` : ""}${productDna.strategicAdvantage ? ` Strategic advantage: "${productDna.strategicAdvantage}".` : ""}
 
 Before composing enemyDefinition, contrastAxis, and narrativeDirection — restate each signal label as an operational failure SPECIFIC to this business type and offer. Do NOT use the surface label (e.g. "cost and affordability concerns") in your output. Instead write what that signal means as a concrete operational breakdown for a buyer of "${productDna.coreOffer}" from a "${productDna.businessType}".
 
@@ -1811,8 +1897,8 @@ Each territory has CLAIM SEEDS derived from real audience signals. Your ONLY job
 
 FIELD RULES:
 - enemyDefinition: Sharpen the Enemy seed. Must name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls). The content MUST derive from the pain/root_cause signal labels listed in the SOURCE SIGNALS.
-- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST derive from the desire/pattern signal labels.
-- narrativeDirection: Sharpen the Narrative seed into one sentence. MUST synthesize the actual signal labels — not invent new concepts.
+- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST derive from the desire/pattern signal labels, AND MUST anchor the resolution to this product's Unique mechanism or Strategic advantage (from the DOMAIN TRANSLATION REQUIREMENT above) so that no generic competitor could truthfully repeat the claim unchanged. A claim any competitor could copy verbatim WILL BE REJECTED.
+- narrativeDirection: Sharpen the Narrative seed into one sentence. MUST synthesize the actual signal labels — not invent new concepts — and MUST state the outcome in terms of this product's Unique mechanism or Strategic advantage, not category-generic language.
 - domainFailure: The operational/system failure this signal cluster represents in this specific domain.
 - operationalProblem: What concretely breaks in the buyer's workflow.
 - proofRequirement: What evidence would resolve this (e.g., "live demo", "case study with metrics").
@@ -2526,11 +2612,38 @@ export async function runPositioningEngine(
         let batteryFeedback = "";
         let failedTerritoryName = "";
         let failedGate = "";
+        // F5a: when strategic doctrine is absent, derive the judge's product
+        // anchor from Product DNA so the interchangeability judge tests against
+        // THIS product's real differentiator instead of the weaker anchor-free
+        // test. Guard: only when a genuine differentiator + core problem exist —
+        // an anchor fabricated from empty strings would flip the judge to the
+        // strict test with hollow context (worse than the weak test). Explicit
+        // if/else selection — no semantic-fallback chains (D1).
+        let batteryAnchor = strategic ? strategic.doctrine.productAnchor : null;
+        if (!batteryAnchor && productDna) {
+          let dnaDifferentiator = "";
+          if (productDna.strategicAdvantage && productDna.strategicAdvantage.trim().length > 0) {
+            dnaDifferentiator = productDna.strategicAdvantage.trim();
+          } else if (productDna.uniqueMechanism && productDna.uniqueMechanism.trim().length > 0) {
+            dnaDifferentiator = productDna.uniqueMechanism.trim();
+          }
+          const dnaProblem = productDna.coreProblemSolved ? productDna.coreProblemSolved.trim() : "";
+          if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && productDna.coreOffer && productDna.businessType) {
+            batteryAnchor = {
+              name: productDna.coreOffer,
+              type: productDna.businessType,
+              keyAttributes: productDna.productCategory ? [productDna.productCategory] : [],
+              coreProblemSolved: dnaProblem,
+              differentiatingFeature: dnaDifferentiator,
+            };
+            console.log(`[PositioningEngine-V3] BATTERY_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from Product DNA | attempt=${specificityAttempt + 1}`);
+          }
+        }
         for (const t of generatedTerritories) {
           const battery = await runCandidateGateBattery({
             kind: "positioning_claim",
             candidateText: `${t.name}: ${t.enemyDefinition} | ${t.contrastAxis} | ${t.narrativeDirection}`,
-            productAnchor: strategic ? strategic.doctrine.productAnchor : null,
+            productAnchor: batteryAnchor,
             priorDecisions: strategic ? strategic.priorDecisions : [],
             accountId,
           });
@@ -2555,7 +2668,7 @@ export async function runPositioningEngine(
         if (specificityAttempt < SPECIFICITY_MAX_RETRIES) {
           specificityRejectionContext = `
 PREVIOUS OUTPUT REJECTED — Rejected by ${failedGate} gate: ${batteryFeedback}
-Fix exactly this and regenerate ALL territories as system-level positioning claims that (a) name a specific enemy system/process/tool that fails, (b) are NOT interchangeable with a generic competitor claim, and (c) do NOT contradict the locked product anchor or prior engine decisions.`;
+Fix exactly this and regenerate ALL territories as system-level positioning claims that (a) name a specific enemy system/process/tool that fails, (b) are NOT interchangeable with a generic competitor claim — anchor contrastAxis and narrativeDirection to this product's Unique mechanism / Strategic advantage from the DOMAIN TRANSLATION REQUIREMENT so no competitor could truthfully repeat them, and (c) do NOT contradict the locked product anchor or prior engine decisions.`;
           continue;
         }
         // Exhausted: degrade rather than hard-fail (Beta axiom B3 — safe

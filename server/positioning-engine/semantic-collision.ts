@@ -53,6 +53,33 @@ Strict rules:
 - Differ from naive token overlap: claims that share zero words can still mean the same thing (e.g. "AI call coaching" and "conversation intelligence for revenue teams" are >=0.70).
 - Output ONLY valid JSON.`;
 
+// Recovers complete entries from a token-truncated perCompetitor JSON array.
+// Trims the raw text back to the last fully-closed object and re-closes the
+// array + wrapper object. Returns null when nothing complete can be recovered
+// (the caller then logs PARSE_FAILED as before).
+function salvageTruncatedPerCompetitor(cleaned: string): { perCompetitor: unknown[] } | null {
+  const arrayStart = cleaned.indexOf("[");
+  if (arrayStart === -1) return null;
+  const lastComplete = cleaned.lastIndexOf("}");
+  if (lastComplete <= arrayStart) return null;
+  for (let cut = lastComplete; cut > arrayStart; cut = cleaned.lastIndexOf("}", cut - 1)) {
+    const candidate = `{"perCompetitor": ${cleaned.slice(arrayStart, cut + 1)}]}`;
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed.perCompetitor) && parsed.perCompetitor.length > 0) {
+        return parsed;
+      }
+      return null;
+    } catch (candidateErr) {
+      // Not yet a complete object boundary — step back to the previous "}".
+      // Loop bound: at most one attempt per "}" in the response. Logged by the
+      // caller (PARSE_SALVAGED / PARSE_FAILED) — nothing is swallowed here.
+      void candidateErr;
+    }
+  }
+  return null;
+}
+
 async function scoreOneTerritory(
   territoryName: string,
   territoryClaim: string,
@@ -80,7 +107,10 @@ Return JSON exactly:
       { role: "system", content: SYSTEM },
       { role: "user", content: userPrompt },
     ],
-    max_tokens: 1200,
+    // Output size scales with the competitor list (one scored object with a
+    // one-sentence rationale per claim). The old fixed 1200 truncated the JSON
+    // mid-string at ~15+ claims → PARSE_FAILED → zero competitors scored.
+    max_tokens: Math.min(4000, 300 + 90 * competitorClaims.length),
     temperature: 0.2,
     accountId,
     endpoint: "positioning-semantic-collision",
@@ -91,8 +121,17 @@ Return JSON exactly:
   try {
     parsed = JSON.parse(cleaned);
   } catch (e: any) {
-    console.error(`[PositioningSemanticCollision] PARSE_FAILED | ${e.message} | raw="${cleaned.slice(0, 200)}"`);
-    return null;
+    // Truncation salvage: if the model still ran out of tokens mid-array,
+    // recover every COMPLETE perCompetitor entry rather than discarding the
+    // whole scoring pass. topCompetitorId is not needed — the caller derives
+    // the top collision from the recovered scores.
+    parsed = salvageTruncatedPerCompetitor(cleaned);
+    if (parsed) {
+      console.warn(`[PositioningSemanticCollision] PARSE_SALVAGED | ${e.message} | recovered=${parsed.perCompetitor.length}/${competitorClaims.length} entries from truncated response`);
+    } else {
+      console.error(`[PositioningSemanticCollision] PARSE_FAILED | ${e.message} | raw="${cleaned.slice(0, 200)}"`);
+      return null;
+    }
   }
   const per = Array.isArray(parsed.perCompetitor) ? parsed.perCompetitor : [];
   const result: Array<{ source: string; claim: string; score: number; rationale: string }> = [];
