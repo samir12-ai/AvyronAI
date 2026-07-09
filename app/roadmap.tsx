@@ -109,7 +109,7 @@ export default function RoadmapScreen() {
               `display: none` keeps unmounted sections cheap rather than tearing down their state on every tab change. */}
           <View style={{ flex: 1, display: section === "build" ? "flex" : "none" }}>
             <BuildThePlan
-              onNavigateToCI={() => router.push("/competitors" as never)}
+              onNavigateToCI={() => router.push({ pathname: "/(tabs)/ai-management", params: { tab: "intelligence", ts: String(Date.now()) } } as never)}
               onNavigateToCalendar={() => router.push("/calendar" as never)}
               onOpenProfile={() => setShowProfile(true)}
             />

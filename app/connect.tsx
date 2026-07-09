@@ -407,7 +407,7 @@ export default function ConnectScreen() {
 
         {/* COMPETITORS — links to existing screen */}
         <Pressable
-          onPress={() => { Haptics.selectionAsync(); router.push("/competitors" as never); }}
+          onPress={() => { Haptics.selectionAsync(); router.push({ pathname: "/(tabs)/ai-management", params: { tab: "intelligence", ts: String(Date.now()) } } as never); }}
           style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
         >
           <View style={styles.cardHeader}>

@@ -34,10 +34,6 @@ function NativeTabLayout() {
         <Icon sf={{ default: "checkmark.shield", selected: "checkmark.shield.fill" }} />
         <Label>{t('tabs.aiManagement')}</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="monitor">
-        <Icon sf={{ default: "waveform.path.ecg", selected: "waveform.path.ecg" }} />
-        <Label>Monitor</Label>
-      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="pivot">
         <Icon sf={{ default: "arrow.triangle.branch", selected: "arrow.triangle.branch" }} />
         <Label>Pivot</Label>
@@ -132,15 +128,6 @@ function ClassicTabLayout() {
           title: t('tabs.aiManagement'),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "shield-checkmark" : "shield-checkmark-outline"} size={22} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="monitor"
-        options={{
-          title: "Monitor",
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "pulse" : "pulse-outline"} size={22} color={color} />
           ),
         }}
       />

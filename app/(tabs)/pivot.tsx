@@ -7,7 +7,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 
 interface PivotTile {
-  key: "connect" | "diagnose" | "roadmap" | "monitor";
+  key: "connect" | "diagnose" | "roadmap";
   title: string;
   subtitle: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -17,9 +17,8 @@ interface PivotTile {
 
 const TILES: PivotTile[] = [
   { key: "connect",  title: "Connect",  subtitle: "Wire up real data — Meta, manual metrics, brand profile, competitors", icon: "link-outline",        route: "/connect",  accent: "#34D399" },
-  { key: "diagnose", title: "Diagnose", subtitle: "See what the engine knows, what's degraded, and what blocks the next plan", icon: "pulse-outline",      route: "/diagnose", accent: "#60A5FA" },
+  { key: "diagnose", title: "Diagnose", subtitle: "See what the engine knows, early-warning signals, and what blocks the next plan", icon: "pulse-outline",      route: "/diagnose", accent: "#60A5FA" },
   { key: "roadmap",  title: "Roadmap",  subtitle: "Build, review, and approve the strategic plan and execution timeline",     icon: "map-outline",        route: "/roadmap",  accent: "#A78BFA" },
-  { key: "monitor",  title: "Monitor",  subtitle: "Early-warning signals: trajectory shifts and audience fatigue",            icon: "radio-outline",      route: "/(tabs)/monitor", accent: "#FBBF24" },
 ];
 
 export default function PivotHub() {
@@ -43,7 +42,7 @@ export default function PivotHub() {
       >
         <Text style={[styles.title, { color: colors.text }]}>Pivot</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Connect · Diagnose · Roadmap · Monitor — the four moves
+          Connect · Diagnose · Roadmap — the three moves
         </Text>
 
         {TILES.map(tile => (

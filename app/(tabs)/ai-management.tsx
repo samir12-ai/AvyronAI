@@ -13,7 +13,7 @@ import {
   Animated as RNAnimated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -24,7 +24,6 @@ import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import ExecutionPlan from '@/components/ExecutionPlan';
-import BuildThePlan from '@/components/BuildThePlan';
 import OrchestratorPanel from '@/components/OrchestratorPanel';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import ControlCenter from '@/components/ControlCenter';
@@ -72,7 +71,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience';
+type TabView = 'buildplan' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -130,7 +129,7 @@ export default function AIManagementScreen() {
   const operator = useOperatorSurface();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
-  const validTabs: Set<string> = new Set(['buildplan', 'pipeline', 'intelligence', 'strategies', 'positioning', 'differentiation', 'mechanism', 'offers', 'funnels', 'integrity', 'awareness', 'persuasion', 'statistical_validation', 'budget_governor', 'channel_selection', 'iteration', 'retention', 'control', 'marketdb', 'publisher', 'audience']);
+  const validTabs: Set<string> = new Set(['buildplan', 'intelligence', 'strategies', 'positioning', 'differentiation', 'mechanism', 'offers', 'funnels', 'integrity', 'awareness', 'persuasion', 'statistical_validation', 'budget_governor', 'channel_selection', 'iteration', 'retention', 'control', 'marketdb', 'publisher', 'audience']);
   const safeTab = (t: string): TabView => validTabs.has(t) ? t as TabView : 'buildplan';
 
   const [activeTab, setActiveTab] = useState<TabView>(safeTab(ps.activeTab));
@@ -147,6 +146,21 @@ export default function AIManagementScreen() {
     });
     updateState({ activeTab: tab });
   }, [updateState]);
+
+  // Deep-link support: /(tabs)/ai-management?tab=intelligence&ts=<nonce>
+  // The `ts` nonce ensures repeat navigations with the same tab re-trigger.
+  // deepLinkRef records the not-yet-superseded deep-link intent so the async
+  // persisted-state hydration effect below doesn't clobber the deep-linked tab
+  // on a cold mount (hydration resolves AFTER this effect fires).
+  const deepLinkRef = useRef<{ tab: TabView; ts: string } | null>(null);
+  const { tab: tabParam, ts: tsParam } = useLocalSearchParams<{ tab?: string; ts?: string }>();
+  useEffect(() => {
+    if (typeof tabParam === 'string' && validTabs.has(tabParam)) {
+      deepLinkRef.current = { tab: tabParam as TabView, ts: typeof tsParam === 'string' ? tsParam : '' };
+      handleTabChange(tabParam as TabView);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabParam, tsParam]);
 
   const [showAudienceModal, setShowAudienceModal] = useState(false);
   const [audienceGoal, setAudienceGoal] = useState(ps.audienceGoal);
@@ -205,13 +219,29 @@ export default function AIManagementScreen() {
     if (hydrationVersion > 0 && hydrationVersion !== lastHydrationRef.current) {
       lastHydrationRef.current = hydrationVersion;
       skipSyncRef.current = true;
-      setActiveTab(safeTab(ps.activeTab));
-      setVisitedTabs(prev => {
-        if (prev.has(ps.activeTab)) return prev;
-        const next = new Set(prev);
-        next.add(ps.activeTab);
-        return next;
-      });
+      const deepLink = deepLinkRef.current;
+      if (deepLink) {
+        // A deep-linked tab was applied before hydration resolved — keep it
+        // instead of resetting to the persisted tab, and persist it now that
+        // we're hydrated. Consume the intent so later hydrations behave normally.
+        deepLinkRef.current = null;
+        setActiveTab(deepLink.tab);
+        setVisitedTabs(prev => {
+          if (prev.has(deepLink.tab)) return prev;
+          const next = new Set(prev);
+          next.add(deepLink.tab);
+          return next;
+        });
+        updateState({ activeTab: deepLink.tab });
+      } else {
+        setActiveTab(safeTab(ps.activeTab));
+        setVisitedTabs(prev => {
+          if (prev.has(ps.activeTab)) return prev;
+          const next = new Set(prev);
+          next.add(ps.activeTab);
+          return next;
+        });
+      }
       setAudienceGoal(ps.audienceGoal);
       setAudienceProduct(ps.audienceProduct);
       setAudienceBudget(ps.audienceBudget);
@@ -1028,7 +1058,6 @@ export default function AIManagementScreen() {
             // 4-screen pivot naming. Content rendering per tab is
             // unchanged (still gated by operator.enabled where applicable).
             { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
-            { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
             { key: 'strategies' as TabView, icon: 'map-outline' as const, label: 'Strategies', color: '#F97316', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
@@ -1055,11 +1084,6 @@ export default function AIManagementScreen() {
         </ScrollView>
 
         {activeTab === 'buildplan' && (operator.enabled ? <OrchestratorPanel /> : <ExecutionPlan />)}
-        {activeTab === 'pipeline' && (
-          <>
-            <ExecutionPlan />
-          </>
-        )}
         {activeTab === 'intelligence' && renderIntelligence()}
         {activeTab === 'strategies' && (
           <>
