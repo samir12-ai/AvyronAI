@@ -96,6 +96,23 @@ SESSION_SECRET is set (2026-07-08: SESSION_SECRET accepted as JWT signing alias;
 env-validator mirrors it into JWT_SECRET and logs the aliasing). STRIPE_WEBHOOK_SECRET
 is no longer boot-fatal: the webhook route fails closed (503) until it is set.
 
+## Publish schema-sync vs own migration runner = collision on non-idempotent DDL
+Replit's publish flow copies the DEV SCHEMA into the prod DB (tables/columns/triggers,
+no data, no `schema_migrations` ledger rows). The app's own boot migration replay then
+re-runs history against a DB that already contains the END-STATE objects. Any
+non-idempotent step — especially RENAME (`ALTER TABLE x RENAME TO y` when `y` was
+already synced in) — crashes boot even though both dev and a fresh DB migrate cleanly.
+**Why:** the synced prod DB is a third schema state (end-state objects + empty ledger)
+that neither "fresh" nor "up-to-date" testing covers.
+**Fix pattern:** make every migration state-aware via `to_regclass()` checks in a DO
+block (rename if only old exists; drop the replayed copy if both exist; no-op
+otherwise). Editing an already-recorded migration file is safe — ledgered DBs never
+re-execute it.
+**How to verify:** simulate with a throwaway local PG: `pg_dump --schema-only` of dev
+restored into it (= the sync), ledger rows set to prod's, replay the recreating
+migration, then run the real runner. Note: background daemons (pg_ctl) die between
+bash tool calls — combine start+work in one command or re-start defensively.
+
 ## Promote-failure symptom = boot crash with no logs
 A publish that fails ~2 min AFTER "Creating Autoscale service" (build phase green) is a
 server boot crash. `fetch_deployment_logs` retains NOTHING from a failed promote — debug
