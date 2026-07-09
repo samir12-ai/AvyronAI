@@ -2132,7 +2132,7 @@ async function executeEngine(
       case "offer": {
         { const sglBlock = resolveSglOrBlock("offer", ctx, startTime); if (sglBlock) return sglBlock; }
         const offerInputHash = computeInputHash(
-          "offer-v1",
+          "offer-v2",
           doctrineSalt(ctx),
           ctx.inputHashes!.mi || "",
           ctx.inputHashes!.audience || "",
@@ -3025,7 +3025,7 @@ async function executeEngine(
 
       case "channel_selection": {
         const csInputHash = computeInputHash(
-          "channel-selection-v2",
+          "channel-selection-v3",
           doctrineSalt(ctx),
           ctx.inputHashes!.audience || "",
           ctx.inputHashes!.awareness || "",
@@ -3084,7 +3084,8 @@ async function executeEngine(
           audInput, awarenessInput, persuasionInput, offerInput,
           budgetInput, validationInput, "INTELLIGENT",
           ctx.memoryContext || undefined,
-          runStrategicContextOf(ctx), config.accountId
+          runStrategicContextOf(ctx), config.accountId,
+          (ctx.audience as any)?.productDna || null
         );
         output = result;
         ctx.channelSelection = result;
@@ -3104,7 +3105,10 @@ async function executeEngine(
               return [];
             })();
             const stageType = (s: any): string => String(s?.stageType || s?.type || s?.stage || "").toLowerCase();
+            const strategicForOrch = runStrategicContextOf(ctx);
             const cj = await designChannelOrchestration({
+              productAnchor: strategicForOrch ? strategicForOrch.doctrine.productAnchor : null,
+              productDna: (ctx.audience as any)?.productDna || null,
               primaryChannelName: primary.channelName || primary.label || primary.channelKey || primary.name || "(none)",
               secondaryChannelName: secondary.channelName || secondary.label || secondary.channelKey || secondary.name || "(none)",
               primaryChannelType: primary.channelType || primary.type || "(unknown)",

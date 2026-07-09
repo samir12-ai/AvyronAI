@@ -14,6 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '@/constants/colors';
 import BusinessDataForm from '@/components/BusinessDataForm';
 import { useAuth } from '@/context/AuthContext';
+import { useCampaign } from '@/context/CampaignContext';
+import { ProductIdentityEditor } from '@/components/ProductIdentityEditor';
 
 interface BusinessProfileProps {
   visible: boolean;
@@ -61,10 +63,50 @@ export function BusinessProfileModal({ visible, onClose, onComplete }: BusinessP
               onComplete?.();
             }}
           />
+
+          <ProductIdentitySection isDark={isDark} />
+
           <View style={{ height: 40 }} />
         </ScrollView>
       </View>
     </Modal>
+  );
+}
+
+function ProductIdentitySection({ isDark }: { isDark: boolean }) {
+  const colors = isDark ? Colors.dark : Colors.light;
+  const { selectedCampaign, selectedCampaignId } = useCampaign();
+  const campaignName = selectedCampaign?.selectedCampaignName || '';
+
+  return (
+    <View style={[s.piSection, { borderColor: colors.cardBorder }]}>
+      <View style={s.piHeader}>
+        <View style={[s.headerIcon, { backgroundColor: '#8B5CF620' }]}>
+          <Ionicons name="cube-outline" size={20} color="#8B5CF6" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.piTitle, { color: colors.text }]}>Product Identity</Text>
+          {!!campaignName && (
+            <Text style={[s.piSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+              for campaign: {campaignName}
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {selectedCampaignId ? (
+        <ProductIdentityEditor
+          key={selectedCampaignId}
+          campaignId={selectedCampaignId}
+          campaignName={campaignName}
+          embedded
+        />
+      ) : (
+        <Text style={[s.piSubtitle, { color: colors.textMuted }]}>
+          Select a campaign to pin the product it promotes. Product identity is saved per campaign.
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -142,6 +184,25 @@ const s = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+  },
+  piSection: {
+    marginTop: 24,
+    paddingTop: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  piHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  piTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+  },
+  piSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
   },
   profileBtn: {
     width: 38,

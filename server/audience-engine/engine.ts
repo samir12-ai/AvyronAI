@@ -1281,6 +1281,14 @@ async function constructSegments(
       }
     }
     const priorDecisions = strategic ? strategic.priorDecisions : [];
+    // T003: anchor-usage evidence (audit trail — engine × site × attempt × source).
+    let audienceAnchorSource: "doctrine" | "dna" | "none" = "none";
+    if (strategic && strategic.doctrine.productAnchor) {
+      audienceAnchorSource = "doctrine";
+    } else if (productAnchor) {
+      audienceAnchorSource = "dna";
+    }
+    console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=first_prompt | attempt=1 | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
 
     const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
 ${doctrineBlock ? `\n${doctrineBlock}\n` : ""}
@@ -1366,6 +1374,7 @@ Return ONLY the JSON array, no markdown.`;
         const isFinalAttempt = attempt === SEGMENT_MAX_ATTEMPTS - 1;
         const passedSegments: typeof candidate = [];
         const discardedInfo: string[] = [];
+        console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=judge | attempt=${attempt + 1} | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
         for (const seg of candidate) {
           const battery = await runCandidateGateBattery({
             kind: "segment",

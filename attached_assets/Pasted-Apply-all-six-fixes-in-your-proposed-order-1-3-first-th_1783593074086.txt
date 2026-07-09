@@ -1,0 +1,17 @@
+Apply all six fixes, in your proposed order (1-3 first, then 4-5, then 6) — with the following changes to fix 6 and one added verification requirement.
+
+FIX 6 — REVISED (UI placement):
+a) REMOVE the hidden entry points: the unlabeled cube icon in the campaign list and the collapsed below-the-fold section in campaign creation are not acceptable as primary entry points.
+b) ADD a prominent "Product Identity" section inside the Brand Profile screen. IMPORTANT — storage stays PER-CAMPAIGN (do not move the data to a business-level table): this section edits the product_anchor of the CURRENTLY SELECTED campaign, with a clear label showing which campaign it belongs to (e.g., "Product Identity — for campaign: [name]"). If no campaign is selected, prompt the user to select one.
+c) In campaign creation, keep the Product Identity section but move it UP (before Notes) and auto-expand it — it should be seen, not discovered.
+d) Degraded-mode banner everywhere analysis is shown when the campaign has no anchor: "AI is reasoning at business level — pin your product identity for sharper results" — tappable, opening the Product Identity editor directly.
+
+ADDED REQUIREMENT — END-TO-END ANCHOR USAGE VERIFICATION (critical):
+I need hard proof that the product anchor actually flows into EVERY engine's analysis from the FIRST attempt, end to end — not just that the field saves. After applying fixes 1-5:
+1. Set a product anchor on a test campaign and run a full analysis.
+2. For EACH engine (audience, positioning, offer, channel selection, and the secondary judges: value-architect reviewer + channel-orchestration designer), show evidence from logs/prompt dumps that the anchor text is present in the prompt of the FIRST generation attempt AND in the judge's context.
+3. Paste a table: engine × anchor-in-first-prompt (yes/no) × anchor-in-judge (yes/no) × mode (ai/fallback) × attempts.
+4. Any engine where the anchor is missing from attempt 1 is a FAIL — fix it before reporting done.
+5. Then clear the anchor and confirm every engine cleanly switches to the DNA-fallback/degraded path with the degraded flag visible in aiPathReport and the new UI banner appearing.
+
+Report all file changes when complete.

@@ -210,6 +210,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       const err = await res.json();
       throw new Error(err.message || 'Failed to update product identity');
     }
+    // Keep the degraded-state banner (and any other reader of the anchor
+    // query) honest immediately after a save/clear — the default 5-min
+    // staleTime would otherwise leave the banner showing stale state.
+    queryClient.invalidateQueries({ queryKey: ['/api/campaigns', campaignId, 'product-anchor'] });
   }, []);
 
   const deleteCampaign = useCallback(async (campaignId: string) => {

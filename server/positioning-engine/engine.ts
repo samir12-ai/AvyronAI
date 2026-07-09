@@ -2595,6 +2595,17 @@ export async function runPositioningEngine(
         console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: Retry attempt ${specificityAttempt + 1}/${SPECIFICITY_MAX_RETRIES + 1} — re-generating with rejection context | temp=${attemptTemperature}`);
       }
 
+      // T003: anchor-usage evidence — the generation prompt carries the anchor via
+      // the doctrine block (doctrine) or the DOMAIN TRANSLATION / DNA block (dna).
+      {
+        let posPromptAnchorSource: "doctrine" | "dna" | "none" = "none";
+        if (strategic && strategic.doctrine.productAnchor) {
+          posPromptAnchorSource = "doctrine";
+        } else if (productDna) {
+          posPromptAnchorSource = "dna";
+        }
+        console.log(`[PositioningEngine-V3] ANCHOR_EVIDENCE | engine=positioning | site=first_prompt | attempt=${specificityAttempt + 1} | present=${posPromptAnchorSource === "none" ? "no" : "yes"} | source=${posPromptAnchorSource}`);
+      }
       generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined, attemptTemperature, strategic);
       console.log(`[PositioningEngine-V3] L11 SIGNAL_DIRECT_COMPOSITION | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}${specificityAttempt > 0 ? " | retryAttempt=" + (specificityAttempt + 1) : ""}`);
 
@@ -2640,6 +2651,15 @@ export async function runPositioningEngine(
             };
             console.log(`[PositioningEngine-V3] BATTERY_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from Product DNA | attempt=${specificityAttempt + 1}`);
           }
+        }
+        {
+          let posJudgeAnchorSource: "doctrine" | "dna" | "none" = "none";
+          if (strategic && strategic.doctrine.productAnchor) {
+            posJudgeAnchorSource = "doctrine";
+          } else if (batteryAnchor) {
+            posJudgeAnchorSource = "dna";
+          }
+          console.log(`[PositioningEngine-V3] ANCHOR_EVIDENCE | engine=positioning | site=judge | attempt=${specificityAttempt + 1} | present=${batteryAnchor ? "yes" : "no"} | source=${posJudgeAnchorSource}`);
         }
         for (const t of generatedTerritories) {
           const battery = await runCandidateGateBattery({

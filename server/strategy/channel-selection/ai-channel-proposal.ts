@@ -36,9 +36,11 @@ import { aiChat } from "../../ai-client";
 import {
   safeJsonParse,
   buildDoctrineBlock,
+  deriveAnchorFromProductDna,
   type RunStrategicContext,
   type ProductAnchor,
   type EngineDecisionSummary,
+  type ProductDnaLike,
 } from "../../shared/strategic-doctrine";
 import { runCandidateGateBattery } from "../../shared/candidate-gate-battery";
 import { z } from "zod";
@@ -84,6 +86,14 @@ function buildProposerPrompt(input: {
 }): string {
   const { primary, secondary, rejected, strategic, feedback } = input;
   const doctrineBlock = buildDoctrineBlock(strategic);
+  // F5a (Fix 3): when the anchor was DNA-derived (doctrine itself is degraded),
+  // show it to the proposer too — the battery judges against this anchor, so the
+  // model must see the same product identity it is being judged on. When the
+  // doctrine is anchored, the doctrine block already renders the anchor (no dup).
+  const dnaAnchorBlock =
+    input.anchor && strategic.doctrine.resolution === "business_level_degraded"
+      ? `\n═══ PRODUCT ANCHOR (derived from Product DNA — resolve your rationale to THIS product) ═══\nProduct name: ${input.anchor.name}\nProduct type: ${input.anchor.type}\n${input.anchor.keyAttributes.length > 0 ? `Key attributes: ${input.anchor.keyAttributes.join("; ")}\n` : ""}Core problem solved: ${input.anchor.coreProblemSolved}\nDifferentiating feature: ${input.anchor.differentiatingFeature}\n`
+      : "";
   const priors = strategic.priorDecisions.length
     ? strategic.priorDecisions.map((d) => `- [${d.engineId}] ${d.summary}`).join("\n")
     : "(no prior decisions recorded)";
@@ -94,12 +104,12 @@ function buildProposerPrompt(input: {
         .join("\n")
     : "(none)";
   const retry = feedback
-    ? `\n═══ PRIOR ATTEMPT REJECTED ═══\n${feedback}\nRewrite so the rationale is specific to THIS product and cannot be pasted onto a generic competitor.\n`
+    ? `\n═══ PRIOR ATTEMPT REJECTED ═══\n${feedback}\nRewrite so the rationale is specific to THIS product and cannot be pasted onto a generic competitor. Cite the anchor's differentiating feature or core problem by name.\n`
     : "";
   return `You are a Channel Strategy Principal. Two channels survived the deterministic scoring floor and are the ONLY channels you may recommend as primary. Your job: choose which leads, and justify it in a way that is specific to THIS product and audience.
 
 ${doctrineBlock}
-
+${dnaAnchorBlock}
 ═══ VALIDATED PRIOR DECISIONS (segment / positioning / offer) ═══
 ${priors}
 
@@ -156,19 +166,23 @@ async function callProposer(
  */
 async function proposeAndValidate(input: {
   strategic: RunStrategicContext;
+  /** F5a (Fix 3): resolved by the caller — doctrine anchor, else DNA-derived, else null. */
+  anchor: ProductAnchor | null;
+  /** T003: how the anchor was resolved (audit trail — never anchor text). */
+  anchorSource: "doctrine" | "dna" | "none";
   primary: ChannelCandidate;
   secondary: ChannelCandidate;
   rejected: ChannelCandidate[];
   accountId: string;
 }): Promise<AiChannelProposal> {
-  const { strategic, primary, secondary, rejected, accountId } = input;
-  const anchor = strategic.doctrine.productAnchor;
+  const { strategic, anchor, anchorSource, primary, secondary, rejected, accountId } = input;
   const whitelist = new Set([primary.channelName, secondary.channelName]);
   const gateTrace: AiChannelGateAttempt[] = [];
   let feedback = "";
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const temperature = TEMP_LADDER[attempt - 1] ?? 0.5;
+    console.log(`[ChannelAIProposer] ANCHOR_EVIDENCE | engine=channel_proposal | site=first_prompt | attempt=${attempt} | present=${anchor ? "yes" : "no"} | source=${anchorSource}`);
     const prompt = buildProposerPrompt({ anchor, strategic, primary, secondary, rejected, feedback });
     const proposal = await callProposer(prompt, temperature, accountId);
 
@@ -204,6 +218,7 @@ async function proposeAndValidate(input: {
     }
 
     // The battery is the sole judge of the rationale.
+    console.log(`[ChannelAIProposer] ANCHOR_EVIDENCE | engine=channel_proposal | site=judge | attempt=${attempt} | present=${anchor ? "yes" : "no"} | source=${anchorSource}`);
     const battery = await runCandidateGateBattery({
       kind: "channel_rationale",
       candidateText: proposal.rationale,
@@ -309,6 +324,9 @@ export async function runChannelSelectionWithAIProposal(
   memoryContext: string | undefined,
   strategic: RunStrategicContext | undefined,
   accountId: string,
+  // F5a (Fix 3): Product DNA threaded from the orchestrator so the battery /
+  // proposer anchor can be derived when the doctrine's anchor is absent.
+  productDna?: ProductDnaLike | null,
 ): Promise<ChannelSelectionResult> {
   const base = runChannelSelectionEngine(
     audience,
@@ -338,8 +356,23 @@ export async function runChannelSelectionWithAIProposal(
   } else if (!twoDistinctViable) {
     proposal = fallbackProposal("insufficient_viable");
   } else {
+    // F5a (Fix 3): doctrine present but its anchor is null → derive the
+    // proposer/battery anchor from Product DNA (explicit branch — D1). The
+    // no_doctrine fallback above is untouched: DNA never fabricates doctrine (D5).
+    let channelAnchor: ProductAnchor | null = strategic.doctrine.productAnchor;
+    let channelAnchorSource: "doctrine" | "dna" | "none" = channelAnchor ? "doctrine" : "none";
+    if (!channelAnchor && productDna) {
+      const derivedChannelAnchor = deriveAnchorFromProductDna(productDna);
+      if (derivedChannelAnchor) {
+        channelAnchor = derivedChannelAnchor;
+        channelAnchorSource = "dna";
+        console.log(`[ChannelAIProposer] BATTERY_ANCHOR_FROM_DNA | doctrine anchor absent — anchor derived from Product DNA`);
+      }
+    }
     proposal = await proposeAndValidate({
       strategic,
+      anchor: channelAnchor,
+      anchorSource: channelAnchorSource,
       primary,
       secondary,
       rejected: base.rejectedChannels,

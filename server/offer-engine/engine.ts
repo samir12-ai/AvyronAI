@@ -183,7 +183,7 @@ import {
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
 import { emissionFromBattery, type BatteryAttemptLike } from "../shared/ai-path-telemetry";
-import { buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
+import { buildDoctrineBlock, deriveAnchorFromProductDna, type RunStrategicContext, type ProductAnchor } from "../shared/strategic-doctrine";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
 
 const STOP_WORDS = new Set([
@@ -1816,6 +1816,17 @@ export async function aiOfferGeneration(
   // doctrine was threaded — never a synthesized/fake doctrine (D5).
   const doctrineBlock = strategic ? buildDoctrineBlock(strategic) : "";
   if (!strategic) console.log("[OfferEngine-V4] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  // T003: anchor-usage evidence — the generation prompt carries the anchor via
+  // the doctrine block (doctrine) or the PRODUCT IDENTITY / DNA block (dna).
+  {
+    let offerPromptAnchorSource: "doctrine" | "dna" | "none" = "none";
+    if (strategic && strategic.doctrine.productAnchor) {
+      offerPromptAnchorSource = "doctrine";
+    } else if (productDna) {
+      offerPromptAnchorSource = "dna";
+    }
+    console.log(`[OfferEngine-V4] ANCHOR_EVIDENCE | engine=offer | site=first_prompt | attempt=${axisCorrection ? axisCorrection.attempt : 1} | present=${offerPromptAnchorSource === "none" ? "no" : "yes"} | source=${offerPromptAnchorSource}`);
+  }
 
   if (strategyRoot) {
     const skeletonResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
@@ -2013,6 +2024,7 @@ This is attempt ${axisCorrection.attempt}. The previous generation was REJECTED 
 ${axisCorrection.previousFailures.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}
 
 You MUST fix these specific issues. Generate offers that directly address these failures.
+Anchor the corrected offers to THIS product's identity — name its unique mechanism / strategic advantage from the PRODUCT IDENTITY / PRODUCT ANCHOR block in the hook, mechanism, and outcome so no generic competitor could truthfully repeat the offer.
 ` : "";
 
   const aelBlockFallback = formatAELForPrompt(analyticalEnrichment || null);
@@ -2415,7 +2427,10 @@ export async function runOfferEngine(
   const offerDepthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
 
   try {
-    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment);
+    // Fix 2: pass `strategic` so the doctrine block (locked anchor + prior
+    // validated decisions) is in the prompt from the VERY FIRST generation —
+    // not only on alignment retries.
+    aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment, undefined, undefined, strategic);
     diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation" };
     if (aiOffers.sourceContext) {
       diagnostics.sourceContext = aiOffers.sourceContext;
@@ -2598,12 +2613,37 @@ export async function runOfferEngine(
     console.error(`[OfferEngine-V4] IDENTITY_REASONING_FAILED | ${idErr.message}`);
   }
 
+  // F5a (Fix 1): when the strategic doctrine's anchor is absent, derive the
+  // battery anchor from Product DNA (mirrors positioning + audience). Explicit
+  // if/else — never fabricated from empty strings (D1/D5); deriveAnchorFromProductDna
+  // returns null unless differentiator + problem + name + type all exist.
+  // Hoisted above the Value Architect so the same anchor grounds it too (Fix 4).
+  let offerBatteryAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!offerBatteryAnchor && productDna) {
+    const derivedOfferAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedOfferAnchor) {
+      offerBatteryAnchor = derivedOfferAnchor;
+      console.log(`[OfferEngine-V4] BATTERY_ANCHOR_FROM_DNA | doctrine anchor absent — battery anchor derived from Product DNA`);
+    }
+  }
+  // T003: anchor source shared by the battery + value-architect evidence lines.
+  let offerAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    offerAnchorSource = "doctrine";
+  } else if (offerBatteryAnchor) {
+    offerAnchorSource = "dna";
+  }
+
   // ── PHASE 3 MARKETING-LOGIC UPGRADE: Value Architect ──
   // Reasons commercially about feature→outcome→identity chain, names where commercial leverage
   // sits, quantifies objection economics. Consumes upstream P1 trustMechanism + P2 gameDimension
   // signals so offer extends (not contradicts) the trust + category strategy chosen upstream.
   try {
     const { designValueArchitecture } = await import("./value-architect");
+    // T003: value-architect passes args.productAnchor into BOTH its designer
+    // prompt and its judge unconditionally — one call-site evidence pair.
+    console.log(`[OfferEngine-V4] ANCHOR_EVIDENCE | engine=value_architect | site=first_prompt | attempt=1 | present=${offerBatteryAnchor ? "yes" : "no"} | source=${offerAnchorSource}`);
+    console.log(`[OfferEngine-V4] ANCHOR_EVIDENCE | engine=value_architect | site=judge | attempt=1 | present=${offerBatteryAnchor ? "yes" : "no"} | source=${offerAnchorSource}`);
     const seg0Va = (audience.audienceSegments || [])[0] as any;
     const rejectedClaimPatternsVa: string[] = [];
     for (const seg of (audience.audienceSegments || []) as any[]) {
@@ -2625,6 +2665,7 @@ export async function runOfferEngine(
       rejectedClaimPatterns: rejectedClaimPatternsVa,
       trustMechanism: trustMechanismSignal,
       gameDimension: gameDimensionSignal,
+      productAnchor: offerBatteryAnchor,
       accountId,
     });
     if (valueArchitecture) {
@@ -2904,10 +2945,11 @@ export async function runOfferEngine(
   // and not `alternative`. The battery shares the alignment loop below (no new
   // retry loop), so total generations stay bounded at ≤3.
   const offerBatteryAttempts: BatteryAttemptLike[] = [];
+  console.log(`[OfferEngine-V4] ANCHOR_EVIDENCE | engine=offer | site=judge | attempt=1 | present=${offerBatteryAnchor ? "yes" : "no"} | source=${offerAnchorSource}`);
   let offerBattery = await runCandidateGateBattery({
     kind: "offer",
     candidateText: `${primaryOffer.offerName}: ${primaryOffer.coreOutcome} — ${primaryOffer.mechanismDescription}`,
-    productAnchor: strategic ? strategic.doctrine.productAnchor : null,
+    productAnchor: offerBatteryAnchor,
     priorDecisions: strategic ? strategic.priorDecisions : [],
     accountId,
   });
@@ -2984,10 +3026,11 @@ export async function runOfferEngine(
       diagnostics.offerAlignmentRetryValidation = retryValidation;
 
       // Re-judge the retry candidate through the full doctrine battery (primary only).
+      console.log(`[OfferEngine-V4] ANCHOR_EVIDENCE | engine=offer | site=judge | attempt=2 | present=${offerBatteryAnchor ? "yes" : "no"} | source=${offerAnchorSource}`);
       const retryBattery = await runCandidateGateBattery({
         kind: "offer",
         candidateText: `${retryPrimary.offerName}: ${retryPrimary.coreOutcome} — ${retryPrimary.mechanismDescription}`,
-        productAnchor: strategic ? strategic.doctrine.productAnchor : null,
+        productAnchor: offerBatteryAnchor,
         priorDecisions: strategic ? strategic.priorDecisions : [],
         accountId,
       });
@@ -3117,7 +3160,7 @@ export async function runOfferEngine(
       console.log(`[OfferEngine-V4] DEPTH_GATE: Attempt ${offerDepthAttempt - 1} BLOCKED — regenerating (${offerDepthAttempt}/${offerDepthGateMaxAttempts})`);
 
       try {
-        aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment, offerDepthRejectionContext);
+        aiOffers = await aiOfferGeneration(audience, positioning, differentiation, accountId, marketLanguage, qualifyingSignals, posLock, undefined, strategyRoot, productDna, analyticalEnrichment, offerDepthRejectionContext, undefined, strategic);
         diagnostics.aiGeneration = { success: true, mode: strategyRoot ? "skeleton_refinement" : "free_generation", depthRetry: offerDepthAttempt };
       } catch (err: any) {
         offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: AI_ERROR (${err.message})`);

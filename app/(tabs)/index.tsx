@@ -37,6 +37,7 @@ import type { MetricCardVerdict } from '@/components/MetricCard';
 import type { ProvenanceKind } from '@/components/DataProvenance';
 import { useAuth } from '@/context/AuthContext';
 import { RunTruthfulnessBanner } from '@/components/RunTruthfulnessBanner';
+import { ProductIdentityDegradedBanner } from '@/components/ProductIdentityEditor';
 import WatchtowerStrip from '@/components/WatchtowerStrip';
 import BlockedReasonsCard from '@/components/BlockedReasonsCard';
 import TruthSubmissionCard from '@/components/TruthSubmissionCard';
@@ -205,6 +206,7 @@ function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
         onClose={() => setTruthForceOpen(false)}
       />
       <RunTruthfulnessBanner campaignId={campaignId} isDark={isDark} />
+      <ProductIdentityDegradedBanner campaignId={campaignId} isDark={isDark} />
       <MarketMindAgent campaignId={campaignId} isDark={isDark} />
       <NarrativeCard campaignId={campaignId} isDark={isDark} refreshKey={narrativeRefreshKey} runId={runId} />
     </>

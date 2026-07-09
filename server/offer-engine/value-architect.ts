@@ -25,6 +25,7 @@
  */
 import { aiChat } from "../ai-client";
 import type { TrustMechanismSignal, GameDimensionSignal } from "../orchestrator/shared-strategic-context";
+import type { ProductAnchor } from "../shared/strategic-doctrine";
 
 export interface OutcomeChainNode {
   feature: string;       // the concrete feature / capability
@@ -73,6 +74,9 @@ interface DesignerInput {
   rejectedClaimPatterns: string[];
   trustMechanism: TrustMechanismSignal | null;
   gameDimension: GameDimensionSignal | null;
+  /** Fix 4: locked product anchor (doctrine or DNA-derived) — grounds the value
+   *  chain in THIS product's identity so the architecture can't be generic. */
+  productAnchor?: ProductAnchor | null;
   accountId: string;
 }
 
@@ -142,6 +146,19 @@ GROUNDING RULE: Your offer's commercial leverage and objection-economics MUST ex
 ═══`
     : "\n(no upstream trust mechanism signal — design from scratch)";
 
+  // Fix 4: product-anchor grounding block — the value chain must resolve to THIS
+  // product's named identity, not a category-generic architecture.
+  const anchorBlock = args.productAnchor
+    ? `\n═══ LOCKED PRODUCT ANCHOR (ground every chain node in THIS product) ═══
+Product name: ${args.productAnchor.name}
+Product type: ${args.productAnchor.type}
+${args.productAnchor.keyAttributes.length > 0 ? `Key attributes: ${args.productAnchor.keyAttributes.join("; ")}\n` : ""}Core problem solved: ${args.productAnchor.coreProblemSolved}
+Differentiating feature: ${args.productAnchor.differentiatingFeature}
+
+GROUNDING RULE: The outcome chain, commercial leverage, and primary value wedge MUST be traceable to the anchor's differentiating feature and core problem. If your value architecture could be pasted onto a generic competitor in the same category without edits, it will be REJECTED.
+═══`
+    : "";
+
   const gameBlock = args.gameDimension
     ? `\n═══ UPSTREAM CATEGORY-GAME DIMENSION (you MUST defend — do NOT play competitor's game) ═══
 Our strategic dimension: ${args.gameDimension.ourDimension}
@@ -157,7 +174,7 @@ GROUNDING RULE: Every value-chain node and the primary value wedge MUST sit on o
     : "\n(no upstream game dimension signal — design from scratch)";
 
   return `You are a Value Architect (Alex Hormozi / 100M Offers / Eugene Schwartz / Russell Brunson lineage).
-Your job is NOT to make the offer "better-stacked" — that produces feature-list offers. Your job is to architect the COMMERCIAL VALUE CHAIN: feature → functional → emotional → identity, name where the largest commercial multiplier sits, and prove it with reasoning the buyer would recognize.${trustBlock}${gameBlock}
+Your job is NOT to make the offer "better-stacked" — that produces feature-list offers. Your job is to architect the COMMERCIAL VALUE CHAIN: feature → functional → emotional → identity, name where the largest commercial multiplier sits, and prove it with reasoning the buyer would recognize.${anchorBlock}${trustBlock}${gameBlock}
 
 ═══ THE OFFER (already drafted — you are reasoning ABOUT it, not redesigning it) ═══
 Offer name: ${args.offerName}
@@ -200,6 +217,7 @@ HARD RULES:
 - Commercial leverage MUST name a specific commercial mechanism (premium tier pricing, lower-CAC channel, faster sales cycle, etc.) and the multiplier estimate doesn't need a number but must be defensible reasoning.
 - Objection economics: each objection needs all 3 fields (stake, mechanism, cost) — partial answers = rejected.
 - Primary wedge cannot be a generic claim ("better X", "faster Y") — it must reference the specific mechanism + the identity it protects.
+${args.productAnchor ? `- The value chain and primary wedge MUST cite the anchor's differentiating feature ("${args.productAnchor.differentiatingFeature.slice(0, 120)}") or core problem — architectures that fit any generic competitor are rejected.` : ""}
 ${args.trustMechanism ? "- Set groundedInTrustMechanism to a 1-line description of how this offer extends the upstream trust mechanism." : ""}
 ${args.gameDimension ? "- Set groundedInGameDimension to a 1-line description of how this offer defends our category-game dimension." : ""}
 
@@ -216,10 +234,16 @@ Return ONLY valid JSON, no commentary:
 }`;
 }
 
-function buildJudgePrompt(designJson: string, hadTrustMechanism: boolean, hadGameDimension: boolean): string {
+function buildJudgePrompt(designJson: string, hadTrustMechanism: boolean, hadGameDimension: boolean, productAnchor?: ProductAnchor | null): string {
   const groundingRules: string[] = [];
   if (hadTrustMechanism) groundingRules.push("- groundedInTrustMechanism is null or doesn't reference how the offer extends the trust mechanism");
   if (hadGameDimension) groundingRules.push("- groundedInGameDimension is null or doesn't reference how the offer defends the category-game dimension");
+  // Fix 4: generic-competitor rejection rule — judged against the locked anchor.
+  if (productAnchor) {
+    groundingRules.push(
+      `- Is INTERCHANGEABLE with a generic competitor: the outcome chain / commercial leverage / primary wedge never resolves to this product's differentiating feature ("${productAnchor.differentiatingFeature.slice(0, 120)}") or its core problem ("${productAnchor.coreProblemSolved.slice(0, 120)}") — if the document could be pasted onto any competitor in the category without edits, REJECT it`,
+    );
+  }
 
   return `You are a hostile reviewer of a value architecture document. Reject anything that:
 - Has identity outcomes that are vibes ("data-driven leader", "modern marketer", "successful X") instead of named roles tied to evidence
@@ -285,7 +309,7 @@ export async function designValueArchitecture(args: DesignerInput): Promise<Valu
   let judgeFix = "";
   try {
     const judgeResp = await aiChat({
-      messages: [{ role: "user", content: buildJudgePrompt(designRaw, !!args.trustMechanism, !!args.gameDimension) }],
+      messages: [{ role: "user", content: buildJudgePrompt(designRaw, !!args.trustMechanism, !!args.gameDimension, args.productAnchor) }],
       model: "gpt-4.1-mini",
       temperature: 0.1,
       max_tokens: 400,

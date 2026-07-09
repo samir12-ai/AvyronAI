@@ -181,6 +181,48 @@ export function resolveDoctrine(input: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// F5a — DNA-fallback anchor derivation (shared by offer / channel batteries;
+// mirrors the inline logic shipped in positioning + audience engines).
+// Guard: only when a genuine differentiator + core problem + name + type ALL
+// exist — an anchor fabricated from empty strings would flip the judge to the
+// strict test with hollow context (worse than the weak anchor-free test).
+// Explicit if/else selection — no semantic-fallback chains (D1). Returns null
+// when the DNA cannot honestly supply an anchor (D5 — never fabricate).
+// ---------------------------------------------------------------------------
+
+export interface ProductDnaLike {
+  productCategory?: string | null;
+  coreProblemSolved?: string | null;
+  uniqueMechanism?: string | null;
+  strategicAdvantage?: string | null;
+  businessType?: string | null;
+  coreOffer?: string | null;
+}
+
+export function deriveAnchorFromProductDna(dna: ProductDnaLike | null | undefined): ProductAnchor | null {
+  if (!dna) return null;
+  let dnaDifferentiator = "";
+  if (dna.strategicAdvantage && dna.strategicAdvantage.trim().length > 0) {
+    dnaDifferentiator = dna.strategicAdvantage.trim();
+  } else if (dna.uniqueMechanism && dna.uniqueMechanism.trim().length > 0) {
+    dnaDifferentiator = dna.uniqueMechanism.trim();
+  }
+  const dnaProblem = dna.coreProblemSolved ? dna.coreProblemSolved.trim() : "";
+  const dnaName = dna.coreOffer ? String(dna.coreOffer).trim() : "";
+  const dnaType = dna.businessType ? String(dna.businessType).trim() : "";
+  if (dnaDifferentiator.length === 0 || dnaProblem.length === 0 || dnaName.length === 0 || dnaType.length === 0) {
+    return null;
+  }
+  return {
+    name: dnaName,
+    type: dnaType,
+    keyAttributes: dna.productCategory ? [dna.productCategory] : [],
+    coreProblemSolved: dnaProblem,
+    differentiatingFeature: dnaDifferentiator,
+  };
+}
+
 /** Stable 16-char sha256 of the anchor JSON; "" (empty) when anchor is null. */
 export function computeAnchorHash(anchor: ProductAnchor | null): string {
   if (!anchor) return "";
