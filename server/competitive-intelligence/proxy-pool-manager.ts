@@ -1,6 +1,16 @@
-import { ProxyAgent } from "undici";
 import * as crypto from "crypto";
 import { LRUCache } from "lru-cache";
+import {
+  unlockerRequest,
+  ScrapingUnconfiguredError,
+  BRIGHT_DATA_TIMEOUT_MS,
+} from "./brightdata-client";
+
+// Re-exported so scrapers can catch the typed error / read the timeout knob
+// WITHOUT importing brightdata-client directly (forbidden by ESLint rule
+// `scraping-transport/no-direct-brightdata-client-import` — the pool manager
+// is the single sanctioned transport gateway).
+export { ScrapingUnconfiguredError, BRIGHT_DATA_TIMEOUT_MS };
 
 const QUARANTINE_THRESHOLD = 2;
 const QUARANTINE_WINDOW_MS = 10 * 60 * 1000;
@@ -12,14 +22,16 @@ const RETRY_DELAYS: [number, number][] = [[10000, 25000], [30000, 60000]];
 
 export type BlockClass = "PROXY_BLOCKED" | "RATE_LIMIT" | "AUTH_REQUIRED" | "CHECKPOINT" | "OTHER";
 
+/**
+ * A logical scrape session. Since the 2026-07 Unlocker-API rebuild there is
+ * no proxy identity (host/port/credentials/dispatcher) attached — Bright Data
+ * manages IPs server-side per request. `sessionId`/`ipHash` survive as a
+ * LOGICAL session-hash used for sticky bookkeeping, quarantine backoff, and
+ * telemetry correlation — they do NOT correspond to a literal upstream IP.
+ */
 export interface ProxySession {
   sessionId: string;
   ipHash: string;
-  dispatcher: ProxyAgent;
-  sessionUsername: string;
-  sessionPassword: string;
-  proxyHost: string;
-  proxyPort: string;
   createdAt: number;
   successCount: number;
   blockCount: number;
@@ -69,51 +81,50 @@ const pools = new LRUCache<string, AccountPool>({
   ttlAutopurge: false,
 });
 
-export function getProxyConfig(): { host: string; port: string; username: string; password: string } | null {
-  const host = process.env.BRIGHT_DATA_PROXY_HOST;
-  const port = process.env.BRIGHT_DATA_PROXY_PORT;
-  const username = process.env.BRIGHT_DATA_PROXY_USERNAME;
-  const password = process.env.BRIGHT_DATA_PROXY_PASSWORD;
-  if (!host || !port || !username || !password) return null;
-  return { host, port, username, password };
+export interface ScrapingConfig {
+  apiKey: string;
+  zone: string;
+  /** ISO-3166 alpha-2 lowercase, or null → zone default geo. */
+  country: string | null;
 }
 
-const COUNTRY_NAME_TO_ISO2: Record<string, string> = {
-  "united arab emirates": "ae",
-  "united states": "us",
-  "united kingdom": "gb",
-  "saudi arabia": "sa",
-  "egypt": "eg",
-  "canada": "ca",
-  "germany": "de",
-  "france": "fr",
-  "india": "in",
-};
+/**
+ * Env contract (2026-07 Unlocker rebuild):
+ *   BRIGHT_DATA_API_KEY — Bearer key for api.brightdata.com
+ *   BRIGHT_DATA_ZONE    — Unlocker zone name (e.g. "marketmindai")
+ *   BRIGHT_DATA_COUNTRY — optional 2-letter geo target
+ *
+ * Both API_KEY and ZONE must be present; anything else is unconfigured.
+ * Partial configuration is boot-FATAL in env-validator; returning null here
+ * is the runtime defense-in-depth for the same rule (D5: missing canonical
+ * config never silently substitutes).
+ */
+export function getScrapingConfig(): ScrapingConfig | null {
+  const apiKey = process.env.BRIGHT_DATA_API_KEY?.trim();
+  const zone = process.env.BRIGHT_DATA_ZONE?.trim();
+  if (!apiKey || !zone) return null;
+  return { apiKey, zone, country: resolveScrapingCountry() };
+}
 
 let warnedInvalidCountry = false;
 
 /**
- * Normalizes BRIGHT_DATA_PROXY_COUNTRY into the ISO-3166 alpha-2 code Bright
- * Data's username syntax requires (`-country-<cc>`). Operators sometimes set
- * the full country name (e.g. "United Arab Emirates") instead of "ae" — that
- * value silently fails to geo-target once fed into the proxy username, so we
- * map known full names to their code and otherwise fall back to a safe
- * lowercase 2-letter slice with a one-time startup warning.
+ * Strict country resolution: a valid ISO-3166 alpha-2 code or null (zone
+ * default). NO silent "us" fallback and NO country-name mapping — a malformed
+ * BRIGHT_DATA_COUNTRY is boot-FATAL in env-validator; if one is somehow seen
+ * at runtime it is IGNORED loudly rather than misdirected (B2/B3).
  */
-export function resolveProxyCountry(): string {
-  const raw = (process.env.BRIGHT_DATA_PROXY_COUNTRY || "us").trim();
+export function resolveScrapingCountry(): string | null {
+  const raw = (process.env.BRIGHT_DATA_COUNTRY || "").trim();
+  if (!raw) return null;
   if (/^[a-zA-Z]{2}$/.test(raw)) return raw.toLowerCase();
-
-  const mapped = COUNTRY_NAME_TO_ISO2[raw.toLowerCase()];
-  if (mapped) return mapped;
-
   if (!warnedInvalidCountry) {
     warnedInvalidCountry = true;
     console.error(
-      `[ProxyPool] INVALID_COUNTRY_FORMAT | BRIGHT_DATA_PROXY_COUNTRY="${raw}" is not a recognized ISO-3166 alpha-2 code (e.g. "ae", "us"). Falling back to "us". Geo-targeting will be wrong until this is corrected.`,
+      `[ProxyPool] INVALID_COUNTRY_FORMAT | BRIGHT_DATA_COUNTRY="${raw}" is not an ISO-3166 alpha-2 code (e.g. "ae", "us"). Value IGNORED — requests use the zone's default geo. Boot validation should have rejected this.`,
     );
   }
-  return "us";
+  return null;
 }
 
 function computeIpHash(sessionId: string): string {
@@ -157,33 +168,17 @@ export function _poolCountForTesting(): number {
 }
 
 function createSession(accountId: string): ProxySession | null {
-  const proxy = getProxyConfig();
-  if (!proxy) return null;
+  const config = getScrapingConfig();
+  if (!config) return null;
 
   const shortAccount = accountId.substring(0, 8);
   const ts = (Date.now() % 1000000).toString(36);
   const rand = Math.random().toString(36).substr(2, 4);
   const sessionId = `s${shortAccount}${ts}${rand}`;
-  const country = resolveProxyCountry();
-  const countrySegment = `-country-${country}`;
-  // Bright Data's Web Unlocker (port 33335) DOES support both `-country-`
-  // and `-session-` suffixes on the username — it was previously treated as
-  // an all-or-nothing product mode and both were dropped, which silently
-  // ignored BRIGHT_DATA_PROXY_COUNTRY and made our own sticky-session /
-  // rotate-on-block bookkeeping a no-op against the real network path
-  // (every "rotated" session sent the identical bare username to Bright
-  // Data). Including both restores real per-competitor IP diversification.
-  const sessionUsername = `${proxy.username}${countrySegment}-session-${sessionId}`;
-  const sessionUrl = `http://${sessionUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
 
   const session: ProxySession = {
     sessionId,
     ipHash: computeIpHash(sessionId),
-    dispatcher: new ProxyAgent({ uri: sessionUrl, requestTls: { rejectUnauthorized: false } }),
-    sessionUsername,
-    sessionPassword: proxy.password,
-    proxyHost: proxy.host,
-    proxyPort: proxy.port,
     createdAt: Date.now(),
     successCount: 0,
     blockCount: 0,
@@ -196,38 +191,6 @@ function createSession(accountId: string): ProxySession | null {
   const pool = getOrCreatePool(accountId);
   pool.sessions.set(sessionId, session);
   return session;
-}
-
-function selectHealthySession(accountId: string, excludeIds: Set<string> = new Set()): ProxySession | null {
-  const pool = getOrCreatePool(accountId);
-  const now = Date.now();
-  for (const session of pool.sessions.values()) {
-    if (excludeIds.has(session.sessionId)) continue;
-    if (now - session.createdAt > SESSION_TTL_MS) {
-      pool.sessions.delete(session.sessionId);
-      continue;
-    }
-    // Quarantine recovery: when the cooldown window has elapsed, clear
-    // the quarantine flag and reset block-history counters so the
-    // session is reusable. Without this, a once-quarantined session
-    // would remain permanently excluded until TTL eviction.
-    if (session.isQuarantined) {
-      if (session.cooldownUntil && session.cooldownUntil <= now) {
-        session.isQuarantined = false;
-        session.cooldownUntil = null;
-        session.blockCount = 0;
-        session.previousBlockAt = null;
-        session.lastBlockAt = null;
-        console.log(`[ProxyPool] QUARANTINE_RECOVERED | account=${accountId} | session=${session.sessionId}`);
-      } else {
-        continue;
-      }
-    } else if (session.cooldownUntil && session.cooldownUntil > now) {
-      continue;
-    }
-    return session;
-  }
-  return null;
 }
 
 export function recordSuccess(accountId: string, sessionId: string): void {
@@ -274,7 +237,22 @@ function addTelemetry(accountId: string, entry: ProxyTelemetryEntry): void {
   }
 }
 
-export function classifyBlock(httpStatus: number | null, errorMessage: string): BlockClass {
+/**
+ * Classifies a failed/blocked scrape attempt.
+ *
+ * `brdErrorCode` is the `x-brd-err-code` response header from the Unlocker
+ * API (surfaced on every poolFetch Response). Documented codes:
+ *   - sr_rate_limit → zone hit its request rate limit (HTTP 429).
+ * Unknown brd codes fall through to status/message heuristics.
+ */
+export function classifyBlock(
+  httpStatus: number | null,
+  errorMessage: string,
+  brdErrorCode?: string | null,
+): BlockClass {
+  const code = (brdErrorCode || "").toLowerCase();
+  if (code === "sr_rate_limit") return "RATE_LIMIT";
+
   const msg = (errorMessage || "").toLowerCase();
   if (msg.includes("proxy") || msg.includes("tunnel") || msg.includes("connect")) return "PROXY_BLOCKED";
   if (httpStatus === 429 || msg.includes("rate limit") || msg.includes("wait a few minutes")) return "RATE_LIMIT";
@@ -284,6 +262,11 @@ export function classifyBlock(httpStatus: number | null, errorMessage: string): 
   return "OTHER";
 }
 
+export interface PoolFetchInit {
+  /** Wall-clock ceiling for this request. Default: BRIGHT_DATA_TIMEOUT_MS. */
+  timeoutMs?: number;
+}
+
 export interface StickySessionContext {
   accountId: string;
   campaignId: string;
@@ -291,6 +274,42 @@ export interface StickySessionContext {
   session: ProxySession;
   attemptNumber: number;
   usedSessionIds: Set<string>;
+  /**
+   * Transport for this sticky session. Routes through the Unlocker API
+   * client. Throws ScrapingUnconfiguredError when BRIGHT_DATA_API_KEY/ZONE
+   * are absent — there is NO direct-fetch fallback anywhere (safe-off).
+   * Custom request headers are intentionally NOT supported: the Unlocker
+   * API manages fingerprints (UA, TLS, headers) server-side.
+   */
+  poolFetch(url: string, init?: PoolFetchInit): Promise<Response>;
+}
+
+async function executePoolFetch(url: string, init?: PoolFetchInit): Promise<Response> {
+  const config = getScrapingConfig();
+  if (!config) throw new ScrapingUnconfiguredError();
+  const result = await unlockerRequest({
+    apiKey: config.apiKey,
+    zone: config.zone,
+    url,
+    country: config.country,
+    timeoutMs: init?.timeoutMs,
+  });
+  return result.response;
+}
+
+/**
+ * One-shot transport for scrapers that do not hold a sticky session
+ * (reviews, TikTok, website/blog). Same contract as ctx.poolFetch.
+ */
+export async function poolFetch(url: string, init?: PoolFetchInit): Promise<Response> {
+  return executePoolFetch(url, init);
+}
+
+function buildCtx(base: Omit<StickySessionContext, "poolFetch">): StickySessionContext {
+  return {
+    ...base,
+    poolFetch: (url: string, init?: PoolFetchInit) => executePoolFetch(url, init),
+  };
 }
 
 export function acquireStickySession(
@@ -307,12 +326,12 @@ export function acquireStickySession(
   if (existingSessionId) {
     const existingSession = pool.sessions.get(existingSessionId);
     if (existingSession && !existingSession.isQuarantined && Date.now() - existingSession.createdAt < SESSION_TTL_MS) {
-      return {
+      return buildCtx({
         accountId, campaignId, competitorHash,
         session: existingSession,
         attemptNumber: 1,
         usedSessionIds: new Set([existingSessionId]),
-      };
+      });
     }
     pool.stickyBindings.delete(bindingKey);
   }
@@ -321,12 +340,12 @@ export function acquireStickySession(
   if (!session) return null;
 
   pool.stickyBindings.set(bindingKey, session.sessionId);
-  return {
+  return buildCtx({
     accountId, campaignId, competitorHash,
     session,
     attemptNumber: 1,
     usedSessionIds: new Set([session.sessionId]),
-  };
+  });
 }
 
 export function rotateSessionOnBlock(ctx: StickySessionContext, blockClass: BlockClass): StickySessionContext | null {
@@ -355,12 +374,14 @@ export function rotateSessionOnBlock(ctx: StickySessionContext, blockClass: Bloc
 
   console.log(`[ProxyPool] SESSION_ROTATED | account=${ctx.accountId} | oldSession=${ctx.session.sessionId} | newSession=${newSession.sessionId} | attempt=${ctx.attemptNumber + 1} | blockClass=${blockClass}`);
 
-  return {
-    ...ctx,
+  return buildCtx({
+    accountId: ctx.accountId,
+    campaignId: ctx.campaignId,
+    competitorHash: ctx.competitorHash,
     session: newSession,
     attemptNumber: ctx.attemptNumber + 1,
     usedSessionIds: newUsed,
-  };
+  });
 }
 
 export async function getRetryDelay(attemptNumber: number): Promise<void> {
@@ -503,6 +524,86 @@ export function isSessionQuarantined(accountId: string, sessionId: string): bool
 
 export function getActivePoolCount(): number {
   return pools.size;
+}
+
+export interface ScrapingConnectivityResult {
+  ok: boolean;
+  configured: true;
+  status: number | null;
+  brdErrorCode: string | null;
+  durationMs: number;
+  detail: string;
+}
+
+/**
+ * Live connectivity probe for the /api/proxy/health endpoint. Sends ONE
+ * Unlocker request to Bright Data's documented test target. Never throws;
+ * never logs or returns the API key.
+ */
+export async function testScrapingConnectivity(): Promise<ScrapingConnectivityResult | { ok: false; configured: false; detail: string }> {
+  const config = getScrapingConfig();
+  if (!config) {
+    return { ok: false, configured: false, detail: "SCRAPING_UNCONFIGURED — BRIGHT_DATA_API_KEY / BRIGHT_DATA_ZONE not set" };
+  }
+  const startMs = Date.now();
+  try {
+    const result = await unlockerRequest({
+      apiKey: config.apiKey,
+      zone: config.zone,
+      url: "https://geo.brdtest.com/welcome.txt",
+      country: config.country,
+      timeoutMs: 30_000,
+    });
+    const ok = result.status >= 200 && result.status < 300 && !result.brdErrorCode;
+    return {
+      ok,
+      configured: true,
+      status: result.status,
+      brdErrorCode: result.brdErrorCode,
+      durationMs: result.durationMs,
+      detail: ok
+        ? `Unlocker API reachable | zone=${config.zone} | country=${config.country ?? "zone-default"} | ${result.durationMs}ms`
+        : `Unlocker API returned status=${result.status}${result.brdErrorCode ? ` brdErrorCode=${result.brdErrorCode}` : ""}`,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      configured: true,
+      status: null,
+      brdErrorCode: null,
+      durationMs: Date.now() - startMs,
+      detail: `Connectivity test failed: ${err?.message || String(err)}`,
+    };
+  }
+}
+
+// Explicit session-selection helper retained for tests / future upgrades.
+export function selectHealthySessionForTesting(accountId: string, excludeIds: Set<string> = new Set()): ProxySession | null {
+  const pool = getOrCreatePool(accountId);
+  const now = Date.now();
+  for (const session of pool.sessions.values()) {
+    if (excludeIds.has(session.sessionId)) continue;
+    if (now - session.createdAt > SESSION_TTL_MS) {
+      pool.sessions.delete(session.sessionId);
+      continue;
+    }
+    if (session.isQuarantined) {
+      if (session.cooldownUntil && session.cooldownUntil <= now) {
+        session.isQuarantined = false;
+        session.cooldownUntil = null;
+        session.blockCount = 0;
+        session.previousBlockAt = null;
+        session.lastBlockAt = null;
+        console.log(`[ProxyPool] QUARANTINE_RECOVERED | account=${accountId} | session=${session.sessionId}`);
+      } else {
+        continue;
+      }
+    } else if (session.cooldownUntil && session.cooldownUntil > now) {
+      continue;
+    }
+    return session;
+  }
+  return null;
 }
 
 export { MAX_RETRIES_PER_STAGE, SESSION_TTL_MS, QUARANTINE_THRESHOLD, QUARANTINE_WINDOW_MS, DEFAULT_QUARANTINE_MS };

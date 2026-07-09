@@ -1,12 +1,13 @@
 import { db } from "../db";
 import { ciCompetitorPosts, ciCompetitorComments, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { getProxyConfig, resolveProxyCountry } from "./proxy-pool-manager";
+import { getScrapingConfig, poolFetch } from "./proxy-pool-manager";
 
-// Seal #5 / F6.7 — outbound HTTP timeout aligned at 15s across all scrapers
-// (validator-#4 closure). 45s previously caused TikTok scrapes to hang past
-// the queue-processor tick interval; 15s + breaker is the hard contract.
-const TIKTOK_SCRAPE_TIMEOUT_MS = 15000;
+// 2026-07 Unlocker rebuild: transport goes through the pool manager's
+// poolFetch (Bright Data Unlocker REST API). The Unlocker performs anti-bot
+// solving server-side (can legitimately take longer than a bare proxied
+// fetch), so the ceiling is the client's 60s wall-clock budget.
+const TIKTOK_SCRAPE_TIMEOUT_MS = 60000;
 const MAX_RETRIES = 2;
 const MAX_COMMENTS_PER_POST = 20;
 
@@ -48,49 +49,10 @@ export interface TiktokScrapedResult {
   degradedReason?: "BRIGHT_DATA_FAIL" | "APIFY_FAIL" | "BOTH_SOURCES_DOWN" | "NO_SOURCE_CONFIGURED" | "NO_HANDLE";
 }
 
-const MOBILE_USER_AGENTS = [
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-  "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/125.0.6422.80 Mobile/15E148 Safari/604.1",
-];
-
-const DESKTOP_USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-];
-
-function pickUA(pool: string[]): string {
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
-async function fetchViaProxy(url: string, headers: Record<string, string>): Promise<{ html: string; status: number }> {
-  const proxy = getProxyConfig();
-  if (!proxy) throw new Error("Bright Data proxy not configured");
-
-  const { ProxyAgent } = await import("undici");
-  const country = resolveProxyCountry();
-  const sessionId = `s${Math.random().toString(36).slice(2, 10)}`;
-  // Web Unlocker (port 33335) supports `-country-`/`-session-` suffixes too;
-  // previously both were dropped on this port, which silently ignored
-  // BRIGHT_DATA_PROXY_COUNTRY and reused one bare identity for every request.
-  const proxyUsername = `${proxy.username}-country-${country}-session-${sessionId}`;
-  const proxyUrl = `http://${proxyUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIKTOK_SCRAPE_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      headers,
-      signal: controller.signal,
-      redirect: "follow",
-      dispatcher: new ProxyAgent({ uri: proxyUrl, requestTls: { rejectUnauthorized: false } }),
-    } as any);
-    const html = await res.text();
-    return { html, status: res.status };
-  } finally {
-    clearTimeout(timer);
-  }
+async function fetchViaUnlocker(url: string): Promise<{ html: string; status: number }> {
+  const res = await poolFetch(url, { timeoutMs: TIKTOK_SCRAPE_TIMEOUT_MS });
+  const html = await res.text();
+  return { html, status: res.status };
 }
 
 function extractRehydrationData(html: string): any | null {
@@ -361,10 +323,9 @@ function toNum(v: any): number | undefined {
   return isNaN(n) ? undefined : n;
 }
 
-async function scrapeTiktokViaProxy(handle: string): Promise<TiktokPost[]> {
-  const proxy = getProxyConfig();
-  if (!proxy) {
-    console.warn("[TiktokScraper] No Bright Data proxy configured — cannot scrape TikTok");
+async function scrapeTiktokViaUnlocker(handle: string): Promise<TiktokPost[]> {
+  if (!getScrapingConfig()) {
+    console.error("[TiktokScraper] SCRAPING_UNCONFIGURED — Bright Data Unlocker API not configured, cannot scrape TikTok");
     return [];
   }
 
@@ -373,21 +334,8 @@ async function scrapeTiktokViaProxy(handle: string): Promise<TiktokPost[]> {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const ua = attempt === 0 ? pickUA(DESKTOP_USER_AGENTS) : pickUA(MOBILE_USER_AGENTS);
-      const headers: Record<string, string> = {
-        "User-Agent": ua,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-      };
-
-      console.log(`[TiktokScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for @${handle} via proxy`);
-      const { html, status } = await fetchViaProxy(profileUrl, headers);
+      console.log(`[TiktokScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for @${handle} via Unlocker API`);
+      const { html, status } = await fetchViaUnlocker(profileUrl);
 
       if (status === 403 || status === 429) {
         lastError = `HTTP ${status} — blocked or rate limited`;
@@ -556,12 +504,12 @@ export async function scrapeTiktokForCompetitor(
     return result;
   }
 
-  const proxy = getProxyConfig();
+  const unlockerConfigured = !!getScrapingConfig();
   let brightDataFailed = false;
 
-  if (proxy) {
+  if (unlockerConfigured) {
     try {
-      const posts = await scrapeTiktokViaProxy(handle);
+      const posts = await scrapeTiktokViaUnlocker(handle);
       if (posts.length > 0) {
         result.postsFetched = posts.length;
         result.source = "brightdata";
@@ -581,8 +529,10 @@ export async function scrapeTiktokForCompetitor(
       console.log(`[TiktokScraper] Bright Data failed for @${handle}: ${safeMsg} — falling back to Apify`);
     }
   } else {
-    brightDataFailed = true;
-    console.log(`[TiktokScraper] Bright Data proxy not configured — trying Apify`);
+    // B4 — unconfigured is NOT a failure. brightDataFailed stays false so the
+    // degradedReason below truthfully reports NO_SOURCE_CONFIGURED (not
+    // BOTH_SOURCES_DOWN) when Apify is also unconfigured.
+    console.log(`[TiktokScraper] SCRAPING_UNCONFIGURED (Bright Data Unlocker API) — trying Apify`);
   }
 
   const { isApifyConfigured, scrapeTiktokViaApify } = await import("./tiktok-apify-scraper");

@@ -1097,8 +1097,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("proxyCtx?.session.dispatcher");
       expect(source).toContain("proxyCtx?.session.sessionId");
+      expect(source).toContain("proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url)");
       expect(source).not.toContain("getSessionDispatcher");
       expect(source).not.toContain("getProxyDispatcher");
     });

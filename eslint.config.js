@@ -9,6 +9,9 @@ const orchestratorNoNewLargeFile = require('./.local/eslint-rules/orchestrator-n
 // Task #93 / Phase 4-E — Cutover + dispatch deletion guards.
 const orchestratorNoDispatchFlags = require('./.local/eslint-rules/orchestrator-no-dispatch-flags.js');
 const orchestratorNoCutoverStateReference = require('./.local/eslint-rules/orchestrator-no-cutover-state-reference.js');
+// 2026-07 Unlocker rebuild — brightdata-client is importable ONLY by the
+// proxy-pool-manager (single transport choke point).
+const noDirectBrightdataClientImport = require('./.local/eslint-rules/no-direct-brightdata-client-import.js');
 
 module.exports = defineConfig([
   expoConfig,
@@ -158,6 +161,26 @@ module.exports = defineConfig([
       // Task #93 / Phase 4-E — guards against resurrecting deleted systems.
       "orchestrator/no-dispatch-flags": "error",
       "orchestrator/no-cutover-state-reference": "error",
+    },
+  },
+  // 2026-07 Unlocker rebuild — all scrape transport MUST go through
+  // proxy-pool-manager (poolFetch / ctx.poolFetch). Direct imports of
+  // brightdata-client bypass rate limiting, quarantine, block
+  // classification, and the SCRAPING_UNCONFIGURED fail-fast contract.
+  {
+    files: ["server/**/*.ts"],
+    ignores: [
+      "server/competitive-intelligence/proxy-pool-manager.ts",
+      "server/competitive-intelligence/brightdata-client.ts",
+      "server/tests/**/*.ts",
+    ],
+    plugins: {
+      "scraping-transport": {
+        rules: { "no-direct-brightdata-client-import": noDirectBrightdataClientImport },
+      },
+    },
+    rules: {
+      "scraping-transport/no-direct-brightdata-client-import": "error",
     },
   },
 ]);

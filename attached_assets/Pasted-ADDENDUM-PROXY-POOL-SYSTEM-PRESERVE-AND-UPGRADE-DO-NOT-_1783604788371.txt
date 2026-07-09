@@ -1,0 +1,15 @@
+ADDENDUM — PROXY POOL SYSTEM: PRESERVE AND UPGRADE, DO NOT REMOVE
+
+Critical clarification on the rebuild: we have an existing proxy-pool management system (proxy-pool-manager: pool rotation, cooldowns, health tracking, etc.). "Rebuild from scratch" applies to the Bright Data CREDENTIALS/TRANSPORT layer ONLY — NOT to this management layer.
+
+RULES:
+1. DO NOT remove or bypass the proxy pool / cooldown system. It survives the migration and sits ABOVE the new Unlocker client: the pool manager decides WHEN and against WHICH target a request fires (cooldowns per competitor profile/platform, spacing, health state), and the Unlocker client is the transport it fires through. Unlocker handles IP rotation internally — our layer handles target-level pacing, failure isolation, and scheduling, which Unlocker does NOT do.
+2. AUDIT the current pool/cooldown implementation and report: what it tracks today (per-target cooldowns? per-platform? global?), how failures affect it, and any weaknesses (e.g., cooldown state lost on restart, no per-platform tuning, no backoff escalation).
+3. UPGRADE it — propose and implement:
+   a. MULTI-POOL support: multiple named pools (e.g., pool per platform: instagram / tiktok / reviews, or per zone if we add more Bright Data zones later), each with its own cooldown profile, concurrency limit, and health state. Config-driven so adding a pool is configuration, not code.
+   b. Smarter cooldowns: per-target adaptive backoff (a target that failed recently gets exponentially longer cooldown with jitter), and per-platform base rates (TikTok tolerance ≠ Instagram tolerance).
+   c. Persistent state: cooldown/health state survives server restarts (DB or durable store), so a restart doesn't unleash a burst against targets that were cooling down.
+   d. Observability: a small status endpoint/log summary — pools, targets in cooldown, recent failure rates — so we can SEE the pool working.
+4. The new brightdata-client.ts (Unlocker transport) must be called ONLY through the pool manager — no scraper bypasses the pool to hit Unlocker directly.
+
+Report the audit findings (point 2) and your upgrade design (point 3) before implementing the upgrades. The Phase 1-3 wiring from the main prompt proceeds in parallel.

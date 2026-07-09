@@ -103,11 +103,14 @@ describe("Seal #5 / F7.2 — SSRF defense", () => {
     await expect(resolveSafeUrl("file:///etc/passwd")).rejects.toThrow();
   });
 
-  it("website-scraper imports resolveSafeUrl + pinnedLookup (F7.2 source tripwire)", () => {
+  it("website-scraper keeps the resolveSafeUrl SSRF gate on every Unlocker fetch (F7.2 source tripwire)", () => {
     const src = readFileSync(`${REPO}/server/market-intelligence-v3/website-scraper.ts`, "utf-8");
-    expect(src).toMatch(/import .*resolveSafeUrl.*pinnedLookup.*from.*scrape-safety/);
+    expect(src).toMatch(/import .*resolveSafeUrl.*from.*scrape-safety/);
     expect(src).toMatch(/await resolveSafeUrl\(opts\.url\)/);
-    expect(src).toMatch(/pinnedLookup\(resolved\.ip, resolved\.family\)/);
+    // 2026-07 Unlocker rebuild: the pinnedLookup direct-fetch path is gone —
+    // every request goes through poolFetch; no direct dispatcher may return.
+    expect(src).not.toMatch(/pinnedLookup\(/);
+    expect(src).not.toMatch(/new ProxyAgent/);
   });
 });
 
@@ -387,13 +390,14 @@ describe("Seal #5 / F6.12 — Breaker wired into production call sites", () => {
     expect(src).toMatch(/throw new Error\(`BREAKER_OPEN: apify:default/);
   });
 
-  it("website fetchWithProxy gates on breaker + records success/failure on both proxy and direct paths", () => {
+  it("website fetchViaUnlocker gates on breaker + records success/failure (single Unlocker path)", () => {
     const src = readFileSync(`${REPO}/server/market-intelligence-v3/website-scraper.ts`, "utf-8");
     expect(src).toMatch(/isBreakerOpen\("website",\s*country\)/);
-    // At least 2 success and 2 failure records (proxy path + direct path).
+    // 2026-07 Unlocker rebuild: ONE transport path (poolFetch). ≥1 success
+    // record and ≥2 failure records (HTTP 5xx + thrown transport error).
     const successCount = (src.match(/recordBreakerSuccess\("website",\s*country\)/g) || []).length;
     const failureCount = (src.match(/recordBreakerFailure\("website",\s*country\)/g) || []).length;
-    expect(successCount).toBeGreaterThanOrEqual(2);
+    expect(successCount).toBeGreaterThanOrEqual(1);
     expect(failureCount).toBeGreaterThanOrEqual(2);
     expect(src).toMatch(/throw new Error\(`BREAKER_OPEN: website:\$\{country\}/);
   });
@@ -456,25 +460,35 @@ describe("Seal #5 / F7.5 detectInjectionTokens runtime contract", () => {
   });
 });
 
-describe("Seal #5 / F6.7 — outbound HTTP timeout = 15s (validator-#3 + #4)", () => {
-  it("apifyFetch uses a 15000ms AbortController timeout", () => {
+describe("Seal #5 / F6.7 — outbound HTTP timeouts (2026-07 Unlocker rebuild)", () => {
+  // Contract split since the Unlocker rebuild:
+  //  - DIRECT outbound calls (Apify API) keep the original 15s ceiling.
+  //  - UNLOCKER-mediated scrapes go through poolFetch → Bright Data /request,
+  //    which performs proxying/unblocking server-side and legitimately needs a
+  //    longer wall-clock: 60s (BRIGHT_DATA_TIMEOUT_MS default), never unbounded.
+  it("apifyFetch uses a 15000ms AbortController timeout (direct API call)", () => {
     const src = readFileSync(`${REPO}/server/competitive-intelligence/tiktok-apify-scraper.ts`, "utf-8");
     expect(src).toMatch(/setTimeout\(\(\) => controller\.abort\(\), 15000\)/);
   });
-  it("website-scraper SCRAPE_TIMEOUT_MS is 15000", () => {
+  it("website-scraper SCRAPE_TIMEOUT_MS is 60000 (Unlocker wall-clock)", () => {
     const src = readFileSync(`${REPO}/server/market-intelligence-v3/website-scraper.ts`, "utf-8");
-    expect(src).toMatch(/const SCRAPE_TIMEOUT_MS = 15000/);
+    expect(src).toMatch(/const SCRAPE_TIMEOUT_MS = 60000/);
   });
-  it("reviews-scraper SCRAPE_TIMEOUT_MS is 15000 (validator-#4)", () => {
+  it("reviews-scraper SCRAPE_TIMEOUT_MS is 60000 (Unlocker wall-clock)", () => {
     const src = readFileSync(`${REPO}/server/competitive-intelligence/reviews-scraper.ts`, "utf-8");
-    expect(src).toMatch(/const SCRAPE_TIMEOUT_MS = 15000/);
-    // negative: must NOT silently re-introduce 40s
+    expect(src).toMatch(/const SCRAPE_TIMEOUT_MS = 60000/);
+    // negative: must NOT silently re-introduce the old 40s special-case
     expect(src).not.toMatch(/const SCRAPE_TIMEOUT_MS = 40000/);
   });
-  it("tiktok-scraper TIKTOK_SCRAPE_TIMEOUT_MS is 15000 (validator-#4)", () => {
+  it("tiktok-scraper TIKTOK_SCRAPE_TIMEOUT_MS is 60000 (Unlocker wall-clock)", () => {
     const src = readFileSync(`${REPO}/server/competitive-intelligence/tiktok-scraper.ts`, "utf-8");
-    expect(src).toMatch(/const TIKTOK_SCRAPE_TIMEOUT_MS = 15000/);
+    expect(src).toMatch(/const TIKTOK_SCRAPE_TIMEOUT_MS = 60000/);
     expect(src).not.toMatch(/const TIKTOK_SCRAPE_TIMEOUT_MS = 45000/);
+  });
+  it("brightdata-client enforces a bounded wall-clock (never bare fetch)", () => {
+    const src = readFileSync(`${REPO}/server/competitive-intelligence/brightdata-client.ts`, "utf-8");
+    expect(src).toMatch(/BRIGHT_DATA_TIMEOUT_MS/);
+    expect(src).toMatch(/controller\.abort\(\)/);
   });
 });
 

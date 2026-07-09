@@ -115,6 +115,20 @@ interface FetchJobDiagnostics {
   rateLimitEvents: number;
   perCompetitorStatus: { name: string; fetchStatus: CompetitorFetchStatus; requestsUsed: number; postsCollected: number; commentsCollected: number }[];
   perCompetitorRequestCap: number;
+  /**
+   * 2026-07 Unlocker rebuild — transport truthfulness summary (B1/B4).
+   * `SUSPECT_ZERO_YIELD` = at least one competitor fetch SUCCEEDED at the
+   * transport level yet the whole job yielded ZERO posts. With the Unlocker
+   * API that pattern usually means the zone is serving challenge/empty pages
+   * (a silent-block), NOT that every profile is genuinely empty — operators
+   * must treat it as a scraping-health incident, never as market signal.
+   */
+  transport: {
+    requests: number;
+    successes: number;
+    failures: number;
+    outcome: "OK" | "SUSPECT_ZERO_YIELD";
+  };
 }
 
 export function computeDynamicBudgets(competitorCount: number): { requestBudget: number; runtimeBudget: number } {
@@ -991,6 +1005,20 @@ async function executeFetchJob(
     const competitorsSkipped = stageValues.filter(s => s.fetchStatus === "SKIPPED_DUE_TO_BUDGET" || s.fetchStatus === "SKIPPED_DUE_TO_RUNTIME" || s.fetchStatus === "SKIPPED_DUE_TO_PAGES_CEILING" || s.fetchStatus === "PENDING").length;
     const coverageRatio = competitors.length > 0 ? competitorsProcessed / competitors.length : 0;
 
+    // 2026-07 Unlocker rebuild — transport truthfulness (B1/B4). A transport
+    // "success" is a competitor whose fetch completed without a transport
+    // error (FETCH_SUCCESS or NO_POSTS_FOUND). Hoisted above the snapshot
+    // persist so BOTH the job-level diagnostics and the snapshot-level
+    // telemetry share ONE criterion: SUSPECT_ZERO_YIELD requires ≥1 transport
+    // success — an all-failed job is a plain transport failure (loud via
+    // partialCoverage/stopReason), NOT a silent-block suspicion.
+    const transportSuccesses = stageValues.filter(
+      s => s.fetchStatus === "FETCH_SUCCESS" || s.fetchStatus === "NO_POSTS_FOUND"
+    ).length;
+    const transportFailures = stageValues.filter(
+      s => s.fetchStatus === "FETCH_FAILED" || s.fetchStatus === "BLOCKED_BY_PLATFORM" || s.fetchStatus === "RATE_LIMITED"
+    ).length;
+
     const anyAnalysisRan = stageValues.some(
       s => s.SIGNAL_COMPUTE === "COMPLETE" || s.SIGNAL_COMPUTE === "CACHED_ANALYSIS"
     );
@@ -1005,7 +1033,7 @@ async function executeFetchJob(
       const willRunDeepPass = anyFetchExecuted && !allCooldown;
       const fastPassDataStatus = willRunDeepPass ? "LIVE" : "COMPLETE";
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE", coverageRatio);
+        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE", coverageRatio, transportSuccesses > 0);
         console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted} | dataStatus=${fastPassDataStatus} | coverageRatio=${coverageRatio.toFixed(2)}`);
       } catch (err: any) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
@@ -1072,6 +1100,19 @@ async function executeFetchJob(
       commentsCollected: s.commentsFetched,
     }));
 
+    // If ≥1 fetch succeeded but the job yielded ZERO posts overall, classify
+    // SUSPECT_ZERO_YIELD: the Unlocker likely returned challenge/empty pages
+    // (silent block) — that must surface as a scraping-health signal, not as
+    // "market is quiet". transportSuccesses/transportFailures are computed
+    // above (before snapshot persistence) so both surfaces share one criterion.
+    const transportOutcome: "OK" | "SUSPECT_ZERO_YIELD" =
+      transportSuccesses > 0 && totalPosts === 0 ? "SUSPECT_ZERO_YIELD" : "OK";
+    if (transportOutcome === "SUSPECT_ZERO_YIELD") {
+      console.warn(
+        `[FetchOrch] TRANSPORT_SUSPECT_ZERO_YIELD | jobId=${jobId} | accountId=${accountId} | campaignId=${campaignId} | successes=${transportSuccesses} | failures=${transportFailures} | requests=${totalRequests} — transport reported success but zero posts across ALL competitors. Likely Unlocker silent-block/challenge pages; treat as scraping-health incident, not market signal.`,
+      );
+    }
+
     const jobDiagnostics: FetchJobDiagnostics = {
       competitorCount: competitors.length,
       requestsUsed: totalRequests,
@@ -1087,6 +1128,12 @@ async function executeFetchJob(
       rateLimitEvents,
       perCompetitorStatus,
       perCompetitorRequestCap,
+      transport: {
+        requests: totalRequests,
+        successes: transportSuccesses,
+        failures: transportFailures,
+        outcome: transportOutcome,
+      },
     };
 
     console.log(`[FetchOrch] JOB_DIAGNOSTICS: ${JSON.stringify(jobDiagnostics)}`);
@@ -1167,7 +1214,7 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
   return "ERROR";
 }
 
-async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE", coverageRatio: number = 1.0): Promise<void> {
+async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE", coverageRatio: number = 1.0, transportSucceeded: boolean = false): Promise<void> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
@@ -1449,6 +1496,12 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       jobStopReason: isPartialCoverage ? jobStopReason : null,
       snapshotSource,
       fetchExecuted,
+      // 2026-07 Unlocker rebuild (B1/B4): a cycle where ≥1 transport fetch
+      // SUCCEEDED yet zero posts were stored is transport-suspect (likely
+      // silent-block), not a quiet market. Same criterion as the job-level
+      // diagnostics — an all-failed cycle is a plain transport failure
+      // (surfaced via partialCoverage/jobStopReason), never SUSPECT.
+      transportOutcome: transportSucceeded && totalPosts === 0 ? "SUSPECT_ZERO_YIELD" : "OK",
     }),
     narrativeSynthesis,
     marketDiagnosis,
@@ -1808,7 +1861,7 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
   }
 
   try {
-    await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
+    await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE", 1.0, enrichedCount > 0);
     console.log(`[FetchOrch] DEEP_PASS snapshot recomputed (COMPLETE) for ${accountId}/${campaignId} | enriched=${enrichedCount} | failed=${failedCount} | skipped=${skippedCount} | duration=${Date.now() - startTime}ms`);
   } catch (err: any) {
     console.error(`[FetchOrch] DEEP_PASS snapshot persistence failed: ${err.message}`);
@@ -2155,7 +2208,9 @@ async function recoverStuckDeepPass(): Promise<void> {
 
     for (const { accountId, campaignId } of campaignGroups.values()) {
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
+        // No fresh transport ran in this recompute cycle — zero-yield
+        // suspicion cannot apply, so transportSucceeded=false.
+        await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE", 1.0, false);
         console.log(`[DeepPassRecovery] Snapshot recomputed for ${accountId}/${campaignId}`);
       } catch (err: any) {
         console.error(`[DeepPassRecovery] Snapshot recompute failed for ${accountId}/${campaignId}: ${err.message}`);

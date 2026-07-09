@@ -8,17 +8,18 @@
  * Why hard-fail at boot rather than soft-fail per request:
  *  - silent missing JWT_SECRET → tokens forgeable.
  *  - silent missing OPENAI_API_KEY → every AI engine returns degraded output.
- *  - silent missing BRIGHT_DATA_PROXY_USERNAME → scrapers fall back to direct
- *    connections that immediately get IP-blocked.
  *  - silent missing PUBLIC_BASE_URL → host-header reflection (F9.1).
  *  - silent missing STRIPE_WEBHOOK_SECRET → forged subscription events.
  *
  * Better to crash visibly at startup than to serve a half-broken app.
  *
- * Required-var contract follows session_plan.md T3 EXACTLY:
- *   DATABASE_URL, JWT_SECRET, OPENAI_API_KEY, BRIGHT_DATA_PROXY_USERNAME,
- *   BRIGHT_DATA_PROXY_COUNTRY, STRIPE_WEBHOOK_SECRET, PUBLIC_BASE_URL.
- * No production-only carve-outs — these are needed for any boot, dev included.
+ * Bright Data (2026-07 Unlocker rebuild) is deliberately NOT in REQUIRED:
+ * scraping is designed to run SAFE-OFF (SCRAPING_UNCONFIGURED fail-fast)
+ * when BRIGHT_DATA_API_KEY + BRIGHT_DATA_ZONE are absent. The contract is
+ * all-or-nothing: setting exactly one of the pair IS boot-fatal (a
+ * half-configured transport would look configured to operators while every
+ * request fails), and a malformed BRIGHT_DATA_COUNTRY is boot-fatal
+ * (geo-targeting must never silently no-op — B1/B2).
  */
 
 /**
@@ -55,9 +56,6 @@ const REQUIRED: Array<{ key: string; description: string; accepts?: string[]; pr
     description: "OpenAI API key — content/strategy engines hard-depend on it",
     accepts: ["AI_INTEGRATIONS_OPENAI_API_KEY"],
   },
-  { key: "BRIGHT_DATA_PROXY_USERNAME", description: "Bright Data customer ID (e.g. brd-customer-…)" },
-  { key: "BRIGHT_DATA_PROXY_PASSWORD", description: "Bright Data zone password" },
-  { key: "BRIGHT_DATA_PROXY_COUNTRY", description: "Bright Data residential pool country" },
   {
     key: "PUBLIC_BASE_URL",
     description:
@@ -95,6 +93,64 @@ const RECOMMENDED: Array<{ key: string; description: string }> = [
  * open-redirect surface. The allowlist forces an explicit override.
  */
 const DEFAULT_ALLOWED_SUFFIXES = [".replit.app", ".replit.dev", ".replit.co"];
+
+/** Legacy proxy-tunnel vars superseded by the 2026-07 Unlocker API rebuild. */
+const LEGACY_BRIGHT_DATA_KEYS = [
+  "BRIGHT_DATA_PROXY_USERNAME",
+  "BRIGHT_DATA_PROXY_PASSWORD",
+  "BRIGHT_DATA_PROXY_HOST",
+  "BRIGHT_DATA_PROXY_PORT",
+  "BRIGHT_DATA_PROXY_COUNTRY",
+];
+
+/**
+ * 2026-07 Unlocker rebuild — Bright Data env contract.
+ *
+ *   both BRIGHT_DATA_API_KEY + BRIGHT_DATA_ZONE set  → configured (ok)
+ *   both missing                                     → SAFE-OFF (warn only;
+ *       every scrape fails fast as SCRAPING_UNCONFIGURED — never boot-fatal)
+ *   exactly one set                                  → BOOT-FATAL (half-
+ *       configured transport looks "configured" while every request fails)
+ *   BRIGHT_DATA_COUNTRY set but not 2-letter ISO     → BOOT-FATAL (geo
+ *       targeting must never silently no-op)
+ *   any legacy BRIGHT_DATA_PROXY_* still set         → warn (ignored)
+ */
+export function validateBrightDataContract(env: NodeJS.ProcessEnv): { fatal: string[]; warns: string[] } {
+  const fatal: string[] = [];
+  const warns: string[] = [];
+  const apiKey = env.BRIGHT_DATA_API_KEY?.trim();
+  const zone = env.BRIGHT_DATA_ZONE?.trim();
+  const country = env.BRIGHT_DATA_COUNTRY?.trim();
+
+  if (apiKey && !zone) {
+    fatal.push(
+      "BRIGHT_DATA_ZONE — BRIGHT_DATA_API_KEY is set but BRIGHT_DATA_ZONE is missing. The pair is all-or-nothing: set both to enable scraping, or unset both to run scraping safe-off (SCRAPING_UNCONFIGURED).",
+    );
+  } else if (!apiKey && zone) {
+    fatal.push(
+      "BRIGHT_DATA_API_KEY — BRIGHT_DATA_ZONE is set but BRIGHT_DATA_API_KEY is missing. The pair is all-or-nothing: set both to enable scraping, or unset both to run scraping safe-off (SCRAPING_UNCONFIGURED).",
+    );
+  } else if (!apiKey && !zone) {
+    warns.push(
+      "BRIGHT_DATA_API_KEY / BRIGHT_DATA_ZONE — not set. Scraping is SAFE-OFF: every scrape request fails fast as SCRAPING_UNCONFIGURED until both are set (Bright Data Unlocker API).",
+    );
+  }
+
+  if (country && !/^[a-zA-Z]{2}$/.test(country)) {
+    fatal.push(
+      `BRIGHT_DATA_COUNTRY — "${country}" is not a 2-letter ISO-3166 code (e.g. "us", "ae"). Fix or unset it (optional; when unset the zone's server-side geo policy applies).`,
+    );
+  }
+
+  const legacySet = LEGACY_BRIGHT_DATA_KEYS.filter((k) => env[k]?.trim());
+  if (legacySet.length) {
+    warns.push(
+      `${legacySet.join(", ")} — legacy Bright Data proxy-tunnel variable(s) are IGNORED since the 2026-07 Unlocker API rebuild. Remove them; the live contract is BRIGHT_DATA_API_KEY + BRIGHT_DATA_ZONE (+ optional BRIGHT_DATA_COUNTRY).`,
+    );
+  }
+
+  return { fatal, warns };
+}
 
 export interface EnvValidationResult {
   ok: boolean;
@@ -200,15 +256,12 @@ export function validateEnv(opts: { exitOnFailure?: boolean } = {}): EnvValidati
     missing.push(...validatePublicBaseUrl(process.env.PUBLIC_BASE_URL, isProd));
   }
 
-  // BRIGHT_DATA_PROXY_COUNTRY — must be an ISO-3166 alpha-2 code (e.g. "ae"),
-  // not a full country name. Bright Data's `-country-<cc>` proxy-username
-  // suffix silently no-ops on anything else, which means geo-targeting quietly
-  // stops working instead of failing loudly. Warn only (not fatal) — the
-  // scraper layer falls back to "us" via resolveProxyCountry().
-  if (process.env.BRIGHT_DATA_PROXY_COUNTRY && !/^[a-zA-Z]{2}$/.test(process.env.BRIGHT_DATA_PROXY_COUNTRY.trim())) {
-    warnings.push(
-      `BRIGHT_DATA_PROXY_COUNTRY — "${process.env.BRIGHT_DATA_PROXY_COUNTRY}" is not a 2-letter ISO-3166 code (e.g. "ae", "us"). Geo-targeting will silently fall back to "us" until corrected.`,
-    );
+  // 2026-07 Unlocker rebuild — Bright Data env contract (all-or-nothing
+  // pair, safe-off when absent, malformed country fatal, legacy vars warned).
+  {
+    const bd = validateBrightDataContract(process.env);
+    missing.push(...bd.fatal);
+    warnings.push(...bd.warns);
   }
 
   // JWT signing secret length sanity — soft floor in dev, hard floor in prod.
@@ -304,6 +357,12 @@ export function checkEnv(env: NodeJS.ProcessEnv = process.env): EnvValidationRes
   if (env.JWT_SECRET) {
     const minLen = isProd ? 32 : 16;
     if (env.JWT_SECRET.length < minLen) missing.push("JWT_SECRET");
+  }
+  // Mirror of validateEnv's Bright Data contract — key names only.
+  {
+    const bd = validateBrightDataContract(env);
+    for (const f of bd.fatal) missing.push(f.split(" ")[0]);
+    for (const w of bd.warns) warnings.push(w.split(" ")[0]);
   }
   for (const r of RECOMMENDED) if (!env[r.key]) warnings.push(r.key);
   return { ok: missing.length === 0, missing, warnings };

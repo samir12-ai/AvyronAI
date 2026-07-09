@@ -1,0 +1,22 @@
+REBUILD SCRAPING ON BRIGHT DATA UNLOCKER API — Clean Setup
+
+CONTEXT: All old Bright Data config was deliberately deleted. We created a FRESH Bright Data zone using the UNLOCKER API product (zone name: marketmindai). The Unlocker API uses direct API requests — NOT the legacy proxy host:port (brd-customer-X-zone-Y) format the old code may have used. New credentials are in Secrets. Wire the whole scraping stack to this, in phases, verifying each phase before the next.
+
+PHASE 1 — SAFE-OFF BASELINE
+1. With scraping env vars currently absent/new, audit every fetch path (proxy-pool-manager, data-acquisition, fetch-orchestrator, profile-scraper, reviews-scraper, tiktok scrapers): each must fail FAST with an explicit "SCRAPING_UNCONFIGURED" state — no hangs, no infinite retries, no silent catches. The MI layer treats it as "no competitor data" (existing degraded paths). Fix any path that doesn't behave this way.
+
+PHASE 2 — CONFIG CONTRACT
+2. Define the definitive env var set for the new setup (e.g., BRIGHT_DATA_API_KEY / BRIGHT_DATA_ZONE / country etc.), document exact expected formats in env-validator.ts with startup validation: present + well-formed (country must be a 2-letter code like "ae" — reject long-form names loudly, remembering the old "United Arab emirates" silent-fallback bug). List for me exactly which secrets you need and their names — I have them ready to paste into Replit Secrets (dev AND deployment).
+
+PHASE 3 — UNLOCKER INTEGRATION
+3. Rewire the scraping call sites to the Unlocker API request format (per Bright Data's current docs — fetch them if needed). Centralize it in ONE client module (e.g., server/competitive-intelligence/brightdata-client.ts) so all scrapers share: auth, zone, country, retries, timeout, and structured error logging. No scraper builds its own request format.
+4. Error handling contract: 4xx auth/config errors log loudly with the Bright Data error body (they include reason headers), rate-limit responses back off with jitter, and every fetch job records success/failure counts — zero-posts-fetched on a "successful" job must be flagged as SUSPECT, not treated as success (that's how the old 407 hid for so long).
+5. Respect existing scrape-safety layers: scrape-volume-cap, rate-limiter, token-budget — wire the new client through them, don't bypass.
+
+PHASE 4 — LIVE VERIFICATION (only after I confirm secrets are in)
+6. Connectivity smoke test: one raw Unlocker request to a simple public URL — confirm 200 with content.
+7. Then one real fetch per type: an Instagram profile, a TikTok profile, and a reviews page for one test competitor. Report per type: HTTP status, posts/items fetched count, sample of extracted fields, and cost/success counters from the Bright Data dashboard side if visible.
+8. Then trigger one full competitor fetch job through the normal pipeline for a test campaign and confirm: posts land in the DB, MI v3 signal extraction runs on them, and total_posts_fetched > 0 in the job record.
+9. Report: the env contract, files changed, and the verification results table.
+
+CONSTRAINT: Do not start Phase 4 until I confirm the secrets are pasted. Phases 1-3 need no credentials — start them now.

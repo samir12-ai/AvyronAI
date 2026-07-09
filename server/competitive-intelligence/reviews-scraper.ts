@@ -1,12 +1,15 @@
 import { db } from "../db";
 import { ciCompetitorReviews, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { getProxyConfig, resolveProxyCountry } from "./proxy-pool-manager";
+import { getScrapingConfig, poolFetch } from "./proxy-pool-manager";
 
-// Seal #5 / F6.7 — outbound HTTP timeout aligned at 15s across all scrapers
-// (validator-#4 closure). 40s previously allowed slow proxies to hold worker
-// slots and starved the per-account budget; 15s + breaker is the hard contract.
-const SCRAPE_TIMEOUT_MS = 15000;
+// 2026-07 Unlocker rebuild: transport goes through the pool manager's
+// poolFetch (Bright Data Unlocker REST API). The Unlocker performs its own
+// anti-bot solving server-side, which can legitimately take longer than a
+// bare proxied fetch — 60s wall-clock ceiling (BRIGHT_DATA_TIMEOUT_MS
+// default) is enforced inside the client. Google Maps pages are heavy, so
+// keep a slightly tighter per-request budget here.
+const SCRAPE_TIMEOUT_MS = 60000;
 const MAX_RETRIES = 2;
 
 export interface ReviewScrapedResult {
@@ -17,49 +20,10 @@ export interface ReviewScrapedResult {
   error?: string;
 }
 
-const USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-];
-
-function pickUA(): string {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-}
-
-async function fetchViaProxy(url: string): Promise<{ html: string; status: number }> {
-  const proxy = getProxyConfig();
-  if (!proxy) throw new Error("Bright Data proxy not configured");
-
-  const { ProxyAgent } = await import("undici");
-  const country = resolveProxyCountry();
-  const sessionId = `s${Math.random().toString(36).slice(2, 10)}`;
-  // Web Unlocker (port 33335) supports `-country-`/`-session-` suffixes too;
-  // previously both were dropped on this port, which silently ignored
-  // BRIGHT_DATA_PROXY_COUNTRY and reused one bare identity for every request.
-  const proxyUsername = `${proxy.username}-country-${country}-session-${sessionId}`;
-  const proxyUrl = `http://${proxyUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": pickUA(),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-      },
-      signal: controller.signal,
-      redirect: "follow",
-      dispatcher: new ProxyAgent({ uri: proxyUrl, requestTls: { rejectUnauthorized: false } }),
-    } as any);
-    const html = await res.text();
-    return { html, status: res.status };
-  } finally {
-    clearTimeout(timer);
-  }
+async function fetchViaUnlocker(url: string): Promise<{ html: string; status: number }> {
+  const res = await poolFetch(url, { timeoutMs: SCRAPE_TIMEOUT_MS });
+  const html = await res.text();
+  return { html, status: res.status };
 }
 
 interface ExtractedReview {
@@ -333,10 +297,9 @@ export async function scrapeReviewsForCompetitor(
     placeId: null,
   };
 
-  const proxy = getProxyConfig();
-  if (!proxy) {
-    result.error = "Bright Data proxy not configured — reviews scraping unavailable. Set BRIGHT_DATA_PROXY_HOST/PORT/USERNAME/PASSWORD.";
-    console.log(`[ReviewsScraper] ${result.error}`);
+  if (!getScrapingConfig()) {
+    result.error = "SCRAPING_UNCONFIGURED: Bright Data Unlocker API not configured — reviews scraping unavailable. Set BRIGHT_DATA_API_KEY and BRIGHT_DATA_ZONE.";
+    console.error(`[ReviewsScraper] ${result.error}`);
     return result;
   }
 
@@ -361,8 +324,8 @@ export async function scrapeReviewsForCompetitor(
           ? buildGoogleMapsSearchUrl(searchQuery)
           : buildGoogleMapsPlaceUrl(searchQuery);
 
-        console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via proxy`);
-        const { html, status } = await fetchViaProxy(searchUrl);
+        console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via Unlocker API`);
+        const { html, status } = await fetchViaUnlocker(searchUrl);
 
         if (status === 403 || status === 429) {
           lastError = `HTTP ${status} — blocked or rate limited`;

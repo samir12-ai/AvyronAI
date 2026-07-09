@@ -1,107 +1,53 @@
-import { getProxyConfig, resolveProxyCountry } from "../competitive-intelligence/proxy-pool-manager";
-import { resolveSafeUrl, pinnedLookup, isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } from "../competitive-intelligence/scrape-safety";
+import { resolveScrapingCountry, poolFetch } from "../competitive-intelligence/proxy-pool-manager";
+import { resolveSafeUrl, isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } from "../competitive-intelligence/scrape-safety";
 import type { WebsiteExtraction, BlogExtraction } from "./source-types";
 
-const SCRAPE_TIMEOUT_MS = 15000;
+// 2026-07 Unlocker rebuild: transport goes through the pool manager's
+// poolFetch (Bright Data Unlocker REST API). The Unlocker performs anti-bot
+// solving server-side, so the per-request wall clock is wider than the old
+// 15s bare-proxy budget. There is NO direct-fetch fallback — unconfigured
+// scraping fails fast as SCRAPING_UNCONFIGURED (thrown by poolFetch).
+const SCRAPE_TIMEOUT_MS = 60000;
 const MAX_PAGES_PER_SITE = 6;
 const MAX_TEXT_PREVIEW = 3000;
 const STALE_THRESHOLD_DAYS = 7;
 
-// Seal #5 / F7.2 — SSRF defense moved to scrape-safety.resolveSafeUrl(). The
+// Seal #5 / F7.2 — SSRF defense stays in scrape-safety.resolveSafeUrl(). The
 // resolver does DNS lookup, checks the resolved IP against RFC1918, link-local,
 // loopback, IPv6 fc00::/7 + fe80::/10 + ::, decimal/hex IPv4 literals and
-// 0.0.0.0/8. fetchWithProxy() then pins the connection to that IP via
-// pinnedLookup() so a second DNS query cannot rebind to an internal IP between
-// the check and the TCP connect.
+// 0.0.0.0/8. The old pinnedLookup direct-fetch path is gone — every request
+// now leaves via the Unlocker API (Bright Data connects to the target on our
+// behalf), but we still refuse to hand internal/unsafe URLs to the Unlocker.
 
 interface FetchOptions {
   url: string;
   timeoutMs?: number;
 }
 
-async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; status: number; ok: boolean }> {
-  const proxy = getProxyConfig();
+async function fetchViaUnlocker(opts: FetchOptions): Promise<{ html: string; status: number; ok: boolean }> {
   const timeout = opts.timeoutMs || SCRAPE_TIMEOUT_MS;
-  const country = resolveProxyCountry();
+  // Breaker keying: BRIGHT_DATA_COUNTRY is optional in the Unlocker contract —
+  // key the breaker on "any" when unset (zone decides geo server-side).
+  const country = resolveScrapingCountry() ?? "any";
 
   // Seal #5 / F6.12 — breaker gate before any outbound attempt.
   const cb = isBreakerOpen("website", country);
   if (cb.open) {
     throw new Error(`BREAKER_OPEN: website:${country} (${cb.reason})`);
   }
-  // F7.2 — resolve hostname + check IP against block ranges before any I/O.
-  // The proxy path bypasses the IP pin (the proxy CONNECTs to the host on our
-  // behalf, so DNS rebinding doesn't affect our process) but the direct fetch
-  // path uses pinnedLookup to defeat rebinding.
-  const resolved = await resolveSafeUrl(opts.url);
+  // F7.2 — SSRF gate before any I/O (throws on internal/unsafe targets).
+  await resolveSafeUrl(opts.url);
 
-  const baseHeaders: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Accept-Encoding": "gzip, deflate",
-    "Connection": "keep-alive",
-  };
-
-  if (proxy) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    try {
-      const { ProxyAgent } = await import("undici");
-      const sessionId = `s${Math.random().toString(36).slice(2, 10)}`;
-      // Web Unlocker (port 33335) supports `-country-`/`-session-` suffixes
-      // too; previously both were dropped on this port, which silently
-      // ignored BRIGHT_DATA_PROXY_COUNTRY and reused one bare identity for
-      // every request.
-      const proxyUsername = `${proxy.username}-country-${country}-session-${sessionId}`;
-      const proxyUrl = `http://${proxyUsername}:${proxy.password}@${proxy.host}:${proxy.port}`;
-      const res = await fetch(opts.url, {
-        headers: baseHeaders,
-        signal: controller.signal,
-        redirect: "follow",
-        dispatcher: new ProxyAgent(proxyUrl),
-      } as any);
-      const html = await res.text();
-      // F6.12 — record breaker state on outcome (5xx = upstream failure, 4xx = our request).
-      if (res.status >= 500) recordBreakerFailure("website", country);
-      else recordBreakerSuccess("website", country);
-      return { html, status: res.status, ok: res.ok };
-    } catch (proxyErr: any) {
-      recordBreakerFailure("website", country);
-      const isConnectError = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|tunnel|socket|proxy/i.test(
-        proxyErr.message + (proxyErr.cause?.message || "")
-      );
-      if (!isConnectError) throw proxyErr;
-      const safeMsg = (proxyErr.message || "").replace(/\/\/[^@]+@/g, "//***@");
-      console.log(`[WebScraper] Proxy connection failed for ${opts.url}: ${safeMsg} — falling back to direct fetch`);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    // F7.2 — pin direct fetch to the resolved IP via custom undici Agent so
-    // a second DNS query (between resolveSafeUrl and fetch) cannot rebind
-    // the hostname to an internal address.
-    const { Agent } = await import("undici");
-    const dispatcher = new Agent({ connect: { lookup: pinnedLookup(resolved.ip, resolved.family) } });
-    const res = await fetch(opts.url, {
-      headers: baseHeaders,
-      signal: controller.signal,
-      redirect: "follow",
-      dispatcher,
-    } as any);
+    const res = await poolFetch(opts.url, { timeoutMs: timeout });
     const html = await res.text();
+    // F6.12 — record breaker state on outcome (5xx = upstream failure, 4xx = our request).
     if (res.status >= 500) recordBreakerFailure("website", country);
     else recordBreakerSuccess("website", country);
     return { html, status: res.status, ok: res.ok };
-  } catch (directErr) {
+  } catch (err) {
     recordBreakerFailure("website", country);
-    throw directErr;
-  } finally {
-    clearTimeout(timer);
+    throw err;
   }
 }
 
@@ -351,13 +297,13 @@ export async function scrapeWebsite(
   if (!normalizedUrl.startsWith("http")) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
-  // F7.2 — SSRF check now lives inside fetchWithProxy() via resolveSafeUrl().
+  // F7.2 — SSRF check now lives inside fetchViaUnlocker() via resolveSafeUrl().
   // The async resolver throws before any I/O if the URL is unsafe.
 
   console.log(`[WebScraper] Starting structured extraction for ${competitorName}: ${normalizedUrl}`);
 
   try {
-    const homeResult = await fetchWithProxy({ url: normalizedUrl });
+    const homeResult = await fetchViaUnlocker({ url: normalizedUrl });
     if (!homeResult.ok) {
       const isBlocked = homeResult.status === 403 || homeResult.status === 451;
       const statusLabel = isBlocked ? "ACCESS_BLOCKED" : "FAILED";
@@ -395,7 +341,7 @@ export async function scrapeWebsite(
     for (const pageUrl of subPages) {
       try {
         await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-        const pageResult = await fetchWithProxy({ url: pageUrl });
+        const pageResult = await fetchViaUnlocker({ url: pageUrl });
         if (pageResult.ok) {
           results.push(extractPage(competitorId, competitorName, pageUrl, pageResult.html, now));
         }
@@ -479,12 +425,12 @@ export async function scrapeBlog(
   if (!normalizedUrl.startsWith("http")) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
-  // F7.2 — SSRF check now lives inside fetchWithProxy() via resolveSafeUrl().
+  // F7.2 — SSRF check now lives inside fetchViaUnlocker() via resolveSafeUrl().
 
   console.log(`[WebScraper] Blog extraction for ${competitorName}: ${normalizedUrl}`);
 
   try {
-    const result = await fetchWithProxy({ url: normalizedUrl });
+    const result = await fetchViaUnlocker({ url: normalizedUrl });
     if (!result.ok) {
       return {
         competitorId,

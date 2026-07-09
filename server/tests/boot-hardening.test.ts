@@ -27,7 +27,10 @@ describe("Seal #7 — env-validator", () => {
     expect(r.ok).toBe(false);
     expect(r.missing.some(m => m.startsWith("DATABASE_URL"))).toBe(true);
     expect(r.missing.some(m => m.startsWith("PUBLIC_BASE_URL"))).toBe(true);
-    expect(r.missing.some(m => m.startsWith("STRIPE_WEBHOOK_SECRET"))).toBe(true);
+    // 2026-07-08: STRIPE_WEBHOOK_SECRET downgraded to RECOMMENDED (webhook
+    // route is fail-closed without it) — warned, never boot-fatal.
+    expect(r.missing.some(m => m.startsWith("STRIPE_WEBHOOK_SECRET"))).toBe(false);
+    expect(r.warnings.some(w => w.startsWith("STRIPE_WEBHOOK_SECRET"))).toBe(true);
     expect(r.missing.some(m => m.startsWith("JWT_SECRET"))).toBe(true);
     expect(r.missing.some(m => m.startsWith("OPENAI_API_KEY"))).toBe(true);
   });
@@ -37,9 +40,6 @@ describe("Seal #7 — env-validator", () => {
       NODE_ENV: "development",
       DATABASE_URL: "postgres://x",
       OPENAI_API_KEY: "sk-test",
-      BRIGHT_DATA_PROXY_USERNAME: "u",
-      BRIGHT_DATA_PROXY_PASSWORD: "p",
-      BRIGHT_DATA_PROXY_COUNTRY: "us",
       PUBLIC_BASE_URL: "not-a-url",
     });
     expect(r.ok).toBe(false);
@@ -53,9 +53,6 @@ describe("Seal #7 — env-validator", () => {
       JWT_SECRET: "0123456789abcdef0123456789abcdef",
       OPENAI_API_KEY: "sk-test",
       STRIPE_WEBHOOK_SECRET: "whsec_x",
-      BRIGHT_DATA_PROXY_USERNAME: "u",
-      BRIGHT_DATA_PROXY_PASSWORD: "p",
-      BRIGHT_DATA_PROXY_COUNTRY: "us",
       PUBLIC_BASE_URL: "https://evil.example.com",
     });
     expect(r.ok).toBe(false);
@@ -69,9 +66,6 @@ describe("Seal #7 — env-validator", () => {
       JWT_SECRET: "0123456789abcdef0123456789abcdef",
       OPENAI_API_KEY: "sk-test",
       STRIPE_WEBHOOK_SECRET: "whsec_x",
-      BRIGHT_DATA_PROXY_USERNAME: "u",
-      BRIGHT_DATA_PROXY_PASSWORD: "p",
-      BRIGHT_DATA_PROXY_COUNTRY: "us",
       PUBLIC_BASE_URL: "http://avyron.replit.app",
     });
     expect(r.ok).toBe(false);
@@ -83,9 +77,6 @@ describe("Seal #7 — env-validator", () => {
       NODE_ENV: "development",
       DATABASE_URL: "postgres://x",
       AI_INTEGRATIONS_OPENAI_API_KEY: "sk-test", // alias only
-      BRIGHT_DATA_PROXY_USERNAME: "u",
-      BRIGHT_DATA_PROXY_PASSWORD: "p",
-      BRIGHT_DATA_PROXY_COUNTRY: "us",
       PUBLIC_BASE_URL: "https://test.replit.dev",
     });
     expect(r.ok).toBe(true);
@@ -96,30 +87,26 @@ describe("Seal #7 — env-validator", () => {
       NODE_ENV: "development",
       DATABASE_URL: "postgres://x",
       OPENAI_API_KEY: "sk-test",
-      BRIGHT_DATA_PROXY_USERNAME: "u",
-      BRIGHT_DATA_PROXY_PASSWORD: "p",
-      BRIGHT_DATA_PROXY_COUNTRY: "us",
       PUBLIC_BASE_URL: "https://test.replit.dev",
     });
     expect(r.ok).toBe(true);
     expect(r.missing).toHaveLength(0);
   });
 
-  it("PRODUCTION boot requires JWT_SECRET + STRIPE_WEBHOOK_SECRET", () => {
-    // Mirror image: in production, the productionOnly carve-out is OFF and
-    // both secrets are required.
+  it("PRODUCTION boot requires JWT_SECRET; STRIPE_WEBHOOK_SECRET is warn-only (2026-07-08)", () => {
+    // Mirror image: in production, the productionOnly carve-out is OFF so
+    // JWT_SECRET is required. STRIPE_WEBHOOK_SECRET was downgraded to
+    // RECOMMENDED — the webhook route is fail-closed without it.
     const r = checkEnv({
       NODE_ENV: "production",
       DATABASE_URL: "postgres://x",
       OPENAI_API_KEY: "sk-test",
-      BRIGHT_DATA_PROXY_USERNAME: "u",
-      BRIGHT_DATA_PROXY_PASSWORD: "p",
-      BRIGHT_DATA_PROXY_COUNTRY: "us",
       PUBLIC_BASE_URL: "https://avyron.replit.app",
     });
     expect(r.ok).toBe(false);
     expect(r.missing).toContain("JWT_SECRET");
-    expect(r.missing).toContain("STRIPE_WEBHOOK_SECRET");
+    expect(r.missing).not.toContain("STRIPE_WEBHOOK_SECRET");
+    expect(r.warnings).toContain("STRIPE_WEBHOOK_SECRET");
   });
 
   it("rejects short JWT_SECRET in production", () => {
@@ -128,13 +115,79 @@ describe("Seal #7 — env-validator", () => {
       DATABASE_URL: "postgres://x",
       JWT_SECRET: "short",
       OPENAI_API_KEY: "sk-test",
-      BRIGHT_DATA_PROXY_USERNAME: "u",
-      BRIGHT_DATA_PROXY_PASSWORD: "p",
-      BRIGHT_DATA_PROXY_COUNTRY: "us",
       PUBLIC_BASE_URL: "https://avyron.replit.app",
       STRIPE_WEBHOOK_SECRET: "whsec_xxx",
     });
     expect(r.missing).toContain("JWT_SECRET");
+  });
+});
+
+// ── 2026-07 Unlocker rebuild — Bright Data env contract ─────────────────────
+describe("Bright Data Unlocker env contract (2026-07 rebuild)", () => {
+  const DEV_BASE = {
+    NODE_ENV: "development",
+    DATABASE_URL: "postgres://x",
+    OPENAI_API_KEY: "sk-test",
+    PUBLIC_BASE_URL: "https://test.replit.dev",
+  };
+
+  it("both missing → SAFE-OFF: boots ok with a warning, never fatal", () => {
+    const r = checkEnv({ ...DEV_BASE } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(true);
+    expect(r.missing).toHaveLength(0);
+    expect(r.warnings.some(w => w.startsWith("BRIGHT_DATA_API_KEY"))).toBe(true);
+  });
+
+  it("API_KEY without ZONE → boot-fatal (all-or-nothing)", () => {
+    const r = checkEnv({ ...DEV_BASE, BRIGHT_DATA_API_KEY: "bd-key" } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(false);
+    expect(r.missing).toContain("BRIGHT_DATA_ZONE");
+  });
+
+  it("ZONE without API_KEY → boot-fatal (all-or-nothing)", () => {
+    const r = checkEnv({ ...DEV_BASE, BRIGHT_DATA_ZONE: "marketmindai" } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(false);
+    expect(r.missing).toContain("BRIGHT_DATA_API_KEY");
+  });
+
+  it("both set → configured, boots ok", () => {
+    const r = checkEnv({ ...DEV_BASE, BRIGHT_DATA_API_KEY: "bd-key", BRIGHT_DATA_ZONE: "marketmindai" } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(true);
+    expect(r.missing).toHaveLength(0);
+  });
+
+  it("malformed BRIGHT_DATA_COUNTRY → boot-fatal (never silently no-ops)", () => {
+    const r = checkEnv({
+      ...DEV_BASE,
+      BRIGHT_DATA_API_KEY: "bd-key",
+      BRIGHT_DATA_ZONE: "marketmindai",
+      BRIGHT_DATA_COUNTRY: "United States",
+    } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(false);
+    expect(r.missing).toContain("BRIGHT_DATA_COUNTRY");
+  });
+
+  it("valid 2-letter BRIGHT_DATA_COUNTRY → ok", () => {
+    const r = checkEnv({
+      ...DEV_BASE,
+      BRIGHT_DATA_API_KEY: "bd-key",
+      BRIGHT_DATA_ZONE: "marketmindai",
+      BRIGHT_DATA_COUNTRY: "ae",
+    } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(true);
+  });
+
+  it("legacy BRIGHT_DATA_PROXY_* vars → warn-ignored, never fatal", () => {
+    const r = checkEnv({
+      ...DEV_BASE,
+      BRIGHT_DATA_API_KEY: "bd-key",
+      BRIGHT_DATA_ZONE: "marketmindai",
+      BRIGHT_DATA_PROXY_USERNAME: "u",
+      BRIGHT_DATA_PROXY_PASSWORD: "p",
+      BRIGHT_DATA_PROXY_COUNTRY: "us",
+    } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some(w => w.startsWith("BRIGHT_DATA_PROXY_USERNAME"))).toBe(true);
   });
 });
 
