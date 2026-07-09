@@ -46,6 +46,7 @@ import { desc, sql as drizzleSql, and, eq, isNull } from "drizzle-orm";
 import { _bossInFlightStats } from "./boss/concurrency";
 import { _continuityTickInflightStats } from "./continuity/scheduler";
 import { _activeJobsStats } from "./market-intelligence-v3/fetch-orchestrator";
+import { getPoolStatusReport } from "./competitive-intelligence/proxy-pool-manager";
 
 const app = express();
 const log = console.log;
@@ -1326,6 +1327,36 @@ function setupErrorHandler(app: express.Application) {
     } catch (err) {
       console.error("[OperationsPanel] PANEL_LOAD_FAILED", err);
       return res.status(500).json({ error: "operations_panel_load_failed" });
+    }
+  });
+
+  // GET /api/admin/pool-status
+  //
+  // T006 — multi-pool scraping status: per-platform pool profile (backoff
+  // curve, failure threshold, concurrency limit), live in-flight counters,
+  // per-target backoff entries, and persistence-layer health counters.
+  //
+  // Doctrine notes:
+  //   * NO-TENANT-LEAK — target keys (competitor handles / hosts / search
+  //     queries) are SHA-256-hashed inside getPoolStatusReport(); this
+  //     surface never exposes a raw competitor identity.
+  //   * B2 (visibility over silence) — persistFailures / hydrateFailures
+  //     surface pool-persistence write problems that would otherwise only
+  //     exist as log lines. Steady-state expectation = 0.
+  //   * Gated by OPERATOR_ADMIN_TOKEN (product-admin), same as the other
+  //     /api/admin/* panels — fail-closed 401 when unset.
+  app.get("/api/admin/pool-status", (req: Request, res: Response) => {
+    if (!process.env.OPERATOR_ADMIN_TOKEN) {
+      return res.status(401).json({ error: "pool_status_disabled_no_operator_token" });
+    }
+    if (!checkOperatorToken(req)) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+    try {
+      return res.status(200).json(getPoolStatusReport());
+    } catch (err) {
+      console.error("[PoolStatus] POOL_STATUS_LOAD_FAILED", err);
+      return res.status(500).json({ error: "pool_status_load_failed" });
     }
   });
 

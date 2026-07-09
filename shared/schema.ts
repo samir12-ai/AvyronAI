@@ -3253,3 +3253,27 @@ export const divergenceClassRoutes = pgTable("divergence_class_routes", {
 export type OrchestratorReplayRun = typeof orchestratorReplayRuns.$inferSelect;
 export type OrchestratorReplayDivergence = typeof orchestratorReplayDivergences.$inferSelect;
 export type DivergenceClassRoute = typeof divergenceClassRoutes.$inferSelect;
+
+// ── T006: persistent adaptive per-target scrape backoff (migration 038) ─────
+// Cooldown/streak state per (account, platform, target) that must survive
+// restarts. Written ONLY by server/competitive-intelligence/pool-persistence.ts
+// (write-through from target-backoff.ts). target_key '__platform__' is
+// reserved for platform-level state. Covered by GDPR CASCADE_TABLES.
+export const scrapeTargetBackoff = pgTable(
+  "scrape_target_backoff",
+  {
+    accountId: varchar("account_id").notNull(),
+    platform: text("platform").notNull(),
+    targetKey: text("target_key").notNull(),
+    failureStreak: integer("failure_streak").notNull().default(0),
+    cooldownUntil: timestamp("cooldown_until", { withTimezone: true }),
+    lastBlockClass: text("last_block_class"),
+    lastFailureAt: timestamp("last_failure_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.accountId, t.platform, t.targetKey] }),
+  }),
+);
+
+export type ScrapeTargetBackoffRow = typeof scrapeTargetBackoff.$inferSelect;

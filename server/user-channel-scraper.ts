@@ -389,10 +389,11 @@ async function scrapeInstagramChannel(
 async function scrapeWebsiteChannel(
   url: string,
   isFirstScrape: boolean,
+  accountId: string,
 ): Promise<UserChannelSnapshotData> {
   const scrapeMode: "INITIAL" | "INCREMENTAL" = isFirstScrape ? "INITIAL" : "INCREMENTAL";
   try {
-    const pages = await scrapeWebsite("user_self", "Self", url);
+    const pages = await scrapeWebsite("user_self", "Self", url, accountId);
     const homepage = pages[0];
 
     if (!homepage || homepage.extractionStatus === "FAILED") {
@@ -524,7 +525,7 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
       if (profile.platform === "instagram" && profile.handle) {
         snapshot = await scrapeInstagramChannel(accountId, campaignId, profile.handle, isFirstScrape);
       } else if (profile.platform === "website" && profile.url) {
-        snapshot = await scrapeWebsiteChannel(profile.url, isFirstScrape);
+        snapshot = await scrapeWebsiteChannel(profile.url, isFirstScrape, accountId);
       } else {
         console.log(`[UserChannelScraper] Skipping unsupported platform or missing handle/url: ${profile.platform}`);
         continue;

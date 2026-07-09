@@ -86,6 +86,7 @@ export const CASCADE_TABLES: readonly string[] = Object.freeze([
   "mi_refresh_schedule",
   "mi_signal_logs",
   "mi_snapshots",
+  "scrape_target_backoff",
   // Orchestrator + plans + analytics
   "orchestrator_jobs",
   "retention_gate_inputs",
@@ -155,6 +156,17 @@ export const CASCADE_TABLES: readonly string[] = Object.freeze([
   "post_interactions",
   "portfolio_posts",
   "photographer_profiles",
+  // Operational/continuity state (2026-07 drift-sentinel closure): tenant-scoped
+  // rows deleted by account_id; NULL/global rows (nullable account_id on
+  // system_notices, orchestrator_replay_cassettes) survive the WHERE clause.
+  "mutation_log",
+  "engine_operational_state",
+  "in_flight_jobs",
+  "plan_anchor_resets",
+  "continuity_window_claims",
+  "system_notices",
+  "ai_input_snapshots",
+  "orchestrator_replay_cassettes",
   // Users last (other tables FK to users)
   "users",
 ]);

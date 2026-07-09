@@ -1,4 +1,4 @@
-import { resolveScrapingCountry, poolFetch } from "../competitive-intelligence/proxy-pool-manager";
+import { resolveScrapingCountry, poolFetch, TargetBackoffActiveError, type PoolFetchTarget } from "../competitive-intelligence/proxy-pool-manager";
 import { resolveSafeUrl, isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } from "../competitive-intelligence/scrape-safety";
 import type { WebsiteExtraction, BlogExtraction } from "./source-types";
 
@@ -22,6 +22,17 @@ const STALE_THRESHOLD_DAYS = 7;
 interface FetchOptions {
   url: string;
   timeoutMs?: number;
+  /** T006 — adaptive per-target backoff identity (host-keyed for websites). */
+  target?: PoolFetchTarget;
+}
+
+/** T006 — targetKey for website backoff is the URL host (stable per site). */
+function websiteTargetKey(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 async function fetchViaUnlocker(opts: FetchOptions): Promise<{ html: string; status: number; ok: boolean }> {
@@ -39,14 +50,16 @@ async function fetchViaUnlocker(opts: FetchOptions): Promise<{ html: string; sta
   await resolveSafeUrl(opts.url);
 
   try {
-    const res = await poolFetch(opts.url, { timeoutMs: timeout });
+    const res = await poolFetch(opts.url, { timeoutMs: timeout, target: opts.target });
     const html = await res.text();
     // F6.12 — record breaker state on outcome (5xx = upstream failure, 4xx = our request).
     if (res.status >= 500) recordBreakerFailure("website", country);
     else recordBreakerSuccess("website", country);
     return { html, status: res.status, ok: res.ok };
   } catch (err) {
-    recordBreakerFailure("website", country);
+    // T006 — a backoff-gated request never left the process; it is not a
+    // breaker-relevant upstream failure.
+    if (!(err instanceof TargetBackoffActiveError)) recordBreakerFailure("website", country);
     throw err;
   }
 }
@@ -289,6 +302,7 @@ export async function scrapeWebsite(
   competitorId: string,
   competitorName: string,
   websiteUrl: string,
+  accountId?: string,
 ): Promise<WebsiteExtraction[]> {
   const results: WebsiteExtraction[] = [];
   const now = new Date().toISOString();
@@ -297,13 +311,19 @@ export async function scrapeWebsite(
   if (!normalizedUrl.startsWith("http")) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
+
+  // T006 — adaptive backoff identity (host-keyed). Absent accountId → no
+  // backoff tracking (legacy callers keep exact pre-T006 behavior).
+  const target: PoolFetchTarget | undefined = accountId
+    ? { accountId, platform: "website", targetKey: websiteTargetKey(normalizedUrl) }
+    : undefined;
   // F7.2 — SSRF check now lives inside fetchViaUnlocker() via resolveSafeUrl().
   // The async resolver throws before any I/O if the URL is unsafe.
 
   console.log(`[WebScraper] Starting structured extraction for ${competitorName}: ${normalizedUrl}`);
 
   try {
-    const homeResult = await fetchViaUnlocker({ url: normalizedUrl });
+    const homeResult = await fetchViaUnlocker({ url: normalizedUrl, target });
     if (!homeResult.ok) {
       const isBlocked = homeResult.status === 403 || homeResult.status === 451;
       const statusLabel = isBlocked ? "ACCESS_BLOCKED" : "FAILED";
@@ -341,7 +361,7 @@ export async function scrapeWebsite(
     for (const pageUrl of subPages) {
       try {
         await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-        const pageResult = await fetchViaUnlocker({ url: pageUrl });
+        const pageResult = await fetchViaUnlocker({ url: pageUrl, target });
         if (pageResult.ok) {
           results.push(extractPage(competitorId, competitorName, pageUrl, pageResult.html, now));
         }
@@ -419,18 +439,24 @@ export async function scrapeBlog(
   competitorId: string,
   competitorName: string,
   blogUrl: string,
+  accountId?: string,
 ): Promise<BlogExtraction> {
   const now = new Date().toISOString();
   let normalizedUrl = blogUrl.trim();
   if (!normalizedUrl.startsWith("http")) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
+
+  // T006 — see scrapeWebsite: host-keyed backoff identity, optional.
+  const target: PoolFetchTarget | undefined = accountId
+    ? { accountId, platform: "website", targetKey: websiteTargetKey(normalizedUrl) }
+    : undefined;
   // F7.2 — SSRF check now lives inside fetchViaUnlocker() via resolveSafeUrl().
 
   console.log(`[WebScraper] Blog extraction for ${competitorName}: ${normalizedUrl}`);
 
   try {
-    const result = await fetchViaUnlocker({ url: normalizedUrl });
+    const result = await fetchViaUnlocker({ url: normalizedUrl, target });
     if (!result.ok) {
       return {
         competitorId,

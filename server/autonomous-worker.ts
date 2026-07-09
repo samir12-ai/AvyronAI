@@ -1206,6 +1206,30 @@ async function releaseWorkerLockOn(client: import("pg").PoolClient): Promise<voi
   }
 }
 
+// T006 — hourly scraping-pool status summary, piggybacked on the 5-min
+// worker tick (runs inside the advisory lock, so exactly one replica logs
+// it). B2: cooling targets and persistence failures become a grep-able
+// heartbeat line instead of silent in-memory state.
+let lastPoolSummaryAt = 0;
+const POOL_SUMMARY_INTERVAL_MS = 60 * 60 * 1000;
+
+async function maybeLogPoolStatusSummary(): Promise<void> {
+  if (Date.now() - lastPoolSummaryAt < POOL_SUMMARY_INTERVAL_MS) return;
+  lastPoolSummaryAt = Date.now();
+  try {
+    const { getPoolStatusReport } = await import("./competitive-intelligence/proxy-pool-manager");
+    const report = getPoolStatusReport();
+    const platformParts = Object.entries(report.platforms).map(
+      ([platform, s]) => `${platform}: inflight=${s.inflight} cooling=${s.coolingTargets}/${s.trackedTargets}`,
+    );
+    console.log(
+      `[Worker] POOL_STATUS_SUMMARY | pools=${report.activeAccountPools} | ${platformParts.join(" | ")} | persistFailures=${report.persistence.persistFailures} | hydrateFailures=${report.persistence.hydrateFailures}`,
+    );
+  } catch (err) {
+    console.error("[Worker] POOL_STATUS_SUMMARY_FAILED:", (err as Error)?.message || err);
+  }
+}
+
 async function workerTick() {
   // Per-tick traceId so worker logs/Sentry carry the same observability
   // contract as HTTP requests.
@@ -1251,6 +1275,7 @@ async function workerTickBody() {
     recordWorkerTick("autonomous", "skipped");
     return;
   }
+  await maybeLogPoolStatusSummary();
   try {
     const accountIds = await getAccountsDueForProcessing();
     const { recordWorkerTick, setWorkerQueueDepth } = await import("./observability/otel");

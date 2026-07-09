@@ -5,12 +5,54 @@ import {
   ScrapingUnconfiguredError,
   BRIGHT_DATA_TIMEOUT_MS,
 } from "./brightdata-client";
+import {
+  POOL_CONFIG,
+  SCRAPE_PLATFORMS,
+  getPoolProfile,
+  type ScrapePlatform,
+} from "./pool-config";
+import {
+  checkTargetCooling,
+  recordTargetFailure,
+  recordTargetSuccess,
+  getTargetBackoffSnapshot,
+  type TargetBackoffSnapshotEntry,
+} from "./target-backoff";
+import {
+  ensureBackoffHydrated,
+  persistTargetFailure,
+  persistTargetCleared,
+  _poolPersistenceStats,
+} from "./pool-persistence";
 
 // Re-exported so scrapers can catch the typed error / read the timeout knob
 // WITHOUT importing brightdata-client directly (forbidden by ESLint rule
 // `scraping-transport/no-direct-brightdata-client-import` — the pool manager
 // is the single sanctioned transport gateway).
 export { ScrapingUnconfiguredError, BRIGHT_DATA_TIMEOUT_MS };
+// T006 multi-pool surface, re-exported through the facade for the same reason.
+export { POOL_CONFIG, SCRAPE_PLATFORMS, type ScrapePlatform };
+
+/**
+ * T006 — thrown by poolFetch/ctx.poolFetch when the requested target is in
+ * an adaptive-backoff cooldown. Typed (never a null return — null already
+ * means "unconfigured" on pool paths; D2 forbids overloading it). NOT
+ * recorded as a block: the request never left the process.
+ */
+export class TargetBackoffActiveError extends Error {
+  readonly code = "TARGET_BACKOFF_ACTIVE";
+  constructor(
+    readonly platform: ScrapePlatform,
+    readonly targetKey: string,
+    readonly retryAfterMs: number,
+    readonly failureStreak: number,
+  ) {
+    super(
+      `TARGET_BACKOFF_ACTIVE: target "${targetKey}" (${platform}) is cooling for ${Math.ceil(retryAfterMs / 1000)}s after ${failureStreak} consecutive transport failure(s).`,
+    );
+    this.name = "TargetBackoffActiveError";
+  }
+}
 
 const QUARANTINE_THRESHOLD = 2;
 const QUARANTINE_WINDOW_MS = 10 * 60 * 1000;
@@ -262,15 +304,32 @@ export function classifyBlock(
   return "OTHER";
 }
 
+/**
+ * T006 — optional per-target identity for adaptive backoff. When present,
+ * executePoolFetch (a) hydrates persisted backoff state for the scope,
+ * (b) throws TargetBackoffActiveError while the target is cooling, and
+ * (c) records transport-level outcomes into the backoff store. Absent →
+ * exact pre-T006 behavior (backward compatible — protects Phase 4).
+ */
+export interface PoolFetchTarget {
+  accountId: string;
+  platform: ScrapePlatform;
+  targetKey: string;
+}
+
 export interface PoolFetchInit {
   /** Wall-clock ceiling for this request. Default: BRIGHT_DATA_TIMEOUT_MS. */
   timeoutMs?: number;
+  /** T006 adaptive-backoff identity (see PoolFetchTarget). */
+  target?: PoolFetchTarget;
 }
 
 export interface StickySessionContext {
   accountId: string;
   campaignId: string;
   competitorHash: string;
+  /** T006 — pool this sticky session belongs to. Default "instagram". */
+  platform: ScrapePlatform;
   session: ProxySession;
   attemptNumber: number;
   usedSessionIds: Set<string>;
@@ -284,17 +343,91 @@ export interface StickySessionContext {
   poolFetch(url: string, init?: PoolFetchInit): Promise<Response>;
 }
 
+// T006 — observe-only per-platform in-flight counters (plain numbers, not an
+// in-flight promise map — Seal #19 8-AUDIT avoidance). Enforcement is
+// deliberately deferred until after Phase 4 live verification: exceeding the
+// configured limit logs CONCURRENCY_EXCEEDED but never blocks.
+const inflightByPlatform: Record<ScrapePlatform, number> = {
+  instagram: 0,
+  tiktok: 0,
+  reviews: 0,
+  website: 0,
+};
+
+/**
+ * Transport statuses treated as target-level failures for adaptive backoff.
+ * Block-shaped only: 401/403/407/429/5xx or any Bright Data error code.
+ * A 404/410 is a VALID answer (transport worked; target content absent) and
+ * must not poison the backoff curve (B4 — explicit classification).
+ */
+function isTransportFailure(status: number, brdErrorCode: string | null): boolean {
+  if (brdErrorCode) return true;
+  if (status === 401 || status === 403 || status === 407 || status === 429) return true;
+  if (status >= 500) return true;
+  return false;
+}
+
 async function executePoolFetch(url: string, init?: PoolFetchInit): Promise<Response> {
   const config = getScrapingConfig();
   if (!config) throw new ScrapingUnconfiguredError();
-  const result = await unlockerRequest({
-    apiKey: config.apiKey,
-    zone: config.zone,
-    url,
-    country: config.country,
-    timeoutMs: init?.timeoutMs,
-  });
-  return result.response;
+
+  const target = init?.target;
+  if (target) {
+    await ensureBackoffHydrated(target.accountId, target.platform);
+    const gate = checkTargetCooling(target.accountId, target.platform, target.targetKey);
+    if (gate.cooling) {
+      throw new TargetBackoffActiveError(target.platform, target.targetKey, gate.retryAfterMs, gate.failureStreak);
+    }
+
+    const limit = getPoolProfile(target.platform).concurrencyLimit;
+    inflightByPlatform[target.platform]++;
+    if (inflightByPlatform[target.platform] > limit) {
+      console.log(
+        `[ProxyPool] CONCURRENCY_EXCEEDED | platform=${target.platform} | inflight=${inflightByPlatform[target.platform]} | limit=${limit} | observe-only (enforcement deferred until post-Phase-4)`,
+      );
+    }
+  }
+
+  try {
+    const result = await unlockerRequest({
+      apiKey: config.apiKey,
+      zone: config.zone,
+      url,
+      country: config.country,
+      timeoutMs: init?.timeoutMs,
+    });
+
+    if (target) {
+      if (isTransportFailure(result.status, result.brdErrorCode)) {
+        const blockClass = classifyBlock(result.status, "", result.brdErrorCode);
+        const state = recordTargetFailure(target.accountId, target.platform, target.targetKey, blockClass);
+        persistTargetFailure(state);
+      } else if (recordTargetSuccess(target.accountId, target.platform, target.targetKey)) {
+        persistTargetCleared(target.accountId, target.platform, target.targetKey);
+      }
+    }
+
+    return result.response;
+  } catch (err) {
+    // Network/timeout failure (unlockerRequest throw). ScrapingUnconfigured
+    // and our own gate error are NOT transport outcomes — everything else is.
+    if (
+      target &&
+      !(err instanceof ScrapingUnconfiguredError) &&
+      !(err instanceof TargetBackoffActiveError)
+    ) {
+      const state = recordTargetFailure(
+        target.accountId,
+        target.platform,
+        target.targetKey,
+        classifyBlock(null, (err as Error)?.message || ""),
+      );
+      persistTargetFailure(state);
+    }
+    throw err;
+  } finally {
+    if (target) inflightByPlatform[target.platform]--;
+  }
 }
 
 /**
@@ -308,7 +441,18 @@ export async function poolFetch(url: string, init?: PoolFetchInit): Promise<Resp
 function buildCtx(base: Omit<StickySessionContext, "poolFetch">): StickySessionContext {
   return {
     ...base,
-    poolFetch: (url: string, init?: PoolFetchInit) => executePoolFetch(url, init),
+    // T006 — sticky-session fetches automatically carry per-target backoff
+    // identity (accountId + platform + competitorHash). An explicit
+    // init.target from the caller wins over the derived one.
+    poolFetch: (url: string, init?: PoolFetchInit) =>
+      executePoolFetch(url, {
+        ...init,
+        target: init?.target ?? {
+          accountId: base.accountId,
+          platform: base.platform,
+          targetKey: base.competitorHash,
+        },
+      }),
   };
 }
 
@@ -316,6 +460,7 @@ export function acquireStickySession(
   accountId: string,
   campaignId: string,
   competitorHash: string,
+  platform: ScrapePlatform = "instagram",
 ): StickySessionContext | null {
   const pool = getOrCreatePool(accountId);
   const bindingKey = `${accountId}:${campaignId}:${competitorHash}`;
@@ -327,7 +472,7 @@ export function acquireStickySession(
     const existingSession = pool.sessions.get(existingSessionId);
     if (existingSession && !existingSession.isQuarantined && Date.now() - existingSession.createdAt < SESSION_TTL_MS) {
       return buildCtx({
-        accountId, campaignId, competitorHash,
+        accountId, campaignId, competitorHash, platform,
         session: existingSession,
         attemptNumber: 1,
         usedSessionIds: new Set([existingSessionId]),
@@ -341,7 +486,7 @@ export function acquireStickySession(
 
   pool.stickyBindings.set(bindingKey, session.sessionId);
   return buildCtx({
-    accountId, campaignId, competitorHash,
+    accountId, campaignId, competitorHash, platform,
     session,
     attemptNumber: 1,
     usedSessionIds: new Set([session.sessionId]),
@@ -378,6 +523,7 @@ export function rotateSessionOnBlock(ctx: StickySessionContext, blockClass: Bloc
     accountId: ctx.accountId,
     campaignId: ctx.campaignId,
     competitorHash: ctx.competitorHash,
+    platform: ctx.platform,
     session: newSession,
     attemptNumber: ctx.attemptNumber + 1,
     usedSessionIds: newUsed,
@@ -575,6 +721,88 @@ export async function testScrapingConnectivity(): Promise<ScrapingConnectivityRe
       detail: `Connectivity test failed: ${err?.message || String(err)}`,
     };
   }
+}
+
+// ── T006: operator pool-status report ────────────────────────────────────────
+
+export interface PoolStatusReport {
+  generatedAt: string;
+  activeAccountPools: number;
+  platforms: Record<
+    ScrapePlatform,
+    {
+      profile: PoolProfileView;
+      inflight: number;
+      coolingTargets: number;
+      trackedTargets: number;
+    }
+  >;
+  /** Target keys are SHA-256-hashed for display — never raw handles/URLs. */
+  backoffEntries: Array<{
+    accountId: string;
+    platform: ScrapePlatform;
+    targetKeyHash: string;
+    failureStreak: number;
+    cooling: boolean;
+    retryAfterMs: number;
+    lastBlockClass: BlockClass | null;
+    lastFailureAt: string | null;
+  }>;
+  persistence: { persistFailures: number; hydrateFailures: number; hydratedScopes: number };
+}
+
+interface PoolProfileView {
+  backoffBaseMs: number;
+  backoffFactor: number;
+  backoffMaxMs: number;
+  failureThreshold: number;
+  concurrencyLimit: number;
+}
+
+function hashTargetKey(targetKey: string): string {
+  return crypto.createHash("sha256").update(targetKey).digest("hex").slice(0, 12);
+}
+
+/**
+ * Aggregate multi-pool status for the admin endpoint + hourly worker summary.
+ * NO-TENANT-LEAK: target keys are hashed; no raw competitor handles or URLs
+ * leave this function.
+ */
+export function getPoolStatusReport(): PoolStatusReport {
+  const snapshot = getTargetBackoffSnapshot();
+  const platforms = {} as PoolStatusReport["platforms"];
+  for (const platform of SCRAPE_PLATFORMS) {
+    const profile = getPoolProfile(platform);
+    const entries = snapshot.filter((e) => e.platform === platform);
+    platforms[platform] = {
+      profile: {
+        backoffBaseMs: profile.backoffBaseMs,
+        backoffFactor: profile.backoffFactor,
+        backoffMaxMs: profile.backoffMaxMs,
+        failureThreshold: profile.failureThreshold,
+        concurrencyLimit: profile.concurrencyLimit,
+      },
+      inflight: inflightByPlatform[platform],
+      coolingTargets: entries.filter((e) => e.cooling).length,
+      trackedTargets: entries.length,
+    };
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    activeAccountPools: pools.size,
+    platforms,
+    backoffEntries: snapshot.map((e: TargetBackoffSnapshotEntry) => ({
+      accountId: e.accountId,
+      platform: e.platform,
+      targetKeyHash: hashTargetKey(e.targetKey),
+      failureStreak: e.failureStreak,
+      cooling: e.cooling,
+      retryAfterMs: e.retryAfterMs,
+      lastBlockClass: e.lastBlockClass,
+      lastFailureAt: e.lastFailureAt ? new Date(e.lastFailureAt).toISOString() : null,
+    })),
+    persistence: _poolPersistenceStats(),
+  };
 }
 
 // Explicit session-selection helper retained for tests / future upgrades.

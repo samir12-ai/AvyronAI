@@ -513,7 +513,7 @@ async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Prom
     const websiteFailedRecently = comp.websiteEnrichmentStatus === "FAILED" && comp.websiteScrapedAt && (Date.now() - new Date(comp.websiteScrapedAt).getTime()) < 24 * 60 * 60 * 1000;
     if (comp.websiteUrl && !websiteBlockedCooldown && !websiteFailedRecently && (isWebDataStale(comp.websiteScrapedAt) || comp.websiteEnrichmentStatus === "NONE" || comp.websiteEnrichmentStatus === "FAILED" || (websiteBlocked && !websiteBlockedCooldown))) {
       console.log(`[FetchOrch] Website scrape starting for ${comp.name}: ${comp.websiteUrl}`);
-      const extractions = await scrapeWebsite(comp.id, comp.name, comp.websiteUrl);
+      const extractions = await scrapeWebsite(comp.id, comp.name, comp.websiteUrl, accountId);
       const successCount = extractions.filter(e => e.extractionStatus === "COMPLETE").length;
 
       for (const ext of extractions) {
@@ -555,7 +555,7 @@ async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Prom
     const blogFailedRecently = comp.blogEnrichmentStatus === "FAILED" && comp.blogScrapedAt && (Date.now() - new Date(comp.blogScrapedAt).getTime()) < 24 * 60 * 60 * 1000;
     if (comp.blogUrl && !blogFailedRecently && (isWebDataStale(comp.blogScrapedAt) || comp.blogEnrichmentStatus === "NONE" || comp.blogEnrichmentStatus === "FAILED")) {
       console.log(`[FetchOrch] Blog scrape starting for ${comp.name}: ${comp.blogUrl}`);
-      const blogResult = await scrapeBlog(comp.id, comp.name, comp.blogUrl);
+      const blogResult = await scrapeBlog(comp.id, comp.name, comp.blogUrl, accountId);
 
       await db.insert(competitorWebData).values({
         accountId,

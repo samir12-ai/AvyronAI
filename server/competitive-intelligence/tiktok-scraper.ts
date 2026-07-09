@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { ciCompetitorPosts, ciCompetitorComments, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { getScrapingConfig, poolFetch } from "./proxy-pool-manager";
+import { getScrapingConfig, poolFetch, TargetBackoffActiveError, type PoolFetchTarget } from "./proxy-pool-manager";
 
 // 2026-07 Unlocker rebuild: transport goes through the pool manager's
 // poolFetch (Bright Data Unlocker REST API). The Unlocker performs anti-bot
@@ -49,8 +49,8 @@ export interface TiktokScrapedResult {
   degradedReason?: "BRIGHT_DATA_FAIL" | "APIFY_FAIL" | "BOTH_SOURCES_DOWN" | "NO_SOURCE_CONFIGURED" | "NO_HANDLE";
 }
 
-async function fetchViaUnlocker(url: string): Promise<{ html: string; status: number }> {
-  const res = await poolFetch(url, { timeoutMs: TIKTOK_SCRAPE_TIMEOUT_MS });
+async function fetchViaUnlocker(url: string, target: PoolFetchTarget): Promise<{ html: string; status: number }> {
+  const res = await poolFetch(url, { timeoutMs: TIKTOK_SCRAPE_TIMEOUT_MS, target });
   const html = await res.text();
   return { html, status: res.status };
 }
@@ -323,19 +323,21 @@ function toNum(v: any): number | undefined {
   return isNaN(n) ? undefined : n;
 }
 
-async function scrapeTiktokViaUnlocker(handle: string): Promise<TiktokPost[]> {
+async function scrapeTiktokViaUnlocker(handle: string, accountId: string): Promise<TiktokPost[]> {
   if (!getScrapingConfig()) {
     console.error("[TiktokScraper] SCRAPING_UNCONFIGURED — Bright Data Unlocker API not configured, cannot scrape TikTok");
     return [];
   }
 
   const profileUrl = `https://www.tiktok.com/@${handle}`;
+  // T006 — adaptive backoff identity: handle-keyed within the tiktok pool.
+  const target: PoolFetchTarget = { accountId, platform: "tiktok", targetKey: handle };
   let lastError = "";
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       console.log(`[TiktokScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for @${handle} via Unlocker API`);
-      const { html, status } = await fetchViaUnlocker(profileUrl);
+      const { html, status } = await fetchViaUnlocker(profileUrl, target);
 
       if (status === 403 || status === 429) {
         lastError = `HTTP ${status} — blocked or rate limited`;
@@ -374,6 +376,13 @@ async function scrapeTiktokViaUnlocker(handle: string): Promise<TiktokPost[]> {
       console.log(`[TiktokScraper] Extracted ${posts.length} posts for @${handle} | comments=${totalComments} | withTranscript=${withTranscript}`);
       return posts;
     } catch (err: any) {
+      // T006 — a cooling target will not recover within this retry loop;
+      // stop immediately instead of burning the remaining attempts.
+      if (err instanceof TargetBackoffActiveError) {
+        lastError = err.message;
+        console.warn(`[TiktokScraper] ${err.message} — aborting retry loop for @${handle}`);
+        break;
+      }
       const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
       lastError = safeMsg;
       console.error(`[TiktokScraper] Proxy fetch error for @${handle}: ${safeMsg}`);
@@ -509,7 +518,7 @@ export async function scrapeTiktokForCompetitor(
 
   if (unlockerConfigured) {
     try {
-      const posts = await scrapeTiktokViaUnlocker(handle);
+      const posts = await scrapeTiktokViaUnlocker(handle, accountId);
       if (posts.length > 0) {
         result.postsFetched = posts.length;
         result.source = "brightdata";

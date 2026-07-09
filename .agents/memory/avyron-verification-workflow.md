@@ -15,6 +15,11 @@ description: How to typecheck and how to verify orchestrator/engine behaviour in
 
 **How to apply:** drive the *real* units directly in a `.local/scripts/*.ts` tsx harness — e.g. `runCandidateGateBattery` → `emissionFromBattery` → `buildAndRecordAiPathReport` — with live LLM judges, and assert on the assembled output. This exercises the same code the engines/aggregator use. Disclose in the harness header that it is a faithful proxy, not a full pipeline run. The interchangeability/contradiction judges make real OpenAI calls (need `OPENAI_API_KEY`); keep attempts bounded (~2 per engine).
 
+# Guard-test gotchas
+
+- Several suites pin **source shapes** (literal call-signature strings read via `readFileSync` on scraper files). Any intentional signature change must update those pin assertions in lockstep — a red pin test after a refactor is usually the pin, not the code.
+- The boot-hardening **cascade-drift sentinel** (account_id tables vs CASCADE_TABLES∪CASCADE_EXEMPT) can be red from drift that predates your change. Prove pre-existence by replaying its regex against `git show HEAD:shared/schema.ts` before touching anything. Deletion-by-default (CASCADE_TABLES) is the GDPR-safe classification; CASCADE_EXEMPT is legal-hold only. Nullable account_id rows survive the `WHERE account_id=$1` delete automatically.
+
 # Synthetic-audit harness gotchas (Audit Runner)
 
 - Background bash processes do NOT survive between tool calls (even `setsid`/`nohup` — killed, 0-byte logs). Long runs MUST go through the `Audit Runner` workflow; full logs land at `/tmp/logs/Audit_Runner_*.log` after `refresh_all_logs`.

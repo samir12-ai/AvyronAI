@@ -1,4 +1,4 @@
-import type { StickySessionContext } from "./proxy-pool-manager";
+import type { StickySessionContext, PoolFetchTarget } from "./proxy-pool-manager";
 import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getScrapingConfig, poolFetch } from "./proxy-pool-manager";
 import { acquireToken } from "./rate-limiter";
 
@@ -9,8 +9,11 @@ import { acquireToken } from "./rate-limiter";
  * (UA/TLS/headers) and anti-bot solving server-side. There is NO direct-fetch
  * fallback: unconfigured scraping fails fast as SCRAPING_UNCONFIGURED.
  */
-function transportFetch(url: string, proxyCtx?: StickySessionContext): Promise<Response> {
-  return proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url);
+function transportFetch(url: string, proxyCtx?: StickySessionContext, bareTarget?: PoolFetchTarget): Promise<Response> {
+  // T006 — sticky-session fetches (proxyCtx path) auto-attach per-target
+  // backoff identity inside the pool manager; the bare path threads an
+  // explicit target built by scrapeInstagramProfile.
+  return proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url, bareTarget ? { target: bareTarget } : undefined);
 }
 
 function randomDelay(): Promise<void> {
@@ -247,7 +250,7 @@ interface PaginationDiagnostics {
   proxyUsed: boolean;
 }
 
-async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS): Promise<{ posts: ScrapedPost[]; embeddedComments: ScrapedComment[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
+async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, bareTarget?: PoolFetchTarget): Promise<{ posts: ScrapedPost[]; embeddedComments: ScrapedComment[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
   const sessionId = proxyCtx?.session.sessionId ?? null;
@@ -279,7 +282,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   let bytesReceived = 0;
 
   if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:www:${handle}`);
-  const response = await transportFetch(apiUrl, proxyCtx);
+  const response = await transportFetch(apiUrl, proxyCtx, bareTarget);
   diag.page1HttpStatus = response.status;
 
   if (response.ok) {
@@ -302,7 +305,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     const iApiUrl = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
     try {
       if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:i.ig:${handle}`);
-      const iResp = await transportFetch(iApiUrl, proxyCtx);
+      const iResp = await transportFetch(iApiUrl, proxyCtx, bareTarget);
       if (iResp.ok) {
         const iText = await iResp.text();
         const iBytes = Buffer.byteLength(iText, "utf-8");
@@ -411,7 +414,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     try {
       if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page2:${handle}`);
       const page2StartMs = Date.now();
-      const feedResponse = await transportFetch(feedUrl, proxyCtx);
+      const feedResponse = await transportFetch(feedUrl, proxyCtx, bareTarget);
       diag.paginationHttpStatus = feedResponse.status;
 
       console.log(`[CI Scraper] WEB_API: PAGINATION_RESPONSE | HTTP=${feedResponse.status} | Content-Type=${feedResponse.headers.get("content-type")} | for ${handle}`);
@@ -457,7 +460,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
               try {
                 if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page${paginationPages + 1}:${handle}`);
                 const pageStartMs = Date.now();
-                const nextResp = await transportFetch(nextFeedUrl, proxyCtx);
+                const nextResp = await transportFetch(nextFeedUrl, proxyCtx, bareTarget);
                 if (!nextResp.ok) {
                   if (proxyCtx) logProxyTelemetry(proxyCtx, `PAGINATION_PAGE_${paginationPages}`, nextResp.status, classifyBlock(nextResp.status, ""), Date.now() - pageStartMs, false);
                   console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} HTTP ${nextResp.status}, stopping`);
@@ -549,7 +552,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
       try {
         if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `GRAPHQL:page${gqlPageNum}:${handle}`);
         const gqlStartMs = Date.now();
-        const gqlResp = await transportFetch(gqlUrl, proxyCtx);
+        const gqlResp = await transportFetch(gqlUrl, proxyCtx, bareTarget);
 
         if (!gqlResp.ok) {
           const gqlErrBody = await gqlResp.text().catch(() => "");
@@ -653,11 +656,11 @@ function parsePostFromV1Feed(item: any, handle: string): ScrapedPost {
   };
 }
 
-async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
+async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx?: StickySessionContext, bareTarget?: PoolFetchTarget): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
   console.log(`[CI Scraper] HTML_PARSE: Fetching ${profileUrl} via Unlocker API${proxyCtx ? ` (session=${proxyCtx.session.sessionId})` : ""}`);
 
   if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `HTML_PARSE:${handle}`);
-  const response = await transportFetch(profileUrl, proxyCtx);
+  const response = await transportFetch(profileUrl, proxyCtx, bareTarget);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const html = await response.text();
   const bytesReceived = Buffer.byteLength(html, "utf-8");
@@ -1085,6 +1088,13 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
 
   await randomDelay();
 
+  // T006 — bare-path backoff identity. When a sticky session ctx exists, the
+  // pool manager derives the target from the ctx (accountId + platform +
+  // competitorHash); only the bare path needs an explicit one.
+  const bareTarget: PoolFetchTarget | undefined = proxyCtx
+    ? undefined
+    : { accountId, platform: "instagram", targetKey: handle };
+
   let paginationPages = 0;
   let rawFetchedCount = 0;
   let paginationStopReason = "";
@@ -1093,7 +1103,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
   attempts.push("WEB_API");
   try {
     const startMs = Date.now();
-    const result = await attemptWebProfileApi(handle, proxyCtx, maxPosts);
+    const result = await attemptWebProfileApi(handle, proxyCtx, maxPosts, bareTarget);
     if (proxyCtx) {
       logProxyTelemetry(proxyCtx, "WEB_API", 200, null, Date.now() - startMs, result.posts.length > 0);
     }
@@ -1119,7 +1129,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     attempts.push("HTML_PARSE");
     try {
       const htmlStartMs = Date.now();
-      const result = await attemptHtmlPageParse(profileUrl, handle, proxyCtx);
+      const result = await attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget);
       if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", 200, null, Date.now() - htmlStartMs, result.posts.length > 0);
       posts = result.posts;
       followers = result.followers;

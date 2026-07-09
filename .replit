@@ -130,6 +130,7 @@ outputType = "console"
 [userenv]
 
 [userenv.shared]
+BRIGHT_DATA_COUNTRY = "ae"
 
 [userenv.production]
 PUBLIC_BASE_URL = "https://avyronai.com"

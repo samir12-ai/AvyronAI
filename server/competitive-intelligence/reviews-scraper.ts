@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { ciCompetitorReviews, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { getScrapingConfig, poolFetch } from "./proxy-pool-manager";
+import { getScrapingConfig, poolFetch, TargetBackoffActiveError, type PoolFetchTarget } from "./proxy-pool-manager";
 
 // 2026-07 Unlocker rebuild: transport goes through the pool manager's
 // poolFetch (Bright Data Unlocker REST API). The Unlocker performs its own
@@ -20,8 +20,8 @@ export interface ReviewScrapedResult {
   error?: string;
 }
 
-async function fetchViaUnlocker(url: string): Promise<{ html: string; status: number }> {
-  const res = await poolFetch(url, { timeoutMs: SCRAPE_TIMEOUT_MS });
+async function fetchViaUnlocker(url: string, target: PoolFetchTarget): Promise<{ html: string; status: number }> {
+  const res = await poolFetch(url, { timeoutMs: SCRAPE_TIMEOUT_MS, target });
   const html = await res.text();
   return { html, status: res.status };
 }
@@ -325,7 +325,13 @@ export async function scrapeReviewsForCompetitor(
           : buildGoogleMapsPlaceUrl(searchQuery);
 
         console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via Unlocker API`);
-        const { html, status } = await fetchViaUnlocker(searchUrl);
+        // T006 — adaptive backoff identity: search-query-keyed within the
+        // reviews pool.
+        const { html, status } = await fetchViaUnlocker(searchUrl, {
+          accountId,
+          platform: "reviews",
+          targetKey: searchQuery,
+        });
 
         if (status === 403 || status === 429) {
           lastError = `HTTP ${status} — blocked or rate limited`;
@@ -356,6 +362,12 @@ export async function scrapeReviewsForCompetitor(
           await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
         }
       } catch (err: any) {
+        // T006 — cooling target cannot recover within this loop; stop early.
+        if (err instanceof TargetBackoffActiveError) {
+          lastError = err.message;
+          console.warn(`[ReviewsScraper] ${err.message} — aborting retry loop for "${searchQuery}"`);
+          break;
+        }
         const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
         lastError = safeMsg;
         console.error(`[ReviewsScraper] Proxy fetch error: ${safeMsg}`);

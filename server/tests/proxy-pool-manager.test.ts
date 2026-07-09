@@ -407,8 +407,8 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
-      expect(source).toContain("attemptWebProfileApi(handle, proxyCtx, maxPosts)");
-      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx)");
+      expect(source).toContain("attemptWebProfileApi(handle, proxyCtx, maxPosts, bareTarget)");
+      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget)");
 
       expect(source).not.toContain("getProxyDispatcher()");
       expect(source).not.toContain("getSessionDispatcher()");
@@ -421,7 +421,8 @@ describe("Proxy Pool Manager — Torture Tests", () => {
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
       expect(source).toContain("function transportFetch");
-      expect(source).toContain("proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url)");
+      // T006 — bare path threads an explicit backoff target into poolFetch.
+      expect(source).toContain("proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url, bareTarget ? { target: bareTarget } : undefined)");
       // Headless rendering is retired — the Unlocker has no browser transport.
       expect(source).not.toContain("async function attemptHeadlessRender");
       expect(source).not.toContain("sessionUsername");
@@ -476,9 +477,9 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       );
       const paginationBlock = source.split("paginationAttempted = true")[1]?.split("if (paginationSuccess)")[0] || "";
       expect(paginationBlock.length).toBeGreaterThan(100);
-      expect(paginationBlock).toContain("transportFetch(feedUrl, proxyCtx)");
+      expect(paginationBlock).toContain("transportFetch(feedUrl, proxyCtx, bareTarget)");
       expect(paginationBlock).toContain("i.instagram.com/api/v1/feed/user/");
-      expect(paginationBlock).toContain("transportFetch(nextFeedUrl, proxyCtx)");
+      expect(paginationBlock).toContain("transportFetch(nextFeedUrl, proxyCtx, bareTarget)");
       expect(paginationBlock).not.toContain("www.instagram.com/api/v1/feed");
       expect(paginationBlock).not.toContain("getSessionDispatcher");
       expect(paginationBlock).not.toContain("getProxyDispatcher");
@@ -582,7 +583,7 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
-      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx)");
+      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget)");
       expect(source).toMatch(/attemptHtmlPageParse\(.*proxyCtx\?: StickySessionContext/);
     });
 
