@@ -20,10 +20,29 @@ export interface ReviewScrapedResult {
   error?: string;
 }
 
-async function fetchViaUnlocker(url: string, target: PoolFetchTarget): Promise<{ html: string; status: number }> {
+async function fetchViaUnlocker(url: string, target: PoolFetchTarget): Promise<{ html: string; status: number; brdErrorCode: string | null }> {
   const res = await poolFetch(url, { timeoutMs: SCRAPE_TIMEOUT_MS, target });
   const html = await res.text();
-  return { html, status: res.status };
+  return { html, status: res.status, brdErrorCode: res.headers.get("x-brd-err-code") };
+}
+
+/**
+ * Phase 4 live-verification finding (2026-07-09): Bright Data has disabled
+ * raw-HTML unlocking for Google domains zone-wide ("This endpoint has been
+ * disabled due to low success rate, please add &brd_json=1"). The parsed
+ * `brd_json` mode returns place METADATA only (rating, review count) — no
+ * review texts — and the `/reviews?fid=` parsed endpoint returns empty on
+ * Web Unlocker zones (it needs the separate SERP API product). Review-text
+ * scraping is therefore structurally unavailable on this transport, which
+ * MUST be reported as its own error class (B4 — explicit classification
+ * over hidden ambiguity), not as a generic "no reviews found in HTML".
+ */
+export const GOOGLE_RAW_HTML_UNSUPPORTED =
+  "GOOGLE_RAW_HTML_UNSUPPORTED: Bright Data Unlocker refuses raw Google Maps HTML (provider requires parsed brd_json mode, which carries no review texts). Review scraping is unavailable on the current Bright Data product — a SERP API zone is required for review texts.";
+
+function isGoogleRawHtmlDisabled(brdErrorCode: string | null, body: string): boolean {
+  if (brdErrorCode === "temporarily_unsupported") return true;
+  return /add\s*&?brd_json=1/i.test(body.slice(0, 500));
 }
 
 interface ExtractedReview {
@@ -327,11 +346,33 @@ export async function scrapeReviewsForCompetitor(
         console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via Unlocker API`);
         // T006 — adaptive backoff identity: search-query-keyed within the
         // reviews pool.
-        const { html, status } = await fetchViaUnlocker(searchUrl, {
+        const { html, status, brdErrorCode } = await fetchViaUnlocker(searchUrl, {
           accountId,
           platform: "reviews",
           targetKey: searchQuery,
         });
+
+        // Provider-level refusal of raw Google HTML is deterministic policy,
+        // not a transient block — retrying cannot succeed. Fail fast with an
+        // explicit class (B4) instead of burning attempts and reporting a
+        // misleading "No reviews found in HTML response".
+        if (isGoogleRawHtmlDisabled(brdErrorCode, html)) {
+          lastError = GOOGLE_RAW_HTML_UNSUPPORTED;
+          console.error(`[ReviewsScraper] ${GOOGLE_RAW_HTML_UNSUPPORTED} (searchQuery="${searchQuery}")`);
+          break;
+        }
+
+        if (brdErrorCode) {
+          // Any other Unlocker transport error rides in on HTTP 200 with an
+          // x-brd-err-code header — the body is an error string, NOT Maps
+          // HTML. Never feed it to the extractor as if it were content.
+          lastError = `UNLOCKER_ERROR ${brdErrorCode}`;
+          console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}", attempt ${attempt + 1}`);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+          }
+          continue;
+        }
 
         if (status === 403 || status === 429) {
           lastError = `HTTP ${status} — blocked or rate limited`;
@@ -381,7 +422,12 @@ export async function scrapeReviewsForCompetitor(
     result.reviewsFetched = reviews.length;
 
     if (reviews.length === 0) {
-      result.error = `No reviews extracted after ${MAX_RETRIES + 1} attempts: ${lastError}`;
+      // Structural provider refusal already carries its full explicit
+      // classification — do not wrap it in retry-count phrasing (we broke
+      // out after the first response; "after N attempts" would be false).
+      result.error = lastError.startsWith("GOOGLE_RAW_HTML_UNSUPPORTED")
+        ? lastError
+        : `No reviews extracted after ${MAX_RETRIES + 1} attempts: ${lastError}`;
       return result;
     }
 
