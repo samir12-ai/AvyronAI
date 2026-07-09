@@ -20,15 +20,39 @@ The deploy build command now uses this script instead of `npm run server:build`.
 **How to apply:** any new `@shared/*` alias added to `tsconfig.json` paths MUST also
 get a corresponding `--alias` line in `scripts/server-build.js`.
 
-## ESM bundle + CommonJS `module` variable = boot crash
-esbuild `--format=esm` output + `require.main === module` pattern = `ReferenceError:
-module is not defined`. esbuild shims `require` as `__require` (making
-`typeof require !== "undefined"` truthy) but leaves the bare `module` identifier
-undefined in ESM scope — so the check short-circuits to the crash, not the false branch.
-**Fix:** `server/migrations/runner.ts` isCliEntryPoint() now guards with
-`typeof module !== "undefined"` before touching `module`.
-**How to apply:** any new CJS-style `require.main === module` guard in server code needs
-the same three-way check.
+## CLI entry-point detection MUST be filename-based in a bundled server
+Any `if (isEntryPoint()) { …; process.exit() }` CLI block bundled into the single-file
+server is a self-kill trap. `require.main === module` crashes in ESM output
+(`module` undefined), and the "safe" ESM check
+`fileURLToPath(import.meta.url) === process.argv[1]` ALSO misfires: inside an esbuild
+bundle `import.meta.url` IS the bundle file, which equals argv[1] — so the prod server
+ran the migration CLI at boot and `process.exit(0)`-ed seconds after `listen()`
+(promote failure: "required port was never opened"). Insidious because the server logs
+"serving on port N" first, then dies.
+**Fix:** detect by entry FILENAME only: regex on `process.argv[1]` for the module's own
+path suffix (e.g. `/[/\\]migrations[/\\]runner\.(ts|js|mjs|cjs)$/`).
+**How to apply:** never use `import.meta.url === argv[1]` or `require.main === module`
+for CLI detection in anything bundled into server_dist — match argv[1]'s filename.
+
+## Blocking pg_advisory_lock + CREATE INDEX CONCURRENTLY = boot deadlock
+Under concurrent autoscale replica boots, a waiter blocked in
+`SELECT pg_advisory_lock(...)` holds a snapshot for its whole wait; the lock holder's
+`CREATE INDEX CONCURRENTLY` (from `-- noTransaction` migrations) waits for ALL
+snapshots → mutual wait → Postgres kills one ("deadlock detected") → boot exit 1.
+**Fix:** poll `pg_try_advisory_lock` in a loop (2s interval, 5-min deadline) — same
+deterministic wait-or-throw contract, but no snapshot held between polls.
+**How to apply:** any new advisory-lock wait that can coexist with CONCURRENTLY DDL
+must poll, never block.
+
+## Autoscale probes the localPort mapped to externalPort 80
+`.replit` has many `[[ports]]` (dev Expo 8081→80, backend 5000→5000, etc.). Autoscale
+requires the app to open the localPort whose externalPort is 80 — here 8081 — but
+`[env] PORT="5000"` forced the prod server onto 5000 → "required port was never
+opened, expected port 8081".
+**Fix:** deploy run command is `sh -c "PORT=8081 npm run server:prod"` (shell-level
+PORT beats `.replit [env]`). Dev is untouched (Expo dev owns 8081; backend 5000).
+**How to apply:** if the 8081→80 mapping ever changes, the hardcoded PORT=8081 in the
+deploy run command must change with it.
 
 ## Web export step can stall and kill the whole build
 `scripts/build.js` kills its Metro process for iOS/Android before starting `expo export

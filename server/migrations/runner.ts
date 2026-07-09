@@ -30,7 +30,6 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Pool, PoolClient } from "pg";
 
 /**
@@ -219,32 +218,37 @@ export async function runMigrations(opts: RunnerOptions = {}): Promise<{ applied
   const applied: MigrationFile[] = [];
 
   try {
-    // Advisory lock — BLOCKING. Per architect-review: pg_try_advisory_lock
-    // with a "skip after timeout, trust the other replica" branch is unsafe
-    // because we can't actually verify the other replica completed the
-    // pending migration before we proceed to read schema state. Use the
-    // blocking pg_advisory_lock so we wait deterministically; only one
-    // replica can hold the lock at a time, and we always observe a
-    // consistent post-migration state when we resume.
+    // Advisory lock — POLLING try-lock (2026-07-09 deadlock fix).
     //
-    // pg's statement_timeout does not apply to advisory-lock waits, so we
-    // bound the wait with a Promise.race against an explicit timeout. On
-    // timeout we throw — boot fails loudly rather than racing the other
-    // replica.
+    // Previously this used a BLOCKING `SELECT pg_advisory_lock($1)`. That
+    // deadlocked in production when two autoscale replicas booted together:
+    // the waiter's in-flight SELECT holds a snapshot for its entire wait,
+    // and the lock-holder's `CREATE INDEX CONCURRENTLY` (-- noTransaction
+    // migrations) must wait for ALL snapshots to release. Holder waits on
+    // waiter's snapshot; waiter waits on holder's advisory lock → Postgres
+    // kills one ("deadlock detected") and that replica's boot fails.
+    //
+    // Polling `pg_try_advisory_lock` keeps the same deterministic contract
+    // (we NEVER "skip after timeout and trust the other replica" — we wait
+    // until we hold the lock or throw) but each poll is an instantaneous
+    // statement, so no snapshot is held between polls and CONCURRENTLY
+    // index builds cannot deadlock against a waiting replica.
     const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
-    const lockAcquired = client.query("SELECT pg_advisory_lock($1)", [ADVISORY_LOCK_KEY]);
-    const lockTimeout = new Promise<never>((_, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new Error(
-              `[Migrations] could not acquire advisory lock ${ADVISORY_LOCK_KEY} within ${LOCK_TIMEOUT_MS}ms — another instance may be stuck. Refusing to boot.`,
-            ),
-          ),
-        LOCK_TIMEOUT_MS,
-      ),
-    );
-    await Promise.race([lockAcquired, lockTimeout]);
+    const LOCK_POLL_INTERVAL_MS = 2000;
+    const lockDeadline = Date.now() + LOCK_TIMEOUT_MS;
+    for (;;) {
+      const r = await client.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock($1) AS locked",
+        [ADVISORY_LOCK_KEY],
+      );
+      if (r.rows[0]?.locked) break;
+      if (Date.now() >= lockDeadline) {
+        throw new Error(
+          `[Migrations] could not acquire advisory lock ${ADVISORY_LOCK_KEY} within ${LOCK_TIMEOUT_MS}ms — another instance may be stuck. Refusing to boot.`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_INTERVAL_MS));
+    }
 
     try {
       await ensureMigrationsTable(client);
@@ -342,27 +346,22 @@ export async function verifySchemaFloor(opts: { databaseUrl?: string } = {}): Pr
  * CLI entry — `npx tsx server/migrations/runner.ts` (dev) or
  * `node server/migrations/runner.js` (compiled).
  *
- * Pass-14: dual-mode entry-point detection so the CLI fires whether the file
- * is loaded as CommonJS (tsx-shimmed `require.main`) OR pure ESM
- * (`import.meta.url` matches the process entry point). Without the ESM
- * fallback, an ESM-only runtime would silently no-op the CLI even though
- * `npm run db:migrate` "completed".
+ * Pass-15 (2026-07-09 prod-kill fix): entry-point detection is now based on
+ * the ENTRY FILENAME, not `import.meta.url` equality. The previous check
+ * (`fileURLToPath(import.meta.url) === process.argv[1]`) misfired when
+ * esbuild bundled this module into `server_dist/index.js` — inside the
+ * bundle, `import.meta.url` IS the bundle file, which equals `argv[1]`, so
+ * a production server boot ran the CLI block and `process.exit(0)`-ed the
+ * server seconds after it opened its port ("required port was never
+ * opened" promote failure).
+ *
+ * The CLI only ever fires when the process entry point is literally this
+ * file — `.../migrations/runner.ts` (tsx dev) or `.../migrations/runner.js`
+ * (compiled). Any bundle entry (`index.js`, etc.) does not match.
  */
 function isCliEntryPoint(): boolean {
-  // CJS path (tsx-shimmed `require` is available; check first because pure
-  // ESM evaluation of this branch is harmless — `require` is undefined and
-  // we short-circuit).
-  if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) return true;
-  // Pure-ESM path: top-level `fileURLToPath` import from `node:url` resolves
-  // the current file's URL → absolute path; compare to `process.argv[1]` to
-  // detect "this file IS the entry point". Wrapped in try/catch for older
-  // runtimes that don't honor `import.meta.url`.
-  try {
-    if (typeof import.meta?.url === "string" && process.argv[1]) {
-      return fileURLToPath(import.meta.url) === process.argv[1];
-    }
-  } catch { /* swallow */ }
-  return false;
+  const entry = process.argv[1] ?? "";
+  return /[/\\]migrations[/\\]runner\.(ts|js|mjs|cjs)$/.test(entry);
 }
 
 if (isCliEntryPoint()) {

@@ -2,13 +2,6 @@ var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined")
-    return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
@@ -92815,14 +92808,14 @@ function registerAuditRoutes(app2) {
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
       const cursor = req.query.cursor;
       const eventTypes = req.query.event_type ? req.query.event_type.split(",") : void 0;
-      const module2 = req.query.module;
+      const module = req.query.module;
       const riskLevel = req.query.risk_level;
       const fromDate = req.query.from;
       const toDate = req.query.to;
       const conditions = [eq82(auditLog.accountId, accountId)];
       let resolvedEventTypes = eventTypes;
-      if (module2 && MODULE_EVENT_MAP[module2]) {
-        resolvedEventTypes = MODULE_EVENT_MAP[module2];
+      if (module && MODULE_EVENT_MAP[module]) {
+        resolvedEventTypes = MODULE_EVENT_MAP[module];
       }
       if (resolvedEventTypes && resolvedEventTypes.length > 0) {
         conditions.push(inArray19(auditLog.eventType, resolvedEventTypes));
@@ -113230,7 +113223,6 @@ init_fetch_orchestrator();
 // server/migrations/runner.ts
 import * as fs6 from "node:fs";
 import * as path7 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { Pool as Pool2 } from "pg";
 var SQL_DIR = path7.resolve(process.cwd(), "server", "migrations", "sql");
 var SQL_NO_TXN_MARKER = "-- noTransaction";
@@ -113346,18 +113338,22 @@ async function runMigrations(opts = {}) {
   const applied = [];
   try {
     const LOCK_TIMEOUT_MS = 5 * 60 * 1e3;
-    const lockAcquired = client.query("SELECT pg_advisory_lock($1)", [ADVISORY_LOCK_KEY]);
-    const lockTimeout = new Promise(
-      (_, reject2) => setTimeout(
-        () => reject2(
-          new Error(
-            `[Migrations] could not acquire advisory lock ${ADVISORY_LOCK_KEY} within ${LOCK_TIMEOUT_MS}ms \u2014 another instance may be stuck. Refusing to boot.`
-          )
-        ),
-        LOCK_TIMEOUT_MS
-      )
-    );
-    await Promise.race([lockAcquired, lockTimeout]);
+    const LOCK_POLL_INTERVAL_MS = 2e3;
+    const lockDeadline = Date.now() + LOCK_TIMEOUT_MS;
+    for (; ; ) {
+      const r = await client.query(
+        "SELECT pg_try_advisory_lock($1) AS locked",
+        [ADVISORY_LOCK_KEY]
+      );
+      if (r.rows[0]?.locked)
+        break;
+      if (Date.now() >= lockDeadline) {
+        throw new Error(
+          `[Migrations] could not acquire advisory lock ${ADVISORY_LOCK_KEY} within ${LOCK_TIMEOUT_MS}ms \u2014 another instance may be stuck. Refusing to boot.`
+        );
+      }
+      await new Promise((resolve4) => setTimeout(resolve4, LOCK_POLL_INTERVAL_MS));
+    }
     try {
       await ensureMigrationsTable(client);
       if (!opts.skipLegacy) {
@@ -113422,15 +113418,8 @@ async function verifySchemaFloor(opts = {}) {
   }
 }
 function isCliEntryPoint() {
-  if (typeof __require !== "undefined" && typeof module !== "undefined" && __require.main === module)
-    return true;
-  try {
-    if (typeof import.meta?.url === "string" && process.argv[1]) {
-      return fileURLToPath2(import.meta.url) === process.argv[1];
-    }
-  } catch {
-  }
-  return false;
+  const entry = process.argv[1] ?? "";
+  return /[/\\]migrations[/\\]runner\.(ts|js|mjs|cjs)$/.test(entry);
 }
 if (isCliEntryPoint()) {
   runMigrations({ exitOnComplete: true }).then((r) => {

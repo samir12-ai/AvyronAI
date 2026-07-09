@@ -8,7 +8,7 @@ packages = ["ffmpeg", "chromium"]
 [deployment]
 deploymentTarget = "autoscale"
 build = ["sh", "-c", "npm run expo:static:build && node scripts/server-build.js"]
-run = ["npm", "run", "server:prod"]
+run = ["sh", "-c", "PORT=8081 npm run server:prod"]
 
 [[ports]]
 localPort = 5000
@@ -33,6 +33,10 @@ externalPort = 3000
 [[ports]]
 localPort = 8084
 externalPort = 3001
+
+[[ports]]
+localPort = 8091
+externalPort = 4200
 
 [env]
 PORT = "5000"
