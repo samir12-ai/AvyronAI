@@ -153,9 +153,20 @@ export async function designValidationJudgement(args: {
   topStructuralWarnings: string[];
   layerScores: Record<string, number>;
   accountId: string;
+  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
+  // computed by the orchestrator and threaded down. Prepended to BOTH the
+  // designer prompts and the judge prompts (anchor in first prompt AND judge).
+  doctrineBlock?: string | null;
+  anchorSource?: "doctrine" | "dna" | "none";
 }): Promise<ValidationJudgement | null> {
   const start = Date.now();
   const MODEL = "gpt-4.1-mini";
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let vjAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (args.anchorSource === "doctrine") vjAnchorSource = "doctrine";
+  else if (args.anchorSource === "dna") vjAnchorSource = "dna";
+  const vjAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  const vjAnchorPrefix = vjAnchorPresent ? `${args.doctrineBlock}\n\n` : "";
 
   if (args.totalClaims === 0 && args.unmappedSignalCount === 0) {
     console.log("[ValidationJudgement] SKIPPED — no claims or signals to judge");
@@ -164,7 +175,8 @@ export async function designValidationJudgement(args: {
 
   console.log(`[ValidationJudgement] STEP_1 | designing | state=${args.validationState} | evidence=${args.evidenceStrength.toFixed(2)} | sbRatio=${args.signalBackedClaimRatio.toFixed(2)}`);
 
-  let prompt = buildDesignerPrompt(args);
+  let prompt = `${vjAnchorPrefix}${buildDesignerPrompt(args)}`;
+  console.log(`[ValidationJudgement] ANCHOR_EVIDENCE | engine=strategy_validation_judgement | site=first_prompt | attempt=1 | present=${vjAnchorPresent ? "yes" : "no"} | source=${vjAnchorSource}`);
   let raw = "";
   try {
     const r = await aiChat({ model: MODEL, messages: [{ role: "user", content: prompt }], temperature: 0.3, max_tokens: 1200, endpoint: "statval-judgement", accountId: args.accountId });
@@ -187,7 +199,8 @@ export async function designValidationJudgement(args: {
   let verdict: "ACCEPTED" | "REJECTED" = "ACCEPTED";
   let reason = ""; let fix = "";
   try {
-    const jr = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudgePrompt(JSON.stringify(j, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "statval-judgement-judge", accountId: args.accountId });
+    console.log(`[ValidationJudgement] ANCHOR_EVIDENCE | engine=strategy_validation_judgement | site=judge | attempt=1 | present=${vjAnchorPresent ? "yes" : "no"} | source=${vjAnchorSource}`);
+    const jr = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${vjAnchorPrefix}${buildJudgePrompt(JSON.stringify(j, null, 2))}` }], temperature: 0.1, max_tokens: 400, endpoint: "statval-judgement-judge", accountId: args.accountId });
     const jp = safeJson(jr.choices[0]?.message?.content?.trim() || "");
     if (jp) { verdict = jp.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp.reason || ""); fix = String(jp.specificFix || ""); }
   } catch (err: any) { console.warn(`[ValidationJudgement] JUDGE_FAILED | ${err.message} | accept v1`); }
@@ -198,7 +211,8 @@ export async function designValidationJudgement(args: {
     const fb = [reason, fix].filter(Boolean).join(" — ");
     console.log(`[ValidationJudgement] STEP_4 | retry`);
     try {
-      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildDesignerPrompt({ ...args, judgeFeedback: fb }) }], temperature: 0.3, max_tokens: 1200, endpoint: "statval-judgement-retry", accountId: args.accountId });
+      console.log(`[ValidationJudgement] ANCHOR_EVIDENCE | engine=strategy_validation_judgement | site=first_prompt | attempt=2 | present=${vjAnchorPresent ? "yes" : "no"} | source=${vjAnchorSource}`);
+      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${vjAnchorPrefix}${buildDesignerPrompt({ ...args, judgeFeedback: fb })}` }], temperature: 0.3, max_tokens: 1200, endpoint: "statval-judgement-retry", accountId: args.accountId });
       const j2 = parseJudgement(safeJson(r2.choices[0]?.message?.content?.trim() || ""), MODEL, 1);
       if (j2) {
         j2.validationState = args.validationState;
@@ -206,7 +220,8 @@ export async function designValidationJudgement(args: {
         j2.signalBackedClaimRatio = args.signalBackedClaimRatio;
         j = j2;
         try {
-          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudgePrompt(JSON.stringify(j, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "statval-judgement-judge-retry", accountId: args.accountId });
+          console.log(`[ValidationJudgement] ANCHOR_EVIDENCE | engine=strategy_validation_judgement | site=judge | attempt=2 | present=${vjAnchorPresent ? "yes" : "no"} | source=${vjAnchorSource}`);
+          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${vjAnchorPrefix}${buildJudgePrompt(JSON.stringify(j, null, 2))}` }], temperature: 0.1, max_tokens: 400, endpoint: "statval-judgement-judge-retry", accountId: args.accountId });
           const jp2 = safeJson(jr2.choices[0]?.message?.content?.trim() || "");
           if (jp2) { verdict = jp2.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp2.reason || ""); }
         } catch {}

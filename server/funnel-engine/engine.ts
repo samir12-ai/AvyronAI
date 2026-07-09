@@ -1,4 +1,11 @@
 import { aiChat } from "../ai-client";
+import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import {
   buildCausalDirectiveForPrompt,
@@ -1061,6 +1068,9 @@ export async function aiFunnelGeneration(
   awarenessCtx?: FunnelAwarenessInput | null,
   analyticalEnrichment?: any,
   depthRejectionContext?: string,
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
+  attemptNumber?: number,
 ): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string } }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
@@ -1101,8 +1111,47 @@ CRITICAL: The funnel type MUST be compatible with the detected awareness route. 
   const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
   if (aelBlock) console.log(`[FunnelEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
+  // Anchor doctrine (criteria A + B): inject the strategic doctrine block when
+  // threaded; when the doctrine anchor is absent, derive an anchor from Product
+  // DNA (F5a). deriveAnchorFromProductDna returns null unless differentiator +
+  // problem + name + type all exist (D5 — never fabricate).
+  let doctrineBlock = "";
+  if (strategic) {
+    doctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[FunnelEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let funnelAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!funnelAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      funnelAnchor = derivedAnchor;
+      console.log("[FunnelEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let funnelAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    funnelAnchorSource = "doctrine";
+  } else if (funnelAnchor) {
+    funnelAnchorSource = "dna";
+  }
+  const dnaAnchorBlock = funnelAnchorSource === "dna" && funnelAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve every funnel concept to THIS product) ===
+Product name: ${funnelAnchor.name}
+Product type: ${funnelAnchor.type}${funnelAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${funnelAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${funnelAnchor.coreProblemSolved}
+Differentiating feature: ${funnelAnchor.differentiatingFeature}
+`
+    : "";
+  const anchorGroundingRule = funnelAnchor
+    ? "\nANCHOR GROUNDING: Every funnel name and journey MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the causal grounding rules; it never replaces them.\n"
+    : "";
+  console.log(`[FunnelEngine-V3] ANCHOR_EVIDENCE | engine=funnel | site=first_prompt | attempt=${attemptNumber ?? 1} | present=${funnelAnchor ? "yes" : "no"} | source=${funnelAnchorSource}`);
+
   const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
-${aelBlock}${causalDirective}
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${aelBlock}${causalDirective}
 STRICT RULES:
 - Do NOT generate strategy decisions, strategic repositioning, offer redesign, pricing logic, budget recommendations, channel selection, media buying, awareness messaging, persuasion copy, scripts, campaign tasks, financial planning, or execution plans
 - ONLY output funnel definitions: name, type (direct, webinar, challenge, vsl, application, consultation, tripwire, product-launch, membership, hybrid)
@@ -1153,7 +1202,7 @@ Return JSON:
 
   const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
   try {
-    const completion = await aiChat({
+    let completion = await aiChat({
       model: "gpt-4.1-mini",
       messages: [{ role: "user", content: fullPrompt }],
       max_tokens: 800,
@@ -1161,23 +1210,50 @@ Return JSON:
       accountId,
       endpoint: "funnel-engine",
     });
-    const response = completion.choices?.[0]?.message?.content || "{}";
-    const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-    const parsed = JSON.parse(cleanedResponse);
+    let response = completion.choices?.[0]?.message?.content || "{}";
+    let cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+    // Criterion C (retry with specific feedback): one strict-format retry when
+    // the response is unparseable or missing required fields — mirrors the
+    // MechanismEngine parse-retry. The retry prompt names the EXACT defect.
+    // Still fail-closed: a second malformed response throws (no fabrication).
+    const validateParsed = (p: any): string[] => {
+      const missing: string[] = [];
+      if (!p?.primary?.name) missing.push("primary.name");
+      if (!p?.primary?.type) missing.push("primary.type");
+      if (!p?.alternative?.name) missing.push("alternative.name");
+      if (!p?.alternative?.type) missing.push("alternative.type");
+      if (!p?.rejected?.name) missing.push("rejected.name");
+      if (!p?.rejected?.type) missing.push("rejected.type");
+      if (!p?.rejected?.rejectionReason) missing.push("rejected.rejectionReason");
+      return missing;
+    };
+    let parsed = safeJsonParse(cleanedResponse);
+    let missing = parsed ? validateParsed(parsed) : ["<unparseable JSON>"];
+    if (missing.length > 0) {
+      const defect = parsed ? `missing required fields: ${missing.join(", ")}` : "previous response was not parseable JSON";
+      console.log(`[FunnelEngine-V3] AI_PARSE_RETRY | defect="${defect}"`);
+      const strictPrompt = `${fullPrompt}\n\n═══ STRICT OUTPUT FORMAT (PREVIOUS RESPONSE WAS MALFORMED: ${defect}) ═══\nRespond with EXACTLY ONE valid JSON object and NOTHING else. No markdown, no preamble. Start with "{" and end with "}". The object MUST contain "primary" {name,type}, "alternative" {name,type}, and "rejected" {name,type,rejectionReason} — every field non-empty.`;
+      completion = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: strictPrompt }],
+        max_tokens: 800,
+        temperature: 0.3,
+        accountId,
+        endpoint: "funnel-engine",
+      });
+      response = completion.choices?.[0]?.message?.content || "{}";
+      cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      parsed = safeJsonParse(cleanedResponse);
+      missing = parsed ? validateParsed(parsed) : ["<unparseable JSON>"];
+    }
 
     // CLP-03 / CLP-05: NO baked-English `||` fallbacks. If the AI omitted a
-    // required field, the response is malformed — throw and let the outer
-    // catch surface STATUS.AI_DEGRADED rather than substituting fake names.
-    const missing: string[] = [];
-    if (!parsed.primary?.name) missing.push("primary.name");
-    if (!parsed.primary?.type) missing.push("primary.type");
-    if (!parsed.alternative?.name) missing.push("alternative.name");
-    if (!parsed.alternative?.type) missing.push("alternative.type");
-    if (!parsed.rejected?.name) missing.push("rejected.name");
-    if (!parsed.rejected?.type) missing.push("rejected.type");
-    if (!parsed.rejected?.rejectionReason) missing.push("rejected.rejectionReason");
+    // required field after the strict retry, the response is malformed —
+    // throw and let the outer catch surface STATUS.AI_DEGRADED rather than
+    // substituting fake names.
     if (missing.length > 0) {
-      throw new Error(`AI response missing required fields: ${missing.join(", ")}`);
+      throw new Error(`AI response missing required fields after strict retry: ${missing.join(", ")}`);
     }
 
     return {
@@ -1221,6 +1297,8 @@ export async function runFunnelEngine(
   accountId: string,
   awareness?: FunnelAwarenessInput | null,
   analyticalEnrichment?: any,
+  strategic?: RunStrategicContext,
+  productDna?: ProductDnaLike | null,
 ): Promise<FunnelResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -1311,7 +1389,7 @@ export async function runFunnelEngine(
   const funnelDepthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
 
   try {
-    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment);
+    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment, undefined, strategic || null, productDna || null, 1);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
     // CLP-03 / Phase 1: AI generation failed. Bail out with STATUS.AI_DEGRADED
@@ -1512,7 +1590,7 @@ export async function runFunnelEngine(
       console.log(`[FunnelEngine-V3] DEPTH_GATE: Attempt ${funnelDepthAttempt - 1} BLOCKED — regenerating (${funnelDepthAttempt}/${funnelDepthGateMaxAttempts})`);
 
       try {
-        aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment, funnelDepthRejectionContext);
+        aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment, funnelDepthRejectionContext, strategic || null, productDna || null, funnelDepthAttempt);
         diagnostics.aiGeneration = { success: true, depthRetry: funnelDepthAttempt };
       } catch (err: any) {
         funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: AI_ERROR (${err.message})`);

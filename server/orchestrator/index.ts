@@ -154,6 +154,7 @@ import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
 import { getActiveRoot, buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
 import { seedDoctrine, doctrineSalt, runStrategicContextOf, appendAudienceDecision, appendPositioningDecision, appendOfferDecision, appendPriorDecision } from "./doctrine-seed";
+import { buildSubEngineAnchorContext } from "../shared/strategic-doctrine";
 import { assembleStrategyRootInput, canonicalizeAudienceShape } from "../shared/strategy-root-assembler";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
@@ -1889,7 +1890,9 @@ async function executeEngine(
           posInput,
           config.accountId,
           undefined,
-          ctx.analyticalEnrichment
+          ctx.analyticalEnrichment,
+          runStrategicContextOf(ctx),
+          (ctx.audience as any)?.productDna || null
         );
         output = result;
         ctx.differentiation = result;
@@ -2011,7 +2014,7 @@ async function executeEngine(
           // T002 v2: confidence flows downstream
           confidenceScore: typeof ctx.differentiation?.confidenceScore === "number" ? ctx.differentiation.confidenceScore : null,
         };
-        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment);
+        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment, runStrategicContextOf(ctx), (ctx.audience as any)?.productDna || null);
         output = result;
         ctx.mechanism = result;
 
@@ -2189,6 +2192,7 @@ async function executeEngine(
           ctx.analyticalEnrichment,
           ctx.ssc?.commercialSignals || null,
           runStrategicContextOf(ctx),
+          (ctx.audience as any)?.productDna || null,
         );
         output = result;
         ctx.offer = result;
@@ -2325,6 +2329,8 @@ async function executeEngine(
             industry: (config as any).industry ?? process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY ?? null,
             businessProfile: ctx.businessProfile ?? null,
           } as any,
+          runStrategicContextOf(ctx),
+          (ctx.audience as any)?.productDna || null,
         );
         output = result;
         ctx.awareness = result;
@@ -2460,7 +2466,9 @@ async function executeEngine(
         const result = await runFunnelEngine(
           miInput, audInput, offerInput, posInput, diffInput,
           config.accountId, awarenessInput,
-          ctx.analyticalEnrichment
+          ctx.analyticalEnrichment,
+          runStrategicContextOf(ctx),
+          (ctx.audience as any)?.productDna || null
         );
         output = result;
         ctx.funnel = result;
@@ -2641,7 +2649,9 @@ async function executeEngine(
         const result = await runPersuasionEngine(
           miInput, audInput, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
           config.accountId, persuasionLineage,
-          ctx.analyticalEnrichment
+          ctx.analyticalEnrichment,
+          runStrategicContextOf(ctx),
+          (ctx.audience as any)?.productDna || null
         );
         output = result;
         ctx.persuasion = result;
@@ -2795,7 +2805,15 @@ async function executeEngine(
             const unmapped = Array.isArray(r.unmappedSignals) ? r.unmappedSignals : [];
             const lowConf = Array.isArray(r.lowConfidenceSignals) ? r.lowConfidenceSignals : [];
             const hypoCount = claimVals.filter((c: any) => c?.classification === "hypothesis" || c?.isHypothesis === true).length;
+            const vjAnchorCtx = buildSubEngineAnchorContext(
+              runStrategicContextOf(ctx),
+              (ctx.audience as any)?.productDna || null,
+              "ANCHOR GROUNDING: Every trust gap, unlock condition, and proof-collection step MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.",
+              "Orchestrator/ValidationJudgement",
+            );
             const cj = await designValidationJudgement({
+              doctrineBlock: vjAnchorCtx.doctrineBlock,
+              anchorSource: vjAnchorCtx.anchorSource,
               validationState: vState,
               evidenceStrength: eStrength,
               signalBackedClaimRatio: sbcRatio,
@@ -2959,7 +2977,15 @@ async function executeEngine(
             const decisionConfidence = typeof r.budgetDecisionConfidence === "number" ? r.budgetDecisionConfidence : (typeof r.confidenceScore === "number" ? r.confidenceScore : 0.5);
             const cacAssess = r.cacAssumptionCheck || r.cacReality || r.cacAssessment || {};
             const reconciledConf = typeof r.baseValidationConfidence === "number" ? r.baseValidationConfidence : (typeof r.reconciledValidationConfidence === "number" ? r.reconciledValidationConfidence : validationConfidence);
+            const bsAnchorCtx = buildSubEngineAnchorContext(
+              runStrategicContextOf(ctx),
+              (ctx.audience as any)?.productDna || null,
+              "ANCHOR GROUNDING: Every budget rationale, kill trigger, and expansion precondition MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.",
+              "Orchestrator/BudgetStrategy",
+            );
             const cj = await designBudgetStrategy({
+              doctrineBlock: bsAnchorCtx.doctrineBlock,
+              anchorSource: bsAnchorCtx.anchorSource,
               action,
               decisionConfidence,
               validationState: validationStateValue,
@@ -3248,7 +3274,15 @@ async function executeEngine(
             const cr = (performance.clicks > 0 && performance.conversions > 0) ? performance.conversions / performance.clicks : 0;
             const roas = performance.spend > 0 ? performance.revenue / performance.spend : 0;
             const cpa = performance.conversions > 0 ? performance.spend / performance.conversions : 0;
+            const itAnchorCtx = buildSubEngineAnchorContext(
+              runStrategicContextOf(ctx),
+              (ctx.audience as any)?.productDna || null,
+              "ANCHOR GROUNDING: Every hypothesis sequencing decision and kill threshold MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.",
+              "Orchestrator/IterationStrategy",
+            );
             const cj = await designIterationStrategy({
+              doctrineBlock: itAnchorCtx.doctrineBlock,
+              anchorSource: itAnchorCtx.anchorSource,
               campaignId: config.campaignId,
               performanceROAS: roas,
               performanceCPA: cpa,
@@ -3428,7 +3462,15 @@ async function executeEngine(
             const churnFlags = Array.isArray(r.churnRiskFlags) ? r.churnRiskFlags : (Array.isArray(r.churnRisks) ? r.churnRisks : []);
             const ltvPaths = Array.isArray(r.ltvExpansionPaths) ? r.ltvExpansionPaths : (Array.isArray(r.expansionPaths) ? r.expansionPaths : []);
             const upsellTriggers = Array.isArray(r.upsellTriggers) ? r.upsellTriggers : [];
+            const reAnchorCtx = buildSubEngineAnchorContext(
+              runStrategicContextOf(ctx),
+              (ctx.audience as any)?.productDna || null,
+              "ANCHOR GROUNDING: Every churn moment, retention loop, and LTV expansion path MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.",
+              "Orchestrator/RetentionEconomics",
+            );
             const cj = await designRetentionEconomics({
+              doctrineBlock: reAnchorCtx.doctrineBlock,
+              anchorSource: reAnchorCtx.anchorSource,
               customerLTV: clv,
               churnRate,
               repeatPurchaseRate,

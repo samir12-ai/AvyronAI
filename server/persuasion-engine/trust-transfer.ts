@@ -245,9 +245,20 @@ export async function designTrustTransfer(args: {
   rejectedClaimPatterns: string[];
   upstreamBuyerPsychology?: string | null;
   accountId: string;
+  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
+  // computed ONCE by the parent persuasion engine. Injected into BOTH the
+  // designer prompts and the judge prompts (anchor in first prompt AND judge).
+  doctrineBlock?: string | null;
+  anchorSource?: "doctrine" | "dna" | "none";
 }): Promise<TrustTransferDesign | null> {
   const startTs = Date.now();
   const MODEL = "gpt-4.1-mini";
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let ttAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (args.anchorSource === "doctrine") ttAnchorSource = "doctrine";
+  else if (args.anchorSource === "dna") ttAnchorSource = "dna";
+  const ttAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  const ttAnchorPrefix = ttAnchorPresent ? `${args.doctrineBlock}\n\n` : "";
 
   if (args.objectionStatements.length === 0 && args.trustBarriers.length === 0) {
     console.log("[TrustTransfer] SKIPPED — no objections or trust barriers to ground design");
@@ -260,7 +271,8 @@ export async function designTrustTransfer(args: {
   const promptArgs = { ...args, rootCauses };
 
   // Attempt 1
-  let prompt = buildDesignerPrompt(promptArgs);
+  let prompt = `${ttAnchorPrefix}${buildDesignerPrompt(promptArgs)}`;
+  console.log(`[TrustTransfer] ANCHOR_EVIDENCE | engine=persuasion_trust_transfer | site=first_prompt | attempt=1 | present=${ttAnchorPresent ? "yes" : "no"} | source=${ttAnchorSource}`);
   let raw = "";
   try {
     const resp = await aiChat({
@@ -293,7 +305,8 @@ export async function designTrustTransfer(args: {
   let judgeReason = "JUDGE_ERROR: judge did not run";
   let specificFix = "";
   try {
-    const judgePrompt = buildJudgePrompt(JSON.stringify(design, null, 2));
+    const judgePrompt = `${ttAnchorPrefix}${buildJudgePrompt(JSON.stringify(design, null, 2))}`;
+    console.log(`[TrustTransfer] ANCHOR_EVIDENCE | engine=persuasion_trust_transfer | site=judge | attempt=1 | present=${ttAnchorPresent ? "yes" : "no"} | source=${ttAnchorSource}`);
     const judgeResp = await aiChat({
       model: MODEL,
       messages: [{ role: "user", content: judgePrompt }],
@@ -324,7 +337,8 @@ export async function designTrustTransfer(args: {
   if (judgeVerdict === "REJECTED" && (judgeReason || specificFix)) {
     const feedback = [judgeReason, specificFix].filter(Boolean).join(" — ");
     console.log(`[TrustTransfer] STEP_4 | retry_with_feedback | "${feedback.slice(0, 100)}"`);
-    prompt = buildDesignerPrompt({ ...promptArgs, judgeFeedback: feedback });
+    prompt = `${ttAnchorPrefix}${buildDesignerPrompt({ ...promptArgs, judgeFeedback: feedback })}`;
+    console.log(`[TrustTransfer] ANCHOR_EVIDENCE | engine=persuasion_trust_transfer | site=first_prompt | attempt=2 | present=${ttAnchorPresent ? "yes" : "no"} | source=${ttAnchorSource}`);
     try {
       const resp2 = await aiChat({
         model: MODEL,
@@ -342,7 +356,8 @@ export async function designTrustTransfer(args: {
         console.log(`[TrustTransfer] STEP_5 | retry_design | mechanism="${design.transferMechanism.name}"`);
         // Re-judge once
         try {
-          const judgePrompt2 = buildJudgePrompt(JSON.stringify(design, null, 2));
+          const judgePrompt2 = `${ttAnchorPrefix}${buildJudgePrompt(JSON.stringify(design, null, 2))}`;
+          console.log(`[TrustTransfer] ANCHOR_EVIDENCE | engine=persuasion_trust_transfer | site=judge | attempt=2 | present=${ttAnchorPresent ? "yes" : "no"} | source=${ttAnchorSource}`);
           const judgeResp2 = await aiChat({
             model: MODEL,
             messages: [{ role: "user", content: judgePrompt2 }],

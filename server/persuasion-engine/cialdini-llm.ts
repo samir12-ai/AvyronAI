@@ -155,6 +155,10 @@ export async function pickCialdiniPrinciple(args: {
   rejectedClaimPatterns: string[];
   accountId: string;
   trustTransferDesign?: TrustTransferDesign;
+  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
+  // computed ONCE by the parent persuasion engine and threaded down.
+  doctrineBlock?: string | null;
+  anchorSource?: "doctrine" | "dna" | "none";
 }): Promise<CialdiniReasoning | null> {
   const startTs = Date.now();
   const aelAck = acknowledgeAelInput("PersuasionCialdini", args.analyticalEnrichment, args.accountId);
@@ -167,11 +171,18 @@ export async function pickCialdiniPrinciple(args: {
   console.log(`[PersuasionCialdini] STEP_1 | invoking LLM | rootCauses=${rootCauses.length} | objections=${args.objectionStatements.length} | trustBarriers=${args.trustBarriers.length} | tier=${args.sophisticationTier ?? "?"} | stage=${args.awarenessStage}`);
 
   const prompt = buildPrompt({ ...args, rootCauses });
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let cdAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (args.anchorSource === "doctrine") cdAnchorSource = "doctrine";
+  else if (args.anchorSource === "dna") cdAnchorSource = "dna";
+  const cdAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  console.log(`[PersuasionCialdini] ANCHOR_EVIDENCE | engine=persuasion_cialdini | site=first_prompt | attempt=1 | present=${cdAnchorPresent ? "yes" : "no"} | source=${cdAnchorSource}`);
+  const finalPrompt = cdAnchorPresent ? `${args.doctrineBlock}\n\n${prompt}` : prompt;
   let response;
   try {
     response = await aiChat({
       model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: finalPrompt }],
       temperature: 0.25,
       max_tokens: 1200,
       endpoint: "persuasion-engine-cialdini",

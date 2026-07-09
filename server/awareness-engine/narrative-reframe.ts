@@ -80,6 +80,11 @@ interface DesignerInput {
   trustMechanism?: string | null;        // from Persuasion (cross-run)
   gameDimension?: string | null;         // from Positioning
   accountId: string;
+  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
+  // computed ONCE by the parent awareness engine. Injected into BOTH the
+  // designer prompt and the judge prompt (anchor in first prompt AND judge).
+  doctrineBlock?: string | null;
+  anchorSource?: "doctrine" | "dna" | "none";
 }
 
 const FEW_SHOT = `
@@ -137,7 +142,14 @@ function safeJSON<T>(raw: string): T | null {
   return null;
 }
 
-async function callDesigner(input: DesignerInput, judgeFeedback?: string): Promise<any | null> {
+function anchorSourceOf(input: DesignerInput): "doctrine" | "dna" | "none" {
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  if (input.anchorSource === "doctrine") return "doctrine";
+  if (input.anchorSource === "dna") return "dna";
+  return "none";
+}
+
+async function callDesigner(input: DesignerInput, judgeFeedback?: string, attempt: number = 1): Promise<any | null> {
   const upstreamBlock = [
     input.buyerBeliefModel ? `Buyer's CURRENT belief about category: ${input.buyerBeliefModel.aboutCategory || "(unknown)"}` : null,
     input.buyerBeliefModel ? `Buyer's CURRENT belief about themselves: ${input.buyerBeliefModel.aboutThemselves || "(unknown)"}` : null,
@@ -150,7 +162,10 @@ async function callDesigner(input: DesignerInput, judgeFeedback?: string): Promi
     input.gameDimension ? `Positioning game we're playing: ${input.gameDimension}` : null,
   ].filter(Boolean).join("\n");
 
-  const sys = `You are a senior brand & narrative strategist who has rebuilt the messaging of three Fortune-100 categories from scratch.
+  const anchorPresent = input.doctrineBlock && input.doctrineBlock.length > 0;
+  console.log(`[NarrativeReframe] ANCHOR_EVIDENCE | engine=awareness_narrative_reframe | site=first_prompt | attempt=${attempt} | present=${anchorPresent ? "yes" : "no"} | source=${anchorSourceOf(input)}`);
+
+  const sys = `${anchorPresent ? `${input.doctrineBlock}\n\n` : ""}You are a senior brand & narrative strategist who has rebuilt the messaging of three Fortune-100 categories from scratch.
 
 You do NOT write hooks, slogans, or "attention-grabbing copy". You re-engineer the buyer's MENTAL MODEL.
 
@@ -205,8 +220,11 @@ Return ONLY valid JSON in the schema above. No prose, no markdown, no commentary
   }
 }
 
-async function callJudge(candidate: any, input: DesignerInput): Promise<{ status: "ACCEPTED" | "REJECTED" | "JUDGE_ERROR"; reason: string }> {
-  const sys = `You are a hostile narrative-strategy critic. You reject any reframe that is a slogan or vibe rather than a real mental-model shift.
+async function callJudge(candidate: any, input: DesignerInput, attempt: number = 1): Promise<{ status: "ACCEPTED" | "REJECTED" | "JUDGE_ERROR"; reason: string }> {
+  const judgeAnchorPresent = input.doctrineBlock && input.doctrineBlock.length > 0;
+  console.log(`[NarrativeReframe] ANCHOR_EVIDENCE | engine=awareness_narrative_reframe | site=judge | attempt=${attempt} | present=${judgeAnchorPresent ? "yes" : "no"} | source=${anchorSourceOf(input)}`);
+
+  const sys = `${judgeAnchorPresent ? `${input.doctrineBlock}\n\n` : ""}You are a hostile narrative-strategy critic. You reject any reframe that is a slogan or vibe rather than a real mental-model shift.
 
 Reject if ANY of:
 1. "namedPrinciple" is a vibe ("be authentic", "be data-driven", "modern marketing", "trust matters").
@@ -265,10 +283,10 @@ export async function engineerNarrativeReframe(input: DesignerInput): Promise<Na
   const t0 = Date.now();
   console.log(`[NarrativeReframe] STEP_1 | engineering | stage=${input.awarenessStage} | entry=${input.primaryEntryRoute} | hasBeliefModel=${!!input.buyerBeliefModel} | rejections=${input.buyerRejectionHistory?.length || 0}`);
 
-  let candidate = await callDesigner(input);
+  let candidate = await callDesigner(input, undefined, 1);
   if (!validateShape(candidate)) {
     console.warn(`[NarrativeReframe] DESIGN_V1_INVALID — retrying with shape feedback`);
-    candidate = await callDesigner(input, "Prior attempt did not return all required fields. Return EXACTLY the schema with every nested field populated.");
+    candidate = await callDesigner(input, "Prior attempt did not return all required fields. Return EXACTLY the schema with every nested field populated.", 2);
     if (!validateShape(candidate)) {
       console.warn(`[NarrativeReframe] DESIGN_V2_INVALID — falling back (engine continues without reframe)`);
       return null;
@@ -276,15 +294,15 @@ export async function engineerNarrativeReframe(input: DesignerInput): Promise<Na
   }
   console.log(`[NarrativeReframe] STEP_2 | design_v1 | movement=${candidate.bridgeMechanism.movement} | newModel="${(candidate.newModel.reclassification || "").slice(0, 60)}"`);
 
-  let { status, reason } = await callJudge(candidate, input);
+  let { status, reason } = await callJudge(candidate, input, 1);
   let retryCount = 0;
   if (status === "REJECTED") {
     retryCount = 1;
     console.log(`[NarrativeReframe] STEP_3 | judge=REJECTED | reason="${reason.slice(0, 100)}" | retrying`);
-    const retry = await callDesigner(input, reason);
+    const retry = await callDesigner(input, reason, 3);
     if (validateShape(retry)) {
       candidate = retry;
-      const second = await callJudge(candidate, input);
+      const second = await callJudge(candidate, input, 2);
       status = second.status;
       reason = second.reason;
     }

@@ -130,9 +130,22 @@ function parseEcon(p: any, model: string, retry: number): RetentionEconomics | n
   };
 }
 
-export async function designRetentionEconomics(args: Parameters<typeof buildDesigner>[0] & { accountId: string }): Promise<RetentionEconomics | null> {
+export async function designRetentionEconomics(args: Parameters<typeof buildDesigner>[0] & {
+  accountId: string;
+  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
+  // computed by the orchestrator and threaded down. Prepended to BOTH the
+  // designer prompts and the judge prompts (anchor in first prompt AND judge).
+  doctrineBlock?: string | null;
+  anchorSource?: "doctrine" | "dna" | "none";
+}): Promise<RetentionEconomics | null> {
   const start = Date.now();
   const MODEL = "gpt-4.1-mini";
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let reAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (args.anchorSource === "doctrine") reAnchorSource = "doctrine";
+  else if (args.anchorSource === "dna") reAnchorSource = "dna";
+  const reAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  const reAnchorPrefix = reAnchorPresent ? `${args.doctrineBlock}\n\n` : "";
 
   if (args.retentionLoops.length === 0 && args.topLTVPaths.length === 0 && args.topMotivations.length === 0) {
     console.log("[RetentionEconomics] SKIPPED — no retention signal to design from"); return null;
@@ -142,7 +155,8 @@ export async function designRetentionEconomics(args: Parameters<typeof buildDesi
 
   let raw = "";
   try {
-    const r = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildDesigner(args) }], temperature: 0.3, max_tokens: 1300, endpoint: "retention-economics", accountId: args.accountId });
+    console.log(`[RetentionEconomics] ANCHOR_EVIDENCE | engine=strategy_retention | site=first_prompt | attempt=1 | present=${reAnchorPresent ? "yes" : "no"} | source=${reAnchorSource}`);
+    const r = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${reAnchorPrefix}${buildDesigner(args)}` }], temperature: 0.3, max_tokens: 1300, endpoint: "retention-economics", accountId: args.accountId });
     raw = r.choices[0]?.message?.content?.trim() || "";
   } catch (err: any) { console.error(`[RetentionEconomics] DESIGN_FAILED | ${err.message}`); return null; }
 
@@ -153,7 +167,8 @@ export async function designRetentionEconomics(args: Parameters<typeof buildDesi
 
   let verdict: "ACCEPTED" | "REJECTED" = "ACCEPTED"; let reason = ""; let fix = "";
   try {
-    const jr = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudge(JSON.stringify(e, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "retention-economics-judge", accountId: args.accountId });
+    console.log(`[RetentionEconomics] ANCHOR_EVIDENCE | engine=strategy_retention | site=judge | attempt=1 | present=${reAnchorPresent ? "yes" : "no"} | source=${reAnchorSource}`);
+    const jr = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${reAnchorPrefix}${buildJudge(JSON.stringify(e, null, 2))}` }], temperature: 0.1, max_tokens: 400, endpoint: "retention-economics-judge", accountId: args.accountId });
     const jp = safeJson(jr.choices[0]?.message?.content?.trim() || "");
     if (jp) { verdict = jp.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp.reason || ""); fix = String(jp.specificFix || ""); }
   } catch (err: any) { console.warn(`[RetentionEconomics] JUDGE_FAILED | ${err.message}`); }
@@ -164,12 +179,14 @@ export async function designRetentionEconomics(args: Parameters<typeof buildDesi
     const fb = [reason, fix].filter(Boolean).join(" — ");
     console.log(`[RetentionEconomics] STEP_4 | retry`);
     try {
-      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildDesigner({ ...args, judgeFeedback: fb }) }], temperature: 0.3, max_tokens: 1300, endpoint: "retention-economics-retry", accountId: args.accountId });
+      console.log(`[RetentionEconomics] ANCHOR_EVIDENCE | engine=strategy_retention | site=first_prompt | attempt=2 | present=${reAnchorPresent ? "yes" : "no"} | source=${reAnchorSource}`);
+      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${reAnchorPrefix}${buildDesigner({ ...args, judgeFeedback: fb })}` }], temperature: 0.3, max_tokens: 1300, endpoint: "retention-economics-retry", accountId: args.accountId });
       const e2 = parseEcon(safeJson(r2.choices[0]?.message?.content?.trim() || ""), MODEL, 1);
       if (e2) {
         e = e2;
         try {
-          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudge(JSON.stringify(e, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "retention-economics-judge-retry", accountId: args.accountId });
+          console.log(`[RetentionEconomics] ANCHOR_EVIDENCE | engine=strategy_retention | site=judge | attempt=2 | present=${reAnchorPresent ? "yes" : "no"} | source=${reAnchorSource}`);
+          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${reAnchorPrefix}${buildJudge(JSON.stringify(e, null, 2))}` }], temperature: 0.1, max_tokens: 400, endpoint: "retention-economics-judge-retry", accountId: args.accountId });
           const jp2 = safeJson(jr2.choices[0]?.message?.content?.trim() || "");
           if (jp2) { verdict = jp2.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp2.reason || ""); }
         } catch {}

@@ -50,7 +50,7 @@ export async function runRecoveryEnrichment(input: {
   results: Map<EngineId, EngineStepResult>;
 }): Promise<{ plan: any; enriched: boolean; error?: string }> {
   try {
-    const { enrichRecoveryPlan } = await import("../system-control/recovery-intelligence");
+    const { enrichRecoveryPlan } = await import("../../system-control/recovery-intelligence");
     const enriched = await enrichRecoveryPlan(input.recoveryPlan, {
       campaignId: input.campaignId,
       accountId: input.accountId,

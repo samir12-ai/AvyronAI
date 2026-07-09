@@ -19,6 +19,13 @@ import {
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
+import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
   isDepthBlocking,
@@ -791,6 +798,11 @@ export async function runAwarenessEngine(
     industry?: string | null;
     businessProfile?: import("../commercial-reasoning/business-context-layer").BusinessProfile | null;
   } | null,
+  // Anchor doctrine (criteria A + B + F): strategic run context + Product DNA
+  // for the F5a fallback. The pre-rendered anchor block is computed ONCE here
+  // and threaded into the myth-breaker + narrative-reframe sub-engines.
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
@@ -903,6 +915,46 @@ export async function runAwarenessEngine(
     rejectionReason: null,
   };
 
+  // Anchor doctrine (criteria A + B + F): compute the pre-rendered anchor
+  // block ONCE for the awareness sub-engines (myth-breaker designer +
+  // narrative-reframe designer/judge). F5a: when the doctrine anchor is
+  // absent, derive one from Product DNA — deriveAnchorFromProductDna returns
+  // null unless differentiator + problem + name + type all exist (D5).
+  let awDoctrineBlock = "";
+  if (strategic) {
+    awDoctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[AwarenessEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let awAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!awAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      awAnchor = derivedAnchor;
+      console.log("[AwarenessEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let awAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    awAnchorSource = "doctrine";
+  } else if (awAnchor) {
+    awAnchorSource = "dna";
+  }
+  const awDnaAnchorBlock = awAnchorSource === "dna" && awAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve every output to THIS product) ===
+Product name: ${awAnchor.name}
+Product type: ${awAnchor.type}${awAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${awAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${awAnchor.coreProblemSolved}
+Differentiating feature: ${awAnchor.differentiatingFeature}
+`
+    : "";
+  const awAnchorGroundingRule = awAnchor
+    ? "\nANCHOR GROUNDING: Every belief contradiction and narrative reframe MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.\n"
+    : "";
+  const awAnchorBlockText = `${awDoctrineBlock}${awDnaAnchorBlock}${awAnchorGroundingRule}`;
+
   // ── INTELLIGENCE UPGRADE: Myth-breaker reasoning ──
   try {
     const { generateMythBreaker } = await import("./myth-breaker-llm");
@@ -929,6 +981,8 @@ export async function runAwarenessEngine(
       sophisticationTier,
       rejectedClaimPatterns,
       accountId,
+      doctrineBlock: awAnchorBlockText.length > 0 ? awAnchorBlockText : null,
+      anchorSource: awAnchorSource,
     });
     if (mythBreaker) {
       primaryRoute.mythBreaker = mythBreaker;
@@ -967,6 +1021,8 @@ export async function runAwarenessEngine(
       trustMechanism: trust?.mechanism || trust?.transferMechanism || null,
       gameDimension: game?.ourDimension || game?.ourGame || null,
       accountId,
+      doctrineBlock: awAnchorBlockText.length > 0 ? awAnchorBlockText : null,
+      anchorSource: awAnchorSource,
     });
     if (reframe) {
       (primaryRoute as any).narrativeReframe = reframe;

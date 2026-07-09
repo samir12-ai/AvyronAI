@@ -1,5 +1,12 @@
 import { aiChat } from "../ai-client";
 import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
+import {
   ENGINE_VERSION,
   STATUS,
   AXIS_MECHANISM_GUIDANCE,
@@ -108,6 +115,8 @@ export async function runMechanismEngine(
   differentiation: MechanismEngineDifferentiationInput,
   accountId: string,
   analyticalEnrichment?: any,
+  strategic?: RunStrategicContext,
+  productDna?: ProductDnaLike | null,
 ): Promise<MechanismEngineResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -147,6 +156,44 @@ export async function runMechanismEngine(
     console.log(`[MechanismEngine] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | structuredBlock=${aelStructuredBlock.length}chars`);
   }
 
+  // Anchor doctrine (criteria A + B): inject the strategic doctrine block when
+  // threaded; when the doctrine anchor is absent, derive an anchor from Product
+  // DNA (F5a). deriveAnchorFromProductDna returns null unless differentiator +
+  // problem + name + type all exist (D5 — never fabricate).
+  let doctrineBlock = "";
+  if (strategic) {
+    doctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[MechanismEngine] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let mechAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!mechAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      mechAnchor = derivedAnchor;
+      console.log("[MechanismEngine] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let mechAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    mechAnchorSource = "doctrine";
+  } else if (mechAnchor) {
+    mechAnchorSource = "dna";
+  }
+  const dnaAnchorBlock = mechAnchorSource === "dna" && mechAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve the mechanism to THIS product) ===
+Product name: ${mechAnchor.name}
+Product type: ${mechAnchor.type}${mechAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${mechAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${mechAnchor.coreProblemSolved}
+Differentiating feature: ${mechAnchor.differentiatingFeature}
+`
+    : "";
+  const anchorGroundingRule = mechAnchor
+    ? "\nANCHOR GROUNDING: The mechanism name, steps, promise, and logic MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the AEL causal grounding rules below; it never replaces the [RC#]/[BB#]/[CC#] requirements.\n"
+    : "";
+
   const pillarSummary = pillars.slice(0, 5).map((p: any) => `"${p.name || p.territory}": ${p.description || ""}`.slice(0, 120)).join("\n");
 
   const validatedClaims = (differentiation.claimStructures || []) as any[];
@@ -176,7 +223,7 @@ You MUST keep the core identity of this mechanism. Refine it to strengthen axis 
 No validated mechanism exists yet. Generate a NEW mechanism from scratch based on the positioning axis and differentiation pillars.`;
 
   const prompt = `You are a Mechanism Architect. Your job is to generate a strategic mechanism that is STRICTLY aligned with the positioning axis and GROUNDED in causal analysis.
-
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}
 ${aelBlock ? `═══ ANALYTICAL ENRICHMENT LAYER (CAUSAL FOUNDATION — MANDATORY) ═══
 ${aelBlock}
 
@@ -306,6 +353,7 @@ Respond with ONLY valid JSON, no markdown:
     }
 
     const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
+    console.log(`[MechanismEngine] ANCHOR_EVIDENCE | engine=mechanism | site=first_prompt | attempt=${depthAttempt} | present=${mechAnchor ? "yes" : "no"} | source=${mechAnchorSource}`);
 
     try {
       let response = await aiChat({

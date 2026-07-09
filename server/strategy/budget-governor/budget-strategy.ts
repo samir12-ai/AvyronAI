@@ -160,13 +160,25 @@ export async function designBudgetStrategy(args: {
   performanceConversions: number; performanceSpend: number;
   marketIntensity: number;
   accountId: string;
+  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
+  // computed by the orchestrator and threaded down. Prepended to BOTH the
+  // designer prompts and the judge prompts (anchor in first prompt AND judge).
+  doctrineBlock?: string | null;
+  anchorSource?: "doctrine" | "dna" | "none";
 }): Promise<BudgetStrategy | null> {
   const start = Date.now();
   const MODEL = "gpt-4.1-mini";
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let bsAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (args.anchorSource === "doctrine") bsAnchorSource = "doctrine";
+  else if (args.anchorSource === "dna") bsAnchorSource = "dna";
+  const bsAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  const bsAnchorPrefix = bsAnchorPresent ? `${args.doctrineBlock}\n\n` : "";
 
   console.log(`[BudgetStrategy] STEP_1 | designing | action=${args.action} | conf=${args.decisionConfidence.toFixed(2)} | killFlag=${args.killFlag}`);
 
-  let prompt = buildDesigner(args);
+  let prompt = `${bsAnchorPrefix}${buildDesigner(args)}`;
+  console.log(`[BudgetStrategy] ANCHOR_EVIDENCE | engine=strategy_budget | site=first_prompt | attempt=1 | present=${bsAnchorPresent ? "yes" : "no"} | source=${bsAnchorSource}`);
   let raw = "";
   try {
     const r = await aiChat({ model: MODEL, messages: [{ role: "user", content: prompt }], temperature: 0.3, max_tokens: 1200, endpoint: "budget-governor-strategy", accountId: args.accountId });
@@ -185,7 +197,8 @@ export async function designBudgetStrategy(args: {
 
   let verdict: "ACCEPTED" | "REJECTED" = "ACCEPTED"; let reason = ""; let fix = "";
   try {
-    const jr = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudge(JSON.stringify(s, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "budget-governor-strategy-judge", accountId: args.accountId });
+    console.log(`[BudgetStrategy] ANCHOR_EVIDENCE | engine=strategy_budget | site=judge | attempt=1 | present=${bsAnchorPresent ? "yes" : "no"} | source=${bsAnchorSource}`);
+    const jr = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${bsAnchorPrefix}${buildJudge(JSON.stringify(s, null, 2))}` }], temperature: 0.1, max_tokens: 400, endpoint: "budget-governor-strategy-judge", accountId: args.accountId });
     const jp = safeJson(jr.choices[0]?.message?.content?.trim() || "");
     if (jp) { verdict = jp.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp.reason || ""); fix = String(jp.specificFix || ""); }
   } catch (err: any) { console.warn(`[BudgetStrategy] JUDGE_FAILED | ${err.message}`); }
@@ -196,7 +209,8 @@ export async function designBudgetStrategy(args: {
     const fb = [reason, fix].filter(Boolean).join(" — ");
     console.log(`[BudgetStrategy] STEP_4 | retry`);
     try {
-      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildDesigner({ ...args, judgeFeedback: fb }) }], temperature: 0.3, max_tokens: 1200, endpoint: "budget-governor-strategy-retry", accountId: args.accountId });
+      console.log(`[BudgetStrategy] ANCHOR_EVIDENCE | engine=strategy_budget | site=first_prompt | attempt=2 | present=${bsAnchorPresent ? "yes" : "no"} | source=${bsAnchorSource}`);
+      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${bsAnchorPrefix}${buildDesigner({ ...args, judgeFeedback: fb })}` }], temperature: 0.3, max_tokens: 1200, endpoint: "budget-governor-strategy-retry", accountId: args.accountId });
       const s2 = parseStrategy(safeJson(r2.choices[0]?.message?.content?.trim() || ""), MODEL, 1);
       if (s2) {
         s2.action = args.action;
@@ -204,7 +218,8 @@ export async function designBudgetStrategy(args: {
         if (args.action === "scale" && args.reconciledValidationConfidence < 0.70 && s2.spendPace === "aggressive") s2.spendPace = "measured";
         s = s2;
         try {
-          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudge(JSON.stringify(s, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "budget-governor-strategy-judge-retry", accountId: args.accountId });
+          console.log(`[BudgetStrategy] ANCHOR_EVIDENCE | engine=strategy_budget | site=judge | attempt=2 | present=${bsAnchorPresent ? "yes" : "no"} | source=${bsAnchorSource}`);
+          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${bsAnchorPrefix}${buildJudge(JSON.stringify(s, null, 2))}` }], temperature: 0.1, max_tokens: 400, endpoint: "budget-governor-strategy-judge-retry", accountId: args.accountId });
           const jp2 = safeJson(jr2.choices[0]?.message?.content?.trim() || "");
           if (jp2) { verdict = jp2.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp2.reason || ""); }
         } catch {}

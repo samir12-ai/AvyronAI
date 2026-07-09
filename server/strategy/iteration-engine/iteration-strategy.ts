@@ -127,9 +127,22 @@ function parseStrategy(p: any, model: string, retry: number): IterationStrategy 
   };
 }
 
-export async function designIterationStrategy(args: Parameters<typeof buildDesigner>[0] & { accountId: string }): Promise<IterationStrategy | null> {
+export async function designIterationStrategy(args: Parameters<typeof buildDesigner>[0] & {
+  accountId: string;
+  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
+  // computed by the orchestrator and threaded down. Prepended to BOTH the
+  // designer prompts and the judge prompts (anchor in first prompt AND judge).
+  doctrineBlock?: string | null;
+  anchorSource?: "doctrine" | "dna" | "none";
+}): Promise<IterationStrategy | null> {
   const start = Date.now();
   const MODEL = "gpt-4.1-mini";
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let itAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (args.anchorSource === "doctrine") itAnchorSource = "doctrine";
+  else if (args.anchorSource === "dna") itAnchorSource = "dna";
+  const itAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  const itAnchorPrefix = itAnchorPresent ? `${args.doctrineBlock}\n\n` : "";
 
   if (args.hypothesisCount === 0) { console.log("[IterationStrategy] SKIPPED — no hypotheses to sequence"); return null; }
 
@@ -137,7 +150,8 @@ export async function designIterationStrategy(args: Parameters<typeof buildDesig
 
   let raw = "";
   try {
-    const r = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildDesigner(args) }], temperature: 0.3, max_tokens: 1200, endpoint: "iteration-strategy", accountId: args.accountId });
+    console.log(`[IterationStrategy] ANCHOR_EVIDENCE | engine=strategy_iteration | site=first_prompt | attempt=1 | present=${itAnchorPresent ? "yes" : "no"} | source=${itAnchorSource}`);
+    const r = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${itAnchorPrefix}${buildDesigner(args)}` }], temperature: 0.3, max_tokens: 1200, endpoint: "iteration-strategy", accountId: args.accountId });
     raw = r.choices[0]?.message?.content?.trim() || "";
   } catch (err: any) { console.error(`[IterationStrategy] DESIGN_FAILED | ${err.message}`); return null; }
 
@@ -148,7 +162,8 @@ export async function designIterationStrategy(args: Parameters<typeof buildDesig
 
   let verdict: "ACCEPTED" | "REJECTED" = "ACCEPTED"; let reason = ""; let fix = "";
   try {
-    const jr = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudge(JSON.stringify(s, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "iteration-strategy-judge", accountId: args.accountId });
+    console.log(`[IterationStrategy] ANCHOR_EVIDENCE | engine=strategy_iteration | site=judge | attempt=1 | present=${itAnchorPresent ? "yes" : "no"} | source=${itAnchorSource}`);
+    const jr = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${itAnchorPrefix}${buildJudge(JSON.stringify(s, null, 2))}` }], temperature: 0.1, max_tokens: 400, endpoint: "iteration-strategy-judge", accountId: args.accountId });
     const jp = safeJson(jr.choices[0]?.message?.content?.trim() || "");
     if (jp) { verdict = jp.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp.reason || ""); fix = String(jp.specificFix || ""); }
   } catch (err: any) { console.warn(`[IterationStrategy] JUDGE_FAILED | ${err.message}`); }
@@ -159,12 +174,14 @@ export async function designIterationStrategy(args: Parameters<typeof buildDesig
     const fb = [reason, fix].filter(Boolean).join(" — ");
     console.log(`[IterationStrategy] STEP_4 | retry`);
     try {
-      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildDesigner({ ...args, judgeFeedback: fb }) }], temperature: 0.3, max_tokens: 1200, endpoint: "iteration-strategy-retry", accountId: args.accountId });
+      console.log(`[IterationStrategy] ANCHOR_EVIDENCE | engine=strategy_iteration | site=first_prompt | attempt=2 | present=${itAnchorPresent ? "yes" : "no"} | source=${itAnchorSource}`);
+      const r2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${itAnchorPrefix}${buildDesigner({ ...args, judgeFeedback: fb })}` }], temperature: 0.3, max_tokens: 1200, endpoint: "iteration-strategy-retry", accountId: args.accountId });
       const s2 = parseStrategy(safeJson(r2.choices[0]?.message?.content?.trim() || ""), MODEL, 1);
       if (s2) {
         s = s2;
         try {
-          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: buildJudge(JSON.stringify(s, null, 2)) }], temperature: 0.1, max_tokens: 400, endpoint: "iteration-strategy-judge-retry", accountId: args.accountId });
+          console.log(`[IterationStrategy] ANCHOR_EVIDENCE | engine=strategy_iteration | site=judge | attempt=2 | present=${itAnchorPresent ? "yes" : "no"} | source=${itAnchorSource}`);
+          const jr2 = await aiChat({ model: MODEL, messages: [{ role: "user", content: `${itAnchorPrefix}${buildJudge(JSON.stringify(s, null, 2))}` }], temperature: 0.1, max_tokens: 400, endpoint: "iteration-strategy-judge-retry", accountId: args.accountId });
           const jp2 = safeJson(jr2.choices[0]?.message?.content?.trim() || "");
           if (jp2) { verdict = jp2.verdict === "REJECTED" ? "REJECTED" : "ACCEPTED"; reason = String(jp2.reason || ""); }
         } catch {}

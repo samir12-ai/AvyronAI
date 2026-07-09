@@ -27,6 +27,13 @@ import {
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
+import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
   isDepthBlocking,
@@ -2013,6 +2020,11 @@ export async function analyzePersuasion(
   upstreamLineage: SignalLineageEntry[] = [],
   analyticalEnrichment?: any,
   accountId?: string,
+  // Anchor doctrine (criteria A + B + F): strategic run context + Product DNA
+  // for the F5a fallback. The pre-rendered anchor block is computed ONCE and
+  // threaded into the trust-transfer + cialdini sub-engines.
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
 ): Promise<PersuasionResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
@@ -2397,6 +2409,46 @@ export async function analyzePersuasion(
   const segmentDescriptions = (audience.audienceSegments || [])
     .map((s: any) => `${s.name || "?"} (pains: ${(s.painProfile || []).slice(0, 2).join("; ")})`);
 
+  // Anchor doctrine (criteria A + B + F): compute the pre-rendered anchor
+  // block ONCE for the persuasion sub-engines (trust-transfer designer/judge
+  // + cialdini picker). F5a: when the doctrine anchor is absent, derive one
+  // from Product DNA — deriveAnchorFromProductDna returns null unless
+  // differentiator + problem + name + type all exist (D5).
+  let psDoctrineBlock = "";
+  if (strategic) {
+    psDoctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[PersuasionEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let psAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!psAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      psAnchor = derivedAnchor;
+      console.log("[PersuasionEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let psAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    psAnchorSource = "doctrine";
+  } else if (psAnchor) {
+    psAnchorSource = "dna";
+  }
+  const psDnaAnchorBlock = psAnchorSource === "dna" && psAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve every output to THIS product) ===
+Product name: ${psAnchor.name}
+Product type: ${psAnchor.type}${psAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${psAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${psAnchor.coreProblemSolved}
+Differentiating feature: ${psAnchor.differentiatingFeature}
+`
+    : "";
+  const psAnchorGroundingRule = psAnchor
+    ? "\nANCHOR GROUNDING: Every trust mechanism and persuasion principle MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.\n"
+    : "";
+  const psAnchorBlockText = `${psDoctrineBlock}${psDnaAnchorBlock}${psAnchorGroundingRule}`;
+
   try {
     const { designTrustTransfer } = await import("./trust-transfer");
     trustTransferDesignResult = await designTrustTransfer({
@@ -2411,6 +2463,8 @@ export async function analyzePersuasion(
       rejectedClaimPatterns,
       upstreamBuyerPsychology: null, // Phase 4 will populate this from audience.commercialSignals
       accountId: accountId || "system",
+      doctrineBlock: psAnchorBlockText.length > 0 ? psAnchorBlockText : null,
+      anchorSource: psAnchorSource,
     });
     if (trustTransferDesignResult) {
       routes.primary.trustTransferDesign = trustTransferDesignResult;
@@ -2438,6 +2492,8 @@ export async function analyzePersuasion(
       rejectedClaimPatterns,
       accountId: accountId || "system",
       trustTransferDesign: trustTransferDesignResult || undefined,
+      doctrineBlock: psAnchorBlockText.length > 0 ? psAnchorBlockText : null,
+      anchorSource: psAnchorSource,
     });
     if (cialdiniReasoning) {
       if (trustTransferDesignResult) {
@@ -2520,6 +2576,8 @@ export async function runPersuasionEngine(
   _accountId?: string,
   upstreamLineage: SignalLineageEntry[] = [],
   analyticalEnrichment?: any,
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
 ): Promise<PersuasionResult> {
-  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment, _accountId);
+  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment, _accountId, strategic, productDna);
 }

@@ -115,6 +115,11 @@ export async function generateMythBreaker(args: {
   sophisticationTier: number | null;
   rejectedClaimPatterns: string[];
   accountId: string;
+  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
+  // computed ONCE by the parent awareness engine and threaded down. The
+  // sub-engine never re-derives — it injects and logs evidence.
+  doctrineBlock?: string | null;
+  anchorSource?: "doctrine" | "dna" | "none";
 }): Promise<MythBreakerReasoning | null> {
   const startTs = Date.now();
   const aelAck = acknowledgeAelInput("AwarenessMythBreaker", args.analyticalEnrichment, args.accountId);
@@ -128,11 +133,18 @@ export async function generateMythBreaker(args: {
   console.log(`[AwarenessMythBreaker] STEP_1 | invoking LLM | rootCauses=${rootCauses.length} | objections=${args.audienceObjections.length} | beliefs=${args.audienceBeliefs.length} | pains=${args.audiencePains.length} | tier=${args.sophisticationTier ?? "?"}`);
 
   const prompt = buildPrompt({ ...args, rootCauses });
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let mbAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (args.anchorSource === "doctrine") mbAnchorSource = "doctrine";
+  else if (args.anchorSource === "dna") mbAnchorSource = "dna";
+  const mbAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  console.log(`[AwarenessMythBreaker] ANCHOR_EVIDENCE | engine=awareness_myth_breaker | site=first_prompt | attempt=1 | present=${mbAnchorPresent ? "yes" : "no"} | source=${mbAnchorSource}`);
+  const finalPrompt = mbAnchorPresent ? `${args.doctrineBlock}\n\n${prompt}` : prompt;
   let response;
   try {
     response = await aiChat({
       model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: finalPrompt }],
       temperature: 0.3,
       max_tokens: 900,
       endpoint: "awareness-engine-myth-breaker",

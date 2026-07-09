@@ -4,3 +4,4 @@
 - [Positioning gate coherence](positioning-gate-coherence.md) — composer prompt, grounding allowlist, and judge anchor must change in lockstep or the engine doom-loops; judge rejection with generic DNA is truthful degradation, fix via richer DNA not gate tuning.
 - [MI snapshot resolution](mi-snapshot-resolution.md) — MI snapshots rarely carry orch runIds; run-pinned lookups starve reuse_allowed surfaces. Phantom drizzle column ⇒ "Cannot convert undefined or null to object".
 - [Persisted UI-state hydration race](persisted-state-hydration-race.md) — async server hydration resets local UI state and clobbers mount-time deep links; gate the reset behind an unconsumed-intent ref and e2e-test the cold path.
+- [Retry paths drop context threading](retry-path-context-threading.md) — regenerate/retry call sites silently omit args the attempt-1 call passes; audit every retry branch and verify per-attempt evidence logs.

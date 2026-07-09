@@ -2148,6 +2148,10 @@ export async function runOfferEngine(
   analyticalEnrichment?: any,
   upstreamSignals?: { trustMechanism?: any; gameDimension?: any } | null,
   strategic?: RunStrategicContext,
+  // F5a threading (criterion B): run-context Product DNA used ONLY when the
+  // DB row is absent (e.g. synthetic/audit campaigns without a persisted DNA
+  // row). Never overrides a loaded DB row; substitution is logged, not silent.
+  productDnaFallback?: ProductDNA | null,
 ): Promise<OfferResult> {
   const startTime = Date.now();
   const aelAck = acknowledgeAelInput("OfferEngine-V4", analyticalEnrichment, accountId);
@@ -2242,10 +2246,18 @@ export async function runOfferEngine(
   }
 
   const campaignId = (mi as any)?._campaignId || "";
-  const productDna = campaignId ? await loadProductDNA(campaignId, accountId) : null;
+  let productDna = campaignId ? await loadProductDNA(campaignId, accountId) : null;
   if (productDna) {
     console.log(`[OfferEngine-V4] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"}`);
     diagnostics.productDnaLoaded = true;
+  } else if (productDnaFallback) {
+    // F5a (criterion B): DB row absent — substitute the run-context DNA that
+    // the orchestrator threaded from the audience engine. Explicit log, never
+    // silent; never overrides a loaded DB row.
+    productDna = productDnaFallback;
+    diagnostics.productDnaLoaded = true;
+    diagnostics.productDnaOrigin = "ctx_fallback";
+    console.log(`[OfferEngine-V4] PRODUCT_DNA_FALLBACK | DB row absent — using run-context Product DNA (F5a) | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"}`);
   }
 
   console.log(`[OfferEngine-V4] Starting 5-layer pipeline`);

@@ -350,3 +350,60 @@ export function parseProductAnchor(raw: unknown): ProductAnchor | null {
   }
   return parsed;
 }
+
+// ---------------------------------------------------------------------------
+// buildSubEngineAnchorContext — computes the pre-rendered anchor block +
+// explicit anchor source for a designer/judge sub-engine call site (criteria
+// A + B + F). F5a: when the doctrine anchor is absent, derives one from
+// Product DNA — deriveAnchorFromProductDna returns null unless differentiator
+// + problem + name + type all exist (D5 — never fabricate).
+// ---------------------------------------------------------------------------
+
+export interface SubEngineAnchorContext {
+  doctrineBlock: string | null;
+  anchorSource: "doctrine" | "dna" | "none";
+}
+
+export function buildSubEngineAnchorContext(
+  strategic: RunStrategicContext | null | undefined,
+  productDna: ProductDnaLike | null | undefined,
+  groundingRule: string,
+  logTag: string,
+): SubEngineAnchorContext {
+  let block = "";
+  if (strategic) {
+    block = buildDoctrineBlock(strategic);
+  } else {
+    console.log(`[${logTag}] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block`);
+  }
+  let anchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!anchor && productDna) {
+    const derived = deriveAnchorFromProductDna(productDna);
+    if (derived) {
+      anchor = derived;
+      console.log(`[${logTag}] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)`);
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let anchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    anchorSource = "doctrine";
+  } else if (anchor) {
+    anchorSource = "dna";
+  }
+  const dnaBlock = anchorSource === "dna" && anchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve every output to THIS product) ===
+Product name: ${anchor.name}
+Product type: ${anchor.type}${anchor.keyAttributes.length > 0 ? `\nKey attributes: ${anchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${anchor.coreProblemSolved}
+Differentiating feature: ${anchor.differentiatingFeature}
+`
+    : "";
+  const rule = anchor ? `\n${groundingRule}\n` : "";
+  const text = `${block}${dnaBlock}${rule}`;
+  if (text.length > 0) {
+    return { doctrineBlock: text, anchorSource };
+  }
+  return { doctrineBlock: null, anchorSource };
+}
