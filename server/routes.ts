@@ -5,7 +5,6 @@ import { aiChat, aiGemini, Modality } from "./ai-client";
 import { validateRoutingIntegrity } from "./shared/engine-health";
 import multer from "multer";
 import path from "path";
-import { registerPhotographyRoutes } from "./photography-routes";
 import { registerVideoRoutes } from "./video-routes";
 import { registerStrategyRoutes } from "./strategy-routes";
 import { registerAutopilotRoutes } from "./autopilot-routes";
@@ -1557,11 +1556,9 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
       res.setHeader("Content-Security-Policy", "default-src 'none'");
     },
   };
-  app.use("/uploads/photography", express.static(path.join(process.cwd(), "uploads", "photography"), uploadStaticOpts));
   app.use("/uploads/videos", express.static(path.join(process.cwd(), "uploads", "videos"), uploadStaticOpts));
   app.use("/uploads/video-output", express.static(path.join(process.cwd(), "uploads", "video-output"), uploadStaticOpts));
 
-  registerPhotographyRoutes(app);
   registerVideoRoutes(app);
   registerStrategyRoutes(app);
   registerAutopilotRoutes(app);
