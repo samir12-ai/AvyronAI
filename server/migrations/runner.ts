@@ -352,7 +352,7 @@ function isCliEntryPoint(): boolean {
   // CJS path (tsx-shimmed `require` is available; check first because pure
   // ESM evaluation of this branch is harmless — `require` is undefined and
   // we short-circuit).
-  if (typeof require !== "undefined" && require.main === module) return true;
+  if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) return true;
   // Pure-ESM path: top-level `fileURLToPath` import from `node:url` resolves
   // the current file's URL → absolute path; compare to `process.argv[1]` to
   // detect "this file IS the entry point". Wrapped in try/catch for older
