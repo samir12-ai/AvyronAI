@@ -549,26 +549,36 @@ async function main() {
   if (metroProcess) {
     metroProcess.kill();
     metroProcess = null;
+    // Give the OS a moment to release port 8081 before web export starts its own Metro.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
   console.log("Building web export...");
+  const WEB_EXPORT_TIMEOUT_MS = 90_000;
   try {
     const webBuildDir = path.join("static-build", "web");
     const webExport = spawn("npx", ["expo", "export", "--platform", "web", "--output-dir", webBuildDir], {
       stdio: "inherit",
       env: { ...process.env, EXPO_PUBLIC_DOMAIN: domain, NODE_ENV: "production" },
     });
-    await new Promise((resolve, reject) => {
+    await new Promise((resolve) => {
+      const killTimer = setTimeout(() => {
+        console.warn(`Web export timed out after ${WEB_EXPORT_TIMEOUT_MS / 1000}s — skipping web build`);
+        try { webExport.kill(); } catch (_) {}
+        resolve();
+      }, WEB_EXPORT_TIMEOUT_MS);
+
       webExport.on("close", (code) => {
+        clearTimeout(killTimer);
         if (code === 0) {
           console.log("Web export complete");
-          resolve();
         } else {
           console.warn("Web export failed (code " + code + "), skipping web build");
-          resolve();
         }
+        resolve();
       });
       webExport.on("error", (err) => {
+        clearTimeout(killTimer);
         console.warn("Web export error:", err.message);
         resolve();
       });
