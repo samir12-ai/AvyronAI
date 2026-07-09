@@ -137,6 +137,8 @@ PUBLIC_BASE_URL = "https://avyronai.com"
 ALLOWED_PUBLIC_HOSTS = "avyronai.com"
 BOOT_AUTO_MIGRATE = "true"
 
+[userenv.development]
+
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 180000
