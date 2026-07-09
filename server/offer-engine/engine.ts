@@ -2640,10 +2640,10 @@ export async function runOfferEngine(
   // signals so offer extends (not contradicts) the trust + category strategy chosen upstream.
   try {
     const { designValueArchitecture } = await import("./value-architect");
-    // T003: value-architect passes args.productAnchor into BOTH its designer
-    // prompt and its judge unconditionally — one call-site evidence pair.
+    // T003: first_prompt evidence logged here at the call site; the judge
+    // evidence line is emitted inside value-architect at the real judge
+    // invocation, so a designer failure cannot fake a judge evidence row.
     console.log(`[OfferEngine-V4] ANCHOR_EVIDENCE | engine=value_architect | site=first_prompt | attempt=1 | present=${offerBatteryAnchor ? "yes" : "no"} | source=${offerAnchorSource}`);
-    console.log(`[OfferEngine-V4] ANCHOR_EVIDENCE | engine=value_architect | site=judge | attempt=1 | present=${offerBatteryAnchor ? "yes" : "no"} | source=${offerAnchorSource}`);
     const seg0Va = (audience.audienceSegments || [])[0] as any;
     const rejectedClaimPatternsVa: string[] = [];
     for (const seg of (audience.audienceSegments || []) as any[]) {
@@ -2666,6 +2666,7 @@ export async function runOfferEngine(
       trustMechanism: trustMechanismSignal,
       gameDimension: gameDimensionSignal,
       productAnchor: offerBatteryAnchor,
+      anchorSource: offerAnchorSource,
       accountId,
     });
     if (valueArchitecture) {

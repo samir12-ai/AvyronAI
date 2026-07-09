@@ -77,6 +77,8 @@ interface DesignerInput {
   /** Fix 4: locked product anchor (doctrine or DNA-derived) — grounds the value
    *  chain in THIS product's identity so the architecture can't be generic. */
   productAnchor?: ProductAnchor | null;
+  /** T003: where the anchor came from — logged in ANCHOR_EVIDENCE lines only. */
+  anchorSource?: "doctrine" | "dna" | "none";
   accountId: string;
 }
 
@@ -307,7 +309,14 @@ export async function designValueArchitecture(args: DesignerInput): Promise<Valu
   let judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN" = "NOT_RUN";
   let judgeReason = "";
   let judgeFix = "";
+  // T003: judge evidence logged at the actual judge invocation — never before,
+  // so a designer failure cannot produce a phantom judge evidence row.
+  let vaAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (args.anchorSource) {
+    vaAnchorSource = args.anchorSource;
+  }
   try {
+    console.log(`[ValueArchitect] ANCHOR_EVIDENCE | engine=value_architect | site=judge | attempt=1 | present=${args.productAnchor ? "yes" : "no"} | source=${vaAnchorSource}`);
     const judgeResp = await aiChat({
       messages: [{ role: "user", content: buildJudgePrompt(designRaw, !!args.trustMechanism, !!args.gameDimension, args.productAnchor) }],
       model: "gpt-4.1-mini",

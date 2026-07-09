@@ -14,3 +14,10 @@ description: How to typecheck and how to verify orchestrator/engine behaviour in
 **Why:** a real orchestrator/boss run needs Postgres, Bright Data proxies, live scrapers, and multi-minute per-engine timeouts — not reproducible in a dev shell.
 
 **How to apply:** drive the *real* units directly in a `.local/scripts/*.ts` tsx harness — e.g. `runCandidateGateBattery` → `emissionFromBattery` → `buildAndRecordAiPathReport` — with live LLM judges, and assert on the assembled output. This exercises the same code the engines/aggregator use. Disclose in the harness header that it is a faithful proxy, not a full pipeline run. The interchangeability/contradiction judges make real OpenAI calls (need `OPENAI_API_KEY`); keep attempts bounded (~2 per engine).
+
+# Synthetic-audit harness gotchas (Audit Runner)
+
+- Background bash processes do NOT survive between tool calls (even `setsid`/`nohup` — killed, 0-byte logs). Long runs MUST go through the `Audit Runner` workflow; full logs land at `/tmp/logs/Audit_Runner_*.log` after `refresh_all_logs`.
+- The synthetic seeder does NOT create `campaign_selections` rows for the intel_audit accounts, so any tenant-scoped-by-selection read (e.g. doctrine product-anchor resolution) silently returns null. Insert selections rows manually before testing selection-scoped paths.
+- Synthetic audit accounts have a 500k tokens/week AI quota that exhausts after ~2–3 full pipeline runs. For focused LLM harnesses, register a fresh account and use its accountId — quota is per-account.
+- Differentiation's depth gate frequently returns DEPTH_FAILED on synthetic seeds, cascading to skip offer/funnel/channel engines (pre-existing, not a regression signal). To verify downstream-engine behavior, drive `designValueArchitecture` / `designChannelOrchestration` directly with a tsx harness instead of chasing a full-pipeline pass.

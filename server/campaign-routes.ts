@@ -116,7 +116,7 @@ export function registerCampaignRoutes(app: Express) {
             target: growthCampaigns.id,
             set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
           });
-        console.log(`[Campaigns] Product anchor set: campaign=${campaignId} product="${resolvedAnchor.name}"`);
+        console.log(`[Campaigns] Product anchor set: campaign=${campaignId}`);
       }
 
       console.log(`[Campaigns] Campaign created: ${campaignName} (${objective}) id=${campaignId} account=${accountId}`);
@@ -235,7 +235,7 @@ export function registerCampaignRoutes(app: Express) {
           target: growthCampaigns.id,
           set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
         });
-      console.log(`[Campaigns] Product anchor updated: campaign=${campaignId} product="${resolvedAnchor.name}" account=${accountId}`);
+      console.log(`[Campaigns] Product anchor updated: campaign=${campaignId} account=${accountId}`);
 
       res.json({ success: true, productAnchor: resolvedAnchor, requestId });
     } catch (error: any) {
