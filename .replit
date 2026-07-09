@@ -131,6 +131,7 @@ outputType = "console"
 
 [userenv.shared]
 BRIGHT_DATA_COUNTRY = "ae"
+BRIGHT_DATA_ZONE = "web_unlocker2"
 
 [userenv.production]
 PUBLIC_BASE_URL = "https://avyronai.com"
