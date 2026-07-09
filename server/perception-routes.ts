@@ -327,7 +327,9 @@ export function registerPerceptionRoutes(app: Express) {
           createdAt: miSnapshots.createdAt,
           status: miSnapshots.status,
           overallConfidence: miSnapshots.overallConfidence,
-          competitorsFound: miSnapshots.competitorsFound,
+          // mi_snapshots has no competitors_found column — count is derived
+          // below from the competitorData JSON array (fail-closed to null).
+          competitorData: miSnapshots.competitorData,
         }).from(miSnapshots).where(where(miSnapshots)).orderBy(desc(miSnapshots.createdAt)).limit(1)),
 
         latest(db.select({
@@ -399,7 +401,15 @@ export function registerPerceptionRoutes(app: Express) {
       // MI provenance: "live" if competitorsFound > 0 (direct scrape this run),
       // else "benchmark" (system fell back to baseline). Other engines have
       // no per-engine provenance signal yet — left null.
-      const miCompetitors = typeof mi?.competitorsFound === "number" ? mi.competitorsFound : null;
+      const miCompetitors = (() => {
+        if (!mi?.competitorData || typeof mi.competitorData !== "string") return null;
+        try {
+          const parsed = JSON.parse(mi.competitorData);
+          return Array.isArray(parsed) ? parsed.length : null;
+        } catch {
+          return null; // malformed JSON → fail-closed, card shows no evidence line
+        }
+      })();
       const miProvenance: "live" | "benchmark" | null = mi
         ? ((miCompetitors ?? 0) > 0 ? "live" : "benchmark")
         : null;

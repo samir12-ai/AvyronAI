@@ -130,7 +130,22 @@ export function registerMIv3Routes(app: Express) {
         return res.json({ snapshot: null, engineState: "REFRESH_REQUIRED", runId: null, isLatest: true, isStale: false, message: "No completed orchestrator run for this campaign yet." });
       }
 
-      const snapshots = await db.select().from(miSnapshots)
+      // MI is the one engine with livenessRule="reuse_allowed" (see Phase C3
+      // comment below). Its snapshots are overwhelmingly written by manual
+      // refreshes ("manual_*") and the background fetch-orchestrator
+      // ("persist:*") rather than by orchestrator runs, so a strict
+      // run-pinned lookup starves the customer surface as soon as the run's
+      // own snapshot is pruned — even when fresh COMPLETE snapshots exist.
+      // Resolution order: (1) run-pinned snapshot, (2) explicit, labeled
+      // fallback to the newest usable snapshot for this campaign. The reuse
+      // is never silent: `snapshotResolution` is surfaced at the response root
+      // and envelope provenance.wasReused already flags jobId mismatch (B3/B4).
+      // NOTE: named `snapshotResolution` (not `snapshotSource`) because the
+      // `...result` spread below already carries the canonical
+      // `snapshotSource: FRESH_DATA | CACHED_DATA` data-provenance enum (D2 —
+      // every meaning has its own field; do not clobber it).
+      let snapshotResolution: "run_pinned" | "latest_reused" = "run_pinned";
+      let snapshots = await db.select().from(miSnapshots)
         .where(and(
           eq(miSnapshots.accountId, accountId),
           eq(miSnapshots.campaignId, campaignId),
@@ -140,7 +155,19 @@ export function registerMIv3Routes(app: Express) {
         .limit(1);
 
       if (snapshots.length === 0) {
-        return res.json({ snapshot: null, engineState: "REFRESH_REQUIRED", runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt, message: "No MI snapshot for this run." });
+        snapshots = await db.select().from(miSnapshots)
+          .where(and(
+            eq(miSnapshots.accountId, accountId),
+            eq(miSnapshots.campaignId, campaignId),
+            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
+          ))
+          .orderBy(desc(miSnapshots.createdAt))
+          .limit(1);
+        if (snapshots.length > 0) snapshotResolution = "latest_reused";
+      }
+
+      if (snapshots.length === 0) {
+        return res.json({ snapshot: null, engineState: "REFRESH_REQUIRED", runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, completedAt: resolved.completedAt, message: "No MI snapshot for this campaign yet. Run analysis first." });
       }
 
       const snapshot = snapshots[0];
@@ -200,9 +227,14 @@ export function registerMIv3Routes(app: Express) {
         engineDiagnostics: readiness.diagnostics,
         freshnessMetadata: readiness.freshnessMetadata || null,
         runId: resolved.runId,
+        // isLatest/isStale describe the resolved orchestrator RUN, not the
+        // snapshot — when snapshotResolution === "latest_reused" the snapshot
+        // may be newer than the run. Snapshot-level freshness travels in
+        // freshnessMetadata and envelope.provenance.
         isLatest: resolved.isLatest,
         isStale: resolved.isStale,
         completedAt: resolved.completedAt,
+        snapshotResolution,
         envelope,
       });
     } catch (err: any) {
