@@ -16,7 +16,12 @@ export function registerBuildPlanLayerRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
-      const depthGateStatusInput = req.body.depthGateStatus || undefined;
+      // Depth-gate map + AEL are loaded SERVER-SIDE inside runBuildPlanLayer
+      // from the run's persisted state (orchestrator_jobs.depth_gate_status /
+      // ael_snapshots, bound by sourceJobId + accountId). We deliberately do
+      // NOT read req.body.depthGateStatus: a client-supplied gate-admission map
+      // is an integrity hole — it would let a caller decide which engines
+      // "passed" the depth gate and thus which snapshots enter synthesis.
 
       // Resolve the most recent completed orchestrator run for this campaign
       // so build-plan synthesis is bound to a single coherent run (the
@@ -53,7 +58,7 @@ export function registerBuildPlanLayerRoutes(app: Express) {
       const result = await runBuildPlanLayer(
         accountId,
         campaignId,
-        depthGateStatusInput,
+        undefined,
         sourceJobId,
       );
 

@@ -28,8 +28,9 @@ import {
   audienceSnapshots,
   miSnapshots,
   businessDataLayer,
+  orchestratorJobs,
 } from "@shared/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { computeAdaptiveRhythm, type AdaptiveRhythm } from "../adaptive-rhythm/engine";
 import { buildMemoryContext, applyMemoryConstraints, type MemoryOverride } from "../orchestrator/memory-context";
 
@@ -655,6 +656,76 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): ParseAIResult
   }
 }
 
+/**
+ * Reload the per-engine depth-gate verdict map from the run's persisted state.
+ *
+ * The map is produced in-memory as ctx.depthGateStatus during runOrchestrator
+ * and persisted to orchestrator_jobs.depth_gate_status (migration 039). We read
+ * it here — scoped by accountId so a client-suppliable sourceJobId cannot reach
+ * another tenant's run — when no in-process caller supplied the map.
+ *
+ * This is data-source resolution, NOT a D1 semantic fallback: a missing job
+ * row, NULL column, or unparseable payload returns undefined, so the D5
+ * CONTRACT_INCOMPLETE path in collectValidatedEngineOutputs fires — no engine
+ * is ever silently defaulted to a pass state.
+ */
+async function loadPersistedDepthGateStatus(
+  accountId: string,
+  sourceJobId: string,
+): Promise<Record<string, string> | undefined> {
+  try {
+    const [row] = await db
+      .select({ depthGate: orchestratorJobs.depthGateStatus })
+      .from(orchestratorJobs)
+      .where(and(eq(orchestratorJobs.id, sourceJobId), eq(orchestratorJobs.accountId, accountId)))
+      .limit(1);
+    if (!row || !row.depthGate) {
+      console.warn(logSafe(`[BuildPlanLayer] DEPTH_GATE_NOT_PERSISTED | job=${sourceJobId} account=${accountId} — gated engines will be treated as CONTRACT_INCOMPLETE`));
+      return undefined;
+    }
+    const parsed = JSON.parse(row.depthGate);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      console.warn(logSafe(`[BuildPlanLayer] DEPTH_GATE_PARSE_FAILED | job=${sourceJobId} | reason=non_object_payload`));
+      return undefined;
+    }
+    return parsed as Record<string, string>;
+  } catch (err: any) {
+    console.warn(logSafe(`[BuildPlanLayer] DEPTH_GATE_PARSE_FAILED | job=${sourceJobId} | error=${err?.message ?? err}`));
+    return undefined;
+  }
+}
+
+/**
+ * Reload the persisted AnalyticalPackage (AEL) for this run from ael_snapshots
+ * (a raw-SQL table, not a drizzle model). Scoped by job_id + account_id +
+ * campaign_id — the same canonical key the narrative layer reads. Absent or
+ * unreadable → null, which drives the truthful AEL-absent downgrade via
+ * acknowledgeAelInput (B3) rather than a fabricated package.
+ */
+async function loadPersistedAel(
+  accountId: string,
+  campaignId: string,
+  sourceJobId: string,
+): Promise<AnalyticalPackage | null> {
+  try {
+    const res = await db.execute(
+      sql`SELECT package FROM ael_snapshots
+          WHERE job_id = ${sourceJobId} AND account_id = ${accountId} AND campaign_id = ${campaignId}
+          LIMIT 1`,
+    );
+    const raw = res.rows?.[0]?.package;
+    if (!raw) {
+      console.warn(logSafe(`[BuildPlanLayer] AEL_NOT_PERSISTED | job=${sourceJobId} account=${accountId} — proceeding with AEL-absent downgrade`));
+      return null;
+    }
+    const pkg = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return pkg as AnalyticalPackage;
+  } catch (err: any) {
+    console.warn(logSafe(`[BuildPlanLayer] AEL_LOAD_FAILED | job=${sourceJobId} | error=${err?.message ?? err}`));
+    return null;
+  }
+}
+
 export async function runBuildPlanLayer(
   accountId: string,
   campaignId: string,
@@ -663,7 +734,6 @@ export async function runBuildPlanLayer(
   analyticalEnrichment?: AnalyticalPackage | null,
 ): Promise<BuildPlanResult> {
   const MAX_ATTEMPTS = 3;
-  const aelAck = acknowledgeAelInput("BuildPlanLayer", analyticalEnrichment ?? null, accountId);
 
   // hard BLOCK when sourceJobId is absent.
   // Without it we cannot prove the snapshots belong to the same run, so
@@ -672,6 +742,7 @@ export async function runBuildPlanLayer(
   // downstream consumers and tests have a stable shape to switch on.
   if (!sourceJobId) {
     console.error(logSafe(`[BuildPlanLayer] STALE_LINEAGE_BLOCK | account=${accountId} campaign=${campaignId} — refusing build-plan synthesis without sourceJobId (cross-run snapshot stitching forbidden)`));
+    const staleAck = acknowledgeAelInput("BuildPlanLayer", analyticalEnrichment ?? null, accountId);
     const blockedResult: BuildPlanResult = {
       status: "BLOCKED",
       reason: "STALE_LINEAGE",
@@ -681,9 +752,27 @@ export async function runBuildPlanLayer(
       attempts: 0,
       error: "STALE_LINEAGE: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
     };
-    return applyPartialAelDowngrade("BuildPlanLayer", blockedResult, aelAck);
+    return applyPartialAelDowngrade("BuildPlanLayer", blockedResult, staleAck);
   }
-  const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus, sourceJobId);
+
+  // Reload the depth-gate map + AEL server-side from the run's persisted state
+  // (bound by sourceJobId + accountId) when an in-process caller did not supply
+  // them. Caller-supplied values win (future in-process orchestrator path); the
+  // DB is the fallback DATA SOURCE carrying the same canonical map — source
+  // resolution, not a D1 semantic fallback. Missing/NULL/unparseable →
+  // undefined/null → the existing D5 CONTRACT_INCOMPLETE / AEL-absent
+  // degradation fires downstream (never a fabricated pass).
+  let resolvedDepthGate = depthGateStatus;
+  if (!resolvedDepthGate) {
+    resolvedDepthGate = await loadPersistedDepthGateStatus(accountId, sourceJobId);
+  }
+  let resolvedAel = analyticalEnrichment ?? null;
+  if (!resolvedAel) {
+    resolvedAel = await loadPersistedAel(accountId, campaignId, sourceJobId);
+  }
+
+  const aelAck = acknowledgeAelInput("BuildPlanLayer", resolvedAel, accountId);
+  const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, resolvedDepthGate, sourceJobId);
 
   if (snapshots.length < 3) {
     return applyPartialAelDowngrade("BuildPlanLayer", {

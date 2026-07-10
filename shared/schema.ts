@@ -1881,6 +1881,7 @@ export const orchestratorJobs = pgTable("orchestrator_jobs", {
   pausedEngine: varchar("paused_engine", { length: 50 }),
   needsInputFields: text("needs_input_fields"),
   aiPathReport: text("ai_path_report"),              // Phase 4 — JSON per-run AI-path telemetry (authoritative source)
+  depthGateStatus: text("depth_gate_status"),        // Migration 039 — JSON Record<engineId, depthGateVerdict> captured from ctx.depthGateStatus; BuildPlanLayer reload source
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

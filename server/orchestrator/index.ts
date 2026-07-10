@@ -3795,7 +3795,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   });
 
   let jobId: string;
-  let ctx: EngineContext = { inputHashes: {} };
+  let ctx: EngineContext = { inputHashes: {}, depthGateStatus: {} };
   let previousSectionStatuses: any[] = [];
 
   // T3.A — Runtime Truth Track: per-run provenance trail for engine
@@ -4137,6 +4137,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         .set({
           status: "BLOCKED",
           error: `Blocked at scoped_hydration: ${blockReason}`,
+          depthGateStatus: JSON.stringify(ctx.depthGateStatus),
           completedAt: new Date(),
         })
         .where(eq(orchestratorJobs.id, jobId));
@@ -4351,7 +4352,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       };
     });
     await db.update(orchestratorJobs)
-      .set({ sectionStatuses: JSON.stringify(sectionStatuses) })
+      .set({
+        sectionStatuses: JSON.stringify(sectionStatuses),
+        depthGateStatus: JSON.stringify(ctx.depthGateStatus),
+      })
       .where(eq(orchestratorJobs.id, jobId));
 
     config.onProgress?.({
@@ -4391,6 +4395,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           pausedContext: JSON.stringify(ctxToSave),
           needsInputFields: JSON.stringify(needsInputPayload),
           sectionStatuses: JSON.stringify(sectionStatuses),
+          depthGateStatus: JSON.stringify(ctx.depthGateStatus),
           completedAt: new Date(),
         })
         .where(eq(orchestratorJobs.id, jobId));
@@ -4946,6 +4951,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           };
         })
       ),
+      depthGateStatus: JSON.stringify(ctx.depthGateStatus),
     })
     .where(eq(orchestratorJobs.id, jobId));
 
