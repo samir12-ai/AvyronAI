@@ -18,6 +18,11 @@ description: Provider-level behaviors of the Bright Data Unlocker REST API that 
 ## Unlocker errors ride on HTTP 200
 - Transport-level errors arrive as HTTP 200 with `x-brd-err-code` / `x-brd-error` headers and an error-string body. Never feed such bodies to HTML/JSON extractors; check the header first.
 
+## A thrown scrape error that later feeds a classifier MUST embed the discriminating token
+- `classifyScrapeFailure(message)` (profile-scraper.ts) pattern-matches the error **string** to decide GENUINE_BLOCK vs TRANSIENT. If the message thrown on the failure path omits the HTTP status / auth marker, a real 403/401/challenge wall silently degrades to the conservative default (TRANSIENT) and gets re-scraped every cycle forever → Bright Data spend amplification with no cooldown ever taking effect.
+- **Why:** the dominant IG `WEB_API` path (`attemptWebProfileApi`) originally threw a bare "No user data from web_profile_info…" with no status, so GENUINE_BLOCK was practically unreachable and the 24h/6h block cooldown never engaged. The direction of error is "safe" (no spurious blocks, no data loss) which makes it easy to miss.
+- **How to apply:** whenever you build the string that will be thrown/returned on a scrape failure, interpolate the transport status of **every** endpoint tried (www AND i.instagram.com), not just the last one — the last-status var can be overwritten by a later 200-null-user. Lock the wiring with a harness assertion feeding the *exact* thrown-message template through the classifier (403/401 → GENUINE_BLOCK, 200-null / n/a → TRANSIENT), so a future message reword can't silently break classification.
+
 ## Zone IP whitelist blocks Replit
 - `client_10030` (`ip_forbidden`) means the zone's "Allowed IPs" list is on and the egress IP isn't in it. Replit egress IPs rotate (and differ in deployments) — the fix is to clear/disable the zone's IP allowlist and rely on the Bearer key, not to whitelist one IP. The error message includes a direct dashboard URL to the zone's access params.
 

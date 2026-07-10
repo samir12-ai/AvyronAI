@@ -253,7 +253,7 @@ export interface MIDiagnostics {
   echoChamberRisk: number;
 }
 
-export type CacheInvalidationReason = "ENGINE_UPGRADE" | "COMPETITOR_SET_CHANGED" | "INCOMPLETE_SNAPSHOT" | "STALE" | null;
+export type CacheInvalidationReason = "ENGINE_UPGRADE" | "COMPETITOR_SET_CHANGED" | "CONTENT_CHANGED" | "INCOMPLETE_SNAPSHOT" | "STALE" | null;
 
 export interface MIv3DiagnosticResult {
   output: MIv3Output;

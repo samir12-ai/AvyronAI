@@ -38,7 +38,7 @@ import type {
 import { MI_CONFIDENCE, ENGINE_VERSION, INSTAGRAM_API_CEILING } from "./constants";
 import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard";
 import { logAudit } from "../audit";
-import { computeCompetitorHash, parseJsonSafe } from "./utils";
+import { computeCompetitorHash, computeCompetitorContentHash, parseJsonSafe } from "./utils";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3, getStoredTikTokPostsForMIv3, getStoredTikTokCommentsForMIv3, getStoredReviewsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { logSignalDiagnostics, detectNarrativeOverlap } from "../engine-hardening";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
@@ -232,6 +232,24 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
     }
   }
 
+  // Fix #2 — content-aware reuse fingerprint. Callers set
+  // `competitorContentHash` (from computeCompetitorContentHash, which folds in
+  // post volume + freshest post timestamp). We embed it inside `telemetry` JSON
+  // so the reuse gate (getCachedSnapshot) can detect that newly scraped posts
+  // should invalidate a prior snapshot even when the competitor SET is
+  // unchanged. It is NOT a real column — deleted before insert.
+  if (typeof snapshotPayload.competitorContentHash === "string" && snapshotPayload.competitorContentHash.length > 0) {
+    let telC: any = {};
+    if (typeof snapshotPayload.telemetry === "string") {
+      try { telC = JSON.parse(snapshotPayload.telemetry); } catch { telC = {}; }
+    } else if (snapshotPayload.telemetry && typeof snapshotPayload.telemetry === "object") {
+      telC = snapshotPayload.telemetry;
+    }
+    telC.contentHash = snapshotPayload.competitorContentHash;
+    snapshotPayload.telemetry = JSON.stringify(telC);
+  }
+  delete snapshotPayload.competitorContentHash;
+
   if (snapshotPayload.status === "COMPLETE") {
     const completionCheck = validateSnapshotCompleteness(snapshotPayload);
     if (!completionCheck.valid) {
@@ -324,7 +342,7 @@ interface CacheResult {
   invalidationReason: import("./types").CacheInvalidationReason;
 }
 
-async function getCachedSnapshot(accountId: string, campaignId: string, competitorHash: string): Promise<CacheResult> {
+async function getCachedSnapshot(accountId: string, campaignId: string, competitorHash: string, contentHash: string): Promise<CacheResult> {
   const snapshots = await db.select().from(miSnapshots)
     .where(and(
       eq(miSnapshots.accountId, accountId),
@@ -341,6 +359,18 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
   if (snapshot.competitorHash && snapshot.competitorHash !== competitorHash) {
     console.log(`[MIv3] Snapshot invalidated: competitor set changed (${snapshot.competitorHash} → ${competitorHash})`);
     return { snapshot: null, invalidationReason: "COMPETITOR_SET_CHANGED" };
+  }
+
+  // Fix #2 — content-aware invalidation. Even when the competitor SET is
+  // unchanged, newly scraped posts must invalidate a stale snapshot. The prior
+  // snapshot's content fingerprint lives in telemetry.contentHash. A missing
+  // stored hash (pre-fix snapshot) is treated as a mismatch → one recompute
+  // (D5: never silently reuse when the canonical fingerprint is absent).
+  const telCached = parseJsonSafe<{ contentHash?: unknown }>(snapshot.telemetry, {});
+  const storedContentHash = typeof telCached.contentHash === "string" ? telCached.contentHash : "";
+  if (storedContentHash !== contentHash) {
+    console.log(`[MIv3] Snapshot invalidated: competitor content changed (${storedContentHash.length > 0 ? storedContentHash : "none"} → ${contentHash})`);
+    return { snapshot: null, invalidationReason: "CONTENT_CHANGED" };
   }
 
   const snapshotVersion = snapshot.analysisVersion || 0;
@@ -854,11 +884,12 @@ export class MarketIntelligenceV3 {
       console.log(`[MIv3] SCRAPING_RESILIENCE: degraded inputs | competitors=${allCompetitors.length} | empty=${allCompetitors.length - competitors.length} | reason=${provenanceReason}`);
     }
     const competitorHash = computeCompetitorHash(competitors);
+    const competitorContentHash = computeCompetitorContentHash(competitors);
 
     let cacheInvalidationReason: import("./types").CacheInvalidationReason = null;
 
     if (!forceRefresh) {
-      const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash);
+      const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash, competitorContentHash);
       if (cacheResult.snapshot) {
         const cached = cacheResult.snapshot;
         if (jobId && cached.jobId !== jobId) {
@@ -1269,6 +1300,7 @@ export class MarketIntelligenceV3 {
       campaignId,
       jobId,
       competitorHash,
+      competitorContentHash,
       version: (previousSnapshot?.version || 0) + 1,
       competitorData: JSON.stringify(competitors.map(c => ({ id: c.id, name: c.name }))),
       signalData: JSON.stringify(signalResults),

@@ -1557,12 +1557,26 @@ async function executeEngine(
         ctx.miSnapshotId = result.snapshotId;
         try {
           const [miRow] = await db
-            .select({ competitorHash: miSnapshots.competitorHash })
+            .select({ competitorHash: miSnapshots.competitorHash, telemetry: miSnapshots.telemetry })
             .from(miSnapshots)
             .where(eq(miSnapshots.id, result.snapshotId))
             .limit(1);
-          if (miRow?.competitorHash) {
-            ctx.inputHashes!.mi = miRow.competitorHash;
+          if (miRow) {
+            // Fix #2 — propagate the content-aware fingerprint
+            // (telemetry.contentHash) so downstream engines' input-hash reuse
+            // also invalidates when competitors post fresh content. A pre-fix
+            // snapshot lacking contentHash falls back to the ID-only
+            // competitorHash. Explicit ternaries (never `??`/`||`) per D1.
+            let telMi: any = {};
+            if (typeof miRow.telemetry === "string") {
+              try { telMi = JSON.parse(miRow.telemetry); } catch { telMi = {}; }
+            }
+            const miContentHash = typeof telMi.contentHash === "string" && telMi.contentHash.length > 0
+              ? telMi.contentHash
+              : (typeof miRow.competitorHash === "string" ? miRow.competitorHash : "");
+            if (miContentHash.length > 0) {
+              ctx.inputHashes!.mi = miContentHash;
+            }
           }
         } catch (miHashErr: any) {
           console.warn(`[Orchestrator] MI_COMPETITOR_HASH_LOAD_FAILED | error=${miHashErr.message}`);

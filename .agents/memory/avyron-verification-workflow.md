@@ -15,6 +15,8 @@ description: How to typecheck and how to verify orchestrator/engine behaviour in
 
 **How to apply:** drive the *real* units directly in a `.local/scripts/*.ts` tsx harness — e.g. `runCandidateGateBattery` → `emissionFromBattery` → `buildAndRecordAiPathReport` — with live LLM judges, and assert on the assembled output. This exercises the same code the engines/aggregator use. Disclose in the harness header that it is a faithful proxy, not a full pipeline run. The interchangeability/contradiction judges make real OpenAI calls (need `OPENAI_API_KEY`); keep attempts bounded (~2 per engine).
 
+- **Any tsx harness that imports the server graph MUST end with an explicit `process.exit(0)`** (and `exit(1)` on failure). Importing `server/**` transitively opens background handles (pg pool, schedulers, timers) that keep the event loop alive, so the harness never exits on its own; the 120s tool timeout then SIGKILLs it and the fully-buffered stdout is lost — the symptom is a run with **"no output" and exit code -1 even though every check actually passed**. If you see that, add the explicit exit, do not assume the harness hung. For pure-function-only harnesses this is unnecessary, but it is harmless and worth defaulting to.
+
 # Guard-test gotchas
 
 - Several suites pin **source shapes** (literal call-signature strings read via `readFileSync` on scraper files). Any intentional signature change must update those pin assertions in lockstep — a red pin test after a refactor is usually the pin, not the code.

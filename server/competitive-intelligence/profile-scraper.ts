@@ -47,6 +47,39 @@ export interface ScrapeResult {
   paginationPages?: number;
   rawFetchedCount?: number;
   paginationStopReason?: string;
+  // Fix #1a — failure classification (B4: explicit over hidden ambiguity).
+  // "NONE": success OR healthy-but-empty (transport reached the platform, just
+  // no posts). "GENUINE_BLOCK": a verified auth/challenge/403 wall — the ONLY
+  // class permitted to persist a 24h platform-block cooldown. "TRANSIENT":
+  // timeout / proxy-tunnel contention / rate-limit / unknown — retry next cycle,
+  // never a persistent block.
+  failureClass: "NONE" | "GENUINE_BLOCK" | "TRANSIENT";
+}
+
+/**
+ * Fix #1a — distinguish a genuine platform block from transient contention,
+ * from the raw transport error message. classifyBlock() (proxy-pool-manager) is
+ * intentionally NOT reused here: it lumps real 403s and mere connect/tunnel
+ * timeouts both into "PROXY_BLOCKED", which is exactly the coarseness that
+ * caused spurious 24h blocks. Only unambiguous auth/challenge/403 walls return
+ * GENUINE_BLOCK; everything else is TRANSIENT (conservative — favours retry
+ * over lock, per B3 safe-degradation).
+ */
+export function classifyScrapeFailure(message: string): "GENUINE_BLOCK" | "TRANSIENT" {
+  const m = (typeof message === "string" ? message : "").toLowerCase();
+  if (
+    m.includes("403") ||
+    m.includes("401") ||
+    m.includes("forbidden") ||
+    m.includes("require_login") ||
+    m.includes("login_required") ||
+    m.includes("login required") ||
+    m.includes("challenge") ||
+    m.includes("checkpoint")
+  ) {
+    return "GENUINE_BLOCK";
+  }
+  return "TRANSIENT";
 }
 
 export interface ScrapeStats {
@@ -303,9 +336,11 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   if (!user) {
     console.log(`[CI Scraper] WEB_API: www failed for ${handle} (HTTP ${diag.page1HttpStatus}), trying i.instagram.com variant...`);
     const iApiUrl = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
+    let iHttpStatus: number | null = null;
     try {
       if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:i.ig:${handle}`);
       const iResp = await transportFetch(iApiUrl, proxyCtx, bareTarget);
+      iHttpStatus = iResp.status;
       if (iResp.ok) {
         const iText = await iResp.text();
         const iBytes = Buffer.byteLength(iText, "utf-8");
@@ -329,7 +364,12 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     } catch (iErr: any) {
       console.log(`[CI Scraper] WEB_API: i.instagram.com fallback failed for ${handle}: ${iErr.message}`);
     }
-    if (!user) throw new Error("No user data from web_profile_info (www and i.instagram.com both failed)");
+    // Fix #1a — surface the transport HTTP status in the thrown message so a
+    // genuine 403/401/challenge wall on the dominant WEB_API path classifies as
+    // GENUINE_BLOCK (classifyScrapeFailure matches on the status/marker text).
+    // Without this the message carried no marker and every real block fell
+    // through to TRANSIENT, defeating the 24h cooldown and re-scraping forever.
+    if (!user) throw new Error(`No user data from web_profile_info (www HTTP ${response.status}, i.instagram.com HTTP ${iHttpStatus === null ? "n/a" : iHttpStatus}; both failed)`);
   }
 
   if (user.is_private === true) {
@@ -1058,6 +1098,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
       collectionMethodUsed: "NONE",
       attempts: ["BATCH_LIMIT"],
       warnings: ["BATCH_LIMIT_EXCEEDED: Testing phase limits scraping to 10 profiles per hour."],
+      failureClass: "TRANSIENT",
     };
   }
 
@@ -1068,6 +1109,11 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
   let followers: number | null = null;
   let profileName: string | null = null;
   let collectionMethodUsed: ScrapeResult["collectionMethodUsed"] = "NONE";
+  // Fix #1a — transport-reachability tracking. transportSucceeded=true once ANY
+  // scrape attempt returns without throwing (even with 0 posts = healthy empty).
+  // lastFailureMessage captures the transport error used to classify a block.
+  let transportSucceeded = false;
+  let lastFailureMessage = "";
 
   // Safe-off fail-fast (D5/B3): without BRIGHT_DATA_API_KEY + BRIGHT_DATA_ZONE
   // there is NO transport — no direct-fetch fallback. Result is NOT cached so
@@ -1083,6 +1129,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
       collectionMethodUsed: "NONE",
       attempts: ["SCRAPING_UNCONFIGURED"],
       warnings: ["SCRAPING_UNCONFIGURED: Set BRIGHT_DATA_API_KEY and BRIGHT_DATA_ZONE (optionally BRIGHT_DATA_COUNTRY) to enable scraping."],
+      failureClass: "TRANSIENT",
     };
   }
 
@@ -1104,6 +1151,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
   try {
     const startMs = Date.now();
     const result = await attemptWebProfileApi(handle, proxyCtx, maxPosts, bareTarget);
+    transportSucceeded = true;
     if (proxyCtx) {
       logProxyTelemetry(proxyCtx, "WEB_API", 200, null, Date.now() - startMs, result.posts.length > 0);
     }
@@ -1121,6 +1169,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
       console.log(`[CI Scraper] WEB_API SUCCESS: ${posts.length} posts (${paginationPages} pages, stop=${paginationStopReason}), ${followers ?? "unknown"} followers for ${handle}`);
     }
   } catch (err: any) {
+    lastFailureMessage = typeof err?.message === "string" ? err.message : "";
     if (proxyCtx) {
       const bc = classifyBlock(null, err.message);
       logProxyTelemetry(proxyCtx, "WEB_API", null, bc, 0, false);
@@ -1130,6 +1179,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     try {
       const htmlStartMs = Date.now();
       const result = await attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget);
+      transportSucceeded = true;
       if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", 200, null, Date.now() - htmlStartMs, result.posts.length > 0);
       posts = result.posts;
       followers = result.followers;
@@ -1143,6 +1193,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
         console.log(`[CI Scraper] HTML_PARSE: Page loaded but no post data extracted for ${handle}`);
       }
     } catch (err2: any) {
+      lastFailureMessage = `${typeof err?.message === "string" ? err.message : ""} | ${typeof err2?.message === "string" ? err2.message : ""}`;
       if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", null, classifyBlock(null, err2.message), 0, false);
       warnings.push(`WEB_API failed: ${err.message} | HTML_PARSE failed: ${err2.message}`);
       console.log(`[CI Scraper] HTML_PARSE FAILED for ${handle}: ${err2.message}`);
@@ -1175,6 +1226,14 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
 
   console.log(`[CI Scraper] EMBEDDED_COMMENT_SUMMARY | ${embeddedComments.length} real comments from profile scrape | ${posts.length} posts | for ${handle}`);
 
+  // Fix #1a — final failure classification. Success or transport-reached-but-
+  // empty ⇒ NONE (never a block). Zero posts with NO transport ⇒ classify the
+  // captured transport error as GENUINE_BLOCK vs TRANSIENT.
+  let failureClass: ScrapeResult["failureClass"] = "NONE";
+  if (posts.length === 0 && !transportSucceeded) {
+    failureClass = classifyScrapeFailure(lastFailureMessage);
+  }
+
   const result: ScrapeResult = {
     success: posts.length > 0,
     posts: posts.slice(0, maxPosts > 60 ? 60 : maxPosts),
@@ -1187,6 +1246,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     paginationPages: paginationPages || 1,
     rawFetchedCount: rawFetchedCount || posts.length,
     paginationStopReason,
+    failureClass,
   };
 
   // P4 isolation seal: cacheKey is already account-namespaced via nsCacheKey above.

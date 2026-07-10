@@ -10,7 +10,7 @@ import { computeConfidence } from "./confidence-engine";
 import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
-import { computeCompetitorHash } from "./utils";
+import { computeCompetitorHash, computeCompetitorContentHash } from "./utils";
 import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION, computeDataFreshnessDays } from "./engine";
 import { MI_THRESHOLDS, MI_CONFIDENCE, INSTAGRAM_API_CEILING } from "./constants";
 import { computeAllContentDNA } from "./content-dna";
@@ -893,18 +893,32 @@ async function executeFetchJob(
         stage.COMMENTS_FETCH = "SKIPPED";
         stage.CTA_ANALYSIS = "SKIPPED";
         stage.SIGNAL_COMPUTE = "SKIPPED";
-        stage.fetchStatus = "BLOCKED_BY_PLATFORM";
+        // Fix #1a/#1b — ONLY a genuine platform block (a verified 403 /
+        // challenge / login wall from a real scrape attempt) may persist the
+        // 24h BLOCKED_BY_PLATFORM cooldown stamp. Transient failures (timeouts,
+        // proxy/tunnel contention, rate-limit) and the inter-probe cooldown
+        // short-circuit carry blockClass !== "GENUINE_BLOCK" and MUST NOT
+        // re-stamp lastCheckedAt — that unconditional re-stamp on every run was
+        // the self-perpetuation bug that made the 24h window never expire. They
+        // surface as a transient fetch failure and retry on the next cycle.
+        const isGenuineBlock = fetchResult.blockClass === "GENUINE_BLOCK";
+        stage.fetchStatus = isGenuineBlock ? "BLOCKED_BY_PLATFORM" : "FETCH_FAILED";
         const reason = classifyBlockReason(fetchResult);
         limitReasons.push({
           competitorId: comp.id, competitorName: comp.name,
           stage: "POSTS_FETCH", reason, details: fetchResult.message,
         });
-        try {
-          await db.update(ciCompetitors)
-            .set({ lastCheckedAt: new Date(), fetchMethod: "BLOCKED_BY_PLATFORM", updatedAt: new Date() })
-            .where(eq(ciCompetitors.id, comp.id));
-        } catch (blockStampErr: any) {
-          console.warn(`[FetchOrch] Failed to stamp blocked state for ${comp.name}: ${blockStampErr.message}`);
+        if (isGenuineBlock) {
+          try {
+            await db.update(ciCompetitors)
+              .set({ lastCheckedAt: new Date(), fetchMethod: "BLOCKED_BY_PLATFORM", updatedAt: new Date() })
+              .where(eq(ciCompetitors.id, comp.id));
+          } catch (blockStampErr: any) {
+            console.warn(`[FetchOrch] Failed to stamp blocked state for ${comp.name}: ${blockStampErr.message}`);
+          }
+        } else {
+          const blockClassLabel = typeof fetchResult.blockClass === "string" ? fetchResult.blockClass : "unset";
+          console.log(`[FetchOrch] TRANSIENT_FETCH_FAILURE: ${comp.name} — ${fetchResult.message} (blockClass=${blockClassLabel}; no platform-block stamp, will retry next cycle)`);
         }
         await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
         continue;
@@ -1238,6 +1252,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   }
 
   const competitorHash = computeCompetitorHash(competitorInputs);
+  const competitorContentHash = computeCompetitorContentHash(competitorInputs);
   const totalPosts = competitorInputs.reduce((s, c) => s + (c.posts?.length || 0), 0);
   const totalComments = competitorInputs.reduce((s, c) => s + (c.comments?.length || 0), 0);
   // Seal #11 / Task #29 / F6.1 — read-through persistence keyed by
@@ -1468,6 +1483,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     // jobId. Stable across worker crash/restart for the SAME persistence cycle.
     jobId: snapshotJobKey,
     competitorHash,
+    competitorContentHash,
     version: newVersion,
     competitorData: JSON.stringify(competitorInputs.map(c => ({ id: c.id, name: c.name }))),
     signalData: JSON.stringify(signalResults),

@@ -415,6 +415,11 @@ export interface FetchResult {
   fetchMethod: string;
   status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "COOLDOWN" | "INSUFFICIENT_DATA";
   message: string;
+  // Fix #1 — set ONLY on status "BLOCKED". Lets the fetch-orchestrator gate the
+  // 24h platform-block stamp: only "GENUINE_BLOCK" (a verified auth/challenge/
+  // 403 wall) may persist it; "TRANSIENT" (timeout / contention / cooldown echo)
+  // must never re-stamp. Absent ⇒ treated as non-genuine (no stamp).
+  blockClass?: "GENUINE_BLOCK" | "TRANSIENT";
   rawFetchedCount?: number;
   paginationPages?: number;
   paginationStopReason?: string;
@@ -512,7 +517,7 @@ async function _executeFetch(
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
 
   if (!competitor) {
-    return { competitorId, postsCollected: 0, commentsCollected: 0, ctaCoverage: 0, ctaTypes: [], followers: null, engagementRate: null, postingFrequency: null, contentMix: null, fetchMethod: "NONE", status: "BLOCKED", message: "Competitor not found" };
+    return { competitorId, postsCollected: 0, commentsCollected: 0, ctaCoverage: 0, ctaTypes: [], followers: null, engagementRate: null, postingFrequency: null, contentMix: null, fetchMethod: "NONE", status: "BLOCKED", blockClass: "TRANSIENT", message: "Competitor not found" };
   }
 
   if (collectionMode === "DEEP_PASS") {
@@ -556,13 +561,25 @@ async function _executeFetch(
     }
   }
 
-  const BLOCKED_PLATFORM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  // Fix #1b — recovery probe replaces the blind 24h lock-out. A competitor
+  // previously stamped BLOCKED_BY_PLATFORM is NOT held for a full 24h with zero
+  // attempts. The self-perpetuation bug (every failed run re-stamping
+  // lastCheckedAt) is fixed in the fetch-orchestrator (only a GENUINE_BLOCK
+  // re-stamps). Here we additionally re-probe: once the block is older than
+  // BLOCKED_PROBE_INTERVAL_MS we fall through and actually attempt a scrape. A
+  // genuine still-blocked result re-stamps upstream (resetting this window); a
+  // recovery overwrites fetchMethod on the successful-fetch update, clearing the
+  // flag. Only a very recent block short-circuits, to avoid hammering a real
+  // wall on every scheduled run. The short-circuit returns status BLOCKED
+  // WITHOUT blockClass "GENUINE_BLOCK" so it can NEVER re-stamp (that would
+  // reintroduce self-perpetuation through the cooldown echo).
+  const BLOCKED_PROBE_INTERVAL_MS = 6 * 60 * 60 * 1000;
   if (!forceRefresh && collectionMode !== "DEEP_PASS" && competitor.fetchMethod === "BLOCKED_BY_PLATFORM" && competitor.lastCheckedAt) {
     const elapsedSinceBlock = Date.now() - new Date(competitor.lastCheckedAt).getTime();
-    if (elapsedSinceBlock < BLOCKED_PLATFORM_COOLDOWN_MS) {
-      const hoursLeft = Math.ceil((BLOCKED_PLATFORM_COOLDOWN_MS - elapsedSinceBlock) / (60 * 60 * 1000));
-      const hoursAgo = Math.round(elapsedSinceBlock / (60 * 60 * 1000) * 10) / 10;
-      console.log(`[DataAcq] BLOCKED_COOLDOWN: ${competitor.name} was platform-blocked ${hoursAgo}h ago. Cooling down for ${hoursLeft}h more.`);
+    const hoursAgo = Math.round(elapsedSinceBlock / (60 * 60 * 1000) * 10) / 10;
+    if (elapsedSinceBlock < BLOCKED_PROBE_INTERVAL_MS) {
+      const minutesLeft = Math.ceil((BLOCKED_PROBE_INTERVAL_MS - elapsedSinceBlock) / (60 * 1000));
+      console.log(`[DataAcq] BLOCKED_COOLDOWN: ${competitor.name} was platform-blocked ${hoursAgo}h ago. Next recovery probe in ${minutesLeft}m.`);
       return {
         competitorId,
         postsCollected: 0,
@@ -575,9 +592,11 @@ async function _executeFetch(
         contentMix: null,
         fetchMethod: "BLOCKED_COOLDOWN",
         status: "BLOCKED",
-        message: `Platform blocked ${hoursAgo}h ago — cooling down for ${hoursLeft}h more.`,
+        blockClass: "TRANSIENT",
+        message: `Platform blocked ${hoursAgo}h ago — next recovery probe in ${minutesLeft}m.`,
       };
     }
+    console.log(`[DataAcq] BLOCKED_COOLDOWN_PROBE: ${competitor.name} was platform-blocked ${hoursAgo}h ago (>= ${Math.round(BLOCKED_PROBE_INTERVAL_MS / (60 * 60 * 1000))}h probe interval). Attempting recovery scrape.`);
   }
 
   if (!forceRefresh && collectionMode !== "DEEP_PASS") {
@@ -713,13 +732,45 @@ async function _executeFetch(
   checkAborted(signal, "executeFetch:afterProfileScrape");
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
-    console.log(`[DataAcq] Scrape blocked for ${competitor.name}`);
+    // Fix #1 — split "healthy empty" from a genuine/transient block. When the
+    // scraper's transport reached the platform and returned zero posts
+    // (failureClass === "NONE"), this is NOT a block — it is a competitor with
+    // no fetchable recent posts. Report INSUFFICIENT_DATA carrying whatever is
+    // already stored, and emit NO blockClass so the orchestrator never persists
+    // a 24h platform-block stamp. Only a classified transport failure
+    // (GENUINE_BLOCK / TRANSIENT) returns status BLOCKED with blockClass, and
+    // only GENUINE_BLOCK is allowed to stamp downstream.
+    const existingStoredForEmpty = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+    const existingStoredEmptyCount = Number(existingStoredForEmpty[0]?.count || 0);
+
+    if (scrapeResult.failureClass === "NONE") {
+      // Report what is already stored (posts AND comments) rather than zeroing.
+      // The success/processed path writes these counts onto ciCompetitors, so a
+      // hard 0 here would erase the recorded comment count while the comments
+      // remain in the DB. Mirrors postsCollected = existingStoredEmptyCount.
+      const existingCommentsForEmpty = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+        .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+      const existingCommentsEmptyCount = Number(existingCommentsForEmpty[0]?.count || 0);
+      console.log(`[DataAcq] HEALTHY_EMPTY: ${competitor.name} — transport reached platform, 0 new posts (stored=${existingStoredEmptyCount}, comments=${existingCommentsEmptyCount}). Not a block.`);
+      return {
+        competitorId,
+        postsCollected: existingStoredEmptyCount, commentsCollected: existingCommentsEmptyCount, ctaCoverage: 0, ctaTypes: [],
+        followers: scrapeResult.followers, engagementRate: null, postingFrequency: null, contentMix: null,
+        fetchMethod: scrapeResult.collectionMethodUsed,
+        status: "INSUFFICIENT_DATA",
+        message: `No fetchable recent posts (transport OK). ${existingStoredEmptyCount} post(s) already stored.`,
+      };
+    }
+
+    console.log(`[DataAcq] Scrape blocked for ${competitor.name} | blockClass=${scrapeResult.failureClass}`);
     return {
       competitorId,
       postsCollected: 0, commentsCollected: 0, ctaCoverage: 0, ctaTypes: [],
       followers: null, engagementRate: null, postingFrequency: null, contentMix: null,
       fetchMethod: scrapeResult.collectionMethodUsed,
       status: "BLOCKED",
+      blockClass: scrapeResult.failureClass,
       message: "Scraping blocked. All methods failed. Using cached data if available.",
     };
   }
