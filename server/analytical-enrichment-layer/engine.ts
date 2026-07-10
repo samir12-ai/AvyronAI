@@ -524,9 +524,9 @@ export async function persistAELSnapshot(args: {
         package, is_partial, partial_reason
       ) VALUES (
         ${id}, ${accountId}, ${campaignId}, ${jobId},
-        ${JSON.stringify(pkg.rootCauses || [])}::jsonb,
-        ${JSON.stringify(pkg.causalChains || [])}::jsonb,
-        ${JSON.stringify(pkg.buyingBarriers || [])}::jsonb,
+        ${JSON.stringify(pkg.root_causes || [])}::jsonb,
+        ${JSON.stringify(pkg.causal_chains || [])}::jsonb,
+        ${JSON.stringify(pkg.buying_barriers || [])}::jsonb,
         ${JSON.stringify(pkg)}::jsonb,
         ${!!pkg.isPartial},
         ${pkg.partialReason || null}
@@ -540,7 +540,7 @@ export async function persistAELSnapshot(args: {
         partial_reason = EXCLUDED.partial_reason,
         created_at = now()
     `);
-    console.log(`${LOG_PREFIX} AEL_PERSISTED | id=${id} | campaign=${campaignId} | job=${jobId} | rootCauses=${pkg.rootCauses?.length || 0} | causalChains=${pkg.causalChains?.length || 0} | buyingBarriers=${pkg.buyingBarriers?.length || 0} | partial=${!!pkg.isPartial}`);
+    console.log(`${LOG_PREFIX} AEL_PERSISTED | id=${id} | campaign=${campaignId} | job=${jobId} | rootCauses=${pkg.root_causes?.length || 0} | causalChains=${pkg.causal_chains?.length || 0} | buyingBarriers=${pkg.buying_barriers?.length || 0} | partial=${!!pkg.isPartial}`);
   } catch (err: any) {
     console.error(`${LOG_PREFIX} AEL_PERSIST_FAILED | campaign=${campaignId} | job=${jobId} | err=${err?.message || err}`);
   }

@@ -14,11 +14,15 @@ function extractRootCausesFromAEL(ael: any): RootCauseRef[] {
   if (Array.isArray(ael.rootCauses)) arrays.push(ael.rootCauses);
   if (Array.isArray(ael.root_causes)) arrays.push(ael.root_causes);
   if (Array.isArray(ael.causalChains)) arrays.push(ael.causalChains);
+  if (Array.isArray(ael.causal_chains)) arrays.push(ael.causal_chains);
   for (const arr of arrays) {
     for (const item of arr) {
       if (!item) continue;
       const id = String(item.id || item.rootCauseId || item.rcId || `RC${candidates.length + 1}`);
-      const desc = String(item.description || item.statement || item.rootCause || item.cause || "").trim();
+      const desc = String(
+        item.deepCause || item.description || item.statement ||
+        item.rootCause || item.cause || item.surfaceSignal || "",
+      ).trim();
       if (desc) candidates.push({ id, description: desc.slice(0, 240) });
     }
   }

@@ -135,12 +135,12 @@ outputType = "console"
 name = "Real Campaign Run"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REASONER_ENABLED=1 COMMERCIAL_REASONER_ALLOWED_INDUSTRIES=b2b_saas,dtc_ecom,local_services npx tsx .local/scripts/run-real-campaign.ts"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REASONER_ENABLED=1 COMMERCIAL_REASONER_ALLOWED_INDUSTRIES=b2b_saas,dtc_ecom,local_services COMMERCIAL_REASONER_CURRENT_INDUSTRY=b2b_saas npx tsx .local/scripts/run-real-campaign.ts"
 
 [userenv]
 

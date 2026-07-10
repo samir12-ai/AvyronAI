@@ -970,7 +970,7 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
     const audienceBeliefs = (audience.audienceSegments || []).flatMap((s: any) => s.beliefProfile || []);
     const objectionStatements = Object.keys(audience.objectionMap || {}).slice(0, 8);
     const mythBreaker = await generateMythBreaker({
-      analyticalEnrichment: (mi as any).analyticalEnrichment || null,
+      analyticalEnrichment: analyticalEnrichment ?? null,
       audienceObjections: objectionStatements,
       audienceBeliefs,
       audiencePains: (audience.audiencePains || []).slice(0, 8),
@@ -1103,6 +1103,21 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
     }
   }
 
+  // Depth gate must score the engine's ACTUAL substantive output — the
+  // grounded myth-breaker + narrative-reframe reasoning — not just the
+  // shallow route-classification labels. Excluding them scores a strawman:
+  // the reasoning that genuinely references AEL root causes never reaches
+  // the cosine matcher. (Shape-agnostic extraction; shallow content still
+  // fails cosine matching against real root-cause text — the 0.20 gate and
+  // SEMANTIC_MATCH_THRESHOLD are unchanged.)
+  const _mb = primaryRoute.mythBreaker as any;
+  const _nr = (primaryRoute as any).narrativeReframe;
+  const asText = (v: any): string =>
+    typeof v === "string"
+      ? v
+      : v && typeof v === "object"
+        ? Object.values(v).filter((x) => typeof x === "string").join(" ")
+        : "";
   const celSourceTexts = [
     primaryRoute.routeName || "",
     primaryRoute.entryMechanismType || "",
@@ -1111,6 +1126,21 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
     primaryRoute.trustRequirement || "",
     primaryRoute.funnelCompatibility || "",
     ...primaryRoute.frictionNotes,
+    ...(_mb
+      ? [
+          _mb.mythBreakerStatement || "",
+          _mb.beliefToContradict || "",
+          _mb.contradictionLogic || "",
+        ]
+      : []),
+    ...(_nr
+      ? [
+          asText(_nr.currentModel),
+          asText(_nr.newModel),
+          asText(_nr.bridgeMechanism),
+          asText(_nr.discomfortCost),
+        ]
+      : []),
   ];
   // Phase 4-A — route the depth gate through the commercial reasoner.
   // The reasoner ALWAYS computes the deterministic floor first (returned
