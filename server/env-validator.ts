@@ -142,6 +142,16 @@ export function validateBrightDataContract(env: NodeJS.ProcessEnv): { fatal: str
     );
   }
 
+  // Optional SERP API zone — restores Google review TEXTS (unavailable on the
+  // Unlocker zone). Shares BRIGHT_DATA_API_KEY. Never boot-fatal: unset → the
+  // reviews scraper stays truthfully degraded (GOOGLE_RAW_HTML_UNSUPPORTED).
+  const serpZone = env.BRIGHT_DATA_SERP_ZONE?.trim();
+  if (serpZone && !apiKey) {
+    warns.push(
+      "BRIGHT_DATA_SERP_ZONE — set, but BRIGHT_DATA_API_KEY is missing. The SERP zone shares the account Bearer key; without it, Google review-text scraping cannot run. Set BRIGHT_DATA_API_KEY.",
+    );
+  }
+
   const legacySet = LEGACY_BRIGHT_DATA_KEYS.filter((k) => env[k]?.trim());
   if (legacySet.length) {
     warns.push(

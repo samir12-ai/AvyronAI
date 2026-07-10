@@ -148,6 +148,24 @@ export function getScrapingConfig(): ScrapingConfig | null {
   return { apiKey, zone, country: resolveScrapingCountry() };
 }
 
+/**
+ * SERP API zone config. Google review TEXTS are unavailable on the Web
+ * Unlocker zone (provider disabled raw Google HTML zone-wide, verified live
+ * 2026-07-09). Bright Data's SERP API product is a SEPARATE zone that returns
+ * parsed review JSON via the `brd_json=1` query param. It shares the account
+ * Bearer key (BRIGHT_DATA_API_KEY) — only the zone name differs.
+ *
+ * Unset → returns null and the reviews scraper stays on the Unlocker zone,
+ * where it fast-fails GOOGLE_RAW_HTML_UNSUPPORTED (current safe-off behaviour,
+ * B3). Set → the reviews platform routes here (see executePoolFetch).
+ */
+export function getSerpConfig(): ScrapingConfig | null {
+  const apiKey = process.env.BRIGHT_DATA_API_KEY?.trim();
+  const zone = process.env.BRIGHT_DATA_SERP_ZONE?.trim();
+  if (!apiKey || !zone) return null;
+  return { apiKey, zone, country: resolveScrapingCountry() };
+}
+
 let warnedInvalidCountry = false;
 
 /**
@@ -388,12 +406,19 @@ async function executePoolFetch(url: string, init?: PoolFetchInit): Promise<Resp
     }
   }
 
+  // Reviews route through the SERP API zone when one is configured (Google
+  // review texts are unavailable on the Unlocker zone). Every other platform,
+  // and reviews when no SERP zone is set, uses the Unlocker zone. Same account
+  // Bearer key either way — only the zone (and thus billing product) differs.
+  const serp = init?.target?.platform === "reviews" ? getSerpConfig() : null;
+  const effective = serp ?? config;
+
   try {
     const result = await unlockerRequest({
-      apiKey: config.apiKey,
-      zone: config.zone,
+      apiKey: effective.apiKey,
+      zone: effective.zone,
       url,
-      country: config.country,
+      country: effective.country,
       timeoutMs: init?.timeoutMs,
     });
 

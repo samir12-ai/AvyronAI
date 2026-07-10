@@ -40,7 +40,7 @@ Preferred communication style: Simple, everyday language.
 ## External Dependencies
 
 - **AI**: OpenAI API, Google Gemini.
-- **Data acquisition**: Bright Data Unlocker API (`POST https://api.brightdata.com/request`, zone-based; Instagram, TikTok, Website/Blog, Google Reviews) via single client `server/competitive-intelligence/brightdata-client.ts` (importable only by proxy-pool-manager, ESLint-enforced); Apify (TikTok fallback).
+- **Data acquisition**: Bright Data Unlocker API (`POST https://api.brightdata.com/request`, zone-based; Instagram, TikTok, Website/Blog) via single client `server/competitive-intelligence/brightdata-client.ts` (importable only by proxy-pool-manager, ESLint-enforced); Google **review texts** require the separate Bright Data SERP API zone (`BRIGHT_DATA_SERP_ZONE`, `brd_json=1`) — the Unlocker zone refuses raw Google HTML; Apify (TikTok fallback).
 - **Database**: PostgreSQL via Drizzle ORM (schema floor enforced on boot).
 - **Auth**: JWT email/password (access 14d during legacy grace; refresh 30d with rotation). Account lockout 5/15min. Stripe webhook for subscriptions. Per-account AI rate limit 50/hr/route. Full prose archived in [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §1.
 - **Other**: Video Credits System, static landing/pricing served by Express, social platforms (IG/FB/Twitter/LinkedIn/TikTok).
@@ -139,6 +139,7 @@ The env validator (`server/env-validator.ts`) refuses to boot if any required se
 | `BRIGHT_DATA_API_KEY` | all-or-nothing with `BRIGHT_DATA_ZONE` | Bright Data Unlocker API bearer key (2026-07 rebuild). Both unset → scraping SAFE-OFF (every scrape fails fast as `SCRAPING_UNCONFIGURED`); one set without the other → boot-fatal. Legacy `BRIGHT_DATA_PROXY_*` vars are warn-ignored. |
 | `BRIGHT_DATA_ZONE` | all-or-nothing with `BRIGHT_DATA_API_KEY` | Unlocker zone name (e.g. `marketmindai`). |
 | `BRIGHT_DATA_COUNTRY` | optional | 2-letter ISO geo-targeting code; malformed value is boot-fatal. Unset → zone's server-side geo policy applies. |
+| `BRIGHT_DATA_SERP_ZONE` | optional | Bright Data **SERP API** zone name (separate product from the Unlocker zone; shares `BRIGHT_DATA_API_KEY`). Restores Google **review texts** — the Unlocker zone refuses raw Google HTML zone-wide and `brd_json` parsed mode carries no review texts. When set, the `reviews` platform routes here with `brd_json=1`; unset → reviews stay truthfully degraded (`GOOGLE_RAW_HTML_UNSUPPORTED`). Billed separately per SERP request. |
 | `STRIPE_WEBHOOK_SECRET` | recommended (2026-07-08: no longer boot-fatal) | Stripe signature verification; webhook route rejects all events (503, fail-closed) and subscription sync stays disabled until set. |
 | `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL. Validated: absolute URL, `https://` in prod, hostname suffix in allowlist or `ALLOWED_PUBLIC_HOSTS`. |
 | `ALLOWED_PUBLIC_HOSTS` | optional | Comma-separated additional hostname suffixes. |

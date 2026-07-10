@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { ciCompetitorReviews, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { getScrapingConfig, poolFetch, TargetBackoffActiveError, type PoolFetchTarget } from "./proxy-pool-manager";
+import { getScrapingConfig, getSerpConfig, poolFetch, TargetBackoffActiveError, type PoolFetchTarget } from "./proxy-pool-manager";
 
 // 2026-07 Unlocker rebuild: transport goes through the pool manager's
 // poolFetch (Bright Data Unlocker REST API). The Unlocker performs its own
@@ -108,6 +108,10 @@ function extractReviewsFromHTML(html: string): ExtractedReview[] {
     }
   }
 
+  return dedupeReviews(reviews);
+}
+
+function dedupeReviews(reviews: ExtractedReview[]): ExtractedReview[] {
   const seen = new Set<string>();
   return reviews.filter(r => {
     if (r.text.length < 5) return false;
@@ -268,6 +272,82 @@ function deepExtractReviews(data: any, depth = 0): ExtractedReview[] {
   return reviews;
 }
 
+/**
+ * SERP API path (BRIGHT_DATA_SERP_ZONE configured). Bright Data's SERP zone
+ * returns PARSED JSON when the target URL carries `brd_json=1`. Shapes vary by
+ * endpoint, so extract defensively: look for arrays of review-like objects
+ * under any key, read the common field aliases, and fall back to the generic
+ * deep-walk used for raw-HTML embedded JSON. Verified/tuned against live SERP
+ * output during Phase 4-SERP.
+ */
+function extractReviewsFromSerpJson(body: string): ExtractedReview[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return [];
+  }
+
+  const reviews: ExtractedReview[] = [];
+  for (const rv of collectSerpReviewObjects(parsed, 0)) {
+    const textRaw = rv.review_text ?? rv.text ?? rv.snippet ?? rv.comment ?? rv.body ?? rv.review;
+    if (typeof textRaw !== "string" || textRaw.trim().length < 5) continue;
+
+    const ratingRaw = rv.rating ?? rv.stars ?? rv.score ?? rv.star_rating;
+    let rating = 0;
+    if (typeof ratingRaw === "number") rating = Math.round(ratingRaw);
+    else if (typeof ratingRaw === "string") rating = Math.round(parseFloat(ratingRaw)) || 0;
+
+    const authorRaw =
+      rv.author_name ?? rv.author ?? rv.name ?? rv.user_name ??
+      (rv.user && typeof rv.user === "object" ? (rv.user as any).name : undefined);
+    const authorName = typeof authorRaw === "string" && authorRaw.length < 120 ? authorRaw : undefined;
+
+    const dateRaw =
+      rv.iso_date ?? rv.date ?? rv.review_datetime_utc ?? rv.review_date ?? rv.time ?? rv.timestamp;
+
+    reviews.push({ text: textRaw.trim(), rating, time: coerceReviewTime(dateRaw), authorName });
+  }
+
+  if (reviews.length > 0) return dedupeReviews(reviews);
+  // Unknown nesting — fall back to the numeric-array heuristic walker.
+  return dedupeReviews(deepExtractReviews(parsed));
+}
+
+/** Walk parsed SERP JSON collecting plain objects that look like a review. */
+function collectSerpReviewObjects(data: unknown, depth: number): Record<string, any>[] {
+  if (depth > 8 || !data || typeof data !== "object") return [];
+  const out: Record<string, any>[] = [];
+
+  if (Array.isArray(data)) {
+    for (const item of data) out.push(...collectSerpReviewObjects(item, depth + 1));
+    return out;
+  }
+
+  const obj = data as Record<string, any>;
+  const hasText =
+    typeof obj.review_text === "string" || typeof obj.snippet === "string" ||
+    typeof obj.comment === "string" ||
+    (typeof obj.text === "string" && ("rating" in obj || "stars" in obj || "score" in obj));
+  if (hasText) out.push(obj);
+
+  for (const key of Object.keys(obj)) out.push(...collectSerpReviewObjects(obj[key], depth + 1));
+  return out;
+}
+
+/** Coerce a SERP date field (ISO string | epoch s | epoch ms) to epoch seconds. */
+function coerceReviewTime(raw: unknown): number {
+  if (typeof raw === "number") {
+    if (raw > 1_000_000_000 && raw < 2_000_000_000) return raw;
+    if (raw >= 1_000_000_000_000) return Math.floor(raw / 1000);
+  }
+  if (typeof raw === "string") {
+    const t = Date.parse(raw);
+    if (!Number.isNaN(t)) return Math.floor(t / 1000);
+  }
+  return Math.floor(Date.now() / 1000);
+}
+
 function cleanHtml(text: string): string {
   return text
     .replace(/<[^>]+>/g, " ")
@@ -289,6 +369,15 @@ function buildGoogleMapsSearchUrl(query: string): string {
 function buildGoogleMapsPlaceUrl(placeIdentifier: string): string {
   const encoded = encodeURIComponent(placeIdentifier);
   return `https://www.google.com/maps/place/${encoded}`;
+}
+
+/**
+ * SERP mode marker: Bright Data intercepts the `brd_json=1` query param on the
+ * target URL and returns parsed JSON instead of raw HTML. Only valid on a SERP
+ * API zone (BRIGHT_DATA_SERP_ZONE) — the Unlocker zone ignores/refuses it.
+ */
+function withBrdJson(url: string): string {
+  return url.includes("?") ? `${url}&brd_json=1` : `${url}?brd_json=1`;
 }
 
 function extractPlaceIdFromHtml(html: string): string | null {
@@ -337,13 +426,19 @@ export async function scrapeReviewsForCompetitor(
     let placeId: string | null = null;
     let lastError = "";
 
+    // SERP mode: a dedicated Bright Data SERP API zone (BRIGHT_DATA_SERP_ZONE)
+    // returns parsed review JSON. Without it, reviews stay on the Unlocker zone
+    // where raw Google HTML is refused → fast-fail GOOGLE_RAW_HTML_UNSUPPORTED.
+    const serpMode = !!getSerpConfig();
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const searchUrl = attempt === 0
+        const baseUrl = attempt === 0
           ? buildGoogleMapsSearchUrl(searchQuery)
           : buildGoogleMapsPlaceUrl(searchQuery);
+        const searchUrl = serpMode ? withBrdJson(baseUrl) : baseUrl;
 
-        console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via Unlocker API`);
+        console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via ${serpMode ? "SERP API" : "Unlocker API"}`);
         // T006 — adaptive backoff identity: search-query-keyed within the
         // reviews pool.
         const { html, status, brdErrorCode } = await fetchViaUnlocker(searchUrl, {
@@ -356,7 +451,11 @@ export async function scrapeReviewsForCompetitor(
         // not a transient block — retrying cannot succeed. Fail fast with an
         // explicit class (B4) instead of burning attempts and reporting a
         // misleading "No reviews found in HTML response".
-        if (isGoogleRawHtmlDisabled(brdErrorCode, html)) {
+        // The raw-Google-HTML refusal only applies to the Unlocker zone. In
+        // SERP mode we deliberately send brd_json to a SERP zone, so this
+        // provider policy does not apply; a genuine SERP error would instead
+        // surface as a brdErrorCode handled below.
+        if (!serpMode && isGoogleRawHtmlDisabled(brdErrorCode, html)) {
           lastError = GOOGLE_RAW_HTML_UNSUPPORTED;
           console.error(`[ReviewsScraper] ${GOOGLE_RAW_HTML_UNSUPPORTED} (searchQuery="${searchQuery}")`);
           break;
@@ -390,14 +489,14 @@ export async function scrapeReviewsForCompetitor(
         }
 
         placeId = extractPlaceIdFromHtml(html);
-        reviews = extractReviewsFromHTML(html);
+        reviews = serpMode ? extractReviewsFromSerpJson(html) : extractReviewsFromHTML(html);
 
         if (reviews.length > 0) {
-          console.log(`[ReviewsScraper] Extracted ${reviews.length} reviews for "${searchQuery}" from Google Maps`);
+          console.log(`[ReviewsScraper] Extracted ${reviews.length} reviews for "${searchQuery}" via ${serpMode ? "SERP JSON" : "Google Maps HTML"}`);
           break;
         }
 
-        lastError = "No reviews found in HTML response";
+        lastError = serpMode ? "No reviews in SERP JSON response" : "No reviews found in HTML response";
         console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}" (html length: ${html.length})`);
         if (attempt < MAX_RETRIES) {
           await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
