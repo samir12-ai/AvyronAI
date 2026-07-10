@@ -372,12 +372,46 @@ function buildGoogleMapsPlaceUrl(placeIdentifier: string): string {
 }
 
 /**
- * SERP mode marker: Bright Data intercepts the `brd_json=1` query param on the
- * target URL and returns parsed JSON instead of raw HTML. Only valid on a SERP
- * API zone (BRIGHT_DATA_SERP_ZONE) — the Unlocker zone ignores/refuses it.
+ * SERP-zone Google search URL. Bright Data returns the full knowledge panel as
+ * parsed JSON (brd_json=1); its `knowledge.fid` is the business Feature ID the
+ * reviews endpoint requires. Only meaningful on a SERP API zone.
  */
-function withBrdJson(url: string): string {
-  return url.includes("?") ? `${url}&brd_json=1` : `${url}?brd_json=1`;
+function buildGoogleSearchUrl(query: string): string {
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}&brd_json=1`;
+}
+
+/**
+ * SERP-zone Google reviews endpoint. Bright Data translates this virtual URL
+ * into Google's reviews RPC and returns parsed JSON. `fid` (Feature ID) comes
+ * from a prior search's `knowledge.fid`; the colon is percent-encoded per
+ * Bright Data's documented example. `hl`/`sort` are optional refinements.
+ */
+function buildGoogleReviewsUrl(fid: string, opts?: { hl?: string; sort?: string }): string {
+  const hl = opts?.hl ?? "en";
+  const sort = opts?.sort ?? "newestFirst";
+  return `https://www.google.com/reviews?fid=${encodeURIComponent(fid)}&brd_json=1&hl=${hl}&sort=${sort}`;
+}
+
+/** Google Feature ID shape: `0x<hex>:0x<hex>`. */
+const FID_RE = /^0x[0-9a-f]+:0x[0-9a-f]+$/i;
+
+/**
+ * Read the business Feature ID from a parsed SERP *search* response —
+ * `knowledge.fid`, falling back to the local-pack `organic[0].fid`. Returns
+ * null when neither is present (truthful degradation, no fabrication).
+ */
+function extractFidFromSerpSearch(body: string): string | null {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const kFid = parsed?.knowledge?.fid;
+  if (typeof kFid === "string" && FID_RE.test(kFid)) return kFid;
+  const oFid = Array.isArray(parsed?.organic) ? parsed.organic[0]?.fid : undefined;
+  if (typeof oFid === "string" && FID_RE.test(oFid)) return oFid;
+  return null;
 }
 
 function extractPlaceIdFromHtml(html: string): string | null {
@@ -391,6 +425,111 @@ function extractPlaceIdFromHtml(html: string): string | null {
   if (cidMatch) return `cid:${cidMatch[1]}`;
 
   return `search_${Date.now()}`;
+}
+
+interface SerpReviewsOutcome {
+  reviews: ExtractedReview[];
+  /** Feature ID resolved in step 1 (persisted as placeId). Null when unresolved. */
+  fid: string | null;
+  error: string;
+}
+
+/**
+ * SERP-zone two-step review fetch (BRIGHT_DATA_SERP_ZONE configured):
+ *   1. Google search  → `knowledge.fid` (business Feature ID).
+ *   2. /reviews?fid=…  → parsed review texts.
+ * Each step retries transient Unlocker/transport errors within MAX_RETRIES.
+ *
+ * Degrades truthfully (B1/B4 — no fabrication): a missing fid yields
+ * `SERP_NO_FID`; an empty step-2 payload yields `SERP_REVIEWS_EMPTY`. The
+ * latter is the live signal that the SERP zone's Google-Reviews collector is
+ * not returning data (feature/product not enabled on the zone) — classified
+ * distinctly from a genuine transport error so operators can act.
+ */
+async function scrapeReviewsViaSerp(
+  searchQuery: string,
+  accountId: string,
+): Promise<SerpReviewsOutcome> {
+  let fid: string | null = null;
+  let lastError = "";
+
+  // Step 1 — resolve the Feature ID via a parsed Google search.
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[ReviewsScraper] SERP search ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}"`);
+      const { html, status, brdErrorCode } = await fetchViaUnlocker(
+        buildGoogleSearchUrl(searchQuery),
+        { accountId, platform: "reviews", targetKey: `${searchQuery}::serp_search` },
+      );
+      if (brdErrorCode) {
+        lastError = `UNLOCKER_ERROR ${brdErrorCode} (SERP search)`;
+        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}", attempt ${attempt + 1}`);
+        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+        continue;
+      }
+      if (status !== 200) {
+        lastError = `HTTP ${status} (SERP search)`;
+        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}"`);
+        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+        continue;
+      }
+      fid = extractFidFromSerpSearch(html);
+      if (fid) break;
+      lastError = `SERP_NO_FID: Google search returned no knowledge.fid for "${searchQuery}"`;
+      console.warn(`[ReviewsScraper] ${lastError} (attempt ${attempt + 1})`);
+      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+    } catch (err: any) {
+      if (err instanceof TargetBackoffActiveError) {
+        return { reviews: [], fid: null, error: err.message };
+      }
+      lastError = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
+      console.error(`[ReviewsScraper] SERP search fetch error: ${lastError}`);
+      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+    }
+  }
+
+  if (!fid) return { reviews: [], fid: null, error: lastError || "SERP_NO_FID" };
+
+  // Step 2 — fetch reviews by Feature ID.
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[ReviewsScraper] SERP reviews ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" (fid=${fid})`);
+      const { html, status, brdErrorCode } = await fetchViaUnlocker(
+        buildGoogleReviewsUrl(fid),
+        { accountId, platform: "reviews", targetKey: `${searchQuery}::serp_reviews` },
+      );
+      if (brdErrorCode) {
+        lastError = `UNLOCKER_ERROR ${brdErrorCode} (SERP reviews)`;
+        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}", attempt ${attempt + 1}`);
+        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+        continue;
+      }
+      if (status !== 200) {
+        lastError = `HTTP ${status} (SERP reviews)`;
+        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}"`);
+        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+        continue;
+      }
+      const reviews = extractReviewsFromSerpJson(html);
+      if (reviews.length > 0) {
+        console.log(`[ReviewsScraper] Extracted ${reviews.length} reviews for "${searchQuery}" via SERP JSON`);
+        return { reviews, fid, error: "" };
+      }
+      lastError =
+        "SERP_REVIEWS_EMPTY: SERP reviews endpoint returned no review texts — the Google-Reviews collector may not be enabled on this SERP zone";
+      console.warn(`[ReviewsScraper] ${lastError} (fid=${fid}, attempt ${attempt + 1})`);
+      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+    } catch (err: any) {
+      if (err instanceof TargetBackoffActiveError) {
+        return { reviews: [], fid, error: err.message };
+      }
+      lastError = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
+      console.error(`[ReviewsScraper] SERP reviews fetch error: ${lastError}`);
+      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+    }
+  }
+
+  return { reviews: [], fid, error: lastError };
 }
 
 export async function scrapeReviewsForCompetitor(
@@ -427,92 +566,95 @@ export async function scrapeReviewsForCompetitor(
     let lastError = "";
 
     // SERP mode: a dedicated Bright Data SERP API zone (BRIGHT_DATA_SERP_ZONE)
-    // returns parsed review JSON. Without it, reviews stay on the Unlocker zone
-    // where raw Google HTML is refused → fast-fail GOOGLE_RAW_HTML_UNSUPPORTED.
+    // returns parsed review JSON via a two-step Feature-ID flow. Without it,
+    // reviews stay on the Unlocker zone where raw Google HTML is refused →
+    // fast-fail GOOGLE_RAW_HTML_UNSUPPORTED.
     const serpMode = !!getSerpConfig();
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const baseUrl = attempt === 0
-          ? buildGoogleMapsSearchUrl(searchQuery)
-          : buildGoogleMapsPlaceUrl(searchQuery);
-        const searchUrl = serpMode ? withBrdJson(baseUrl) : baseUrl;
+    if (serpMode) {
+      const serp = await scrapeReviewsViaSerp(searchQuery, accountId);
+      reviews = serp.reviews;
+      placeId = serp.fid;
+      lastError = serp.error;
+    } else {
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const searchUrl = attempt === 0
+            ? buildGoogleMapsSearchUrl(searchQuery)
+            : buildGoogleMapsPlaceUrl(searchQuery);
 
-        console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via ${serpMode ? "SERP API" : "Unlocker API"}`);
-        // T006 — adaptive backoff identity: search-query-keyed within the
-        // reviews pool.
-        const { html, status, brdErrorCode } = await fetchViaUnlocker(searchUrl, {
-          accountId,
-          platform: "reviews",
-          targetKey: searchQuery,
-        });
+          console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via Unlocker API`);
+          // T006 — adaptive backoff identity: search-query-keyed within the
+          // reviews pool.
+          const { html, status, brdErrorCode } = await fetchViaUnlocker(searchUrl, {
+            accountId,
+            platform: "reviews",
+            targetKey: searchQuery,
+          });
 
-        // Provider-level refusal of raw Google HTML is deterministic policy,
-        // not a transient block — retrying cannot succeed. Fail fast with an
-        // explicit class (B4) instead of burning attempts and reporting a
-        // misleading "No reviews found in HTML response".
-        // The raw-Google-HTML refusal only applies to the Unlocker zone. In
-        // SERP mode we deliberately send brd_json to a SERP zone, so this
-        // provider policy does not apply; a genuine SERP error would instead
-        // surface as a brdErrorCode handled below.
-        if (!serpMode && isGoogleRawHtmlDisabled(brdErrorCode, html)) {
-          lastError = GOOGLE_RAW_HTML_UNSUPPORTED;
-          console.error(`[ReviewsScraper] ${GOOGLE_RAW_HTML_UNSUPPORTED} (searchQuery="${searchQuery}")`);
-          break;
-        }
-
-        if (brdErrorCode) {
-          // Any other Unlocker transport error rides in on HTTP 200 with an
-          // x-brd-err-code header — the body is an error string, NOT Maps
-          // HTML. Never feed it to the extractor as if it were content.
-          lastError = `UNLOCKER_ERROR ${brdErrorCode}`;
-          console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}", attempt ${attempt + 1}`);
-          if (attempt < MAX_RETRIES) {
-            await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+          // Provider-level refusal of raw Google HTML is deterministic policy,
+          // not a transient block — retrying cannot succeed. Fail fast with an
+          // explicit class (B4) instead of burning attempts and reporting a
+          // misleading "No reviews found in HTML response".
+          if (isGoogleRawHtmlDisabled(brdErrorCode, html)) {
+            lastError = GOOGLE_RAW_HTML_UNSUPPORTED;
+            console.error(`[ReviewsScraper] ${GOOGLE_RAW_HTML_UNSUPPORTED} (searchQuery="${searchQuery}")`);
+            break;
           }
-          continue;
-        }
 
-        if (status === 403 || status === 429) {
-          lastError = `HTTP ${status} — blocked or rate limited`;
-          console.warn(`[ReviewsScraper] ${lastError}, attempt ${attempt + 1}`);
-          if (attempt < MAX_RETRIES) {
-            await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+          if (brdErrorCode) {
+            // Any other Unlocker transport error rides in on HTTP 200 with an
+            // x-brd-err-code header — the body is an error string, NOT Maps
+            // HTML. Never feed it to the extractor as if it were content.
+            lastError = `UNLOCKER_ERROR ${brdErrorCode}`;
+            console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}", attempt ${attempt + 1}`);
+            if (attempt < MAX_RETRIES) {
+              await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+            }
+            continue;
           }
-          continue;
-        }
 
-        if (status !== 200) {
-          lastError = `HTTP ${status}`;
-          console.warn(`[ReviewsScraper] Unexpected status ${status} for "${searchQuery}"`);
-          continue;
-        }
+          if (status === 403 || status === 429) {
+            lastError = `HTTP ${status} — blocked or rate limited`;
+            console.warn(`[ReviewsScraper] ${lastError}, attempt ${attempt + 1}`);
+            if (attempt < MAX_RETRIES) {
+              await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+            }
+            continue;
+          }
 
-        placeId = extractPlaceIdFromHtml(html);
-        reviews = serpMode ? extractReviewsFromSerpJson(html) : extractReviewsFromHTML(html);
+          if (status !== 200) {
+            lastError = `HTTP ${status}`;
+            console.warn(`[ReviewsScraper] Unexpected status ${status} for "${searchQuery}"`);
+            continue;
+          }
 
-        if (reviews.length > 0) {
-          console.log(`[ReviewsScraper] Extracted ${reviews.length} reviews for "${searchQuery}" via ${serpMode ? "SERP JSON" : "Google Maps HTML"}`);
-          break;
-        }
+          placeId = extractPlaceIdFromHtml(html);
+          reviews = extractReviewsFromHTML(html);
 
-        lastError = serpMode ? "No reviews in SERP JSON response" : "No reviews found in HTML response";
-        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}" (html length: ${html.length})`);
-        if (attempt < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
-        }
-      } catch (err: any) {
-        // T006 — cooling target cannot recover within this loop; stop early.
-        if (err instanceof TargetBackoffActiveError) {
-          lastError = err.message;
-          console.warn(`[ReviewsScraper] ${err.message} — aborting retry loop for "${searchQuery}"`);
-          break;
-        }
-        const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
-        lastError = safeMsg;
-        console.error(`[ReviewsScraper] Proxy fetch error: ${safeMsg}`);
-        if (attempt < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+          if (reviews.length > 0) {
+            console.log(`[ReviewsScraper] Extracted ${reviews.length} reviews for "${searchQuery}" via Google Maps HTML`);
+            break;
+          }
+
+          lastError = "No reviews found in HTML response";
+          console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}" (html length: ${html.length})`);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+          }
+        } catch (err: any) {
+          // T006 — cooling target cannot recover within this loop; stop early.
+          if (err instanceof TargetBackoffActiveError) {
+            lastError = err.message;
+            console.warn(`[ReviewsScraper] ${err.message} — aborting retry loop for "${searchQuery}"`);
+            break;
+          }
+          const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
+          lastError = safeMsg;
+          console.error(`[ReviewsScraper] Proxy fetch error: ${safeMsg}`);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+          }
         }
       }
     }
@@ -521,10 +663,15 @@ export async function scrapeReviewsForCompetitor(
     result.reviewsFetched = reviews.length;
 
     if (reviews.length === 0) {
-      // Structural provider refusal already carries its full explicit
-      // classification — do not wrap it in retry-count phrasing (we broke
-      // out after the first response; "after N attempts" would be false).
-      result.error = lastError.startsWith("GOOGLE_RAW_HTML_UNSUPPORTED")
+      // Errors that already carry a full, explicit classification pass through
+      // verbatim — wrapping them in Unlocker-loop retry-count phrasing ("after
+      // N attempts") would be false: the provider refusal breaks out after the
+      // first response, and the SERP path retries each step independently.
+      const isPreClassified =
+        lastError.startsWith("GOOGLE_RAW_HTML_UNSUPPORTED") ||
+        lastError.startsWith("SERP_NO_FID") ||
+        lastError.startsWith("SERP_REVIEWS_EMPTY");
+      result.error = isPreClassified
         ? lastError
         : `No reviews extracted after ${MAX_RETRIES + 1} attempts: ${lastError}`;
       return result;
@@ -590,3 +737,15 @@ export async function scrapeReviewsForCampaign(
   }
   return results;
 }
+
+/**
+ * Test-only surface for the live SERP verification harness. Lets the harness
+ * exercise the REAL SERP JSON parser + URL builders instead of a copy, so what
+ * it validates is exactly what production runs. Not for product code.
+ */
+export const _reviewsSerpTestHooks = {
+  extractReviewsFromSerpJson,
+  extractFidFromSerpSearch,
+  buildGoogleSearchUrl,
+  buildGoogleReviewsUrl,
+};
