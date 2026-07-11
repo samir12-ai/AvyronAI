@@ -1445,29 +1445,39 @@ export async function runFunnelEngine(
     };
   }
 
-  const primaryFunnel = buildFunnelCandidate(
-    aiFunnels.primary.name, aiFunnels.primary.type,
-    audience, offer, positioning, differentiation, awareness,
-  );
-  diagnostics.layer7_primary = primaryFunnel.integrityResult;
-  diagnostics.layer8_primary = { strength: primaryFunnel.funnelStrengthScore };
-  diagnostics.entryTrigger_primary = primaryFunnel.entryTrigger;
-  diagnostics.compression_primary = { applied: primaryFunnel.compressionApplied, stages: primaryFunnel.stageMap.length };
-  diagnostics.priorityMatrix_primary = primaryFunnel.priorityMatrixDecision;
+  let primaryFunnel!: FunnelCandidate;
+  let alternativeFunnel!: FunnelCandidate;
+  let rejectedFunnel!: FunnelCandidate;
+  // FIX-A: build (attempt 1) or REBUILD (depth-gate retry) all three candidates
+  // from the current aiFunnels selection and refresh their per-candidate
+  // diagnostics. Extracted so a depth-gate retry rebuilds the FULL funnel from the
+  // regenerated LLM selection instead of scoring a degenerate [type, name] pair.
+  const buildAllFunnels = () => {
+    primaryFunnel = buildFunnelCandidate(
+      aiFunnels.primary.name, aiFunnels.primary.type,
+      audience, offer, positioning, differentiation, awareness,
+    );
+    diagnostics.layer7_primary = primaryFunnel.integrityResult;
+    diagnostics.layer8_primary = { strength: primaryFunnel.funnelStrengthScore };
+    diagnostics.entryTrigger_primary = primaryFunnel.entryTrigger;
+    diagnostics.compression_primary = { applied: primaryFunnel.compressionApplied, stages: primaryFunnel.stageMap.length };
+    diagnostics.priorityMatrix_primary = primaryFunnel.priorityMatrixDecision;
 
-  const alternativeFunnel = buildFunnelCandidate(
-    aiFunnels.alternative.name, aiFunnels.alternative.type,
-    audience, offer, positioning, differentiation, awareness,
-  );
-  diagnostics.layer7_alternative = alternativeFunnel.integrityResult;
-  diagnostics.layer8_alternative = { strength: alternativeFunnel.funnelStrengthScore };
-  diagnostics.priorityMatrix_alternative = alternativeFunnel.priorityMatrixDecision;
+    alternativeFunnel = buildFunnelCandidate(
+      aiFunnels.alternative.name, aiFunnels.alternative.type,
+      audience, offer, positioning, differentiation, awareness,
+    );
+    diagnostics.layer7_alternative = alternativeFunnel.integrityResult;
+    diagnostics.layer8_alternative = { strength: alternativeFunnel.funnelStrengthScore };
+    diagnostics.priorityMatrix_alternative = alternativeFunnel.priorityMatrixDecision;
 
-  const rejectedFunnel = buildFunnelCandidate(
-    aiFunnels.rejected.name, aiFunnels.rejected.type,
-    audience, offer, positioning, differentiation, awareness,
-  );
-  diagnostics.layer7_rejected = rejectedFunnel.integrityResult;
+    rejectedFunnel = buildFunnelCandidate(
+      aiFunnels.rejected.name, aiFunnels.rejected.type,
+      audience, offer, positioning, differentiation, awareness,
+    );
+    diagnostics.layer7_rejected = rejectedFunnel.integrityResult;
+  };
+  buildAllFunnels();
 
   const collectFunnelText = (f: FunnelCandidate) => [
     f.funnelName, f.funnelType, f.commitmentLevel,
@@ -1477,6 +1487,22 @@ export async function runFunnelEngine(
     ...f.proofPlacements.map(p => `${p.stage} ${p.proofType} ${p.placement} ${p.purpose}`),
     ...f.frictionMap.map(fp => `${fp.stage} ${fp.frictionType} ${fp.mitigation}`),
   ];
+  // FIX-A: all cross-funnel state (boundary + sanitize + generic penalty + status
+  // + cross-engine alignment + trust-path gaps + critical friction) is derived from
+  // the CURRENT primary/alternative/rejected funnels. Extracted into a closure so it
+  // can be recomputed after a depth-gate rebuild — a retry that passes then returns
+  // state matching the funnel actually scored, never attempt-1 state stamped onto a
+  // rebuilt funnel (that would be fake success). l1..l6/dataReliability stay outside:
+  // they derive from stable engine inputs, not the LLM selection, so never go stale.
+  let boundaryCheck!: { passed: boolean; violations: string[] };
+  let genericOutputCheck!: ReturnType<typeof detectGenericOutput>;
+  let status: string = STATUS.COMPLETE;
+  let statusMessage: string | null = null;
+  let structuralWarnings: string[] = [];
+  let alignmentResult!: ReturnType<typeof checkCrossEngineAlignment>;
+  let trustPathGaps: string[] = [];
+  let criticalFrictionPoints = 0;
+  const deriveFunnelState = () => {
   const allFunnelText = [
     ...collectFunnelText(primaryFunnel),
     ...collectFunnelText(alternativeFunnel),
@@ -1484,7 +1510,7 @@ export async function runFunnelEngine(
     aiFunnels.rejected.rejectionReason || "",
   ].join(" ");
   const boundaryResult = enforceBoundaryWithSanitization(allFunnelText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
-  const boundaryCheck = { passed: boundaryResult.clean, violations: boundaryResult.violations };
+  boundaryCheck = { passed: boundaryResult.clean, violations: boundaryResult.violations };
   diagnostics.boundaryCheck = boundaryCheck;
   if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
     console.log(`[FunnelEngine-V3] BOUNDARY SANITIZED: ${boundaryResult.warnings.join("; ")}`);
@@ -1511,7 +1537,7 @@ export async function runFunnelEngine(
     sanitizeFunnel(rejectedFunnel);
   }
 
-  const genericOutputCheck = detectGenericOutput(allFunnelText);
+  genericOutputCheck = detectGenericOutput(allFunnelText);
   diagnostics.genericOutputCheck = genericOutputCheck;
   if (genericOutputCheck.genericDetected) {
     primaryFunnel.funnelStrengthScore = clamp(primaryFunnel.funnelStrengthScore - genericOutputCheck.penalty);
@@ -1519,9 +1545,9 @@ export async function runFunnelEngine(
     console.log(`[FunnelEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
   }
 
-  let status: string = STATUS.COMPLETE;
-  let statusMessage: string | null = null;
-  const structuralWarnings: string[] = [];
+  status = STATUS.COMPLETE;
+  statusMessage = null;
+  structuralWarnings = [];
 
   if (!boundaryCheck.passed) {
     status = STATUS.INTEGRITY_FAILED;
@@ -1559,7 +1585,7 @@ export async function runFunnelEngine(
       : 3;
     const readinessGap = funnelMinReadiness - audienceReadinessNum;
 
-    const alignmentResult = checkCrossEngineAlignment([
+    alignmentResult = checkCrossEngineAlignment([
       {
         name: "offer_commitment_alignment",
         aligned: commitmentGap <= 1,
@@ -1582,7 +1608,7 @@ export async function runFunnelEngine(
     }
     diagnostics.crossEngineAlignment = alignmentResult;
 
-    const trustPathGaps: string[] = [];
+    trustPathGaps = [];
   const mandatoryProofInPath = ["process_proof", "case_proof"];
   for (const required of mandatoryProofInPath) {
     if (!primaryFunnel.trustPath.some(t => t.proofType === required)) {
@@ -1590,13 +1616,16 @@ export async function runFunnelEngine(
     }
   }
 
-  const criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
+  criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
+  };
+  deriveFunnelState();
 
-  let celSourceTexts: string[] = [
-    primaryFunnel.funnelType || "",
-    ...(primaryFunnel.frictionMap || []).map((f: any) => `${f.stage || ""} ${f.frictionType || ""} ${f.mitigation || ""}`),
-    ...(primaryFunnel.trustPath || []).map((t: any) => `${t.stage || ""} ${t.proofType || ""} ${t.rationale || ""}`),
-  ];
+  // FIX-A: depth scorer input = the SAME full funnel composition helper used
+  // everywhere else (type/name + stages + trustPath + proofPlacements + friction).
+  // Previously this hand-built a partial subset with the WRONG trustPath keys
+  // (t.stage/t.rationale — neither exists on a trust step), starving the scorer so
+  // it read near-zero causal depth and spuriously blocked. FIX INPUTS, NOT GATES.
+  let celSourceTexts: string[] = collectFunnelText(primaryFunnel);
   let celDepth = enforceEngineDepthCompliance(
     "funnel",
     celSourceTexts,
@@ -1618,10 +1647,12 @@ export async function runFunnelEngine(
         continue;
       }
 
-      celSourceTexts = [
-        aiFunnels.primary?.type || "",
-        aiFunnels.primary?.name || "",
-      ];
+      // FIX-A: rebuild the FULL funnel from the regenerated selection and re-derive
+      // all cross-funnel state, so the retry is scored on the identical composition
+      // as attempt 1 AND the funnel that passes is the funnel we return.
+      buildAllFunnels();
+      deriveFunnelState();
+      celSourceTexts = collectFunnelText(primaryFunnel);
       celDepth = enforceEngineDepthCompliance(
         "funnel",
         celSourceTexts,

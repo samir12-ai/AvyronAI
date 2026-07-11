@@ -1,0 +1,45 @@
+Context:
+Dual diagnosis (report at .local/validation/dual-diagnosis-funnel-territory.md) produced two evidenced root causes:
+
+	1.	Funnel (decisive): The depth scorer receives a degenerate subset. Attempt 1 concat at server/funnel-engine/engine.ts:1598 reads t.stage/t.rationale — keys that don’t exist on TrustPathStep (real keys: proofType/audienceState, per types.ts:129-130; the correct sibling concat exists at engine.ts:1476). The retry path at engine.ts:1621-1624 is worse: it scores only [primary.type, primary.name] (two short strings), discarding the entire deterministically-built funnel — making retry success mathematically impossible. Result: depthScore=0.1 in every run despite valid LLM output and a correctly built funnel.
+	2.	Positioning territory: The recurring phrase “marketing capability transformation validation gap” comes from a hardcoded lookup table at server/positioning-engine/engine.ts:947 (psych-driver “weak → strong” → ${domainNoun} capability transformation validation gap). The interchangeability judge correctly rejects it every run — it is literally a template. Reuse/invalidation was verified working and is NOT the problem.
+
+All gates, judges, thresholds, retry counts, and System Control remain 100% untouched. We fix inputs, never gates.
+
+PHASE 1 — Fix A: Funnel depth-scorer input
+
+	1.	Fix the attempt-1 concat at engine.ts:1598 to read the real TrustPathStep fields (mirror the correct concat at engine.ts:1476: action/proofType/audienceState).
+	2.	Fix the retry path (engine.ts:1621-1624): on each retry, re-run the full funnel build (buildFunnelCandidate from the new LLM selection) and feed the scorer the SAME full text composition as attempt 1 (trustPath narrative + frictionMap + proofPlacements + type/name). Attempt 1 and retries must be scored on identical input shapes.
+	3.	Do NOT change the scorer itself (causal-enforcement-layer), the 0.20 threshold, or the retry count. Do NOT change the failure placeholder behavior (buildEmptyFunnel on genuine DEPTH_FAILED stays — but now it should only trigger on genuinely thin content).
+	4.	Enable ai-replay recording for the funnel engine for the verification run in Phase 3 (temporary, verification-scoped) so the raw LLM output is captured — note how it was enabled so it can be reverted.
+
+PHASE 2 — Fix B: Territory generation grounded in anchor/AEL
+
+	1.	Replace the static lookup-table naming at engine.ts:947 for territory generation: territory names/frames must be produced by an LLM call grounded via the EXISTING grounding contract (buildGroundingContract — already wired into positioning) using the product anchor’s differentiatingFeature + AEL items, instead of ${domainNoun} template strings.
+	2.	Keep the psych-driver taxonomy as INPUT/context to the LLM (the “weak → strong” driver concept is fine as strategic direction) — what must go is the deterministic template OUTPUT.
+	3.	Fail-closed: if the LLM call fails, log loudly (TERRITORY_GENERATION_FAILED) and fall back to the existing template WITH an explicit degradation marker on the territory object — never silent. The judge remains the final authority either way.
+	4.	Keep the change surgical: only the naming/framing generation path. Do not restructure layer7/layer11 flow, scoring, or the battery.
+
+Constraints:
+
+	•	ZERO changes to: interchangeability judge, depth gates/thresholds, CEL scorer, Integrity, System Control, retry counts.
+	•	tsc net-new = 0 vs the 722 baseline (managed TSC Check workflow, tsc alone, compare error multisets not just totals).
+	•	Loud logging on all new failure paths, no silent catches, English-only.
+	•	Architect review of the full diff must PASS before Phase 3.
+
+PHASE 3 — Verification run + before/after
+
+	1.	Full pipeline run on campaign_1773576062201_6t0oxi (same corpus, within cooldown fine, forceRefresh as usual).
+	2.	Report with quoted evidence vs the CONFIRM baseline (12-44-04-555Z):
+	•	Funnel: depth score per attempt (baseline: 0.1 both). Quote the exact text composition fed to the scorer (prove it’s the full funnel now). Quote the raw LLM output from ai-replay. Did funnel DEPTH_PASS? If it still fails, is the score movement consistent with real content being scored (e.g. 0.1 → 0.17), and is the failure now truthful thin-content degradation?
+	•	Positioning territory: quote the new LLM-generated territory name(s). Judge verdicts per attempt (baseline: 3/3 REJECTED on the template phrase). Did positioning PASS the judge? Confirm the phrase “capability transformation validation gap” no longer appears in this run’s territories.
+	•	Run-level: engines completed, DEPTH_FAILED / DEPTH_CASCADE_BLOCKED counts, doctrineResolution, System Control verdict + reasons, BuildPlan actionability, CEL score, GROUNDING_CONTRACT MET/UNMET.
+	•	Regression safety: awareness still DEPTH_PASSED (~0.25), differentiation/mechanism/persuasion depth scores unchanged range, no new silent catches, no WRITE_FAILED.
+	3.	Revert the temporary ai-replay enablement after evidence is captured (or report exactly what to revert).
+
+Done-conditions:
+
+	•	Both fixes implemented, tsc net-new = 0, architect PASS.
+	•	Full run report with the before/after table, truthful whether improved or not.
+	•	Explicit confirmation: no gate, judge, threshold, or scorer logic was modified.
+	•	If either fix did not move its metric, report the evidenced reason — no additional “while I’m here” changes.
