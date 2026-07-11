@@ -73,6 +73,10 @@ args = "Phase A Validation"
 task = "workflow.run"
 args = "Real Campaign Run"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "TSC Check"
+
 [[workflows.workflow]]
 name = "Start App"
 author = "agent"
@@ -141,6 +145,17 @@ outputType = "console"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REASONER_ENABLED=1 COMMERCIAL_REASONER_ALLOWED_INDUSTRIES=b2b_saas,dtc_ecom,local_services COMMERCIAL_REASONER_CURRENT_INDUSTRY=b2b_saas npx tsx .local/scripts/run-real-campaign.ts"
+
+[[workflows.workflow]]
+name = "TSC Check"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsc --noEmit 2>&1 | tee /tmp/tsc-baseline.txt; echo \"===TSC_DONE exit=${PIPESTATUS[0]} count=$(grep -c 'error TS' /tmp/tsc-baseline.txt)===\" | tee -a /tmp/tsc-baseline.txt"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [userenv]
 

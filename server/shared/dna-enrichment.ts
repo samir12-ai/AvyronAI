@@ -258,11 +258,55 @@ Anchor the ${target} to one of these so no competitor could truthfully repeat it
 }
 
 /**
+ * Normalise a phrase for coarse semantic comparison: lowercase, strip
+ * punctuation, collapse whitespace. Used only to detect a circular confirm — it
+ * is intentionally lossy and never used for grounding or gate decisions.
+ */
+function normalizeForCompare(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * True when the enrichment candidate essentially restates the anchor's existing
+ * differentiating feature (exact-normalised match, substring containment, or a
+ * high content-word overlap). Deliberately conservative so we only trip the
+ * circular-confirm guard when the two are substantially the same claim.
+ */
+function isSubstantiallyIdentical(candidate: string, existing: string): boolean {
+  const nc = normalizeForCompare(candidate);
+  const ne = normalizeForCompare(existing);
+  if (!nc || !ne) return false;
+  if (nc === ne) return true;
+  if (nc.includes(ne) || ne.includes(nc)) return true;
+  const tc = new Set(nc.split(" ").filter((w) => w.length > 3));
+  const te = new Set(ne.split(" ").filter((w) => w.length > 3));
+  if (tc.size === 0 || te.size === 0) return false;
+  let overlap = 0;
+  for (const w of tc) if (te.has(w)) overlap++;
+  const smaller = Math.min(tc.size, te.size);
+  return overlap / smaller >= 0.7;
+}
+
+/**
  * Build the non-technical, user-facing confirm/edit suggestion for the dashboard
  * card (Path B). Returns "" when there is no grounded candidate to suggest.
+ *
+ * When the top grounded candidate substantially restates the product's CURRENT
+ * differentiating feature (`anchor`), a "does your product do this? confirm it"
+ * prompt would be a circular no-op. In that case we instead ask the operator for
+ * a NEW proof point (number / named capability / uncontestable result). Purely a
+ * card-copy change — no gate, judge, threshold, or decision field is affected.
  */
-export function buildEnrichmentSuggestion(result: DnaEnrichmentResult): string {
+export function buildEnrichmentSuggestion(
+  result: DnaEnrichmentResult,
+  anchor?: { differentiatingFeature?: string | null } | null,
+): string {
   if (result.status !== "ENRICHED" || result.candidates.length === 0) return "";
   const top = result.candidates[0];
+  const existingFeature = (anchor?.differentiatingFeature ?? "").trim();
+  if (existingFeature && isSubstantiallyIdentical(top.differentiator, existingFeature)) {
+    console.log(`[DnaEnrichment] SUGGESTION_CIRCULAR_GUARD — top candidate restates existing anchor differentiator; asking for a new proof point instead`);
+    return `Your current edge is "${existingFeature}", but competitors are closing this gap. Add ONE new proof point that makes it undeniable — a specific number, a named capability, or a result no competitor can truthfully claim.`;
+  }
   return `Based on what competitors keep getting wrong, your edge may be: "${top.differentiator}". Does your product do this? Confirm it, or write one line describing what you do that no competitor does.`;
 }

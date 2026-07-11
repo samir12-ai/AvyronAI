@@ -2586,6 +2586,28 @@ export async function runOfferEngine(
     { problemStatement: aiOffers.primary.problemStatement, proofPath: aiOffers.primary.proofPath, objectionHandling: aiOffers.primary.objectionHandling },
   );
 
+  // F5a (Fix 1): when the strategic doctrine's anchor is absent, derive the
+  // battery anchor from Product DNA (mirrors positioning + audience). Explicit
+  // if/else — never fabricated from empty strings (D1/D5); deriveAnchorFromProductDna
+  // returns null unless differentiator + problem + name + type all exist.
+  // Hoisted above BOTH the Identity reasoning and the Value Architect so the
+  // same anchor grounds every offer LLM site (Fix 4 + offer/identity anchor).
+  let offerBatteryAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!offerBatteryAnchor && productDna) {
+    const derivedOfferAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedOfferAnchor) {
+      offerBatteryAnchor = derivedOfferAnchor;
+      console.log(`[OfferEngine-V4] BATTERY_ANCHOR_FROM_DNA | doctrine anchor absent — battery anchor derived from Product DNA`);
+    }
+  }
+  // T003: anchor source shared by the battery + value-architect evidence lines.
+  let offerAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    offerAnchorSource = "doctrine";
+  } else if (offerBatteryAnchor) {
+    offerAnchorSource = "dna";
+  }
+
   // ── INTELLIGENCE UPGRADE: Identity / Commercial / Value Translation reasoning ──
   try {
     const { generateOfferIdentityReasoning } = await import("./identity-llm");
@@ -2622,6 +2644,8 @@ export async function runOfferEngine(
       cialdiniRationale,
       competitorEquivalentClaim,
       analyticalEnrichment: (mi as any)?.analyticalEnrichment || null,
+      productAnchor: offerBatteryAnchor,
+      anchorSource: offerAnchorSource,
       accountId,
     });
     if (identityReasoning) {
@@ -2630,27 +2654,6 @@ export async function runOfferEngine(
     }
   } catch (idErr: any) {
     console.error(`[OfferEngine-V4] IDENTITY_REASONING_FAILED | ${idErr.message}`);
-  }
-
-  // F5a (Fix 1): when the strategic doctrine's anchor is absent, derive the
-  // battery anchor from Product DNA (mirrors positioning + audience). Explicit
-  // if/else — never fabricated from empty strings (D1/D5); deriveAnchorFromProductDna
-  // returns null unless differentiator + problem + name + type all exist.
-  // Hoisted above the Value Architect so the same anchor grounds it too (Fix 4).
-  let offerBatteryAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
-  if (!offerBatteryAnchor && productDna) {
-    const derivedOfferAnchor = deriveAnchorFromProductDna(productDna);
-    if (derivedOfferAnchor) {
-      offerBatteryAnchor = derivedOfferAnchor;
-      console.log(`[OfferEngine-V4] BATTERY_ANCHOR_FROM_DNA | doctrine anchor absent — battery anchor derived from Product DNA`);
-    }
-  }
-  // T003: anchor source shared by the battery + value-architect evidence lines.
-  let offerAnchorSource: "doctrine" | "dna" | "none" = "none";
-  if (strategic && strategic.doctrine.productAnchor) {
-    offerAnchorSource = "doctrine";
-  } else if (offerBatteryAnchor) {
-    offerAnchorSource = "dna";
   }
 
   // ── PHASE 3 MARKETING-LOGIC UPGRADE: Value Architect ──
@@ -3159,7 +3162,7 @@ export async function runOfferEngine(
       engineKind: "offer",
       lastRejectionReason: offerBattery.rejectionFeedback,
       candidates: enr.candidates,
-      suggestionText: buildEnrichmentSuggestion(enr),
+      suggestionText: buildEnrichmentSuggestion(enr, offerBatteryAnchor),
     };
     console.log(`[OfferEngine-V4] DNA_ENRICHMENT_REQUIRED | engine=offer | status=${enr.status} | candidates=${enr.candidates.length}`);
   } else if (offerBattery.passed) {

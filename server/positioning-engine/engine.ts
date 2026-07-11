@@ -16,7 +16,8 @@ import {
   type EnrichmentDnaInput,
 } from "../shared/dna-enrichment";
 import { emissionFromBattery, type BatteryAttemptLike } from "../shared/ai-path-telemetry";
-import { buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
+import { buildDoctrineBlock, deriveAnchorFromProductDna, type ProductAnchor, type RunStrategicContext } from "../shared/strategic-doctrine";
+import { buildGroundingContract, buildAelReferenceIndex, checkGroundingContract } from "../shared/grounding-contract";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
@@ -1836,6 +1837,19 @@ async function layer11_positioningStatementGeneration(
     const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
     if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
+    // Grounding contract (shared): resolve the product anchor — the locked
+    // doctrine anchor first, else one derived from Product DNA (never fabricated
+    // — deriveAnchorFromProductDna returns null when DNA is empty). Then build the
+    // additive contract block + a citable [RC#]/[CC#]/[BB#] AEL index. Positioning
+    // previously exposed only prose AEL with no citable tags.
+    let positioningAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+    if (!positioningAnchor) {
+      const derivedAnchor = deriveAnchorFromProductDna(productDna);
+      if (derivedAnchor) positioningAnchor = derivedAnchor;
+    }
+    const aelRefIndex = buildAelReferenceIndex(analyticalEnrichment || null);
+    const groundingContractBlock = buildGroundingContract(positioningAnchor, analyticalEnrichment || null);
+
     const hasSignals = structuredSignals && getAllSignalLabels(structuredSignals).length > 0;
 
     const signalMapping = hasSignals ? mapSignalsToTerritories(territories, structuredSignals!) : null;
@@ -1899,7 +1913,7 @@ Also return three additional fields per territory:
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}${domainTranslationInstruction}
 TERRITORIES WITH CLAIM SEEDS AND SOURCE SIGNALS:
 ${territoriesBlock}
 ${websitePositioningContext}
@@ -1912,8 +1926,8 @@ Each territory has CLAIM SEEDS derived from real audience signals. Your ONLY job
 
 FIELD RULES:
 - enemyDefinition: Sharpen the Enemy seed. Must name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls). The content MUST derive from the pain/root_cause signal labels listed in the SOURCE SIGNALS.
-- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST derive from the desire/pattern signal labels, AND MUST anchor the resolution to this product's Unique mechanism or Strategic advantage (from the DOMAIN TRANSLATION REQUIREMENT above) so that no generic competitor could truthfully repeat the claim unchanged. A claim any competitor could copy verbatim WILL BE REJECTED.
-- narrativeDirection: Sharpen the Narrative seed into one sentence. MUST synthesize the actual signal labels — not invent new concepts — and MUST state the outcome in terms of this product's Unique mechanism or Strategic advantage, not category-generic language.
+- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST derive from the desire/pattern signal labels, AND MUST anchor the resolution to this product's differentiating feature / Unique mechanism / Strategic advantage (named in the GROUNDING CONTRACT and DOMAIN TRANSLATION REQUIREMENT above) so that no generic competitor could truthfully repeat the claim unchanged. A claim any competitor could copy verbatim WILL BE REJECTED.
+- narrativeDirection: Sharpen the Narrative seed into one sentence. MUST synthesize the actual signal labels — not invent new concepts — and MUST state the outcome in terms of this product's differentiating feature / Unique mechanism / Strategic advantage (named in the GROUNDING CONTRACT above), not category-generic language.
 - domainFailure: The operational/system failure this signal cluster represents in this specific domain.
 - operationalProblem: What concretely breaks in the buyer's workflow.
 - proofRequirement: What evidence would resolve this (e.g., "live demo", "case study with metrics").
@@ -1926,14 +1940,14 @@ HARD CONSTRAINTS:
 - If a territory has no claim seeds, set narrativeDirection to "UNMAPPED".
 
 Return a JSON array:
-[{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }]
+[{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "...", "groundingRefs": ["RC2", "CC1"] }]
 
 Return ONLY the JSON array.`
       : `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}${domainTranslationInstruction}
 TERRITORIES:
 ${territoriesBlock}
 ${websitePositioningContext}
@@ -1946,7 +1960,7 @@ RULES:
 5. narrativeDirection: One sentence using domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
 
 For each territory, return a JSON array with objects containing:
-{ "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis", "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }
+{ "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis", "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "...", "groundingRefs": ["RC2", "CC1"] }
 
 Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON array.`;
 
@@ -1964,10 +1978,21 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned) as any[];
 
+    const aggregatedGroundingRefs = new Set<string>();
     for (const item of parsed) {
       const idx = (item.index || 1) - 1;
       if (idx >= 0 && idx < territories.length) {
         const seed = claimSeeds.get(idx);
+
+        if (Array.isArray(item.groundingRefs)) {
+          const refs = item.groundingRefs
+            .filter((r: any) => typeof r === "string" && r.trim().length > 0)
+            .map((r: string) => r.trim());
+          if (refs.length > 0) {
+            territories[idx].groundingRefs = refs;
+            refs.forEach((r: string) => aggregatedGroundingRefs.add(r));
+          }
+        }
 
         if (item.narrativeDirection && typeof item.narrativeDirection === "string" && item.narrativeDirection.includes("UNMAPPED")) {
           territories[idx].confidenceScore = Math.max(0, territories[idx].confidenceScore - 0.15);
@@ -2031,6 +2056,14 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
         }
       }
     }
+
+    checkGroundingContract({
+      engine: "positioning",
+      site: "layer11_statements",
+      groundingRefs: Array.from(aggregatedGroundingRefs),
+      ael: analyticalEnrichment || null,
+      accountId,
+    });
   } catch (err: any) {
     console.error("[PositioningEngine-V3] Statement generation failed:", err.message);
   }
@@ -2822,7 +2855,7 @@ CORRECTION REQUIRED:
         engineKind: "positioning_claim",
         lastRejectionReason: finalRejectionReason,
         candidates: enr.candidates,
-        suggestionText: buildEnrichmentSuggestion(enr),
+        suggestionText: buildEnrichmentSuggestion(enr, strategic ? strategic.doctrine.productAnchor : null),
       };
       console.log(`[PositioningEngine-V3] DNA_ENRICHMENT_REQUIRED | engine=positioning_claim | status=${enr.status} | candidates=${enr.candidates.length}`);
     } else if (positioningBatteryPassed) {

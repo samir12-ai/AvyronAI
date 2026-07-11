@@ -101,6 +101,7 @@ export interface OfferIdentityReasoning {
   rejectedAlternatives: Array<{ alternative: string; reasonRejected: string }>;
   modelUsed: string;
   generatedAt: string;
+  groundingRefs?: string[];
 }
 
 export interface OfferValueArchitecture {

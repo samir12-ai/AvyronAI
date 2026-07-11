@@ -20,6 +20,7 @@ import {
 } from "../engine-hardening";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import { buildStructuredAELBlock } from "../differentiation-engine/engine";
+import { buildGroundingContract, checkGroundingContract } from "../shared/grounding-contract";
 import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
@@ -193,6 +194,7 @@ Differentiating feature: ${mechAnchor.differentiatingFeature}
   const anchorGroundingRule = mechAnchor
     ? "\nANCHOR GROUNDING: The mechanism name, steps, promise, and logic MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the AEL causal grounding rules below; it never replaces the [RC#]/[BB#]/[CC#] requirements.\n"
     : "";
+  const groundingContractBlock = buildGroundingContract(mechAnchor, analyticalEnrichment || null);
 
   const pillarSummary = pillars.slice(0, 5).map((p: any) => `"${p.name || p.territory}": ${p.description || ""}`.slice(0, 120)).join("\n");
 
@@ -223,7 +225,7 @@ You MUST keep the core identity of this mechanism. Refine it to strengthen axis 
 No validated mechanism exists yet. Generate a NEW mechanism from scratch based on the positioning axis and differentiation pillars.`;
 
   const prompt = `You are a Mechanism Architect. Your job is to generate a strategic mechanism that is STRICTLY aligned with the positioning axis and GROUNDED in causal analysis.
-${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${groundingContractBlock}
 ${aelBlock ? `═══ ANALYTICAL ENRICHMENT LAYER (CAUSAL FOUNDATION — MANDATORY) ═══
 ${aelBlock}
 
@@ -340,7 +342,8 @@ Respond with ONLY valid JSON, no markdown:
     ],
     "commercialFunction": { "type": "trust_transfer|risk_reduction|identity_shift|perception_change|category_capture", "description": "one sentence" },
     "upstreamDependency": { "positioningHook": "...", "differentiationHook": "..." }
-  }
+  },
+  "groundingRefs": ["RC1"]
 }`;
 
   const depthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
@@ -415,6 +418,17 @@ Respond with ONLY valid JSON, no markdown:
       const rcHits = aelRefs.filter((r: any) => r.rootCauseUsed && /\[RC\d+\]/.test(r.rootCauseUsed)).length;
       const bbHits = aelRefs.filter((r: any) => r.barrierResolved && /\[BB\d+\]/.test(r.barrierResolved)).length;
       console.log(`[MechanismEngine] AEL_GROUNDING_RESULT | mechanisms=${aelRefs.length} | rootCauseRefs=${rcHits}/${aelRefs.length} | barrierRefs=${bbHits}/${aelRefs.length}`);
+      const mechGroundingRefs: string[] = Array.isArray(parsed.groundingRefs)
+        ? parsed.groundingRefs.filter((r: any) => typeof r === "string" && r.trim().length > 0).map((r: string) => r.trim())
+        : [];
+      checkGroundingContract({
+        engine: "mechanism",
+        site: "primary_mechanism",
+        groundingRefs: mechGroundingRefs,
+        ael: analyticalEnrichment || null,
+        accountId,
+        attemptNumber: depthAttempt,
+      });
 
       const nameValidation = validateMechanismName(primaryMech.mechanismName, positioning.domainVocab);
       if (!nameValidation.valid) {

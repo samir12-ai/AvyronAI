@@ -25,6 +25,7 @@ import {
   type ProductAnchor,
   type ProductDnaLike,
 } from "../shared/strategic-doctrine";
+import { buildGroundingContract } from "../shared/grounding-contract";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
@@ -954,6 +955,7 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
     ? "\nANCHOR GROUNDING: Every belief contradiction and narrative reframe MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.\n"
     : "";
   const awAnchorBlockText = `${awDoctrineBlock}${awDnaAnchorBlock}${awAnchorGroundingRule}`;
+  const awGroundingContract = buildGroundingContract(awAnchor, (analyticalEnrichment ?? null) as any);
 
   // ── INTELLIGENCE UPGRADE: Myth-breaker reasoning ──
   try {
@@ -983,6 +985,7 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
       accountId,
       doctrineBlock: awAnchorBlockText.length > 0 ? awAnchorBlockText : null,
       anchorSource: awAnchorSource,
+      groundingContractBlock: awGroundingContract,
     });
     if (mythBreaker) {
       primaryRoute.mythBreaker = mythBreaker;

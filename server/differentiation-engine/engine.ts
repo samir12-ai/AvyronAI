@@ -7,6 +7,7 @@ import {
   type ProductDnaLike,
 } from "../shared/strategic-doctrine";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { buildGroundingContract, checkGroundingContract } from "../shared/grounding-contract";
 import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
@@ -1083,6 +1084,7 @@ Differentiating feature: ${diffAnchor.differentiatingFeature}
   const anchorGroundingRule = diffAnchor
     ? "\nANCHOR GROUNDING: Every refined pillar and claim MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the AEL causal grounding rules below; it never replaces the [RC#]/[BB#]/[CC#] requirements.\n"
     : "";
+  const groundingContractBlock = buildGroundingContract(diffAnchor, analyticalEnrichment || null);
   console.log(`[DifferentiationEngine-V3] ANCHOR_EVIDENCE | engine=differentiation | site=first_prompt | attempt=${attemptNumber ?? 1} | present=${diffAnchor ? "yes" : "no"} | source=${diffAnchorSource}`);
 
   const mechanismCoreBlock = mechanismCore && mechanismCore.mechanismSteps.length > 0
@@ -1098,7 +1100,7 @@ Promise: ${mechanismCore.mechanismPromise}
     : "";
 
   const prompt = `You are refining differentiation language. You must improve wording to be clearer, more distinctive, and causally grounded.
-${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${aelBlock}${causalDirective}${aelStructuredBlock}${domainContextBlock}${mechanismCoreBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${aelBlock}${causalDirective}${aelStructuredBlock}${groundingContractBlock}${domainContextBlock}${mechanismCoreBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT add pricing, packaging, guarantees, CTAs, or channel recommendations
@@ -1147,7 +1149,8 @@ Return JSON:
 {
   "pillars": [{ "name": "refined name", "description": "refined description incorporating root cause language, barrier resolution, and mechanism anchor with contrast", "rootCauseUsed": "RC1: <quote the deep cause text>", "barrierResolved": "BB1: <quote the barrier text>" }],
   "claims": [{ "claim": "refined claim text showing cause→effect reasoning from causal chains, with contrast framing", "rootCauseUsed": "RC1", "barrierResolved": "BB1" }],
-  "mechanismDescription": "refined mechanism description grounded in root causes"
+  "mechanismDescription": "refined mechanism description grounded in root causes",
+  "groundingRefs": ["RC1"]
 }`;
 
   try {
@@ -1166,6 +1169,18 @@ Return JSON:
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in AI response");
     const parsed = JSON.parse(jsonMatch[0]);
+
+    const diffGroundingRefs: string[] = Array.isArray(parsed.groundingRefs)
+      ? parsed.groundingRefs.filter((r: any) => typeof r === "string" && r.trim().length > 0).map((r: string) => r.trim())
+      : [];
+    checkGroundingContract({
+      engine: "differentiation",
+      site: "layer11_refinement",
+      groundingRefs: diffGroundingRefs,
+      ael: analyticalEnrichment || null,
+      accountId,
+      attemptNumber,
+    });
 
     const aelRefs = (parsed.pillars || []).map((p: any, i: number) => ({
       pillar: i + 1,

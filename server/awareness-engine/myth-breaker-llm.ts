@@ -1,5 +1,6 @@
 import { aiChat } from "../ai-client";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
+import { checkGroundingContract } from "../shared/grounding-contract";
 import type { MythBreakerReasoning } from "./types";
 
 interface RootCauseRef {
@@ -90,6 +91,7 @@ Return JSON:
   "beliefToContradict": "<the belief, in audience's own framing>",
   "rootCauseContradicted": "<RC# and short description>",
   "rootCauseRefs": ["RC1", "RC4"],
+  "groundingRefs": ["RC1"],
   "evidenceForBelief": ["[BLF#] or [OBJ#] or [PAIN#] quote"],
   "contradictionLogic": "<3-4 sentence walkthrough of the contradiction>",
   "reasoningSteps": [
@@ -124,6 +126,10 @@ export async function generateMythBreaker(args: {
   // sub-engine never re-derives — it injects and logs evidence.
   doctrineBlock?: string | null;
   anchorSource?: "doctrine" | "dna" | "none";
+  // GROUNDING CONTRACT (RULES 1-3): pre-rendered block built ONCE by the parent
+  // (which owns the ProductAnchor) and threaded down. Additive; the existing
+  // gates remain the sole enforcement authority.
+  groundingContractBlock?: string | null;
 }): Promise<MythBreakerReasoning | null> {
   const startTs = Date.now();
   const aelAck = acknowledgeAelInput("AwarenessMythBreaker", args.analyticalEnrichment, args.accountId);
@@ -142,8 +148,9 @@ export async function generateMythBreaker(args: {
   if (args.anchorSource === "doctrine") mbAnchorSource = "doctrine";
   else if (args.anchorSource === "dna") mbAnchorSource = "dna";
   const mbAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  const mbGroundingBlock = args.groundingContractBlock && args.groundingContractBlock.length > 0 ? `${args.groundingContractBlock}\n\n` : "";
   console.log(`[AwarenessMythBreaker] ANCHOR_EVIDENCE | engine=awareness_myth_breaker | site=first_prompt | attempt=1 | present=${mbAnchorPresent ? "yes" : "no"} | source=${mbAnchorSource}`);
-  const finalPrompt = mbAnchorPresent ? `${args.doctrineBlock}\n\n${prompt}` : prompt;
+  const finalPrompt = `${mbAnchorPresent ? `${args.doctrineBlock}\n\n` : ""}${mbGroundingBlock}${prompt}`;
   let response;
   try {
     response = await aiChat({
@@ -178,6 +185,15 @@ export async function generateMythBreaker(args: {
     generatedAt: new Date().toISOString(),
   };
   applyPartialAelDowngrade("AwarenessMythBreaker", result, aelAck);
+
+  const mbGroundingRefs: string[] = Array.isArray(parsed.groundingRefs) ? parsed.groundingRefs.map(String) : [];
+  checkGroundingContract({
+    engine: "awareness_myth_breaker",
+    site: "first_prompt",
+    groundingRefs: mbGroundingRefs,
+    ael: args.analyticalEnrichment,
+    accountId: args.accountId,
+  });
 
   console.log(`[AwarenessMythBreaker] STEP_2 | parsed | mythBreaker="${result.mythBreakerStatement.slice(0, 100)}" | rcRefs=${result.rootCauseRefs.join(",") || "(none)"} | evidence=${result.evidenceForBelief.length}`);
   console.log(`[AwarenessMythBreaker] STEP_3 | DONE in ${Date.now() - startTs}ms`);

@@ -35,6 +35,7 @@ import { scoreAudienceSophistication, type AudienceSophisticationOutput } from "
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
 import { emissionFromBattery, type BatteryAttemptLike, type EngineAiPathEmission } from "../shared/ai-path-telemetry";
 import { safeJsonParse, buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
+import { buildGroundingContract, checkGroundingContract, groundingRefsSchema } from "../shared/grounding-contract";
 import { z } from "zod";
 
 interface EvidenceMeta {
@@ -1175,6 +1176,7 @@ const SegmentCandidateSchema = z.object({
   objectionProfile: z.array(z.string()).default([]),
   motivationProfile: z.array(z.string()).default([]),
   estimatedPercentage: z.coerce.number().catch(0),
+  groundingRefs: groundingRefsSchema,
 });
 const SegmentArraySchema = z.array(SegmentCandidateSchema);
 
@@ -1290,8 +1292,15 @@ async function constructSegments(
     }
     console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=first_prompt | attempt=1 | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
 
+    // Grounding contract (RULES 1-3). Audience has NO AEL in scope, so RULE 2
+    // renders the "no AEL available" branch (groundingRefs: []) truthfully;
+    // RULE 1 (name the differentiating feature) and RULE 3 (interchangeability
+    // self-check) still reinforce the existing gate battery. Additive only.
+    const audEffectiveAnchor = (strategic && strategic.doctrine.productAnchor) ? strategic.doctrine.productAnchor : (productAnchor || null);
+    const audGroundingContract = buildGroundingContract(audEffectiveAnchor as any, null);
+
     const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
-${doctrineBlock ? `\n${doctrineBlock}\n` : ""}
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${audGroundingContract ? `\n${audGroundingContract}\n` : ""}
 BUSINESS: ${businessContext.industry} — ${businessContext.coreOffer}
 ${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
 
@@ -1322,7 +1331,8 @@ Return a JSON array of 2-4 segments. Each segment:
   "desireProfile": ["desire1", "desire2"],
   "objectionProfile": ["objection1"],
   "motivationProfile": ["motivation1", "motivation2"],
-  "estimatedPercentage": number (must total ~100)
+  "estimatedPercentage": number (must total ~100),
+  "groundingRefs": []
 }
 
 Return ONLY the JSON array, no markdown.`;
@@ -1433,6 +1443,15 @@ Return ONLY the JSON array, no markdown.`;
       if (aiPathSink) aiPathSink.emission = emissionFromBattery(false, segmentBatteryAttempts);
       return deterministicFallback();
     }
+
+    const audGroundingRefs = acceptedSegments.flatMap((s: any) => Array.isArray(s.groundingRefs) ? s.groundingRefs.map(String) : []);
+    checkGroundingContract({
+      engine: "audience_segments",
+      site: "segment_generation",
+      groundingRefs: audGroundingRefs,
+      ael: null,
+      accountId,
+    });
 
     const finalSegments = acceptedSegments;
     if (aiPathSink) aiPathSink.emission = emissionFromBattery(true, segmentBatteryAttempts);

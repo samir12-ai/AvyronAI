@@ -1,5 +1,6 @@
 import { aiChat } from "../ai-client";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
+import { checkGroundingContract } from "../shared/grounding-contract";
 import type { CialdiniReasoning, CialdiniPrinciple, TrustTransferDesign } from "./types";
 
 const PRINCIPLES: CialdiniPrinciple[] = [
@@ -119,6 +120,7 @@ Return JSON:
   ],
   "groundedSignals": ["[OBJ2] quote", "RC3"],
   "rootCauseRefs": ["RC1", "RC3"],
+  "groundingRefs": ["RC1"],
   "reasoningSteps": [
     "Step 1: scored each principle against tier ${args.sophisticationTier ?? "?"} ...",
     "Step 2: eliminated <principle> because <evidence> ...",
@@ -159,6 +161,10 @@ export async function pickCialdiniPrinciple(args: {
   // computed ONCE by the parent persuasion engine and threaded down.
   doctrineBlock?: string | null;
   anchorSource?: "doctrine" | "dna" | "none";
+  // GROUNDING CONTRACT (RULES 1-3): pre-rendered block built ONCE by the parent
+  // (which owns the ProductAnchor) and threaded down. Additive; the existing
+  // gates remain the sole enforcement authority.
+  groundingContractBlock?: string | null;
 }): Promise<CialdiniReasoning | null> {
   const startTs = Date.now();
   const aelAck = acknowledgeAelInput("PersuasionCialdini", args.analyticalEnrichment, args.accountId);
@@ -176,8 +182,9 @@ export async function pickCialdiniPrinciple(args: {
   if (args.anchorSource === "doctrine") cdAnchorSource = "doctrine";
   else if (args.anchorSource === "dna") cdAnchorSource = "dna";
   const cdAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
+  const cdGroundingBlock = args.groundingContractBlock && args.groundingContractBlock.length > 0 ? `${args.groundingContractBlock}\n\n` : "";
   console.log(`[PersuasionCialdini] ANCHOR_EVIDENCE | engine=persuasion_cialdini | site=first_prompt | attempt=1 | present=${cdAnchorPresent ? "yes" : "no"} | source=${cdAnchorSource}`);
-  const finalPrompt = cdAnchorPresent ? `${args.doctrineBlock}\n\n${prompt}` : prompt;
+  const finalPrompt = `${cdAnchorPresent ? `${args.doctrineBlock}\n\n` : ""}${cdGroundingBlock}${prompt}`;
   let response;
   try {
     response = await aiChat({
@@ -220,6 +227,15 @@ export async function pickCialdiniPrinciple(args: {
     generatedAt: new Date().toISOString(),
   };
   applyPartialAelDowngrade("PersuasionCialdini", result, aelAck);
+
+  const cdGroundingRefs: string[] = Array.isArray(parsed.groundingRefs) ? parsed.groundingRefs.map(String) : [];
+  checkGroundingContract({
+    engine: "persuasion_cialdini",
+    site: "primary_principle",
+    groundingRefs: cdGroundingRefs,
+    ael: args.analyticalEnrichment,
+    accountId: args.accountId,
+  });
 
   console.log(`[PersuasionCialdini] STEP_2 | parsed | principle=${result.primaryCialdiniPrinciple} | rcRefs=${result.rootCauseRefs.join(",") || "(none)"} | whyOthersFail=${result.whyOthersFail.length}`);
   console.log(`[PersuasionCialdini] STEP_3 | DONE in ${Date.now() - startTs}ms`);

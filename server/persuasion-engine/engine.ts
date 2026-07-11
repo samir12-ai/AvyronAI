@@ -33,6 +33,7 @@ import {
   type ProductAnchor,
   type ProductDnaLike,
 } from "../shared/strategic-doctrine";
+import { buildGroundingContract } from "../shared/grounding-contract";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
@@ -2448,6 +2449,7 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
     ? "\nANCHOR GROUNDING: Every trust mechanism and persuasion principle MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.\n"
     : "";
   const psAnchorBlockText = `${psDoctrineBlock}${psDnaAnchorBlock}${psAnchorGroundingRule}`;
+  const psGroundingContract = buildGroundingContract(psAnchor, ((mi as any).analyticalEnrichment || null) as any);
 
   try {
     const { designTrustTransfer } = await import("./trust-transfer");
@@ -2465,6 +2467,7 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
       accountId: accountId || "system",
       doctrineBlock: psAnchorBlockText.length > 0 ? psAnchorBlockText : null,
       anchorSource: psAnchorSource,
+      groundingContractBlock: psGroundingContract,
     });
     if (trustTransferDesignResult) {
       routes.primary.trustTransferDesign = trustTransferDesignResult;
@@ -2494,6 +2497,7 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
       trustTransferDesign: trustTransferDesignResult || undefined,
       doctrineBlock: psAnchorBlockText.length > 0 ? psAnchorBlockText : null,
       anchorSource: psAnchorSource,
+      groundingContractBlock: psGroundingContract,
     });
     if (cialdiniReasoning) {
       if (trustTransferDesignResult) {

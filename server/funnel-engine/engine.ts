@@ -7,6 +7,7 @@ import {
   type ProductDnaLike,
 } from "../shared/strategic-doctrine";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { buildGroundingContract, buildAelReferenceIndex, checkGroundingContract } from "../shared/grounding-contract";
 import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
@@ -1071,7 +1072,7 @@ export async function aiFunnelGeneration(
   strategic?: RunStrategicContext | null,
   productDna?: ProductDnaLike | null,
   attemptNumber?: number,
-): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string } }> {
+): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string }; groundingRefs?: string[] }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const pillars = differentiation.pillars || [];
@@ -1150,8 +1151,14 @@ Differentiating feature: ${funnelAnchor.differentiatingFeature}
     : "";
   console.log(`[FunnelEngine-V3] ANCHOR_EVIDENCE | engine=funnel | site=first_prompt | attempt=${attemptNumber ?? 1} | present=${funnelAnchor ? "yes" : "no"} | source=${funnelAnchorSource}`);
 
+  // Grounding contract (shared): citable [RC#]/[CC#]/[BB#] AEL index + additive
+  // contract compelling the model to name the anchor's differentiating feature
+  // and cite AEL evidence via groundingRefs. Funnel previously had prose AEL only.
+  const aelRefIndex = buildAelReferenceIndex(analyticalEnrichment || null);
+  const groundingContractBlock = buildGroundingContract(funnelAnchor, analyticalEnrichment || null);
+
   const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
-${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${aelBlock}${causalDirective}
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}
 STRICT RULES:
 - Do NOT generate strategy decisions, strategic repositioning, offer redesign, pricing logic, budget recommendations, channel selection, media buying, awareness messaging, persuasion copy, scripts, campaign tasks, financial planning, or execution plans
 - ONLY output funnel definitions: name, type (direct, webinar, challenge, vsl, application, consultation, tripwire, product-launch, membership, hybrid)
@@ -1197,7 +1204,8 @@ Return JSON:
 {
   "primary": { "name": "Specific funnel name", "type": "funnel_type" },
   "alternative": { "name": "Alternative funnel name", "type": "funnel_type" },
-  "rejected": { "name": "Rejected funnel name", "type": "funnel_type", "rejectionReason": "Why this funnel fails" }
+  "rejected": { "name": "Rejected funnel name", "type": "funnel_type", "rejectionReason": "Why this funnel fails" },
+  "groundingRefs": ["RC1", "CC2"]
 }`;
 
   const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
@@ -1256,6 +1264,18 @@ Return JSON:
       throw new Error(`AI response missing required fields after strict retry: ${missing.join(", ")}`);
     }
 
+    const funnelGroundingRefs: string[] = Array.isArray(parsed.groundingRefs)
+      ? parsed.groundingRefs.filter((r: any) => typeof r === "string" && r.trim().length > 0).map((r: string) => r.trim())
+      : [];
+    checkGroundingContract({
+      engine: "funnel",
+      site: "concept_generation",
+      groundingRefs: funnelGroundingRefs,
+      ael: analyticalEnrichment || null,
+      accountId,
+      attemptNumber,
+    });
+
     return {
       primary: { name: parsed.primary.name, type: parsed.primary.type },
       alternative: { name: parsed.alternative.name, type: parsed.alternative.type },
@@ -1264,6 +1284,7 @@ Return JSON:
         type: parsed.rejected.type,
         rejectionReason: parsed.rejected.rejectionReason,
       },
+      groundingRefs: funnelGroundingRefs,
     };
   } catch (err: any) {
     // CLP-03 / Phase 1 (May 2026): NO baked English fallback. The prior

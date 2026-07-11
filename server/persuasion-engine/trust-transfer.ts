@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { checkGroundingContract } from "../shared/grounding-contract";
 
 export type RiskSeverity = "low" | "moderate" | "high" | "critical";
 
@@ -137,6 +138,7 @@ Return ONLY valid JSON:
   "requiredProofShape": "<shape of proof: peer-named outcomes / institutional credentials / contrarian reframe / lived demonstration / etc>",
   "commercialFunction": "<one sentence: this transfers [X trust] to [Y claim] because buyer is in [Z risk state]>",
   "groundedSignals": ["[OBJ2] quote", "RC3"],
+  "groundingRefs": ["RC1"],
   "reasoningSteps": [
     "Step 1: identified risk state from [evidence] ...",
     "Step 2: located current trust sources from [evidence] ...",
@@ -250,6 +252,10 @@ export async function designTrustTransfer(args: {
   // designer prompts and the judge prompts (anchor in first prompt AND judge).
   doctrineBlock?: string | null;
   anchorSource?: "doctrine" | "dna" | "none";
+  // GROUNDING CONTRACT (RULES 1-3): pre-rendered block built ONCE by the parent
+  // (which owns the ProductAnchor). Injected into the DESIGNER prompts only —
+  // never the internal judge. Additive; the existing gates remain authoritative.
+  groundingContractBlock?: string | null;
 }): Promise<TrustTransferDesign | null> {
   const startTs = Date.now();
   const MODEL = "gpt-4.1-mini";
@@ -259,6 +265,7 @@ export async function designTrustTransfer(args: {
   else if (args.anchorSource === "dna") ttAnchorSource = "dna";
   const ttAnchorPresent = args.doctrineBlock && args.doctrineBlock.length > 0;
   const ttAnchorPrefix = ttAnchorPresent ? `${args.doctrineBlock}\n\n` : "";
+  const ttGroundingBlock = args.groundingContractBlock && args.groundingContractBlock.length > 0 ? `${args.groundingContractBlock}\n\n` : "";
 
   if (args.objectionStatements.length === 0 && args.trustBarriers.length === 0) {
     console.log("[TrustTransfer] SKIPPED — no objections or trust barriers to ground design");
@@ -271,7 +278,7 @@ export async function designTrustTransfer(args: {
   const promptArgs = { ...args, rootCauses };
 
   // Attempt 1
-  let prompt = `${ttAnchorPrefix}${buildDesignerPrompt(promptArgs)}`;
+  let prompt = `${ttAnchorPrefix}${ttGroundingBlock}${buildDesignerPrompt(promptArgs)}`;
   console.log(`[TrustTransfer] ANCHOR_EVIDENCE | engine=persuasion_trust_transfer | site=first_prompt | attempt=1 | present=${ttAnchorPresent ? "yes" : "no"} | source=${ttAnchorSource}`);
   let raw = "";
   try {
@@ -295,6 +302,7 @@ export async function designTrustTransfer(args: {
     console.error(`[TrustTransfer] PARSE_FAILED_ATTEMPT_1 | raw=${raw.slice(0, 200)}`);
     return null;
   }
+  let finalGroundingRefs: string[] = Array.isArray(parsed?.groundingRefs) ? parsed.groundingRefs.map(String) : [];
 
   console.log(`[TrustTransfer] STEP_2 | design_v1 | mechanism="${design.transferMechanism.name}" | risk=${design.riskSeverity} | failureModes=${design.failureModes.length}`);
 
@@ -337,7 +345,7 @@ export async function designTrustTransfer(args: {
   if (judgeVerdict === "REJECTED" && (judgeReason || specificFix)) {
     const feedback = [judgeReason, specificFix].filter(Boolean).join(" — ");
     console.log(`[TrustTransfer] STEP_4 | retry_with_feedback | "${feedback.slice(0, 100)}"`);
-    prompt = `${ttAnchorPrefix}${buildDesignerPrompt({ ...promptArgs, judgeFeedback: feedback })}`;
+    prompt = `${ttAnchorPrefix}${ttGroundingBlock}${buildDesignerPrompt({ ...promptArgs, judgeFeedback: feedback })}`;
     console.log(`[TrustTransfer] ANCHOR_EVIDENCE | engine=persuasion_trust_transfer | site=first_prompt | attempt=2 | present=${ttAnchorPresent ? "yes" : "no"} | source=${ttAnchorSource}`);
     try {
       const resp2 = await aiChat({
@@ -353,6 +361,7 @@ export async function designTrustTransfer(args: {
       const design2 = parseDesign(parsed2, MODEL, 1);
       if (design2) {
         design = design2;
+        finalGroundingRefs = Array.isArray(parsed2?.groundingRefs) ? parsed2.groundingRefs.map(String) : [];
         console.log(`[TrustTransfer] STEP_5 | retry_design | mechanism="${design.transferMechanism.name}"`);
         // Re-judge once
         try {
@@ -389,6 +398,14 @@ export async function designTrustTransfer(args: {
   design.judgeReason = judgeReason || undefined;
 
   console.log(`[TrustTransfer] DONE in ${Date.now() - startTs}ms | finalVerdict=${design.judgeVerdict} | retries=${design.retryCount}`);
+  checkGroundingContract({
+    engine: "persuasion_trust_transfer",
+    site: "designer",
+    groundingRefs: finalGroundingRefs,
+    ael: args.analyticalEnrichment,
+    accountId: args.accountId,
+    attemptNumber: design.retryCount + 1,
+  });
   if (design.judgeVerdict === "REJECTED") {
     console.warn(`[TrustTransfer] FINAL_REJECTED — falling back to legacy persuasion output (no trustTransferDesign emitted)`);
     try {
