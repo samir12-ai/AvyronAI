@@ -3833,6 +3833,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           ctx.inputHashes = {};
           console.log(`[Orchestrator] INPUT_HASHES_RESTORED_EMPTY | job=${jobId} | reason=paused_context_missing_inputHashes`);
         }
+        if (!ctx.depthGateStatus) {
+          ctx.depthGateStatus = {};
+          console.log(`[Orchestrator] DEPTH_GATE_STATUS_RESTORED_EMPTY | job=${jobId} | reason=paused_context_missing_depthGateStatus`);
+        }
         if (!ctx.ssc) {
           ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
           console.log(`[Orchestrator] SSC_RESTORED_EMPTY | job=${jobId} | reason=paused_context_missing_ssc`);

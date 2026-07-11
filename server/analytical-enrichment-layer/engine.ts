@@ -517,6 +517,41 @@ export async function persistAELSnapshot(args: {
     const { db } = await import("../db");
     const { sql } = await import("drizzle-orm");
     const id = `ael_${jobId}`;
+
+    // D1/D5 + B1/B4: root_causes / causal_chains / buying_barriers are REQUIRED
+    // array fields on AnalyticalPackage. A silent `|| []` lets a MISSING
+    // (undefined / non-array) field masquerade on reload as a real
+    // "analyzed, found none" result — a fake-success substitution. Distinguish
+    // a legitimately-empty array (valid) from a missing field (loud): coerce
+    // only genuine arrays, record any field that was absent, and mark the whole
+    // snapshot PARTIAL so downstream AEL-absent degradation fires truthfully.
+    const missingArrayFields: string[] = [];
+    const requireArray = (val: unknown, field: string): unknown[] => {
+      if (Array.isArray(val)) return val;
+      missingArrayFields.push(field);
+      return [];
+    };
+    const rootCauses = requireArray(pkg.root_causes, "root_causes");
+    const causalChains = requireArray(pkg.causal_chains, "causal_chains");
+    const buyingBarriers = requireArray(pkg.buying_barriers, "buying_barriers");
+
+    const fieldsMissing = missingArrayFields.length > 0;
+    if (fieldsMissing) {
+      console.error(
+        `${LOG_PREFIX} AEL_FIELD_MISSING | campaign=${campaignId} | job=${jobId} | missing=[${missingArrayFields.join(",")}] — persisting snapshot as PARTIAL (an empty array is NOT a substitute for a missing required field)`,
+      );
+    }
+
+    const persistIsPartial = !!pkg.isPartial || fieldsMissing;
+    let persistPartialReason: string | null;
+    if (pkg.partialReason) {
+      persistPartialReason = pkg.partialReason;
+    } else if (fieldsMissing) {
+      persistPartialReason = `AEL_FIELDS_MISSING:${missingArrayFields.join("+")}`;
+    } else {
+      persistPartialReason = null;
+    }
+
     await db.execute(sql`
       INSERT INTO ael_snapshots (
         id, account_id, campaign_id, job_id,
@@ -524,12 +559,12 @@ export async function persistAELSnapshot(args: {
         package, is_partial, partial_reason
       ) VALUES (
         ${id}, ${accountId}, ${campaignId}, ${jobId},
-        ${JSON.stringify(pkg.root_causes || [])}::jsonb,
-        ${JSON.stringify(pkg.causal_chains || [])}::jsonb,
-        ${JSON.stringify(pkg.buying_barriers || [])}::jsonb,
+        ${JSON.stringify(rootCauses)}::jsonb,
+        ${JSON.stringify(causalChains)}::jsonb,
+        ${JSON.stringify(buyingBarriers)}::jsonb,
         ${JSON.stringify(pkg)}::jsonb,
-        ${!!pkg.isPartial},
-        ${pkg.partialReason || null}
+        ${persistIsPartial},
+        ${persistPartialReason}
       )
       ON CONFLICT (account_id, campaign_id, job_id) DO UPDATE SET
         root_causes = EXCLUDED.root_causes,
@@ -540,7 +575,7 @@ export async function persistAELSnapshot(args: {
         partial_reason = EXCLUDED.partial_reason,
         created_at = now()
     `);
-    console.log(`${LOG_PREFIX} AEL_PERSISTED | id=${id} | campaign=${campaignId} | job=${jobId} | rootCauses=${pkg.root_causes?.length || 0} | causalChains=${pkg.causal_chains?.length || 0} | buyingBarriers=${pkg.buying_barriers?.length || 0} | partial=${!!pkg.isPartial}`);
+    console.log(`${LOG_PREFIX} AEL_PERSISTED | id=${id} | campaign=${campaignId} | job=${jobId} | rootCauses=${rootCauses.length} | causalChains=${causalChains.length} | buyingBarriers=${buyingBarriers.length} | partial=${persistIsPartial}`);
   } catch (err: any) {
     console.error(`${LOG_PREFIX} AEL_PERSIST_FAILED | campaign=${campaignId} | job=${jobId} | err=${err?.message || err}`);
   }
