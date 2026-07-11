@@ -38,3 +38,20 @@ the emitted refs and logs `GROUNDING_CONTRACT_MET` (console.log) / `GROUNDING_CO
   `DEPTH_FAILED` gate, not a regression.
 - Favorable single-run deltas (e.g. `BLOCKED_BY_INTEGRITY` down, `NOT_REACHED` down) are **stochastic** — report as
   observations, never claim causation from one LLM run against an unchanged integrity stack.
+
+## Pipeline-path stochasticity vs engine-level grounding stability (confirmed 2026-07-11)
+
+- The real-campaign pipeline reaches `ORCH_STATUS=BLOCKED` via **different paths on identical input**: across three
+  runs of the same campaign it completed 9, then 10, then 15 engines, and the block moved between layers —
+  Statistical Validation `Critical gate failure (no retry)` (stops mid-pipeline, never reaches System Control) vs
+  System Control `PIPELINE_INCOMPLETE, COMPLIANCE_FAILURE, CONFIDENCE_SPREAD_EXCESSIVE`. Statistical validation can
+  reject (`LINEAGE_REJECTED`, capped 0.00) in *both* cases but only sometimes acts as the hard stop.
+- **Only `GROUNDING_CONTRACT_MET/UNMET` and `BLOCKED_BY_INTEGRITY` are the contract-specific stability signals.**
+  `completedEngines`, `NOT_REACHED`, and `ANCHOR_EVIDENCE` are pipeline-reach byproducts and move stochastically —
+  never cite them as evidence the contract is (un)stable.
+- **Strongest stability proof:** the gains (MET/UNMET=7/0, BLOCKED_BY_INTEGRITY=0) reproduced even when the confirm
+  run took a *deeper* path (15 engines) than the original grounding run (10). Grounding engages per-engine
+  (positioning×3, funnel×2, differentiation×1, awareness×1), so it holds regardless of how far the pipeline gets.
+- `orchestrator.blockReason` + `completedEngines` persist in `SUMMARY.json` and ARE the authoritative cross-run
+  diff for block layer/reach; the workflow console log is overwritten on each workflow restart, so gate-level detail
+  (interchangeability BATTERY_GATE verdicts, CEL, depth scores) is only available for the most recent run.
