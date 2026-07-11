@@ -179,4 +179,11 @@ export interface OfferResult {
     groundingRatio: number;
     strippedClaims: string[];
   };
+  /**
+   * DNA Enrichment Gate (Path B) surface signal. Present only when the offer
+   * interchangeability gate was exercised; `required=true` means it was STILL
+   * failing at retry exhaustion and the orchestrator should raise the operator
+   * prompt. The orchestrator (not the engine) writes the DB.
+   */
+  dnaEnrichment?: import("../shared/dna-enrichment").DnaEnrichmentSignal;
 }

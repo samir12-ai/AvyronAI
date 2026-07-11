@@ -182,6 +182,13 @@ import {
 } from "../causal-enforcement-layer/engine";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import {
+  enrichDnaFromRejection,
+  formatEnrichmentForRetry,
+  buildEnrichmentSuggestion,
+  type DnaEnrichmentResult,
+  type DnaEnrichmentSignal,
+} from "../shared/dna-enrichment";
 import { emissionFromBattery, type BatteryAttemptLike } from "../shared/ai-path-telemetry";
 import { buildDoctrineBlock, deriveAnchorFromProductDna, type RunStrategicContext, type ProductAnchor } from "../shared/strategic-doctrine";
 import { detectGenericOutput, checkCrossEngineAlignment, enforceBoundaryWithSanitization, applySoftSanitization } from "../engine-hardening";
@@ -2985,6 +2992,36 @@ export async function runOfferEngine(
   // 1 first-gen + ≤2 alignment + ≤DEPTH_GATE_MAX_RETRIES depth (no runaway).
   const ALIGNMENT_MAX_ATTEMPTS = 3;
   const ALIGNMENT_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
+
+  // DNA Enrichment Gate (Path A) — offer side. Run ONCE per engine run, cached and
+  // reused across alignment retries; triggered only when the doctrine battery
+  // fails specifically on interchangeability (generic/reused offer). Candidate-only:
+  // the regenerated offer still passes through the UNCHANGED battery below.
+  let offerDnaEnrichment: DnaEnrichmentResult | null = null;
+  let offerDnaEnrichmentSignal: DnaEnrichmentSignal | undefined;
+  const runOfferDnaEnrichmentOnce = async (reason: string): Promise<DnaEnrichmentResult> => {
+    if (offerDnaEnrichment) return offerDnaEnrichment;
+    console.log(`[OfferEngine-V4] DNA_ENRICHMENT_TRIGGER | gate=interchangeability | reason="${reason.slice(0, 120)}"`);
+    offerDnaEnrichment = await enrichDnaFromRejection({
+      kind: "offer",
+      rejectionReason: reason,
+      dna: productDna
+        ? {
+            name: productDna.coreOffer ? String(productDna.coreOffer) : undefined,
+            businessType: productDna.businessType ? String(productDna.businessType) : undefined,
+            productCategory: productDna.productCategory ? String(productDna.productCategory) : undefined,
+            coreProblemSolved: productDna.coreProblemSolved ? String(productDna.coreProblemSolved) : undefined,
+            uniqueMechanism: productDna.uniqueMechanism ? String(productDna.uniqueMechanism) : undefined,
+            strategicAdvantage: productDna.strategicAdvantage ? String(productDna.strategicAdvantage) : undefined,
+          }
+        : null,
+      ael: analyticalEnrichment ?? null,
+      competitorComplaints: [],
+      accountId,
+    });
+    return offerDnaEnrichment;
+  };
+
   for (
     let alignmentAttempt = 2;
     alignmentAttempt <= ALIGNMENT_MAX_ATTEMPTS && (!offerAlignmentValidation.aligned || !offerBattery.passed) && status === STATUS.COMPLETE;
@@ -2996,6 +3033,13 @@ export async function runOfferEngine(
     const combinedFailures = offerBattery.passed
       ? offerAlignmentValidation.failures
       : [...offerAlignmentValidation.failures, `Rejected by ${offerBattery.failedGate ? offerBattery.failedGate : "battery"} gate: ${offerBattery.rejectionFeedback}`];
+    // DNA Enrichment (Path A): on interchangeability failure, append grounded
+    // differentiator candidates to the retry feedback (candidate-only, no bypass).
+    if (!offerBattery.passed && offerBattery.failedGate === "interchangeability") {
+      const enr = await runOfferDnaEnrichmentOnce(offerBattery.rejectionFeedback);
+      const enrichmentBlock = formatEnrichmentForRetry(enr, "offer");
+      if (enrichmentBlock.length > 0) combinedFailures.push(enrichmentBlock);
+    }
     console.log(`[OfferEngine-V4] ALIGNMENT_RETRY | Attempt ${alignmentAttempt}/${ALIGNMENT_MAX_ATTEMPTS} — alignment=${offerAlignmentValidation.aligned ? "ok" : offerAlignmentValidation.failures.join("; ")} | battery=${offerBattery.passed ? "ok" : (offerBattery.failedGate ? offerBattery.failedGate : "failed")}. Fix exactly this. | temp=${alignmentTemp}`);
     try {
       const retryOffers = await aiOfferGeneration(
@@ -3099,6 +3143,33 @@ export async function runOfferEngine(
     structuralWarnings.push(batteryWarn);
     primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore - 0.1);
     console.log(`[OfferEngine-V4] BATTERY_GATE: EXHAUSTED | ${batteryWarn}`);
+  }
+
+  // DNA Enrichment Gate (Path B): surface the outcome for the orchestrator (the
+  // engine never writes the DB — purity). required=true ONLY when the
+  // interchangeability gate was still failing at loop exit. On battery pass, emit
+  // an explicit required=false so the orchestrator auto-resolves any open request.
+  if (!offerBattery.passed && offerBattery.failedGate === "interchangeability") {
+    // runOfferDnaEnrichmentOnce is idempotent — this also covers the case where
+    // interchangeability first failed on the final (exhaustion) attempt, so the
+    // retry branch that normally runs enrichment never executed.
+    const enr = await runOfferDnaEnrichmentOnce(offerBattery.rejectionFeedback);
+    offerDnaEnrichmentSignal = {
+      required: true,
+      engineKind: "offer",
+      lastRejectionReason: offerBattery.rejectionFeedback,
+      candidates: enr.candidates,
+      suggestionText: buildEnrichmentSuggestion(enr),
+    };
+    console.log(`[OfferEngine-V4] DNA_ENRICHMENT_REQUIRED | engine=offer | status=${enr.status} | candidates=${enr.candidates.length}`);
+  } else if (offerBattery.passed) {
+    offerDnaEnrichmentSignal = {
+      required: false,
+      engineKind: "offer",
+      lastRejectionReason: "",
+      candidates: [],
+      suggestionText: "",
+    };
   }
 
     const mechanism = differentiation.mechanismFraming || {};
@@ -3333,6 +3404,7 @@ export async function runOfferEngine(
     },
     celDepthCompliance: celDepth,
     depthGateResult: depthGateResultOffer,
+    dnaEnrichment: offerDnaEnrichmentSignal,
   };
   return applyPartialAelDowngrade("OfferEngine-V4", __offerResult, aelAck);
 }

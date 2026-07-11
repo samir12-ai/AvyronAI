@@ -32,7 +32,7 @@ import { logger } from "./logger";
 
 // =====================================================================
 // Tables walked by cascadeDeleteAccount. Order: child → parent.
-// Auto-generated from shared/schema.ts on 2026-05-12. Total: 105 tables.
+// Auto-generated from shared/schema.ts on 2026-05-12. Total: 106 tables.
 // =====================================================================
 export const CASCADE_TABLES: readonly string[] = Object.freeze([
   // Pipeline overlay (Phase 1-6) — innermost first
@@ -160,6 +160,7 @@ export const CASCADE_TABLES: readonly string[] = Object.freeze([
   // rows deleted by account_id; NULL/global rows (nullable account_id on
   // system_notices, orchestrator_replay_cassettes) survive the WHERE clause.
   "mutation_log",
+  "dna_enrichment_requests",
   "engine_operational_state",
   "in_flight_jobs",
   "plan_anchor_resets",

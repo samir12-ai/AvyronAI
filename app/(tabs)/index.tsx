@@ -40,6 +40,7 @@ import { RunTruthfulnessBanner } from '@/components/RunTruthfulnessBanner';
 import { ProductIdentityDegradedBanner } from '@/components/ProductIdentityEditor';
 import WatchtowerStrip from '@/components/WatchtowerStrip';
 import BlockedReasonsCard from '@/components/BlockedReasonsCard';
+import DnaEnrichmentCard from '@/components/DnaEnrichmentCard';
 import TruthSubmissionCard from '@/components/TruthSubmissionCard';
 import ActivityTimeline from '@/components/ActivityTimeline';
 import { MarketMindAgent } from '@/components/MarketMindAgent';
@@ -199,6 +200,7 @@ function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
         isDark={isDark}
         onSubmitTruth={() => setTruthForceOpen(true)}
       />
+      <DnaEnrichmentCard campaignId={campaignId} isDark={isDark} />
       <TruthSubmissionCard
         campaignId={campaignId}
         isDark={isDark}

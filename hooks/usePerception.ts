@@ -106,3 +106,32 @@ export function useMonitoring(campaignId: string | null | undefined) {
     refetchInterval: active ? 5 * 60_000 : false,
   });
 }
+
+// DNA Enrichment Gate (Path B) — the campaign owner's prompt to confirm a
+// grounded differentiator when the Positioning/Offer interchangeability judge
+// keeps rejecting a generic, reused strategy. engineKind is the canonical engine
+// tag; the customer surface maps it to plain English in the card.
+export interface DnaEnrichmentPendingItem {
+  engineKind: "positioning_claim" | "offer";
+  suggestionText: string | null;
+  candidateDifferentiator: string | null;
+  groundingRefs: string[] | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface DnaEnrichmentPendingResponse {
+  success: true;
+  requests: DnaEnrichmentPendingItem[];
+}
+
+export function useDnaEnrichment(campaignId: string | null | undefined) {
+  const active = useIsAppActive();
+  return useQuery<DnaEnrichmentPendingResponse>({
+    queryKey: ["/api/dna-enrichment/pending", campaignId],
+    queryFn: () => fetchJson<DnaEnrichmentPendingResponse>(`/api/dna-enrichment/pending?campaignId=${campaignId}`),
+    enabled: !!campaignId,
+    staleTime: 2 * 60_000,
+    refetchInterval: active ? 2 * 60_000 : false,
+  });
+}

@@ -5,7 +5,9 @@ import { eq, and, desc } from "drizzle-orm";
 import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode, getManualMetrics } from "./campaign-data-layer";
 
 import { resolveAccountId } from "./auth";
-import { ProductAnchorSchema, parseProductAnchor } from "./shared/strategic-doctrine";
+import { ProductAnchorSchema, parseProductAnchor, deriveAnchorFromProductDna } from "./shared/strategic-doctrine";
+import { loadProductDNA } from "./shared/product-dna";
+import { getOpenEnrichmentRequests, getOpenEnrichmentRequest, markEnrichmentResolved } from "./dna-enrichment/store";
 const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING"] as const;
 
 export function registerCampaignRoutes(app: Express) {
@@ -241,6 +243,144 @@ export function registerCampaignRoutes(app: Express) {
     } catch (error: any) {
       console.error("[Campaigns] Update product anchor error:", error);
       res.status(500).json({ code: "ANCHOR_UPDATE_FAILED", message: "Failed to update product anchor", requestId });
+    }
+  });
+
+  // ── DNA Enrichment Gate (Path B) — operator surface ──
+  // When the Positioning/Offer interchangeability judge keeps rejecting a generic,
+  // reused strategy because the Product DNA carries no proprietary differentiator,
+  // the orchestrator raises an open dna_enrichment_requests row. These two routes
+  // let the campaign owner see the grounded suggestion and confirm/edit the
+  // differentiator, which is written durably onto the product anchor so the
+  // UNCHANGED judge can re-pass on the next run (candidate-only, no bypass).
+  //
+  // Tenant isolation: ownership proven via the account's own campaign_selections
+  // row BEFORE any growth_campaigns / dna_enrichment_requests access (NO-TENANT-LEAK).
+  app.get("/api/dna-enrichment/pending", async (req, res) => {
+    const requestId = `dnapend_${Date.now()}`;
+    try {
+      const accountId = resolveAccountId(req);
+      const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : "";
+      if (!campaignId) {
+        return res.status(400).json({ code: "MISSING_CAMPAIGN", message: "campaignId query param is required", requestId });
+      }
+
+      const [owned] = await db
+        .select({ name: campaignSelections.selectedCampaignName })
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId),
+          ),
+        )
+        .limit(1);
+      if (!owned) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found for this account", requestId });
+      }
+
+      const open = await getOpenEnrichmentRequests(campaignId);
+      // Customer-safe projection — no internal row ids, accountId, or status strings.
+      const requests = open.map((r) => ({
+        engineKind: r.engineKind,
+        suggestionText: r.suggestionText,
+        candidateDifferentiator: r.candidateDifferentiator,
+        groundingRefs: r.groundingRefs,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+      res.json({ success: true, requests, requestId });
+    } catch (error: any) {
+      console.error("[DnaEnrichment] Pending fetch error:", error);
+      res.status(500).json({ code: "DNA_PENDING_FAILED", message: "Failed to fetch pending DNA enrichment requests", requestId });
+    }
+  });
+
+  app.post("/api/dna-enrichment/resolve", async (req, res) => {
+    const requestId = `dnares_${Date.now()}`;
+    try {
+      const accountId = resolveAccountId(req);
+      const { campaignId, engineKind, differentiatingFeature } = req.body;
+
+      if (!campaignId || typeof campaignId !== "string") {
+        return res.status(400).json({ code: "MISSING_CAMPAIGN", message: "campaignId is required", requestId });
+      }
+      if (engineKind !== "positioning_claim" && engineKind !== "offer") {
+        return res.status(400).json({ code: "INVALID_ENGINE_KIND", message: "engineKind must be 'positioning_claim' or 'offer'", requestId });
+      }
+      if (typeof differentiatingFeature !== "string" || differentiatingFeature.trim().length === 0) {
+        return res.status(400).json({ code: "MISSING_DIFFERENTIATOR", message: "differentiatingFeature is required", requestId });
+      }
+      const confirmed = differentiatingFeature.trim();
+
+      const [owned] = await db
+        .select({ name: campaignSelections.selectedCampaignName })
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId),
+          ),
+        )
+        .limit(1);
+      if (!owned) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found for this account", requestId });
+      }
+
+      // Fail-closed: there MUST be a live open request. Never silently mint/patch
+      // a product anchor without an active enrichment prompt for this engine.
+      const open = await getOpenEnrichmentRequest({ campaignId, engineKind });
+      if (!open) {
+        return res.status(404).json({ code: "NO_OPEN_REQUEST", message: "No open DNA enrichment request for this campaign and engine", requestId });
+      }
+
+      // Load the current anchor; if absent, derive a base from Product DNA (F5a).
+      // The operator-confirmed differentiator overrides differentiatingFeature.
+      const [row] = await db
+        .select({ productAnchor: growthCampaigns.productAnchor })
+        .from(growthCampaigns)
+        .where(eq(growthCampaigns.id, campaignId))
+        .limit(1);
+      let baseAnchor = parseProductAnchor(row?.productAnchor ?? null);
+      if (!baseAnchor) {
+        const dna = await loadProductDNA(campaignId, accountId);
+        baseAnchor = deriveAnchorFromProductDna(dna);
+      }
+      if (!baseAnchor) {
+        // D5 — never fabricate name/type/coreProblemSolved. Require a full anchor first.
+        return res.status(409).json({
+          code: "ANCHOR_INCOMPLETE",
+          message: "No product anchor exists and Product DNA is insufficient to derive one. Set a full product anchor (name, type, core problem) before confirming a differentiator.",
+          requestId,
+        });
+      }
+
+      const nextAnchor = { ...baseAnchor, differentiatingFeature: confirmed };
+      const anchorResult = ProductAnchorSchema.safeParse(nextAnchor);
+      if (!anchorResult.success) {
+        return res.status(400).json({
+          code: "INVALID_PRODUCT_ANCHOR",
+          message: `Product anchor validation failed: ${anchorResult.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
+          requestId,
+        });
+      }
+      const resolvedAnchor = anchorResult.data;
+
+      await db
+        .insert(growthCampaigns)
+        .values({ id: campaignId, name: owned.name, productAnchor: resolvedAnchor })
+        .onConflictDoUpdate({
+          target: growthCampaigns.id,
+          set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
+        });
+
+      await markEnrichmentResolved({ campaignId, engineKind });
+      console.log(`[DnaEnrichment] RESOLVED | campaign=${campaignId} | engine=${engineKind} | account=${accountId}`);
+
+      res.json({ success: true, productAnchor: resolvedAnchor, requestId });
+    } catch (error: any) {
+      console.error("[DnaEnrichment] Resolve error:", error);
+      res.status(500).json({ code: "DNA_RESOLVE_FAILED", message: "Failed to resolve DNA enrichment request", requestId });
     }
   });
 

@@ -7,6 +7,14 @@ import {
 } from "@shared/schema";
 import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import {
+  enrichDnaFromRejection,
+  formatEnrichmentForRetry,
+  buildEnrichmentSuggestion,
+  type DnaEnrichmentResult,
+  type DnaEnrichmentSignal,
+  type EnrichmentDnaInput,
+} from "../shared/dna-enrichment";
 import { emissionFromBattery, type BatteryAttemptLike } from "../shared/ai-path-telemetry";
 import { buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
 import { inArray, eq, and, desc } from "drizzle-orm";
@@ -96,6 +104,13 @@ interface PositioningEngineResult {
     unmappedElements: string[];
     validationPassed: boolean;
   };
+  /**
+   * DNA Enrichment Gate (Path B) surface signal. Present only when the
+   * interchangeability gate was exercised this run; `required=true` means it was
+   * STILL failing at retry exhaustion and the orchestrator should raise the
+   * campaign-scoped operator prompt. The orchestrator (not the engine) writes the DB.
+   */
+  dnaEnrichment?: DnaEnrichmentSignal;
 }
 
 interface CategoryResult {
@@ -2566,6 +2581,10 @@ export async function runPositioningEngine(
   let strategyCards: ReturnType<typeof generateStrategyCards> = [];
   let signalTraceability: PositioningEngineResult["signalTraceability"] = undefined;
 
+  // DNA Enrichment Gate (Path B): surfaced on the result when the
+  // interchangeability gate was exercised. Set inside the battery block below.
+  let dnaEnrichmentSignal: DnaEnrichmentSignal | undefined;
+
   // Phase 4: one battery attempt recorded per generation that reached the
   // doctrine battery (specificity is a pre-gate, not part of the battery).
   const positioningBatteryAttempts: BatteryAttemptLike[] = [];
@@ -2586,6 +2605,36 @@ export async function runPositioningEngine(
     let specificityAttempt = 0;
     let specificityRejectionContext = "";
     let generatedTerritories: Territory[] = [];
+
+    // DNA Enrichment Gate (Path A) — run ONCE per engine run, cached and reused
+    // across retries. Triggered only when the interchangeability gate fails.
+    let dnaEnrichmentResult: DnaEnrichmentResult | null = null;
+    let finalFailedGate = "";
+    let finalRejectionReason = "";
+    const buildDnaInput = (): EnrichmentDnaInput | null => {
+      if (!productDna) return null;
+      return {
+        name: productDna.coreOffer ? String(productDna.coreOffer) : undefined,
+        businessType: productDna.businessType ? String(productDna.businessType) : undefined,
+        productCategory: productDna.productCategory ? String(productDna.productCategory) : undefined,
+        coreProblemSolved: productDna.coreProblemSolved ? String(productDna.coreProblemSolved) : undefined,
+        uniqueMechanism: productDna.uniqueMechanism ? String(productDna.uniqueMechanism) : undefined,
+        strategicAdvantage: productDna.strategicAdvantage ? String(productDna.strategicAdvantage) : undefined,
+      };
+    };
+    const runDnaEnrichmentOnce = async (reason: string): Promise<DnaEnrichmentResult> => {
+      if (dnaEnrichmentResult) return dnaEnrichmentResult;
+      console.log(`[PositioningEngine-V3] DNA_ENRICHMENT_TRIGGER | gate=interchangeability | reason="${reason.slice(0, 120)}"`);
+      dnaEnrichmentResult = await enrichDnaFromRejection({
+        kind: "positioning_claim",
+        rejectionReason: reason,
+        dna: buildDnaInput(),
+        ael: analyticalEnrichment ?? null,
+        competitorComplaints: [],
+        accountId,
+      });
+      return dnaEnrichmentResult;
+    };
 
     for (specificityAttempt = 0; specificityAttempt <= SPECIFICITY_MAX_RETRIES; specificityAttempt++) {
       const territoriesSnapshot = JSON.parse(JSON.stringify(territories)) as Territory[];
@@ -2681,6 +2730,10 @@ export async function runPositioningEngine(
           failedGate: failedGate,
           rejectionFeedback: batteryFeedback,
         });
+        // Track the latest battery outcome so the DNA Enrichment signal can be
+        // built after the loop (failedGate is block-scoped and lost at loop exit).
+        finalFailedGate = failedGate;
+        finalRejectionReason = batteryFeedback;
         if (!batteryFeedback) {
           positioningBatteryPassed = true;
           console.log(`[PositioningEngine-V3] BATTERY_GATE: PASSED | territories=${generatedTerritories.length} | gates=breadth+interchangeability+contradiction | attempt=${specificityAttempt + 1}`);
@@ -2688,9 +2741,18 @@ export async function runPositioningEngine(
         }
         console.log(`[PositioningEngine-V3] BATTERY_GATE: FAILED | gate=${failedGate} | territory="${failedTerritoryName}" | attempt=${specificityAttempt + 1}`);
         if (specificityAttempt < SPECIFICITY_MAX_RETRIES) {
+          // DNA Enrichment Gate (Path A): when the failure is specifically
+          // interchangeability (generic/reused), inject grounded differentiator
+          // candidates into the retry context. Candidate-only — the regenerated
+          // territories still pass through the UNCHANGED battery on the next attempt.
+          let enrichmentBlock = "";
+          if (failedGate === "interchangeability") {
+            const enr = await runDnaEnrichmentOnce(batteryFeedback);
+            enrichmentBlock = formatEnrichmentForRetry(enr, "positioning_claim");
+          }
           specificityRejectionContext = `
 PREVIOUS OUTPUT REJECTED — Rejected by ${failedGate} gate: ${batteryFeedback}
-Fix exactly this and regenerate ALL territories as system-level positioning claims that (a) name a specific enemy system/process/tool that fails, (b) are NOT interchangeable with a generic competitor claim — anchor contrastAxis and narrativeDirection to this product's Unique mechanism / Strategic advantage from the DOMAIN TRANSLATION REQUIREMENT so no competitor could truthfully repeat them, and (c) do NOT contradict the locked product anchor or prior engine decisions.`;
+Fix exactly this and regenerate ALL territories as system-level positioning claims that (a) name a specific enemy system/process/tool that fails, (b) are NOT interchangeable with a generic competitor claim — anchor contrastAxis and narrativeDirection to this product's Unique mechanism / Strategic advantage from the DOMAIN TRANSLATION REQUIREMENT so no competitor could truthfully repeat them, and (c) do NOT contradict the locked product anchor or prior engine decisions.${enrichmentBlock}`;
           continue;
         }
         // Exhausted: degrade rather than hard-fail (Beta axiom B3 — safe
@@ -2744,6 +2806,33 @@ CORRECTION REQUIRED:
         }
         console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: EXHAUSTED | proceeding with best available output after ${specificityAttempt + 1} attempts | battery=NOT_RUN`);
       }
+    }
+
+    // DNA Enrichment Gate (Path B): surface the outcome for the orchestrator (the
+    // engine never writes the DB — purity). required=true ONLY when the
+    // interchangeability gate was still failing at loop exit. On pass, emit an
+    // explicit required=false so the orchestrator auto-resolves any open request.
+    if (finalFailedGate === "interchangeability" && !positioningBatteryPassed) {
+      // runDnaEnrichmentOnce is idempotent — this also covers the case where
+      // interchangeability first failed on the final (exhaustion) attempt, so the
+      // retry branch that normally runs enrichment never executed.
+      const enr = await runDnaEnrichmentOnce(finalRejectionReason);
+      dnaEnrichmentSignal = {
+        required: true,
+        engineKind: "positioning_claim",
+        lastRejectionReason: finalRejectionReason,
+        candidates: enr.candidates,
+        suggestionText: buildEnrichmentSuggestion(enr),
+      };
+      console.log(`[PositioningEngine-V3] DNA_ENRICHMENT_REQUIRED | engine=positioning_claim | status=${enr.status} | candidates=${enr.candidates.length}`);
+    } else if (positioningBatteryPassed) {
+      dnaEnrichmentSignal = {
+        required: false,
+        engineKind: "positioning_claim",
+        lastRejectionReason: "",
+        candidates: [],
+        suggestionText: "",
+      };
     }
 
     const boundaryText = generatedTerritories.map(t =>
@@ -3217,6 +3306,7 @@ CORRECTION REQUIRED:
     executionTimeMs,
     createdAt: new Date().toISOString(),
     signalTraceability,
+    dnaEnrichment: dnaEnrichmentSignal,
   };
   return applyPartialAelDowngrade("PositioningEngine-V3", __positioningResult, aelAck);
 }

@@ -335,6 +335,30 @@ export const growthCampaigns = pgTable("growth_campaigns", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// DNA Enrichment Gate (Path B): campaign-scoped operator prompt raised when the
+// interchangeability judge rejects positioning/offer as generic and auto-enrichment
+// cannot ground a passing candidate. Resolve appends the confirmed differentiator
+// to growth_campaigns.product_anchor. Operational/UX state — NOT strategy_memory.
+export const dnaEnrichmentRequests = pgTable("dna_enrichment_requests", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  engineKind: text("engine_kind").notNull(),
+  lastRejectionReason: text("last_rejection_reason").notNull(),
+  candidateDifferentiator: text("candidate_differentiator"),
+  groundingRefs: jsonb("grounding_refs"),
+  suggestionText: text("suggestion_text"),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
+
+export type DnaEnrichmentRequest = typeof dnaEnrichmentRequests.$inferSelect;
+export type InsertDnaEnrichmentRequest = typeof dnaEnrichmentRequests.$inferInsert;
+
 export const weeklyReports = pgTable("weekly_reports", {
   id: varchar("id")
     .primaryKey()

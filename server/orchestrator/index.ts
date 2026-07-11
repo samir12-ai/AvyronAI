@@ -152,6 +152,8 @@ import { runPositioningEngine } from "../positioning-engine/engine";
 import { runDifferentiationEngine } from "../differentiation-engine/engine";
 import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
+import { upsertEnrichmentRequest, autoResolveEnrichmentRequest } from "../dna-enrichment/store";
+import type { DnaEnrichmentSignal } from "../shared/dna-enrichment";
 import { getActiveRoot, buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
 import { seedDoctrine, doctrineSalt, runStrategicContextOf, appendAudienceDecision, appendPositioningDecision, appendOfferDecision, appendPriorDecision } from "./doctrine-seed";
 import { buildSubEngineAnchorContext } from "../shared/strategic-doctrine";
@@ -334,6 +336,37 @@ export function countAelDownstreamConsumers(
     n++;
   }
   return n;
+}
+
+/**
+ * DNA Enrichment Gate (Path B) — persist the enrichment signal an engine surfaced.
+ * The ENGINES never write the DB (purity); the orchestrator owns the campaign-scoped
+ * dna_enrichment_requests row. required=true raises/refreshes the operator prompt;
+ * required=false auto-resolves any open request (the interchangeability gate cleared).
+ * A write failure is logged LOUDLY (Beta axiom B2) and never crashes the run — the
+ * engine has already degraded truthfully; only the operator-prompt UX is affected.
+ */
+async function persistDnaEnrichmentSignal(
+  accountId: string,
+  campaignId: string,
+  signal: DnaEnrichmentSignal | undefined,
+): Promise<void> {
+  if (!signal) return;
+  try {
+    if (signal.required) {
+      await upsertEnrichmentRequest({ accountId, campaignId, signal });
+      console.log(`[Orchestrator] DNA_ENRICHMENT_REQUEST_RAISED | engine=${signal.engineKind} | campaign=${campaignId} | candidates=${signal.candidates.length}`);
+    } else {
+      await autoResolveEnrichmentRequest({ campaignId, engineKind: signal.engineKind });
+      console.log(`[Orchestrator] DNA_ENRICHMENT_REQUEST_AUTORESOLVED | engine=${signal.engineKind} | campaign=${campaignId}`);
+    }
+  } catch (e: any) {
+    // DrizzleQueryError buries the real pg detail in e.cause.message (e.message is
+    // only the generic "Failed query:" prefix). Surface both so the loud log is
+    // actually diagnosable (Beta axiom B2 — visibility over partial silence).
+    const detail = e?.cause?.message ? `${e.message} | cause=${e.cause.message}` : e?.message || String(e);
+    console.error(`[Orchestrator] DNA_ENRICHMENT_WRITE_FAILED | engine=${signal.engineKind} | campaign=${campaignId} | ${detail}`);
+  }
 }
 
 async function getBusinessData(accountId: string, campaignId: string): Promise<any> {
@@ -1824,6 +1857,9 @@ async function executeEngine(
         // Phase 2: record the positioning decision for the contradiction gate —
         // fresh AND snapshot-reuse paths both converge here.
         appendPositioningDecision(ctx, (result as any)?.territories);
+        // DNA Enrichment Gate (Path B): persist the positioning engine's enrichment
+        // signal (raise on interchangeability fail, auto-resolve on pass).
+        await persistDnaEnrichmentSignal(config.accountId, config.campaignId, (result as any)?.dnaEnrichment as DnaEnrichmentSignal | undefined);
 
         // ── COMMERCIAL SIGNAL EMISSION: gameDimension (Phase 2 marketing-logic upgrade) ──
         // Emit the positioning engine's category-game design so downstream Offer / Awareness / Persuasion
@@ -2213,6 +2249,9 @@ async function executeEngine(
         // Phase 2: append the offer decision for the contradiction gate. The offer
         // reuse branch appends separately (paths do NOT converge here).
         appendOfferDecision(ctx, (result as any)?.primaryOffer);
+        // DNA Enrichment Gate (Path B): persist the offer engine's enrichment signal
+        // (raise on interchangeability fail, auto-resolve on pass).
+        await persistDnaEnrichmentSignal(config.accountId, config.campaignId, (result as any)?.dnaEnrichment as DnaEnrichmentSignal | undefined);
 
         // ── COMMERCIAL SIGNAL EMISSION: valueArchitecture (Phase 3 marketing-logic upgrade) ──
         // Emit so downstream (awareness, persuasion) can extend the wedge / leverage point.

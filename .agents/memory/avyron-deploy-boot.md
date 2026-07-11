@@ -89,6 +89,14 @@ requires the PROD DB to be migrated independently — run `npm run db:migrate` a
 production DATABASE_URL, or set `BOOT_AUTO_MIGRATE=true` as a deploy env var — or the
 deploy will crash-loop at boot. Dev and prod DBs are separate; a green dev boot does not
 prove prod schema is current.
+**DEV is verify-only too** (BOOT_AUTO_MIGRATE is unset in dev). Adding a numbered SQL
+migration file + bumping REQUIRED_SCHEMA_VERSION is NOT enough: restarting the backend
+NEVER applies pending SQL — it only re-runs the floor check and refuses to boot
+("boot schema check FAILED — refusing to start", `mode:"verify-only"`). You MUST run the
+standalone `npm run db:migrate` in dev to apply the new table/index. Symptom if you
+forget: the backend won't boot, and any fresh `tsx` script (run-real-campaign, harnesses
+— they don't run migrations) hits `relation "…" does not exist` / an ON CONFLICT insert
+failure against the missing table, while a stale-booted server keeps running old schema.
 
 ## Prod-only secret crashes
 `server/auth.ts` throws at module load in production only when NEITHER JWT_SECRET nor
