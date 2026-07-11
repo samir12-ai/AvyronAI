@@ -5,7 +5,7 @@ import {
   audienceSnapshots,
   ciCompetitors,
 } from "@shared/schema";
-import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
+import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
 import {
   enrichDnaFromRejection,
@@ -970,6 +970,112 @@ export function translateToSystemTerritory(
   }
 
   return buildGenericSystemTerritory(cleanLabel, domainNoun, signalType);
+}
+
+/**
+ * FIX-B: Generate grounded, product-specific NAMES for signal-injected
+ * root_cause + psych_driver territories in ONE batched grounded-LLM call.
+ *
+ * This is the NAME source ONLY. It replaces the static translateToSystemTerritory
+ * keyword→phrase lookup (which emitted the SAME canned phrase — e.g. "capability
+ * transformation validation gap" for every "weak → strong" driver — regardless of
+ * the product, starving the downstream judge of specificity). It does NOT touch a
+ * single gate, judge, threshold, or the scoring of these territories. The same
+ * grounding contract + AEL citation index used by layer11 is injected so names
+ * trace to the product's named mechanism and the audience's real evidence.
+ *
+ * Fail-closed: any error, a non-array response, or zero parseable names returns
+ * null and logs TERRITORY_GENERATION_FAILED loudly — the caller then falls back
+ * per-territory to translateToSystemTerritory and marks the source
+ * template_fallback. Returns a Map keyed by cluster id → generated name; ids the
+ * model omits are simply absent (the caller treats an absent id as a fallback).
+ */
+export async function generateGroundedTerritoryNames(
+  clusters: { id: string; label: string; signalType: "root_cause" | "psych_driver"; evidence: string[] }[],
+  productDna: ProductDNA | null,
+  anchor: ProductAnchor | null,
+  ael: any,
+  accountId: string,
+): Promise<Map<string, string> | null> {
+  if (clusters.length === 0) return null;
+
+  const groundingContractBlock = buildGroundingContract(anchor, ael);
+  const aelRefIndex = buildAelReferenceIndex(ael);
+  const domainNoun = inferDomainNoun(productDna);
+  const productBlock = productDna
+    ? `PRODUCT CONTEXT:\n- Business type: ${productDna.businessType || "n/a"}\n- Core offer: ${productDna.coreOffer || "n/a"}\n- Unique mechanism: ${productDna.uniqueMechanism || "n/a"}\n- Category: ${productDna.productCategory || "n/a"}`
+    : "PRODUCT CONTEXT: (none provided — do NOT invent product specifics)";
+
+  const clusterBlock = clusters
+    .map((c, i) => `${i + 1}. id="${c.id}" | type=${c.signalType} | audience label="${c.label}" | evidence: ${(c.evidence || []).slice(0, 3).map(e => `"${e}"`).join("; ") || "(none)"}`)
+    .join("\n");
+
+  const prompt = `You are a strategic positioning analyst. For each audience signal below, produce a SHORT positioning-territory NAME (4-8 words) stating the specific operational/system failure (for root_cause) or transformation/capability gap (for psych_driver) this signal represents FOR THIS PRODUCT.
+
+${productBlock}
+${groundingContractBlock}${aelRefIndex}
+
+SIGNAL CLUSTERS:
+${clusterBlock}
+
+NAMING RULES:
+- Name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and its failure/gap — specific to this product's domain ("${domainNoun}"), NOT a generic emotional label.
+- The name MUST derive from the audience label + evidence for that cluster. Do NOT reuse the same phrase across clusters.
+- A name any generic competitor could reuse unchanged is WRONG. Anchor to this product's named mechanism where possible.
+- Keep each name 4-8 words as a plain phrase.
+
+Return ONLY a JSON array: [{ "id": "<cluster id exactly as given>", "territory": "<name>", "groundingRefs": ["RC1"] }]`;
+
+  try {
+    const response = await aiChat({
+      model: "gpt-4.1-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.4,
+      max_tokens: 800,
+      seed: 42,
+      endpoint: "positioning-engine-v3-territory-naming",
+      accountId,
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || "[]";
+    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned) as any[];
+    if (!Array.isArray(parsed)) {
+      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=NON_ARRAY_RESPONSE | clusters=${clusters.length} | account=${accountId}`);
+      return null;
+    }
+
+    const names = new Map<string, string>();
+    const aggregatedRefs = new Set<string>();
+    for (const item of parsed) {
+      if (item && typeof item.id === "string" && typeof item.territory === "string" && item.territory.trim().length > 0) {
+        names.set(item.id, item.territory.trim());
+      }
+      if (Array.isArray(item?.groundingRefs)) {
+        item.groundingRefs.forEach((r: any) => { if (typeof r === "string" && r.trim().length > 0) aggregatedRefs.add(r.trim()); });
+      }
+    }
+
+    // Observability only — checkGroundingContract never mutates a verdict.
+    checkGroundingContract({
+      engine: "positioning",
+      site: "territory_naming",
+      groundingRefs: Array.from(aggregatedRefs),
+      ael,
+      accountId,
+    });
+
+    if (names.size === 0) {
+      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=NO_NAMES_PARSED | clusters=${clusters.length} | account=${accountId}`);
+      return null;
+    }
+
+    console.log(`[PositioningEngine-V3] TERRITORY_NAMES_GENERATED | named=${names.size}/${clusters.length} | account=${accountId}`);
+    return names;
+  } catch (err: any) {
+    console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=${err?.message || "unknown"} | clusters=${clusters.length} | account=${accountId}`);
+    return null;
+  }
 }
 
 function inferDomainNoun(
@@ -2496,11 +2602,47 @@ export async function runPositioningEngine(
     const signalTerritories: OpportunityGap[] = [];
     const existingNames = new Set(opportunityGaps.map(o => o.territory.toLowerCase()));
 
+    // FIX-B: produce territory NAMES for signal-injected root_cause + psych_driver
+    // clusters via ONE batched grounded-LLM call instead of the static
+    // translateToSystemTerritory phrase lookup. This changes ONLY the NAME input —
+    // every gate/judge/threshold below is untouched. Resolve the anchor exactly as
+    // layer11 does (locked doctrine anchor, else derived from Product DNA, never
+    // fabricated). Fail-closed: on any failure each territory falls back to
+    // translateToSystemTerritory and is explicitly marked template_fallback.
+    const namingClusters = [
+      ...parsedStructuredSignals.root_causes.map(rc => ({ id: rc.id, label: rc.label, signalType: "root_cause" as const, evidence: rc.evidence || [] })),
+      ...parsedStructuredSignals.psychological_drivers.map(pd => ({ id: pd.id, label: pd.label, signalType: "psych_driver" as const, evidence: pd.evidence || [] })),
+    ];
+    let groundedNames: Map<string, string> | null = null;
+    if (namingClusters.length > 0) {
+      let territoryAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+      if (!territoryAnchor) {
+        const derivedAnchor = deriveAnchorFromProductDna(productDna);
+        if (derivedAnchor) territoryAnchor = derivedAnchor;
+      }
+      groundedNames = await generateGroundedTerritoryNames(namingClusters, productDna, territoryAnchor, analyticalEnrichment || null, accountId);
+    }
+
+    // Explicit if/else — NOT `??` (D1 semantic/no-semantic-fallback). LLM name when
+    // present, else the static template name with a loud fallback log. The provenance
+    // is stamped on territoryNameSource so downstream surfaces can see it.
+    const resolveTerritoryName = (
+      cluster: { id: string; label: string; signalType: "root_cause" | "psych_driver" },
+    ): { name: string; source: "llm" | "template_fallback" } => {
+      const llmName = groundedNames ? groundedNames.get(cluster.id) : undefined;
+      if (llmName && llmName.trim().length > 0) {
+        return { name: llmName.trim(), source: "llm" };
+      }
+      const fallbackName = translateToSystemTerritory(cluster.label, cluster.signalType, productDna);
+      console.log(`[PositioningEngine-V3] TERRITORY_NAME_FALLBACK | cluster=${cluster.id} | signalType=${cluster.signalType} | name="${fallbackName}"`);
+      return { name: fallbackName, source: "template_fallback" };
+    };
+
     for (const rc of parsedStructuredSignals.root_causes) {
-      const translatedName = translateToSystemTerritory(rc.label, "root_cause", productDna);
-      if (!existingNames.has(translatedName.toLowerCase())) {
+      const resolved = resolveTerritoryName({ id: rc.id, label: rc.label, signalType: "root_cause" });
+      if (!existingNames.has(resolved.name.toLowerCase())) {
         signalTerritories.push({
-          territory: translatedName,
+          territory: resolved.name,
           saturationLevel: 0,
           audienceDemand: Math.min(1.0, rc.frequency / 15),
           competitorAuthority: 0,
@@ -2508,16 +2650,17 @@ export async function runPositioningEngine(
           painSignals: purifyEvidence(rc.evidence || []).slice(0, 3),
           desireSignals: [],
           signalSource: rc.id,
+          territoryNameSource: resolved.source,
         });
-        existingNames.add(translatedName.toLowerCase());
+        existingNames.add(resolved.name.toLowerCase());
       }
     }
 
     for (const pd of parsedStructuredSignals.psychological_drivers) {
-      const translatedName = translateToSystemTerritory(pd.label, "psych_driver", productDna);
-      if (!existingNames.has(translatedName.toLowerCase())) {
+      const resolved = resolveTerritoryName({ id: pd.id, label: pd.label, signalType: "psych_driver" });
+      if (!existingNames.has(resolved.name.toLowerCase())) {
         signalTerritories.push({
-          territory: translatedName,
+          territory: resolved.name,
           saturationLevel: 0,
           audienceDemand: Math.min(1.0, pd.frequency / 15),
           competitorAuthority: 0,
@@ -2525,8 +2668,9 @@ export async function runPositioningEngine(
           painSignals: [],
           desireSignals: purifyEvidence(pd.evidence || []).slice(0, 3),
           signalSource: pd.id,
+          territoryNameSource: resolved.source,
         });
-        existingNames.add(translatedName.toLowerCase());
+        existingNames.add(resolved.name.toLowerCase());
       }
     }
 

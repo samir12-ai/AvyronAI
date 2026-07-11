@@ -145,6 +145,10 @@ export interface OpportunityGap {
   painSignals: string[];
   desireSignals: string[];
   signalSource?: string;
+  // FIX-B provenance marker: how this territory's NAME was produced.
+  // "llm" = grounded generateGroundedTerritoryNames output; "template_fallback"
+  // = static translateToSystemTerritory (LLM naming unavailable / failed).
+  territoryNameSource?: "llm" | "template_fallback";
 }
 
 export interface StabilityAdvisory {
