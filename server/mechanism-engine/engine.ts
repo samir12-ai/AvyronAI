@@ -362,7 +362,7 @@ Respond with ONLY valid JSON, no markdown:
       let response = await aiChat({
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: fullPrompt }],
-        max_tokens: 2000,
+        max_tokens: 4000,
         temperature: 0.7,
       });
 
@@ -371,13 +371,17 @@ Respond with ONLY valid JSON, no markdown:
       let parsed = safeJsonParse(cleaned);
 
       if (!parsed || !parsed.primary) {
-        console.log(`[MechanismEngine] AI_PARSE_FAILED | attempting one-shot retry with strict JSON reinforcement`);
+        const rawFinish1 = response?.choices?.[0]?.finish_reason;
+        const finishReason1 = typeof rawFinish1 === "string" ? rawFinish1 : "unknown";
+        const truncNote1 = finishReason1 === "length" ? " | OUTPUT_TRUNCATED (finish_reason=length — max_tokens exhausted before JSON closed)" : "";
+        console.log(`[MechanismEngine] AI_PARSE_FAILED | finish_reason=${finishReason1} | contentChars=${content.length}${truncNote1} | attempting one-shot retry with strict JSON reinforcement`);
         diagnostics.parseRetryAttempted = true;
+        diagnostics.firstFinishReason = finishReason1;
         const strictPrompt = `${fullPrompt}\n\n═══ STRICT OUTPUT FORMAT (PREVIOUS RESPONSE WAS UNPARSEABLE) ═══\nRespond with EXACTLY ONE valid JSON object and NOTHING else. No markdown, no preamble, no explanation. Start your response with "{" and end with "}". The top-level object MUST contain a "primary" key.`;
         response = await aiChat({
           model: "gpt-4.1-mini",
           messages: [{ role: "user", content: strictPrompt }],
-          max_tokens: 2000,
+          max_tokens: 4000,
           temperature: 0.3,
         });
         content = response?.choices?.[0]?.message?.content || "";
@@ -386,9 +390,13 @@ Respond with ONLY valid JSON, no markdown:
       }
 
       if (!parsed || !parsed.primary) {
-        console.log(`[MechanismEngine] AI_PARSE_FAILED_AFTER_RETRY | falling back to differentiation core with deterministic axis="${primaryAxis}"`);
+        const rawFinish2 = response?.choices?.[0]?.finish_reason;
+        const finishReason2 = typeof rawFinish2 === "string" ? rawFinish2 : "unknown";
+        const truncNote2 = finishReason2 === "length" ? " | OUTPUT_TRUNCATED (finish_reason=length — max_tokens still exhausted after retry)" : "";
+        console.log(`[MechanismEngine] AI_PARSE_FAILED_AFTER_RETRY | finish_reason=${finishReason2} | contentChars=${content.length}${truncNote2} | falling back to differentiation core with deterministic axis="${primaryAxis}"`);
         diagnostics.aiFailed = true;
         diagnostics.parseRetryFailed = true;
+        diagnostics.retryFinishReason = finishReason2;
         const fallbackMech = buildFallbackMechanism(diffCore, primaryAxis);
         const hasUsableFallback = !!(diffCore && diffCore.mechanismType !== "none" && diffCore.mechanismName);
         return {
