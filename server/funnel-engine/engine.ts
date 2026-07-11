@@ -992,6 +992,7 @@ function buildFunnelCandidate(
     integrityResult: { passed: true, failures: [] },
     compressionApplied: wasCompressed,
     genericFlag: isGeneric,
+    groundedJourneyRationale: [],
     priorityMatrixDecision: matrixDecision,
   };
 
@@ -1056,6 +1057,7 @@ function buildEmptyFunnel(): FunnelCandidate {
     integrityResult: { passed: false, failures: ["No data"] },
     compressionApplied: false,
     genericFlag: false,
+    groundedJourneyRationale: [],
   };
 }
 
@@ -1072,7 +1074,7 @@ export async function aiFunnelGeneration(
   strategic?: RunStrategicContext | null,
   productDna?: ProductDnaLike | null,
   attemptNumber?: number,
-): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string }; groundingRefs?: string[] }> {
+): Promise<{ primary: { name: string; type: string; journeyRationale: string[] }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string }; groundingRefs?: string[] }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const pillars = differentiation.pillars || [];
@@ -1200,9 +1202,11 @@ ${(() => {
   return section;
 })()}
 
+JOURNEY RATIONALE (primary funnel only): In "primary.journeyRationale", return 3-5 sentences. Each sentence MUST name the specific buying barrier or root cause that one phase of the buyer's journey removes, expressed in the audience's OWN pain language and consistent with the evidence IDs you list in "groundingRefs". Do NOT copy the AEL evidence text verbatim — paraphrase what the buyer feels and how that funnel stage resolves it. Generic journey descriptions that could apply to any product are unacceptable.
+
 Return JSON:
 {
-  "primary": { "name": "Specific funnel name", "type": "funnel_type" },
+  "primary": { "name": "Specific funnel name", "type": "funnel_type", "journeyRationale": ["Names a specific barrier/root cause a journey phase removes, in the buyer's pain language", "...", "..."] },
   "alternative": { "name": "Alternative funnel name", "type": "funnel_type" },
   "rejected": { "name": "Rejected funnel name", "type": "funnel_type", "rejectionReason": "Why this funnel fails" },
   "groundingRefs": ["RC1", "CC2"]
@@ -1213,7 +1217,7 @@ Return JSON:
     let completion = await aiChat({
       model: "gpt-4.1-mini",
       messages: [{ role: "user", content: fullPrompt }],
-      max_tokens: 800,
+      max_tokens: 1200,
       temperature: 0.7,
       accountId,
       endpoint: "funnel-engine",
@@ -1234,6 +1238,10 @@ Return JSON:
       if (!p?.rejected?.name) missing.push("rejected.name");
       if (!p?.rejected?.type) missing.push("rejected.type");
       if (!p?.rejected?.rejectionReason) missing.push("rejected.rejectionReason");
+      const jr = Array.isArray(p?.primary?.journeyRationale)
+        ? p.primary.journeyRationale.filter((s: any) => typeof s === "string" && s.trim().length > 0)
+        : [];
+      if (jr.length < 3) missing.push("primary.journeyRationale(>=3 non-empty sentences)");
       return missing;
     };
     let parsed = safeJsonParse(cleanedResponse);
@@ -1241,11 +1249,11 @@ Return JSON:
     if (missing.length > 0) {
       const defect = parsed ? `missing required fields: ${missing.join(", ")}` : "previous response was not parseable JSON";
       console.log(`[FunnelEngine-V3] AI_PARSE_RETRY | defect="${defect}"`);
-      const strictPrompt = `${fullPrompt}\n\n═══ STRICT OUTPUT FORMAT (PREVIOUS RESPONSE WAS MALFORMED: ${defect}) ═══\nRespond with EXACTLY ONE valid JSON object and NOTHING else. No markdown, no preamble. Start with "{" and end with "}". The object MUST contain "primary" {name,type}, "alternative" {name,type}, and "rejected" {name,type,rejectionReason} — every field non-empty.`;
+      const strictPrompt = `${fullPrompt}\n\n═══ STRICT OUTPUT FORMAT (PREVIOUS RESPONSE WAS MALFORMED: ${defect}) ═══\nRespond with EXACTLY ONE valid JSON object and NOTHING else. No markdown, no preamble. Start with "{" and end with "}". The object MUST contain "primary" {name,type,journeyRationale}, "alternative" {name,type}, and "rejected" {name,type,rejectionReason} — every field non-empty. "primary.journeyRationale" MUST be an array of 3-5 non-empty sentences, each naming a specific buying barrier/root cause a journey phase removes in the buyer's own pain language (paraphrased, never copied from the evidence text).`;
       completion = await aiChat({
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: strictPrompt }],
-        max_tokens: 800,
+        max_tokens: 1200,
         temperature: 0.3,
         accountId,
         endpoint: "funnel-engine",
@@ -1276,8 +1284,46 @@ Return JSON:
       attemptNumber,
     });
 
+    // FIX-C: the grounded buyer-journey rationale is the funnel's OWN generated
+    // prose that names the specific barriers/root causes each journey phase
+    // removes. It flows onto FunnelCandidate.groundedJourneyRationale →
+    // collectFunnelText → the depth gate, so the gate scores real per-run
+    // grounded content (mirrors the awareness engine's myth-breaker prose) — NOT
+    // a copy of the AEL (that would score the AEL against itself). The unchanged
+    // gates remain the sole enforcement authority; this only enriches their INPUT.
+    const journeyRationale: string[] = Array.isArray(parsed.primary?.journeyRationale)
+      ? parsed.primary.journeyRationale
+          .filter((s: any) => typeof s === "string" && s.trim().length > 0)
+          .map((s: string) => s.trim())
+      : [];
+    console.log(`[FunnelEngine-V3] GROUNDED_RATIONALE | segments=${journeyRationale.length} | chars=${journeyRationale.join(" ").length} | attempt=${attemptNumber ?? 1}`);
+
+    // Bypass guard (log-only — NEVER changes a verdict): if the model copied an
+    // AEL deep-cause/barrier text near-verbatim into the rationale, the depth
+    // gate would be scoring the AEL against itself. Flag it loudly for review
+    // (B2/B4); the unchanged gates stay the sole enforcement authority.
+    const aelPkg: any = analyticalEnrichment || null;
+    if (aelPkg && journeyRationale.length > 0) {
+      const aelVerbatimSources: string[] = [];
+      for (const rc of (Array.isArray(aelPkg.root_causes) ? aelPkg.root_causes : [])) {
+        if (typeof rc?.deepCause === "string") aelVerbatimSources.push(rc.deepCause);
+      }
+      for (const bb of (Array.isArray(aelPkg.buying_barriers) ? aelPkg.buying_barriers : [])) {
+        if (typeof bb?.barrier === "string") aelVerbatimSources.push(bb.barrier);
+        if (typeof bb?.rootCause === "string") aelVerbatimSources.push(bb.rootCause);
+      }
+      const rationaleJoinedLower = journeyRationale.join(" \u2016 ").toLowerCase();
+      for (const src of aelVerbatimSources) {
+        const norm = src.trim().toLowerCase();
+        if (norm.length >= 80 && rationaleJoinedLower.includes(norm.slice(0, 80))) {
+          console.error(`[FunnelEngine-V3] FUNNEL_RATIONALE_VERBATIM_SUSPECT | attempt=${attemptNumber ?? 1} | an AEL evidence text appears near-verbatim in journeyRationale — depth grounding may be self-scoring; gates unchanged, review generation prompt`);
+          break;
+        }
+      }
+    }
+
     return {
-      primary: { name: parsed.primary.name, type: parsed.primary.type },
+      primary: { name: parsed.primary.name, type: parsed.primary.type, journeyRationale },
       alternative: { name: parsed.alternative.name, type: parsed.alternative.type },
       rejected: {
         name: parsed.rejected.name,
@@ -1457,6 +1503,17 @@ export async function runFunnelEngine(
       aiFunnels.primary.name, aiFunnels.primary.type,
       audience, offer, positioning, differentiation, awareness,
     );
+    // FIX-C: carry the LLM's grounded buyer-journey rationale onto the scored
+    // candidate so the depth gate sees real per-run grounded prose. Explicit
+    // if/else (D1 — no `??`); a missing array is loud, not silent (B2). Because
+    // the depth-gate retry reassigns aiFunnels then calls buildAllFunnels(), BOTH
+    // attempt 1 and every retry carry the rationale with no extra retry-path code.
+    if (Array.isArray(aiFunnels.primary.journeyRationale) && aiFunnels.primary.journeyRationale.length > 0) {
+      primaryFunnel.groundedJourneyRationale = aiFunnels.primary.journeyRationale;
+    } else {
+      primaryFunnel.groundedJourneyRationale = [];
+      console.error("[FunnelEngine-V3] FUNNEL_RATIONALE_MISSING | primary funnel built without grounded journey rationale — depth grounding will score the deterministic structure only");
+    }
     diagnostics.layer7_primary = primaryFunnel.integrityResult;
     diagnostics.layer8_primary = { strength: primaryFunnel.funnelStrengthScore };
     diagnostics.entryTrigger_primary = primaryFunnel.entryTrigger;
@@ -1486,6 +1543,9 @@ export async function runFunnelEngine(
     ...f.trustPath.map(t => `${t.action} ${t.proofType} ${t.audienceState}`),
     ...f.proofPlacements.map(p => `${p.stage} ${p.proofType} ${p.placement} ${p.purpose}`),
     ...f.frictionMap.map(fp => `${fp.stage} ${fp.frictionType} ${fp.mitigation}`),
+    // FIX-C: the funnel's OWN grounded buyer-journey rationale (required field,
+    // [] when absent — no `??`). This is the per-run prose the depth gate scores.
+    ...f.groundedJourneyRationale,
   ];
   // FIX-A: all cross-funnel state (boundary + sanitize + generic penalty + status
   // + cross-engine alignment + trust-path gaps + critical friction) is derived from
@@ -1531,6 +1591,7 @@ export async function runFunnelEngine(
       for (const fp of f.frictionMap) {
         fp.mitigation = applySoftSanitization(fp.mitigation, BOUNDARY_SOFT_PATTERNS);
       }
+      f.groundedJourneyRationale = f.groundedJourneyRationale.map(r => applySoftSanitization(r, BOUNDARY_SOFT_PATTERNS));
     };
     sanitizeFunnel(primaryFunnel);
     sanitizeFunnel(alternativeFunnel);

@@ -113,6 +113,7 @@ export interface FunnelCandidate {
   integrityResult: { passed: boolean; failures: string[] };
   compressionApplied: boolean;
   genericFlag: boolean;
+  groundedJourneyRationale: string[];
   priorityMatrixDecision?: PriorityMatrixDecision;
 }
 
