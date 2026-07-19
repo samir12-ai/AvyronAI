@@ -37,6 +37,11 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey, runId }:
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
+  // Real truncation detection: a hidden, unclamped copy of each step's text
+  // reports its natural height via onLayout (works on native AND web, unlike
+  // onTextLayout). The old length>80 heuristic hid "Read more" on short texts
+  // that still wrapped past 2 lines, leaving them cut with no way to expand.
+  const [stepLineCounts, setStepLineCounts] = useState<Record<string, number>>({});
 
   const bg = isDark ? '#0F1419' : '#FFFFFF';
   const borderColor = isDark ? '#1E2736' : '#E5E7EB';
@@ -89,7 +94,7 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey, runId }:
             const isLast = i === data.steps.length - 1;
             const isPending = step.source === 'none';
             const isStepExpanded = !!expandedSteps[step.key];
-            const needsTruncation = step.text.length > 80;
+            const needsTruncation = (stepLineCounts[step.key] ?? 0) > 2 || step.text.length > 80;
             return (
               <View key={step.key} style={s.stepRow}>
                 <View style={s.stepTimeline}>
@@ -110,6 +115,17 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey, runId }:
                   <Text
                     style={[s.stepText, { color: isPending ? textSecondary : textPrimary, fontStyle: isPending ? 'italic' : 'normal' }]}
                     numberOfLines={isStepExpanded ? undefined : 2}
+                  >
+                    {step.text}
+                  </Text>
+                  <Text
+                    style={[s.stepText, s.measureText]}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                    onLayout={(e) => {
+                      const lines = Math.round(e.nativeEvent.layout.height / 20);
+                      setStepLineCounts(prev => prev[step.key] === lines ? prev : { ...prev, [step.key]: lines });
+                    }}
                   >
                     {step.text}
                   </Text>
@@ -149,5 +165,6 @@ const s = StyleSheet.create({
   sourceTag: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
   sourceTagText: { fontSize: 9, fontWeight: '600' as const },
   stepText: { fontSize: 14, lineHeight: 20 },
+  measureText: { position: 'absolute', left: 0, right: 0, top: 0, opacity: 0, zIndex: -1, pointerEvents: 'none' as const },
   readMore: { fontSize: 12, fontWeight: '600' as const, marginTop: 4 },
 });
