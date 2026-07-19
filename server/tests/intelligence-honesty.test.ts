@@ -473,19 +473,27 @@ function runConsumerGuardTests() {
 
   const result1: any = { foo: "bar" };
   attachAelProvenance(result1, ackPartial);
-  assert(result1._provenance?.aelPartialPropagated === true,
-    "attachAelProvenance(partial): result._provenance.aelPartialPropagated=true");
-  assert(result1._provenance?.aelAcknowledgement === "AEL_PARTIAL",
-    "attachAelProvenance(partial): result._provenance.aelAcknowledgement='AEL_PARTIAL'");
-  assert(result1._provenance?.aelPartialReason === "parse_failure",
-    "attachAelProvenance(partial): result._provenance.aelPartialReason propagated");
+  assert(result1._aelProvenance?.aelPartialPropagated === true,
+    "attachAelProvenance(partial): result._aelProvenance.aelPartialPropagated=true");
+  assert(result1._aelProvenance?.aelAcknowledgement === "AEL_PARTIAL",
+    "attachAelProvenance(partial): result._aelProvenance.aelAcknowledgement='AEL_PARTIAL'");
+  assert(result1._aelProvenance?.aelPartialReason === "parse_failure",
+    "attachAelProvenance(partial): result._aelProvenance.aelPartialReason propagated");
+  // Key-collision guard (2026-07): `_provenance` is owned by the
+  // snapshot-reuse trust layer — extractProvenance() classifies ANY
+  // non-null `_provenance` without sourceJobId as REUSED_UNVERIFIED →
+  // STALE. AEL metadata MUST NOT create that key on fresh outputs.
+  assert(result1._provenance === undefined,
+    "attachAelProvenance: does NOT create `_provenance` (snapshot-reuse trust key)");
 
-  const result2: any = { _provenance: { existing: "keep-me" }, foo: "bar" };
+  const result2: any = { _aelProvenance: { existing: "keep-me" }, _provenance: { sourceJobId: "job-1" }, foo: "bar" };
   attachAelProvenance(result2, ackFull);
-  assert(result2._provenance?.existing === "keep-me",
-    "attachAelProvenance preserves existing _provenance fields");
-  assert(result2._provenance?.aelPartialPropagated === false,
+  assert(result2._aelProvenance?.existing === "keep-me",
+    "attachAelProvenance preserves existing _aelProvenance fields");
+  assert(result2._aelProvenance?.aelPartialPropagated === false,
     "attachAelProvenance(full): aelPartialPropagated=false");
+  assert(result2._provenance?.sourceJobId === "job-1" && Object.keys(result2._provenance).length === 1,
+    "attachAelProvenance leaves snapshot-reuse `_provenance` untouched");
 
   // formatAELForPrompt banner emission
   const fullPkg = {
@@ -548,17 +556,19 @@ function runConsumerGuardTests() {
     `applyPartialAelDowngrade(partial): offerStrengthScore downgraded by ×${m}`);
   assert(Math.abs(r1.engineConfidence - 0.6 * m) < 1e-3,
     `applyPartialAelDowngrade(partial): engineConfidence downgraded by ×${m}`);
-  assert(r1._provenance?.aelPartialDowngradeApplied === true,
+  assert(r1._aelProvenance?.aelPartialDowngradeApplied === true,
     "applyPartialAelDowngrade(partial): records aelPartialDowngradeApplied=true");
-  assert(Array.isArray(r1._provenance?.aelPartialDowngradeFields) && r1._provenance.aelPartialDowngradeFields.length === 4,
+  assert(Array.isArray(r1._aelProvenance?.aelPartialDowngradeFields) && r1._aelProvenance.aelPartialDowngradeFields.length === 4,
     "applyPartialAelDowngrade(partial): records all 4 downgraded fields");
+  assert(r1._provenance === undefined,
+    "applyPartialAelDowngrade: does NOT create `_provenance` (snapshot-reuse trust key)");
 
   // pass-6: NOT mutated when AEL is full
   const r2: any = { confidenceScore: 0.8, score: 0.5 };
   applyPartialAelDowngrade("TestEngine", r2, ackFull);
   assert(r2.confidenceScore === 0.8 && r2.score === 0.5,
     "applyPartialAelDowngrade(full): no mutation of numeric fields");
-  assert(r2._provenance?.aelPartialPropagated === false,
+  assert(r2._aelProvenance?.aelPartialPropagated === false,
     "applyPartialAelDowngrade(full): provenance still attached, partial=false");
 
   // pass-6: F3.7 string-presence detector — fires on marketing copy even with 0 classifier counts

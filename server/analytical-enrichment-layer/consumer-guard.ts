@@ -36,15 +36,26 @@ export function acknowledgeAelInput(
   return { usable: true, partial: false, reason: "AEL_OK" };
 }
 
+/**
+ * AEL provenance is written under `_aelProvenance` — NOT `_provenance`.
+ *
+ * `_provenance` is owned by the snapshot-reuse trust layer: the contract
+ * registry's `extractProvenance()` treats ANY non-null `_provenance` object
+ * without a `sourceJobId` as REUSED_UNVERIFIED → STALE, which cascades into
+ * `offer_input_sufficient=UNKNOWN` → PIPELINE_INCOMPLETE at system-control.
+ * Writing AEL acknowledgement flags into that key on FRESH engine outputs
+ * (2026-07 regression) made every guard-wrapped engine look like an
+ * unverified snapshot reuse. Keep AEL metadata in its own namespace.
+ */
 export function attachAelProvenance<T extends object>(
   result: T,
   ack: AelAcknowledgement,
 ): T {
   const r = result as Record<string, unknown>;
-  const existing = (r._provenance && typeof r._provenance === "object")
-    ? r._provenance as Record<string, unknown>
+  const existing = (r._aelProvenance && typeof r._aelProvenance === "object")
+    ? r._aelProvenance as Record<string, unknown>
     : {};
-  r._provenance = {
+  r._aelProvenance = {
     ...existing,
     aelPartialPropagated: ack.partial === true,
     aelAcknowledgement: ack.reason,
@@ -74,10 +85,10 @@ export function applyPartialAelDowngrade<T extends object>(
     }
   }
 
-  const existing = (r._provenance && typeof r._provenance === "object")
-    ? r._provenance as Record<string, unknown>
+  const existing = (r._aelProvenance && typeof r._aelProvenance === "object")
+    ? r._aelProvenance as Record<string, unknown>
     : {};
-  r._provenance = {
+  r._aelProvenance = {
     ...existing,
     aelPartialDowngradeApplied: downgraded.length > 0,
     aelPartialDowngradeMultiplier: m,

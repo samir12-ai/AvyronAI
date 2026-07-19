@@ -141,7 +141,16 @@ const ENGINE_CONFIDENCE_MAP: Record<string, EngineFieldMap> = {
     dataFields: [],
   },
   persuasion: {
-    engineFields: [{ path: "confidenceScore", provenance: "direct_evidence" }],
+    // Field-drift repair (2026-07): the persuasion engine never emits a
+    // top-level `confidenceScore` — its real engine confidence lives at
+    // `primaryRoute.persuasionStrengthScore` (mirrors awareness, which reads
+    // `primaryRoute.awarenessStrengthScore`). Reading only `confidenceScore`
+    // collapsed engineConfidence to 0 and dragged combined to ~0.39,
+    // tripping the 0.50 confidence-spread gate on healthy runs.
+    engineFields: [
+      { path: "primaryRoute.persuasionStrengthScore", provenance: "direct_evidence" },
+      { path: "confidenceScore", provenance: "direct_evidence" },
+    ],
     dataFields: [{ path: "celDepthCompliance.causalDepthScore", provenance: "direct_evidence" }],
   },
   statistical_validation: {

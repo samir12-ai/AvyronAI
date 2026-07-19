@@ -2307,7 +2307,17 @@ async function executeEngine(
         }
 
         if (ctx.analyticalEnrichment) {
-          const offerTexts = [result.offerName, result.coreOutcome, result.mechanismDescription, result.headline].filter(Boolean);
+          // Field-drift repair (2026-07): the offer engine returns
+          // { primaryOffer: { offerName, coreOutcome, mechanismDescription,
+          // problemStatement, ... } } — none of these exist at the result top
+          // level and `headline` does not exist at all. Reading top-level
+          // fields fed CEL an empty text list, guaranteeing a
+          // missing_alignment FAIL every run.
+          const poCel = result.primaryOffer;
+          const offerTexts = [poCel?.offerName, poCel?.coreOutcome, poCel?.mechanismDescription, poCel?.problemStatement].filter(Boolean);
+          if (offerTexts.length === 0) {
+            console.warn(`[Orchestrator] CEL_OFFER_INPUT_EMPTY | primaryOffer yielded no evaluable text — CEL will evaluate an empty output`);
+          }
           const celResult = enforceGenericEngineCompliance("offer", offerTexts, ctx.analyticalEnrichment);
           { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }
           if (!ctx.celResults) ctx.celResults = [];
@@ -2560,7 +2570,18 @@ async function executeEngine(
         }
 
         if (ctx.analyticalEnrichment) {
-          const funnelTexts = (result.stages || []).map((s: any) => `${s.name || ""} ${s.objective || ""} ${s.contentStrategy || ""}`);
+          // Field-drift repair (2026-07): the funnel engine returns
+          // { primaryFunnel: { stageMap, groundedJourneyRationale, ... } } —
+          // there is no top-level `stages`. Reading `result.stages` fed CEL an
+          // empty text list, guaranteeing a missing_alignment FAIL every run.
+          const pfCel = result.primaryFunnel;
+          const funnelTexts: string[] = [
+            ...(pfCel?.stageMap || []).map((s: any) => `${s.name || ""} ${s.purpose || ""} ${s.contentType || ""} ${s.conversionGoal || ""}`),
+            ...(Array.isArray(pfCel?.groundedJourneyRationale) ? pfCel.groundedJourneyRationale.filter((t: any) => typeof t === "string") : []),
+          ].filter((t: string) => t && t.trim().length > 0);
+          if (funnelTexts.length === 0) {
+            console.warn(`[Orchestrator] CEL_FUNNEL_INPUT_EMPTY | primaryFunnel yielded no evaluable text — CEL will evaluate an empty output`);
+          }
           const celResult = enforceGenericEngineCompliance("funnel", funnelTexts, ctx.analyticalEnrichment);
           { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }
           if (!ctx.celResults) ctx.celResults = [];

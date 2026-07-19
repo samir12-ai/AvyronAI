@@ -619,10 +619,32 @@ export function layer1_outcomeConstruction(
     rawPainPhrase || (pains.length > 0 ? pains[0] : null),
     "",
   );
-  const primaryDesire = coerceText(
-    rawDesirePhrase || (desires.length > 0 ? desires[0][0] : null),
-    "",
-  );
+  // Synthetic-key resolution (FIX-INPUTS): desireMap keys can be synthetic
+  // index tokens ("desire_0", "0") when the map arrives keyed by position.
+  // The KEY must never leak into customer-visible prose ("deliver desire_0
+  // through …"), so resolve the desire TEXT from the entry VALUE instead
+  // (audience v3 values carry { canonical, frequency, evidence } — coerceText
+  // probes canonical). If neither key nor value yields real text, degrade
+  // truthfully to the no-desire outcome templates below rather than
+  // fabricating a label.
+  let primaryDesire: string;
+  if (rawDesirePhrase) {
+    primaryDesire = coerceText(rawDesirePhrase, "");
+  } else if (desires.length > 0) {
+    const desireKey = desires[0][0];
+    if (/^(desire_)?\d+$/.test(desireKey)) {
+      console.log(`[OfferEngine-V4] SYNTHETIC_DESIRE_KEY_RESOLVED | key="${desireKey}" is a synthetic index token — resolving desire text from the entry value instead of leaking the key`);
+      primaryDesire = coerceText(desires[0][1], "");
+    } else {
+      primaryDesire = coerceText(desireKey, "");
+    }
+  } else {
+    primaryDesire = "";
+  }
+  if (primaryDesire.length > 0 && /^\d+(\.\d+)?$/.test(primaryDesire)) {
+    console.log(`[OfferEngine-V4] SYNTHETIC_DESIRE_VALUE_REJECTED | resolved desire text "${primaryDesire}" is numeric, not market language — dropping to no-desire outcome templates`);
+    primaryDesire = "";
+  }
   const topTerritory = territories.length > 0 ? (territories[0].name || "") : "";
   const topPillar = pillars.length > 0 ? (pillars[0].name || "") : "";
 
@@ -1306,6 +1328,46 @@ export function validateOfferAlignment(
 
     if (!hasPainRef && !hasDesireRef) {
       failures.push("Outcome statement does not reflect any identified audience pain signals or desires");
+    }
+  }
+
+  // PAIN ECHO (integrity-l2 mirror — FIX-INPUTS, not a new gate): the
+  // downstream integrity engine (integrity-engine/engine.ts layer2) checks the
+  // coreOutcome text ALONE — not name/mechanism/deliverables — for at least
+  // one verbatim audience pain word (>3 chars, substring match). When absent
+  // it emits the "Offer outcome does not reference audience pain language"
+  // warning, which feeds painAlignmentFailed → ENFORCEMENT_BLOCK →
+  // safeToExecute=false. The fuzzy combined-text check above lets candidates
+  // through whose pain words live only in deliverables, so they pass here and
+  // then trip the block downstream. Mirror the integrity predicate
+  // byte-for-byte so such candidates are rejected NOW, while the existing
+  // bounded alignment retry loop can still regenerate them. The integrity
+  // gate itself is untouched.
+  if (pains.length > 0) {
+    const outcomeOnly = (offer.coreOutcome || "").toLowerCase();
+    // Identical probe order to integrity l2 (canonical first — audience v3
+    // emits structured pains as { canonical, frequency, evidence }).
+    const l2PainTexts = pains.slice(0, 5).map((p: any) =>
+      (typeof p === "string"
+        ? p
+        : (p?.canonical || p?.text || p?.canonicalText || p?.pain || p?.name || p?.label || p?.description || "")
+      ).toLowerCase()
+    );
+    const painEchoMet = l2PainTexts.some((pt: string) => {
+      const words = pt.split(/\s+/).filter((w: string) => w.length > 3);
+      return words.some((w: string) => outcomeOnly.includes(w));
+    });
+    if (!painEchoMet) {
+      const echoWords: string[] = [];
+      for (const pt of l2PainTexts) {
+        for (const w of pt.split(/\s+/)) {
+          if (w.length > 3 && !echoWords.includes(w)) {
+            echoWords.push(w);
+          }
+        }
+      }
+      console.log(`[OfferEngine-V4] PAIN_ECHO_REJECTED | coreOutcome carries none of the audience pain words [${echoWords.slice(0, 8).join(", ")}] — downstream integrity layer2 reads coreOutcome alone, so this candidate would trip ENFORCEMENT_BLOCK`);
+      failures.push(`The "outcome" field itself must contain at least one of these exact audience pain words: ${echoWords.slice(0, 8).join(", ")}. Pain words appearing only in the mechanism or deliverables do NOT satisfy this — the outcome sentence must name the pain it eliminates.`);
     }
   }
 
@@ -2003,6 +2065,24 @@ Return JSON:
   const objectionPhrases = marketLanguage?.objectionLanguage?.slice(0, 5) || [];
   const hasMarketLanguage = painPhrases.length > 0 || desirePhrases.length > 0;
 
+  // PAIN ECHO prompt injection (FIX-INPUTS): downstream integrity layer2
+  // requires the outcome text ALONE to carry >=1 verbatim audience pain word
+  // (>3 chars). Surface those exact words in the prompt (identical canonical
+  // probe to the integrity check) so the FIRST generation can satisfy it
+  // instead of relying on alignment retries.
+  const painEchoPromptWords: string[] = [];
+  for (const p of pains.slice(0, 5) as any[]) {
+    const painEchoText = (typeof p === "string"
+      ? p
+      : (p?.canonical || p?.text || p?.canonicalText || p?.pain || p?.name || p?.label || p?.description || "")
+    ).toLowerCase();
+    for (const w of painEchoText.split(/\s+/)) {
+      if (w.length > 3 && !painEchoPromptWords.includes(w)) {
+        painEchoPromptWords.push(w);
+      }
+    }
+  }
+
   const deliverableSteps = hasMechanismCore
     ? core!.mechanismSteps.map((step, i) => `  Step ${i + 1}: "${step}"`).join("\n")
     : pillars.slice(0, 4).map((p: any, i: number) => `  Step ${i + 1}: "${p.name || p.territory || "component"}"`).join("\n");
@@ -2059,6 +2139,7 @@ MANDATORY LANGUAGE RULES:
 ═══ SECTION 2: OUTCOME PRECISION (MANDATORY) ═══
 Outcomes MUST be specific, measurable, and market-relevant.
 NEVER use vague outcomes like "financial improvement", "measurable improvement", "better results", "business growth".
+${painEchoPromptWords.length > 0 ? `The "outcome" field of EVERY offer MUST contain at least one of these exact audience pain words: ${painEchoPromptWords.slice(0, 8).join(", ")}. Name the pain the offer eliminates inside the outcome sentence itself — pain words appearing only in the mechanism or deliverables do NOT count.` : ""}
 
 ═══ SECTION 3: MECHANISM (single source of truth) ═══
 ${hasMechanismCore ? `Mechanism Name: "${core!.mechanismName}"
@@ -2077,8 +2158,14 @@ ${qualifyingSignals && qualifyingSignals.length > 0 ? `Every claim must be deriv
 ${qualifyingSignals.slice(0, 10).map((s, i) => `  [${s.signalId}] (${s.originEngine}/${s.category}): "${s.text}"`).join("\n")}` : "No qualifying signals provided — generate conservatively."}
 
 ═══ SECTION 5: CONTEXT ═══
-- Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : p?.pain || p?.name))}
-- Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k]) => k))}
+- Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : (p?.canonical || p?.pain || p?.name || "")).filter((t: string) => t.length > 0))}
+- Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k, v]: [string, any]) => {
+    if (/^(desire_)?\d+$/.test(k)) {
+      const resolved = v && typeof v === "object" ? (v.canonical || v.text || v.label || v.name || "") : "";
+      return typeof resolved === "string" ? resolved : "";
+    }
+    return k;
+  }).filter((t: string) => t.length > 0))}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 ${positioning.contrastAxis ? `- Contrast Axis: ${positioning.contrastAxis}` : ""}
 
