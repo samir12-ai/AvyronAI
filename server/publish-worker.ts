@@ -598,6 +598,51 @@ async function checkAndPublishDuePosts() {
   }
 }
 
+// P-1 — shared Meta post-insights fetch, extracted from the 6h metrics loop so
+// the revisit scheduler (server/revisit-scheduler.ts) reuses the exact same
+// token handling, timeout (fetchMeta 15s AbortController), and metric parsing.
+// Metrics absent from Meta's response come back as null — NEVER coerced to 0
+// here (B1: truthfulness over confidence). The legacy in-place update below
+// maps null→0 to preserve its historical column semantics (integer, default 0).
+export type PostInsightsResult =
+  | { ok: true; impressions: number | null; engagement: number | null; clicks: number | null }
+  | { ok: false; reason: string };
+
+export async function fetchPostInsights(accountId: string, metaPostId: string): Promise<PostInsightsResult> {
+  const metaMode = await getAccountMetaMode(accountId);
+  if (metaMode !== "REAL") {
+    return { ok: false, reason: `META_MODE_${metaMode}` };
+  }
+
+  const serverTokens = await getServerSidePageToken(accountId);
+  if (!serverTokens) {
+    return { ok: false, reason: "NO_SERVER_SIDE_TOKEN" };
+  }
+
+  const metricsRes = await fetchMeta(
+    `https://graph.facebook.com/v21.0/${metaPostId}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${serverTokens.token}`
+  );
+  const metricsData = await metricsRes.json();
+
+  if (!metricsData.data) {
+    const metaErr = metricsData?.error?.message;
+    return { ok: false, reason: `META_INSIGHTS_ERROR: ${typeof metaErr === "string" ? metaErr : "no data field in insights response"}` };
+  }
+
+  const metricValue = (name: string): number | null => {
+    const metric = (metricsData.data as Array<{ name?: string; values?: Array<{ value?: unknown }> }>).find(m => m.name === name);
+    const v = metric?.values?.[0]?.value;
+    return typeof v === "number" ? v : null;
+  };
+
+  return {
+    ok: true,
+    impressions: metricValue("post_impressions"),
+    engagement: metricValue("post_engaged_users"),
+    clicks: metricValue("post_clicks"),
+  };
+}
+
 async function fetchPostMetrics() {
   if (isShuttingDown) return;
 
@@ -618,36 +663,31 @@ async function fetchPostMetrics() {
       try {
         const accountId = post.accountId;
         if (!accountId) continue;
-        const metaMode = await getAccountMetaMode(accountId);
-        if (metaMode !== "REAL") continue;
 
-        const serverTokens = await getServerSidePageToken(accountId);
-        if (!serverTokens) continue;
-
-        const metricsRes = await fetchMeta(
-          `https://graph.facebook.com/v21.0/${post.metaPostId}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${serverTokens.token}`
-        );
-        const metricsData = await metricsRes.json();
-
-        if (metricsData.data) {
-          let impressions = 0, engagement = 0, clicks = 0;
-          for (const metric of metricsData.data) {
-            if (metric.name === "post_impressions") impressions = metric.values?.[0]?.value || 0;
-            if (metric.name === "post_engaged_users") engagement = metric.values?.[0]?.value || 0;
-            if (metric.name === "post_clicks") clicks = metric.values?.[0]?.value || 0;
+        const insights = await fetchPostInsights(accountId, post.metaPostId);
+        if (!insights.ok) {
+          // Pre-P-1 this skip was silent for META_INSIGHTS_ERROR; B2 says log it.
+          // META_MODE_* / NO_SERVER_SIDE_TOKEN are normal disconnected states.
+          if (insights.reason.startsWith("META_INSIGHTS_ERROR")) {
+            console.warn(`[PublishWorker] METRICS_SKIPPED | post=${post.id} reason="${insights.reason}"`);
           }
-
-          await db.update(publishedPosts)
-            .set({
-              impressions,
-              reach: Math.floor(impressions * 0.7),
-              engagement,
-              clicks,
-              lastMetricsFetch: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(publishedPosts.id, post.id));
+          continue;
         }
+
+        // Historical in-place columns are integers defaulting to 0, and reach
+        // was always derived (impressions * 0.7). Behavior preserved verbatim;
+        // the honest per-checkpoint history lives in performance_snapshots.
+        const impressions = insights.impressions ?? 0;
+        await db.update(publishedPosts)
+          .set({
+            impressions,
+            reach: Math.floor(impressions * 0.7),
+            engagement: insights.engagement ?? 0,
+            clicks: insights.clicks ?? 0,
+            lastMetricsFetch: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(publishedPosts.id, post.id));
       } catch (error) {
         console.error(`[PublishWorker] Metrics fetch failed for post ${post.id}:`, String(error));
       }

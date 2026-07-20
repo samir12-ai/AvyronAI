@@ -1,0 +1,59 @@
+PROMPT FOR REPLIT AGENT — P-1: Wire Publish Lineage + Revive Outcome Tracker
+
+Context:
+Truth Audit P-0 confirmed the ingestion pipeline is not broken — it's disconnected. All parts exist (publish workers, outcome_snapshots table with 2,199 rows, Meta webhooks writing data, performance-feedback routes) but they live on two disconnected islands: organic publishes go to content_calendar_items with campaignId = null, and outcome-tracker.ts is a stub logger. This session bridges them so the Performance Loop has real fuel to score plans against. Standing doctrine applies: diagnosis before fixing, architect review before implementation, no gates/judges touched, loud logging on all failure paths, tsc net-new = 0 vs the 722 baseline.
+
+PHASE 1 — Confirm the exact wiring points (no code changes)
+
+Locate the publish path for organic posts. Print file:line for: (a) where content_calendar_items rows are created at plan generation, (b) where the publish worker marks a post as published, (c) every field currently persisted on that record. Confirm whether campaignId is available at either point — and if yes, why it's not being written.
+Locate every consumer/reader of outcome_snapshots today. What entities/columns does the current schema tie a snapshot to, and what's missing to tie one to a specific published post + its plan lineage?
+Locate the exact stub in outcome-tracker.ts (the "logs only" comment referenced in P-0) and every call site that reaches it. Report the full call graph in a table.
+Confirm which per-post metrics are actually populated in existing outcome_snapshots rows (sample 5 real rows, print field-by-field what's non-null). This decides what L3 scoring can compute honestly vs what stays UNAVAILABLE.
+Report the table before any implementation. Do not proceed to Phase 2 without explicit findings on all 5.
+
+PHASE 2 — Implement the three wiring changes
+
+A. Plan lineage at publish time
+
+At the point a content_calendar_item is created, persist the lineage tags from the plan that generated it: content_type, hook_style, angle, mix_bucket (problem/education/proof/conversion), planned_slot (day+time), and campaign_id (the campaign that owns the plan). New column(s) via a proper numbered migration, fail-closed consistent with existing schema-floor checks.
+At publish time, propagate these tags onto whatever record represents the published post (or a linking table if that's the cleaner shape — justify choice in Phase 1 findings).
+Posts published outside a plan (user manual publishes) get tagged unplanned explicitly — measured but excluded from plan scoring.
+Failure to attach lineage does NOT block publish — log PUBLISH_LINEAGE_MISSING loudly with the reason. Never silent.
+
+B. Revive outcome-tracker.ts to READ, not create
+
+Replace the stub with a real reader that pulls from the existing outcome_snapshots populated by Meta webhooks — do NOT build a parallel ingestion pipeline (this is the key P-0 finding: infrastructure exists, connection missing).
+Join outcome_snapshots to published posts via the lineage from (A). Snapshots that predate the lineage change stay legacy — flagged, not deleted.
+Expose a per-post query surface: given postId, return the last-known metrics with their capturedAt timestamps. Missing metrics return null (not zero) — honest boundary per performance-loop-spec §1.
+Loud log on join failures: OUTCOME_SNAPSHOT_ORPHAN with the reason. Never silent.
+
+C. Per-post revisit scheduler (the shared component)
+
+New scheduler that revisits each published post at 24h / 72h / 7d after publish, calls the existing metric fetch, and writes a fresh outcome_snapshot row (append-only history — do not overwrite prior rows).
+Same scheduler serves the future Watchtower engagement-spike sense (competitor post revisit). Design the job signature so both callers (own posts, competitor posts) share the code path with different targets — do not fork.
+Fail-closed: revisit failure = one log line (REVISIT_FAILED with post id + reason), skip this cycle, try again next scheduled hit. Never retry storms.
+
+Constraints:
+
+ZERO changes to: interchangeability judge, depth gates/thresholds, CEL scorer, Integrity engine, System Control, orchestrator verdict logic.
+All new failure paths log loudly with structured tags. No silent catches, no || null swallows.
+Migrations numbered and forward-only, consistent with existing schema-floor discipline.
+English-only code/comments/logs. Architect review of the full diff must PASS before Phase 3.
+tsc net-new = 0 vs the 722 baseline (managed TSC Check workflow, tsc alone, compare error multisets not just totals).
+
+PHASE 3 — Verification (with evidence)
+
+Publish a test plan and confirm the calendar item carries lineage — print the persisted row.
+Simulate the publish path completing → print the resulting published-post record with all lineage fields populated.
+Force a lineage-missing case (test harness) → confirm PUBLISH_LINEAGE_MISSING fires loudly and publish still succeeds (visibility, not blocking).
+Given an existing outcome_snapshots row from a real published post, call the revived outcome-tracker → confirm it returns the metrics with timestamps and the correct lineage joined in.
+Trigger the revisit scheduler manually on one recent post → confirm a new snapshot row is appended (not overwriting) with the correct capturedAt.
+Regression safety: run one full campaign pipeline end-to-end → confirm the last verdict (DOWNGRADE/RESTRICTED_EXECUTION with zero block reasons) is unchanged. Nothing in this session should have moved that.
+
+Done-conditions:
+
+All 3 wiring changes live, migrations applied, tsc net-new = 0.
+All 6 verification checks pass with quoted evidence.
+Architect review: PASS.
+Explicit confirmation: no gate, judge, threshold, or verdict logic was modified — this is a data-plumbing session only.
+One-line summary: "Performance Loop L1+L2 fuel path complete: lineage flows publish → outcome, revisit scheduler live, ready for P-2 (scoring)."

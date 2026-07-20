@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory, calendarEntries, studioItems, publishedPosts, decisionAttributions, strategicPlans } from "@shared/schema";
-import { eq, sql, gte, isNull, isNotNull, lte, desc, and, inArray } from "drizzle-orm";
+import { eq, sql, gte, isNull, isNotNull, lte, desc, and, or, inArray } from "drizzle-orm";
 import { logAudit } from "./audit";
 import { recordHallucinationExposure } from "./memory-system/cv06-metrics";
 
@@ -37,10 +37,18 @@ async function resolvePerformanceForEntries(entryIds: string[], accountId: strin
 
   const studioIds = linkedStudio.map(s => s.id);
 
+  // P-1: published_posts.studio_item_id (migration 041) is the intended join
+  // key, captured at publish time. The legacy media_item_id path is kept for
+  // rows published before the lineage wiring — historically it held client
+  // media-library ids (0 matches against studio_items.id), so it contributes
+  // nothing for old rows but costs nothing to keep.
   const linkedPublished = await db.select({ metaPostId: publishedPosts.metaPostId })
     .from(publishedPosts)
     .where(and(
-      inArray(publishedPosts.mediaItemId, studioIds),
+      or(
+        inArray(publishedPosts.studioItemId, studioIds),
+        inArray(publishedPosts.mediaItemId, studioIds),
+      ),
       eq(publishedPosts.accountId, accountId),
       isNotNull(publishedPosts.metaPostId),
     ));
@@ -54,23 +62,33 @@ async function resolvePerformanceForEntries(entryIds: string[], accountId: strin
     };
   }
 
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-  const snapshots = await db.select({
-    avgCpa: sql<number>`coalesce(avg(${performanceSnapshots.cpa}), 0)`,
-    avgRoas: sql<number>`coalesce(avg(${performanceSnapshots.roas}), 0)`,
-    avgCtr: sql<number>`coalesce(avg(${performanceSnapshots.ctr}), 0)`,
-    totalSpend: sql<number>`coalesce(sum(${performanceSnapshots.spend}), 0)`,
-    cnt: sql<number>`count(*)`,
+  // P-1: latest snapshot PER POST, not a rolling 24h fetchedAt window. The old
+  // window silently starved evaluatePendingOutcomes (runs at 48h post-decision):
+  // a 24h-checkpoint snapshot is ~24h old at evaluation time and could fall just
+  // outside the window, so snapshotCount read 0 and every outcome degraded to
+  // campaign/account scope.
+  //
+  // B1 guard (architect finding): restrict to checkpoint='sync' rows. Revisit
+  // checkpoint rows (24h/72h/7d) carry EXPLICIT-NULL economics (cpa/roas/ctr/
+  // spend) by design — if they were allowed to be "latest", the Number(v)||0
+  // coercion below would fabricate zero economics while snapshotCount>0 signals
+  // "measured". Economics live on sync rows; P-2 scoring will consume the
+  // checkpoint rows for engagement trajectories.
+  const latestPerPost = await db.selectDistinctOn([performanceSnapshots.postId], {
+    postId: performanceSnapshots.postId,
+    cpa: performanceSnapshots.cpa,
+    roas: performanceSnapshots.roas,
+    ctr: performanceSnapshots.ctr,
+    spend: performanceSnapshots.spend,
   }).from(performanceSnapshots)
     .where(and(
       eq(performanceSnapshots.accountId, accountId),
       inArray(performanceSnapshots.postId, metaPostIds),
-      gte(performanceSnapshots.fetchedAt, oneDayAgo),
-    ));
+      eq(performanceSnapshots.checkpoint, "sync"),
+    ))
+    .orderBy(performanceSnapshots.postId, desc(performanceSnapshots.fetchedAt));
 
-  const s = snapshots[0];
-  const snapshotCount = Number(s?.cnt) || 0;
+  const snapshotCount = latestPerPost.length;
 
   if (snapshotCount === 0) {
     return {
@@ -79,11 +97,16 @@ async function resolvePerformanceForEntries(entryIds: string[], accountId: strin
     };
   }
 
+  const avg = (vals: (number | null)[]) => {
+    const nums = vals.map(v => Number(v) || 0);
+    return nums.reduce((a, b) => a + b, 0) / nums.length;
+  };
+
   return {
-    avgCpa: Number(s?.avgCpa) || 0,
-    avgRoas: Number(s?.avgRoas) || 0,
-    avgCtr: Number(s?.avgCtr) || 0,
-    totalSpend: Number(s?.totalSpend) || 0,
+    avgCpa: avg(latestPerPost.map(r => r.cpa)),
+    avgRoas: avg(latestPerPost.map(r => r.roas)),
+    avgCtr: avg(latestPerPost.map(r => r.ctr)),
+    totalSpend: latestPerPost.reduce((sum, r) => sum + (Number(r.spend) || 0), 0),
     actionCount: entryIds.length,
     publishedCount: metaPostIds.length,
     snapshotCount,
@@ -452,6 +475,101 @@ export async function evaluatePendingOutcomes(accountId: string) {
       (weightedMetrics ? ` actions=${weightedMetrics.actionCount} published=${weightedMetrics.publishedCount} snapshots=${weightedMetrics.snapshotCount}` : ""),
     );
   }
+}
+
+// P-1 — per-post outcome reader. Returns publish lineage + every checkpoint
+// snapshot for one published post, honestly: metrics never fetched are null,
+// never 0 (B1). Legacy 'sync' rows may carry default-0 columns — the
+// checkpoint tag tells callers which capture semantics apply.
+export interface PostCheckpointSnapshot {
+  checkpoint: string;
+  fetchedAt: Date | null;
+  impressions: number | null;
+  engagedUsers: number | null;
+  clicks: number | null;
+  reach: number | null;
+  ctr: number | null;
+  spend: number | null;
+}
+
+export interface PostOutcome {
+  postId: string;
+  metaPostId: string | null;
+  publishedAt: Date | null;
+  status: string | null;
+  lineage: {
+    lineageSource: string;
+    planId: string | null;
+    calendarEntryId: string | null;
+    studioItemId: string | null;
+    hookStyle: string | null;
+    contentAngle: string | null;
+    plannedSlot: string | null;
+  };
+  checkpoints: PostCheckpointSnapshot[];
+}
+
+export async function getPostOutcome(publishedPostId: string, accountId: string): Promise<PostOutcome | null> {
+  const posts = await db.select({
+    id: publishedPosts.id,
+    metaPostId: publishedPosts.metaPostId,
+    publishedAt: publishedPosts.publishedAt,
+    status: publishedPosts.status,
+    lineageSource: publishedPosts.lineageSource,
+    planId: publishedPosts.planId,
+    calendarEntryId: publishedPosts.calendarEntryId,
+    studioItemId: publishedPosts.studioItemId,
+    hookStyle: publishedPosts.hookStyle,
+    contentAngle: publishedPosts.contentAngle,
+    plannedSlot: publishedPosts.plannedSlot,
+  })
+    .from(publishedPosts)
+    .where(and(
+      eq(publishedPosts.id, publishedPostId),
+      eq(publishedPosts.accountId, accountId),
+    ))
+    .limit(1);
+
+  if (posts.length === 0) return null;
+  const post = posts[0];
+
+  let checkpoints: PostCheckpointSnapshot[] = [];
+  if (post.metaPostId) {
+    const snapshotRows = await db.select({
+      checkpoint: performanceSnapshots.checkpoint,
+      fetchedAt: performanceSnapshots.fetchedAt,
+      impressions: performanceSnapshots.impressions,
+      engagedUsers: performanceSnapshots.engagedUsers,
+      clicks: performanceSnapshots.clicks,
+      reach: performanceSnapshots.reach,
+      ctr: performanceSnapshots.ctr,
+      spend: performanceSnapshots.spend,
+    })
+      .from(performanceSnapshots)
+      .where(and(
+        eq(performanceSnapshots.postId, post.metaPostId),
+        eq(performanceSnapshots.accountId, accountId),
+      ))
+      .orderBy(performanceSnapshots.fetchedAt);
+    checkpoints = snapshotRows;
+  }
+
+  return {
+    postId: post.id,
+    metaPostId: post.metaPostId,
+    publishedAt: post.publishedAt,
+    status: post.status,
+    lineage: {
+      lineageSource: post.lineageSource,
+      planId: post.planId,
+      calendarEntryId: post.calendarEntryId,
+      studioItemId: post.studioItemId,
+      hookStyle: post.hookStyle,
+      contentAngle: post.contentAngle,
+      plannedSlot: post.plannedSlot,
+    },
+    checkpoints,
+  };
 }
 
 export async function computeSuccessRates(accountId: string): Promise<Record<string, { total: number; successRate: number }>> {

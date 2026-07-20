@@ -124,6 +124,9 @@ export function registerStrategyRoutes(app: Express) {
           await db.insert(performanceSnapshots).values({
             postId: post.id,
             platform: "facebook",
+            // P-1: explicit capture-point classification (migration 041 default
+            // is also 'sync'; written explicitly so the intent is in the code).
+            checkpoint: "sync",
             contentType: post.type || "status",
             reach: getMetricValue("post_impressions"),
             impressions: getMetricValue("post_impressions"),

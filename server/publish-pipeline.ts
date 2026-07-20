@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "./db";
-import { publishedPosts, accountState, captionVariants, studioItems } from "@shared/schema";
+import { publishedPosts, accountState, captionVariants, studioItems, calendarEntries } from "@shared/schema";
 import { eq, sql, lte, desc, and } from "drizzle-orm";
 import { generateAndScoreCaptions, validateCaseMetadata } from "./caption-engine";
 import { logAudit } from "./audit";
@@ -11,6 +11,130 @@ import { runStudioAnalysis } from "./studio-analysis-engine";
 import { resolveAccountId } from "./auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
 const router = Router();
+
+// P-1 publish lineage (migration 041). Resolves which plan/calendar entry/studio
+// item a published post traces back to, captured AT PUBLISH TIME so later
+// calendar reshuffles can't rewrite history. Classification is explicit (B4):
+//   'planned'   — resolvable to a plan-generated calendar entry.
+//   'unplanned' — manual publish with no calendar lineage. Truthful state, not an error.
+// Resolution failure NEVER blocks a publish — it logs PUBLISH_LINEAGE_MISSING
+// and the post proceeds as 'unplanned'.
+export interface PublishLineage {
+  planId: string | null;
+  calendarEntryId: string | null;
+  studioItemId: string | null;
+  hookStyle: string | null;
+  contentAngle: string | null;
+  plannedSlot: string | null;
+  lineageSource: "planned" | "unplanned";
+}
+
+const UNPLANNED_LINEAGE: PublishLineage = {
+  planId: null,
+  calendarEntryId: null,
+  studioItemId: null,
+  hookStyle: null,
+  contentAngle: null,
+  plannedSlot: null,
+  lineageSource: "unplanned",
+};
+
+export async function resolvePublishLineage(params: {
+  accountId: string;
+  postId: string;
+  mediaItemId: string | null;
+  createdStudioItemId: string | null;
+}): Promise<PublishLineage> {
+  const { accountId, postId, mediaItemId, createdStudioItemId } = params;
+
+  const lineageFields = {
+    id: studioItems.id,
+    planId: studioItems.planId,
+    calendarEntryId: studioItems.calendarEntryId,
+    hook: studioItems.hook,
+    contentAngle: studioItems.contentAngle,
+  };
+
+  // Preferred join: mediaItemId that IS a studio_items.id — this is the join
+  // the outcome tracker was built around. Historically the client sends a
+  // media-library id here (0 matches in prod), so the miss is logged loudly
+  // and we fall back to the studio item created for this post.
+  let lineageItem: { id: string; planId: string | null; calendarEntryId: string | null; hook: string | null; contentAngle: string | null } | null = null;
+
+  if (mediaItemId) {
+    const byMediaId = await db.select(lineageFields)
+      .from(studioItems)
+      .where(and(eq(studioItems.id, mediaItemId), eq(studioItems.accountId, accountId)))
+      .limit(1);
+    if (byMediaId.length > 0) {
+      lineageItem = byMediaId[0];
+    } else {
+      console.warn(
+        `[PublishPipeline] PUBLISH_LINEAGE_MISSING | post=${postId} mediaItemId=${mediaItemId} ` +
+        `matched no studio_items.id (client media-library id, not a studio item) — falling back to this post's own studio item.`,
+      );
+    }
+  }
+
+  if (!lineageItem && createdStudioItemId) {
+    const byCreatedId = await db.select(lineageFields)
+      .from(studioItems)
+      .where(and(eq(studioItems.id, createdStudioItemId), eq(studioItems.accountId, accountId)))
+      .limit(1);
+    if (byCreatedId.length > 0) {
+      lineageItem = byCreatedId[0];
+    }
+  }
+
+  if (!lineageItem) {
+    console.warn(
+      `[PublishPipeline] PUBLISH_LINEAGE_MISSING | post=${postId} — no studio item resolvable ` +
+      `(mediaItemId=${mediaItemId || "NONE"} createdStudioItemId=${createdStudioItemId || "NONE"}). lineageSource=unplanned.`,
+    );
+    return UNPLANNED_LINEAGE;
+  }
+
+  let planId = lineageItem.planId;
+  const calendarEntryId = lineageItem.calendarEntryId;
+  let plannedSlot: string | null = null;
+
+  if (calendarEntryId) {
+    const entryRows = await db.select({
+      planId: calendarEntries.planId,
+      scheduledDate: calendarEntries.scheduledDate,
+      scheduledTime: calendarEntries.scheduledTime,
+    })
+      .from(calendarEntries)
+      .where(eq(calendarEntries.id, calendarEntryId))
+      .limit(1);
+
+    if (entryRows.length === 0) {
+      console.warn(
+        `[PublishPipeline] PUBLISH_LINEAGE_MISSING | post=${postId} studioItem=${lineageItem.id} ` +
+        `references calendarEntryId=${calendarEntryId} but no calendar_entries row exists — plannedSlot unknowable (kept null).`,
+      );
+    } else {
+      const entry = entryRows[0];
+      if (!planId) planId = entry.planId;
+      plannedSlot = `${entry.scheduledDate} ${entry.scheduledTime}`;
+    }
+  }
+
+  return {
+    planId,
+    calendarEntryId,
+    studioItemId: lineageItem.id,
+    hookStyle: lineageItem.hook,
+    contentAngle: lineageItem.contentAngle,
+    plannedSlot,
+    // Definition: 'planned' means the post occupied a concrete calendar slot.
+    // A studio item CAN carry a planId with no calendarEntryId (plan-inspired
+    // but never scheduled) — that is deliberately 'unplanned' WITH planId kept,
+    // so P-2 scoring can still attribute it to the plan without claiming it
+    // executed a scheduled slot.
+    lineageSource: calendarEntryId ? "planned" : "unplanned",
+  };
+}
 
 router.post("/api/studio/case", async (req, res) => {
   try {
@@ -98,13 +222,43 @@ router.post("/api/studio/case", async (req, res) => {
       postId
     );
 
+    // P-1: lineage resolved in the follow-up update (not the insert) because the
+    // studio item for this post only exists after the insert above. Failure here
+    // must never block the publish path — log loud, proceed as 'unplanned'.
+    let lineage: PublishLineage = UNPLANNED_LINEAGE;
+    try {
+      lineage = await resolvePublishLineage({
+        accountId,
+        postId,
+        mediaItemId: mediaItemId || null,
+        createdStudioItemId: studioItemId,
+      });
+    } catch (lineageErr: any) {
+      console.error(
+        `[PublishPipeline] PUBLISH_LINEAGE_MISSING | post=${postId} — lineage resolution threw: ` +
+        `"${lineageErr?.message ?? String(lineageErr)}". Post proceeds as lineageSource=unplanned.`,
+      );
+    }
+
     await db.update(publishedPosts)
       .set({
         caption: captionResult.winner.text,
         status: "scheduled",
+        planId: lineage.planId,
+        calendarEntryId: lineage.calendarEntryId,
+        studioItemId: lineage.studioItemId,
+        hookStyle: lineage.hookStyle,
+        contentAngle: lineage.contentAngle,
+        plannedSlot: lineage.plannedSlot,
+        lineageSource: lineage.lineageSource,
         updatedAt: new Date(),
       })
       .where(eq(publishedPosts.id, postId));
+
+    console.log(
+      `[PublishPipeline] PUBLISH_LINEAGE_RESOLVED | post=${postId} source=${lineage.lineageSource} ` +
+      `plan=${lineage.planId || "NONE"} calendarEntry=${lineage.calendarEntryId || "NONE"} studioItem=${lineage.studioItemId || "NONE"}`,
+    );
 
     if (studioItemId) {
       await db.update(studioItems)

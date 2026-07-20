@@ -23,6 +23,7 @@ import {
   getReplicaId,
 } from "./continuity";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
+import { startRevisitScheduler, stopRevisitScheduler } from "./revisit-scheduler";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { stopQueueProcessor as stopMiQueueProcessor } from "./market-intelligence-v3/fetch-orchestrator";
 import { runAllHealthChecks } from "./meta-token-manager";
@@ -1610,6 +1611,10 @@ function setupErrorHandler(app: express.Application) {
       log(`express server serving on port ${port}`);
       startAutonomousWorker();
       startPublishWorker();
+      // P-1 — per-post revisit scheduler (24h/72h/7d append-only performance
+      // snapshots). Lives outside autonomous-worker on purpose: revisits must
+      // run regardless of autopilot state. REVISIT_SCHEDULER_DISABLED=true to disable.
+      startRevisitScheduler();
       startSnapshotCleanupWorker();
       // Seal #13 / Track #1 — operational continuity heartbeat. Hourly
       // tick + idempotent runBoss invocation per campaign. First tick
@@ -1791,6 +1796,7 @@ function setupErrorHandler(app: express.Application) {
     log(`[Server] ${signal} received — shutting down gracefully...`);
     stopAutonomousWorker();
     await stopPublishWorker();
+    await stopRevisitScheduler();
     stopSnapshotCleanupWorker();
     await stopContinuityScheduler();
     await stopContinuitySupervisor();

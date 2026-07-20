@@ -29,6 +29,7 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { logger } from "../logger";
+import { _lastRevisitCycleCompletedAt } from "../revisit-scheduler";
 
 export interface ChainDescriptor {
   chainId: string;
@@ -68,8 +69,9 @@ async function maxTimestamp(query: ReturnType<typeof sql>): Promise<Date | null>
 }
 
 /**
- * The 10 scheduled producers. Order is stable for /healthz/continuity
- * and the chain_lag_seconds Prometheus label space.
+ * The 11 scheduled producers (10 from Seal #14 + revisit_scheduler from P-1).
+ * Order is stable for /healthz/continuity and the chain_lag_seconds
+ * Prometheus label space — append only, never reorder.
  */
 export function buildChainRegistry(): ChainDescriptor[] {
   return [
@@ -173,6 +175,16 @@ export function buildChainRegistry(): ChainDescriptor[] {
       description: "AEL/CEL re-enrichment lane",
       expectedIntervalMs: 24 * MS_PER_HOUR,
       introspect: null, // Wired in Track #3
+    },
+    {
+      chainId: "revisit_scheduler",
+      description: "30min per-post 24h/72h/7d outcome revisit capture (P-1)",
+      expectedIntervalMs: 30 * MS_PER_MIN,
+      // In-process signal: a cycle completes every tick even with zero due
+      // targets, so cadence is truthful per replica. Multi-replica dedupe of
+      // the capture itself is DB-level (unique partial index on
+      // performance_snapshots(post_id, checkpoint)).
+      introspect: async () => _lastRevisitCycleCompletedAt(),
     },
   ];
 }

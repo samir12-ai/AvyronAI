@@ -151,6 +151,11 @@ export const performanceSnapshots = pgTable("performance_snapshots", {
   campaignId: varchar("campaign_id"),
   accountId: varchar("account_id").default("default"),
   publishedAt: timestamp("published_at"),
+  // P-1 capture-point tag (migration 041): 'sync' | '24h' | '72h' | '7d' | 'adhoc'.
+  // Scheduled checkpoints are unique per (post_id, checkpoint) — append-only history.
+  checkpoint: text("checkpoint").notNull().default("sync"),
+  // P-1 (migration 041): nullable, NO default — null = not captured, 0 = Meta said 0.
+  engagedUsers: integer("engaged_users"),
   fetchedAt: timestamp("fetched_at").defaultNow(),
 });
 
@@ -689,6 +694,15 @@ export const publishedPosts = pgTable("published_posts", {
   publishMode: text("publish_mode").default("BLOCKED"),
   publishAttempts: integer("publish_attempts").default(0),
   lastPublishError: text("last_publish_error"),
+  // P-1 publish lineage (migration 041). lineage_source is an explicit
+  // classification, never inferred: 'planned' | 'unplanned' | 'legacy'.
+  planId: varchar("plan_id"),
+  calendarEntryId: varchar("calendar_entry_id"),
+  studioItemId: varchar("studio_item_id"),
+  hookStyle: text("hook_style"),
+  contentAngle: text("content_angle"),
+  plannedSlot: text("planned_slot"),
+  lineageSource: text("lineage_source").notNull().default("unplanned"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
