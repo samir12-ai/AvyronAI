@@ -22,6 +22,7 @@
  *   - Records every decision so the verdict is fully explainable from lineage.
  */
 import { acquire } from "../collector";
+import { runWatchtowerOrchestrator } from "../watchtower/orchestrator";
 import type { CollectorEnvelope } from "../collector/envelope";
 import { runUserLane, type UserLaneInput } from "../pipeline/lanes/user";
 import { runCompetitorLane, type CompetitorLaneInput } from "../pipeline/lanes/competitor";
@@ -158,6 +159,22 @@ export async function runBoss(input: BossRunInput): Promise<BossRunResult> {
           execution.laneRuns.push(result);
           if (result.status === "validated" && result.runId) {
             lastCompetitorRunId = result.runId;
+            // W-1 Watchtower orchestration — runs inline after each successful
+            // competitor lane. Failures are isolated: never propagate to boss run.
+            try {
+              await runWatchtowerOrchestrator({
+                accountId: input.accountId,
+                campaignId: input.campaignId,
+                competitorId: item.entityId,
+                acquisitionId: envelope.acquisition_id,
+                runId: result.runId,
+                isCacheHit: !!envelope.provenance.cache_hit,
+              });
+            } catch (err) {
+              console.error(
+                `[Boss] WATCHTOWER_ORCHESTRATOR_FAILED competitorId=${item.entityId} reason=${(err as Error).message}`,
+              );
+            }
           }
         }
       } catch (err) {

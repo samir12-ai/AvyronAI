@@ -2990,6 +2990,16 @@ export const pipelineChangeEvents = pgTable("pipeline_change_events", {
   evidence: text("evidence"),
   schemaVersion: text("schema_version").notNull().default("v1"),
   createdAt: timestamp("created_at").defaultNow(),
+  // W-1 Watchtower additions (migration 042).
+  // competitorId: links event to the specific ci_competitors row.
+  competitorId: varchar("competitor_id"),
+  // kind: W-1 classification (offer_language_change | posting_frequency_shift |
+  //   competitor_profile_change | phrase_saturation_change | engagement_pattern_shift |
+  //   dominance_shift | pricing_page_change). Null on pre-W-1 events.
+  kind: text("kind"),
+  // validatedAt: null = candidate (first observation); non-null = confirmed by a
+  //   second independent fresh fetch. Two-fetch gate per W-1 spec §D.
+  validatedAt: timestamp("validated_at"),
 });
 
 export type PipelineChangeEvent = typeof pipelineChangeEvents.$inferSelect;

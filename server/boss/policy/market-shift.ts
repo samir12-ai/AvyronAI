@@ -82,7 +82,7 @@
  */
 import { db } from "../../db";
 import { pipelineChangeEvents, pipelineRuns, pipelineSignals } from "@shared/schema";
-import { and, eq, gte, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import type { BossQuestionVerdict, Q2Verdict } from "../types";
 import { readCompetitorCorpus } from "../../pipeline/lanes/competitor/corpus";
 import type { CompetitorInterpretation } from "../../pipeline/lanes/competitor/interpret";
@@ -195,6 +195,13 @@ async function loadCompetitorSnapshot(
         and(
           inArray(pipelineChangeEvents.runId, runIds),
           gte(pipelineChangeEvents.createdAt, cutoff),
+          // W-1 fence: Watchtower rows (kind IS NOT NULL) are excluded so the
+          // two-fetch validation gate cannot be bypassed — an unconfirmed
+          // candidate must never count toward Q2 severity buckets. Q2 keeps
+          // reading only legacy detectChange rows (kind IS NULL), byte-identical
+          // to pre-W-1 behaviour. Confirmed Watchtower events feed a later
+          // Watchtower step, not Q2.
+          isNull(pipelineChangeEvents.kind),
         ),
       ),
     db

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { db } from "../db";
 import { pipelineSnapshots, pipelineSignals, pipelineChangeEvents, pipelineAcquisitions } from "@shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { evaluateWindowState } from "./eval-windows";
 import {
   readSnapshotsForRun,
@@ -343,7 +343,10 @@ router.get("/boss/runs/:id/lineage", async (req: Request, res: Response) => {
         const [snaps, sigs, changes] = await Promise.all([
           db.select({ id: pipelineSnapshots.id }).from(pipelineSnapshots).where(eq(pipelineSnapshots.runId, lr.runId)),
           db.select({ id: pipelineSignals.id }).from(pipelineSignals).where(eq(pipelineSignals.runId, lr.runId)),
-          db.select({ id: pipelineChangeEvents.id, severity: pipelineChangeEvents.severity }).from(pipelineChangeEvents).where(eq(pipelineChangeEvents.runId, lr.runId)),
+          // W-1 fence: kind IS NULL keeps this dashboard distribution aligned
+          // with what actually drives Q2 (legacy rows only) — unconfirmed
+          // Watchtower candidates must not inflate severity counts.
+          db.select({ id: pipelineChangeEvents.id, severity: pipelineChangeEvents.severity }).from(pipelineChangeEvents).where(and(eq(pipelineChangeEvents.runId, lr.runId), isNull(pipelineChangeEvents.kind))),
         ]);
         snapshotCount = snaps.length;
         signalCount = sigs.length;

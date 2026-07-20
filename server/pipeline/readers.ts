@@ -29,7 +29,7 @@ import {
   type PipelineChangeEvent,
   type PipelineAcquisition,
 } from "@shared/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   SnapshotContractSchema,
   SignalContractSchema,
@@ -397,7 +397,21 @@ export async function readChangeEventsForRun(
   runId: string,
   expected?: LineageExpectation,
 ): Promise<Array<{ row: PipelineChangeEvent; contract: ChangeEventContract }>> {
-  const rows = await db.select().from(pipelineChangeEvents).where(eq(pipelineChangeEvents.runId, runId));
+  const rows = await db
+    .select()
+    .from(pipelineChangeEvents)
+    .where(
+      and(
+        eq(pipelineChangeEvents.runId, runId),
+        // W-1 fence: Watchtower market-event rows (kind IS NOT NULL) use a
+        // structured evidence object and their own validation gate — they are
+        // not legacy detectChange contract rows. Excluding them here keeps the
+        // bridge/integrity readers byte-identical to pre-W-1 behaviour and
+        // prevents CONTRACT_SHAPE_INVALID rejections on runs that produced a
+        // Watchtower candidate.
+        isNull(pipelineChangeEvents.kind),
+      ),
+    );
   const out = [];
   for (const row of rows) {
     const contract = await changeEventRowToContract(row, { ...expected, runId });
@@ -418,6 +432,8 @@ export async function readChangeEventsForRunAndCampaign(
         eq(pipelineChangeEvents.runId, runId),
         eq(pipelineChangeEvents.accountId, expected.accountId),
         eq(pipelineChangeEvents.campaignId, expected.campaignId),
+        // W-1 fence: exclude Watchtower rows (see readChangeEventsForRun).
+        isNull(pipelineChangeEvents.kind),
       ),
     );
   const out = [];
