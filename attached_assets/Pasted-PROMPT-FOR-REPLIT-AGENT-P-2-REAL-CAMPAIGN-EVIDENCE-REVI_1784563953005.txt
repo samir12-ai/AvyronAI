@@ -1,0 +1,194 @@
+PROMPT FOR REPLIT AGENT — P-2 REAL CAMPAIGN EVIDENCE REVIEW
+
+P-2 implementation is reported complete. Before starting any new work, provide the exact real-campaign evidence showing what the Performance Loop currently concludes.
+
+Do not modify code unless you discover that the evidence cannot be produced because of a real implementation defect. This is an evidence and verification request first.
+
+Use the same real Avyron campaign and owned social account used during P-2 verification.
+
+## 1. Real campaign identity
+
+Print:
+
+* Campaign ID and name
+* Account ID
+* Owned social profile URL
+* Platform
+* Scrape run ID
+* Fresh scrape timestamp
+* Whether the data came from a fresh fetch, fallback source, or reused snapshot
+
+## 2. Real owned posts used
+
+Provide a table for every real post included in the latest scoring run:
+
+* External post ID
+* Post URL
+* Publish timestamp
+* Content type
+* Hook style
+* Content angle
+* Lineage status
+* Lineage matching method
+* Matching confidence
+* Snapshot ID used
+* Observation age / maturity
+* Views
+* Likes
+* Comments
+* Any other public metric used
+* Exclusion reason if the post was not scored
+
+Do not include fixture or synthetic posts.
+
+## 3. Baseline evidence
+
+For each platform and primary metric used, print:
+
+* Metric formula
+* Baseline window
+* Posts included in the baseline
+* Snapshot IDs
+* Baseline value
+* Baseline timestamp
+* Baseline/scorer version
+* Any posts excluded and why
+
+Manually recalculate one sample baseline and confirm that it matches the code result.
+
+## 4. Actual content scorecard
+
+Print the latest real scorecard for:
+
+* Hook styles
+* Content angles
+* Content types
+
+For every dimension value, show:
+
+* Sample size
+* Included post IDs
+* Primary metric
+* Dimension result
+* Baseline result
+* Absolute delta
+* Relative delta
+* Consistency
+* Outlier concentration
+* Confidence
+* Maturity
+* Confounders
+* Final verdict:
+
+  * WINNING
+  * NEUTRAL
+  * UNDERPERFORMING
+  * TESTING
+  * UNKNOWN
+
+Do not summarize only the strongest result. Show all dimension values that were evaluated.
+
+If no real dimension qualifies as WINNING or UNDERPERFORMING, state that clearly. `TESTING` or `UNKNOWN` is an acceptable and honest result.
+
+## 5. Weekly business outcomes
+
+Print the actual real weekly business input used:
+
+* Week
+* Leads
+* Qualified
+* Booked
+* Paying
+* Main source if supplied
+* Related campaign or post if supplied
+* Missing fields
+* Conversion rates
+* Historical weeks used as baseline
+* Weekly business verdict:
+
+  * WORKING
+  * DRIFTING
+  * UNKNOWN
+* Attribution confidence:
+
+  * DIRECT
+  * SUPPORTED
+  * CORRELATED
+  * UNKNOWN
+
+Do not present content as the cause of business outcomes unless attribution confidence is DIRECT.
+
+## 6. Combined relationship
+
+Print the exact combined code output before AI interpretation.
+
+It must clearly separate:
+
+* Proven content-performance result
+* Proven weekly business result
+* Observed correlation
+* Attribution confidence
+* Unknowns
+* Confounders
+
+Show the underlying score IDs, post IDs, snapshot IDs, and weekly outcome row IDs.
+
+## 7. Real AI interpretation
+
+Print the complete AI interpretation generated for this campaign, including:
+
+* What is proven
+* What is correlated
+* What is only a hypothesis
+* What remains unknown
+* Confounding factors
+* The specific next controlled experiment
+* Metric and checkpoint to evaluate
+* Business outcome to observe
+* Evidence references
+
+Then print:
+
+* Judge verdict
+* Judge reasons
+* Interchangeability result
+* Number of AI attempts
+* Whether any retry occurred
+
+## 8. Template-disease check
+
+Run the final interpretation through this practical check:
+
+“Could this exact recommendation be given unchanged to another unrelated business?”
+
+Answer YES or NO and explain using the actual campaign-specific details.
+
+If YES, treat the output as rejected and investigate why the existing judge accepted it.
+
+## 9. Honest current status
+
+Close with a status table:
+
+* Owned-page scraping: IMPLEMENTED / LIVE VERIFIED / FAILED
+* Lineage matching: IMPLEMENTED / LIVE VERIFIED / PARTIAL
+* Snapshot history: IMPLEMENTED / LIVE VERIFIED / PENDING MATURITY
+* Content scoring: IMPLEMENTED / LIVE VERIFIED / TESTING / UNKNOWN
+* Weekly outcome scoring: IMPLEMENTED / LIVE VERIFIED / UNKNOWN
+* AI interpretation: IMPLEMENTED / LIVE VERIFIED / REJECTED / UNAVAILABLE
+* Real winning hook: name it or say NONE PROVEN
+* Real winning angle: name it or say NONE PROVEN
+* Real winning content type: name it or say NONE PROVEN
+* Business verdict: state it
+* Attribution confidence: state it
+
+## Required conclusion
+
+End with exactly one of these conclusions:
+
+1. “P-2 is live and has sufficient real evidence to support the quoted verdicts.”
+
+2. “P-2 is live, but the current real evidence supports only TESTING or UNKNOWN states.”
+
+3. “P-2 implementation exists, but real production verification is incomplete because: [exact reason].”
+
+Do not claim that P-2 found a winner unless the printed real sample size, baseline, metrics, consistency, and evidence support it.
