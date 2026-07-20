@@ -19,6 +19,10 @@ description: How to typecheck and how to verify orchestrator/engine behaviour in
 
 - **Stale-log trap:** `/tmp/logs/<Workflow>_*.log` snapshots are written only by `refresh_all_logs` — after restarting a workflow, `ls -t /tmp/logs` returns the *previous* run's snapshot, which can look complete (markers present, plausible counts) and silently report old results. Either call `refresh_all_logs` first, or poll the file the workflow command itself tees to (e.g. `/tmp/tsc-baseline.txt`) and gate on its completion marker.
 
+# Clean-boot verification
+
+- In dev, `/healthz/continuity` reports several chains DEAD (autonomous_worker, publish_worker, snapshot_cleanup_worker, ci_shared_pool_refresh, meta_token_health_check, orchestrator_parity_replay). These heartbeats are derived from `audit_log` event queries that a quiet dev instance never writes (publish_worker lag was ~140 days) — pre-existing noise, not a boot regression. Judge boot health by the worker START log lines plus continuity_scheduler/continuity_supervisor/revisit_scheduler chain states and absence of zombie/STUCK/AUDIT_WRITE_FAILED tags.
+
 # Guard-test gotchas
 
 - Several suites pin **source shapes** (literal call-signature strings read via `readFileSync` on scraper files). Any intentional signature change must update those pin assertions in lockstep — a red pin test after a refactor is usually the pin, not the code.

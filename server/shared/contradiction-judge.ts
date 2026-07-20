@@ -77,6 +77,7 @@ const KIND_LABEL: Record<JudgeKind, string> = {
   positioning_claim: "POSITIONING CLAIM / TERRITORY",
   offer: "OFFER (outcome + mechanism)",
   channel_rationale: "CHANNEL RECOMMENDATION RATIONALE",
+  performance_interpretation: "PERFORMANCE INTERPRETATION (hypotheses + next experiment)",
 };
 
 function anchorReference(anchor: ProductAnchor | null): string {

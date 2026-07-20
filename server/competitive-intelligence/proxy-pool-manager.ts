@@ -340,6 +340,14 @@ export interface PoolFetchInit {
   timeoutMs?: number;
   /** T006 adaptive-backoff identity (see PoolFetchTarget). */
   target?: PoolFetchTarget;
+  /**
+   * P-2 fallback-chain fix (2026-07): epoch-ms start of the caller's scrape
+   * run. A cooldown whose triggering failure happened at/after this instant
+   * does NOT gate this fetch — a run's own first-method failure must not
+   * block that same run's fallback methods. Sticky-session fetches inherit
+   * this automatically from the session context.
+   */
+  backoffGraceSince?: number;
 }
 
 export interface StickySessionContext {
@@ -351,6 +359,12 @@ export interface StickySessionContext {
   session: ProxySession;
   attemptNumber: number;
   usedSessionIds: Set<string>;
+  /**
+   * Epoch ms when this scrape run's first context was built. Carried across
+   * session rotation so in-run fallback fetches are never gated by a cooldown
+   * the run itself just triggered (see PoolFetchInit.backoffGraceSince).
+   */
+  backoffGraceSince: number;
   /**
    * Transport for this sticky session. Routes through the Unlocker API
    * client. Throws ScrapingUnconfiguredError when BRIGHT_DATA_API_KEY/ZONE
@@ -392,9 +406,14 @@ async function executePoolFetch(url: string, init?: PoolFetchInit): Promise<Resp
   const target = init?.target;
   if (target) {
     await ensureBackoffHydrated(target.accountId, target.platform);
-    const gate = checkTargetCooling(target.accountId, target.platform, target.targetKey);
+    const gate = checkTargetCooling(target.accountId, target.platform, target.targetKey, init?.backoffGraceSince);
     if (gate.cooling) {
       throw new TargetBackoffActiveError(target.platform, target.targetKey, gate.retryAfterMs, gate.failureStreak);
+    }
+    if (gate.graceBypassed) {
+      console.log(
+        `[TargetBackoff] GATE_GRACE_BYPASS | account=${target.accountId} | platform=${target.platform} | target=${target.targetKey} | streak=${gate.failureStreak} | remainingMs=${gate.retryAfterMs} | in-run fallback allowed; cooldown still gates future runs`,
+      );
     }
 
     const limit = getPoolProfile(target.platform).concurrencyLimit;
@@ -463,9 +482,15 @@ export async function poolFetch(url: string, init?: PoolFetchInit): Promise<Resp
   return executePoolFetch(url, init);
 }
 
-function buildCtx(base: Omit<StickySessionContext, "poolFetch">): StickySessionContext {
+function buildCtx(
+  base: Omit<StickySessionContext, "poolFetch" | "backoffGraceSince"> & { backoffGraceSince?: number },
+): StickySessionContext {
+  // First context of a scrape run stamps the run start; rotation re-builds
+  // carry the original stamp so the whole run shares one grace window.
+  const backoffGraceSince = base.backoffGraceSince ?? Date.now();
   return {
     ...base,
+    backoffGraceSince,
     // T006 — sticky-session fetches automatically carry per-target backoff
     // identity (accountId + platform + competitorHash). An explicit
     // init.target from the caller wins over the derived one.
@@ -477,6 +502,7 @@ function buildCtx(base: Omit<StickySessionContext, "poolFetch">): StickySessionC
           platform: base.platform,
           targetKey: base.competitorHash,
         },
+        backoffGraceSince: init?.backoffGraceSince ?? backoffGraceSince,
       }),
   };
 }
@@ -552,6 +578,7 @@ export function rotateSessionOnBlock(ctx: StickySessionContext, blockClass: Bloc
     session: newSession,
     attemptNumber: ctx.attemptNumber + 1,
     usedSessionIds: newUsed,
+    backoffGraceSince: ctx.backoffGraceSince,
   });
 }
 

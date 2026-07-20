@@ -277,6 +277,21 @@ export function registerPerceptionRoutes(app: Express) {
         bookedCalls: Number(body.bookedCalls),
         paidActive: body.paidActive === true,
         submittedBy,
+        // P-2 Phase 4D — optional source fields. Absent stays NULL (never 0).
+        // NULL≠0 doctrine: only an integer number or all-digit string counts
+        // as "provided". Number(false)/Number(" ")/Number([]) all coerce to 0
+        // and would silently turn "not provided" into an explicit stored 0.
+        payingCustomers:
+          typeof body.payingCustomers === "number" && Number.isInteger(body.payingCustomers)
+            ? body.payingCustomers
+            : typeof body.payingCustomers === "string" && /^\d+$/.test(body.payingCustomers.trim())
+              ? Number(body.payingCustomers.trim())
+              : null,
+        leadSource: typeof body.leadSource === "string" ? body.leadSource : null,
+        relatedCampaign: typeof body.relatedCampaign === "string" ? body.relatedCampaign : null,
+        relatedPostUrl: typeof body.relatedPostUrl === "string" ? body.relatedPostUrl : null,
+        leadChannel: typeof body.leadChannel === "string" ? body.leadChannel : null,
+        attributionKnown: typeof body.attributionKnown === "boolean" ? body.attributionKnown : null,
       });
       return res.status(201).json({
         success: true,

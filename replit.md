@@ -12,7 +12,7 @@ Preferred communication style: Simple, everyday language.
 
 **Backend** — Express.js + Node.js + TypeScript, RESTful APIs. Dual AI engine (OpenAI GPT + Google Gemini). Autonomous engine with guardrails and a decision feedback loop.
 
-**Data Storage** — Client-side AsyncStorage. Server-side PostgreSQL with Drizzle ORM (schema floor enforced on boot, `REQUIRED_SCHEMA_VERSION = 41`).
+**Data Storage** — Client-side AsyncStorage. Server-side PostgreSQL with Drizzle ORM (schema floor enforced on boot, `REQUIRED_SCHEMA_VERSION = 45`).
 
 **Core principles** — Monorepo, TypeScript everywhere, platform abstraction (iOS/Android/Web), dynamic theming, Zod request validation, system-wide fail-safe enforcement, cross-engine isolation validation.
 
@@ -92,6 +92,16 @@ Beta-readiness package: [`.local/docs/beta-readiness/`](.local/docs/beta-readine
 ### performance_snapshots row contract (P-1)
 
 `checkpoint='sync'` rows carry full economics. `checkpoint IN ('24h','72h','7d')` rows carry engagement metrics only — economics are **explicit NULL by design** (null = not captured, 0 = platform said 0 — B1). Any reader aggregating this table MUST filter by checkpoint class. Idempotency is DB-level: unique partial index on `(post_id, checkpoint)` + `onConflictDoNothing()`.
+
+### Scraping-First Performance Loop (P-2)
+
+`server/performance-loop/` — owned-post tracking + lineage, deterministic content scoring (`owned_content_scores`), weekly business outcome scoring (`weekly_business_scores`), contracted AI interpretation. Migrations 044/045 (schema floor 45). Live rules:
+
+- **NULL≠zero everywhere**: missing metrics/rates stay NULL; rate/delta helpers return null on missing or zero denominators. Never coerce to 0.
+- **Verdicts are earned**: `businessVerdict=UNKNOWN` with `<2` prior baseline weeks; `attributionConfidence` strict-enum, never defaulted.
+- **Interpretation is judge-gated**: deterministic evidence judge (verdict preservation, invented-metric ban, causation guard); both attempts rejected → `PERFORMANCE_INTERPRETATION_UNAVAILABLE`, no template fallback.
+- **FAILED snapshots never satisfy freshness** — in BOTH the outer campaign gate (`needsUserChannelScrape`) and the inner per-profile gate (`snapshot_data::json->>'scrapeStatus' IS DISTINCT FROM 'FAILED'`). A failure never suppresses the retry.
+- **Backoff grace window**: one run stamps `graceSince` once and may retry a target that failed within its own window (fallback chain completes in-run); `cooldownUntil` is never mutated by the bypass — cross-run cooling stays intact.
 
 ---
 

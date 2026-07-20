@@ -567,7 +567,11 @@ router.get("/boss/runs/:id/explanation", async (req: Request, res: Response) => 
 // evaluateWindowState() at submit time. Client cannot pick the window.
 router.post("/user-truth", async (req: Request, res: Response) => {
   try {
-    const { campaignId, totalLeads, qualifiedLeads, bookedCalls, paidActive, accountId: bodyAccountId } = req.body ?? {};
+    const {
+      campaignId, totalLeads, qualifiedLeads, bookedCalls, paidActive, accountId: bodyAccountId,
+      // P-2 Phase 4D — optional source fields (never required).
+      payingCustomers, leadSource, relatedCampaign, relatedPostUrl, leadChannel, attributionKnown,
+    } = req.body ?? {};
     if (!campaignId) {
       return res.status(400).json({ error: "BadRequest", message: "campaignId required" });
     }
@@ -594,6 +598,12 @@ router.post("/user-truth", async (req: Request, res: Response) => {
       bookedCalls,
       paidActive,
       submittedBy,
+      payingCustomers: payingCustomers ?? null,
+      leadSource: leadSource ?? null,
+      relatedCampaign: relatedCampaign ?? null,
+      relatedPostUrl: relatedPostUrl ?? null,
+      leadChannel: leadChannel ?? null,
+      attributionKnown: typeof attributionKnown === "boolean" ? attributionKnown : null,
     });
 
     res.status(201).json({

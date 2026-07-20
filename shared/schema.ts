@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, jsonb, primaryKey, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, index, jsonb, primaryKey, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -2822,6 +2822,208 @@ export const userChannelSnapshots = pgTable("user_channel_snapshots", {
 export type UserPublicProfile = typeof userPublicProfiles.$inferSelect;
 export type UserChannelSnapshot = typeof userChannelSnapshots.$inferSelect;
 
+// =============================================
+// P-2: OWNED-PAGE POST TRACKING (scraping-first Performance Loop)
+// =============================================
+// Design locked by Phase 1 architect gate (2026-07-20):
+// - Dedicated tables — NOT ci_competitor_posts (competitor_id-scoped) and NOT
+//   performance_snapshots (Meta vocab + `.default(0)` fabricated-zero hazard).
+// - Metric columns NULLABLE with NO defaults. NULL = not observed on the
+//   public surface; 0 = the platform displayed 0. (NULL-never-zero.)
+
+/** Canonical lineage verdict for an owned post (D2/D3: strict enum, no fallback). */
+export const OWNED_POST_LINEAGE_STATES = [
+  "planned_direct",
+  "planned_matched",
+  "manual_matched",
+  "unplanned",
+  "ambiguous",
+  "unmatched",
+] as const;
+export type OwnedPostLineageState = (typeof OWNED_POST_LINEAGE_STATES)[number];
+
+/** Metric provenance registry (Phase 2D). */
+export const OWNED_METRIC_SOURCES = ["public_scrape", "manual_input", "authenticated_api"] as const;
+export type OwnedMetricSource = (typeof OWNED_METRIC_SOURCES)[number];
+
+/** Observation checkpoint bands. observation_age_hours carries the ACTUAL age. */
+export const OWNED_SNAPSHOT_CHECKPOINTS = ["discovery", "24h", "72h", "7d", "late", "unknown_age"] as const;
+export type OwnedSnapshotCheckpoint = (typeof OWNED_SNAPSHOT_CHECKPOINTS)[number];
+
+export const ownedPosts = pgTable("owned_posts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  ownedProfileId: varchar("owned_profile_id").notNull(),
+  platform: text("platform").notNull(),
+  postId: text("post_id").notNull(),
+  shortcode: text("shortcode"),
+  permalink: text("permalink"),
+  mediaType: text("media_type"),
+  caption: text("caption"),
+  hashtags: text("hashtags"),
+  hookText: text("hook_text"),
+  postedAt: timestamp("posted_at"),
+  firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at"),
+  lineageState: text("lineage_state").notNull().default("unmatched"),
+  matchMethod: text("match_method"),
+  matchConfidence: doublePrecision("match_confidence"),
+  matchedPublishedPostId: varchar("matched_published_post_id"),
+  matchedPlanId: varchar("matched_plan_id"),
+  matchedCalendarEntryId: varchar("matched_calendar_entry_id"),
+  matchedStudioItemId: varchar("matched_studio_item_id"),
+  lineageResolvedAt: timestamp("lineage_resolved_at"),
+  // Plan-derived dimensions — populated ONLY from a supported lineage match.
+  hookStyle: text("hook_style"),
+  contentAngle: text("content_angle"),
+  contentType: text("content_type"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  profilePostUnique: uniqueIndex("owned_posts_profile_postid_uidx").on(table.ownedProfileId, table.postId),
+  campaignIdx: index("owned_posts_campaign_idx").on(table.accountId, table.campaignId, table.platform),
+}));
+
+export const ownedPostSnapshots = pgTable("owned_post_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  ownedPostId: varchar("owned_post_id").notNull(),
+  checkpoint: text("checkpoint").notNull(),
+  observedAt: timestamp("observed_at").notNull(),
+  /** ACTUAL post age at observation (hours). NULL only when postedAt unknown. */
+  observationAgeHours: doublePrecision("observation_age_hours"),
+  // Public metrics: NULLABLE, NO DEFAULTS (NULL = not observed, 0 = platform said 0).
+  likes: integer("likes"),
+  comments: integer("comments"),
+  views: integer("views"),
+  followersAtObservation: integer("followers_at_observation"),
+  metricSource: text("metric_source").notNull().default("public_scrape"),
+  scrapeSnapshotId: varchar("scrape_snapshot_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  postCheckpointUnique: uniqueIndex("owned_post_snapshots_post_checkpoint_uidx")
+    .on(table.ownedPostId, table.checkpoint, table.metricSource)
+    .where(sql`${table.checkpoint} IN ('24h', '72h', '7d')`),
+  postIdx: index("owned_post_snapshots_post_idx").on(table.ownedPostId, table.observedAt),
+}));
+
+export type OwnedPost = typeof ownedPosts.$inferSelect;
+export type OwnedPostSnapshot = typeof ownedPostSnapshots.$inferSelect;
+
+// =============================================
+// P-2 Phase 3 + 4 — Deterministic scoring truth layers (migration 045).
+// Append-only score runs: a re-score inserts new rows keyed by scoreRunId;
+// previous runs stay queryable (Check 10). All derived columns NULLABLE with
+// no defaults — NULL = not computable, 0 = a real zero.
+// =============================================
+
+/** Phase 3 scoring dimensions (only plan-derived lineage dimensions). */
+export const CONTENT_SCORE_DIMENSIONS = ["hook_style", "content_angle", "content_type"] as const;
+export type ContentScoreDimension = (typeof CONTENT_SCORE_DIMENSIONS)[number];
+
+/** Phase 3 checkpoint maturity states (one per scored post cohort). */
+export const CONTENT_SCORE_MATURITIES = [
+  "MATURE_7D",
+  "PROVISIONAL_72H",
+  "EARLY_24H",
+  "OBSERVED_LATE",
+  "IMMATURE",
+  "UNKNOWN",
+] as const;
+export type ContentScoreMaturity = (typeof CONTENT_SCORE_MATURITIES)[number];
+
+/** Phase 3 content verdicts (D3: strict enum). */
+export const CONTENT_SCORE_VERDICTS = ["WINNING", "NEUTRAL", "UNDERPERFORMING", "TESTING", "UNKNOWN"] as const;
+export type ContentScoreVerdict = (typeof CONTENT_SCORE_VERDICTS)[number];
+
+/** Phase 4 weekly business verdicts (D3: strict enum). */
+export const BUSINESS_VERDICTS = ["WORKING", "DRIFTING", "UNKNOWN"] as const;
+export type BusinessVerdict = (typeof BUSINESS_VERDICTS)[number];
+
+/** Phase 4 attribution confidence levels (D3: strict enum). */
+export const ATTRIBUTION_CONFIDENCES = ["DIRECT", "SUPPORTED", "CORRELATED", "UNKNOWN"] as const;
+export type AttributionConfidence = (typeof ATTRIBUTION_CONFIDENCES)[number];
+
+export const ownedContentScores = pgTable("owned_content_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  platform: text("platform").notNull(),
+  scoreRunId: varchar("score_run_id").notNull(),
+  dimension: text("dimension").notNull(),
+  dimensionValue: text("dimension_value").notNull(),
+  sampleSize: integer("sample_size").notNull(),
+  includedPostIds: text("included_post_ids").notNull(),
+  snapshotIds: text("snapshot_ids").notNull(),
+  maturity: text("maturity").notNull(),
+  primaryMetric: text("primary_metric"),
+  baselineValue: doublePrecision("baseline_value"),
+  baselineSampleSize: integer("baseline_sample_size"),
+  baselineWindowDays: integer("baseline_window_days"),
+  baselineVersion: text("baseline_version"),
+  measuredValue: doublePrecision("measured_value"),
+  absoluteDelta: doublePrecision("absolute_delta"),
+  relativeDelta: doublePrecision("relative_delta"),
+  consistency: doublePrecision("consistency"),
+  outlierConcentration: doublePrecision("outlier_concentration"),
+  confounders: text("confounders").notNull().default("[]"),
+  confidence: doublePrecision("confidence"),
+  verdict: text("verdict").notNull(),
+  scorerVersion: text("scorer_version").notNull(),
+  scoredAt: timestamp("scored_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  campaignIdx: index("owned_content_scores_campaign_idx")
+    .on(table.accountId, table.campaignId, table.platform, table.dimension, table.scoredAt),
+  runIdx: index("owned_content_scores_run_idx").on(table.scoreRunId),
+}));
+
+export const weeklyBusinessScores = pgTable("weekly_business_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  scoreRunId: varchar("score_run_id").notNull(),
+  windowId: varchar("window_id").notNull(),
+  truthId: varchar("truth_id"),
+  windowIndex: integer("window_index").notNull(),
+  planId: varchar("plan_id"),
+  windowStart: timestamp("window_start").notNull(),
+  windowEnd: timestamp("window_end").notNull(),
+  leads: integer("leads"),
+  qualified: integer("qualified"),
+  booked: integer("booked"),
+  /** Count from user input. NEVER derived from the paid_active boolean (D4). */
+  payingCustomers: integer("paying_customers"),
+  paidActive: boolean("paid_active"),
+  leadToQualifiedRate: doublePrecision("lead_to_qualified_rate"),
+  qualifiedToBookedRate: doublePrecision("qualified_to_booked_rate"),
+  bookedToPayingRate: doublePrecision("booked_to_paying_rate"),
+  leadToPayingRate: doublePrecision("lead_to_paying_rate"),
+  wowDeltaLeads: doublePrecision("wow_delta_leads"),
+  wowDeltaQualified: doublePrecision("wow_delta_qualified"),
+  wowDeltaBooked: doublePrecision("wow_delta_booked"),
+  wowDeltaPaying: doublePrecision("wow_delta_paying"),
+  baseline: text("baseline"),
+  baselineWeeks: integer("baseline_weeks"),
+  businessVerdict: text("business_verdict").notNull(),
+  verdictReason: text("verdict_reason"),
+  attributionConfidence: text("attribution_confidence").notNull(),
+  attributionBasis: text("attribution_basis"),
+  missingFields: text("missing_fields").notNull().default("[]"),
+  scorerVersion: text("scorer_version").notNull(),
+  scoredAt: timestamp("scored_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  campaignIdx: index("weekly_business_scores_campaign_idx")
+    .on(table.accountId, table.campaignId, table.windowIndex, table.scoredAt),
+  windowIdx: index("weekly_business_scores_window_idx").on(table.windowId),
+}));
+
+export type OwnedContentScore = typeof ownedContentScores.$inferSelect;
+export type WeeklyBusinessScore = typeof weeklyBusinessScores.$inferSelect;
+
 export const buildPlanSnapshots = pgTable("build_plan_snapshots", {
   id: varchar("id")
     .primaryKey()
@@ -3138,6 +3340,15 @@ export const pipelineUserTruth = pgTable("pipeline_user_truth", {
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
   submittedBy: varchar("submitted_by"),                 // admin user id from JWT (audit trail)
   wasLate: boolean("was_late").notNull().default(false),
+  // P-2 Phase 4D (migration 045) — optional minimal source input. ALL nullable,
+  // never required for submission. paying_customers is a COUNT; scorers must
+  // NEVER derive it from the paid_active boolean (D4).
+  payingCustomers: integer("paying_customers"),
+  leadSource: text("lead_source"),
+  relatedCampaign: text("related_campaign"),
+  relatedPostUrl: text("related_post_url"),
+  leadChannel: text("lead_channel"),
+  attributionKnown: boolean("attribution_known"),       // tri-state: NULL = unanswered
   supersededAt: timestamp("superseded_at"),
   supersededBy: varchar("superseded_by"),               // FK to a newer pipeline_user_truth.id
   createdAt: timestamp("created_at").defaultNow(),

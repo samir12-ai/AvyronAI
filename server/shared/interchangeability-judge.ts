@@ -44,6 +44,7 @@ export const JudgeKindSchema = z.enum([
   "positioning_claim",
   "offer",
   "channel_rationale",
+  "performance_interpretation",
 ]);
 export type JudgeKind = z.infer<typeof JudgeKindSchema>;
 
@@ -104,6 +105,17 @@ const KIND_TEST: Record<JudgeKind, { label: string; test: string; examples: stri
       "Could this channel reasoning be given, UNCHANGED, for any generic competitor in the category? Best-practice reasoning like \"Instagram because it has high engagement\" or \"email because it converts\" is interchangeable and FAILS. A valid rationale explains why THIS specific segment is reachable on THIS channel for THIS product.",
     examples:
       'Generic (REJECT): "run Meta ads because they reach a broad audience". Specific (ACCEPT): reasoning tied to where this exact segment\'s attention actually is.',
+  },
+  // P-2 Phase 5D — performance interpretation (hypotheses + next experiment +
+  // campaign-specificity narrative). The judge tests BOTH interchangeability
+  // AND evidence honesty: generic marketing advice, template-shaped
+  // recommendations, and correlation presented as causation all FAIL.
+  performance_interpretation: {
+    label: "PERFORMANCE INTERPRETATION (hypotheses, next experiment, campaign specificity)",
+    test:
+      "Reject if ANY of these hold: (1) the hypotheses or recommended experiment could be pasted UNCHANGED into a generic competitor's performance report — best-practice advice like \"post more consistently\", \"use stronger hooks\", \"engage your audience\" is interchangeable and FAILS; (2) the text presents a correlation or hypothesis as a proven causal result (e.g. claims content CAUSED sales/customers without the text itself flagging attribution as confirmed); (3) the recommendation reads like a fixed template with the campaign's nouns swapped in. A valid interpretation names the actual posts, hooks, angles, metrics, and product mechanism, and its experiment changes exactly one named variable for a stated, evidence-tied reason.",
+    examples:
+      'Generic (REJECT): "test different hook styles to see what resonates with your audience". Specific (ACCEPT): an experiment that names the exact hook/angle value being varied, the constants preserved, and the evidence that motivated it.',
   },
 };
 

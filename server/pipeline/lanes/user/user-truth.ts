@@ -29,6 +29,17 @@ export interface AcceptUserTruthInput {
   bookedCalls: number;
   paidActive: boolean;
   submittedBy?: string;
+  /**
+   * P-2 Phase 4D — optional minimal source input. All optional, never required
+   * for weekly submission. payingCustomers is a COUNT; it is NEVER derived
+   * from paidActive (D4).
+   */
+  payingCustomers?: number | null;
+  leadSource?: string | null;
+  relatedCampaign?: string | null;
+  relatedPostUrl?: string | null;
+  leadChannel?: string | null;
+  attributionKnown?: boolean | null;
   /** Optional override for testing time-dependent behavior; defaults to new Date(). */
   now?: Date;
 }
@@ -59,6 +70,27 @@ export async function acceptUserTruth(input: AcceptUserTruthInput): Promise<Acce
       "qualifiedLeads must be <= totalLeads and bookedCalls must be <= qualifiedLeads",
       { totalLeads, qualifiedLeads, bookedCalls });
   }
+
+  // P-2 Phase 4D — optional source fields. Absent/NULL stays NULL (never 0).
+  const payingCustomers =
+    input.payingCustomers === undefined || input.payingCustomers === null
+      ? null
+      : assertInteger("payingCustomers", input.payingCustomers);
+  if (input.attributionKnown !== undefined && input.attributionKnown !== null && typeof input.attributionKnown !== "boolean") {
+    throw new PipelineValidationError("INVALID_FIELD", "attributionKnown must be a boolean when provided", { field: "attributionKnown", value: input.attributionKnown });
+  }
+  const optionalText = (name: string, v: string | null | undefined): string | null => {
+    if (v === undefined || v === null) return null;
+    if (typeof v !== "string" || v.length > 2000) {
+      throw new PipelineValidationError("INVALID_FIELD", `${name} must be a string (max 2000 chars) when provided`, { field: name });
+    }
+    const trimmed = v.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+  const leadSource = optionalText("leadSource", input.leadSource);
+  const relatedCampaign = optionalText("relatedCampaign", input.relatedCampaign);
+  const relatedPostUrl = optionalText("relatedPostUrl", input.relatedPostUrl);
+  const leadChannel = optionalText("leadChannel", input.leadChannel);
 
   // Look up the window and assert it belongs to (account, campaign).
   const wRows = await db
@@ -126,6 +158,12 @@ export async function acceptUserTruth(input: AcceptUserTruthInput): Promise<Acce
         submittedAt: now,
         submittedBy: input.submittedBy ?? null,
         wasLate,
+        payingCustomers,
+        leadSource,
+        relatedCampaign,
+        relatedPostUrl,
+        leadChannel,
+        attributionKnown: input.attributionKnown ?? null,
       })
       .returning();
     const truth = inserted[0];

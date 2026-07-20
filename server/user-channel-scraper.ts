@@ -10,7 +10,7 @@
 
 import { db } from "./db";
 import { userPublicProfiles, userChannelSnapshots } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { scrapeWebsite } from "./market-intelligence-v3/website-scraper";
 import {
   acquireStickySession,
@@ -237,12 +237,25 @@ function computeDelta(
 
 // ── Instagram scraper (with proxy pool enforcement) ───────────────────────────
 
-async function scrapeInstagramChannel(
+/**
+ * P-2: returns the snapshot AND the raw per-post scrape results so the
+ * owned-post tracker can persist post-level records (previously discarded).
+ */
+interface InstagramChannelScrapeOutput {
+  snapshot: UserChannelSnapshotData;
+  posts: import("./competitive-intelligence/profile-scraper").ScrapedPost[];
+  followers: number | null;
+}
+
+// Exported for the P-2 Phase 6 verification harness ONLY (dev acceptance
+// checks need a genuinely fresh fetch without waiting out the 24-48h pacing
+// gate). Production callers MUST go through scrapeUserChannels.
+export async function scrapeInstagramChannel(
   accountId: string,
   campaignId: string,
   handle: string,
   isFirstScrape: boolean,
-): Promise<UserChannelSnapshotData> {
+): Promise<InstagramChannelScrapeOutput> {
   const { scrapeInstagramProfile } = await import("./competitive-intelligence/profile-scraper");
   const maxPosts = isFirstScrape ? INITIAL_SCRAPE_MAX_POSTS : INCREMENTAL_SCRAPE_MAX_POSTS;
   const scrapeMode: "INITIAL" | "INCREMENTAL" = isFirstScrape ? "INITIAL" : "INCREMENTAL";
@@ -325,17 +338,21 @@ async function scrapeInstagramChannel(
 
   if (!result || (!result.success && result.posts.length === 0)) {
     return {
-      platform: "instagram",
-      handle,
-      url: `https://www.instagram.com/${handle}/`,
-      postCount: 0,
+      snapshot: {
+        platform: "instagram",
+        handle,
+        url: `https://www.instagram.com/${handle}/`,
+        postCount: 0,
+        followers: result?.followers ?? null,
+        recentPostTypes: {},
+        avgEngagement: null,
+        scrapedAt: new Date().toISOString(),
+        scrapeStatus: "FAILED",
+        scrapeError: result?.warnings.join("; ") || "No data retrieved",
+        scrapeMode,
+      },
+      posts: [],
       followers: result?.followers ?? null,
-      recentPostTypes: {},
-      avgEngagement: null,
-      scrapedAt: new Date().toISOString(),
-      scrapeStatus: "FAILED",
-      scrapeError: result?.warnings.join("; ") || "No data retrieved",
-      scrapeMode,
     };
   }
 
@@ -370,17 +387,21 @@ async function scrapeInstagramChannel(
   }
 
   return {
-    platform: "instagram",
-    handle,
-    url: `https://www.instagram.com/${handle}/`,
-    postCount: result.posts.length,
+    snapshot: {
+      platform: "instagram",
+      handle,
+      url: `https://www.instagram.com/${handle}/`,
+      postCount: result.posts.length,
+      followers: result.followers,
+      recentPostTypes: typeMix,
+      avgEngagement,
+      engagementByType,
+      scrapedAt: new Date().toISOString(),
+      scrapeStatus: result.success ? "SUCCESS" : "PARTIAL",
+      scrapeMode,
+    },
+    posts: result.posts,
     followers: result.followers,
-    recentPostTypes: typeMix,
-    avgEngagement,
-    engagementByType,
-    scrapedAt: new Date().toISOString(),
-    scrapeStatus: result.success ? "SUCCESS" : "PARTIAL",
-    scrapeMode,
   };
 }
 
@@ -474,12 +495,28 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
 
   console.log(`[UserChannelScraper] Scraping ${profiles.length} user channel(s) for account=${accountId}`);
 
+  const { extractHandleFromUrl } = await import("./competitive-intelligence/profile-scraper");
+
   for (const profile of profiles) {
     try {
+      // P-2 input normalization (Phase 1 audit finding): some stored handles
+      // contain a full profile URL (e.g. "https://www.instagram.com/x/").
+      // Normalize to a bare handle before scraping, keying, and URL building —
+      // URL-based lineage matching depends on clean identity.
+      const normalizedHandle: string | null =
+        profile.platform === "instagram" && profile.handle
+          ? extractHandleFromUrl(profile.handle)
+          : profile.handle;
+      if (profile.handle && normalizedHandle !== profile.handle) {
+        console.log(
+          `[UserChannelScraper] Handle normalized: "${profile.handle}" → "${normalizedHandle}" (profile=${profile.id})`,
+        );
+      }
+
       // Channel identity key: handle for Instagram, URL for website
       // Using both platform + channelKey prevents stale snapshots from a different handle/URL
       // from suppressing re-scrapes after the user updates their channel config.
-      const channelKey: string | null = profile.handle ?? profile.url ?? null;
+      const channelKey: string | null = normalizedHandle ?? profile.url ?? null;
 
       // Determine first-scrape vs incremental for this exact channel identity
       const previousSnapshot = await getPreviousSnapshot(accountId, campaignId, profile.platform, channelKey);
@@ -502,6 +539,11 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
           eq(userChannelSnapshots.accountId, accountId),
           eq(userChannelSnapshots.campaignId, campaignId),
           eq(userChannelSnapshots.platform, profile.platform),
+          // P-2 (INVARIANT-RETRY alignment, 2026-07): a FAILED snapshot MUST
+          // NOT satisfy the freshness window — failures never suppress the
+          // retry. Failure pacing is the target-backoff cooldown's job;
+          // freshness reuse is exclusively for successful snapshots.
+          sql`(${userChannelSnapshots.snapshotData}::json->>'scrapeStatus') IS DISTINCT FROM 'FAILED'`,
         ];
         if (channelKey) conditions.push(eq(userChannelSnapshots.handle, channelKey));
         const latestForProfile = await db
@@ -513,7 +555,10 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
         if (latestForProfile.length > 0 && latestForProfile[0].scrapedAt) {
           const scrapeIntervalCutoff = Date.now() - intervalMs;
           if (latestForProfile[0].scrapedAt.getTime() >= scrapeIntervalCutoff) {
-            console.log(`[UserChannelScraper] Skipping fresh profile: ${profile.platform}:${channelKey ?? "unknown"} (interval=${Math.round(intervalMs / 3600000)}h)`);
+            // P-2: reused snapshots must be visibly distinct from fresh fetches.
+            console.log(
+              `[UserChannelScraper] OWNED_ACCOUNT_SNAPSHOT_REUSED target=owned_account platform=${profile.platform} channel=${channelKey ?? "unknown"} snapshotAgeH=${((Date.now() - latestForProfile[0].scrapedAt.getTime()) / 3600000).toFixed(1)} interval=${Math.round(intervalMs / 3600000)}h`,
+            );
             continue;
           }
         }
@@ -521,9 +566,14 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
       const isFirstScrape = previousSnapshot === null;
 
       let snapshot: UserChannelSnapshotData;
+      let scrapedPosts: import("./competitive-intelligence/profile-scraper").ScrapedPost[] = [];
+      let scrapedFollowers: number | null = null;
 
-      if (profile.platform === "instagram" && profile.handle) {
-        snapshot = await scrapeInstagramChannel(accountId, campaignId, profile.handle, isFirstScrape);
+      if (profile.platform === "instagram" && normalizedHandle) {
+        const igResult = await scrapeInstagramChannel(accountId, campaignId, normalizedHandle, isFirstScrape);
+        snapshot = igResult.snapshot;
+        scrapedPosts = igResult.posts;
+        scrapedFollowers = igResult.followers;
       } else if (profile.platform === "website" && profile.url) {
         snapshot = await scrapeWebsiteChannel(profile.url, isFirstScrape, accountId);
       } else {
@@ -531,11 +581,18 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
         continue;
       }
 
+      // P-2: owned-account scrape failures must be loud and classified.
+      if (snapshot.scrapeStatus === "FAILED") {
+        console.error(
+          `[UserChannelScraper] OWNED_ACCOUNT_SCRAPE_FAILED target=owned_account platform=${profile.platform} channel=${channelKey ?? "unknown"} error=${snapshot.scrapeError ?? "unknown"}`,
+        );
+      }
+
       const delta = computeDelta(snapshot, previousSnapshot);
 
       // ── DB write only — no engine calls ────────────────────────────────
       // Store channelKey (handle for Instagram, URL for website) so queries can key by channel identity.
-      await db.insert(userChannelSnapshots).values({
+      const snapshotRows = await db.insert(userChannelSnapshots).values({
         accountId,
         campaignId,
         platform: profile.platform,
@@ -543,13 +600,35 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
         snapshotData: JSON.stringify(snapshot),
         deltaFromPrevious: JSON.stringify(delta),
         scrapedAt: new Date(),
-      });
+      }).returning({ id: userChannelSnapshots.id });
 
       console.log(
-        `[UserChannelScraper] Snapshot saved: platform=${profile.platform} handle=${profile.handle || profile.url} ` +
+        `[UserChannelScraper] Snapshot saved: platform=${profile.platform} handle=${channelKey || profile.url} ` +
         `mode=${snapshot.scrapeMode} posts=${snapshot.postCount} status=${snapshot.scrapeStatus} ` +
         `newPosts=${delta.newPostsSinceLastSnapshot} engDelta=${delta.avgEngagementDelta}`
       );
+
+      // ── P-2: persist per-post records + lineage (DB writes only) ───────
+      if (profile.platform === "instagram" && scrapedPosts.length > 0) {
+        const { recordOwnedPostObservations } = await import("./performance-loop/owned-post-tracker");
+        const { resolveOwnedPostLineage } = await import("./performance-loop/lineage-resolver");
+        const tracked = await recordOwnedPostObservations({
+          accountId,
+          campaignId,
+          ownedProfileId: profile.id,
+          platform: "instagram",
+          posts: scrapedPosts,
+          followers: scrapedFollowers,
+          scrapeSnapshotId: snapshotRows[0]?.id ?? null,
+        });
+        if (tracked.ownedPostIds.length > 0) {
+          const lineage = await resolveOwnedPostLineage(accountId, campaignId, tracked.ownedPostIds);
+          console.log(
+            `[UserChannelScraper] Lineage resolved for ${lineage.processed} owned post(s): ` +
+            Object.entries(lineage.byState).filter(([, n]) => n > 0).map(([s, n]) => `${s}=${n}`).join(" "),
+          );
+        }
+      }
     } catch (err: any) {
       console.error(`[UserChannelScraper] Failed for profile ${profile.id}:`, err.message);
     }
@@ -595,6 +674,9 @@ export async function needsUserChannelScrape(accountId: string, campaignId: stri
       eq(userChannelSnapshots.accountId, accountId),
       eq(userChannelSnapshots.campaignId, campaignId),
       eq(userChannelSnapshots.platform, profile.platform),
+      // FAILED snapshots MUST NOT satisfy freshness — a failure never
+      // suppresses the retry (same doctrine as the inner freshness gate).
+      sql`(${userChannelSnapshots.snapshotData}::json->>'scrapeStatus') IS DISTINCT FROM 'FAILED'`,
     ];
     if (channelKey) conditions.push(eq(userChannelSnapshots.handle, channelKey));
 

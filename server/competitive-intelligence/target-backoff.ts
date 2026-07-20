@@ -62,13 +62,29 @@ export interface CoolingCheck {
   cooling: boolean;
   retryAfterMs: number;
   failureStreak: number;
+  /**
+   * True when a live cooldown was bypassed because the failure that set it
+   * occurred during the caller's own scrape run (graceSince). The cooldown
+   * itself is untouched — it still gates runs that start later.
+   */
+  graceBypassed?: boolean;
 }
 
-/** Lazy-expiry read: a past-due cooldownUntil reads as not-cooling. */
+/**
+ * Lazy-expiry read: a past-due cooldownUntil reads as not-cooling.
+ *
+ * `graceSince` (P-2 fallback-chain fix, 2026-07): when provided, a cooldown
+ * whose triggering failure happened AT OR AFTER this timestamp does not gate
+ * the caller. Rationale: a scrape run's own first-method transport failure
+ * must not block that same run's fallback methods (WEB_API → HTML_PARSE),
+ * otherwise the fallback chain is unreachable exactly when it is needed.
+ * Runs that start after the failure still see the full cooldown.
+ */
 export function checkTargetCooling(
   accountId: string,
   platform: ScrapePlatform,
   targetKey: string,
+  graceSince?: number,
 ): CoolingCheck {
   const state = targetStates.get(stateKey(accountId, platform, targetKey));
   if (!state || state.cooldownUntil === null) {
@@ -80,6 +96,18 @@ export function checkTargetCooling(
     // failure escalates instead of restarting the curve.
     state.cooldownUntil = null;
     return { cooling: false, retryAfterMs: 0, failureStreak: state.failureStreak };
+  }
+  if (
+    graceSince !== undefined &&
+    state.lastFailureAt !== null &&
+    state.lastFailureAt >= graceSince
+  ) {
+    return {
+      cooling: false,
+      retryAfterMs: remaining,
+      failureStreak: state.failureStreak,
+      graceBypassed: true,
+    };
   }
   return { cooling: true, retryAfterMs: remaining, failureStreak: state.failureStreak };
 }
