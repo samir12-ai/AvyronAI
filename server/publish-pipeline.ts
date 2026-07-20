@@ -53,13 +53,15 @@ export async function resolvePublishLineage(params: {
     calendarEntryId: studioItems.calendarEntryId,
     hook: studioItems.hook,
     contentAngle: studioItems.contentAngle,
+    campaignId: studioItems.campaignId,
+    contentType: studioItems.contentType,
   };
 
   // Preferred join: mediaItemId that IS a studio_items.id — this is the join
   // the outcome tracker was built around. Historically the client sends a
   // media-library id here (0 matches in prod), so the miss is logged loudly
   // and we fall back to the studio item created for this post.
-  let lineageItem: { id: string; planId: string | null; calendarEntryId: string | null; hook: string | null; contentAngle: string | null } | null = null;
+  let lineageItem: { id: string; planId: string | null; calendarEntryId: string | null; hook: string | null; contentAngle: string | null; campaignId: string | null; contentType: string | null } | null = null;
 
   if (mediaItemId) {
     const byMediaId = await db.select(lineageFields)
@@ -120,7 +122,20 @@ export async function resolvePublishLineage(params: {
     }
   }
 
-  return {
+  // P-1 closure — non-negotiable minimum (B4 explicit classification):
+  // campaignId + contentType on the resolved studio item are the minimum for a
+  // usable lineage. Either null → treat as full MISSING (existing behavior:
+  // loud log, post proceeds as 'unplanned'; never blocks).
+  if (!lineageItem.campaignId || !lineageItem.contentType) {
+    console.warn(
+      `[PublishPipeline] PUBLISH_LINEAGE_MISSING | post=${postId} studioItem=${lineageItem.id} ` +
+      `reason=minimum_lineage_fields_null (campaignId=${lineageItem.campaignId || "NULL"} contentType=${lineageItem.contentType || "NULL"}) ` +
+      `— treated as full missing. lineageSource=unplanned.`,
+    );
+    return UNPLANNED_LINEAGE;
+  }
+
+  const lineage: PublishLineage = {
     planId,
     calendarEntryId,
     studioItemId: lineageItem.id,
@@ -134,6 +149,24 @@ export async function resolvePublishLineage(params: {
     // executed a scheduled slot.
     lineageSource: calendarEntryId ? "planned" : "unplanned",
   };
+
+  // P-1 closure — partial-lineage visibility (B2 visibility over silence):
+  // lineage resolved and the minimum is present, but scoring-critical fields
+  // are null, so P-2 scoring for those dimensions will be unavailable later.
+  // Scoring-critical set in THIS schema: hookStyle, contentAngle, plannedSlot,
+  // planId (plan attribution). Additive observability ONLY — loud log, never
+  // blocks the publish, never retries.
+  const nullCriticalFields = (["hookStyle", "contentAngle", "plannedSlot", "planId"] as const)
+    .filter((field) => lineage[field] === null);
+  if (nullCriticalFields.length > 0) {
+    console.warn(
+      `[PublishPipeline] PUBLISH_LINEAGE_PARTIAL | post=${postId} studioItem=${lineageItem.id} ` +
+      `reason=scoring_critical_fields_null nullFields=${nullCriticalFields.join(",")} ` +
+      `— lineage present but partial; publish proceeds normally, later scoring on these dimensions unavailable.`,
+    );
+  }
+
+  return lineage;
 }
 
 router.post("/api/studio/case", async (req, res) => {

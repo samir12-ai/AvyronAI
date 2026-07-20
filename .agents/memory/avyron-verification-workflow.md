@@ -17,6 +17,8 @@ description: How to typecheck and how to verify orchestrator/engine behaviour in
 
 - **Any tsx harness that imports the server graph MUST end with an explicit `process.exit(0)`** (and `exit(1)` on failure). Importing `server/**` transitively opens background handles (pg pool, schedulers, timers) that keep the event loop alive, so the harness never exits on its own; the 120s tool timeout then SIGKILLs it and the fully-buffered stdout is lost — the symptom is a run with **"no output" and exit code -1 even though every check actually passed**. If you see that, add the explicit exit, do not assume the harness hung. For pure-function-only harnesses this is unnecessary, but it is harmless and worth defaulting to.
 
+- **Stale-log trap:** `/tmp/logs/<Workflow>_*.log` snapshots are written only by `refresh_all_logs` — after restarting a workflow, `ls -t /tmp/logs` returns the *previous* run's snapshot, which can look complete (markers present, plausible counts) and silently report old results. Either call `refresh_all_logs` first, or poll the file the workflow command itself tees to (e.g. `/tmp/tsc-baseline.txt`) and gate on its completion marker.
+
 # Guard-test gotchas
 
 - Several suites pin **source shapes** (literal call-signature strings read via `readFileSync` on scraper files). Any intentional signature change must update those pin assertions in lockstep — a red pin test after a refactor is usually the pin, not the code.
