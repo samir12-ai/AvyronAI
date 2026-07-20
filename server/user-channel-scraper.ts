@@ -280,7 +280,7 @@ export async function scrapeInstagramChannel(
     const startMs = Date.now();
 
     // ── First attempt ─────────────────────────────────────────────────────
-    result = await scrapeInstagramProfile(handle, proxyCtx ?? undefined, maxPosts, accountId);
+    result = await scrapeInstagramProfile(handle, proxyCtx ?? undefined, maxPosts, accountId, { allowApifyFallback: true });
 
     if (proxyCtx) {
       logProxyTelemetry(
@@ -310,7 +310,7 @@ export async function scrapeInstagramChannel(
         await getRetryDelay(rotated.attemptNumber);
 
         const retryMs = Date.now();
-        result = await scrapeInstagramProfile(handle, proxyCtx, maxPosts, accountId);
+        result = await scrapeInstagramProfile(handle, proxyCtx, maxPosts, accountId, { allowApifyFallback: true });
         logProxyTelemetry(
           proxyCtx,
           "USER_CHANNEL_SCRAPE_RETRY",

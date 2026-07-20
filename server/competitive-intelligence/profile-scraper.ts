@@ -41,7 +41,7 @@ export interface ScrapeResult {
   embeddedComments: ScrapedComment[];
   followers: number | null;
   profileName: string | null;
-  collectionMethodUsed: "WEB_API" | "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
+  collectionMethodUsed: "WEB_API" | "HTML_PARSE" | "HEADLESS_RENDER" | "APIFY_ACTOR" | "NONE";
   attempts: string[];
   warnings: string[];
   paginationPages?: number;
@@ -87,6 +87,7 @@ export interface ScrapeStats {
   webApiSuccess: number;
   htmlParseSuccess: number;
   headlessRenderSuccess: number;
+  apifyActorSuccess: number;
   scrapeBlocked: number;
   totalBytesEstimated: number;
   lastReset: number;
@@ -97,6 +98,7 @@ const scrapeStats: ScrapeStats = {
   webApiSuccess: 0,
   htmlParseSuccess: 0,
   headlessRenderSuccess: 0,
+  apifyActorSuccess: 0,
   scrapeBlocked: 0,
   totalBytesEstimated: 0,
   lastReset: Date.now(),
@@ -106,7 +108,7 @@ export function getScrapeStats(): ScrapeStats & { successRate: string; blockedRa
   const total = scrapeStats.totalRequests || 1;
   return {
     ...scrapeStats,
-    successRate: `${(((scrapeStats.webApiSuccess + scrapeStats.htmlParseSuccess + scrapeStats.headlessRenderSuccess) / total) * 100).toFixed(1)}%`,
+    successRate: `${(((scrapeStats.webApiSuccess + scrapeStats.htmlParseSuccess + scrapeStats.headlessRenderSuccess + scrapeStats.apifyActorSuccess) / total) * 100).toFixed(1)}%`,
     blockedRate: `${((scrapeStats.scrapeBlocked / total) * 100).toFixed(1)}%`,
     bandwidthMB: `${(scrapeStats.totalBytesEstimated / (1024 * 1024)).toFixed(2)} MB`,
   };
@@ -1063,7 +1065,7 @@ export async function scrapeCommentsForPosts(
   return { totalScraped, results };
 }
 
-export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, accountId: string = "unknown"): Promise<ScrapeResult> {
+export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, accountId: string = "unknown", opts?: { allowApifyFallback?: boolean }): Promise<ScrapeResult> {
   const profileUrl = normalizeInstagramUrl(rawUrl);
   const handle = extractHandleFromUrl(rawUrl);
   // P4 isolation seal: namespace cache + rate-limit keys by accountId. Two
@@ -1197,6 +1199,68 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
       if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", null, classifyBlock(null, err2.message), 0, false);
       warnings.push(`WEB_API failed: ${err.message} | HTML_PARSE failed: ${err2.message}`);
       console.log(`[CI Scraper] HTML_PARSE FAILED for ${handle}: ${err2.message}`);
+    }
+  }
+
+  // Phase 2 (2026-07-20) — Apify fallback. Bright Data's Unlocker stopped
+  // passing IG internal-API endpoints (~Jul 19: synthesized 400 + canned
+  // "obsolete endpoint" interception) and logged-out profile HTML carries no
+  // embedded post data, so WEB_API and HTML_PARSE can both "succeed" at
+  // transport with 0 posts. The gate is therefore posts.length === 0 (NOT
+  // catch-only). Bright Data stays first in the ladder so this self-heals if
+  // the provider restores IG support.
+  // Root-cause audit: .local/docs/audits/owned-ig-scrape-root-cause-2026-07-20.md
+  //
+  // OPT-IN ONLY (allowApifyFallback): the competitor fetch path runs under the
+  // F6.9 45s watchdog (data-acquisition FETCH_WATCHDOG_TIMEOUT_MS) while an
+  // Apify actor run takes ~80-120s — the watchdog would abandon the raced
+  // promise mid-run, the actor would keep billing, and the evict/restart cycle
+  // would double spend across the competitor fleet. Only the owned-channel
+  // path (user-channel-scraper, no watchdog) opts in. Competitor semantics are
+  // unchanged from the pre-fallback ladder.
+  if (posts.length === 0 && !opts?.allowApifyFallback) {
+    attempts.push("APIFY_ACTOR_SKIPPED");
+    console.log(`[CI Scraper] APIFY_ACTOR_SKIPPED for ${handle} (caller did not opt in; watchdog-budgeted path)`);
+  }
+  if (posts.length === 0 && opts?.allowApifyFallback) {
+    const { isInstagramApifyConfigured, scrapeInstagramViaApify } = await import("./instagram-apify-scraper");
+    if (!isInstagramApifyConfigured()) {
+      attempts.push("APIFY_ACTOR_SKIPPED");
+      warnings.push("APIFY_ACTOR_SKIPPED: APIFY_API_KEY not set — no Apify fallback available.");
+      console.log(`[CI Scraper] APIFY_ACTOR_SKIPPED for ${handle} (APIFY_API_KEY not set)`);
+    } else {
+      attempts.push("APIFY_ACTOR");
+      try {
+        const apifyResult = await scrapeInstagramViaApify(handle, maxPosts);
+        // Actor run completed ⇒ transport reached the platform. 0 posts from a
+        // completed run = healthy-empty (failureClass NONE), same semantics as
+        // the other rungs.
+        transportSucceeded = true;
+        posts = apifyResult.posts;
+        followers = apifyResult.followers ?? followers;
+        profileName = apifyResult.profileName ?? profileName;
+        if (posts.length > 0) {
+          collectionMethodUsed = "APIFY_ACTOR";
+          scrapeStats.apifyActorSuccess++;
+          console.log(`[CI Scraper] APIFY_ACTOR SUCCESS: ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
+        } else {
+          console.log(`[CI Scraper] APIFY_ACTOR: run completed but no posts extracted for ${handle}`);
+        }
+      } catch (err3: any) {
+        // Deliberately NOT folded into lastFailureMessage: classifyScrapeFailure
+        // pattern-matches for IG block tokens ("403"/"forbidden"/...), and an
+        // Apify-side error (e.g. "Apify API 403" on a bad token) must never
+        // stamp a GENUINE_BLOCK 24h cooldown on the Instagram target. Block
+        // classification stays owned by the Bright Data transport error.
+        // The warning text is additionally sanitized: user-channel-scraper's
+        // isBlockWarning() substring-matches "403"/"429"/"RATE_LIMIT" against
+        // result.warnings, and an Apify-side status code must not trigger IG
+        // block detection (session rotation + a second billed Apify run).
+        const rawMsg = typeof err3?.message === "string" ? err3.message : "unknown";
+        const msg = rawMsg.replace(/\b(403|429)\b/g, "4xx").replace(/rate.?limit(ed)?/gi, "throttled");
+        warnings.push(`APIFY_ACTOR failed: ${msg}`);
+        console.log(`[CI Scraper] APIFY_ACTOR FAILED for ${handle}: ${msg}`);
+      }
     }
   }
 
