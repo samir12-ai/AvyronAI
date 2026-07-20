@@ -320,6 +320,7 @@ export function validateEnv(opts: { exitOnFailure?: boolean } = {}): EnvValidati
     { key: "MI_QUEUE_DEPTH_DEFER_THRESHOLD", description: "GR23 — global MI queue depth defer threshold" },
   ];
   for (const k of betaKnobs) {
+    // eslint-disable-next-line expo/no-dynamic-env-var -- env-validator's core purpose is iterating a declared knob table; keys come from the static `betaKnobs` list above, never user input.
     const v = process.env[k.key];
     if (v && v.trim()) {
       console.log(`[EnvValidator] beta-knob ${k.key}=${v} (${k.description})`);

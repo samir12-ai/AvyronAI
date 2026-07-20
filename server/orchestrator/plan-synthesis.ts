@@ -4,6 +4,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { createAttributionEntries } from "../decision-attribution";
 import { casUpdateStrategicPlan } from "../strategic-core/cas-helper";
+// eslint-disable-next-line orchestrator-replay/no-bare-llm-call-in-replay -- replay-safe: aiChat auto-records via getCurrentRecorder()?.recordLlmCall() (ai-client.ts), and synthesizePlan is only invoked from runOrchestrator (index.ts ~L4895) AFTER enterRecorderScope() binds the recorder to this async context (~L3821). Routing through commercial-reasoning/llm-call.ts would force JSON-mode + a 45s timeout (behavior change).
 import { aiChat } from "../ai-client";
 import { lockRootBundle } from "../root-bundle";
 import { decomposeGoal, generateSimulation, normalizeGoal, computeFunnelMath, checkFeasibility } from "../goal-math";

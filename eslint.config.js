@@ -1,17 +1,17 @@
 const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
-const noSemanticFallback = require('./.local/eslint-rules/no-semantic-fallback.js');
-const noDirectStrategyMemoryWrite = require('./.local/eslint-rules/no-direct-strategy-memory-write.js');
-const noValidateDecisionMemoryWriteImport = require('./.local/eslint-rules/no-validate-decision-memory-write-import.js');
-const noBareLlmCallInReplay = require('./.local/eslint-rules/no-bare-llm-call-in-replay.js');
-const orchestratorModuleBoundary = require('./.local/eslint-rules/orchestrator-module-boundary.js');
-const orchestratorNoNewLargeFile = require('./.local/eslint-rules/orchestrator-no-new-large-file.js');
+const noSemanticFallback = require('./tools/eslint-rules/no-semantic-fallback.js');
+const noDirectStrategyMemoryWrite = require('./tools/eslint-rules/no-direct-strategy-memory-write.js');
+const noValidateDecisionMemoryWriteImport = require('./tools/eslint-rules/no-validate-decision-memory-write-import.js');
+const noBareLlmCallInReplay = require('./tools/eslint-rules/no-bare-llm-call-in-replay.js');
+const orchestratorModuleBoundary = require('./tools/eslint-rules/orchestrator-module-boundary.js');
+const orchestratorNoNewLargeFile = require('./tools/eslint-rules/orchestrator-no-new-large-file.js');
 // Task #93 / Phase 4-E — Cutover + dispatch deletion guards.
-const orchestratorNoDispatchFlags = require('./.local/eslint-rules/orchestrator-no-dispatch-flags.js');
-const orchestratorNoCutoverStateReference = require('./.local/eslint-rules/orchestrator-no-cutover-state-reference.js');
+const orchestratorNoDispatchFlags = require('./tools/eslint-rules/orchestrator-no-dispatch-flags.js');
+const orchestratorNoCutoverStateReference = require('./tools/eslint-rules/orchestrator-no-cutover-state-reference.js');
 // 2026-07 Unlocker rebuild — brightdata-client is importable ONLY by the
 // proxy-pool-manager (single transport choke point).
-const noDirectBrightdataClientImport = require('./.local/eslint-rules/no-direct-brightdata-client-import.js');
+const noDirectBrightdataClientImport = require('./tools/eslint-rules/no-direct-brightdata-client-import.js');
 
 module.exports = defineConfig([
   expoConfig,
@@ -142,10 +142,25 @@ module.exports = defineConfig([
   //     down with every Phase-4 extraction; current ceiling = 5000).
   {
     files: ["server/**/*.ts"],
+    // Tests legitimately unit-test extracted-module internals (e.g.
+    // task-70-domain-composition.test.ts imports post-run-projections
+    // internals directly) — the (B) external-import boundary applies to
+    // production code, not the test harness.
+    ignores: ["server/tests/**/*.ts"],
+    plugins: {
+      orchestrator: {
+        rules: { "module-boundary": orchestratorModuleBoundary },
+      },
+    },
+    rules: {
+      "orchestrator/module-boundary": "error",
+    },
+  },
+  {
+    files: ["server/**/*.ts"],
     plugins: {
       orchestrator: {
         rules: {
-          "module-boundary": orchestratorModuleBoundary,
           "no-new-large-file": orchestratorNoNewLargeFile,
           "no-dispatch-flags": orchestratorNoDispatchFlags,
           "no-cutover-state-reference": orchestratorNoCutoverStateReference,
@@ -153,7 +168,6 @@ module.exports = defineConfig([
       },
     },
     rules: {
-      "orchestrator/module-boundary": "error",
       "orchestrator/no-new-large-file": [
         "error",
         { maxModuleLines: 200, orchestratorIndexMaxLines: 5000 },

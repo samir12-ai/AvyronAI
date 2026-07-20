@@ -16,7 +16,7 @@
 
 import { RuleTester } from "eslint";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const rule = require("../../.local/eslint-rules/no-semantic-fallback.js");
+const rule = require("../../tools/eslint-rules/no-semantic-fallback.js");
 
 const PASS = "\x1b[32m[PASS]\x1b[0m";
 const FAIL = "\x1b[31m[FAIL]\x1b[0m";
@@ -132,7 +132,7 @@ for (const c of CLEAN) {
 // ── Fixture-file proof (code-review pass-2) ──────────────────────────────
 //
 // The audit asked for fixture-based lint proof. We additionally lint the
-// real fixture files in `.local/eslint-rules/__fixtures__/` and assert the
+// real fixture files in `tools/eslint-rules/__fixtures__/` and assert the
 // rule reports the EXPECTED set of offenders + zero false positives on
 // the clean fixture. This protects against the inline-RuleTester suite
 // drifting away from the production fixtures.
@@ -147,7 +147,7 @@ const tsParser = require("@typescript-eslint/parser");
 // rules are passed inline via the `plugins` map of the per-call config.
 const linter = new Linter({ configType: "flat" });
 
-const FIXTURE_DIR = join(__dirname, "..", "..", ".local", "eslint-rules", "__fixtures__");
+const FIXTURE_DIR = join(__dirname, "..", "..", "tools", "eslint-rules", "__fixtures__");
 
 function lintFixture(name: string): Linter.LintMessage[] {
   const code = readFileSync(join(FIXTURE_DIR, name), "utf-8");

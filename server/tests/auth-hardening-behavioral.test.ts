@@ -17,7 +17,7 @@
  *          gets stripped {ok:true})
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { Router, Request, Response } from "express";
 
 // ─── In-memory db tables ────────────────────────────────────────────────────

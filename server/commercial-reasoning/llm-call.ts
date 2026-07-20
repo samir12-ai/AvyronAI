@@ -17,8 +17,10 @@
  *     classes the caller can map to GATE_DECISION_REASONS.
  */
 
-// eslint-disable-next-line orchestrator-replay/no-bare-llm-call-in-replay
-// This file IS the recorder boundary — see file header.
+// This file IS the recorder boundary — see file header. (No inline
+// eslint-disable here: the file is excluded from the rule block via
+// `ignores` in eslint.config.js, so a disable directive would reference
+// an undefined rule and itself become a lint error.)
 import { aiChat, PRIMARY_CHAT_MODEL, AICallError } from "../ai-client";
 
 const DEFAULT_TIMEOUT_MS = (() => {
