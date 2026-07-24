@@ -28,6 +28,7 @@
  * column / index that ships in an SQL migration. Boot refuses to start if
  * schema_migrations.last_applied_version < REQUIRED.
  */
+import "dotenv/config"; // must be first — loads .env before process.env.DATABASE_URL is read
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Pool, PoolClient } from "pg";

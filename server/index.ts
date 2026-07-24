@@ -1571,6 +1571,11 @@ function setupErrorHandler(app: express.Application) {
   setupErrorHandler(app);
 
   const port = parseInt(process.env.PORT || "5000", 10);
+  // HOST resolution: explicit env var > Windows local dev (127.0.0.1) > deployed default (0.0.0.0).
+  // reusePort is only valid with 0.0.0.0; on win32 localhost it is silently ignored by Node.
+  const host =
+    process.env.HOST ??
+    (process.platform === "win32" ? "127.0.0.1" : "0.0.0.0");
 
   // owned by `npm run db:migrate`. Single-instance Replit operators may
   // opt-in to apply-at-boot with BOOT_AUTO_MIGRATE=true.
@@ -1604,11 +1609,11 @@ function setupErrorHandler(app: express.Application) {
   server.listen(
     {
       port,
-      host: "0.0.0.0",
-      reusePort: true,
+      host,
+      reusePort: host === "0.0.0.0", // reusePort only valid on non-loopback interfaces
     },
     () => {
-      log(`express server serving on port ${port}`);
+      log(`express server serving on http://${host}:${port}`);
       startAutonomousWorker();
       startPublishWorker();
       // P-1 — per-post revisit scheduler (24h/72h/7d append-only performance
