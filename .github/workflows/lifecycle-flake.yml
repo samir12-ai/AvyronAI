@@ -40,11 +40,15 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci --include=dev
+
       - name: Lifecycle flake check
         env:
+          NODE_ENV: test
           N: ${{ github.event.inputs.iterations || '100' }}
         run: npm run lifecycle:flake
+
       - name: Upload per-iteration logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
