@@ -1,0 +1,108 @@
+s)"}
+Hi,
+
+We need to verify one critical aspect before moving forward:
+
+Run-level consistency between backend engine outputs and the dashboard (Narrative + Execution systems).
+
+This is not about engine logic anymore.  
+This is about whether the user is seeing a single coherent truth or a mixed state.
+
+---
+
+# Objective
+
+Ensure that:
+
+> All dashboard outputs (Narrative + Execution) are strictly bound to a single run_id and never mix data across runs.
+
+---
+
+# Phase 1 — Code-Level Audit
+
+Answer these from the codebase:
+
+## 1. Source of Truth
+- Do dashboard APIs return:
+  - latest run?
+  - a specific run_id?
+  - or mixed sources?
+
+---
+
+## 2. Narrative System
+- What data sources are used for:
+  - summaries
+  - problem descriptions
+  - insights
+- Are they bound to a specific run_id?
+
+---
+
+## 3. Execution System
+- What data sources are used for:
+  - plan
+  - execution decisions
+- Are they guaranteed to be from the same run_id as Narrative?
+
+---
+
+## 4. API Layer
+Audit these endpoints:
+- /agent-brief
+- /plans/active
+
+Check:
+- do they query latest?
+- do they accept run_id?
+- can they return stale + fresh data together?
+
+---
+
+## 5. Data Binding Guarantee
+Confirm whether:
+- all components share the same run_id
+- or if fallback to latest snapshot is still possible anywhere
+
+---
+
+# Phase 2 — Failure Simulation
+
+Simulate this scenario:
+
+1. Run A completes → dashboard loads
+2. Run B completes with different results
+3. Dashboard refreshes
+
+Answer:
+- Does the dashboard show only Run B? (correct)
+- Or can it mix Run A + Run B? (critical failure)
+
+---
+
+# Phase 3 — Required Guarantees
+
+We need explicit guarantees that:
+
+- Every response includes:
+  - runId
+  - isLatest
+  - isStale
+
+- No UI surface renders mixed-run data
+
+- No endpoint falls back to "latest" without explicit run binding
+
+---
+
+# Important
+
+Even if engine logic is perfect:
+
+> If run consistency is broken, the product becomes misleading.
+
+Do not assume correctness — prove it from the code.
+
+Proceed with the audit and provide concrete findings.
+
+Tha

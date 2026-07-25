@@ -19,22 +19,22 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
     switch (engineId) {
       case "market_intelligence": {
         const out = output.output || output;
-        const rawCompetitors = out.competitors || out.competitorData || out.competitor_data;
+        const rawCompetitors = out.competitors || out.competitorData || out.competitor_data || out.competitorIntentMap;
         const compArr = typeof rawCompetitors === "string" ? safeParseArr(rawCompetitors) : (Array.isArray(rawCompetitors) ? rawCompetitors : []);
         const competitors = compArr.length;
-        const marketState = out.marketState || out.market_state || "analyzed";
+        const marketStateLabel = out.marketState || out.market_state || "analyzed";
         const saturation = out.angleSaturation !== undefined ? ` Saturation: ${out.angleSaturation}%.` : "";
-        return `Found ${competitors} competitors. Market state: ${marketState}.${saturation}`;
+        return `Found ${competitors} competitors. Market state: ${marketStateLabel}.${saturation}`;
       }
       case "audience": {
         const out = output.output || output;
-        const rawPains = out.painProfiles || out.audiencePains;
+        const rawPains = out.audiencePains || out.painMap || out.painProfiles;
         const painsArr = typeof rawPains === "string" ? safeParseArr(rawPains) : (Array.isArray(rawPains) ? rawPains : []);
         const pains = painsArr.length;
         const rawSegments = out.audienceSegments;
         const segArr = typeof rawSegments === "string" ? safeParseArr(rawSegments) : (Array.isArray(rawSegments) ? rawSegments : []);
         const segments = segArr.length;
-        const topPain = painsArr[0]?.canonicalPain || painsArr[0]?.pain;
+        const topPain = painsArr[0]?.canonical || painsArr[0]?.canonicalPain || painsArr[0]?.pain || painsArr[0]?.label || painsArr[0]?.name;
         return `${pains} pain profiles across ${segments} segments.${topPain ? ` Primary pain: ${topPain}.` : ""}`;
       }
       case "positioning": {
@@ -67,8 +67,17 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
         const out = output.output || output;
         const ofr = out.primaryOffer || out;
         const name = ofr.offerName || out.offerName;
-        const outcome = ofr.coreOutcome || out.coreOutcome;
-        return name ? `Offer: "${name}".${outcome ? ` Core outcome: ${outcome}.` : ""}` : "Offer structured.";
+        // Domain-content prose read (offer transformation outcome string, not a
+        // canonical contract verdict). Local var renamed off the `outcome`
+        // suffix per Seal #9 doctrine D1; the property keys read here
+        // (`coreOutcome`) are themselves outside the FORBIDDEN set.
+        let coreOutcomeText: string | undefined;
+        if (typeof ofr.coreOutcome === "string" && ofr.coreOutcome.length > 0) {
+          coreOutcomeText = ofr.coreOutcome;
+        } else if (typeof out.coreOutcome === "string" && out.coreOutcome.length > 0) {
+          coreOutcomeText = out.coreOutcome;
+        }
+        return name ? `Offer: "${name}".${coreOutcomeText ? ` Core outcome: ${coreOutcomeText}.` : ""}` : "Offer structured.";
       }
       case "awareness": {
         const out = output.output || output;
@@ -102,23 +111,32 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
         return `Integrity score: ${score !== undefined ? score : "checked"}.${stable !== undefined ? ` Stable: ${stable}.` : ""}`;
       }
       case "statistical_validation": {
+        // H1 (2026-05-10): canonical-only field read.
+        // `validationState` is the F3 verdict (validated|provisional|weak|rejected).
+        // Reading `result.status` (F1 engine-execution state) as a fallback is
+        // FORBIDDEN — that's the offender O1 patched here. If the canonical
+        // field is missing, surface "(missing verdict)" rather than fabricate.
         const out = output.output || output;
         const snap = safeParseObj(out.snapshot);
         const result = snap?.result || out.result || out;
-        const state = result.validationState || out.validationState || result.status;
-        const confidence = result.claimConfidenceScore || out.claimConfidenceScore || result.confidenceScore;
-        return `Statistical validation: ${state || "complete"}.${confidence !== undefined ? ` Claim confidence: ${confidence}.` : ""}`;
+        const validationStateLabel = result.validationState ?? out.validationState ?? null;
+        const confidence = result.claimConfidenceScore ?? out.claimConfidenceScore;
+        return `Statistical validation: ${validationStateLabel ?? "(missing verdict)"}.${confidence !== undefined ? ` Claim confidence: ${confidence}.` : ""}`;
       }
       case "budget_governor": {
+        // H2 (2026-05-10): canonical-only field read.
+        // `decision.action` is the F9 budget action (test|scale|hold|halt).
+        // The previous `verdict || status || "reviewed"` chain (offender O2)
+        // fabricated a verdict from execution-status semantics. Removed.
         const out = output.output || output;
         const snap = safeParseObj(out.snapshot);
         const result = snap?.result || out.result || out;
         const rawDecision = result.decision || out.decision;
-        const decision = typeof rawDecision === "object" ? (rawDecision?.verdict || rawDecision?.status || "reviewed") : rawDecision;
+        const actionLabel = typeof rawDecision === "object" ? rawDecision?.action : rawDecision;
         const budget = result.recommendedBudget || result.monthlyBudget || out.recommendedBudget || out.monthlyBudget;
         const testRange = result.testBudgetRange;
         const budgetStr = budget ? `$${budget}/mo` : (testRange ? `$${testRange.min}-$${testRange.max}/mo` : null);
-        return `Budget decision: ${decision || "reviewed"}.${budgetStr ? ` Recommended: ${budgetStr}.` : ""}`;
+        return `Budget action: ${actionLabel ?? "(missing action)"}.${budgetStr ? ` Recommended: ${budgetStr}.` : ""}`;
       }
       case "channel_selection": {
         const out = output.output || output;

@@ -1,0 +1,220 @@
+Hey,
+
+I want to pause before we make more assumptions and run a clear audit on the adaptive agent pipeline.
+
+I need you to verify how the current system actually behaves against the intended design below.
+
+---
+
+## Intended system structure
+
+There are two agent-side pipelines:
+
+1. Competitor Pipeline
+2. User Pipeline
+
+They are not the same, and they should not overwrite each other’s data or snapshots.
+
+---
+
+## 1) Competitor Pipeline — intended responsibility
+
+The competitor pipeline should:
+
+- scrape competitor data weekly
+- detect whether there is a real market shift
+- only treat it as meaningful if more than one competitor shows the same direction
+- use Instagram mainly as strategy source
+- use TikTok mainly as validation source
+- surface weak / insufficient data instead of pretending the market is stable
+
+Important question:
+
+When the competitor pipeline pulls new competitor data, does it analyze that data through Market Intelligence in the backend without corrupting or overwriting the user’s existing Market Intelligence snapshots?
+
+Please audit this specifically.
+
+If the answer is no, we need to fix it.
+
+The competitor pipeline must be able to analyze new competitor data separately, then trigger a new analysis when needed, without mutating the old user snapshot silently.
+
+---
+
+## 2) Competitor shift behavior
+
+If the competitor pipeline detects a market shift, the system should:
+
+- create a clear shift signal
+- show an alert on the dashboard
+- tell the user/operator that the market changed
+- recommend running a new analysis on the new data
+- make sure the new analysis uses fresh data, not stale data
+
+Please audit:
+
+- where the shift is detected
+- where the signal is stored
+- whether the dashboard alert exists
+- whether the alert clearly says the next analysis should use new data
+- whether stale data can accidentally be reused
+
+---
+
+## 3) User Pipeline — intended responsibility
+
+The user pipeline should:
+
+- scrape the user’s own pages every 48 hours
+- check if the user is following the planned rhythm
+- check if the published content is working
+- separate:
+  - Instagram as source/strategy signal
+  - TikTok as validation signal
+- track paid / organic context where possible
+- trigger clarification when paid/organic is uncertain
+- help determine whether the current DNA is working
+
+Please audit:
+
+- whether the 48-hour scraping cycle exists
+- whether rhythm compliance is actually checked
+- whether Instagram and TikTok are treated differently
+- whether TikTok validation is used correctly
+- whether paid / organic classification is wired or only exists as helper logic
+- whether missing weekly truth blocks or downgrades the decision correctly
+
+---
+
+## 4) DNA ownership — very important
+
+I need a clear answer on DNA responsibility.
+
+Please audit and explain:
+
+### A) Who creates the original DNA?
+- Which engine or module is responsible?
+- Is it created by the engine system, adaptive system, or another layer?
+- What inputs are used?
+
+### B) Who reviews whether DNA is working?
+- Is the Boss Agent only reviewing Q1 / Q2?
+- Is the User Pipeline providing evidence?
+- Is the Control Layer responsible for orchestration?
+
+### C) How is DNA updated?
+- Does a market shift automatically change DNA?
+- Or does it only trigger a new analysis/review?
+- Is there any silent DNA mutation?
+- Is approval required?
+
+Hard rule:
+
+> No silent DNA mutation.
+
+Creation, review, and update must be separate and traceable.
+
+---
+
+## 5) Clarify system roles
+
+Please confirm the correct responsibility split:
+
+- Control Layer runs and orchestrates the system.
+- Engines generate marketing intelligence and strategy logic.
+- User Pipeline monitors user execution and DNA performance evidence.
+- Competitor Pipeline monitors market shifts.
+- Boss Agent reviews whether current DNA is working and whether the market has shifted.
+- AI Overlay explains only; it does not decide.
+
+If the current code does not match this split, show exactly where it differs.
+
+---
+
+## 6) Database and lineage audit
+
+Please audit whether the database supports this properly:
+
+- competitor data separated from user data
+- no cross-campaign leakage
+- no cross-lane leakage
+- acquisition lineage preserved
+- snapshots tied to correct account/campaign/lane
+- new competitor analysis does not overwrite old user analysis
+- rejections are logged when invalid data is attempted
+- stale data cannot pass as fresh
+
+I need exact findings, not assumptions.
+
+---
+
+## 7) Runtime and scheduling audit
+
+Please verify:
+
+- competitor pipeline weekly schedule
+- user pipeline 48-hour schedule
+- manual triggers
+- rerun triggers after shift
+- freshness gates
+- whether jobs can overlap
+- whether concurrent runs are locked
+
+If something is only planned but not implemented, say so clearly.
+
+---
+
+## 8) Frontend / dashboard audit
+
+Please audit whether the dashboard currently shows:
+
+- market shift alerts
+- insufficient data alerts
+- user rhythm status
+- missing truth prompt
+- paid/organic clarification prompt
+- DNA status
+- Q1 result
+- Q2 result
+- reason codes
+- lineage / rejection information
+- AI explanation clearly separated from system verdict
+
+If any of these are missing, list them.
+
+---
+
+## 9) What I need back
+
+Please return a structured audit report with:
+
+1. What is implemented  
+2. What is partially implemented  
+3. What is missing  
+4. What is wrong or risky  
+5. What must be fixed before production usage  
+6. What can wait until later  
+7. Exact file paths / modules involved  
+8. Recommended execution order  
+
+---
+
+## Important
+
+Do not start building yet.
+
+This is an audit first.
+
+I want to understand exactly where the system stands before we change anything.
+
+The most important questions are:
+
+1. Does competitor analysis happen without corrupting the user’s Market Intelligence snapshot?
+2. Who creates DNA originally?
+3. Who reviews DNA performance?
+4. What actually happens when market shift is detected?
+5. Are dashboard alerts and fresh-data analysis wired correctly?
+6. Is lineage strong enough to prove where every decision came from?
+
+Please audit carefully and report back.
+
+— Samir

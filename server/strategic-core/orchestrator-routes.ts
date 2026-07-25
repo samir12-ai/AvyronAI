@@ -2,17 +2,25 @@ import type { Express, Request, Response } from "express";
 import { aiChat, AICallError } from "../ai-client";
 import { db } from "../db";
 import { strategicBlueprints, strategicPlans, planApprovals, strategyMemory, strategyInsights, moatCandidates, businessDataLayer, planDocuments, requiredWork, calendarEntries, orchestratorJobs } from "@shared/schema";
-import { eq, desc, gte, and, sql, ne } from "drizzle-orm";
+import { eq, desc, gte, and, or, sql, ne, notInArray } from "drizzle-orm";
+import { NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
 import { logAuditEvent } from "./audit-logger";
 import { logAudit } from "../audit";
+import { casUpdateStrategicPlan, casUpdateStrategicPlanByVersion } from "./cas-helper";
 import * as crypto from "crypto";
-import { buildStrategicContext, type StrategicContext } from "../engine-contracts/context-kernel";
-import { wrapEngineOutput, type EngineOutput } from "../engine-contracts/engine-contract";
-import { validateSectionConsumption, type OutputType } from "../engine-contracts/output-types";
-import { evaluateUncertainty, type UncertaintyResult } from "../engine-contracts/uncertainty-guard";
-import { validateExecutionRoute } from "../engine-contracts/execution-map";
-import { enforceOutputType } from "../engine-contracts/type-enforcement";
-import { globalRegistry } from "../engine-contracts/engine-registry";
+import { buildStrategicContext, type StrategicContext } from "../output-projection/context-kernel";
+import { wrapEngineOutput, type EngineOutput } from "../output-projection/engine-contract";
+import { validateSectionConsumption, type OutputType } from "../output-projection/output-types";
+// Phase 3 (Task #66) — pre-plan gate verdict is owned by system-control.
+// `uncertainty-guard` is now metrics-only; the BLOCK/DOWNGRADE/PROCEED
+// decision flows through `decidePrePlanGate` so a single directory owns
+// verdict emission. (Task #68 renamed engine-contracts → output-projection;
+// imports updated accordingly during rebase.)
+import { analyzeUncertaintyMetrics } from "../output-projection/uncertainty-guard";
+import { decidePrePlanGate, type PrePlanGateResult } from "../system-control/pre-plan-gate";
+import { validateExecutionRoute } from "../output-projection/execution-map";
+import { enforceOutputType } from "../output-projection/type-enforcement";
+import { globalRegistry } from "../output-projection/engine-registry";
 import { activateExecution } from "../execution-activation/engine";
 import { assertSnapshotReadOnly, assertNoComputeFromExternal } from "../market-intelligence-v3/isolation-guard";
 import { runOrchestrator } from "../orchestrator/index";
@@ -48,6 +56,10 @@ function generateFallbackPlan(params: {
 
   return {
     fallback: true,
+    planSource: "deterministic_fallback",
+    degraded: true,
+    lockedDecisionLabels: [],
+    synthesisVerification: { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() },
     fallbackReason: "AI generation timed out or failed. This is a deterministic skeleton plan. You can approve it and refine later, or retry generation.",
     contentDistributionPlan: {
       platforms: [
@@ -482,7 +494,7 @@ async function generateSingleSection(
 async function executeOrchestratorJob(jobId: string, blueprintId: string) {
   const startMs = Date.now();
   const stageTimes: Record<string, number> = {};
-  let accountId = "default";
+  let accountId;
   let campaignId = "";
 
   const log = (stage: string, extra?: Record<string, any>) => {
@@ -517,7 +529,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     let businessData: any = null;
     try {
       const cId = campaignContext?.campaignId || blueprint.campaignId;
-      const aId = campaignContext?.accountId || blueprint.accountId || "default";
+      const aId = campaignContext?.accountId || blueprint.accountId;
       if (cId) {
         const bizRows = await db.select().from(businessDataLayer).where(and(eq(businessDataLayer.campaignId, cId), eq(businessDataLayer.accountId, aId))).limit(1);
         if (bizRows.length > 0) businessData = bizRows[0];
@@ -529,11 +541,11 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     let performanceIntelligenceBlock = "";
     let performanceSignalsInjected = false;
     try {
-      const sAccountId = campaignContext?.accountId || "default";
+      const sAccountId = campaignContext?.accountId || accountId;
       const sCampaignId = campaignContext?.campaignId;
       if (sCampaignId) {
         const [memories, insights, moats] = await Promise.all([
-          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, sAccountId), eq(strategyMemory.campaignId, sCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyMemory.updatedAt)).limit(5),
+          db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, sAccountId), eq(strategyMemory.campaignId, sCampaignId), sql`${strategyMemory.campaignId} != 'unscoped_legacy'`, notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(5),
           db.select().from(strategyInsights).where(and(gte(strategyInsights.confidence, 0.7), eq(strategyInsights.accountId, sAccountId), eq(strategyInsights.campaignId, sCampaignId), sql`${strategyInsights.campaignId} != 'unscoped_legacy'`)).orderBy(desc(strategyInsights.createdAt)).limit(5),
           db.select().from(moatCandidates).where(and(eq(moatCandidates.status, "candidate"), eq(moatCandidates.accountId, sAccountId), eq(moatCandidates.campaignId, sCampaignId), sql`${moatCandidates.campaignId} != 'unscoped_legacy'`)).orderBy(desc(moatCandidates.moatScore)).limit(3),
         ]);
@@ -550,7 +562,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       log("V2_ORCHESTRATOR_START", { accountId, campaignId });
       const v2Result = await runOrchestrator({
         accountId,
-        campaignId: campaignId || "default",
+        campaignId: campaignId,
         forceRefresh: false,
       });
       log("V2_ORCHESTRATOR_COMPLETE", {
@@ -565,7 +577,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
 
     let strategicContext: StrategicContext | null = null;
     try {
-      strategicContext = await buildStrategicContext(campaignId || "default", accountId);
+      strategicContext = await buildStrategicContext(campaignId, accountId);
       log("STRATEGIC_CONTEXT_BUILT", {
         marketMode: strategicContext.marketMode,
         awarenessLevel: strategicContext.awarenessLevel,
@@ -707,9 +719,9 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       }
     }
 
-    let uncertaintyResult: UncertaintyResult | null = null;
+    let uncertaintyResult: PrePlanGateResult | null = null;
     if (engineOutputs.length > 0) {
-      uncertaintyResult = evaluateUncertainty(engineOutputs);
+      uncertaintyResult = decidePrePlanGate(analyzeUncertaintyMetrics(engineOutputs));
       log("UNCERTAINTY_GUARD", {
         decision: uncertaintyResult.decision,
         confidence: uncertaintyResult.aggregatedConfidence,
@@ -732,7 +744,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
           .where(eq(strategicBlueprints.id, blueprintId));
 
         const [blockedPlan] = await db.insert(strategicPlans).values({
-          accountId, blueprintId, campaignId: campaignId || "default",
+          accountId, blueprintId, campaignId: campaignId,
           planJson: JSON.stringify(orchestratorPlan),
           planSummary: `BLOCKED — ${uncertaintyResult.reasoning.substring(0, 100)}`,
           status: "BLOCKED", executionStatus: "IDLE",
@@ -771,7 +783,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
     const [planRow] = await db.insert(strategicPlans).values({
       accountId,
       blueprintId,
-      campaignId: campaignId || "default",
+      campaignId: campaignId,
       planJson: JSON.stringify(orchestratorPlan),
       planSummary: summary,
       status: "DRAFT",
@@ -810,7 +822,7 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
       await db.insert(planDocuments).values({
         planId: planRow.id,
         blueprintId,
-        campaignId: campaignId || "default",
+        campaignId: campaignId,
         accountId,
         version: nextVersion,
         fileName,
@@ -852,8 +864,16 @@ async function executeOrchestratorJob(jobId: string, blueprintId: string) {
   } catch (error: any) {
     const durationMs = Date.now() - startMs;
     log("UNHANDLED_ERROR", { code: error.code, message: error.message, durationMs, stageTimes });
-    await updateJob({ status: "FAILED", error: error.message, errorCode: error.code || "INTERNAL_ERROR", stageTimes: JSON.stringify(stageTimes), durationMs, completedAt: new Date() }).catch(() => {});
-    await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: 0, event: "ORCHESTRATOR_FAILED", details: { jobId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes } }).catch(() => {});
+    // Track #3 / Seal #15 — these two writes were silently swallowed. If
+    // updateJob fails, the orchestrator job stays RUNNING in the UI forever
+    // (a "stuck claim"). If logAuditEvent fails, the crash leaves no audit
+    // trail. Surface both so operators see them in logs.
+    await updateJob({ status: "FAILED", error: error.message, errorCode: error.code || "INTERNAL_ERROR", stageTimes: JSON.stringify(stageTimes), durationMs, completedAt: new Date() }).catch((updateErr) => {
+      console.error(`[Orchestrator] STUCK_JOB_UPDATE_FAILED | jobId=${jobId} | err=${(updateErr as Error)?.message || updateErr}`);
+    });
+    await logAuditEvent({ accountId, campaignId: campaignId || undefined, blueprintId, blueprintVersion: 0, event: "ORCHESTRATOR_FAILED", details: { jobId, error: error.code || "INTERNAL_ERROR", message: error.message, durationMs, stageTimes } }).catch((auditErr) => {
+      console.error(`[Orchestrator] AUDIT_WRITE_FAILED event=ORCHESTRATOR_FAILED | jobId=${jobId} | err=${(auditErr as Error)?.message || auditErr}`);
+    });
   }
 }
 
@@ -863,8 +883,10 @@ export function registerOrchestratorRoutes(app: Express) {
     const { id } = req.params;
 
     try {
+      const callerAccountId = resolveAccountId(req);
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 (not 403) on accountId mismatch to avoid leaking blueprint existence across tenants.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found", requestId });
       }
 
@@ -911,7 +933,7 @@ export function registerOrchestratorRoutes(app: Express) {
       const [job] = await db.insert(orchestratorJobs).values({
         blueprintId: id,
         accountId: blueprint.accountId,
-        campaignId: blueprint.campaignId || "default",
+        campaignId: blueprint.campaignId,
         status: "RUNNING",
         sectionStatuses: JSON.stringify(initSectionStatuses()),
       }).returning();
@@ -937,8 +959,12 @@ export function registerOrchestratorRoutes(app: Express) {
   app.get("/api/strategic/orchestrate-status/:jobId", async (req: Request, res: Response) => {
     try {
       const { jobId } = req.params;
+      const callerAccountId = resolveAccountId(req);
       const [job] = await db.select().from(orchestratorJobs).where(eq(orchestratorJobs.id, jobId)).limit(1);
-      if (!job) {
+      // SECURITY: 404 on accountId mismatch — orchestratorPlan payload is
+      // tenant-private (contains strategic plan output). Avoid existence leak
+      // by returning JOB_NOT_FOUND rather than 403 across tenants.
+      if (!job || job.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "JOB_NOT_FOUND", message: "Job not found" });
       }
 
@@ -1017,9 +1043,11 @@ export function registerOrchestratorRoutes(app: Express) {
     const requestId = crypto.randomUUID();
     try {
       const { id } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
       }
 
@@ -1084,9 +1112,22 @@ export function registerOrchestratorRoutes(app: Express) {
         });
       }
 
-      await db.update(strategicPlans)
-        .set({ status: "APPROVED", updatedAt: new Date() })
-        .where(eq(strategicPlans.id, plan.id));
+      // atomic CAS: bind to plan.version AND status predicate so a
+      // concurrent writer that flipped the row past DRAFT/READY_FOR_REVIEW
+      // is detected (no rows updated → 409).
+      try {
+        await casUpdateStrategicPlanByVersion(
+          plan.id,
+          plan.version,
+          { status: "APPROVED", updatedAt: new Date() },
+          or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW")),
+        );
+      } catch (casErr: any) {
+        if (casErr?.code === "CONCURRENT_MODIFICATION") {
+          return res.status(409).json({ success: false, error: "CONCURRENT_MODIFICATION", message: "Plan was modified concurrently or already approved/rejected", requestId });
+        }
+        throw casErr;
+      }
 
       await db.insert(planApprovals).values({
         planId: plan.id,
@@ -1135,9 +1176,11 @@ export function registerOrchestratorRoutes(app: Express) {
     const requestId = crypto.randomUUID();
     try {
       const { id } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
       }
 
@@ -1162,9 +1205,16 @@ export function registerOrchestratorRoutes(app: Express) {
       let previousStatus = "NONE";
       for (const p of existingPlans) {
         previousStatus = p.status;
-        await db.update(strategicPlans)
-          .set({ status: "SUPERSEDED", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, p.id));
+        // CAS via casUpdateStrategicPlan helper.
+        try {
+          await casUpdateStrategicPlan(p.id, { status: "SUPERSEDED", updatedAt: new Date() });
+        } catch (casErr: any) {
+          if (casErr?.code !== "CONCURRENT_MODIFICATION") throw casErr;
+          // Concurrent writer already changed the row — re-read latest status
+          // and continue (regenerate path remains idempotent).
+          const [latest] = await db.select({ status: strategicPlans.status }).from(strategicPlans).where(eq(strategicPlans.id, p.id)).limit(1);
+          previousStatus = latest?.status ?? previousStatus;
+        }
       }
 
       await db.update(strategicBlueprints)
@@ -1202,14 +1252,16 @@ export function registerOrchestratorRoutes(app: Express) {
     const requestId = crypto.randomUUID();
     try {
       const { blueprintId } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", requestId });
       }
 
       const accountId = blueprint.accountId;
-      const campaignId = blueprint.campaignId || "default";
+      const campaignId = blueprint.campaignId;
 
       const plans = await db.select().from(strategicPlans)
         .where(and(
@@ -1284,9 +1336,11 @@ export function registerOrchestratorRoutes(app: Express) {
   app.get("/api/strategic/blueprint/:blueprintId/plan-pdf", async (req: Request, res: Response) => {
     try {
       const { blueprintId } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND" });
       }
 
@@ -1328,9 +1382,11 @@ export function registerOrchestratorRoutes(app: Express) {
   app.get("/api/strategic/blueprint/:id/plan-status", async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
+      const callerAccountId = resolveAccountId(req);
 
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, id)).limit(1);
-      if (!blueprint) {
+      // SECURITY: 404 on accountId mismatch — see /orchestrate note above.
+      if (!blueprint || blueprint.accountId !== callerAccountId) {
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND" });
       }
 
@@ -1415,8 +1471,20 @@ export function registerOrchestratorRoutes(app: Express) {
     try {
       const { id: blueprintId } = req.params;
 
+      // SECURITY: enforce ownership. Previously this route only checked that
+      // the blueprint existed, allowing any authenticated user to read the
+      // strategy document of any other account by blueprint ID (IDOR).
+      const accountId = resolveAccountId(req);
+      if (!accountId) {
+        return res.status(401).json({ success: false, error: "UNAUTHORIZED" });
+      }
+
       const [blueprint] = await db.select().from(strategicBlueprints).where(eq(strategicBlueprints.id, blueprintId)).limit(1);
       if (!blueprint) {
+        return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found." });
+      }
+      if (blueprint.accountId !== accountId) {
+        // Return 404 (not 403) to avoid leaking blueprint-ID existence across accounts.
         return res.status(404).json({ success: false, error: "BLUEPRINT_NOT_FOUND", message: "Blueprint not found." });
       }
 

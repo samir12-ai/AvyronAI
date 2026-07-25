@@ -1,0 +1,192 @@
+Hi team,
+
+Now that the Operational Continuity layer (Seals #13–#20) has been stabilized and the major continuity/runtime failure classes have been sealed, I want a full end-to-end audit focused specifically on the User Pipeline itself.
+
+This audit should NOT assume correctness simply because the continuity infrastructure is now stable.
+
+I want verification of the actual operational and behavioral integrity of the User Pipeline under real runtime conditions.
+
+==================================================
+AUDIT OBJECTIVES
+================
+
+The goal is to validate that the User Pipeline:
+
+* behaves correctly
+* progresses correctly
+* maintains continuity correctly
+* evaluates correctly
+* recovers correctly
+* surfaces degradation correctly
+* does not silently stall, drift, or corrupt state
+
+This must be treated as a production-grade operational audit, not a surface-level review.
+
+==================================================
+AREAS TO AUDIT
+==============
+
+1. Full Lifecycle Integrity
+
+---
+
+Verify the complete lifecycle flow:
+
+* approved plan
+* scheduler activation
+* boss invocation
+* evaluation window creation
+* truth submission
+* cluster production
+* Q1/Q2 evaluation
+* DNA progression
+* retries
+* completion
+* degradation handling
+
+Confirm there are no hidden lifecycle gaps, skipped transitions, orphan states, or invalid assumptions.
+
+==================================================
+
+2. Runtime Stability & Operational Health
+
+---
+
+Audit for:
+
+* zombie execution
+* stuck claims
+* stalled windows
+* dangling async tasks
+* queue starvation
+* retry amplification
+* lock persistence
+* runtime leaks
+* event-loop blocking
+* scheduler drift
+* memory growth
+* partial commits
+* race conditions
+* silent exceptions
+* stale references
+* DB/runtime divergence
+* degraded chains incorrectly classified as healthy
+
+I want aggressive validation against silent operational degradation.
+
+==================================================
+
+3. Continuity & Cadence Verification
+
+---
+
+Verify:
+
+* hourly scheduler cadence
+* idempotent execution behavior
+* retry guarantees
+* multi-replica safety
+* long-gap re-anchor behavior
+* dead-cycle detection
+* heartbeat freshness
+* supervisor classifications
+* HEALTHY / DEGRADED / DEAD transition correctness
+
+Confirm the system cannot silently stop progressing.
+
+==================================================
+
+4. Data & Semantic Integrity
+
+---
+
+Audit:
+
+* canonical field usage
+* no semantic fallbacks
+* strict enum integrity
+* snapshot lineage
+* evaluation correctness
+* cluster lineage
+* stale evidence handling
+* missing evidence handling
+* contract completeness enforcement
+* retry-state correctness
+* audit/event consistency
+
+Verify the pipeline is still aligned with D1–D5 doctrine after all continuity/runtime changes.
+
+==================================================
+
+5. Observability & Operator Visibility
+
+---
+
+Verify:
+
+* dashboard accuracy
+* alert correctness
+* metrics integrity
+* audit log completeness
+* degraded-state visibility
+* dead-cycle surfacing
+* operator signal reliability
+* no hidden failures
+* no silent skips
+* no false HEALTHY reporting
+
+If the pipeline degrades, operators must know:
+
+* what failed
+* where
+* why
+* impact level
+* recovery path
+
+==================================================
+
+6. Stress / Recovery Validation
+
+---
+
+I want explicit testing for:
+
+* worker restart recovery
+* scheduler restart recovery
+* replica race conditions
+* DB interruption recovery
+* partial execution recovery
+* timeout recovery
+* retry recovery
+* long inactive campaign recovery
+* empty-world scenarios
+* high-frequency scheduler ticks
+* delayed async completion
+* watchdog intervention correctness
+
+==================================================
+DELIVERABLES
+============
+
+Please provide:
+
+* full audit report
+* categorized findings
+* severity classification
+* unresolved risks
+* deferred risks with justification
+* architectural concerns
+* operational concerns
+* runtime concerns
+* scalability concerns
+* doctrine compliance status
+* recommendations
+* explicit pass/fail status per audit category
+
+I also want architect review after implementation and audit completion.
+
+No “probably fine” conclusions.
+
+Every major operational assumption should be verified behaviorally or explicitly classified as unverified.
+
+Thanks.

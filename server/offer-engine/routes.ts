@@ -3,6 +3,7 @@ import { db } from "../db";
 import { offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots, mechanismSnapshots } from "@shared/schema";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { runOfferEngine } from "./engine";
+import { normalizeOfferResult } from "./normalize";
 import { ENGINE_VERSION } from "./constants";
 import { ENGINE_VERSION as DIFF_ENGINE_VERSION } from "../differentiation-engine/constants";
 import { getEngineReadinessState, verifySnapshotIntegrity } from "../market-intelligence-v3/engine-state";
@@ -13,6 +14,9 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 import { getActiveRoot, validateRootBinding, validatePreGeneration, validatePostGeneration } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -23,6 +27,7 @@ export function registerOfferEngineRoutes(app: Express) {
   app.post("/api/offer-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, differentiationSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -238,6 +243,22 @@ export function registerOfferEngineRoutes(app: Express) {
         }
       }
 
+      // CONTRACT CONSISTENCY: an offer that fails root binding or post-gen
+      // validation must NOT be persisted as COMPLETE. Downgrade status to
+      // INVALID_ROOT_BINDING so dashboards/approval treat it as needing
+      // attention. We still persist the snapshot so manual debugging is
+      // possible (the offer payload remains intact and inspectable).
+      const bindingFailed = !rootValidation.valid;
+      const postGenFailed = !!(postGenValidation && !postGenValidation.valid);
+      if ((bindingFailed || postGenFailed) && result.status === "COMPLETE") {
+        const reasons: string[] = [];
+        if (bindingFailed) reasons.push(`Root binding invalid: ${rootValidation.issues.join("; ")}`);
+        if (postGenFailed) reasons.push(`Post-gen validation failed: ${postGenValidation.issues.join("; ")}`);
+        result.status = "INVALID_ROOT_BINDING";
+        result.statusMessage = reasons.join(" | ");
+        console.log(`[OfferEngine] STATUS_DOWNGRADED | COMPLETE → INVALID_ROOT_BINDING | ${reasons.join(" | ")}`);
+      }
+
       const diagnostics = result.layerDiagnostics || {};
       diagnostics.strategyRoot = {
         rootId: activeRoot.id,
@@ -258,6 +279,7 @@ export function registerOfferEngineRoutes(app: Express) {
       };
 
       const [saved] = await db.insert(offerSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         miSnapshotId: miSnapshot.id,
@@ -285,10 +307,14 @@ export function registerOfferEngineRoutes(app: Express) {
 
       await pruneOldSnapshots(db, offerSnapshots, campaignId, 20, accountId);
 
+      const normalized = normalizeOfferResult(result);
+      if (normalized.lineage.contractViolations.length > 0) {
+        console.log(`[OfferEngine] BOUNDARY_NORMALIZE | violations=${normalized.lineage.contractViolations.length} | grounding=${normalized.lineage.groundingRefs.length}`);
+      }
       res.json({
         success: true,
         snapshotId: saved.id,
-        ...result,
+        ...normalized,
         freshnessMetadata: miFreshnessMetadata,
       });
     } catch (error: any) {
@@ -306,17 +332,23 @@ export function registerOfferEngineRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const requestedRunId = (req.query.runId as string) || null;
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.json({ exists: false, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(offerSnapshots)
         .where(and(
           eq(offerSnapshots.campaignId, campaignId),
           eq(offerSnapshots.accountId, accountId),
-          eq(offerSnapshots.engineVersion, ENGINE_VERSION),
+          eq(offerSnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(offerSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ exists: false });
+        return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
       const activeRoot = await getActiveRoot(campaignId, accountId);
@@ -325,16 +357,64 @@ export function registerOfferEngineRoutes(app: Express) {
         rootSyncStatus = latest.strategyRootId === activeRoot.id ? "synced" : "stale";
       }
 
-      res.json({
-        exists: true,
-        id: latest.id,
-        campaignId: latest.campaignId,
-        status: latest.status,
-        statusMessage: latest.statusMessage,
-        engineVersion: latest.engineVersion,
+      // Normalize stored offer payload at the boundary so any historical
+      // tokens/synthetic keys are stripped before they reach the frontend.
+      const storedNormalized = normalizeOfferResult({
         primaryOffer: safeJsonParse(latest.primaryOffer),
         alternativeOffer: safeJsonParse(latest.alternativeOffer),
         rejectedOffer: safeJsonParse(latest.rejectedOffer),
+        statusMessage: latest.statusMessage,
+        layerDiagnostics: safeJsonParse(latest.layerDiagnostics),
+      });
+
+      // Phase C3 — emit LiveSnapshotEnvelope. Pass the normalized offer
+      // payload + offerStrengthScore + structuralWarnings so contract paths
+      // (primaryOffer, primaryOffer.coreOutcome, etc.) resolve correctly.
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const offerOutput = {
+          primaryOffer: storedNormalized.primaryOffer,
+          alternativeOffer: storedNormalized.alternativeOffer,
+          rejectedOffer: storedNormalized.rejectedOffer,
+          offerStrengthScore: latest.offerStrengthScore,
+          confidenceScore: latest.confidenceScore,
+          structuralWarnings: safeJsonParse(latest.structuralWarnings) || [],
+          layerDiagnostics: storedNormalized.layerDiagnostics,
+        };
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("offer", offerOutput, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=offer snap=${latest.id} err=${e?.message ?? String(e)}`);
+      }
+
+      res.json({
+        exists: true,
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
+        id: latest.id,
+        campaignId: latest.campaignId,
+        status: latest.status,
+        statusMessage: storedNormalized.statusMessage ?? latest.statusMessage,
+        engineVersion: latest.engineVersion,
+        envelope,
+        primaryOffer: storedNormalized.primaryOffer,
+        alternativeOffer: storedNormalized.alternativeOffer,
+        rejectedOffer: storedNormalized.rejectedOffer,
         offerStrengthScore: latest.offerStrengthScore,
         positioningConsistency: safeJsonParse(latest.positioningConsistency),
         hookMechanismAlignment: safeJsonParse(latest.hookMechanismAlignment),
@@ -342,7 +422,8 @@ export function registerOfferEngineRoutes(app: Express) {
         confidenceScore: latest.confidenceScore,
         selectedOption: latest.selectedOption,
         structuralWarnings: safeJsonParse(latest.structuralWarnings),
-        layerDiagnostics: safeJsonParse(latest.layerDiagnostics),
+        layerDiagnostics: storedNormalized.layerDiagnostics,
+        lineage: storedNormalized.lineage,
         mechanismSnapshotId: latest.mechanismSnapshotId,
         strategyRootId: latest.strategyRootId,
         executionTimeMs: latest.executionTimeMs,

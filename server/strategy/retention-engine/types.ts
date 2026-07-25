@@ -111,4 +111,5 @@ export interface RetentionResult {
     advisories: string[];
   };
   strategyAcceptability?: import("../../shared/strategy-acceptability").StrategyAcceptability;
+  commercialRetentionEconomics?: import("./retention-economics").RetentionEconomics | null;
 }

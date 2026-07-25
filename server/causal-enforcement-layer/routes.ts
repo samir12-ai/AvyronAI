@@ -11,6 +11,7 @@ import { getCachedAEL } from "../analytical-enrichment-layer/routes";
 import { getLatestPositioningSnapshot } from "../positioning-engine/engine";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 const LOG_PREFIX = "[CEL-Routes]";
 
 export function registerCELRoutes(app: Express) {
@@ -18,6 +19,8 @@ export function registerCELRoutes(app: Express) {
     try {
       const { campaignId } = req.params;
       const accountId = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const ael = getCachedAEL(campaignId, accountId);
       if (!ael) {

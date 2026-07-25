@@ -14,7 +14,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useCampaign } from '@/context/CampaignContext';
+import { useCampaign, type ProductAnchorInput } from '@/context/CampaignContext';
 
 const GOAL_TYPE_COLORS: Record<string, string> = {
   LEADS: '#10B981',
@@ -277,15 +277,40 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [paName, setPaName] = useState('');
+  const [paType, setPaType] = useState('');
+  const [paKeyAttrs, setPaKeyAttrs] = useState('');
+  const [paCoreProblem, setPaCoreProblem] = useState('');
+  const [paDiffFeature, setPaDiffFeature] = useState('');
+
   const handleSave = async () => {
     setError(null);
     if (!name.trim()) { setError('Campaign name is required'); return; }
     if (!objective) { setError('Select an objective'); return; }
     if (!location.trim()) { setError('Location is required'); return; }
 
+    // Product identity is optional, but partial input is rejected: either all
+    // four required fields are present or the whole anchor is left blank (so the
+    // run degrades to business-level doctrine rather than a half-formed anchor).
+    const anchorTouched = !!(paName.trim() || paType.trim() || paKeyAttrs.trim() || paCoreProblem.trim() || paDiffFeature.trim());
+    let productAnchor: ProductAnchorInput | undefined;
+    if (anchorTouched) {
+      if (!paName.trim() || !paType.trim() || !paCoreProblem.trim() || !paDiffFeature.trim()) {
+        setError('To set product identity, fill product name, type, core problem, and differentiating feature — or clear all product identity fields.');
+        return;
+      }
+      productAnchor = {
+        name: paName.trim(),
+        type: paType.trim(),
+        keyAttributes: paKeyAttrs.split(',').map(s => s.trim()).filter(Boolean),
+        coreProblemSolved: paCoreProblem.trim(),
+        differentiatingFeature: paDiffFeature.trim(),
+      };
+    }
+
     setSaving(true);
     try {
-      await createCampaign({ name: name.trim(), objective, location: location.trim(), notes: notes.trim() || undefined, dataSourceMode });
+      await createCampaign({ name: name.trim(), objective, location: location.trim(), notes: notes.trim() || undefined, dataSourceMode, productAnchor });
       onCreated();
     } catch (err: any) {
       setError(err.message || 'Failed to create campaign');
@@ -363,6 +388,75 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
           <Text style={{ color: '#6B7280', fontSize: 11, marginTop: 4 }}>
             {DATA_SOURCE_OPTIONS.find(o => o.value === dataSourceMode)?.desc}
           </Text>
+        </View>
+
+        <View style={formStyles.field}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
+            <Text style={{ color: '#8B5CF6', fontSize: 13, fontWeight: '600', flex: 1 }}>Product Identity (optional)</Text>
+          </View>
+
+          <View style={{ marginTop: 10, gap: 12 }}>
+            <Text style={{ color: '#6B7280', fontSize: 11, lineHeight: 15 }}>
+              Pin the specific product this campaign promotes so the AI reasons at product level, not generic category level. Leave blank to reason at business level.
+            </Text>
+            <View>
+              <Text style={formStyles.label}>Product Name</Text>
+              <TextInput
+                style={formStyles.input}
+                value={paName}
+                onChangeText={setPaName}
+                placeholder="e.g. AcmeFlow Pro"
+                placeholderTextColor="#4B5563"
+                testID="pa-name-input"
+              />
+            </View>
+            <View>
+              <Text style={formStyles.label}>Product Type</Text>
+              <TextInput
+                style={formStyles.input}
+                value={paType}
+                onChangeText={setPaType}
+                placeholder="e.g. Project management SaaS"
+                placeholderTextColor="#4B5563"
+                testID="pa-type-input"
+              />
+            </View>
+            <View>
+              <Text style={formStyles.label}>Key Attributes (comma-separated)</Text>
+              <TextInput
+                style={formStyles.input}
+                value={paKeyAttrs}
+                onChangeText={setPaKeyAttrs}
+                placeholder="e.g. real-time sync, offline mode"
+                placeholderTextColor="#4B5563"
+                testID="pa-attributes-input"
+              />
+            </View>
+            <View>
+              <Text style={formStyles.label}>Core Problem Solved</Text>
+              <TextInput
+                style={[formStyles.input, { height: 64, textAlignVertical: 'top' }]}
+                value={paCoreProblem}
+                onChangeText={setPaCoreProblem}
+                placeholder="What specific problem does it solve?"
+                placeholderTextColor="#4B5563"
+                multiline
+                testID="pa-problem-input"
+              />
+            </View>
+            <View>
+              <Text style={formStyles.label}>Differentiating Feature</Text>
+              <TextInput
+                style={[formStyles.input, { height: 64, textAlignVertical: 'top' }]}
+                value={paDiffFeature}
+                onChangeText={setPaDiffFeature}
+                placeholder="What makes it different from alternatives?"
+                placeholderTextColor="#4B5563"
+                multiline
+                testID="pa-diff-input"
+              />
+            </View>
+          </View>
         </View>
 
         <View style={formStyles.field}>
@@ -1014,6 +1108,23 @@ const formStyles = StyleSheet.create({
   cancelButtonText: {
     color: '#6B7280',
     fontSize: 14,
+  },
+  clearButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#F59E0B40',
+    backgroundColor: '#F59E0B12',
+  },
+  clearButtonText: {
+    color: '#F59E0B',
+    fontSize: 14,
+    fontWeight: '600',
   },
   newCampaignButton: {
     flexDirection: 'row',

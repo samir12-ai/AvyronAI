@@ -1,0 +1,125 @@
+After reviewing the current Perception Layer UX in the live dashboard, there is still a major perception problem:
+
+The agent often feels inactive, uncertain, or non-functional from the user perspective — even when the backend is actively scanning, monitoring, and building baseline intelligence.
+
+Right now many surfaces communicate mainly:
+
+* missing data
+* low signal
+* incomplete confidence
+
+Examples:
+
+* “Not enough signal yet”
+* “Waiting on enough data”
+* “No performance data available”
+* “No strategy memory entries yet”
+
+The problem is not that these messages are wrong.
+
+The problem is:
+the UX does not clearly communicate:
+
+* what the system DID find
+* what is actively being monitored
+* what is missing
+* why it is missing
+* what the system is currently doing
+* what conditions are preventing stronger recommendations
+
+This creates the perception:
+“the agent is not doing anything”
+instead of:
+“the system is actively building validated intelligence.”
+
+We need the empty / low-signal states to become evidence-aware.
+
+Examples:
+
+Instead of:
+“No performance data available.”
+
+Show:
+
+* “Found 3 published posts.”
+* “Performance integrations are not connected yet.”
+* “Baseline is still building.”
+* “Optimization confidence is limited until engagement/performance metrics are available.”
+
+Or:
+
+* “Monitoring active — waiting for first validated benchmark window.”
+* “Initial audience baseline still forming.”
+* “Need additional posting/activity cycles before trend analysis becomes reliable.”
+
+Most important:
+show what the system already discovered — not only what is missing.
+
+Competitor Pipeline Visibility
+The competitor-monitoring pipeline also needs much stronger visibility in the UX.
+
+The user should clearly understand:
+
+* competitors ARE being watched
+* scans ARE happening
+* market monitoring IS active
+* even when no major market shift happened yet
+
+Examples:
+
+* “Watching 5 competitors.”
+* “Last competitor scan completed 2h ago.”
+* “42 competitor posts analyzed this week.”
+* “No major market movement detected.”
+* “Market stable over the last 24h.”
+* “No significant competitor shifts detected.”
+* “Competitor activity unchanged since last scan.”
+
+This is extremely important psychologically.
+
+Even:
+“nothing happened”
+is valuable information if the system explains:
+
+* what it checked
+* how many competitors it scanned
+* when it checked them
+* what conclusion it reached
+
+Otherwise the user perceives:
+
+* empty UI
+* dead agent
+* inactive monitoring
+
+instead of:
+
+* active continuous market observation.
+
+I do NOT want fake AI chatter or synthetic activity.
+
+I want:
+
+* real signal-backed visibility
+* operational transparency
+* monitoring transparency
+* evidence-aware empty states
+* baseline-building visibility
+* competitor monitoring visibility
+* confidence explanation
+* readiness explanation
+
+The user should always understand:
+
+* what the system currently knows
+* what it is monitoring
+* what it already analyzed
+* what is still missing
+* why confidence is limited
+* what the system is waiting for next
+
+The system already produces most of these signals internally.
+
+The problem is:
+the UX currently surfaces mostly absence,
+instead of operational awareness.

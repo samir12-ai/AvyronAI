@@ -1,0 +1,267 @@
+After reviewing the full frontend + UX audit, it is now clear that the system’s biggest remaining problem is no longer intelligence capability.
+
+The problem is:
+frontend entropy, surface overlap, unclear ownership, and excessive cognitive load.
+
+The backend/runtime intelligence is now significantly stronger than the product experience itself.
+
+The next phase must focus on:
+
+* simplification
+* clarity
+* surface ownership
+* architectural cleanup
+* UX coherence
+* runtime→UI alignment
+* customer understanding
+* perceived intelligence density
+
+—not adding more features or engines.
+
+Most important:
+I want a deep cleanup + verification sprint focused on:
+
+* removing weak surfaces
+* merging overlapping surfaces
+* clarifying ownership
+* fixing architectural inconsistencies
+* eliminating operator leakage
+* simplifying customer perception
+* auditing every visible surface end-to-end
+
+1. Full Surface Ownership Audit
+   For EVERY customer-visible surface/card/component:
+   I want explicit mapping of:
+
+* purpose
+* owner
+* runtime source
+* backend endpoint
+* underlying tables/signals
+* orchestration dependencies
+* confidence sensitivity
+* freshness sensitivity
+* degraded behavior
+* stale behavior
+* fallback behavior
+
+I want complete runtime→UI traceability.
+
+If a surface exists and we cannot clearly explain:
+
+* why it exists
+* what business question it answers
+* what logic powers it
+* what value it creates
+
+then it should be:
+
+* removed
+* merged
+* redesigned
+* or hidden.
+
+2. Remove “To Do Today”
+   I want “To Do Today” removed completely.
+
+Reason:
+it creates the wrong product feeling:
+
+* generic AI productivity app
+* task manager
+* filler checklist
+* weak authority surface
+
+It does NOT feel like:
+
+* strategic intelligence
+* market awareness
+* adaptive diagnosis
+* high-confidence prioritization
+
+The underlying useful logic/signals can remain internally if valuable.
+
+But the surface itself should be removed.
+
+Instead:
+focus on:
+
+* one clear Priority Action
+* strategic reasoning
+* market explanation
+* impact-focused guidance
+
+The product should communicate:
+“What matters most right now?”
+—not:
+“Here are random daily tasks.”
+
+3. Merge & Simplify Overlapping Surfaces
+   The audit confirmed major surface overlap.
+
+Examples:
+
+* DashboardChat
+* MarketMindAgent
+* app/agent.tsx
+* onboarding agent
+
+These should NOT compete.
+
+I want:
+ONE unified agent surface.
+
+The same applies to:
+
+* PlanStatus
+* RequiredWork
+* ExecutionPlan
+* Narrative overlaps
+* monitoring overlaps
+* diagnose overlaps
+
+Goal:
+fewer surfaces,
+higher intelligence density per surface.
+
+4. Eliminate Remaining Operator Vocabulary
+   I want a full sweep for:
+
+* operator language
+* architecture language
+* engine terminology
+* orchestration terminology
+* enum leakage
+* internal-state phrasing
+
+Examples already identified:
+
+* drift detected
+* reused
+* incomplete
+* blocked
+* trusted signal
+* shadowed
+* system_untrusted
+* plan binding
+* envelope states
+
+Customer UX should communicate:
+business meaning,
+not system mechanics.
+
+5. Dashboard Simplification
+   The dashboard must stop behaving like a control room.
+
+Current state:
+
+* too many cards
+* too many status badges
+* too many numbers
+* too many simultaneous mental models
+* too many competing intelligence surfaces
+
+The dashboard should answer only:
+
+* what is happening?
+* why is it happening?
+* what should I focus on?
+* what is the system monitoring?
+
+Everything else should either:
+
+* collapse
+* move deeper
+* merge
+* or disappear.
+
+6. Initialization / First-Run Experience
+   The current post-onboarding experience still feels broken.
+
+Users land on:
+
+* empty states
+* missing data warnings
+* low-signal messages
+
+before understanding:
+
+* the system is scanning
+* baseline is building
+* competitors are being analyzed
+* the first intelligence cycle is running
+
+I want a dedicated initialization experience:
+
+* baseline-building visibility
+* competitor scan progress
+* first-run orchestration visibility
+* intelligence-building explanations
+* confidence formation explanations
+
+The first impression should feel:
+alive,
+active,
+and intelligent.
+
+—not empty.
+
+7. Architectural Cleanup & Bug Sweep
+   While simplifying the frontend:
+   I also want a deep bug + architecture audit across:
+
+* frontend state ownership
+* AppContext bloat
+* duplicate hooks
+* polling overlap
+* stale-query risks
+* hidden refresh races
+* silent client-side failures
+* routing leaks
+* customer/operator separation
+* dead components
+* orphaned UI flows
+* translation inconsistencies
+* loading-state inconsistencies
+* empty-state inconsistencies
+
+Fix:
+
+* architectural inconsistencies
+* runtime/UX mismatches
+* stale UI behavior
+* broken mental models
+* hidden operator leakage
+* weak trust surfaces
+
+8. Product Philosophy Going Forward
+   The audit made the core issue very clear:
+
+We built more intelligence than product simplicity.
+
+The next phase should optimize for:
+
+* clarity
+* simplicity
+* trust
+* strategic understanding
+* perceived intelligence
+* operational awareness
+
+—not:
+
+* more visible complexity
+* more surfaces
+* more status systems
+* more cards
+* more architectural exposure
+
+Most important:
+I want the frontend to feel:
+simple,
+alive,
+trustworthy,
+and strategically intelligent.
+
+Not:
+like an internal AI operations console.

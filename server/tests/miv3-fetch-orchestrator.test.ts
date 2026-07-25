@@ -572,11 +572,16 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).not.toContain("pendingSnapshotIds.get");
     });
 
-    it("should cleanup activeJobs in-memory map in finally block", async () => {
+    it("should cleanup activeJobs in-memory map in finally block (Seal #16 / F1: token-checked)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8")
       );
-      expect(source).toContain("activeJobs.delete(lockKey)");
+      // Seal #16 refactor: cleanup is centralized in `trackActiveJob()` and
+      // is token-checked (`current.token === myToken`) so a late-settling
+      // stale promise cannot delete a fresh successor entry.
+      expect(source).toContain("trackActiveJob");
+      expect(source).toContain("activeJobs.delete(lockKey)"); // inside trackActiveJob's finally
+      expect(source).toContain("current.token === myToken");
       expect(source).toContain(".finally(");
     });
 
@@ -1092,8 +1097,8 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("proxyCtx?.session.dispatcher");
       expect(source).toContain("proxyCtx?.session.sessionId");
+      expect(source).toContain("proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url)");
       expect(source).not.toContain("getSessionDispatcher");
       expect(source).not.toContain("getProxyDispatcher");
     });
@@ -2316,7 +2321,7 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
     });
 
     it("FP-31) Context kernel uses enrichmentStatus for data quality weighting", () => {
-      const ckSource = require("fs").readFileSync("server/engine-contracts/context-kernel.ts", "utf-8");
+      const ckSource = require("fs").readFileSync("server/output-projection/context-kernel.ts", "utf-8");
       expect(ckSource).toContain('enrichmentStatus === "ENRICHED"');
       expect(ckSource).toContain("enrichmentRatio");
     });

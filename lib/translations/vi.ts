@@ -486,7 +486,7 @@ const vi: TranslationKeys = {
     step1Title: 'Tải Lên Clip',
     step1Desc: 'Chọn các clip video thô từ thiết bị của bạn',
     step2Title: 'AI Chỉnh Sửa Video',
-    step2Desc: 'GPT-5.2 phân tích clip và tạo quyết định chỉnh sửa chuyên nghiệp',
+    step2Desc: 'Avyron AI phân tích clip và tạo quyết định chỉnh sửa chuyên nghiệp',
     step3Title: 'Nhận Video',
     step3Desc: 'Tải xuống video đã chỉnh sửa hoàn chỉnh với hiệu ứng chuyển cảnh',
     clip: 'Clip',

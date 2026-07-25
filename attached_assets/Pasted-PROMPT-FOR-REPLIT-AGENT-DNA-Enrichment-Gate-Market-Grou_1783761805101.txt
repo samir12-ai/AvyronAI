@@ -1,0 +1,42 @@
+PROMPT FOR REPLIT AGENT — DNA Enrichment Gate (Market-Grounded Auto-Fix + Dashboard Warning)
+Context:
+In the latest full run (campaign campaign_1773576062201_6t0oxi, output dir 2026-07-11T08-27-37-952Z), Positioning and Offer failed the interchangeability judge 3/3 times and fell back to generic (REUSED_UNVERIFIED), causing doctrineResolution=business_level_degraded and a truthful System Control BLOCK. Root cause per doctrine: Product DNA lacks a proprietary mechanism/differentiator. We will NOT touch the judge, the depth gates, or any threshold. Instead, we add one enrichment step that feeds the existing retry-with-feedback loop from market data we already persist (AEL root causes/causal chains, competitor post corpus), and a dashboard warning when auto-enrichment cannot resolve it.
+PHASE 1 — Diagnose the exact rejection surface (no code changes)
+
+Locate the interchangeability judge rejection path for positioning-engine and offer-engine. Identify: (a) where the 3-attempt retry loop lives, (b) what feedback text is passed between attempts, (c) where the final fallback to REUSED_UNVERIFIED is decided.
+Locate where Product DNA is loaded for these engines, and where AEL (root_causes, causal_chains, buying_barriers) and competitor intelligence signals are accessible at that point in the pipeline.
+Report file paths + line numbers. Do not implement anything in this phase.
+
+PHASE 2 — Implement the enrichment step (two paths)
+
+Path A — auto-enrichment: When the judge rejects an attempt with a "generic/interchangeable" reason, before the next retry, run ONE additional LLM call (dna-enrichment) that receives: current Product DNA + AEL root causes/causal chains/buying barriers + top competitor complaint signals. Its task: extract 1–2 candidate proprietary differentiators/mechanisms grounded in gaps competitors demonstrably have (cite the AEL IDs, e.g. RC2/CC2). Inject the candidates into the retry context as structured feedback — NOT as accepted truth. The judge remains the sole acceptance authority.
+Path B — user prompt: If all retries still fail after enrichment, do NOT change the fallback behavior of the pipeline (keep REUSED_UNVERIFIED + truthful SC block). Additionally persist a dna_enrichment_required flag (campaign-scoped) with: the judge's last rejection reason, and the top candidate differentiator(s) from Path A phrased as a confirm/edit suggestion.
+Dashboard warning: Surface this flag on the main dashboard (not buried in Brand Profile): a single non-technical card — headline like "Your strategy needs one detail from you", body showing the suggested differentiator as a question ("Competitors show repeated pricing complaints — does your product solve this? Confirm or write one line about what you do that no competitor does."), one text input + confirm button. On submit: append to Product DNA, clear the flag, and mark positioning/offer for re-run on next orchestration.
+
+Constraints:
+
+Do NOT modify: interchangeability judge logic, DEPTH_GATE_THRESHOLD, any gate/threshold, System Control verdict logic.
+Path A output is candidate feedback only — it must pass through the judge like any other attempt. No bypass.
+All new failure points must log loudly (structured tags, e.g. DNA_ENRICHMENT_FAILED), never silent catch. If the enrichment LLM call fails, proceed to Path B — never block the pipeline.
+New DB column/flag (if needed) via a proper numbered migration, fail-closed consistent with existing schema-floor checks.
+English-only code/comments/logs, consistent with existing conventions.
+
+PHASE 3 — Verify on the CURRENT campaign state
+
+Run tsc alone (no chained commands) — net-new errors must be 0 vs the 722 baseline.
+Re-run the full pipeline on campaign campaign_1773576062201_6t0oxi with the existing data (within cooldown is fine — same corpus as the last clean run).
+Report, with evidence (log lines + output files):
+
+Did Path A's enrichment produce candidates grounded in AEL IDs? Quote them.
+Did positioning and/or offer PASS the judge this time? Show the judge verdict per attempt.
+If still failing: confirm the dna_enrichment_required flag persisted and the dashboard card renders, with the exact suggestion text shown to the user.
+Confirm doctrineResolution and System Control verdict for this run — report truthfully, whether improved or not.
+
+
+
+Done-conditions:
+
+tsc net-new = 0.
+Either: (a) judge PASS on positioning/offer with enriched context, evidenced by verdict logs, OR (b) judge still rejects AND the dashboard warning card is live with a grounded, user-confirmable suggestion.
+No gate, judge, or threshold was weakened — confirm explicitly.
+Architect review of the diff: PASS.

@@ -33,6 +33,45 @@ function safeNumber(v: any, fallback: number): number {
   return isNaN(parsed) ? fallback : parsed;
 }
 
+// ── CLP-15: per-layer evidence gating ─────────────────────────────────────
+// Each layer evaluator MUST early-return INSUFFICIENT_EVIDENCE when its
+// declared upstream prerequisites are missing or empty. The prior shape
+// (score initialised to 1.0, deductions only on present-but-conflicting
+// inputs) silently produced `passed: true` for completely empty engine
+// outputs — the headline finding of E-4 in `.local/plans/intelligence-
+// forensic-audit.md`. D5 doctrine: never silently substitute.
+const MIN_EVALUATED_BASE_LAYERS = 4;
+
+function insufficientEvidence(layerName: string, missingDeps: string[]): LayerResult {
+  return {
+    layerName,
+    passed: null,
+    score: null,
+    findings: [],
+    warnings: [
+      `INSUFFICIENT_EVIDENCE: cannot evaluate ${layerName}; missing upstream inputs: ${missingDeps.join(", ")}`,
+    ],
+    evaluationState: "INSUFFICIENT_EVIDENCE",
+    missingDeps,
+  };
+}
+
+function hasPositioningSignal(p: IntegrityPositioningInput): boolean {
+  return !!(p.narrativeDirection || p.enemyDefinition || (p.territories && p.territories.length > 0));
+}
+function hasDifferentiationSignal(d: IntegrityDifferentiationInput): boolean {
+  return !!((d.pillars && d.pillars.length > 0) || (d.mechanismCore && d.mechanismCore.mechanismType !== "none") || (d.proofArchitecture && d.proofArchitecture.length > 0));
+}
+function hasOfferSignal(o: IntegrityOfferInput): boolean {
+  return !!(o.offerName || o.coreOutcome || (o.deliverables && o.deliverables.length > 0));
+}
+function hasFunnelSignal(f: IntegrityFunnelInput): boolean {
+  return !!(f.funnelType || (f.stageMap && f.stageMap.length > 0) || (f.trustPath && f.trustPath.length > 0));
+}
+function hasAudienceSignal(a: IntegrityAudienceInput): boolean {
+  return !!((a.audiencePains && a.audiencePains.length > 0) || Object.keys(a.desireMap || {}).length > 0 || Object.keys(a.objectionMap || {}).length > 0);
+}
+
 export function sanitizeBoundary(text: string): { clean: boolean; violations: string[] } {
   if (!text) return { clean: true, violations: [] };
   const result = enforceBoundaryWithSanitization(text, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
@@ -46,6 +85,17 @@ export function layer1_strategicConsistency(
   funnel: IntegrityFunnelInput,
   audience: IntegrityAudienceInput,
 ): LayerResult {
+  // CLP-15: cross-engine consistency requires at least one positioning OR
+  // differentiation signal AND an offer signal AND a funnel signal. Empty
+  // upstream snapshots produce vacuous "consistency" — INSUFFICIENT_EVIDENCE.
+  const missing: string[] = [];
+  if (!hasPositioningSignal(positioning) && !hasDifferentiationSignal(differentiation)) {
+    missing.push("positioning_snapshot", "differentiation_snapshot");
+  }
+  if (!hasOfferSignal(offer)) missing.push("offer_snapshot");
+  if (!hasFunnelSignal(funnel)) missing.push("funnel_snapshot");
+  if (missing.length > 0) return insufficientEvidence("strategic_consistency", missing);
+
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 1.0;
@@ -89,10 +139,17 @@ export function layer1_strategicConsistency(
 
   const pains = audience.audiencePains || [];
   const desires = Object.keys(audience.desireMap || {});
-  const outcome = offer.coreOutcome || "";
-  if (outcome && pains.length > 0) {
+  // Domain-content read of the OFFER's `coreOutcome` prose string for
+  // pain-match scoring. Local var renamed off the `outcome` suffix per
+  // Seal #9 doctrine D1; the property accessed (`coreOutcome`) is itself
+  // outside the FORBIDDEN set. Empty-string sentinel = "no outcome to score".
+  let coreOutcomeText = "";
+  if (typeof offer.coreOutcome === "string" && offer.coreOutcome.length > 0) {
+    coreOutcomeText = offer.coreOutcome;
+  }
+  if (coreOutcomeText && pains.length > 0) {
     const painTexts = pains.map((p: any) => (typeof p === "string" ? p : p?.pain || p?.name || "").toLowerCase());
-    const outcomeWords = outcome.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+    const outcomeWords = coreOutcomeText.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
     const anyPainMatch = painTexts.some((pt: string) => outcomeWords.some((w: string) => pt.includes(w)));
     if (!anyPainMatch && desires.length === 0) {
       warnings.push("Offer core outcome does not clearly address identified audience pain signals");
@@ -118,7 +175,7 @@ export function layer1_strategicConsistency(
     findings.push("Funnel commitment level is consistent with offer friction");
   }
 
-  return { layerName: "strategic_consistency", passed: score >= 0.5, score: clamp(score), findings, warnings };
+  return { layerName: "strategic_consistency", passed: score >= 0.5, score: clamp(score), findings, warnings, evaluationState: "EVALUATED" };
 }
 
 export function layer2_audienceOfferAlignment(
@@ -126,6 +183,12 @@ export function layer2_audienceOfferAlignment(
   offer: IntegrityOfferInput,
   funnel: IntegrityFunnelInput,
 ): LayerResult {
+  // CLP-15: requires audience signals AND offer signals to be meaningful.
+  const missing: string[] = [];
+  if (!hasAudienceSignal(audience)) missing.push("audience_snapshot");
+  if (!hasOfferSignal(offer)) missing.push("offer_snapshot");
+  if (missing.length > 0) return insufficientEvidence("audience_offer_alignment", missing);
+
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 1.0;
@@ -137,7 +200,17 @@ export function layer2_audienceOfferAlignment(
   const deliverables = offer.deliverables || [];
 
   if (pains.length > 0 && outcome) {
-    const painTexts = pains.slice(0, 5).map((p: any) => (typeof p === "string" ? p : p?.pain || p?.name || "").toLowerCase());
+    // Audience engine v3 emits structured pains as { canonical, frequency, evidence, ... }.
+    // Earlier shapes used { pain } or { name }. Probe canonical first so the
+    // alignment check reads real text instead of "" (the source of the
+    // long-standing false-positive "outcome does not reference pain language"
+    // ENFORCEMENT_BLOCK warning).
+    const painTexts = pains.slice(0, 5).map((p: any) =>
+      (typeof p === "string"
+        ? p
+        : (p?.canonical || p?.text || p?.canonicalText || p?.pain || p?.name || p?.label || p?.description || "")
+      ).toLowerCase()
+    );
     const anyMatch = painTexts.some((pt: string) => {
       const words = pt.split(/\s+/).filter((w: string) => w.length > 3);
       return words.some((w: string) => outcome.includes(w));
@@ -193,13 +266,20 @@ export function layer2_audienceOfferAlignment(
     }
   }
 
-  return { layerName: "audience_offer_alignment", passed: score >= 0.5, score: clamp(score), findings, warnings };
+  return { layerName: "audience_offer_alignment", passed: score >= 0.5, score: clamp(score), findings, warnings, evaluationState: "EVALUATED" };
 }
 
+// Phase 3 (Task #66) — layer3 emits typed contradictions; see body.
 export function layer3_positioningDifferentiationCompatibility(
   positioning: IntegrityPositioningInput,
   differentiation: IntegrityDifferentiationInput,
 ): LayerResult {
+  // CLP-15: a compatibility check requires both inputs to be present.
+  const missing: string[] = [];
+  if (!hasPositioningSignal(positioning)) missing.push("positioning_snapshot");
+  if (!hasDifferentiationSignal(differentiation)) missing.push("differentiation_snapshot");
+  if (missing.length > 0) return insufficientEvidence("positioning_differentiation_compatibility", missing);
+
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 1.0;
@@ -210,8 +290,21 @@ export function layer3_positioningDifferentiationCompatibility(
   const authorityMode = (differentiation.authorityMode || "").toLowerCase();
   const mechanism = differentiation.mechanismFraming?.description || differentiation.mechanismFraming?.name || "";
 
+  // Phase 3 (Task #66) — typed cross-engine contradictions. The string
+  // warnings below now ALSO emit a structured Contradiction entry so
+  // system-control's `dedupeContradictions` can collapse this layer's
+  // findings against any equivalent detection from contradiction-detector.
+  const contradictions: import("../shared/contradictions").Contradiction[] = [];
+
   if (authorityMode.includes("price") && narrative.includes("authority")) {
     warnings.push("Positioning claims authority but differentiation relies on price competition — contradiction");
+    contradictions.push({
+      kind: "positioning_orphan_vs_signal_grounding",
+      engineA: "positioning",
+      engineB: "differentiation",
+      description: "Positioning claims authority but differentiation relies on price competition",
+      resolution: "Reconcile authority claim with a non-price differentiation pillar, or downgrade authority narrative",
+    });
     score -= 0.2;
   }
 
@@ -220,6 +313,13 @@ export function layer3_positioningDifferentiationCompatibility(
     return name.includes("tactical") || name.includes("basic") || name.includes("simple");
   }) && pillars.length > 0) {
     warnings.push("Positioning claims strategic expertise but differentiation pillars are purely tactical");
+    contradictions.push({
+      kind: "positioning_orphan_vs_signal_grounding",
+      engineA: "positioning",
+      engineB: "differentiation",
+      description: "Positioning claims strategic expertise but differentiation pillars are purely tactical",
+      resolution: "Add at least one strategic-level differentiation pillar, or revise positioning narrative",
+    });
     score -= 0.15;
   }
 
@@ -229,6 +329,13 @@ export function layer3_positioningDifferentiationCompatibility(
     const enemyInMechanism = enemyWords.some((w: string) => mechLower.includes(w));
     if (enemyInMechanism) {
       warnings.push("Enemy narrative language appears in differentiation mechanism — potential narrative contradiction");
+      contradictions.push({
+        kind: "positioning_orphan_vs_signal_grounding",
+        engineA: "positioning",
+        engineB: "differentiation",
+        description: "Enemy narrative language appears in differentiation mechanism — potential narrative contradiction",
+        resolution: "Reframe mechanism description to avoid enemy vocabulary, OR strengthen the framing as a deliberate counter-mechanism",
+      });
       score -= 0.1;
     }
   }
@@ -251,13 +358,18 @@ export function layer3_positioningDifferentiationCompatibility(
     findings.push("Positioning and differentiation are structurally compatible");
   }
 
-  return { layerName: "positioning_differentiation_compatibility", passed: score >= 0.5, score: clamp(score), findings, warnings };
+  return { layerName: "positioning_differentiation_compatibility", passed: score >= 0.5, score: clamp(score), findings, warnings, contradictions, evaluationState: "EVALUATED" };
 }
 
 export function layer4_offerFunnelCompatibility(
   offer: IntegrityOfferInput,
   funnel: IntegrityFunnelInput,
 ): LayerResult {
+  const missing: string[] = [];
+  if (!hasOfferSignal(offer)) missing.push("offer_snapshot");
+  if (!hasFunnelSignal(funnel)) missing.push("funnel_snapshot");
+  if (missing.length > 0) return insufficientEvidence("offer_funnel_compatibility", missing);
+
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 1.0;
@@ -300,13 +412,15 @@ export function layer4_offerFunnelCompatibility(
     findings.push(`Offer-funnel compatibility: ${warnings.length} issue(s) detected`);
   }
 
-  return { layerName: "offer_funnel_compatibility", passed: score >= 0.5, score: clamp(score), findings, warnings };
+  return { layerName: "offer_funnel_compatibility", passed: score >= 0.5, score: clamp(score), findings, warnings, evaluationState: "EVALUATED" };
 }
 
 export function layer5_trustPathContinuity(
   funnel: IntegrityFunnelInput,
   differentiation: IntegrityDifferentiationInput,
 ): LayerResult {
+  if (!hasFunnelSignal(funnel)) return insufficientEvidence("trust_path_continuity", ["funnel_snapshot"]);
+
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 1.0;
@@ -351,7 +465,7 @@ export function layer5_trustPathContinuity(
     findings.push("Trust path has adequate depth and proof sequencing");
   }
 
-  return { layerName: "trust_path_continuity", passed: score >= 0.5, score: clamp(score), findings, warnings };
+  return { layerName: "trust_path_continuity", passed: score >= 0.5, score: clamp(score), findings, warnings, evaluationState: "EVALUATED" };
 }
 
 export function layer6_proofSufficiency(
@@ -359,6 +473,13 @@ export function layer6_proofSufficiency(
   offer: IntegrityOfferInput,
   funnel: IntegrityFunnelInput,
 ): LayerResult {
+  const missing: string[] = [];
+  if (!hasDifferentiationSignal(differentiation) && !hasOfferSignal(offer)) {
+    missing.push("differentiation_snapshot", "offer_snapshot");
+  }
+  if (!hasFunnelSignal(funnel)) missing.push("funnel_snapshot");
+  if (missing.length > 0) return insufficientEvidence("proof_sufficiency", missing);
+
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 1.0;
@@ -403,7 +524,7 @@ export function layer6_proofSufficiency(
     findings.push("Offer proof alignment references are present");
   }
 
-  return { layerName: "proof_sufficiency", passed: score >= 0.5, score: clamp(score), findings, warnings };
+  return { layerName: "proof_sufficiency", passed: score >= 0.5, score: clamp(score), findings, warnings, evaluationState: "EVALUATED" };
 }
 
 export function layer7_conversionFeasibility(
@@ -411,6 +532,11 @@ export function layer7_conversionFeasibility(
   audience: IntegrityAudienceInput,
   offer: IntegrityOfferInput,
 ): LayerResult {
+  const missing: string[] = [];
+  if (!hasFunnelSignal(funnel)) missing.push("funnel_snapshot");
+  if (!hasOfferSignal(offer)) missing.push("offer_snapshot");
+  if (missing.length > 0) return insufficientEvidence("conversion_feasibility", missing);
+
   const findings: string[] = [];
   const warnings: string[] = [];
   let score = 1.0;
@@ -459,7 +585,7 @@ export function layer7_conversionFeasibility(
     findings.push("Conversion path is structurally feasible");
   }
 
-  return { layerName: "conversion_feasibility", passed: score >= 0.5, score: clamp(score), findings, warnings };
+  return { layerName: "conversion_feasibility", passed: score >= 0.5, score: clamp(score), findings, warnings, evaluationState: "EVALUATED" };
 }
 
 const AWARENESS_PERSUASION_MAP: Record<string, string> = {
@@ -530,12 +656,23 @@ export function layer8_systemCoherence(
   const findings: string[] = [];
   const warnings: string[] = [];
 
-  const failedLayers = layerResults.filter(l => !l.passed);
+  // CLP-15: system coherence operates ONLY over layers that were actually
+  // evaluated. INSUFFICIENT_EVIDENCE layers contribute neither to "passed"
+  // nor "failed" — they contribute to a separate insufficient-coverage
+  // count which the aggregator translates into INSUFFICIENT_LAYER_COVERAGE.
+  const evaluatedLayers = layerResults.filter(l => l.evaluationState === "EVALUATED");
+  const insufficientLayers = layerResults.filter(l => l.evaluationState !== "EVALUATED");
+  const failedLayers = evaluatedLayers.filter(l => l.passed === false);
   const totalWarnings = layerResults.reduce((sum, l) => sum + l.warnings.length, 0);
-  const avgScore = layerResults.reduce((sum, l) => sum + l.score, 0) / Math.max(layerResults.length, 1);
+  const avgScore = evaluatedLayers.length > 0
+    ? evaluatedLayers.reduce((sum, l) => sum + (l.score ?? 0), 0) / evaluatedLayers.length
+    : 0;
 
   if (failedLayers.length > 0) {
     warnings.push(`${failedLayers.length} validation layer(s) failed: ${failedLayers.map(l => l.layerName).join(", ")}`);
+  }
+  if (insufficientLayers.length > 0) {
+    warnings.push(`${insufficientLayers.length} layer(s) returned INSUFFICIENT_EVIDENCE: ${insufficientLayers.map(l => l.layerName).join(", ")}`);
   }
 
   if (totalWarnings > 8) {
@@ -564,10 +701,15 @@ export function layer8_systemCoherence(
     warnings.push(...crossEngine.warnings);
   }
 
-  const score = clamp(avgScore - (failedLayers.length * 0.05) - (totalWarnings > 8 ? 0.1 : 0));
-  findings.push(`System coherence: ${failedLayers.length} failed layers, ${totalWarnings} total warnings`);
+  // If no base layers evaluated, system_coherence itself is INSUFFICIENT.
+  if (evaluatedLayers.length === 0) {
+    return insufficientEvidence("system_coherence", ["all_base_layers_insufficient"]);
+  }
 
-  return { layerName: "system_coherence", passed: failedLayers.length <= 2 && score >= 0.4, score, findings, warnings };
+  const score = clamp(avgScore - (failedLayers.length * 0.05) - (totalWarnings > 8 ? 0.1 : 0));
+  findings.push(`System coherence: ${failedLayers.length} failed, ${evaluatedLayers.length} evaluated, ${insufficientLayers.length} insufficient (of ${layerResults.length} base layers), ${totalWarnings} total warnings`);
+
+  return { layerName: "system_coherence", passed: failedLayers.length <= 2 && score >= 0.4, score, findings, warnings, evaluationState: "EVALUATED" };
 }
 
 export function runIntegrityEngine(
@@ -625,9 +767,24 @@ export function runIntegrityEngine(
 
   const allLayers = [...firstSevenLayers, l8];
 
-  let overallIntegrityScore = clamp(
-    allLayers.reduce((sum, l) => sum + l.score * (LAYER_WEIGHTS[l.layerName] || 0.1), 0)
-  );
+  // CLP-15: score numerator AND denominator exclude INSUFFICIENT_EVIDENCE
+  // layers. If every layer is INSUFFICIENT, score is 0 and the aggregator
+  // returns INSUFFICIENT_LAYER_COVERAGE.
+  const evaluatedLayers = allLayers.filter(l => l.evaluationState === "EVALUATED");
+  const insufficientLayers = allLayers.filter(l => l.evaluationState !== "EVALUATED");
+  const evaluatedBaseLayers = firstSevenLayers.filter(l => l.evaluationState === "EVALUATED");
+  const evaluatedLayerCount = evaluatedLayers.length;
+  const insufficientLayerCount = insufficientLayers.length;
+  const missingPrerequisites = Array.from(new Set(insufficientLayers.flatMap(l => l.missingDeps ?? [])));
+
+  let weightSum = 0;
+  let scoredSum = 0;
+  for (const l of evaluatedLayers) {
+    const w = LAYER_WEIGHTS[l.layerName] || 0.1;
+    weightSum += w;
+    scoredSum += (l.score ?? 0) * w;
+  }
+  let overallIntegrityScore = weightSum > 0 ? clamp(scoredSum / weightSum) : 0;
   const rawIntegrityScore = overallIntegrityScore;
   overallIntegrityScore = normalizeConfidence(overallIntegrityScore, dataReliability);
   const confidenceNormalized = rawIntegrityScore !== overallIntegrityScore;
@@ -635,9 +792,14 @@ export function runIntegrityEngine(
   if (confidenceNormalized) {
     diagnostics.rawIntegrityScore = rawIntegrityScore;
   }
+  diagnostics.evaluatedLayerCount = evaluatedLayerCount;
+  diagnostics.insufficientLayerCount = insufficientLayerCount;
+  diagnostics.missingPrerequisites = missingPrerequisites;
 
   const structuralWarnings = allLayers.flatMap(l => l.warnings);
-  const flaggedInconsistencies = allLayers.filter(l => !l.passed).flatMap(l =>
+  // Only EVALUATED+failed layers count as "inconsistencies" — an
+  // INSUFFICIENT_EVIDENCE layer cannot have detected an inconsistency.
+  const flaggedInconsistencies = evaluatedLayers.filter(l => l.passed === false).flatMap(l =>
     l.warnings.map(w => `[${l.layerName}] ${w}`)
   );
 
@@ -656,21 +818,99 @@ export function runIntegrityEngine(
   let status: string = STATUS.COMPLETE;
   let statusMessage: string | null = null;
 
+  // CLP-15: when fewer than MIN_EVALUATED_BASE_LAYERS of the 7 base layers
+  // were actually evaluable, the integrity verdict is structurally untrustable.
+  const insufficientCoverage = evaluatedBaseLayers.length < MIN_EVALUATED_BASE_LAYERS;
+  if (insufficientCoverage) {
+    status = "INSUFFICIENT_LAYER_COVERAGE";
+    statusMessage = `Only ${evaluatedBaseLayers.length}/${firstSevenLayers.length} base layers evaluable; missing upstream inputs: ${missingPrerequisites.join(", ")}`;
+  }
+
   if (!boundaryCheck.passed) {
     status = STATUS.INTEGRITY_FAILED;
     statusMessage = `Boundary violation in integrity output: ${boundaryCheck.violations.join("; ")}`;
   }
 
-  const failedCount = allLayers.filter(l => !l.passed).length;
-  const safeToExecute = boundaryCheck.passed && failedCount <= 2 && overallIntegrityScore >= 0.4;
+  // Compound check throughout: only EVALUATED layers with passed===false
+  // are real failures. INSUFFICIENT_EVIDENCE !== failure.
+  const failedCount = evaluatedLayers.filter(l => l.passed === false).length;
 
-  console.log(`[IntegrityEngine-V3] Complete | status=${status} | score=${overallIntegrityScore.toFixed(2)} | safeToExecute=${safeToExecute} | failed=${failedCount}/8 | warnings=${structuralWarnings.length} | boundary=${boundaryCheck.passed}`);
+  const audienceOfferLayer = l2;
+  const painAlignmentFailed = audienceOfferLayer.evaluationState === "EVALUATED" && (
+    (audienceOfferLayer.score ?? 0) < 0.3 ||
+    audienceOfferLayer.passed === false ||
+    audienceOfferLayer.warnings.some(w => {
+      const wl = w.toLowerCase();
+      return wl.includes("audience pain") || wl.includes("readiness gap") || wl.includes("pain signal") || wl.includes("pain alignment");
+    })
+  );
+
+  const objectionCoverageZero = l6.evaluationState === "EVALUATED" && (
+    (l6.score ?? 0) < 0.3 ||
+    l6.passed === false ||
+    l6.warnings.some(w => {
+      const wl = w.toLowerCase();
+      return wl.includes("no proof") || wl.includes("proof missing") || wl.includes("zero proof") || wl.includes("missing proof") || wl.includes("proof gap");
+    })
+  );
+
+  const hasEnforcementFailure = painAlignmentFailed || objectionCoverageZero;
+
+  if (hasEnforcementFailure) {
+    const reasons: string[] = [];
+    if (painAlignmentFailed) reasons.push("offer↔audience pain alignment failed");
+    if (objectionCoverageZero) reasons.push("objection/proof coverage is critically low");
+    structuralWarnings.push(`ENFORCEMENT_BLOCK: safeToExecute overridden — ${reasons.join(", ")}`);
+    console.log(`[IntegrityEngine-V3] ENFORCEMENT_OVERRIDE | safeToExecute=false | reasons=${reasons.join(", ")}`);
+  }
+
+  // CLP-15: insufficient coverage forces safeToExecute=false.
+  const safeToExecute = !insufficientCoverage
+    && boundaryCheck.passed
+    && failedCount <= 2
+    && overallIntegrityScore >= 0.4
+    && !hasEnforcementFailure;
+
+  // ── Canonical integrity verdict (PASS / PARTIAL / FAIL) ──────────────────
+  // CLP-15: insufficient coverage → FAIL. Otherwise unchanged.
+  let overallStatus: "PASS" | "PARTIAL" | "FAIL";
+  if (insufficientCoverage || !boundaryCheck.passed || hasEnforcementFailure || failedCount >= 3 || !safeToExecute) {
+    overallStatus = "FAIL";
+  } else if (failedCount > 0 || insufficientLayerCount > 0 || structuralWarnings.length > 0) {
+    overallStatus = "PARTIAL";
+  } else {
+    overallStatus = "PASS";
+  }
+
+  const failureReasons: string[] = [];
+  if (insufficientCoverage) failureReasons.push(`insufficient_layer_coverage: ${evaluatedBaseLayers.length}/${firstSevenLayers.length} base layers evaluable`);
+  if (!boundaryCheck.passed) failureReasons.push(`boundary_violation: ${boundaryCheck.violations?.join(", ") || "unspecified"}`);
+  if (hasEnforcementFailure) failureReasons.push("enforcement_block: pain alignment or objection coverage failed");
+  for (const layer of allLayers) {
+    if (layer.evaluationState === "EVALUATED" && layer.passed === false) {
+      failureReasons.push(`layer_failed:${layer.layerName ?? "unknown"}`);
+    } else if (layer.evaluationState === "INSUFFICIENT_EVIDENCE") {
+      failureReasons.push(`layer_insufficient:${layer.layerName ?? "unknown"}`);
+    }
+  }
+  const zeroLeakage = flaggedInconsistencies.length === 0;
+  const traceabilityComplete = !insufficientCoverage && boundaryCheck.passed && failedCount === 0 && insufficientLayerCount === 0;
+
+  console.log(`[IntegrityEngine-V3] Complete | status=${status} | overallStatus=${overallStatus} | score=${overallIntegrityScore.toFixed(2)} | safeToExecute=${safeToExecute} | evaluated=${evaluatedLayerCount}/${allLayers.length} | insufficient=${insufficientLayerCount} | failed=${failedCount} | warnings=${structuralWarnings.length} | boundary=${boundaryCheck.passed}`);
 
   return {
     status,
+    evaluatedLayerCount,
+    insufficientLayerCount,
+    missingPrerequisites,
+    overallStatus,
+    integrityVerdict: overallStatus,
     statusMessage,
     overallIntegrityScore,
     safeToExecute,
+    failureReasons,
+    zeroLeakage,
+    traceabilityComplete,
     layerResults: allLayers,
     structuralWarnings,
     flaggedInconsistencies,

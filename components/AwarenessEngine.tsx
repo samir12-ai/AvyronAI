@@ -13,7 +13,10 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
 
 interface LayerResult {
   layerName: string;
@@ -102,7 +105,12 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
+  // Phase 8 defense-in-depth: this component is mounted by the customer-pivot
+  // "How buyers find you" tab AND by the operator strategies branch. All
+  // engine-named copy MUST be gated.
+  const operator = useOperatorSurface();
   const [data, setData] = useState<AwarenessData | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [offerSnapshotId, setOfferSnapshotId] = useState<string | null>(null);
@@ -118,6 +126,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
       const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       setData(json);
+      setEnvelope(json?.envelope ?? null);
     } catch (err) {
       console.error('[AwarenessEngine] Fetch error:', err);
     } finally {
@@ -149,7 +158,12 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId || !offerSnapshotId) {
-      Alert.alert('Missing Dependency', 'A completed Offer Engine analysis is required before running the Awareness Engine.');
+      Alert.alert(
+        operator.enabled ? 'Missing Dependency' : 'One more step first',
+        operator.enabled
+          ? 'A completed Offer Engine analysis is required before running the Awareness Engine.'
+          : 'Please finish the offer analysis first — it sets up the inputs this step needs.'
+      );
       return;
     }
     setAnalyzing(true);
@@ -379,7 +393,7 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
             <Ionicons name="eye" size={20} color="#fff" />
-            <Text style={styles.headerTitle}>Awareness Engine V3</Text>
+            <Text style={styles.headerTitle}>{operator.enabled ? 'Awareness Engine V3' : 'How buyers find you'}</Text>
           </View>
           {data?.engineVersion && (
             <View style={styles.versionBadge}>
@@ -405,18 +419,28 @@ export default function AwarenessEngine({ isActive }: { isActive?: boolean }) {
         )}
       </LinearGradient>
 
+      {envelope && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={runAnalysis} />
+        </View>
+      )}
+
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
           <Ionicons name="eye-outline" size={40} color={colors.textMuted} />
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No Awareness Analysis</Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            {operator.enabled ? 'No Awareness Analysis' : 'No awareness analysis yet'}
+          </Text>
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Run the Awareness Engine to map entry routes, readiness stages, and attention triggers for your strategic positioning.
+            {operator.enabled
+              ? 'Run the Awareness Engine to map entry routes, readiness stages, and attention triggers for your strategic positioning.'
+              : 'Analyze how buyers discover you, how ready they are to act, and which attention triggers actually move them.'}
           </Text>
           {!offerSnapshotId && (
             <View style={[styles.depWarning, { backgroundColor: '#F59E0B15' }]}>
               <Ionicons name="alert-circle" size={16} color="#F59E0B" />
               <Text style={[styles.depWarningText, { color: '#F59E0B' }]}>
-                Complete an Offer Engine analysis first
+                {operator.enabled ? 'Complete an Offer Engine analysis first' : 'Finish the offer analysis first'}
               </Text>
             </View>
           )}

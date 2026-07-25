@@ -1,30 +1,20 @@
-import { ProxyAgent } from "undici";
-import type { StickySessionContext } from "./proxy-pool-manager";
-import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getProxyConfig } from "./proxy-pool-manager";
+import type { StickySessionContext, PoolFetchTarget } from "./proxy-pool-manager";
+import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getScrapingConfig, poolFetch } from "./proxy-pool-manager";
 import { acquireToken } from "./rate-limiter";
 
-type Browser = any;
-type Page = any;
-
-let playwrightChromium: any = null;
-async function getChromium(): Promise<any> {
-  if (playwrightChromium) return playwrightChromium;
-  try {
-    const pw = await import("playwright-chromium");
-    playwrightChromium = pw.chromium;
-    return playwrightChromium;
-  } catch {
-    try {
-      const pw: any = await import("playwright");
-      playwrightChromium = pw.chromium;
-      return playwrightChromium;
-    } catch {
-      return null;
-    }
-  }
+/**
+ * 2026-07 Unlocker rebuild: ALL transport goes through the pool manager
+ * (Bright Data Unlocker API). No UA pools, custom headers, ProxyAgent
+ * dispatchers, or headless browsers — the Unlocker manages fingerprints
+ * (UA/TLS/headers) and anti-bot solving server-side. There is NO direct-fetch
+ * fallback: unconfigured scraping fails fast as SCRAPING_UNCONFIGURED.
+ */
+function transportFetch(url: string, proxyCtx?: StickySessionContext, bareTarget?: PoolFetchTarget): Promise<Response> {
+  // T006 — sticky-session fetches (proxyCtx path) auto-attach per-target
+  // backoff identity inside the pool manager; the bare path threads an
+  // explicit target built by scrapeInstagramProfile.
+  return proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url, bareTarget ? { target: bareTarget } : undefined);
 }
-
-const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
 
 function randomDelay(): Promise<void> {
   const ms = 3000 + Math.random() * 2000;
@@ -51,12 +41,45 @@ export interface ScrapeResult {
   embeddedComments: ScrapedComment[];
   followers: number | null;
   profileName: string | null;
-  collectionMethodUsed: "WEB_API" | "HTML_PARSE" | "HEADLESS_RENDER" | "NONE";
+  collectionMethodUsed: "WEB_API" | "HTML_PARSE" | "HEADLESS_RENDER" | "APIFY_ACTOR" | "NONE";
   attempts: string[];
   warnings: string[];
   paginationPages?: number;
   rawFetchedCount?: number;
   paginationStopReason?: string;
+  // Fix #1a — failure classification (B4: explicit over hidden ambiguity).
+  // "NONE": success OR healthy-but-empty (transport reached the platform, just
+  // no posts). "GENUINE_BLOCK": a verified auth/challenge/403 wall — the ONLY
+  // class permitted to persist a 24h platform-block cooldown. "TRANSIENT":
+  // timeout / proxy-tunnel contention / rate-limit / unknown — retry next cycle,
+  // never a persistent block.
+  failureClass: "NONE" | "GENUINE_BLOCK" | "TRANSIENT";
+}
+
+/**
+ * Fix #1a — distinguish a genuine platform block from transient contention,
+ * from the raw transport error message. classifyBlock() (proxy-pool-manager) is
+ * intentionally NOT reused here: it lumps real 403s and mere connect/tunnel
+ * timeouts both into "PROXY_BLOCKED", which is exactly the coarseness that
+ * caused spurious 24h blocks. Only unambiguous auth/challenge/403 walls return
+ * GENUINE_BLOCK; everything else is TRANSIENT (conservative — favours retry
+ * over lock, per B3 safe-degradation).
+ */
+export function classifyScrapeFailure(message: string): "GENUINE_BLOCK" | "TRANSIENT" {
+  const m = (typeof message === "string" ? message : "").toLowerCase();
+  if (
+    m.includes("403") ||
+    m.includes("401") ||
+    m.includes("forbidden") ||
+    m.includes("require_login") ||
+    m.includes("login_required") ||
+    m.includes("login required") ||
+    m.includes("challenge") ||
+    m.includes("checkpoint")
+  ) {
+    return "GENUINE_BLOCK";
+  }
+  return "TRANSIENT";
 }
 
 export interface ScrapeStats {
@@ -64,6 +87,7 @@ export interface ScrapeStats {
   webApiSuccess: number;
   htmlParseSuccess: number;
   headlessRenderSuccess: number;
+  apifyActorSuccess: number;
   scrapeBlocked: number;
   totalBytesEstimated: number;
   lastReset: number;
@@ -74,6 +98,7 @@ const scrapeStats: ScrapeStats = {
   webApiSuccess: 0,
   htmlParseSuccess: 0,
   headlessRenderSuccess: 0,
+  apifyActorSuccess: 0,
   scrapeBlocked: 0,
   totalBytesEstimated: 0,
   lastReset: Date.now(),
@@ -83,26 +108,33 @@ export function getScrapeStats(): ScrapeStats & { successRate: string; blockedRa
   const total = scrapeStats.totalRequests || 1;
   return {
     ...scrapeStats,
-    successRate: `${(((scrapeStats.webApiSuccess + scrapeStats.htmlParseSuccess + scrapeStats.headlessRenderSuccess) / total) * 100).toFixed(1)}%`,
+    successRate: `${(((scrapeStats.webApiSuccess + scrapeStats.htmlParseSuccess + scrapeStats.headlessRenderSuccess + scrapeStats.apifyActorSuccess) / total) * 100).toFixed(1)}%`,
     blockedRate: `${((scrapeStats.scrapeBlocked / total) * 100).toFixed(1)}%`,
     bandwidthMB: `${(scrapeStats.totalBytesEstimated / (1024 * 1024)).toFixed(2)} MB`,
   };
 }
 
 const MAX_BATCH_SIZE = 10;
-let currentBatchCount = 0;
-let batchResetTime = Date.now();
 const BATCH_WINDOW_MS = 60 * 60 * 1000;
 
-function checkBatchLimit(): boolean {
-  if (Date.now() - batchResetTime > BATCH_WINDOW_MS) {
-    currentBatchCount = 0;
-    batchResetTime = Date.now();
+// P4 isolation seal: per-account batch counter, profile cache, and rate-limit
+// map. The pre-hardening implementation used a single global counter / cache
+// keyed by handle, which meant Tenant A's 10 scrapes in an hour starved
+// Tenant B (and rate-limit hits cached A's result for B's reads). Every
+// observable bucket is now keyed by accountId.
+const batchCounters = new Map<string, { count: number; resetAt: number }>();
+
+function checkBatchLimit(accountId: string): boolean {
+  const now = Date.now();
+  let bucket = batchCounters.get(accountId);
+  if (!bucket || now - bucket.resetAt > BATCH_WINDOW_MS) {
+    bucket = { count: 0, resetAt: now };
+    batchCounters.set(accountId, bucket);
   }
-  if (currentBatchCount >= MAX_BATCH_SIZE) {
+  if (bucket.count >= MAX_BATCH_SIZE) {
     return false;
   }
-  currentBatchCount++;
+  bucket.count++;
   return true;
 }
 
@@ -110,6 +142,10 @@ const profileCache = new Map<string, { data: ScrapeResult; timestamp: number }>(
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 const rateLimitMap = new Map<string, number>();
 const RATE_LIMIT_MS = 10000;
+
+function nsCacheKey(accountId: string, base: string): string {
+  return `${accountId}::${base}`;
+}
 
 export function normalizeInstagramUrl(url: string): string {
   let handle = url.trim();
@@ -249,30 +285,15 @@ interface PaginationDiagnostics {
   proxyUsed: boolean;
 }
 
-async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS): Promise<{ posts: ScrapedPost[]; embeddedComments: ScrapedComment[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
+async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, bareTarget?: PoolFetchTarget): Promise<{ posts: ScrapedPost[]; embeddedComments: ScrapedComment[]; followers: number | null; profileName: string | null; bytesReceived: number; paginationPages: number; rawFetchedCount: number; paginationStopReason: PaginationStopReason; diagnostics: PaginationDiagnostics }> {
   const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
 
-  const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "X-IG-App-ID": "936619743392459",
-    "X-Requested-With": "XMLHttpRequest",
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": `https://www.instagram.com/${handle}/`,
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-  };
-
-  const dispatcher = proxyCtx?.session.dispatcher ?? undefined;
   const sessionId = proxyCtx?.session.sessionId ?? null;
-  const fetchOptions: any = { headers, redirect: "follow" };
-  if (dispatcher) {
-    fetchOptions.dispatcher = dispatcher;
-  }
-  const proxyUsed = !!dispatcher;
+  // All requests route through the Unlocker API — transport is always
+  // pool-managed (main entry fails fast when unconfigured).
+  const proxyUsed = true;
 
-  console.log(`[CI Scraper] WEB_API: Fetching web_profile_info for ${handle} ${proxyUsed ? `via Bright Data proxy (session=${sessionId})` : "direct"}`);
+  console.log(`[CI Scraper] WEB_API: Fetching web_profile_info for ${handle} via Unlocker API${sessionId ? ` (session=${sessionId})` : ""}`);
 
   const diag: PaginationDiagnostics = {
     page1PostCount: 0,
@@ -292,24 +313,11 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     proxyUsed,
   };
 
-  const iHeaders: Record<string, string> = {
-    "User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
-    "X-IG-App-ID": "936619743392459",
-    "X-IG-WWW-Claim": "0",
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-  };
-  const iFetchOptions: any = { headers: iHeaders, redirect: "follow" };
-  if (dispatcher) iFetchOptions.dispatcher = dispatcher;
-
   let user: any = null;
   let bytesReceived = 0;
 
   if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:www:${handle}`);
-  const response = await fetch(apiUrl, fetchOptions);
+  const response = await transportFetch(apiUrl, proxyCtx, bareTarget);
   diag.page1HttpStatus = response.status;
 
   if (response.ok) {
@@ -330,9 +338,11 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
   if (!user) {
     console.log(`[CI Scraper] WEB_API: www failed for ${handle} (HTTP ${diag.page1HttpStatus}), trying i.instagram.com variant...`);
     const iApiUrl = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`;
+    let iHttpStatus: number | null = null;
     try {
       if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:i.ig:${handle}`);
-      const iResp = await fetch(iApiUrl, iFetchOptions);
+      const iResp = await transportFetch(iApiUrl, proxyCtx, bareTarget);
+      iHttpStatus = iResp.status;
       if (iResp.ok) {
         const iText = await iResp.text();
         const iBytes = Buffer.byteLength(iText, "utf-8");
@@ -356,7 +366,12 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
     } catch (iErr: any) {
       console.log(`[CI Scraper] WEB_API: i.instagram.com fallback failed for ${handle}: ${iErr.message}`);
     }
-    if (!user) throw new Error("No user data from web_profile_info (www and i.instagram.com both failed)");
+    // Fix #1a — surface the transport HTTP status in the thrown message so a
+    // genuine 403/401/challenge wall on the dominant WEB_API path classifies as
+    // GENUINE_BLOCK (classifyScrapeFailure matches on the status/marker text).
+    // Without this the message carried no marker and every real block fell
+    // through to TRANSIENT, defeating the 24h cooldown and re-scraping forever.
+    if (!user) throw new Error(`No user data from web_profile_info (www HTTP ${response.status}, i.instagram.com HTTP ${iHttpStatus === null ? "n/a" : iHttpStatus}; both failed)`);
   }
 
   if (user.is_private === true) {
@@ -435,25 +450,13 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
 
     const maxId = `${lastPostId}_${userId}`;
     const feedUrl = `https://i.instagram.com/api/v1/feed/user/${userId}/?count=50&max_id=${maxId}`;
-    const feedHeaders: Record<string, string> = {
-      "User-Agent": "Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100)",
-      "X-IG-App-ID": "936619743392459",
-      "X-IG-WWW-Claim": "0",
-      "Accept": "*/*",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Sec-Fetch-Dest": "empty",
-      "Sec-Fetch-Mode": "cors",
-      "Sec-Fetch-Site": "same-origin",
-    };
-    const feedFetchOptions: any = { headers: feedHeaders, redirect: "follow" };
-    if (dispatcher) feedFetchOptions.dispatcher = dispatcher;
 
     console.log(`[CI Scraper] WEB_API: PAGINATION_ATTEMPT | method=V1_FEED_API | userId=${userId} | max_id=${maxId.substring(0, 30)}... | for ${handle}`);
 
     try {
       if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page2:${handle}`);
       const page2StartMs = Date.now();
-      const feedResponse = await fetch(feedUrl, feedFetchOptions);
+      const feedResponse = await transportFetch(feedUrl, proxyCtx, bareTarget);
       diag.paginationHttpStatus = feedResponse.status;
 
       console.log(`[CI Scraper] WEB_API: PAGINATION_RESPONSE | HTTP=${feedResponse.status} | Content-Type=${feedResponse.headers.get("content-type")} | for ${handle}`);
@@ -499,7 +502,7 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
               try {
                 if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page${paginationPages + 1}:${handle}`);
                 const pageStartMs = Date.now();
-                const nextResp = await fetch(nextFeedUrl, feedFetchOptions);
+                const nextResp = await transportFetch(nextFeedUrl, proxyCtx, bareTarget);
                 if (!nextResp.ok) {
                   if (proxyCtx) logProxyTelemetry(proxyCtx, `PAGINATION_PAGE_${paginationPages}`, nextResp.status, classifyBlock(nextResp.status, ""), Date.now() - pageStartMs, false);
                   console.log(`[CI Scraper] WEB_API: PAGINATION_PAGE_${paginationPages} HTTP ${nextResp.status}, stopping`);
@@ -586,26 +589,12 @@ async function attemptWebProfileApi(handle: string, proxyCtx?: StickySessionCont
       const gqlVars = JSON.stringify({ id: userId, first: 50, after: gqlCursor });
       const gqlUrl = `https://www.instagram.com/graphql/query/?query_hash=${queryHash}&variables=${encodeURIComponent(gqlVars)}`;
 
-      const gqlHeaders: Record<string, string> = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "X-IG-App-ID": "936619743392459",
-        "X-Requested-With": "XMLHttpRequest",
-        "Accept": "*/*",
-        "Referer": `https://www.instagram.com/${handle}/`,
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-      };
-
-      const gqlFetchOptions: any = { headers: gqlHeaders, redirect: "follow" };
-      if (dispatcher) gqlFetchOptions.dispatcher = dispatcher;
-
       console.log(`[CI Scraper] WEB_API: GRAPHQL_PAGE_${gqlPageNum} | have=${posts.length}/${maxPosts} | cursor=${gqlCursor.substring(0, 20)}... | for ${handle}`);
 
       try {
         if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `GRAPHQL:page${gqlPageNum}:${handle}`);
         const gqlStartMs = Date.now();
-        const gqlResp = await fetch(gqlUrl, gqlFetchOptions);
+        const gqlResp = await transportFetch(gqlUrl, proxyCtx, bareTarget);
 
         if (!gqlResp.ok) {
           const gqlErrBody = await gqlResp.text().catch(() => "");
@@ -709,28 +698,11 @@ function parsePostFromV1Feed(item: any, handle: string): ScrapedPost {
   };
 }
 
-async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
-  const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-  };
-
-  const dispatcher = proxyCtx?.session.dispatcher ?? undefined;
-  const fetchOptions: any = { headers, redirect: "follow" };
-  if (dispatcher) {
-    fetchOptions.dispatcher = dispatcher;
-  }
-
-  console.log(`[CI Scraper] HTML_PARSE: Fetching ${profileUrl} ${dispatcher ? `via pool session (${proxyCtx?.session.sessionId})` : "direct"}`);
+async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx?: StickySessionContext, bareTarget?: PoolFetchTarget): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesReceived: number }> {
+  console.log(`[CI Scraper] HTML_PARSE: Fetching ${profileUrl} via Unlocker API${proxyCtx ? ` (session=${proxyCtx.session.sessionId})` : ""}`);
 
   if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `HTML_PARSE:${handle}`);
-  const response = await fetch(profileUrl, fetchOptions);
+  const response = await transportFetch(profileUrl, proxyCtx, bareTarget);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const html = await response.text();
   const bytesReceived = Buffer.byteLength(html, "utf-8");
@@ -790,135 +762,6 @@ async function attemptHtmlPageParse(profileUrl: string, handle: string, proxyCtx
   return { posts, followers, profileName, bytesReceived };
 }
 
-async function attemptHeadlessRender(profileUrl: string, handle: string, proxyCtx?: StickySessionContext): Promise<{ posts: ScrapedPost[]; followers: number | null; profileName: string | null; bytesEstimated: number }> {
-  const chromiumModule = await getChromium();
-  if (!chromiumModule) throw new Error("Playwright not available");
-
-  let browser: Browser | null = null;
-
-  const proxyHost = proxyCtx?.session.proxyHost ?? null;
-  const proxyPort = proxyCtx?.session.proxyPort ?? null;
-  const proxyUsername = proxyCtx?.session.sessionUsername ?? null;
-  const proxyPassword = proxyCtx?.session.sessionPassword ?? null;
-  const hasProxy = !!(proxyHost && proxyPort && proxyUsername && proxyPassword);
-
-  try {
-    const baseArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
-    if (hasProxy) {
-      baseArgs.push("--ignore-certificate-errors");
-    }
-
-    const launchOptions: any = {
-      executablePath: CHROMIUM_PATH,
-      headless: true,
-      args: baseArgs,
-    };
-
-    if (hasProxy) {
-      launchOptions.proxy = {
-        server: `http://${proxyHost}:${proxyPort}`,
-        username: proxyUsername,
-        password: proxyPassword,
-      };
-      console.log(`[CI Scraper] HEADLESS_RENDER: Launching with pool-managed proxy session=${proxyCtx?.session.sessionId} for ${handle}`);
-    } else {
-      console.log(`[CI Scraper] HEADLESS_RENDER: Launching direct (no proxy) for ${handle}`);
-    }
-
-    if (proxyCtx) await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `HEADLESS_RENDER:${handle}`);
-    browser = await chromiumModule.launch(launchOptions);
-
-    const context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 1280, height: 900 },
-    });
-
-    const page: Page = await context.newPage();
-    await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.waitForTimeout(5000);
-
-    const data = await page.evaluate(() => {
-      const posts: any[] = [];
-      let followers: number | null = null;
-      let profileName: string | null = null;
-
-      const nameEl = document.querySelector("header h2, header span[dir]");
-      if (nameEl) profileName = nameEl.textContent?.trim() || null;
-
-      const statEls = document.querySelectorAll("header ul li span, header section ul li span");
-      for (let i = 0; i < statEls.length; i++) {
-        const el = statEls[i];
-        const title = el.getAttribute("title");
-        if (title && /\d/.test(title)) {
-          const parent = el.closest("li");
-          const parentText = parent?.textContent || "";
-          if (parentText.toLowerCase().includes("follower")) {
-            followers = parseInt(title.replace(/,/g, ""));
-          }
-        }
-      }
-
-      const postLinks = document.querySelectorAll("article a[href*='/p/'], article a[href*='/reel/'], main a[href*='/p/'], main a[href*='/reel/']");
-      const seen = new Set<string>();
-      for (let i = 0; i < postLinks.length; i++) {
-        const link = postLinks[i] as HTMLAnchorElement;
-        const href = link.href;
-        if (seen.has(href)) continue;
-        seen.add(href);
-        const isReel = href.includes("/reel/");
-        const shortcode = href.match(/\/(p|reel)\/([^\/]+)/)?.[2] || "";
-        const img = link.querySelector("img");
-        const video = link.querySelector("video");
-
-        posts.push({
-          shortcode,
-          permalink: href,
-          mediaType: isReel || video ? "REEL" : "IMAGE",
-          caption: img?.getAttribute("alt") || null,
-          timestamp: null,
-          likes: null,
-          comments: null,
-          views: null,
-          videoUrl: null,
-          displayUrl: img?.getAttribute("src") || null,
-        });
-
-        if (posts.length >= 30) break;
-      }
-
-      return { posts, followers, profileName };
-    });
-
-    await context.close();
-
-    const scrapedPosts: ScrapedPost[] = data.posts.map((p: any) => ({
-      postId: p.shortcode,
-      permalink: p.permalink.startsWith("http") ? p.permalink : `https://www.instagram.com${p.permalink}`,
-      mediaType: p.mediaType as ScrapedPost["mediaType"],
-      timestamp: p.timestamp,
-      caption: p.caption ? String(p.caption).substring(0, 2000) : null,
-      likes: p.likes,
-      comments: p.comments,
-      views: p.views,
-      videoUrl: null,
-      displayUrl: p.displayUrl || null,
-      shortcode: p.shortcode || "",
-    }));
-
-    const bytesEstimated = scrapedPosts.length * 500 + 50000;
-    console.log(`[CI Scraper] HEADLESS_RENDER: Found ${scrapedPosts.length} posts for ${handle}, ~${(bytesEstimated / 1024).toFixed(1)} KB estimated`);
-
-    return {
-      posts: scrapedPosts,
-      followers: data.followers,
-      profileName: data.profileName || handle,
-      bytesEstimated,
-    };
-  } finally {
-    if (browser) await browser.close().catch(() => {});
-  }
-}
-
 export interface ScrapedComment {
   commentId: string;
   postId: string;
@@ -951,35 +794,19 @@ export async function scrapePostComments(
   const variables = JSON.stringify({ shortcode, first: MAX_COMMENTS_PER_POST });
   const url = `https://www.instagram.com/graphql/query/?query_hash=${COMMENT_QUERY_HASH}&variables=${encodeURIComponent(variables)}`;
 
-  const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "X-IG-App-ID": "936619743392459",
-    "X-Requested-With": "XMLHttpRequest",
-    "Accept": "*/*",
-    "Referer": `https://www.instagram.com/p/${shortcode}/`,
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-  };
-
-  const dispatcher = proxyCtx?.session.dispatcher ?? undefined;
-
-  const fetchOptions: any = { headers, redirect: "follow" };
-  if (dispatcher) fetchOptions.dispatcher = dispatcher;
-
   try {
     if (proxyCtx) {
       await acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `COMMENTS:${shortcode}`);
     }
 
     const startMs = Date.now();
-    const resp = await fetch(url, fetchOptions);
+    const resp = await transportFetch(url, proxyCtx);
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => "");
       if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_GRAPHQL`, resp.status, classifyBlock(resp.status, errBody), Date.now() - startMs, false);
       console.log(`[CI Scraper] COMMENTS: GraphQL HTTP ${resp.status} for ${shortcode}, falling back to V1/HTML | ${errBody.substring(0, 100)}`);
-      return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
+      return await scrapePostCommentsV1(shortcode, postId, proxyCtx);
     }
 
     const text = await resp.text();
@@ -1007,14 +834,14 @@ export async function scrapePostComments(
 
     if (comments.length === 0) {
       console.log(`[CI Scraper] COMMENTS: GraphQL returned 200 but 0 edges for ${shortcode}, falling back to V1/HTML`);
-      return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
+      return await scrapePostCommentsV1(shortcode, postId, proxyCtx);
     }
 
     console.log(`[CI Scraper] COMMENTS: ${comments.length} real comments scraped for ${shortcode} (${totalAvailable} total available)`);
     return { success: true, comments, shortcode, totalAvailable };
   } catch (err: any) {
     console.log(`[CI Scraper] COMMENTS: GraphQL error for ${shortcode}: ${err.message}, falling back to V1/HTML`);
-    return await scrapePostCommentsV1(shortcode, postId, proxyCtx, dispatcher);
+    return await scrapePostCommentsV1(shortcode, postId, proxyCtx);
   }
 }
 
@@ -1022,24 +849,8 @@ async function scrapePostCommentsFromHTML(
   shortcode: string,
   postId: string,
   proxyCtx?: StickySessionContext,
-  existingDispatcher?: any,
 ): Promise<CommentScrapeResult> {
   const postPageUrl = `https://www.instagram.com/p/${shortcode}/`;
-
-  const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-  };
-
-  const dispatcher = existingDispatcher ?? proxyCtx?.session.dispatcher ?? undefined;
-
-  const fetchOptions: any = { headers, redirect: "follow" };
-  if (dispatcher) fetchOptions.dispatcher = dispatcher;
 
   try {
     if (proxyCtx) {
@@ -1047,7 +858,7 @@ async function scrapePostCommentsFromHTML(
     }
 
     const startMs = Date.now();
-    const resp = await fetch(postPageUrl, fetchOptions);
+    const resp = await transportFetch(postPageUrl, proxyCtx);
 
     if (!resp.ok) {
       if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_HTML`, resp.status, classifyBlock(resp.status, ""), Date.now() - startMs, false);
@@ -1142,23 +953,8 @@ async function scrapePostCommentsV1(
   shortcode: string,
   postId: string,
   proxyCtx?: StickySessionContext,
-  existingDispatcher?: any,
 ): Promise<CommentScrapeResult> {
   const mediaInfoUrl = `https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`;
-
-  const headers: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "X-IG-App-ID": "936619743392459",
-    "Accept": "*/*",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-  };
-
-  const dispatcher = existingDispatcher ?? proxyCtx?.session.dispatcher ?? undefined;
-
-  const fetchOptions: any = { headers, redirect: "follow" };
-  if (dispatcher) fetchOptions.dispatcher = dispatcher;
 
   try {
     if (proxyCtx) {
@@ -1166,12 +962,12 @@ async function scrapePostCommentsV1(
     }
 
     const startMs = Date.now();
-    const resp = await fetch(mediaInfoUrl, fetchOptions);
+    const resp = await transportFetch(mediaInfoUrl, proxyCtx);
 
     if (!resp.ok) {
       if (proxyCtx) logProxyTelemetry(proxyCtx, `COMMENTS_V1`, resp.status, classifyBlock(resp.status, ""), Date.now() - startMs, false);
       console.log(`[CI Scraper] COMMENTS_V1: HTTP ${resp.status} for ${shortcode}, falling back to HTML scrape`);
-      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx, dispatcher);
+      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx);
     }
 
     const text = await resp.text();
@@ -1179,7 +975,7 @@ async function scrapePostCommentsV1(
     const item = data?.items?.[0] || data?.graphql?.shortcode_media;
     if (!item) {
       console.log(`[CI Scraper] COMMENTS_V1: No media data for ${shortcode}, falling back to HTML scrape`);
-      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx, dispatcher);
+      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx);
     }
 
     const commentEdges = item.edge_media_to_parent_comment?.edges
@@ -1231,14 +1027,14 @@ async function scrapePostCommentsV1(
 
     if (comments.length === 0) {
       console.log(`[CI Scraper] COMMENTS_V1: 0 comments from V1 API for ${shortcode}, falling back to HTML scrape`);
-      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx, dispatcher);
+      return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx);
     }
 
     console.log(`[CI Scraper] COMMENTS_V1: ${comments.length} real comments for ${shortcode} (${totalAvailable} total available)`);
     return { success: comments.length > 0, comments, shortcode, totalAvailable };
   } catch (err: any) {
     console.log(`[CI Scraper] COMMENTS_V1: Error for ${shortcode}: ${err.message}, falling back to HTML scrape`);
-    return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx, dispatcher);
+    return await scrapePostCommentsFromHTML(shortcode, postId, proxyCtx);
   }
 }
 
@@ -1269,10 +1065,14 @@ export async function scrapeCommentsForPosts(
   return { totalScraped, results };
 }
 
-export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, accountId: string = "unknown"): Promise<ScrapeResult> {
+export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySessionContext, maxPosts: number = TARGET_POSTS, accountId: string = "unknown", opts?: { allowApifyFallback?: boolean }): Promise<ScrapeResult> {
   const profileUrl = normalizeInstagramUrl(rawUrl);
   const handle = extractHandleFromUrl(rawUrl);
-  const cacheKey = `instagram:${handle}`;
+  // P4 isolation seal: namespace cache + rate-limit keys by accountId. Two
+  // tenants asking for the same Instagram handle now get independent buckets,
+  // so one tenant's CACHE_HIT or RATE_LIMITED state cannot influence another.
+  const cacheKey = nsCacheKey(accountId, `instagram:${handle}`);
+  const rateKey = nsCacheKey(accountId, handle);
 
   const cached = profileCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -1280,15 +1080,15 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     return { ...cached.data, attempts: [...cached.data.attempts, "CACHE_HIT"] };
   }
 
-  const lastRequest = rateLimitMap.get(handle);
+  const lastRequest = rateLimitMap.get(rateKey);
   if (lastRequest && Date.now() - lastRequest < RATE_LIMIT_MS) {
     const cachedAny = profileCache.get(cacheKey);
     if (cachedAny) return { ...cachedAny.data, attempts: ["RATE_LIMITED", "CACHE_HIT"] };
   }
-  rateLimitMap.set(handle, Date.now());
+  rateLimitMap.set(rateKey, Date.now());
 
-  if (!checkBatchLimit()) {
-    console.log(`[CI Scraper] BATCH_LIMIT reached (${MAX_BATCH_SIZE} profiles/hour). Returning cached or blocked.`);
+  if (!checkBatchLimit(accountId)) {
+    console.log(`[CI Scraper] BATCH_LIMIT reached for account=${accountId} (${MAX_BATCH_SIZE} profiles/hour). Returning cached or blocked.`);
     const cachedFallback = profileCache.get(cacheKey);
     if (cachedFallback) return { ...cachedFallback.data, attempts: ["BATCH_LIMIT", "CACHE_HIT"] };
     return {
@@ -1300,6 +1100,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
       collectionMethodUsed: "NONE",
       attempts: ["BATCH_LIMIT"],
       warnings: ["BATCH_LIMIT_EXCEEDED: Testing phase limits scraping to 10 profiles per hour."],
+      failureClass: "TRANSIENT",
     };
   }
 
@@ -1310,13 +1111,38 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
   let followers: number | null = null;
   let profileName: string | null = null;
   let collectionMethodUsed: ScrapeResult["collectionMethodUsed"] = "NONE";
+  // Fix #1a — transport-reachability tracking. transportSucceeded=true once ANY
+  // scrape attempt returns without throwing (even with 0 posts = healthy empty).
+  // lastFailureMessage captures the transport error used to classify a block.
+  let transportSucceeded = false;
+  let lastFailureMessage = "";
 
-  const proxyAvailable = !!getProxyConfig();
-  if (!proxyAvailable) {
-    console.warn("[CI Scraper] WARNING: No Bright Data proxy configured. Scraping without proxy may trigger rate limits.");
+  // Safe-off fail-fast (D5/B3): without BRIGHT_DATA_API_KEY + BRIGHT_DATA_ZONE
+  // there is NO transport — no direct-fetch fallback. Result is NOT cached so
+  // configuring secrets takes effect immediately.
+  if (!getScrapingConfig()) {
+    console.error(`[CI Scraper] SCRAPING_UNCONFIGURED | Bright Data Unlocker API not configured (BRIGHT_DATA_API_KEY / BRIGHT_DATA_ZONE). Refusing to scrape ${handle}.`);
+    return {
+      success: false,
+      posts: [],
+      embeddedComments: [],
+      followers: null,
+      profileName: handle,
+      collectionMethodUsed: "NONE",
+      attempts: ["SCRAPING_UNCONFIGURED"],
+      warnings: ["SCRAPING_UNCONFIGURED: Set BRIGHT_DATA_API_KEY and BRIGHT_DATA_ZONE (optionally BRIGHT_DATA_COUNTRY) to enable scraping."],
+      failureClass: "TRANSIENT",
+    };
   }
 
   await randomDelay();
+
+  // T006 — bare-path backoff identity. When a sticky session ctx exists, the
+  // pool manager derives the target from the ctx (accountId + platform +
+  // competitorHash); only the bare path needs an explicit one.
+  const bareTarget: PoolFetchTarget | undefined = proxyCtx
+    ? undefined
+    : { accountId, platform: "instagram", targetKey: handle };
 
   let paginationPages = 0;
   let rawFetchedCount = 0;
@@ -1326,7 +1152,8 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
   attempts.push("WEB_API");
   try {
     const startMs = Date.now();
-    const result = await attemptWebProfileApi(handle, proxyCtx, maxPosts);
+    const result = await attemptWebProfileApi(handle, proxyCtx, maxPosts, bareTarget);
+    transportSucceeded = true;
     if (proxyCtx) {
       logProxyTelemetry(proxyCtx, "WEB_API", 200, null, Date.now() - startMs, result.posts.length > 0);
     }
@@ -1344,6 +1171,7 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
       console.log(`[CI Scraper] WEB_API SUCCESS: ${posts.length} posts (${paginationPages} pages, stop=${paginationStopReason}), ${followers ?? "unknown"} followers for ${handle}`);
     }
   } catch (err: any) {
+    lastFailureMessage = typeof err?.message === "string" ? err.message : "";
     if (proxyCtx) {
       const bc = classifyBlock(null, err.message);
       logProxyTelemetry(proxyCtx, "WEB_API", null, bc, 0, false);
@@ -1352,7 +1180,8 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     attempts.push("HTML_PARSE");
     try {
       const htmlStartMs = Date.now();
-      const result = await attemptHtmlPageParse(profileUrl, handle, proxyCtx);
+      const result = await attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget);
+      transportSucceeded = true;
       if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", 200, null, Date.now() - htmlStartMs, result.posts.length > 0);
       posts = result.posts;
       followers = result.followers;
@@ -1366,33 +1195,83 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
         console.log(`[CI Scraper] HTML_PARSE: Page loaded but no post data extracted for ${handle}`);
       }
     } catch (err2: any) {
+      lastFailureMessage = `${typeof err?.message === "string" ? err.message : ""} | ${typeof err2?.message === "string" ? err2.message : ""}`;
       if (proxyCtx) logProxyTelemetry(proxyCtx, "HTML_PARSE", null, classifyBlock(null, err2.message), 0, false);
       warnings.push(`WEB_API failed: ${err.message} | HTML_PARSE failed: ${err2.message}`);
       console.log(`[CI Scraper] HTML_PARSE FAILED for ${handle}: ${err2.message}`);
     }
   }
 
-  if (posts.length < 5) {
-    await randomDelay();
-    attempts.push("HEADLESS_RENDER");
-    try {
-      const headlessStartMs = Date.now();
-      const result = await attemptHeadlessRender(profileUrl, handle, proxyCtx);
-      if (proxyCtx) logProxyTelemetry(proxyCtx, "HEADLESS_RENDER", 200, null, Date.now() - headlessStartMs, result.posts.length > 0);
-      scrapeStats.totalBytesEstimated += result.bytesEstimated;
-      if (result.posts.length > posts.length) {
-        posts = result.posts;
-        collectionMethodUsed = "HEADLESS_RENDER";
-        scrapeStats.headlessRenderSuccess++;
-        console.log(`[CI Scraper] HEADLESS_RENDER SUCCESS: ${posts.length} posts for ${handle}`);
+  // Phase 2 (2026-07-20) — Apify fallback. Bright Data's Unlocker stopped
+  // passing IG internal-API endpoints (~Jul 19: synthesized 400 + canned
+  // "obsolete endpoint" interception) and logged-out profile HTML carries no
+  // embedded post data, so WEB_API and HTML_PARSE can both "succeed" at
+  // transport with 0 posts. The gate is therefore posts.length === 0 (NOT
+  // catch-only). Bright Data stays first in the ladder so this self-heals if
+  // the provider restores IG support.
+  // Root-cause audit: .local/docs/audits/owned-ig-scrape-root-cause-2026-07-20.md
+  //
+  // OPT-IN ONLY (allowApifyFallback): the competitor fetch path runs under the
+  // F6.9 45s watchdog (data-acquisition FETCH_WATCHDOG_TIMEOUT_MS) while an
+  // Apify actor run takes ~80-120s — the watchdog would abandon the raced
+  // promise mid-run, the actor would keep billing, and the evict/restart cycle
+  // would double spend across the competitor fleet. Only the owned-channel
+  // path (user-channel-scraper, no watchdog) opts in. Competitor semantics are
+  // unchanged from the pre-fallback ladder.
+  if (posts.length === 0 && !opts?.allowApifyFallback) {
+    attempts.push("APIFY_ACTOR_SKIPPED");
+    console.log(`[CI Scraper] APIFY_ACTOR_SKIPPED for ${handle} (caller did not opt in; watchdog-budgeted path)`);
+  }
+  if (posts.length === 0 && opts?.allowApifyFallback) {
+    const { isInstagramApifyConfigured, scrapeInstagramViaApify } = await import("./instagram-apify-scraper");
+    if (!isInstagramApifyConfigured()) {
+      attempts.push("APIFY_ACTOR_SKIPPED");
+      warnings.push("APIFY_ACTOR_SKIPPED: APIFY_API_KEY not set — no Apify fallback available.");
+      console.log(`[CI Scraper] APIFY_ACTOR_SKIPPED for ${handle} (APIFY_API_KEY not set)`);
+    } else {
+      attempts.push("APIFY_ACTOR");
+      try {
+        const apifyResult = await scrapeInstagramViaApify(handle, maxPosts);
+        // Actor run completed ⇒ transport reached the platform. 0 posts from a
+        // completed run = healthy-empty (failureClass NONE), same semantics as
+        // the other rungs.
+        transportSucceeded = true;
+        posts = apifyResult.posts;
+        followers = apifyResult.followers ?? followers;
+        profileName = apifyResult.profileName ?? profileName;
+        if (posts.length > 0) {
+          collectionMethodUsed = "APIFY_ACTOR";
+          scrapeStats.apifyActorSuccess++;
+          console.log(`[CI Scraper] APIFY_ACTOR SUCCESS: ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
+        } else {
+          console.log(`[CI Scraper] APIFY_ACTOR: run completed but no posts extracted for ${handle}`);
+        }
+      } catch (err3: any) {
+        // Deliberately NOT folded into lastFailureMessage: classifyScrapeFailure
+        // pattern-matches for IG block tokens ("403"/"forbidden"/...), and an
+        // Apify-side error (e.g. "Apify API 403" on a bad token) must never
+        // stamp a GENUINE_BLOCK 24h cooldown on the Instagram target. Block
+        // classification stays owned by the Bright Data transport error.
+        // The warning text is additionally sanitized: user-channel-scraper's
+        // isBlockWarning() substring-matches "403"/"429"/"RATE_LIMIT" against
+        // result.warnings, and an Apify-side status code must not trigger IG
+        // block detection (session rotation + a second billed Apify run).
+        const rawMsg = typeof err3?.message === "string" ? err3.message : "unknown";
+        const msg = rawMsg.replace(/\b(403|429)\b/g, "4xx").replace(/rate.?limit(ed)?/gi, "throttled");
+        warnings.push(`APIFY_ACTOR failed: ${msg}`);
+        console.log(`[CI Scraper] APIFY_ACTOR FAILED for ${handle}: ${msg}`);
       }
-      if (!followers && result.followers) followers = result.followers;
-      if (!profileName && result.profileName) profileName = result.profileName;
-    } catch (err: any) {
-      if (proxyCtx) logProxyTelemetry(proxyCtx, "HEADLESS_RENDER", null, classifyBlock(null, err.message), 0, false);
-      warnings.push(`HEADLESS_RENDER failed: ${err.message}`);
-      console.log(`[CI Scraper] HEADLESS_RENDER FAILED for ${handle}: ${err.message}`);
     }
+  }
+
+  if (posts.length < 5) {
+    // 2026-07 Unlocker rebuild: headless browser rendering removed — a local
+    // Chromium cannot route through the Unlocker REST API, and running it
+    // direct would be an unproxied-fingerprint leak. Recorded explicitly
+    // (B4: explicit classification over hidden ambiguity).
+    attempts.push("HEADLESS_RENDER_SKIPPED");
+    warnings.push("HEADLESS_RENDER_SKIPPED: headless rendering retired in Unlocker API rebuild (no browser-level transport).");
+    console.log(`[CI Scraper] HEADLESS_RENDER_SKIPPED for ${handle} (retired in Unlocker rebuild)`);
   }
 
   if (posts.length === 0) {
@@ -1411,6 +1290,14 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
 
   console.log(`[CI Scraper] EMBEDDED_COMMENT_SUMMARY | ${embeddedComments.length} real comments from profile scrape | ${posts.length} posts | for ${handle}`);
 
+  // Fix #1a — final failure classification. Success or transport-reached-but-
+  // empty ⇒ NONE (never a block). Zero posts with NO transport ⇒ classify the
+  // captured transport error as GENUINE_BLOCK vs TRANSIENT.
+  let failureClass: ScrapeResult["failureClass"] = "NONE";
+  if (posts.length === 0 && !transportSucceeded) {
+    failureClass = classifyScrapeFailure(lastFailureMessage);
+  }
+
   const result: ScrapeResult = {
     success: posts.length > 0,
     posts: posts.slice(0, maxPosts > 60 ? 60 : maxPosts),
@@ -1423,8 +1310,10 @@ export async function scrapeInstagramProfile(rawUrl: string, proxyCtx?: StickySe
     paginationPages: paginationPages || 1,
     rawFetchedCount: rawFetchedCount || posts.length,
     paginationStopReason,
+    failureClass,
   };
 
+  // P4 isolation seal: cacheKey is already account-namespaced via nsCacheKey above.
   profileCache.set(cacheKey, { data: result, timestamp: Date.now() });
   return result;
 }

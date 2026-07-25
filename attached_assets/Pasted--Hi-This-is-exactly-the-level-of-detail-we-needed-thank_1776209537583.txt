@@ -1,0 +1,174 @@
+"}
+Hi,
+
+This is exactly the level of detail we needed — thanks for the full gap mapping.
+
+The findings are clear and consistent across all transformation points:
+
+Signal identity is being lost at multiple stages, and more importantly, there is currently no mechanism that enforces preservation of signal type across the system.
+
+---
+
+## Alignment on the Core Problem
+
+From your mapping, the issue is now very explicit:
+
+- SignalLineageEntry tracks structure (IDs, lineage, hops)
+- But does NOT track epistemic origin (real / competitor / inferred / fallback)
+
+And across the pipeline:
+
+- Signals are aggregated → flattened → re-created → semantically matched
+- Without preserving their original identity
+- Resulting in:
+  - Mixed signal types
+  - Undifferentiated plan elements
+  - Aggregated confidence masking underlying composition
+
+This matches what we were observing at the system level.
+
+---
+
+## Critical Concern (Before Implementation)
+
+Before we move into implementation, there are two areas I want you to focus on very carefully:
+
+---
+
+### 1. Enforcement (Strict — Not Partial)
+
+We do NOT want a soft layer or advisory tagging.
+
+We need:
+
+- Deterministic enforcement
+- No silent propagation of:
+  - inferred signals as real
+  - competitor signals as native
+  - fallback signals into decision layers without visibility
+
+At the same time:
+
+⚠️ We must avoid breaking existing pipelines or introducing instability.
+
+---
+
+### 2. Propagation Isolation (No Leakage)
+
+This is critical.
+
+From your mapping, leakage happens at:
+
+- T1 (aggregation)
+- T3 (lineage reset in orchestrator)
+- T5 (semantic matching)
+- T6 (plan synthesis flattening)
+- T7 (aggregation into budget decisions)
+
+We need to ensure:
+
+- No transformation step can:
+  - drop origin identity
+  - merge signal types implicitly
+  - reinterpret one type as another
+
+In other words:
+
+> Signal identity must be preserved end-to-end without any implicit conversion or collapse.
+
+---
+
+## System Scope (Important)
+
+This is not a local fix.
+
+We are not solving for:
+- one engine
+- one campaign
+- one account
+
+This must apply to:
+
+- all engines
+- all pipelines
+- all users (current and future)
+- all signal flows
+
+---
+
+## What I Need From You Now
+
+Based on the actual codebase and your mapping, I want your recommendation on the following:
+
+---
+
+### 1. Where to Anchor Enforcement
+
+Given all transformation points (T1 → T8):
+
+- Where should enforcement logically live so it is:
+  - guaranteed
+  - non-bypassable
+  - and consistent across all engines?
+
+Is it enough to anchor on SignalLineageEntry, or do we also need enforcement at:
+
+- orchestrator boundaries?
+- engine input validation?
+- plan synthesis stage?
+
+---
+
+### 2. Preventing Leakage at Transformation Points
+
+For each of the critical points you identified (T1–T8):
+
+- Which ones MUST be hardened first to prevent leakage?
+- Which ones are the highest risk for:
+  - identity loss
+  - type merging
+  - silent reinterpretation?
+
+---
+
+### 3. Backward Compatibility
+
+You mentioned adding originType to SignalLineageEntry as a safe entry point.
+
+I need your confirmation:
+
+- Will this safely propagate through:
+  - all existing lineage flows
+  - without breaking snapshots, stored data, or existing engines?
+
+- Are there any places where adding this field would:
+  - require migrations
+  - or break assumptions in current logic?
+
+---
+
+### 4. Enforcement Strategy (Your View)
+
+Given the current architecture:
+
+- What is the cleanest way to enforce signal identity:
+  - without rewriting pipelines
+  - without fragmenting the system
+  - and without introducing inconsistencies between engines?
+
+---
+
+## Important Constraints
+
+- No partial enforcement
+- No engine-by-engine patching
+- No local fixes
+- No assumption that current tagging is sufficient
+
+We are looking for a single consistent model that applies across the entire system.
+
+---
+
+Once we align on the enforcement approach, we’ll move into implementation.
+
+Tha

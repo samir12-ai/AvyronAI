@@ -1,0 +1,53 @@
+Infrastructure Audit — Patch 3/5
+Scope: Video + Photography + Studio + Lead Engine + Agent + Output Projection + Collector (25 files)
+
+Files to audit:
+- server/veo-routes.ts
+- server/video-routes.ts
+- server/video-routes-helpers.ts
+- server/photography-routes.ts
+- server/caption-engine.ts
+- server/studio-analysis-engine.ts
+- server/agent/ (all files — list each individually)
+- server/lead-engine/ (all files — list each individually)
+- server/output-projection/ (all files — list each individually)
+- server/collector/ (all files — list each individually)
+- server/performance-feedback/ (all files — list each individually)
+- server/performance-signal/normalizer.ts
+
+Risk categories to check:
+
+1. AUTH & ROUTE PROTECTION
+   - Do video/photography/studio routes require authentication?
+   - Does lead-engine have proper campaign ownership checks?
+   - Are agent routes restricted appropriately?
+
+2. ERROR DISCLOSURE
+   - Do any catch blocks return raw err.message to the client?
+
+3. FILE UPLOAD SAFETY (video/photography)
+   - Are uploaded file types validated (not just by extension)?
+   - Is there a file size limit enforced server-side?
+   - Are uploaded files stored securely (not publicly accessible by URL guessing)?
+
+4. AI GENERATION ABUSE
+   - Do veo-routes.ts and caption-engine.ts have rate limiting?
+   - Can a user trigger unlimited AI video/caption generation?
+
+5. TENANT ISOLATION
+   - Do lead-engine queries scope by accountId + campaignId?
+   - Does output-projection scope results by account?
+   - Does collector scope by accountId?
+
+6. SILENT FAILURES
+   - Do studio-analysis-engine.ts or caption-engine.ts have bare catch{}?
+   - Does performance-feedback silently discard signal errors?
+
+Please provide:
+A) Per-file verdict table
+B) Summary by category  
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Are file uploads (video/photography) validated and rate-limited?
+   Q2: Can users trigger unlimited AI generation via veo or caption routes?
+   Q3: Does lead-engine properly isolate data between accounts?

@@ -523,7 +523,7 @@ export async function generateBlueprintForId(blueprintId: string): Promise<{
 
   let engineOutputBlock = "";
   try {
-    engineOutputBlock = await loadEngineOutputs(blueprint.accountId || "default", resolvedCampaignId);
+    engineOutputBlock = await loadEngineOutputs(blueprint.accountId, resolvedCampaignId);
     if (engineOutputBlock) {
       contextBlock += `\nENGINE PIPELINE OUTPUTS (use as PRIMARY data source for blueprint fields):\n${engineOutputBlock}\n`;
       console.log(`[StrategicCore] Engine outputs loaded for blueprint: ${engineOutputBlock.split('\n').filter((l: string) => l.endsWith(':')).length} engines found`);
@@ -546,7 +546,7 @@ export async function generateBlueprintForId(blueprintId: string): Promise<{
         { role: "user", content: `Generate a Creative Blueprint based on this strategic data:\n\n${contextBlock}` },
       ],
       max_tokens: 2000,
-      accountId: blueprint.accountId || "default",
+      accountId: blueprint.accountId,
       endpoint: "strategic-creative-blueprint",
     });
 
@@ -564,7 +564,7 @@ export async function generateBlueprintForId(blueprintId: string): Promise<{
           { role: "user", content: `Generate a Creative Blueprint:\n\n${contextBlock}` },
         ],
         max_tokens: 2000,
-        accountId: blueprint.accountId || "default",
+        accountId: blueprint.accountId,
         endpoint: "strategic-creative-blueprint-retry",
       });
 

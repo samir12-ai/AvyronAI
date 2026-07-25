@@ -1,0 +1,132 @@
+Hi Replit Team,
+
+Great work on the audit and fixes — the system is now structurally clean, and the major bypass issues have been resolved.
+
+Before we consider this fully closed, I want to address the remaining areas that were classified as “by design” or “non-defect,” to ensure they do not introduce ambiguity or unintended behavior over time.
+
+The goal here is not to question the design, but to make sure these areas are:
+
+- explicitly bounded  
+- clearly separated (operational vs learning)  
+- non-contaminating to the learning loop  
+
+---
+
+# 🧠 1. Operational vs Learning Memory Separation
+
+We currently allow certain memory types (e.g. adaptive rhythm, exploration budget) to bypass strict policy under “operational” classification.
+
+### Required:
+
+- Clearly enforce a distinction between:
+  - strategic memory (affects learning and decisions)
+  - operational state (system configuration / constraints)
+
+- Ensure:
+  - operational memory NEVER influences learning signals or reinforcement logic  
+  - operational memory is excluded from any confidence mutation or attribution loops  
+
+- Add explicit tagging and filtering so downstream components cannot accidentally treat operational entries as strategic signals  
+
+---
+
+# ⚠️ 2. Adaptive Rhythm as Direct Input
+
+Adaptive Rhythm is currently injected directly into plan synthesis as a “locked constraint.”
+
+### Required:
+
+- Ensure this input is always:
+  - explicitly labeled as non-decision / non-market signal  
+  - never treated as validated insight  
+
+- Add safeguards so:
+  - Adaptive Rhythm cannot indirectly influence memory updates or decision confidence  
+
+- Confirm there is no path where rhythm outputs feed back into learning as if they were outcomes  
+
+---
+
+# 🔁 3. Mutation Logic (Period-Based Updates)
+
+The current mutation system uses period-based validation (2–3 consecutive periods) instead of confidence thresholds.
+
+### Required:
+
+- Ensure mutation updates:
+  - are clearly separated from prediction-based updates  
+  - cannot override high-confidence strategic memory too aggressively  
+
+- Add visibility for:
+  - why a mutation occurred  
+  - which periods triggered it  
+  - what evidence was used  
+
+- Confirm that mutation cannot amplify noise in edge cases (e.g. unstable metrics, low-volume signals)  
+
+---
+
+# 🧾 4. Mutation Logs (Audit Entries)
+
+Mutation logs are written with confidence 1.0 as audit entries.
+
+### Required:
+
+- Ensure these entries are:
+  - strictly excluded from:
+    - decision-making  
+    - learning loops  
+    - attribution logic  
+
+- Add a hard filter so they are never read as signals or decisions  
+
+---
+
+# 🧪 5. Boundary Verification
+
+Please verify explicitly that:
+
+- no operational memory influences:
+  - decision confidence  
+  - signal validation  
+  - attribution weighting  
+
+- no mutation log or audit entry is ever consumed downstream  
+
+- no indirect feedback loop exists where:
+  - system-generated constraints or state → re-enters as “learned truth”  
+
+---
+
+# 📊 Expected Response
+
+Please confirm:
+
+1. How each of these areas is currently isolated in code  
+2. Whether any additional safeguards are required  
+3. What changes (if any) you will apply to fully enforce separation  
+4. How you will verify that no cross-contamination occurs  
+
+---
+
+# 🎯 Final Goal
+
+We want to guarantee that:
+
+- learning is driven only by validated, attributed outcomes  
+- operational logic remains strictly separate  
+- no internal system state is mistakenly treated as external truth  
+
+---
+
+# 🧠 Key Principle
+
+The system must not learn from itself unless that learning is explicitly validated and intended.
+
+---
+
+Please review these points and confirm the final alignment.
+
+Thanks,  
+Samir  
+Avyron AI

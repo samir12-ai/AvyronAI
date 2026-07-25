@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, useColorScheme } from 'react-native'
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getApiUrl , authFetch } from '@/lib/query-client';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface NarrativeStep {
   key: string;
@@ -22,20 +23,25 @@ interface NarrativeData {
 
 const STEP_COLORS = ['#FF6B6B', '#F59E0B', '#8B5CF6', '#3B82F6', '#10B981'];
 
-const SOURCE_LABELS: Record<string, string> = {
-  positioning: 'Positioning',
-  ael: 'AEL',
-  mechanism: 'Mechanism',
-  differentiation: 'Differentiation',
-  'offer+funnel': 'Offer + Funnel',
-  none: 'Pending',
-};
-
-export default function NarrativeCard({ campaignId, isDark, refreshKey }: { campaignId: string | null; isDark: boolean; refreshKey?: number }) {
+export default function NarrativeCard({ campaignId, isDark, refreshKey, runId }: { campaignId: string | null; isDark: boolean; refreshKey?: number; runId?: string | null }) {
+  const { t } = useLanguage();
+  const SOURCE_LABELS: Record<string, string> = {
+    positioning: t('narrative.sourcePositioning'),
+    ael: t('narrative.sourceAnalysis'),
+    mechanism: t('narrative.sourceMechanism'),
+    differentiation: t('narrative.sourceDifferentiation'),
+    'offer+funnel': t('narrative.sourceOffer'),
+    none: t('narrative.pending'),
+  };
   const [data, setData] = useState<NarrativeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
+  // Real truncation detection: a hidden, unclamped copy of each step's text
+  // reports its natural height via onLayout (works on native AND web, unlike
+  // onTextLayout). The old length>80 heuristic hid "Read more" on short texts
+  // that still wrapped past 2 lines, leaving them cut with no way to expand.
+  const [stepLineCounts, setStepLineCounts] = useState<Record<string, number>>({});
 
   const bg = isDark ? '#0F1419' : '#FFFFFF';
   const borderColor = isDark ? '#1E2736' : '#E5E7EB';
@@ -49,6 +55,7 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey }: { camp
     setLoading(true);
     try {
       const url = new URL(`/api/narrative/${campaignId}`, getApiUrl());
+      if (runId) url.searchParams.set('runId', runId);
       const resp = await authFetch(url.toString());
       if (resp.ok) {
         const json = await resp.json();
@@ -56,7 +63,7 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey }: { camp
       }
     } catch {}
     setLoading(false);
-  }, [campaignId]);
+  }, [campaignId, runId]);
 
   useEffect(() => { fetchNarrative(); }, [fetchNarrative, refreshKey]);
 
@@ -71,9 +78,9 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey }: { camp
             <Ionicons name="link-outline" size={16} color="#FFF" />
           </LinearGradient>
           <View style={{ flex: 1 }}>
-            <Text style={[s.headerTitle, { color: textPrimary }]}>Strategic Narrative</Text>
+            <Text style={[s.headerTitle, { color: textPrimary }]}>{t('narrative.title')}</Text>
             <Text style={[s.headerSub, { color: textSecondary }]} numberOfLines={1}>
-              {data.engineCount} engines · simplified
+              {t('narrative.insightsSimplified', { count: data.engineCount })}
             </Text>
           </View>
         </View>
@@ -87,7 +94,7 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey }: { camp
             const isLast = i === data.steps.length - 1;
             const isPending = step.source === 'none';
             const isStepExpanded = !!expandedSteps[step.key];
-            const needsTruncation = step.text.length > 80;
+            const needsTruncation = (stepLineCounts[step.key] ?? 0) > 2 || step.text.length > 80;
             return (
               <View key={step.key} style={s.stepRow}>
                 <View style={s.stepTimeline}>
@@ -111,12 +118,23 @@ export default function NarrativeCard({ campaignId, isDark, refreshKey }: { camp
                   >
                     {step.text}
                   </Text>
+                  <Text
+                    style={[s.stepText, s.measureText]}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                    onLayout={(e) => {
+                      const lines = Math.round(e.nativeEvent.layout.height / 20);
+                      setStepLineCounts(prev => prev[step.key] === lines ? prev : { ...prev, [step.key]: lines });
+                    }}
+                  >
+                    {step.text}
+                  </Text>
                   {needsTruncation && (
                     <Pressable
                       onPress={() => setExpandedSteps(prev => ({ ...prev, [step.key]: !prev[step.key] }))}
                       hitSlop={8}
                     >
-                      <Text style={[s.readMore, { color }]}>{isStepExpanded ? 'Show less' : 'Read more'}</Text>
+                      <Text style={[s.readMore, { color }]}>{isStepExpanded ? t('narrative.showLess') : t('narrative.readMore')}</Text>
                     </Pressable>
                   )}
                 </View>
@@ -147,5 +165,6 @@ const s = StyleSheet.create({
   sourceTag: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
   sourceTagText: { fontSize: 9, fontWeight: '600' as const },
   stepText: { fontSize: 14, lineHeight: 20 },
+  measureText: { position: 'absolute', left: 0, right: 0, top: 0, opacity: 0, zIndex: -1, pointerEvents: 'none' as const },
   readMore: { fontSize: 12, fontWeight: '600' as const, marginTop: 4 },
 });

@@ -1,0 +1,88 @@
+I want to adjust the operator dashboard direction before expanding it further.
+
+The raw dashboard is useful internally, but I do not want noisy infrastructure details exposed in a way that feels unprofessional or confusing to users. Instead, I want this to evolve into an Operations Guardian / Reliability Agent layer.
+
+Please first audit whether the system already has something equivalent:
+
+* existing operational agent
+* supervisor agent
+* reliability agent
+* autonomous recovery agent
+* admin/operator notice system
+* degraded-state interpreter
+* alert routing layer
+* dashboard notification layer
+
+Do not build blindly if something already exists.
+
+Use a subagent-style approach so the work stays separated and does not tangle with the main pipeline logic.
+
+Proposed direction:
+
+1. Raw operational signals remain internal only
+
+* watchdogs
+* retry loops
+* stuck claims
+* scraper health
+* AI spend
+* dead-letter rows
+* queue depth
+* degraded chains
+
+2. A dedicated Operations Guardian Agent interprets these signals
+   It should:
+
+* classify severity
+* correlate related failures
+* distinguish transient vs persistent issues
+* attempt safe auto-recovery where allowed
+* suppress noisy non-actionable alerts
+* generate operator notices only when needed
+* generate user-facing notices only when there is real user impact
+
+3. User-facing notices should show impact, not infrastructure
+   For example:
+
+* “Some market signals are delayed. The system is retrying automatically.”
+* “Competitor refresh is temporarily degraded.”
+* “Plan confidence is reduced because recent source data is incomplete.”
+* “We are waiting for updated channel data before making a high-confidence recommendation.”
+
+Do NOT expose raw terms like:
+
+* stuck claims
+* watchdog zombie
+* continuity_window_claims
+* retry loop internals
+* worker lock state
+* database row state
+
+4. Please check whether the system already has:
+
+* notice model/schema
+* alert/event model
+* audit-control notification surface
+* degraded-state messages
+* operator escalation flow
+* user-visible confidence/degraded UI
+* existing agent that can own this responsibility
+
+5. Deliverables first:
+
+* existing-system audit
+* proposed architecture
+* what already exists
+* what is missing
+* what should remain internal-only
+* what should be surfaced to operators
+* what should be surfaced to users
+* whether this should be a new subagent or extension of an existing agent
+* recommended implementation plan
+
+Do not start implementation until the audit/design is clear.
+
+The goal is:
+raw dashboards for internal truth,
+Guardian Agent for interpretation and recovery,
+clean professional notices for users only when there is real impact.

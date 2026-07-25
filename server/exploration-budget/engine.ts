@@ -2,6 +2,7 @@ import { db } from "../db";
 import { strategyMemory } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import { aiChat } from "../ai-client";
+import { upsertOperationalState } from "../memory-system/operational-state-store";
 import type { MemoryBlock, IndustryBaseline } from "../memory-system/types";
 import type { SynthesizedPlan } from "../orchestrator/plan-synthesis";
 
@@ -251,45 +252,18 @@ async function persistExplorationBudget(
   rationale: string,
   slots: ExplorationSlot[],
 ): Promise<void> {
+  // Task #64 / Phase 1 — operational singleton upsert via dedicated store.
   const label = `Exploration Budget: ${explorationPercent}% (${explorationCount}/${weeklyTotal} slots/week)`;
-  const details = JSON.stringify({ explorationPercent, explorationCount, weeklyTotal, slots, rationale });
-
-  const existing = await db
-    .select()
-    .from(strategyMemory)
-    .where(
-      and(
-        eq(strategyMemory.accountId, accountId),
-        eq(strategyMemory.campaignId, campaignId),
-        eq(strategyMemory.memoryType, "exploration_budget"),
-        eq(strategyMemory.engineName, "exploration-budget"),
-      ),
-    )
-    .limit(1);
-
-  if (existing.length > 0) {
-    await db
-      .update(strategyMemory)
-      .set({ label, details, performance: rationale, lastValidatedAt: new Date(), updatedAt: new Date() })
-      .where(eq(strategyMemory.id, existing[0].id));
-  } else {
-    const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    await db.insert(strategyMemory).values({
-      id: memId,
-      accountId,
-      campaignId,
-      memoryType: "exploration_budget",
-      engineName: "exploration-budget",
-      label,
-      details,
-      performance: rationale,
-      score: 0.5,
-      isWinner: false,
-      confidenceScore: 0.5,
-      direction: "neutral",
-      lastValidatedAt: new Date(),
-    });
-  }
+  await upsertOperationalState({
+    accountId,
+    campaignId,
+    stateType: "exploration_budget",
+    engineName: "exploration-budget",
+    label,
+    payload: { explorationPercent, explorationCount, weeklyTotal, slots, rationale },
+    rationale,
+    confidenceScore: 0.5,
+  });
 }
 
 export async function computeLegacyExplorationBudget(

@@ -25,6 +25,15 @@ import {
   MESSAGE_STEP_CATEGORY_MAP,
 } from "./constants";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
+import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
+import { buildGroundingContract } from "../shared/grounding-contract";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
@@ -34,7 +43,7 @@ import {
 } from "../causal-enforcement-layer/engine";
 import { enforceBoundaryWithSanitization } from "../engine-hardening";
 import { assessStrategyAcceptability } from "../shared/strategy-acceptability";
-import { cosineSimilarity } from "../shared/embedding";
+import { cosineSimilarity, tokenize } from "../shared/embedding";
 import {
   type SignalLineageEntry,
   extractQualifyingSignals,
@@ -144,9 +153,58 @@ function buildPersuasionResponse(objType: StructuredObjection["objectionType"], 
   }
 }
 
+function aelTokenize(s: string): string[] {
+  return (s || "").toLowerCase().match(/[a-z0-9]{4,}/g) || [];
+}
+const AEL_GROUNDING_MIN_OVERLAP = 0.05;
+function aelOverlapScore(a: string, b: string): number {
+  const ta = new Set(aelTokenize(a));
+  const tb = aelTokenize(b);
+  if (ta.size === 0 || tb.length === 0) return 0;
+  let hits = 0;
+  for (const t of tb) if (ta.has(t)) hits++;
+  return hits / Math.max(ta.size, tb.length);
+}
+
+function attachAELGrounding(
+  obj: StructuredObjection,
+  ael: any,
+): void {
+  if (!ael || !ael.root_causes || ael.root_causes.length === 0) return;
+  const objText = `${obj.objectionStatement} ${obj.objectionTrigger} ${obj.persuasionResponse}`;
+
+  let bestRc: any = null;
+  let bestRcScore = 0;
+  for (const rc of ael.root_causes) {
+    const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
+    const s = aelOverlapScore(rcText, objText);
+    if (s > bestRcScore) { bestRcScore = s; bestRc = rc; }
+  }
+  if (bestRc && bestRcScore >= AEL_GROUNDING_MIN_OVERLAP) {
+    obj.rootCause = `${bestRc.deepCause || ""}: ${bestRc.causalReasoning || ""}`.trim().slice(0, 400);
+    obj.userThinking = `Surface signal observed: ${bestRc.surfaceSignal || bestRc.deepCause || ""}`.slice(0, 300);
+    obj.resolution = `Resolve by addressing ${bestRc.deepCause || "underlying cause"} via ${obj.requiredProofType} — ${obj.persuasionResponse}`.slice(0, 400);
+  }
+
+  const chains = ael.causal_chains || [];
+  if (chains.length > 0) {
+    let bestCh: any = null;
+    let bestChScore = 0;
+    for (const ch of chains) {
+      const chText = `${ch.cause || ""} ${ch.impact || ""} ${ch.behavior || ""} ${ch.pain || ""}`;
+      const s = aelOverlapScore(chText, objText);
+      if (s > bestChScore) { bestChScore = s; bestCh = ch; }
+    }
+    if (bestCh && bestChScore >= AEL_GROUNDING_MIN_OVERLAP) {
+      obj.causalChainAlignment = `Causal chain — cause: ${bestCh.cause || ""}; impact: ${bestCh.impact || ""}; behavior: ${bestCh.behavior || ""}; pain: ${bestCh.pain || ""}`.slice(0, 500);
+    }
+  }
+}
+
 function buildStructuredObjectionMap(
   audience: PersuasionAudienceInput,
   mi: PersuasionMIInput,
+  analyticalEnrichment?: any,
 ): StructuredObjection[] {
   const structuredObjections: StructuredObjection[] = [];
   const seen = new Set<string>();
@@ -1174,6 +1232,46 @@ function layer6_messageOrderLogic(
     }
   }
 
+  const funnelStages = funnel.stageMap || [];
+  const funnelDepth = funnelStages.length;
+  if (funnelDepth >= 5) {
+    if (sequence.includes("invite_commitment")) {
+      const commitIdx = sequence.indexOf("invite_commitment");
+      if (!sequence.includes("build_anticipation")) {
+        sequence.splice(commitIdx, 0, "build_anticipation");
+        findings.push(`Deep funnel (${funnelDepth} stages) → anticipation step injected before commitment — audience has more touchpoints for gradual escalation`);
+      }
+    }
+    if (!sequence.includes("demonstrate_understanding") && sequence.length > 3) {
+      sequence.splice(1, 0, "demonstrate_understanding");
+      findings.push(`Deep funnel → demonstrate_understanding added early — multi-stage funnels need empathy anchoring`);
+    }
+    score += 0.05;
+  } else if (funnelDepth > 0 && funnelDepth <= 2) {
+    const educationSteps = ["educate_on_problem", "demonstrate_understanding", "disrupt_assumption"];
+    const compressed = sequence.filter(s => !educationSteps.includes(s) || s === sequence[0]);
+    if (compressed.length < sequence.length) {
+      sequence.length = 0;
+      sequence.push(...compressed);
+      findings.push(`Shallow funnel (${funnelDepth} stages) → compressed sequence: removed redundant education steps for fast conversion path`);
+    }
+  }
+
+  const funnelTrustPath = funnel.trustPath || [];
+  if (Array.isArray(funnelTrustPath) && funnelTrustPath.length > 0) {
+    const trustStages = funnelTrustPath.map((tp: any) => typeof tp === "string" ? tp : tp?.stage || tp?.name || "");
+    const hasSocialProofStage = trustStages.some((s: string) => s.toLowerCase().includes("social") || s.toLowerCase().includes("testimonial"));
+    if (hasSocialProofStage && !sequence.includes("present_proof")) {
+      const authIdx = sequence.indexOf("establish_authority");
+      if (authIdx >= 0) {
+        sequence.splice(authIdx + 1, 0, "present_proof");
+      } else {
+        sequence.push("present_proof");
+      }
+      findings.push(`Funnel trust path includes social proof stage → proof step added to persuasion sequence`);
+    }
+  }
+
   const architectureViolations = validateMessageArchitecture(sequence);
   if (architectureViolations.length === 0) {
     findings.push(`Message architecture validated: follows problem → mechanism → proof → outcome → offer`);
@@ -1381,6 +1479,16 @@ function layer8_persuasionStrengthScoring(
   if (unresolvedObjections.length > 2) {
     readinessMultiplier *= 0.85;
     warnings.push(`${unresolvedObjections.length} unresolved objection(s) weaken persuasion completeness`);
+  }
+
+  const totalLinks = objectionProofLinks.length;
+  const unmappedCount = unresolvedObjections.length;
+  if (totalLinks > 0 && unmappedCount === totalLinks) {
+    readinessMultiplier *= 0.70;
+    warnings.push(`ALL ${totalLinks} objection-proof links are unmapped — persuasion has zero proof grounding`);
+  } else if (totalLinks > 0 && unmappedCount / totalLinks > 0.5) {
+    readinessMultiplier *= 0.85;
+    warnings.push(`${unmappedCount}/${totalLinks} objection-proof links unmapped (>${Math.round(50)}%) — proof coverage is weak`);
   }
 
   const compatibleModes = FUNNEL_PERSUASION_COMPATIBILITY[funnelType] || [];
@@ -1602,25 +1710,58 @@ function buildPersuasionRoutes(
     ? driverFindings.replace("Selected influence drivers: ", "").split(", ")
     : ["authority", "proof_of_work"];
 
-  const objections: string[] = [];
+  // T005: objectionPriorities is now structured: { tag: {category, awarenessStage}, objection: {canonical, frequency, evidence} }
+  // Strings remain valid for downstream backwards-compat but new shapes are emitted.
+  const objections: any[] = [];
 
   if (structuredObjections && structuredObjections.length > 0) {
     const sorted = [...structuredObjections].sort((a, b) => b.confidence - a.confidence);
     for (const so of sorted.slice(0, 6)) {
-      objections.push(`[${so.objectionType}/${so.objectionStage}] ${so.objectionStatement}`);
+      objections.push({
+        tag: {
+          category: so.objectionType,
+          awarenessStage: so.objectionStage,
+        },
+        objection: {
+          canonical: so.objectionStatement,
+          frequency: (so as any).frequency ?? null,
+          evidence: Array.isArray((so as any).evidence) ? (so as any).evidence : [],
+          confidence: so.confidence,
+        },
+      });
     }
   } else {
-    const directObjections = Object.keys(audience.objectionMap || {}).slice(0, 5);
-    objections.push(...directObjections);
+    const objMap = audience.objectionMap || {};
+    const directKeys = Object.keys(objMap).slice(0, 5);
+    for (const k of directKeys) {
+      const v: any = (objMap as any)[k];
+      objections.push({
+        tag: { category: "direct", awarenessStage: "unknown" },
+        objection: {
+          canonical: (v && typeof v === "object" && v.canonical) ? v.canonical : k,
+          frequency: (v && typeof v === "object" && typeof v.frequency === "number") ? v.frequency : null,
+          evidence: (v && typeof v === "object" && Array.isArray(v.evidence)) ? v.evidence : [],
+          confidence: (v && typeof v === "object" && typeof v.confidence === "number") ? v.confidence : null,
+        },
+      });
+    }
 
     if (objections.length === 0) {
       for (const link of objectionProofLinks.slice(0, 4)) {
-        objections.push(`[inferred] ${link.objectionCategory}: ${link.objectionDetail.slice(0, 60)}`);
+        objections.push({
+          tag: { category: link.objectionCategory || "inferred", awarenessStage: "unknown" },
+          objection: { canonical: (link.objectionDetail || "").slice(0, 200), frequency: null, evidence: [], confidence: null },
+        });
       }
     }
 
     if (objections.length === 0 && (offer.riskNotes || []).length > 0) {
-      objections.push(...(offer.riskNotes || []).slice(0, 3).map(r => `risk: ${r}`));
+      for (const r of (offer.riskNotes || []).slice(0, 3)) {
+        objections.push({
+          tag: { category: "risk", awarenessStage: "unknown" },
+          objection: { canonical: r, frequency: null, evidence: [], confidence: null },
+        });
+      }
     }
   }
 
@@ -1868,7 +2009,7 @@ function applyPositioningLockConstraints(
   return result;
 }
 
-export function analyzePersuasion(
+export async function analyzePersuasion(
   mi: PersuasionMIInput,
   audience: PersuasionAudienceInput,
   positioning: PersuasionPositioningInput,
@@ -1879,9 +2020,16 @@ export function analyzePersuasion(
   awareness: PersuasionAwarenessInput,
   upstreamLineage: SignalLineageEntry[] = [],
   analyticalEnrichment?: any,
-): PersuasionResult {
+  accountId?: string,
+  // Anchor doctrine (criteria A + B + F): strategic run context + Product DNA
+  // for the F5a fallback. The pre-rendered anchor block is computed ONCE and
+  // threaded into the trust-transfer + cialdini sub-engines.
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
+): Promise<PersuasionResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+  const aelAck = acknowledgeAelInput("PersuasionEngine-V3", analyticalEnrichment, accountId);
 
   if (analyticalEnrichment) {
     const aelBlock = formatAELForPrompt(analyticalEnrichment);
@@ -1945,7 +2093,12 @@ export function analyzePersuasion(
     };
   }
 
-  const structuredObjections = buildStructuredObjectionMap(audience, mi);
+  const structuredObjections = buildStructuredObjectionMap(audience, mi, analyticalEnrichment);
+  if (analyticalEnrichment && analyticalEnrichment.root_causes && analyticalEnrichment.root_causes.length > 0) {
+    for (const obj of structuredObjections) attachAELGrounding(obj, analyticalEnrichment);
+    const grounded = structuredObjections.filter(o => !!o.rootCause).length;
+    console.log(`[PersuasionEngine-V3] AEL_GROUNDING_ATTACHED | objections=${structuredObjections.length} | grounded=${grounded} | root_causes=${analyticalEnrichment.root_causes.length} | chains=${(analyticalEnrichment.causal_chains || []).length}`);
+  }
 
   const multiSource = safeJsonParse(mi.multiSourceSignals);
   let websiteProofCount = 0;
@@ -2012,21 +2165,55 @@ export function analyzePersuasion(
   const pMode = routes.primary.persuasionMode;
   const pMsgOrder = routes.primary.messageOrderLogic;
 
+  let positioningDriftMinSimilarity = 1;
+  let positioningDriftWorstDecision = "";
   if (lockedDecisions.length > 0) {
-    const persuasionOutputText = [
-      routes.primary.routeName || "",
+    // Drift detection measures whether persuasion's SUBSTANTIVE content
+    // (drivers, objections, trust, messaging, proof links, stage properties)
+    // references the content vocabulary of each locked positioning decision.
+    //
+    // Why token-coverage instead of bigram cosineSimilarity:
+    //   Locked decisions are long prose sentences (~40 content tokens).
+    //   Persuasion output is structured keyword data. They share concepts
+    //   but rarely share exact bigrams, so bigram-weighted cosine collapses
+    //   to ~0.02-0.07 even when semantic alignment is strong — producing
+    //   false-positive SEVERE drift.
+    //
+    // Why exclude frictionNotes and routeName lock suffix from the compared
+    // surface: those fields inject the decision text verbatim via
+    // applyPositioningLockConstraints. Including them would be circular
+    // self-matching and mask genuine drift.
+    const persuasionSubstantiveText = [
       routes.primary.persuasionMode || "",
       ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
       ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
+      ...(routes.primary.messageOrderLogic || []).map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
+      ...(routes.primary.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
+      ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
+      ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
+      ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objectionCategory || o.objection || ""} ${o.objectionDetail || ""} ${o.requiredProofType || o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
+      ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.objectionType || ""} ${o.requiredProofType || ""} ${o.persuasionResponse || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""}`),
     ].join(" ");
+    const persuasionTokenSet = new Set(tokenize(persuasionSubstantiveText));
 
     for (const decision of lockedDecisions) {
       const decisionCore = decision.replace(/^(contrast_axis|enemy|mechanism|narrative_direction):\s*/i, "").trim();
       if (!decisionCore) continue;
-      const similarity = cosineSimilarity(decisionCore, persuasionOutputText);
-      if (similarity < 0.20) {
+      const decisionTokens = tokenize(decisionCore);
+      if (decisionTokens.length === 0) continue;
+      const uniqueDecisionTokens = new Set(decisionTokens);
+      let covered = 0;
+      for (const t of uniqueDecisionTokens) {
+        if (persuasionTokenSet.has(t)) covered++;
+      }
+      const coverage = covered / uniqueDecisionTokens.size;
+      if (coverage < positioningDriftMinSimilarity) {
+        positioningDriftMinSimilarity = coverage;
+        positioningDriftWorstDecision = decisionCore;
+      }
+      if (coverage < 0.20) {
         crossEngineValidation.push(
-          `POSITIONING LOCK DRIFT: Persuasion output has low semantic alignment (score=${similarity.toFixed(2)}, threshold=0.20) with locked decision "${decisionCore}" — output may have drifted from offer engine contracts`,
+          `POSITIONING LOCK DRIFT: Persuasion substantive output covers only ${(coverage * 100).toFixed(0)}% of content tokens from locked decision "${decisionCore}" (threshold=20%) — output may have drifted from offer engine contracts`,
         );
       }
     }
@@ -2062,6 +2249,17 @@ export function analyzePersuasion(
   if ((pReadiness === "unaware" || pReadiness === "problem_aware") &&
       (funnelType === "direct" || funnelType === "tripwire" || funnelType === "application")) {
     crossEngineValidation.push(`CROSS-ENGINE VIOLATION: Funnel type "${funnelType}" contradicts awareness stage "${pReadiness}" — funnel should not have passed awareness gate`);
+  }
+
+  const positioningDriftDetected = crossEngineValidation.some(v =>
+    v.includes("POSITIONING LOCK DRIFT") || v.includes("GENERIC DRIFT WARNING")
+  );
+
+  if (positioningDriftDetected) {
+    const driftPenalty = 0.20;
+    routes.primary.persuasionStrengthScore = clamp(routes.primary.persuasionStrengthScore - driftPenalty);
+    routes.alternative.persuasionStrengthScore = clamp(routes.alternative.persuasionStrengthScore - driftPenalty);
+    console.log(`[PersuasionEngine-V3] POSITIONING_DRIFT_PENALTY | score reduced by ${driftPenalty} | drift detected in cross-engine validation`);
   }
 
   if (crossEngineValidation.length > 0) {
@@ -2117,22 +2315,28 @@ export function analyzePersuasion(
     structuralWarnings.push(...outputBoundaryCheck.warnings);
   }
 
+  const celSourceTexts = [
+    routes.primary.routeName || "",
+    routes.primary.persuasionMode || "",
+    ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
+    ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
+    ...routes.primary.messageOrderLogic.map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
+    ...(routes.primary.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
+    ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
+    ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
+    ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
+    ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""} ${o.causalChainAlignment || ""}`),
+  ];
   const celDepth = enforceEngineDepthCompliance(
     "persuasion",
-    [
-      routes.primary.routeName || "",
-      routes.primary.persuasionMode || "",
-      ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
-      ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
-      ...routes.primary.messageOrderLogic.map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
-    ],
+    celSourceTexts,
     analyticalEnrichment || null,
   );
 
   let depthGateResult: DepthGateResult | null = null;
 
-  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
-    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`]);
+  if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
+    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`], celSourceTexts);
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
     }
@@ -2142,7 +2346,7 @@ export function analyzePersuasion(
 
     const failedAcceptability = assessStrategyAcceptability(0, 0, allLayers.length, false, [...structuralWarnings, "DEPTH_FAILED"]);
 
-    return {
+    return applyPartialAelDowngrade("PersuasionEngine-V3", {
       status: "DEPTH_FAILED",
       statusMessage: `Depth gate failed: depthScore=${celDepth.causalDepthScore} — non-generative engine, cannot regenerate`,
       primaryRoute: routes.primary,
@@ -2159,7 +2363,7 @@ export function analyzePersuasion(
       strategyAcceptability: failedAcceptability,
       celDepthCompliance: celDepth,
       depthGateResult,
-    };
+    }, aelAck);
   }
 
   if (celDepth.violations.length > 0) {
@@ -2174,7 +2378,7 @@ export function analyzePersuasion(
     console.log(`[PersuasionEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
 
-  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`]);
+  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`], celSourceTexts);
 
   const finalLayersPassed = allLayers.filter(l => l.passed).length;
   const finalConfidence = routes.primary.persuasionStrengthScore;
@@ -2184,9 +2388,145 @@ export function analyzePersuasion(
     structuralWarnings,
   );
 
-  return {
-    status: STATUS.COMPLETE,
-    statusMessage: null,
+  // ── MARKETING-LOGIC CORE: Trust Transfer Design (commercial reasoning) ──
+  // Designs the specific commercial mechanism BEFORE any Cialdini label is picked.
+  // Cialdini selection (below) becomes a downstream consequence of this design.
+  let trustTransferDesignResult: import("./types").TrustTransferDesign | null = null;
+  const segments0 = (audience.audienceSegments || [])[0] as any;
+  const sophisticationTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+  const rejectedClaimPatterns: string[] = [];
+  for (const seg of (audience.audienceSegments || []) as any[]) {
+    const profile = seg?.sophisticationProfile;
+    if (profile?.rejectedClaimPatterns) {
+      for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
+    }
+  }
+  const objectionStatements = (routes.primary.objectionPriorities || [])
+    .map((o: any) => typeof o === "string" ? o : (o.objection || ""))
+    .filter(Boolean);
+  const trustBarrierStrings = (routes.primary.trustBarriers || [])
+    .map((b: any) => `${b.barrierType || ""}: ${b.persuasionImplication || b.source || ""}`)
+    .filter((s: string) => s.length > 2);
+  const segmentDescriptions = (audience.audienceSegments || [])
+    .map((s: any) => `${s.name || "?"} (pains: ${(s.painProfile || []).slice(0, 2).join("; ")})`);
+
+  // Anchor doctrine (criteria A + B + F): compute the pre-rendered anchor
+  // block ONCE for the persuasion sub-engines (trust-transfer designer/judge
+  // + cialdini picker). F5a: when the doctrine anchor is absent, derive one
+  // from Product DNA — deriveAnchorFromProductDna returns null unless
+  // differentiator + problem + name + type all exist (D5).
+  let psDoctrineBlock = "";
+  if (strategic) {
+    psDoctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[PersuasionEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let psAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!psAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      psAnchor = derivedAnchor;
+      console.log("[PersuasionEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let psAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    psAnchorSource = "doctrine";
+  } else if (psAnchor) {
+    psAnchorSource = "dna";
+  }
+  const psDnaAnchorBlock = psAnchorSource === "dna" && psAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve every output to THIS product) ===
+Product name: ${psAnchor.name}
+Product type: ${psAnchor.type}${psAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${psAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${psAnchor.coreProblemSolved}
+Differentiating feature: ${psAnchor.differentiatingFeature}
+`
+    : "";
+  const psAnchorGroundingRule = psAnchor
+    ? "\nANCHOR GROUNDING: Every trust mechanism and persuasion principle MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.\n"
+    : "";
+  const psAnchorBlockText = `${psDoctrineBlock}${psDnaAnchorBlock}${psAnchorGroundingRule}`;
+  const psGroundingContract = buildGroundingContract(psAnchor, ((mi as any).analyticalEnrichment || null) as any);
+
+  try {
+    const { designTrustTransfer } = await import("./trust-transfer");
+    trustTransferDesignResult = await designTrustTransfer({
+      analyticalEnrichment: (mi as any).analyticalEnrichment || null,
+      objectionStatements,
+      trustBarriers: trustBarrierStrings,
+      audienceSegmentDescriptions: segmentDescriptions,
+      sophisticationTier,
+      awarenessStage: awareness.targetReadinessStage || "unknown",
+      marketDiagnosis: (mi as any).marketDiagnosis || null,
+      enemyDefinition: (offer as any)?.enemyDefinition || null,
+      rejectedClaimPatterns,
+      upstreamBuyerPsychology: null, // Phase 4 will populate this from audience.commercialSignals
+      accountId: accountId || "system",
+      doctrineBlock: psAnchorBlockText.length > 0 ? psAnchorBlockText : null,
+      anchorSource: psAnchorSource,
+      groundingContractBlock: psGroundingContract,
+    });
+    if (trustTransferDesignResult) {
+      routes.primary.trustTransferDesign = trustTransferDesignResult;
+      console.log(`[PersuasionEngine-V3] TRUST_TRANSFER_ATTACHED | mechanism="${trustTransferDesignResult.transferMechanism.name}" | risk=${trustTransferDesignResult.riskSeverity} | judge=${trustTransferDesignResult.judgeVerdict}`);
+    }
+  } catch (ttErr: any) {
+    console.error(`[PersuasionEngine-V3] TRUST_TRANSFER_FAILED | ${ttErr.message} | falling back to legacy Cialdini-only`);
+  }
+
+  // ── INTELLIGENCE UPGRADE: Cialdini reasoning (now grounded in Trust Transfer Design when present) ──
+  try {
+    const { pickCialdiniPrinciple } = await import("./cialdini-llm");
+    const cialdiniReasoning = await pickCialdiniPrinciple({
+      analyticalEnrichment: (mi as any).analyticalEnrichment || null,
+      objectionStatements,
+      trustBarriers: trustBarrierStrings,
+      audienceSegmentDescriptions: segmentDescriptions,
+      sophisticationTier,
+      awarenessStage: awareness.targetReadinessStage || "unknown",
+      marketDiagnosis: (mi as any).marketDiagnosis || null,
+      enemyDefinition: (offer as any)?.enemyDefinition || null,
+      trustRequirement: routes.primary.trustSequence?.[0]
+        ? (typeof routes.primary.trustSequence[0] === "string" ? routes.primary.trustSequence[0] : (routes.primary.trustSequence[0] as any).step)
+        : "default",
+      rejectedClaimPatterns,
+      accountId: accountId || "system",
+      trustTransferDesign: trustTransferDesignResult || undefined,
+      doctrineBlock: psAnchorBlockText.length > 0 ? psAnchorBlockText : null,
+      anchorSource: psAnchorSource,
+      groundingContractBlock: psGroundingContract,
+    });
+    if (cialdiniReasoning) {
+      if (trustTransferDesignResult) {
+        cialdiniReasoning.groundedInTrustMechanism = trustTransferDesignResult.transferMechanism.name;
+      }
+      routes.primary.cialdiniReasoning = cialdiniReasoning;
+      console.log(`[PersuasionEngine-V3] CIALDINI_ATTACHED | principle=${cialdiniReasoning.primaryCialdiniPrinciple} | tier=${sophisticationTier ?? "?"} | rcRefs=${cialdiniReasoning.rootCauseRefs.join(",") || "(none)"}${cialdiniReasoning.groundedInTrustMechanism ? ` | groundedIn="${cialdiniReasoning.groundedInTrustMechanism}"` : ""}`);
+    }
+  } catch (cErr: any) {
+    console.error(`[PersuasionEngine-V3] CIALDINI_FAILED | ${cErr.message}`);
+  }
+
+  let driftStatus: string = STATUS.COMPLETE;
+  let driftStatusMessage: string | null = null;
+  if (lockedDecisions.length > 0 && positioningDriftMinSimilarity < 0.20) {
+    if (positioningDriftMinSimilarity < 0.10) {
+      driftStatus = STATUS.POSITIONING_DRIFT;
+      driftStatusMessage = `BLOCKED: Severe positioning drift detected (similarity=${positioningDriftMinSimilarity.toFixed(2)} < 0.10) against locked decision "${positioningDriftWorstDecision}" — persuasion output is semantically disconnected from positioning lock`;
+      console.log(`[PersuasionEngine-V3] POSITIONING_DRIFT_ENFORCEMENT | severity=SEVERE | minSim=${positioningDriftMinSimilarity.toFixed(2)} | status=POSITIONING_DRIFT (BLOCK)`);
+    } else {
+      driftStatus = STATUS.PARTIAL;
+      driftStatusMessage = `PARTIAL: Positioning drift detected (similarity=${positioningDriftMinSimilarity.toFixed(2)} < 0.20 threshold) against locked decision "${positioningDriftWorstDecision}" — persuasion output drifted from positioning lock`;
+      console.log(`[PersuasionEngine-V3] POSITIONING_DRIFT_ENFORCEMENT | severity=MILD | minSim=${positioningDriftMinSimilarity.toFixed(2)} | status=PARTIAL`);
+    }
+  }
+
+  const __persuasionResult = {
+    status: driftStatus,
+    statusMessage: driftStatusMessage,
     primaryRoute: routes.primary,
     alternativeRoute: routes.alternative,
     rejectedRoute: routes.rejected,
@@ -2202,6 +2542,7 @@ export function analyzePersuasion(
     celDepthCompliance: celDepth,
     depthGateResult,
   };
+  return applyPartialAelDowngrade("PersuasionEngine-V3", __persuasionResult, aelAck);
 }
 
 function emptyRoute(name: string): PersuasionRoute {
@@ -2239,6 +2580,8 @@ export async function runPersuasionEngine(
   _accountId?: string,
   upstreamLineage: SignalLineageEntry[] = [],
   analyticalEnrichment?: any,
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
 ): Promise<PersuasionResult> {
-  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment);
+  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment, _accountId, strategic, productDna);
 }

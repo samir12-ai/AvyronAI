@@ -75,6 +75,18 @@ export interface LayerResult {
   warnings: string[];
 }
 
+export interface MythBreakerReasoning {
+  mythBreakerStatement: string;
+  beliefToContradict: string;
+  rootCauseContradicted: string;
+  rootCauseRefs: string[];
+  evidenceForBelief: string[];
+  contradictionLogic: string;
+  reasoningSteps: string[];
+  modelUsed: string;
+  generatedAt: string;
+}
+
 export interface AwarenessRoute {
   routeName: string;
   entryMechanismType: string;
@@ -85,6 +97,7 @@ export interface AwarenessRoute {
   awarenessStrengthScore: number;
   frictionNotes: string[];
   rejectionReason: string | null;
+  mythBreaker?: MythBreakerReasoning;
 }
 
 export interface DataReliabilityDiagnostics {

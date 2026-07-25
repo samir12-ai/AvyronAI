@@ -1,0 +1,45 @@
+Context:
+Verification run 2026-07-11T10-52-49-949Z proved the output-side gates work correctly (interchangeability judge rejected 3/3, Integrity blocked on “0 of 5 audience objections addressed”, CEL FAIL 0.79) — but the generation prompts are not compelled to use the product anchor’s differentiatingFeature or cite AEL evidence. The anchor is passed as optional context and the LLM drifts to abstract phrasing (“marketing capability transformation validation gap”). We fix the INPUT side: generation prompts must be forced to ground their output. All gates, judges, thresholds, and retry counts remain 100% untouched — they stay the final authority.
+
+PHASE 1 — Diagnosis (no code changes)
+
+	1.	Enumerate every engine whose LLM calls generate strategic text that is later checked by the interchangeability judge, Integrity, or CEL. Expected set (confirm and correct): positioning, offer, differentiation, mechanism, awareness (myth-breaker + narrative-reframe), persuasion, funnel. Exclude purely deterministic/rule-based engines (integrity, statistical validation, budget governor).
+	2.	For each engine, locate the exact prompt-builder function and report: (a) does the prompt currently receive the product anchor (differentiatingFeature, coreProblemSolved, keyAttributes)? (b) does it receive AEL items (root_causes / causal_chains / buying_barriers) with their [RC/CC/BB] refs? (c) is usage of either MANDATED in the output contract, or merely provided as context?
+	3.	Produce a table: engine → prompt file:line → anchor in prompt? → AEL in prompt? → mandated or optional. Report before implementing.
+
+PHASE 2 — Implement a shared grounding contract
+
+	1.	Create ONE shared prompt module (e.g. server/shared/grounding-contract.ts) exporting a buildGroundingContract(anchor, ael) block, injected into every engine prompt identified in Phase 1. The block must impose three output-contract rules:
+	•	RULE 1 — Mechanism naming: The output MUST reference the product’s differentiating mechanism from differentiatingFeature concretely (named capability, not an abstract paraphrase). If differentiatingFeature is empty, state so in the output metadata rather than inventing one.
+	•	RULE 2 — AEL citation: The output MUST ground its claims in 2–3 AEL items using the audience’s actual pain language, and include the refs ([RC2], [CC2], …) in a structured groundingRefs field of the JSON output.
+	•	RULE 3 — Self-check: Before returning, verify: “Could any sentence be pasted unchanged into a generic competitor’s marketing? If yes, rewrite it.” (This mirrors the judge’s criterion — it does NOT replace the judge.)
+	2.	Extend each engine’s Zod output schema with groundingRefs: string[] where absent. Missing/empty groundingRefs on a judged engine = log GROUNDING_CONTRACT_UNMET loudly (no silent pass) — but do NOT hard-fail generation; the existing gates remain the enforcement authority.
+	3.	Wire the contract into every Phase 1 engine’s prompt builder. Keep per-engine prompt intent intact — the contract is additive, one shared block, no per-engine forks.
+	4.	Dashboard card fix (small, related): in the Path B suggestion generation, if the candidate differentiator is substantially identical to the existing product_anchor.differentiatingFeature, do not raise a confirm-this-again suggestion (circular). Instead the suggestion must ask for a NEW additional detail (e.g. a concrete proof point, number, or named capability not yet in the anchor).
+
+Constraints:
+
+	•	ZERO changes to: interchangeability judge, Integrity engine logic, CEL scoring, depth gates, thresholds, retry counts, System Control.
+	•	The grounding contract is prompt-side only + schema field + loud logging. No gate bypass, no auto-acceptance.
+	•	tsc net-new = 0 vs the 722 baseline (run tsc alone via the managed workflow — background shells get killed).
+	•	English-only code/comments/logs. Architect review of the diff before Phase 3.
+
+PHASE 3 — Full verification run + before/after
+
+	1.	Re-run the full pipeline on campaign_1773576062201_6t0oxi (same corpus, within cooldown).
+	2.	Report with quoted evidence, comparing against baseline run 2026-07-11T10-52-49-949Z:
+	•	Judge verdicts per attempt for positioning + offer (baseline: 3/3 REJECTED both). Did any PASS now?
+	•	Integrity: does the offer now reference audience pain language? (baseline: “0 of 5 objections addressed” → what is it now?)
+	•	CEL score (baseline: FAIL 0.79) and remaining violations.
+	•	Engines completed (baseline: 9/15, blocked by Integrity) — how many now?
+	•	doctrineResolution, System Control verdict, BuildPlan actionability.
+	•	groundingRefs samples from 3 different engines proving the contract is being honored.
+	•	Confirm depth-gate scores with the 0.20 threshold untouched, and DEPTH_CASCADE_BLOCKED count.
+	3.	If judges still reject: report the exact rejected sentences vs the anchor content so we can see WHERE the drift persists. No prompt re-tuning beyond the contract in this session — diagnose and report.
+
+Done-conditions:
+
+	•	Phase 1 table delivered before any edit.
+	•	Grounding contract live in all judged engines, tsc net-new = 0, architect PASS.
+	•	Full run report with the before/after table above, truthful whether improved or not.
+	•	Explicit confirmation: no gate, judge, threshold, or retry count was modified.

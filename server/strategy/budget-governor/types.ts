@@ -27,6 +27,7 @@ export interface BudgetGovernorInput {
   historicalCPA: number | null;
   historicalROAS: number | null;
   campaignPerformance?: CampaignPerformanceMetrics;
+  signalComposition?: import("../../shared/signal-lineage").SignalComposition;
 }
 
 export interface BudgetDecision {
@@ -80,8 +81,11 @@ export interface BudgetGovernorResult {
   boundaryCheck: { passed: boolean; violations: string[] };
   structuralWarnings: string[];
   confidenceScore: number;
+  budgetDecisionConfidence: number;
+  baseValidationConfidence: number;
   executionTimeMs: number;
   engineVersion: number;
   layerDiagnostics: Record<string, any>;
   strategyAcceptability?: import("../../shared/strategy-acceptability").StrategyAcceptability;
+  commercialStrategy?: import("./budget-strategy").BudgetStrategy | null;
 }

@@ -1,0 +1,185 @@
+Hi Replit Team,
+
+Now that the Audience Engine reliability work is complete and the concurrency issue has been resolved, we’re ready for the next phase: **adding TikTok and Reviews as controlled additional sources**.
+
+We want to do this carefully and in a way that fits the current architecture, without breaking the existing system.
+
+Please review the following direction and respond based on the current codebase before we proceed.
+
+---
+
+## Goal
+
+We do NOT want to add more data just for volume.
+
+We want to add **different kinds of signals**:
+
+* **TikTok** → what content patterns and hooks the market actually rewards
+* **Reviews** → direct pain, frustration, objections, and real customer language
+
+---
+
+## 1. Source Model — Controlled Multi-Source Expansion
+
+We do NOT want to rebuild the competitor model.
+
+The preferred direction is:
+
+* keep the current competitor as the main entity
+* extend the existing supplementary-source pattern
+* attach new source types to the same competitor
+
+### Proposed source types:
+
+* `tiktok`
+* `reviews`
+
+Please confirm:
+
+* whether extending the current supplementary-source model is the safest path
+* and which current table/model is the best fit for this extension
+
+---
+
+## 2. Important Rule: Do Not Treat All Sources the Same
+
+We do not want TikTok and Reviews to be processed as if they were just more Instagram captions/comments.
+
+### TikTok should contribute:
+
+* hooks
+* repeated problem framings
+* high-performing content patterns
+* engagement-backed messaging signals
+
+### Reviews should contribute:
+
+* direct pain language
+* complaints
+* objections
+* unmet expectations
+* real market wording
+
+Please confirm:
+
+* where in the current ingestion + Audience Engine flow source-specific handling should be introduced
+
+---
+
+## 3. Audience Engine Logic Changes (Before or Alongside Ingestion)
+
+The current engine is now reliable, but these new sources will only be useful if the engine can distinguish them correctly.
+
+We want to support:
+
+### A. Source typing
+
+Every matched signal should know whether it came from:
+
+* comments
+* captions
+* website
+* blog
+* TikTok
+* reviews
+
+### B. Source-aware weighting
+
+We want weighting to reflect signal quality, for example:
+
+* reviews > comments > TikTok > captions
+
+### C. Cross-source agreement
+
+If the same signal appears across multiple source types, confidence should increase.
+
+Please confirm:
+
+* whether the current `matchPatternClusters()` + confidence pipeline can support this cleanly
+* and where you would extend it
+
+---
+
+## 4. TikTok Ingestion
+
+We want TikTok to be treated mainly as a **content validation source**, not a comment source.
+
+Please confirm based on the current scraper architecture:
+
+* what is realistically accessible from TikTok without destabilizing the system
+* whether we should start with:
+
+  * captions
+  * hooks / text
+  * engagement metrics
+* and avoid comment scraping initially
+
+We do not want to overcomplicate this first version.
+
+---
+
+## 5. Reviews Ingestion
+
+We want reviews to function as a **truth / pain source**.
+
+Please confirm:
+
+* what review source is the most practical first step
+* whether this should be:
+
+  * Google Maps / Google Reviews
+  * or another review source
+
+And:
+
+* how best to map review text into the existing Audience Engine without mixing it incorrectly with captions
+
+---
+
+## 6. Reliability First
+
+This is important:
+
+We do NOT want to add TikTok + Reviews unless the resulting system remains:
+
+* deterministic enough
+* stable under repeated runs
+* consistent in frontend and backend outputs
+* safe under load
+
+Please identify:
+
+* any architecture risks
+* any likely bottlenecks
+* and the safest implementation order
+
+---
+
+## 7. Proposed Build Order
+
+Please validate or adjust this order:
+
+1. Extend supplementary source model to support `tiktok` and `reviews`
+2. Add ingestion for each source
+3. Add source typing in signal matching
+4. Add source-aware weighting
+5. Add cross-source agreement boost
+6. Run full validation under repeated and concurrent load
+
+---
+
+## Deliverable
+
+Please respond with:
+
+* what already exists that we can reuse
+* what needs schema changes
+* what needs ingestion changes
+* what needs Audience Engine logic changes
+* and the safest implementation path
+
+We want to build this on top of the current structure, not beside it.
+
+Thanks,
+Samir
+Avyron AI

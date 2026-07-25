@@ -1,9 +1,9 @@
 import crypto from "crypto";
 import { db } from "../db";
 import { strategyRoots, offerSnapshots, funnelSnapshots, integritySnapshots } from "@shared/schema";
-import { eq, and, desc, ne } from "drizzle-orm";
+import { eq, and, desc, ne, sql } from "drizzle-orm";
 
-interface StrategyRootInput {
+export interface StrategyRootInput {
   campaignId: string;
   accountId: string;
   miSnapshotId: string;
@@ -14,17 +14,66 @@ interface StrategyRootInput {
   primaryAxis: string | null;
   contrastAxisText: string | null;
   approvedMechanism: any;
-  approvedAudiencePains: any;
+  /** CANONICAL: array of pain profile objects. NEVER `painProfiles` / `painMap`. */
+  approvedAudiencePains: unknown[];
   approvedDesires: any;
   approvedTransformation: string | null;
   approvedClaim: string | null;
+  approvedClaims: any;
   approvedPromise: string | null;
   approvedObjections: any;
   approvedProofTypes: any;
   approvedPositioningContext: any;
 }
 
+/**
+ * Thrown by buildStrategyRoot() when the caller-supplied input would produce
+ * an incomplete row that downstream engines could not consume. The pipeline
+ * MUST surface this error (not swallow it) so the operator sees the failure
+ * at write time rather than later at the offer-engine gate.
+ */
+export class StrategyRootIncompleteError extends Error {
+  code = "STRATEGY_ROOT_INCOMPLETE_INPUT" as const;
+  constructor(public missingFields: string[], public phase: "build" | "consume") {
+    super(`Strategy Root ${phase}-time validation failed — missing: ${missingFields.join(", ")}`);
+    this.name = "StrategyRootIncompleteError";
+  }
+}
+
+/**
+ * Single shared predicate. Returns the list of fields that disqualify a
+ * strategy root from being persisted (`build`) or consumed (`consume`).
+ *
+ * `subject` may be either a `StrategyRootInput` (build path) or a persisted
+ * row (consume path). The shape is uniform enough — both expose
+ * `approvedAudiencePains`, `mechanismSnapshotId`, etc.
+ */
+export function assertCompleteRoot(subject: any, phase: "build" | "consume" = "build"): string[] {
+  const missing: string[] = [];
+  if (!subject) {
+    missing.push(phase === "consume" ? "strategy_root" : "input");
+    return missing;
+  }
+
+  if (!subject.primaryAxis) missing.push("primary_axis");
+  if (!subject.mechanismSnapshotId) missing.push("approved_mechanism");
+  if (!subject.audienceSnapshotId) missing.push("audience_data");
+  if (!subject.contrastAxisText) missing.push("contrast_axis");
+
+  // Persisted rows store JSON strings; in-memory inputs hold the parsed value.
+  const rawPains = subject.approvedAudiencePains;
+  const pains = typeof rawPains === "string" ? safeJsonParse(rawPains) : rawPains;
+  if (!pains || !Array.isArray(pains) || pains.length === 0) {
+    missing.push("approved_audience_pains");
+  }
+
+  return missing;
+}
+
 export function computeRootHash(input: StrategyRootInput): string {
+  const claimsKey = Array.isArray(input.approvedClaims)
+    ? input.approvedClaims.slice(0, 3).map((c: any) => (typeof c === "string" ? c : c?.claim || "")).join("|")
+    : null;
   const hashPayload = {
     mi: input.miSnapshotId,
     aud: input.audienceSnapshotId,
@@ -36,6 +85,7 @@ export function computeRootHash(input: StrategyRootInput): string {
     objections: input.approvedObjections ? JSON.stringify(input.approvedObjections) : null,
     proofTypes: input.approvedProofTypes ? JSON.stringify(input.approvedProofTypes) : null,
     posContext: input.approvedPositioningContext ? JSON.stringify(input.approvedPositioningContext) : null,
+    claims: claimsKey,
   };
   return crypto.createHash("sha256").update(JSON.stringify(hashPayload)).digest("hex").substring(0, 16);
 }
@@ -50,60 +100,110 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
   rootHash: string;
   isNew: boolean;
 }> {
+  // ---------------------------------------------------------------
+  // BUILD-TIME VALIDATION (fail-loud, no degraded persist)
+  // Symmetrical to validatePreGeneration's read-time gate. Sharing
+  // assertCompleteRoot ensures the two contracts cannot drift again.
+  // ---------------------------------------------------------------
+  const missing = assertCompleteRoot(input, "build");
+  if (missing.length > 0) {
+    console.error(
+      `[StrategyRoot] BUILD_REJECTED | campaign=${input.campaignId} | missing=${missing.join(",")} | mech=${input.mechanismSnapshotId} | aud=${input.audienceSnapshotId}`
+    );
+    throw new StrategyRootIncompleteError(missing, "build");
+  }
+
   const rootHash = computeRootHash(input);
   const runId = generateRunId();
 
-  const [existing] = await db.select().from(strategyRoots)
-    .where(and(
-      eq(strategyRoots.campaignId, input.campaignId),
-      eq(strategyRoots.accountId, input.accountId),
-      eq(strategyRoots.rootHash, rootHash),
-      eq(strategyRoots.status, "ACTIVE"),
-    ))
-    .limit(1);
+  // ---------------------------------------------------------------
+  // ATOMIC SUPERSEDE + INSERT
+  // The previous implementation ran SELECT → UPDATE → INSERT in three
+  // separate statements. Concurrent calls (parallel orchestrator runs
+  // for the same campaign, mechanism-engine + orchestrator racing, or
+  // dual-analysis re-runs) could leave 0 or 2+ ACTIVE rows. We now
+  // serialize through a transaction with row-level locks (FOR UPDATE)
+  // and a uniqueness invariant verified before commit.
+  // ---------------------------------------------------------------
+  return await db.transaction(async (tx: any) => {
+    // Lock all rows for this (campaign, account) so concurrent transactions
+    // serialize on this campaign — postgres holds the locks until commit.
+    await tx.execute(sql`
+      SELECT id FROM strategy_roots
+       WHERE campaign_id = ${input.campaignId}
+         AND account_id  = ${input.accountId}
+       FOR UPDATE
+    `);
 
-  if (existing) {
-    console.log(`[StrategyRoot] REUSE | existing root ${existing.id} | hash=${rootHash} | campaign=${input.campaignId}`);
-    return { id: existing.id, runId: existing.runId, rootHash, isNew: false };
-  }
+    // Idempotent reuse: same hash already ACTIVE → return it, do nothing else.
+    const [existing] = await tx.select().from(strategyRoots)
+      .where(and(
+        eq(strategyRoots.campaignId, input.campaignId),
+        eq(strategyRoots.accountId, input.accountId),
+        eq(strategyRoots.rootHash, rootHash),
+        eq(strategyRoots.status, "ACTIVE"),
+      ))
+      .limit(1);
 
-  await db.update(strategyRoots)
-    .set({ status: "SUPERSEDED" })
-    .where(and(
-      eq(strategyRoots.campaignId, input.campaignId),
-      eq(strategyRoots.accountId, input.accountId),
-      eq(strategyRoots.status, "ACTIVE"),
-    ));
+    if (existing) {
+      console.log(`[StrategyRoot] REUSE | existing root ${existing.id} | hash=${rootHash} | campaign=${input.campaignId}`);
+      return { id: existing.id, runId: existing.runId, rootHash, isNew: false };
+    }
 
-  const [created] = await db.insert(strategyRoots).values({
-    accountId: input.accountId,
-    campaignId: input.campaignId,
-    runId,
-    rootHash,
-    primaryAxis: input.primaryAxis,
-    contrastAxisText: input.contrastAxisText,
-    approvedMechanism: JSON.stringify(input.approvedMechanism),
-    approvedAudiencePains: JSON.stringify(input.approvedAudiencePains),
-    approvedDesires: JSON.stringify(input.approvedDesires),
-    approvedTransformation: input.approvedTransformation,
-    approvedClaim: input.approvedClaim,
-    approvedPromise: input.approvedPromise,
-    approvedObjections: JSON.stringify(input.approvedObjections),
-    approvedProofTypes: JSON.stringify(input.approvedProofTypes),
-    approvedPositioningContext: JSON.stringify(input.approvedPositioningContext),
-    miSnapshotId: input.miSnapshotId,
-    audienceSnapshotId: input.audienceSnapshotId,
-    positioningSnapshotId: input.positioningSnapshotId,
-    differentiationSnapshotId: input.differentiationSnapshotId,
-    mechanismSnapshotId: input.mechanismSnapshotId,
-    status: "ACTIVE",
-  }).returning();
+    // Supersede any existing ACTIVE roots for this (campaign, account).
+    await tx.update(strategyRoots)
+      .set({ status: "SUPERSEDED" })
+      .where(and(
+        eq(strategyRoots.campaignId, input.campaignId),
+        eq(strategyRoots.accountId, input.accountId),
+        eq(strategyRoots.status, "ACTIVE"),
+      ));
 
-  console.log(`[StrategyRoot] CREATED | id=${created.id} | hash=${rootHash} | runId=${runId} | campaign=${input.campaignId}`);
-  return { id: created.id, runId, rootHash, isNew: true };
+    const [created] = await tx.insert(strategyRoots).values({
+      accountId: input.accountId,
+      campaignId: input.campaignId,
+      runId,
+      rootHash,
+      primaryAxis: input.primaryAxis,
+      contrastAxisText: input.contrastAxisText,
+      approvedMechanism: JSON.stringify(input.approvedMechanism),
+      approvedAudiencePains: JSON.stringify(input.approvedAudiencePains),
+      approvedDesires: JSON.stringify(input.approvedDesires),
+      approvedTransformation: input.approvedTransformation,
+      approvedClaim: input.approvedClaim,
+      approvedClaims: JSON.stringify(input.approvedClaims || []),
+      approvedPromise: input.approvedPromise,
+      approvedObjections: JSON.stringify(input.approvedObjections),
+      approvedProofTypes: JSON.stringify(input.approvedProofTypes),
+      approvedPositioningContext: JSON.stringify(input.approvedPositioningContext),
+      miSnapshotId: input.miSnapshotId,
+      audienceSnapshotId: input.audienceSnapshotId,
+      positioningSnapshotId: input.positioningSnapshotId,
+      differentiationSnapshotId: input.differentiationSnapshotId,
+      mechanismSnapshotId: input.mechanismSnapshotId,
+      status: "ACTIVE",
+    }).returning();
+
+    // Invariant guard: exactly one ACTIVE row for (campaign, account) post-commit.
+    const activeRows = await tx.select({ id: strategyRoots.id }).from(strategyRoots)
+      .where(and(
+        eq(strategyRoots.campaignId, input.campaignId),
+        eq(strategyRoots.accountId, input.accountId),
+        eq(strategyRoots.status, "ACTIVE"),
+      ));
+    if (activeRows.length !== 1) {
+      // Throwing inside the transaction triggers a rollback — no degraded state persists.
+      throw new Error(
+        `[StrategyRoot] INVARIANT_VIOLATION | expected exactly 1 ACTIVE row, found ${activeRows.length} | campaign=${input.campaignId}`
+      );
+    }
+
+    console.log(`[StrategyRoot] CREATED | id=${created.id} | hash=${rootHash} | runId=${runId} | campaign=${input.campaignId}`);
+    return { id: created.id, runId, rootHash, isNew: true };
+  });
 }
 
-export async function getActiveRoot(campaignId: string, accountId: string = "default"): Promise<any | null> {
+export async function getActiveRoot(campaignId: string, accountId: string): Promise<any | null> {
   const [active] = await db.select().from(strategyRoots)
     .where(and(
       eq(strategyRoots.campaignId, campaignId),
@@ -250,22 +350,9 @@ export function validatePreGeneration(activeRoot: any): {
   canGenerate: boolean;
   missingFields: string[];
 } {
-  if (!activeRoot) {
-    return { canGenerate: false, missingFields: ["strategy_root"] };
-  }
-
-  const missing: string[] = [];
-
-  if (!activeRoot.primaryAxis) missing.push("primary_axis");
-  if (!activeRoot.mechanismSnapshotId) missing.push("approved_mechanism");
-  if (!activeRoot.audienceSnapshotId) missing.push("audience_data");
-  if (!activeRoot.contrastAxisText) missing.push("contrast_axis");
-
-  const pains = safeJsonParse(activeRoot.approvedAudiencePains);
-  if (!pains || (Array.isArray(pains) && pains.length === 0)) {
-    missing.push("approved_audience_pains");
-  }
-
+  // Delegates to the shared predicate so build-time and consume-time gates
+  // can never disagree about what counts as a "complete" root.
+  const missing = assertCompleteRoot(activeRoot, "consume");
   return { canGenerate: missing.length === 0, missingFields: missing };
 }
 

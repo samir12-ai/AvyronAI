@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Pipeline Overlay — Login</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232d; --border: #2a3340;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); padding: 24px;
+    border-radius: 8px; min-width: 440px; max-width: 540px; width: 100%; }
+  h1 { margin: 0 0 6px; font-size: 14px; font-weight: 600; letter-spacing: 0.5px; }
+  .sub { color: var(--muted); font-size: 12px; margin: 0 0 16px; }
+  textarea { width: 100%; min-height: 130px; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; padding: 9px;
+    font: 11px ui-monospace, monospace; resize: vertical; }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  button { background: #1f6feb; color: white; border: 1px solid #1f6feb;
+    padding: 7px 18px; border-radius: 4px; font: inherit; cursor: pointer; font-weight: 600; }
+  button:hover { background: #388bfd; border-color: #388bfd; }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .err { color: var(--bad); margin: 10px 0 0; font-size: 12px; min-height: 16px; }
+  .row { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 12px; }
+  .badge { font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <form class="card" id="login-form">
+    <h1>PIPELINE OVERLAY <span class="badge">admin</span></h1>
+    <p class="sub">Paste an admin Bearer JWT. Validated server-side; on success an httpOnly cookie is set for this browser session and you'll be redirected to the dashboard.</p>
+    <textarea id="token" placeholder="eyJhbGciOi..." autofocus required></textarea>
+    <div class="err" id="err"></div>
+    <div class="row">
+      <span class="badge" id="status">idle</span>
+      <button type="submit" id="submit">Sign in</button>
+    </div>
+  </form>
+<script>
+const form = document.getElementById("login-form");
+const tokenEl = document.getElementById("token");
+const errEl = document.getElementById("err");
+const submitEl = document.getElementById("submit");
+const statusEl = document.getElementById("status");
+const TOKEN_KEY = "pipeline-overlay-token";
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const token = tokenEl.value.trim();
+  if (!token) { errEl.textContent = "empty"; return; }
+  errEl.textContent = "";
+  submitEl.disabled = true;
+  statusEl.textContent = "verifying…";
+  try {
+    const res = await fetch("/admin/pipeline-overlay/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+      credentials: "same-origin",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      errEl.textContent = (body && body.error) || ("HTTP " + res.status);
+      statusEl.textContent = "rejected";
+      submitEl.disabled = false;
+      return;
+    }
+    // Stash the same token in sessionStorage so the dashboard's /api/pipeline/* XHRs
+    // (which require an Authorization header, not a cookie) keep working.
+    sessionStorage.setItem(TOKEN_KEY, token);
+    statusEl.textContent = "ok";
+    location.href = "/admin/pipeline-overlay";
+  } catch (e) {
+    errEl.textContent = "network error: " + (e && e.message);
+    statusEl.textContent = "error";
+    submitEl.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

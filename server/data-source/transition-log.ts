@@ -58,7 +58,7 @@ function mapRow(row: any) {
   };
 }
 
-export async function getTransitionLog(campaignId?: string, accountId: string = "default", limit: number = 50): Promise<any[]> {
+export async function getTransitionLog(campaignId?: string, accountId: string, limit: number = 50): Promise<any[]> {
   try {
     const conditions = [eq(dataSourceTransitions.accountId, accountId)];
     if (campaignId) {
@@ -77,7 +77,7 @@ export async function getTransitionLog(campaignId?: string, accountId: string = 
   }
 }
 
-export async function getLatestTransition(campaignId: string, accountId: string = "default"): Promise<any | null> {
+export async function getLatestTransition(campaignId: string, accountId: string): Promise<any | null> {
   try {
     const [row] = await db.select().from(dataSourceTransitions)
       .where(and(

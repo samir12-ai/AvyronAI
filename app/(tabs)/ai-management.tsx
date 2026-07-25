@@ -13,7 +13,7 @@ import {
   Animated as RNAnimated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -24,10 +24,11 @@ import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import ExecutionPlan from '@/components/ExecutionPlan';
-import BuildThePlan from '@/components/BuildThePlan';
 import OrchestratorPanel from '@/components/OrchestratorPanel';
 import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
 import ControlCenter from '@/components/ControlCenter';
+import AudienceEngine, { type AudienceEngineSnapshot } from '@/components/AudienceEngine';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import MarketDatabaseAdmin from '@/components/MarketDatabaseAdmin';
 import PositioningStrategy from '@/components/PositioningStrategy';
 import DifferentiationEngine from '@/components/DifferentiationEngine';
@@ -47,6 +48,11 @@ import DataFreshnessWarning from '@/components/DataFreshnessWarning';
 import AELDebugPanel from '@/components/AELDebugPanel';
 import SignalFlowPanel from '@/components/SignalFlowPanel';
 import SystemIntegrityPanel from '@/components/SystemIntegrityPanel';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
+// Task #71 / Phase 8 — operator engine labels live in a separate module
+// so the vocab CI gate can scan this file itself for customer-surface
+// regressions without flagging the operator-only branch.
+import { OPERATOR_STRATEGY_BRANCHES } from '@/lib/operator-labels';
 
 interface AIAudience {
   name: string;
@@ -65,7 +71,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'pipeline' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience';
+type TabView = 'buildplan' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -117,9 +123,13 @@ export default function AIManagementScreen() {
   const { t } = useLanguage();
 
   const { selectedCampaignId, isCampaignSelected, dataSourceMode } = useCampaign();
+  // Task #71 / Phase 8 / Step 1 — gate 5 operator panels behind the unified
+  // operator-surface predicate. In customer builds (no EXPO_PUBLIC_METRICS_
+  // ADMIN_TOKEN), `operator.enabled === false` and the panels self-disable.
+  const operator = useOperatorSurface();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
-  const validTabs: Set<string> = new Set(['buildplan', 'pipeline', 'intelligence', 'strategies', 'positioning', 'differentiation', 'mechanism', 'offers', 'funnels', 'integrity', 'awareness', 'persuasion', 'statistical_validation', 'budget_governor', 'channel_selection', 'iteration', 'retention', 'control', 'marketdb', 'publisher', 'audience']);
+  const validTabs: Set<string> = new Set(['buildplan', 'intelligence', 'strategies', 'positioning', 'differentiation', 'mechanism', 'offers', 'funnels', 'integrity', 'awareness', 'persuasion', 'statistical_validation', 'budget_governor', 'channel_selection', 'iteration', 'retention', 'control', 'marketdb', 'publisher', 'audience']);
   const safeTab = (t: string): TabView => validTabs.has(t) ? t as TabView : 'buildplan';
 
   const [activeTab, setActiveTab] = useState<TabView>(safeTab(ps.activeTab));
@@ -137,6 +147,21 @@ export default function AIManagementScreen() {
     updateState({ activeTab: tab });
   }, [updateState]);
 
+  // Deep-link support: /(tabs)/ai-management?tab=intelligence&ts=<nonce>
+  // The `ts` nonce ensures repeat navigations with the same tab re-trigger.
+  // deepLinkRef records the not-yet-superseded deep-link intent so the async
+  // persisted-state hydration effect below doesn't clobber the deep-linked tab
+  // on a cold mount (hydration resolves AFTER this effect fires).
+  const deepLinkRef = useRef<{ tab: TabView; ts: string } | null>(null);
+  const { tab: tabParam, ts: tsParam } = useLocalSearchParams<{ tab?: string; ts?: string }>();
+  useEffect(() => {
+    if (typeof tabParam === 'string' && validTabs.has(tabParam)) {
+      deepLinkRef.current = { tab: tabParam as TabView, ts: typeof tsParam === 'string' ? tsParam : '' };
+      handleTabChange(tabParam as TabView);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabParam, tsParam]);
+
   const [showAudienceModal, setShowAudienceModal] = useState(false);
   const [audienceGoal, setAudienceGoal] = useState(ps.audienceGoal);
   const [audienceProduct, setAudienceProduct] = useState(ps.audienceProduct);
@@ -146,7 +171,8 @@ export default function AIManagementScreen() {
   const [audienceError, setAudienceError] = useState('');
   const [expandedAudience, setExpandedAudience] = useState<number | null>(null);
 
-  const [audienceEngineData, setAudienceEngineData] = useState<any>(null);
+  const [audienceEngineData, setAudienceEngineData] = useState<AudienceEngineSnapshot | null>(null);
+  const [audienceEnvelope, setAudienceEnvelope] = useState<import('@/lib/envelope').LiveSnapshotEnvelope | null>(null);
   const [audienceEngineLoading, setAudienceEngineLoading] = useState(false);
   const [audienceEngineError, setAudienceEngineError] = useState('');
   const [expandedPersona, setExpandedPersona] = useState<number | null>(null);
@@ -180,6 +206,7 @@ export default function AIManagementScreen() {
         if (res.ok) {
           const data = await res.json();
           setAudienceEngineData(data);
+          setAudienceEnvelope(data?.envelope ?? null);
         }
       } catch {}
     };
@@ -192,13 +219,29 @@ export default function AIManagementScreen() {
     if (hydrationVersion > 0 && hydrationVersion !== lastHydrationRef.current) {
       lastHydrationRef.current = hydrationVersion;
       skipSyncRef.current = true;
-      setActiveTab(safeTab(ps.activeTab));
-      setVisitedTabs(prev => {
-        if (prev.has(ps.activeTab)) return prev;
-        const next = new Set(prev);
-        next.add(ps.activeTab);
-        return next;
-      });
+      const deepLink = deepLinkRef.current;
+      if (deepLink) {
+        // A deep-linked tab was applied before hydration resolved — keep it
+        // instead of resetting to the persisted tab, and persist it now that
+        // we're hydrated. Consume the intent so later hydrations behave normally.
+        deepLinkRef.current = null;
+        setActiveTab(deepLink.tab);
+        setVisitedTabs(prev => {
+          if (prev.has(deepLink.tab)) return prev;
+          const next = new Set(prev);
+          next.add(deepLink.tab);
+          return next;
+        });
+        updateState({ activeTab: deepLink.tab });
+      } else {
+        setActiveTab(safeTab(ps.activeTab));
+        setVisitedTabs(prev => {
+          if (prev.has(ps.activeTab)) return prev;
+          const next = new Set(prev);
+          next.add(ps.activeTab);
+          return next;
+        });
+      }
       setAudienceGoal(ps.audienceGoal);
       setAudienceProduct(ps.audienceProduct);
       setAudienceBudget(ps.audienceBudget);
@@ -229,6 +272,7 @@ export default function AIManagementScreen() {
 
       const data = await response.json();
       setAudienceEngineData(data);
+      setAudienceEnvelope(data?.envelope ?? null);
     } catch (err: any) {
       setAudienceEngineError(err.message || 'Audience analysis failed');
     } finally {
@@ -305,20 +349,27 @@ export default function AIManagementScreen() {
     loadControlData();
   }, []);
 
-  const strategyBranches: { key: TabView; icon: keyof typeof Ionicons.glyphMap; label: string; color: string; description: string }[] = [
-    { key: 'positioning', icon: 'compass-outline', label: 'Positioning', color: '#10B981', description: 'Strategic territory discovery and narrative positioning' },
-    { key: 'differentiation', icon: 'layers-outline', label: 'Differentiation', color: '#8B5CF6', description: '12-layer proof-backed differentiation analysis' },
-    { key: 'mechanism', icon: 'construct-outline', label: 'Mechanism Engine', color: '#D946EF', description: 'Axis-aligned mechanism generation from positioning and differentiation' },
-    { key: 'offers', icon: 'pricetag-outline', label: 'Offer Engine', color: '#F97316', description: '5-layer structured offer construction' },
-    { key: 'awareness', icon: 'eye-outline', label: 'Awareness Engine', color: '#F97316', description: '8-layer awareness architecture — entry routes, readiness mapping, and trigger classes' },
-    { key: 'funnels', icon: 'funnel-outline', label: 'Funnel Engine', color: '#14B8A6', description: '8-layer funnel decision with trust path and proof placement' },
-    { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Integrity Engine', color: '#6366F1', description: 'Final validation gate — 8-layer strategic consistency check before execution' },
-    { key: 'persuasion', icon: 'megaphone-outline', label: 'Persuasion Engine', color: '#EC4899', description: '8-layer persuasion logic — influence drivers, objection mapping, and trust sequencing' },
-    { key: 'statistical_validation', icon: 'stats-chart-outline', label: 'Statistical Validation', color: '#06B6D4', description: 'Evidence density evaluation — validates claims against real MI signals' },
-    { key: 'budget_governor', icon: 'wallet-outline', label: 'Budget Governor', color: '#F59E0B', description: 'Multi-factor risk scoring — test/scale/hold/halt budget decisions' },
-    { key: 'channel_selection', icon: 'git-branch-outline', label: 'Channel Selection', color: '#3B82F6', description: '16-channel scoring across 8 layers — audience density and mode compatibility' },
-    { key: 'iteration', icon: 'repeat-outline', label: 'Iteration Engine', color: '#F43F5E', description: 'Optimization opportunities — test hypotheses and controlled experimentation' },
-    { key: 'retention', icon: 'heart-outline', label: 'Retention Engine', color: '#059669', description: 'Retention leverage points — churn risks, LTV expansion, and upsell triggers' },
+  // Task #71 / Phase 8 / Step 3 + 7 — engine names DEMOTED from customer
+  // surface. The customer-facing labels here are outcome-framed
+  // ("Where you stand", "Why you'll win") so the 13 internal engine names
+  // are no longer the navigation vocabulary. Keys retain canonical engine
+  // identifiers (D2 — canonical fields preserved for routing/persistence).
+  // Operator builds (operator.enabled) get the original engine names
+  // restored so dev work isn't disrupted.
+  const strategyBranches: { key: TabView; icon: keyof typeof Ionicons.glyphMap; label: string; color: string; description: string }[] = operator.enabled ? OPERATOR_STRATEGY_BRANCHES.map(b => ({ ...b, key: b.key as TabView })) : [
+    { key: 'positioning', icon: 'compass-outline', label: 'Where you stand', color: '#10B981', description: 'Your place in the market and how customers will find you' },
+    { key: 'differentiation', icon: 'layers-outline', label: 'Why you’re different', color: '#8B5CF6', description: 'What makes you stand apart from competitors — backed by proof' },
+    { key: 'mechanism', icon: 'construct-outline', label: 'How it works', color: '#D946EF', description: 'The simple way your product solves the problem' },
+    { key: 'offers', icon: 'pricetag-outline', label: 'What you offer', color: '#F97316', description: 'How your offer is packaged and presented to buyers' },
+    { key: 'awareness', icon: 'eye-outline', label: 'How buyers find you', color: '#F97316', description: 'Where attention comes from and how ready buyers are to act' },
+    { key: 'funnels', icon: 'funnel-outline', label: 'The buying path', color: '#14B8A6', description: 'How a stranger becomes a paying customer step by step' },
+    { key: 'integrity', icon: 'shield-checkmark-outline', label: 'Plan check', color: '#6366F1', description: 'Final sanity check before we put the plan into action' },
+    { key: 'persuasion', icon: 'megaphone-outline', label: 'What convinces buyers', color: '#EC4899', description: 'The reasons buyers say yes — and how to handle objections' },
+    { key: 'statistical_validation', icon: 'stats-chart-outline', label: 'Evidence strength', color: '#06B6D4', description: 'How confident we are that the plan is backed by real data' },
+    { key: 'budget_governor', icon: 'wallet-outline', label: 'Spending guardrails', color: '#F59E0B', description: 'When to test, scale, hold, or pause spend based on risk' },
+    { key: 'channel_selection', icon: 'git-branch-outline', label: 'Where to run ads', color: '#3B82F6', description: 'Which channels fit your audience and how to prioritize them' },
+    { key: 'iteration', icon: 'repeat-outline', label: 'What to test next', color: '#F43F5E', description: 'Concrete experiments to keep improving results' },
+    { key: 'retention', icon: 'heart-outline', label: 'Keeping customers', color: '#059669', description: 'Where customers churn and how to grow lifetime value' },
   ];
 
   const renderStrategiesBranch = () => (
@@ -540,9 +591,25 @@ export default function AIManagementScreen() {
 
         {hasCachedData && (
           <DataFreshnessWarning
-            freshnessMetadata={ae.freshnessMetadata}
+            freshnessMetadata={(ae as any).freshnessMetadata}
             onRefresh={handleRunAudienceEngine}
           />
+        )}
+
+        {/* T004: comprehensive AudienceEngine v3 panel — surfaces every commercial-reasoning field */}
+        {hasCachedData && (
+          <>
+            {audienceEnvelope && (
+              <View style={{ marginHorizontal: 16, marginTop: 8 }}>
+                <EnvelopeBadge envelope={audienceEnvelope} onRerun={handleRunAudienceEngine} />
+              </View>
+            )}
+            <AudienceEngine
+              data={ae as AudienceEngineSnapshot}
+              loading={audienceEngineLoading}
+              error={audienceEngineError}
+            />
+          </>
         )}
 
         {hasCachedData && ae.status === 'DATASET_TOO_SMALL' && (
@@ -985,8 +1052,12 @@ export default function AIManagementScreen() {
           contentContainerStyle={styles.tabBarContent}
         >
           {([
+            // Restored (per user request) — Build Plan and Strategies are
+            // shown again as their own dedicated, clearly-labeled tabs
+            // instead of being folded into the "Roadmap"/"Diagnose"
+            // 4-screen pivot naming. Content rendering per tab is
+            // unchanged (still gated by operator.enabled where applicable).
             { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
-            { key: 'pipeline' as TabView, icon: 'git-merge-outline' as const, label: 'Pipeline', color: '#8B5CF6', advanced: false },
             { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
             { key: 'strategies' as TabView, icon: 'map-outline' as const, label: 'Strategies', color: '#F97316', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
@@ -1012,23 +1083,22 @@ export default function AIManagementScreen() {
             })}
         </ScrollView>
 
-        {activeTab === 'buildplan' && <OrchestratorPanel />}
-        {activeTab === 'pipeline' && (
-          <>
-            <ExecutionPlan />
-          </>
-        )}
+        {activeTab === 'buildplan' && (operator.enabled ? <OrchestratorPanel /> : <ExecutionPlan />)}
         {activeTab === 'intelligence' && renderIntelligence()}
         {activeTab === 'strategies' && (
           <>
             {renderStrategiesBranch()}
-            <CampaignGuard><SystemIntegrityPanel /></CampaignGuard>
-            <CampaignGuard><SignalFlowPanel /></CampaignGuard>
-            <CampaignGuard><AELDebugPanel /></CampaignGuard>
+            {operator.enabled && (
+              <>
+                <CampaignGuard><SystemIntegrityPanel /></CampaignGuard>
+                <CampaignGuard><SignalFlowPanel /></CampaignGuard>
+                <CampaignGuard><AELDebugPanel /></CampaignGuard>
+              </>
+            )}
           </>
         )}
         {activeTab === 'control' && renderControlCenter()}
-        {activeTab === 'marketdb' && <MarketDatabaseAdmin />}
+        {activeTab === 'marketdb' && (operator.enabled ? <MarketDatabaseAdmin /> : renderIntelligence())}
         {activeTab === 'publisher' && renderPublisher()}
         {activeTab === 'audience' && <CampaignGuard>{renderAudienceManager()}</CampaignGuard>}
 

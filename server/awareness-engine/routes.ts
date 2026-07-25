@@ -23,6 +23,9 @@ import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, cre
 import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -39,6 +42,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
   app.post("/api/awareness-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, offerSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -231,7 +235,14 @@ export function registerAwarenessEngineRoutes(app: Express) {
           const objMap = JSON.parse(miSnapshot.objectionMapData as string);
           miNarrativeObjectionCount = objMap?.totalObjectionsDetected || 0;
           miNarrativeObjectionDensity = objMap?.objectionDensity || 0;
-        } catch {}
+        } catch (parseErr) {
+          // Seal #15: malformed objectionMapData JSON degrades the awareness
+          // narrative inputs. Surface it so a data-quality issue can be traced.
+          console.error("[AwarenessRoutes] OBJECTION_MAP_PARSE_FAILED", {
+            campaignId: campaign?.id,
+            error: (parseErr as Error)?.message,
+          });
+        }
       }
 
       const selectedOfferKey = activeOfferSnapshot.selectedOption || "primary";
@@ -342,6 +353,7 @@ export function registerAwarenessEngineRoutes(app: Express) {
       console.log(`[AwarenessEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${awarenessLineage.length} | claims=${awarenessClaims.length}`);
 
       const [saved] = await db.insert(awarenessSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         integritySnapshotId: null,
@@ -385,31 +397,71 @@ export function registerAwarenessEngineRoutes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.json({ exists: false, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(awarenessSnapshots)
         .where(and(
           eq(awarenessSnapshots.campaignId, campaignId),
           eq(awarenessSnapshots.accountId, accountId),
-          eq(awarenessSnapshots.engineVersion, ENGINE_VERSION),
+          eq(awarenessSnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(awarenessSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ exists: false });
+        return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
+      }
+
+      // Phase C3 — emit LiveSnapshotEnvelope. Build a small output object
+      // exposing primaryRoute + dataReliability fields the contract reads.
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const awarenessOutput = {
+          primaryRoute: safeJsonParse(latest.primaryRoute),
+          alternativeRoute: safeJsonParse(latest.alternativeRoute),
+          dataReliability: safeJsonParse(latest.dataReliability),
+          structuralWarnings: safeJsonParse(latest.structuralWarnings) || [],
+        };
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("awareness", awarenessOutput, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=awareness snap=${latest.id} err=${e?.message ?? String(e)}`);
       }
 
       res.json({
         exists: true,
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
         id: latest.id,
         campaignId: latest.campaignId,
         status: latest.status,
         statusMessage: latest.statusMessage,
         engineVersion: latest.engineVersion,
+        envelope,
         primaryRoute: safeJsonParse(latest.primaryRoute),
         alternativeRoute: safeJsonParse(latest.alternativeRoute),
         rejectedRoute: safeJsonParse(latest.rejectedRoute),

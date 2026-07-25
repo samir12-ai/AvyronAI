@@ -1,0 +1,161 @@
+Hi,
+
+We’ve completed the recent fixes (Positioning confidence split + evaluability preconditions), and the system is now stable at a control level.
+
+Before moving forward, I need a **full engine-by-engine check-up** to verify that the **actual engine logic issues are resolved**, not just masked.
+
+This is not a system-level summary.
+This is a **deep engine validation pass**.
+
+---
+
+## Scope
+
+Run the full pipeline on:
+
+* **MarketMindAI**
+* **SWA Media**
+
+Then produce a **check-up report per engine**.
+
+---
+
+## For EACH engine (all 15 engines)
+
+### 1. Input Integrity
+
+* What did the engine receive?
+
+  * SSC context (problems, awareness, constraints)
+  * upstream outputs
+* Were inputs complete and correctly structured?
+
+---
+
+### 2. Logic Execution
+
+* What did the engine actually do?
+* Provide reasoning trace (not summary — actual decision logic)
+* Engine confidence:
+
+  * engineConfidence
+  * dataConfidence (if applicable)
+* Is the confidence justified?
+
+---
+
+### 3. Problem Handling
+
+For each relevant problem:
+
+* Did the engine:
+
+  * resolve it
+  * defer it
+  * mark it cannot_resolve
+* Was that decision correct?
+
+---
+
+### 4. Output Quality
+
+* Is the output:
+
+  * logically consistent
+  * aligned with upstream context
+  * usable by downstream engines
+* Any contradictions introduced?
+
+---
+
+### 5. Cross-Engine Impact
+
+* Did this engine:
+
+  * improve the system state?
+  * propagate the problem correctly?
+  * create new issues?
+
+---
+
+## Critical Focus Areas
+
+Pay extra attention to these engines:
+
+### Positioning
+
+* After confidence split:
+
+  * Is low score due to logic or data?
+* Is it still failing too aggressively?
+
+### Offer
+
+* Pain alignment — is it now real or still superficial?
+* Objection coverage — is it actually handled?
+
+### Funnel
+
+* Is there a real conversion path?
+* Is trust path meaningful or synthetic?
+
+### Persuasion
+
+* Are proofs mapped correctly?
+* Is positioning drift still happening?
+
+### Channel Selection
+
+* Is awareness propagation correct?
+* Are decisions consistent with funnel + audience?
+
+---
+
+## Required Output Format
+
+For each engine:
+
+* Previous issue (from earlier reports)
+* Current behavior
+* Status:
+
+  * FIXED
+  * PARTIALLY FIXED
+  * NOT FIXED
+* Evidence (from actual run)
+* If not fixed:
+
+  * exact root cause (logic, dependency, or data interpretation)
+
+---
+
+## Final Summary Required
+
+At the end, provide:
+
+1. Which engines are now fully reliable
+2. Which engines still produce weak or inconsistent logic
+3. Any remaining systemic patterns (e.g. repeated failure at positioning)
+4. Whether the system is:
+
+   * truly solving problems
+   * or just blocking them correctly
+
+---
+
+## Important
+
+* Do NOT modify code during this step
+* Do NOT optimize or patch anything
+* Do NOT summarize without evidence
+* Do NOT skip engines
+
+This is a **diagnostic pass to verify real logic quality** after the fixes.
+
+---
+
+Once this is complete, we will decide whether the system is ready to move forward or if deeper logic work is still required.
+
+Proceed.
+
+Thanks.

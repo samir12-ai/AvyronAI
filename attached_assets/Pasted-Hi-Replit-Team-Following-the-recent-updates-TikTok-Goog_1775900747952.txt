@@ -1,0 +1,152 @@
+Hi Replit Team,
+
+Following the recent updates (TikTok + Google Maps integration and scraping improvements), I’d like to verify the **end-to-end Market Intelligence flow** and ensure full clarity on what signals are being collected, processed, and used across the system.
+
+This is important to confirm that all data sources are correctly feeding into the adaptive loop and that we have full visibility into what the system is actually “seeing” and learning from.
+
+🔍 **Requested Clarifications**
+
+### 1. End-to-End Market Intelligence Flow
+
+Can you confirm the exact flow for competitor data across the system?
+
+Specifically:
+
+scraping (TikTok / Instagram / Google Maps / others)
+→ normalization / transformation
+→ storage (which tables exactly?)
+→ consumption (which engines read this data?)
+
+A simple step-by-step flow or diagram would be very helpful.
+
+---
+
+### 2. Per-Platform Signal Coverage
+
+For each platform, I want to understand exactly what the system is extracting and analyzing:
+
+#### TikTok
+
+* What metrics are captured?
+  (e.g. views, likes, comments, shares, posting frequency, format type)
+* Are we extracting:
+
+  * hooks / captions?
+  * content categories?
+  * posting velocity?
+
+#### Instagram (existing)
+
+* Confirm current signals used in MI vs user performance
+* What is used for:
+
+  * competitor analysis
+  * vs user performance scoring
+
+#### Google Maps
+
+* What signals are being captured?
+  (e.g. rating, reviews count, sentiment, review velocity)
+* Is there any:
+
+  * sentiment analysis?
+  * keyword extraction?
+
+---
+
+### 3. Data Storage & Tables
+
+Please clarify where each type of data is stored:
+
+* mi_snapshots → what exactly goes here?
+* user_channel_snapshots → raw vs processed?
+* content_performance_snapshots → normalized signals only?
+
+Also:
+
+* Is there any separation between **raw scraped data** and **normalized signals**?
+
+---
+
+### 4. Signal Usage Across Engines
+
+Which parts of the system use Market Intelligence data?
+
+Please confirm usage in:
+
+* Adaptive Rhythm Engine (#13)
+* Dual Analysis loop
+* Strategy / Plan synthesis
+* Any agent decision-making logic
+
+And how it is used:
+
+* baseline?
+* comparison?
+* weighting factor?
+
+---
+
+### 5. Market Change Detection
+
+Do we currently have explicit logic that detects **market shifts**?
+
+For example:
+
+* competitor posting frequency changes
+* format dominance shifts (e.g. reels → carousels)
+* engagement pattern changes
+
+If yes:
+
+* where is this implemented?
+* what triggers an action (rerun / adjustment)?
+
+---
+
+### 6. Data Freshness & Frequency
+
+For each platform:
+
+* How often is scraping executed?
+* Is it:
+
+  * scheduled (cron/worker)?
+  * event-based?
+* Are there any caching or rate-limiting mechanisms?
+
+---
+
+### 7. Integration with Adaptive Loop
+
+Final confirmation:
+
+How exactly does Market Intelligence feed into:
+
+* performance comparison
+* memory mutation
+* rhythm decisions
+
+Is it:
+
+* primary signal (in some cases)?
+* or always secondary to user performance?
+
+---
+
+🎯 **Goal**
+
+The goal is to ensure:
+
+* Full visibility into what each platform contributes
+* Clear separation between raw data vs processed signals
+* Confidence that Market Intelligence is properly integrated into the adaptive system
+
+Let me know if you can provide this as:
+
+* a structured breakdown
+* or a quick system map
+
+Thanks,
+Samir
+Avyron AI

@@ -616,7 +616,7 @@ export default function CreateScreen() {
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
-      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases', selectedCampaignId] });
       setSaveState('done');
       setTimeout(() => {
         setTopic('');
@@ -852,7 +852,7 @@ export default function CreateScreen() {
 
       queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
-      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/studio/cases', selectedCampaignId] });
 
       try {
         await saveImageToGallery(generatedPoster);
@@ -1345,7 +1345,10 @@ export default function CreateScreen() {
                   ]}
                 >
                   <Ionicons name="flash" size={14} color={aiEngine === 'openai' ? '#fff' : colors.textMuted} />
-                  <Text style={[styles.engineBtnText, { color: aiEngine === 'openai' ? '#fff' : colors.textMuted }]}>GPT-5.2</Text>
+                  {/* Task #71 / Phase 8 / Step 6 — model names demoted to
+                      outcome-framed copy. The internal engine selection
+                      (openai|gemini) is preserved on the state field. */}
+                  <Text style={[styles.engineBtnText, { color: aiEngine === 'openai' ? '#fff' : colors.textMuted }]}>Punchy</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => { Haptics.selectionAsync(); setAiEngine('gemini'); }}
@@ -1355,7 +1358,7 @@ export default function CreateScreen() {
                   ]}
                 >
                   <Ionicons name="diamond" size={14} color={aiEngine === 'gemini' ? '#fff' : colors.textMuted} />
-                  <Text style={[styles.engineBtnText, { color: aiEngine === 'gemini' ? '#fff' : colors.textMuted }]}>Gemini 3 Pro</Text>
+                  <Text style={[styles.engineBtnText, { color: aiEngine === 'gemini' ? '#fff' : colors.textMuted }]}>Polished</Text>
                 </Pressable>
               </View>
 
@@ -2687,7 +2690,7 @@ export default function CreateScreen() {
 
                           queryClient.invalidateQueries({ queryKey: [`/api/execution/required-work?campaignId=${selectedCampaignId}`] });
                           queryClient.invalidateQueries({ queryKey: ['/api/required-work', selectedCampaignId] });
-                          queryClient.invalidateQueries({ queryKey: ['/api/studio/cases'] });
+                          queryClient.invalidateQueries({ queryKey: ['/api/studio/cases', selectedCampaignId] });
                           setSaveState('done');
                           setTimeout(() => {
                             setSaveState('idle');

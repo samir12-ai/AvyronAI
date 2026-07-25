@@ -1,0 +1,152 @@
+Hi,
+
+Before we move to any further integration work, I want a complete validation of the new engine logic in isolation.
+
+We need to confirm that the engines are not only upgraded internally, but that:
+- they are producing the new marketing-level outputs
+- those outputs are correctly surfaced in the frontend (not just backend)
+- and the behavior is measurably different from before
+
+---
+
+## 1) Test Scope
+
+Use a real campaign context:
+
+> Campaign: MindAI
+
+Run the full engine pipeline on this campaign using:
+- the new engine logic (current version)
+- and a controlled baseline (pre-upgrade logic or simulated equivalent)
+
+---
+
+## 2) Engines to Test
+
+Run ALL engines using the new logic:
+
+- Audience
+- Positioning
+- Persuasion
+- Offer
+- Awareness
+- (and any other active engines in the pipeline)
+
+---
+
+## 3) Required Output (Per Engine)
+
+For EACH engine, I want a clear comparison:
+
+### A) Before (old logic or baseline)
+- what the engine would output previously
+- typical structure (labels / generic reasoning)
+
+### B) After (new logic)
+- full output using the new logic
+- including:
+  - commercial reasoning
+  - buyer context
+  - decision logic
+  - non-generic interpretation
+
+### C) Delta (Critical)
+- what actually changed
+- did the decision change or just the wording?
+- what new dimensions appeared (risk, trust, identity, etc.)
+
+---
+
+## 4) Frontend Verification (Very Important)
+
+This must NOT stay in backend only.
+
+For each engine:
+
+- confirm the new outputs are visible in the frontend
+- confirm they are not truncated, hidden, or flattened into old formats
+- confirm UI reflects:
+  - commercial logic
+  - structured reasoning (not generic summaries)
+
+If anything is not visible or degraded in the UI:
+- identify exactly where the mismatch is
+- fix it
+
+---
+
+## 5) End-to-End Engine Run
+
+Run a full pipeline execution for MindAI and provide:
+
+- all engine outputs (structured)
+- signal flow between engines (if any exists already)
+- any inconsistencies between engines
+
+---
+
+## 6) System Clean-Up
+
+During this process:
+
+- remove or flag any leftover:
+  - legacy fields
+  - unused outputs
+  - duplicate logic paths
+- ensure the system is not mixing:
+  - old logic + new logic silently
+
+---
+
+## 7) Validation Criteria
+
+We are NOT validating that:
+- “the system runs”
+
+We ARE validating that:
+
+> engines now think differently
+
+Specifically:
+- outputs are commercially meaningful
+- reasoning reflects buyer psychology, trust, risk, identity
+- decisions are not just reworded labels
+
+---
+
+## 8) Deliverables
+
+Provide a structured report that includes:
+
+### 1. Engine-by-Engine Comparison
+- before vs after
+- explanation of improvement
+
+### 2. Frontend Screens / Output Verification
+- confirmation of visibility
+- issues found (if any)
+
+### 3. Full MindAI Run Output
+- all engine outputs together
+
+### 4. Observations
+- where logic is still weak
+- where outputs are still generic
+- where improvements are needed
+
+---
+
+## 9) Goal
+
+Before we connect engines to the adaptive system, we must confirm:
+
+> the engines themselves are operating at a true marketing intelligence level
+
+---
+
+Do not move to integration yet.
+
+Focus only on:
+engine logic validation, visibility, and correctness.
+
+Thanks.

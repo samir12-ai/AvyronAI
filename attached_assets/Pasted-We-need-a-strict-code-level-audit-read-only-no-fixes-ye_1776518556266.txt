@@ -1,0 +1,68 @@
+We need a strict code-level audit (read-only, no fixes yet) on several inconsistencies observed in the Offer output and downstream rendering.
+
+Do NOT apply fixes. We want root-cause tracing from the code.
+
+Please investigate and report for each point:
+- where it originates
+- how it propagates
+- why it is not caught earlier in the pipeline
+
+Issues to audit:
+
+1. Object Rendering Leak
+UI is displaying “[object Object]” in:
+- Problem
+- Promise / Outcome
+- Proof Path
+- Objection Handling  
+Trace exactly which field(s) are objects instead of strings and where the serialization/mapping breaks between backend → frontend.
+
+2. Internal IDs Leaking to UI
+Tokens like:
+- [RC1], [BB1], [CC1]
+- objection_0, objection_1  
+are exposed in the UI.  
+Audit where these identifiers are supposed to be resolved and why they are leaking past the presentation layer.
+
+3. Weak / Non-human Hook Output
+Example:
+“simplicity and ease: marketing capability transformation validation gap”  
+This looks like internal naming, not a generated claim or user-facing hook.  
+Trace how the hook is constructed:
+- which source field is used (approvedClaim? axis? fallback?)
+- why it is not transformed into a human-readable output
+
+4. Fallback Template Activation
+Generic templates are appearing:
+- “Users feel uncertain…”
+- “Eliminate X and achieve Y…”  
+Audit:
+- exact conditions that trigger fallback mode in Offer Engine
+- why valid upstream data (claims/mechanism) is not being used instead
+
+5. Claim → Offer Translation Gap
+Claims exist and are validated upstream, but are not correctly reflected in:
+- hook
+- promise
+- problem framing  
+Trace the mapping from:
+Differentiation.claimStructures → StrategyRoot.approvedClaim(s) → Offer construction  
+Identify where semantic loss or substitution happens.
+
+6. Data Contract / Shape Mismatch (Backend → Frontend)
+Evidence suggests mismatch between API response shape and UI expectations.  
+Audit:
+- Offer API response structure
+- frontend consumption (fields expected vs received)
+- any missing normalization layer before rendering
+
+Deliverable:
+For each issue, provide:
+- file(s) and function(s)
+- exact failure point
+- propagation path across engines (if applicable)
+- whether it is a data issue, contract issue, or rendering issue
+
+No fixes yet — investigation only.
+
+Once we review your audit, we will decide the next step.

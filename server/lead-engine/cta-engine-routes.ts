@@ -7,6 +7,7 @@ import { logAudit } from "../audit";
 import { aiChat } from "../ai-client";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 export function registerCtaEngineRoutes(app: Express) {
   app.post("/api/cta-variants/generate", async (req, res) => {
     try {
@@ -17,6 +18,11 @@ export function registerCtaEngineRoutes(app: Express) {
       }
 
       const { postId, campaignId, contentContext, brandTone, count } = req.body;
+      // Doctrine W5: campaignId is an optional FK tag; if supplied, validate.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(accountId, campaignId); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+      }
       const numVariants = Math.min(count || 4, 8);
 
       const response = await aiChat({

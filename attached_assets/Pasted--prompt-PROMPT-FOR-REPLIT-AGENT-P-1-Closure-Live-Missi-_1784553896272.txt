@@ -1,0 +1,38 @@
+هيدا الـ prompt — قصير ومحدد، بمرحلتين متسلسلتين:
+
+PROMPT FOR REPLIT AGENT — P-1 Closure: Live Missing-Lineage Verification + Null-Field Warning Policy
+
+Context:
+P-1 shipped and passed 5 of 6 verification checks with evidence. Verification #3 (force a lineage-missing case and confirm PUBLISH_LINEAGE_MISSING fires loudly) was resolved analytically rather than executed live. Standing doctrine requires empirical proof, not logical inference. Additionally, the architect flagged that the current warning only fires when the lineage object is entirely absent, not when critical fields inside it are null — this session decides that policy explicitly. Same constraints as P-1: no gates/judges/thresholds touched, loud logging, tsc net-new = 0.
+
+PHASE 1 — Live execution of Verification #3
+
+	1.	Construct a test harness that creates a content_calendar_item WITHOUT plan lineage (either by direct DB insert bypassing the plan-generation path, or by simulating a manual publish where lineage was intentionally omitted — pick whichever is closer to a realistic production edge case).
+	2.	Route that item through the actual Studio publish path (or the scheduled worker, whichever is easier to trigger in dev). Do NOT modify publish logic to make the test pass — the test must exercise real production code.
+	3.	Capture and quote the raw log line where PUBLISH_LINEAGE_MISSING fires — with timestamp, structured tag, and the reason field populated. Confirm the publish itself still succeeded (visibility, not blocking).
+	4.	If the warning does NOT fire during this execution, STOP and report why — do not “fix” it silently. Report the actual behavior with evidence.
+
+PHASE 2 — Null-field policy decision
+
+The architect noted that PUBLISH_LINEAGE_MISSING triggers only when the full lineage object is absent, not when critical fields (hookStyle, mixBucket, angle, plannedSlot) are individually null. This means a published post can carry a partial lineage that later prevents scoring — and today we’d have no warning about it.
+
+Decision to implement: emit a distinct warning tag PUBLISH_LINEAGE_PARTIAL when a lineage object is present but any of the four critical fields are null. Same behavior semantics as PUBLISH_LINEAGE_MISSING: loud log, does NOT block publish, does NOT retry.
+
+	1.	Add the null-critical-fields check in the same code path that currently emits PUBLISH_LINEAGE_MISSING. Distinct log tag, distinct reason field naming which fields are null.
+	2.	content_type and campaign_id are the non-negotiable minimum — if either of those is null, treat as full MISSING (existing behavior). The PARTIAL warning is specifically for the four scoring-critical fields being null when the required minimum IS present.
+	3.	Add a corresponding live verification: create a test item with a lineage object that has content_type + campaign_id set but hookStyle null → route through publish → confirm PUBLISH_LINEAGE_PARTIAL fires with the correct fields listed in the reason.
+
+Constraints:
+
+	•	Zero changes to gates/judges/thresholds/verdict logic.
+	•	No modifications to publish flow control — warnings are additive observability, never blocking.
+	•	tsc net-new = 0 vs the current 720 baseline.
+	•	Architect review of the diff must PASS before closing.
+
+Done-conditions:
+
+	•	Verification #3 executed live with quoted log evidence (Phase 1).
+	•	PUBLISH_LINEAGE_PARTIAL tag implemented and verified live with quoted log evidence (Phase 2).
+	•	Confirm publish success in both cases — warnings did not block.
+	•	Architect PASS.
+	•	One-line summary: “P-1 closure complete: lineage-missing verified live, partial-lineage warning live and verified. Ready for W-1.”

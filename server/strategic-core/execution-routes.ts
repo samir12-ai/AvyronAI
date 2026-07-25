@@ -10,6 +10,7 @@ import {
   businessDataLayer,
 } from "@shared/schema";
 import { eq, and, sql, ne, inArray } from "drizzle-orm";
+import { createAttributionEntries } from "../decision-attribution";
 import { logAudit } from "../audit";
 import { logAuditEvent } from "./audit-logger";
 import { aiChat } from "../ai-client";
@@ -17,6 +18,16 @@ import { computeFulfillment } from "../fulfillment-engine";
 import { activateExecution } from "../execution-activation/engine";
 
 import { resolveAccountId } from "../auth";
+import { resolveRunId } from "../orchestrator/run-resolver";
+import { casUpdateStrategicPlan, casUpdateStrategicPlanByVersion } from "./cas-helper";
+
+async function verifyPlanOwnership(planId: string | string[], req: Request): Promise<{ plan: any } | null> {
+  const id = Array.isArray(planId) ? planId[0] : planId;
+  const accountId = resolveAccountId(req);
+  const [plan] = await db.select().from(strategicPlans).where(and(eq(strategicPlans.id, id), eq(strategicPlans.accountId, accountId))).limit(1);
+  return plan ? { plan } : null;
+}
+
 function deriveDistributionFromBusinessData(bizData: any): {
   reelsPerWeek: number;
   postsPerWeek: number;
@@ -76,7 +87,7 @@ async function generateCreativeContent(
   title: string | null,
   scheduledDate: string,
   planContext: string,
-  accountId: string = "default"
+  accountId: string
 ): Promise<{ caption: string; creativeBrief: string; ctaCopy: string }> {
   const prompt = `You are an expert social media content creator. Generate content for a ${contentType} post.
 
@@ -120,10 +131,11 @@ function requirePlanStatus(...allowedStatuses: string[]) {
     const planId = req.params.planId || req.params.id;
     if (!planId) return res.status(400).json({ error: "MISSING_PLAN_ID" });
 
+    const accountId = resolveAccountId(req);
     const [plan] = await db
       .select()
       .from(strategicPlans)
-      .where(eq(strategicPlans.id, planId))
+      .where(and(eq(strategicPlans.id, planId), eq(strategicPlans.accountId, accountId)))
       .limit(1);
 
     if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
@@ -198,7 +210,7 @@ function generateCalendarSlots(
   accountId: string,
   work: any,
   startDate: Date,
-  periodDays: number
+  periodDays: number,
 ): any[] {
   const slots: any[] = [];
   const contentQueue: { type: string; count: number }[] = [];
@@ -244,6 +256,13 @@ function generateCalendarSlots(
   return slots;
 }
 
+// F8.3 documented exception: this is a single atomic SQL statement that flips
+// every account-scoped RUNNING plan into emergency-stop in one transaction.
+// Per-row CAS is not applicable — the operation is a kill-switch with no
+// "expected version" semantics; the desired guarantee (every RUNNING plan
+// reaches the stopped state, no lost updates) is provided by the single
+// statement's atomicity. The version column is bumped so concurrent CAS
+// writers on those rows correctly see CONCURRENT_MODIFICATION.
 export async function emergencyStopAllRunningPlans(accountId: string, reason: string): Promise<void> {
   await db
     .update(strategicPlans)
@@ -251,6 +270,7 @@ export async function emergencyStopAllRunningPlans(accountId: string, reason: st
       emergencyStopped: true,
       emergencyStoppedAt: new Date(),
       emergencyStoppedReason: reason,
+      version: sql`${strategicPlans.version} + 1`,
     })
     .where(and(
       eq(strategicPlans.accountId, accountId),
@@ -366,8 +386,9 @@ export function registerExecutionRoutes(app: Express) {
   app.get("/api/execution/plans/:planId", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const plan = ownership.plan;
 
       const work = await db.select().from(requiredWork).where(eq(requiredWork.planId, planId));
       const entries = await db.select().from(calendarEntries).where(eq(calendarEntries.planId, planId));
@@ -427,10 +448,13 @@ export function registerExecutionRoutes(app: Express) {
         const plan = (req as any).plan;
         const { reason, decidedBy = "client" } = req.body;
 
-        await db
-          .update(strategicPlans)
-          .set({ status: "APPROVED", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, plan.id));
+        // CAS using plan.version loaded by verifyPlanOwnership.
+        try {
+          await casUpdateStrategicPlanByVersion(plan.id, plan.version, { status: "APPROVED", updatedAt: new Date() });
+        } catch (e: any) {
+          if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+          throw e;
+        }
 
         await db.insert(planApprovals).values({
           planId: plan.id,
@@ -469,10 +493,12 @@ export function registerExecutionRoutes(app: Express) {
           return res.status(400).json({ error: "Rejection reason is required" });
         }
 
-        await db
-          .update(strategicPlans)
-          .set({ status: "REJECTED", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, plan.id));
+        try {
+          await casUpdateStrategicPlanByVersion(plan.id, plan.version, { status: "REJECTED", updatedAt: new Date() });
+        } catch (e: any) {
+          if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+          throw e;
+        }
 
         await db.insert(planApprovals).values({
           planId: plan.id,
@@ -498,23 +524,26 @@ export function registerExecutionRoutes(app: Express) {
       const { planId } = req.params;
       const { reason } = req.body;
 
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const plan = ownership.plan;
 
       if (plan.emergencyStopped) {
         return res.status(409).json({ error: "ALREADY_STOPPED", message: "Emergency stop already active." });
       }
 
-      await db
-        .update(strategicPlans)
-        .set({
+      try {
+        await casUpdateStrategicPlanByVersion(planId, plan.version, {
           emergencyStopped: true,
           emergencyStoppedAt: new Date(),
           emergencyStoppedReason: reason || "Manual emergency stop",
           executionStatus: "PAUSED",
           updatedAt: new Date(),
-        })
-        .where(eq(strategicPlans.id, planId));
+        });
+      } catch (e: any) {
+        if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+        throw e;
+      }
 
       await logAudit(plan.accountId, "EMERGENCY_STOP_TRIGGERED", {
         details: { planId, reason, previousExecutionStatus: plan.executionStatus },
@@ -530,23 +559,26 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const { planId } = req.params;
 
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const plan = ownership.plan;
 
       if (!plan.emergencyStopped) {
         return res.status(409).json({ error: "NOT_STOPPED", message: "Plan is not in emergency stop state." });
       }
 
-      await db
-        .update(strategicPlans)
-        .set({
+      try {
+        await casUpdateStrategicPlanByVersion(planId, plan.version, {
           emergencyStopped: false,
           emergencyStoppedAt: null,
           emergencyStoppedReason: null,
           executionStatus: "IDLE",
           updatedAt: new Date(),
-        })
-        .where(eq(strategicPlans.id, planId));
+        });
+      } catch (e: any) {
+        if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+        throw e;
+      }
 
       await logAudit(plan.accountId, "EXECUTION_RESUMED", {
         details: { planId },
@@ -571,10 +603,12 @@ export function registerExecutionRoutes(app: Express) {
           return res.status(409).json({ error: "EMERGENCY_STOPPED", message: "Cannot execute while emergency stop is active." });
         }
 
-        await db
-          .update(strategicPlans)
-          .set({ executionStatus: "RUNNING", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, plan.id));
+        try {
+          await casUpdateStrategicPlanByVersion(plan.id, plan.version, { executionStatus: "RUNNING", updatedAt: new Date() });
+        } catch (e: any) {
+          if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") return res.status(409).json({ error: "CONCURRENT_MODIFICATION", message: e.message });
+          throw e;
+        }
 
         try {
           let planJson: any;
@@ -654,15 +688,18 @@ export function registerExecutionRoutes(app: Express) {
             .where(eq(calendarEntries.planId, plan.id));
 
           if (existingEntries.length > 0) {
-            await db
-              .update(strategicPlans)
-              .set({
-                executionStatus: "COMPLETED",
-                generatedToCalendarAt: new Date(),
-                totalCalendarEntries: existingEntries.length,
-                updatedAt: new Date(),
-              })
-              .where(eq(strategicPlans.id, plan.id));
+            await casUpdateStrategicPlan(plan.id, {
+              executionStatus: "COMPLETED",
+              generatedToCalendarAt: new Date(),
+              totalCalendarEntries: existingEntries.length,
+              updatedAt: new Date(),
+            }).catch((e: any) => {
+              if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") {
+                console.warn(`[ExecutionRoutes] CAS_CONFLICT idempotent-completion plan=${plan.id}`);
+                return { updated: false, newVersion: 0 };
+              }
+              throw e;
+            });
 
             return res.json({
               success: true,
@@ -677,19 +714,38 @@ export function registerExecutionRoutes(app: Express) {
           const slots = generateCalendarSlots(plan.id, plan.campaignId, plan.accountId, totals, start, periodDays);
 
           if (slots.length > 0) {
-            await db.insert(calendarEntries).values(slots);
+            const inserted = await db.insert(calendarEntries).values(slots).returning({ id: calendarEntries.id, contentType: calendarEntries.contentType });
+
+            const byType = new Map<string, string[]>();
+            for (const entry of inserted) {
+              const t = entry.contentType.toUpperCase();
+              if (!byType.has(t)) byType.set(t, []);
+              byType.get(t)!.push(entry.id);
+            }
+
+            for (const [contentType, entryIds] of byType) {
+              const attrResult = await createAttributionEntries(entryIds, contentType, plan.campaignId, plan.accountId);
+              if (attrResult.primaryDecisionId) {
+                await db.update(calendarEntries)
+                  .set({ sourceDecisionId: attrResult.primaryDecisionId })
+                  .where(inArray(calendarEntries.id, entryIds));
+              }
+            }
           }
 
-          await db
-            .update(strategicPlans)
-            .set({
-              executionStatus: "COMPLETED",
-              status: "GENERATED_TO_CALENDAR",
-              generatedToCalendarAt: new Date(),
-              totalCalendarEntries: slots.length,
-              updatedAt: new Date(),
-            })
-            .where(eq(strategicPlans.id, plan.id));
+          await casUpdateStrategicPlan(plan.id, {
+            executionStatus: "COMPLETED",
+            status: "GENERATED_TO_CALENDAR",
+            generatedToCalendarAt: new Date(),
+            totalCalendarEntries: slots.length,
+            updatedAt: new Date(),
+          }).catch((e: any) => {
+            if ((e as Error & { code?: string }).code === "CONCURRENT_MODIFICATION") {
+              console.warn(`[ExecutionRoutes] CAS_CONFLICT calendar-completion plan=${plan.id}`);
+              return { updated: false, newVersion: 0 };
+            }
+            throw e;
+          });
 
           await logAudit(plan.accountId, "CALENDAR_ENTRIES_GENERATED", {
             details: { planId: plan.id, entries: slots.length, periodDays },
@@ -702,10 +758,8 @@ export function registerExecutionRoutes(app: Express) {
             totals,
           });
         } catch (innerErr: any) {
-          await db
-            .update(strategicPlans)
-            .set({ executionStatus: "FAILED", updatedAt: new Date() })
-            .where(eq(strategicPlans.id, plan.id));
+          await casUpdateStrategicPlan(plan.id, { executionStatus: "FAILED", updatedAt: new Date() })
+            .catch(() => { /* CAS conflict is benign here — another writer already moved the plan */ });
 
           await logAudit(plan.accountId, "EXECUTION_FAILED", {
             details: { planId: plan.id, error: innerErr.message },
@@ -949,10 +1003,18 @@ export function registerExecutionRoutes(app: Express) {
           studioDeleted += deleted.length;
         }
 
-        await tx
-          .update(strategicPlans)
-          .set({ executionStatus: "IDLE", updatedAt: new Date() })
-          .where(eq(strategicPlans.id, planId));
+        // CAS inside the existing tx. Read
+        // version inside the tx for consistency, then conditional update.
+        const [verRow] = await tx.select({ version: strategicPlans.version })
+          .from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+        const expectedVersion = verRow?.version ?? 1;
+        const upd = await tx.update(strategicPlans)
+          .set({ executionStatus: "IDLE", updatedAt: new Date(), version: sql`${strategicPlans.version} + 1` })
+          .where(and(eq(strategicPlans.id, planId), eq(strategicPlans.version, expectedVersion)))
+          .returning({ id: strategicPlans.id });
+        if (upd.length === 0) {
+          throw new Error(`CONCURRENT_MODIFICATION: strategic_plans.id=${planId} expectedVersion=${expectedVersion}`);
+        }
       });
 
       await logAudit(plan.accountId, "FAILED_ENTRIES_RESET", {
@@ -972,8 +1034,9 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const { planId } = req.params;
 
-      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
-      if (!plan) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
+      const plan = ownership.plan;
 
       const entries = await db.select().from(calendarEntries).where(eq(calendarEntries.planId, planId));
       const calendarFailed = entries.filter((e) => e.status === "FAILED").length;
@@ -1015,21 +1078,33 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string | undefined;
+      const requestedRunId = (req.query.runId as string) || null;
 
-      const planConditions = [eq(strategicPlans.accountId, accountId)];
-      if (campaignId) planConditions.push(eq(strategicPlans.campaignId, campaignId));
+      let resolved: { runId: string | null; isLatest: boolean; isStale: boolean; completedAt: any; planId: string | null } = { runId: null, isLatest: true, isStale: false, completedAt: null, planId: null };
+      if (campaignId) {
+        try {
+          resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+        } catch (e: any) {
+          return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
+        }
+      }
 
-      const plans = await db
-        .select()
-        .from(strategicPlans)
-        .where(and(...planConditions));
+      let plans: any[] = [];
+      if (campaignId) {
+        if (resolved.planId) {
+          plans = await db.select().from(strategicPlans)
+            .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.id, resolved.planId)));
+        }
+      } else {
+        plans = await db.select().from(strategicPlans).where(eq(strategicPlans.accountId, accountId));
+      }
 
       const totalPlans = plans.length;
       const activePlans = plans.filter((p) => !["REJECTED", "DRAFT"].includes(p.status)).length;
       const emergencyStoppedPlans = plans.filter((p) => p.emergencyStopped).length;
 
       let fulfillment = null;
-      if (campaignId) {
+      if (campaignId && resolved.planId) {
         fulfillment = await computeFulfillment(campaignId, accountId);
       }
 
@@ -1065,6 +1140,10 @@ export function registerExecutionRoutes(app: Express) {
           createdAt: p.createdAt,
         })),
         fulfillment,
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1075,9 +1154,21 @@ export function registerExecutionRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.query.campaignId as string;
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter is required" });
+      }
+
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
+      }
+
+      if (!resolved.planId) {
+        return res.json({ success: true, entries: [], planId: null, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, message: "No plan from current run." });
       }
 
       let matchingPlans = await db
@@ -1087,13 +1178,12 @@ export function registerExecutionRoutes(app: Express) {
           and(
             eq(strategicPlans.accountId, accountId),
             eq(strategicPlans.campaignId, campaignId),
-            sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
+            eq(strategicPlans.id, resolved.planId),
           )
-        )
-        .orderBy(sql`${strategicPlans.createdAt} DESC`);
+        );
 
       if (matchingPlans.length === 0) {
-        return res.json({ success: true, entries: [], planId: null, message: "No approved plan found for this campaign." });
+        return res.json({ success: true, entries: [], planId: null, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale, message: "No plan found for resolved run." });
       }
 
       let bestPlan = matchingPlans[0];
@@ -1127,6 +1217,10 @@ export function registerExecutionRoutes(app: Express) {
         executionStatus: bestPlan.executionStatus,
         entries,
         fulfillment,
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
       });
     } catch (err: any) {
       console.error("Calendar entries fetch error:", err);
@@ -1137,6 +1231,8 @@ export function registerExecutionRoutes(app: Express) {
   app.get("/api/execution/plans/:planId/calendar", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
       const entries = await db
         .select()
         .from(calendarEntries)
@@ -1152,6 +1248,8 @@ export function registerExecutionRoutes(app: Express) {
   app.get("/api/execution/plans/:planId/studio", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const ownership = await verifyPlanOwnership(planId, req);
+      if (!ownership) return res.status(404).json({ error: "PLAN_NOT_FOUND" });
       const items = await db
         .select()
         .from(studioItems)

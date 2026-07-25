@@ -1,0 +1,297 @@
+Hi,
+
+The current system can now detect commercial problems and block unsafe campaigns. That is good.
+
+But the next step is bigger:
+
+> The system must not only block problems.
+> It must diagnose them, assign ownership, and generate a recovery path for any user, any campaign, and any failure type.
+
+We need a universal recovery logic system.
+
+---
+
+## 1) Core Objective
+
+Build a generalized **Block Resolution / Recovery Logic System** that works across all campaigns, not only MindAI.
+
+The system should answer:
+
+* Why is this campaign blocked?
+* Which engine caused the block?
+* Is the issue strategic, commercial, executional, data-related, or system-related?
+* What must change?
+* Who owns the fix?
+* What proof is needed?
+* What next execution mode can become available after the fix?
+
+The goal is:
+
+> every blocked campaign should produce a clear path to recovery.
+
+---
+
+## 2) Do Not Solve Only One Case
+
+Do not hardcode MindAI.
+
+MindAI should be the first validation case, but the logic must work for any user campaign.
+
+The recovery system must support:
+
+* weak offer
+* no conversion path
+* low validation confidence
+* low channel confidence
+* excessive confidence spread
+* budget kill / halt
+* weak proof structure
+* missing CTA
+* unclear audience pain
+* weak positioning
+* weak mechanism
+* broken funnel logic
+* retention risk
+* data insufficiency
+* engine failure states
+* parser / contract issues
+
+---
+
+## 3) Required Recovery Framework
+
+For every block code or warning, the system must produce:
+
+### A) Diagnosis
+
+What exactly went wrong?
+
+### B) Root Cause Category
+
+Classify the issue as one of:
+
+* strategy issue
+* offer issue
+* funnel issue
+* channel issue
+* proof issue
+* audience mismatch
+* validation issue
+* budget risk
+* system / parser issue
+* data insufficiency
+
+### C) Owner Engine
+
+Which engine is responsible for fixing or improving the issue?
+
+### D) Repair Action
+
+What specifically must change?
+
+### E) Success Criteria
+
+What measurable condition removes or downgrades the block?
+
+### F) Next Possible Mode
+
+What mode becomes possible after repair?
+
+Examples:
+
+* PROOF_COLLECTION
+* LIMITED_SPEND
+* CHANNEL_VALIDATION_REQUIRED
+* HUMAN_REVIEW_REQUIRED
+* APPROVED_TO_TEST
+* APPROVED_TO_SCALE
+
+---
+
+## 4) Universal Output Schema
+
+Create a structured recovery output like:
+
+```json
+{
+  "currentVerdict": "BLOCKED",
+  "currentExecutionMode": "HALTED",
+  "blockCodes": [],
+  "rootCauseSummary": "",
+  "issues": [
+    {
+      "blockCode": "NO_CONVERSION_PATH",
+      "rootCauseCategory": "funnel issue",
+      "ownerEngine": "Funnel / Channel",
+      "diagnosis": "",
+      "repairAction": "",
+      "successCriteria": "",
+      "requiredProof": [],
+      "nextPossibleMode": "PROOF_COLLECTION"
+    }
+  ],
+  "priorityOrder": [],
+  "globalRecoveryPlan": [],
+  "rerunRequirements": [],
+  "humanReviewNeeded": true
+}
+```
+
+---
+
+## 5) Recovery Should Be Practical
+
+The system should not generate vague advice.
+
+Avoid:
+
+* “improve funnel”
+* “increase confidence”
+* “make offer better”
+
+Instead produce concrete actions like:
+
+* add a decision-stage CTA
+* add proof asset before offer reveal
+* connect offer headline to top audience pain
+* add channel-specific validation test
+* collect 3 proof signals before spend unlock
+* run capped budget test instead of scale budget
+* rerun Mechanism if axis confidence is weak
+* require human review if engine outputs conflict
+
+---
+
+## 6) Block Types Must Be Mapped
+
+Create a recovery map for all current block codes, including:
+
+* BUDGET_KILL
+* BUDGET_HALT
+* NO_CONVERSION_PATH
+* CHANNEL_CONFIDENCE_BELOW_MINIMUM
+* CONFIDENCE_SPREAD_EXCESSIVE
+* INTEGRITY_FAILURE
+* AXIS_MISMATCH
+* LOW_VALIDATION_CONFIDENCE
+* WEAK_OFFER
+* MISSING_PROOF
+* DATA_INSUFFICIENT
+* ENGINE_FAILURE
+
+Each block code should have:
+
+* meaning
+* severity
+* owner engine
+* likely root causes
+* repair patterns
+* success criteria
+* allowed next modes
+
+---
+
+## 7) System-Level Logic
+
+The recovery planner should prioritize fixes correctly.
+
+For example:
+
+* If Mechanism failed structurally, fix Mechanism before Offer.
+* If Audience pain is unclear, do not rewrite Offer yet.
+* If Funnel lacks CTA, fix Funnel before Channel.
+* If validation confidence is low, do not unlock Budget scale.
+* If Channel confidence is low but proof is strong, recommend channel validation mode, not hard block.
+* If data is insufficient, recommend proof/data collection, not strategy rewrite.
+
+This is critical.
+
+The system must know the order of repair.
+
+---
+
+## 8) Frontend Requirement
+
+In the dashboard, the user should see:
+
+* why the campaign is blocked
+* what to fix first
+* which engine owns the fix
+* what evidence is required
+* what mode becomes possible after repair
+* rerun button / rerun requirement
+
+The goal is to make the dashboard feel like:
+
+> a commercial operator guiding the user out of failure
+
+not just a diagnostic panel.
+
+---
+
+## 9) Testing Requirements
+
+Test this broadly.
+
+Use:
+
+### A) MindAI
+
+Use the current blocked campaign as the first real-world case.
+
+### B) Synthetic Scenario Matrix
+
+Create cases for:
+
+* weak offer
+* no conversion path
+* low proof
+* low channel confidence
+* budget kill
+* insufficient data
+* engine parser failure
+* audience / offer mismatch
+* strong strategy but weak evidence
+
+For each scenario, verify:
+
+* correct diagnosis
+* correct owner engine
+* correct repair action
+* correct next possible mode
+* no false approval
+* no vague recommendation
+
+---
+
+## 10) Constraint
+
+Do not weaken enforcement.
+
+The recovery system should NOT force campaigns to pass.
+
+It should explain how to earn the next mode legitimately.
+
+The goal is not:
+
+> approve everything
+
+The goal is:
+
+> make every failure actionable.
+
+---
+
+## 11) Deliverable
+
+Please provide:
+
+* recovery logic design
+* block-code recovery map
+* implementation summary
+* MindAI recovery roadmap
+* synthetic scenario test results
+* dashboard preview confirmation
+* before/after example of BLOCK → Recovery Plan
+
+Thanks.

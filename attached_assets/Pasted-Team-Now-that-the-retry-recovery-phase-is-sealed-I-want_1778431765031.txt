@@ -1,0 +1,118 @@
+Team,
+
+Now that the retry/recovery phase is sealed, I want a full end-to-end verification pass across the system.
+
+Goal:
+confirm that the current platform behavior is correctly reflected operationally, visually, and commercially — not just internally in code.
+
+## Main verification areas
+
+1. Frontend truthfulness verification
+   The frontend must reflect the REAL current system state.
+
+Verify:
+
+* no stale snapshots displayed
+* no outdated PASS states cached visually
+* no frontend trust badges showing old execution states
+* no legacy contract interpretations leaking through
+* no hidden BLOCK/repair states masked in the UI
+* no repaired/downgraded execution shown as FULL_EXECUTION incorrectly
+
+The UI must always reflect:
+
+* latest canonical snapshot
+* latest recovery state
+* latest repair result
+* latest execution mode
+* latest trust state
+* latest block/recovery explanation
+
+The frontend should show the current truth,
+not an older snapshot of truth.
+
+2. Scenario verification
+   Run realistic operational scenarios and verify the system behavior end-to-end.
+
+Examples:
+
+* confidence spread excessive
+* low channel confidence
+* budget hold downgrade
+* alignment contradiction
+* safeToExecute=false
+* unresolved critical problem
+* downgrade-to-validation path
+* repair success
+* repair failure
+* final BLOCK with recovery plan
+
+For each scenario verify:
+
+* repair attempt occurs where authorized
+* re-check executes correctly
+* BLOCK returns only when unresolved
+* recovery guidance is actionable
+* provenance remains visible
+* execution mode is correct
+* frontend state matches backend reality
+
+3. Frontend operational visibility
+   When frontend checks state:
+   show/log exactly:
+
+* what was repaired
+* what failed
+* what remained blocked
+* what execution mode was chosen
+* which engine caused the issue
+* whether retry/repair was attempted
+* whether repair succeeded or failed
+* what the user should do next
+
+No hidden operational state.
+
+4. Snapshot freshness verification
+   Explicitly verify:
+
+* frontend never displays stale snapshot truth
+* repaired runs do not show previous failed states
+* failed runs do not visually inherit previous PASS states
+* canonical snapshot path is respected everywhere
+
+5. End-to-end repair-before-block validation
+   Verify that:
+
+* the 4 v1 repair handlers behave correctly
+* repairs are downgrade-only
+* repairs are idempotent
+* re-check logic restores BLOCK when still failing
+* mode downgrade only occurs on the authorized path
+* no truthfulness weakening occurs
+
+## Important constraints
+
+* verification/testing only first
+* no new architecture
+* no new reliability layers
+* no retry-loop expansion
+* no frontend masking/hiding
+* no fake recovery states
+
+## Output requested
+
+Please provide:
+
+* scenario-by-scenario results
+* screenshots/logs where useful
+* frontend/backend state comparisons
+* any stale-state inconsistencies
+* any misleading frontend states
+* any operational gaps
+* any places where the frontend still behaves like a static validator instead of a live operational system
+
+The goal is:
+a truthful, operationally-transparent commercial system.
+
+Best,
+[Your Name]

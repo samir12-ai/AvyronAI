@@ -1,0 +1,271 @@
+Team,
+
+We are now shifting focus away from infrastructure/security and into the next critical frontier:
+
+Strategic intelligence quality.
+
+The goal of this audit is NOT:
+
+* route safety
+* tenant isolation
+* runtime truth
+* auth
+* ownership
+* lineage
+
+Those tracks are already heavily hardened.
+
+This audit is about one question:
+
+Is the system producing real strategic intelligence,
+or is it partially hiding template behavior behind sophisticated infrastructure?
+
+==================================================
+CORE AUDIT OBJECTIVE
+====================
+
+I want a full forensic audit of the intelligence layer itself.
+
+Specifically detect:
+
+* template thinking
+* generic reasoning
+* repeated structures
+* fake strategic depth
+* shallow analysis disguised as confidence
+* pseudo-intelligence
+* repetitive narratives
+* weak personalization
+* low commercial sharpness
+* formulaic positioning
+* recycled recommendations
+* generic marketing language
+* output hallucination
+* unsupported claims
+* fake certainty
+* benchmark contamination
+* low evidence grounding
+
+We need to know:
+Does Avyron actually think strategically,
+or does it sometimes only sound strategic?
+
+==================================================
+AUDIT SCOPE
+===========
+
+Audit ALL intelligence-producing surfaces:
+
+* positioning engine
+* audience engine
+* offer engine
+* narrative engine
+* strategy generation
+* content DNA
+* CEL
+* AEL
+* MI-V3
+* signal synthesis
+* recommendation generation
+* scoring systems
+* benchmark comparison
+* opportunity detection
+* competitor analysis
+* campaign recommendations
+* plan generation
+* content generation
+* CTA generation
+* agent reasoning
+* execution planning
+* business analysis
+* scoring explanations
+* recovery intelligence
+* system-control summaries
+* dashboard narratives
+* generated reports
+
+Also audit:
+
+* prompts
+* hidden templates
+* fallback wording
+* static phrasing
+* canned transitions
+* repeated recommendation structures
+* overused strategic patterns
+* repeated persuasion language
+* weak adaptation logic
+* deterministic outputs disguised as dynamic reasoning
+
+==================================================
+THINGS TO DETECT
+================
+
+1. Template behavior
+   Examples:
+
+* same strategic structure reused
+* same positioning logic reused
+* same pain framing reused
+* same CTA logic reused
+* same narrative arc reused
+* same recommendation ordering reused
+
+2. Fake personalization
+   Outputs that:
+
+* mention user data
+  but
+* don’t materially adapt reasoning
+
+3. Benchmark hallucination
+   Claims that sound data-backed but are mostly:
+
+* benchmark-derived
+* inferred
+* weakly grounded
+
+4. Intelligence inflation
+   Places where:
+
+* confidence sounds stronger than evidence
+* wording exaggerates certainty
+* strategic language exceeds grounding quality
+
+5. Generic business language
+   Detect:
+
+* MBA filler language
+* startup clichés
+* consultant-style fluff
+* empty strategic wording
+* fake precision
+
+6. Prompt contamination
+   Detect:
+
+* prompt leakage
+* static chain structures
+* deterministic response skeletons
+* over-constrained generation
+
+7. Cross-engine sameness
+   Check whether engines truly reason differently,
+   or if they collapse into the same voice/pattern.
+
+8. Weak commercial realism
+   Find outputs that:
+
+* sound smart
+  but
+* would fail in real operator use.
+
+==================================================
+MANDATORY EXECUTION METHOD
+==========================
+
+Do NOT only read prompts.
+
+You must:
+
+* run real generation scenarios
+* compare outputs across industries
+* compare outputs across campaigns
+* compare outputs across users
+* compare outputs across time
+* compare outputs with different evidence densities
+* compare outputs under weak-data conditions
+* compare outputs under contradictory-data conditions
+
+I want empirical proof,
+not only static review.
+
+==================================================
+REQUIRED OUTPUTS
+================
+
+1.
+
+.local/plans/intelligence-forensic-audit.md
+
+Include:
+
+* engine-by-engine intelligence assessment
+* template-risk scoring
+* grounding-quality scoring
+* commercial usefulness scoring
+* adaptation-depth scoring
+* strategic originality scoring
+* realism scoring
+* evidence quality scoring
+
+2.
+
+.local/plans/intelligence-closure-plan.md
+
+Include:
+
+* fake intelligence risks
+* template reduction plan
+* grounding improvements
+* prompt restructuring
+* reasoning diversity improvements
+* personalization improvements
+* signal-quality improvements
+
+3.
+
+.local/validation/intelligence-diff-matrix.json
+
+Compare:
+
+* outputs
+* patterns
+* repeated structures
+* recommendation overlap
+* wording overlap
+* narrative overlap
+* strategic overlap
+
+==================================================
+IMPORTANT
+=========
+
+Do NOT optimize for:
+“sounding smart.”
+
+Optimize for:
+
+* operator usefulness
+* commercial realism
+* strategic adaptability
+* evidence-grounded reasoning
+* truthful uncertainty
+* differentiated thinking
+
+The system must not merely:
+“generate sophisticated marketing text.”
+
+It must:
+produce genuinely adaptive strategic intelligence.
+
+==================================================
+FINAL GOAL
+==========
+
+I want to know:
+
+* where the system is truly intelligent
+* where it is partially templated
+* where it hallucinates strategic certainty
+* where it lacks grounding
+* where it overuses benchmark reasoning
+* where personalization is superficial
+* where strategic reasoning becomes repetitive
+
+We already hardened the infrastructure.
+
+Now we audit the mind of the system itself.
+
+Best,
+[Your Name]

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic",
+  "pathShape": "needs_input",
+  "capturedAt": "2026-05-17T00:00:00.000Z",
+  "input": { "campaignId": "syn-camp-06", "accountId": "syn-acct-06", "forceRefresh": false },
+  "contextResolved": {
+    "sscPresent": true,
+    "contextKeys": ["mi", "audience"],
+    "inputHashes": { "mi": "h-mi-06" }
+  },
+  "engineOutputs": [
+    { "order": 0, "engineId": "mi", "engineName": "MI", "tier": "T0", "status": "COMPLETED", "durationMs": 200, "output": {} },
+    { "order": 1, "engineId": "audience", "engineName": "Audience", "tier": "T0", "status": "NEEDS_INPUT", "durationMs": 50, "output": { "fields": ["brand_voice"] }, "blockReason": "missing_brand_voice" }
+  ],
+  "synthesisInput": { "engineCount": 1, "controlVerdictPresent": false, "ledgerEntryCount": 0, "fingerprint": "fp-06" },
+  "systemControlVerdict": { "integrityVerdict": "PARTIAL", "executionMode": "PAUSED", "blockReasons": [] },
+  "budgetLedger": [],
+  "inFlightEvents": [],
+  "llmCalls": [],
+  "finalResult": {
+    "jobId": "syn-job-06",
+    "status": "NEEDS_INPUT",
+    "completedEngines": ["mi"],
+    "failedEngine": "audience",
+    "blockReason": "missing_brand_voice",
+    "durationMs": 300,
+    "controlVerdict": { "integrityVerdict": "PARTIAL", "executionMode": "PAUSED", "blockReasons": [] },
+    "ledgerEntryCount": 0
+  }
+}

@@ -27,6 +27,7 @@ import { generateId } from '@/lib/storage';
 import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { normalizeMediaType } from '@/lib/media-types';
+import StudioComingSoon, { STUDIO_COMING_SOON } from '@/components/StudioComingSoon';
 import type { MediaItem } from '@/lib/types';
 
 interface AutoAnalysisData {
@@ -97,6 +98,13 @@ const mediaTypes: { id: StudioMediaType; label: string; icon: 'videocam-outline'
 ];
 
 export default function StudioScreen() {
+  if (STUDIO_COMING_SOON) {
+    return <StudioComingSoon />;
+  }
+  return <StudioScreenFull />;
+}
+
+function StudioScreenFull() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;

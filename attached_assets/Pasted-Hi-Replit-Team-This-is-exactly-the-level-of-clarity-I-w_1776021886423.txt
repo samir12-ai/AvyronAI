@@ -1,0 +1,125 @@
+Hi Replit Team,
+
+This is exactly the level of clarity I was looking for — the breakdown is solid, and the approach fits well within the current architecture.
+
+Let’s proceed, but with a strict prioritization to avoid over-expanding the scope too early.
+
+---
+
+# 🧠 Implementation Direction
+
+We should treat this as building a **Decision Attribution Layer**, not just incremental improvements.
+
+The goal is:
+
+to move from correlation-based updates
+to causation-aware learning
+
+---
+
+# 🚀 Priority Order (Important)
+
+## Phase A — Attribution Foundation (Must come first)
+
+1. Decision → Action linkage
+
+   * Add decisionId to calendar_entries / required_work
+   * Ensure every executed action is tied to a specific decision
+
+2. Per-action outcome measurement
+
+   * Modify outcome evaluation to measure KPI deltas per decision
+   * Stop using full account-level aggregation as the primary signal
+
+These two together are the core — without them, everything else remains noisy.
+
+---
+
+## Phase B — Memory Coupling
+
+3. Add sourceDecisionId to strategy_memory
+
+   * Memory entries must explicitly reference their originating decision
+
+4. Route outcome tracker through decision policy
+
+   * All memory updates (including outcome-based) must pass validation
+   * No exceptions
+
+---
+
+## Phase C — Learning Quality
+
+5. Graduated confidence adjustment
+
+   * Replace fixed 0.85 / 0.15 with proportional scoring based on outcome magnitude
+   * Stronger results → stronger reinforcement
+   * Weak results → minimal adjustment
+
+---
+
+## Phase D — Isolation & Noise Control
+
+6. Multi-decision isolation
+
+   * Ensure each decision only learns from its own generated actions
+   * Prevent cross-contamination when multiple decisions run in the same window
+
+---
+
+# ⚠️ Important Constraints
+
+* Do not attempt to retroactively fix historical data
+  → this applies only to new data going forward
+
+* Do not introduce new parallel systems
+  → extend existing tables and flows
+
+* Keep everything traceable end-to-end
+  → decision → action → outcome → memory
+
+---
+
+# 🧪 Verification Requirements
+
+Before considering this complete, we need to confirm:
+
+* A single decision can be traced to:
+
+  * the actions it generated
+  * the outcomes of those actions
+  * the resulting memory update
+
+* Multiple decisions in the same window do NOT receive identical outcome updates
+
+* Memory updates differ based on actual outcome magnitude
+
+---
+
+# 🎯 Final Goal
+
+By the end of this implementation:
+
+The system should be able to say:
+
+“This decision led to this action, which produced this measurable outcome, and this is how memory was updated as a result.”
+
+---
+
+# 🧠 Final Note
+
+This is the transition from:
+
+“learning from co-occurrence”
+
+to:
+
+“learning from causation”
+
+---
+
+Please proceed with Phase A first, then confirm before moving to the next stages.
+
+Thanks,
+Samir
+Avyron AI

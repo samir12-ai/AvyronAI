@@ -1,81 +1,66 @@
-import { getProxyConfig } from "../competitive-intelligence/proxy-pool-manager";
+import { resolveScrapingCountry, poolFetch, TargetBackoffActiveError, type PoolFetchTarget } from "../competitive-intelligence/proxy-pool-manager";
+import { resolveSafeUrl, isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } from "../competitive-intelligence/scrape-safety";
 import type { WebsiteExtraction, BlogExtraction } from "./source-types";
 
-const SCRAPE_TIMEOUT_MS = 30000;
+// 2026-07 Unlocker rebuild: transport goes through the pool manager's
+// poolFetch (Bright Data Unlocker REST API). The Unlocker performs anti-bot
+// solving server-side, so the per-request wall clock is wider than the old
+// 15s bare-proxy budget. There is NO direct-fetch fallback — unconfigured
+// scraping fails fast as SCRAPING_UNCONFIGURED (thrown by poolFetch).
+const SCRAPE_TIMEOUT_MS = 60000;
 const MAX_PAGES_PER_SITE = 6;
 const MAX_TEXT_PREVIEW = 3000;
 const STALE_THRESHOLD_DAYS = 7;
 
-const BLOCKED_HOSTNAMES = new Set([
-  "localhost", "127.0.0.1", "0.0.0.0", "[::1]", "metadata.google.internal",
-  "169.254.169.254", "metadata", "kubernetes.default",
-]);
-
-function validateScrapeUrl(rawUrl: string): string {
-  let parsed: URL;
-  try { parsed = new URL(rawUrl); } catch { throw new Error("Invalid URL"); }
-  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Only http/https URLs allowed");
-  const host = parsed.hostname.toLowerCase();
-  if (BLOCKED_HOSTNAMES.has(host)) throw new Error("Blocked hostname");
-  if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|fc|fd|fe80)/i.test(host)) throw new Error("Private network address blocked");
-  if (host.endsWith(".local") || host.endsWith(".internal")) throw new Error("Internal hostname blocked");
-  return parsed.toString();
-}
+// Seal #5 / F7.2 — SSRF defense stays in scrape-safety.resolveSafeUrl(). The
+// resolver does DNS lookup, checks the resolved IP against RFC1918, link-local,
+// loopback, IPv6 fc00::/7 + fe80::/10 + ::, decimal/hex IPv4 literals and
+// 0.0.0.0/8. The old pinnedLookup direct-fetch path is gone — every request
+// now leaves via the Unlocker API (Bright Data connects to the target on our
+// behalf), but we still refuse to hand internal/unsafe URLs to the Unlocker.
 
 interface FetchOptions {
   url: string;
   timeoutMs?: number;
+  /** T006 — adaptive per-target backoff identity (host-keyed for websites). */
+  target?: PoolFetchTarget;
 }
 
-async function fetchWithProxy(opts: FetchOptions): Promise<{ html: string; status: number; ok: boolean }> {
-  const proxy = getProxyConfig();
-  const timeout = opts.timeoutMs || SCRAPE_TIMEOUT_MS;
-
-  const baseHeaders: Record<string, string> = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Accept-Encoding": "gzip, deflate",
-    "Connection": "keep-alive",
-  };
-
-  if (proxy) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    try {
-      const { ProxyAgent } = await import("undici");
-      const proxyUrl = `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`;
-      const res = await fetch(opts.url, {
-        headers: baseHeaders,
-        signal: controller.signal,
-        redirect: "follow",
-        dispatcher: new ProxyAgent(proxyUrl),
-      } as any);
-      const html = await res.text();
-      return { html, status: res.status, ok: res.ok };
-    } catch (proxyErr: any) {
-      const isConnectError = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|tunnel|socket|proxy/i.test(
-        proxyErr.message + (proxyErr.cause?.message || "")
-      );
-      if (!isConnectError) throw proxyErr;
-      console.log(`[WebScraper] Proxy connection failed for ${opts.url}: ${proxyErr.message} — falling back to direct fetch`);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+/** T006 — targetKey for website backoff is the URL host (stable per site). */
+function websiteTargetKey(url: string): string {
   try {
-    const res = await fetch(opts.url, {
-      headers: baseHeaders,
-      signal: controller.signal,
-      redirect: "follow",
-    });
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+async function fetchViaUnlocker(opts: FetchOptions): Promise<{ html: string; status: number; ok: boolean }> {
+  const timeout = opts.timeoutMs || SCRAPE_TIMEOUT_MS;
+  // Breaker keying: BRIGHT_DATA_COUNTRY is optional in the Unlocker contract —
+  // key the breaker on "any" when unset (zone decides geo server-side).
+  const country = resolveScrapingCountry() ?? "any";
+
+  // Seal #5 / F6.12 — breaker gate before any outbound attempt.
+  const cb = isBreakerOpen("website", country);
+  if (cb.open) {
+    throw new Error(`BREAKER_OPEN: website:${country} (${cb.reason})`);
+  }
+  // F7.2 — SSRF gate before any I/O (throws on internal/unsafe targets).
+  await resolveSafeUrl(opts.url);
+
+  try {
+    const res = await poolFetch(opts.url, { timeoutMs: timeout, target: opts.target });
     const html = await res.text();
+    // F6.12 — record breaker state on outcome (5xx = upstream failure, 4xx = our request).
+    if (res.status >= 500) recordBreakerFailure("website", country);
+    else recordBreakerSuccess("website", country);
     return { html, status: res.status, ok: res.ok };
-  } finally {
-    clearTimeout(timer);
+  } catch (err) {
+    // T006 — a backoff-gated request never left the process; it is not a
+    // breaker-relevant upstream failure.
+    if (!(err instanceof TargetBackoffActiveError)) recordBreakerFailure("website", country);
+    throw err;
   }
 }
 
@@ -237,7 +222,10 @@ function sanitizeExtractedText(raw: string): string {
 }
 
 function isCleanText(text: string): boolean {
-  return text.length > 5 && text.length < 200 && !/href=|class=|onclick=|data-|style=|utm_|\.js|\.css/i.test(text);
+  const { sanitizeWebsiteBlock } = require("../shared/text-sanitizer");
+  if (text.length <= 5 || text.length >= 200) return false;
+  const result = sanitizeWebsiteBlock(text, "general");
+  return result.text.length > 0;
 }
 
 function extractOfferPhrases(html: string): string[] {
@@ -314,6 +302,7 @@ export async function scrapeWebsite(
   competitorId: string,
   competitorName: string,
   websiteUrl: string,
+  accountId?: string,
 ): Promise<WebsiteExtraction[]> {
   const results: WebsiteExtraction[] = [];
   const now = new Date().toISOString();
@@ -322,12 +311,19 @@ export async function scrapeWebsite(
   if (!normalizedUrl.startsWith("http")) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
-  normalizedUrl = validateScrapeUrl(normalizedUrl);
+
+  // T006 — adaptive backoff identity (host-keyed). Absent accountId → no
+  // backoff tracking (legacy callers keep exact pre-T006 behavior).
+  const target: PoolFetchTarget | undefined = accountId
+    ? { accountId, platform: "website", targetKey: websiteTargetKey(normalizedUrl) }
+    : undefined;
+  // F7.2 — SSRF check now lives inside fetchViaUnlocker() via resolveSafeUrl().
+  // The async resolver throws before any I/O if the URL is unsafe.
 
   console.log(`[WebScraper] Starting structured extraction for ${competitorName}: ${normalizedUrl}`);
 
   try {
-    const homeResult = await fetchWithProxy({ url: normalizedUrl });
+    const homeResult = await fetchViaUnlocker({ url: normalizedUrl, target });
     if (!homeResult.ok) {
       const isBlocked = homeResult.status === 403 || homeResult.status === 451;
       const statusLabel = isBlocked ? "ACCESS_BLOCKED" : "FAILED";
@@ -365,12 +361,16 @@ export async function scrapeWebsite(
     for (const pageUrl of subPages) {
       try {
         await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-        const pageResult = await fetchWithProxy({ url: pageUrl });
+        const pageResult = await fetchViaUnlocker({ url: pageUrl, target });
         if (pageResult.ok) {
           results.push(extractPage(competitorId, competitorName, pageUrl, pageResult.html, now));
         }
       } catch (err: any) {
-        console.log(`[WebScraper] Sub-page fetch failed for ${pageUrl}: ${err.message}`);
+        // F-S2 (scraping audit 2026-05): upgraded from console.log to
+        // console.warn so operators grepping WARN|ERROR see sub-page
+        // failures at the same severity as the outer "critical failure"
+        // path. No behavioral change — log severity only.
+        console.warn(`[WebScraper] SUB_PAGE_FETCH_FAILED url=${pageUrl} err=${err?.message ?? String(err)}`);
       }
     }
 
@@ -439,18 +439,24 @@ export async function scrapeBlog(
   competitorId: string,
   competitorName: string,
   blogUrl: string,
+  accountId?: string,
 ): Promise<BlogExtraction> {
   const now = new Date().toISOString();
   let normalizedUrl = blogUrl.trim();
   if (!normalizedUrl.startsWith("http")) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
-  normalizedUrl = validateScrapeUrl(normalizedUrl);
+
+  // T006 — see scrapeWebsite: host-keyed backoff identity, optional.
+  const target: PoolFetchTarget | undefined = accountId
+    ? { accountId, platform: "website", targetKey: websiteTargetKey(normalizedUrl) }
+    : undefined;
+  // F7.2 — SSRF check now lives inside fetchViaUnlocker() via resolveSafeUrl().
 
   console.log(`[WebScraper] Blog extraction for ${competitorName}: ${normalizedUrl}`);
 
   try {
-    const result = await fetchWithProxy({ url: normalizedUrl });
+    const result = await fetchViaUnlocker({ url: normalizedUrl, target });
     if (!result.ok) {
       return {
         competitorId,

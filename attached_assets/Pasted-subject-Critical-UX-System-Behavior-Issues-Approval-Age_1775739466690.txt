@@ -1,0 +1,134 @@
+subject=“Critical UX + System Behavior Issues (Approval, Agent, Rhythm, Pipeline, Onboarding)”}
+Hi Replit Team,
+
+I want to consolidate a few issues we’re currently seeing across the system before we proceed further. These are affecting both UX clarity and system reliability, so I’d like answers based on the current code implementation.
+
+⸻
+
+🔴 1. Approve Button — UI Not Updating
+	•	The approve action succeeds (backend), but:
+	•	The dashboard card remains “Awaiting Approval”
+	•	UI does not reflect the updated state
+
+Please confirm:
+	•	Is queryClient.invalidateQueries correctly wired to /api/plans/active?
+	•	Is the approve route actually updating the plan status in DB?
+	•	Are we reading from a stale cache or incorrect query key?
+
+⸻
+
+🔴 2. Agent Not Producing Ongoing Insights
+
+We have active campaigns running for a while, but:
+	•	The agent does NOT:
+	•	Surface market shifts
+	•	Comment on performance changes
+	•	Suggest strategy updates
+	•	It behaves like a static assistant, not a monitoring system
+
+Please clarify:
+	•	Is the autonomous worker actually triggering analysis loops?
+	•	Is runStrategyAnalysis() being called on schedule?
+	•	Are results being stored anywhere (memory / logs)?
+	•	If yes, why are they not surfaced in the agent UI?
+
+⸻
+
+🔴 3. Adaptive Rhythm Feels Template-Based
+
+Current behavior:
+	•	Rhythm appears static / template-like
+	•	No visible adaptation based on:
+	•	performance
+	•	memory
+	•	market changes
+
+Please confirm:
+	•	Is computeAdaptiveRhythm() actually using:
+	•	performance snapshots
+	•	memory constraints
+	•	competitor data
+	•	Or is it falling back to default logic (no data case)?
+
+⸻
+
+🔴 4. Pipeline Snapshots Not Persisting
+
+In the pipeline section:
+	•	After running analyze → results appear
+	•	On refresh → data is gone
+
+Please confirm:
+	•	Are pipeline outputs being persisted in DB?
+	•	Or are they only held in-memory / response payload?
+
+⸻
+
+🔴 5. Build Plan Layer — Last Engines Behavior
+
+In the build-plan flow:
+	•	The last 2 engines (minimal output ones):
+	•	Were intended to be lightweight
+	•	Current behavior unclear:
+	•	Are they running?
+	•	Are they returning anything meaningful?
+	•	Or being skipped?
+
+Please clarify:
+	•	Are these engines executed in runBuildPlanLayer?
+	•	Are their outputs stored or discarded?
+
+⸻
+
+🔴 6. Onboarding Flow — Needs Simplification
+
+Current onboarding is too fragmented (engine-by-engine).
+
+We want to move to a 3-step flow:
+
+Step 1 — System Setup
+	•	User fills:
+	•	business data
+	•	product DNA
+	•	content DNA
+	•	links for scraping
+
+Step 2 — Market Setup
+	•	Add competitors
+	•	Validate inputs
+
+Step 3 — Run System
+	•	Single trigger:
+	•	run full build-plan pipeline
+	•	No manual engine-by-engine execution
+
+Please confirm:
+	•	What changes are needed to:
+	•	bypass per-engine execution
+	•	trigger full pipeline from one action
+
+⸻
+
+🎯 Goal
+
+We need to ensure:
+	•	UI reflects system state correctly
+	•	Agent behaves as a monitoring + decision system (not static)
+	•	Rhythm is truly adaptive (not template fallback)
+	•	Pipeline outputs persist
+	•	Build-plan flow is streamlined
+	•	Onboarding is simplified to a usable flow
+
+⸻
+
+Please respond with:
+	•	What is currently implemented vs expected
+	•	Where the gaps are in code
+	•	What needs to be fixed vs already working
+
+⸻
+
+Thanks,
+Samir
+Avyron AI
+:::

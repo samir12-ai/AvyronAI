@@ -1,5 +1,13 @@
 import { aiChat } from "../ai-client";
+import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { buildGroundingContract, buildAelReferenceIndex, checkGroundingContract } from "../shared/grounding-contract";
 import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
@@ -538,7 +546,7 @@ export function layerEntryTriggerDetection(
 
   const route = awarenessInput.awarenessRoute || "";
   const triggerClass = awarenessInput.triggerClass || "";
-  const trustState = awarenessInput.trustState || "";
+  const trustStateLabel = awarenessInput.trustState || "";
   const awarenessStage = awarenessInput.awarenessStage || "";
 
   const allBlocked = new Set<string>();
@@ -561,10 +569,10 @@ export function layerEntryTriggerDetection(
     enforcementChain.push(`trigger:${triggerClass}`);
   }
 
-  const trustOverride = TRUST_STATE_ENTRY_OVERRIDES[trustState];
+  const trustOverride = TRUST_STATE_ENTRY_OVERRIDES[trustStateLabel];
   if (trustOverride) {
     trustOverride.blocked.forEach(m => { allBlocked.add(m); allAllowed.delete(m); });
-    enforcementChain.push(`trust:${trustState}`);
+    enforcementChain.push(`trust:${trustStateLabel}`);
   }
 
   if (awarenessStage === "unaware") {
@@ -580,7 +588,7 @@ export function layerEntryTriggerDetection(
   const blockedArr = Array.from(allBlocked);
 
   if (allowedArr.length === 0) {
-    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_ALL_BLOCKED | route=${route} trigger=${triggerClass} trust=${trustState} stage=${awarenessStage}`);
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_ALL_BLOCKED | route=${route} trigger=${triggerClass} trust=${trustStateLabel} stage=${awarenessStage}`);
     return {
       mechanismType: "ENFORCEMENT_FAILED",
       purpose: "All entry mechanisms blocked by awareness constraints — cannot derive valid trigger",
@@ -588,7 +596,7 @@ export function layerEntryTriggerDetection(
         enforcedBy: enforcementChain.join(" + "),
         awarenessRoute: route,
         triggerClass,
-        trustState,
+        trustState: trustStateLabel,
         originalMechanism: "none",
         finalMechanism: "ENFORCEMENT_FAILED",
         wasOverridden: false,
@@ -620,7 +628,7 @@ export function layerEntryTriggerDetection(
         enforcedBy: enforcementChain.join(" + "),
         awarenessRoute: route,
         triggerClass,
-        trustState,
+        trustState: trustStateLabel,
         originalMechanism: "none",
         finalMechanism: "ENFORCEMENT_FAILED",
         wasOverridden: false,
@@ -634,7 +642,7 @@ export function layerEntryTriggerDetection(
   const enforcedBy = enforcementChain.join(" + ") || "ENFORCEMENT_FAILED";
 
   if (enforcedBy === "ENFORCEMENT_FAILED") {
-    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_NO_RULES | awareness present but no matching rules for route=${route} trigger=${triggerClass} trust=${trustState}`);
+    console.log(`[FunnelEngine-V3] ENTRY_TRIGGER_NO_RULES | awareness present but no matching rules for route=${route} trigger=${triggerClass} trust=${trustStateLabel}`);
     return {
       mechanismType: "ENFORCEMENT_FAILED",
       purpose: "No awareness rules matched — entry trigger cannot be derived without enforcement",
@@ -642,7 +650,7 @@ export function layerEntryTriggerDetection(
         enforcedBy: "ENFORCEMENT_FAILED",
         awarenessRoute: route,
         triggerClass,
-        trustState,
+        trustState: trustStateLabel,
         originalMechanism: "none",
         finalMechanism: "ENFORCEMENT_FAILED",
         wasOverridden: false,
@@ -662,7 +670,7 @@ export function layerEntryTriggerDetection(
       enforcedBy,
       awarenessRoute: route,
       triggerClass,
-      trustState,
+      trustState: trustStateLabel,
       originalMechanism: finalType,
       finalMechanism: finalType,
       wasOverridden: false,
@@ -774,7 +782,7 @@ export function applyAwarenessPriorityMatrix(
   let decidingPriorityName = "Offer Fit (default)";
 
   const entryMechanism = awareness?.entryMechanism || "";
-  const trustState = awareness?.trustState || "";
+  const trustStateLabel = awareness?.trustState || "";
   const awarenessStage = awareness?.awarenessStage || audience.awarenessLevel || "problem_aware";
   const triggerClass = awareness?.triggerClass || "";
   const awarenessScore = awareness?.awarenessStrengthScore ?? 0;
@@ -812,14 +820,14 @@ export function applyAwarenessPriorityMatrix(
   });
 
   const p2Blocked: string[] = [];
-  const highTrust = trustState === "high" || trustState === "very_high" || trustState === "critical"
+  const highTrust = trustStateLabel === "high" || trustStateLabel === "very_high" || trustStateLabel === "critical"
     || entryMechanism === "trust_repair_entry" || entryMechanism === "proof_led_entry";
   if (highTrust && awareness) {
     for (const ft of TRUST_LIGHT_FUNNELS) {
       if (eligible.has(ft)) {
         eligible.delete(ft);
         p2Blocked.push(ft);
-        blocked.push({ funnelType: ft, blockedByPriority: 2, reason: `Trust requirement "${trustState}" blocks low-trust funnel "${ft}"` });
+        blocked.push({ funnelType: ft, blockedByPriority: 2, reason: `Trust requirement "${trustStateLabel}" blocks low-trust funnel "${ft}"` });
       }
     }
     if (!eligible.has(proposedType) && decidingPriority > 2) {
@@ -984,8 +992,28 @@ function buildFunnelCandidate(
     integrityResult: { passed: true, failures: [] },
     compressionApplied: wasCompressed,
     genericFlag: isGeneric,
+    groundedJourneyRationale: [],
     priorityMatrixDecision: matrixDecision,
   };
+
+  // T006: trust-path proof-coverage penalty.
+  // Integrity engine flags "Differentiation has proof architecture but funnel has no proof placements"
+  // as a structural integrity warning. Funnel must reflect the same reality in its trust score
+  // so the two engines agree.
+  {
+    const proofArchLen = (differentiation.proofArchitecture || []).length;
+    const placementsLen = (proofResult.proofPlacements || []).length;
+    if (proofArchLen > 0 && placementsLen === 0) {
+      const beforePenalty = candidate.trustPathScore;
+      candidate.trustPathScore = clamp(candidate.trustPathScore * 0.55);
+      console.log(`[FunnelEngine] TRUST_PATH_PROOF_PENALTY | proofArch=${proofArchLen} placements=0 | trustPathScore=${beforePenalty.toFixed(2)}→${candidate.trustPathScore.toFixed(2)}`);
+    } else if (proofArchLen >= 2 && placementsLen === 1) {
+      // partial — soft penalty
+      const beforePenalty = candidate.trustPathScore;
+      candidate.trustPathScore = clamp(candidate.trustPathScore * 0.8);
+      console.log(`[FunnelEngine] TRUST_PATH_PROOF_PENALTY_SOFT | proofArch=${proofArchLen} placements=1 | trustPathScore=${beforePenalty.toFixed(2)}→${candidate.trustPathScore.toFixed(2)}`);
+    }
+  }
 
   const integrityResult = layer7_funnelIntegrityGuard(candidate, audience, offer, positioning, differentiation);
   candidate.integrityResult = integrityResult;
@@ -1029,6 +1057,7 @@ function buildEmptyFunnel(): FunnelCandidate {
     integrityResult: { passed: false, failures: ["No data"] },
     compressionApplied: false,
     genericFlag: false,
+    groundedJourneyRationale: [],
   };
 }
 
@@ -1042,7 +1071,10 @@ export async function aiFunnelGeneration(
   awarenessCtx?: FunnelAwarenessInput | null,
   analyticalEnrichment?: any,
   depthRejectionContext?: string,
-): Promise<{ primary: { name: string; type: string }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string } }> {
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
+  attemptNumber?: number,
+): Promise<{ primary: { name: string; type: string; journeyRationale: string[] }; alternative: { name: string; type: string }; rejected: { name: string; type: string; rejectionReason: string }; groundingRefs?: string[] }> {
   const pains = audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const pillars = differentiation.pillars || [];
@@ -1082,8 +1114,53 @@ CRITICAL: The funnel type MUST be compatible with the detected awareness route. 
   const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
   if (aelBlock) console.log(`[FunnelEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
+  // Anchor doctrine (criteria A + B): inject the strategic doctrine block when
+  // threaded; when the doctrine anchor is absent, derive an anchor from Product
+  // DNA (F5a). deriveAnchorFromProductDna returns null unless differentiator +
+  // problem + name + type all exist (D5 — never fabricate).
+  let doctrineBlock = "";
+  if (strategic) {
+    doctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[FunnelEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let funnelAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!funnelAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      funnelAnchor = derivedAnchor;
+      console.log("[FunnelEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let funnelAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    funnelAnchorSource = "doctrine";
+  } else if (funnelAnchor) {
+    funnelAnchorSource = "dna";
+  }
+  const dnaAnchorBlock = funnelAnchorSource === "dna" && funnelAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve every funnel concept to THIS product) ===
+Product name: ${funnelAnchor.name}
+Product type: ${funnelAnchor.type}${funnelAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${funnelAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${funnelAnchor.coreProblemSolved}
+Differentiating feature: ${funnelAnchor.differentiatingFeature}
+`
+    : "";
+  const anchorGroundingRule = funnelAnchor
+    ? "\nANCHOR GROUNDING: Every funnel name and journey MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the causal grounding rules; it never replaces them.\n"
+    : "";
+  console.log(`[FunnelEngine-V3] ANCHOR_EVIDENCE | engine=funnel | site=first_prompt | attempt=${attemptNumber ?? 1} | present=${funnelAnchor ? "yes" : "no"} | source=${funnelAnchorSource}`);
+
+  // Grounding contract (shared): citable [RC#]/[CC#]/[BB#] AEL index + additive
+  // contract compelling the model to name the anchor's differentiating feature
+  // and cite AEL evidence via groundingRefs. Funnel previously had prose AEL only.
+  const aelRefIndex = buildAelReferenceIndex(analyticalEnrichment || null);
+  const groundingContractBlock = buildGroundingContract(funnelAnchor, analyticalEnrichment || null);
+
   const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
-${aelBlock}${causalDirective}
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}
 STRICT RULES:
 - Do NOT generate strategy decisions, strategic repositioning, offer redesign, pricing logic, budget recommendations, channel selection, media buying, awareness messaging, persuasion copy, scripts, campaign tasks, financial planning, or execution plans
 - ONLY output funnel definitions: name, type (direct, webinar, challenge, vsl, application, consultation, tripwire, product-launch, membership, hybrid)
@@ -1125,49 +1202,147 @@ ${(() => {
   return section;
 })()}
 
+JOURNEY RATIONALE (primary funnel only): In "primary.journeyRationale", return 3-5 sentences. Each sentence MUST name the specific buying barrier or root cause that one phase of the buyer's journey removes, expressed in the audience's OWN pain language and consistent with the evidence IDs you list in "groundingRefs". Do NOT copy the AEL evidence text verbatim — paraphrase what the buyer feels and how that funnel stage resolves it. Generic journey descriptions that could apply to any product are unacceptable.
+
 Return JSON:
 {
-  "primary": { "name": "Specific funnel name", "type": "funnel_type" },
+  "primary": { "name": "Specific funnel name", "type": "funnel_type", "journeyRationale": ["Names a specific barrier/root cause a journey phase removes, in the buyer's pain language", "...", "..."] },
   "alternative": { "name": "Alternative funnel name", "type": "funnel_type" },
-  "rejected": { "name": "Rejected funnel name", "type": "funnel_type", "rejectionReason": "Why this funnel fails" }
+  "rejected": { "name": "Rejected funnel name", "type": "funnel_type", "rejectionReason": "Why this funnel fails" },
+  "groundingRefs": ["RC1", "CC2"]
 }`;
 
   const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
   try {
-    const completion = await aiChat({
-      model: "gpt-4o-mini",
+    let completion = await aiChat({
+      model: "gpt-4.1-mini",
       messages: [{ role: "user", content: fullPrompt }],
-      max_tokens: 800,
+      max_tokens: 1200,
       temperature: 0.7,
       accountId,
       endpoint: "funnel-engine",
     });
-    const response = completion.choices?.[0]?.message?.content || "{}";
-    const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-    const parsed = JSON.parse(cleanedResponse);
+    let response = completion.choices?.[0]?.message?.content || "{}";
+    let cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+    // Criterion C (retry with specific feedback): one strict-format retry when
+    // the response is unparseable or missing required fields — mirrors the
+    // MechanismEngine parse-retry. The retry prompt names the EXACT defect.
+    // Still fail-closed: a second malformed response throws (no fabrication).
+    const validateParsed = (p: any): string[] => {
+      const missing: string[] = [];
+      if (!p?.primary?.name) missing.push("primary.name");
+      if (!p?.primary?.type) missing.push("primary.type");
+      if (!p?.alternative?.name) missing.push("alternative.name");
+      if (!p?.alternative?.type) missing.push("alternative.type");
+      if (!p?.rejected?.name) missing.push("rejected.name");
+      if (!p?.rejected?.type) missing.push("rejected.type");
+      if (!p?.rejected?.rejectionReason) missing.push("rejected.rejectionReason");
+      const jr = Array.isArray(p?.primary?.journeyRationale)
+        ? p.primary.journeyRationale.filter((s: any) => typeof s === "string" && s.trim().length > 0)
+        : [];
+      if (jr.length < 3) missing.push("primary.journeyRationale(>=3 non-empty sentences)");
+      return missing;
+    };
+    let parsed = safeJsonParse(cleanedResponse);
+    let missing = parsed ? validateParsed(parsed) : ["<unparseable JSON>"];
+    if (missing.length > 0) {
+      const defect = parsed ? `missing required fields: ${missing.join(", ")}` : "previous response was not parseable JSON";
+      console.log(`[FunnelEngine-V3] AI_PARSE_RETRY | defect="${defect}"`);
+      const strictPrompt = `${fullPrompt}\n\n═══ STRICT OUTPUT FORMAT (PREVIOUS RESPONSE WAS MALFORMED: ${defect}) ═══\nRespond with EXACTLY ONE valid JSON object and NOTHING else. No markdown, no preamble. Start with "{" and end with "}". The object MUST contain "primary" {name,type,journeyRationale}, "alternative" {name,type}, and "rejected" {name,type,rejectionReason} — every field non-empty. "primary.journeyRationale" MUST be an array of 3-5 non-empty sentences, each naming a specific buying barrier/root cause a journey phase removes in the buyer's own pain language (paraphrased, never copied from the evidence text).`;
+      completion = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: strictPrompt }],
+        max_tokens: 1200,
+        temperature: 0.3,
+        accountId,
+        endpoint: "funnel-engine",
+      });
+      response = completion.choices?.[0]?.message?.content || "{}";
+      cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      parsed = safeJsonParse(cleanedResponse);
+      missing = parsed ? validateParsed(parsed) : ["<unparseable JSON>"];
+    }
+
+    // CLP-03 / CLP-05: NO baked-English `||` fallbacks. If the AI omitted a
+    // required field after the strict retry, the response is malformed —
+    // throw and let the outer catch surface STATUS.AI_DEGRADED rather than
+    // substituting fake names.
+    if (missing.length > 0) {
+      throw new Error(`AI response missing required fields after strict retry: ${missing.join(", ")}`);
+    }
+
+    const funnelGroundingRefs: string[] = Array.isArray(parsed.groundingRefs)
+      ? parsed.groundingRefs.filter((r: any) => typeof r === "string" && r.trim().length > 0).map((r: string) => r.trim())
+      : [];
+    checkGroundingContract({
+      engine: "funnel",
+      site: "concept_generation",
+      groundingRefs: funnelGroundingRefs,
+      ael: analyticalEnrichment || null,
+      accountId,
+      attemptNumber,
+    });
+
+    // FIX-C: the grounded buyer-journey rationale is the funnel's OWN generated
+    // prose that names the specific barriers/root causes each journey phase
+    // removes. It flows onto FunnelCandidate.groundedJourneyRationale →
+    // collectFunnelText → the depth gate, so the gate scores real per-run
+    // grounded content (mirrors the awareness engine's myth-breaker prose) — NOT
+    // a copy of the AEL (that would score the AEL against itself). The unchanged
+    // gates remain the sole enforcement authority; this only enriches their INPUT.
+    const journeyRationale: string[] = Array.isArray(parsed.primary?.journeyRationale)
+      ? parsed.primary.journeyRationale
+          .filter((s: any) => typeof s === "string" && s.trim().length > 0)
+          .map((s: string) => s.trim())
+      : [];
+    console.log(`[FunnelEngine-V3] GROUNDED_RATIONALE | segments=${journeyRationale.length} | chars=${journeyRationale.join(" ").length} | attempt=${attemptNumber ?? 1}`);
+
+    // Bypass guard (log-only — NEVER changes a verdict): if the model copied an
+    // AEL deep-cause/barrier text near-verbatim into the rationale, the depth
+    // gate would be scoring the AEL against itself. Flag it loudly for review
+    // (B2/B4); the unchanged gates stay the sole enforcement authority.
+    const aelPkg: any = analyticalEnrichment || null;
+    if (aelPkg && journeyRationale.length > 0) {
+      const aelVerbatimSources: string[] = [];
+      for (const rc of (Array.isArray(aelPkg.root_causes) ? aelPkg.root_causes : [])) {
+        if (typeof rc?.deepCause === "string") aelVerbatimSources.push(rc.deepCause);
+      }
+      for (const bb of (Array.isArray(aelPkg.buying_barriers) ? aelPkg.buying_barriers : [])) {
+        if (typeof bb?.barrier === "string") aelVerbatimSources.push(bb.barrier);
+        if (typeof bb?.rootCause === "string") aelVerbatimSources.push(bb.rootCause);
+      }
+      const rationaleJoinedLower = journeyRationale.join(" \u2016 ").toLowerCase();
+      for (const src of aelVerbatimSources) {
+        const norm = src.trim().toLowerCase();
+        if (norm.length >= 80 && rationaleJoinedLower.includes(norm.slice(0, 80))) {
+          console.error(`[FunnelEngine-V3] FUNNEL_RATIONALE_VERBATIM_SUSPECT | attempt=${attemptNumber ?? 1} | an AEL evidence text appears near-verbatim in journeyRationale — depth grounding may be self-scoring; gates unchanged, review generation prompt`);
+          break;
+        }
+      }
+    }
 
     return {
-      primary: {
-        name: parsed.primary?.name || "Primary Conversion Funnel",
-        type: parsed.primary?.type || "webinar",
-      },
-      alternative: {
-        name: parsed.alternative?.name || "Alternative Engagement Funnel",
-        type: parsed.alternative?.type || "challenge",
-      },
+      primary: { name: parsed.primary.name, type: parsed.primary.type, journeyRationale },
+      alternative: { name: parsed.alternative.name, type: parsed.alternative.type },
       rejected: {
-        name: parsed.rejected?.name || "Rejected Generic Funnel",
-        type: parsed.rejected?.type || "direct",
-        rejectionReason: parsed.rejected?.rejectionReason || "Does not match audience readiness level",
+        name: parsed.rejected.name,
+        type: parsed.rejected.type,
+        rejectionReason: parsed.rejected.rejectionReason,
       },
+      groundingRefs: funnelGroundingRefs,
     };
   } catch (err: any) {
-    console.error(`[FunnelEngine] AI generation failed: ${err.message}`);
-    return {
-      primary: { name: "Structured Conversion Journey", type: "webinar" },
-      alternative: { name: "Progressive Engagement Path", type: "challenge" },
-      rejected: { name: "Generic Direct Funnel", type: "direct", rejectionReason: "Generic funnel — no audience-specific journey design" },
-    };
+    // CLP-03 / Phase 1 (May 2026): NO baked English fallback. The prior
+    // implementation returned hand-written funnel names from this catch
+    // block, which were then surfaced to customers as if they were
+    // AI-derived strategy. Re-throw so the outer `runFunnelEngine` catch
+    // surfaces STATUS.AI_DEGRADED with an explicit reason.
+    console.error(`[FunnelEngine] AI_FUNNEL_GENERATION_FAILED: ${err.message}`);
+    const wrapped = new Error(`AI_FUNNEL_GENERATION_FAILED: ${err.message}`);
+    (wrapped as any).code = "AI_FUNNEL_GENERATION_FAILED";
+    (wrapped as any).originalMessage = err.message;
+    throw wrapped;
   }
 }
 
@@ -1189,6 +1364,8 @@ export async function runFunnelEngine(
   accountId: string,
   awareness?: FunnelAwarenessInput | null,
   analyticalEnrichment?: any,
+  strategic?: RunStrategicContext,
+  productDna?: ProductDnaLike | null,
 ): Promise<FunnelResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -1279,40 +1456,85 @@ export async function runFunnelEngine(
   const funnelDepthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
 
   try {
-    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment);
+    aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment, undefined, strategic || null, productDna || null, 1);
     diagnostics.aiGeneration = { success: true };
   } catch (err: any) {
-    diagnostics.aiGeneration = { success: false, error: err.message };
-    aiFunnels = {
-      primary: { name: "Structured Conversion Journey", type: l2Fit.funnelType },
-      alternative: { name: "Progressive Engagement Path", type: "challenge" },
-      rejected: { name: "Generic Direct Funnel", type: "direct", rejectionReason: "Generic — no audience-specific design" },
+    // CLP-03 / Phase 1: AI generation failed. Bail out with STATUS.AI_DEGRADED
+    // and an empty funnel rather than fabricating English funnel names. The
+    // caller (orchestrator + system-control) is responsible for honouring
+    // AI_DEGRADED and refusing to surface the funnel as executable strategy.
+    const reason = (err && (err.originalMessage || err.message)) || "unknown AI failure";
+    diagnostics.aiGeneration = { success: false, error: reason };
+    const emptyFunnel = buildEmptyFunnel();
+    const acceptability = assessStrategyAcceptability(0, 0, 8, false, [`AI funnel generation failed: ${reason}`]);
+    console.log(`[FunnelEngine-V3] AI_DEGRADED | reason="${reason}" | returning empty funnel + structuralWarning`);
+    return {
+      status: STATUS.AI_DEGRADED,
+      statusMessage: `AI funnel generation failed: ${reason}`,
+      primaryFunnel: emptyFunnel,
+      alternativeFunnel: emptyFunnel,
+      rejectedFunnel: { funnel: emptyFunnel, rejectionReason: "AI generation failed — no candidates produced" },
+      funnelStrengthScore: 0,
+      trustPathAnalysis: { score: 0, steps: 0, gaps: ["AI generation failed — trust path not constructed"] },
+      proofPlacementLogic: { score: 0, placements: 0, missingPlacements: ["AI generation failed — proof placements not computed"] },
+      frictionMap: { totalFriction: 1, criticalPoints: 0, mitigations: 0 },
+      boundaryCheck: { passed: true, violations: [] },
+      structuralWarnings: [
+        `AI_FUNNEL_GENERATION_FAILED: ${reason}`,
+        "Funnel result is empty — downstream consumers MUST treat status=AI_DEGRADED as non-executable.",
+      ],
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      layerDiagnostics: diagnostics,
+      strategyAcceptability: acceptability,
     };
   }
 
-  const primaryFunnel = buildFunnelCandidate(
-    aiFunnels.primary.name, aiFunnels.primary.type,
-    audience, offer, positioning, differentiation, awareness,
-  );
-  diagnostics.layer7_primary = primaryFunnel.integrityResult;
-  diagnostics.layer8_primary = { strength: primaryFunnel.funnelStrengthScore };
-  diagnostics.entryTrigger_primary = primaryFunnel.entryTrigger;
-  diagnostics.compression_primary = { applied: primaryFunnel.compressionApplied, stages: primaryFunnel.stageMap.length };
-  diagnostics.priorityMatrix_primary = primaryFunnel.priorityMatrixDecision;
+  let primaryFunnel!: FunnelCandidate;
+  let alternativeFunnel!: FunnelCandidate;
+  let rejectedFunnel!: FunnelCandidate;
+  // FIX-A: build (attempt 1) or REBUILD (depth-gate retry) all three candidates
+  // from the current aiFunnels selection and refresh their per-candidate
+  // diagnostics. Extracted so a depth-gate retry rebuilds the FULL funnel from the
+  // regenerated LLM selection instead of scoring a degenerate [type, name] pair.
+  const buildAllFunnels = () => {
+    primaryFunnel = buildFunnelCandidate(
+      aiFunnels.primary.name, aiFunnels.primary.type,
+      audience, offer, positioning, differentiation, awareness,
+    );
+    // FIX-C: carry the LLM's grounded buyer-journey rationale onto the scored
+    // candidate so the depth gate sees real per-run grounded prose. Explicit
+    // if/else (D1 — no `??`); a missing array is loud, not silent (B2). Because
+    // the depth-gate retry reassigns aiFunnels then calls buildAllFunnels(), BOTH
+    // attempt 1 and every retry carry the rationale with no extra retry-path code.
+    if (Array.isArray(aiFunnels.primary.journeyRationale) && aiFunnels.primary.journeyRationale.length > 0) {
+      primaryFunnel.groundedJourneyRationale = aiFunnels.primary.journeyRationale;
+    } else {
+      primaryFunnel.groundedJourneyRationale = [];
+      console.error("[FunnelEngine-V3] FUNNEL_RATIONALE_MISSING | primary funnel built without grounded journey rationale — depth grounding will score the deterministic structure only");
+    }
+    diagnostics.layer7_primary = primaryFunnel.integrityResult;
+    diagnostics.layer8_primary = { strength: primaryFunnel.funnelStrengthScore };
+    diagnostics.entryTrigger_primary = primaryFunnel.entryTrigger;
+    diagnostics.compression_primary = { applied: primaryFunnel.compressionApplied, stages: primaryFunnel.stageMap.length };
+    diagnostics.priorityMatrix_primary = primaryFunnel.priorityMatrixDecision;
 
-  const alternativeFunnel = buildFunnelCandidate(
-    aiFunnels.alternative.name, aiFunnels.alternative.type,
-    audience, offer, positioning, differentiation, awareness,
-  );
-  diagnostics.layer7_alternative = alternativeFunnel.integrityResult;
-  diagnostics.layer8_alternative = { strength: alternativeFunnel.funnelStrengthScore };
-  diagnostics.priorityMatrix_alternative = alternativeFunnel.priorityMatrixDecision;
+    alternativeFunnel = buildFunnelCandidate(
+      aiFunnels.alternative.name, aiFunnels.alternative.type,
+      audience, offer, positioning, differentiation, awareness,
+    );
+    diagnostics.layer7_alternative = alternativeFunnel.integrityResult;
+    diagnostics.layer8_alternative = { strength: alternativeFunnel.funnelStrengthScore };
+    diagnostics.priorityMatrix_alternative = alternativeFunnel.priorityMatrixDecision;
 
-  const rejectedFunnel = buildFunnelCandidate(
-    aiFunnels.rejected.name, aiFunnels.rejected.type,
-    audience, offer, positioning, differentiation, awareness,
-  );
-  diagnostics.layer7_rejected = rejectedFunnel.integrityResult;
+    rejectedFunnel = buildFunnelCandidate(
+      aiFunnels.rejected.name, aiFunnels.rejected.type,
+      audience, offer, positioning, differentiation, awareness,
+    );
+    diagnostics.layer7_rejected = rejectedFunnel.integrityResult;
+  };
+  buildAllFunnels();
 
   const collectFunnelText = (f: FunnelCandidate) => [
     f.funnelName, f.funnelType, f.commitmentLevel,
@@ -1321,7 +1543,26 @@ export async function runFunnelEngine(
     ...f.trustPath.map(t => `${t.action} ${t.proofType} ${t.audienceState}`),
     ...f.proofPlacements.map(p => `${p.stage} ${p.proofType} ${p.placement} ${p.purpose}`),
     ...f.frictionMap.map(fp => `${fp.stage} ${fp.frictionType} ${fp.mitigation}`),
+    // FIX-C: the funnel's OWN grounded buyer-journey rationale (required field,
+    // [] when absent — no `??`). This is the per-run prose the depth gate scores.
+    ...f.groundedJourneyRationale,
   ];
+  // FIX-A: all cross-funnel state (boundary + sanitize + generic penalty + status
+  // + cross-engine alignment + trust-path gaps + critical friction) is derived from
+  // the CURRENT primary/alternative/rejected funnels. Extracted into a closure so it
+  // can be recomputed after a depth-gate rebuild — a retry that passes then returns
+  // state matching the funnel actually scored, never attempt-1 state stamped onto a
+  // rebuilt funnel (that would be fake success). l1..l6/dataReliability stay outside:
+  // they derive from stable engine inputs, not the LLM selection, so never go stale.
+  let boundaryCheck!: { passed: boolean; violations: string[] };
+  let genericOutputCheck!: ReturnType<typeof detectGenericOutput>;
+  let status: string = STATUS.COMPLETE;
+  let statusMessage: string | null = null;
+  let structuralWarnings: string[] = [];
+  let alignmentResult!: ReturnType<typeof checkCrossEngineAlignment>;
+  let trustPathGaps: string[] = [];
+  let criticalFrictionPoints = 0;
+  const deriveFunnelState = () => {
   const allFunnelText = [
     ...collectFunnelText(primaryFunnel),
     ...collectFunnelText(alternativeFunnel),
@@ -1329,7 +1570,7 @@ export async function runFunnelEngine(
     aiFunnels.rejected.rejectionReason || "",
   ].join(" ");
   const boundaryResult = enforceBoundaryWithSanitization(allFunnelText, BOUNDARY_HARD_PATTERNS, BOUNDARY_SOFT_PATTERNS);
-  const boundaryCheck = { passed: boundaryResult.clean, violations: boundaryResult.violations };
+  boundaryCheck = { passed: boundaryResult.clean, violations: boundaryResult.violations };
   diagnostics.boundaryCheck = boundaryCheck;
   if (boundaryResult.sanitized && boundaryResult.warnings.length > 0) {
     console.log(`[FunnelEngine-V3] BOUNDARY SANITIZED: ${boundaryResult.warnings.join("; ")}`);
@@ -1350,13 +1591,14 @@ export async function runFunnelEngine(
       for (const fp of f.frictionMap) {
         fp.mitigation = applySoftSanitization(fp.mitigation, BOUNDARY_SOFT_PATTERNS);
       }
+      f.groundedJourneyRationale = f.groundedJourneyRationale.map(r => applySoftSanitization(r, BOUNDARY_SOFT_PATTERNS));
     };
     sanitizeFunnel(primaryFunnel);
     sanitizeFunnel(alternativeFunnel);
     sanitizeFunnel(rejectedFunnel);
   }
 
-  const genericOutputCheck = detectGenericOutput(allFunnelText);
+  genericOutputCheck = detectGenericOutput(allFunnelText);
   diagnostics.genericOutputCheck = genericOutputCheck;
   if (genericOutputCheck.genericDetected) {
     primaryFunnel.funnelStrengthScore = clamp(primaryFunnel.funnelStrengthScore - genericOutputCheck.penalty);
@@ -1364,9 +1606,9 @@ export async function runFunnelEngine(
     console.log(`[FunnelEngine-V3] GENERIC_OUTPUT_PENALTY | phrases=${genericOutputCheck.genericPhrases.length} | penalty=${genericOutputCheck.penalty.toFixed(2)}`);
   }
 
-  let status: string = STATUS.COMPLETE;
-  let statusMessage: string | null = null;
-  const structuralWarnings: string[] = [];
+  status = STATUS.COMPLETE;
+  statusMessage = null;
+  structuralWarnings = [];
 
   if (!boundaryCheck.passed) {
     status = STATUS.INTEGRITY_FAILED;
@@ -1404,7 +1646,7 @@ export async function runFunnelEngine(
       : 3;
     const readinessGap = funnelMinReadiness - audienceReadinessNum;
 
-    const alignmentResult = checkCrossEngineAlignment([
+    alignmentResult = checkCrossEngineAlignment([
       {
         name: "offer_commitment_alignment",
         aligned: commitmentGap <= 1,
@@ -1427,7 +1669,7 @@ export async function runFunnelEngine(
     }
     diagnostics.crossEngineAlignment = alignmentResult;
 
-    const trustPathGaps: string[] = [];
+    trustPathGaps = [];
   const mandatoryProofInPath = ["process_proof", "case_proof"];
   for (const required of mandatoryProofInPath) {
     if (!primaryFunnel.trustPath.some(t => t.proofType === required)) {
@@ -1435,44 +1677,51 @@ export async function runFunnelEngine(
     }
   }
 
-  const criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
+  criticalFrictionPoints = primaryFunnel.frictionMap.filter(f => f.severity > 0.7).length;
+  };
+  deriveFunnelState();
 
+  // FIX-A: depth scorer input = the SAME full funnel composition helper used
+  // everywhere else (type/name + stages + trustPath + proofPlacements + friction).
+  // Previously this hand-built a partial subset with the WRONG trustPath keys
+  // (t.stage/t.rationale — neither exists on a trust step), starving the scorer so
+  // it read near-zero causal depth and spuriously blocked. FIX INPUTS, NOT GATES.
+  let celSourceTexts: string[] = collectFunnelText(primaryFunnel);
   let celDepth = enforceEngineDepthCompliance(
     "funnel",
-    [
-      primaryFunnel.funnelType || "",
-      ...(primaryFunnel.frictionMap || []).map((f: any) => `${f.stage || ""} ${f.frictionType || ""} ${f.mitigation || ""}`),
-      ...(primaryFunnel.trustPath || []).map((t: any) => `${t.stage || ""} ${t.proofType || ""} ${t.rationale || ""}`),
-    ],
+    celSourceTexts,
     analyticalEnrichment || null,
   );
   diagnostics.celDepthCompliance = celDepth;
 
-  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+  if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
     for (let funnelDepthAttempt = 2; funnelDepthAttempt <= funnelDepthGateMaxAttempts; funnelDepthAttempt++) {
       funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt - 1}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
       funnelDepthRejectionContext = buildDepthRejectionDirective(celDepth, funnelDepthAttempt - 1);
       console.log(`[FunnelEngine-V3] DEPTH_GATE: Attempt ${funnelDepthAttempt - 1} BLOCKED — regenerating (${funnelDepthAttempt}/${funnelDepthGateMaxAttempts})`);
 
       try {
-        aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment, funnelDepthRejectionContext);
+        aiFunnels = await aiFunnelGeneration(audience, offer, positioning, differentiation, accountId, mi, awareness, analyticalEnrichment, funnelDepthRejectionContext, strategic || null, productDna || null, funnelDepthAttempt);
         diagnostics.aiGeneration = { success: true, depthRetry: funnelDepthAttempt };
       } catch (err: any) {
         funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: AI_ERROR (${err.message})`);
         continue;
       }
 
+      // FIX-A: rebuild the FULL funnel from the regenerated selection and re-derive
+      // all cross-funnel state, so the retry is scored on the identical composition
+      // as attempt 1 AND the funnel that passes is the funnel we return.
+      buildAllFunnels();
+      deriveFunnelState();
+      celSourceTexts = collectFunnelText(primaryFunnel);
       celDepth = enforceEngineDepthCompliance(
         "funnel",
-        [
-          aiFunnels.primary?.type || "",
-          aiFunnels.primary?.name || "",
-        ],
+        celSourceTexts,
         analyticalEnrichment || null,
       );
       diagnostics.celDepthCompliance = celDepth;
 
-      if (!isDepthBlocking(celDepth)) {
+      if (!isDepthBlocking(celDepth, celSourceTexts)) {
         funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
         console.log(`[FunnelEngine-V3] DEPTH_GATE: Attempt ${funnelDepthAttempt} PASSED | depthScore=${celDepth.causalDepthScore}`);
         break;
@@ -1480,7 +1729,7 @@ export async function runFunnelEngine(
 
       if (funnelDepthAttempt >= funnelDepthGateMaxAttempts) {
         funnelDepthGateLog.push(`Attempt ${funnelDepthAttempt}: FINAL FAILURE (depthScore=${celDepth.causalDepthScore})`);
-        const depthGateResult = buildDepthGateResult(celDepth, funnelDepthAttempt, funnelDepthGateMaxAttempts, funnelDepthGateLog);
+        const depthGateResult = buildDepthGateResult(celDepth, funnelDepthAttempt, funnelDepthGateMaxAttempts, funnelDepthGateLog, celSourceTexts);
         console.log(`[FunnelEngine-V3] DEPTH_GATE: FINAL FAILURE after ${funnelDepthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
         return {
           status: "DEPTH_FAILED",
@@ -1501,7 +1750,7 @@ export async function runFunnelEngine(
           strategyAcceptability: { grade: "F", acceptable: false, reasons: ["DEPTH_FAILED"] },
           celDepthCompliance: celDepth,
           depthGateResult,
-        } as any;
+        } as FunnelResult;
       }
     }
   }
@@ -1513,7 +1762,7 @@ export async function runFunnelEngine(
   } else {
     console.log(`[FunnelEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
-  const depthGateResultFunnel = funnelDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, funnelDepthGateLog.length, funnelDepthGateMaxAttempts, funnelDepthGateLog) : null;
+  const depthGateResultFunnel = funnelDepthGateLog.length > 0 ? buildDepthGateResult(celDepth, funnelDepthGateLog.length, funnelDepthGateMaxAttempts, funnelDepthGateLog, celSourceTexts) : null;
   diagnostics.depthGate = depthGateResultFunnel;
   const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
 

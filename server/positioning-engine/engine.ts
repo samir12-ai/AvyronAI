@@ -5,12 +5,25 @@ import {
   audienceSnapshots,
   ciCompetitors,
 } from "@shared/schema";
-import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
+import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
+import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import {
+  enrichDnaFromRejection,
+  formatEnrichmentForRetry,
+  buildEnrichmentSuggestion,
+  type DnaEnrichmentResult,
+  type DnaEnrichmentSignal,
+  type EnrichmentDnaInput,
+} from "../shared/dna-enrichment";
+import { emissionFromBattery, type BatteryAttemptLike } from "../shared/ai-path-telemetry";
+import { buildDoctrineBlock, deriveAnchorFromProductDna, type ProductAnchor, type RunStrategicContext } from "../shared/strategic-doctrine";
+import { buildGroundingContract, buildAelReferenceIndex, checkGroundingContract } from "../shared/grounding-contract";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { acknowledgeAelInput, attachAelProvenance, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import {
   enforcePositioningCompliance,
   buildCausalDirectiveForPrompt,
@@ -51,6 +64,8 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 interface PositioningEngineResult {
   status: PositioningStatus;
   statusMessage: string | null;
+  /** Phase 4 — AI-proposal path telemetry emitted by the engine this run. */
+  aiPathTelemetry?: import("../shared/ai-path-telemetry").EngineAiPathEmission;
   territory: Territory | null;
   territories: Territory[];
   strategyCards: StrategyCard[];
@@ -65,6 +80,8 @@ interface PositioningEngineResult {
   differentiationVector: string[];
   proofSignals: string[];
   confidenceScore: number;
+  // Phase 2 marketing-logic upgrade — additive, optional. Engine never breaks if absent.
+  categoryGameDesign?: import("./category-game").CategoryGameDesign;
   inputSummary: {
     miSnapshotId: string;
     audienceSnapshotId: string;
@@ -88,6 +105,13 @@ interface PositioningEngineResult {
     unmappedElements: string[];
     validationPassed: boolean;
   };
+  /**
+   * DNA Enrichment Gate (Path B) surface signal. Present only when the
+   * interchangeability gate was exercised this run; `required=true` means it was
+   * STILL failing at retry exhaustion and the orchestrator should raise the
+   * campaign-scoped operator prompt. The orchestrator (not the engine) writes the DB.
+   */
+  dnaEnrichment?: DnaEnrichmentSignal;
 }
 
 interface CategoryResult {
@@ -96,7 +120,7 @@ interface CategoryResult {
 }
 
 function layer1_categoryDetection(miData: any, competitorCount: number = 0, signalCount: number = 0): CategoryResult {
-  const marketState = miData.marketState || "";
+  const marketCondition = miData.marketState ? String(miData.marketState) : "";
   const diagnosis = miData.marketDiagnosis || "";
   const narrative = miData.narrativeSynthesis || "";
   const contentDna = safeJsonParse(miData.contentDnaData, []);
@@ -111,7 +135,7 @@ function layer1_categoryDetection(miData: any, competitorCount: number = 0, sign
     }
   }
 
-  const combined = `${marketState} ${diagnosis} ${narrative} ${websiteText}`.toLowerCase();
+  const combined = `${marketCondition} ${diagnosis} ${narrative} ${websiteText}`.toLowerCase();
 
   const categories: Record<string, string[]> = {
     fitness: ["fitness", "workout", "gym", "exercise", "weight", "muscle", "body"],
@@ -716,10 +740,10 @@ function extractStrategicSignals(miData: any): { signal: string; cluster: string
 
   const textSources: { text: string; source: string }[] = [];
 
-  const marketState = miData.marketState || "";
+  const marketCondition = miData.marketState ? String(miData.marketState) : "";
   const diagnosis = miData.marketDiagnosis || "";
   const narrative = miData.narrativeSynthesis || "";
-  if (marketState) textSources.push({ text: marketState, source: "market_intelligence" });
+  if (marketCondition) textSources.push({ text: marketCondition, source: "market_intelligence" });
   if (diagnosis) textSources.push({ text: diagnosis, source: "market_intelligence" });
   if (narrative) textSources.push({ text: narrative, source: "market_intelligence" });
 
@@ -946,6 +970,112 @@ export function translateToSystemTerritory(
   }
 
   return buildGenericSystemTerritory(cleanLabel, domainNoun, signalType);
+}
+
+/**
+ * FIX-B: Generate grounded, product-specific NAMES for signal-injected
+ * root_cause + psych_driver territories in ONE batched grounded-LLM call.
+ *
+ * This is the NAME source ONLY. It replaces the static translateToSystemTerritory
+ * keyword→phrase lookup (which emitted the SAME canned phrase — e.g. "capability
+ * transformation validation gap" for every "weak → strong" driver — regardless of
+ * the product, starving the downstream judge of specificity). It does NOT touch a
+ * single gate, judge, threshold, or the scoring of these territories. The same
+ * grounding contract + AEL citation index used by layer11 is injected so names
+ * trace to the product's named mechanism and the audience's real evidence.
+ *
+ * Fail-closed: any error, a non-array response, or zero parseable names returns
+ * null and logs TERRITORY_GENERATION_FAILED loudly — the caller then falls back
+ * per-territory to translateToSystemTerritory and marks the source
+ * template_fallback. Returns a Map keyed by cluster id → generated name; ids the
+ * model omits are simply absent (the caller treats an absent id as a fallback).
+ */
+export async function generateGroundedTerritoryNames(
+  clusters: { id: string; label: string; signalType: "root_cause" | "psych_driver"; evidence: string[] }[],
+  productDna: ProductDNA | null,
+  anchor: ProductAnchor | null,
+  ael: any,
+  accountId: string,
+): Promise<Map<string, string> | null> {
+  if (clusters.length === 0) return null;
+
+  const groundingContractBlock = buildGroundingContract(anchor, ael);
+  const aelRefIndex = buildAelReferenceIndex(ael);
+  const domainNoun = inferDomainNoun(productDna);
+  const productBlock = productDna
+    ? `PRODUCT CONTEXT:\n- Business type: ${productDna.businessType || "n/a"}\n- Core offer: ${productDna.coreOffer || "n/a"}\n- Unique mechanism: ${productDna.uniqueMechanism || "n/a"}\n- Category: ${productDna.productCategory || "n/a"}`
+    : "PRODUCT CONTEXT: (none provided — do NOT invent product specifics)";
+
+  const clusterBlock = clusters
+    .map((c, i) => `${i + 1}. id="${c.id}" | type=${c.signalType} | audience label="${c.label}" | evidence: ${(c.evidence || []).slice(0, 3).map(e => `"${e}"`).join("; ") || "(none)"}`)
+    .join("\n");
+
+  const prompt = `You are a strategic positioning analyst. For each audience signal below, produce a SHORT positioning-territory NAME (4-8 words) stating the specific operational/system failure (for root_cause) or transformation/capability gap (for psych_driver) this signal represents FOR THIS PRODUCT.
+
+${productBlock}
+${groundingContractBlock}${aelRefIndex}
+
+SIGNAL CLUSTERS:
+${clusterBlock}
+
+NAMING RULES:
+- Name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and its failure/gap — specific to this product's domain ("${domainNoun}"), NOT a generic emotional label.
+- The name MUST derive from the audience label + evidence for that cluster. Do NOT reuse the same phrase across clusters.
+- A name any generic competitor could reuse unchanged is WRONG. Anchor to this product's named mechanism where possible.
+- Keep each name 4-8 words as a plain phrase.
+
+Return ONLY a JSON array: [{ "id": "<cluster id exactly as given>", "territory": "<name>", "groundingRefs": ["RC1"] }]`;
+
+  try {
+    const response = await aiChat({
+      model: "gpt-4.1-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.4,
+      max_tokens: 800,
+      seed: 42,
+      endpoint: "positioning-engine-v3-territory-naming",
+      accountId,
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || "[]";
+    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned) as any[];
+    if (!Array.isArray(parsed)) {
+      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=NON_ARRAY_RESPONSE | clusters=${clusters.length} | account=${accountId}`);
+      return null;
+    }
+
+    const names = new Map<string, string>();
+    const aggregatedRefs = new Set<string>();
+    for (const item of parsed) {
+      if (item && typeof item.id === "string" && typeof item.territory === "string" && item.territory.trim().length > 0) {
+        names.set(item.id, item.territory.trim());
+      }
+      if (Array.isArray(item?.groundingRefs)) {
+        item.groundingRefs.forEach((r: any) => { if (typeof r === "string" && r.trim().length > 0) aggregatedRefs.add(r.trim()); });
+      }
+    }
+
+    // Observability only — checkGroundingContract never mutates a verdict.
+    checkGroundingContract({
+      engine: "positioning",
+      site: "territory_naming",
+      groundingRefs: Array.from(aggregatedRefs),
+      ael,
+      accountId,
+    });
+
+    if (names.size === 0) {
+      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=NO_NAMES_PARSED | clusters=${clusters.length} | account=${accountId}`);
+      return null;
+    }
+
+    console.log(`[PositioningEngine-V3] TERRITORY_NAMES_GENERATED | named=${names.size}/${clusters.length} | account=${accountId}`);
+    return names;
+  } catch (err: any) {
+    console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=${err?.message || "unknown"} | clusters=${clusters.length} | account=${accountId}`);
+    return null;
+  }
 }
 
 function inferDomainNoun(
@@ -1408,6 +1538,357 @@ function formatMappedSignalsForTerritory(mapped: MappedSignalCluster[]): string 
   ).join("\n");
 }
 
+function getAllValidSignalIds(signals: StructuredSignals): Set<string> {
+  const ids = new Set<string>();
+  for (const c of signals.pain_clusters) ids.add(c.id);
+  for (const c of signals.desire_clusters) ids.add(c.id);
+  for (const c of signals.pattern_clusters) ids.add(c.id);
+  for (const c of signals.root_causes) ids.add(c.id);
+  for (const c of signals.psychological_drivers) ids.add(c.id);
+  return ids;
+}
+
+function deterministicSignalMapping(
+  territories: Territory[],
+  signals: StructuredSignals,
+): { mappings: Map<number, string[]>; validSignalIds: Set<string>; coverage: number; totalMapped: number } {
+  const validSignalIds = getAllValidSignalIds(signals);
+  const allClusters: { id: string; label: string; words: Set<string>; category: string }[] = [];
+  const addClusters = (clusters: { id: string; label: string }[], cat: string) => {
+    for (const c of clusters) {
+      const words = new Set(
+        c.label.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2)
+      );
+      allClusters.push({ id: c.id, label: c.label.toLowerCase(), words, category: cat });
+    }
+  };
+  addClusters(signals.pain_clusters, "pain");
+  addClusters(signals.desire_clusters, "desire");
+  addClusters(signals.pattern_clusters, "pattern");
+  addClusters(signals.root_causes, "root_cause");
+  addClusters(signals.psychological_drivers, "psych");
+
+  const mappings = new Map<number, string[]>();
+  const globalMappedIds = new Set<string>();
+
+  for (let tIdx = 0; tIdx < territories.length; tIdx++) {
+    const t = territories[tIdx];
+    const claimTexts = [
+      t.name, t.enemyDefinition, t.contrastAxis, t.narrativeDirection,
+      ...(t.painAlignment || []), ...(t.desireAlignment || []),
+      t.domainFailure || "", t.operationalProblem || "",
+    ].filter(Boolean).join(" ").toLowerCase().replace(/[^a-z0-9\s]/g, "");
+
+    const claimWords = new Set(claimTexts.split(/\s+/).filter(w => w.length > 2));
+
+    const scored: { id: string; score: number; method: string }[] = [];
+
+    for (const cluster of allClusters) {
+      let score = 0;
+      let method = "";
+
+      if (claimTexts.includes(cluster.label)) {
+        score += 3.0;
+        method = "substring";
+      }
+
+      let wordOverlap = 0;
+      for (const cw of cluster.words) {
+        if (claimWords.has(cw)) {
+          wordOverlap++;
+        } else {
+          for (const tw of claimWords) {
+            if ((tw.length >= 5 && cw.length >= 5) && (tw.includes(cw) || cw.includes(tw))) {
+              wordOverlap += 0.5;
+              break;
+            }
+          }
+        }
+      }
+      if (cluster.words.size > 0) {
+        const overlapRatio = wordOverlap / cluster.words.size;
+        score += overlapRatio * 2.0;
+        if (overlapRatio >= 0.5) method = method || "word_overlap";
+      }
+
+      const claimWordsArr = Array.from(claimWords);
+      let reverseOverlap = 0;
+      for (const tw of claimWordsArr.slice(0, 30)) {
+        if (cluster.words.has(tw)) reverseOverlap++;
+      }
+      if (claimWordsArr.length > 0) {
+        score += (reverseOverlap / Math.min(claimWordsArr.length, 30)) * 0.5;
+      }
+
+      if (score >= 0.5) {
+        scored.push({ id: cluster.id, score, method: method || "partial" });
+      }
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    const topMapped = scored.slice(0, 6).map(s => s.id);
+
+    if (topMapped.length === 0 && allClusters.length > 0) {
+      const tNameWords = new Set(
+        t.name.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3)
+      );
+      for (const cluster of allClusters) {
+        for (const cw of cluster.words) {
+          if (tNameWords.has(cw)) {
+            topMapped.push(cluster.id);
+            break;
+          }
+        }
+        if (topMapped.length >= 3) break;
+      }
+    }
+
+    mappings.set(tIdx, topMapped);
+    for (const id of topMapped) globalMappedIds.add(id);
+  }
+
+  const totalSignals = allClusters.length;
+  const coverage = totalSignals > 0 ? globalMappedIds.size / totalSignals : 0;
+
+  return { mappings, validSignalIds, coverage, totalMapped: globalMappedIds.size };
+}
+
+interface ClaimSeed {
+  enemySeed: string;
+  contrastSeed: string;
+  narrativeSeed: string;
+  sourceSignalIds: string[];
+  sourceLabels: string[];
+  painLabels: string[];
+  desireLabels: string[];
+  rootCauseLabels: string[];
+}
+
+function buildSignalClaimSeeds(
+  territory: Territory,
+  mapped: MappedSignalCluster[],
+  productDna?: any,
+): ClaimSeed | null {
+  if (mapped.length === 0) return null;
+
+  const pains = mapped.filter(m => m.category === "pain" || m.category === "root_cause");
+  const desires = mapped.filter(m => m.category === "desire" || m.category === "pattern");
+  const drivers = mapped.filter(m => m.category === "psychological_driver");
+
+  const enemySources = pains.length > 0 ? pains : (drivers.length > 0 ? drivers : mapped.slice(0, 2));
+  const contrastSources = desires.length > 0 ? desires : (drivers.length > 0 ? drivers : mapped.slice(0, 2));
+
+  const domainNoun = inferDomainNoun(productDna);
+
+  // Seed strings are DISPLAY/fallback text (and get judged by the gate
+  // battery when grounding falls back) — strip machine taxonomy prefixes like
+  // "Problem behind objection: " so the fallback reads as a claim, not a raw
+  // signal dump. sourceLabels/painLabels/etc. below keep the RAW labels —
+  // grounding keyword matching is unaffected.
+  const stripTaxonomyPrefix = (label: string): string => {
+    const stripped = label.replace(/^[a-z][a-z0-9 _\/-]{2,40}:\s*/i, "").trim();
+    return stripped.length >= 3 ? stripped : label.trim();
+  };
+
+  const enemyParts = [...new Set(enemySources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))];
+  const enemySeed = enemyParts.length > 0
+    ? `${domainNoun} failure: ${enemyParts.join(" + ")}`
+    : `${domainNoun} system breakdown`;
+
+  // Degenerate-contrast guard: when desires are empty, contrastSources can
+  // collapse onto the same labels as enemySources, historically producing
+  // "X vs current X". Exclude the enemy's lead label from the contrast side;
+  // if nothing distinct remains, phrase the gain from Product DNA instead.
+  const contrastParts = [...new Set(contrastSources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))]
+    .filter(p => p.toLowerCase() !== (enemyParts[0] || "").toLowerCase());
+  const dnaGain = (productDna?.coreProblemSolved || productDna?.coreOffer || "").toString().trim();
+  let contrastSeed: string;
+  if (contrastParts.length > 0) {
+    contrastSeed = `${contrastParts.join(", ")} vs current ${enemyParts[0] || "breakdown"}`;
+  } else if (dnaGain.length >= 3 && enemyParts.length > 0) {
+    contrastSeed = `${dnaGain} vs current ${enemyParts[0]}`;
+  } else {
+    contrastSeed = "operational improvement vs current failure";
+  }
+
+  const allParts = [...new Set([...enemyParts, ...contrastParts])];
+  const narrativeSeed = allParts.length > 0
+    ? `Addressing ${allParts.slice(0, 3).join(", ")} through ${domainNoun} system correction`
+    : "System-level correction of operational failures";
+
+  return {
+    enemySeed,
+    contrastSeed,
+    narrativeSeed,
+    sourceSignalIds: mapped.map(m => m.id),
+    sourceLabels: mapped.map(m => m.label.toLowerCase()),
+    painLabels: pains.map(p => p.label.toLowerCase()),
+    desireLabels: desires.map(d => d.label.toLowerCase()),
+    rootCauseLabels: mapped.filter(m => m.category === "root_cause").map(r => r.label.toLowerCase()),
+  };
+}
+
+/**
+ * Item 7 (AI Proposes / Code Validates): anchor-term allowlist for the grounding
+ * gate. When the LLM generates freely, a claim grounded in the product anchor,
+ * the territory name, or the product's mechanism is legitimately grounded even
+ * if it does not echo a raw audience-signal label. These terms count toward
+ * `grounded`/`score` but are NEVER recorded as matched SIGNAL ids.
+ * Phase 1 source = productDna (coreOffer ≈ anchor name; uniqueMechanism =
+ * mechanism) + the territory name. Phase 2 (item 11) also folds in
+ * doctrine.productAnchor (name / keyAttributes / differentiatingFeature); a null
+ * anchor (business_level_degraded) simply omits those — never placeholder text.
+ */
+function buildAnchorAllowlistTerms(territory: Territory, productDna?: any): string[] {
+  const terms: string[] = [];
+  if (territory?.name) terms.push(territory.name);
+  if (productDna) {
+    if (productDna.uniqueMechanism) terms.push(String(productDna.uniqueMechanism));
+    if (productDna.coreOffer) terms.push(String(productDna.coreOffer));
+    // F5: the composer prompt now steers claims toward the strategic
+    // advantage — the grounding allowlist must accept that same language or
+    // advantage-anchored claims can never ground (partial doom-loop).
+    if (productDna.strategicAdvantage) terms.push(String(productDna.strategicAdvantage));
+  }
+  return terms.filter((t) => t && t.trim().length > 2);
+}
+
+// Item 7 hallucination guard: filler words that appear in almost every
+// marketing-domain mechanism/offer sentence. A sentence-length anchor term is
+// matched only on tokens OUTSIDE this set, so a generic claim cannot count as
+// anchor-grounded by echoing ubiquitous domain vocabulary.
+const GENERIC_ANCHOR_TOKENS = new Set([
+  "marketing", "market", "markets", "platform", "system", "systems",
+  "business", "businesses", "content", "audience", "audiences", "strategy",
+  "strategies", "analysis", "tools", "users", "customers", "brands", "media",
+  "social", "digital", "online", "solution", "solutions", "product",
+  "products", "service", "services", "their", "about", "other", "every",
+  "helps", "using", "based", "focused", "focuses", "rather", "which",
+  "through", "provide", "provides", "providing", "better", "growth",
+]);
+
+function validateClaimGrounding(
+  claimText: string,
+  seed: ClaimSeed,
+  extraAllowedTerms: string[] = [],
+): { grounded: boolean; matchedSignals: string[]; score: number } {
+  if (!claimText || claimText.trim().length < 5) return { grounded: false, matchedSignals: [], score: 0 };
+
+  const claimLower = claimText.toLowerCase().replace(/[^a-z0-9\s]/g, "");
+  const claimWords = new Set(claimLower.split(/\s+/).filter(w => w.length > 2));
+  const matchedSignals: string[] = [];
+  let totalScore = 0;
+
+  for (let i = 0; i < seed.sourceLabels.length; i++) {
+    const label = seed.sourceLabels[i];
+    const labelWords = label.replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 2);
+    if (labelWords.length === 0) continue;
+
+    if (claimLower.includes(label)) {
+      matchedSignals.push(seed.sourceSignalIds[i]);
+      totalScore += 3.0;
+      continue;
+    }
+
+    let wordOverlap = 0;
+    for (const lw of labelWords) {
+      if (claimWords.has(lw)) {
+        wordOverlap++;
+      } else {
+        for (const cw of claimWords) {
+          if (cw.length >= 4 && lw.length >= 4 && (cw.includes(lw) || lw.includes(cw))) {
+            wordOverlap += 0.5;
+            break;
+          }
+        }
+      }
+    }
+
+    const overlapRatio = wordOverlap / labelWords.length;
+    if (overlapRatio >= 0.3) {
+      matchedSignals.push(seed.sourceSignalIds[i]);
+      totalScore += overlapRatio * 2.0;
+    }
+  }
+
+  // Item 7: anchor-term allowlist. Anchor / mechanism / territory terms count
+  // toward grounding (grounded + score) but are deliberately NOT pushed into
+  // matchedSignals — they are not audience signals and must not leak synthetic
+  // ids into signal traceability. Empty extraAllowedTerms → byte-identical to
+  // the prior behaviour (existing callers unaffected).
+  let anchorGrounded = false;
+  for (const term of extraAllowedTerms) {
+    const t = term.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+    if (t.length < 3) continue;
+    if (claimLower.includes(t)) {
+      anchorGrounded = true;
+      totalScore += 1.5;
+      continue;
+    }
+    const termWords = t.split(/\s+/).filter((w) => w.length > 2);
+    if (termWords.length === 0) continue;
+
+    if (termWords.length > 6) {
+      // Sentence-length anchor (e.g. a full uniqueMechanism sentence). The
+      // whole-string / 50%-overlap rule can never match a concise claim against
+      // a ~30-word sentence, which silently defeats Item 7's documented intent
+      // ("a claim grounded in the product's mechanism is legitimately
+      // grounded"). Match on DISTINCTIVE tokens only (length >= 5, stopwords
+      // and generic domain nouns excluded) so hallucinated claims can't ride
+      // in on filler words like "marketing" or "platform". Grounded when a
+      // distinctive bigram from the anchor appears verbatim in the claim, or
+      // >= 3 distinctive tokens match.
+      const distinctive = termWords.filter(
+        (w) => w.length >= 5 && !GENERIC_ANCHOR_TOKENS.has(w),
+      );
+      if (distinctive.length === 0) continue;
+      let distinctiveMatches = 0;
+      for (const dw of distinctive) {
+        if (claimWords.has(dw)) {
+          distinctiveMatches++;
+          continue;
+        }
+        for (const cw of claimWords) {
+          if (cw.length >= 5 && (cw.includes(dw) || dw.includes(cw))) {
+            distinctiveMatches++;
+            break;
+          }
+        }
+      }
+      let bigramMatch = false;
+      for (let bi = 0; bi < termWords.length - 1; bi++) {
+        const w1 = termWords[bi];
+        const w2 = termWords[bi + 1];
+        const eitherDistinctive =
+          (w1.length >= 5 && !GENERIC_ANCHOR_TOKENS.has(w1)) ||
+          (w2.length >= 5 && !GENERIC_ANCHOR_TOKENS.has(w2));
+        if (eitherDistinctive && claimLower.includes(`${w1} ${w2}`)) {
+          bigramMatch = true;
+          break;
+        }
+      }
+      if (bigramMatch || distinctiveMatches >= 3) {
+        anchorGrounded = true;
+        totalScore += 1.0;
+      }
+      continue;
+    }
+
+    let overlap = 0;
+    for (const tw of termWords) if (claimWords.has(tw)) overlap++;
+    if (overlap / termWords.length >= 0.5) {
+      anchorGrounded = true;
+      totalScore += (overlap / termWords.length) * 1.0;
+    }
+  }
+
+  return {
+    grounded: matchedSignals.length > 0 || anchorGrounded,
+    matchedSignals: [...new Set(matchedSignals)],
+    score: totalScore,
+  };
+}
+
 async function layer11_positioningStatementGeneration(
   territories: Territory[],
   category: string,
@@ -1418,6 +1899,10 @@ async function layer11_positioningStatementGeneration(
   analyticalEnrichment?: any,
   structuredSignals?: StructuredSignals | null,
   specificityRejectionContext?: string,
+  // Item 6: temperature escalation across retry attempts (0.3 → 0.4 → 0.5).
+  // Defaults to the first-attempt temperature so any other caller is unaffected.
+  temperature: number = 0.3,
+  strategic?: RunStrategicContext,
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1448,16 +1933,35 @@ async function layer11_positioningStatementGeneration(
     }
 
     const productDnaBlock = productDna ? formatProductDNAForPrompt(productDna) : "";
+    // T13 (AI Proposes / Code Validates): inject the strategic doctrine (product
+    // anchor + prior validated decisions) so the model proposes claims already
+    // aligned to the locked anchor. Omitted cleanly when no doctrine was threaded
+    // — never a synthesized/fake doctrine (D5).
+    const doctrineBlock = strategic ? buildDoctrineBlock(strategic) : "";
+    if (!strategic) console.log("[PositioningEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
     const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
     const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
     if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
+
+    // Grounding contract (shared): resolve the product anchor — the locked
+    // doctrine anchor first, else one derived from Product DNA (never fabricated
+    // — deriveAnchorFromProductDna returns null when DNA is empty). Then build the
+    // additive contract block + a citable [RC#]/[CC#]/[BB#] AEL index. Positioning
+    // previously exposed only prose AEL with no citable tags.
+    let positioningAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+    if (!positioningAnchor) {
+      const derivedAnchor = deriveAnchorFromProductDna(productDna);
+      if (derivedAnchor) positioningAnchor = derivedAnchor;
+    }
+    const aelRefIndex = buildAelReferenceIndex(analyticalEnrichment || null);
+    const groundingContractBlock = buildGroundingContract(positioningAnchor, analyticalEnrichment || null);
 
     const hasSignals = structuredSignals && getAllSignalLabels(structuredSignals).length > 0;
 
     const signalMapping = hasSignals ? mapSignalsToTerritories(territories, structuredSignals!) : null;
     if (signalMapping) {
       const totalMapped = Array.from(signalMapping.values()).reduce((s, arr) => s + arr.length, 0);
-      console.log(`[PositioningEngine-V3] SIGNAL_DIRECT_MODE | pre-mapped ${totalMapped} signals across ${territories.length} territories`);
+      console.log(`[PositioningEngine-V3] SIGNAL_FIRST_MODE | pre-mapped ${totalMapped} signals across ${territories.length} territories`);
     }
 
     const allSignalIds = hasSignals ? new Set([
@@ -1468,19 +1972,37 @@ async function layer11_positioningStatementGeneration(
       ...structuredSignals!.psychological_drivers,
     ].map(c => c.id)) : null;
 
+    const claimSeeds = new Map<number, ClaimSeed>();
+    if (signalMapping && hasSignals) {
+      for (let i = 0; i < territories.length; i++) {
+        const mapped = signalMapping.get(i) || [];
+        const seed = buildSignalClaimSeeds(territories[i], mapped, productDna);
+        if (seed) claimSeeds.set(i, seed);
+      }
+      console.log(`[PositioningEngine-V3] CLAIM_SEEDS | built=${claimSeeds.size}/${territories.length} territories have signal-derived seeds`);
+    }
+
     const territoriesBlock = territories.map((t, i) => {
       const mapped = signalMapping?.get(i) || [];
+      const seed = claimSeeds.get(i);
       const signalSection = mapped.length > 0
-        ? `\n   SOURCE SIGNALS (compose your output FROM these):\n${formatMappedSignalsForTerritory(mapped)}`
+        ? `\n   SOURCE SIGNALS (these are the ONLY inputs you may use):\n${formatMappedSignalsForTerritory(mapped)}`
+        : "";
+      const seedSection = seed
+        ? `\n   CLAIM SEEDS (refine these — do NOT replace with unrelated content):
+   - Enemy seed: "${seed.enemySeed}"
+   - Contrast seed: "${seed.contrastSeed}"
+   - Narrative seed: "${seed.narrativeSeed}"
+   - Source signal IDs: [${seed.sourceSignalIds.join(", ")}]`
         : "";
       return `${i + 1}. "${t.name}" (opportunity: ${t.opportunityScore}, distance: ${t.narrativeDistanceScore})
    Pain alignment: ${t.painAlignment.join(", ") || "general"}
-   Desire alignment: ${t.desireAlignment.join(", ") || "general"}${signalSection}`;
+   Desire alignment: ${t.desireAlignment.join(", ") || "general"}${signalSection}${seedSection}`;
     }).join("\n\n");
 
     const domainTranslationInstruction = productDna ? `
 DOMAIN TRANSLATION REQUIREMENT (apply before composing any field):
-This campaign is for a "${productDna.businessType}" offering "${productDna.coreOffer}".${productDna.coreProblemSolved ? ` Core problem it solves: "${productDna.coreProblemSolved}".` : ""}${productDna.uniqueMechanism ? ` Unique mechanism: "${productDna.uniqueMechanism}".` : ""}
+This campaign is for a "${productDna.businessType}" offering "${productDna.coreOffer}".${productDna.coreProblemSolved ? ` Core problem it solves: "${productDna.coreProblemSolved}".` : ""}${productDna.uniqueMechanism ? ` Unique mechanism: "${productDna.uniqueMechanism}".` : ""}${productDna.strategicAdvantage ? ` Strategic advantage: "${productDna.strategicAdvantage}".` : ""}
 
 Before composing enemyDefinition, contrastAxis, and narrativeDirection — restate each signal label as an operational failure SPECIFIC to this business type and offer. Do NOT use the surface label (e.g. "cost and affordability concerns") in your output. Instead write what that signal means as a concrete operational breakdown for a buyer of "${productDna.coreOffer}" from a "${productDna.businessType}".
 
@@ -1493,34 +2015,45 @@ Also return three additional fields per territory:
     const rejectionBlock = specificityRejectionContext ? `\n${specificityRejectionContext}\n` : "";
 
     const prompt = hasSignals
-      ? `You are a strategic positioning COMPOSER. You build positioning statements by DIRECTLY COMPOSING from the provided audience signal clusters — not by generating freely.
+      ? `You are a strategic positioning REFINER. Your job is to SHARPEN the provided claim seeds into precise positioning statements. You must NOT generate new concepts — only refine what is given.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
-TERRITORIES WITH THEIR SOURCE SIGNALS:
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}${domainTranslationInstruction}
+TERRITORIES WITH CLAIM SEEDS AND SOURCE SIGNALS:
 ${territoriesBlock}
 ${websitePositioningContext}
 ${rejectionBlock}
-RULES:
-1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each signal label as the operational failure it represents for this specific business type and offer. Use that operational language — not the surface signal label — in every field you write.
-2. COMPRESSION: Focus on the FIRST territory as the PRIMARY positioning. Express it as a specific root-cause SYSTEM FAILURE — not an emotional category. The enemyDefinition must name what specific process, system, or operational component breaks for the buyer. If the territory is broad (e.g. "cost concerns" or "trust issues"), compress it into the ONE operational failure that causes it.
-3. enemyDefinition: Compose from the PAIN and ROOT_CAUSE signals mapped to this territory. Translate them into the domain-specific operational failure. Name what specifically fails in this market for this type of buyer. Must contain a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls).
-4. contrastAxis: Compose from the DESIRE and PATTERN signals. Name what the buyer wants operationally vs what currently breaks — in terms specific to this business type.
-5. narrativeDirection: Synthesize across all mapped signals into one positioning sentence that uses domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
-6. mappedSignalIds: List the exact signal IDs you used from the SOURCE SIGNALS.
-7. Do NOT invent concepts outside the provided signals. Every word of substance must trace to a signal label.
-8. If a territory has no usable signals, set narrativeDirection to "UNMAPPED".
+YOUR TASK:
+Each territory has CLAIM SEEDS derived from real audience signals. Your ONLY job is to:
+1. Take each claim seed and sharpen it into professional positioning language
+2. Translate signal labels into domain-specific operational language for this business type
+3. Keep the core meaning of each seed — do NOT replace it with unrelated concepts
+
+FIELD RULES:
+- enemyDefinition: Sharpen the Enemy seed. Must name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls). The content MUST derive from the pain/root_cause signal labels listed in the SOURCE SIGNALS.
+- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST derive from the desire/pattern signal labels, AND MUST anchor the resolution to this product's differentiating feature / Unique mechanism / Strategic advantage (named in the GROUNDING CONTRACT and DOMAIN TRANSLATION REQUIREMENT above) so that no generic competitor could truthfully repeat the claim unchanged. A claim any competitor could copy verbatim WILL BE REJECTED.
+- narrativeDirection: Sharpen the Narrative seed into one sentence. MUST synthesize the actual signal labels — not invent new concepts — and MUST state the outcome in terms of this product's differentiating feature / Unique mechanism / Strategic advantage (named in the GROUNDING CONTRACT above), not category-generic language.
+- domainFailure: The operational/system failure this signal cluster represents in this specific domain.
+- operationalProblem: What concretely breaks in the buyer's workflow.
+- proofRequirement: What evidence would resolve this (e.g., "live demo", "case study with metrics").
+- mappedSignalIds: Copy the Source signal IDs from the claim seeds. These are pre-assigned — do NOT change them.
+
+HARD CONSTRAINTS:
+- Your output MUST preserve the meaning of the claim seeds. If you cannot refine a seed, return it as-is.
+- Do NOT introduce concepts, problems, or solutions not present in the SOURCE SIGNALS.
+- Every word in your output must trace back to a SOURCE SIGNAL label. If unsure, use the signal label directly.
+- If a territory has no claim seeds, set narrativeDirection to "UNMAPPED".
 
 Return a JSON array:
-[{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }]
+[{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "...", "groundingRefs": ["RC2", "CC1"] }]
 
 Return ONLY the JSON array.`
       : `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${aelBlock}${causalDirective}${domainTranslationInstruction}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}${domainTranslationInstruction}
 TERRITORIES:
 ${territoriesBlock}
 ${websitePositioningContext}
@@ -1533,15 +2066,16 @@ RULES:
 5. narrativeDirection: One sentence using domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
 
 For each territory, return a JSON array with objects containing:
-{ "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis", "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "..." }
+{ "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis", "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "...", "groundingRefs": ["RC2", "CC1"] }
 
 Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON array.`;
 
     const response = await aiChat({
       model: "gpt-4.1-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
+      temperature,
       max_tokens: 1500,
+      seed: 42,
       endpoint: "positioning-engine-v3-statements",
       accountId,
     });
@@ -1550,24 +2084,73 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned) as any[];
 
+    const aggregatedGroundingRefs = new Set<string>();
     for (const item of parsed) {
       const idx = (item.index || 1) - 1;
       if (idx >= 0 && idx < territories.length) {
+        const seed = claimSeeds.get(idx);
+
+        if (Array.isArray(item.groundingRefs)) {
+          const refs = item.groundingRefs
+            .filter((r: any) => typeof r === "string" && r.trim().length > 0)
+            .map((r: string) => r.trim());
+          if (refs.length > 0) {
+            territories[idx].groundingRefs = refs;
+            refs.forEach((r: string) => aggregatedGroundingRefs.add(r));
+          }
+        }
+
         if (item.narrativeDirection && typeof item.narrativeDirection === "string" && item.narrativeDirection.includes("UNMAPPED")) {
           territories[idx].confidenceScore = Math.max(0, territories[idx].confidenceScore - 0.15);
           territories[idx].stabilityNotes.push("[SIGNAL_UNMAPPED] Territory could not be grounded in audience signals");
           console.log(`[PositioningEngine-V3] L11 UNMAPPED territory: "${territories[idx].name}"`);
           continue;
         }
-        if (item.enemyDefinition && validateNarrativeOutput(item.enemyDefinition).valid) {
-          territories[idx].enemyDefinition = item.enemyDefinition;
+
+        if (seed) {
+          const enemyText = (item.enemyDefinition && validateNarrativeOutput(item.enemyDefinition).valid) ? item.enemyDefinition : seed.enemySeed;
+          const contrastText = (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) ? item.contrastAxis : seed.contrastSeed;
+          const narrativeText = (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) ? item.narrativeDirection : seed.narrativeSeed;
+
+          const anchorAllowTerms = buildAnchorAllowlistTerms(territories[idx], productDna);
+          const enemyGrounding = validateClaimGrounding(enemyText, seed, anchorAllowTerms);
+          const contrastGrounding = validateClaimGrounding(contrastText, seed, anchorAllowTerms);
+          const narrativeGrounding = validateClaimGrounding(narrativeText, seed, anchorAllowTerms);
+
+          territories[idx].enemyDefinition = enemyGrounding.grounded ? enemyText : seed.enemySeed;
+          territories[idx].contrastAxis = contrastGrounding.grounded ? contrastText : seed.contrastSeed;
+          territories[idx].narrativeDirection = narrativeGrounding.grounded ? narrativeText : seed.narrativeSeed;
+
+          const allGroundedIds = new Set([
+            ...enemyGrounding.matchedSignals,
+            ...contrastGrounding.matchedSignals,
+            ...seed.sourceSignalIds,
+          ]);
+          territories[idx].mappedSignalIds = Array.from(allGroundedIds);
+          territories[idx]._systemMapped = true;
+
+          const groundedFields = [enemyGrounding.grounded, contrastGrounding.grounded, narrativeGrounding.grounded].filter(Boolean).length;
+          const fallbackFields = 3 - groundedFields;
+
+          if (fallbackFields > 0) {
+            territories[idx].stabilityNotes.push(`[GROUNDING_GATE] ${fallbackFields}/3 claim fields fell back to signal seeds (LLM output not grounded)`);
+            console.log(`[PositioningEngine-V3] GROUNDING_FALLBACK | territory="${territories[idx].name}" | fallbacks=${fallbackFields}/3`);
+          }
+
+          territories[idx].stabilityNotes.push(`[SIGNAL_GROUNDED] ${allGroundedIds.size} signal(s) verified: ${Array.from(allGroundedIds).join(", ")}`);
+
+        } else {
+          if (item.enemyDefinition && validateNarrativeOutput(item.enemyDefinition).valid) {
+            territories[idx].enemyDefinition = item.enemyDefinition;
+          }
+          if (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) {
+            territories[idx].narrativeDirection = item.narrativeDirection;
+          }
+          if (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) {
+            territories[idx].contrastAxis = item.contrastAxis;
+          }
         }
-        if (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) {
-          territories[idx].narrativeDirection = item.narrativeDirection;
-        }
-        if (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) {
-          territories[idx].contrastAxis = item.contrastAxis;
-        }
+
         if (item.domainFailure && typeof item.domainFailure === "string" && item.domainFailure.trim()) {
           territories[idx].domainFailure = item.domainFailure.trim();
         }
@@ -1577,28 +2160,36 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
         if (item.proofRequirement && typeof item.proofRequirement === "string" && item.proofRequirement.trim()) {
           territories[idx].proofRequirement = item.proofRequirement.trim();
         }
-        if (hasSignals && Array.isArray(item.mappedSignalIds) && allSignalIds) {
-          const preMapped = signalMapping?.get(idx) || [];
-          const preMappedIds = new Set(preMapped.map(m => m.id));
-          const validIds = item.mappedSignalIds.filter((id: string) => allSignalIds.has(id));
-          const groundedIds = validIds.filter((id: string) => preMappedIds.has(id));
-          const extraIds = validIds.filter((id: string) => !preMappedIds.has(id));
-          territories[idx].mappedSignalIds = validIds;
-          if (groundedIds.length > 0) {
-            territories[idx].stabilityNotes.push(`[SIGNAL_COMPOSED] Built from ${groundedIds.length} source signal(s): ${groundedIds.join(", ")}`);
-          }
-          if (extraIds.length > 0) {
-            territories[idx].stabilityNotes.push(`[SIGNAL_EXTRA] ${extraIds.length} signal(s) outside pre-mapped set: ${extraIds.join(", ")}`);
-          }
-          if (validIds.length === 0) {
-            territories[idx].stabilityNotes.push("[SIGNAL_WEAK] No valid signal IDs returned — composition may not be grounded");
-            territories[idx].confidenceScore = Math.max(0, territories[idx].confidenceScore - 0.10);
-          }
-        }
       }
     }
+
+    checkGroundingContract({
+      engine: "positioning",
+      site: "layer11_statements",
+      groundingRefs: Array.from(aggregatedGroundingRefs),
+      ael: analyticalEnrichment || null,
+      accountId,
+    });
   } catch (err: any) {
     console.error("[PositioningEngine-V3] Statement generation failed:", err.message);
+  }
+
+  if (structuredSignals && getAllSignalLabels(structuredSignals).length > 0) {
+    const detMapping = deterministicSignalMapping(territories, structuredSignals);
+    const validIdSet = detMapping.validSignalIds;
+    for (let tIdx = 0; tIdx < territories.length; tIdx++) {
+      const systemMappedIds = detMapping.mappings.get(tIdx) || [];
+      const existingIds = (territories[tIdx].mappedSignalIds || []).filter(id => validIdSet.has(id));
+      const finalIds = Array.from(new Set([...existingIds, ...systemMappedIds]));
+      territories[tIdx].mappedSignalIds = finalIds;
+      if (!territories[tIdx]._systemMapped) {
+        territories[tIdx]._systemMapped = systemMappedIds.length > 0;
+      }
+      if (systemMappedIds.length > 0 && existingIds.length === 0) {
+        territories[tIdx].stabilityNotes.push(`[SYSTEM_MAPPED] Deterministic signal mapping assigned ${systemMappedIds.length} signal(s)`);
+      }
+    }
+    console.log(`[PositioningEngine-V3] DETERMINISTIC_MAPPING | totalMapped=${detMapping.totalMapped} | coverage=${(detMapping.coverage * 100).toFixed(1)}% | method=keyword_overlap`);
   }
 
   for (const t of territories) {
@@ -1832,8 +2423,11 @@ export async function runPositioningEngine(
   miSnapshotId: string,
   audienceSnapshotId: string,
   analyticalEnrichment?: any,
+  jobId?: string,
+  strategic?: RunStrategicContext,
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
+  const aelAck = acknowledgeAelInput("PositioningEngine-V3", analyticalEnrichment, accountId);
 
   const stateRefresh = await enforceGlobalStateRefresh(accountId, campaignId);
   if (stateRefresh.refreshRequired) {
@@ -1864,26 +2458,16 @@ export async function runPositioningEngine(
     return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot ${miSnapshotId} belongs to campaign ${miSnapshot.campaignId}, not ${campaignId}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
   }
 
-  let activeMiSnapshot = miSnapshot;
+  const activeMiSnapshot = miSnapshot;
   const miIntegrity = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
   if (!miIntegrity.valid) {
-    console.log(`[PositioningEngine-V3] MI snapshot integrity failed: ${miIntegrity.failures.join(", ")} — attempting self-healing`);
-    const [healed] = await db.select().from(miSnapshots)
-      .where(and(
-        eq(miSnapshots.campaignId, campaignId),
-        eq(miSnapshots.accountId, accountId),
-        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-        eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
-      ))
-      .orderBy(desc(miSnapshots.createdAt))
-      .limit(1);
-    if (!healed) {
-      console.log(`[PositioningEngine-V3] Self-healing failed: no valid MI snapshot found for campaign ${campaignId}`);
-      const executionTimeMs = Date.now() - startTime;
-      return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot integrity verification failed and no valid fallback found: ${miIntegrity.failures.join("; ")}`, executionTimeMs, miSnapshotId, audienceSnapshotId);
-    }
-    console.log(`[PositioningEngine-V3] Self-healed: resolved stale MI ${miSnapshotId} → ${healed.id}`);
-    activeMiSnapshot = healed;
+    console.log(`[PositioningEngine-V3] RUN_SCOPED_INTEGRITY_FAIL | id=${miSnapshotId} | failures=${miIntegrity.failures.join(", ")} — failing fast (no cross-run fallback)`);
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult(
+      "MISSING_DEPENDENCY",
+      `Run-scoped MI snapshot ${miSnapshotId} failed integrity verification: ${miIntegrity.failures.join("; ")} — re-run Market Intelligence to produce a fresh snapshot`,
+      executionTimeMs, miSnapshotId, audienceSnapshotId,
+    );
   }
 
   const miFreshnessMetadata = buildFreshnessMetadata(activeMiSnapshot);
@@ -1900,11 +2484,17 @@ export async function runPositioningEngine(
     );
   }
 
-  const miFreshness = activeMiSnapshot.dataFreshnessDays;
-  if (miFreshness !== null && miFreshness !== undefined && miFreshness > 14) {
-    console.log(`[PositioningEngine-V3] MI data stale: ${miFreshness}d exceeds 14d threshold — requires MI refresh first`);
+  const miSnapshotAgeDays = activeMiSnapshot.createdAt
+    ? Math.max(0, Math.round((Date.now() - new Date(activeMiSnapshot.createdAt).getTime()) / (1000 * 60 * 60 * 24)))
+    : null;
+  if (miSnapshotAgeDays !== null && miSnapshotAgeDays > 14) {
+    console.log(`[PositioningEngine-V3] MI snapshot stale: created ${miSnapshotAgeDays}d ago (threshold=14d) — refresh MI`);
     const executionTimeMs = Date.now() - startTime;
-    return buildEmptyResult("MISSING_DEPENDENCY", `MI data is stale (${miFreshness}d) — refresh Market Intelligence before running Positioning`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    return buildEmptyResult("MISSING_DEPENDENCY", `MI snapshot is ${miSnapshotAgeDays}d old (>14d) — re-run Market Intelligence before Positioning`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+  }
+  const miSourceDataDays = activeMiSnapshot.dataFreshnessDays;
+  if (miSourceDataDays !== null && miSourceDataDays !== undefined && miSourceDataDays > 14) {
+    console.log(`[PositioningEngine-V3] MI source data is ${miSourceDataDays}d old (snapshot itself is fresh: ${miSnapshotAgeDays}d) — proceeding with staleness annotation`);
   }
 
   const [audienceSnapshot] = await db.select().from(audienceSnapshots)
@@ -2012,11 +2602,47 @@ export async function runPositioningEngine(
     const signalTerritories: OpportunityGap[] = [];
     const existingNames = new Set(opportunityGaps.map(o => o.territory.toLowerCase()));
 
+    // FIX-B: produce territory NAMES for signal-injected root_cause + psych_driver
+    // clusters via ONE batched grounded-LLM call instead of the static
+    // translateToSystemTerritory phrase lookup. This changes ONLY the NAME input —
+    // every gate/judge/threshold below is untouched. Resolve the anchor exactly as
+    // layer11 does (locked doctrine anchor, else derived from Product DNA, never
+    // fabricated). Fail-closed: on any failure each territory falls back to
+    // translateToSystemTerritory and is explicitly marked template_fallback.
+    const namingClusters = [
+      ...parsedStructuredSignals.root_causes.map(rc => ({ id: rc.id, label: rc.label, signalType: "root_cause" as const, evidence: rc.evidence || [] })),
+      ...parsedStructuredSignals.psychological_drivers.map(pd => ({ id: pd.id, label: pd.label, signalType: "psych_driver" as const, evidence: pd.evidence || [] })),
+    ];
+    let groundedNames: Map<string, string> | null = null;
+    if (namingClusters.length > 0) {
+      let territoryAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+      if (!territoryAnchor) {
+        const derivedAnchor = deriveAnchorFromProductDna(productDna);
+        if (derivedAnchor) territoryAnchor = derivedAnchor;
+      }
+      groundedNames = await generateGroundedTerritoryNames(namingClusters, productDna, territoryAnchor, analyticalEnrichment || null, accountId);
+    }
+
+    // Explicit if/else — NOT `??` (D1 semantic/no-semantic-fallback). LLM name when
+    // present, else the static template name with a loud fallback log. The provenance
+    // is stamped on territoryNameSource so downstream surfaces can see it.
+    const resolveTerritoryName = (
+      cluster: { id: string; label: string; signalType: "root_cause" | "psych_driver" },
+    ): { name: string; source: "llm" | "template_fallback" } => {
+      const llmName = groundedNames ? groundedNames.get(cluster.id) : undefined;
+      if (llmName && llmName.trim().length > 0) {
+        return { name: llmName.trim(), source: "llm" };
+      }
+      const fallbackName = translateToSystemTerritory(cluster.label, cluster.signalType, productDna);
+      console.log(`[PositioningEngine-V3] TERRITORY_NAME_FALLBACK | cluster=${cluster.id} | signalType=${cluster.signalType} | name="${fallbackName}"`);
+      return { name: fallbackName, source: "template_fallback" };
+    };
+
     for (const rc of parsedStructuredSignals.root_causes) {
-      const translatedName = translateToSystemTerritory(rc.label, "root_cause", productDna);
-      if (!existingNames.has(translatedName.toLowerCase())) {
+      const resolved = resolveTerritoryName({ id: rc.id, label: rc.label, signalType: "root_cause" });
+      if (!existingNames.has(resolved.name.toLowerCase())) {
         signalTerritories.push({
-          territory: translatedName,
+          territory: resolved.name,
           saturationLevel: 0,
           audienceDemand: Math.min(1.0, rc.frequency / 15),
           competitorAuthority: 0,
@@ -2024,16 +2650,17 @@ export async function runPositioningEngine(
           painSignals: purifyEvidence(rc.evidence || []).slice(0, 3),
           desireSignals: [],
           signalSource: rc.id,
+          territoryNameSource: resolved.source,
         });
-        existingNames.add(translatedName.toLowerCase());
+        existingNames.add(resolved.name.toLowerCase());
       }
     }
 
     for (const pd of parsedStructuredSignals.psychological_drivers) {
-      const translatedName = translateToSystemTerritory(pd.label, "psych_driver", productDna);
-      if (!existingNames.has(translatedName.toLowerCase())) {
+      const resolved = resolveTerritoryName({ id: pd.id, label: pd.label, signalType: "psych_driver" });
+      if (!existingNames.has(resolved.name.toLowerCase())) {
         signalTerritories.push({
-          territory: translatedName,
+          territory: resolved.name,
           saturationLevel: 0,
           audienceDemand: Math.min(1.0, pd.frequency / 15),
           competitorAuthority: 0,
@@ -2041,8 +2668,9 @@ export async function runPositioningEngine(
           painSignals: [],
           desireSignals: purifyEvidence(pd.evidence || []).slice(0, 3),
           signalSource: pd.id,
+          territoryNameSource: resolved.source,
         });
-        existingNames.add(translatedName.toLowerCase());
+        existingNames.add(resolved.name.toLowerCase());
       }
     }
 
@@ -2130,26 +2758,188 @@ export async function runPositioningEngine(
   let strategyCards: ReturnType<typeof generateStrategyCards> = [];
   let signalTraceability: PositioningEngineResult["signalTraceability"] = undefined;
 
+  // DNA Enrichment Gate (Path B): surfaced on the result when the
+  // interchangeability gate was exercised. Set inside the battery block below.
+  let dnaEnrichmentSignal: DnaEnrichmentSignal | undefined;
+
+  // Phase 4: one battery attempt recorded per generation that reached the
+  // doctrine battery (specificity is a pre-gate, not part of the battery).
+  const positioningBatteryAttempts: BatteryAttemptLike[] = [];
+  let positioningBatteryPassed = false;
+
   {
-    const SPECIFICITY_MAX_RETRIES = 1;
+    // Item 6: 3 total attempts (SPECIFICITY_MAX_RETRIES 1 → 2), env-overridable.
+    // Clamp retries to 0–2 so total attempts never exceeds the doctrine cap of 3
+    // per engine even under an operator override; NaN falls back to the default.
+    const SPECIFICITY_MAX_RETRIES = (() => {
+      const raw = process.env.POSITIONING_SPECIFICITY_MAX_RETRIES;
+      const n = raw !== undefined ? parseInt(raw, 10) : NaN;
+      if (Number.isNaN(n)) return 2;
+      return Math.max(0, Math.min(2, n));
+    })();
+    // Item 6: temperature escalation ladder across attempts (0.3 → 0.4 → 0.5).
+    const SPECIFICITY_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
     let specificityAttempt = 0;
     let specificityRejectionContext = "";
     let generatedTerritories: Territory[] = [];
 
+    // DNA Enrichment Gate (Path A) — run ONCE per engine run, cached and reused
+    // across retries. Triggered only when the interchangeability gate fails.
+    let dnaEnrichmentResult: DnaEnrichmentResult | null = null;
+    let finalFailedGate = "";
+    let finalRejectionReason = "";
+    const buildDnaInput = (): EnrichmentDnaInput | null => {
+      if (!productDna) return null;
+      return {
+        name: productDna.coreOffer ? String(productDna.coreOffer) : undefined,
+        businessType: productDna.businessType ? String(productDna.businessType) : undefined,
+        productCategory: productDna.productCategory ? String(productDna.productCategory) : undefined,
+        coreProblemSolved: productDna.coreProblemSolved ? String(productDna.coreProblemSolved) : undefined,
+        uniqueMechanism: productDna.uniqueMechanism ? String(productDna.uniqueMechanism) : undefined,
+        strategicAdvantage: productDna.strategicAdvantage ? String(productDna.strategicAdvantage) : undefined,
+      };
+    };
+    const runDnaEnrichmentOnce = async (reason: string): Promise<DnaEnrichmentResult> => {
+      if (dnaEnrichmentResult) return dnaEnrichmentResult;
+      console.log(`[PositioningEngine-V3] DNA_ENRICHMENT_TRIGGER | gate=interchangeability | reason="${reason.slice(0, 120)}"`);
+      dnaEnrichmentResult = await enrichDnaFromRejection({
+        kind: "positioning_claim",
+        rejectionReason: reason,
+        dna: buildDnaInput(),
+        ael: analyticalEnrichment ?? null,
+        competitorComplaints: [],
+        accountId,
+      });
+      return dnaEnrichmentResult;
+    };
+
     for (specificityAttempt = 0; specificityAttempt <= SPECIFICITY_MAX_RETRIES; specificityAttempt++) {
       const territoriesSnapshot = JSON.parse(JSON.stringify(territories)) as Territory[];
+      const attemptTemperature = SPECIFICITY_TEMPERATURE_LADDER[Math.min(specificityAttempt, SPECIFICITY_TEMPERATURE_LADDER.length - 1)];
 
       if (specificityAttempt > 0) {
-        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: Retry attempt ${specificityAttempt + 1}/${SPECIFICITY_MAX_RETRIES + 1} — re-generating with rejection context`);
+        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: Retry attempt ${specificityAttempt + 1}/${SPECIFICITY_MAX_RETRIES + 1} — re-generating with rejection context | temp=${attemptTemperature}`);
       }
 
-      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined);
+      // T003: anchor-usage evidence — the generation prompt carries the anchor via
+      // the doctrine block (doctrine) or the DOMAIN TRANSLATION / DNA block (dna).
+      {
+        let posPromptAnchorSource: "doctrine" | "dna" | "none" = "none";
+        if (strategic && strategic.doctrine.productAnchor) {
+          posPromptAnchorSource = "doctrine";
+        } else if (productDna) {
+          posPromptAnchorSource = "dna";
+        }
+        console.log(`[PositioningEngine-V3] ANCHOR_EVIDENCE | engine=positioning | site=first_prompt | attempt=${specificityAttempt + 1} | present=${posPromptAnchorSource === "none" ? "no" : "yes"} | source=${posPromptAnchorSource}`);
+      }
+      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined, attemptTemperature, strategic);
       console.log(`[PositioningEngine-V3] L11 SIGNAL_DIRECT_COMPOSITION | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}${specificityAttempt > 0 ? " | retryAttempt=" + (specificityAttempt + 1) : ""}`);
 
       const specificityCheck = validateTerritorySpecificity(generatedTerritories);
 
       if (specificityCheck.passed) {
         console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: PASSED | system=${specificityCheck.systemCount} | audience=${specificityCheck.audienceCount} | attempt=${specificityAttempt + 1}`);
+        // T13 FULL GATE BATTERY: specificity held (system-level) — now every
+        // territory must clear breadth + interchangeability + contradiction as a
+        // positioning claim. Short-circuit at the first failing territory; retry
+        // the whole generation with focused feedback (bounded by the SAME
+        // SPECIFICITY_MAX_RETRIES cap, so total attempts never exceed 3). The
+        // judges log every verdict — including NOT_RUN abstentions — so nothing
+        // is silent. Battery failure DEGRADES (never hard-fails) on exhaustion.
+        let batteryFeedback = "";
+        let failedTerritoryName = "";
+        let failedGate = "";
+        // F5a: when strategic doctrine is absent, derive the judge's product
+        // anchor from Product DNA so the interchangeability judge tests against
+        // THIS product's real differentiator instead of the weaker anchor-free
+        // test. Guard: only when a genuine differentiator + core problem exist —
+        // an anchor fabricated from empty strings would flip the judge to the
+        // strict test with hollow context (worse than the weak test). Explicit
+        // if/else selection — no semantic-fallback chains (D1).
+        let batteryAnchor = strategic ? strategic.doctrine.productAnchor : null;
+        if (!batteryAnchor && productDna) {
+          let dnaDifferentiator = "";
+          if (productDna.strategicAdvantage && productDna.strategicAdvantage.trim().length > 0) {
+            dnaDifferentiator = productDna.strategicAdvantage.trim();
+          } else if (productDna.uniqueMechanism && productDna.uniqueMechanism.trim().length > 0) {
+            dnaDifferentiator = productDna.uniqueMechanism.trim();
+          }
+          const dnaProblem = productDna.coreProblemSolved ? productDna.coreProblemSolved.trim() : "";
+          const dnaName = productDna.coreOffer ? String(productDna.coreOffer).trim() : "";
+          const dnaType = productDna.businessType ? String(productDna.businessType).trim() : "";
+          if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && dnaName.length > 0 && dnaType.length > 0) {
+            batteryAnchor = {
+              name: dnaName,
+              type: dnaType,
+              keyAttributes: productDna.productCategory ? [productDna.productCategory] : [],
+              coreProblemSolved: dnaProblem,
+              differentiatingFeature: dnaDifferentiator,
+            };
+            console.log(`[PositioningEngine-V3] BATTERY_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from Product DNA | attempt=${specificityAttempt + 1}`);
+          }
+        }
+        {
+          let posJudgeAnchorSource: "doctrine" | "dna" | "none" = "none";
+          if (strategic && strategic.doctrine.productAnchor) {
+            posJudgeAnchorSource = "doctrine";
+          } else if (batteryAnchor) {
+            posJudgeAnchorSource = "dna";
+          }
+          console.log(`[PositioningEngine-V3] ANCHOR_EVIDENCE | engine=positioning | site=judge | attempt=${specificityAttempt + 1} | present=${batteryAnchor ? "yes" : "no"} | source=${posJudgeAnchorSource}`);
+        }
+        for (const t of generatedTerritories) {
+          const battery = await runCandidateGateBattery({
+            kind: "positioning_claim",
+            candidateText: `${t.name}: ${t.enemyDefinition} | ${t.contrastAxis} | ${t.narrativeDirection}`,
+            productAnchor: batteryAnchor,
+            priorDecisions: strategic ? strategic.priorDecisions : [],
+            accountId,
+          });
+          if (!battery.passed) {
+            failedTerritoryName = t.name;
+            failedGate = battery.failedGate ? battery.failedGate : "";
+            batteryFeedback = battery.rejectionFeedback;
+            break;
+          }
+        }
+        positioningBatteryAttempts.push({
+          passed: batteryFeedback.length === 0,
+          failedGate: failedGate,
+          rejectionFeedback: batteryFeedback,
+        });
+        // Track the latest battery outcome so the DNA Enrichment signal can be
+        // built after the loop (failedGate is block-scoped and lost at loop exit).
+        finalFailedGate = failedGate;
+        finalRejectionReason = batteryFeedback;
+        if (!batteryFeedback) {
+          positioningBatteryPassed = true;
+          console.log(`[PositioningEngine-V3] BATTERY_GATE: PASSED | territories=${generatedTerritories.length} | gates=breadth+interchangeability+contradiction | attempt=${specificityAttempt + 1}`);
+          break;
+        }
+        console.log(`[PositioningEngine-V3] BATTERY_GATE: FAILED | gate=${failedGate} | territory="${failedTerritoryName}" | attempt=${specificityAttempt + 1}`);
+        if (specificityAttempt < SPECIFICITY_MAX_RETRIES) {
+          // DNA Enrichment Gate (Path A): when the failure is specifically
+          // interchangeability (generic/reused), inject grounded differentiator
+          // candidates into the retry context. Candidate-only — the regenerated
+          // territories still pass through the UNCHANGED battery on the next attempt.
+          let enrichmentBlock = "";
+          if (failedGate === "interchangeability") {
+            const enr = await runDnaEnrichmentOnce(batteryFeedback);
+            enrichmentBlock = formatEnrichmentForRetry(enr, "positioning_claim");
+          }
+          specificityRejectionContext = `
+PREVIOUS OUTPUT REJECTED — Rejected by ${failedGate} gate: ${batteryFeedback}
+Fix exactly this and regenerate ALL territories as system-level positioning claims that (a) name a specific enemy system/process/tool that fails, (b) are NOT interchangeable with a generic competitor claim — anchor contrastAxis and narrativeDirection to this product's Unique mechanism / Strategic advantage from the DOMAIN TRANSLATION REQUIREMENT so no competitor could truthfully repeat them, and (c) do NOT contradict the locked product anchor or prior engine decisions.${enrichmentBlock}`;
+          continue;
+        }
+        // Exhausted: degrade rather than hard-fail (Beta axiom B3 — safe
+        // degradation over fake success). Record the battery failure on each
+        // territory so the surface stays truthful about the weakened output.
+        for (const t of generatedTerritories) {
+          t.confidenceScore = Math.max(0, t.confidenceScore - 0.15);
+          t.stabilityNotes.push(`[BATTERY_FAILED] Positioning claim failed ${failedGate} gate after ${specificityAttempt + 1} attempts: ${batteryFeedback}`);
+        }
+        console.log(`[PositioningEngine-V3] BATTERY_GATE: EXHAUSTED | proceeding with degraded output after ${specificityAttempt + 1} attempts`);
         break;
       }
 
@@ -2160,10 +2950,14 @@ export async function runPositioningEngine(
 
       if (specificityAttempt < SPECIFICITY_MAX_RETRIES) {
         const rejectionLines = specificityCheck.rejections.map(r =>
-          `REJECTED: "${r.name}" — ${r.reasons.join("; ")}`
+          `"${r.name}" — ${r.reasons.join("; ")}`
         ).join("\n");
+        // Item 6 rejection-feedback format (multi-gate ready): "Rejected by
+        // [gate]: [specific reason]. Fix exactly this." Phase 1 = specificity
+        // gate only; Phase 2 appends breadth / interchangeability / contradiction
+        // rejection lines to this same block for drop-in assembly.
         specificityRejectionContext = `
-PREVIOUS OUTPUT REJECTED — TERRITORIES WERE AUDIENCE-LEVEL, NOT SYSTEM-LEVEL:
+PREVIOUS OUTPUT REJECTED — Rejected by specificity gate: territories were audience-level (too generic), not system-level. Fix exactly this:
 ${rejectionLines}
 
 CORRECTION REQUIRED:
@@ -2179,9 +2973,43 @@ CORRECTION REQUIRED:
             t.confidenceScore = Math.max(0, t.confidenceScore - 0.15);
             t.stabilityNotes.push(`[SPECIFICITY_FAILED] Territory remains audience-level after retry: ${classification.reasons.join("; ")}`);
           }
+          // Gate-authority truthfulness: the full battery (breadth /
+          // interchangeability / contradiction) only runs once specificity
+          // clears. On this exhaustion path specificity NEVER cleared, so the
+          // battery NEVER evaluated this output. Record the NOT_RUN explicitly
+          // rather than shipping a silently un-batteried territory (NOT_RUN
+          // verdicts must be RECORDED, never swallowed).
+          t.stabilityNotes.push(`[BATTERY_NOT_RUN] specificity gate exhausted before battery evaluation after ${specificityAttempt + 1} attempts`);
         }
-        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: EXHAUSTED | proceeding with best available output after ${specificityAttempt + 1} attempts`);
+        console.log(`[PositioningEngine-V3] SPECIFICITY_GATE: EXHAUSTED | proceeding with best available output after ${specificityAttempt + 1} attempts | battery=NOT_RUN`);
       }
+    }
+
+    // DNA Enrichment Gate (Path B): surface the outcome for the orchestrator (the
+    // engine never writes the DB — purity). required=true ONLY when the
+    // interchangeability gate was still failing at loop exit. On pass, emit an
+    // explicit required=false so the orchestrator auto-resolves any open request.
+    if (finalFailedGate === "interchangeability" && !positioningBatteryPassed) {
+      // runDnaEnrichmentOnce is idempotent — this also covers the case where
+      // interchangeability first failed on the final (exhaustion) attempt, so the
+      // retry branch that normally runs enrichment never executed.
+      const enr = await runDnaEnrichmentOnce(finalRejectionReason);
+      dnaEnrichmentSignal = {
+        required: true,
+        engineKind: "positioning_claim",
+        lastRejectionReason: finalRejectionReason,
+        candidates: enr.candidates,
+        suggestionText: buildEnrichmentSuggestion(enr, strategic ? strategic.doctrine.productAnchor : null),
+      };
+      console.log(`[PositioningEngine-V3] DNA_ENRICHMENT_REQUIRED | engine=positioning_claim | status=${enr.status} | candidates=${enr.candidates.length}`);
+    } else if (positioningBatteryPassed) {
+      dnaEnrichmentSignal = {
+        required: false,
+        engineKind: "positioning_claim",
+        lastRejectionReason: "",
+        candidates: [],
+        suggestionText: "",
+      };
     }
 
     const boundaryText = generatedTerritories.map(t =>
@@ -2239,6 +3067,7 @@ CORRECTION REQUIRED:
       })),
       totalInputSignals: allStrategicSignals.length,
       rejectedSignals: [] as any[],
+      mediumQualitySignals: [] as any[],
       deduplicatedCount: 0,
       crossValidatedCount: allStrategicSignals.length,
       averageQuality: 1,
@@ -2248,25 +3077,79 @@ CORRECTION REQUIRED:
 
     let totalOrphanedClaims = 0;
     let totalTracedClaims = 0;
-    for (const territory of generatedTerritories) {
+    let droppedTerritories = 0;
+    const beforeCount = generatedTerritories.length;
+
+    generatedTerritories = generatedTerritories.filter(territory => {
       const claims = [territory.name, territory.enemyDefinition, territory.contrastAxis, territory.narrativeDirection].filter(Boolean);
+
+      const hasSystemMapping = territory._systemMapped === true;
+      if (hasSystemMapping) {
+        // is a usable starting point but cannot claim MI-traced confidence.
+        // Tag provenance and cap at 0.30 (vs. MI-traced 0.85+).
+        territory.provenance = "system_default";
+        territory.confidenceScore = Math.min(territory.confidenceScore, 0.30);
+        if (!territory.stabilityNotes) territory.stabilityNotes = [];
+        territory.stabilityNotes.push(`[PROVENANCE_SYSTEM_DEFAULT] Deterministic system mapping — confidence capped at 0.30 vs. MI-traced 0.85+`);
+        totalTracedClaims += claims.length;
+        return true;
+      }
+
+      const hasAnyMappedSignals = territory.mappedSignalIds && territory.mappedSignalIds.length > 0;
+      if (hasAnyMappedSignals) {
+        territory.provenance = "mi_traced";
+        totalTracedClaims += claims.length;
+        return true;
+      }
+
       const orphanResult = checkForOrphanClaims(claims, strategicSignalGate);
+
+      // They are retained with confidenceScore capped at ≤0.10 and marked
+      // degraded so plan synthesis can see them, account for them, and
+      // downgrade dependent decisions instead of silently losing the
+      // territory entirely.
+      if (orphanResult.orphanedClaims.length === claims.length) {
+        if (!territory.stabilityNotes) territory.stabilityNotes = [];
+        territory.stabilityNotes.push(`[ORPHAN_ALL_CLAIMS] All ${claims.length} claims have no traceable MI/strategic signal grounding — territory marked degraded, confidence capped ≤0.10`);
+        territory.confidenceScore = Math.min(territory.confidenceScore, 0.10);
+        territory.provenance = "orphaned";
+        territory.degraded = true;
+        totalOrphanedClaims += orphanResult.orphanedClaims.length;
+        console.log(`[PositioningEngine-V3] ORPHAN_DEGRADED | territory="${territory.name}" | all ${claims.length} claims orphaned — RETAINED with confidence≤0.10 + degraded flag`);
+        return true;
+      }
 
       totalOrphanedClaims += orphanResult.orphanedClaims.length;
       totalTracedClaims += orphanResult.tracedClaims;
 
       if (orphanResult.orphanedClaims.length > 0) {
+        if (!territory.stabilityNotes) territory.stabilityNotes = [];
         for (const orphan of orphanResult.orphanedClaims) {
-          if (!territory.stabilityNotes) territory.stabilityNotes = [];
           territory.stabilityNotes.push(`[HYPOTHESIS] Claim not directly traceable to MIv3 signal: "${orphan.slice(0, 80)}"`);
         }
-        territory.confidenceScore = Math.max(0, territory.confidenceScore - (orphanResult.orphanedClaims.length * 0.05));
+        // per-territory ceiling. Each orphaned claim costs 0.05 in full,
+        // so a partially-orphaned territory's confidence reflects the real
+        // grounding deficit rather than being clamped at -0.10.
+        const orphanPenaltyPerClaim = 0.05;
+        const totalPenalty = orphanResult.orphanedClaims.length * orphanPenaltyPerClaim;
+        // is grounded (i.e. partial-orphan territory). The previous 0.15
+        // floor for all-orphan territories has been removed (those are now
+        // capped ≤0.10 above).
+        territory.confidenceScore = Math.max(0.20, territory.confidenceScore - totalPenalty);
+        territory.provenance = "partial_traced";
+      } else {
+        territory.provenance = territory.provenance ?? "fully_traced";
       }
+      return true;
+    });
+
+    if (droppedTerritories > 0) {
+      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | PREVENTIVE | dropped=${droppedTerritories} territories | remaining=${generatedTerritories.length}/${beforeCount}`);
     }
-    if (totalOrphanedClaims > 0) {
-      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | orphaned=${totalOrphanedClaims} | traced=${totalTracedClaims} | territories=${generatedTerritories.length} — orphaned claims flagged as [HYPOTHESIS]`);
-    } else {
-      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | ZERO_ORPHANS | all ${totalTracedClaims} claims traceable to MIv3 signals`);
+    if (totalOrphanedClaims > 0 && droppedTerritories === 0) {
+      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | orphaned=${totalOrphanedClaims} | traced=${totalTracedClaims} | territories=${generatedTerritories.length}`);
+    } else if (totalOrphanedClaims === 0) {
+      console.log(`[PositioningEngine-V3] ORPHAN_AUDIT | ZERO_ORPHANS | all ${totalTracedClaims} claims grounded (system-mapped or MI-traced)`);
     }
 
     const allPositioningText = generatedTerritories.map(t => [
@@ -2283,11 +3166,14 @@ CORRECTION REQUIRED:
     }
 
     if (parsedStructuredSignals) {
+      const validSignalIdSet = getAllValidSignalIds(parsedStructuredSignals);
       const allMappedIds = new Set<string>();
       const unmappedTerritories: string[] = [];
       for (const t of generatedTerritories) {
         if (t.mappedSignalIds && t.mappedSignalIds.length > 0) {
-          for (const id of t.mappedSignalIds) allMappedIds.add(id);
+          for (const id of t.mappedSignalIds) {
+            if (validSignalIdSet.has(id)) allMappedIds.add(id);
+          }
         } else {
           const isUnmapped = t.stabilityNotes.some(n => n.includes("SIGNAL_UNMAPPED"));
           if (!isUnmapped) {
@@ -2319,6 +3205,55 @@ CORRECTION REQUIRED:
     console.log(`[PositioningEngine-V3] SIGNAL_DIRECT_COMPOSITION COMPLETE | territories=${finalTerritories.length} | cards=${strategyCards.length}`);
   }
 
+  // ── INTELLIGENCE UPGRADE: Embedding-based Semantic Collision Detection ──
+  let semanticCollisions: any[] = [];
+  try {
+    const { computeSemanticCollisions } = await import("./semantic-collision");
+    const territoryClaims = finalTerritories.map(t => ({
+      name: t.name,
+      claimText: [t.name, t.enemyDefinition, t.contrastAxis, t.narrativeDirection].filter(Boolean).join(" — "),
+    }));
+    const competitorClaimList: Array<{ source: string; claim: string }> = [];
+    if (narrativeMap && Object.keys(narrativeMap).length > 0) {
+      for (const [comp, narratives] of Object.entries(narrativeMap)) {
+        for (const narr of (narratives as string[]).slice(0, 3)) {
+          if (narr && narr.length > 5) competitorClaimList.push({ source: comp, claim: narr });
+        }
+      }
+    }
+    if (competitorClaimList.length === 0) {
+      for (const c of competitors.slice(0, 6) as any[]) {
+        const candidate = c.narrativeStyle || c.bio || c.description || c.contentThemes || "";
+        const claim = typeof candidate === "string" ? candidate : JSON.stringify(candidate);
+        if (claim.length > 8) competitorClaimList.push({ source: c.competitorName || c.name || "competitor", claim: claim.slice(0, 240) });
+      }
+    }
+    semanticCollisions = await computeSemanticCollisions({
+      territoryClaims,
+      competitorClaims: competitorClaimList,
+      accountId,
+    });
+    for (const result of semanticCollisions) {
+      const t = finalTerritories.find(x => x.name === result.territoryName);
+      if (t) {
+        t.semanticCollision = {
+          semanticCollisionScore: result.semanticCollisionScore,
+          collisionMeaning: result.collisionMeaning,
+          competitorEquivalentClaim: result.competitorEquivalentClaim,
+          competitorSource: result.competitorSource,
+          jaccardScore: result.jaccardScore,
+          perCompetitor: result.perCompetitor,
+          reasoningSteps: result.reasoningSteps,
+          modelUsed: result.modelUsed,
+          generatedAt: result.generatedAt,
+        };
+      }
+    }
+    console.log(`[PositioningEngine-V3] SEMANTIC_COLLISIONS_ATTACHED | territories=${semanticCollisions.length} | competitorClaims=${competitorClaimList.length}`);
+  } catch (scErr: any) {
+    console.error(`[PositioningEngine-V3] SEMANTIC_COLLISION_FAILED | ${scErr.message}`);
+  }
+
   const celCompliance = enforcePositioningCompliance(finalTerritories, analyticalEnrichment || null);
   if (celCompliance.violations.length > 0) {
     applyCompliancePenalties(finalTerritories, celCompliance);
@@ -2335,21 +3270,128 @@ CORRECTION REQUIRED:
   }
 
   const primaryTerritory = finalTerritories[0] || null;
+
+  // ── PHASE 2: Category-Game Strategist (commercial reasoning core) ──
+  // Runs AFTER deterministic territory selection — does not change which territory is
+  // selected, but adds a commercial-game design layer that downstream engines (offer,
+  // persuasion, awareness) can consume via the SSC `gameDimension` signal. Pipeline
+  // and existing fields preserved; on failure, result.categoryGameDesign is simply absent.
+  let categoryGameDesign: import("./category-game").CategoryGameDesign | undefined;
+  try {
+    if (primaryTerritory) {
+      const { designCategoryGame } = await import("./category-game");
+      // Pull competitor positioning text from MI snapshot's multiSourceSignals (richer than ciCompetitors row).
+      const multiSourceForGame = safeJsonParse(activeMiSnapshot.multiSourceSignals, {}) as Record<string, any>;
+      const competitorBriefs = competitors.slice(0, 6).map(c => {
+        const cName = c.name || "(unnamed)";
+        const ms = multiSourceForGame[cName] || multiSourceForGame[(c as any).competitorName] || {};
+        const positioningParts: string[] = [];
+        if (ms?.website?.headlineExtractions?.length) positioningParts.push(ms.website.headlineExtractions.slice(0, 3).join(" | "));
+        if (ms?.website?.positioningLanguage?.length) positioningParts.push(ms.website.positioningLanguage.slice(0, 3).join(" | "));
+        if (!positioningParts.length && c.messagingTone) positioningParts.push(`tone: ${c.messagingTone}`);
+        if (!positioningParts.length && c.hookStyles) positioningParts.push(`hooks: ${c.hookStyles}`);
+        if (!positioningParts.length && c.notes) positioningParts.push(c.notes);
+        if (!positioningParts.length) positioningParts.push(`${c.businessType || "competitor"} — ${c.primaryObjective || "unknown objective"}`);
+        return {
+          name: cName,
+          positioning: positioningParts.join(" || ").slice(0, 240),
+          authority: marketPower.find(m => m.competitorName === cName)?.authorityScore ?? undefined,
+        };
+      });
+      const painSignals = audiencePains.slice(0, 8).map((p: any) => typeof p === "string" ? p : (p?.label || p?.canonical || p?.text || JSON.stringify(p))).filter(Boolean);
+      const desireSignals = audienceDesires.slice(0, 8).map((d: any) => typeof d === "string" ? d : (d?.label || d?.canonical || d?.text || JSON.stringify(d))).filter(Boolean);
+      const objectionsRaw = safeJsonParse(audienceSnapshot.objectionMap, []) as any[];
+      const objections = (Array.isArray(objectionsRaw) ? objectionsRaw : []).slice(0, 6).map((o: any) => typeof o === "string" ? o : (o?.statement || o?.label || o?.text || JSON.stringify(o))).filter(Boolean);
+      const rejectedTerritoryPatterns = finalTerritories.slice(1, 5).map(t => t.name).filter(Boolean);
+
+      categoryGameDesign = await designCategoryGame({
+        category,
+        marketDiagnosis: activeMiSnapshot.marketDiagnosis || null,
+        competitorBriefs,
+        audiencePainSignals: painSignals,
+        audienceDesireSignals: desireSignals,
+        audienceObjections: objections,
+        productAdvantage: productDna?.strategicAdvantage || null,
+        productMechanism: productDna?.uniqueMechanism || null,
+        rejectedTerritoryPatterns,
+        accountId,
+      }) || undefined;
+      if (categoryGameDesign) {
+        console.log(`[PositioningEngine-V3] CATEGORY_GAME_DESIGNED | dimension="${categoryGameDesign.ourDimension}" | defensibility=${categoryGameDesign.defensibility} | judge=${categoryGameDesign.judgeVerdict} | retries=${categoryGameDesign.retryCount}`);
+      } else {
+        console.log(`[PositioningEngine-V3] CATEGORY_GAME_SKIPPED — designer returned null (legacy path active)`);
+      }
+    }
+  } catch (cgErr: any) {
+    console.warn(`[PositioningEngine-V3] CATEGORY_GAME_FAILED | ${cgErr.message} — continuing with legacy positioning`);
+  }
+
   const executionTimeMs = Date.now() - startTime;
 
-  const rawConfidence = primaryTerritory
-    ? Math.round(primaryTerritory.confidenceScore * 100) / 100
-    : 0;
+  // normalize/threshold gates downstream see actual values. Display
+  // rounding happens at API/serialization boundary only.
+  const rawConfidence = primaryTerritory ? primaryTerritory.confidenceScore : 0;
   const overallConfidence = normalizeConfidence(rawConfidence, dataReliability);
   const confidenceNormalized = rawConfidence !== overallConfidence;
 
-  const status: PositioningStatus = !stabilityResult.isStable ? "UNSTABLE" : "COMPLETE";
+  // engineConfidence reflects deterministic engine LOGIC quality (process integrity,
+  // structural completeness, internal-check passage), NOT LLM content self-rating
+  // and NOT data reliability. It is the input to the positioning hard gate (≥ 0.40).
+  let positioningEngineConfidence = 0;
+  const engineConfidenceFactors: string[] = [];
+  if (primaryTerritory) {
+    positioningEngineConfidence += 0.35;
+    engineConfidenceFactors.push("territory_produced(+0.35)");
+  }
+  if (finalTerritories.length >= 2) {
+    positioningEngineConfidence += 0.10;
+    engineConfidenceFactors.push("multiple_territories(+0.10)");
+  }
+  if (stabilityResult.isStable) {
+    positioningEngineConfidence += 0.15;
+    engineConfidenceFactors.push("stability_passed(+0.15)");
+  }
+  if (celCompliance.passed) {
+    positioningEngineConfidence += 0.10;
+    engineConfidenceFactors.push("cel_passed(+0.10)");
+  }
+  if (signalTraceability?.validationPassed) {
+    positioningEngineConfidence += 0.15;
+    engineConfidenceFactors.push("signal_trace_passed(+0.15)");
+  } else if (signalTraceability && signalTraceability.signalsUsed.length > 0) {
+    positioningEngineConfidence += 0.05;
+    engineConfidenceFactors.push("partial_signal_trace(+0.05)");
+  }
+  if (primaryTerritory && (primaryTerritory.evidenceSignals?.length || 0) > 0) {
+    positioningEngineConfidence += 0.10;
+    engineConfidenceFactors.push("evidence_signals(+0.10)");
+  }
+  if (primaryTerritory?.enemyDefinition && primaryTerritory?.contrastAxis && primaryTerritory?.narrativeDirection) {
+    positioningEngineConfidence += 0.05;
+    engineConfidenceFactors.push("complete_narrative_fields(+0.05)");
+  }
+  positioningEngineConfidence = Math.round(Math.min(1, Math.max(0, positioningEngineConfidence)) * 100) / 100;
+  console.log(`[PositioningEngine-V3] ENGINE_CONFIDENCE_BREAKDOWN | score=${positioningEngineConfidence.toFixed(2)} | factors=[${engineConfidenceFactors.join(",")}]`);
+
+  const positioningDataConfidence = Math.round(dataReliability.overallReliability * 100) / 100;
+
+  // Canonical F1 status authoring site — composed from the stability-check
+  // boolean (engine's source of truth). Renamed off the `status` suffix per
+  // Seal #9 doctrine D1 (alias-detector) and rewritten as if/else so the
+  // composition is a plain control-flow assignment, not an alias-init.
+  let positioningStatusValue: PositioningStatus;
+  if (!stabilityResult.isStable) {
+    positioningStatusValue = "UNSTABLE";
+  } else {
+    positioningStatusValue = "COMPLETE";
+  }
   const hasAdvisories = stabilityResult.advisories.length > 0;
-  const statusMessage = !stabilityResult.isStable
-    ? "Positioning generated but stability checks failed — review recommended"
-    : hasAdvisories
-      ? stabilityResult.advisories.map(a => a.message).join("; ")
-      : null;
+  let positioningStatusMessage: string | null = null;
+  if (!stabilityResult.isStable) {
+    positioningStatusMessage = "Positioning generated but stability checks failed — review recommended";
+  } else if (hasAdvisories) {
+    positioningStatusMessage = stabilityResult.advisories.map(a => a.message).join("; ");
+  }
 
   const combinedSignalCount = totalSignals + allStrategicSignals.length;
   const resolvedMiSnapshotId = activeMiSnapshot.id;
@@ -2376,11 +3418,12 @@ CORRECTION REQUIRED:
   const [inserted] = await db.insert(positioningSnapshots).values({
     accountId,
     campaignId,
+    jobId,
     miSnapshotId: resolvedMiSnapshotId,
     audienceSnapshotId,
     engineVersion: POSITIONING_ENGINE_VERSION,
-    status,
-    statusMessage,
+    status: positioningStatusValue,
+    statusMessage: positioningStatusMessage,
     territory: JSON.stringify(primaryTerritory),
     enemyDefinition: primaryTerritory?.enemyDefinition || "",
     contrastAxis: primaryTerritory?.contrastAxis || "",
@@ -2412,11 +3455,12 @@ CORRECTION REQUIRED:
     console.error(`[PositioningEngine-V3] Root invalidation failed (non-blocking): ${invErr.message}`);
   }
 
-  console.log(`[PositioningEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence}`);
+  console.log(`[PositioningEngine-V3] ${positioningStatusValue} in ${executionTimeMs}ms | snapshot=${inserted.id} | territories=${finalTerritories.length} | confidence=${overallConfidence} | engineConfidence=${positioningEngineConfidence} | dataConfidence=${positioningDataConfidence}`);
 
-  return {
-    status,
-    statusMessage,
+  const __positioningResult = {
+    status: positioningStatusValue,
+    statusMessage: positioningStatusMessage,
+    aiPathTelemetry: emissionFromBattery(positioningBatteryPassed, positioningBatteryAttempts),
     territory: primaryTerritory,
     territories: finalTerritories,
     strategyCards,
@@ -2431,12 +3475,17 @@ CORRECTION REQUIRED:
     differentiationVector: differentiationAxes,
     proofSignals: primaryTerritory?.evidenceSignals || [],
     confidenceScore: overallConfidence,
+    engineConfidence: positioningEngineConfidence,
+    dataConfidence: positioningDataConfidence,
+    categoryGameDesign,
     inputSummary,
     snapshotId: inserted.id,
     executionTimeMs,
     createdAt: new Date().toISOString(),
     signalTraceability,
+    dnaEnrichment: dnaEnrichmentSignal,
   };
+  return applyPartialAelDowngrade("PositioningEngine-V3", __positioningResult, aelAck);
 }
 
 async function buildAndPersistEmptyResult(
@@ -2455,6 +3504,7 @@ async function buildAndPersistEmptyResult(
     const [inserted] = await db.insert(positioningSnapshots).values({
       accountId,
       campaignId,
+      jobId,
       miSnapshotId,
       audienceSnapshotId,
       engineVersion: POSITIONING_ENGINE_VERSION,
@@ -2529,15 +3579,17 @@ function buildEmptyResult(
   };
 }
 
-export async function getLatestPositioningSnapshot(accountId: string, campaignId: string) {
-  const [snapshot] = await db.select().from(positioningSnapshots)
-    .where(and(
-      eq(positioningSnapshots.accountId, accountId),
-      eq(positioningSnapshots.campaignId, campaignId),
-      eq(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION),
-    ))
-    .orderBy(desc(positioningSnapshots.createdAt))
-    .limit(1);
+export async function getLatestPositioningSnapshot(accountId: string, campaignId: string, runId?: string | null) {
+  const baseFilters = [
+    eq(positioningSnapshots.accountId, accountId),
+    eq(positioningSnapshots.campaignId, campaignId),
+    eq(positioningSnapshots.engineVersion, POSITIONING_ENGINE_VERSION),
+  ];
+  if (runId) baseFilters.push(eq(positioningSnapshots.jobId, runId));
+  const query = db.select().from(positioningSnapshots).where(and(...baseFilters));
+  const [snapshot] = runId
+    ? await query.limit(1)
+    : await query.orderBy(desc(positioningSnapshots.createdAt)).limit(1);
 
   if (!snapshot) return null;
 

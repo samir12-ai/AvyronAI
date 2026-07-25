@@ -47,7 +47,7 @@ const DEFAULT_ENABLED_FLAGS: LeadEngineModule[] = [
 ];
 
 export class FeatureFlagService {
-  async isEnabled(flagName: LeadEngineModule, accountId: string = "default"): Promise<boolean> {
+  async isEnabled(flagName: LeadEngineModule, accountId: string): Promise<boolean> {
     const globalKill = await this.getRawFlag("lead_engine_global_off", accountId);
     if (globalKill) return false;
 
@@ -78,7 +78,7 @@ export class FeatureFlagService {
     console.log(`[FeatureFlags] Seeded ${toInsert.length} default flags for account=${accountId}: ${toInsert.join(", ")}`);
   }
 
-  async checkWithDependencies(flagName: LeadEngineModule, accountId: string = "default"): Promise<FlagCheckResult> {
+  async checkWithDependencies(flagName: LeadEngineModule, accountId: string): Promise<FlagCheckResult> {
     const enabled = await this.isEnabled(flagName, accountId);
     if (!enabled) {
       return { enabled: false, safeMode: false, missingDependencies: [] };
@@ -103,7 +103,7 @@ export class FeatureFlagService {
     return { enabled: true, safeMode, missingDependencies };
   }
 
-  async getAllFlags(accountId: string = "default"): Promise<Record<string, boolean>> {
+  async getAllFlags(accountId: string): Promise<Record<string, boolean>> {
     const flags = await db.select().from(featureFlags)
       .where(eq(featureFlags.accountId, accountId));
 
@@ -135,7 +135,7 @@ export class FeatureFlagService {
   async setFlag(
     flagName: LeadEngineModule,
     enabled: boolean,
-    accountId: string = "default",
+    accountId: string,
     userId?: string,
     reason?: string
   ): Promise<void> {
@@ -197,7 +197,7 @@ export class FeatureFlagService {
     }
   }
 
-  async getFlagAuditHistory(accountId: string = "default", limit: number = 50) {
+  async getFlagAuditHistory(accountId: string, limit: number = 50) {
     return db.select().from(featureFlagAudit)
       .where(eq(featureFlagAudit.accountId, accountId))
       .orderBy(sql`${featureFlagAudit.createdAt} DESC`)

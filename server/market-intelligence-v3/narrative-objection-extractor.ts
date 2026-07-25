@@ -11,6 +11,11 @@ export interface NarrativeObjectionItem {
   patternCategory: string;
   signalType: NarrativeSignalType;
   clusterId?: string;
+  // Phase 6 / Task #69 step 2 — optional D5-anti-fabrication tag. Single-evidence
+  // inferred rows (e.g. content-DNA-hook problem statements) carry "inferred_synthesis"
+  // so downstream gates (T1.A signal lineage, T3.A confidence integrity, Step 4
+  // hallucination exposure) can identify and weight them appropriately.
+  signalOrigin?: "real" | "competitor" | "inferred" | "inferred_synthesis" | "fallback" | "unknown";
 }
 
 export interface NarrativeObjectionMap {

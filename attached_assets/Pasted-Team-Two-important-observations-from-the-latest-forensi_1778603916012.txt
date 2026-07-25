@@ -1,0 +1,119 @@
+Team,
+
+Two important observations from the latest forensic pass.
+
+These are not blockers to stop work,
+but they are critical doctrine-level lessons and must become part of the system culture moving forward.
+
+1. “Previously sealed” does NOT mean unquestionable
+
+---
+
+The latest audit proved something important:
+
+Some earlier “SEALED” claims were technically incomplete or overstated.
+
+Examples:
+
+* requireCampaign silent-substitution behavior
+* ownership enforcement relying only on scoped queries
+* layered-defense routes without explicit assertCampaignBelongsTo checks
+
+The important part is NOT that the bugs existed.
+
+The important part is that:
+the audit process successfully challenged prior assumptions,
+re-verified behaviorally,
+and exposed integrity ambiguities that static review alone missed.
+
+This is good.
+
+That means the:
+“no fake-green”
+and
+“trust nothing automatically”
+doctrine is working correctly.
+
+Keep this mindset permanently.
+
+Never assume:
+
+* “already sealed”
+* “already reviewed”
+* “probably safe”
+
+Every future audit should continue behaving adversarially.
+
+---
+
+2. “Leak-safe” is NOT enough
+
+---
+
+A route/query being technically leak-safe is no longer sufficient for production-grade integrity.
+
+We now require:
+
+* deterministic ownership semantics
+* explicit ownership enforcement
+* explicit denial behavior
+* no silent substitution
+* no hidden fallback routing
+* no ambiguous campaign resolution
+
+Difference:
+
+OLD mindset:
+“Scoped query = good enough.”
+
+NEW mindset:
+“Explicit ownership truth must be provable at every boundary.”
+
+This is why adding assertCampaignBelongsTo on top of account-scoped queries was the correct direction even when the query itself was already leak-safe.
+
+The target is no longer:
+“hard to exploit.”
+
+The target is:
+“semantically trustworthy and operationally deterministic.”
+
+---
+
+3. PASS-WITH-NITS culture
+
+---
+
+Architect PASS-WITH-NITS should NOT be treated as:
+“done forever.”
+
+LOW findings must remain tracked and visible.
+
+Specifically:
+
+* 403 vs 404 semantics consistency
+* raw-SQL ownership helper consistency
+
+Do not bury or silently forget these.
+Track them until consciously resolved or intentionally accepted.
+
+---
+
+4. Continue the audit philosophy exactly as-is
+
+---
+
+The current forensic process is correct because it:
+
+* distrusts prior seals
+* validates behaviorally
+* verifies runtime outcomes
+* challenges assumptions
+* checks semantic correctness, not just leak absence
+* escalates even integrity ambiguities
+
+Keep this exact mentality throughout the remaining closure work.
+
+That rigor is the reason the platform is getting stronger with every pass.
+
+Best,
+[Your Name]

@@ -65,3 +65,423 @@ id = "Jv6rOMMTxO53k5I1QEySz"
 uri = "file://.local/avyron-architecture.md"
 type = "text"
 title = "Avyron AI — Backend Architecture Overview"
+
+[[outputs]]
+id = "WXT-OXZbWXB196pzclTVq"
+uri = "file://.local/architecture-audit-cleaning-enforcement.md"
+type = "text"
+title = "Architecture Audit: Cleaning, Enforcement, Structure & Traceability"
+
+[[outputs]]
+id = "d9qjx4m9IT8UNInS_qhFw"
+uri = "file://.local/cross-engine-alignment-audit.md"
+type = "text"
+title = "Cross-Engine Alignment Audit — Full System Report"
+
+[[outputs]]
+id = "UghQebr_fWlYlkYzyyal8"
+uri = "file://.local/validation-evidence-report.md"
+type = "text"
+title = "System Validation Evidence Report"
+
+[[outputs]]
+id = "1E8qNMzglL4kATL_TgU69"
+uri = "file://.local/validation-report-final.md"
+type = "text"
+title = "Phase 1: Validation Suite Report (50/50 checks)"
+
+[[outputs]]
+id = "WTRQKNjD_Kp-tUQyfVCcw"
+uri = "file://.local/phase2-evidence-report.md"
+type = "text"
+title = "Phase 2: Full 15/15 Engine Run Evidence Report"
+
+[[outputs]]
+id = "OFOCFUL7AgqtV7pVJUD4K"
+uri = "file://server/docs/agent-system-audit.md"
+type = "text"
+title = "Agent System — Complete Code-Level Audit"
+
+[[outputs]]
+id = "ypjilYn6kBntcfXYz1rZA"
+uri = "file://server/docs/control-layer-architecture.md"
+type = "text"
+title = "Control Layer Architecture — Technical Validation & Design"
+
+[[outputs]]
+id = "f7WgpNVkwmN_K0a4nmDHv"
+uri = "file://server/audits/engine-decision-audit.md"
+type = "text"
+title = "Full Engine Decision Logic Audit"
+
+[[outputs]]
+id = "8gYcvH3PSU6nW5EInWHDr"
+uri = "file://server/audits/signal-interpretation-audit.md"
+type = "text"
+title = "Signal Interpretation & Propagation Audit — Deep Root Cause Analysis"
+
+[[outputs]]
+id = "8plIvBf9oZ7-vj13xB8B3"
+uri = "file://server/audits/implementation-plan-validation.md"
+type = "text"
+title = "Technical Validation & Implementation Plan — Validated Against Codebase"
+
+[[outputs]]
+id = "h3XibbJloNLIaokvvAmS8"
+uri = "file://server/tests/DIAGNOSTIC-REPORT.md"
+type = "text"
+title = "Avyron AI — Full Engine Diagnostic Report"
+
+[[outputs]]
+id = "AiVYFWambpO8_sl7itL9T"
+uri = "file://.local/engine-audit.md"
+type = "text"
+title = "Avyron AI — 15-Engine Deep Audit"
+
+[[outputs]]
+id = "fkeWW7-XomPSaw-JTdXzA"
+uri = "file://.local/validation/STRATEGY_ROOT_INCOMPLETE_DIAGNOSIS.md"
+type = "text"
+title = "STRATEGY_ROOT_INCOMPLETE — Root-Cause Diagnosis"
+
+[[outputs]]
+id = "bRETsr0S4-1WQyPlGSo9I"
+uri = "file://.local/validation/PRE_LAUNCH_AUDIT.md"
+type = "text"
+title = "Pre-Launch System Audit Report"
+
+[[outputs]]
+id = "EFMicB1SmbdIoSWDTHFIO"
+uri = "file://.local/validation/INTELLIGENCE_LAYER_REVIEW.md"
+type = "text"
+title = "Engine Intelligence & Logic-Depth Review"
+
+[[outputs]]
+id = "2ilGrhdjK5l2_woCSfl45"
+uri = "file://.local/validation/INTELLIGENCE_UPGRADE_PROOF.md"
+type = "text"
+title = "Engine Intelligence Upgrade — Before/After Proof"
+
+[[outputs]]
+id = "Oci4Llsj46p9VLIHho4Wv"
+uri = "file://.local/validation/MindAI-Engine-Summary-2026-05-03.md"
+type = "text"
+title = "MindAI Engine Output Summary — 2026-05-03"
+
+[[outputs]]
+id = "hssHdm-w8FNF5C_hoPR7E"
+uri = "file://.local/plans/15-engine-contract-map.md"
+type = "text"
+title = "15-Engine Contract Map"
+
+[[outputs]]
+id = "lkiK1pSZmY_2SRrbhPpRz"
+uri = "file://.local/plans/unified-reliability-doctrine-audit.md"
+type = "text"
+title = "Unified Weighted Reliability Doctrine — System-Wide Audit"
+
+[[outputs]]
+id = "3rpBwmefZSSSpDtLr_skj"
+uri = "file://.local/plans/repair-before-block-audit.md"
+type = "text"
+title = "Repair-Before-Block Audit (May 2026) — with Actionable Block Recovery alignment"
+
+[[outputs]]
+id = "iwBfmbQM9PV7lFibLt_-E"
+uri = "file://.local/runs/marketmindai-e2e-run-audit-orch_1778338988220_jjcwv2.md"
+type = "text"
+title = "MarketMindAI E2E Run Audit — orch_1778338988220_jjcwv2"
+
+[[outputs]]
+id = "o1aqSMbU6czStebfbPENT"
+uri = "file://.local/runs/marketmindai-engine-intelligence-breakdown-orch_1778338988220_jjcwv2.md"
+type = "text"
+title = "MarketMindAI — Per-Engine Intelligence Breakdown (orch_1778338988220_jjcwv2)"
+
+[[outputs]]
+id = "1kwOBmI4BkbXJEunOe_GI"
+uri = "file://.local/plans/cross-campaign-account-leakage-audit.md"
+type = "text"
+title = "Cross-Campaign / Cross-Account Leakage Audit"
+
+[[outputs]]
+id = "lnk31svKjIrFX48D4nuXf"
+uri = "file://.local/plans/full-codebase-master-audit.md"
+type = "text"
+title = "Full Codebase Master Audit"
+
+[[outputs]]
+id = "XJeqZu_zMGJ1NtnaKdlRL"
+uri = "file://.local/plans/full-codebase-closure-plan.md"
+type = "text"
+title = "Full Codebase Closure Plan"
+
+[[outputs]]
+id = "gSE-z_rvchuiU4cs0hbcw"
+uri = "file://.local/plans/system-wide-forensic-audit-v2.md"
+type = "text"
+title = "System-Wide Forensic Audit v2 (101 findings)"
+
+[[outputs]]
+id = "-WOhXm3ffmZoBWuUqNk4R"
+uri = "file://.local/plans/system-wide-forensic-closure-v2.md"
+type = "text"
+title = "Forensic Closure Plan v2"
+
+[[outputs]]
+id = "cs6z2lU9122Dt3JF21kFb"
+uri = "file://.local/validation/system-risk-matrix-v2.json"
+type = "unspecified"
+title = "Risk Matrix v2 (machine-readable)"
+
+[[outputs]]
+id = "w6wv50z1Gl242KK_xOkXb"
+uri = "file://docs/operations-guardian-design.md"
+type = "text"
+title = "Operations Guardian — Audit & Architecture Proposal"
+
+[[outputs]]
+id = "ZgfEbRPcAtSJU_eMwo_z2"
+uri = "file://.local/docs/structural-consolidation-audit.md"
+type = "text"
+title = "Structural Consolidation Audit — All 10 Sections"
+
+[[outputs]]
+id = "dTLf9BEjTELn41ctyqZAP"
+uri = "file://.local/docs/consolidation-execution-framework-INDEX.md"
+type = "text"
+title = "0 — Master Index (start here)"
+
+[[outputs]]
+id = "zHUxeFNlCqwm6U1WAjk7J"
+uri = "file://.local/docs/consolidation-execution-framework-cross-cutting.md"
+type = "text"
+title = "1 — Cross-Cutting: Decisions, Dep Graph, Enforcement, Continuous Validation, Testing, Rollback"
+
+[[outputs]]
+id = "CLhd9PI6_eZNPw--31O20"
+uri = "file://.local/docs/consolidation-plan-phases-1-3.md"
+type = "text"
+title = "2 — Phases 1–3: Canonical Fact Ownership + Memory Unification + Enforcement Consolidation"
+
+[[outputs]]
+id = "AIzSyl6diwFDXm4bryjw_"
+uri = "file://.local/docs/phase-4-5-execution-framework.md"
+type = "text"
+title = "3 — Phases 4–5: Orchestrator Decomposition + Contract Tightening"
+
+[[outputs]]
+id = "O9rBTdVxQipoIrKLNMhkX"
+uri = "file://.local/docs/phases-6-9-execution-plan.md"
+type = "text"
+title = "4 — Phases 6–9: Runtime Safety + Domain Composition + UX Projection + Monitor/Pivot Readiness"
+
+[[outputs]]
+id = "dJCPWKJVqf2HQy0LYKd7Z"
+uri = "file://docs/beta-readiness/frontend-ux-audit.md"
+type = "text"
+title = "Frontend & UX Audit — Pre-Beta"
+
+[[outputs]]
+id = "tWctRJGSZAdvDWHyPmisA"
+uri = "file://.local/validation/bcl-progressive-audit.md"
+type = "text"
+title = "Progressive BCL — Data Availability & Engine Dependency Audit"
+
+[[outputs]]
+id = "fQN9-hqL-8u5XbpL6k2J7"
+uri = "file://.local/validation/phase-4a-result.md"
+type = "text"
+title = "Phase 4-A/4-B Result Log (includes Fourth Measurement — post-progressive-BCL)"
+
+[[outputs]]
+id = "xVghK-CxtSjlFPJ2up4Vz"
+uri = "file://.local/validation/compare-output-v3.md"
+type = "text"
+title = "v3 Control-vs-Treatment Comparator"
+
+[[outputs]]
+id = "-5PkM4WbKge7xCYmPoCX_"
+uri = "file://.local/exports/avyron-file-tree.txt"
+type = "text"
+title = "Avyron AI — complete file tree, sizes, and active/unused notes"
+
+[[outputs]]
+id = "YITscaj15UjkBNbguzSn0"
+uri = "file://replit.md"
+type = "text"
+title = "replit.md (cleaned — 201 lines, ~4,800 tokens)"
+
+[[outputs]]
+id = "ILF0kFexfqrYqUDS5G2_u"
+uri = "file://.local/docs/seals/replit-md-prune-2026-05-22.md"
+type = "text"
+title = "replit-md-prune-2026-05-22.md (new archive — 178 lines, §12 sections)"
+
+[[outputs]]
+id = "-QTOw8lXRo41ydF5ivZ3i"
+uri = "file://.local/exports/avyron-files-export.tar.gz"
+type = "unspecified"
+title = "Avyron AI — 5 requested files (env-validator, index, migrations/runner, schema, orchestrator/index) — 113 KB compressed"
+
+[[outputs]]
+id = "zQwzV2xnoyfY5C4-tH1_u"
+uri = "file://.local/exports/avyron-files-export-2.tar.gz"
+type = "unspecified"
+title = "Avyron AI — 6 requested files (narrative-layer, continuity/scheduler, perception-translator, commercial-dna, audience-engine, positioning-engine) — 89 KB compressed"
+
+[[outputs]]
+id = "m9HytHYvI4F2dQ-15Np40"
+uri = "file://.local/exports/avyron-files-export-3.tar.gz"
+type = "unspecified"
+title = "Avyron AI — 3 requested files (boss/index, orchestrator/snapshot-reuse, market-intelligence-v3/engine-state) — 8.1 KB compressed"
+
+[[outputs]]
+id = "7WThoS-2plP5OzluFQCi7"
+uri = "file://.local/exports/avyron-files-export-4.tar.gz"
+type = "unspecified"
+title = "Avyron AI — 3 requested files (user-channel-scraper, market-intelligence-v3/fetch-orchestrator, boss/run) — 37 KB compressed"
+
+[[outputs]]
+id = "L-HoqH7sJRJ-3lR7-FsyE"
+uri = "file://.local/exports/avyron-files-export-5.tar.gz"
+type = "unspecified"
+title = "Avyron AI — 5 requested boss files (plan, policy/market-shift, policy/dna-working, eval-hierarchy, types) — 13 KB compressed"
+
+[[outputs]]
+id = "u6xj9D-VRu00yJvP37Tnu"
+uri = "file://.local/exports/file-map-delta-2026-05-23.md"
+type = "text"
+title = "File-map verification — delta report (171 working files missing from map)"
+
+[[outputs]]
+id = "C2nivWZ2IvRsPu6yLWURu"
+uri = "file://.local/exports/boss-audit-12files.tar.gz"
+type = "unspecified"
+title = "Boss audit — 12 files (tar.gz, 26 KB)"
+
+[[outputs]]
+id = "5SsY6NZa29MFpxeZfgga_"
+uri = "file://cluster_files.zip"
+type = "unspecified"
+title = "cluster-producer.ts + cluster-comparator.ts"
+
+[[outputs]]
+id = "H1vvpEcnjmP8nOyN_2HPu"
+uri = "file://audience_engine_files.zip"
+type = "unspecified"
+title = "audience-engine (6 files)"
+
+[[outputs]]
+id = "d-lrwQEjs3vykiplJNxrF"
+uri = "file://boss_files.zip"
+type = "unspecified"
+title = "Boss module (12 files)"
+
+[[outputs]]
+id = "lcoey0qfs7JB0anL-UFL4"
+uri = "file://audit_report.md"
+type = "text"
+title = "Full Audit Report - Seven Engine Modules"
+
+[[outputs]]
+id = "kc5RgBT8OsZuD5eZOWZo4"
+uri = "file://ai_audit_report.md"
+type = "text"
+title = "Batch 2 Core Engines Security & Doctrine Audit Report"
+
+[[outputs]]
+id = "6n8Gl35Lbf7R8l20ymOUc"
+uri = "file://ai_audit_report_final_batch.md"
+type = "text"
+title = "Intelligence Audit Report - Final Batch"
+
+[[outputs]]
+id = "gj1ldouloWj3MDp2sr7KE"
+uri = "file://ai_audit_report_replay_causal_batch.md"
+type = "text"
+title = "Intelligence Audit Report - Replay Harness + Analytical & Causal Layers"
+
+[[outputs]]
+id = "_KlgRZ7GIJohHbbtJw0JW"
+uri = "file://SECURITY_AUDIT_REPORT.md"
+type = "text"
+title = "Avyron AI Security Audit Report"
+
+[[outputs]]
+id = "DxtfOOxiq7d4VSDrrgo7J"
+uri = "file://CONTINUITY_AUDIT_REPORT.md"
+type = "text"
+title = "Continuity Module Audit Report"
+
+[[outputs]]
+id = "e2WQDJCRUsvD3ndCb_Wtd"
+uri = "file://docs/audits/miv3-data-audit-batch-1.md"
+type = "text"
+title = "Market Intelligence v3 — Data Audit Batch 1/4"
+
+[[outputs]]
+id = "NXHAge0ulvT3V4GGOpLL9"
+uri = "file://docs/audits/competitive-intelligence-data-audit-batch-2.md"
+type = "text"
+title = "Competitive Intelligence — Data Audit Batch 2/4"
+
+[[outputs]]
+id = "EvFOaPI1OwyzRrICwV9Eh"
+uri = "file://docs/audits/pipeline-data-audit-batch-3.md"
+type = "text"
+title = "Pipeline — Data Audit Batch 3/4"
+
+[[outputs]]
+id = "XxSvY81HQCtLZtfS1Eb7U"
+uri = "file://docs/audits/pipeline-lanes-ai-overlay-data-quality-frontend-batch-4.md"
+type = "text"
+title = "Batch 4 Audit Report — Pipeline Lanes + AI Overlay + Data Quality + Frontend"
+
+[[outputs]]
+id = "jIxj-m3OypKcXfnAgv2Lk"
+uri = "file://docs/audits/ux-watchtower-perception-dashboard-patch-1.md"
+type = "text"
+title = "Patch 1/3 Audit — Watchtower, Perception Layer, and Dashboard Routes"
+
+[[outputs]]
+id = "pLp5FRHQ4BZ_cOgrwfOLo"
+uri = "file://docs/audits/ux-security-audit-patch-2-3.md"
+type = "text"
+title = "UX Security Audit Patch 2/3 Report"
+
+[[outputs]]
+id = "_ucMZ-Tus-xXquYE2Wg3J"
+uri = "file://docs/audits/ux-security-audit-patch-3-3.md"
+type = "text"
+title = "UX Security Audit Patch 3/3 Report"
+
+[[outputs]]
+id = "wOxpuucJdgyRe-gaabSM0"
+uri = "file://docs/audits/ux-data-freshness-audit.md"
+type = "text"
+title = "UX Data Freshness Audit Report"
+
+[[outputs]]
+id = "OTS4QuzTjneknJZKBVAHQ"
+uri = "file://docs/audits/infrastructure-audit-patch-1-5.md"
+type = "text"
+title = "Infrastructure Audit Patch 1/5 Report"
+
+[[outputs]]
+id = "00AedkKwyMiPGtXbzZu51"
+uri = "file://docs/audit-ai-vs-template-report.md"
+type = "text"
+title = "Avyron AI — AI vs Template Audit Report (Final, verbatim)"
+
+[[outputs]]
+id = "r1NOHsYVsP4RKlsNXPjri"
+uri = "file://docs/feasibility-audit-ai-inversion.md"
+type = "text"
+title = "Feasibility Audit — AI Architecture Inversion (Full Report)"
+
+[[outputs]]
+id = "isewvGiFidHqx5XhnAUJo"
+uri = "file://docs/ai-proposes-code-validates-full-report.md"
+type = "text"
+title = "AI Proposes, Code Validates — Full Report (Phases 0–4)"

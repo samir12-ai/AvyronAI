@@ -6,6 +6,7 @@ import {
   Pressable,
   ActivityIndicator,
   useColorScheme,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -44,6 +45,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [planData, setPlanData] = useState<any>(null);
+  const [pipelineState, setPipelineState] = useState<any>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [expandedRiskIdx, setExpandedRiskIdx] = useState<number | null>(null);
 
@@ -87,6 +89,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
       }
 
       setPlanData({ ...activeData, documentData: docData });
+      setPipelineState(activeData.pipelineState || null);
     } catch (err: any) {
       setError(err.message || 'Network error.');
     } finally {
@@ -143,6 +146,10 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   const work = planData.requiredWork;
   const calendar = planData.calendar;
   const docContent = planData.documentData?.document?.contentJson || {};
+
+  const isPipelineBlocked = pipelineState?.isBlocked === true;
+  const isPipelineFailed = pipelineState?.isFailed === true;
+  const isPlanStale = pipelineState?.isPlanStale === true;
 
   const statusLabel = plan?.status?.replace(/_/g, ' ') || 'DRAFT';
   const isActive = ['APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'SCHEDULED', 'PUBLISHED'].includes(plan?.status);
@@ -383,32 +390,133 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
   };
 
   const renderWeeklyRhythm = () => {
-    if (!work) return null;
-    const items = [
-      { label: 'Reels', count: work.reels?.perWeek, icon: 'videocam-outline', color: C.coral },
-      { label: 'Posts', count: work.posts?.perWeek, icon: 'image-outline', color: C.blue },
-      { label: 'Stories', count: work.stories?.perDay ? `${work.stories.perDay}/day` : 0, icon: 'layers-outline', color: C.teal },
-      { label: 'Carousels', count: work.carousels?.perWeek, icon: 'albums-outline', color: C.orange },
-      { label: 'Videos', count: work.videos?.perWeek, icon: 'film-outline', color: C.mint },
-    ].filter(i => i.count && i.count !== 0);
+    const liveRhythm = planData.liveRhythm;
+    const approvedRhythm = planData.approvedRhythm;
+    const rhythmDelta = planData.rhythmDelta;
+    const showApproved = !!approvedRhythm;
+    const showDelta = !!(rhythmDelta && showApproved);
 
-    if (items.length === 0) return null;
+    const planJsonDna = planData.plan?.sections?.contentDna?.weeklyStructure;
+
+    const formatRows = [
+      {
+        label: 'Reels',
+        icon: 'videocam-outline' as const,
+        color: C.coral,
+        current: liveRhythm?.reelsPerWeek ?? planJsonDna?.reels ?? work?.reels?.perWeek,
+        approved: approvedRhythm?.reelsPerWeek,
+        delta: rhythmDelta?.reels,
+        unit: '/wk',
+      },
+      {
+        label: 'Posts',
+        icon: 'image-outline' as const,
+        color: C.blue,
+        current: liveRhythm?.postsPerWeek ?? work?.posts?.perWeek,
+        approved: approvedRhythm?.postsPerWeek,
+        delta: null as number | null,
+        unit: '/wk',
+      },
+      {
+        label: 'Stories',
+        icon: 'layers-outline' as const,
+        color: C.teal,
+        current: liveRhythm?.storiesPerDay ?? planJsonDna?.stories ?? work?.stories?.perDay,
+        approved: approvedRhythm?.storiesPerDay,
+        delta: rhythmDelta?.stories,
+        unit: '/day',
+      },
+      {
+        label: 'Carousels',
+        icon: 'albums-outline' as const,
+        color: C.orange,
+        current: liveRhythm?.carouselsPerWeek ?? planJsonDna?.carousels ?? work?.carousels?.perWeek,
+        approved: approvedRhythm?.carouselsPerWeek,
+        delta: rhythmDelta?.carousels,
+        unit: '/wk',
+      },
+    ].filter(r => r.current != null && r.current !== 0);
+
+    if (formatRows.length === 0 && !work) return null;
+
+    const deltaColor = (d: number | null | undefined) => {
+      if (d == null) return textSecondary;
+      if (d > 0) return '#10B981';
+      if (d < 0) return C.coral;
+      return textSecondary;
+    };
+    const deltaStr = (d: number | null | undefined) => {
+      if (d == null) return '—';
+      if (d > 0) return `+${d}`;
+      if (d < 0) return `${d}`;
+      return '0';
+    };
 
     return (
       <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-        <View style={st.sectionHead}>
-          <Ionicons name="calendar-outline" size={18} color={C.orange} />
-          <Text style={[st.sectionTitle, { color: textPrimary }]}>Weekly Rhythm</Text>
+        <View style={{ padding: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="calendar-outline" size={18} color={C.orange} />
+            <Text style={[st.sectionTitle, { color: textPrimary, flex: 1 }]}>Weekly Rhythm</Text>
+            <Pressable
+              onPress={() => Alert.alert(
+                'Adaptive System',
+                'These values are continuously updated by the system based on performance data and market signals. They reflect live output from the adaptive rhythm engine — not a fixed plan snapshot.'
+              )}
+              style={st.livePill}
+              hitSlop={8}
+            >
+              <View style={st.liveDot} />
+              <Text style={st.livePillText}>Adaptive · Live</Text>
+              <Ionicons name="information-circle-outline" size={11} color="#3B82F6" />
+            </Pressable>
+          </View>
         </View>
-        <View style={st.rhythmGrid}>
-          {items.map((item, i) => (
-            <View key={i} style={[st.rhythmCard, { backgroundColor: surfaceBg, borderColor: cardBorder }]}>
-              <Ionicons name={item.icon as any} size={16} color={item.color} />
-              <Text style={[st.rhythmCount, { color: textPrimary }]}>{item.count}</Text>
-              <Text style={[st.rhythmLabel, { color: textSecondary }]}>{item.label}</Text>
+
+        <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+          <View style={[st.rhythmTableHeader, { borderBottomColor: cardBorder }]}>
+            <Text style={[st.rhythmTableHeaderCell, { flex: 2, color: textSecondary }]}>Format</Text>
+            <Text style={[st.rhythmTableHeaderCell, { color: textSecondary }]}>Current</Text>
+            {showApproved && <Text style={[st.rhythmTableHeaderCell, { color: textSecondary }]}>Approved</Text>}
+            {showDelta && <Text style={[st.rhythmTableHeaderCell, { color: textSecondary }]}>Δ</Text>}
+          </View>
+          {formatRows.map((row, i) => (
+            <View
+              key={i}
+              style={[
+                st.rhythmTableRow,
+                { borderBottomColor: cardBorder, borderBottomWidth: i < formatRows.length - 1 ? 1 : 0 },
+              ]}
+            >
+              <View style={[st.rhythmFormatCell, { flex: 2 }]}>
+                <Ionicons name={row.icon} size={13} color={row.color} />
+                <Text style={[st.rhythmFormatLabel, { color: textPrimary }]}>{row.label}</Text>
+              </View>
+              <Text style={[st.rhythmValueCell, { color: textPrimary }]}>
+                {row.current}{row.unit}
+              </Text>
+              {showApproved && (
+                <Text style={[st.rhythmValueCell, { color: textSecondary }]}>
+                  {row.approved != null ? `${row.approved}${row.unit}` : '—'}
+                </Text>
+              )}
+              {showDelta && (
+                <Text style={[st.rhythmValueCell, { color: deltaColor(row.delta), fontWeight: '700' as const }]}>
+                  {deltaStr(row.delta)}
+                </Text>
+              )}
             </View>
           ))}
         </View>
+
+        {showApproved && approvedRhythm?.approvedAt && (
+          <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+            <Text style={{ fontSize: 10, color: textSecondary }}>
+              Approved on {new Date(approvedRhythm.approvedAt).toLocaleDateString()}
+            </Text>
+          </View>
+        )}
+
         {work && (
           <View style={st.progressSection}>
             <View style={st.progressHeader}>
@@ -774,6 +882,93 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
         </Pressable>
       )}
 
+      {(() => {
+        // Task #53 / U1 — Degraded-plan banner.
+        // Surfaces the truthful provenance fields the synthesis pipeline
+        // already records (B1 doctrine — confidence-with-provenance over
+        // confident-looking fabrication). Reads `degraded`, `planSource`,
+        // and `_provenance.aelPartialReason` directly off the synthesized
+        // plan JSON (returned as `plan.sections` by /api/plans/active/:id,
+        // see server/orchestrator/routes.ts).
+        // No string fallback at the prop boundary (D2/D5) — the banner
+        // renders ONLY when `degraded === true`; absence of the flag is
+        // NOT silently treated as "probably degraded".
+        const sections: any = (plan as any)?.sections;
+        const isDegraded = sections?.degraded === true;
+        if (!isDegraded) return null;
+        const partialReason: string | null =
+          (typeof sections?._provenance?.aelPartialReason === 'string' && sections._provenance.aelPartialReason.length > 0)
+            ? sections._provenance.aelPartialReason
+            : null;
+        const planSource: string | null =
+          typeof sections?.planSource === 'string' ? sections.planSource : null;
+        const sourceLabel =
+          planSource === 'degraded_no_decisions' ? 'No validated market decisions were available for this run.' :
+          planSource === 'degraded_ai_failed' ? 'AI plan synthesis failed for this run.' :
+          planSource === 'deterministic_fallback' ? 'This plan was generated by the deterministic fallback layer.' :
+          'This plan was generated with reduced inputs.';
+        return (
+          <View
+            style={{
+              backgroundColor: isDark ? '#2A0F0F' : '#FEF2F2',
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: '#EF444460',
+              padding: 14,
+              marginHorizontal: 16,
+              marginBottom: 12,
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: 10,
+            }}
+            testID="plan-degraded-banner"
+          >
+            <Ionicons name="alert-circle-outline" size={20} color="#EF4444" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700' as const, color: '#EF4444' }}>
+                Degraded plan
+              </Text>
+              <Text style={{ fontSize: 12, color: isDark ? '#FCA5A5' : '#7F1D1D', marginTop: 4, lineHeight: 18 }}>
+                {sourceLabel}
+                {partialReason ? ` Reason: ${partialReason}.` : ''}
+              </Text>
+              <Text style={{ fontSize: 11, color: isDark ? '#FCA5A5AA' : '#991B1B', marginTop: 4 }}>
+                Re-run the pipeline once your data sources are healthy for a higher-confidence plan.
+              </Text>
+            </View>
+          </View>
+        );
+      })()}
+
+      {isPlanStale && (
+        <View style={{
+          backgroundColor: isDark ? '#1A1400' : '#FFFBEB',
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: '#F59E0B40',
+          padding: 14,
+          marginHorizontal: 16,
+          marginBottom: 12,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 10,
+        }}>
+          <Ionicons name="warning-outline" size={20} color="#F59E0B" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700' as const, color: '#F59E0B' }}>
+              This plan is from a previous run
+            </Text>
+            <Text style={{ fontSize: 12, color: isDark ? '#8892A4' : '#546478', marginTop: 4, lineHeight: 18 }}>
+              The latest pipeline run is {isPipelineBlocked ? 'blocked' : 'in error state'}.
+              {pipelineState?.blockReason ? ` Reason: ${pipelineState.blockReason}` : ''}
+            </Text>
+            <Text style={{ fontSize: 11, color: isDark ? '#4A5568' : '#8A96A8', marginTop: 4 }}>
+              Re-run the pipeline to generate a current plan.
+            </Text>
+          </View>
+        </View>
+      )}
+
       <View style={[st.headerStrip, { backgroundColor: cardBg, borderColor: cardBorder }]}>
         <View style={st.headerRow}>
           <View style={st.headerIconWrap}>
@@ -791,6 +986,60 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
             <Text style={[st.statusText, { color: isActive ? C.neon : C.gold }]}>{statusLabel}</Text>
           </View>
         </View>
+        {(() => {
+          // Task #53 / U3 — validationState confidence badge.
+          // 4-value strict enum from server/orchestrator/plan-synthesis.ts:
+          // validated | provisional | weak | rejected. No string fallback
+          // at the prop boundary (D2/D3); unknown values render nothing
+          // rather than silently coercing to "validated".
+          const VALIDATION_LABELS = {
+            validated: 'Validated',
+            provisional: 'Provisional',
+            weak: 'Low confidence',
+            rejected: 'Rejected',
+          } as const;
+          const VALIDATION_COLORS = {
+            validated: '#10B981',
+            provisional: '#3B82F6',
+            weak: '#F59E0B',
+            rejected: '#EF4444',
+          } as const;
+          const VALIDATION_ICONS = {
+            validated: 'shield-checkmark-outline',
+            provisional: 'shield-half-outline',
+            weak: 'shield-outline',
+            rejected: 'close-circle-outline',
+          } as const;
+          const raw = (plan as any)?.sections?.validationState;
+          if (raw !== 'validated' && raw !== 'provisional' && raw !== 'weak' && raw !== 'rejected') {
+            return null;
+          }
+          const v = raw as keyof typeof VALIDATION_LABELS;
+          const color = VALIDATION_COLORS[v];
+          return (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 8,
+                marginTop: 10,
+                backgroundColor: color + '15',
+                borderWidth: 1,
+                borderColor: color + '40',
+                alignSelf: 'flex-start',
+              }}
+              testID="plan-validation-state-badge"
+            >
+              <Ionicons name={VALIDATION_ICONS[v] as any} size={13} color={color} />
+              <Text style={{ fontSize: 11, fontWeight: '600' as const, color }}>
+                Confidence: {VALIDATION_LABELS[v]}
+              </Text>
+            </View>
+          );
+        })()}
       </View>
 
       {renderGoalBlock()}
@@ -866,6 +1115,15 @@ const st = StyleSheet.create({
   rhythmCard: { flex: 1, minWidth: 70, borderWidth: 1, borderRadius: 10, padding: 10, alignItems: 'center' as const, gap: 4 },
   rhythmCount: { fontSize: 18, fontWeight: '800' as const },
   rhythmLabel: { fontSize: 10 },
+  rhythmTableHeader: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1 },
+  rhythmTableHeaderCell: { flex: 1, fontSize: 10, fontWeight: '600' as const, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  rhythmTableRow: { flexDirection: 'row', paddingVertical: 10, alignItems: 'center' as const },
+  rhythmFormatCell: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rhythmFormatLabel: { fontSize: 13, fontWeight: '600' as const },
+  rhythmValueCell: { flex: 1, fontSize: 13, fontWeight: '600' as const },
+  livePill: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, backgroundColor: '#3B82F615', borderWidth: 1, borderColor: '#3B82F650' },
+  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#10B981' },
+  livePillText: { fontSize: 10, fontWeight: '600' as const, color: '#3B82F6', letterSpacing: 0.3 },
   progressSection: { paddingHorizontal: 14, paddingBottom: 14 },
   progressHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   progressLabel: { fontSize: 12 },

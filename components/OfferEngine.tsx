@@ -14,8 +14,51 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
 import { useColorScheme } from 'react-native';
+
+// Defense-in-depth display helpers. The server-side normalizer is the
+// primary contract guard; these never let raw objects, synthetic indexed
+// keys (objection_N), or internal grounding tokens ([RC#]/[BB#]/[CC#])
+// reach the screen. Uncoercible values render as the em-dash placeholder.
+function stripDisplayTokens(s: string): string {
+  return s
+    .replace(/\[(?:RC|BB|CC|[A-Z]{2,3})\d+\]/g, '')
+    .replace(/\b(?:objection|desire|pain|claim|barrier)_\d+\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .trim();
+}
+export function safeText(val: any): string {
+  if (val === null || val === undefined) return '—';
+  if (typeof val === 'string') {
+    const cleaned = stripDisplayTokens(val);
+    return cleaned.length > 0 ? cleaned : '—';
+  }
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  if (typeof val === 'object') {
+    const candidates = [val.label, val.text, val.pain, val.desire, val.objection, val.name, val.title, val.value];
+    for (const c of candidates) {
+      if (typeof c === 'string') {
+        const cleaned = stripDisplayTokens(c);
+        if (cleaned.length > 0) return cleaned;
+      }
+    }
+    return '—';
+  }
+  return '—';
+}
+export function safeTextArray(arr: any): string[] {
+  if (!Array.isArray(arr)) return [];
+  const out: string[] = [];
+  for (const item of arr) {
+    const s = safeText(item);
+    if (s && s !== '—') out.push(s);
+  }
+  return out;
+}
 
 interface OfferDepthScores {
   outcomeClarity: number;
@@ -105,6 +148,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
   const [data, setData] = useState<OfferData | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [activeSection, setActiveSection] = useState<'primary' | 'alternative' | 'rejected'>('primary');
@@ -120,6 +164,7 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
       const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
       setData(json);
+      setEnvelope(json?.envelope ?? null);
     } catch (err) {
       console.error('[OfferEngine] Fetch error:', err);
     } finally {
@@ -239,24 +284,57 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
     const ctx = data?.layerDiagnostics?.sourceContext;
     if (!ctx) return null;
 
-    const toStr = (val: any): string => {
-      if (val === null || val === undefined) return '';
-      if (typeof val === 'string') return val;
-      if (typeof val === 'number') return String(val);
-      if (typeof val === 'object') {
-        return val.name || val.label || val.pain || val.desire || val.text || val.title || JSON.stringify(val);
+    // Defense-in-depth: the API boundary normalizer is the primary fix.
+    // safeText is the last-resort guard — it NEVER renders raw objects,
+    // synthetic indexed keys (objection_N), or internal grounding tokens
+    // ([RC#]/[BB#]/[CC#]). Uncoercible values render as the em-dash
+    // placeholder rather than "[object Object]" or JSON debris.
+    const stripDisplayTokens = (s: string): string =>
+      s
+        .replace(/\[(?:RC|BB|CC|[A-Z]{2,3})\d+\]/g, '')
+        .replace(/\b(?:objection|desire|pain|claim|barrier)_\d+\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+([,.;:!?])/g, '$1')
+        .trim();
+
+    const safeText = (val: any): string => {
+      if (val === null || val === undefined) return '—';
+      if (typeof val === 'string') {
+        const cleaned = stripDisplayTokens(val);
+        return cleaned.length > 0 ? cleaned : '—';
       }
-      return String(val);
+      if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+      if (typeof val === 'object') {
+        const candidates = [val.label, val.text, val.pain, val.desire, val.objection, val.name, val.title, val.value];
+        for (const c of candidates) {
+          if (typeof c === 'string') {
+            const cleaned = stripDisplayTokens(c);
+            if (cleaned.length > 0) return cleaned;
+          }
+        }
+        return '—';
+      }
+      return '—';
     };
+    // Backward-compatible alias used throughout this component.
+    const toStr = safeText;
 
     const toTagStr = (val: any): string => {
-      if (typeof val === 'string') return val.replace(/_/g, ' ');
-      if (typeof val === 'object' && val !== null) {
-        const s = val.type || val.name || val.label || val.title || '';
-        return typeof s === 'string' ? s.replace(/_/g, ' ') : JSON.stringify(val);
-      }
-      return String(val);
+      const t = safeText(val);
+      return t === '—' ? t : t.replace(/_/g, ' ');
     };
+
+    // Filter array → only keep human-readable strings (or coercible objects).
+    const safeArray = (arr: any): string[] => {
+      if (!Array.isArray(arr)) return [];
+      const out: string[] = [];
+      for (const item of arr) {
+        const s = safeText(item);
+        if (s && s !== '—') out.push(s);
+      }
+      return out;
+    };
+    void safeArray; // exposed for future use; consumed by caller scopes below
 
     return (
       <View style={[styles.contextCard, { backgroundColor: colors.card, borderColor: '#8B5CF630' }]}>
@@ -574,6 +652,12 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
           </View>
         )}
       </LinearGradient>
+
+      {envelope && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={runAnalysis} />
+        </View>
+      )}
 
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>

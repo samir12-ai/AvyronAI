@@ -1,0 +1,235 @@
+Hi,
+
+We now have enough evidence to stop validating and start fixing the two actual blocking issues exposed by the real runs.
+
+This is not a request for another audit, another hypothesis pass, or another plan.
+
+Build the fixes directly based on the code and the observed runtime behavior.
+
+---
+
+# ISSUE 1 — MarketMindAI: Positioning is being blocked for the wrong reason
+
+## Observed behavior
+
+In the MarketMindAI run:
+
+* Market Intelligence completed successfully
+* Audience completed successfully
+* Positioning returned confidence = 0.20
+* The system triggered the positioning hard gate and blocked the pipeline
+
+The current system is treating this as a positioning logic failure.
+
+That is not yet proven.
+
+The evidence shows the positioning score is heavily influenced by:
+
+* low signal coverage
+* orphaned claims
+* weak market power gap
+* weak trust gap
+
+This means the engine may be doing its job correctly while operating on weak or sparse usable market signal density.
+
+The problem is that the current gate is using a single confidence number as if it means:
+
+> “the engine logic is weak”
+
+when in reality it may mean:
+
+> “the engine worked correctly, but the available positioning-grade data is weak”
+
+That distinction matters.
+
+---
+
+## Required fix for MarketMindAI
+
+### Separate the cause of low positioning confidence inside the Positioning engine output
+
+Do NOT block purely on the current single confidence field.
+
+The Positioning engine must explicitly produce:
+
+* `engineConfidence`
+
+  * how well the engine performed its reasoning process
+  * based on logic quality, internal consistency, interpretation quality, and rule adherence
+
+* `dataConfidence`
+
+  * how strong the available input data is for positioning
+  * based on signal coverage, usable evidence density, mapped signals, market clarity
+
+* `combinedConfidence`
+
+  * final rolled-up value if still needed for display
+
+### Hard requirement
+
+The mid-pipeline positioning gate must block only when:
+
+* `engineConfidence` is below threshold
+
+It must NOT block purely because:
+
+* `dataConfidence` is low
+
+### Required behavior
+
+If:
+
+* `engineConfidence` is strong
+* but `dataConfidence` is weak
+
+Then:
+
+* the system continues
+* the run is marked as data-limited
+* the problem registry records a weak-data problem
+* but the engine is NOT treated as a failed reasoner
+
+### Deliverable for this fix
+
+Implement this directly in the Positioning engine and in the post-Positioning gate.
+
+Do not patch this in the Control Layer only.
+Do not solve this with more penalties.
+Fix the meaning of the confidence signal at the source.
+
+---
+
+# ISSUE 2 — SWA Media: System is blocking before the picture is complete
+
+## Observed behavior
+
+In the SWA Media run, the system emitted:
+
+* `NO_CONVERSION_PATH`
+
+even though:
+
+* Channel Selection had not completed
+* the responsible stage for determining conversion path had not actually run to completion
+
+This is logically invalid.
+
+A missing downstream result is not proof of failure.
+
+It only means:
+
+> the system does not yet have evaluable evidence for that check
+
+Right now the system is conflating:
+
+* “not yet evaluated”
+  with
+* “evaluated and failed”
+
+That must be corrected.
+
+---
+
+## Required fix for SWA Media / pipeline completeness logic
+
+### Introduce evaluability preconditions for structural checks
+
+Every block check must first verify:
+
+1. Did the responsible engine run?
+2. Did it produce valid evaluable output?
+3. Is the required data present to make this judgment?
+
+Only if all three are true can the check fire as a failure.
+
+### Specifically for `NO_CONVERSION_PATH`
+
+This block reason must only be allowed if:
+
+* `channel_selection` ran
+* channel selection produced valid structured output
+* conversion-stage evaluation actually occurred
+* and the evaluated result shows no conversion path
+
+If Channel Selection did NOT run:
+
+* do NOT emit `NO_CONVERSION_PATH`
+* do NOT treat missing output as failure
+* mark the check as:
+
+  * `not_yet_evaluable`
+  * or `deferred_due_to_incomplete_pipeline`
+
+### Hard rule
+
+The system must never block on a downstream structural failure that has not yet become evaluable.
+
+In short:
+
+> absence of output before the responsible engine runs is not a failure
+
+This rule must be implemented in the structural checks / System Control evaluation logic itself.
+
+---
+
+# REQUIRED IMPLEMENTATION DIRECTION
+
+## A. Fix Positioning block semantics
+
+Implement:
+
+* `engineConfidence`
+* `dataConfidence`
+* correct gate semantics after Positioning
+
+## B. Fix structural check evaluability
+
+Implement:
+
+* evaluability preconditions on all structural block checks
+* immediate correction for `NO_CONVERSION_PATH`
+
+---
+
+# DO NOT DO
+
+* Do not ask for another validation plan
+* Do not return another diagnosis-only report
+* Do not solve this by weakening thresholds globally
+* Do not add more warning text
+* Do not add another layer around the issue
+
+---
+
+# DO THIS
+
+Build the fix directly in code, then run both campaigns again:
+
+* **MarketMindAI**
+* **SWA Media**
+
+And return only:
+
+1. exact code-level changes
+2. before vs after behavior
+3. final result for each campaign
+4. confirmation that:
+
+   * MarketMindAI is no longer blocked purely due to weak data masquerading as weak logic
+   * SWA Media no longer emits premature `NO_CONVERSION_PATH` before the responsible engine has run
+
+---
+
+## Important
+
+This is not a design question anymore.
+
+This is a direct implementation task based on real runtime evidence from the current system behavior. The previous evidence already showed:
+
+* positioning confidence is being used too bluntly as a gate
+* structural blocking can fire before the picture is complete
+
+Proceed directly with the fix.
+
+Thanks.

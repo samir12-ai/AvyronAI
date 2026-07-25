@@ -29,6 +29,7 @@ import { pruneOldSnapshots, checkValidationSession } from "../engine-hardening";
 import { parseLineageFromSnapshot, mergeLineageArrays, findBestParentSignal, createDerivedLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -87,6 +88,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
   app.post("/api/persuasion-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, awarenessSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -413,6 +415,7 @@ export function registerPersuasionEngineRoutes(app: Express) {
       console.log(`[PersuasionEngine] LINEAGE_BUILT | upstream=${upstreamLineage.length} | derived=${persuasionLineage.length} | claims=${persuasionClaims.length}`);
 
       const [saved] = await db.insert(persuasionSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         awarenessSnapshotId: awarenessSnapshot.id,
@@ -457,26 +460,36 @@ export function registerPersuasionEngineRoutes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.json({ exists: false, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(persuasionSnapshots)
         .where(and(
           eq(persuasionSnapshots.campaignId, campaignId),
           eq(persuasionSnapshots.accountId, accountId),
-          eq(persuasionSnapshots.engineVersion, ENGINE_VERSION),
+          eq(persuasionSnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(persuasionSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ exists: false });
+        return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
       }
 
       res.json({
         exists: true,
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
         id: latest.id,
         campaignId: latest.campaignId,
         status: latest.status,

@@ -1,0 +1,207 @@
+Hi,
+
+We are now at the final root-level blocker.
+
+All system layers are functioning correctly:
+
+* run consistency ✔
+* data plumbing ✔
+* AEL ✔
+* orchestration ✔
+* engine logic (structurally) ✔
+
+What remains is a **fundamental flaw in Statistical Validation lineage logic**.
+
+This is not a bug.
+This is a **design limitation** that must be corrected at the root.
+
+---
+
+# 1. Problem (Confirmed)
+
+Statistical Validation currently uses:
+
+> **lexical word-overlap matching** to link claims → signals
+
+Specifically:
+
+* ≥1 overlapping word (≥4 chars) required
+* otherwise claim = orphaned
+
+---
+
+## Result
+
+Valid claims are being rejected:
+
+Example pattern:
+
+* Offer: “Reduce financial anxiety…”
+* Audience pains: “confusion”, “overwhelm”, “decision paralysis”
+
+→ No shared words
+→ orphaned
+→ validationState = rejected
+
+Despite:
+
+* correct upstream signals
+* correct positioning
+* correct logic
+
+---
+
+# 2. This Must Be Replaced (Not Tuned)
+
+Do NOT:
+
+* lower thresholds
+* allow partial matches
+* add exceptions
+* whitelist claims
+
+This is not a tuning issue.
+
+---
+
+# 3. Required Fix — Semantic Lineage Matching
+
+Replace `findLineageMatch()` logic with **semantic grounding**, not lexical matching.
+
+---
+
+## Required Behavior
+
+For each claim:
+
+### Step A — Compute semantic similarity
+
+* claim.text vs upstreamLineage[].signalText
+* use embeddings / semantic similarity
+
+### Step B — Assign parentSignalId
+
+* select best matching signal(s)
+* allow multi-match if needed
+
+### Step C — Confidence-weighted mapping
+
+* high similarity → strong grounding
+* medium similarity → weak/inferred grounding
+* low similarity → orphan (valid case)
+
+---
+
+## Important
+
+* Matching must be **system-calculated**, not LLM-reported
+* Must be deterministic
+* Must not depend on wording coincidence
+
+---
+
+# 4. Grounding Output Requirements
+
+Each claim must produce:
+
+* parentSignalId (if matched)
+* groundingScore (semantic similarity)
+* groundingType:
+
+  * direct
+  * inferred
+  * none
+
+---
+
+# 5. Validation Logic Update
+
+Replace:
+
+```text
+orphaned = no word overlap
+```
+
+With:
+
+```text
+orphaned = no semantic match above minimum threshold
+```
+
+---
+
+# 6. Offer Engine Constraint (Secondary, NOT substitute)
+
+Additionally:
+
+* Encourage (not force) offer generation to reuse audience pain vocabulary
+* This improves traceability but must NOT replace semantic matching
+
+---
+
+# 7. Acceptance Criteria (Strict)
+
+This fix is NOT complete until:
+
+## A. MMA Validation
+
+* orphaned claims: 5 → near 0
+* signalBackedClaimRatio increases materially
+* validationState transitions:
+
+  * rejected → provisional / validated
+
+## B. Grounding Integrity
+
+* claims mapped to real upstream signals
+* no artificial mapping
+* no fabricated lineage
+
+## C. No Regression
+
+* no false-positive grounding
+* no over-permissive matching
+
+---
+
+# 8. Evidence Required
+
+Provide:
+
+### Before vs After
+
+* orphaned claim count
+* signalBackedClaimRatio
+* validationState
+
+### Matching Proof
+
+* example claims
+* matched signals
+* similarity scores
+
+---
+
+# 9. Non-Negotiable Rules
+
+Do NOT:
+
+* weaken validation
+* inject fake matches
+* rely on LLM to assign lineage
+* patch outputs to pass validation
+* bypass Statistical Validation
+
+---
+
+# 10. Final Note
+
+This is the last major logic barrier.
+
+Once semantic lineage is implemented:
+
+> The system will finally operate as a **coherent reasoning engine**, not a lexical filter.
+
+Proceed directly.
+
+Thanks.

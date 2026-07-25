@@ -1,0 +1,142 @@
+:::writing{variant=“email” id=“77452” subject=“Post-Claims Fix Validation Checklist + Next Steps”}
+Hi,
+
+Now that the claims contract fix (Option B) is implemented, we need a structured validation phase before moving to any further changes (including Option C).
+
+Please follow the checklist below exactly and confirm each step with evidence.
+
+⸻
+
+Phase 1 — Multi-Campaign Validation
+
+Run the full pipeline on at least 3–5 different campaigns (not just one), ideally:
+	•	different industries
+	•	different audience types
+	•	different signal strengths
+
+For each campaign, confirm:
+
+1. Claims Integrity
+	•	strategy_roots.approved_claims is populated
+	•	approved_claim matches the top-ranked claim from claimStructures
+	•	approved_promise is distinct from approved_claim
+	•	At least 2 claims exist when data allows
+
+⸻
+
+2. Cross-Engine Claim Consistency
+
+Verify that the same claims propagate across:
+	•	Differentiation → Mechanism → Strategy Root → Offer
+
+Check:
+	•	No claim regeneration replacing upstream truth
+	•	Mechanism promise is clearly anchored to one of the approved claims
+	•	Offer hooks:
+	•	primaryHook uses top claim
+	•	altHook uses second claim (not fallback template)
+
+⸻
+
+3. No Drift / No Mismatch
+
+Confirm:
+	•	No POSITIONING_MISMATCH caused by claim drift
+	•	No cases where:
+	•	upstream claims are strong
+	•	but downstream output diverges
+
+⸻
+
+4. Offer Quality Sanity
+
+Check manually for each campaign:
+	•	Offer is logically consistent with:
+	•	positioning
+	•	awareness (trust level)
+	•	No aggressive claims when trust is low
+	•	No generic fallback text replacing claims
+
+⸻
+
+Phase 2 — Frontend Verification
+
+For each tested campaign:
+
+5. UI Claim Consistency
+
+Verify that frontend:
+	•	Displays the same claims as backend
+	•	Does NOT:
+	•	show stale claims
+	•	mix claims from previous runs
+	•	show regenerated variants
+
+⸻
+
+6. Section Alignment
+
+Check:
+	•	Offer section reflects the same claim used in backend
+	•	Narrative / summary sections are consistent with claim direction
+	•	No cross-campaign leakage
+
+⸻
+
+Phase 3 — Stability & Repeatability
+
+7. Re-run Stability
+	•	Re-run the same campaign multiple times
+	•	Confirm:
+	•	Claims remain consistent (unless input changes)
+	•	No random drift between runs
+
+⸻
+
+8. Root Supersession Behavior
+	•	Confirm:
+	•	Old strategy roots are superseded correctly
+	•	New runs always use the latest valid root
+	•	No reuse of stale roots (especially those without approved_claims)
+
+⸻
+
+Phase 4 — Edge Cases
+
+9. Low-Signal Campaign
+
+Test at least one weak-data campaign:
+	•	Confirm system still:
+	•	produces valid (even if simpler) claims
+	•	does not break or fallback incorrectly
+
+⸻
+
+Deliverables
+
+After completing all steps, send back:
+	1.	Summary of tested campaigns
+	2.	Evidence (logs / snapshots) for:
+	•	claims propagation
+	•	offer consistency
+	3.	Any anomalies found
+	4.	Confirmation:
+	•	whether system is stable enough to proceed
+
+⸻
+
+Next Step (Do NOT start yet)
+
+Only after this checklist is fully validated:
+
+→ We will decide whether to proceed with Option C (strict claim alignment validator)
+
+⸻
+
+Do not skip steps.
+Do not assume correctness from a single run.
+
+Proceed with validation only.
+
+Thanks.
+:::

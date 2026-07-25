@@ -1,0 +1,108 @@
+Hi,
+
+Before we continue iterating on the Business Context Layer (BCL), I want to pause and properly audit the actual data availability and engine dependencies across the system.
+
+I suspect a large portion of the information the BCL needs may already exist inside the current pipeline, but not all of it is available at the same stage of orchestration.
+
+Right now I do not want us to solve this by adding excessive manual user inputs.
+
+Instead, I want a proper audit answering:
+
+* what business-context signals already exist,
+* where they exist,
+* when they become available,
+* which engines produce them,
+* which stages depend on other stages,
+* and what minimum viable business profile can be constructed progressively throughout orchestration.
+
+Important:
+The BCL should not assume all fields exist from the beginning.
+It should support progressive enrichment.
+
+Example:
+Early-stage profile:
+
+* industry
+* business category
+* basic buyer type
+* website/service understanding
+* high-level commercial lens
+
+Later-stage enrichment:
+
+* offer clarity
+* ICP refinement
+* positioning
+* funnel bottlenecks
+* pricing complexity
+* objection patterns
+* trust gaps
+* activation friction
+* retention signals
+
+I want an audit of:
+
+1. Existing data already available in the system
+   Please inspect:
+
+* scraped website data
+* social/account bios
+* reviews
+* campaign/user inputs
+* positioning outputs
+* audience outputs
+* offer engine outputs
+* market intelligence outputs
+* strategy outputs
+* product DNA
+* canonical snapshots
+* signal maps
+* orchestration context
+
+For each:
+
+* what fields exist,
+* how reliable they are,
+* when they become available,
+* and whether they are usable for BCL construction.
+
+2. Engine dependency timeline
+   Map:
+
+* which engines run first,
+* which engines depend on later engines,
+* what context exists before Offer Engine,
+* what context only becomes available afterward,
+* and how a progressive BCL should evolve across the orchestration lifecycle.
+
+3. Progressive BCL design recommendation
+   I want a proposed staged architecture:
+
+Stage 1:
+Minimal business understanding from early evidence only.
+
+Stage 2:
+Enriched profile after mid-pipeline engines.
+
+Stage 3:
+Final commercial lens before strategic synthesis / agents.
+
+The key point:
+BCL must not block on unavailable engines or unavailable fields.
+
+Unknown fields should remain explicitly unknown — never hallucinated.
+
+4. Missing data analysis
+   Please identify:
+
+* what critical business signals are truly missing,
+* what can already be inferred safely,
+* what should remain optional,
+* and whether any additional user input is genuinely necessary.
+
+5. Recommendation
+   After the audit:
+   Recommend the cleanest architecture for making the LLM understand the business context progressively without creating hard dependencies, hallucinated assumptions, or orchestration deadlocks.
+
+Do not implement new architecture yet.
+First perform the audit and produce the dependency/data map so we can decide the next step based on actual system reality rather than assumptions.

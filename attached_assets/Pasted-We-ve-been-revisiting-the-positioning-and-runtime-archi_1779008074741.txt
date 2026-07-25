@@ -1,0 +1,139 @@
+We’ve been revisiting the positioning and runtime architecture of Avyron, and we want to pressure-test both the product layer and the underlying system design before continuing deeper implementation.
+
+Current direction:
+
+Avyron is no longer just “AI agents” or generic adaptive marketing automation.
+
+The stronger direction seems to be:
+
+1. User connects an existing page/brand (Instagram, TikTok, Website, etc.)
+2. System analyzes:
+
+   * profile structure
+   * positioning
+   * content patterns
+   * engagement rhythm
+   * market pacing
+   * competitors
+   * offer quality
+   * messaging gaps
+3. System compares against market/cluster behavior
+4. System outputs:
+
+   * diagnosis
+   * market-relative weaknesses
+   * strategic gaps
+   * 30-day execution roadmap
+   * adaptive recommendations
+   * ongoing degradation / shift detection
+
+Core recurring intelligence layer we care about:
+
+* What is weakening before collapse?
+* Why did ROAS drop this week?
+* Which competitor started taking attention?
+* Is the problem market-side or creative-side?
+* Does the angle need changing?
+* Is audience fatigue appearing?
+* Is the offer becoming stale?
+
+The challenge is:
+most of these capabilities already exist inside our current system architecture in fragmented form.
+
+We already have:
+
+* scraping infrastructure
+* orchestration
+* adaptive engines
+* reliability doctrine
+* weighted evidence systems
+* market intelligence
+* audience systems
+* positioning systems
+* retry layers
+* canonical truth systems
+* memory concepts
+
+But we’re struggling with:
+how to unify this into a coherent runtime + product experience without turning the system into an uncontrollable long-term complexity trap.
+
+Main architecture concerns:
+
+1. Reference / Evaluation Layer
+   How should we define the “market reference model” that the system evaluates against?
+
+* static standards?
+* cluster-relative baselines?
+* dynamic percentile systems?
+* historical self-performance?
+* hybrid weighted scoring?
+
+2. AI Runtime Isolation
+   How do we safely expose scraped market/context data to AI reasoning layers without:
+
+* hallucination drift
+* truth distortion
+* stale evidence inflation
+* confidence leakage
+* over-inference
+* runaway adaptation loops
+
+3. Pipeline Integration
+   Best practices for integrating:
+   scraping → normalization → canonical truth → scoring → AI reasoning → strategic output
+   without:
+
+* state corruption
+* retry amplification
+* context poisoning
+* unstable outputs
+* inconsistent narratives between engines
+
+4. Runtime Determinism
+   How deterministic should the system remain?
+   We are trying to preserve:
+
+* replayability
+* explainability
+* auditability
+  while still allowing adaptive reasoning.
+
+5. Strategic Memory
+   How should memory evolve safely?
+   We do NOT want:
+   “successful once = permanently trusted”
+   We want:
+   weighted evolving memory that decays, revalidates, and cross-checks against live market conditions.
+
+6. Product Layer
+   Big concern:
+   users do not buy “adaptive intelligence.”
+   They buy:
+
+* monitoring
+* strategic clarity
+* decision confidence
+* early warnings
+* execution guidance
+
+So we’re trying to bridge:
+deep adaptive architecture
+with
+a simple understandable UX.
+
+Main question:
+
+If you were designing this system from scratch today:
+
+* how would you structure the runtime boundaries?
+* where would AI reasoning start/end?
+* what should remain deterministic vs adaptive?
+* how would you structure the market-reference layer?
+* how would you prevent long-term architectural entropy as the system scales?
+
+Would love brutally honest feedback on both:
+
+* product direction
+* systems architecture
+* runtime safety
+* scalability tradeoffs.

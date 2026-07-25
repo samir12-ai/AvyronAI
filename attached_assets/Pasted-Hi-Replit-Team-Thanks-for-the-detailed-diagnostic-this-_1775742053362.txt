@@ -1,0 +1,120 @@
+Hi Replit Team,
+
+Thanks for the detailed diagnostic — this was very helpful and aligned with what we’re seeing.
+
+Let’s proceed with the next steps based on priority and product impact.
+
+---
+
+### 🔴 1. Build Plan Persistence (Priority #1)
+
+This is currently the most critical issue.
+
+* The Build Plan output (from `runBuildPlanLayer`) is not persisted
+* On refresh, the system regenerates instead of fetching
+* This breaks continuity and user trust
+
+**Action:**
+
+* Persist the final build plan output to DB (e.g. `plan_documents` or equivalent)
+* On “latest” calls:
+
+  * Return stored version if exists
+  * Only regenerate when explicitly triggered
+
+---
+
+### 🔴 2. Surface Agent Decisions in UI (Priority #2)
+
+The system is generating decisions (`strategy_decisions` table), but they are not visible to the user.
+
+We want to surface these inside the **agent box**.
+
+**Implementation direction:**
+
+* Pull recent entries from `strategy_decisions`
+* Display them as agent messages (not logs)
+
+Each insight should be structured as:
+
+* **Observation** (what changed)
+* **Why it matters** (context / comparison)
+* **Suggested action**
+
+Example:
+
+> I’ve detected a shift in your campaign.
+> Reels are underperforming vs market (1.8% vs 3.9% save rate).
+> Suggested: shift 1 slot → carousel next week.
+
+**Guidelines:**
+
+* 2–4 insights max (no spam)
+* Separate messages (not one block)
+* Tone: strategist, not system logs
+* Agent should initiate (not wait for user prompt)
+
+---
+
+### 🟡 3. Agent Behavior (Follow-up)
+
+Now that the worker is fixed and decisions are being generated:
+
+* Confirm the worker is consistently running on schedule
+* Confirm decisions continue to be written to DB
+* Once surfaced in UI, the agent should feel “alive” (continuous monitoring)
+
+---
+
+### 🟡 4. Onboarding Simplification (Next Phase)
+
+We will move to a simplified 3-step flow:
+
+1. **System Setup**
+
+   * Business data
+   * Product DNA
+   * Content DNA
+   * Scraping links
+
+2. **Market Setup**
+
+   * Add competitors
+   * Validate inputs
+
+3. **Run System**
+
+   * Single trigger → full orchestrator pipeline
+   * No per-engine manual execution
+
+This is not blocking current fixes, but should be the next product step.
+
+---
+
+### 🟢 5. Rhythm (No Change Needed)
+
+Confirmed — current behavior is correct:
+
+* System is using fallback due to lack of performance data
+* Will self-correct once content is published
+
+No changes required here.
+
+---
+
+### 🎯 Summary
+
+Immediate focus:
+
+1. Persist Build Plan output
+2. Surface agent decisions in UI
+
+These two will significantly improve product clarity and perceived intelligence.
+
+---
+
+Let me know once Build Plan persistence is implemented, then proceed directly with the agent insights UI.
+
+Thanks,
+Samir
+Avyron AI

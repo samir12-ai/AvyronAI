@@ -1,0 +1,61 @@
+Final Verification Run: DNA Enrichment Gate End-to-End
+Context:
+The DNA Enrichment Gate (Path A auto-enrichment + Path B dashboard flag) is fully implemented and migration 040 is applied. The user has now filled the Product Identity (product anchor) form with a real, specific differentiatingFeature describing the live competitor monitoring mechanism and the anti-generic validation gate. This is the first full run with BOTH the enrichment gate live AND an enriched product anchor. The purpose of this run is verification only — no code changes unless a genuine bug is found, and if one is found, diagnose root cause first and report before fixing.
+PHASE 1 — Pre-run state confirmation
+
+Confirm the product anchor for campaign campaign_1773576062201_6t0oxi now contains the user's new values — print growth_campaigns.product_anchor (name, type, keyAttributes, coreProblemSolved, differentiatingFeature) from the DB. If the anchor is empty or still at old values, STOP and report — do not run the pipeline against a stale anchor.
+Confirm schema version = 40 and the backend is booted clean (no schema-floor refusal).
+Confirm no active QUEUED/RUNNING fetch job exists (no zombie dedup risk). Report the state of the most recent fetch jobs.
+
+PHASE 2 — Full pipeline run
+
+Run the full real-data pipeline on campaign campaign_1773576062201_6t0oxi (within cooldown is fine — same corpus as the last clean runs).
+Do not modify any gate, threshold, judge logic, or retry counts. This run must reflect the system exactly as it will behave for a real user.
+
+PHASE 3 — Evidence report (answer ALL of the following explicitly, with log lines / DB rows / file paths as proof)
+
+Judge verdicts, per attempt:
+
+Positioning: for each attempt (1–3), quote the [InterchangeabilityJudge] kind=positioning_claim verdict=... line with its reason.
+Offer: same, for kind=offer.
+Final answer: did positioning PASS the judge? Did offer PASS? Yes/no each.
+
+
+Enrichment behavior:
+
+Did DNA_ENRICHMENT_TRIGGER fire at all this run? (With a strong anchor, the judge may pass on attempt 1 and enrichment should correctly NOT fire — that is a valid success outcome. If it fired, quote the DNA_ENRICHMENT_OK candidates and their AEL refs.)
+
+
+Path B flag + dashboard (only relevant if a judge still rejects at exhaustion):
+
+Quote DNA_ENRICHMENT_REQUEST_RAISED from the orchestrator log if emitted.
+Print the actual dna_enrichment_requests row(s) for this campaign from the DB (engine_kind, status, suggestion_text).
+Confirm the dashboard card renders with the exact suggestion text (screenshot or rendered-output evidence).
+If a previous run left an open flag and this run's judge now PASSES, confirm DNA_ENRICHMENT_REQUEST_AUTORESOLVED fired and the row status flipped to resolved.
+
+
+Run-level outcome vs the previous baseline run:
+
+doctrineResolution (previous: business_level_degraded, coverage 0.5) — report the new value truthfully.
+System Control verdict and its exact reasons (previous: BLOCKED on PIPELINE_INCOMPLETE / COMPLIANCE_FAILURE / CONFIDENCE_SPREAD_EXCESSIVE with offer REUSED_UNVERIFIED).
+BuildPlan actionability score.
+Positioning/Offer trust classification (did REUSED_UNVERIFIED disappear?).
+Awareness and Funnel depth-gate scores (confirm the 0.20 gate untouched).
+
+
+Regression safety:
+
+Confirm all 15 engines completed (NOT_REACHED=0, DEPTH_CASCADE_BLOCKED=0).
+Confirm no new DNA_ENRICHMENT_WRITE_FAILED or silent-catch patterns appeared in this run's logs.
+
+
+
+Constraints:
+
+Verification only. No gate/threshold/judge/prompt changes. No "fixing" anything mid-run without reporting root cause first.
+Report results truthfully whether improved or not — a truthful BLOCK is an acceptable answer; a fake PASS is not.
+
+Done-conditions:
+
+All 5 evidence sections answered with quoted logs/DB rows.
+Explicit final one-line verdict: "Enrichment loop closed: judge PASS with enriched anchor" OR "Judge still rejects: dashboard card live with suggestion X" — one of the two, backed by evidence.

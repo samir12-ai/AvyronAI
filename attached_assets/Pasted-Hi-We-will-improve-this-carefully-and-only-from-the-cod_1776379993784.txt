@@ -1,0 +1,101 @@
+Hi,
+
+We will improve this carefully and only from the codebase, not from assumptions.
+
+I do NOT want a broad redesign, multiple speculative fixes, or a new theory built on top of an unverified theory.
+
+We will do this in two controlled phases only.
+
+---
+
+# Phase 1 — Code-Grounded Objection Audit
+
+The goal is to identify exactly why campaigns like SWA can have high data volume but still end up with missing objection signals.
+
+This phase must be based on the code and the actual data flow, not on runtime excuses or intuition.
+
+## Audit exactly this path:
+
+- MI output
+- Audience labeled text ingestion
+- objection pattern matching
+- objection confidence scoring
+- evidence integrity filtering
+- semantic bridge usage
+- structuredSignals objection category output
+- SGL coverage mapping
+
+## I want exact answers to these questions:
+
+1. At what exact step are objection signals being lost?
+2. Are objection candidates present in raw/labeled inputs but filtered out later?
+3. Is the current logic only good at extracting explicit objections and weak at implicit objections?
+4. Is this a threshold/filtering issue, or a category-mapping issue?
+5. Is the final SGL missing-objection state caused by:
+   - extraction failure
+   - filtering failure
+   - mapping failure
+   - or contract/output-shape mismatch?
+
+## Required output for Phase 1:
+
+- code-level trace
+- step-by-step counts through the objection pipeline
+- exact root cause(s)
+- no fixes yet
+
+Do not propose five ideas.  
+Identify the real cause first.
+
+---
+
+# Phase 2 — One Minimal Logic Upgrade Only
+
+After Phase 1 identifies the real root cause from code, implement only one minimal improvement and rerun.
+
+Possible directions are:
+
+- implicit objection inference from comparison / distrust / wrong-choice signals
+- objection threshold calibration
+- objection-to-SGL mapping correction
+- objection-specific semantic bridge improvement
+
+But you must choose only the one that is most directly supported by the code audit.
+
+## Rules for Phase 2:
+
+- one change only
+- no threshold weakening across the whole system
+- no new broad architecture
+- no patches
+- no bundling multiple fixes together
+
+---
+
+# Validation Required
+
+After the single improvement is implemented, rerun and provide:
+
+- objection count before vs after
+- SGL objection coverage before vs after
+- downstream impact:
+  - differentiation
+  - offer
+  - funnel
+  - persuasion
+  - statistical validation
+- whether the change improved real logic or just increased noise
+
+---
+
+# Important
+
+Do not build a new layer on top of a possibly wrong assumption.
+
+We are doing this properly:
+
+> trace → isolate → improve once → rerun → compare
+
+Proceed with Phase 1 first.
+
+Thanks.

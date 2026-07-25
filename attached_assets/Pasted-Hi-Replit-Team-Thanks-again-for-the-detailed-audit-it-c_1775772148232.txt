@@ -1,0 +1,197 @@
+Hi Replit Team,
+
+Thanks again for the detailed audit — it clarified the system architecture very well.
+
+We now have a clear direction for the next phase. The goal is not to rebuild anything, but to connect existing pieces correctly and add the missing decision layer that routes between execution and strategy.
+
+Please review the following and respond based on the current codebase.
+
+---
+
+# 🔴 1. Execution Compliance (Critical Missing Layer)
+
+Right now, the system can:
+- generate plans
+- generate insights
+- detect performance issues
+
+But it does NOT verify whether the user actually executed the plan before making higher-level decisions.
+
+We need a clear way to answer:
+
+- Did the user publish content according to the plan?
+- Is there enough activity to evaluate performance?
+- Do we have real signals, or just absence of execution?
+
+---
+
+### Expected behavior:
+
+If the user has NOT executed:
+→ the system should NOT trigger any strategy changes
+
+Instead:
+→ it should route to execution actions (content creation, publishing, cadence)
+
+---
+
+# 🔴 2. Strategy Rebuild Gate (Core Logic)
+
+We want to enforce a strict rule:
+
+> Strategy should only change in two cases:
+
+1. The user followed the system AND results underperformed  
+2. The market changed significantly  
+
+---
+
+### What this means in practice:
+
+- If the user did not publish → no rebuild  
+- If there is no performance data → no rebuild  
+- If signals are weak → no rebuild  
+
+Only when:
+- execution happened  
+AND  
+- results are clearly below expectation  
+
+→ allow strategy-level changes
+
+---
+
+# 🔴 3. Insight Classification Must Be Grounded in Reality
+
+Currently, insight types are derived from text patterns.
+
+We need them to reflect actual system state.
+
+---
+
+### Expected behavior:
+
+- No content → user_execution  
+- Low cadence → user_execution  
+- No usable signal → measurement_gap  
+- Market movement → market_shift  
+- Only after compliance + failure → strategy_gap  
+
+---
+
+### Goal:
+
+Insight classification should be based on:
+- execution state  
+- performance data  
+- market signals  
+
+Not just text matching
+
+---
+
+# 🔴 4. Enforce Execution-First Routing
+
+We need to correct how actions are triggered from insights.
+
+---
+
+### Required behavior:
+
+#### For execution issues:
+- route to execution actions  
+- do NOT trigger plan rebuild  
+
+#### For measurement gaps:
+- initialize signal generation (content + tracking)  
+
+#### For market shifts:
+- update strategy layers (positioning, funnel, offer)  
+- then adjust rhythm  
+
+#### For strategy gaps:
+- only allowed if rebuild conditions are met  
+
+---
+
+### Core principle:
+
+> Do not fix execution problems with strategy changes
+
+---
+
+# 🔴 5. Connect Agent to Execution Pipeline
+
+We confirmed that a full execution system already exists:
+- content generation
+- calendar scheduling
+- publishing worker
+
+However, the agent currently does not trigger these flows.
+
+---
+
+### Required:
+
+When an insight requires execution:
+- the agent should trigger the execution pipeline directly  
+- not only update plans or rhythm  
+
+---
+
+### Example:
+
+If the issue is “no content”:
+→ the system should guide or trigger content creation/publishing  
+→ not rebuild strategy
+
+---
+
+# 🔴 6. Important Constraint
+
+We do NOT want to:
+- rebuild existing systems  
+- duplicate logic  
+- create parallel flows  
+
+We want to:
+> use the existing execution and strategy pipelines, and connect them correctly
+
+---
+
+# 🎯 Summary
+
+This phase is about adding the missing decision layer:
+
+- verify execution before strategy changes  
+- enforce when strategy is allowed to change  
+- classify insights based on real signals  
+- route actions correctly (execution vs strategy)  
+- connect the agent to actual execution, not just planning  
+
+---
+
+# 🚀 Expected Outcome
+
+The system should behave like:
+
+- Execution issue → execution action  
+- Market shift → strategy update  
+- Proven failure after compliance → strategy rebuild  
+
+---
+
+Please respond with:
+
+- what already exists  
+- what partially exists  
+- what is missing  
+- and where each part would live in the current codebase  
+
+---
+
+We want to build on top of what already exists — not override it.
+
+Thanks,  
+Samir  
+Avyron AI

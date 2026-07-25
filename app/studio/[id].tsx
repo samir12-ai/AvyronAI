@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { apiRequest } from '@/lib/query-client';
+import StudioComingSoon, { STUDIO_COMING_SOON } from '@/components/StudioComingSoon';
 
 interface StudioItemDetail {
   id: string;
@@ -46,6 +47,13 @@ interface StudioItemDetail {
 }
 
 export default function StudioItemDetailScreen() {
+  if (STUDIO_COMING_SOON) {
+    return <StudioComingSoon />;
+  }
+  return <StudioItemDetailScreenFull />;
+}
+
+function StudioItemDetailScreenFull() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const colorScheme = useColorScheme();

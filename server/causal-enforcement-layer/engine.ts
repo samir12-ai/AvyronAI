@@ -16,12 +16,45 @@ import {
 
 const LOG_PREFIX = "[CEL]";
 
+// P1-4 (runtime-truth-isolation): bounded LRU cache. The previous Map was
+// unbounded — any account could grow it indefinitely (one entry per
+// (account, campaign) pair) until process OOM. The eviction policy is
+// strict LRU on read+write with a hard size cap, and TTL is enforced on
+// every read so stale entries never serve a live decision. The cache key
+// remains `${accountId}:${campaignId}` (per-tenant); cross-run blending
+// within a tenant is gated downstream by sourceJobId checks in
+// classifyTrust + the build-plan-layer sourceJobId reads (P0-6).
 const celReportCache = new Map<string, { report: CELReport; storedAt: number }>();
 const CEL_REPORT_TTL = 30 * 60 * 1000;
+const CEL_REPORT_MAX_ENTRIES = 500;
+
+// Phase 6 / Task #69 step 8 — cache eviction telemetry. Counts size-cap and
+// TTL evictions separately so an operator can detect (a) cache thrash (size
+// evictions climbing fast on a small tenant set = key collision bug) and
+// (b) stale-read avoidance (ttl evictions = healthy churn). Exposed via
+// `_getCelCacheStats()` for /metrics integration.
+const _celCacheEvictions = { size: 0, ttl: 0 };
+export function _getCelCacheStats(): { size: number; ttl: number; entries: number; maxEntries: number; ttlMs: number } {
+  return { size: _celCacheEvictions.size, ttl: _celCacheEvictions.ttl, entries: celReportCache.size, maxEntries: CEL_REPORT_MAX_ENTRIES, ttlMs: CEL_REPORT_TTL };
+}
+
+function celCacheTouch(key: string, value: { report: CELReport; storedAt: number }): void {
+  // Re-insertion at the end of the Map = LRU touch (Map preserves
+  // insertion order on iteration; the oldest key is the first one out).
+  celReportCache.delete(key);
+  celReportCache.set(key, value);
+  while (celReportCache.size > CEL_REPORT_MAX_ENTRIES) {
+    const oldest = celReportCache.keys().next().value;
+    if (oldest === undefined) break;
+    celReportCache.delete(oldest);
+    _celCacheEvictions.size++;
+    console.warn(`${LOG_PREFIX} CACHE_LRU_EVICT | key=${oldest} | reason=size_cap | totalSizeEvicts=${_celCacheEvictions.size}`);
+  }
+}
 
 export function storeCELReport(campaignId: string, accountId: string, report: CELReport): void {
   const key = `${accountId}:${campaignId}`;
-  celReportCache.set(key, { report, storedAt: Date.now() });
+  celCacheTouch(key, { report, storedAt: Date.now() });
   console.log(`${LOG_PREFIX} REPORT_STORED | campaign=${campaignId} | account=${accountId} | engines=${report.engineResults.length} | score=${report.overallScore}`);
 }
 
@@ -31,9 +64,36 @@ export function getCachedCELReport(campaignId: string, accountId: string): CELRe
   if (!entry) return null;
   if (Date.now() - entry.storedAt > CEL_REPORT_TTL) {
     celReportCache.delete(key);
+    _celCacheEvictions.ttl++;
     return null;
   }
+  // LRU touch on read so hot keys survive eviction longer.
+  celCacheTouch(key, entry);
   return entry.report;
+}
+
+/**
+ * Per-rule pass thresholds.
+ * Default raised from 0.4 → 0.6 (a "passed" engine must clear the majority of
+ * its causal-compliance budget, not just survive minor violations).
+ * "Critical" rules — those whose root-cause is named CAUSAL_CHAIN or
+ * ROOT_CAUSE_GROUNDING in the engine taxonomy — require 0.75. The map keys
+ * are matched against ComplianceResult.appliedRules entries.
+ */
+export const DEFAULT_CONSTRAINT_THRESHOLD = 0.6;
+export const CONSTRAINT_THRESHOLDS: Record<string, number> = {
+  TRUST_OPACITY_RULE: 0.75,
+  VALUE_PERCEPTION_RULE: 0.75,
+  MECHANISM_COMPREHENSION_RULE: 0.75,
+  FEAR_RISK_RULE: 0.75,
+};
+export function resolveConstraintThreshold(appliedRules: string[]): number {
+  let max = DEFAULT_CONSTRAINT_THRESHOLD;
+  for (const id of appliedRules) {
+    const t = CONSTRAINT_THRESHOLDS[id];
+    if (typeof t === "number" && t > max) max = t;
+  }
+  return max;
 }
 
 const CAUSAL_CONSTRAINT_RULES: CausalConstraintRule[] = [
@@ -186,7 +246,24 @@ export function enforcePositioningCompliance(
   };
 
   if (!ael || !ael.root_causes || ael.root_causes.length === 0) {
-    result.enforcementLog.push("NO_AEL: No analytical enrichment available — skipping enforcement");
+    // evaluate causal compliance at all; the gate must treat this as a hard
+    // fail so downstream callers don't get a green light from a non-evaluation.
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.reason = "AEL_MISSING";
+    result.enforcementLog.push("NO_AEL: No analytical enrichment available — verdict=INCOMPLETE (cannot evaluate)");
+    return result;
+  }
+
+  // INCOMPLETE. A degraded enrichment package cannot ground positioning
+  // territories' causal compliance any more than a missing one can.
+  if (ael.isPartial === true) {
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.reason = "AEL_PARTIAL";
+    result.enforcementLog.push(`AEL_PARTIAL: ${ael.partialReason || "partial enrichment"} — verdict=INCOMPLETE (positioning cannot be grounded on degraded AEL)`);
     return result;
   }
 
@@ -195,7 +272,12 @@ export function enforcePositioningCompliance(
   result.enforcementLog.push(`THEMES: ${themes.join(", ")} | primary=${primaryTheme}`);
 
   if (themes.length === 0) {
-    result.enforcementLog.push("NO_MATCHING_RULES: AEL root causes did not match any constraint rules");
+    // either way. Mark INCOMPLETE so plan synthesis knows compliance was
+    // not actually verified.
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.enforcementLog.push("NO_MATCHING_RULES: AEL root causes did not match any constraint rules — verdict=INCOMPLETE");
     return result;
   }
 
@@ -265,12 +347,22 @@ export function enforcePositioningCompliance(
   if (blockingViolations.length > 0) {
     result.passed = false;
     result.score = 0;
+    result.verdict = "FAIL";
+    result.reason = blockingViolations[0].violationType;
   } else if (majorViolations.length > 0) {
+    // value (default 0.6, critical themes 0.75). Raw score compared, no
+    // pre-rounding (F3.9).
     result.score = Math.max(0, 1 - (majorViolations.length * 0.3));
-    result.passed = result.score >= 0.4;
+    const threshold = resolveConstraintThreshold(result.appliedRules);
+    result.passed = result.score >= threshold;
+    result.verdict = result.passed ? "PASS" : "FAIL";
+    result.reason = result.passed ? "OK" : majorViolations[0].violationType;
+  } else {
+    result.verdict = "PASS";
+    result.reason = "OK";
   }
 
-  result.enforcementLog.push(`RESULT: passed=${result.passed} | score=${result.score.toFixed(2)} | violations=${result.violations.length} (blocking=${blockingViolations.length}, major=${majorViolations.length})`);
+  result.enforcementLog.push(`RESULT: passed=${result.passed} | verdict=${result.verdict} | score=${result.score.toFixed(2)} | threshold=${resolveConstraintThreshold(result.appliedRules).toFixed(2)} | violations=${result.violations.length} (blocking=${blockingViolations.length}, major=${majorViolations.length})`);
 
   return result;
 }
@@ -291,7 +383,20 @@ export function enforceGenericEngineCompliance(
   };
 
   if (!ael || !ael.root_causes || ael.root_causes.length === 0) {
-    result.enforcementLog.push("NO_AEL: Skipping enforcement");
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.reason = "AEL_MISSING";
+    result.enforcementLog.push(`NO_AEL: ${engineId} cannot be evaluated — verdict=INCOMPLETE`);
+    return result;
+  }
+
+  if (ael.isPartial === true) {
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.reason = "AEL_PARTIAL";
+    result.enforcementLog.push(`AEL_PARTIAL: ${engineId} — ${ael.partialReason || "partial enrichment"} — verdict=INCOMPLETE`);
     return result;
   }
 
@@ -300,7 +405,11 @@ export function enforceGenericEngineCompliance(
   result.appliedRules = themes;
 
   if (!primaryTheme || themes.length === 0) {
-    result.enforcementLog.push("NO_MATCHING_RULES: No causal themes detected");
+    result.passed = false;
+    result.score = 0;
+    result.verdict = "INCOMPLETE";
+    result.reason = "NO_MATCHING_RULES";
+    result.enforcementLog.push(`NO_MATCHING_RULES: ${engineId} — verdict=INCOMPLETE`);
     return result;
   }
 
@@ -338,8 +447,14 @@ export function enforceGenericEngineCompliance(
     result.score = Math.max(0, result.score - 0.1 * genericHits.length);
   }
 
-  result.passed = result.score >= 0.4;
-  result.enforcementLog.push(`RESULT: passed=${result.passed} | score=${result.score.toFixed(2)} | violations=${result.violations.length}`);
+  // value (default 0.6, critical themes 0.75). Raw score compared (F3.9).
+  const threshold = resolveConstraintThreshold(result.appliedRules);
+  result.passed = result.score >= threshold;
+  result.verdict = result.passed ? "PASS" : "FAIL";
+  result.reason = result.passed
+    ? "OK"
+    : (result.violations[0]?.violationType || "BELOW_THRESHOLD");
+  result.enforcementLog.push(`RESULT: passed=${result.passed} | verdict=${result.verdict} | score=${result.score.toFixed(2)} | threshold=${threshold.toFixed(2)} | violations=${result.violations.length}`);
 
   return result;
 }
@@ -497,10 +612,59 @@ export interface DepthGateResult {
   failureReason: string | null;
 }
 
-export function isDepthBlocking(depthResult: DepthComplianceResult): boolean {
-  const hasFactualClaims = depthResult.factualClaimCount > 0;
+// marketing-claim language even when the classifier returns 0 counts.
+// This closes the bypass where shallow / emotional copy that the classifier
+// misclassified would have skipped the depth gate entirely.
+const MARKETING_CLAIM_STRING_PATTERNS: RegExp[] = [
+  /\b(best|fastest|easiest|cheapest|simplest|smartest|safest|strongest|leading|premium|world[- ]class|industry[- ]leading|cutting[- ]edge|state[- ]of[- ]the[- ]art|game[- ]chang(er|ing)|next[- ]gen(eration)?|revolutionary|breakthrough|unmatched|unrivaled|unparalleled|guaranteed|proven|trusted|effortless|seamless)\b/i,
+  /\b(transform|unlock|empower|skyrocket|supercharge|elevate|maximi[sz]e|optimi[sz]e|10x|2x faster|10x faster)\b/i,
+  /\b(more (sales|revenue|leads|customers|growth|impact|value|results)|drive (sales|revenue|leads|growth)|boost (sales|revenue|conversion|engagement))\b/i,
+  /\b(in (just |only )?(\d+|a few|minutes|hours|days)|same[- ]day|overnight|instantly|on demand)\b/i,
+  /\b(love it|you'?ll love|customers love|everyone loves)\b/i,
+];
+
+export function detectMarketingClaimStrings(outputTexts: string[]): { present: boolean; matchedPattern: string | null; sample: string | null } {
+  for (const text of outputTexts) {
+    if (!text) continue;
+    for (const re of MARKETING_CLAIM_STRING_PATTERNS) {
+      const m = re.exec(text);
+      if (m) return { present: true, matchedPattern: re.source, sample: m[0] };
+    }
+  }
+  // F3.7 closure: ANY non-empty marketing output text counts as a claim,
+  // even when no regex keyword fires. The depth gate must not be bypassable
+  // by a classifier false-negative on novel/unstyled copy.
+  for (const text of outputTexts) {
+    const trimmed = (text ?? "").trim();
+    if (trimmed.length >= 8) {
+      return {
+        present: true,
+        matchedPattern: "NON_EMPTY_OUTPUT_FALLBACK",
+        sample: trimmed.slice(0, 80),
+      };
+    }
+  }
+  return { present: false, matchedPattern: null, sample: null };
+}
+
+export function isDepthBlocking(depthResult: DepthComplianceResult, sourceTexts?: string[]): boolean {
+  // EITHER from classifier counts OR (pass-6) from string-presence scan over
+  // the raw output sections. Pass-6 added the string-presence parallel trigger
+  // because the classifier was missing copy that bypassed enforcement.
+  const cb = depthResult.claimBreakdown || { factual: 0, inferred: 0, emotional: 0 };
+  const hasClassifierClaim =
+    (cb.factual ?? 0) > 0 ||
+    (cb.inferred ?? 0) > 0 ||
+    (cb.emotional ?? 0) > 0;
+  const stringDetect = sourceTexts && sourceTexts.length > 0
+    ? detectMarketingClaimStrings(sourceTexts)
+    : { present: false, matchedPattern: null, sample: null };
+  const hasAnyMarketingClaim = hasClassifierClaim || stringDetect.present;
   if (depthResult.causalDepthScore < DEPTH_GATE_THRESHOLD) {
-    if (!hasFactualClaims) return false;
+    if (!hasAnyMarketingClaim) return false;
+    if (!hasClassifierClaim && stringDetect.present) {
+      console.log(`[CEL-DepthGate] STRING_PRESENCE_TRIGGER | classifierMiss | matched="${stringDetect.sample}" | pattern=${stringDetect.matchedPattern}`);
+    }
     return true;
   }
   return false;
@@ -566,8 +730,9 @@ export function buildDepthGateResult(
   attempt: number,
   maxAttempts: number,
   regenerationLog: string[],
+  sourceTexts?: string[],
 ): DepthGateResult {
-  const blocked = isDepthBlocking(depthResult);
+  const blocked = isDepthBlocking(depthResult, sourceTexts);
   return {
     passed: !blocked,
     blocked,
@@ -725,7 +890,9 @@ export function enforceEngineDepthCompliance(
     result.depthDiagnostics.hasBehavioralImpact ? 0.15 : 0,
     Math.max(0, 0.10 - (genericTermCount * 0.02) - (shallowPatternCount * 0.03)),
   ];
-  result.causalDepthScore = Math.round(depthComponents.reduce((a, b) => a + b, 0) * 100) / 100;
+  // threshold compare in isDepthBlocking sees the actual score. Display
+  // rounding happens at serialization time only.
+  result.causalDepthScore = depthComponents.reduce((a, b) => a + b, 0);
 
   if (hasFactualClaims && !result.depthDiagnostics.hasRootCauseGrounding) {
     result.violations.push({
@@ -793,6 +960,26 @@ export function enforceEngineDepthCompliance(
     }
   }
 
+  // Reconcile individual component violations with the overall depth-gate decision.
+  // When overall causalDepthScore is at/above the gate threshold, the engine has
+  // demonstrated sufficient causal depth via OTHER components even if one specific
+  // component (e.g., causal_chain or root_cause) did not semantically match.
+  // Treat those component-level "missing X" violations as MAJOR rather than
+  // BLOCKING, so they still penalize confidence but do not veto an output that
+  // passes the gate. This aligns passed/blocked decisions across the two layers
+  // that previously disagreed (isDepthBlocking used depthScore, result.passed
+  // used blocking-count).
+  if (result.causalDepthScore >= DEPTH_GATE_THRESHOLD) {
+    for (const v of result.violations) {
+      if (
+        v.severity === "blocking" &&
+        (v.violationType === "missing_root_cause" || v.violationType === "missing_causal_chain")
+      ) {
+        v.severity = "major";
+      }
+    }
+  }
+
   const blockingViolations = result.violations.filter(v => v.severity === "blocking");
   const majorViolations = result.violations.filter(v => v.severity === "major");
   const minorViolations = result.violations.filter(v => v.severity === "minor");
@@ -835,3 +1022,60 @@ export function applyDepthPenalty(
 }
 
 export { CAUSAL_CONSTRAINT_RULES };
+
+/**
+ * Phase 3 fix — persist a per-engine ComplianceResult to `cel_reports`.
+ *
+ * The orchestrator calls `enforceGenericEngineCompliance` five times
+ * per run (positioning, differentiation, offer, funnel, persuasion);
+ * each call's result is used inline and then discarded. The narrative
+ * layer + future audit tooling expects to read these from `cel_reports`,
+ * which migration 033 created. This helper is the single write site;
+ * called inline at each of the 5 sites in runOrchestrator.
+ *
+ * Idempotent: UNIQUE(account, campaign, job, engineId) so re-runs
+ * UPSERT instead of stacking. Fail-loud-but-don't-block per Seal #15.
+ */
+export async function persistCELComplianceResult(args: {
+  accountId: string;
+  campaignId: string;
+  jobId: string;
+  result: ComplianceResult;
+}): Promise<void> {
+  const { accountId, campaignId, jobId, result } = args;
+  if (!accountId || !campaignId || !jobId || !result?.engineId) {
+    console.error(`${LOG_PREFIX} CEL_PERSIST_SKIPPED | missing required args | hasAccount=${!!accountId} hasCampaign=${!!campaignId} hasJob=${!!jobId} engineId=${result?.engineId || "missing"}`);
+    return;
+  }
+  try {
+    const { db } = await import("../db");
+    const { sql } = await import("drizzle-orm");
+    const id = `cel_${jobId}_${result.engineId}`;
+    const verdict = result.verdict || (result.passed ? "PASS" : "FAIL");
+    await db.execute(sql`
+      INSERT INTO cel_reports (
+        id, account_id, campaign_id, job_id, engine_id,
+        passed, verdict, reason, score, root_causes_evaluated, report
+      ) VALUES (
+        ${id}, ${accountId}, ${campaignId}, ${jobId}, ${result.engineId},
+        ${!!result.passed},
+        ${verdict},
+        ${result.reason || null},
+        ${Number(result.score) || 0},
+        ${Number(result.rootCausesEvaluated) || 0},
+        ${JSON.stringify(result)}::jsonb
+      )
+      ON CONFLICT (account_id, campaign_id, job_id, engine_id) DO UPDATE SET
+        passed = EXCLUDED.passed,
+        verdict = EXCLUDED.verdict,
+        reason = EXCLUDED.reason,
+        score = EXCLUDED.score,
+        root_causes_evaluated = EXCLUDED.root_causes_evaluated,
+        report = EXCLUDED.report,
+        created_at = now()
+    `);
+    console.log(`${LOG_PREFIX} CEL_PERSISTED | engine=${result.engineId} | verdict=${verdict} | score=${result.score} | violations=${result.violations?.length || 0} | campaign=${campaignId} | job=${jobId}`);
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} CEL_PERSIST_FAILED | engine=${result.engineId} | campaign=${campaignId} | job=${jobId} | err=${err?.message || err}`);
+  }
+}

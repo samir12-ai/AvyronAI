@@ -36,8 +36,17 @@ export function computeSampleStrength(signalResults: CompetitorSignalResult[]): 
   return Math.min(1, totalSamples / idealSamples);
 }
 
+/**
+ * T3.A — Runtime Truth Track: with <2 competitors there is no meaningful
+ * cross-competitor variance to compute. Pre-T3.A this returned a synthetic
+ * 0.5 which then flowed into the weighted-confidence sum (`* 0.10`),
+ * inflating overall by ~0.05 on every single-competitor run and masking
+ * the absence of cross-source verification. Returning 0 surfaces the gap
+ * to the orchestrator's confidence integrity verdict; the absence is also
+ * flagged via `crossCompetitorConsistencyAbsent` on `ConfidenceResult`.
+ */
 export function computeCrossCompetitorConsistency(signalResults: CompetitorSignalResult[]): number {
-  if (signalResults.length < 2) return 0.5;
+  if (signalResults.length < 2) return 0;
   const signalKeys = [
     "postingFrequencyTrend",
     "engagementVolatility",

@@ -17,6 +17,12 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import Colors from '@/constants/colors';
 import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
+import {
+  colorForExecutionStatus,
+  labelForExecutionStatus,
+  isCanonicalExecutionStatus,
+  iconForExecutionStatus,
+} from '@/lib/verdict-colors';
 
 type PanelState = 'loading' | 'empty' | 'error' | 'success';
 
@@ -623,13 +629,36 @@ export default function ControlCenter() {
                 <Text style={[s.decisionDetail, { color: colors.textMuted }]} numberOfLines={2}>{d.details.reason}</Text>
               )}
               <View style={s.decisionMeta}>
-                {d.executionStatus && (
-                  <View style={[s.statusPill, { backgroundColor: d.executionStatus === 'SUCCESS' ? '#10B981' + '15' : '#EF4444' + '15' }]}>
-                    <Text style={[s.statusPillText, { color: d.executionStatus === 'SUCCESS' ? '#10B981' : '#EF4444' }]}>
-                      {d.executionStatus}
-                    </Text>
-                  </View>
-                )}
+                {d.executionStatus && (() => {
+                  // Seal #6: full executionStatus enum (D2/D3). Legacy SUCCESS
+                  // / FAILURE strings are coerced to amber/red — never green.
+                  // BLOCKED_BY_INTEGRITY renders with a distinct lock icon so
+                  // the "integrity layer is holding execution" semantic is
+                  // visible at a glance (vs generic BLOCKED's ban icon).
+                  const isCanonical = isCanonicalExecutionStatus(d.executionStatus);
+                  const color = colorForExecutionStatus(
+                    isCanonical ? d.executionStatus : null,
+                    isCanonical ? null : d.executionStatus,
+                  );
+                  const label = labelForExecutionStatus(
+                    isCanonical ? d.executionStatus : null,
+                    isCanonical ? null : d.executionStatus,
+                  );
+                  const iconName = iconForExecutionStatus(isCanonical ? d.executionStatus : null);
+                  const showIcon = isCanonical && (
+                    d.executionStatus === 'BLOCKED_BY_INTEGRITY'
+                    || d.executionStatus === 'BLOCKED'
+                    || d.executionStatus === 'NEEDS_INPUT'
+                  );
+                  return (
+                    <View style={[s.statusPill, { backgroundColor: color + '15', flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                      {showIcon && <Ionicons name={iconName} size={11} color={color} />}
+                      <Text style={[s.statusPillText, { color }]}>
+                        {label}{!isCanonical ? '*' : ''}
+                      </Text>
+                    </View>
+                  );
+                })()}
                 <Text style={[s.decisionTime, { color: colors.textMuted }]}>{timeAgo(d.createdAt)}</Text>
               </View>
             </View>

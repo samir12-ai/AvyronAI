@@ -1,0 +1,300 @@
+:::writing{variant=“email” id=“68431” subject=“Full Validation Pass Request: End-to-End System Checklist (No Persistent Data Changes)”}
+Hi Replit Team,
+
+Now that the latest decision-layer changes are in place, I’d like to request a full end-to-end validation pass across both backend and frontend.
+
+Please treat this as a comprehensive system QA / verification run, not just a spot check.
+
+⸻
+
+Important Constraint
+
+Please do not permanently modify any existing campaign/account data.
+
+That means:
+	•	no edits to user inputs unless strictly required for a test
+	•	no permanent changes to settings
+	•	no content/state changes left behind after validation
+
+If any temporary test data must be created:
+	•	add it only if necessary
+	•	clean it up afterward
+	•	return the system to the same state it was in before testing
+
+The goal is:
+
+validate the system thoroughly without leaving side effects
+
+⸻
+
+Scope of Validation
+
+Please validate the system from both sides:
+
+1. Frontend / UX behavior
+
+2. Backend / state / DB / routing behavior
+
+We want confidence that the system is correct:
+	•	visually
+	•	functionally
+	•	logically
+	•	persistently
+
+⸻
+
+A. Frontend Validation Checklist
+
+A1. Dashboard / Agent UI
+
+Please verify:
+	•	Insight cards are visible at the top of the Dashboard Agent area
+	•	Insight cards remain visible even after sending chat messages
+	•	Insight cards also appear on the full Agent screen before any conversation
+	•	Insight cards do not disappear when the user interacts with the chat
+	•	Priority badge, timestamp, observation, and suggested action all render correctly
+	•	Action button label matches the correct insight type
+	•	Action button color matches the correct intent
+	•	Haptic / interaction feedback works on insight button tap
+	•	Agent begins responding immediately after action button tap
+	•	Agent response explains:
+	•	what it did
+	•	why it did it
+	•	what changed
+
+⸻
+
+A2. Strategy / Rhythm Screens
+
+Please verify:
+	•	Rhythm values shown in Agent output match rhythm values shown in dashboard/strategy screens
+	•	Closing and reopening the app does not reset these values
+	•	Current rhythm, approved rhythm, and delta (if available) are rendered consistently
+	•	No stale UI remains after action execution
+	•	Refreshing the relevant screens reflects the latest persistent state
+
+⸻
+
+A3. Onboarding / Guide
+
+Please verify:
+	•	The onboarding flow now uses the simplified 3-step structure
+	•	The guide appears only when appropriate:
+	•	first-time user
+	•	missing required setup data
+	•	The guide does NOT reappear every time for existing users
+	•	Step sequencing is correct:
+	1.	Setup
+	2.	Market
+	3.	Launch System
+
+⸻
+
+A4. Settings / Performance Section
+
+Please verify:
+	•	Manual content performance input is no longer shown as the primary path
+	•	The settings UI clearly indicates that performance is auto-collected from connected/scraped channels
+	•	If no performance data exists, the empty state is correct and understandable
+	•	No broken references remain to old manual metrics flow
+
+⸻
+
+B. Backend Validation Checklist
+
+B1. Rhythm Persistence
+
+Please run a controlled rhythm update test and confirm:
+	•	update_content_rhythm computes successfully
+	•	Backend logs show adaptive rhythm computation
+	•	Rhythm result is written persistently
+	•	A content_rhythm entry exists or is updated correctly in strategy_memory
+	•	Upsert behavior is correct (no unintended duplication)
+	•	Refreshing / reopening still reads the same state
+
+⸻
+
+B2. Execution Compliance Logic
+
+Please validate all compliance states using existing data where possible, and temporary test data only if required:
+	•	NO_EXECUTION
+	•	LOW_CADENCE
+	•	COMPLIANT
+
+Please confirm that the compliance check is using actual system data and not prompt text.
+
+Also confirm:
+	•	published content counts are read correctly
+	•	cadence floor is computed correctly
+	•	compliance result is deterministic
+	•	compliance state is the same across repeated checks on unchanged data
+
+⸻
+
+B3. Insight Classification
+
+Please verify that classification is now driven by real state, not just text matching.
+
+Specifically confirm expected routing for cases like:
+	•	no published content → user_execution
+	•	low cadence → user_execution
+	•	no usable performance signal → measurement_gap
+	•	significant market movement / volatility → market_shift
+	•	compliant execution + underperformance → strategy_gap
+
+Also confirm:
+	•	text/keyword matching is now fallback only
+	•	the system is not misclassifying insights because of words like “plan” or similar phrasing
+
+⸻
+
+B4. Rebuild Gate
+
+This is critical.
+
+Please verify the guard before any strategy rebuild/tool-triggered rerun.
+
+Test and confirm:
+
+Case 1
+	•	No execution
+	•	Rebuild request should be blocked
+
+Case 2
+	•	Low cadence, no market shift
+	•	Rebuild request should be blocked
+
+Case 3
+	•	Significant market shift
+	•	Rebuild request should be allowed
+
+Case 4
+	•	Compliant execution + weak outcome/confidence
+	•	Rebuild request should be allowed
+
+Please confirm:
+	•	the block happens server-side
+	•	the response is structured and correct
+	•	the frontend/agent receives the correct explanation
+
+⸻
+
+B5. Execution Tools
+
+Please validate the new execution tools end-to-end:
+	•	activate execution plan
+	•	retry failed content
+
+Please confirm for each:
+	•	correct preconditions are checked
+	•	plan approval requirement is respected
+	•	no bypass occurs
+	•	correct response is returned
+	•	execution pipeline is called properly
+	•	failures are handled gracefully
+
+If temporary execution-state changes are required for testing:
+	•	clean them up afterward
+
+⸻
+
+B6. Insight Action Routing
+
+Please validate that insight actions now route to the correct tool/path.
+
+Check examples like:
+	•	user_execution should not lead to rebuild
+	•	measurement_gap should not lead to rebuild
+	•	market_shift should route toward strategy/market actions
+	•	strategy_gap should be the only case that can lead to rebuild, and only when gate conditions pass
+
+Please confirm that routing is correct in both:
+	•	frontend behavior
+	•	backend enforcement
+
+⸻
+
+B7. Persistence / DB Integrity
+
+Please inspect and confirm:
+	•	no unexpected duplicate rows
+	•	no broken writes
+	•	no missing column / schema errors
+	•	no stale state after action execution
+	•	no invalid transitions in plan/account/decision states
+
+Please also check:
+	•	strategy decisions
+	•	strategy memory
+	•	plan state
+	•	rhythm state
+	•	approval-related records
+
+⸻
+
+C. System Flow Validation
+
+Please validate the entire system loop as a sequence:
+
+C1. User / Execution Track
+	•	signal state detected
+	•	compliance evaluated
+	•	insight classified
+	•	surfaced in UI
+	•	correct action triggered
+	•	execution or rhythm path chosen
+	•	state persisted
+	•	UI reflects update
+
+⸻
+
+C2. Strategy / Market Track
+	•	market signal detected
+	•	market-related insight classified
+	•	surfaced correctly
+	•	allowed action chain triggered
+	•	rebuild gate enforced correctly
+	•	state persists
+	•	updated state visible after refresh
+
+⸻
+
+D. Logging / Health / Errors
+
+Please check logs during the full validation and confirm:
+	•	no backend crashes
+	•	no schema/column errors
+	•	no tool-call routing errors
+	•	no silent failures
+	•	expected logs appear where appropriate
+	•	only valid 200/expected blocked responses occur
+
+⸻
+
+E. Deliverable Back
+
+Please send back:
+	1.	A checklist result for each section above
+	2.	Any bugs, inconsistencies, or edge cases found
+	3.	What was confirmed correct
+	4.	What still needs adjustment
+	5.	Confirmation that the environment/data was restored to its original state after testing
+
+⸻
+
+Goal
+
+We want confidence that the system is correct:
+	•	in UI
+	•	in backend logic
+	•	in routing
+	•	in persistence
+	•	in guardrails
+	•	and in real end-to-end behavior
+
+This should be a full “inside and outside” validation pass.
+
+Thanks,
+Samir
+Avyron AI
+:::

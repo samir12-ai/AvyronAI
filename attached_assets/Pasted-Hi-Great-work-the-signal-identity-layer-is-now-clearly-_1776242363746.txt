@@ -1,0 +1,143 @@
+Hi,
+
+Great work — the signal identity layer is now clearly implemented and stable. The system has moved from blind aggregation to full signal awareness, which is a major step forward.
+
+Before we move to the next phase, we need to close the remaining gaps to reach full enforcement (not just visibility).
+
+---
+
+## What’s Working
+
+- Origin types are correctly assigned and preserved
+- No leakage or identity loss across pipelines
+- Composition is visible in validation, plan, and budget layers
+
+This is solid.
+
+---
+
+## Remaining Gaps to Close
+
+### 1. Real Signal Integration (Critical)
+
+Current state:
+- "real" origin type exists but is not used in the lineage system
+
+Issue:
+- The system still operates purely on competitor + inferred signals
+- No grounding in actual performance outcomes
+
+Required:
+
+- Introduce a minimal bridge from performance data → lineage
+  - When campaign metrics exist (CPA, conversions, ROAS), generate lineage entries tagged as "real"
+  - These do NOT need full semantic richness — even simple structured signals are sufficient
+
+Implementation approach:
+- Do NOT modify existing pipelines
+- Add a lightweight adapter at the boundary where performance is already available
+- Feed into lineage using createSourceLineageEntry()
+
+Goal:
+> Ensure the system can distinguish “market belief” vs “actual performance reality”
+
+---
+
+### 2. Composition Enforcement at Engine Boundaries
+
+Current state:
+- Engines receive lineage (with originType)
+- Composition is not explicitly enforced at input level
+
+Issue:
+- Engines can ignore signal composition even if available
+
+Required:
+
+- At orchestrator level:
+  - Compute signalComposition once
+  - Pass it explicitly to ALL engine inputs (not optional)
+
+- Engines should:
+  - Read composition
+  - Adjust internal scoring or behavior (no hard blocking required)
+
+Implementation approach:
+- Do NOT duplicate logic inside engines
+- Inject composition centrally via orchestrator
+
+Goal:
+> Ensure all engines operate with awareness of signal quality, not just signal presence
+
+---
+
+### 3. Upgrade Budget Governor from Warning → Soft Enforcement
+
+Current state:
+- Composition produces warnings only
+
+Issue:
+- System can still scale decisions based on weak (competitor-heavy) signals
+
+Required:
+
+Convert key conditions into soft enforcement:
+
+- If realRatio === 0:
+  → force HOLD (no scale)
+
+- If competitorRatio > 0.8:
+  → reduce confidence score (penalty, not block)
+
+- If inferredRatio is dominant:
+  → cap max allowed action (no aggressive decisions)
+
+Implementation approach:
+- Keep logic additive
+- Do NOT override existing decision flow
+- Apply modifiers, not hard stops (except zero-real case)
+
+Goal:
+> Decisions must reflect signal quality, not just signal availability
+
+---
+
+### 4. Normalize “Unknown” Handling
+
+Current state:
+- Legacy signals default to "unknown"
+
+Required:
+
+- Treat "unknown" as:
+  - neutral (not trusted)
+  - never equivalent to "real"
+
+- Include unknown in composition calculations explicitly
+
+Goal:
+> Avoid silent promotion of legacy data into trusted signals
+
+---
+
+## Final Direction
+
+We are not changing architecture.
+
+We are completing the transition:
+
+> From: system that understands signal origin  
+> To: system that behaves differently based on signal origin
+
+---
+
+## What I Need
+
+- Confirmation for each of the 4 items above:
+  - ✅ implemented
+  - ❌ missing (implement directly)
+  - ⚠️ partial (clarify gap)
+
+Once these are complete, we move to engine-level alignment (Offer / Funnel / Persuasion issues).
+
+Thanks

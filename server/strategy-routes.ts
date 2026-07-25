@@ -10,16 +10,20 @@ import {
   signatureSeries,
   strategicBlueprints,
 } from "@shared/schema";
-import { eq, desc, sql, and, gte, lte, ne } from "drizzle-orm";
+import { eq, desc, sql, and, gte, lte, ne, notInArray } from "drizzle-orm";
 import { aiChat } from "./ai-client";
 import { requireCampaign } from "./campaign-routes";
+import { policyEnforcedMemoryCheck, NON_STRATEGIC_MEMORY_TYPES } from "./decision-policy";
 import { getRevenueSummary, getCampaignMetrics } from "./campaign-data-layer";
 import { logAuditEvent } from "./strategic-core/audit-logger";
 
 import { resolveAccountId } from "./auth";
 const LEGACY_CAMPAIGN = "unscoped_legacy";
 
-async function getAccountAverages() {
+async function getAccountAverages(accountId?: string, campaignId?: string) {
+  const conditions = [];
+  if (accountId) conditions.push(eq(performanceSnapshots.accountId, accountId));
+  if (campaignId) conditions.push(eq(performanceSnapshots.campaignId, campaignId));
   const result = await db.select({
     avgReach: sql<number>`coalesce(avg(${performanceSnapshots.reach}), 0)`,
     avgImpressions: sql<number>`coalesce(avg(${performanceSnapshots.impressions}), 0)`,
@@ -36,7 +40,7 @@ async function getAccountAverages() {
     avgRetention: sql<number>`coalesce(avg(${performanceSnapshots.retentionRate}), 0)`,
     avgWatchTime: sql<number>`coalesce(avg(${performanceSnapshots.watchTime}), 0)`,
     totalPosts: sql<number>`count(*)`,
-  }).from(performanceSnapshots);
+  }).from(performanceSnapshots).where(conditions.length > 0 ? and(...conditions) : undefined);
   return result[0];
 }
 
@@ -54,17 +58,48 @@ export function registerStrategyRoutes(app: Express) {
 
   app.post("/api/strategy/sync-performance", requireCampaign, async (req, res) => {
     try {
-      const { accessToken, pageId } = req.body;
-
+      // P1-20 (W4.1 launch-closure): the route used to accept `accessToken`
+      // and `pageId` directly from req.body. That bypassed Meta connection
+      // state and let any caller hand the server an arbitrary token to
+      // call Graph API on their behalf — and any data fetched would be
+      // attributed to the caller's campaign. Now we look up the connected
+      // Meta credentials for the authenticated account, decrypt the page
+      // token server-side, and only proceed when Meta is actually linked.
+      const accountId = (req as any).accountId as string | undefined;
+      if (!accountId) {
+        return res.status(401).json({ success: false, error: "AUTH_REQUIRED" });
+      }
+      const { metaCredentials } = await import("@shared/schema");
+      const { decryptToken } = await import("./meta-crypto");
+      // Deterministic single-row pick — if duplicate rows ever exist for an
+      // account (no DB-level unique constraint today), always use the most
+      // recently updated one rather than relying on undefined query order.
+      const creds = await db.select().from(metaCredentials)
+        .where(eq(metaCredentials.accountId, accountId))
+        .orderBy(desc(metaCredentials.updatedAt))
+        .limit(1);
+      const cred = creds[0];
       const campaignContext = (req as any).campaignContext;
 
-      if (!accessToken || !pageId) {
+      if (!cred || !cred.encryptedPageToken || !cred.ivPage || !cred.encryptionKeyVersion || !cred.pageId) {
         return res.status(400).json({
           success: false,
           error: "META_NOT_CONNECTED",
-          message: "Meta access token and page ID are required to sync performance data. Connect Meta in Settings or enter manual metrics.",
+          message: "Meta is not connected for this account. Connect Meta in Settings or enter manual metrics.",
         });
       }
+      let accessToken: string;
+      try {
+        accessToken = decryptToken(cred.encryptedPageToken, cred.ivPage, cred.encryptionKeyVersion);
+      } catch (decryptErr) {
+        console.error("[Strategy/sync-performance] page token decrypt failed:", (decryptErr as any)?.message);
+        return res.status(400).json({
+          success: false,
+          error: "META_TOKEN_INVALID",
+          message: "Stored Meta credentials could not be decrypted. Please reconnect Meta in Settings.",
+        });
+      }
+      const pageId = cred.pageId;
 
       try {
         const postsRes = await fetch(
@@ -89,6 +124,9 @@ export function registerStrategyRoutes(app: Express) {
           await db.insert(performanceSnapshots).values({
             postId: post.id,
             platform: "facebook",
+            // P-1: explicit capture-point classification (migration 041 default
+            // is also 'sync'; written explicitly so the intent is in the code).
+            checkpoint: "sync",
             contentType: post.type || "status",
             reach: getMetricValue("post_impressions"),
             impressions: getMetricValue("post_impressions"),
@@ -136,9 +174,31 @@ export function registerStrategyRoutes(app: Express) {
 
   app.get("/api/strategy/performance", requireCampaign, async (req, res) => {
     try {
-      const data = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(100);
-      const averages = await getAccountAverages();
-      res.json({ data, averages });
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const data = await db.select().from(performanceSnapshots)
+        .where(and(eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId)))
+        .orderBy(desc(performanceSnapshots.fetchedAt)).limit(100);
+      const averages = await getAccountAverages(accountId, campaignId);
+
+      // Phase 9 — D2/D3 additive projection. Empty → weak/unknown/degraded; <14 rows → provisional; ≥14 → validated.
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown";
+      let signalOrigin: "real" | "inferred" | "fallback" | "unknown";
+      let degraded: { flag: true; reason: string; source: string; signalOrigin: "real" | "inferred" | "fallback" | "unknown" } | null;
+      if (data.length === 0) {
+        validationState = "weak";
+        signalOrigin = "unknown";
+        degraded = { flag: true, reason: "No performance snapshots for this campaign", source: "missing_dependency", signalOrigin };
+      } else if (data.length < 14) {
+        validationState = "provisional";
+        signalOrigin = "real";
+        degraded = { flag: true, reason: `Only ${data.length} snapshots — below 14-day validation window`, source: "data_quality", signalOrigin };
+      } else {
+        validationState = "validated";
+        signalOrigin = "real";
+        degraded = null;
+      }
+
+      res.json({ data, averages, validationState, signalOrigin, degraded, sourceEndpoint: "/api/strategy/performance" });
     } catch (error) {
       console.error("[Strategy] Performance fetch error:", error);
       res.status(500).json({ error: "Failed to fetch performance data" });
@@ -149,9 +209,9 @@ export function registerStrategyRoutes(app: Express) {
     try {
       const campaignContext = (req as any).campaignContext;
       const { accountId, campaignId } = campaignContext;
-      const allData = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
-      const averages = await getAccountAverages();
-      const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyMemory.updatedAt)).limit(20);
+      const allData = await db.select().from(performanceSnapshots).where(and(eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId))).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
+      const averages = await getAccountAverages(accountId, campaignId);
+      const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(20);
 
       if (allData.length === 0) {
         return res.status(400).json({ error: "No performance data available. Sync your Meta data first." });
@@ -350,6 +410,7 @@ Return ONLY valid JSON with this structure:
         for (const dec of decisions) {
           await db.insert(strategyDecisions).values({
             accountId,
+            campaignId,
             trigger: dec.trigger,
             action: dec.action,
             reason: dec.reason,
@@ -361,18 +422,20 @@ Return ONLY valid JSON with this structure:
       }
 
       if (analysis.memoryUpdates?.length) {
+        const { upsertByFingerprint } = await import("./memory-system/store");
         for (const mem of analysis.memoryUpdates) {
-          await db.insert(strategyMemory).values({
+          const direction = mem.isWinner ? "reinforce" as const : "neutral" as const;
+          const confidenceScore = mem.isWinner ? 0.85 : 0.5;
+          await upsertByFingerprint({
             accountId,
             campaignId,
             memoryType: mem.memoryType,
+            engineName: "performance-analysis",
             label: mem.label,
             details: mem.details,
             score: mem.score || 0,
-            direction: mem.isWinner ? "reinforce" : "neutral",
-            isWinner: mem.isWinner ? true : false,
-            confidenceScore: mem.isWinner ? 0.85 : 0.5,
-            lastValidatedAt: new Date(),
+            direction,
+            confidenceScore,
           });
         }
       }
@@ -427,7 +490,9 @@ Return ONLY valid JSON with this structure:
 
   app.get("/api/strategy/decisions", requireCampaign, async (req, res) => {
     try {
+      const { accountId, campaignId } = (req as any).campaignContext;
       const decisions = await db.select().from(strategyDecisions)
+        .where(and(eq(strategyDecisions.accountId, accountId), eq(strategyDecisions.campaignId, campaignId)))
         .orderBy(desc(strategyDecisions.createdAt))
         .limit(30);
       res.json(decisions);
@@ -438,10 +503,19 @@ Return ONLY valid JSON with this structure:
 
   app.patch("/api/strategy/decisions/:id", requireCampaign, async (req, res) => {
     try {
+      const { accountId, campaignId } = (req as any).campaignContext;
       const { status, outcome } = req.body;
-      await db.update(strategyDecisions)
+      const result = await db.update(strategyDecisions)
         .set({ status, outcome, executedAt: status === 'executed' ? new Date() : undefined })
-        .where(eq(strategyDecisions.id, req.params.id as string));
+        .where(and(
+          eq(strategyDecisions.id, req.params.id as string),
+          eq(strategyDecisions.accountId, accountId),
+          eq(strategyDecisions.campaignId, campaignId),
+        ))
+        .returning({ id: strategyDecisions.id });
+      if (result.length === 0) {
+        return res.status(404).json({ error: "Decision not found or does not belong to this campaign" });
+      }
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to update decision" });
@@ -452,7 +526,7 @@ Return ONLY valid JSON with this structure:
     try {
       const { accountId, campaignId } = (req as any).campaignContext;
       const memories = await db.select().from(strategyMemory)
-        .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN)))
+        .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES])))
         .orderBy(desc(strategyMemory.updatedAt))
         .limit(50);
       res.json(memories);
@@ -466,24 +540,24 @@ Return ONLY valid JSON with this structure:
       const now = new Date();
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-      const weekData = await db.select().from(performanceSnapshots)
-        .where(gte(performanceSnapshots.fetchedAt, weekAgo))
-        .orderBy(desc(performanceSnapshots.fetchedAt));
-
       const { accountId, campaignId } = (req as any).campaignContext;
+
+      const weekData = await db.select().from(performanceSnapshots)
+        .where(and(gte(performanceSnapshots.fetchedAt, weekAgo), eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId)))
+        .orderBy(desc(performanceSnapshots.fetchedAt));
       const campaignContext = (req as any).campaignContext;
       const insights = await db.select().from(strategyInsights)
         .where(and(gte(strategyInsights.createdAt, weekAgo), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN)))
         .orderBy(desc(strategyInsights.createdAt));
 
       const decisions = await db.select().from(strategyDecisions)
-        .where(gte(strategyDecisions.createdAt, weekAgo));
+        .where(and(gte(strategyDecisions.createdAt, weekAgo), eq(strategyDecisions.accountId, accountId), eq(strategyDecisions.campaignId, campaignId)));
 
       const memories = await db.select().from(strategyMemory)
-        .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN)))
+        .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES])))
         .orderBy(desc(strategyMemory.updatedAt)).limit(20);
 
-      const averages = await getAccountAverages();
+      const averages = await getAccountAverages(accountId, campaignId);
       const revenueSummary = await getRevenueSummary(campaignContext.campaignId, accountId);
       const activePlanId = await getActiveBlueprintId();
 
@@ -573,20 +647,24 @@ Return JSON:
       }).returning();
 
       if (report.selfImprovements?.length) {
-        for (const improvement of report.selfImprovements) {
-          await db.insert(strategyMemory).values({
-            accountId,
-            campaignId,
-            memoryType: "self_improvement",
-            label: improvement,
-            details: `Auto-generated improvement from weekly report on ${now.toISOString().split('T')[0]}`,
-            score: 0.5,
-            direction: "neutral",
-            isWinner: false,
-            confidenceScore: 0.5,
-            lastValidatedAt: new Date(),
-          });
-        }
+        // Task #64 / Phase 1 — self_improvement is in NON_STRATEGIC_MEMORY_TYPES
+        // (operational/audit telemetry, not strategy signal). Route to the
+        // operational store under its own stateType so each weekly run captures
+        // the latest improvement set without polluting strategy_memory.
+        const { upsertOperationalState } = await import("./memory-system/operational-state-store");
+        await upsertOperationalState({
+          accountId,
+          campaignId,
+          stateType: "self_improvement",
+          engineName: "weekly-report",
+          label: `Weekly improvements — ${now.toISOString().split('T')[0]}`,
+          payload: {
+            improvements: report.selfImprovements,
+            generatedAt: now.toISOString(),
+          },
+          rationale: `Auto-generated improvement set from weekly report on ${now.toISOString().split('T')[0]} (${report.selfImprovements.length} item(s))`,
+          confidenceScore: 0.5,
+        });
       }
 
       await logAuditEvent({
@@ -624,12 +702,12 @@ Return JSON:
       const { campaignGoal, product, budget } = req.body;
       const { accountId, campaignId } = (req as any).campaignContext;
       const memories = await db.select().from(strategyMemory)
-        .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN)))
+        .where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES])))
         .orderBy(desc(strategyMemory.updatedAt)).limit(20);
       const insights = await db.select().from(strategyInsights)
         .where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN)))
         .orderBy(desc(strategyInsights.createdAt)).limit(15);
-      const averages = await getAccountAverages();
+      const averages = await getAccountAverages(accountId, campaignId);
 
       const aiResponse = await aiChat({
         model: "gpt-5.2",
@@ -701,10 +779,10 @@ Return JSON:
   app.post("/api/strategy/moat-scan", requireCampaign, async (req, res) => {
     try {
       const { accountId, campaignId } = (req as any).campaignContext;
-      const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyMemory.updatedAt)).limit(30);
+      const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(30);
       const insights = await db.select().from(strategyInsights).where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyInsights.createdAt)).limit(20);
-      const allPerf = await db.select().from(performanceSnapshots).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
-      const averages = await getAccountAverages();
+      const allPerf = await db.select().from(performanceSnapshots).where(and(eq(performanceSnapshots.accountId, accountId), eq(performanceSnapshots.campaignId, campaignId))).orderBy(desc(performanceSnapshots.fetchedAt)).limit(50);
+      const averages = await getAccountAverages(accountId, campaignId);
 
       if (memories.length === 0 && insights.length === 0) {
         return res.status(400).json({ error: "Run AI Analysis first to populate memory and patterns before scanning for moat candidates." });
@@ -841,8 +919,8 @@ Return ONLY valid JSON:
       const [candidate] = await db.select().from(moatCandidates).where(and(eq(moatCandidates.id, candidateId), eq(moatCandidates.accountId, accountId), eq(moatCandidates.campaignId, campaignId), ne(moatCandidates.campaignId, LEGACY_CAMPAIGN)));
       if (!candidate) return res.status(404).json({ error: "Moat candidate not found" });
 
-      const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyMemory.updatedAt)).limit(15);
-      const averages = await getAccountAverages();
+      const memories = await db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(15);
+      const averages = await getAccountAverages(accountId, campaignId);
 
       const aiResponse = await aiChat({
         model: "gpt-5.2",
@@ -947,8 +1025,8 @@ Return ONLY valid JSON:
       const [candidates, series, memories, averages] = await Promise.all([
         db.select().from(moatCandidates).where(and(eq(moatCandidates.accountId, accountId), eq(moatCandidates.campaignId, campaignId), ne(moatCandidates.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(moatCandidates.moatScore)).limit(10),
         db.select().from(signatureSeries).where(eq(signatureSeries.isActive, true)).orderBy(desc(signatureSeries.createdAt)),
-        db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyMemory.updatedAt)).limit(20),
-        getAccountAverages(),
+        db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(20),
+        getAccountAverages(accountId, campaignId),
       ]);
 
       const activeSeries = series.length;
@@ -989,10 +1067,10 @@ Return ONLY valid JSON:
       const { accountId, campaignId } = (req as any).campaignContext;
 
       const [averages, recentInsights, recentDecisions, memoryItems, latestReport] = await Promise.all([
-        getAccountAverages(),
+        getAccountAverages(accountId, campaignId),
         db.select().from(strategyInsights).where(and(eq(strategyInsights.isActive, true), eq(strategyInsights.accountId, accountId), eq(strategyInsights.campaignId, campaignId), ne(strategyInsights.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyInsights.createdAt)).limit(5),
-        db.select().from(strategyDecisions).orderBy(desc(strategyDecisions.createdAt)).limit(5),
-        db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN))).orderBy(desc(strategyMemory.updatedAt)).limit(10),
+        db.select().from(strategyDecisions).where(and(eq(strategyDecisions.accountId, accountId), eq(strategyDecisions.campaignId, campaignId))).orderBy(desc(strategyDecisions.createdAt)).limit(5),
+        db.select().from(strategyMemory).where(and(eq(strategyMemory.accountId, accountId), eq(strategyMemory.campaignId, campaignId), ne(strategyMemory.campaignId, LEGACY_CAMPAIGN), notInArray(strategyMemory.memoryType, [...NON_STRATEGIC_MEMORY_TYPES]))).orderBy(desc(strategyMemory.updatedAt)).limit(10),
         db.select().from(weeklyReports).orderBy(desc(weeklyReports.createdAt)).limit(1),
       ]);
 

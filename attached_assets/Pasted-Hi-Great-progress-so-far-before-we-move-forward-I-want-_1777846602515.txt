@@ -1,0 +1,92 @@
+Hi,
+
+Great progress so far — before we move forward, I want a clear, structured summary of the new engine outputs and to make sure everything is visible and reviewable in the dashboard (preview mode).
+
+---
+
+## 1) Engine Output Summary (Required)
+
+For the MindAI campaign, I want a concise but detailed summary across all engines:
+
+- Audience  
+- Positioning  
+- Differentiation  
+- Mechanism  
+- Persuasion  
+- Offer  
+- Awareness  
+- (and any other active engines)
+
+For each engine, provide:
+
+- Key output (final conclusion)
+- Core reasoning (what changed in logic)
+- Most important signals used
+- Any critical conditions (why it works / when it fails)
+
+This should read like a marketing-level summary, not raw JSON.
+
+---
+
+## 2) Snapshot Visibility (Very Important)
+
+I need to be able to see the new outputs directly in the dashboard.
+
+Please ensure:
+
+- All new snapshots from the latest MindAI run are:
+  - saved correctly
+  - accessible
+  - visible in the dashboard (preview)
+
+- No caching or reuse is hiding updated results
+- Latest run is clearly identifiable (timestamp / runId)
+
+---
+
+## 3) Dashboard Preview
+
+Prepare a clean preview view where I can:
+
+- open the MindAI campaign
+- see all engine outputs in one place
+- clearly distinguish:
+  - new logic outputs
+  - structured reasoning (not flattened text)
+
+If needed:
+- create a temporary “debug / preview mode” view
+- prioritize clarity over design
+
+---
+
+## 4) End-to-End Visibility
+
+I want to visually confirm:
+
+- Audience → feeds into other engines
+- Positioning / Differentiation → reflected in Mechanism
+- Mechanism → reflected in Offer / Persuasion
+- Integrity → affects final flow
+
+Not just backend correctness — I want to see the logic flow.
+
+---
+
+## 5) Goal
+
+Before moving to full system integration, I want:
+
+> a clear, human-readable understanding of what the engines are now producing
+
+and
+
+> direct visibility in the UI to validate the difference
+
+---
+
+Let me know once:
+- the summary is ready
+- and the dashboard preview is accessible
+
+Thanks.

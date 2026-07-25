@@ -1,0 +1,92 @@
+the four engines in parallel.
+Audit complete — read-only, no code changes made. Here is the full trace.
+
+1. Root Cause
+The pipeline has no end-to-end "claim" contract. claimStructures (the only validated claims in the system) is never propagated past the Differentiation snapshot. Every downstream engine — including the Strategy Root that binds the run — substitutes mechanismPromise (a different, regenerated artifact) wherever a "claim" is required.
+
+This is a contract issue (primary), with a lossy-propagation symptom on top.
+
+2. Code Evidence
+A. Differentiation produces two unrelated artifacts
+server/differentiation-engine/engine.ts
+
+Lines 1368–1610 — finalClaims is built across Layers 10/11/12 (scoring, refinement, stability guard) and emitted as claimStructures: ClaimStructure[] ({ claim, territory, distinctiveness, believability, defensibility, relevance, overallScore, collisionRisk, proofBasis }). This is the canonical claim object in the system.
+Lines 692–710 — mechanismPromise is built as a hardcoded template string independent of those claims:
+const mechanismPromise = topTerritory
+  ? `Achieve ${topTerritory} through a structured ${mechanismType !== "none" ? mechanismType : "approach"}`
+  : mechanism.description;
+This is then attached to mechanismCore.mechanismPromise. It has zero relationship to finalClaims.
+So Differentiation already publishes two parallel artifacts that are not reconciled.
+
+B. Mechanism never sees claimStructures
+server/mechanism-engine/engine.ts:100–238 (the AI prompt)
+
+Reads only differentiation.mechanismCore (diffCore) and differentiation.pillars — it builds existingMechanismSection from diffCore.mechanismPromise/Problem/Logic/Steps.
+claimStructures is type-declared on the input shape (server/mechanism-engine/types.ts:22, also passed in server/orchestrator/index.ts:1333 and server/mechanism-engine/routes.ts:109) but never read or referenced inside the prompt or anywhere else in engine.ts.
+Then it asks the AI to generate a fresh promise (line 217 of the prompt, captured at line 457 of buildMechanismOutput):
+
+mechanismPromise: raw.promise || ""
+So mechanism's mechanismPromise is a third independent string — neither a Differentiation claimStructure nor Differentiation's mechanismCore.mechanismPromise template.
+
+C. Strategy Root binds the wrong field as "claim"
+server/mechanism-engine/routes.ts:187–188 and the mirror in server/orchestrator/index.ts:1414–1416:
+
+const mechClaim = primaryMech?.mechanismPromise || null;
+…
+approvedClaim:   mechClaim,
+approvedPromise: primaryMech?.mechanismPromise || null,
+approvedClaim and approvedPromise are the same string (mechanism's AI-generated promise).
+claimStructures is not persisted on strategyRoots at all. The schema has no approvedClaims[] field — see StrategyRootInput in server/shared/strategy-root.ts:6–25.
+This is the binding gap: the only thing the Offer Engine can read as "the approved claim" is, structurally, mechanism's promise.
+
+D. Offer Engine consumes the gap
+server/offer-engine/engine.ts
+
+1377–1378: rootClaim = strategyRoot.approvedClaim, rootPromise = strategyRoot.approvedPromise — same string.
+1455–1461: hooks are built as
+primaryHook = `${axisPhrase}: ${rootClaim.substring(0, 80)}`
+altHook     = (rootPromise && rootPromise !== rootClaim) ? … : `${axisPhrase} — Achieve ${primaryDesire}`
+Because rootPromise === rootClaim, altHook always falls through to a desire-synthesized template — nothing claim-derived.
+1966: differentiation.claimStructures is read by checkClaimsSignalGrounding (signal-grounding check only) but never used to build the offer hook/outcome and never compared to rootClaim.
+E. Offer's lexical validators police the wrong axis
+server/offer-engine/engine.ts:810–840 (checkPositioningConsistency) and 843–940 (checkHookMechanismAlignment)
+
+Both only test offer text vs positioning.contrastAxis / positioning.enemyDefinition.
+Neither validator references claimStructures or even approvedClaim.
+A drifting rootClaim therefore cannot be caught here; the check is purely axis-token / problem-keyword based.
+F. The validator's mode is environment-dependent
+server/offer-engine/engine.ts:2294–2300 and 2387–2394:
+
+if (!hookMechAlignment.aligned && !strategyRoot) → status = POSITIONING_MISMATCH.
+if (!hookMechAlignment.aligned && strategyRoot) → logged as advisory, status = COMPLETE.
+So the same underlying drift surfaces as POSITIONING_MISMATCH on runs without an active root and as silently inconsistent claims on runs with one. This explains the report's two symptoms ("sometimes POSITIONING_MISMATCH, sometimes drifting claims").
+
+3. Failure Chain (step-by-step)
+Differentiation produces claimStructures[] (validated) and mechanismCore.mechanismPromise (template). Two artifacts. No contract that mechanismPromise must be one of claimStructures[].claim.
+Orchestrator → Mechanism passes both fields, but Mechanism's AI prompt drops claimStructures and re-anchors only on mechanismCore + AEL + positioning axis.
+Mechanism AI generates a new promise field. This is the first divergence — a third "claim-shaped" string with no required relation to the Differentiation claims.
+Strategy Root build (buildStrategyRoot in server/shared/strategy-root.ts) writes approvedClaim = approvedPromise = mechanism.mechanismPromise. The validated claimStructures are not stored on the root. This is where the validated-claim chain ends.
+Offer Engine reads rootClaim/rootPromise (same string) for hooks; falls through to desire/pain templates for the alternative. The offer's mechanism description is then refined by a second AI pass and can drift further.
+Offer validators test against positioning axis tokens, not against any claim. With a strategy root present they downgrade mismatches to advisory; without one they hard-fail to POSITIONING_MISMATCH.
+Net effect: claim text shown downstream is a paraphrased/regenerated mechanism promise that was never verified against the validated claimStructures upstream, and the only validator that would catch the drift either doesn't run on the right field or is muted by the presence of the strategy root.
+
+4. Classification
+Primary: Contract issue.
+There is no canonical "approved claim" contract. claimStructures (the only thing the system actually validates as a claim) is not part of the inter-engine contract past the Differentiation snapshot. approvedClaim on the strategy root is structurally typed as a single string and is wired to mechanism.mechanismPromise, which is a different artifact.
+
+Secondary: Propagation issue.
+Even within the existing contract, three independent strings travel under the name "promise/claim" (Differentiation template → Mechanism AI promise → Offer hook), each one regenerated rather than passed through. Lossy by construction.
+
+Not the cause:
+
+Not a data issue — Differentiation is producing valid, scored claims.
+Not a logic bug in any single engine — each engine does what its prompt/spec says.
+Not the strategy-root-binding fix from earlier — that closed OFFER_ROOT_MISSING/POSITIONING_MISMATCH for the root-presence path; it did not (and could not) introduce claim propagation, because the root schema has no field for the validated claims.
+5. Where the first divergence occurs
+server/mechanism-engine/engine.ts, the prompt at lines 136–146 / 209–238, where:
+
+claimStructures is dropped before the AI call, and
+the AI is asked to emit a fresh promise field that will then be lifted (via buildMechanismOutput line 457 → buildStrategyRoot approvedClaim) as the system's authoritative "approved claim."
+That single step is where the validated upstream claims stop being the source of truth.
+
+No fixes applied. Awaiting your direction on whether to address this as a schema/contract change (add approvedClaims: ClaimStructure[] to strategyRoots and thread it through Mechanism + Offer prompts and validators) or some narrower scope.

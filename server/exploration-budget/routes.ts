@@ -5,12 +5,21 @@ import { db } from "../db";
 import { businessDataLayer, growthCampaigns, strategicPlans } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 
 export function registerExplorationBudgetRoutes(app: Express): void {
   app.get("/api/exploration-budget/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req) as string;
       const campaignId = req.params.campaignId as string;
+
+      // W1-T4 (P0-4): all DB queries below filter by (accountId, campaignId)
+      // so a foreign campaignId is leak-safe by data-layer scoping. Explicit
+      // assert is defense-in-depth: it produces a clean 404 instead of an
+      // empty-budget response, and prevents campaign-id enumeration via
+      // response-shape probing.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const [bizSnap] = await db
         .select()

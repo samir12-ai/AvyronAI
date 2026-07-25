@@ -1,0 +1,164 @@
+:::writing{variant=“email” id=“68421” subject=“Critical Verification: Pipeline Persistence, Run Integrity, and False Block Investigation”}
+Hi,
+
+We need a full verification pass on the Strategic Pipeline execution layer immediately.
+
+There are signs that the UI and pipeline state may still be partially desynchronized, and I do NOT want assumptions here.
+
+This is now a system-trust issue, not just a frontend issue.
+
+⸻
+
+1) Verify Pipeline Run Integrity End-to-End
+
+When I trigger:
+
+Re-run Pipeline
+
+from the Strategic Pipeline section, I need confirmation that the ENTIRE execution chain is consistent.
+
+Specifically verify:
+	•	A brand-new orchestrator run is created
+	•	All 15 engines execute under the SAME runId
+	•	Every engine writes a NEW snapshot
+	•	Every engine section reads the snapshot from THAT SAME run
+	•	No engine tab is silently resolving older snapshots
+	•	No resolver fallback is occurring
+	•	No stale cache is masking new outputs
+
+I want proof, not assumptions.
+
+⸻
+
+2) Snapshot Persistence Audit (Mandatory)
+
+For EVERY engine:
+	•	Market Intelligence
+	•	Audience
+	•	Positioning
+	•	Differentiation
+	•	Mechanism
+	•	Offer
+	•	Awareness
+	•	Funnel
+	•	Persuasion
+	•	Integrity
+	•	Statistical Validation
+	•	Budget
+	•	Channel
+	•	Iteration
+	•	Retention
+
+Provide:
+
+| Engine | Current UI Snapshot ID | Actual Latest DB Snapshot ID | Match? | Run ID | Timestamp |
+
+If ANY mismatch exists:
+	•	identify exactly where it breaks
+	•	identify resolver source
+	•	identify cache layer
+	•	identify stale fallback path
+
+This is critical.
+
+⸻
+
+3) Current “Blocked” Status Investigation
+
+The previous block (BLOCKED_BY_INTEGRITY) was already fixed.
+
+However, the UI is STILL showing:
+
+Blocked at system_control
+
+with:
+	•	BUDGET_KILL
+	•	BUDGET_HALT
+	•	NO_CONVERSION_PATH
+	•	CHANNEL_CONFIDENCE_BELOW_MINIMUM
+	•	CONFIDENCE_SPREAD_EXCESSIVE
+
+I need a hard determination:
+
+Is this:
+
+A) a REAL downstream commercial block
+
+OR
+
+B) stale UI state / stale resolver / old run bleed-through
+
+Do NOT assume.
+
+Trace:
+	•	who sets the final status
+	•	where the block originates
+	•	whether the UI is reading the active run
+	•	whether the Pipeline card refreshes correctly after completion
+	•	whether the Full Table and engine tabs agree on the same run
+
+⸻
+
+4) Frontend Synchronization Audit
+
+I suspect there may still be synchronization issues after the frontend updates.
+
+Verify:
+	•	polling logic
+	•	run status hydration
+	•	latest-run resolution
+	•	blocked/completed state transitions
+	•	optimistic UI states
+	•	cached engine cards
+	•	engine-section refresh timing
+	•	pipeline summary refresh timing
+
+Especially verify:
+	•	whether a previous blocked run can overwrite a newer completed run visually
+	•	whether engine tabs update before the pipeline header updates
+	•	whether “15/15 passed” can coexist incorrectly with a stale blocked verdict
+
+That specific combination should NOT happen unless intentionally designed.
+
+⸻
+
+5) Important Context
+
+The mismatch bug was already fixed:
+	•	Mechanism no longer returns axis="unknown"
+	•	Offer no longer throws AXIS_MISMATCH
+	•	Integrity alignment warnings were resolved
+	•	The pipeline successfully reached all downstream engines
+
+So if the system is still blocked:
+	•	either this is a REAL commercial decision
+	•	or there is still a state synchronization issue
+
+We need certainty.
+
+⸻
+
+6) Deliverable Required
+
+I want:
+	1.	A full persistence audit
+	2.	A synchronization audit
+	3.	A block-origin trace
+	4.	Exact root cause of the current blocked state
+	5.	Confirmation whether the block is:
+	•	legitimate commercial logic
+	•	or stale UI/system-state behavior
+
+And if any inconsistency exists:
+	•	identify exact file
+	•	exact resolver
+	•	exact state transition path
+
+No implementation yet.
+No assumptions.
+Only verification and proof.
+
+This is now a system-trust validation step.
+
+Thanks.
+:::

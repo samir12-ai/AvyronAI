@@ -1,0 +1,302 @@
+Audit
+
+Hi Replit Team,
+
+I need a complete end-to-end feature audit of the system before launch.
+
+This is not a narrow bug check and not a partial architecture review.
+
+I want you to treat this as a full internal product validation audit to confirm that every major feature, every engine, every layer, every update we made, and every frontend/backend flow is still working correctly from start to finish.
+
+My main concern is this:
+
+After many updates, integrations, validations, enforcement layers, memory changes, scraping changes, decision logic changes, and UI changes, I do not want hidden regressions where something technically exists but no longer completes its full flow.
+
+I do not want partial execution.
+I do not want silent failures.
+I do not want features that start correctly but stop halfway.
+I do not want UI paths that now trigger the wrong action.
+
+I want confirmation that the entire system still works as one connected system.
+
+---
+
+# Main Objective
+
+Please audit the full product and verify that:
+
+- every feature we built still works
+- every engine completes its intended flow
+- every layer passes data correctly to the next layer
+- frontend actions trigger the correct backend behavior
+- backend outputs actually arrive where they are supposed to go
+- no flow is broken, partial, misrouted, or silently degraded without explicit handling
+
+---
+
+# 1. Full Feature Audit
+
+Please inspect all major product features, not just the latest ones.
+
+I want confirmation that every feature we worked on is still functioning correctly after all recent updates.
+
+This includes, but is not limited to:
+
+- scraping features
+- intelligence features
+- decision features
+- validation features
+- memory features
+- attribution features
+- planning features
+- execution features
+- agent features
+- rhythm / update logic
+- frontend user flows
+- backend processing flows
+
+If a feature exists but no longer completes end-to-end, treat that as an issue.
+
+---
+
+# 2. Full Engine Audit
+
+Please verify every engine one by one.
+
+I want confirmation that each engine:
+
+- still runs
+- still receives the expected inputs
+- still produces the expected outputs
+- still writes or passes its results to the correct downstream layer
+- is not silently broken or partially disconnected
+
+This includes all engines, including:
+
+- Market Intelligence
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Awareness
+- Funnel
+- Persuasion
+- Integrity
+- Statistical Validation
+- Budget Governor
+- Channel Selection
+- Iteration
+- Retention
+
+For each engine, confirm:
+
+- input source
+- output destination
+- whether the flow fully completes
+- whether any updates broke or bypassed it
+
+---
+
+# 3. Full Narrative / Strategy Flow Audit
+
+Please verify that narrative generation and strategic plan generation still work fully and correctly.
+
+I want to confirm that:
+
+- intelligence outputs still flow into narrative
+- narrative still flows into plan synthesis
+- plan synthesis still respects decisions, constraints, and enforcement
+- degraded/fallback behavior is explicit and safe
+- nothing is producing partial or misleading output
+
+---
+
+# 4. Full Intelligence Layer Audit
+
+Please verify the full intelligence path:
+
+data → cleaning → signals → decisions
+
+Confirm that:
+
+- cleaning is applied
+- noise is filtered
+- validation still works
+- confidence still works
+- cross-signal logic still works
+- decision layer still receives the right inputs
+- no old logic or raw signals bypass the intended path
+
+---
+
+# 5. Validation Layer / Forcing Layer Audit
+
+Please audit all validation and enforcement logic.
+
+I want confirmation that:
+
+- all forcing layers still work
+- all validation gates still work
+- memory write policy still works
+- plan forcing still works
+- agent forcing still works
+- no recent changes accidentally bypassed any of these
+
+If something used to be enforced but now only works partially, call it out.
+
+---
+
+# 6. Agent Audit
+
+Please inspect the agent system carefully.
+
+I want to know:
+
+- whether the agent still follows the intended decision-driven flow
+- whether it can still trigger the wrong path
+- whether it always uses validated decisions
+- whether any frontend action or backend path can cause agent behavior to skip the intended route
+
+Please verify that agent actions are:
+
+- correctly triggered
+- correctly scoped
+- correctly tied to decisions
+- correctly reflected in downstream system behavior
+
+---
+
+# 7. Frontend-to-Backend Flow Audit
+
+This is very important.
+
+Please verify that frontend actions still map to the correct backend behavior.
+
+For example:
+if a user performs a certain action in the UI, I want confirmation that it still triggers the correct flow all the way through.
+
+I am specifically worried about regressions like:
+
+- a frontend action supposed to update an existing entity instead creating a new one
+- a frontend action supposed to trigger one section but accidentally routing to another
+- update flows now acting like create flows
+- buttons still rendering but no longer doing the correct thing
+- UI paths that complete visually but fail logically underneath
+
+Please inspect these end-to-end, not only at component level.
+
+---
+
+# 8. Update vs Create / Mutation Integrity
+
+Please specifically audit all important update flows.
+
+I want to know whether any flow that is supposed to:
+
+- update rhythm
+- update plan
+- update memory
+- update campaign state
+- update agent state
+- update strategy state
+
+is mistakenly:
+
+- creating new objects
+- duplicating state
+- writing to the wrong place
+- resetting instead of updating
+- partially mutating only one layer but not the connected layers
+
+This is one of my biggest concerns.
+
+---
+
+# 9. End-to-End Completion Audit
+
+For every major flow, verify not only that it starts — but that it reaches the end successfully.
+
+I do not want:
+
+- partial execution
+- tasks stopping in the middle
+- missing downstream writes
+- missing UI reflection
+- silent no-ops
+- incomplete propagation
+
+If a feature starts correctly but does not complete, treat that as a broken feature.
+
+---
+
+# 10. Data / State Consistency Audit
+
+Please verify that data remains consistent across the system.
+
+I want confirmation that:
+
+- account state is correct
+- campaign state is correct
+- decisions, plans, memory, and outcomes remain consistent
+- state is not duplicated or drifting
+- the UI, DB, engines, and memory are all aligned
+
+---
+
+# 11. Hidden Regression Audit
+
+Please actively search for regressions caused by recent updates.
+
+The concern is not just whether the latest code works in isolation, but whether older parts were unintentionally affected by newer changes.
+
+Please look for cases where:
+
+- a new feature broke an old one
+- a new path replaced an update flow with create flow
+- a new validation layer disconnected an old feature
+- a new engine integration left another feature partially broken
+
+---
+
+# 12. Deliverables
+
+Please return with a structured report containing:
+
+1. Full feature audit summary  
+2. Full engine audit summary  
+3. Frontend-to-backend audit results  
+4. Update-vs-create integrity findings  
+5. Any partial flows or incomplete executions found  
+6. Any regressions found  
+7. Any fixes applied  
+8. Remaining risks  
+9. Final answer:
+
+Is the system fully flowing end-to-end across all major features, or not?
+
+---
+
+# Important
+
+Do not give me only conceptual reassurance.
+
+I want this checked from the actual code and actual runtime behavior wherever possible.
+
+Please verify aggressively.
+
+Assume that hidden breakage may exist and actively try to find it.
+
+If you find anything broken, partial, misrouted, duplicated, or inconsistent:
+- fix it if it is within scope
+- then explain what was wrong and how you fixed it
+
+---
+
+# Final Goal
+
+I want to know whether, if I launch tomorrow, the system is genuinely working as a whole system — not as disconnected working parts.
+
+Thanks,  
+Samir  
+Avyron AI

@@ -28,6 +28,7 @@ import {
   growthSimulations,
   executionTasks,
   planAssumptions,
+  orchestratorJobs,
 } from "@shared/schema";
 import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import { ACTIVE_PLAN_STATUSES } from "./plan-constants";
@@ -36,7 +37,68 @@ import { getLatestContentDna } from "./content-dna-routes";
 import { getActiveRootBundle, detectStaleness, validateRootIntegrity, computeCalendarDeviation } from "./root-bundle";
 
 import { resolveAccountId } from "./auth";
+import { resolveRunId } from "./orchestrator/run-resolver";
 const LOG_PREFIX = "[Dashboard]";
+
+async function getLatestPipelineState(campaignId: string, accountId: string) {
+  try {
+    const [latestJob] = await db
+      .select({
+        id: orchestratorJobs.id,
+        status: orchestratorJobs.status,
+        error: orchestratorJobs.error,
+        sectionStatuses: orchestratorJobs.sectionStatuses,
+        planId: orchestratorJobs.planId,
+        durationMs: orchestratorJobs.durationMs,
+        createdAt: orchestratorJobs.createdAt,
+        completedAt: orchestratorJobs.completedAt,
+      })
+      .from(orchestratorJobs)
+      .where(
+        and(
+          eq(orchestratorJobs.campaignId, campaignId),
+          eq(orchestratorJobs.accountId, accountId)
+        )
+      )
+      .orderBy(desc(orchestratorJobs.createdAt))
+      .limit(1);
+
+    if (!latestJob) return null;
+
+    let sections: Array<{ id: string; name: string; status: string }> = [];
+    try {
+      sections = latestJob.sectionStatuses ? JSON.parse(latestJob.sectionStatuses) : [];
+    } catch {}
+
+    const completedEngines = sections.filter(s => s.status === "SUCCESS").map(s => s.id);
+    const blockedEngines = sections.filter(s => s.status === "BLOCKED" || s.status === "DEPTH_CASCADE_BLOCKED").map(s => s.id);
+    const failedEngines = sections.filter(s => s.status === "FAILED" || s.status === "DEPTH_FAILED" || s.status === "ERROR").map(s => s.id);
+    const isTerminal = ["COMPLETED", "FAILED", "PARTIAL", "BLOCKED", "ERROR"].includes(latestJob.status);
+
+    return {
+      jobId: latestJob.id,
+      pipelineStatus: latestJob.status,
+      isBlocked: latestJob.status === "BLOCKED",
+      isFailed: latestJob.status === "FAILED" || latestJob.status === "ERROR",
+      isRunning: latestJob.status === "RUNNING",
+      isTerminal,
+      blockReason: latestJob.status === "BLOCKED" ? (latestJob.error || "Pipeline blocked — check engine results") : null,
+      errorMessage: (latestJob.status === "FAILED" || latestJob.status === "ERROR") ? latestJob.error : null,
+      completedEngines,
+      blockedEngines,
+      failedEngines,
+      totalEngines: 15,
+      completedCount: completedEngines.length,
+      planId: latestJob.planId,
+      durationMs: latestJob.durationMs,
+      lastRunAt: latestJob.createdAt,
+      completedAt: latestJob.completedAt,
+    };
+  } catch (err: any) {
+    console.warn(`${LOG_PREFIX} Pipeline state fetch failed:`, err.message);
+    return null;
+  }
+}
 
 type SourceTag = "MANUAL_METRICS" | "PLAN_PROGRESS" | "HYBRID" | "PERFORMANCE";
 
@@ -73,12 +135,17 @@ export function registerDashboardRoutes(app: Express) {
         const manualOnly = await getManualMetrics(campaignId, accountId);
         if (manualOnly && (manualOnly.spend > 0 || manualOnly.revenue > 0 || manualOnly.impressions > 0 || manualOnly.clicks > 0 || manualOnly.leads > 0)) {
           const actions = buildManualOnlyActions(manualOnly, campaignId);
+          // Phase 9 — manual-only path: real user-entered metrics, but no approved strategic plan.
           return res.json({
             success: true,
             gated: false,
             planId: null,
             mode,
             actions,
+            validationState: "provisional",
+            signalOrigin: "real",
+            degraded: { flag: true, reason: "Actions derived from manual metrics only (no approved plan)", source: "missing_dependency", signalOrigin: "real" },
+            sourceEndpoint: "/api/dashboard/ai-actions",
           });
         }
         return res.json({
@@ -87,6 +154,10 @@ export function registerDashboardRoutes(app: Express) {
           gateReason: "NO_APPROVED_PLAN",
           mode,
           actions: [],
+          validationState: "weak",
+          signalOrigin: "unknown",
+          degraded: { flag: true, reason: "No approved plan and no manual metrics", source: "missing_dependency", signalOrigin: "unknown" },
+          sourceEndpoint: "/api/dashboard/ai-actions",
         });
       }
 
@@ -358,12 +429,38 @@ export function registerDashboardRoutes(app: Express) {
 
       console.log(`${LOG_PREFIX} AI Actions for ${campaignId}: ${actions.length} actions (mode=${mode}, manual=${!!hasManualData}, plan=${!!hasPlanProgress})`);
 
+      // Phase 9 — D2/D3 additive projection. Strength is a function of evidence depth:
+      //   real perf snapshots ≥7 + manual + plan progress → validated
+      //   plan + (manual OR ≥1 snapshot) → provisional
+      //   plan only, no perf data, no manual → weak
+      const realSnapshotCount = recentSnapshots.length;
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown";
+      let signalOrigin: "real" | "inferred" | "fallback" | "unknown";
+      let degraded: { flag: true; reason: string; source: string; signalOrigin: "real" | "inferred" | "fallback" | "unknown" } | null;
+      if (realSnapshotCount >= 7 && (hasManualData || hasPlanProgress)) {
+        validationState = "validated";
+        signalOrigin = "real";
+        degraded = null;
+      } else if (hasManualData || realSnapshotCount >= 1) {
+        validationState = "provisional";
+        signalOrigin = "real";
+        degraded = { flag: true, reason: `Only ${realSnapshotCount} perf snapshot(s) — below 7-day validation window`, source: "data_quality", signalOrigin: "real" };
+      } else {
+        validationState = "weak";
+        signalOrigin = "inferred";
+        degraded = { flag: true, reason: "Actions derived from plan structure with no measured outcomes", source: "data_quality", signalOrigin: "inferred" };
+      }
+
       res.json({
         success: true,
         gated: false,
         planId: plan.id,
         mode,
         actions: actions.slice(0, 8),
+        validationState,
+        signalOrigin,
+        degraded,
+        sourceEndpoint: "/api/dashboard/ai-actions",
       });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} AI Actions error:`, error);
@@ -462,50 +559,78 @@ export function registerDashboardRoutes(app: Express) {
 
       const safeJson = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
 
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, (req.query.runId as string) || null);
+      } catch (e: any) {
+        return res.status(404).json({ success: false, error: e.message, runId: null, isLatest: false, isStale: false });
+      }
+      const runId = resolved.runId;
+
+      if (!runId) {
+        return res.json({
+          success: true,
+          runId: null,
+          isLatest: true,
+          isStale: false,
+          completedAt: null,
+          plan: null,
+          performance: null,
+          engines: {},
+          contentDna: null,
+          message: "No completed orchestrator run for this campaign yet.",
+        });
+      }
+
+      const pipelineState = await getLatestPipelineState(campaignId, accountId);
+
       const [plans, manual, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, statValData, budgetData, channelData, iterData, retentionData, blueprint, goalDecompData, simulationData] = await Promise.all([
-        db.select().from(strategicPlans)
-          .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
-          .orderBy(desc(strategicPlans.createdAt)).limit(1),
+        resolved.planId
+          ? db.select().from(strategicPlans).where(and(eq(strategicPlans.id, resolved.planId), eq(strategicPlans.accountId, accountId))).limit(1)
+          : Promise.resolve([] as any[]),
         getManualMetrics(campaignId, accountId),
         db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, competitorData: miSnapshots.competitorData, status: miSnapshots.status })
-          .from(miSnapshots).where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId)))
-          .orderBy(desc(miSnapshots.createdAt)).limit(1),
+          .from(miSnapshots).where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers })
-          .from(audienceSnapshots).where(and(eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.campaignId, campaignId)))
-          .orderBy(desc(audienceSnapshots.createdAt)).limit(1),
+          .from(audienceSnapshots).where(and(eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection })
-          .from(positioningSnapshots).where(and(eq(positioningSnapshots.accountId, accountId), eq(positioningSnapshots.campaignId, campaignId)))
-          .orderBy(desc(positioningSnapshots.createdAt)).limit(1),
+          .from(positioningSnapshots).where(and(eq(positioningSnapshots.accountId, accountId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode })
-          .from(differentiationSnapshots).where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId)))
-          .orderBy(desc(differentiationSnapshots.createdAt)).limit(1),
+          .from(differentiationSnapshots).where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ primaryOffer: offerSnapshots.primaryOffer })
-          .from(offerSnapshots).where(and(eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.campaignId, campaignId)))
-          .orderBy(desc(offerSnapshots.createdAt)).limit(1),
+          .from(offerSnapshots).where(and(eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ primaryFunnel: funnelSnapshots.primaryFunnel })
-          .from(funnelSnapshots).where(and(eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.campaignId, campaignId)))
-          .orderBy(desc(funnelSnapshots.createdAt)).limit(1),
+          .from(funnelSnapshots).where(and(eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore })
-          .from(awarenessSnapshots).where(and(eq(awarenessSnapshots.accountId, accountId), eq(awarenessSnapshots.campaignId, campaignId)))
-          .orderBy(desc(awarenessSnapshots.createdAt)).limit(1),
+          .from(awarenessSnapshots).where(and(eq(awarenessSnapshots.accountId, accountId), eq(awarenessSnapshots.campaignId, campaignId), eq(awarenessSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore })
-          .from(persuasionSnapshots).where(and(eq(persuasionSnapshots.accountId, accountId), eq(persuasionSnapshots.campaignId, campaignId)))
-          .orderBy(desc(persuasionSnapshots.createdAt)).limit(1),
+          .from(persuasionSnapshots).where(and(eq(persuasionSnapshots.accountId, accountId), eq(persuasionSnapshots.campaignId, campaignId), eq(persuasionSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ result: strategyValidationSnapshots.result, confidenceScore: strategyValidationSnapshots.confidenceScore, status: strategyValidationSnapshots.status })
-          .from(strategyValidationSnapshots).where(and(eq(strategyValidationSnapshots.accountId, accountId), eq(strategyValidationSnapshots.campaignId, campaignId)))
-          .orderBy(desc(strategyValidationSnapshots.createdAt)).limit(1),
+          .from(strategyValidationSnapshots).where(and(eq(strategyValidationSnapshots.accountId, accountId), eq(strategyValidationSnapshots.campaignId, campaignId), eq(strategyValidationSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ result: budgetGovernorSnapshots.result, status: budgetGovernorSnapshots.status })
-          .from(budgetGovernorSnapshots).where(and(eq(budgetGovernorSnapshots.accountId, accountId), eq(budgetGovernorSnapshots.campaignId, campaignId)))
-          .orderBy(desc(budgetGovernorSnapshots.createdAt)).limit(1),
+          .from(budgetGovernorSnapshots).where(and(eq(budgetGovernorSnapshots.accountId, accountId), eq(budgetGovernorSnapshots.campaignId, campaignId), eq(budgetGovernorSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ result: channelSelectionSnapshots.result, status: channelSelectionSnapshots.status })
-          .from(channelSelectionSnapshots).where(and(eq(channelSelectionSnapshots.accountId, accountId), eq(channelSelectionSnapshots.campaignId, campaignId)))
-          .orderBy(desc(channelSelectionSnapshots.createdAt)).limit(1),
+          .from(channelSelectionSnapshots).where(and(eq(channelSelectionSnapshots.accountId, accountId), eq(channelSelectionSnapshots.campaignId, campaignId), eq(channelSelectionSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ result: iterationSnapshots.result, status: iterationSnapshots.status })
-          .from(iterationSnapshots).where(and(eq(iterationSnapshots.accountId, accountId), eq(iterationSnapshots.campaignId, campaignId)))
-          .orderBy(desc(iterationSnapshots.createdAt)).limit(1),
+          .from(iterationSnapshots).where(and(eq(iterationSnapshots.accountId, accountId), eq(iterationSnapshots.campaignId, campaignId), eq(iterationSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ result: retentionSnapshots.result, status: retentionSnapshots.status })
-          .from(retentionSnapshots).where(and(eq(retentionSnapshots.accountId, accountId), eq(retentionSnapshots.campaignId, campaignId)))
-          .orderBy(desc(retentionSnapshots.createdAt)).limit(1),
+          .from(retentionSnapshots).where(and(eq(retentionSnapshots.accountId, accountId), eq(retentionSnapshots.campaignId, campaignId), eq(retentionSnapshots.jobId, runId)))
+          .limit(1),
+        // strategic_blueprints is INTENTIONALLY non-run-bound: it is a campaign-config artifact
+        // (DRAFT → CONFIRMED → ORCHESTRATED lifecycle), one per campaign. The orchestrator
+        // consumes it as input; it is not a per-run output. Latest-by-createdAt is correct here.
         db.select().from(strategicBlueprints)
           .where(and(eq(strategicBlueprints.accountId, accountId), eq(strategicBlueprints.campaignId, campaignId)))
           .orderBy(desc(strategicBlueprints.createdAt)).limit(1),
@@ -515,15 +640,15 @@ export function registerDashboardRoutes(app: Express) {
           feasibility: goalDecompositions.feasibility, feasibilityScore: goalDecompositions.feasibilityScore,
           confidenceScore: goalDecompositions.confidenceScore, funnelMath: goalDecompositions.funnelMath,
         }).from(goalDecompositions)
-          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.status, "active")))
-          .orderBy(desc(goalDecompositions.createdAt)).limit(1),
+          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.jobId, runId)))
+          .limit(1),
         db.select({
           conservativeCase: growthSimulations.conservativeCase, baseCase: growthSimulations.baseCase,
           upsideCase: growthSimulations.upsideCase, confidenceScore: growthSimulations.confidenceScore,
           bottleneckAlerts: growthSimulations.bottleneckAlerts,
         }).from(growthSimulations)
-          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.status, "active")))
-          .orderBy(desc(growthSimulations.createdAt)).limit(1),
+          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.jobId, runId)))
+          .limit(1),
       ]);
 
       const plan = plans[0] || null;
@@ -791,6 +916,10 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
 
       res.json({
         success: true,
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
         campaignStatus,
         insight,
         priorityAction,
@@ -820,6 +949,7 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
         } : null,
         executionTasksSummary: taskSummary,
         assumptionsSummary,
+        pipelineState,
       });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Agent brief error:`, error);
@@ -831,39 +961,52 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
     try {
       const { accountId, campaignId } = (req as any).campaignContext;
       const { question } = req.body;
+      const requestedRunId = (req.body?.runId as string) || (req.query?.runId as string) || null;
 
       if (!question || typeof question !== "string") {
         return res.status(400).json({ success: false, error: "Question is required" });
       }
 
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+      } catch (e: any) {
+        return res.status(404).json({ success: false, error: e.message, runId: null, isLatest: false, isStale: false });
+      }
+      const runId = resolved.runId;
+      if (!runId) {
+        return res.json({ success: true, runId: null, isLatest: true, isStale: false, answer: "No completed orchestrator run yet for this campaign. Run the strategic engines first." });
+      }
+
       const [plans, miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, blueprint, goalDecompExplain, simulationExplain] = await Promise.all([
-        db.select().from(strategicPlans)
-          .where(and(eq(strategicPlans.campaignId, campaignId), eq(strategicPlans.accountId, accountId), inArray(strategicPlans.status, [...ACTIVE_PLAN_STATUSES])))
-          .orderBy(desc(strategicPlans.createdAt)).limit(1),
+        resolved.planId
+          ? db.select().from(strategicPlans).where(and(eq(strategicPlans.id, resolved.planId), eq(strategicPlans.accountId, accountId))).limit(1)
+          : Promise.resolve([] as any[]),
         db.select({ marketDiagnosis: miSnapshots.marketDiagnosis, narrativeSynthesis: miSnapshots.narrativeSynthesis, threatSignals: miSnapshots.threatSignals, opportunitySignals: miSnapshots.opportunitySignals })
-          .from(miSnapshots).where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId)))
-          .orderBy(desc(miSnapshots.createdAt)).limit(1),
+          .from(miSnapshots).where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers })
-          .from(audienceSnapshots).where(and(eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.campaignId, campaignId)))
-          .orderBy(desc(audienceSnapshots.createdAt)).limit(1),
+          .from(audienceSnapshots).where(and(eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.campaignId, campaignId), eq(audienceSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection })
-          .from(positioningSnapshots).where(and(eq(positioningSnapshots.accountId, accountId), eq(positioningSnapshots.campaignId, campaignId)))
-          .orderBy(desc(positioningSnapshots.createdAt)).limit(1),
+          .from(positioningSnapshots).where(and(eq(positioningSnapshots.accountId, accountId), eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode })
-          .from(differentiationSnapshots).where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId)))
-          .orderBy(desc(differentiationSnapshots.createdAt)).limit(1),
+          .from(differentiationSnapshots).where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ primaryOffer: offerSnapshots.primaryOffer })
-          .from(offerSnapshots).where(and(eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.campaignId, campaignId)))
-          .orderBy(desc(offerSnapshots.createdAt)).limit(1),
+          .from(offerSnapshots).where(and(eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.campaignId, campaignId), eq(offerSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ primaryFunnel: funnelSnapshots.primaryFunnel })
-          .from(funnelSnapshots).where(and(eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.campaignId, campaignId)))
-          .orderBy(desc(funnelSnapshots.createdAt)).limit(1),
+          .from(funnelSnapshots).where(and(eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.campaignId, campaignId), eq(funnelSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore })
-          .from(awarenessSnapshots).where(and(eq(awarenessSnapshots.accountId, accountId), eq(awarenessSnapshots.campaignId, campaignId)))
-          .orderBy(desc(awarenessSnapshots.createdAt)).limit(1),
+          .from(awarenessSnapshots).where(and(eq(awarenessSnapshots.accountId, accountId), eq(awarenessSnapshots.campaignId, campaignId), eq(awarenessSnapshots.jobId, runId)))
+          .limit(1),
         db.select({ primaryRoute: persuasionSnapshots.primaryRoute, persuasionStrengthScore: persuasionSnapshots.persuasionStrengthScore })
-          .from(persuasionSnapshots).where(and(eq(persuasionSnapshots.accountId, accountId), eq(persuasionSnapshots.campaignId, campaignId)))
-          .orderBy(desc(persuasionSnapshots.createdAt)).limit(1),
+          .from(persuasionSnapshots).where(and(eq(persuasionSnapshots.accountId, accountId), eq(persuasionSnapshots.campaignId, campaignId), eq(persuasionSnapshots.jobId, runId)))
+          .limit(1),
+        // strategic_blueprints is INTENTIONALLY non-run-bound (config-layer artifact). See note above.
         db.select().from(strategicBlueprints)
           .where(and(eq(strategicBlueprints.accountId, accountId), eq(strategicBlueprints.campaignId, campaignId)))
           .orderBy(desc(strategicBlueprints.createdAt)).limit(1),
@@ -875,15 +1018,15 @@ Be specific and data-driven. Reference actual numbers, DNA rules, and goal/simul
           feasibilityExplanation: goalDecompositions.feasibilityExplanation,
           assumptions: goalDecompositions.assumptions,
         }).from(goalDecompositions)
-          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.status, "active")))
-          .orderBy(desc(goalDecompositions.createdAt)).limit(1),
+          .where(and(eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.campaignId, campaignId), eq(goalDecompositions.jobId, runId)))
+          .limit(1),
         db.select({
           conservativeCase: growthSimulations.conservativeCase, baseCase: growthSimulations.baseCase,
           upsideCase: growthSimulations.upsideCase, confidenceScore: growthSimulations.confidenceScore,
           keyAssumptions: growthSimulations.keyAssumptions, bottleneckAlerts: growthSimulations.bottleneckAlerts,
         }).from(growthSimulations)
-          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.status, "active")))
-          .orderBy(desc(growthSimulations.createdAt)).limit(1),
+          .where(and(eq(growthSimulations.accountId, accountId), eq(growthSimulations.campaignId, campaignId), eq(growthSimulations.jobId, runId)))
+          .limit(1),
       ]);
 
       const plan = plans[0] || null;
@@ -1007,7 +1150,7 @@ Be specific, reference actual data, and explain the strategic reasoning. Keep yo
 
       const rawText = typeof response === "string" ? response : response?.choices?.[0]?.message?.content || "";
 
-      res.json({ success: true, answer: rawText.trim() });
+      res.json({ success: true, runId, isLatest: resolved.isLatest, isStale: resolved.isStale, answer: rawText.trim() });
     } catch (error: any) {
       console.error(`${LOG_PREFIX} Agent explain error:`, error);
       res.status(500).json({ success: false, error: "Failed to generate explanation" });

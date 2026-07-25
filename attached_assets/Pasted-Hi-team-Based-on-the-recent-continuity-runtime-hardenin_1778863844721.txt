@@ -1,0 +1,139 @@
+Hi team,
+
+Based on the recent continuity/runtime hardening work and the latest audit results, I want the next beta-readiness priorities executed in the following order.
+
+The focus now is not feature expansion first.
+
+The focus is:
+
+* operational survivability
+* runtime visibility
+* controlled beta safety
+* trustworthy system behavior under real-world conditions
+
+==================================================
+PRIORITY #1 — OPERATOR DASHBOARDS
+=================================
+
+This is now the highest priority.
+
+We need deep operational visibility into the live system before expanding beta exposure.
+
+Please build operator dashboards covering:
+
+* retry loops
+* scraper health
+* queue depth
+* scheduler cadence
+* supervisor state
+* dead/degraded chains
+* zombie watchdog interventions
+* heartbeat freshness
+* ingestion health
+* failed source visibility
+* stale-source visibility
+* worker/runtime health
+* AI spend
+* provider consumption
+* retry amplification
+* orchestration pressure
+* runtime degradation indicators
+
+The system is now operationally complex enough that we need live visibility into runtime behavior at all times.
+
+If the system degrades, operators must immediately understand:
+
+* what failed
+* where
+* why
+* severity
+* affected systems
+* recovery path
+
+No silent operational ambiguity should remain.
+
+==================================================
+PRIORITY #2 — SPEND CAPS & BETA KILL SWITCH
+===========================================
+
+Before broader beta rollout, I want strict operational safety controls.
+
+Please implement:
+
+* per-account AI spend caps
+* scraping/provider usage caps
+* retry-spend protection
+* emergency beta kill switch
+* emergency orchestration pause
+* emergency scraping pause
+* emergency provider disable controls
+* runaway-cost protection
+* abuse/throttling protection
+* beta admission gating
+
+The system must be able to:
+
+* stop safely
+* throttle safely
+* degrade safely
+* recover safely
+
+without operational chaos or uncontrolled spending.
+
+==================================================
+PRIORITY #3 — USER-FACING CONFIDENCE & DEGRADED-DATA VISIBILITY
+===============================================================
+
+Once operator visibility and safety controls are stable, I want stronger trust surfaces exposed to end users.
+
+Please make visible:
+
+* plan confidence
+* degraded-data states
+* stale-data warnings
+* missing-data warnings
+* low-confidence recommendations
+* source-health impact
+* incomplete-evidence states
+* uncertainty classification
+
+The system should never appear “fully confident” when operating on weak, stale, degraded, or incomplete evidence.
+
+Users should understand:
+
+* confidence level
+* evidence quality
+* degradation impact
+* when the system is uncertain
+
+This is a core trust requirement for beta.
+
+==================================================
+IMPORTANT DOCTRINE
+==================
+
+The system must continue prioritizing:
+
+* truthfulness over confidence
+* visibility over silence
+* safe degradation over fake success
+* explicit classification over hidden ambiguity
+* operational continuity over feature velocity
+
+==================================================
+DELIVERABLES
+============
+
+Please provide:
+
+* implementation plan
+* operational dashboard architecture
+* spend-protection architecture
+* kill-switch design
+* user-facing trust-state design
+* alert strategy
+* runtime-risk analysis
+* scaling-risk analysis
+* architect review after implementation
+
+Thanks.

@@ -13,6 +13,7 @@ import {
   Inter_600SemiBold, 
   Inter_700Bold 
 } from "@expo-google-fonts/inter";
+import { Ionicons } from "@expo/vector-icons";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { AppProvider } from "@/context/AppContext";
@@ -70,7 +71,7 @@ const loadingStyles = StyleSheet.create({
 });
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, user, isAccessActive } = useAuth();
+  const { isAuthenticated, isLoading, user, isAccessActive, isAddingAccount } = useAuth();
   const segments = useSegments();
 
   useEffect(() => {
@@ -93,11 +94,14 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         router.replace('/upgrade');
       }
     } else {
+      if (inAuthGroup && isAddingAccount) {
+        return;
+      }
       if (inAuthGroup || inIntro || inUpgrade) {
         router.replace('/(tabs)');
       }
     }
-  }, [isAuthenticated, isLoading, user, isAccessActive, segments]);
+  }, [isAuthenticated, isLoading, user, isAccessActive, isAddingAccount, segments]);
 
   if (isLoading) {
     return <LoadingScreen />;
@@ -117,6 +121,7 @@ function RootLayoutNav() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="studio/[id]" options={{ headerShown: false, presentation: 'card' }} />
           <Stack.Screen name="agent" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+          <Stack.Screen name="audit-control" options={{ headerShown: false, presentation: 'card' }} />
         </Stack>
         <AccountSwitcherModal />
       </OnboardingProvider>
@@ -125,11 +130,17 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  // Preload Ionicons alongside Inter so the icon font is registered exactly
+  // once during splash. Without this, @expo/vector-icons calls Font.loadAsync
+  // lazily on first icon render, which on iOS triggers
+  // CTFontManagerError code 104 ("Font registration was unsuccessful")
+  // during Fast Refresh / re-mount because the font is already registered.
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
+    ...Ionicons.font,
   });
 
   useEffect(() => {
@@ -139,7 +150,7 @@ export default function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   if (!fontsLoaded && !fontError) {
-    return null;
+    return <LoadingScreen />;
   }
 
   return (

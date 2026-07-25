@@ -1,0 +1,32 @@
+PROMPT FOR REPLIT AGENT — Confirmation Run: Grounding Contract Stability
+
+Context:
+The grounding contract shipped and the after-run 2026-07-11T12-13-31-822Z showed 7 MET / 0 UNMET and BLOCKED_BY_INTEGRITY 2→0. These favorable deltas are from a single stochastic run. This session is a pure confirmation run — ZERO code changes of any kind. If anything looks wrong, diagnose and report only; do not fix.
+
+PHASE 1 — Run
+
+	1.	Confirm backend booted clean at schema floor 40 and no active QUEUED/RUNNING fetch job (no zombie dedup).
+	2.	Run the full pipeline on campaign_1773576062201_6t0oxi (same corpus, within cooldown is fine).
+
+PHASE 2 — Evidence report (compare against BOTH prior runs: baseline 10-52-49-949Z and grounding run 12-13-31-822Z)
+Quote logs / SUMMARY.json values for each:
+
+	1.	Grounding contract: GROUNDING_CONTRACT_MET / UNMET counts (prior: 7/0). Sample 3 cited groundingRefs from different engines.
+	2.	Integrity: BLOCKED_BY_INTEGRITY count (prior: 0). Does the offer↔audience pain alignment still pass? Quote the integrity verdict line.
+	3.	Judge verdicts: positioning + offer interchangeability verdicts per attempt — PASS or REJECTED with reason.
+	4.	Engine completion: engines completed / NOT_REACHED / DEPTH_CASCADE_BLOCKED (prior: NOT_REACHED=5).
+	5.	Run-level: doctrineResolution, System Control verdict + exact reasons, BuildPlan actionability, CEL score, depth-gate scores for awareness and funnel (0.20 threshold untouched — confirm).
+	6.	Regression safety: no DNA_ENRICHMENT_WRITE_FAILED, no GROUNDING_CONTRACT errors, no new silent-catch patterns.
+
+PHASE 3 — Stability verdict
+One explicit answer: are the grounding-contract gains STABLE (MET/UNMET and Integrity=0 blocks reproduced) or NOT STABLE (quote what diverged)? If results diverge, report the divergence honestly with root-cause hypotheses — no fixes this session.
+
+Constraints:
+
+	•	Verification only. No code, prompt, gate, threshold, or config changes.
+	•	Report truthfully whether stable or not — a truthful divergence report is a valid outcome.
+
+Done-conditions:
+
+	•	All 6 evidence sections answered with quoted proof.
+	•	Explicit STABLE / NOT STABLE verdict with the comparison table across the 3 runs.

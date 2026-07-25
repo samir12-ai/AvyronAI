@@ -13,7 +13,15 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
+import {
+  colorForValidationState,
+  labelForValidationState,
+  isCanonicalValidationState,
+} from '@/lib/verdict-colors';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
 
 interface LayerResult {
   layerName: string;
@@ -74,7 +82,10 @@ interface StatisticalValidationData {
   statusMessage?: string | null;
   claimConfidenceScore?: number;
   evidenceStrength?: number;
-  validationState?: "validated" | "provisional" | "weak" | "rejected";
+  /** Canonical F3 statistical-validation verdict (D3 strict enum). 'unknown'
+   *  is rendered when the field is missing from the snapshot — never silently
+   *  defaulted to 'weak' (Seal #6 / D5). */
+  validationState?: "validated" | "provisional" | "weak" | "rejected" | "unknown";
   assumptionFlags?: string[];
   claimValidations?: ClaimValidation[];
   layerResults?: LayerResult[];
@@ -112,11 +123,15 @@ const LAYER_ICONS: Record<string, string> = {
   confidence_calibration: "speedometer",
 };
 
-const STATE_CONFIG: Record<string, { color: string; label: string; icon: keyof typeof Ionicons.glyphMap }> = {
-  validated: { color: '#10B981', label: 'Validated', icon: 'checkmark-circle' },
-  provisional: { color: '#F59E0B', label: 'Provisional', icon: 'time' },
-  weak: { color: '#EF4444', label: 'Weak', icon: 'warning' },
-  rejected: { color: '#DC2626', label: 'Rejected', icon: 'close-circle' },
+// Icon mapping per validationState. Color and label are sourced from the
+// canonical helpers (`colorForValidationState`, `labelForValidationState`) so
+// every surface renders identical semantics for the same enum value.
+const STATE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  validated: 'checkmark-circle',
+  provisional: 'time',
+  weak: 'warning',
+  rejected: 'close-circle',
+  unknown: 'help-circle',
 };
 
 const EVIDENCE_TYPE_COLORS: Record<string, string> = {
@@ -127,13 +142,23 @@ const EVIDENCE_TYPE_COLORS: Record<string, string> = {
   inferred: '#8B5CF6',
 };
 
-const PROVENANCE_ENGINE_LABELS: Record<string, string> = {
+// Phase 8: two label maps — the operator one keeps internal engine names so
+// architecture is debuggable; the customer one speaks outcomes.
+const PROVENANCE_ENGINE_LABELS_OPERATOR: Record<string, string> = {
   market_intelligence: "Market Intelligence",
   audience: "Audience Engine",
   offer: "Offer Engine",
   persuasion: "Persuasion Engine",
   awareness: "Awareness Engine",
   funnel: "Funnel Engine",
+};
+const PROVENANCE_ENGINE_LABELS_CUSTOMER: Record<string, string> = {
+  market_intelligence: "Market signals",
+  audience: "Audience research",
+  offer: "Offer analysis",
+  persuasion: "What convinces buyers",
+  awareness: "How buyers find you",
+  funnel: "Buyer journey",
 };
 
 const PROVENANCE_SOURCE_LABELS: Record<string, string> = {
@@ -153,7 +178,14 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
+  // Phase 8 defense-in-depth: mounted by the customer-pivot "Evidence
+  // strength" tab AND by the operator strategies branch.
+  const operator = useOperatorSurface();
+  const PROVENANCE_ENGINE_LABELS = operator.enabled
+    ? PROVENANCE_ENGINE_LABELS_OPERATOR
+    : PROVENANCE_ENGINE_LABELS_CUSTOMER;
   const [data, setData] = useState<StatisticalValidationData | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
@@ -167,6 +199,7 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
       url.searchParams.set('campaignId', selectedCampaignId);
       const res = await authFetch(url.toString());
       const json = await safeApiJson(res);
+      setEnvelope(json?.envelope ?? null);
       if (json.exists && json.result) {
         const r = json.result;
         setData({
@@ -447,8 +480,16 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
   const hasData = data?.exists && data.layerResults;
   const confidencePercent = Math.round((data?.claimConfidenceScore || 0) * 100);
   const evidencePercent = Math.round((data?.evidenceStrength || 0) * 100);
-  const validationState = data?.validationState || 'weak';
-  const stateConfig = STATE_CONFIG[validationState] || STATE_CONFIG.weak;
+  // Canonical-truth migration (Seal #6 / D5): never silently default to 'weak'.
+  // Missing canonical `validationState` ⇒ render as 'unknown' so the user
+  // sees CONTRACT_INCOMPLETE instead of fake-amber confidence.
+  const validationState = data?.validationState ?? 'unknown';
+  const stateConfig = {
+    color: colorForValidationState(validationState),
+    label: labelForValidationState(validationState),
+    icon: STATE_ICONS[validationState] || STATE_ICONS.unknown,
+    isCanonical: isCanonicalValidationState(validationState),
+  };
   const passedLayers = data?.layerResults?.filter(l => l.passed).length || 0;
   const totalLayers = data?.layerResults?.length || 7;
 
@@ -495,6 +536,12 @@ export default function StatisticalValidationEngine({ isActive }: { isActive?: b
           </View>
         )}
       </LinearGradient>
+
+      {envelope && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={runAnalysis} />
+        </View>
+      )}
 
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>

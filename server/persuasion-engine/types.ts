@@ -7,6 +7,10 @@ export interface StructuredObjection {
   persuasionResponse: string;
   source: "audience_objection" | "narrative_extraction" | "pain_inference";
   confidence: number;
+  rootCause?: string;
+  userThinking?: string;
+  resolution?: string;
+  causalChainAlignment?: string;
 }
 
 export interface PersuasionMIInput {
@@ -157,16 +161,87 @@ export interface LayerResult {
   warnings: string[];
 }
 
+export type CialdiniPrinciple =
+  | "reciprocity"
+  | "commitment_consistency"
+  | "social_proof"
+  | "authority"
+  | "liking"
+  | "scarcity"
+  | "unity";
+
+export interface CialdiniReasoning {
+  primaryCialdiniPrinciple: CialdiniPrinciple;
+  principleRationale: string;
+  buyerPsychologyFit: string;
+  whyOthersFail: Array<{ principle: CialdiniPrinciple; whyItWouldFail: string }>;
+  groundedSignals: string[];
+  reasoningSteps: string[];
+  rootCauseRefs: string[];
+  audienceSophisticationTier?: number;
+  modelUsed: string;
+  generatedAt: string;
+  /**
+   * When present, this principle was selected as a *consequence* of the upstream
+   * Trust Transfer Design (the marketing-logic core), not as a standalone label.
+   */
+  groundedInTrustMechanism?: string;
+}
+
+export type RiskSeverity = "low" | "moderate" | "high" | "critical";
+
+/**
+ * Trust Transfer Design — the commercial-reasoning output produced BEFORE
+ * Cialdini selection. Answers "what is this doing commercially?" by naming
+ * the buyer's risk state, current trust source, the deficit, the bridging
+ * mechanism, and the failure modes if a wrong mechanism were chosen.
+ *
+ * Cialdini selection becomes a downstream consequence of this design,
+ * not the primary classification.
+ */
+export interface TrustTransferDesign {
+  buyerRiskState: string;
+  riskSeverity: RiskSeverity;
+  currentTrustSources: string[];
+  trustDeficit: string;
+  transferMechanism: {
+    name: string;
+    description: string;
+    proofArtifact: string;
+  };
+  failureModes: Array<{ mechanism: string; whyItWouldFail: string }>;
+  requiredProofShape: string;
+  commercialFunction: string;
+  groundedSignals: string[];
+  reasoningSteps: string[];
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  judgeReason?: string;
+  retryCount: number;
+  modelUsed: string;
+  generatedAt: string;
+}
+
 export interface PersuasionRoute {
   routeName: string;
   persuasionMode: string;
   primaryInfluenceDrivers: string[];
-  objectionPriorities: string[];
+  /** T005: structured objection — { tag:{category,awarenessStage}, objection:{canonical,frequency,evidence,confidence} }.
+   *  Strings are accepted for legacy downstream compat. */
+  objectionPriorities: Array<string | {
+    tag: { category: string; awarenessStage: string };
+    objection: { canonical: string; frequency: number | null; evidence: string[]; confidence: number | null };
+  }>;
   trustSequence: string[];
   messageOrderLogic: string[];
   persuasionStrengthScore: number;
   frictionNotes: string[];
   rejectionReason: string | null;
+  cialdiniReasoning?: CialdiniReasoning;
+  /**
+   * Marketing-logic core — designs the commercial trust-transfer mechanism
+   * before any Cialdini label is picked. See TrustTransferDesign.
+   */
+  trustTransferDesign?: TrustTransferDesign;
   trustBarriers?: TrustBarrierClassification[];
   awarenessStageProperties?: AwarenessStageProperty[];
   objectionProofLinks?: ObjectionProofLink[];

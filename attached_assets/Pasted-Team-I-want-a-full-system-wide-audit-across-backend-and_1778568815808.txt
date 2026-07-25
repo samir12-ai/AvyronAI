@@ -1,0 +1,171 @@
+Team,
+
+I want a full system-wide audit across backend and frontend.
+
+This should not be limited to leakage only.
+
+Goal:
+map every surface related to runtime truth, snapshots, signals, routes, cache, account/campaign isolation, frontend state, agent context, and pipeline execution.
+
+I want to know exactly what is missing, weak, risky, duplicated, stale, or not fully verified.
+
+Scope must include:
+
+1. Backend routes
+
+* every API route
+* auth enforcement
+* accountId scoping
+* campaignId scoping
+* jobId/runId ownership checks
+* body-param trust
+* query-param trust
+* route-level fallbacks
+* any route using defaults like `"default"`
+
+2. Snapshot system
+
+* snapshot reads
+* snapshot reuse
+* sourceJobId
+* sourceAccountId
+* sourceCampaignId
+* freshness logic
+* stale snapshot prevention
+* canonical snapshot reader usage
+* legacy snapshot paths
+
+3. Runtime pipeline
+
+* orchestrator jobs
+* run resolver
+* agent context hydration
+* scoped engine runs
+* selective reruns
+* recovery reruns
+* run locks
+* in-flight maps
+* retry/repair execution
+* system-control verdict generation
+
+4. Signal system
+
+* signal lineage
+* inferred vs direct signals
+* duplicate signal risk
+* signal confidence
+* signal coverage
+* signal grounding
+* signal reuse across engines
+* any place where labels or UI badges could satisfy logic incorrectly
+
+5. Metrics and performance data
+
+* manual campaign metrics
+* campaign_metrics
+* content performance snapshots
+* scraped performance
+* Meta/connected data
+* benchmark fallback
+* whether engines know the difference between manual, scraped, inferred, and benchmark data
+
+6. Frontend
+
+* React Query keys
+* cache invalidation
+* account switch
+* campaign switch
+* AsyncStorage namespacing
+* stale local component state
+* stale PASS/verdict display
+* stale metrics display
+* frontend truthfulness vs backend canonical state
+
+7. Agent pipeline
+
+* prompt hydration
+* memory/context loading
+* recovery intelligence
+* plan synthesis
+* build-plan layer
+* content pipeline
+* agent-run state
+* any shared helper that could carry context across campaigns/accounts
+
+8. Shared caches / dedup / scraping
+
+* MI-V3 dedup
+* shared profile store
+* profile scraper cache
+* rate limits
+* proxy pools
+* cookie/session pools
+* active fetch maps
+* competitor hash logic
+* any public-data sharing that still leaks timing/status/quota metadata
+
+9. Trust / contract / enforcement
+
+* contract registry
+* classifyTrust
+* WRONG_ACCOUNT / WRONG_CAMPAIGN
+* CONTRACT_INCOMPLETE
+* SYSTEM_UNTRUSTED
+* PIPELINE_INCOMPLETE
+* STALE_SNAPSHOT_EVIDENCE
+* ENGINE_TIMEOUT
+* runtime vs shadow-only enforcement
+
+10. Recovery / repair / block behavior
+
+* repair-before-block
+* recovery plans
+* resolverActor
+* retrySafe
+* safeToExecute
+* block reasons
+* downgrade paths
+* user-facing next steps
+* any dead-end BLOCK remaining
+
+Output requested:
+Create a full audit document:
+
+`.local/plans/full-system-runtime-isolation-truth-audit.md`
+
+For every surface, include:
+
+* file/path checked
+* what it does
+* account/campaign/job/run scoping
+* current protection
+* missing protection
+* risk level
+* confirmed vs theoretical
+* recommended fix
+* whether fix is urgent
+* whether test exists
+* whether frontend reflects it truthfully
+
+Important:
+Do not shortcut this audit.
+
+Do not only search obvious files.
+Do not only inspect engines.
+Include frontend, backend, agent pipeline, caches, routes, snapshots, metrics, runtime state, and recovery.
+
+No code changes yet.
+
+This is audit-only.
+
+After the audit, produce a prioritized closure plan:
+P0 — must fix immediately
+P1 — important hardening
+P2 — cleanup / defense-in-depth
+P3 — documentation / future verification
+
+Core rule:
+No campaign/account/runtime truth should ever be stale, mixed, inherited, leaked, reused incorrectly, or displayed misleadingly.
+
+Best,
+[Your Name]

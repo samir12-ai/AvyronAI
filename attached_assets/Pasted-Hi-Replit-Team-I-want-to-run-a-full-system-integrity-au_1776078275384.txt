@@ -1,0 +1,207 @@
+Hi Replit Team,
+
+I want to run a full system integrity audit focused specifically on path discipline, enforcement, and memory consistency.
+
+The goal is to verify — based on actual code behavior — that the system is fully aligned with the intended architecture:
+
+data → signals → decisions → actions → outcomes → memory
+
+and that there are no remaining bypasses, silent fallbacks, or cross-path contamination.
+
+---
+
+# 🧠 Objective
+
+Ensure that:
+
+- every component operates strictly within its defined role  
+- no layer bypasses the decision system  
+- no raw or unvalidated data leaks into downstream behavior  
+- memory remains clean, controlled, and policy-enforced  
+- attribution is accurate and not introducing hidden bias  
+- fallback behavior is explicit and not silently reverting to legacy logic  
+
+---
+
+# 🔍 Scope of Audit
+
+Please perform a deep, code-level audit (not conceptual), covering the following areas:
+
+---
+
+## 1. Data Path Integrity
+
+- Verify that all raw data flows into signals, then into decisions  
+- Confirm that no raw signals directly influence:
+  - plan synthesis  
+  - agent actions  
+  - memory writes  
+
+- Identify any remaining paths that bypass the decision layer  
+
+If found:
+- fix them immediately  
+- route them through the decision layer  
+- explain exactly where the bypass existed and how it was resolved  
+
+---
+
+## 2. Decision Layer Enforcement
+
+- Confirm all validation logic is based on:
+  - decision objects  
+  - confidence  
+  - agreement type  
+
+- Ensure no usage of:
+  - single-source signals  
+  - legacy heuristics  
+  - direct engine outputs as truth  
+
+- Verify that:
+  - plan synthesis uses only validated decisions  
+  - agent behavior is fully decision-driven  
+
+---
+
+## 3. Memory Integrity
+
+- Confirm all memory writes (including outcome-driven updates) pass through the same policy layer  
+- Verify no direct writes or updates bypass validation  
+- Ensure memory only stores:
+  - high-confidence decisions  
+  - properly validated updates  
+
+- Identify and fix any fallback or weak-signal contamination paths  
+
+---
+
+## 4. Attribution Integrity
+
+- Confirm all actions are correctly linked to one or more decisions  
+- Ensure no remaining “most recent decision” heuristics exist  
+- Verify that:
+  - multi-decision attribution is functioning  
+  - weights are applied correctly  
+  - outcome reinforcement is proportional, not equal  
+
+- Ensure no action influences learning without a valid decision linkage  
+
+---
+
+## 5. Fallback & Degraded Behavior
+
+- Verify all fallback modes are explicit and logged  
+- Ensure no silent fallback to legacy behavior  
+- Confirm that degraded modes:
+  - clearly signal failure  
+  - do not behave like valid output  
+
+- Identify any remaining hidden defaults or implicit fallbacks  
+
+---
+
+## 6. Debug Visibility
+
+- Ensure the system exposes:
+  - which decisions were used  
+  - which were rejected and why  
+  - attribution structure (single vs multi, weights)  
+  - fallback/degraded events  
+
+- Confirm we can trace:
+  decision → action → outcome → memory update  
+
+---
+
+## 7. Legacy Path Audit
+
+Search explicitly for any remaining legacy logic that:
+
+- reads raw signals directly  
+- writes memory without policy enforcement  
+- builds plans without decisions  
+- triggers actions without decision binding  
+
+If any are found:
+- remove or disable them  
+- document the change  
+
+---
+
+## 8. End-to-End Flow Verification
+
+Validate the full pipeline in practice:
+
+- data → signals → decisions → actions → outcomes → memory  
+
+Ensure:
+- no stage skips another  
+- no stage performs logic outside its responsibility  
+- no cross-contamination between layers  
+
+---
+
+# ⚙️ Required Behavior
+
+If you find any issue:
+
+- fix it immediately (within scope)  
+- do not leave it as a recommendation  
+- after fixing, explain:
+  - what the issue was  
+  - why it mattered  
+  - how it was fixed  
+  - how you verified the fix  
+
+---
+
+# 📊 Expected Response Structure
+
+Please respond with:
+
+1. Audit Summary  
+   - Is the system fully aligned or are there remaining gaps?
+
+2. Issues Found  
+   - each issue with location, severity, and impact  
+
+3. Fixes Applied  
+   - what was changed and where  
+
+4. Verification  
+   - how you confirmed fixes are working  
+
+5. Remaining Risks  
+   - anything not broken, but still requiring tuning (precision vs structure)  
+
+---
+
+# 🎯 Final Goal
+
+We want to confirm that the system is:
+
+- structurally clean  
+- fully enforced  
+- free of silent legacy behavior  
+- operating through a single, consistent path  
+
+---
+
+# 🧠 Key Principle
+
+Treat this as a production-grade system audit.
+
+Any deviation from the defined flow:
+
+data → signals → decisions → actions → outcomes → memory  
+
+should be considered a defect and handled accordingly.
+
+---
+
+Please proceed with the audit and fixes.
+
+Thanks,  
+Samir  
+Avyron AI

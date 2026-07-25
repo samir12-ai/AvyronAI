@@ -464,6 +464,110 @@ router.get("/api/autopilot/guardrails", requireCampaign, async (req, res) => {
   }
 });
 
+router.get("/api/decisions/proactive-insights", async (req, res) => {
+  try {
+    const accountId = resolveAccountId(req);
+    const campaignId = req.query.campaign_id as string | undefined;
+
+    const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000);
+
+    const baseConditions = [
+      eq(strategyDecisions.accountId, accountId),
+      gte(strategyDecisions.createdAt, cutoff),
+    ];
+    if (campaignId) baseConditions.push(eq(strategyDecisions.campaignId, campaignId));
+
+    let decisions = await db
+      .select({
+        id: strategyDecisions.id,
+        trigger: strategyDecisions.trigger,
+        action: strategyDecisions.action,
+        reason: strategyDecisions.reason,
+        priority: strategyDecisions.priority,
+        status: strategyDecisions.status,
+        riskLevel: strategyDecisions.riskLevel,
+        createdAt: strategyDecisions.createdAt,
+        insightType: strategyDecisions.insightType,
+      })
+      .from(strategyDecisions)
+      .where(and(...baseConditions))
+      .orderBy(desc(strategyDecisions.createdAt))
+      .limit(4);
+
+    if (decisions.length === 0) {
+      const fallbackConditions: any[] = [eq(strategyDecisions.accountId, accountId)];
+      if (campaignId) fallbackConditions.push(eq(strategyDecisions.campaignId, campaignId));
+
+      decisions = await db
+        .select({
+          id: strategyDecisions.id,
+          trigger: strategyDecisions.trigger,
+          action: strategyDecisions.action,
+          reason: strategyDecisions.reason,
+          priority: strategyDecisions.priority,
+          status: strategyDecisions.status,
+          riskLevel: strategyDecisions.riskLevel,
+          createdAt: strategyDecisions.createdAt,
+          insightType: strategyDecisions.insightType,
+        })
+        .from(strategyDecisions)
+        .where(and(...fallbackConditions))
+        .orderBy(desc(strategyDecisions.createdAt))
+        .limit(3);
+    }
+
+    const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    const sorted = [...decisions].sort((a, b) => {
+      const pa = priorityOrder[a.priority || "medium"] ?? 1;
+      const pb = priorityOrder[b.priority || "medium"] ?? 1;
+      return pa - pb;
+    });
+
+    const MIN_FIELD_LENGTH = 20;
+
+    function isStructuredInsight(d: typeof decisions[0]): boolean {
+      const trigger = (d.trigger || "").trim();
+      const reason = (d.reason || "").trim();
+      const action = (d.action || "").trim();
+      return (
+        trigger.length >= MIN_FIELD_LENGTH &&
+        reason.length >= MIN_FIELD_LENGTH &&
+        action.length >= MIN_FIELD_LENGTH
+      );
+    }
+
+    const validDecisions = sorted.filter(isStructuredInsight);
+
+    const insights = validDecisions.slice(0, 3).map(d => {
+      const trigger = (d.trigger || "").trim();
+      const reason = (d.reason || "").trim();
+      const action = (d.action || "").trim();
+
+      const messageText =
+        `Observation:\n${trigger}\n\n` +
+        `Why this matters:\n${reason}\n\n` +
+        `Suggested action:\n${action}`;
+
+      return {
+        id: d.id,
+        messageText,
+        priority: d.priority || "medium",
+        // eslint-disable-next-line semantic/no-semantic-fallback -- D1-safe: `status` here is the autopilot-decision-row lifecycle column (pending/approved/rejected/applied) defaulting to schema default "pending" for unprocessed rows during serialization. NOT a verdict-shape semantic substitution.
+        status: d.status || "pending",
+        riskLevel: d.riskLevel || "low",
+        createdAt: d.createdAt,
+        insightType: d.insightType || "user_execution",
+        validated: true,
+      };
+    });
+
+    res.json({ insights, total: decisions.length, validCount: validDecisions.length });
+  } catch (error) {
+    console.error("[Autopilot] Error fetching proactive insights:", error);
+    res.status(500).json({ error: "Failed to fetch insights" });
+  }
+});
+
 export function registerAutopilotRoutes(app: any) {
   app.use(router);
 }

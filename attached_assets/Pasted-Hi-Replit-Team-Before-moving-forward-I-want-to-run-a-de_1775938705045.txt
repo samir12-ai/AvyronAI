@@ -1,0 +1,165 @@
+Hi Replit Team,
+
+Before moving forward, I want to run a deep technical audit of the current memory system to fully understand how it operates today — not conceptually, but based on actual code behavior.
+
+The goal is to verify whether our memory layer is already acting as a true learning system, or if it is still primarily storing validated signals without full outcome coupling.
+
+Please answer based strictly on the implementation (files, logic, and data flow), not intended design.
+
+---
+
+# 🧠 1. Memory Entry Structure
+
+- What exactly is stored in memory entries today?
+  - decision type?
+  - confidence?
+  - source signals?
+  - context (campaign / timeframe)?
+  - any performance-related metadata?
+
+- Are memory entries:
+  - immutable?
+  - updated over time?
+  - versioned?
+
+---
+
+# 🔁 2. Memory Write Triggers
+
+- What are the exact conditions under which a memory entry is written?
+
+- Confirm:
+  - Only HIGH-confidence decisions are written?
+  - Are provisional writes still possible anywhere?
+  - Are there any paths that write to memory outside the enforced thresholds?
+
+- Which files/functions handle memory writes?
+
+---
+
+# 📊 3. Outcome Coupling (Critical)
+
+This is the most important section.
+
+- Does the system currently link a memory entry to:
+  - a specific action or plan where it was used?
+
+- Do we store:
+  - when a decision was applied?
+  - where it was applied?
+  - what the outcome was afterward?
+
+- Is there any mechanism that:
+  - updates memory strength based on actual performance outcomes?
+
+Or is memory currently:
+
+- “validated at creation time” only, without feedback from results?
+
+---
+
+# 🧮 4. Memory Strength / Evolution
+
+- Does a memory entry:
+  - gain strength if repeatedly successful?
+  - decay if unused or ineffective?
+  - get invalidated if contradicted by new data?
+
+- Is there:
+  - confidence mutation?
+  - reinforcement logic?
+  - negative feedback loop?
+
+---
+
+# 🔄 5. Memory Usage in Decision-Making
+
+- Where is memory actually used today?
+
+Specifically:
+- Plan Synthesis?
+- Dual Analysis?
+- Agent logic?
+- Market Intelligence reruns?
+
+- How is memory injected:
+  - as constraints?
+  - as bias?
+  - as hard rules?
+
+---
+
+# 🧠 6. Memory vs Decision Layer
+
+- What is the relationship between:
+  - decision objects
+  - memory entries
+
+- Are memory entries:
+  - direct copies of decisions?
+  - transformed abstractions?
+  - aggregated patterns?
+
+---
+
+# ⚠️ 7. Failure & Safety
+
+- What happens if:
+  - memory constraint enforcement fails?
+  - memory data is missing?
+  - memory contradicts current signals?
+
+- Is there any:
+  - fallback behavior?
+  - or does the system block/degrade?
+
+---
+
+# 🧪 8. Observability
+
+- What logs or debug outputs exist for memory?
+
+- Can we trace:
+  - which memory entries influenced a plan?
+  - which were ignored?
+  - why a memory entry was applied?
+
+---
+
+# 🧭 9. Current Limitations (From Code Perspective)
+
+Based on the current implementation:
+
+- What are the known limitations of the memory system?
+
+Examples:
+- no outcome tracking
+- no reinforcement
+- no decay
+- no cross-campaign linking
+
+---
+
+# 🎯 Goal of This Audit
+
+We want to clearly determine:
+
+- Is memory currently:
+  1) a validated signal store  
+  or  
+  2) a true learning system tied to outcomes?
+
+- What is already implemented vs missing for a closed learning loop:
+  decision → action → outcome → memory update
+
+---
+
+Please include:
+
+- exact files/functions responsible for each part
+- confirmation of real behavior (not intended architecture)
+- any edge cases or hidden fallback paths
+
+Thanks,  
+Samir  
+Avyron A

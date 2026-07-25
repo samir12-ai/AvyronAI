@@ -1,0 +1,142 @@
+The latest perception-gap audit confirmed something important:
+
+The system is already doing significantly more reasoning, monitoring, validation, comparison, and adaptive analysis internally than the user actually perceives from the UX.
+
+Right now the backend/runtime intelligence is far ahead of the frontend intelligence visibility.
+
+This creates a dangerous product gap:
+
+Internally:
+
+* the system continuously watches competitors
+* detects shifts
+* evaluates confidence
+* reruns engines
+* validates freshness
+* tracks degradation
+* monitors signal quality
+* detects divergence
+* adjusts strategic confidence
+* observes rhythm changes
+* performs adaptive reasoning
+
+But externally:
+the product often still feels closer to:
+
+* periodic reports
+* dashboard updates
+* performance summaries
+
+instead of:
+“an always-on market intelligence analyst.”
+
+This is now becoming a major product priority.
+
+Most important realization:
+we do NOT need significantly more intelligence right now.
+
+We need:
+better exposure of the intelligence that already exists.
+
+The goal is:
+users should FEEL that the system is:
+
+* continuously watching
+* continuously comparing
+* continuously validating
+* continuously adapting
+* continuously learning
+
+without leaking raw architecture complexity.
+
+The audit already identified several existing backend signals/events that are safe and valuable to surface:
+
+* market shift detected
+* competitor posting velocity changes
+* messaging pivots
+* audience fatigue risk
+* engagement/conversion divergence
+* confidence downgrades
+* stale-data advisories
+* fresh scrape completion
+* rerun events
+* re-anchor events
+* strategic reversions
+* channel promotions/demotions
+* conservative optimization mode
+* partial evidence mode
+
+These already exist operationally.
+Most are already computed continuously by the runtime.
+
+The problem is:
+the user barely sees them.
+
+I want us to prioritize a dedicated “Perception Layer” initiative focused on exposing real operational intelligence through UX.
+
+Most promising directions from the audit:
+
+1. Watchtower Strip
+   Persistent lightweight status layer:
+
+* competitors watched
+* last scan
+* market state
+* confidence state
+* freshness state
+
+This is likely the highest ROI perception upgrade.
+
+2. Activity Timeline
+   Real runtime events only.
+   No fake AI chatter.
+   No cosmetic activity feed.
+
+Only real:
+
+* shift detections
+* reruns
+* confidence changes
+* fresh scans
+* strategic changes
+* competitor movements
+* degradation notices
+* evidence refreshes
+
+3. “Why This Changed” Cards
+   Whenever recommendations or priorities change:
+   show:
+
+* what changed
+* why it changed
+* which signals caused it
+* confidence level
+* freshness state
+
+4. Trust Meter
+   Replace simplistic Stable/Caution states with:
+
+* confidence composition
+* competitor agreement
+* freshness quality
+* validated signal coverage
+
+Most important:
+the system should feel alive and continuously aware.
+
+Right now the intelligence exists,
+but much of it is hidden behind backend/runtime layers the user never experiences.
+
+We should prioritize exposing:
+
+* operational awareness
+* strategic reasoning
+* monitoring continuity
+* confidence evolution
+* adaptive behavior
+
+before adding major new engine complexity.
+
+The audit strongly suggests the backend is already substantially more capable than the product currently communicates.
+
+I want the next phase to focus on closing that perception gap carefully and intentionally.

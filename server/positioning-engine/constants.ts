@@ -98,9 +98,25 @@ export interface Territory {
   evidenceSignals: string[];
   confidenceScore: number;
   mappedSignalIds?: string[];
+  /** Canonical AEL evidence IDs this territory's claims cite (grounding contract). */
+  groundingRefs?: string[];
   domainFailure?: string;
   operationalProblem?: string;
   proofRequirement?: string;
+  provenance?: "system_default" | "mi_traced" | "orphaned" | "partial_traced" | "fully_traced";
+  degraded?: boolean;
+  _systemMapped?: boolean;
+  semanticCollision?: {
+    semanticCollisionScore: number;
+    collisionMeaning: string;
+    competitorEquivalentClaim: string;
+    competitorSource?: string;
+    jaccardScore?: number;
+    perCompetitor?: Array<Record<string, unknown>>;
+    reasoningSteps?: string[];
+    modelUsed?: string;
+    generatedAt?: string;
+  };
 }
 
 export interface StrategyCard {
@@ -129,6 +145,10 @@ export interface OpportunityGap {
   painSignals: string[];
   desireSignals: string[];
   signalSource?: string;
+  // FIX-B provenance marker: how this territory's NAME was produced.
+  // "llm" = grounded generateGroundedTerritoryNames output; "template_fallback"
+  // = static translateToSystemTerritory (LLM naming unavailable / failed).
+  territoryNameSource?: "llm" | "template_fallback";
 }
 
 export interface StabilityAdvisory {

@@ -53,6 +53,8 @@ interface Competitor {
   primaryObjective: string;
   websiteUrl: string | null;
   blogUrl: string | null;
+  tiktokUrl: string | null;
+  googleMapsUrl: string | null;
   websiteEnrichmentStatus: string | null;
   postingFrequency: number | null;
   contentTypeRatio: string | null;
@@ -98,7 +100,7 @@ export default function CompetitiveIntelligence() {
     platform: 'instagram', postingFrequency: '', contentTypeRatio: '',
     engagementRatio: '', ctaPatterns: '', discountFrequency: '',
     hookStyles: '', messagingTone: '', socialProofPresence: '',
-    websiteUrl: '', blogUrl: '',
+    websiteUrl: '', blogUrl: '', tiktokUrl: '', googleMapsUrl: '',
   };
 
   const [newComp, setNewComp] = useState(emptyComp);
@@ -107,6 +109,8 @@ export default function CompetitiveIntelligence() {
     queryKey: ['ci-competitors', activeCampaignId],
     enabled: !!activeCampaignId,
     gcTime: 30 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: 'always' as const,
     queryFn: async () => {
       const res = await authFetch(new URL(`/api/ci/competitors?campaignId=${activeCampaignId}`, baseUrl).toString());
       return safeApiJson(res);
@@ -134,9 +138,28 @@ export default function CompetitiveIntelligence() {
   });
 
   useEffect(() => {
-    if (cachedSnapshot) {
-      setMiv3Override(null);
-    }
+    if (!cachedSnapshot) return;
+    setMiv3Override((prev: any) => {
+      if (!prev) return prev;
+      const parseTs = (v: any): number => {
+        if (!v) return NaN;
+        const t = new Date(v).getTime();
+        return Number.isFinite(t) ? t : NaN;
+      };
+      const prevTs = parseTs(prev?.snapshot?.createdAt || prev?.timestamp);
+      const cachedTs = parseTs(
+        (cachedSnapshot as any)?.snapshot?.createdAt ||
+          (cachedSnapshot as any)?.timestamp,
+      );
+      // Drop the override only when the server refetch is STRICTLY newer
+      // than the override. Otherwise the freshly-computed re-run result
+      // would be replaced by the older orchestrator-tied snapshot and the
+      // stale "Re-run Analysis" badge would flash and reappear.
+      if (Number.isFinite(prevTs) && Number.isFinite(cachedTs) && cachedTs > prevTs) {
+        return null;
+      }
+      return prev;
+    });
   }, [cachedSnapshot]);
 
   useEffect(() => {
@@ -216,15 +239,21 @@ export default function CompetitiveIntelligence() {
       socialProofPresence: comp.socialProofPresence || '',
       websiteUrl: comp.websiteUrl || '',
       blogUrl: comp.blogUrl || '',
+      tiktokUrl: comp.tiktokUrl || '',
+      googleMapsUrl: comp.googleMapsUrl || '',
     });
     setShowAddCompetitor(true);
   }, []);
 
   const analyzeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts?: { forceRefresh?: boolean }) => {
       const res = await authFetch(new URL('/api/ci/mi-v3/analyze', baseUrl).toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({  campaignId: activeCampaignId || 'default', mode: 'overview' }),
+        body: JSON.stringify({
+          campaignId: activeCampaignId || 'default',
+          mode: 'overview',
+          forceRefresh: opts?.forceRefresh === true,
+        }),
       });
       const data = await safeApiJson(res);
       if (!res.ok) throw new Error(data.message || data.error);
@@ -232,7 +261,6 @@ export default function CompetitiveIntelligence() {
     },
     onSuccess: (data: any) => {
       setMiv3Override(data);
-      queryClient.setQueryData(['mi-v3-snapshot', activeCampaignId], data);
       queryClient.invalidateQueries({ queryKey: ['ci-miv3-history', activeCampaignId] });
       queryClient.invalidateQueries({ queryKey: ['mi-v3-snapshot', activeCampaignId] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -580,6 +608,14 @@ export default function CompetitiveIntelligence() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                       <Ionicons name="document-text-outline" size={12} color={comp.blogUrl ? '#10B981' : colors.textMuted} />
                       <Text style={{ fontSize: 11, color: comp.blogUrl ? '#10B981' : colors.textMuted }}>Blog</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="logo-tiktok" size={12} color={comp.tiktokUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.tiktokUrl ? '#10B981' : colors.textMuted }}>TikTok</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="map-outline" size={12} color={comp.googleMapsUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.googleMapsUrl ? '#10B981' : colors.textMuted }}>GMaps</Text>
                     </View>
                     {comp.websiteEnrichmentStatus === 'COMPLETE' && (
                       <View style={{ backgroundColor: '#10B98120', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
@@ -931,7 +967,7 @@ export default function CompetitiveIntelligence() {
 
             <DataFreshnessWarning
               freshnessMetadata={miv3Result?.freshnessMetadata}
-              onRefresh={() => analyzeMutation.mutate()}
+              onRefresh={() => analyzeMutation.mutate({ forceRefresh: true })}
             />
 
             <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
@@ -1779,6 +1815,28 @@ export default function CompetitiveIntelligence() {
                 value={newComp.blogUrl}
                 onChangeText={v => setNewComp(p => ({ ...p, blogUrl: v }))}
                 placeholder="https://competitor.com/blog"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>TikTok URL</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.tiktokUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, tiktokUrl: v }))}
+                placeholder="https://tiktok.com/@competitor"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+
+              <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Google Maps URL</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
+                value={newComp.googleMapsUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, googleMapsUrl: v }))}
+                placeholder="https://maps.google.com/?cid=..."
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
                 keyboardType="url"

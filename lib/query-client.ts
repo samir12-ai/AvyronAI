@@ -1,14 +1,24 @@
 import { fetch } from "expo/fetch";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getAuthToken } from "./secure-token-storage";
 
+// P0-3 (launch-closure Wave 1): JWT now read from expo-secure-store
+// (hardware-backed Keychain/Keystore). The legacy AsyncStorage key
+// `avyron_auth_token` is auto-migrated on first read and then deleted.
 async function getAuthHeaders(): Promise<Record<string, string>> {
   try {
-    const token = await AsyncStorage.getItem("avyron_auth_token");
+    const token = await getAuthToken();
     if (token) {
       return { Authorization: `Bearer ${token}` };
     }
-  } catch {}
+  } catch (err) {
+    // Seal #15/#16: surface secure-store read failures explicitly so
+    // request paths missing an auth header are diagnosable rather than
+    // silently degrading to anonymous calls.
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console
+    console.error(`[QueryClient] AUTH_TOKEN_READ_FAILED ${message}`);
+  }
   return {};
 }
 
@@ -113,17 +123,33 @@ export const getQueryFn: <T>(options: {
     return await safeApiJson(res);
   };
 
+// P1-7 (launch-closure W3): bound staleTime to 5 minutes. The previous
+// `Infinity` default relied entirely on manual invalidation — any missing
+// invalidation call left users staring at stale dashboard metrics with no
+// hint that the data had aged. 5 minutes matches the 5-min autonomous worker
+// tick so the dashboard cannot lag the engine state by more than one cycle.
+const DEFAULT_STALE_TIME_MS = 5 * 60 * 1000;
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: Infinity,
+      staleTime: DEFAULT_STALE_TIME_MS,
       retry: false,
     },
     mutations: {
       retry: false,
+      // P1-7 (launch-closure W3): surface mutation failures in the console so
+      // silent write failures (network drops, server 5xx, expired tokens) are
+      // visible during dev/QA. UI components remain free to attach their own
+      // onError for user-facing toasts; this is the floor.
+      onError: (err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        // eslint-disable-next-line no-console
+        console.warn(`[ReactQuery] mutation error: ${message}`);
+      },
     },
   },
 });

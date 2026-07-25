@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, index, jsonb, primaryKey, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -25,6 +25,10 @@ export const photographerProfiles = pgTable("photographer_profiles", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  // tenant ownership column. Added by migration
+  // 012. Nullable for safe online deploy; reads filter by accountId, so any
+  // pre-migration row with NULL account_id is invisible to every authed user.
+  accountId: varchar("account_id"),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   phone: text("phone"),
@@ -51,6 +55,8 @@ export const portfolioPosts = pgTable("portfolio_posts", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  // tenant ownership column. See migration 012.
+  accountId: varchar("account_id"),
   photographerId: varchar("photographer_id").notNull(),
   imageUrl: text("image_url").notNull(),
   title: text("title"),
@@ -77,6 +83,8 @@ export const reservations = pgTable("reservations", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  // tenant ownership column. See migration 012.
+  accountId: varchar("account_id"),
   photographerId: varchar("photographer_id").notNull(),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
@@ -94,6 +102,10 @@ export const videoProjects = pgTable("video_projects", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  // tenant ownership column. Added by migration
+  // 012. Nullable for safe online deploy; reads filter by accountId, so any
+  // pre-migration row with NULL account_id is invisible to every authed user.
+  accountId: varchar("account_id"),
   title: text("title"),
   status: text("status").default("uploading"),
   clipCount: integer("clip_count").default(0),
@@ -139,6 +151,11 @@ export const performanceSnapshots = pgTable("performance_snapshots", {
   campaignId: varchar("campaign_id"),
   accountId: varchar("account_id").default("default"),
   publishedAt: timestamp("published_at"),
+  // P-1 capture-point tag (migration 041): 'sync' | '24h' | '72h' | '7d' | 'adhoc'.
+  // Scheduled checkpoints are unique per (post_id, checkpoint) — append-only history.
+  checkpoint: text("checkpoint").notNull().default("sync"),
+  // P-1 (migration 041): nullable, NO default — null = not captured, 0 = Meta said 0.
+  engagedUsers: integer("engaged_users"),
   fetchedAt: timestamp("fetched_at").defaultNow(),
 });
 
@@ -165,6 +182,7 @@ export const strategyDecisions = pgTable("strategy_decisions", {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").default("default"),
+  campaignId: varchar("campaign_id"),
   trigger: text("trigger").notNull(),
   action: text("action").notNull(),
   reason: text("reason").notNull(),
@@ -179,6 +197,7 @@ export const strategyDecisions = pgTable("strategy_decisions", {
   outcomeStatus: text("outcome_status"),
   createdAt: timestamp("created_at").defaultNow(),
   executedAt: timestamp("executed_at"),
+  insightType: text("insight_type").default("user_execution"),
 });
 
 export const strategyMemory = pgTable("strategy_memory", {
@@ -210,6 +229,60 @@ export const strategyMemory = pgTable("strategy_memory", {
   platform: text("platform"),
   campaignType: text("campaign_type"),
   funnelObjective: text("funnel_objective"),
+  sourceOutcomeId: varchar("source_outcome_id"),
+  // Task #65 / Phase 2 — DEC-B FK on strategy_decisions.id. Nullable for
+  // legacy/backfilled rows; new reinforcement-path writes populate this
+  // so updates can target by the decision that triggered them.
+  decisionId: varchar("decision_id"),
+  // Task #65 / Phase 2 — explicit provenance tag for every write.
+  // Canonical values: 'outcome' | 'mutation' | 'engine_seed' |
+  // 'exploration' | 'decay' | 'unknown'. Non-outcome writes that lack a
+  // sourceOutcomeId set this to a non-'unknown' value so audits can
+  // distinguish "never had a source" from "writer didn't declare one".
+  provenanceOrigin: text("provenance_origin").default("unknown"),
+});
+
+// Task #64 / Phase 1 — Canonical Fact Ownership.
+// mutation_log was previously persisted as a strategy_memory row with
+// memoryType='mutation_log'. That collapsed two distinct concerns onto one
+// table: strategic facts (winners/avoids/insights — readable as AI context)
+// and operational audit logs (mutation runs — strictly internal). Splitting
+// removes the need for every fact reader to filter out the audit row.
+export const mutationLog = pgTable("mutation_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  label: text("label").notNull(),
+  confirmedCount: integer("confirmed_count").default(0),
+  challengedCount: integer("challenged_count").default(0),
+  flippedCount: integer("flipped_count").default(0),
+  decayedCount: integer("decayed_count").default(0),
+  totalProcessed: integer("total_processed").default(0),
+  challengedIds: jsonb("challenged_ids").$type<string[]>().default(sql`'[]'::jsonb`),
+  flipped: jsonb("flipped").$type<Array<{ label: string; from: string; to: string }>>().default(sql`'[]'::jsonb`),
+  runAt: timestamp("run_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Task #64 / Phase 1 — Canonical Fact Ownership.
+// content_rhythm, exploration_budget, and agent rhythm rows are operational
+// state, not strategic memory. Co-locating them on strategy_memory required
+// the OPERATIONAL_MEMORY_TYPES bypass in decision-policy and a NON_STRATEGIC
+// filter on every read path. Demoting them to a dedicated table removes both.
+// Singleton-per-(account, campaign, stateType): writers upsert.
+export const engineOperationalState = pgTable("engine_operational_state", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  // 'content_rhythm' | 'exploration_budget' | 'agent_rhythm'
+  stateType: text("state_type").notNull(),
+  engineName: text("engine_name").notNull(),
+  label: text("label").notNull(),
+  payload: jsonb("payload").default(sql`'{}'::jsonb`),
+  rationale: text("rationale"),
+  confidenceScore: doublePrecision("confidence_score").default(0.5),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const contentPerformanceSnapshots = pgTable("content_performance_snapshots", {
@@ -258,9 +331,38 @@ export const growthCampaigns = pgTable("growth_campaigns", {
   isActive: boolean("is_active").default(true),
   goalMode: text("goal_mode").default("STRATEGY_MODE"),
   explorationBudgetPercent: doublePrecision("exploration_budget_percent"),
+  // Phase 0 (AI Proposes / Code Validates): nullable per-campaign product
+  // identity { name, type, keyAttributes[], coreProblemSolved,
+  // differentiatingFeature } validated by ProductAnchorSchema. NULL → doctrine
+  // degrades to business_level. Editing invalidates cached engine snapshots.
+  productAnchor: jsonb("product_anchor"),
   startedAt: timestamp("started_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// DNA Enrichment Gate (Path B): campaign-scoped operator prompt raised when the
+// interchangeability judge rejects positioning/offer as generic and auto-enrichment
+// cannot ground a passing candidate. Resolve appends the confirmed differentiator
+// to growth_campaigns.product_anchor. Operational/UX state — NOT strategy_memory.
+export const dnaEnrichmentRequests = pgTable("dna_enrichment_requests", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  engineKind: text("engine_kind").notNull(),
+  lastRejectionReason: text("last_rejection_reason").notNull(),
+  candidateDifferentiator: text("candidate_differentiator"),
+  groundingRefs: jsonb("grounding_refs"),
+  suggestionText: text("suggestion_text"),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
+
+export type DnaEnrichmentRequest = typeof dnaEnrichmentRequests.$inferSelect;
+export type InsertDnaEnrichmentRequest = typeof dnaEnrichmentRequests.$inferInsert;
 
 export const weeklyReports = pgTable("weekly_reports", {
   id: varchar("id")
@@ -367,6 +469,7 @@ export const decisionOutcomes = pgTable("decision_outcomes", {
     .default(sql`gen_random_uuid()`),
   decisionId: varchar("decision_id").notNull(),
   accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
   decisionType: text("decision_type"),
   preMetricsCpa: doublePrecision("pre_metrics_cpa").default(0),
   preMetricsRoas: doublePrecision("pre_metrics_roas").default(0),
@@ -476,6 +579,65 @@ export const insertReservationSchema = createInsertSchema(reservations).omit({
   status: true,
 });
 
+// ─── () — F1.9 / F1.10 strict body schemas ──────────────────
+// Pass-3 (reviewer-aligned): built via drizzle-zod's createInsertSchema()
+// so the column allowlist is DERIVED FROM THE TABLE SCHEMA — if a column
+// is renamed or dropped, the `.pick({...})` here fails to type-check, so
+// the allowlist cannot silently drift from the database. `.strict()`
+// produces `unrecognized_keys` for any body field outside the picked set.
+// Per-field regex constraints are layered on with `.extend()`.
+const SEAL3_PHOTO_TEXT_RE = new RegExp("^[A-Za-z0-9 .,'\"!?@()_+\\-/\\[\\]]{0,500}$");
+const SEAL3_PHOTO_URL_RE = new RegExp("^https?://[A-Za-z0-9._~:/?#\\[\\]@!$'()*+,;=%\\-]{1,500}$", "i");
+const SEAL3_PHOTO_HANDLE_RE = new RegExp("^[A-Za-z0-9._@:\\-/]{1,100}$");
+const SEAL3_PHOTO_PHONE_RE = new RegExp("^[+0-9 ()\\-]{0,40}$");
+const SEAL3_PHOTO_PATH_RE = new RegExp("^[A-Za-z0-9._\\-/]{0,500}$");
+const SEAL3_VIDEO_TITLE_RE = new RegExp("^[A-Za-z0-9 .,'\"!?@()_+\\-/\\[\\]]{1,200}$");
+const SEAL3_VIDEO_TAG_RE = new RegExp("^[A-Za-z0-9 _\\-]{1,50}$");
+
+export const photographyProfileUpdateSchema = createInsertSchema(photographerProfiles)
+  .pick({
+    name: true,
+    phone: true,
+    bio: true,
+    specialties: true,
+    profileImage: true,
+    coverImage: true,
+    location: true,
+    city: true,
+    country: true,
+    priceRange: true,
+    instagram: true,
+    website: true,
+  })
+  .extend({
+    name: z.string().trim().min(1).max(120).regex(SEAL3_PHOTO_TEXT_RE),
+    phone: z.string().trim().max(40).regex(SEAL3_PHOTO_PHONE_RE).nullable(),
+    bio: z.string().trim().max(2000).regex(SEAL3_PHOTO_TEXT_RE).nullable(),
+    specialties: z.string().trim().max(500).regex(SEAL3_PHOTO_TEXT_RE).nullable(),
+    profileImage: z.string().trim().max(500).regex(SEAL3_PHOTO_PATH_RE).nullable(),
+    coverImage: z.string().trim().max(500).regex(SEAL3_PHOTO_PATH_RE).nullable(),
+    location: z.string().trim().max(120).regex(SEAL3_PHOTO_TEXT_RE),
+    city: z.string().trim().max(120).regex(SEAL3_PHOTO_TEXT_RE),
+    country: z.string().trim().max(120).regex(SEAL3_PHOTO_TEXT_RE),
+    priceRange: z.string().trim().max(120).regex(SEAL3_PHOTO_TEXT_RE).nullable(),
+    instagram: z.string().trim().max(120).regex(SEAL3_PHOTO_HANDLE_RE).nullable(),
+    website: z.string().trim().max(500).regex(SEAL3_PHOTO_URL_RE).nullable(),
+  })
+  .strict()
+  .partial();
+export type PhotographyProfileUpdate = z.infer<typeof photographyProfileUpdateSchema>;
+
+export const videoProjectCreateSchema = createInsertSchema(videoProjects)
+  .pick({ title: true, style: true, mood: true })
+  .extend({
+    title: z.string().trim().min(1).max(200).regex(SEAL3_VIDEO_TITLE_RE),
+    style: z.string().trim().min(1).max(50).regex(SEAL3_VIDEO_TAG_RE),
+    mood: z.string().trim().min(1).max(50).regex(SEAL3_VIDEO_TAG_RE),
+  })
+  .strict()
+  .partial();
+export type VideoProjectCreate = z.infer<typeof videoProjectCreateSchema>;
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type PhotographerProfile = typeof photographerProfiles.$inferSelect;
@@ -532,6 +694,15 @@ export const publishedPosts = pgTable("published_posts", {
   publishMode: text("publish_mode").default("BLOCKED"),
   publishAttempts: integer("publish_attempts").default(0),
   lastPublishError: text("last_publish_error"),
+  // P-1 publish lineage (migration 041). lineage_source is an explicit
+  // classification, never inferred: 'planned' | 'unplanned' | 'legacy'.
+  planId: varchar("plan_id"),
+  calendarEntryId: varchar("calendar_entry_id"),
+  studioItemId: varchar("studio_item_id"),
+  hookStyle: text("hook_style"),
+  contentAngle: text("content_angle"),
+  plannedSlot: text("planned_slot"),
+  lineageSource: text("lineage_source").notNull().default("unplanned"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -869,6 +1040,12 @@ export const ciCompetitors = pgTable("ci_competitors", {
   syntheticChurnFlag: text("synthetic_churn_flag"),
   lastPostWatermark: timestamp("last_post_watermark"),
   sharedProfileId: varchar("shared_profile_id"),
+  tiktokUrl: text("tiktok_url"),
+  googleMapsUrl: text("google_maps_url"),
+  // refresh tier. 'A' = priority (24h cooldown), 'B' = standard
+  // (72h cooldown). Defaults to 'B' for safety; operators promote competitors
+  // to tier A explicitly via UI/API.
+  tier: text("tier").notNull().default("B"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1211,6 +1388,7 @@ export const strategicPlans = pgTable("strategic_plans", {
   accountId: varchar("account_id").notNull().default("default"),
   blueprintId: varchar("blueprint_id").notNull(),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id"),
   planJson: text("plan_json").notNull(),
   planSummary: text("plan_summary"),
   status: text("status").notNull().default("DRAFT"),
@@ -1228,6 +1406,12 @@ export const strategicPlans = pgTable("strategic_plans", {
   totalCanceled: integer("total_canceled").default(0),
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),
+  approvedRhythmJson: text("approved_rhythm_json"),
+  // optimistic-locking version. Every UPDATE
+  // must include WHERE version=? + SET version=version+1; affected-rows=0
+  // throws CONCURRENT_MODIFICATION instead of silently overwriting a
+  // concurrent edit (e.g. plan approval racing plan synthesis re-write).
+  version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1241,7 +1425,204 @@ export const planApprovals = pgTable("plan_approvals", {
   decision: text("decision").notNull(),
   reason: text("reason"),
   decidedBy: text("decided_by").default("client"),
+  rhythmSnapshotJson: text("rhythm_snapshot_json"),
+  // optimistic-locking version (same contract
+  // as strategicPlans.version above).
+  version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+// in_flight_jobs: snapshot-cleanup-worker
+// MUST exclude any snapshot whose jobId is currently in this table. The
+// orchestrator inserts on job start, deletes on terminal status (COMPLETED
+// / NEEDS_INPUT / BLOCKED / ERROR). Reaper deletes rows whose started_at
+// is older than the orchestrator wall-clock budget (currently ~30 min).
+export const inFlightJobs = pgTable("in_flight_jobs", {
+  jobId: varchar("job_id").primaryKey(),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  expectedCompleteBy: timestamp("expected_complete_by"),
+});
+
+// Seal #13 / Track #1 — Operational continuity layer.
+//
+// plan_anchor_resets: explicit re-anchor records consulted by
+// evaluateWindowState() in addition to plan_approvals.decided_at.
+// The scheduler writes a row here when it detects a long gap
+// (>1 window since the most-recent anchor with no eval windows
+// produced) so that the next evaluation cycle starts cleanly at
+// window_index=0 instead of jumping to index N with N orphan
+// windows. Append-only.
+export const planAnchorResets = pgTable("plan_anchor_resets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  planId: varchar("plan_id").notNull(),
+  reanchoredAt: timestamp("reanchored_at").notNull(),
+  reason: text("reason").notNull(),
+  source: text("source").notNull().default("continuity_scheduler"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type PlanAnchorReset = typeof planAnchorResets.$inferSelect;
+export type InsertPlanAnchorReset = typeof planAnchorResets.$inferInsert;
+
+// continuity_ticks: one row per continuity scheduler tick. Drives
+// the /healthz/continuity endpoint and gives ops a paper trail
+// explaining WHY no boss_run was produced for a given window.
+export const continuityTicks = pgTable("continuity_ticks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tickAt: timestamp("tick_at").notNull().defaultNow(),
+  durationMs: integer("duration_ms").notNull().default(0),
+  campaignsScanned: integer("campaigns_scanned").notNull().default(0),
+  runsInvoked: integer("runs_invoked").notNull().default(0),
+  runsSkippedIdempotent: integer("runs_skipped_idempotent").notNull().default(0),
+  runsFailed: integer("runs_failed").notNull().default(0),
+  reanchorsWritten: integer("reanchors_written").notNull().default(0),
+  missedWindowsDetected: integer("missed_windows_detected").notNull().default(0),
+  deadCyclesDetected: integer("dead_cycles_detected").notNull().default(0),
+  notes: jsonb("notes").notNull().default(sql`'[]'::jsonb`),
+});
+export type ContinuityTick = typeof continuityTicks.$inferSelect;
+export type InsertContinuityTick = typeof continuityTicks.$inferInsert;
+
+// Seal #14 / Track #2 — Continuity Supervision Layer.
+//
+// continuity_window_claims: DB-level idempotency lock per
+// (campaign_id, plan_id, window_index). Replaces the single-process
+// inFlightTick Map with a multi-replica-safe claim handshake. INSERT
+// ON CONFLICT DO NOTHING is the lock acquire; DELETE on failed/partial
+// boss_run is the retry hook (preserves INVARIANT-RETRY: failed runs
+// MUST never be suppressed). UPDATE to status='completed' on success
+// is the idempotency sentinel.
+export const continuityWindowClaims = pgTable("continuity_window_claims", {
+  campaignId: varchar("campaign_id").notNull(),
+  planId: varchar("plan_id").notNull(),
+  windowIndex: integer("window_index").notNull(),
+  accountId: varchar("account_id").notNull(),
+  claimedBy: varchar("claimed_by").notNull(),
+  claimedAt: timestamp("claimed_at").notNull().defaultNow(),
+  status: varchar("status").notNull().default("in_progress"),
+  outcome: varchar("outcome"),
+  outcomeAt: timestamp("outcome_at"),
+  bossRunId: varchar("boss_run_id"),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.campaignId, t.planId, t.windowIndex] }),
+}));
+export type ContinuityWindowClaim = typeof continuityWindowClaims.$inferSelect;
+export type InsertContinuityWindowClaim = typeof continuityWindowClaims.$inferInsert;
+
+// system_notices: Operations Guardian (Task #52 follow-up) — single
+// source of truth for "what should the operator/user see right now?"
+// Written by the Guardian Interpreter (server/operations-guardian/
+// interpreter.ts) which runs as a step inside the existing Continuity
+// Supervisor tick. NOT a per-event log — one row per (correlationKey,
+// audience) until resolved. The unique partial index below collapses
+// repeat observations into lastSeenAt bumps; resolution sets
+// resolved_at and frees the slot for the next occurrence.
+//
+// Audience is set ONCE AT WRITE TIME and never recomputed. It is the
+// firewall that prevents internal vocabulary (stuck claims, watchdog
+// zombies, retry loops) from leaking into customer-visible surfaces.
+// audience='user' rows MUST come from the USER_COPY firewall in
+// server/operations-guardian/types.ts.
+//
+// During the observe-only phase (Steps 1–7 of the Guardian rollout)
+// the interpreter only writes audience='operator' rows. audience='user'
+// stays empty until copy review unlocks each category individually.
+export const systemNotices = pgTable("system_notices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: varchar("category").notNull(),
+  severity: varchar("severity").notNull(),
+  audience: varchar("audience").notNull(),
+  correlationKey: varchar("correlation_key").notNull(),
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  copyKey: varchar("copy_key").notNull(),
+  copyVars: jsonb("copy_vars"),
+  detail: jsonb("detail"),
+  firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at"),
+  suppressedUntil: timestamp("suppressed_until"),
+  recoveryAttempted: boolean("recovery_attempted").notNull().default(false),
+  recoveryOutcome: varchar("recovery_outcome"),
+  observationCount: integer("observation_count").notNull().default(1),
+}, (t) => ({
+  // Partial unique index — at most ONE open notice per (correlationKey,
+  // audience). Re-emitting bumps lastSeenAt + observationCount via
+  // ON CONFLICT DO UPDATE; never inserts a duplicate.
+  openCorrelationUnique: uniqueIndex("system_notices_open_correlation_unique")
+    .on(t.correlationKey, t.audience)
+    .where(sql`resolved_at IS NULL`),
+}));
+export type SystemNotice = typeof systemNotices.$inferSelect;
+export type InsertSystemNotice = typeof systemNotices.$inferInsert;
+
+// chain_registry_state: observability state for the 10-chain operational
+// registry. Updated every supervisor tick (~5min). last_state ∈
+// {HEALTHY, DEGRADED, DEAD, UNKNOWN}; UNKNOWN means
+// introspection_available=false (no data-source query wired yet — these
+// chains will be promoted in Track #3 silent-degradation sweep).
+export const chainRegistryState = pgTable("chain_registry_state", {
+  chainId: varchar("chain_id").primaryKey(),
+  expectedIntervalMs: bigint("expected_interval_ms", { mode: "number" }).notNull(),
+  lastObservedRunAt: timestamp("last_observed_run_at"),
+  lastObservedLagMs: bigint("last_observed_lag_ms", { mode: "number" }),
+  lastState: varchar("last_state").notNull().default("UNKNOWN"),
+  lastStateChangedAt: timestamp("last_state_changed_at").notNull().defaultNow(),
+  introspectionAvailable: boolean("introspection_available").notNull().default(true),
+  notes: jsonb("notes").notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export type ChainRegistryStateRow = typeof chainRegistryState.$inferSelect;
+export type InsertChainRegistryState = typeof chainRegistryState.$inferInsert;
+
+// continuity_supervisor_ticks: paper trail for the continuity supervisor
+// itself. A missing row for >2× supervisor interval is the operator-
+// visible signal that the supervisor has stalled (the watcher of the
+// watchers).
+export const continuitySupervisorTicks = pgTable("continuity_supervisor_ticks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tickAt: timestamp("tick_at").notNull().defaultNow(),
+  durationMs: integer("duration_ms").notNull().default(0),
+  schedulerHeartbeatAgeMs: bigint("scheduler_heartbeat_age_ms", { mode: "number" }),
+  schedulerState: varchar("scheduler_state").notNull().default("UNKNOWN"),
+  chainsChecked: integer("chains_checked").notNull().default(0),
+  chainsHealthy: integer("chains_healthy").notNull().default(0),
+  chainsDegraded: integer("chains_degraded").notNull().default(0),
+  chainsDead: integer("chains_dead").notNull().default(0),
+  chainsUnknown: integer("chains_unknown").notNull().default(0),
+  details: jsonb("details").notNull().default(sql`'[]'::jsonb`),
+});
+export type ContinuitySupervisorTick = typeof continuitySupervisorTicks.$inferSelect;
+export type InsertContinuitySupervisorTick = typeof continuitySupervisorTicks.$inferInsert;
+
+// F6.8 — orphan-observation tracking. (table_name, snapshot_id) PK with
+// first_observed_at gates orphan deletion to ORPHAN_GRACE_DAYS after the
+// first time this worker saw the snapshot in an orphaned state.
+export const snapshotOrphanObserved = pgTable("snapshot_orphan_observed", {
+  tableName: varchar("table_name").notNull(),
+  snapshotId: varchar("snapshot_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  firstObservedAt: timestamp("first_observed_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Seal #11 / Task #29 / F6.1
+// ai_token_budget: per-(jobId, provider) persistence of the MI v3 token-budget
+// projection. Engine + fetch-orchestrator persist on first compute and read
+// through on subsequent calls so a restart after crash gets the SAME
+// projection (and therefore the same selectedMode) instead of recomputing
+// under different sample counts.
+export const aiTokenBudget = pgTable("ai_token_budget", {
+  jobId: varchar("job_id").notNull(),
+  provider: varchar("provider").notNull(),
+  projectedTokens: integer("projected_tokens").notNull(),
+  ceiling: integer("ceiling").notNull(),
+  selectedMode: varchar("selected_mode").notNull(),
+  downgradeReason: text("downgrade_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
 export const requiredWork = pgTable("required_work", {
@@ -1300,11 +1681,27 @@ export const calendarEntries = pgTable("calendar_entries", {
   sourceLabel: text("source_label"),
   rootBundleId: varchar("root_bundle_id"),
   rootBundleVersion: integer("root_bundle_version"),
+  sourceDecisionId: varchar("source_decision_id"),
   isExploration: boolean("is_exploration").default(false),
   explorationIntent: text("exploration_intent"),
   explorationHypothesis: text("exploration_hypothesis"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const decisionAttributions = pgTable("decision_attributions", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  calendarEntryId: varchar("calendar_entry_id").notNull(),
+  decisionId: varchar("decision_id").notNull(),
+  weight: doublePrecision("weight").notNull().default(1.0),
+  relevanceScore: doublePrecision("relevance_score").default(0),
+  attributionMethod: text("attribution_method").notNull().default("single"),
+  matchReason: text("match_reason"),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id"),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const studioItems = pgTable("studio_items", {
@@ -1521,6 +1918,8 @@ export const orchestratorJobs = pgTable("orchestrator_jobs", {
   pausedContext: text("paused_context"),
   pausedEngine: varchar("paused_engine", { length: 50 }),
   needsInputFields: text("needs_input_fields"),
+  aiPathReport: text("ai_path_report"),              // Phase 4 — JSON per-run AI-path telemetry (authoritative source)
+  depthGateStatus: text("depth_gate_status"),        // Migration 039 — JSON Record<engineId, depthGateVerdict> captured from ctx.depthGateStatus; BuildPlanLayer reload source
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });
@@ -1536,6 +1935,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   competitorHash: varchar("competitor_hash", { length: 16 }),
   version: integer("version").notNull().default(1),
   competitorData: text("competitor_data"),
@@ -1655,6 +2055,10 @@ export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
   hasOffer: boolean("has_offer").default(false),
   shortcode: text("shortcode"),
   batchId: varchar("batch_id"),
+  platform: text("platform").notNull().default("instagram"),
+  hookText: text("hook_text"),
+  transcript: text("transcript"),
+  hookSource: text("hook_source"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   competitorPostUnique: uniqueIndex("idx_ci_posts_competitor_postid").on(table.competitorId, table.postId),
@@ -1682,6 +2086,30 @@ export const ciCompetitorComments = pgTable("ci_competitor_comments", {
 });
 
 export type CiCompetitorComment = typeof ciCompetitorComments.$inferSelect;
+
+export const ciCompetitorReviews = pgTable("ci_competitor_reviews", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  competitorId: varchar("competitor_id").notNull(),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  reviewId: varchar("review_id", { length: 256 }),
+  reviewText: text("review_text").notNull(),
+  rating: integer("rating"),
+  platform: text("platform").notNull().default("google"),
+  reviewDate: timestamp("review_date"),
+  isSynthetic: boolean("is_synthetic").notNull().default(false),
+  // sha256(name).slice(0,12). PII-safe alternative to
+  // persisting raw author names (which we never stored in production, but the
+  // extractor produced them). Used for cross-review dedup and reviewer-pattern
+  // analysis without revealing identity.
+  authorHash: varchar("author_hash", { length: 12 }),
+  scrapedAt: timestamp("scraped_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CiCompetitorReview = typeof ciCompetitorReviews.$inferSelect;
 
 export const ciCompetitorMetricsSnapshot = pgTable("ci_competitor_metrics_snapshot", {
   id: varchar("id")
@@ -1743,6 +2171,7 @@ export const audienceSnapshots = pgTable("audience_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   miSnapshotId: varchar("mi_snapshot_id"),
   engineVersion: integer("engine_version").notNull().default(3),
   languageSignals: text("language_signals"),
@@ -1761,6 +2190,7 @@ export const audienceSnapshots = pgTable("audience_snapshots", {
   signalLineage: text("signal_lineage"),
   structuredSignals: text("structured_signals"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1772,6 +2202,7 @@ export const positioningSnapshots = pgTable("positioning_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   miSnapshotId: varchar("mi_snapshot_id").notNull(),
   audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
   engineVersion: integer("engine_version").notNull().default(3),
@@ -1794,6 +2225,7 @@ export const positioningSnapshots = pgTable("positioning_snapshots", {
   confidenceScore: doublePrecision("confidence_score"),
   signalTraceability: text("signal_traceability"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1805,6 +2237,7 @@ export const differentiationSnapshots = pgTable("differentiation_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   miSnapshotId: varchar("mi_snapshot_id").notNull(),
   audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
   positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
@@ -1823,6 +2256,7 @@ export const differentiationSnapshots = pgTable("differentiation_snapshots", {
   stabilityResult: text("stability_result"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1834,6 +2268,7 @@ export const mechanismSnapshots = pgTable("mechanism_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
   differentiationSnapshotId: varchar("differentiation_snapshot_id").notNull(),
   engineVersion: integer("engine_version").notNull().default(1),
@@ -1844,6 +2279,7 @@ export const mechanismSnapshots = pgTable("mechanism_snapshots", {
   axisConsistency: text("axis_consistency"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1855,6 +2291,7 @@ export const offerSnapshots = pgTable("offer_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   miSnapshotId: varchar("mi_snapshot_id").notNull(),
   audienceSnapshotId: varchar("audience_snapshot_id").notNull(),
   positioningSnapshotId: varchar("positioning_snapshot_id").notNull(),
@@ -1877,6 +2314,7 @@ export const offerSnapshots = pgTable("offer_snapshots", {
   layerDiagnostics: text("layer_diagnostics"),
   strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1888,6 +2326,7 @@ export const funnelSnapshots = pgTable("funnel_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   offerSnapshotId: varchar("offer_snapshot_id").notNull(),
   awarenessSnapshotId: varchar("awareness_snapshot_id"),
   miSnapshotId: varchar("mi_snapshot_id").notNull(),
@@ -1910,6 +2349,7 @@ export const funnelSnapshots = pgTable("funnel_snapshots", {
   strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
   layerDiagnostics: text("layer_diagnostics"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1921,6 +2361,7 @@ export const integritySnapshots = pgTable("integrity_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   funnelSnapshotId: varchar("funnel_snapshot_id").notNull(),
   offerSnapshotId: varchar("offer_snapshot_id").notNull(),
   miSnapshotId: varchar("mi_snapshot_id").notNull(),
@@ -1938,6 +2379,7 @@ export const integritySnapshots = pgTable("integrity_snapshots", {
   boundaryCheck: text("boundary_check"),
   strategyRootId: varchar("strategy_root_id"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1949,6 +2391,7 @@ export const awarenessSnapshots = pgTable("awareness_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   integritySnapshotId: varchar("integrity_snapshot_id"),
   funnelSnapshotId: varchar("funnel_snapshot_id"),
   offerSnapshotId: varchar("offer_snapshot_id").notNull(),
@@ -1966,10 +2409,13 @@ export const awarenessSnapshots = pgTable("awareness_snapshots", {
   structuralWarnings: text("structural_warnings"),
   boundaryCheck: text("boundary_check"),
   dataReliability: text("data_reliability"),
+  // T008 [DEPRECATED 2026-05-03]: confidence_normalized — legacy boolean=false everywhere; engines no longer write to it.
+  // Column kept in DB for backwards compat; safe to drop in a follow-up migration once no consumer remains.
   confidenceNormalized: boolean("confidence_normalized").default(false),
   awarenessStrengthScore: doublePrecision("awareness_strength_score"),
   signalLineage: text("signal_lineage"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1981,6 +2427,7 @@ export const persuasionSnapshots = pgTable("persuasion_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   awarenessSnapshotId: varchar("awareness_snapshot_id").notNull(),
   integritySnapshotId: varchar("integrity_snapshot_id").notNull(),
   funnelSnapshotId: varchar("funnel_snapshot_id").notNull(),
@@ -1999,10 +2446,13 @@ export const persuasionSnapshots = pgTable("persuasion_snapshots", {
   structuralWarnings: text("structural_warnings"),
   boundaryCheck: text("boundary_check"),
   dataReliability: text("data_reliability"),
+  // T008 [DEPRECATED 2026-05-03]: confidence_normalized — legacy boolean=false everywhere; engines no longer write to it.
+  // Column kept in DB for backwards compat; safe to drop in a follow-up migration once no consumer remains.
   confidenceNormalized: boolean("confidence_normalized").default(false),
   persuasionStrengthScore: doublePrecision("persuasion_strength_score"),
   signalLineage: text("signal_lineage"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2014,6 +2464,7 @@ export const strategyValidationSnapshots = pgTable("strategy_validation_snapshot
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   persuasionSnapshotId: varchar("persuasion_snapshot_id"),
   engineVersion: integer("engine_version").notNull().default(1),
   status: text("status").notNull().default("COMPLETE"),
@@ -2025,6 +2476,7 @@ export const strategyValidationSnapshots = pgTable("strategy_validation_snapshot
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2036,6 +2488,7 @@ export const budgetGovernorSnapshots = pgTable("budget_governor_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   validationSnapshotId: varchar("validation_snapshot_id"),
   engineVersion: integer("engine_version").notNull().default(1),
   status: text("status").notNull().default("COMPLETE"),
@@ -2047,6 +2500,7 @@ export const budgetGovernorSnapshots = pgTable("budget_governor_snapshots", {
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2058,6 +2512,7 @@ export const channelSelectionSnapshots = pgTable("channel_selection_snapshots", 
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   validationSnapshotId: varchar("validation_snapshot_id"),
   budgetSnapshotId: varchar("budget_snapshot_id"),
   engineVersion: integer("engine_version").notNull().default(1),
@@ -2070,6 +2525,7 @@ export const channelSelectionSnapshots = pgTable("channel_selection_snapshots", 
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2081,6 +2537,7 @@ export const iterationSnapshots = pgTable("iteration_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   engineVersion: integer("engine_version").notNull().default(1),
   status: text("status").notNull().default("COMPLETE"),
   statusMessage: text("status_message"),
@@ -2091,6 +2548,7 @@ export const iterationSnapshots = pgTable("iteration_snapshots", {
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2102,6 +2560,7 @@ export const retentionSnapshots = pgTable("retention_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id").notNull(),
   engineVersion: integer("engine_version").notNull().default(1),
   status: text("status").notNull().default("COMPLETE"),
   statusMessage: text("status_message"),
@@ -2112,6 +2571,7 @@ export const retentionSnapshots = pgTable("retention_snapshots", {
   dataReliability: text("data_reliability"),
   confidenceScore: doublePrecision("confidence_score"),
   executionTimeMs: integer("execution_time_ms"),
+  inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2234,6 +2694,7 @@ export const goalDecompositions = pgTable("goal_decompositions", {
   assumptions: text("assumptions"),
   confidenceScore: integer("confidence_score"),
   status: text("status").notNull().default("active"),
+  jobId: varchar("job_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2256,6 +2717,7 @@ export const growthSimulations = pgTable("growth_simulations", {
   bottleneckAlerts: text("bottleneck_alerts"),
   constraintSimulation: text("constraint_simulation"),
   status: text("status").notNull().default("active"),
+  jobId: varchar("job_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2312,6 +2774,7 @@ export const strategyRoots = pgTable("strategy_roots", {
   approvedDesires: text("approved_desires"),
   approvedTransformation: text("approved_transformation"),
   approvedClaim: text("approved_claim"),
+  approvedClaims: text("approved_claims"),
   approvedPromise: text("approved_promise"),
   approvedObjections: text("approved_objections"),
   approvedProofTypes: text("approved_proof_types"),
@@ -2328,7 +2791,7 @@ export const strategyRoots = pgTable("strategy_roots", {
 export type StrategyRoot = typeof strategyRoots.$inferSelect;
 
 // =============================================
-// USER CHANNEL SCRAPING (Task #10)
+// USER CHANNEL SCRAPING ()
 // =============================================
 export const userPublicProfiles = pgTable("user_public_profiles", {
   id: varchar("id")
@@ -2358,3 +2821,719 @@ export const userChannelSnapshots = pgTable("user_channel_snapshots", {
 
 export type UserPublicProfile = typeof userPublicProfiles.$inferSelect;
 export type UserChannelSnapshot = typeof userChannelSnapshots.$inferSelect;
+
+// =============================================
+// P-2: OWNED-PAGE POST TRACKING (scraping-first Performance Loop)
+// =============================================
+// Design locked by Phase 1 architect gate (2026-07-20):
+// - Dedicated tables — NOT ci_competitor_posts (competitor_id-scoped) and NOT
+//   performance_snapshots (Meta vocab + `.default(0)` fabricated-zero hazard).
+// - Metric columns NULLABLE with NO defaults. NULL = not observed on the
+//   public surface; 0 = the platform displayed 0. (NULL-never-zero.)
+
+/** Canonical lineage verdict for an owned post (D2/D3: strict enum, no fallback). */
+export const OWNED_POST_LINEAGE_STATES = [
+  "planned_direct",
+  "planned_matched",
+  "manual_matched",
+  "unplanned",
+  "ambiguous",
+  "unmatched",
+] as const;
+export type OwnedPostLineageState = (typeof OWNED_POST_LINEAGE_STATES)[number];
+
+/** Metric provenance registry (Phase 2D). */
+export const OWNED_METRIC_SOURCES = ["public_scrape", "manual_input", "authenticated_api"] as const;
+export type OwnedMetricSource = (typeof OWNED_METRIC_SOURCES)[number];
+
+/** Observation checkpoint bands. observation_age_hours carries the ACTUAL age. */
+export const OWNED_SNAPSHOT_CHECKPOINTS = ["discovery", "24h", "72h", "7d", "late", "unknown_age"] as const;
+export type OwnedSnapshotCheckpoint = (typeof OWNED_SNAPSHOT_CHECKPOINTS)[number];
+
+export const ownedPosts = pgTable("owned_posts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  ownedProfileId: varchar("owned_profile_id").notNull(),
+  platform: text("platform").notNull(),
+  postId: text("post_id").notNull(),
+  shortcode: text("shortcode"),
+  permalink: text("permalink"),
+  mediaType: text("media_type"),
+  caption: text("caption"),
+  hashtags: text("hashtags"),
+  hookText: text("hook_text"),
+  postedAt: timestamp("posted_at"),
+  firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at"),
+  lineageState: text("lineage_state").notNull().default("unmatched"),
+  matchMethod: text("match_method"),
+  matchConfidence: doublePrecision("match_confidence"),
+  matchedPublishedPostId: varchar("matched_published_post_id"),
+  matchedPlanId: varchar("matched_plan_id"),
+  matchedCalendarEntryId: varchar("matched_calendar_entry_id"),
+  matchedStudioItemId: varchar("matched_studio_item_id"),
+  lineageResolvedAt: timestamp("lineage_resolved_at"),
+  // Plan-derived dimensions — populated ONLY from a supported lineage match.
+  hookStyle: text("hook_style"),
+  contentAngle: text("content_angle"),
+  contentType: text("content_type"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  profilePostUnique: uniqueIndex("owned_posts_profile_postid_uidx").on(table.ownedProfileId, table.postId),
+  campaignIdx: index("owned_posts_campaign_idx").on(table.accountId, table.campaignId, table.platform),
+}));
+
+export const ownedPostSnapshots = pgTable("owned_post_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  ownedPostId: varchar("owned_post_id").notNull(),
+  checkpoint: text("checkpoint").notNull(),
+  observedAt: timestamp("observed_at").notNull(),
+  /** ACTUAL post age at observation (hours). NULL only when postedAt unknown. */
+  observationAgeHours: doublePrecision("observation_age_hours"),
+  // Public metrics: NULLABLE, NO DEFAULTS (NULL = not observed, 0 = platform said 0).
+  likes: integer("likes"),
+  comments: integer("comments"),
+  views: integer("views"),
+  followersAtObservation: integer("followers_at_observation"),
+  metricSource: text("metric_source").notNull().default("public_scrape"),
+  scrapeSnapshotId: varchar("scrape_snapshot_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  postCheckpointUnique: uniqueIndex("owned_post_snapshots_post_checkpoint_uidx")
+    .on(table.ownedPostId, table.checkpoint, table.metricSource)
+    .where(sql`${table.checkpoint} IN ('24h', '72h', '7d')`),
+  postIdx: index("owned_post_snapshots_post_idx").on(table.ownedPostId, table.observedAt),
+}));
+
+export type OwnedPost = typeof ownedPosts.$inferSelect;
+export type OwnedPostSnapshot = typeof ownedPostSnapshots.$inferSelect;
+
+// =============================================
+// P-2 Phase 3 + 4 — Deterministic scoring truth layers (migration 045).
+// Append-only score runs: a re-score inserts new rows keyed by scoreRunId;
+// previous runs stay queryable (Check 10). All derived columns NULLABLE with
+// no defaults — NULL = not computable, 0 = a real zero.
+// =============================================
+
+/** Phase 3 scoring dimensions (only plan-derived lineage dimensions). */
+export const CONTENT_SCORE_DIMENSIONS = ["hook_style", "content_angle", "content_type"] as const;
+export type ContentScoreDimension = (typeof CONTENT_SCORE_DIMENSIONS)[number];
+
+/** Phase 3 checkpoint maturity states (one per scored post cohort). */
+export const CONTENT_SCORE_MATURITIES = [
+  "MATURE_7D",
+  "PROVISIONAL_72H",
+  "EARLY_24H",
+  "OBSERVED_LATE",
+  "IMMATURE",
+  "UNKNOWN",
+] as const;
+export type ContentScoreMaturity = (typeof CONTENT_SCORE_MATURITIES)[number];
+
+/** Phase 3 content verdicts (D3: strict enum). */
+export const CONTENT_SCORE_VERDICTS = ["WINNING", "NEUTRAL", "UNDERPERFORMING", "TESTING", "UNKNOWN"] as const;
+export type ContentScoreVerdict = (typeof CONTENT_SCORE_VERDICTS)[number];
+
+/** Phase 4 weekly business verdicts (D3: strict enum). */
+export const BUSINESS_VERDICTS = ["WORKING", "DRIFTING", "UNKNOWN"] as const;
+export type BusinessVerdict = (typeof BUSINESS_VERDICTS)[number];
+
+/** Phase 4 attribution confidence levels (D3: strict enum). */
+export const ATTRIBUTION_CONFIDENCES = ["DIRECT", "SUPPORTED", "CORRELATED", "UNKNOWN"] as const;
+export type AttributionConfidence = (typeof ATTRIBUTION_CONFIDENCES)[number];
+
+export const ownedContentScores = pgTable("owned_content_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  platform: text("platform").notNull(),
+  scoreRunId: varchar("score_run_id").notNull(),
+  dimension: text("dimension").notNull(),
+  dimensionValue: text("dimension_value").notNull(),
+  sampleSize: integer("sample_size").notNull(),
+  includedPostIds: text("included_post_ids").notNull(),
+  snapshotIds: text("snapshot_ids").notNull(),
+  maturity: text("maturity").notNull(),
+  primaryMetric: text("primary_metric"),
+  baselineValue: doublePrecision("baseline_value"),
+  baselineSampleSize: integer("baseline_sample_size"),
+  baselineWindowDays: integer("baseline_window_days"),
+  baselineVersion: text("baseline_version"),
+  measuredValue: doublePrecision("measured_value"),
+  absoluteDelta: doublePrecision("absolute_delta"),
+  relativeDelta: doublePrecision("relative_delta"),
+  consistency: doublePrecision("consistency"),
+  outlierConcentration: doublePrecision("outlier_concentration"),
+  confounders: text("confounders").notNull().default("[]"),
+  confidence: doublePrecision("confidence"),
+  verdict: text("verdict").notNull(),
+  scorerVersion: text("scorer_version").notNull(),
+  scoredAt: timestamp("scored_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  campaignIdx: index("owned_content_scores_campaign_idx")
+    .on(table.accountId, table.campaignId, table.platform, table.dimension, table.scoredAt),
+  runIdx: index("owned_content_scores_run_idx").on(table.scoreRunId),
+}));
+
+export const weeklyBusinessScores = pgTable("weekly_business_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  scoreRunId: varchar("score_run_id").notNull(),
+  windowId: varchar("window_id").notNull(),
+  truthId: varchar("truth_id"),
+  windowIndex: integer("window_index").notNull(),
+  planId: varchar("plan_id"),
+  windowStart: timestamp("window_start").notNull(),
+  windowEnd: timestamp("window_end").notNull(),
+  leads: integer("leads"),
+  qualified: integer("qualified"),
+  booked: integer("booked"),
+  /** Count from user input. NEVER derived from the paid_active boolean (D4). */
+  payingCustomers: integer("paying_customers"),
+  paidActive: boolean("paid_active"),
+  leadToQualifiedRate: doublePrecision("lead_to_qualified_rate"),
+  qualifiedToBookedRate: doublePrecision("qualified_to_booked_rate"),
+  bookedToPayingRate: doublePrecision("booked_to_paying_rate"),
+  leadToPayingRate: doublePrecision("lead_to_paying_rate"),
+  wowDeltaLeads: doublePrecision("wow_delta_leads"),
+  wowDeltaQualified: doublePrecision("wow_delta_qualified"),
+  wowDeltaBooked: doublePrecision("wow_delta_booked"),
+  wowDeltaPaying: doublePrecision("wow_delta_paying"),
+  baseline: text("baseline"),
+  baselineWeeks: integer("baseline_weeks"),
+  businessVerdict: text("business_verdict").notNull(),
+  verdictReason: text("verdict_reason"),
+  attributionConfidence: text("attribution_confidence").notNull(),
+  attributionBasis: text("attribution_basis"),
+  missingFields: text("missing_fields").notNull().default("[]"),
+  scorerVersion: text("scorer_version").notNull(),
+  scoredAt: timestamp("scored_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  campaignIdx: index("weekly_business_scores_campaign_idx")
+    .on(table.accountId, table.campaignId, table.windowIndex, table.scoredAt),
+  windowIdx: index("weekly_business_scores_window_idx").on(table.windowId),
+}));
+
+export type OwnedContentScore = typeof ownedContentScores.$inferSelect;
+export type WeeklyBusinessScore = typeof weeklyBusinessScores.$inferSelect;
+
+export const buildPlanSnapshots = pgTable("build_plan_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  status: text("status").notNull().default("SUCCESS"),
+  plan: text("plan"),
+  actionabilityScore: doublePrecision("actionability_score").default(0),
+  failedBlocks: text("failed_blocks"),
+  attempts: integer("attempts").default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type BuildPlanSnapshot = typeof buildPlanSnapshots.$inferSelect;
+
+// Phase 6 / Task #69 step 5 — AI Input Snapshot persistence layer.
+//
+// Captures the EXACT input shape sent to every LLM call (15 engines)
+// alongside the model name, prompt fingerprint, and resolved provenance.
+// Required by the replay/audit lane so a contested AI output can be
+// re-derived deterministically from its captured inputs without re-running
+// the entire upstream pipeline.
+//
+// This is the table-of-record. The wrapper that writes to it lives at
+// `server/shared/ai-replay/persistAiInputSnapshot.ts`. NOTE: per the task's
+// drift-acceptable footnote, this PR ships the table + wrapper only — the
+// 15 per-engine `persistAiInputSnapshot(...)` call sites are filed as a
+// follow-up so the wiring can happen behind a shadow flag and each
+// engine's payload shape can be validated against its prompt fixture.
+export const aiInputSnapshots = pgTable("ai_input_snapshots", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id"),
+  engineId: text("engine_id").notNull(),
+  engineVersion: integer("engine_version").default(0),
+  model: text("model").notNull(),
+  promptFingerprint: text("prompt_fingerprint").notNull(),
+  inputPayload: text("input_payload").notNull(),
+  inputBytes: integer("input_bytes").default(0),
+  contextSummary: text("context_summary"),
+  provenance: text("provenance"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type AiInputSnapshot = typeof aiInputSnapshots.$inferSelect;
+export type InsertAiInputSnapshot = typeof aiInputSnapshots.$inferInsert;
+
+export const systemControlVerdicts = pgTable("system_control_verdicts", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  jobId: varchar("job_id"),
+  verdict: text("verdict").notNull(),
+  executionMode: text("execution_mode").notNull(),
+  blockReasons: text("block_reasons"),
+  downgrades: text("downgrades"),
+  structuralChecks: text("structural_checks"),
+  contradictions: text("contradictions"),
+  repairActions: text("repair_actions"),
+  repairAttempted: boolean("repair_attempted").default(false),
+  checksTotal: integer("checks_total").default(0),
+  checksPassed: integer("checks_passed").default(0),
+  durationMs: integer("duration_ms").default(0),
+  controlVersion: text("control_version"),
+  shadowMode: boolean("shadow_mode").default(false),
+  commercialJudgement: text("commercial_judgement"),
+  recoveryPlan: text("recovery_plan"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type SystemControlVerdictRecord = typeof systemControlVerdicts.$inferSelect;
+
+
+// =============================================
+// PHASE 8.0 — REMIX ADAPTIVE PIPELINE OVERLAY
+// Source: Avyron Remix → Avyron Main migration
+// Additive only. Does not modify or replace any
+// existing engine snapshot/signal storage.
+// 12 tables: pipeline_runs/snapshots/signals/change_events/rejections/
+// acquisitions/eval_windows/user_truth/dna/dna_versions/clusters + boss_runs
+// =============================================
+// =============================================
+// REMIX PIPELINE OVERLAY (Phase 1)
+// Additive only. Does not modify or replace any
+// existing engine snapshot/signal storage.
+// =============================================
+export const pipelineRuns = pgTable("pipeline_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  lane: text("lane").notNull(), // user | competitor | bridge | shared
+  trigger: text("trigger").notNull().default("manual"), // cron | manual | approval | bridge
+  parentRunId: varchar("parent_run_id"),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  status: text("status").notNull().default("pending"), // pending | running | validated | rejected | failed
+  rejectionReasons: text("rejection_reasons"),
+  summary: text("summary"),
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineRun = typeof pipelineRuns.$inferSelect;
+export type InsertPipelineRun = typeof pipelineRuns.$inferInsert;
+
+export const pipelineSnapshots = pgTable("pipeline_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull(),
+  // Phase 6.5 — first-class lineage. Nullable for additive backfill safety;
+  // writers must populate; readers hard-reject rows with missing lineage.
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  acquisitionId: varchar("acquisition_id"),
+  windowId: varchar("window_id"),
+  entityId: varchar("entity_id").notNull(),
+  entityType: text("entity_type").notNull(),
+  lane: text("lane").notNull(),
+  source: text("source").notNull(),
+  collectedAt: timestamp("collected_at").notNull(),
+  payload: text("payload").notNull(),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineSnapshot = typeof pipelineSnapshots.$inferSelect;
+
+export const pipelineSignals = pgTable("pipeline_signals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull(),
+  // Phase 6.5 — first-class lineage (see pipelineSnapshots note).
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  acquisitionId: varchar("acquisition_id"),
+  windowId: varchar("window_id"),
+  derivedFromSignalId: varchar("derived_from_signal_id"),
+  sourceSnapshotId: varchar("source_snapshot_id").notNull(),
+  lane: text("lane").notNull(),
+  type: text("type").notNull(),
+  value: text("value").notNull(),
+  confidence: doublePrecision("confidence").notNull().default(0),
+  evidence: text("evidence"),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineSignal = typeof pipelineSignals.$inferSelect;
+
+export const pipelineChangeEvents = pgTable("pipeline_change_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull(),
+  // Phase 6.5 — first-class lineage (see pipelineSnapshots note).
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  acquisitionId: varchar("acquisition_id"),
+  windowId: varchar("window_id"),
+  baselineSnapshotId: varchar("baseline_snapshot_id").notNull(),
+  currentSnapshotId: varchar("current_snapshot_id").notNull(),
+  changeDimension: text("change_dimension").notNull(),
+  severity: text("severity").notNull(),
+  evidence: text("evidence"),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+  // W-1 Watchtower additions (migration 042).
+  // competitorId: links event to the specific ci_competitors row.
+  competitorId: varchar("competitor_id"),
+  // kind: W-1 classification (offer_language_change | posting_frequency_shift |
+  //   competitor_profile_change | phrase_saturation_change | engagement_pattern_shift |
+  //   dominance_shift | pricing_page_change). Null on pre-W-1 events.
+  kind: text("kind"),
+  // validatedAt: null = candidate (first observation); non-null = confirmed by a
+  //   second independent fresh fetch. Two-fetch gate per W-1 spec §D.
+  validatedAt: timestamp("validated_at"),
+});
+
+export type PipelineChangeEvent = typeof pipelineChangeEvents.$inferSelect;
+
+// =============================================
+// Phase 6.5 — Integrity Engineering rejection log.
+// Locked by Samir 2026-04-20:
+//   Every hard-reject from the reader/writer boundary writes a row here.
+//   Provides queryable proof that the system is fail-closed and surfaces
+//   structured reasons on the admin dashboard. Append-only; no updates.
+// =============================================
+export const pipelineRejections = pgTable("pipeline_rejections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  observedAt: timestamp("observed_at").defaultNow().notNull(),
+  // Boundary that caught the violation: "reader" | "writer" | "harness".
+  boundary: text("boundary").notNull(),
+  // Logical table the rejected row came from (or "n/a" for non-row violations).
+  tableName: text("table_name").notNull(),
+  // Row id when known; null for shape/contract violations with no persisted row.
+  rowId: varchar("row_id"),
+  // Run id when the rejection happened in the context of a pipeline run.
+  runId: varchar("run_id"),
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
+  lane: text("lane"),
+  // Canonical machine-readable reason code (LINEAGE_MISSING_ACCOUNT, etc).
+  reasonCode: text("reason_code").notNull(),
+  // Human-readable detail.
+  reasonDetail: text("reason_detail").notNull(),
+  // JSON snapshot of lineage context (account_id, campaign_id, acquisition_id,
+  // expected vs observed values, etc) for debugging. Strict JSON, no fallback.
+  context: text("context"),
+});
+
+export type PipelineRejection = typeof pipelineRejections.$inferSelect;
+export type InsertPipelineRejection = typeof pipelineRejections.$inferInsert;
+
+// =============================================
+// Phase 2 — Centralized Collector overlay.
+// Single source of acquisition for the new pipeline.
+// Additive only. Legacy scrapers and their tables remain untouched.
+// =============================================
+export const pipelineAcquisitions = pgTable("pipeline_acquisitions", {
+  id: varchar("id").primaryKey(),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  lane: text("lane").notNull(),                 // user | competitor
+  entityType: text("entity_type").notNull(),    // user_channel | competitor_website | competitor_instagram | competitor_tiktok | competitor_reviews
+  entityId: varchar("entity_id").notNull(),
+  sourceAdapter: text("source_adapter").notNull(),
+  collectedAt: timestamp("collected_at").notNull(),
+  payload: text("payload").notNull(),           // JSON — adapter-normalized raw acquisition (no signals)
+  provenance: text("provenance").notNull(),     // JSON — upstream scraper, backend, timing, rate-limit, cache info
+  ttlMs: integer("ttl_ms").notNull(),
+  scopeHash: text("scope_hash").notNull().default("default"),
+  schemaVersion: text("schema_version").notNull().default("v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineAcquisition = typeof pipelineAcquisitions.$inferSelect;
+export type InsertPipelineAcquisition = typeof pipelineAcquisitions.$inferInsert;
+
+// =============================================
+// Phase 3 — Boss Agent overlay.
+// Orchestration-only. Records the decision/execution log for every Boss run.
+// Lane runs spawned by a Boss run reuse pipeline_runs.parentRunId = boss_runs.id.
+// =============================================
+export const bossRuns = pgTable("boss_runs", {
+  id: varchar("id").primaryKey(),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  trigger: text("trigger").notNull(),               // "manual" | "approval" (cron deferred to Phase 8)
+  status: text("status").notNull().default("running"), // "running" | "completed" | "partial" | "failed"
+  scope: text("scope"),                             // JSON — what the caller asked for
+  plan: text("plan"),                               // JSON — BossPlan
+  execution: text("execution"),                     // JSON — acquisitions + lane run ids + bridge run id
+  q1Verdict: text("q1_verdict").notNull().default("UNKNOWN"),    // "WORKING" | "DEGRADED" | "UNKNOWN"
+  q1Reasons: text("q1_reasons"),                    // JSON array
+  q2Verdict: text("q2_verdict").notNull().default("UNCERTAIN"),  // "STABLE" | "SHIFTED" | "UNCERTAIN" | "INSUFFICIENT_DATA"
+  q2Reasons: text("q2_reasons"),                    // JSON array
+  warnings: text("warnings"),                       // JSON array
+  aiPathReport: text("ai_path_report"),             // Phase 4 — JSON per-engine AI-path telemetry
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type BossRun = typeof bossRuns.$inferSelect;
+export type InsertBossRun = typeof bossRuns.$inferInsert;
+
+// =============================================
+// Phase 5 — User Truth Layer + Plan-Anchored Eval Windows.
+// Overlay-only. Locked by Samir 2026-04-20:
+//   - Anchor source = plan_approvals.decided_at (primary) /
+//     strategic_plans.updated_at (fallback w/ warning).
+//   - Each approved plan creates its own anchor — no retroactive mixing
+//     of rhythm expectations across different plans.
+//   - 4 truth fields exactly: total_leads, qualified_leads, booked_calls,
+//     paid_active. Nothing else (no notes, no derived ratios).
+//   - Truth FK-bound to a specific window so orphan truth is impossible.
+// =============================================
+export const pipelineEvalWindows = pgTable("pipeline_eval_windows", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  planId: varchar("plan_id").notNull(),                 // FK to strategic_plans.id
+  anchorAt: timestamp("anchor_at").notNull(),           // plan_approvals.decided_at OR fallback
+  anchorFallbackUsed: boolean("anchor_fallback_used").notNull().default(false),
+  windowIndex: integer("window_index").notNull(),       // 0 = first 7-day cycle from anchor
+  windowStart: timestamp("window_start").notNull(),     // inclusive
+  windowEnd: timestamp("window_end").notNull(),         // exclusive
+  state: text("state").notNull().default("open"),       // "open" | "closed_with_truth" | "closed_missing_truth" | "late_filled"
+  openedAt: timestamp("opened_at").notNull().defaultNow(),
+  closedAt: timestamp("closed_at"),
+  truthId: varchar("truth_id"),                         // FK to pipeline_user_truth.id
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  // Each (campaign, plan, window_index) gets exactly one row.
+  // Lazy-create uses INSERT ... ON CONFLICT DO NOTHING on this constraint.
+  campaignPlanWindowUnique: uniqueIndex("idx_pipeline_eval_windows_unique")
+    .on(table.campaignId, table.planId, table.windowIndex),
+}));
+
+export type PipelineEvalWindow = typeof pipelineEvalWindows.$inferSelect;
+export type InsertPipelineEvalWindow = typeof pipelineEvalWindows.$inferInsert;
+
+export const pipelineUserTruth = pgTable("pipeline_user_truth", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  windowId: varchar("window_id").notNull(),             // FK to pipeline_eval_windows.id (orphan truth impossible)
+  totalLeads: integer("total_leads").notNull(),
+  qualifiedLeads: integer("qualified_leads").notNull(),
+  bookedCalls: integer("booked_calls").notNull(),
+  paidActive: boolean("paid_active").notNull(),
+  submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+  submittedBy: varchar("submitted_by"),                 // admin user id from JWT (audit trail)
+  wasLate: boolean("was_late").notNull().default(false),
+  // P-2 Phase 4D (migration 045) — optional minimal source input. ALL nullable,
+  // never required for submission. paying_customers is a COUNT; scorers must
+  // NEVER derive it from the paid_active boolean (D4).
+  payingCustomers: integer("paying_customers"),
+  leadSource: text("lead_source"),
+  relatedCampaign: text("related_campaign"),
+  relatedPostUrl: text("related_post_url"),
+  leadChannel: text("lead_channel"),
+  attributionKnown: boolean("attribution_known"),       // tri-state: NULL = unanswered
+  supersededAt: timestamp("superseded_at"),
+  supersededBy: varchar("superseded_by"),               // FK to a newer pipeline_user_truth.id
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type PipelineUserTruth = typeof pipelineUserTruth.$inferSelect;
+export type InsertPipelineUserTruth = typeof pipelineUserTruth.$inferInsert;
+
+// =============================================
+// Phase 6 — DNA lifecycle + Cluster comparison + Outcome-gated Q1.
+// Overlay-only. Locked by Samir 2026-04-20 (rev 2):
+//   - Q1 is a JOINED interpretation of three layers (Phase 5 execution +
+//     Phase 5 truth + Phase 6 cluster comparison). No single layer can
+//     promote WORKING on its own.
+//   - Active-DNA cardinality enforced at the DB level by a partial unique
+//     index on (account_id, campaign_id) WHERE status='active'.
+//   - Hypothesis edits do NOT mint a new dna_id — they append a
+//     pipeline_dna_versions row so the cluster baseline survives.
+//   - Cluster production is idempotent per (window_id, dna_id).
+// =============================================
+export const pipelineDna = pgTable("pipeline_dna", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  hypothesis: text("hypothesis").notNull(),
+  status: text("status").notNull().default("proposed"), // "proposed" | "active" | "paused" | "retired"
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  activatedAt: timestamp("activated_at"),
+  retiredAt: timestamp("retired_at"),
+  notes: text("notes"),
+});
+
+export type PipelineDna = typeof pipelineDna.$inferSelect;
+export type InsertPipelineDna = typeof pipelineDna.$inferInsert;
+
+export const pipelineDnaVersions = pgTable("pipeline_dna_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  dnaId: varchar("dna_id").notNull(),               // FK -> pipeline_dna.id
+  hypothesis: text("hypothesis").notNull(),         // snapshot at this version
+  status: text("status").notNull(),                 // snapshot at this version
+  changedBy: varchar("changed_by"),
+  changedAt: timestamp("changed_at").notNull().defaultNow(),
+  reason: text("reason"),                           // operator note
+});
+
+export type PipelineDnaVersion = typeof pipelineDnaVersions.$inferSelect;
+export type InsertPipelineDnaVersion = typeof pipelineDnaVersions.$inferInsert;
+
+export const pipelineClusters = pgTable("pipeline_clusters", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  dnaId: varchar("dna_id").notNull(),               // FK -> pipeline_dna.id
+  windowId: varchar("window_id").notNull(),         // FK -> pipeline_eval_windows.id
+  clusterSignature: jsonb("cluster_signature").notNull(),
+  producedAt: timestamp("produced_at").notNull().defaultNow(),
+  producedByRunId: varchar("produced_by_run_id"),   // FK -> boss_runs.id
+}, (table) => ({
+  // Idempotency boundary: re-running boss in the same window with same active DNA is a no-op.
+  windowDnaUnique: uniqueIndex("idx_pipeline_clusters_window_dna").on(table.windowId, table.dnaId),
+}));
+
+export type PipelineCluster = typeof pipelineClusters.$inferSelect;
+export type InsertPipelineCluster = typeof pipelineClusters.$inferInsert;
+
+// ─── () — F9.4 account lockout & F9.8 refresh-token rotation ──
+// Auth-hardening tables. Migration 013 creates them in PG. Read by server/auth.ts.
+export const authLockouts = pgTable("auth_lockouts", {
+  email: text("email").primaryKey(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  windowStart: timestamp("window_start").notNull().defaultNow(),
+  lockedUntil: timestamp("locked_until"),
+  lastAttemptAt: timestamp("last_attempt_at").notNull().defaultNow(),
+});
+
+export const authSessions = pgTable("auth_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  deviceFingerprint: text("device_fingerprint").notNull().default("default"),
+  refreshTokenHash: text("refresh_token_hash").notNull(),
+  issuedAt: timestamp("issued_at").notNull().defaultNow(),
+  lastUsedAt: timestamp("last_used_at").notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+  revokeReason: text("revoke_reason"),
+});
+
+export type AuthLockout = typeof authLockouts.$inferSelect;
+export type AuthSession = typeof authSessions.$inferSelect;
+
+
+
+// =============================================
+// Task #89 / Phase 4-A — Orchestrator Replay / Shadow Harness.
+// Migration 027 creates this table. Body holds the full ReplayCassetteBody;
+// cassette_hash is the SHA-256 content-address (UNIQUE). Source is one of
+// 'production' | 'synthetic'. Schema version is CHECK-constrained > 0 so
+// the player can reject unknown versions before deserialising.
+// =============================================
+export const orchestratorReplayCassettes = pgTable("orchestrator_replay_cassettes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  cassetteHash: text("cassette_hash").notNull().unique(),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  source: text("source").notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  redactionApplied: boolean("redaction_applied").notNull().default(true),
+  pathShape: text("path_shape"),
+  campaignId: varchar("campaign_id"),
+  accountId: varchar("account_id"),
+  body: jsonb("body").notNull(),
+  // Task #92 / Phase 4-D — 'parity' (default) vs 'behavioral_change_proof'.
+  // The parity health gate filters its BLOCK-divergence histogram to
+  // 'parity' cassettes only; 'behavioral_change_proof' cassettes are
+  // expected to diverge (the divergence proves the behavioral change).
+  purpose: text("purpose").notNull().default("parity"),
+});
+
+// Task #93 / Phase 4-E — `cutover_state` table archived by migration 032
+// (renamed to `cutover_state_archive`, no code reads/writes it). The
+// pgTable export is intentionally removed. Operators may DROP the
+// archive table after the 30d retention window.
+
+export type OrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferSelect;
+export type InsertOrchestratorReplayCassette = typeof orchestratorReplayCassettes.$inferInsert;
+
+// Task #91 / Phase 4-C — Orchestrator parity replay surface.
+export const orchestratorReplayRuns = pgTable("orchestrator_replay_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ranAt: timestamp("ran_at", { withTimezone: true }).notNull().defaultNow(),
+  cassetteHash: text("cassette_hash").notNull(),
+  pathShape: text("path_shape"),
+  outcome: text("outcome").notNull(),
+  divergenceCount: integer("divergence_count").notNull().default(0),
+  highestClass: text("highest_class"),
+  routedAction: text("routed_action").notNull(),
+  engineWallclockMs: integer("engine_wallclock_ms").notNull().default(0),
+  finalPlanHash: text("final_plan_hash"),
+  finalVerdictHash: text("final_verdict_hash"),
+  candidateError: text("candidate_error"),
+  shadowMode: boolean("shadow_mode").notNull().default(true),
+});
+
+export const orchestratorReplayDivergences = pgTable("orchestrator_replay_divergences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull(),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+  divergenceClass: text("divergence_class").notNull(),
+  path: text("path").notNull(),
+  moduleId: text("module_id"),
+  expected: jsonb("expected"),
+  actual: jsonb("actual"),
+});
+
+export const divergenceClassRoutes = pgTable("divergence_class_routes", {
+  divergenceClass: text("divergence_class").primaryKey(),
+  action: text("action").notNull(),
+  description: text("description").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type OrchestratorReplayRun = typeof orchestratorReplayRuns.$inferSelect;
+export type OrchestratorReplayDivergence = typeof orchestratorReplayDivergences.$inferSelect;
+export type DivergenceClassRoute = typeof divergenceClassRoutes.$inferSelect;
+
+// ── T006: persistent adaptive per-target scrape backoff (migration 038) ─────
+// Cooldown/streak state per (account, platform, target) that must survive
+// restarts. Written ONLY by server/competitive-intelligence/pool-persistence.ts
+// (write-through from target-backoff.ts). target_key '__platform__' is
+// reserved for platform-level state. Covered by GDPR CASCADE_TABLES.
+export const scrapeTargetBackoff = pgTable(
+  "scrape_target_backoff",
+  {
+    accountId: varchar("account_id").notNull(),
+    platform: text("platform").notNull(),
+    targetKey: text("target_key").notNull(),
+    failureStreak: integer("failure_streak").notNull().default(0),
+    cooldownUntil: timestamp("cooldown_until", { withTimezone: true }),
+    lastBlockClass: text("last_block_class"),
+    lastFailureAt: timestamp("last_failure_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.accountId, t.platform, t.targetKey] }),
+  }),
+);
+
+export type ScrapeTargetBackoffRow = typeof scrapeTargetBackoff.$inferSelect;

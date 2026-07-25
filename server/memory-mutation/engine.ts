@@ -1,12 +1,25 @@
 import { db } from "../db";
-import { strategyMemory, contentPerformanceSnapshots, calendarEntries } from "@shared/schema";
-import { eq, and, lt, gt, desc, isNotNull } from "drizzle-orm";
-import { makeStrategyFingerprint } from "../memory-system/manager";
+import { strategyMemory, contentPerformanceSnapshots, calendarEntries, userChannelSnapshots } from "@shared/schema";
+import { eq, and, gt, desc, isNotNull } from "drizzle-orm";
 import { checkResultsOverrideMemory } from "../orchestrator/memory-context";
 import type { MemoryClass, MemoryDirection, MemorySlot, PerformanceSnapshot } from "../memory-system/types";
+import { applyFallbackSourcePenalty, DECISION_CONFIDENCE_THRESHOLDS, NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
+import { upsertByFingerprint, applyMutationUpdate } from "../memory-system/store";
+import { recordMutationRun, getLatestMutationRun } from "../memory-system/mutation-log-store";
 
-const DECAY_HALF_LIFE_DAYS = 30;
-const DECAY_THRESHOLD = 0.05;
+// Task #65 / Phase 2 step 5 — DECAY UNIFICATION.
+// Pre-#65 there were two decay implementations:
+//   (a) write-time half-life (computeDecay + applyConfidenceDecay here, plus
+//       a per-format decay loop at the tail of runMemoryMutation), and
+//   (b) read-time multiplicative decay (computeEffectiveConfidence in
+//       manager.ts and store.ts).
+// They drifted in semantics — (a) compounded with elapsed days, (b)
+// compounded with elapsed read-periods — so the same row could be reported
+// as "confident" by a write path and "decayed" by a read path on the same
+// tick. Phase 2 removes (a) entirely; (b) is now the canonical decay layer.
+// The `decayed` counter on MutationSummary is retained at 0 for the
+// MemoryMutationResult schema; mutation_log keeps a "decayedCount" column
+// for historical inspection.
 
 interface MemoryMutationEntry {
   engineName: string;
@@ -17,11 +30,6 @@ interface MemoryMutationEntry {
   direction?: "reinforce" | "avoid" | "neutral";
   isWinner?: boolean;
   planId?: string | null;
-}
-
-function computeDecay(score: number, daysSinceUpdate: number): number {
-  const halfLifeFactor = Math.pow(0.5, daysSinceUpdate / DECAY_HALF_LIFE_DAYS);
-  return score * halfLifeFactor;
 }
 
 export async function applyMemoryMutation(
@@ -35,123 +43,38 @@ export async function applyMemoryMutation(
   let decayed = 0;
 
   for (const entry of entries) {
-    const fingerprint = makeStrategyFingerprint(entry.engineName, entry.label, entry.details);
-    const confidence = entry.confidenceScore ?? 0;
+    // Task #64 / Phase 1 — every strategy_memory write flows through
+    // memoryStore. Direction derivation: explicit > isWinner-implied > neutral.
+    // isWinner is no longer written (deprecated read-time projection).
+    const direction: "reinforce" | "avoid" | "neutral" = entry.direction
+      ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? "avoid" : "neutral");
+    const confidence = entry.confidenceScore
+      ?? (direction === "reinforce" ? 0.85 : direction === "avoid" ? 0.15 : 0.5);
 
-    const existing = await db
-      .select()
-      .from(strategyMemory)
-      .where(
-        and(
-          eq(strategyMemory.accountId, accountId),
-          eq(strategyMemory.campaignId, campaignId),
-          eq(strategyMemory.strategyFingerprint, fingerprint),
-        )
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
-      const prev = existing[0];
-      const daysSince = prev.updatedAt
-        ? (Date.now() - prev.updatedAt.getTime()) / (1000 * 60 * 60 * 24)
-        : 0;
-      const blendedScore = prev.score !== null
-        ? 0.6 * (prev.score ?? 0) + 0.4 * confidence
-        : confidence;
-
-      const updatedDirection: "reinforce" | "avoid" | "neutral" = entry.direction
-        ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? "avoid" : undefined)
-        ?? (prev.direction as "reinforce" | "avoid" | "neutral" | undefined)
-        ?? "neutral";
-      const updatedIsWinner = updatedDirection === "reinforce";
-      const updatedConfidence = entry.confidenceScore
-        ?? (updatedDirection === "reinforce" ? 0.85 : updatedDirection === "avoid" ? 0.15 : 0.5);
-      await db
-        .update(strategyMemory)
-        .set({
-          label: entry.label,
-          details: entry.details ?? prev.details,
-          score: blendedScore,
-          isWinner: updatedIsWinner,
-          confidenceScore: updatedConfidence,
-          direction: updatedDirection,
-          lastValidatedAt: new Date(),
-          planId: planId,
-          usageCount: (prev.usageCount ?? 0) + 1,
-          updatedAt: new Date(),
-        })
-        .where(eq(strategyMemory.id, prev.id));
-      updated++;
-    } else {
-      const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-      const insertDirection: "reinforce" | "avoid" | "neutral" = entry.direction
-        ?? (entry.isWinner === true ? "reinforce" : entry.isWinner === false ? "avoid" : undefined)
-        ?? "neutral";
-      const insertIsWinner = insertDirection === "reinforce";
-      const insertConfidence = entry.confidenceScore
-        ?? (insertDirection === "reinforce" ? 0.85 : insertDirection === "avoid" ? 0.15 : 0.5);
-      await db.insert(strategyMemory).values({
-        id: memId,
-        accountId,
-        campaignId,
-        memoryType: entry.memoryType,
-        engineName: entry.engineName,
-        label: entry.label,
-        details: entry.details ?? null,
-        score: confidence,
-        isWinner: insertIsWinner,
-        confidenceScore: insertConfidence,
-        direction: insertDirection,
-        lastValidatedAt: new Date(),
-        planId,
-        strategyFingerprint: fingerprint,
-      });
-      written++;
+    const result = await upsertByFingerprint({
+      accountId,
+      campaignId,
+      memoryType: entry.memoryType,
+      engineName: entry.engineName,
+      label: entry.label,
+      details: entry.details ?? null,
+      confidenceScore: confidence,
+      direction,
+      planId,
+      provenanceOrigin: "mutation",
+    });
+    if (!result.allowed) {
+      console.log(`[MemoryMutation] WRITE_BLOCKED | label="${entry.label.slice(0, 60)}" confidence=${confidence} engine=${entry.engineName} reason="${result.reason}"`);
+      continue;
     }
+    if (result.reason === "inserted") written++;
+    else updated++;
   }
 
-  decayed = await applyConfidenceDecay(campaignId, accountId);
-
+  // Task #65 / Phase 2 step 5 — write-time decay removed; read-time
+  // multiplicative decay (manager.computeEffectiveConfidence) is canonical.
   console.log(`[MemoryMutation] written=${written} updated=${updated} decayed=${decayed} | campaign=${campaignId}`);
   return { written, updated, decayed };
-}
-
-async function applyConfidenceDecay(campaignId: string, accountId: string): Promise<number> {
-  const staleThreshold = new Date(Date.now() - DECAY_HALF_LIFE_DAYS * 24 * 60 * 60 * 1000);
-
-  const staleRows = await db
-    .select()
-    .from(strategyMemory)
-    .where(
-      and(
-        eq(strategyMemory.accountId, accountId),
-        eq(strategyMemory.campaignId, campaignId),
-        lt(strategyMemory.updatedAt, staleThreshold),
-      )
-    );
-
-  let decayed = 0;
-  for (const row of staleRows) {
-    if (!row.updatedAt || (row.score ?? 0) < DECAY_THRESHOLD) continue;
-    const daysSince = (Date.now() - row.updatedAt.getTime()) / (1000 * 60 * 60 * 24);
-    const newScore = computeDecay(row.score ?? 0, daysSince);
-
-    if (newScore < DECAY_THRESHOLD) {
-      await db
-        .update(strategyMemory)
-        .set({ score: 0, isWinner: false, confidenceScore: 0.1, direction: "neutral", updatedAt: new Date() })
-        .where(eq(strategyMemory.id, row.id));
-    } else {
-      const decayedConfidence = Math.max(0, Math.min(1, newScore));
-      await db
-        .update(strategyMemory)
-        .set({ score: newScore, confidenceScore: decayedConfidence, updatedAt: new Date() })
-        .where(eq(strategyMemory.id, row.id));
-    }
-    decayed++;
-  }
-
-  return decayed;
 }
 
 export async function recordWinnerMemory(
@@ -184,7 +107,6 @@ const MIN_PERIODS_FOR_FLIP = 3;
 const BELOW_BASELINE_THRESHOLD = 0.15;
 const CONFIDENCE_INCREMENT = 0.05;
 const FLIP_RESET_CONFIDENCE = 0.35;
-const DECAY_NEUTRAL_THRESHOLD = 0.1;
 const INDUSTRY_BASELINE_DEFAULT = 0.5;
 const MAX_SNAPSHOTS = 4;
 
@@ -313,7 +235,15 @@ async function processExplorationResults(
 
       const strongPeriods = inWindowSnaps.filter((s) => (s.smoothedPerformanceScore ?? 0) >= industryBaseline);
 
-      if (strongPeriods.length >= 1) {
+      const PROVISIONAL_PERIODS_REQUIRED = DECISION_CONFIDENCE_THRESHOLDS.PROVISIONAL_WRITE_PERIODS_REQUIRED;
+      const PROVISIONAL_CONFIDENCE = DECISION_CONFIDENCE_THRESHOLDS.MEMORY_WRITE_MIN;
+
+      if (strongPeriods.length < PROVISIONAL_PERIODS_REQUIRED) {
+        console.log(
+          `[MemoryMutation] MEMORY_WRITE_BLOCKED | format=${fmt} strongPeriods=${strongPeriods.length} required=${PROVISIONAL_PERIODS_REQUIRED} ` +
+          `reason="Insufficient qualifying periods for provisional reinforce — policy requires ${PROVISIONAL_PERIODS_REQUIRED} periods above baseline"`,
+        );
+      } else {
         const existingProvisional = await db
           .select({ id: strategyMemory.id, label: strategyMemory.label })
           .from(strategyMemory)
@@ -331,23 +261,23 @@ async function processExplorationResults(
         );
 
         if (!alreadyExists) {
-          const details = hypothesis || `${fmt} showed above-baseline performance during exploration (${strongPeriods.length} qualifying period(s)).`;
-          const provId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-          await db.insert(strategyMemory).values({
-            id: provId,
+          const details = hypothesis || `${fmt} showed above-baseline performance during exploration (${strongPeriods.length} qualifying period(s) — policy minimum: ${PROVISIONAL_PERIODS_REQUIRED}).`;
+          const result = await upsertByFingerprint({
             accountId,
             campaignId,
             memoryType: "content_distribution",
             engineName: "exploration-result",
             label: `${fmt} exploration result — provisional reinforce`,
             details,
-            score: 0.5,
-            isWinner: true,
-            confidenceScore: 0.5,
+            confidenceScore: PROVISIONAL_CONFIDENCE,
             direction: "reinforce",
-            lastValidatedAt: new Date(),
+            provenanceOrigin: "exploration",
           });
-          console.log(`[MemoryMutation] EXPLORATION_RESULT | format=${fmt} baseline=${industryBaseline.toFixed(3)} strongPeriods=${strongPeriods.length} windowStart=${explorationWindowStart.toISOString()} windowEnd=${windowEnd.toISOString()} → provisional reinforce created`);
+          if (!result.allowed) {
+            console.log(`[MemoryMutation] MEMORY_WRITE_BLOCKED | format=${fmt} reason="${result.reason}"`);
+          } else {
+            console.log(`[MemoryMutation] EXPLORATION_RESULT | format=${fmt} baseline=${industryBaseline.toFixed(3)} strongPeriods=${strongPeriods.length} windowStart=${explorationWindowStart.toISOString()} windowEnd=${windowEnd.toISOString()} → provisional reinforce created`);
+          }
         }
       }
     }
@@ -366,14 +296,81 @@ async function resolveIndustryBaseline(accountId: string, campaignId: string): P
         (bl.reelsPerWeek + bl.postsPerWeek + bl.storiesPerDay + bl.carouselsPerWeek) / 4;
       return avg > 0 ? Math.min(1.0, avg / 10) : INDUSTRY_BASELINE_DEFAULT;
     }
-  } catch {}
+  } catch (err: any) {
+    // Seal #15 silent-degradation rules — no bare catch on a trusted read.
+    console.error(
+      `[MemoryMutation] INDUSTRY_BASELINE_READ_FAILED | account=${accountId} campaign=${campaignId} ` +
+      `err="${err?.message ?? String(err)}" — falling back to INDUSTRY_BASELINE_DEFAULT=${INDUSTRY_BASELINE_DEFAULT}`,
+    );
+  }
   return INDUSTRY_BASELINE_DEFAULT;
+}
+
+// ── Scrape Health Guard ────────────────────────────────────────────────────────
+
+const CONSECUTIVE_FAILED_THRESHOLD = 3;
+
+/**
+ * Returns true if the most recent N snapshots for this account are all FAILED.
+ * When an account is degraded the signal cannot be trusted, so memory mutation
+ * is skipped entirely to protect memory integrity.
+ */
+async function checkScrapeHealthForAccount(
+  accountId: string,
+): Promise<{ isDegraded: boolean; consecutiveFailed: number }> {
+  const recentSnaps = await db
+    .select({ snapshotData: userChannelSnapshots.snapshotData })
+    .from(userChannelSnapshots)
+    .where(eq(userChannelSnapshots.accountId, accountId))
+    .orderBy(desc(userChannelSnapshots.scrapedAt))
+    .limit(CONSECUTIVE_FAILED_THRESHOLD);
+
+  let consecutiveFailed = 0;
+  for (const snap of recentSnaps) {
+    try {
+      const data = snap.snapshotData ? JSON.parse(snap.snapshotData) : null;
+      if (data?.scrapeStatus === "FAILED") {
+        consecutiveFailed++;
+      } else {
+        break;
+      }
+    } catch (err: any) {
+      // Seal #15 — corrupt snapshot rows shouldn't be silently squelched.
+      console.error(
+        `[MemoryMutation] SNAPSHOT_PARSE_FAILED | account=${accountId} ` +
+        `err="${err?.message ?? String(err)}" — treating as non-FAILED and ending degradation scan.`,
+      );
+      break;
+    }
+  }
+
+  return {
+    isDegraded: consecutiveFailed >= CONSECUTIVE_FAILED_THRESHOLD,
+    consecutiveFailed,
+  };
 }
 
 export async function runMemoryMutation(
   accountId: string,
   campaignId: string,
 ): Promise<MemoryMutationResult> {
+  // ── Degradation guard ────────────────────────────────────────────────────────
+  // If the account's last 3 channel scrapes all failed, the performance signal
+  // is unreliable. Skip mutation entirely rather than risk corrupting memory
+  // with bad data (e.g. false "zero engagement" from a blocked scrape).
+  const scrapeHealth = await checkScrapeHealthForAccount(accountId);
+  if (scrapeHealth.isDegraded) {
+    console.warn(
+      `[MemoryMutation] Skipping mutation for account=${accountId} — ` +
+      `${scrapeHealth.consecutiveFailed} consecutive FAILED scrapes detected. ` +
+      `Signal integrity compromised. Memory unchanged.`
+    );
+    return {
+      summary: { confirmed: 0, challenged: 0, flipped: [], decayed: 0, totalProcessed: 0 },
+      logEntryId: "degraded-skip",
+    };
+  }
+
   const memoryRows = await db
     .select()
     .from(strategyMemory)
@@ -387,11 +384,12 @@ export async function runMemoryMutation(
     )
     .orderBy(desc(strategyMemory.createdAt));
 
+  const NON_STRATEGIC_SET = new Set<string>(NON_STRATEGIC_MEMORY_TYPES);
   const eligible = memoryRows.filter(
     (r) =>
       r.direction !== null &&
       r.direction !== "neutral" &&
-      r.memoryType !== "mutation_log",
+      !NON_STRATEGIC_SET.has(r.memoryType ?? ""),
   );
 
   const summary: MutationSummary = {
@@ -449,6 +447,14 @@ export async function runMemoryMutation(
           .orderBy(desc(contentPerformanceSnapshots.createdAt))
           .limit(MAX_SNAPSHOTS);
 
+    if (!usingChannelAsPrimary && newSnaps.length > 0) {
+      console.warn(
+        `[MemoryMutation] MEMORY_FALLBACK_SOURCE_ACTIVE | format=${fmt} snaps=${newSnaps.length} ` +
+        `reason="channel-scrape insufficient (${channelSnaps.length}/${MIN_PERIODS_FOR_CONFIDENCE_MOVE}) — using all-sources fallback. ` +
+        `Confidence penalty of ${DECISION_CONFIDENCE_THRESHOLDS.FALLBACK_SOURCE_PENALTY} will be applied to any memory writes from this signal."`,
+      );
+    }
+
     console.log(
       `[MemoryMutation] format=${fmt} signalSource=${usingChannelAsPrimary ? "channel-scrape (primary)" : "all-sources (fallback)"} snaps=${newSnaps.length}`,
     );
@@ -459,8 +465,14 @@ export async function runMemoryMutation(
 
     const scores = newSnaps.map((s) => s.smoothedPerformanceScore ?? 0);
     const currentDirection = (row.direction ?? "neutral") as MemoryDirection;
-    const currentConfidence = row.confidenceScore ?? 0.5;
+    const rawConfidence = row.confidenceScore ?? 0.5;
     const currentValidationCount = row.validationCount ?? 0;
+
+    let currentConfidence = rawConfidence;
+    if (!usingChannelAsPrimary) {
+      const penaltyResult = applyFallbackSourcePenalty(rawConfidence, row.label);
+      currentConfidence = penaltyResult.penalizedScore;
+    }
 
     if (currentDirection === "reinforce") {
       const consistentAbove = countConsecutiveConfirmed(scores, industryBaseline, "above");
@@ -473,31 +485,25 @@ export async function runMemoryMutation(
 
       if (consistentAbove >= MIN_PERIODS_FOR_CONFIDENCE_MOVE) {
         const newConfidence = Math.min(1.0, currentConfidence + CONFIDENCE_INCREMENT * consistentAbove);
-        await db
-          .update(strategyMemory)
-          .set({
-            confidenceScore: newConfidence,
-            validationCount: currentValidationCount + consistentAbove,
-            lastValidatedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(strategyMemory.id, row.id));
+        await applyMutationUpdate(row.id, {
+          kind: "confirm",
+          confidenceScore: newConfidence,
+          validationCount: currentValidationCount + consistentAbove,
+        });
+        console.log(`[MemoryMutation] CONFIRMED | label="${row.label.slice(0, 60)}" periods=${consistentAbove} confidence=${currentConfidence.toFixed(3)}→${newConfidence.toFixed(3)} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.confirmed++;
       } else if (challengedPeriods >= MIN_PERIODS_FOR_FLIP) {
-        await db
-          .update(strategyMemory)
-          .set({
-            direction: "avoid",
-            isWinner: false,
-            confidenceScore: FLIP_RESET_CONFIDENCE,
-            lastValidatedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(strategyMemory.id, row.id));
+        await applyMutationUpdate(row.id, {
+          kind: "flip",
+          direction: "avoid",
+          confidenceScore: FLIP_RESET_CONFIDENCE,
+        });
+        console.log(`[MemoryMutation] FLIPPED | label="${row.label.slice(0, 60)}" from=reinforce to=avoid periods=${challengedPeriods} confidence=${currentConfidence.toFixed(3)}→${FLIP_RESET_CONFIDENCE} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.flipped.push({ label: row.label, from: "reinforce", to: "avoid" });
         summary.challenged++;
         challengedEntryIds.add(row.id);
       } else if (challengedPeriods >= MIN_PERIODS_FOR_CONFIDENCE_MOVE) {
+        console.log(`[MemoryMutation] CHALLENGED | label="${row.label.slice(0, 60)}" periods=${challengedPeriods} confidence=${currentConfidence.toFixed(3)} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.challenged++;
         challengedEntryIds.add(row.id);
       }
@@ -536,91 +542,54 @@ export async function runMemoryMutation(
       const consistentAboveForAvoid = countConsecutiveConfirmed(scores, industryBaseline, "above");
 
       if (overrideResult.override) {
-        await db
-          .update(strategyMemory)
-          .set({
-            direction: "reinforce",
-            isWinner: true,
-            confidenceScore: FLIP_RESET_CONFIDENCE,
-            lastValidatedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(strategyMemory.id, row.id));
+        await applyMutationUpdate(row.id, {
+          kind: "flip",
+          direction: "reinforce",
+          confidenceScore: FLIP_RESET_CONFIDENCE,
+        });
+        console.log(`[MemoryMutation] FLIPPED | label="${row.label.slice(0, 60)}" from=avoid to=reinforce reason=results_override confidence=${currentConfidence.toFixed(3)}→${FLIP_RESET_CONFIDENCE} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.flipped.push({ label: row.label, from: "avoid", to: "reinforce" });
         summary.confirmed++;
       } else if (consistentBelow >= MIN_PERIODS_FOR_CONFIDENCE_MOVE) {
         const newConfidence = Math.min(1.0, currentConfidence + CONFIDENCE_INCREMENT * consistentBelow);
-        await db
-          .update(strategyMemory)
-          .set({
-            confidenceScore: newConfidence,
-            validationCount: currentValidationCount + consistentBelow,
-            lastValidatedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(strategyMemory.id, row.id));
+        await applyMutationUpdate(row.id, {
+          kind: "confirm",
+          confidenceScore: newConfidence,
+          validationCount: currentValidationCount + consistentBelow,
+        });
+        console.log(`[MemoryMutation] AVOID_CONFIRMED | label="${row.label.slice(0, 60)}" periods=${consistentBelow} confidence=${currentConfidence.toFixed(3)}→${newConfidence.toFixed(3)} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.confirmed++;
       } else if (consistentAboveForAvoid >= MIN_PERIODS_FOR_CONFIDENCE_MOVE && !overrideResult.override) {
+        console.log(`[MemoryMutation] AVOID_CHALLENGED | label="${row.label.slice(0, 60)}" periods=${consistentAboveForAvoid} confidence=${currentConfidence.toFixed(3)} scores=[${scores.slice(0, 4).map(s => s.toFixed(2)).join(",")}] baseline=${industryBaseline.toFixed(2)}`);
         summary.challenged++;
         challengedEntryIds.add(row.id);
       }
     }
   }
 
-  for (const row of eligible) {
-    if (validatedIds.has(row.id)) continue;
-    const fmt = detectContentFormat({ label: row.label, details: row.details ?? null });
-    if (!fmt) continue;
-
-    const currentConfidence = row.confidenceScore ?? 0.5;
-    const decayRate = row.decayRate ?? 0.95;
-    const effectiveConfidence = currentConfidence * decayRate;
-
-    if (effectiveConfidence < DECAY_NEUTRAL_THRESHOLD) {
-      await db
-        .update(strategyMemory)
-        .set({
-          confidenceScore: effectiveConfidence,
-          direction: "neutral",
-          isWinner: false,
-          updatedAt: new Date(),
-        })
-        .where(eq(strategyMemory.id, row.id));
-      summary.decayed++;
-    } else {
-      await db
-        .update(strategyMemory)
-        .set({ confidenceScore: effectiveConfidence, updatedAt: new Date() })
-        .where(eq(strategyMemory.id, row.id));
-    }
-  }
+  // Task #65 / Phase 2 step 5 — the per-row write-time decay loop that used
+  // to live here is removed. Read-time multiplicative decay in
+  // computeEffectiveConfidence is the single canonical decay layer; writing
+  // a decayed value back to the row corrupted the provenance audit (decay
+  // writes appeared in CV-06 as ordinary "updated" events from
+  // engine="memory-mutation" with no source outcome).
+  // summary.decayed stays at 0; mutation_log's decayed_count column is kept
+  // for historical schema compat.
 
   await processExplorationResults(accountId, campaignId, industryBaseline);
 
-  const logId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-  const logDetails = JSON.stringify({
-    confirmed: summary.confirmed,
-    challenged: summary.challenged,
-    challengedIds: Array.from(challengedEntryIds),
-    flipped: summary.flipped,
-    decayed: summary.decayed,
-    totalProcessed: summary.totalProcessed,
-    runAt: new Date().toISOString(),
-  });
-
-  await db.insert(strategyMemory).values({
-    id: logId,
+  // Task #64 / Phase 1 — mutation_log persisted to its dedicated table.
+  const logId = await recordMutationRun({
     accountId,
     campaignId,
-    memoryType: "mutation_log",
     label: `Mutation — ${summary.confirmed} confirmed, ${summary.challenged} challenged, ${summary.flipped.length} flipped, ${summary.decayed} decayed`,
-    details: logDetails,
-    score: 0,
-    isWinner: false,
-    direction: "neutral",
-    confidenceScore: 1.0,
-    decayRate: 1.0,
-    validationCount: 0,
+    confirmedCount: summary.confirmed,
+    challengedCount: summary.challenged,
+    flippedCount: summary.flipped.length,
+    decayedCount: summary.decayed,
+    totalProcessed: summary.totalProcessed,
+    challengedIds: Array.from(challengedEntryIds),
+    flipped: summary.flipped,
   });
 
   console.log(
@@ -634,6 +603,10 @@ export async function getMemoryHealth(
   accountId: string,
   campaignId: string,
 ): Promise<MemoryHealthSummary> {
+  // Task #64 / Phase 1 — read split:
+  //   • Active strategic facts come from strategy_memory (filtered to exclude
+  //     legacy operational/log rows that may still exist pre-sweep).
+  //   • Audit history comes from the dedicated mutation_log table.
   const rows = await db
     .select()
     .from(strategyMemory)
@@ -645,35 +618,25 @@ export async function getMemoryHealth(
     )
     .orderBy(desc(strategyMemory.createdAt));
 
-  const logEntry = rows.find((r) => r.memoryType === "mutation_log");
+  const NON_STRATEGIC_HEALTH_SET = new Set<string>(NON_STRATEGIC_MEMORY_TYPES);
   const activeEntries = rows.filter(
-    (r) => r.memoryType !== "mutation_log" && r.direction !== null && r.direction !== "neutral",
+    (r) =>
+      !NON_STRATEGIC_HEALTH_SET.has(r.memoryType ?? "") &&
+      r.direction !== null &&
+      r.direction !== "neutral",
   );
-
   const highConfidenceCount = activeEntries.filter((r) => (r.confidenceScore ?? 0) > 0.7).length;
 
+  const logEntry = await getLatestMutationRun(accountId, campaignId);
   let recentFlips: Array<{ label: string; from: string; to: string }> = [];
   let recentlyDecayed = 0;
+  let challengedCount = 0;
   let lastMutationRunAt: Date | null = null;
-
   if (logEntry) {
     lastMutationRunAt = logEntry.createdAt ?? null;
-    try {
-      const parsed =
-        typeof logEntry.details === "string" ? JSON.parse(logEntry.details) : logEntry.details;
-      if (parsed?.flipped) recentFlips = parsed.flipped;
-      if (typeof parsed?.decayed === "number") recentlyDecayed = parsed.decayed;
-    } catch {}
-  }
-
-  let challengedCount = 0;
-  if (logEntry) {
-    try {
-      const parsed =
-        typeof logEntry.details === "string" ? JSON.parse(logEntry.details) : logEntry.details;
-      const challengedIds: string[] = parsed?.challengedIds ?? [];
-      challengedCount = challengedIds.length;
-    } catch {}
+    recentFlips = (logEntry.flipped ?? []) as typeof recentFlips;
+    recentlyDecayed = logEntry.decayedCount ?? 0;
+    challengedCount = (logEntry.challengedIds ?? []).length;
   }
 
   return {

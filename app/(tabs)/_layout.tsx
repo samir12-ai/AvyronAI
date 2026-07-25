@@ -34,9 +34,9 @@ function NativeTabLayout() {
         <Icon sf={{ default: "checkmark.shield", selected: "checkmark.shield.fill" }} />
         <Label>{t('tabs.aiManagement')}</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="photography">
-        <Icon sf={{ default: "camera", selected: "camera.fill" }} />
-        <Label>{t('tabs.photography')}</Label>
+      <NativeTabs.Trigger name="pivot">
+        <Icon sf={{ default: "arrow.triangle.branch", selected: "arrow.triangle.branch" }} />
+        <Label>Pivot</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
@@ -132,11 +132,11 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="photography"
+        name="pivot"
         options={{
-          title: t('tabs.photography'),
+          title: "Pivot",
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "camera" : "camera-outline"} size={22} color={color} />
+            <Ionicons name={focused ? "git-branch" : "git-branch-outline"} size={22} color={color} />
           ),
         }}
       />

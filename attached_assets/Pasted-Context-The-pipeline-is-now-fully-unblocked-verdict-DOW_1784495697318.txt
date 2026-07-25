@@ -1,0 +1,33 @@
+Context:
+The pipeline is now fully unblocked (verdict DOWNGRADE/RESTRICTED_EXECUTION, zero block reasons). We are starting two new subsystems specified in watchtower-spec.md and performance-loop-spec.md: the Watchtower (market change detection over time) and the Performance Loop (own-page performance measurement). Before building anything, we need a truthful map of what exists vs what’s missing.
+
+HARD RULE: This session is 100% diagnosis. Zero code changes, zero config changes, zero “small fixes while I’m here”. Every claim backed by quoted code (file:line), DB rows with timestamps, or log lines. If evidence is missing, say so explicitly — do not reconstruct from assumption.
+
+PART 1 — W-0: Watchtower Memory Audit
+
+The Watchtower design turns Avyron from “analyze the present” into “detect what CHANGED”. It needs persisted history to diff against. Answer:
+
+	1.	Change events table: Does pipeline_change_events (or any equivalent) contain MARKET-level change events over time (competitor offer changed, dominance shifted, new content angle), or only pipeline/system events? Print: schema, row count, 10 sample rows with timestamps, and the distinct event types present.
+	2.	Signal persistence map: For each signal below, state whether it is (a) persisted per-run with history, (b) computed per-run then discarded, or (c) not computed at all — with file:line evidence:
+	•	offerLanguageChange / offer wording per competitor
+	•	dominance scores per competitor per run
+	•	hashtag drift / posting frequency per competitor per run
+	•	phrase-family repetition across competitors (“narrative saturation”)
+	•	per-post engagement metrics at fetch time
+	3.	Snapshot diff readiness: Do stored competitor snapshots retain the raw fields needed to compute an offer-language diff between two points in time (the actual offer text, not just a score)? Show a concrete example: for one competitor, can you produce “old offer text vs new offer text” from two stored snapshots? Try it and show the result.
+	4.	Existing SHIFTED logic: Quote the current Q2/SHIFTED detection path (boss/run.ts area) — what exactly does it compare today, and over what lookback window?
+	5.	Verdict table: For each Watchtower sense in the spec’s fuel map (§8), one line: EXISTS-WITH-HISTORY / COMPUTED-BUT-DISCARDED / MISSING — plus the smallest persistence change needed (description only, no implementation).
+
+PART 2 — P-0: Performance Loop Ingestion Audit
+
+The dashboard shows “No signals from your accounts yet — I couldn’t extract any posts from your connected accounts.” Answer:
+
+	1.	Root cause of zero posts: Trace the connected-accounts extraction path (user-channel-scraper and whatever feeds it). Why does it return zero posts for the user’s own account? Is it: no account actually connected, auth/token failure, scraper target misconfiguration, silent error swallowed, or genuinely no posts? Quote the exact failure point with log evidence from the most recent attempt.
+	2.	outcome-tracker.ts reality check: What does it actually track today? Is it wired into any live path or abandoned code? Evidence.
+	3.	Publish lineage: Does the publish pipeline (publish-worker/publish-pipeline) persist ANY plan-lineage metadata on published posts today (content_type, hook_style, angle, slot)? Show the persisted shape of one published post record.
+	4.	Metric availability: For the currently connected account type, which per-post metrics are actually retrievable with existing credentials/methods (reach, likes, comments, saves, shares)? State what was verified vs assumed.
+	5.	Revisit scheduler: Does ANY existing scheduler re-visit content after initial fetch (for either user posts or competitor posts)? If yes, quote it — it’s the shared component both specs need.
+	6.	Verdict table: For each Performance Loop layer (L1 ingestion / L2 attribution / L3 scoring / L4 feed-forward): EXISTS / PARTIAL / MISSING, with the entry-point file for each.
+
+Output format:
+Single structured report: PART 1 findings → PART 1 verdict table → PART 2 findings → PART 2 verdict table → a final combined section “BUILD ORDER IMPLICATIONS” listing any spec assumptions that turned out wrong and what should change in W-1/P-

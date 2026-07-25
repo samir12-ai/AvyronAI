@@ -1,0 +1,65 @@
+Subject: Intelligence Audit — Final Batch: Commercial Reasoning + Shared Types + Frontend (37 files)
+
+Please audit the following files:
+
+**Commercial Reasoning (8 files)**
+- server/commercial-reasoning/business-context-layer.ts
+- server/commercial-reasoning/awareness-depth-interpreter.ts
+- server/commercial-reasoning/integrity-gates.ts
+- server/commercial-reasoning/contract.ts
+- server/commercial-reasoning/llm-call.ts
+- server/commercial-reasoning/metrics.ts
+- server/commercial-reasoning/persist.ts
+- server/commercial-reasoning/template-phrases.ts
+
+**Shared Types & Contracts (20 files)**
+- shared/commercial-dna.ts
+- shared/schema.ts
+- shared/perception-translator.ts
+- shared/contracts/change-event.ts
+- shared/contracts/cluster.ts
+- shared/contracts/dna.ts
+- shared/contracts/index.ts
+- shared/contracts/lane.ts
+- shared/contracts/rhythm.ts
+- shared/contracts/signal.ts
+- shared/contracts/snapshot.ts
+- shared/contracts/version.ts
+- shared/models/chat.ts
+- server/shared/strategy-root.ts
+- server/shared/strategy-root-assembler.ts
+- server/shared/confidence-provenance.ts
+- server/shared/signal-lineage.ts
+- server/shared/signal-quality-gate.ts
+- server/shared/weight-schema.ts
+- server/shared/snapshot-trust.ts
+- server/shared/confidence-ceilings.ts
+- server/shared/canonical-snapshot-reader.ts
+- server/shared/contradictions.ts
+- server/shared/strategy-acceptability.ts
+- server/shared/product-dna.ts
+- server/shared/ai-replay/persistAiInputSnapshot.ts
+
+**Frontend Intelligence (key files)**
+- components/AudienceEngine.tsx
+- components/PositioningStrategy.tsx
+- components/OfferEngine.tsx
+- components/OrchestratorPanel.tsx
+- components/BuildThePlan.tsx
+- components/WatchtowerStrip.tsx
+- components/NarrativeCard.tsx
+- app/(tabs)/index.tsx
+- app/(tabs)/monitor.tsx
+
+Same checks as before:
+1. Silent catches
+2. Internal error disclosure
+3. Unguarded JSON.parse
+4. Doctrine D1/D3/D5 violations
+5. Input validation
+6. Unbounded queries
+7. as any on canonical paths
+
+Report findings only — no fixes for now.
+
+Thank you

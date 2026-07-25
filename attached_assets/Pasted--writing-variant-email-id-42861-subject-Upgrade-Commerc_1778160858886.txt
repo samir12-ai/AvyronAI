@@ -1,0 +1,395 @@
+:::writing{variant=“email” id=“42861” subject=“Upgrade Commercial Decision Engines (Post-Integrity Layer) to Marketing-Level Intelligence”}
+Hi,
+
+We’ve now validated and stabilized the upstream intelligence layer:
+	•	Market Intelligence
+	•	Audience
+	•	Positioning
+	•	Differentiation
+	•	Mechanism
+	•	Offer
+	•	Awareness
+	•	Funnel
+	•	Persuasion
+	•	Integrity
+
+The previous structural issues are resolved:
+	•	snapshot persistence verified
+	•	resolver consistency verified
+	•	AXIS_MISMATCH fixed
+	•	integrity mismatch bugs fixed
+	•	end-to-end execution verified
+
+The system is now reaching the downstream commercial-decision layer correctly for the first time.
+
+Now we need to upgrade the engines AFTER Integrity to the same intelligence standard as the upstream marketing engines.
+
+This is the next major phase.
+
+⸻
+
+1) Scope
+
+Focus ONLY on the downstream commercial decision engines:
+	•	Statistical Validation (StatVal)
+	•	Budget Governor
+	•	Channel Selection
+	•	Iteration Engine
+	•	Retention Engine
+	•	System Control Layer
+
+These engines currently make real launch / viability decisions, but their logic is still operating at a lower sophistication level than the upstream marketing engines.
+
+We need to bring them to the same level of:
+	•	commercial reasoning
+	•	contextual intelligence
+	•	adaptive logic
+	•	marketing-awareness
+	•	strategic interpretation
+
+⸻
+
+2) Current Problem
+
+The current downstream layer is technically functional, but still too rigid and score-driven.
+
+Example:
+	•	confidence spread causes hard blocks
+	•	low channel confidence kills execution
+	•	weak validation immediately halts budget
+	•	no conversion path becomes terminal
+
+The decisions may be mathematically valid, but the reasoning is not yet commercially intelligent enough.
+
+Right now the layer behaves more like:
+	•	risk-control software
+than
+	•	adaptive commercial strategy logic
+
+⸻
+
+3) What Must Improve
+
+A) Conversion Path Intelligence
+
+Current issue:
+NO_CONVERSION_PATH
+
+The system must stop treating conversion as binary.
+
+It should reason about:
+	•	awareness stage
+	•	buyer readiness
+	•	proof maturity
+	•	channel intent
+	•	trust-building sequence
+	•	assisted conversion paths
+	•	delayed conversion environments
+	•	educational conversion models
+
+Example:
+A proof-led educational webinar funnel should not be judged using the same expectations as a direct-response purchase funnel.
+
+The engine must understand:
+
+HOW this market converts.
+
+Not just:
+
+whether conversion exists immediately.
+
+⸻
+
+B) Confidence Intelligence
+
+Current issue:
+CONFIDENCE_SPREAD_EXCESSIVE
+
+Right now:
+	•	engine disagreement is treated too mechanically
+
+The system must distinguish between:
+	•	strategic disagreement
+	•	uncertainty
+	•	parser failure
+	•	low-signal environments
+	•	intentional exploration
+	•	weak-but-valid hypotheses
+
+We need:
+	•	confidence inheritance
+	•	weighted confidence
+	•	engine trust ranking
+	•	uncertainty-aware reasoning
+	•	confidence decay models
+	•	confidence stabilization logic
+
+A failed engine must NOT distort the entire spread calculation as if it were a valid low-confidence vote.
+
+⸻
+
+C) Commercial Viability Logic
+
+Current issue:
+BUDGET_KILL, BUDGET_HALT
+
+The budget layer must become commercially adaptive.
+
+It should reason about:
+	•	testing-stage campaigns
+	•	proof-building campaigns
+	•	low-budget discovery phases
+	•	market maturity
+	•	audience sophistication
+	•	expected CAC learning curves
+	•	strategic experimentation
+	•	early-stage uncertainty tolerance
+
+The current logic is too immediate and deterministic.
+
+We need:
+	•	progressive budget confidence
+	•	staged validation thresholds
+	•	controlled exploration budgets
+	•	adaptive risk tolerance
+	•	conditional scaling logic
+
+The engine should think like:
+
+a strategic growth operator
+
+not:
+
+a static budget firewall
+
+⸻
+
+D) Channel Intelligence
+
+Current issue:
+CHANNEL_CONFIDENCE_BELOW_MINIMUM
+
+Channel selection must become:
+	•	buyer-state aware
+	•	persuasion aware
+	•	trust-path aware
+	•	content-structure aware
+	•	proof-aware
+
+The system must understand:
+	•	some channels validate
+	•	some channels educate
+	•	some channels convert
+	•	some channels amplify authority
+	•	some channels build trust over time
+
+Channels are not interchangeable traffic pipes.
+
+The engine should reason:
+
+“What commercial function does this channel serve in THIS buyer journey?”
+
+⸻
+
+E) Iteration Intelligence
+
+The iteration engine currently behaves too mechanically.
+
+It must evolve into:
+	•	hypothesis intelligence
+	•	strategic experimentation
+	•	controlled adaptation
+	•	market learning logic
+
+It should understand:
+	•	signal quality
+	•	experimental confidence
+	•	strategic drift
+	•	market feedback loops
+	•	confidence accumulation over time
+
+⸻
+
+F) Retention Intelligence
+
+Retention must stop acting as:
+	•	post-sale metric tracking
+
+and become:
+	•	expectation alignment intelligence
+	•	trust sustainability
+	•	buyer outcome continuity
+	•	churn-risk psychology
+	•	value reinforcement logic
+
+The engine should understand:
+	•	why buyers disengage
+	•	where trust breaks
+	•	how perception decays
+	•	what reinforces long-term conviction
+
+⸻
+
+4) System Control Layer (Critical)
+
+System Control must evolve beyond:
+	•	hard threshold aggregation
+
+and become:
+	•	commercial orchestration intelligence
+
+It must distinguish:
+	•	weak campaign
+	•	risky campaign
+	•	exploratory campaign
+	•	incomplete campaign
+	•	contradictory campaign
+	•	parser/system failure
+	•	low-data uncertainty
+
+The system currently blocks too absolutely.
+
+We need:
+	•	nuanced verdicts
+	•	graduated execution states
+	•	conditional approvals
+	•	monitored launches
+	•	test-mode approvals
+	•	low-confidence sandbox execution
+
+Example:
+Instead of:
+BLOCKED
+
+We may need:
+	•	TEST_ONLY
+	•	LIMITED_SPEND
+	•	PROOF_COLLECTION
+	•	CHANNEL_VALIDATION_REQUIRED
+	•	AWARENESS_BUILD_PHASE
+	•	HUMAN_REVIEW_REQUIRED
+
+The system should think commercially, not bureaucratically.
+
+⸻
+
+5) Required Work
+
+For EACH downstream engine:
+	1.	Audit current logic
+	2.	Redesign commercial reasoning layer
+	3.	Add adaptive intelligence
+	4.	Add uncertainty-aware logic
+	5.	Add staged-decision capability
+	6.	Add confidence stabilization
+	7.	Add richer commercial interpretation
+	8.	Preserve enforcement integrity
+	9.	Maintain deterministic traceability
+
+⸻
+
+6) Testing Requirements (Very Important)
+
+I want extremely strong testing here.
+
+Not simple unit tests.
+
+I want:
+
+A) Scenario Matrix Testing
+
+Run multiple scenarios:
+	•	high confidence / low proof
+	•	strong proof / weak offer
+	•	educational funnels
+	•	trust-first funnels
+	•	direct response funnels
+	•	experimental campaigns
+	•	early-stage launches
+	•	mature markets
+	•	low-budget discovery campaigns
+
+⸻
+
+B) Failure Injection Testing
+
+Inject:
+	•	parser failures
+	•	missing signals
+	•	conflicting engines
+	•	stale confidence
+	•	weak channel evidence
+
+Verify:
+	•	system remains stable
+	•	confidence handling behaves correctly
+	•	no catastrophic false blocks
+
+⸻
+
+C) End-to-End Full Pipeline Runs
+
+Run complete orchestrator flows repeatedly.
+
+Verify:
+	•	no stale states
+	•	no snapshot mismatches
+	•	no resolver inconsistencies
+	•	no false blocks
+	•	commercial verdicts remain explainable
+
+⸻
+
+D) Before vs After Commercial Comparison
+
+For each engine:
+show:
+	•	old reasoning
+	•	new reasoning
+	•	why the new reasoning is commercially superior
+
+I want evidence that the system is becoming:
+
+commercially intelligent
+
+not just technically more complex.
+
+⸻
+
+7) Important Constraint
+
+Do NOT:
+	•	weaken integrity
+	•	remove enforcement
+	•	hide uncertainty
+	•	bypass blockers artificially
+
+The goal is NOT:
+
+“make the system pass”
+
+The goal is:
+
+make the system think better.
+
+⸻
+
+8) Final Goal
+
+The upstream engines now think like marketers.
+
+The downstream engines must now think like:
+	•	strategic operators
+	•	growth leaders
+	•	commercial decision-makers
+
+The entire system should become:
+
+a unified adaptive commercial intelligence system
+
+—not disconnected engine layers.
+
+Proceed carefully and systematically.
+
+Thanks.
+:::

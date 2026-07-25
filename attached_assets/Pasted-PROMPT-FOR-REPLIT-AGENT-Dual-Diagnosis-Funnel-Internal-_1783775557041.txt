@@ -1,0 +1,26 @@
+PROMPT FOR REPLIT AGENT — Dual Diagnosis: Funnel Internal Failure + Rejected Territory Provenance
+
+Context:
+Confirmation run 2026-07-11T12-44-04-555Z proved the grounding contract STABLE. Two open questions remain, both diagnosis-only. HARD RULE: This session is 100% diagnosis. Zero code changes, zero prompt changes, zero config changes. Root cause with evidence, then STOP and report.
+
+PART 1 — Funnel: why does it produce near-empty output?
+
+The funnel scored depth=0.1 → DEPTH_FAILED in ALL THREE runs, with output “Funnel: none, trust path 0” — even in the CONFIRM run where its inputs were clean (grounding MET with full 9-ref citations, integrity passing, awareness DEPTH_PASSED at 0.25). The funnel’s own grounding was MET ×2 — so the LLM is citing evidence yet the scored output is nearly empty. This smells like the old awareness pattern: content generated but lost between generation and scoring.
+
+Trace the full path and answer each with quoted evidence:
+
+	1.	Raw LLM output: From the CONFIRM run logs (or ai-replay snapshots if persisted), what did the funnel LLM actually return? Full raw JSON of the best attempt. Is it rich or genuinely empty?
+	2.	Parse survival: After parsing/normalization, which fields survived into the FunnelCandidate / typed result? Specifically: where does “trust path 0” originate — did the LLM return an empty trust path, or did a field-name/shape mismatch drop it during parse (camelCase/snake_case, missing key, silent || [] / || 0 defaults)?
+	3.	Scorer input: What exact texts were fed into the funnel depth scorer (enforceEngineDepthCompliance or equivalent for funnel)? Are they the full generated content or a thin subset? Compare: raw LLM content vs what the scorer received.
+	4.	Retry behavior: The funnel retried 2/2 — did attempt 2 receive the rejection feedback, and did the LLM change its output meaningfully, or return near-identical content?
+	5.	Verdict: State which link in the chain breaks: (a) LLM genuinely generates thin content, (b) parse/normalization drops content, (c) scorer receives a subset, or (d) something else. Quote the exact file:line where the break occurs.
+
+PART 2 — Rejected positioning territory: fresh or reused?
+
+The exact phrase “marketing capability transformation validation gap” has appeared VERBATIM across runs spanning days — before and after the anchor was enriched, before and after the grounding contract. Verbatim recurrence across independent LLM generations is suspicious. Determine its provenance:
+
+	1.	Generation trace: In the CONFIRM run, was this territory text produced by a fresh LLM call in that run (find the generation log/AI call for it), or loaded/reused from persisted state (DB rows, cached territories, REUSED trust path, pausedContext, or any warm-start mechanism)?
+	2.	Persistence scan: Search the DB and any territory/candidate caches for this phrase. Which tables/rows contain it, with created_at timestamps? Does its first occurrence predate the anchor enrichment (2026-07-11 ~10:45)?
+	3.	Reuse mechanics: If reuse exists — what triggers it? Does the positioning engine (or the orchestrator around it) load prior territories/candidates when retrying or when a prior run exists for the campaign? Is there any invalidation when product_anchor changes?
+	4.	Fresh-generation check: If it IS freshly generated each run — confirm by quoting the actual LLM response containing the phrase from the CONFIRM run’s AI calls, and note that identical verbatim output across days would then point to a highly deterministic prompt+temperature combination (report the temperature and model used).
+	5.	Verdict: One of: (a) REUSED from stale state (

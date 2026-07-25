@@ -1,0 +1,161 @@
+After testing the current dashboard and perception layer in real usage, I found several potentially serious runtime / UX inconsistencies that need investigation BEFORE additional frontend work continues.
+
+These may indicate:
+
+* time-window issues
+* baseline accumulation problems
+* refresh orchestration gaps
+* perception/runtime mismatch
+* signal-threshold problems
+* or broken monitoring assumptions
+
+I want a focused audit on the following areas before further UX iteration.
+
+1. Manual Watchtower Refresh
+   I want the user to be able to manually trigger a Watchtower refresh / market scan whenever they want.
+
+However:
+this MUST NOT break:
+
+* continuity windows
+* benchmark windows
+* cadence logic
+* freshness logic
+* rerun sequencing
+* baseline accumulation
+* historical comparisons
+* re-anchor behavior
+
+Please audit:
+
+* whether manual refreshes are currently safe
+* whether they would distort cadence/time-window calculations
+* whether they would accidentally reset or pollute baseline logic
+* whether they could create duplicate scans/events
+* whether they interfere with continuity scheduling
+
+I want a safe design for:
+“Refresh Market Scan”
+without corrupting the intelligence lifecycle.
+
+2. Weekly Manual Data Window
+   The “weekly manual data window” / benchmark-building flow still appears missing or inactive in the UX.
+
+I want a full audit of:
+
+* whether the weekly window is actually running
+* whether the UI is correctly surfacing it
+* whether manual metrics are being consumed properly
+* whether benchmark windows are initializing correctly
+* whether first-window thresholds are too strict
+* whether the perception layer incorrectly claims “not enough data”
+  even when enough runtime evidence already exists
+
+Please verify:
+
+* runtime state
+* thresholds
+* cadence logic
+* UI state mapping
+* perception translation
+* freshness gates
+* benchmark initialization
+
+3. “Not Enough Data” After ~1 Month
+   Most important:
+   this campaign has existed for approximately a month.
+
+The system STILL communicates:
+
+* “building baseline”
+* “not enough signal”
+* “first benchmark window still building”
+
+This may be correct —
+or it may indicate a serious orchestration/perception issue.
+
+I need a deep audit to determine:
+
+* Does the system ACTUALLY lack enough evidence?
+  OR
+* Is the perception layer under-reporting system readiness?
+  OR
+* Are thresholds unrealistic?
+  OR
+* Is competitor monitoring incomplete?
+  OR
+* Are scans failing silently?
+  OR
+* Is the benchmark window never resolving?
+  OR
+* Is manual performance data not entering the pipeline correctly?
+  OR
+* Is continuity cadence failing to mature the account state?
+
+I want a full trace of:
+
+* competitor scan counts
+* market snapshots collected
+* continuity ticks
+* benchmark windows
+* performance snapshots
+* freshness classes
+* timeline progression
+* baseline maturity logic
+* readiness thresholds
+* confidence thresholds
+* perception-layer translation decisions
+
+Please determine:
+exactly WHY the system still believes the campaign lacks enough validated market/performance intelligence after this amount of runtime history.
+
+4. Runtime vs Perception Validation
+   I specifically want verification that:
+   the UX is not accidentally communicating:
+   “the system knows nothing”
+   when the backend actually already has meaningful evidence.
+
+This is now a critical trust issue.
+
+If the backend already knows:
+
+* competitors
+* posting rhythm
+* content structure
+* scans
+* engagement patterns
+* market cadence
+
+then the UX should reflect:
+partial intelligence maturity,
+not:
+“still waiting for data.”
+
+5. Possible Architectural / Logic Bugs
+   Please actively audit for:
+
+* stuck benchmark windows
+* stale freshness states
+* failed maturity transitions
+* continuity scheduler gaps
+* missing snapshot promotions
+* failed market-scan persistence
+* threshold logic bugs
+* manual-metric ingestion failures
+* hidden degraded states
+* event-generation gaps
+* timeline maturity bugs
+* polling/UI desync
+* cache invalidation issues
+* incorrect “no_data” states
+* re-anchor loops
+* scan-completion states not surfacing
+
+I want a brutally honest diagnosis before we continue frontend simplification work.
+
+Most important:
+I need to know whether:
+
+* the runtime intelligence lifecycle is actually healthy,
+  or
+* the UX/perception layer is currently misrepresenting the system state.

@@ -1,0 +1,116 @@
+writing{variant=“email” id=“91827” subject=“Claims Mismatch Across Engines — Code-Level Audit Required”}
+Hi,
+
+We’re seeing a recurring inconsistency specifically around claims generation and propagation across engines, and I need a code-level audit to identify the root cause.
+
+⸻
+
+Observed Behavior
+
+Across recent runs:
+	•	Positioning / Differentiation
+	•	Producing strong, well-defined claims
+	•	Clear contrast axis and narrative direction
+	•	Mechanism
+	•	Appears structurally aligned with positioning
+	•	Claims seem to propagate correctly at this stage
+
+⸻
+
+Issue
+
+At the Offer / downstream layers, we’re seeing:
+	•	Claims that:
+	•	do not match upstream positioning
+	•	or appear reinterpreted / rephrased in a way that breaks alignment
+	•	In some cases:
+	•	Offer reports POSITIONING_MISMATCH
+	•	while upstream layers remain consistent
+	•	In other cases:
+	•	Claims exist but are:
+	•	inconsistent across layers
+	•	or not traceable back to their original source
+
+⸻
+
+Core Symptom
+
+The same pipeline produces:
+
+	•	strong upstream claims
+	•	but inconsistent or drifting claims downstream
+
+This is not isolated — it appears systematic.
+
+⸻
+
+What I Need
+
+Please investigate this from the code and execution flow:
+
+Trace:
+	1.	Where claims are first generated (Positioning / Differentiation)
+	2.	How claims are:
+	•	stored
+	•	transformed
+	•	passed downstream
+	3.	How claims are:
+	•	consumed by Mechanism
+	•	consumed by Offer
+
+⸻
+
+Questions to Answer
+	1.	Where does the first divergence in claims occur?
+	2.	Are claims:
+	•	being regenerated instead of reused?
+	•	being transformed in a lossy way?
+	•	being passed incorrectly between engines?
+	3.	Is there:
+	•	a missing binding (e.g. root / lineage / signal mapping)?
+	•	or a contract mismatch between layers?
+	4.	Why do downstream layers sometimes fail alignment checks even when upstream claims are valid?
+
+⸻
+
+Output Required
+
+Please return:
+
+1. Root Cause
+	•	single primary cause (and secondary only if necessary)
+
+2. Code Evidence
+	•	exact files and functions involved
+
+3. Failure Chain
+	•	step-by-step: where claim divergence starts → how it propagates
+
+4. Classification
+
+Is this primarily:
+	•	data issue
+	•	logic issue
+	•	contract issue
+	•	propagation issue
+	•	or something else?
+
+⸻
+
+Important
+	•	Do not assume the cause
+	•	Do not implement fixes yet
+	•	Do not rely on UI interpretation only
+
+This must be traced from actual code paths and data flow.
+
+⸻
+
+We want to confirm whether this mismatch is:
+	•	structural (system-level)
+	•	or localized to a specific engine / contract
+
+Proceed with audit only.
+
+Thanks.
+:::

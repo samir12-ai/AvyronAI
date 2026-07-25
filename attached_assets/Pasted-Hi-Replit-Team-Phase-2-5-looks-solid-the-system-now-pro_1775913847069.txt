@@ -1,0 +1,237 @@
+Hi Replit Team,
+
+Phase 2.5 looks solid — the system now produces validated, explainable, confidence-bound decisions.
+
+We are now moving into Phase 3: Decision-to-Action & Learning Loop, with one critical requirement:
+
+The system must not bypass the new decision layer.  
+All validation and downstream behavior must be enforced through it.
+
+This phase is not about adding new intelligence — it is about making decisions actionable, measurable, and enforced across the system.
+
+---
+
+# Phase 3 Objective
+
+Transform validated decisions into controlled actions and measurable outcomes, while ensuring that no legacy logic path can override or bypass the decision layer.
+
+---
+
+# Phase 3 Scope
+
+## 1. Decision → Action Policy Layer
+
+Introduce a clear mapping between decision types and allowed actions.
+
+For example:
+
+- Validated pain should update messaging and objection handling  
+- Validated hooks should be injected into content strategy  
+- Confirmed objections should modify positioning and CTA framing  
+- Conflicted signals should be blocked from usage  
+- Weak signals should be ignored or treated as low priority  
+
+This must be implemented as a central policy layer, not scattered logic.
+
+---
+
+## 2. Decision → Plan Integration
+
+All plan generation must be driven by decisions:
+
+- Plans must reference validated pain, validated hooks, and confirmed objections  
+- No raw signal should directly influence plans unless it has passed through the decision layer  
+
+---
+
+## 3. Decision Outcome Tracking (Critical)
+
+Introduce tracking for each decision used:
+
+- decision identifier  
+- where it was applied (plan, messaging, or strategy)  
+- timestamp  
+- resulting performance changes (when available)  
+
+The goal is to track: decision → action → outcome → evaluation
+
+---
+
+## 4. Memory Write Policy (Strict)
+
+Refine memory mutation:
+
+- Only high-confidence decisions are stored  
+- Store decision type, context, and outcome when available  
+
+Do not store raw signals, weak decisions, or unvalidated insights.
+
+Memory must represent what was validated and proven useful.
+
+---
+
+## 5. Agent Trigger Logic
+
+Agent behavior must depend on decisions.
+
+Examples:
+
+- Rerun analysis when a market shift is confirmed  
+- Update strategy when multiple high-confidence signals appear  
+- Ignore weak or conflicted signals  
+
+---
+
+# 6. ENFORCEMENT LAYER (Critical Requirement)
+
+This is the most important part of Phase 3.
+
+The new decision system must not be optional — it must be enforced.
+
+## Required Enforcement Rules
+
+### 1. No Legacy Bypass
+
+Any existing logic that directly reads raw signals or uses pre-decision outputs must be removed or routed through the decision layer.
+
+---
+
+### 2. Validation Forcing
+
+Anywhere in the system where validation happens must use:
+
+- cross-signal decisions  
+- confidence scores  
+- agreement types  
+
+Not raw counts, single-source signals, or old heuristics.
+
+---
+
+### 3. Plan Forcing
+
+Plan synthesis must only use decision objects.
+
+If a signal is not validated, it must not appear in the plan.
+
+---
+
+### 4. Memory Forcing
+
+Memory must only accept high-confidence decisions.
+
+Any attempt to write raw or weak signals must be blocked.
+
+---
+
+### 5. Agent Behavior Forcing
+
+Agent must only act on validated decisions.
+
+No fallback to raw outputs or unvalidated signals.
+
+---
+
+### 6. System-Wide Consistency
+
+There must be a single path of truth:
+
+data → signals → decisions → actions
+
+Not:
+
+data → signals → actions
+
+---
+
+# Acceptance Criteria (Strict)
+
+## Enforcement
+
+- No code path exists where raw signals directly influence plans, memory, or actions  
+- Logs or verification must confirm all decisions come from the decision layer  
+
+---
+
+## Decision Usage
+
+- Every plan must reference decision objects, not raw signals  
+- Every agent action must reference a decision  
+
+---
+
+## Outcome Tracking
+
+- System must log decision → action → outcome linkage  
+
+---
+
+## Memory Integrity
+
+- Memory entries must only contain high-confidence decisions  
+
+---
+
+## Debug Visibility
+
+System must expose:
+
+- which decisions were used  
+- where they were applied  
+- which were rejected  
+- if any downgrade occurred  
+
+---
+
+## Regression Protection
+
+- The system must not silently fall back to old behavior  
+- If the decision layer fails, the system must degrade safely, not revert to legacy logic  
+
+---
+
+# Final Goal
+
+By the end of Phase 3:
+
+- decisions drive actions  
+- actions are measurable  
+- memory reflects validated outcomes  
+- agent behavior is controlled and grounded  
+- the system cannot revert to legacy shortcuts  
+
+---
+
+# Key Principle
+
+We are not just building intelligence.
+
+We are enforcing disciplined, validated, decision-driven behavior across the entire system.
+
+---
+
+## Implementation Guidance
+
+Please keep implementation aligned with the current system.
+
+What is required:
+
+- extend existing components, do not replace them  
+- centralize enforcement logic  
+- reuse decision objects across backend and frontend  
+- maintain one consistent source-of-truth path  
+- explicitly remove or block legacy paths, do not leave them silently active  
+- ensure clear visibility in backend logs and frontend/debug views to verify the new system is being used  
+
+---
+
+Please confirm:
+
+1. feasibility of enforcing no-legacy-bypass architecture  
+2. which modules currently bypass decisions (if any)  
+3. where enforcement checks should be implemented  
+4. proposed rollout order to avoid breaking current flows  
+
+Thanks,  
+Samir  
+Avyron AI

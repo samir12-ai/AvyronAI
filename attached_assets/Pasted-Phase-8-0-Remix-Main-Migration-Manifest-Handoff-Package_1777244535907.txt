@@ -1,0 +1,334 @@
+Phase 8.0 — Remix → Main Migration Manifest (Handoff Package)
+Source repo: Avyron AI Remix testing project (separate Replit, contains the adaptive overlay). Target repo: Avyron AI Main (production system, separate codebase). Source bundle: server/audits/phase8.0-remix-source-bundle.tar.gz (alongside this file). 58 files, 110 KB, integrity-verifiable via MANIFEST.txt inside. Audience: the agent working inside Avyron AI Main who will execute this migration. Status: SELF-CONTAINED. The receiving agent runs every step listed here; nothing in this document requires the source-side agent or Sam mid-flight.
+
+0. How to use this document
+You (the receiving agent in Main) execute this in five passes:
+
+Pass	What you do	Doc section
+1. Discover Main	Run the discovery commands below to learn Main's existing layout (auth path, db path, collector path, ai-client path, schema column names, Postgres extensions, Express entry). Write the answers into a local notes file.	§0.1
+2. Verify the bundle	Unpack phase8.0-remix-source-bundle.tar.gz, run sha256sum -c against MANIFEST.txt. All files must report OK.	§0.2
+3. Stage the schema	Paste shared/schema-additions.ts (the 12 tables) into Main's shared/schema.ts. Run npm run db:push.	§3, §7 step 1
+4. Copy in dependency order	Walk steps 2–9 of §7. Each step has its own validation gate. Do NOT proceed to the next step until the current gate is GREEN.	§7
+5. Validate end-to-end	Run §8's eight commands. Migration is GREEN only when all 8 pass.	§8, §10
+Anything that depends on Main's actual structure (file paths, import sites, column names) is flagged in §2 with a marker like [verify §0.1.X]. The discovery section §0.1 returns concrete answers that resolve every such marker.
+
+0.1 Discovery procedure (run FIRST, in Main, before copying anything)
+These ten commands tell you everything the rest of this document needs about Main. Run each, paste the output into a working notes file, and use the answers to resolve [verify §0.1.X] markers in §2.
+
+#	Command (run in Main)	What you're determining	Used in
+0.1.1	find server -maxdepth 3 -name "auth*.ts" -o -name "auth" -type d	Path of Main's auth module (exports authMiddleware, adminMiddleware).	§2.7 row 52 — adjust the import in routes.ts if not ../auth.
+0.1.2	find server -maxdepth 2 -name "db.ts" -o -name "db" -type d	Path of Main's Drizzle DB instance.	§2 — adjust ../db imports in any file if not ../db.
+0.1.3	find server -maxdepth 2 \( -name "collector*" -o -name "collectors" \) -type d -o -name "collector*.ts" then grep -l "discoverEntities|getAdapterRegistry" server/**/*.ts	Path of Main's collector module. It MUST already exist; this overlay does not bring its own collector. Confirm exports discoverEntities, acquire, getAcquisition, getAdapterRegistry.	§2.5 (boss/plan.ts, boss/envelope-to-lane.ts), §2.7 (routes.ts).
+0.1.4	find server -maxdepth 2 -name "ai-client*" -o -name "ai" -type d	Path of Main's AI client wrapper used by ai-overlay/client.ts.	§2.6 row 45 — adjust ../../../ai-client if needed. One site to patch.
+0.1.5	cat tsconfig.json | grep -A 5 '"paths"'	Confirm @shared/* and @/* path aliases match this bundle's expectations (@shared/schema, @shared/contracts).	All files using @shared/* imports.
+0.1.6	psql "$DATABASE_URL" -c "\d strategic_plans" -c "\d plan_approvals" -c "\d published_posts" -c "\d ci_competitors" -c "\d ci_competitor_posts"	Confirm Main has columns: strategic_plans.approved_rhythm_json, plan_approvals.decided_at, published_posts.account_id/campaign_id, ci_competitors/ci_competitor_posts tables.	§2.3 lanes, §2.2 eval-windows. If any column name differs, patch the reader at the import site — do NOT change the contract.
+0.1.7	psql "$DATABASE_URL" -c "SELECT extname FROM pg_extension WHERE extname='pgcrypto';"	Confirm pgcrypto is enabled (the 12 new tables use gen_random_uuid()).	§3.3. If missing: CREATE EXTENSION IF NOT EXISTS pgcrypto;
+0.1.8	grep -rn 'app\.use(|app\.listen(' server --include="*.ts" | head -20	Find Main's Express entry to know where to mount app.use("/api/pipeline", pipelineRouter).	§2.7 mount step.
+0.1.9	cat package.json | grep -E '"(tsx|ts-node)":' and which tsx	Confirm Main runs TS via tsx (the harnesses use npx tsx). If Main uses ts-node or a build step, harness commands change accordingly.	§6, §8 cmd 1, 2, 3.
+0.1.10	(manual) — confirm an admin JWT or session token is reachable as $ADMIN_TOKEN.	Needed for §8 cmd 7 (route smoke test).	§8 cmd 7.
+After running 0.1.1 through 0.1.10, you have all the info needed to execute §2–§10 deterministically.
+
+0.2 Bundle verification
+tar -xzf phase8.0-remix-source-bundle.tar.gz
+cd remix-source-bundle
+# Verify every file's sha256 against MANIFEST.txt
+awk -F' \\| ' 'NR>4 && $1!="" {print $4"  "$1}' MANIFEST.txt | sha256sum -c -
+# Expected: every line ends in ": OK"
+
+If any file reports FAILED, do NOT proceed. The bundle is corrupted and Sam needs to re-export from Remix.
+
+1. Architecture Summary (what you're moving)
+Collector (server/collector/) ──── ALREADY IN MAIN ─── do NOT migrate (this overlay imports Main's existing collector)
+   │
+   ▼
+Acceptors (server/pipeline/validate-and-accept.ts) ── HARD-FAIL boundary ── MIGRATE
+   │  Throws PipelineValidationError with structured codes:
+   │  SNAPSHOT_LINEAGE_MISMATCH, SIGNAL_LINEAGE_MISMATCH, INVALID_SIGNAL_CONTRACT,
+   │  INVALID_SNAPSHOT_CONTRACT, ACQUISITION_CROSS_CAMPAIGN, RUN_LANE_MISMATCH
+   ▼
+Snapshot/Signal/ChangeEvent tables (pipeline_*) ── 12 NEW TABLES TO CREATE IN MAIN'S DB
+   │
+   ▼
+Lanes (server/pipeline/lanes/{user/, competitor.ts + competitor/}) ── MIGRATE
+   │  user (directory + index.ts pattern):
+   │    rhythm-compliance, lead-quality, outcome-regression, post-classification,
+   │    composition, cluster-interpretation, user-truth, index (runUserLane)
+   │  competitor (sibling-file + helper-directory pattern):
+   │    competitor.ts (runCompetitorLane entry) + competitor/{corpus, pattern-detection,
+   │    pattern-validation, interpret, types} helpers
+   ▼
+Bridge (server/pipeline/bridge.ts) ── MIGRATE
+   │  Bridge signals carry derived_from_signal_id (lineage)
+   ▼
+Boss (server/boss/) ── MIGRATE
+   │  plan → run → eval-hierarchy → store
+   │  Each verdict carries a codified ruleCode (the e2e harness asserts ruleCode prefix per scenario).
+   ▼
+AI Overlay (server/pipeline/ai-overlay/) ── MIGRATE (descriptive-only, doctrinally separate)
+   │  FORBIDDEN ZONE: boss/policy/* and boss/run.ts must NOT import from ai-overlay/
+   ▼
+Routes (server/pipeline/routes.ts) ── MIGRATE + mount under /api/pipeline/* in Main's Express app
+   │  26 routes; admin auth on every one
+   ▼
+Dashboard templates (server/templates/pipeline-overlay*.html) ── MIGRATE
+
+Surface area: 56 TypeScript files (8,800+ LOC) + 12 schema tables + 26 routes + 2 HTML templates + 3 test harnesses. All in the bundle.
+
+Doctrine: AI explains. The system decides. AI overlay produces narratives; the deterministic decision tree (Boss + lanes + acceptors) decides verdicts. The forbidden import zone enforces this at compile time.
+
+2. File Transfer Map
+For each row: source path inside the bundle → target path in Main. The "Target path" column uses mirror placement (same path under Main's server/ and shared/). If §0.1 discovery reveals Main's layout differs (e.g. auth lives under server/auth/ directory not server/auth.ts), only the IMPORT SITES need adjustment — the file placements themselves can usually mirror.
+
+2.1 Shared contracts (copy first — everything else depends on these)
+#	Source (in bundle)	Target path (in Main)	LOC	Purpose	External imports
+1	shared/contracts/version.ts	shared/contracts/version.ts	3	SCHEMA_VERSION = "v1". Pinned.	none
+2	shared/contracts/lane.ts	shared/contracts/lane.ts	~10	LaneSchema enum: user/competitor/bridge/shared.	zod
+3	shared/contracts/snapshot.ts	shared/contracts/snapshot.ts	53	SnapshotContract with lineage rules.	zod, ./lane, ./version
+4	shared/contracts/signal.ts	shared/contracts/signal.ts	61	SignalContract with bridge derived_from_signal_id superRefine.	zod, ./lane, ./version
+5	shared/contracts/change-event.ts	shared/contracts/change-event.ts	42	ChangeEventContract. evidence: string[], NOT object.	zod, ./version
+6	shared/contracts/rhythm.ts	shared/contracts/rhythm.ts	25	Canonical rhythm: posts/reels/carousels/videos/stories/approved_at/schema_version=v1. Hard-rejects legacy shapes.	zod
+7	shared/contracts/cluster.ts	shared/contracts/cluster.ts	20	Cluster signature contract.	zod
+8	shared/contracts/dna.ts	shared/contracts/dna.ts	17	DNA contract.	zod
+9	shared/contracts/index.ts	shared/contracts/index.ts	~15	Barrel export.	siblings above
+Validation gate: npx tsc --noEmit shared/contracts/*.ts — clean.
+
+2.2 Pipeline boundary (copy second)
+#	Source	Target	LOC	Purpose	External deps
+10	server/pipeline/errors.ts	mirror	~30	PipelineValidationError + reason codes.	none
+11	server/pipeline/ids.ts	mirror	~20	ID minting.	crypto (Node built-in)
+12	server/pipeline/_tokenize.ts	mirror	81	Hashtag/token utilities.	none
+13	server/pipeline/rejection-log.ts	mirror	98	recordRejection + listRejections.	../db [verify §0.1.2], @shared/schema (pipelineRejections)
+14	server/pipeline/validate-and-accept.ts	mirror	256	The acceptors. Single boundary surface.	../db, @shared/schema (pipelineSnapshots/Signals/ChangeEvents/Acquisitions/Runs), @shared/contracts, ./errors, ./ids, ./rejection-log
+15	server/pipeline/readers.ts	mirror	507	Guarded readers; every read parses contract + lineage.	../db, @shared/schema, @shared/contracts, ./errors, ./rejection-log
+16	server/pipeline/eval-windows.ts	mirror	176	Window resolution from strategic_plans.approved_rhythm_json with anchor fallback.	../db, @shared/schema (pipelineEvalWindows, strategicPlans [verify §0.1.6], planApprovals [verify §0.1.6])
+17	server/pipeline/runs.ts	mirror	103	Run state mgmt.	../db, @shared/schema (pipelineRuns)
+Validation gate: npx tsc --noEmit server/pipeline/{errors,ids,_tokenize,rejection-log,validate-and-accept,readers,eval-windows,runs}.ts.
+
+2.3 Lanes (copy third)
+Important file-system note: the user lane uses lanes/user/index.ts as its entry point; the competitor lane uses a SIBLING FILE lanes/competitor.ts (not lanes/competitor/index.ts) as its entry point, with helper modules under lanes/competitor/. Preserve both layouts when copying.
+
+#	Source	Target	LOC	Purpose	External deps
+18	server/pipeline/lanes/competitor/types.ts	mirror	25	Lane types.	@shared/contracts
+19	server/pipeline/lanes/competitor/corpus.ts	mirror	216	Theme tokens come from hashtags only.	../../_tokenize, @shared/schema (ciCompetitors [verify §0.1.6], ciCompetitorPosts [verify §0.1.6])
+20	server/pipeline/lanes/competitor/pattern-detection.ts	mirror	89	Pattern detection.	./types, ./corpus
+21	server/pipeline/lanes/competitor/pattern-validation.ts	mirror	116	Cross-channel (IG+TikTok) validation.	./types
+22	server/pipeline/lanes/competitor/interpret.ts	mirror	201	Q2 interpretation feed.	./types, ./pattern-validation
+23	server/pipeline/lanes/competitor.ts (sibling file, NOT under directory)	server/pipeline/lanes/competitor.ts	252	runCompetitorLane(...) — entry point. Imports the helpers from ./competitor/.	./competitor/{corpus,pattern-detection,pattern-validation,interpret,types}, ../validate-and-accept
+24	server/pipeline/lanes/user/post-classification.ts	mirror	220	paid/organic/uncertain.	@shared/schema (publishedPosts [verify §0.1.6])
+25	server/pipeline/lanes/user/composition.ts	mirror	160	paid/organic ambiguity → clarification trigger.	./post-classification
+26	server/pipeline/lanes/user/rhythm-compliance.ts	mirror	246	Read strategic_plans.approved_rhythm_json → compliance. Hard-rejects legacy shapes.	@shared/contracts (rhythm), @shared/schema (strategicPlans, publishedPosts), ../../rejection-log
+27	server/pipeline/lanes/user/lead-quality.ts	mirror	42	Lead quality.	@shared/schema (pipelineUserTruth)
+28	server/pipeline/lanes/user/outcome-regression.ts	mirror	69	Outcome regression check.	@shared/schema (pipelineUserTruth)
+29	server/pipeline/lanes/user/cluster-interpretation.ts	mirror	145	Cluster comparison.	@shared/schema (pipelineClusters)
+30	server/pipeline/lanes/user/user-truth.ts	mirror	150	acceptUserTruth.	../../validate-and-accept, @shared/schema (pipelineUserTruth, pipelineEvalWindows)
+31	server/pipeline/lanes/user/index.ts	mirror	185	runUserLane(...) — entry point.	all the above + acceptors
+2.4 Bridge + DNA + Clusters (copy fourth)
+#	Source	Target	LOC	Purpose	External deps
+32	server/pipeline/bridge.ts	mirror	199	Translates competitor signal → user lane. Bridge signals carry derived_from_signal_id.	acceptors, readers
+33	server/pipeline/dna.ts	mirror	164	DNA lifecycle (proposed/active/paused/retired).	../db, @shared/schema (pipelineDna, pipelineDnaVersions)
+34	server/pipeline/cluster-producer.ts	mirror	245	Aggregate signals into clusters. Idempotent per (window_id, dna_id).	acceptors, @shared/schema (pipelineClusters)
+35	server/pipeline/cluster-comparator.ts	mirror	131	Window-over-window cluster comparison.	@shared/schema (pipelineClusters)
+2.5 Boss (copy fifth)
+#	Source	Target	LOC	Purpose	External deps
+36	server/boss/types.ts	mirror	190	BossPlan, BossScope, BossRunResult { questions: { q1_dna_working, q2_market_shifted }, warnings, ruleCode }.	@shared/contracts
+37	server/boss/concurrency.ts	mirror	41	Per-(account, campaign) lock.	(in-memory)
+38	server/boss/store.ts	mirror	44	boss_runs persistence.	../db, @shared/schema (bossRuns)
+39	server/boss/envelope-to-lane.ts	mirror	140	Lane envelope serialization.	../collector/envelope [verify §0.1.3], ./types
+40	server/boss/plan.ts	mirror	42	planBoss(account,campaign,scope). Pure.	../collector/discovery [verify §0.1.3], ./types
+41	server/boss/eval-hierarchy.ts	mirror	68	Q1 / Q2 decision tree. Each verdict carries a codified ruleCode.	../pipeline/lanes/* (read-only)
+42	server/boss/run.ts	mirror	617	runBoss(...). Persists phase6.q2_inputs.interpretation for explanation route.	every adaptive module above + Boss store
+43	server/boss/index.ts	mirror	29	Barrel export.	the above
+Forbidden zone validation gate: after copy, run:
+
+rg "from.*ai-overlay" server/boss/
+# Expected: zero matches.
+
+2.6 AI Overlay (copy sixth — descriptive-only, doctrinally separate)
+#	Source	Target	LOC	Purpose	External deps
+44	server/pipeline/ai-overlay/types.ts	mirror	52	Overlay output types.	@shared/contracts
+45	server/pipeline/ai-overlay/client.ts	mirror	199	Provider client (OpenAI/Gemini); reads PIPELINE_AI_OVERLAY_ENABLED.	../../../ai-client [verify §0.1.4 — single import site to patch]
+46	server/pipeline/ai-overlay/competitor.ts	mirror	190	Competitor narrative.	./client, ./types
+47	server/pipeline/ai-overlay/user-interpretation.ts	mirror	152	Q1 narrative.	./client, ./types
+48	server/pipeline/ai-overlay/q2-reasoning.ts	mirror	247	Q2 narrative. Descriptive, never prescriptive.	./client, ./types
+49	server/pipeline/ai-overlay/dna.ts	mirror	142	DNA narrative.	./client, ./types
+50	server/pipeline/ai-overlay/explanation.ts	mirror	93	Explanation composer.	./client, ./types
+51	server/pipeline/ai-overlay/assemble.ts	mirror	178	assembleInterpretation(...) — entry the explanation route calls.	every overlay module above
+2.7 Routes + Dashboard (copy seventh — last, since they pull all the above)
+#	Source	Target	LOC	Purpose	External deps
+52	server/pipeline/routes.ts	mirror	703	26 routes mounted under /api/pipeline/*.	every module above + ../auth [verify §0.1.1] (authMiddleware, adminMiddleware) + ../boss + ../collector [verify §0.1.3]
+53	server/templates/pipeline-overlay.html	mirror	(HTML)	Admin dashboard.	served by routes.ts
+54	server/templates/pipeline-overlay-login.html	mirror	(HTML)	Login.	served by routes.ts
+Mount step in Main's Express entry (location from §0.1.8):
+
+import pipelineRouter from "./pipeline/routes";
+app.use("/api/pipeline", pipelineRouter);
+
+2.8 Test harnesses (copy last; not strictly required for prod but proves migration)
+#	Source	Target	LOC	Purpose	How to run
+55	server/pipeline/e2e-system-test.ts	mirror	980	8-scenario E2E (8/8 PASS in Remix as of 2026-04-24).	PIPELINE_AI_OVERLAY_ENABLED=true npx tsx server/pipeline/e2e-system-test.ts
+56	server/pipeline/integrity-harness.ts	mirror	443	9-class lineage attack harness.	npx tsx server/pipeline/integrity-harness.ts
+57	server/pipeline/real-scenario-harness.ts	mirror	257	Replays production-shaped data.	npx tsx server/pipeline/real-scenario-harness.ts
+3. Database Migration Map
+3.1 Tables to add to Main's shared/schema.ts
+12 tables. All additive. The schema's own header (in the bundle's shared/schema-additions.ts line 4) reads:
+
+// REMIX PIPELINE OVERLAY (Phase 1) // Additive only. Does not modify or replace any existing engine snapshot/signal storage.
+
+Do not modify any existing engine table. Only ADD these 12.
+
+#	Table	Drizzle name	Purpose	Indexes	Owner write surface
+T1	pipeline_runs	pipelineRuns	One row per lane execution.	(pk only)	Lane runners + Boss
+T2	pipeline_snapshots	pipelineSnapshots	Frozen lane outputs, lineage-asserted.	(pk only — lineage cols nullable for additive backfill safety)	acceptSnapshot ONLY
+T3	pipeline_signals	pipelineSignals	Atomic signals with bridge lineage.	(pk only)	acceptSignal ONLY
+T4	pipeline_change_events	pipelineChangeEvents	Mild/medium/major events. evidence: text storing JSON string[].	(pk only)	acceptChangeEvent ONLY
+T5	pipeline_rejections	pipelineRejections	Append-only audit trail of every hard-reject.	(pk + reasonCode searchable)	recordRejection ONLY
+T6	pipeline_acquisitions	pipelineAcquisitions	Collector acquisition lineage.	(pk only)	Collector + acceptors
+T7	boss_runs	bossRuns	Orchestrator runs with persisted execution JSON.	(pk only)	Boss store
+T8	pipeline_eval_windows	pipelineEvalWindows	Plan-anchored 7-day eval windows.	uniqueIndex("idx_pipeline_eval_windows_unique") on (campaignId, planId, windowIndex)	eval-windows.ts
+T9	pipeline_user_truth	pipelineUserTruth	4 truth fields: total_leads, qualified_leads, booked_calls, paid_active. FK-bound to window.	(pk only)	acceptUserTruth
+T10	pipeline_dna	pipelineDna	Active DNA state.	partial unique on (account_id, campaign_id) WHERE status='active'	dna.ts
+T11	pipeline_dna_versions	pipelineDnaVersions	DNA history (hypothesis edits append here).	(pk only)	dna.ts
+T12	pipeline_clusters	pipelineClusters	Thematic clusters. Idempotent per (window_id, dna_id).	uniqueIndex("idx_pipeline_clusters_window_dna") on (windowId, dnaId)	cluster-producer.ts
+3.2 Exact DDL to copy
+The complete Drizzle DDL for these 12 tables is in the bundle at shared/schema-additions.ts (283 lines). Paste it verbatim at the END of Main's shared/schema.ts. Do not edit any existing table while doing this.
+
+3.3 Database safety rules
+Do not change the type of any existing primary-key column in Main.
+These 12 tables use varchar("id").primaryKey().default(sql\gen_random_uuid()`)— Postgrespgcrypto` extension is required (verified in §0.1.7).
+After pasting, run npm run db:push (NOT db:push --force). The 12 new tables are additive — db:push should detect them as new tables only and create them safely. Only escalate to --force if Drizzle reports a non-destructive change you've reviewed.
+3.4 Existing tables Main must already have (referenced by adaptive code)
+Verified in §0.1.6. The adaptive code reads from these existing engine tables. They MUST be present in Main with these field names:
+
+Table	Adaptive code reads via
+strategic_plans (with approved_rhythm_json text col)	eval-windows.ts, lanes/user/rhythm-compliance.ts
+plan_approvals (with decided_at timestamp)	eval-windows.ts
+published_posts (with account_id, campaign_id)	lanes/user/post-classification.ts, lanes/user/rhythm-compliance.ts, harness cleanup
+ci_competitors + ci_competitor_posts	lanes/competitor/corpus.ts, harness seeding
+If any column name differs in Main, the adaptive code must be patched at the import site — the contract stays unchanged.
+
+4. Engine Connection Map (post-migration)
+After this migration lands, the adaptive overlay will be physically present in Main but still logically parallel to Main's 13 engines (Market Intelligence v3, Audience, Positioning, Differentiation, Mechanism, Awareness, Offer, Persuasion, Integrity, Validation, Intention, Channel Selection, Iteration). The migration itself does NOT wire engine ↔ overlay integration — that is Phase 8.1+ work, sequenced separately.
+
+For Phase 8.0 (this migration), the connection points are:
+
+Adaptive surface	Engine consumer in Main (today)	Coupling
+pipeline_signals (validated patterns)	none yet	Will become input to Positioning / Offer in 8.1+
+pipeline_dna	none yet	Will become authority all engines must reconcile against in 8.1+
+boss_runs.questions.{q1,q2}	none yet	Will become AND-input to Validation / Integrity in 8.1+
+pipeline_rejections	none yet	Will become input to Integrity engine's safeToExecute in 8.1+
+Collector adapters	already shared (Main's collector is the source)	Adaptive overlay will import Main's existing ../collector/. Do NOT duplicate.
+The Phase 8.0 acceptance is: all adaptive code lives in Main, the 8/8 E2E harness passes against Main's database, and engines remain unchanged.
+
+5. Environment / Config Map
+Var	Required?	Default	Where used	Notes
+PIPELINE_AI_OVERLAY_ENABLED	optional	unset = AI overlay disabled (verdicts still produced; narratives skipped)	server/pipeline/ai-overlay/client.ts	E2E harness sets "true" at top of file. Production: "true" to enable narrations; "false" for dashboard verdicts only.
+OPENAI_API_KEY	yes (only if AI overlay enabled)	—	ai-client (Main's existing wrapper)	Already provisioned in Main (it's the same Avyron AI product).
+GEMINI_API_KEY	yes (only if AI overlay enabled and Gemini selected)	—	ai-client	Same.
+DATABASE_URL	yes	—	../db (Main's existing wrapper)	Main's existing Postgres URL.
+No new env vars are introduced. The overlay flag is the only addition.
+
+6. Test Harness Map
+Harness	What it proves	Pass criteria	Last run (in Remix)
+e2e-system-test.ts	8 scenarios end-to-end through real acceptors. Asserts ruleCode prefix per scenario, not just verdict. S8 runs 6 lineage attacks.	8/8 PASS, 6/6 attacks blocked.	8/8 PASS, 2026-04-24
+integrity-harness.ts	9 contract/lineage failure classes.	every required failure case fails as expected.	passing
+real-scenario-harness.ts	Production-shaped data through decision tree.	runs to completion.	passing
+After migration, every harness must produce the same result against Main's database. If S1–S4 of the e2e harness regress, the adaptive code is correctly placed but the database pipeline_* tables or the strategic_plans columns differ — investigate column names first (§0.1.6).
+
+7. Copy / Paste Order (deterministic)
+Follow this sequence exactly. Each step has a validation gate; do NOT proceed until the current gate is GREEN.
+
+Step	Action	Files / objects	Validation gate
+1	Add the 12 schema tables to Main's shared/schema.ts (additive paste at end).	Bundle's shared/schema-additions.ts (T1–T12 DDL block).	npm run db:push in Main creates 12 new tables; existing tables unchanged. Inspect with \d pipeline_* and \d boss_runs.
+2	Copy contracts (rows 1–9).	shared/contracts/*.ts	npx tsc --noEmit shared/contracts/*.ts clean.
+3	Copy pipeline boundary (rows 10–17).	server/pipeline/{errors,ids,_tokenize,rejection-log,validate-and-accept,readers,eval-windows,runs}.ts	npx tsc --noEmit on those files clean.
+4	Copy lanes (rows 18–31). Note: lanes/competitor.ts is a sibling file, not under lanes/competitor/.	server/pipeline/lanes/competitor.ts + server/pipeline/lanes/competitor/* + server/pipeline/lanes/user/*	TypeCheck clean. Verify import { runCompetitorLane } from "./lanes/competitor" resolves to the sibling file.
+5	Copy bridge + DNA + clusters (rows 32–35).	server/pipeline/{bridge,dna,cluster-producer,cluster-comparator}.ts	TypeCheck clean.
+6	Copy Boss (rows 36–43).	server/boss/**	TypeCheck clean. rg "from.*ai-overlay" server/boss/ returns zero.
+7	Copy AI overlay (rows 44–51).	server/pipeline/ai-overlay/**	TypeCheck clean.
+8	Copy routes + dashboard (rows 52–54), mount under /api/pipeline/*.	server/pipeline/routes.ts, templates, +1 line in Main's Express entry (§0.1.8)	GET /api/pipeline/boss/runs?campaignId=X returns 200 with admin auth.
+9	Copy harnesses (rows 55–57).	three harness files	npx tsx server/pipeline/integrity-harness.ts runs; rejection rows visible in pipeline_rejections.
+10	Run E2E in Main against Main's DB.	—	8/8 PASS in Main. This is the migration's acceptance signal.
+Dependency-order rationale: every step's files only import from steps already completed. If a step shows a missing-import TypeScript error, that's evidence a prior step was incomplete — fix that step before proceeding.
+
+8. Validation Checklist (post-migration, run in Main)
+# 1. Adaptive E2E (MUST be 8/8 in Main)
+PIPELINE_AI_OVERLAY_ENABLED=true npx tsx server/pipeline/e2e-system-test.ts
+# 2. Integrity harness (lineage attacks must still be blocked)
+npx tsx server/pipeline/integrity-harness.ts
+# 3. Real-scenario harness (production-shaped data must still flow)
+npx tsx server/pipeline/real-scenario-harness.ts
+# 4. AI overlay disabled: verdicts and ruleCodes must be identical
+PIPELINE_AI_OVERLAY_ENABLED=false npx tsx server/pipeline/e2e-system-test.ts
+# 5. Forbidden zone intact
+rg "from.*ai-overlay" server/boss/
+# Expected: zero matches.
+# 6. Engines do not directly write to pipeline_* tables
+rg "db\.(insert|update|delete)\(pipeline" server/ --glob '!server/pipeline/**' --glob '!server/audits/**'
+# Expected: zero matches.
+# 7. Routes mounted (replace $ADMIN_TOKEN per §0.1.10)
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:5000/api/pipeline/boss/runs?campaignId=test
+# Expected: 200 with empty array (not 404).
+# 8. Dashboard reachable
+curl -s http://localhost:5000/admin/pipeline-overlay
+# Expected: HTML returned.
+
+Migration is GREEN if and only if commands 1–8 all pass.
+
+9. Rollback Plan
+The migration is a single-direction copy with feature-flag isolation. Rollback by step:
+
+Failure mode	Rollback action
+Step 1 (schema) fails	npm run db:push is idempotent. If a constraint conflicts, that table didn't get created — fix the column definition and re-run. No DROP TABLE needed; the 12 tables are additive.
+Steps 2–7 (file copies) cause TypeScript errors	The error tells you which file imports something missing. Either copy the missing dependency (you skipped a row) or stub the import. Do not weaken contracts.
+Step 8 (routes mount) fails	Comment out the app.use("/api/pipeline", pipelineRouter) line in Main's app entry. Adaptive code is dormant; engines unaffected.
+Step 10 (E2E in Main) regresses below 8/8	Read the failing scenario's reason. If column-name mismatch (strategic_plans.approved_rhythm_json etc.), Main's existing schema differs from Remix — patch the reader at the import site, do NOT change the contract.
+AI overlay produces prescriptive language in Main	Set PIPELINE_AI_OVERLAY_ENABLED=false. Verdicts still work. Investigate prompt drift.
+Do not delete pipeline_rejections rows during rollback. They are the audit trail.
+
+10. Final Acceptance Criteria
+Migration is COMPLETE only when ALL of these hold IN MAIN:
+
+#	Criterion	Verified by
+A1	All 12 pipeline_*/boss_runs tables exist in Main's database with the schemas from §3.	\d pipeline_* + \d boss_runs in Main's psql.
+A2	All 56 source files in §2 exist at their target paths.	find server/pipeline server/boss shared/contracts -name '*.ts' | wc -l ≥ 47 (plus the 9 contracts).
+A3	npx tsc --noEmit is clean for all migrated files in Main.	TypeScript compiler.
+A4	e2e-system-test.ts reports 8/8 PASS in Main with PIPELINE_AI_OVERLAY_ENABLED=true.	§8 cmd 1.
+A5	e2e-system-test.ts reports 8/8 PASS in Main with PIPELINE_AI_OVERLAY_ENABLED=false AND every verdict + ruleCode is identical to A4.	Diff cmd 1 vs cmd 4.
+A6	Forbidden zone intact: boss/run.ts and boss/policy/* import nothing from ai-overlay/.	§8 cmd 5.
+A7	No engine in Main writes to any pipeline_* table directly.	§8 cmd 6.
+A8	All 26 routes in §2.7 respond with admin auth (200 or 400, never 404).	§8 cmd 7.
+A9	Dashboard renders.	§8 cmd 8.
+A10	All 13 existing engines in Main remain unmodified — diff against Main's pre-migration state shows zero changes outside server/pipeline/, server/boss/, shared/contracts/, shared/schema.ts.	git diff --stat <pre-migration-commit>..HEAD -- 'server/' ':(exclude)server/pipeline' ':(exclude)server/boss' → empty.
+Sign-off line for the receiving agent to write back:
+
+"The Remix adaptive pipeline is now physically present in Main. Schema is additive, no engine table modified. 8/8 E2E pass on Main's database. Forbidden import zones intact. Engines untouched. Phase 8.1 (engine ↔ overlay wiring) starts from this baseline."
+
+Appendix A — Files NOT to migrate
+File / dir	Why NOT
+server/audits/*.md	Documentation specific to Remix's review history. Optional for context, not required for runtime.
+Any test fixture under attached_assets/	Tester-specific.
+replit.md	Remix's documentation; Main has its own.
+Anything under server/collector/	The collector lives in Main already (verified §0.1.3). The adaptive overlay must consume Main's collector, NOT bring its own.
+Appendix B — External imports the Main project must already provide
+Static analysis of all adaptive import statements pointing outside the migration set:
+
+Import in adaptive code	What Main must provide	Verified by
+../auth (used by routes.ts)	Express middlewares authMiddleware and adminMiddleware returning 401/403.	§0.1.1
+../db (used widely)	A configured Drizzle DB instance bound to DATABASE_URL.	§0.1.2
+../collector and ../collector/{discovery,envelope} (used by boss/plan.ts, boss/envelope-to-lane.ts, routes.ts)	Main's existing collector exposing discoverEntities, acquire, getAcquisition, getAdapterRegistry.	§0.1.3
+../../ai-client (used by ai-overlay/client.ts)	Main's AI client wrapper. Single site to patch if path differs.	§0.1.4
+@shared/schema	Drizzle schema barrel containing both Main's existing tables AND the 12 new tables added in step 1.	§0.1.5
+@shared/contracts	The contracts barrel created in step 2.	§0.1.5
+npm express, drizzle-orm, zod	Standard. Main has these.	inspect package.json
+Node built-ins crypto	Standard.	always present
+If Main lacks any of ../auth, ../db, ../collector, ../../ai-client, the receiving agent must locate Main's equivalent (via §0.1) and update the import sites in the listed adaptive files. The migration cannot proceed without resolving all four.
+
+Appendix C — Reference: known PROOFs from Remix-side execution
+The following were proven on the source side (Remix project) before this handoff. They are listed for your benchmark — your migration is acceptance-equivalent to Remix only when these same proofs hold in Main.
+
+Proof	Source-side document (Remix)	Reproduced in Main by
+Reader enforcement complete; no silent fallbacks	server/audits/phase6.5-integrity-proof.md	§8 cmd 5 + cmd 6
+Rejection visibility (pipeline_rejections populated on every hard-reject)	same	§8 cmd 2
+Integrity harness — 9 failure classes blocked	integrity-harness.ts	§8 cmd 2
+8/8 e2e PASS with ruleCode-prefix assertions + 6/6 lineage attacks blocked	server/audits/phase7.5-e2e-system-test-proof.md	§8 cmd 1 + cmd 4
+Forbidden import zone intact (boss → ai-overlay)	architectural review	§8 cmd 5

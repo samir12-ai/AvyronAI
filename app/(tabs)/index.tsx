@@ -11,12 +11,14 @@ import {
   Animated as RNAnimated,
   Dimensions,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { WEB_TOP_INSET } from '@/lib/insets';
 import AvyronLogo from '@/components/AvyronLogo';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
@@ -25,14 +27,26 @@ import { useCampaign } from '@/context/CampaignContext';
 import { MetricCard } from '@/components/MetricCard';
 import { CampaignBar } from '@/components/CampaignSelector';
 import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
+import { useQueryClient } from '@tanstack/react-query';
 import { BusinessProfileModal, ProfileButton } from '@/components/BusinessProfile';
-import { PlanStatus } from '@/components/PlanStatus';
-import ExecutionPlan from '@/components/ExecutionPlan';
-import { RequiredWorkCard } from '@/components/RequiredWorkCard';
-import DashboardChat from '@/components/DashboardChat';
 import NarrativeCard from '@/components/NarrativeCard';
+import { useRunAnchor } from '@/hooks/useRunAnchor';
+import { useRunTruthfulness } from '@/hooks/useRunTruthfulness';
+import { presentRunTruthfulness } from '@/lib/run-truthfulness-presentation';
+import type { MetricCardVerdict } from '@/components/MetricCard';
+import type { ProvenanceKind } from '@/components/DataProvenance';
 import { useAuth } from '@/context/AuthContext';
-import OnboardingAgent from '@/components/OnboardingAgent';
+import { RunTruthfulnessBanner } from '@/components/RunTruthfulnessBanner';
+import { ProductIdentityDegradedBanner } from '@/components/ProductIdentityEditor';
+import WatchtowerStrip from '@/components/WatchtowerStrip';
+import BlockedReasonsCard from '@/components/BlockedReasonsCard';
+import DnaEnrichmentCard from '@/components/DnaEnrichmentCard';
+import TruthSubmissionCard from '@/components/TruthSubmissionCard';
+import ActivityTimeline from '@/components/ActivityTimeline';
+import { MarketMindAgent } from '@/components/MarketMindAgent';
+import InitializationExperience from '@/components/InitializationExperience';
+import { useWatchtower } from '@/hooks/usePerception';
+import ReasoningPanel from '@/components/ReasoningPanel';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -131,6 +145,76 @@ type DashboardMetrics = {
 
 type PanelState = 'loading' | 'empty' | 'error' | 'success' | 'no_data';
 
+function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
+  campaignId: string; isDark: boolean; narrativeRefreshKey: number;
+}) {
+  // Sprint cleanup (post-audit): the dashboard is now strategy-focused.
+  // PlanStatus / ExecutionPlan / RequiredWorkCard moved off the dashboard
+  // (live on the roadmap surface). DashboardChat removed — MarketMindAgent
+  // is the single conversational entry point. WatchtowerStrip is folded
+  // in here as a slim status pill above the strategic content.
+  // When the watchtower reports no_data (no boss_runs yet for this
+  // campaign) we render the InitializationExperience instead of the
+  // empty-state cards so the first-run feel is alive, not blank.
+  const { data: anchor } = useRunAnchor(campaignId);
+  const runId = anchor?.runId || null;
+  const { data: watchtower, isLoading: isWatchtowerLoading } = useWatchtower(campaignId);
+  // CTA bridge: BlockedReasonsCard's `submit_user_truth` action sets this
+  // true, which forces TruthSubmissionCard open even if the close window
+  // is more than 36h away. Cleared once the truth post succeeds.
+  const [truthForceOpen, setTruthForceOpen] = useState(false);
+
+  // Stabilize the first-render path so we don't flicker from the "active"
+  // shell into the initialization card the moment the watchtower query
+  // resolves to `no_data`. Reserve a fixed-height neutral placeholder
+  // (matching the rough first-card stack) until the watchtower response
+  // arrives, then commit to whichever branch is real — this prevents
+  // both branch flicker AND structural reflow / hero jump.
+  if (isWatchtowerLoading && !watchtower) {
+    const placeholderBg = isDark ? '#0F1419' : '#FFFFFF';
+    const placeholderBorder = isDark ? '#1A2030' : '#E2E8E4';
+    return (
+      <View
+        testID="dashboard-loading-placeholder"
+        style={{
+          minHeight: 260,
+          borderRadius: 18,
+          borderWidth: 1,
+          backgroundColor: placeholderBg,
+          borderColor: placeholderBorder,
+          marginBottom: 14,
+        }}
+      />
+    );
+  }
+
+  if (watchtower?.state === 'no_data') {
+    return <InitializationExperience campaignId={campaignId} isDark={isDark} />;
+  }
+
+  return (
+    <>
+      <WatchtowerStrip campaignId={campaignId} isDark={isDark} />
+      <BlockedReasonsCard
+        campaignId={campaignId}
+        isDark={isDark}
+        onSubmitTruth={() => setTruthForceOpen(true)}
+      />
+      <DnaEnrichmentCard campaignId={campaignId} isDark={isDark} />
+      <TruthSubmissionCard
+        campaignId={campaignId}
+        isDark={isDark}
+        forceOpen={truthForceOpen}
+        onClose={() => setTruthForceOpen(false)}
+      />
+      <RunTruthfulnessBanner campaignId={campaignId} isDark={isDark} />
+      <ProductIdentityDegradedBanner campaignId={campaignId} isDark={isDark} />
+      <MarketMindAgent campaignId={campaignId} isDark={isDark} />
+      <NarrativeCard campaignId={campaignId} isDark={isDark} refreshKey={narrativeRefreshKey} runId={runId} />
+    </>
+  );
+}
+
 export default function DashboardScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -161,6 +245,7 @@ export default function DashboardScreen() {
   const [showProfile, setShowProfile] = useState(false);
   const [orchestratorRunning, setOrchestratorRunning] = useState(false);
   const [narrativeRefreshKey, setNarrativeRefreshKey] = useState(0);
+  const [isApproving, setIsApproving] = useState(false);
   const prevCampaignRef = useRef<string | null | undefined>(undefined);
 
   const headerFade = useRef(new RNAnimated.Value(0)).current;
@@ -173,9 +258,49 @@ export default function DashboardScreen() {
   }, []);
 
   const baseUrl = getApiUrl();
+  const queryClient = useQueryClient();
 
   const activeCampaignRef = useRef<string | null>(selectedCampaignId);
   useEffect(() => { activeCampaignRef.current = selectedCampaignId; }, [selectedCampaignId]);
+
+  // P1-5/6 (launch-closure W3): bind dashboard metric truthfulness +
+  // provenance to the canonical run-truthfulness signal so trend deltas are
+  // hidden when the run is shadowed/untrusted/blocked, and so users can tell
+  // META-measured data apart from PLAN projections at a glance.
+  const { data: truthfulness } = useRunTruthfulness(selectedCampaignId);
+  // Task #71 / Phase 8 / Step 5 — verdict resolution routed through the
+  // unified presenter so dashboard / banner / audit-control are aligned.
+  // The MetricCardVerdict mapping (SHADOWED/UNTRUSTED/STALE) remains
+  // dashboard-specific because those states drive a different visual
+  // affordance (delta hiding) than the banner/screen color. The verdict
+  // → IntegrityVerdict mapping itself is now produced by the presenter.
+  const metricVerdict: MetricCardVerdict = (() => {
+    if (!truthfulness) return 'UNKNOWN';
+    if (truthfulness.isStale) return 'STALE';
+    if (truthfulness.headline === 'shadowed') return 'SHADOWED';
+    if (truthfulness.headline === 'system_untrusted') return 'UNTRUSTED';
+    const verdictRaw = truthfulness.verdict?.verdict;
+    const canonicalVerdict: 'PASS' | 'PARTIAL' | 'FAIL' | null =
+      verdictRaw === 'PASS' ? 'PASS'
+      : verdictRaw === 'BLOCK' ? 'FAIL'
+      : verdictRaw === 'DOWNGRADE' || verdictRaw === 'REPAIR' ? 'PARTIAL'
+      : null;
+    const presented = presentRunTruthfulness(canonicalVerdict, truthfulness.headline);
+    if (!presented?.isCanonical) return 'UNKNOWN';
+    if (canonicalVerdict === 'PASS') return 'PASS';
+    if (canonicalVerdict === 'FAIL') return 'FAIL';
+    if (canonicalVerdict === 'PARTIAL') return 'PARTIAL';
+    return 'UNKNOWN';
+  })();
+  const metricProvenance: ProvenanceKind | undefined = (() => {
+    // Reads dataSource set by /api/dashboard/metrics: META=measured,
+    // PLAN=projected, MANUAL=user-entered, NONE=no signal.
+    const ds = dataSource;
+    if (ds === 'META') return 'verified';
+    if (ds === 'PLAN') return 'projected';
+    if (ds === 'MANUAL') return 'manual';
+    return undefined;
+  })();
 
   const fetchMetrics = useCallback(async () => {
     const requestCampaign = selectedCampaignId;
@@ -298,18 +423,53 @@ export default function DashboardScreen() {
     setTimeout(() => setOrchestratorRunning(false), 5000);
   }, [selectedCampaignId, baseUrl, orchestratorRunning]);
 
-  const handleApprovePlan = useCallback(async (planId: string) => {
+  const doApprove = useCallback(async (planId: string, force: boolean) => {
+    setIsApproving(true);
     try {
-      await authFetch(new URL(`/api/plans/${planId}/approve`, baseUrl).toString(), {
+      const res = await authFetch(new URL(`/api/plans/${planId}/approve`, baseUrl).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(force ? { force: true } : {}),
       });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (err) {
-      console.error('Failed to approve plan:', err);
+      if (res.ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        queryClient.setQueryData(['/api/plans/active', selectedCampaignId], (old: any) => {
+          if (!old?.plan) return old;
+          return { ...old, plan: { ...old.plan, status: 'APPROVED' } };
+        });
+        queryClient.invalidateQueries({ queryKey: ['/api/plans/active', selectedCampaignId] });
+      } else {
+        const body = await res.json().catch(() => ({}));
+        if (body.blocked) {
+          const warningText = Array.isArray(body.warnings) && body.warnings.length > 0
+            ? body.warnings.join('\n')
+            : 'Integrity or deviation checks failed.';
+          Alert.alert(
+            'Approval Blocked',
+            warningText,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Force Approve',
+                style: 'destructive',
+                onPress: () => doApprove(planId, true),
+              },
+            ]
+          );
+        } else {
+          Alert.alert('Approval Failed', body.error || body.message || 'Unknown error. Please try again.');
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Approval Failed', err.message || 'Network error. Please try again.');
+    } finally {
+      setIsApproving(false);
     }
-  }, [baseUrl]);
+  }, [baseUrl, queryClient, selectedCampaignId]);
+
+  const handleApprovePlan = useCallback((planId: string) => {
+    doApprove(planId, false);
+  }, [doApprove]);
 
   const confColor = confidenceStatus === 'Stable' ? P.mint : confidenceStatus === 'Caution' ? P.orange : P.coral;
 
@@ -501,7 +661,7 @@ export default function DashboardScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           s.scrollContent,
-          { paddingTop: Platform.OS === 'web' ? 67 + 8 : insets.top + 8 },
+          { paddingTop: Platform.OS === 'web' ? WEB_TOP_INSET + 8 : insets.top + 8 },
         ]}
         refreshControl={
           <RefreshControl 
@@ -556,25 +716,16 @@ export default function DashboardScreen() {
           {renderMetricsPanel()}
         </RNAnimated.View>
 
-        <OnboardingAgent />
-
-        <DashboardChat />
+        {selectedCampaignId ? (
+          <DashboardActive
+            campaignId={selectedCampaignId}
+            isDark={isDark}
+            narrativeRefreshKey={narrativeRefreshKey}
+          />
+        ) : null}
 
         {selectedCampaignId ? (
-          <>
-            <PlanStatus
-              campaignId={selectedCampaignId}
-              isDark={isDark}
-              onBuildPlan={handleBuildPlan}
-              onApprovePlan={handleApprovePlan}
-            />
-
-            <NarrativeCard campaignId={selectedCampaignId} isDark={isDark} refreshKey={narrativeRefreshKey} />
-
-            <ExecutionPlan onPlanGenerated={() => setNarrativeRefreshKey(k => k + 1)} />
-
-            <RequiredWorkCard campaignId={selectedCampaignId} isDark={isDark} />
-          </>
+          <ReasoningPanel campaignId={selectedCampaignId} />
         ) : null}
 
         <View style={[s.metaStrip, { 
@@ -598,6 +749,10 @@ export default function DashboardScreen() {
             </Pressable>
           )}
         </View>
+
+        {selectedCampaignId ? (
+          <ActivityTimeline campaignId={selectedCampaignId} isDark={isDark} />
+        ) : null}
 
         {metricsState === 'success' && metrics ? (
           <>
@@ -631,12 +786,16 @@ export default function DashboardScreen() {
                       change={0}
                       icon="eye-outline"
                       isGradient
+                      integrityVerdict={metricVerdict}
+                      provenance={metricProvenance}
                     />
                     <MetricCard
                       title="Engagement"
                       value={formatNumber(metrics.engagement)}
                       change={0}
                       icon="heart-outline"
+                      integrityVerdict={metricVerdict}
+                      provenance={metricProvenance}
                     />
                   </View>
                 </View>

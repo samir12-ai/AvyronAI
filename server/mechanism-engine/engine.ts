@@ -1,5 +1,12 @@
 import { aiChat } from "../ai-client";
 import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
+import {
   ENGINE_VERSION,
   STATUS,
   AXIS_MECHANISM_GUIDANCE,
@@ -13,6 +20,7 @@ import {
 } from "../engine-hardening";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
 import { buildStructuredAELBlock } from "../differentiation-engine/engine";
+import { buildGroundingContract, checkGroundingContract } from "../shared/grounding-contract";
 import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
@@ -38,7 +46,22 @@ function clamp(v: number, min = 0, max = 1): number {
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
-  try { return JSON.parse(text); } catch { return null; }
+  try { return JSON.parse(text); } catch {}
+
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const slice = text.slice(firstBrace, lastBrace + 1);
+    try { return JSON.parse(slice); } catch {}
+
+    const repaired = slice
+      .replace(/,(\s*[}\]])/g, "$1")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'");
+    try { return JSON.parse(repaired); } catch {}
+  }
+
+  return null;
 }
 
 function resolvePrimaryAxis(positioning: MechanismEnginePositioningInput): string {
@@ -93,6 +116,8 @@ export async function runMechanismEngine(
   differentiation: MechanismEngineDifferentiationInput,
   accountId: string,
   analyticalEnrichment?: any,
+  strategic?: RunStrategicContext,
+  productDna?: ProductDnaLike | null,
 ): Promise<MechanismEngineResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -117,7 +142,7 @@ export async function runMechanismEngine(
       statusMessage: "No positioning axis, contrast axis, or differentiation pillars available — cannot generate axis-aligned mechanism",
       primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
       alternativeMechanism: null,
-      axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "none", failures: ["Insufficient positioning data"] },
+      axisConsistency: { consistent: false, primaryAxis, mechanismAxis: primaryAxis, failures: ["Insufficient positioning data"] },
       confidenceScore: 0.2,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
@@ -132,7 +157,61 @@ export async function runMechanismEngine(
     console.log(`[MechanismEngine] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | structuredBlock=${aelStructuredBlock.length}chars`);
   }
 
+  // Anchor doctrine (criteria A + B): inject the strategic doctrine block when
+  // threaded; when the doctrine anchor is absent, derive an anchor from Product
+  // DNA (F5a). deriveAnchorFromProductDna returns null unless differentiator +
+  // problem + name + type all exist (D5 — never fabricate).
+  let doctrineBlock = "";
+  if (strategic) {
+    doctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[MechanismEngine] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let mechAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!mechAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      mechAnchor = derivedAnchor;
+      console.log("[MechanismEngine] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let mechAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    mechAnchorSource = "doctrine";
+  } else if (mechAnchor) {
+    mechAnchorSource = "dna";
+  }
+  const dnaAnchorBlock = mechAnchorSource === "dna" && mechAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve the mechanism to THIS product) ===
+Product name: ${mechAnchor.name}
+Product type: ${mechAnchor.type}${mechAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${mechAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${mechAnchor.coreProblemSolved}
+Differentiating feature: ${mechAnchor.differentiatingFeature}
+`
+    : "";
+  const anchorGroundingRule = mechAnchor
+    ? "\nANCHOR GROUNDING: The mechanism name, steps, promise, and logic MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the AEL causal grounding rules below; it never replaces the [RC#]/[BB#]/[CC#] requirements.\n"
+    : "";
+  const groundingContractBlock = buildGroundingContract(mechAnchor, analyticalEnrichment || null);
+
   const pillarSummary = pillars.slice(0, 5).map((p: any) => `"${p.name || p.territory}": ${p.description || ""}`.slice(0, 120)).join("\n");
+
+  const validatedClaims = (differentiation.claimStructures || []) as any[];
+  const sortedClaims = [...validatedClaims].sort((a: any, b: any) => (b?.overallScore || 0) - (a?.overallScore || 0)).slice(0, 5);
+  const claimsBlock = sortedClaims.length > 0
+    ? sortedClaims.map((c: any, i: number) => `[CLAIM ${i + 1}] (score=${(c.overallScore || 0).toFixed(2)}, territory="${c.territory || "n/a"}"): ${c.claim}`).join("\n")
+    : "";
+  const claimsSection = claimsBlock ? `
+═══ VALIDATED CLAIMS FROM DIFFERENTIATION (CANONICAL — anchor your promise to one of these) ═══
+The Differentiation Engine produced and validated these claims via three layers (scoring, refinement, stability guard). Your mechanism's "promise" field MUST be a refined version of ONE of these claims — same core meaning, sharpened for axis alignment. Do NOT invent a new promise unrelated to these claims.
+
+${claimsBlock}
+
+In your output, set "anchorClaimIndex" to the [CLAIM N] you anchored on (1-based). The promise text must preserve the semantic core of that claim.
+` : "";
+
   const existingMechanismSection = diffCore && diffCore.mechanismType !== "none" ? `
 EXISTING MECHANISM FROM DIFFERENTIATION ENGINE (use as foundation):
 Name: "${diffCore.mechanismName}"
@@ -146,7 +225,7 @@ You MUST keep the core identity of this mechanism. Refine it to strengthen axis 
 No validated mechanism exists yet. Generate a NEW mechanism from scratch based on the positioning axis and differentiation pillars.`;
 
   const prompt = `You are a Mechanism Architect. Your job is to generate a strategic mechanism that is STRICTLY aligned with the positioning axis and GROUNDED in causal analysis.
-
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${groundingContractBlock}
 ${aelBlock ? `═══ ANALYTICAL ENRICHMENT LAYER (CAUSAL FOUNDATION — MANDATORY) ═══
 ${aelBlock}
 
@@ -178,7 +257,7 @@ The mechanism MUST embody the "${primaryAxis}" axis in every component:
 
 ═══ DIFFERENTIATION PILLARS ═══
 ${pillarSummary || "No pillars available"}
-
+${claimsSection}
 ${existingMechanismSection}
 
 ═══ MECHANISM NAMING RULES (MUST SATISFY ALL) ═══
@@ -206,6 +285,15 @@ VALID name examples (domain-grounded):
 4. The mechanism promise must be specific and measurable
 5. The mechanism problem must use audience language, not consultant language
 
+═══ MECHANISM v2 — COMMERCIAL REASONING DEPTH (REQUIRED, depth like Persuasion v3 / Differentiation v8) ═══
+Beyond the structural fields, every mechanism MUST justify itself commercially:
+- "whyItWorks": one paragraph (60-120 words) explaining the BUYER PSYCHOLOGY this mechanism converts — do NOT restate the steps; explain why a real buyer changes belief/behavior because of it. Reference at least one [RC#] root cause or [BB#] barrier.
+- "failureModes": 2-4 SPECIFIC counterfactual conditions under which this mechanism FAILS (audience type, market state, missing proof, wrong awareness stage). Be concrete; "if applied poorly" does NOT count.
+- "causalChain": ordered array of 3-5 steps, each {"cause": "what buyer believes/experiences (cite [RC#]/[BB#])", "impact": "structural change the mechanism produces", "behavior": "buyer behavior that follows", "upstreamSignalRefs": ["[RC#]", "[BB#]" ...]}. This is the cause→impact→behavior chain.
+- "commercialFunction": {"type": one of "trust_transfer"|"risk_reduction"|"identity_shift"|"perception_change"|"category_capture", "description": one sentence naming what commercial work this mechanism does}.
+- "upstreamDependency": {"positioningHook": which positioning element this anchors on (axis/contrast/enemy text), "differentiationHook": which differentiation pillar/claim this anchors on}.
+- "alternativeMechanisms": 1-2 mechanisms you considered but did NOT pick, each {"name", "whyAlternative": one sentence stating the trade-off and why the chosen primary is stronger}.
+
 ═══ OUTPUT FORMAT ═══
 Respond with ONLY valid JSON, no markdown:
 {
@@ -220,7 +308,20 @@ Respond with ONLY valid JSON, no markdown:
     "structuralFrame": "The [Name] Framework|System|Protocol",
     "axisEmphasis": ["keyword1", "keyword2", "keyword3"],
     "rootCauseUsed": "[RC#] identifier and exact deep cause text used",
-    "barrierResolved": "[BB#] identifier and exact barrier text resolved"
+    "barrierResolved": "[BB#] identifier and exact barrier text resolved",
+    "anchorClaimIndex": 1,
+    "whyItWorks": "60-120 word buyer-psychology explanation citing [RC#]/[BB#]",
+    "failureModes": ["specific condition 1", "specific condition 2", "specific condition 3"],
+    "causalChain": [
+      { "cause": "buyer belief from [RC#] / [BB#]", "impact": "structural change", "behavior": "buyer behavior", "upstreamSignalRefs": ["[RC#]", "[BB#]"] },
+      { "cause": "...", "impact": "...", "behavior": "...", "upstreamSignalRefs": ["..."] },
+      { "cause": "...", "impact": "...", "behavior": "...", "upstreamSignalRefs": ["..."] }
+    ],
+    "commercialFunction": { "type": "trust_transfer|risk_reduction|identity_shift|perception_change|category_capture", "description": "one sentence" },
+    "upstreamDependency": { "positioningHook": "axis/contrast/enemy text", "differentiationHook": "pillar/claim text" },
+    "alternativeMechanisms": [
+      { "name": "alt 1 name", "whyAlternative": "trade-off and why primary wins" }
+    ]
   },
   "alternative": {
     "name": "alternative mechanism name",
@@ -233,8 +334,16 @@ Respond with ONLY valid JSON, no markdown:
     "structuralFrame": "The [Name] Framework|System|Protocol",
     "axisEmphasis": ["keyword1", "keyword2", "keyword3"],
     "rootCauseUsed": "[RC#] identifier and exact deep cause text used",
-    "barrierResolved": "[BB#] identifier and exact barrier text resolved"
-  }
+    "barrierResolved": "[BB#] identifier and exact barrier text resolved",
+    "whyItWorks": "60-120 word buyer-psychology explanation",
+    "failureModes": ["specific condition 1", "specific condition 2"],
+    "causalChain": [
+      { "cause": "...", "impact": "...", "behavior": "...", "upstreamSignalRefs": ["..."] }
+    ],
+    "commercialFunction": { "type": "trust_transfer|risk_reduction|identity_shift|perception_change|category_capture", "description": "one sentence" },
+    "upstreamDependency": { "positioningHook": "...", "differentiationHook": "..." }
+  },
+  "groundingRefs": ["RC1"]
 }`;
 
   const depthGateMaxAttempts = DEPTH_GATE_MAX_RETRIES + 1;
@@ -247,29 +356,63 @@ Respond with ONLY valid JSON, no markdown:
     }
 
     const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
+    console.log(`[MechanismEngine] ANCHOR_EVIDENCE | engine=mechanism | site=first_prompt | attempt=${depthAttempt} | present=${mechAnchor ? "yes" : "no"} | source=${mechAnchorSource}`);
 
     try {
-      const response = await aiChat({
+      let response = await aiChat({
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: fullPrompt }],
-        max_tokens: 2000,
+        max_tokens: 4000,
         temperature: 0.7,
       });
 
-      const content = response?.choices?.[0]?.message?.content || "";
-      const cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-      const parsed = safeJsonParse(cleaned);
+      let content = response?.choices?.[0]?.message?.content || "";
+      let cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      let parsed = safeJsonParse(cleaned);
 
       if (!parsed || !parsed.primary) {
-        console.log(`[MechanismEngine] AI_PARSE_FAILED | falling back to differentiation core`);
+        const rawFinish1 = response?.choices?.[0]?.finish_reason;
+        const finishReason1 = typeof rawFinish1 === "string" ? rawFinish1 : "unknown";
+        const truncNote1 = finishReason1 === "length" ? " | OUTPUT_TRUNCATED (finish_reason=length — max_tokens exhausted before JSON closed)" : "";
+        console.log(`[MechanismEngine] AI_PARSE_FAILED | finish_reason=${finishReason1} | contentChars=${content.length}${truncNote1} | attempting one-shot retry with strict JSON reinforcement`);
+        diagnostics.parseRetryAttempted = true;
+        diagnostics.firstFinishReason = finishReason1;
+        const strictPrompt = `${fullPrompt}\n\n═══ STRICT OUTPUT FORMAT (PREVIOUS RESPONSE WAS UNPARSEABLE) ═══\nRespond with EXACTLY ONE valid JSON object and NOTHING else. No markdown, no preamble, no explanation. Start your response with "{" and end with "}". The top-level object MUST contain a "primary" key.`;
+        response = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: strictPrompt }],
+          max_tokens: 4000,
+          temperature: 0.3,
+        });
+        content = response?.choices?.[0]?.message?.content || "";
+        cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+        parsed = safeJsonParse(cleaned);
+      }
+
+      if (!parsed || !parsed.primary) {
+        const rawFinish2 = response?.choices?.[0]?.finish_reason;
+        const finishReason2 = typeof rawFinish2 === "string" ? rawFinish2 : "unknown";
+        const truncNote2 = finishReason2 === "length" ? " | OUTPUT_TRUNCATED (finish_reason=length — max_tokens still exhausted after retry)" : "";
+        console.log(`[MechanismEngine] AI_PARSE_FAILED_AFTER_RETRY | finish_reason=${finishReason2} | contentChars=${content.length}${truncNote2} | falling back to differentiation core with deterministic axis="${primaryAxis}"`);
         diagnostics.aiFailed = true;
+        diagnostics.parseRetryFailed = true;
+        diagnostics.retryFinishReason = finishReason2;
+        const fallbackMech = buildFallbackMechanism(diffCore, primaryAxis);
+        const hasUsableFallback = !!(diffCore && diffCore.mechanismType !== "none" && diffCore.mechanismName);
         return {
-          status: STATUS.FAILED,
-          statusMessage: "Failed to parse AI mechanism generation response",
-          primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
+          status: hasUsableFallback ? STATUS.COMPLETE : STATUS.FAILED,
+          statusMessage: hasUsableFallback
+            ? `AI generation unparseable — using differentiation-core fallback (axis="${primaryAxis}" propagated deterministically; confidence reduced)`
+            : `AI generation unparseable and no differentiation-core fallback available (axis="${primaryAxis}" propagated deterministically)`,
+          primaryMechanism: fallbackMech,
           alternativeMechanism: null,
-          axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "unknown", failures: ["AI generation failed"] },
-          confidenceScore: 0.3,
+          axisConsistency: {
+            consistent: hasUsableFallback,
+            primaryAxis,
+            mechanismAxis: primaryAxis,
+            failures: hasUsableFallback ? [] : ["AI generation failed and no differentiation-core fallback available"],
+          },
+          confidenceScore: hasUsableFallback ? 0.4 : 0.3,
           executionTimeMs: Date.now() - startTime,
           engineVersion: ENGINE_VERSION,
           diagnostics,
@@ -283,6 +426,17 @@ Respond with ONLY valid JSON, no markdown:
       const rcHits = aelRefs.filter((r: any) => r.rootCauseUsed && /\[RC\d+\]/.test(r.rootCauseUsed)).length;
       const bbHits = aelRefs.filter((r: any) => r.barrierResolved && /\[BB\d+\]/.test(r.barrierResolved)).length;
       console.log(`[MechanismEngine] AEL_GROUNDING_RESULT | mechanisms=${aelRefs.length} | rootCauseRefs=${rcHits}/${aelRefs.length} | barrierRefs=${bbHits}/${aelRefs.length}`);
+      const mechGroundingRefs: string[] = Array.isArray(parsed.groundingRefs)
+        ? parsed.groundingRefs.filter((r: any) => typeof r === "string" && r.trim().length > 0).map((r: string) => r.trim())
+        : [];
+      checkGroundingContract({
+        engine: "mechanism",
+        site: "primary_mechanism",
+        groundingRefs: mechGroundingRefs,
+        ael: analyticalEnrichment || null,
+        accountId,
+        attemptNumber: depthAttempt,
+      });
 
       const nameValidation = validateMechanismName(primaryMech.mechanismName, positioning.domainVocab);
       if (!nameValidation.valid) {
@@ -341,25 +495,26 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
 
       const finalValidation = validateMechanismAxisAlignment(primaryMech, primaryAxis);
 
+      const celSourceTexts = [
+        primaryMech.mechanismDescription,
+        primaryMech.mechanismLogic,
+        primaryMech.mechanismPromise,
+        primaryMech.mechanismProblem,
+        ...primaryMech.mechanismSteps,
+      ];
       const celDepth = enforceEngineDepthCompliance(
         "mechanism",
-        [
-          primaryMech.mechanismDescription,
-          primaryMech.mechanismLogic,
-          primaryMech.mechanismPromise,
-          primaryMech.mechanismProblem,
-          ...primaryMech.mechanismSteps,
-        ],
+        celSourceTexts,
         analyticalEnrichment || null,
       );
       diagnostics.celDepthCompliance = celDepth;
 
-      if (analyticalEnrichment && isDepthBlocking(celDepth)) {
+      if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
         depthGateLog.push(`Attempt ${depthAttempt}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
         console.log(`[MechanismEngine] DEPTH_GATE: Attempt ${depthAttempt} BLOCKED | depthScore=${celDepth.causalDepthScore} | violations=${celDepth.violations.length}`);
 
         if (depthAttempt >= depthGateMaxAttempts) {
-          const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+          const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
           console.log(`[MechanismEngine] DEPTH_GATE: FINAL FAILURE after ${depthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
           return {
             status: "DEPTH_FAILED",
@@ -391,10 +546,41 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
 
       const rawConfidence = computeConfidence(primaryMech, primaryAxis, pillars, finalValidation.consistent);
       const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
-      const confidence = clamp(rawConfidence * depthPenaltyFactor);
-      const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+      const rawLLMConfidence = clamp(rawConfidence * depthPenaltyFactor);
 
-      console.log(`[MechanismEngine] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | confidence=${confidence.toFixed(2)} | depthScore=${celDepth.causalDepthScore} | depthAttempts=${depthAttempt}`);
+      // T002 v2: confidence inheritance — mechanism cannot exceed upstream ceiling
+      // Ceiling = min(positioning.confidence, differentiation.confidence) + 0.05 margin
+      // (small margin allows mechanism to add a sliver of value, but cannot mask weak inputs)
+      const posConf = typeof positioning.confidenceScore === "number" ? positioning.confidenceScore : null;
+      const diffConf = typeof differentiation.confidenceScore === "number" ? differentiation.confidenceScore : null;
+      let inheritedConfidence: number;
+      if (posConf !== null && diffConf !== null) {
+        inheritedConfidence = clamp(Math.min(posConf, diffConf) + 0.05);
+      } else if (posConf !== null) {
+        inheritedConfidence = clamp(posConf + 0.05);
+      } else if (diffConf !== null) {
+        inheritedConfidence = clamp(diffConf + 0.05);
+      } else {
+        inheritedConfidence = 1.0; // no upstream confidence — no ceiling effect
+      }
+      const confidence = Math.min(rawLLMConfidence, inheritedConfidence);
+      const confidencePenalty = Math.max(0, rawLLMConfidence - confidence);
+
+      const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
+
+      // T002 v2: collect alternativeMechanisms surfaced by the LLM for audit
+      const altMechanismsRaw = Array.isArray(parsed.primary?.alternativeMechanisms)
+        ? parsed.primary.alternativeMechanisms
+        : [];
+      const alternativeMechanisms = altMechanismsRaw
+        .filter((a: any) => a && typeof a === "object" && a.name)
+        .map((a: any) => ({
+          name: String(a.name),
+          whyAlternative: String(a.whyAlternative || ""),
+        }))
+        .slice(0, 3);
+
+      console.log(`[MechanismEngine-v2] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | rawConf=${rawLLMConfidence.toFixed(2)} | ceiling=${inheritedConfidence.toFixed(2)} | finalConf=${confidence.toFixed(2)} | penalty=${confidencePenalty.toFixed(2)} | posConf=${posConf?.toFixed(2) ?? "null"} | diffConf=${diffConf?.toFixed(2) ?? "null"} | depthScore=${celDepth.causalDepthScore} | depthAttempts=${depthAttempt} | hasWhyItWorks=${!!primaryMech.whyItWorks} | failureModes=${(primaryMech.failureModes || []).length} | causalChainSteps=${(primaryMech.causalChain || []).length}`);
 
       return {
         status: finalValidation.consistent ? STATUS.COMPLETE : STATUS.AXIS_REJECTED,
@@ -413,6 +599,11 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
         diagnostics: { ...diagnostics, depthGate: depthGateResult },
         celDepthCompliance: celDepth,
         depthGateResult,
+        // v2 audit trail
+        inheritedConfidence,
+        rawLLMConfidence,
+        confidencePenalty,
+        alternativeMechanisms,
       };
     } catch (error: any) {
       console.error(`[MechanismEngine] ERROR | ${error.message}`);
@@ -425,7 +616,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
       statusMessage: `Mechanism generation failed: ${error.message}`,
       primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
       alternativeMechanism: null,
-      axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "fallback", failures: [error.message] },
+      axisConsistency: { consistent: false, primaryAxis, mechanismAxis: primaryAxis, failures: [error.message] },
       confidenceScore: 0.2,
       executionTimeMs: Date.now() - startTime,
       engineVersion: ENGINE_VERSION,
@@ -439,7 +630,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
     statusMessage: "Mechanism generation failed after all depth gate attempts",
     primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
     alternativeMechanism: null,
-    axisConsistency: { consistent: false, primaryAxis, mechanismAxis: "unknown", failures: ["All attempts failed"] },
+    axisConsistency: { consistent: false, primaryAxis, mechanismAxis: primaryAxis, failures: ["All attempts failed"] },
     confidenceScore: 0,
     executionTimeMs: Date.now() - startTime,
     engineVersion: ENGINE_VERSION,
@@ -449,6 +640,41 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
 
 function buildMechanismOutput(raw: any, primaryAxis: string, pillars: any[]): MechanismOutput {
   const topPillar = pillars.length > 0 ? (pillars[0].name || pillars[0].territory || "core pillar") : "core pillar";
+
+  // T002 v2: parse new commercial-reasoning fields
+  const validFunctions = new Set(["trust_transfer", "risk_reduction", "identity_shift", "perception_change", "category_capture"]);
+  const cf = raw.commercialFunction;
+  const commercialFunction = (cf && typeof cf === "object" && validFunctions.has(cf.type))
+    ? { type: cf.type, description: typeof cf.description === "string" ? cf.description : "" }
+    : undefined;
+
+  const causalChain = Array.isArray(raw.causalChain)
+    ? raw.causalChain
+        .filter((s: any) => s && typeof s === "object" && (s.cause || s.impact || s.behavior))
+        .map((s: any) => ({
+          cause: String(s.cause || ""),
+          impact: String(s.impact || ""),
+          behavior: String(s.behavior || ""),
+          upstreamSignalRefs: Array.isArray(s.upstreamSignalRefs) ? s.upstreamSignalRefs.map(String) : [],
+        }))
+    : undefined;
+
+  const failureModes = Array.isArray(raw.failureModes)
+    ? raw.failureModes.filter((f: any) => typeof f === "string" && f.trim().length > 0).slice(0, 6)
+    : undefined;
+
+  const upstream = raw.upstreamDependency;
+  const upstreamDependency = (upstream && typeof upstream === "object")
+    ? {
+        positioningHook: String(upstream.positioningHook || ""),
+        differentiationHook: String(upstream.differentiationHook || ""),
+      }
+    : undefined;
+
+  const whyItWorks = typeof raw.whyItWorks === "string" && raw.whyItWorks.trim().length > 0
+    ? raw.whyItWorks.trim()
+    : undefined;
+
   return {
     mechanismName: raw.name || "Unnamed Mechanism",
     mechanismType: raw.type || "system",
@@ -464,6 +690,11 @@ function buildMechanismOutput(raw: any, primaryAxis: string, pillars: any[]): Me
     },
     structuralFrame: raw.structuralFrame || `The ${raw.name || "Core"} System`,
     differentiationLink: `Mechanism anchored to ${topPillar} via ${primaryAxis} axis`,
+    whyItWorks,
+    failureModes,
+    causalChain,
+    commercialFunction,
+    upstreamDependency,
   };
 }
 

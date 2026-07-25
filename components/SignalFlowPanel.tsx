@@ -11,6 +11,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, authFetch } from '@/lib/query-client';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 
 interface SignalCluster {
   id: string;
@@ -164,6 +166,8 @@ export default function SignalFlowPanel() {
   const [positioningStatus, setPositioningStatus] = useState<string | null>(null);
   const [positioningMessage, setPositioningMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [audienceEnvelope, setAudienceEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
+  const [positioningEnvelope, setPositioningEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
 
   const bg = isDark ? '#12122a' : '#ffffff';
   const headerBg = isDark ? '#1a1a3e' : '#f5f5ff';
@@ -184,6 +188,8 @@ export default function SignalFlowPanel() {
     setTraceability(null);
     setPositioningStatus(null);
     setPositioningMessage(null);
+    setAudienceEnvelope(null);
+    setPositioningEnvelope(null);
     try {
       const baseUrl = getApiUrl();
       const audRes = await authFetch(new URL(`/api/audience-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
@@ -191,6 +197,7 @@ export default function SignalFlowPanel() {
       const audData = await audRes.json();
       if (!audData) throw new Error('No audience snapshot available');
       setSignals(audData.structuredSignals || null);
+      setAudienceEnvelope(audData?.envelope ?? null);
 
       const posRes = await authFetch(new URL(`/api/positioning-engine/latest?campaignId=${selectedCampaignId}`, baseUrl).toString());
       if (posRes.ok) {
@@ -198,6 +205,7 @@ export default function SignalFlowPanel() {
         setTraceability(posData?.signalTraceability || null);
         setPositioningStatus(posData?.status || null);
         setPositioningMessage(posData?.statusMessage || null);
+        setPositioningEnvelope(posData?.envelope ?? null);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load signal flow data');
@@ -243,6 +251,12 @@ export default function SignalFlowPanel() {
 
       {expanded && (
         <View style={s.body}>
+          {(audienceEnvelope || positioningEnvelope) && (
+            <View style={{ gap: 6, marginBottom: 8 }}>
+              {audienceEnvelope && <EnvelopeBadge envelope={audienceEnvelope} onRerun={fetchData} />}
+              {positioningEnvelope && <EnvelopeBadge envelope={positioningEnvelope} onRerun={fetchData} />}
+            </View>
+          )}
           {loading && <ActivityIndicator size="small" color="#7c5cfc" style={s.loader} />}
           {error && <Text style={[s.errorText, { color: '#ef4444' }]}>{error}</Text>}
 

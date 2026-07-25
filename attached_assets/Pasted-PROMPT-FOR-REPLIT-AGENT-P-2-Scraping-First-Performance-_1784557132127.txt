@@ -1,0 +1,852 @@
+PROMPT FOR REPLIT AGENT — P-2: Scraping-First Performance Scoring + Weekly Business Outcomes + Contracted AI Interpretation
+
+Context:
+
+P-1 is complete: plan lineage flows into published posts, missing and partial lineage states are visible, and the revisit infrastructure exists.
+
+W-1 is complete: competitor scraping, historical snapshots, and evidence-backed market change events are live.
+
+The P-2 Phase 1 audit found that no Meta account is currently connected and there are zero performance snapshots. However, Meta OAuth must not become a hard dependency for Avyron.
+
+Avyron’s intended architecture is:
+
+Scraping-first.
+Manual business-outcome inputs.
+API-enhanced later.
+
+The user’s own public social pages must be measurable through the same scraping infrastructure used for competitors. Meta or platform APIs may later enrich the data with private metrics such as reach, saves, clicks, and profile visits, but the Performance Loop must function without them.
+
+Avyron also already collects weekly manual business outcomes from the user:
+
+* leads
+* qualified leads
+* booked
+* paying customers
+
+These business outcomes must be included in the Performance Loop.
+
+The architecture for this session is non-negotiable:
+
+Code measures and proves.
+AI interprets and designs the next test.
+Code judges the AI output before anything reaches the user.
+
+Do not replace AI with rigid templates.
+Do not allow AI to calculate or alter factual verdicts.
+Do not claim that content caused sales when attribution is incomplete.
+Do not use test fixtures as final proof that the production Performance Loop works.
+
+Current guardrails:
+
+* TypeScript baseline: 718.
+* Current schema floor: 43.
+* No gate, judge, threshold, CEL scorer, Integrity engine, System Control, Watchtower classification, or campaign verdict logic may be weakened.
+* Missing metrics remain NULL / UNAVAILABLE, never zero.
+* No global benchmarks.
+* No cross-customer benchmarks.
+* No silent semantic fallback.
+* No generic recommendation templates.
+* Every factual claim must link to real source rows, post records, snapshots, or weekly outcome records.
+
+## Session Objective
+
+Build the Performance Loop so Avyron can combine:
+
+1. Public performance data scraped from the user’s own page.
+2. Plan and post lineage.
+3. Weekly manually entered business outcomes.
+4. Deterministic self-baseline scoring.
+5. AI interpretation under evidence and judgment contracts.
+6. A campaign-specific next experiment.
+
+Required production flow:
+
+Owned social account
+→ scrape public posts and visible metrics
+→ match posts to Avyron plans where possible
+→ capture 24h / 72h / 7d snapshots
+→ score hooks, angles, and content types against self-baselines
+→ combine with weekly leads / qualified / booked / paying
+→ produce honest content and business verdicts
+→ AI interprets the relationship as evidence or hypothesis
+→ code judge accepts or rejects
+→ campaign-specific next experiment
+
+Meta OAuth is optional enrichment and must not block this flow.
+
+# Phase 1 — Truth Audit and Architecture Confirmation
+
+Do not modify code in this phase.
+
+## 1. Audit the existing owned-account model
+
+Find where Avyron currently stores or can derive:
+
+* the user’s Instagram, TikTok, website, or other social profile URLs
+* account ownership
+* platform identifiers
+* campaign-to-account relationships
+* competitor profiles versus the user’s own profiles
+
+Report whether the current competitor scraping infrastructure can safely support a target type such as:
+
+* `competitor`
+* `owned_account`
+
+Do not duplicate the entire scraper unless the existing architecture cannot be extended safely.
+
+Print exact file and line references.
+
+## 2. Audit the available public scraping metrics
+
+For every supported platform, report which owned-page fields can be collected honestly:
+
+* post ID
+* post URL
+* caption
+* hook text
+* hashtags
+* format / media type
+* publish timestamp
+* likes
+* comments
+* views
+* shares if public
+* follower count
+* posting frequency
+* any visible CTA
+* any other public signal
+
+Classify each field:
+
+* POPULATED
+* PARTIALLY_POPULATED
+* UNAVAILABLE
+
+Do not design scoring around unavailable public metrics.
+
+Metrics such as saves, reach, private clicks, profile visits, DMs, and private conversions must remain unavailable unless supplied through an authenticated API or direct user input.
+
+## 3. Audit weekly manual business outcomes
+
+Locate the existing input and storage paths for:
+
+* leads
+* qualified
+* booked
+* paying
+
+Report:
+
+* table names
+* field names
+* campaign/account relationships
+* week boundaries
+* timestamps
+* current readers
+* current Q1 verdict logic
+* whether historical weekly rows are append-only
+* whether missing weeks are NULL, absent, or incorrectly converted to zero
+
+Also report whether the user currently supplies:
+
+* lead source
+* related campaign
+* related post
+* channel
+* notes
+
+These fields are optional for v1, but their absence must reduce attribution confidence.
+
+## 4. Audit the current post-lineage matching options
+
+Report how a scraped owned-page post can be matched to an Avyron item using:
+
+* platform post ID
+* stored post URL
+* `metaPostId` or equivalent external ID
+* calendar entry
+* studio item
+* caption fingerprint
+* publish timestamp
+* media fingerprint if available
+
+Define the intended lineage states:
+
+* `planned_direct`
+* `planned_matched`
+* `manual_matched`
+* `unplanned`
+* `ambiguous`
+* `unmatched`
+
+Do not silently force an uncertain match.
+
+## 5. Audit reusable scoring and judge infrastructure
+
+Locate and report reusable components for:
+
+* self-relative baseline calculations
+* metric normalization
+* evidence references
+* grounding contracts
+* interchangeability judge
+* AI retries
+* rejection logging
+* degraded output handling
+
+The existing outcome-tracker’s hardcoded thresholds and NULL-to-zero behavior must not be inherited.
+
+## 6. Select a real owned account and campaign
+
+Identify the best real Avyron campaign and the user-owned page associated with it.
+
+Report:
+
+* campaign ID and name
+* account ID
+* owned page URL
+* platform
+* number of real public posts available
+* how many can be matched to Avyron plans
+* number of unique hook styles
+* number of unique content angles
+* number of unique content types
+* available weekly business outcome rows
+* whether at least one historical week exists for baseline comparison
+
+If no owned-page URL exists, identify the exact smallest user input required to register it.
+
+## Phase 1 output
+
+Provide a complete findings table before implementation.
+
+Architect review must PASS before Phase 2.
+
+Do not proceed with unresolved HIGH findings.
+
+# Phase 2 — Owned-Page Scraping and Attribution Fuel
+
+## A. Extend scraping to owned accounts
+
+Reuse the existing scraping infrastructure where possible.
+
+The scraper must support an explicit target classification:
+
+* competitor
+* owned_account
+
+Requirements:
+
+* Ownership-scoped.
+* A user cannot scrape or query another user’s owned account.
+* Fresh fetches and reused snapshots are visibly distinct.
+* Scraping failures are loud.
+* Existing competitor scraping behavior remains backward-compatible.
+* No duplicate scraper implementation unless architect-approved.
+
+## B. Persist owned-post records and snapshots
+
+Persist public owned-account posts with:
+
+* account ID
+* campaign ID where known
+* platform
+* external post ID
+* post URL
+* caption
+* hook text
+* content type / format
+* publish timestamp
+* visible metrics
+* scrape timestamp
+* freshness source
+* lineage status
+* linked plan ID where known
+* linked calendar entry or studio item where known
+
+Snapshots must be append-only.
+
+Capture checkpoints:
+
+* 24h
+* 72h
+* 7d
+
+If a post was discovered after a checkpoint passed, store the actual observation age and do not label it falsely as an exact checkpoint.
+
+A unique database constraint must prevent duplicate captures of the same post and observation checkpoint.
+
+Missing public metrics remain NULL.
+
+## C. Post-lineage resolver
+
+Matching priority:
+
+1. Exact platform post ID.
+2. Exact stored post URL.
+3. Existing direct publish lineage.
+4. High-confidence caption fingerprint plus publish-time window.
+5. Media fingerprint if available.
+6. Otherwise unmatched.
+
+Requirements:
+
+* Every match records method and confidence.
+* Ambiguous matches remain ambiguous.
+* A manual or unplanned post may be measured, but must not be treated as proof that an Avyron plan succeeded.
+* Posts with incomplete plan lineage may contribute to account baseline but not unsupported hook or angle scoring.
+
+Required logs:
+
+* `OWNED_POST_LINEAGE_MISSING`
+* `OWNED_POST_LINEAGE_AMBIGUOUS`
+* `OWNED_POST_LINEAGE_PARTIAL`
+* `OWNED_POST_MATCHED_MANUAL`
+
+## D. Optional API enrichment boundary
+
+Do not make Meta OAuth part of the done-condition.
+
+Design the metric source registry so future authenticated sources can enrich a post with private metrics.
+
+Each metric must record its source:
+
+* `public_scrape`
+* `manual_input`
+* `authenticated_api`
+
+Authenticated API values may enrich but must not silently overwrite contradictory historical observations.
+
+# Phase 3 — Deterministic Content Scoring
+
+The scoring truth is produced by code.
+
+## A. Honest cohorts
+
+Comparisons must respect:
+
+* same account
+* same platform
+* comparable post format where necessary
+* compatible metric availability
+* comparable post age / checkpoint maturity
+* time-bounded baseline
+
+Do not directly mix Instagram and TikTok.
+
+Do not compare a 24-hour observation to a 7-day observation without explicit maturity handling.
+
+## B. Checkpoint maturity
+
+Expose one maturity state per scored post:
+
+* `MATURE_7D`
+* `PROVISIONAL_72H`
+* `EARLY_24H`
+* `OBSERVED_LATE`
+* `IMMATURE`
+* `UNKNOWN`
+
+Only one observation per post may enter one scoring run.
+
+## C. Public metric registry
+
+Create a config-driven registry based only on metrics verified in Phase 1.
+
+Possible metrics include:
+
+* views growth
+* likes per view
+* comments per view
+* visible engagement per view
+* likes per follower
+* comments per follower
+* engagement velocity
+
+Use only metrics with honest numerator and denominator availability.
+
+A missing denominator returns UNAVAILABLE.
+
+Do not label public metrics as reach, saves, or conversions unless that exact metric is actually available.
+
+## D. Self-baseline
+
+All content scoring compares the user with the same user.
+
+The baseline must be:
+
+* account-specific
+* platform-specific
+* maturity-specific
+* time-bounded
+* based on comparable posts
+* versioned
+* timestamped
+
+No global benchmark.
+
+Exclude the evaluated post from its own baseline where appropriate.
+
+## E. Scoring dimensions
+
+Score only supported lineage dimensions:
+
+* hook style
+* content angle
+* content type
+
+For each dimension value, persist:
+
+* sample size
+* included post IDs
+* snapshot IDs
+* maturity
+* primary metric
+* baseline
+* measured result
+* absolute delta
+* relative delta
+* consistency
+* outlier concentration
+* confounders
+* confidence
+* verdict
+* scorer version
+
+Verdicts:
+
+* `WINNING`
+* `NEUTRAL`
+* `UNDERPERFORMING`
+* `TESTING`
+* `UNKNOWN`
+
+Rules:
+
+* Fewer than 3 comparable posts: `TESTING`.
+* No usable metric: `UNKNOWN`.
+* One viral post cannot create `WINNING`.
+* One weak post cannot create `UNDERPERFORMING`.
+* Mixed evidence becomes `NEUTRAL` or `TESTING`.
+* Thresholds are config-driven.
+* Thresholds must not be lowered to manufacture a result.
+
+# Phase 4 — Weekly Business Outcome Scoring
+
+The weekly manual inputs are a separate truth layer.
+
+## A. Persist and normalize weekly outcomes
+
+For each week, use:
+
+* leads
+* qualified
+* booked
+* paying
+
+Calculate honestly where denominators exist:
+
+* lead-to-qualified rate
+* qualified-to-booked rate
+* booked-to-paying rate
+* lead-to-paying rate
+* week-over-week deltas
+* trailing self-baselines
+
+A missing number remains unavailable.
+
+Do not treat a missing week as zero activity.
+
+## B. Business verdict
+
+Produce one weekly business verdict:
+
+* `WORKING`
+* `DRIFTING`
+* `UNKNOWN`
+
+Rules must be config-driven and based on the business’s own baseline.
+
+Example logic direction:
+
+* `WORKING`: meaningful improvement in downstream outcomes with sufficient data.
+* `DRIFTING`: deterioration across meaningful funnel stages.
+* `UNKNOWN`: missing inputs, too little history, or conflicting movements.
+
+Do not inherit any old unsafe Q1 logic without auditing its semantics.
+
+## C. Attribution confidence
+
+Content performance and weekly business outcomes must not be presented as causal unless the evidence supports it.
+
+Use explicit confidence levels:
+
+* `DIRECT`
+* `SUPPORTED`
+* `CORRELATED`
+* `UNKNOWN`
+
+Examples:
+
+* `DIRECT`: the user supplied a source or post/campaign link for the lead.
+* `SUPPORTED`: strong campaign/channel association, but not post-level proof.
+* `CORRELATED`: outcomes improved during the same period as content performance.
+* `UNKNOWN`: no reliable relationship can be inferred.
+
+Without direct source input, the system may say:
+
+“Qualified leads increased during the same week.”
+
+It may not say:
+
+“This angle generated the leads.”
+
+## D. Optional minimal source input
+
+If the existing weekly form supports safe extension, add optional fields:
+
+* main lead source
+* related campaign
+* related post URL
+* channel
+* attribution known / unknown
+
+Do not make these required for weekly submission.
+
+The UI must remain simple for a solo SMB owner.
+
+# Phase 5 — Contracted AI Interpretation
+
+AI receives only verified code outputs and source evidence.
+
+## A. AI input
+
+Provide:
+
+* deterministic content verdicts
+* weekly business verdict
+* attribution confidence
+* baseline calculations
+* evidence post and snapshot IDs
+* weekly outcome row IDs
+* actual captions and hooks
+* confounders
+* campaign product and audience grounding
+* relevant Watchtower events where available
+
+AI cannot calculate or replace verdicts.
+
+## B. AI responsibilities
+
+AI may:
+
+* explain what the factual results mean
+* identify semantic similarities between hooks or angles
+* identify possible confounding factors
+* explain the relationship between public attention and business outcomes
+* generate one controlled next experiment
+* state what evidence is still needed
+
+AI must separate:
+
+1. Proven result.
+2. Observed correlation.
+3. Hypothesis.
+4. Unknown.
+
+## C. Performance Interpretation Contract
+
+Every interpretation must include:
+
+### What is proven
+
+* content verdict
+* business verdict
+* metrics
+* sample size
+* maturity
+* evidence references
+
+### What is correlated
+
+* timing relationship between content and weekly outcomes
+* explicit attribution confidence
+
+### What is only a hypothesis
+
+* possible reasons the hook or angle performed
+* clearly labeled as hypothesis
+
+### What could be confounding the result
+
+* format
+* timing
+* follower growth
+* outlier post
+* hook-angle overlap
+* organic versus paid traffic
+* referral or offline source
+* missing attribution
+* insufficient maturity
+
+### What to test next
+
+One controlled experiment:
+
+* one main variable changed
+* relevant constants preserved
+* target platform
+* target hook or angle
+* measurement checkpoint
+* metric to evaluate
+* business metric to observe
+* what outcome strengthens or weakens the hypothesis
+
+### Why it is specific to this campaign
+
+The interpretation must name the actual product, audience, posts, hooks, angles, and evidence.
+
+It must not apply unchanged to a generic competitor.
+
+## D. Judge
+
+Reuse and extend the existing interchangeability and evidence judgment infrastructure.
+
+Reject AI output if it:
+
+* changes the deterministic verdict
+* presents correlation as causation
+* invents private metrics
+* invents customer behavior
+* omits evidence
+* ignores insufficient sample size
+* recommends scaling a `TESTING` dimension as proven
+* hides confounders
+* gives generic marketing advice
+* produces a fixed recommendation template
+* claims that content caused sales without adequate attribution
+* references unavailable metrics
+
+Required rejection log:
+
+`PERFORMANCE_INTERPRETATION_REJECTED`
+
+If retries fail:
+
+* deterministic results stay visible
+* interpretation becomes visibly unavailable
+* no fallback template appears
+* log `PERFORMANCE_INTERPRETATION_UNAVAILABLE`
+
+# Phase 6 — Real Campaign Verification
+
+Final acceptance must use:
+
+* one real Avyron campaign
+* one real user-owned social page
+* real scraped public posts
+* real visible metrics
+* real weekly business inputs
+
+Fixtures may test edge cases but may not satisfy final acceptance.
+
+## Check 1 — Real owned-page scrape
+
+Show:
+
+* campaign ID
+* account ID
+* owned profile URL
+* fresh scrape timestamp
+* posts fetched
+* public metrics fetched
+* database rows
+* proof of fresh fetch versus reuse
+
+## Check 2 — Real lineage resolution
+
+Show real posts classified as:
+
+* planned
+* manually matched
+* unplanned
+* ambiguous or unmatched
+
+Print matching method and confidence.
+
+## Check 3 — Real snapshots
+
+Show at least two observations for one real owned post where time permits.
+
+Confirm:
+
+* append-only rows
+* actual observation ages
+* no overwrite
+* no duplicate capture
+* missing metrics remain NULL
+
+The full 24h / 72h / 7d maturity cycle may remain pending if real time has not passed, but the live scheduler and first production observation must be verified.
+
+## Check 4 — Content scoring
+
+For one real supported dimension, print:
+
+* included real posts
+* real snapshots
+* baseline
+* measured value
+* delta
+* sample size
+* verdict
+* confidence
+* confounders
+
+If fewer than 3 comparable real posts exist, the correct live result is `TESTING`.
+
+## Check 5 — Weekly business outcomes
+
+Use one real user-entered week.
+
+Print:
+
+* leads
+* qualified
+* booked
+* paying
+* conversion rates
+* historical baseline
+* business verdict
+* missing fields
+
+Do not replace missing values with zero.
+
+## Check 6 — Honest relationship
+
+Show the combined output.
+
+It must distinguish between:
+
+* public content performance
+* weekly business performance
+* attribution confidence
+
+Confirm that correlation is not presented as causation.
+
+## Check 7 — AI interpretation
+
+Generate an interpretation for the real campaign.
+
+Confirm it:
+
+* preserves both code verdicts
+* cites real evidence
+* separates proof, correlation, hypothesis, and unknowns
+* names confounders
+* proposes one specific controlled experiment
+* passes the interchangeability judge
+
+## Check 8 — Forced judge rejection
+
+Supply a deliberately unsafe interpretation that says an angle caused sales without evidence or gives generic advice.
+
+Confirm rejection with:
+
+`PERFORMANCE_INTERPRETATION_REJECTED`
+
+## Check 9 — Degraded path
+
+Force all AI retries to fail.
+
+Confirm:
+
+* code scorecards remain available
+* interpretation is visibly unavailable
+* no template fallback ships
+
+## Check 10 — Historical persistence
+
+Run the scoring process twice when new data is available.
+
+Confirm:
+
+* previous score runs remain stored
+* weekly outcome history remains stored
+* scorer versions and evidence remain queryable
+
+## Check 11 — Regression safety
+
+Run the latest real campaign pipeline and report:
+
+* campaign ID
+* timestamp
+* campaign verdict
+* block reasons
+* degraded states
+* Watchtower state
+* Performance Loop state
+
+Confirm no existing gate, judge, threshold, CEL, Integrity, System Control, Watchtower, or campaign verdict logic was weakened.
+
+## Check 12 — TypeScript and runtime
+
+* Compare error multisets against the 718 baseline.
+* Net-new TypeScript errors must equal zero.
+* Use numbered forward-only migrations.
+* Restart the backend.
+* Confirm scrapers, revisit workers, and scorers start cleanly.
+* Confirm no retry storms.
+* Confirm no zombie jobs.
+* Clean test data after verification.
+
+Required logs:
+
+* `OWNED_ACCOUNT_SCRAPE_FAILED`
+* `OWNED_ACCOUNT_SNAPSHOT_REUSED`
+* `OWNED_POST_LINEAGE_MISSING`
+* `OWNED_POST_LINEAGE_AMBIGUOUS`
+* `OWNED_POST_LINEAGE_PARTIAL`
+* `PERFORMANCE_BASELINE_UNAVAILABLE`
+* `PERFORMANCE_METRIC_UNAVAILABLE`
+* `PERFORMANCE_EVIDENCE_INSUFFICIENT`
+* `BUSINESS_OUTCOME_INCOMPLETE`
+* `BUSINESS_ATTRIBUTION_UNKNOWN`
+* `PERFORMANCE_INTERPRETATION_REJECTED`
+* `PERFORMANCE_INTERPRETATION_UNAVAILABLE`
+* `PERFORMANCE_SCORE_PERSIST_FAILED`
+
+# Done Conditions
+
+This session is complete only when:
+
+* Owned-account scraping works without Meta OAuth.
+* Real user-owned posts and public metrics are persisted.
+* Historical observations are append-only.
+* Posts are matched to Avyron plans honestly.
+* Public content scoring uses only real available metrics.
+* Weekly leads / qualified / booked / paying are included.
+* Content verdict and business verdict remain separate.
+* Attribution confidence is explicit.
+* Correlation is never presented as causation.
+* Low sample sizes return `TESTING`.
+* Missing data remains unavailable, not zero.
+* AI cannot alter factual verdicts.
+* AI interpretation cites real evidence.
+* AI proposes a campaign-specific controlled experiment.
+* Generic or causally unsupported AI output is rejected.
+* No silent template fallback exists.
+* Final verification runs on a real Avyron campaign, real owned page, real scraped posts, and real weekly business input.
+* TypeScript net-new errors equal zero.
+* No gate, judge, threshold, CEL, Integrity, System Control, Watchtower, or campaign verdict logic was weakened.
+
+Final status must distinguish clearly between:
+
+* IMPLEMENTED
+* LIVE VERIFIED
+* PENDING MATURITY
+* UNAVAILABLE
+
+Final one-line summary format:
+
+“Performance Loop P-2 complete: owned-page public performance and weekly business outcomes combined through self-baselines, attribution kept honest, and AI interpretation constrained by evidence and judges without Meta dependency or template fallback.”

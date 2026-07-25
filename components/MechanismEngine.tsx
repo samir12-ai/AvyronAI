@@ -17,6 +17,13 @@ import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useQuery } from '@tanstack/react-query';
 import { useColorScheme } from 'react-native';
 
+interface CausalChainStep {
+  cause: string;
+  impact: string;
+  behavior: string;
+  upstreamSignalRefs?: string[];
+}
+
 interface MechanismOutput {
   mechanismName: string;
   mechanismType: string;
@@ -32,6 +39,12 @@ interface MechanismOutput {
   };
   structuralFrame: string;
   differentiationLink: string;
+  // v2 commercial-reasoning fields
+  whyItWorks?: string;
+  failureModes?: string[];
+  causalChain?: CausalChainStep[];
+  commercialFunction?: { type: string; description: string };
+  upstreamDependency?: { positioningHook: string; differentiationHook: string };
 }
 
 interface Props {
@@ -266,7 +279,152 @@ export default function MechanismEngine({ isActive }: Props) {
             </View>
           )}
 
+          {/* v2: confidence inheritance audit trail */}
+          {(typeof latestData.rawLLMConfidence === 'number' || typeof latestData.inheritedConfidence === 'number') && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="trending-down" size={14} color="#6366F1" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Confidence Inheritance (v2)</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {typeof latestData.rawLLMConfidence === 'number' && (
+                  <View style={[styles.emphasisTag, { backgroundColor: '#9CA3AF15' }]}>
+                    <Text style={styles.emphasisText}>raw {(latestData.rawLLMConfidence * 100).toFixed(0)}%</Text>
+                  </View>
+                )}
+                {typeof latestData.inheritedConfidence === 'number' && (
+                  <View style={[styles.emphasisTag, { backgroundColor: '#F59E0B15' }]}>
+                    <Text style={[styles.emphasisText, { color: '#92400E' }]}>ceiling {(latestData.inheritedConfidence * 100).toFixed(0)}%</Text>
+                  </View>
+                )}
+                {typeof latestData.confidenceScore === 'number' && (
+                  <View style={[styles.emphasisTag, { backgroundColor: '#10B98115' }]}>
+                    <Text style={[styles.emphasisText, { color: '#065F46' }]}>final {(latestData.confidenceScore * 100).toFixed(0)}%</Text>
+                  </View>
+                )}
+                {typeof latestData.confidencePenalty === 'number' && latestData.confidencePenalty > 0 && (
+                  <View style={[styles.emphasisTag, { backgroundColor: '#EF444415' }]}>
+                    <Text style={[styles.emphasisText, { color: '#991B1B' }]}>penalty −{(latestData.confidencePenalty * 100).toFixed(0)}%</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[styles.mechDesc, isDark && styles.textMuted, { marginTop: 6, fontSize: 11 }]}>
+                Mechanism cannot exceed min(positioning, differentiation) confidence + small margin. Penalty surfaces upstream weakness rather than masking it.
+              </Text>
+            </View>
+          )}
+
           {renderMechanismCard(mechanism, 'Primary Mechanism')}
+
+          {/* v2: whyItWorks */}
+          {mechanism.whyItWorks && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="bulb" size={14} color="#F59E0B" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Why It Works (Buyer Psychology)</Text>
+              </View>
+              <Text style={[styles.mechDesc, isDark && styles.textMuted]}>{mechanism.whyItWorks}</Text>
+            </View>
+          )}
+
+          {/* v2: causalChain */}
+          {mechanism.causalChain && mechanism.causalChain.length > 0 && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="git-branch" size={14} color="#8B5CF6" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Causal Chain — Cause → Impact → Behavior</Text>
+              </View>
+              {mechanism.causalChain.map((step, i) => (
+                <View key={i} style={{ marginTop: i === 0 ? 6 : 12, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: '#8B5CF6' }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#8B5CF6', marginBottom: 2 }}>STEP {i + 1}</Text>
+                  <Text style={[styles.mechDesc, isDark && styles.textMuted, { fontSize: 11 }]}>
+                    <Text style={{ fontWeight: '600' }}>Cause:</Text> {step.cause}
+                  </Text>
+                  <Text style={[styles.mechDesc, isDark && styles.textMuted, { fontSize: 11 }]}>
+                    <Text style={{ fontWeight: '600' }}>Impact:</Text> {step.impact}
+                  </Text>
+                  <Text style={[styles.mechDesc, isDark && styles.textMuted, { fontSize: 11 }]}>
+                    <Text style={{ fontWeight: '600' }}>Behavior:</Text> {step.behavior}
+                  </Text>
+                  {step.upstreamSignalRefs && step.upstreamSignalRefs.length > 0 && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                      {step.upstreamSignalRefs.map((ref, ri) => (
+                        <View key={ri} style={[styles.emphasisTag, { backgroundColor: '#8B5CF615' }]}>
+                          <Text style={[styles.emphasisText, { color: '#5B21B6', fontSize: 9 }]}>{ref}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* v2: failureModes */}
+          {mechanism.failureModes && mechanism.failureModes.length > 0 && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="warning" size={14} color="#EF4444" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Failure Modes (When This Mechanism Breaks)</Text>
+              </View>
+              {mechanism.failureModes.map((fm, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: i === 0 ? 6 : 4 }}>
+                  <Ionicons name="close-circle" size={11} color="#EF4444" style={{ marginTop: 2 }} />
+                  <Text style={[styles.mechDesc, isDark && styles.textMuted, { flex: 1, fontSize: 11 }]}>{fm}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* v2: commercialFunction */}
+          {mechanism.commercialFunction && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="briefcase" size={14} color="#06B6D4" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Commercial Function</Text>
+                <View style={[styles.emphasisTag, { backgroundColor: '#06B6D415', marginLeft: 'auto' as any }]}>
+                  <Text style={[styles.emphasisText, { color: '#0E7490' }]}>{mechanism.commercialFunction.type.replace(/_/g, ' ')}</Text>
+                </View>
+              </View>
+              <Text style={[styles.mechDesc, isDark && styles.textMuted]}>{mechanism.commercialFunction.description}</Text>
+            </View>
+          )}
+
+          {/* v2: upstreamDependency */}
+          {mechanism.upstreamDependency && (mechanism.upstreamDependency.positioningHook || mechanism.upstreamDependency.differentiationHook) && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="link" size={14} color="#3B82F6" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Upstream Dependency</Text>
+              </View>
+              {mechanism.upstreamDependency.positioningHook && (
+                <Text style={[styles.mechDesc, isDark && styles.textMuted, { fontSize: 11 }]}>
+                  <Text style={{ fontWeight: '600' }}>Positioning hook:</Text> {mechanism.upstreamDependency.positioningHook}
+                </Text>
+              )}
+              {mechanism.upstreamDependency.differentiationHook && (
+                <Text style={[styles.mechDesc, isDark && styles.textMuted, { fontSize: 11 }]}>
+                  <Text style={{ fontWeight: '600' }}>Differentiation hook:</Text> {mechanism.upstreamDependency.differentiationHook}
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* v2: alternativeMechanisms (audit trail) */}
+          {Array.isArray(latestData.alternativeMechanisms) && latestData.alternativeMechanisms.length > 0 && (
+            <View style={[styles.card, isDark && styles.cardDark]}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="git-merge" size={14} color="#9CA3AF" />
+                <Text style={[styles.cardTitle, isDark && styles.textLight]}>Alternatives Considered (Not Picked)</Text>
+              </View>
+              {latestData.alternativeMechanisms.map((a: any, i: number) => (
+                <View key={i} style={{ marginTop: 4, paddingLeft: 6, borderLeftWidth: 2, borderLeftColor: '#9CA3AF' }}>
+                  <Text style={[styles.cardTitle, isDark && styles.textLight, { fontSize: 12 }]}>{a.name}</Text>
+                  <Text style={[styles.mechDesc, isDark && styles.textMuted, { fontSize: 11, fontStyle: 'italic' }]}>{a.whyAlternative}</Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           {latestData.alternativeMechanism && renderMechanismCard(latestData.alternativeMechanism, 'Alternative Mechanism')}
 

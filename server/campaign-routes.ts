@@ -1,10 +1,13 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs, strategyMemory, userPublicProfiles, userChannelSnapshots } from "@shared/schema";
+import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs, strategyMemory, userPublicProfiles, userChannelSnapshots, growthCampaigns } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode, getManualMetrics } from "./campaign-data-layer";
 
 import { resolveAccountId } from "./auth";
+import { ProductAnchorSchema, parseProductAnchor, deriveAnchorFromProductDna } from "./shared/strategic-doctrine";
+import { loadProductDNA } from "./shared/product-dna";
+import { getOpenEnrichmentRequests, getOpenEnrichmentRequest, markEnrichmentResolved } from "./dna-enrichment/store";
 const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING"] as const;
 
 export function registerCampaignRoutes(app: Express) {
@@ -41,7 +44,7 @@ export function registerCampaignRoutes(app: Express) {
 
   app.post("/api/campaigns/create", async (req, res) => {
     try {
-      const { name, objective, location, platform, notes, dataSourceMode } = req.body;
+      const { name, objective, location, platform, notes, dataSourceMode, productAnchor } = req.body;
       const accountId = resolveAccountId(req);
       const requestId = `crt_${Date.now()}`;
 
@@ -60,6 +63,23 @@ export function registerCampaignRoutes(app: Express) {
       }
       if (!location || !location.trim()) {
         return res.status(400).json({ code: "MISSING_LOCATION", message: "Campaign location is required", requestId });
+      }
+
+      // Phase 0 (AI Proposes / Code Validates): optional per-campaign product
+      // anchor. Validated by the same Zod contract the doctrine layer reads. A
+      // null/absent anchor leaves the run to degrade to business-level doctrine
+      // (never a silent placeholder). An invalid anchor fails loud (D5).
+      let resolvedAnchor: import("./shared/strategic-doctrine").ProductAnchor | null = null;
+      if (productAnchor != null && typeof productAnchor === "object") {
+        const anchorResult = ProductAnchorSchema.safeParse(productAnchor);
+        if (!anchorResult.success) {
+          return res.status(400).json({
+            code: "INVALID_PRODUCT_ANCHOR",
+            message: `Product anchor validation failed: ${anchorResult.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
+            requestId,
+          });
+        }
+        resolvedAnchor = anchorResult.data;
       }
 
       const validModes = ["campaign_metrics", "benchmark"];
@@ -85,6 +105,22 @@ export function registerCampaignRoutes(app: Express) {
 
       const selection = inserted[0];
 
+      // Persist the product anchor onto growth_campaigns keyed by campaignId so
+      // the orchestrator's doctrine-seed can read it (growth_campaigns is the
+      // canonical table every engine keys off `eq(id, campaignId)`; a row is
+      // created here only when an anchor is set). Tenant-safe: the campaignId was
+      // just minted for this account's campaignSelections row above.
+      if (resolvedAnchor) {
+        await db
+          .insert(growthCampaigns)
+          .values({ id: campaignId, name: campaignName, productAnchor: resolvedAnchor })
+          .onConflictDoUpdate({
+            target: growthCampaigns.id,
+            set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
+          });
+        console.log(`[Campaigns] Product anchor set: campaign=${campaignId}`);
+      }
+
       console.log(`[Campaigns] Campaign created: ${campaignName} (${objective}) id=${campaignId} account=${accountId}`);
 
       res.json({
@@ -105,6 +141,246 @@ export function registerCampaignRoutes(app: Express) {
     } catch (error: any) {
       console.error("[Campaigns] Create campaign error:", error);
       res.status(500).json({ code: "CREATE_FAILED", message: "Failed to create campaign", requestId: `crt_err_${Date.now()}` });
+    }
+  });
+
+  // Phase 0 (AI Proposes / Code Validates): read the current product anchor for
+  // an owned campaign so the edit UI can pre-fill. Tenant-scoped — ownership is
+  // proven by the account's own campaign_selections row before growth_campaigns
+  // (which has no accountId) is read (NO-TENANT-LEAK).
+  app.get("/api/campaigns/:campaignId/product-anchor", async (req, res) => {
+    const requestId = `paget_${Date.now()}`;
+    try {
+      const accountId = resolveAccountId(req);
+      const { campaignId } = req.params;
+
+      const [owned] = await db
+        .select({ name: campaignSelections.selectedCampaignName })
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId),
+          ),
+        )
+        .limit(1);
+      if (!owned) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found for this account", requestId });
+      }
+
+      const [row] = await db
+        .select({ productAnchor: growthCampaigns.productAnchor })
+        .from(growthCampaigns)
+        .where(eq(growthCampaigns.id, campaignId))
+        .limit(1);
+
+      res.json({ productAnchor: parseProductAnchor(row?.productAnchor ?? null), requestId });
+    } catch (error: any) {
+      console.error("[Campaigns] Get product anchor error:", error);
+      res.status(500).json({ code: "ANCHOR_GET_FAILED", message: "Failed to fetch product anchor", requestId });
+    }
+  });
+
+  // Set/edit/clear the product anchor for an owned campaign. Editing the anchor
+  // changes the doctrine hash salt, so cached engine snapshots for this campaign
+  // are invalidated on the next run. `productAnchor: null` explicitly clears it
+  // (degrade to business-level doctrine) — never a silent substitution (D5).
+  app.put("/api/campaigns/:campaignId/product-anchor", async (req, res) => {
+    const requestId = `paput_${Date.now()}`;
+    try {
+      const accountId = resolveAccountId(req);
+      const { campaignId } = req.params;
+      const { productAnchor } = req.body;
+
+      const [owned] = await db
+        .select({ name: campaignSelections.selectedCampaignName })
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId),
+          ),
+        )
+        .limit(1);
+      if (!owned) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found for this account", requestId });
+      }
+
+      // Explicit clear.
+      if (productAnchor === null) {
+        await db
+          .update(growthCampaigns)
+          .set({ productAnchor: null, updatedAt: new Date() })
+          .where(eq(growthCampaigns.id, campaignId));
+        console.log(`[Campaigns] Product anchor cleared: campaign=${campaignId} account=${accountId}`);
+        return res.json({ success: true, productAnchor: null, requestId });
+      }
+
+      if (productAnchor == null || typeof productAnchor !== "object") {
+        return res.status(400).json({ code: "MISSING_PRODUCT_ANCHOR", message: "Provide a productAnchor object to set, or null to clear", requestId });
+      }
+
+      const anchorResult = ProductAnchorSchema.safeParse(productAnchor);
+      if (!anchorResult.success) {
+        return res.status(400).json({
+          code: "INVALID_PRODUCT_ANCHOR",
+          message: `Product anchor validation failed: ${anchorResult.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
+          requestId,
+        });
+      }
+      const resolvedAnchor = anchorResult.data;
+
+      await db
+        .insert(growthCampaigns)
+        .values({ id: campaignId, name: owned.name, productAnchor: resolvedAnchor })
+        .onConflictDoUpdate({
+          target: growthCampaigns.id,
+          set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
+        });
+      console.log(`[Campaigns] Product anchor updated: campaign=${campaignId} account=${accountId}`);
+
+      res.json({ success: true, productAnchor: resolvedAnchor, requestId });
+    } catch (error: any) {
+      console.error("[Campaigns] Update product anchor error:", error);
+      res.status(500).json({ code: "ANCHOR_UPDATE_FAILED", message: "Failed to update product anchor", requestId });
+    }
+  });
+
+  // ── DNA Enrichment Gate (Path B) — operator surface ──
+  // When the Positioning/Offer interchangeability judge keeps rejecting a generic,
+  // reused strategy because the Product DNA carries no proprietary differentiator,
+  // the orchestrator raises an open dna_enrichment_requests row. These two routes
+  // let the campaign owner see the grounded suggestion and confirm/edit the
+  // differentiator, which is written durably onto the product anchor so the
+  // UNCHANGED judge can re-pass on the next run (candidate-only, no bypass).
+  //
+  // Tenant isolation: ownership proven via the account's own campaign_selections
+  // row BEFORE any growth_campaigns / dna_enrichment_requests access (NO-TENANT-LEAK).
+  app.get("/api/dna-enrichment/pending", async (req, res) => {
+    const requestId = `dnapend_${Date.now()}`;
+    try {
+      const accountId = resolveAccountId(req);
+      const campaignId = typeof req.query.campaignId === "string" ? req.query.campaignId : "";
+      if (!campaignId) {
+        return res.status(400).json({ code: "MISSING_CAMPAIGN", message: "campaignId query param is required", requestId });
+      }
+
+      const [owned] = await db
+        .select({ name: campaignSelections.selectedCampaignName })
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId),
+          ),
+        )
+        .limit(1);
+      if (!owned) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found for this account", requestId });
+      }
+
+      const open = await getOpenEnrichmentRequests(campaignId);
+      // Customer-safe projection — no internal row ids, accountId, or status strings.
+      const requests = open.map((r) => ({
+        engineKind: r.engineKind,
+        suggestionText: r.suggestionText,
+        candidateDifferentiator: r.candidateDifferentiator,
+        groundingRefs: r.groundingRefs,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+      res.json({ success: true, requests, requestId });
+    } catch (error: any) {
+      console.error("[DnaEnrichment] Pending fetch error:", error);
+      res.status(500).json({ code: "DNA_PENDING_FAILED", message: "Failed to fetch pending DNA enrichment requests", requestId });
+    }
+  });
+
+  app.post("/api/dna-enrichment/resolve", async (req, res) => {
+    const requestId = `dnares_${Date.now()}`;
+    try {
+      const accountId = resolveAccountId(req);
+      const { campaignId, engineKind, differentiatingFeature } = req.body;
+
+      if (!campaignId || typeof campaignId !== "string") {
+        return res.status(400).json({ code: "MISSING_CAMPAIGN", message: "campaignId is required", requestId });
+      }
+      if (engineKind !== "positioning_claim" && engineKind !== "offer") {
+        return res.status(400).json({ code: "INVALID_ENGINE_KIND", message: "engineKind must be 'positioning_claim' or 'offer'", requestId });
+      }
+      if (typeof differentiatingFeature !== "string" || differentiatingFeature.trim().length === 0) {
+        return res.status(400).json({ code: "MISSING_DIFFERENTIATOR", message: "differentiatingFeature is required", requestId });
+      }
+      const confirmed = differentiatingFeature.trim();
+
+      const [owned] = await db
+        .select({ name: campaignSelections.selectedCampaignName })
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId),
+          ),
+        )
+        .limit(1);
+      if (!owned) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found for this account", requestId });
+      }
+
+      // Fail-closed: there MUST be a live open request. Never silently mint/patch
+      // a product anchor without an active enrichment prompt for this engine.
+      const open = await getOpenEnrichmentRequest({ campaignId, engineKind });
+      if (!open) {
+        return res.status(404).json({ code: "NO_OPEN_REQUEST", message: "No open DNA enrichment request for this campaign and engine", requestId });
+      }
+
+      // Load the current anchor; if absent, derive a base from Product DNA (F5a).
+      // The operator-confirmed differentiator overrides differentiatingFeature.
+      const [row] = await db
+        .select({ productAnchor: growthCampaigns.productAnchor })
+        .from(growthCampaigns)
+        .where(eq(growthCampaigns.id, campaignId))
+        .limit(1);
+      let baseAnchor = parseProductAnchor(row?.productAnchor ?? null);
+      if (!baseAnchor) {
+        const dna = await loadProductDNA(campaignId, accountId);
+        baseAnchor = deriveAnchorFromProductDna(dna);
+      }
+      if (!baseAnchor) {
+        // D5 — never fabricate name/type/coreProblemSolved. Require a full anchor first.
+        return res.status(409).json({
+          code: "ANCHOR_INCOMPLETE",
+          message: "No product anchor exists and Product DNA is insufficient to derive one. Set a full product anchor (name, type, core problem) before confirming a differentiator.",
+          requestId,
+        });
+      }
+
+      const nextAnchor = { ...baseAnchor, differentiatingFeature: confirmed };
+      const anchorResult = ProductAnchorSchema.safeParse(nextAnchor);
+      if (!anchorResult.success) {
+        return res.status(400).json({
+          code: "INVALID_PRODUCT_ANCHOR",
+          message: `Product anchor validation failed: ${anchorResult.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
+          requestId,
+        });
+      }
+      const resolvedAnchor = anchorResult.data;
+
+      await db
+        .insert(growthCampaigns)
+        .values({ id: campaignId, name: owned.name, productAnchor: resolvedAnchor })
+        .onConflictDoUpdate({
+          target: growthCampaigns.id,
+          set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
+        });
+
+      await markEnrichmentResolved({ campaignId, engineKind });
+      console.log(`[DnaEnrichment] RESOLVED | campaign=${campaignId} | engine=${engineKind} | account=${accountId}`);
+
+      res.json({ success: true, productAnchor: resolvedAnchor, requestId });
+    } catch (error: any) {
+      console.error("[DnaEnrichment] Resolve error:", error);
+      res.status(500).json({ code: "DNA_RESOLVE_FAILED", message: "Failed to resolve DNA enrichment request", requestId });
     }
   });
 
@@ -159,6 +435,18 @@ export function registerCampaignRoutes(app: Express) {
           .returning();
         selection = updated[0];
       } else {
+        // NO-TENANT-LEAK: refuse to claim a campaignId already owned by a
+        // DIFFERENT account. Without this, an account could mint an ownership
+        // row for a foreign campaignId and then overwrite that campaign's
+        // shared growth_campaigns product anchor via PUT /product-anchor.
+        const claimedByOther = await db
+          .select({ ownerAccountId: campaignSelections.accountId })
+          .from(campaignSelections)
+          .where(eq(campaignSelections.selectedCampaignId, campaignId))
+          .limit(1);
+        if (claimedByOther.length > 0 && claimedByOther[0].ownerAccountId !== accountId) {
+          return res.status(409).json({ code: "CAMPAIGN_ID_CLAIMED", message: "This campaign belongs to another account", requestId });
+        }
         const inserted = await db
           .insert(campaignSelections)
           .values({
@@ -314,7 +602,24 @@ export function registerCampaignRoutes(app: Express) {
       const campaignContext = (req as any).campaignContext;
       const accountId = resolveAccountId(req);
       const dashboardMetrics = await getDashboardMetrics(campaignContext.campaignId, accountId);
-      res.json({ success: true, ...dashboardMetrics, campaign: campaignContext });
+
+      // D2/D3 — additive projection fields for Diagnose/Monitor consumers.
+      // dataSource ∈ {META|MANUAL|PLAN|NONE} is the canonical truth — derive validationState from it.
+      let validationState: "validated" | "provisional" | "weak" | "rejected" | "unknown" = "unknown";
+      if (dashboardMetrics.dataSource === "META") validationState = "validated";
+      else if (dashboardMetrics.dataSource === "MANUAL") validationState = "provisional";
+      else if (dashboardMetrics.dataSource === "PLAN") validationState = "provisional";
+      else if (dashboardMetrics.dataSource === "NONE") validationState = "weak";
+      const signalOrigin: "real" | "inferred" | "fallback" | "unknown" =
+        dashboardMetrics.dataSource === "META" ? "real" :
+        dashboardMetrics.dataSource === "MANUAL" ? "real" :
+        dashboardMetrics.dataSource === "PLAN" ? "inferred" :
+        dashboardMetrics.dataSource === "NONE" ? "unknown" : "unknown";
+      const degraded = (dashboardMetrics.dataSource === "NONE" || dashboardMetrics.dataSource === "PLAN")
+        ? { flag: true as const, reason: dashboardMetrics.dataSource === "NONE" ? "No revenue data connected" : "Metrics derived from plan, not measured outcomes", source: "data_quality", signalOrigin }
+        : null;
+
+      res.json({ success: true, ...dashboardMetrics, validationState, signalOrigin, degraded, campaign: campaignContext });
     } catch (error: any) {
       console.error("[Dashboard] Metrics error:", error);
       res.status(500).json({ code: "DASHBOARD_FAILED", message: "Failed to fetch dashboard metrics", requestId: `dash_${Date.now()}` });
@@ -1041,9 +1346,32 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
           )
         )
         .limit(1);
-    }
 
-    if (!selections || selections.length === 0) {
+      // W0-T1 (launch-closure): close silent-substitution gap. Previously, when a
+      // caller supplied a campaignId that did NOT belong to their account, the
+      // ownership filter returned 0 rows and we silently fell through to
+      // "select most-recent for this account" — caller got a DIFFERENT campaign
+      // than requested with no error, and any cross-tenant probing was invisible
+      // in logs.
+      // W5 (cleanup): normalize denial response to 404 CAMPAIGN_NOT_FOUND to
+      // match `assertCampaignBelongsTo` (server/auth-helpers.ts) — anti-
+      // enumeration policy: never confirm to a non-owner that a campaign id
+      // exists. The structured WARN log is preserved (with the original
+      // OWNERSHIP_REJECTED tag) so cross-tenant probing remains observable in
+      // production logs even though the public response is intentionally
+      // generic. The "no campaignId requested → load latest" convenience path
+      // (used by dashboard widgets) is preserved below.
+      if (selections.length === 0) {
+        console.warn(
+          `[Campaigns] CAMPAIGN_OWNERSHIP_REJECTED | accountId=${accountId} | requestedCampaignId=${requestedCampaignId} | path=${req.path}`
+        );
+        return res.status(404).json({
+          code: "CAMPAIGN_NOT_FOUND",
+          message: "Campaign not found.",
+          requestId: `mw_owned_${Date.now()}`,
+        });
+      }
+    } else {
       selections = await db
         .select()
         .from(campaignSelections)
@@ -1092,7 +1420,25 @@ export async function requireCampaign(req: Request, res: Response, next: NextFun
 
     next();
   } catch (error: any) {
-    console.error("[Campaigns] Middleware error:", error);
-    return res.status(500).json({ code: "MIDDLEWARE_FAILED", message: "Failed to validate campaign context", requestId: `mw_err_${Date.now()}` });
+    // W0-T1 (launch-closure): preserve auth-context errors at their declared
+    // status. Previously every thrown error became 500 MIDDLEWARE_FAILED, which
+    // hid AuthConfigurationError (401, "no account context") behind a generic
+    // server-error and falsely suggested an outage when the real cause was a
+    // missing/expired session. Honor the declared `status` field on the error
+    // when present (AuthConfigurationError sets status=401), fall back to 500
+    // for anything else.
+    const status = typeof error?.status === "number" ? error.status : 500;
+    if (status === 500) {
+      console.error("[Campaigns] Middleware error:", error);
+    } else {
+      console.warn(`[Campaigns] Middleware ${status} | ${error?.name || "Error"}: ${error?.message || ""}`);
+    }
+    return res.status(status).json({
+      code: status === 401 ? "AUTH_REQUIRED" : "MIDDLEWARE_FAILED",
+      message: status === 401
+        ? (error?.message || "Authentication required.")
+        : "Failed to validate campaign context",
+      requestId: `mw_err_${Date.now()}`,
+    });
   }
 }

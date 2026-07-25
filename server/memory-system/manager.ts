@@ -1,6 +1,8 @@
 import { db } from "../db";
 import { strategyMemory } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { NON_STRATEGIC_MEMORY_TYPES } from "../decision-policy";
+const NON_STRATEGIC_MEMORY_TYPES_SET = new Set<string>(NON_STRATEGIC_MEMORY_TYPES);
 import type {
   MemoryBlock,
   MemorySlot,
@@ -120,6 +122,12 @@ export async function loadMemoryBlock(
   bizData?: { funnelObjective?: string; businessType?: string; monthlyBudget?: string } | null,
   memoryContext?: MemoryContext | null,
 ): Promise<MemoryBlock> {
+  // Task #65 / Phase 2 step 7 — confidence-banded reader. Pre-#65 the query
+  // was `ORDER BY updated_at DESC LIMIT 100`, which let a flurry of recent
+  // low-confidence writes displace older high-confidence facts (the
+  // strategic memory equivalent of cache pollution). The new ordering pulls
+  // by confidence first (high → low) so high-conf facts are never evicted
+  // by recency alone; updated_at remains a deterministic tiebreaker.
   const rows = await db
     .select()
     .from(strategyMemory)
@@ -129,7 +137,7 @@ export async function loadMemoryBlock(
         eq(strategyMemory.campaignId, campaignId),
       )
     )
-    .orderBy(desc(strategyMemory.updatedAt))
+    .orderBy(desc(strategyMemory.confidenceScore), desc(strategyMemory.updatedAt))
     .limit(100);
 
   const ctx: MemoryContext = memoryContext ?? {
@@ -143,17 +151,58 @@ export async function loadMemoryBlock(
   const reinforceSlots: MemorySlot[] = [];
   const avoidSlots: MemorySlot[] = [];
   const pendingSlots: MemorySlot[] = [];
+
+  // Task #64 / Phase 1 — rhythmSlot now sourced from engine_operational_state.
+  // Build a MemorySlot-shaped projection so downstream code (renderMemoryBlock)
+  // requires no change. Failure to read the operational store is logged
+  // (Seal #15 silent-degradation rules — no bare catch on a trusted read).
   let rhythmSlot: MemorySlot | null = null;
+  try {
+    const { getOperationalState } = await import("./operational-state-store");
+    const rhythmState = await getOperationalState(accountId, campaignId, "content_rhythm");
+    if (rhythmState) {
+      const payloadStr =
+        typeof rhythmState.payload === "string"
+          ? rhythmState.payload
+          : JSON.stringify(rhythmState.payload);
+      rhythmSlot = {
+        id: rhythmState.id,
+        accountId: rhythmState.accountId,
+        campaignId: rhythmState.campaignId,
+        memoryType: "content_rhythm",
+        engineName: rhythmState.engineName,
+        label: rhythmState.label,
+        details: payloadStr,
+        performance: rhythmState.rationale ?? null,
+        score: rhythmState.confidenceScore ?? 0.5,
+        confidenceScore: rhythmState.confidenceScore ?? 0.5,
+        direction: "neutral",
+        isWinner: false,
+        usageCount: 0,
+        planId: null,
+        strategyFingerprint: null,
+        lastValidatedAt: rhythmState.updatedAt ?? null,
+        decayRate: 1.0,
+        validationCount: 0,
+        industry: null,
+        platform: null,
+        campaignType: null,
+        funnelObjective: null,
+        updatedAt: rhythmState.updatedAt ?? null,
+        createdAt: rhythmState.createdAt ?? null,
+      };
+    }
+  } catch (err: any) {
+    console.error(
+      `[MemoryManager] OPERATIONAL_RHYTHM_READ_FAILED | account=${accountId} campaign=${campaignId} ` +
+      `err="${err?.message ?? String(err)}" — falling back to null rhythmSlot`,
+    );
+  }
 
   for (const row of rows) {
     const slot = rowToSlot(row);
 
-    if (slot.memoryType === "content_rhythm") {
-      if (!rhythmSlot || (slot.updatedAt && rhythmSlot.updatedAt && slot.updatedAt > rhythmSlot.updatedAt)) {
-        rhythmSlot = slot;
-      }
-      continue;
-    }
+    if (NON_STRATEGIC_MEMORY_TYPES_SET.has(slot.memoryType as any)) continue;
 
     if (!contextMatches(slot, ctx)) continue;
 

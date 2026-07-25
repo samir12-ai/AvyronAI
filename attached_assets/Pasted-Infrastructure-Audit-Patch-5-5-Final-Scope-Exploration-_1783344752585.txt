@@ -1,0 +1,54 @@
+Infrastructure Audit — Patch 5/5 (Final)
+Scope: Exploration Budget + Gates + SQL Migrations + HTML Templates (30 files)
+Note: SQL migration files (server/migrations/sql/ — 21 files) and HTML 
+templates (server/templates/ — 5 files) can be batch-audited. Focus 
+the detailed per-file audit on the logic files.
+
+Files to audit:
+
+GROUP 1 — Exploration Budget (all files in server/exploration-budget/):
+List and audit each file individually.
+
+GROUP 2 — Gates (all files in server/gates/):
+List and audit each file individually.
+
+GROUP 3 — SQL Migrations (server/migrations/sql/ — 21 files):
+Batch audit — check for:
+- Hardcoded emails, passwords, UUIDs, or API keys in seed data
+- Raw SQL that could be injection-vulnerable if ever templated
+- Irreversible operations (DROP TABLE, DELETE) without documented intent
+
+GROUP 4 — HTML Templates (server/templates/ — 5 files):
+Batch audit — check for:
+- Hardcoded internal URLs, API keys, or secrets in templates
+- XSS vectors (unescaped user data rendered in templates)
+- Sensitive data rendered server-side that shouldn't be in HTML
+
+Risk categories to check for Groups 1 and 2:
+
+1. AUTH & ROUTE PROTECTION
+   - Do exploration-budget routes require authentication?
+   - Do gates routes require authentication and campaign ownership?
+   - Can unauthenticated users query or modify budget/gate state?
+
+2. TENANT ISOLATION
+   - Do all DB queries scope by accountId + campaignId?
+   - Can budget decisions from one account affect another?
+
+3. BUSINESS LOGIC SAFETY
+   - Does the exploration-budget enforce hard spending limits?
+   - Can the budget be exceeded through concurrent requests?
+   - Do gates correctly block progression when conditions aren't met?
+
+4. ERROR DISCLOSURE & SILENT FAILURES
+   - Do catch blocks return raw err.message to the client?
+   - Are budget calculation failures logged or silently defaulted?
+
+Please provide:
+A) Per-file verdict table for Groups 1 and 2
+B) Single batch verdict for Groups 3 and 4
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Can exploration budget limits be bypassed through concurrent 
+       requests or missing validation?
+   Q2: Do HTML templates safely escape user data before rendering?

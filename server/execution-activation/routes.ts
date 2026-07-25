@@ -1,7 +1,10 @@
 import type { Express, Request, Response } from "express";
 import { activateExecution, getActivationStatus } from "./engine";
+import { resolveAccountId } from "../auth";
+import { assertPlanBelongsTo, handleOwnershipError } from "../auth-helpers";
 
 function handleError(res: Response, err: any) {
+  if (handleOwnershipError(err, res)) return;
   if (err.message === "PLAN_NOT_FOUND") {
     return res.status(404).json({ success: false, error: "PLAN_NOT_FOUND", message: "Plan not found" });
   }
@@ -12,6 +15,8 @@ export function registerExecutionActivationRoutes(app: Express) {
   app.get("/api/execution-activation/status/:planId", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const accountId = resolveAccountId(req);
+      await assertPlanBelongsTo(accountId, planId);
       const status = await getActivationStatus(planId);
       res.json({ success: true, ...status });
     } catch (err: any) {
@@ -22,6 +27,8 @@ export function registerExecutionActivationRoutes(app: Express) {
   app.post("/api/execution-activation/activate/:planId", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const accountId = resolveAccountId(req);
+      await assertPlanBelongsTo(accountId, planId);
       const result = await activateExecution(planId);
 
       const errorStatusMap: Record<string, number> = {
@@ -46,6 +53,8 @@ export function registerExecutionActivationRoutes(app: Express) {
   app.post("/api/execution-activation/retry/:planId", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const accountId = resolveAccountId(req);
+      await assertPlanBelongsTo(accountId, planId);
       const status = await getActivationStatus(planId);
 
       if (status.executionStatus !== "ACTIVATION_FAILED" && status.executionStatus !== "FAILED") {
@@ -66,6 +75,8 @@ export function registerExecutionActivationRoutes(app: Express) {
   app.get("/api/execution-activation/content-queue/:planId", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const accountId = resolveAccountId(req);
+      await assertPlanBelongsTo(accountId, planId);
       const status = await getActivationStatus(planId);
 
       if (!status.contentQueue) {
@@ -90,6 +101,8 @@ export function registerExecutionActivationRoutes(app: Express) {
   app.post("/api/execution-activation/validate-funnel/:planId", async (req: Request, res: Response) => {
     try {
       const { planId } = req.params;
+      const accountId = resolveAccountId(req);
+      await assertPlanBelongsTo(accountId, planId);
       const status = await getActivationStatus(planId);
 
       if (!status.funnelFeeding) {

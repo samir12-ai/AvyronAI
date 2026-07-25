@@ -1,0 +1,117 @@
+Subject: Continuity Module Audit — Please Export 25 Files as ZIP
+
+Hi,
+
+The Security and Intelligence audits are complete. Next I want to audit the CONTINUITY module — the layer responsible for keeping operations running and never failing silently.
+
+Please export the following 25 files as a single ZIP archive for a line-by-line audit.
+
+---
+
+FILES TO EXPORT (25 files):
+
+Core Continuity:
+1. server/continuity/scheduler.ts
+2. server/continuity/supervisor.ts
+3. server/continuity/health-classifier.ts
+4. server/continuity/chain-registry.ts
+5. server/continuity/metrics.ts
+6. server/continuity/index.ts
+
+Workers & Concurrency:
+7. server/boss/concurrency.ts
+8. server/autonomous-worker.ts
+9. server/snapshot-cleanup-worker.ts
+10. server/publish-worker.ts
+11. server/publish-pipeline.ts
+
+Pipeline Locks & Runs:
+12. server/pipeline/eval-windows.ts
+13. server/pipeline/run-lock.ts
+14. server/pipeline/runs.ts
+
+Outcome & Operations:
+15. server/outcome-tracker.ts
+16. server/operations-guardian/interpreter.ts
+17. server/operations-guardian/ai-pressure-stats.ts
+18. server/operations-guardian/types.ts
+
+Early Warning:
+19. server/monitor/early-warning/audience-fatigue-accessor.ts
+20. server/monitor/early-warning/routes.ts
+21. server/monitor/early-warning/shape.ts
+22. server/monitor/early-warning/trajectory-severity.ts
+
+Frontend:
+23. hooks/useContinuityPanel.ts
+24. hooks/useOperationsPanel.ts
+25. app/audit-control.tsx
+
+---
+
+AUDIT INSTRUCTIONS:
+
+Do a thorough line-by-line review of each file (read every line, NOT a keyword scan). Focus on these continuity-specific risks:
+
+1. SILENT FAILURE
+   - Are there any empty catch blocks `catch {}` or `.catch(() => [])` that swallow errors without logging?
+   - If a scheduled job, worker, or cycle fails, does anyone get notified, or does it die silently?
+   - Are failures logged with a structured tag (e.g. console.error with a context label)?
+
+2. ZOMBIE / STUCK STATE
+   - If a worker crashes mid-run, does it leave records stuck in a "running" / "in-progress" state forever?
+   - Is there try/catch/finally that guarantees a job is always finalized (success OR failure)?
+   - Is there dead-cycle detection (a job that never completes)?
+
+3. LOCKS & CONCURRENCY
+   - Are run-locks released correctly even when an exception is thrown?
+   - Can two workers grab the same job at once (race condition)?
+   - Are locks held too long (blocking other runs)?
+
+4. RETRY LOGIC
+   - Are partial/failed cycles retried correctly?
+   - Is there an infinite-retry risk (a job that keeps failing and retrying forever)?
+   - Is there a max-retry ceiling?
+
+5. GRACEFUL SHUTDOWN
+   - Are all timers and intervals tracked and cleared on SIGTERM?
+   - Does an in-flight job get a chance to finish or roll back on shutdown?
+
+6. UNBOUNDED QUERIES
+   - Any DB query without a `.limit()` that could load a huge table into memory?
+
+7. ERROR DISCLOSURE (routes only)
+   - Does early-warning/routes.ts return raw `err.message` to the client?
+
+---
+
+OUTPUT FORMAT:
+
+For each file:
+
+## [Filename]
+**Verdict:** PASS / FAIL
+**Lines reviewed:** [total]
+
+### Issues found:
+| ID | Severity | Line | Description | Fix |
+|----|----------|------|-------------|-----|
+
+(If clean: "No issues found.")
+
+Severity:
+- CRITICAL — blocks launch or causes data loss / stuck operations
+- HIGH — important before launch
+- MEDIUM — fix after launch
+- LOW — minor / future note
+
+---
+
+After all files, a SUMMARY TABLE:
+
+| File | Verdict | Critical | High | Medium | Low |
+|------|---------|----------|------|--------|-----|
+
+Plus the top 3 most urgent fixes, and explicitly confirm whether any worker or scheduler can leave a job stuck in a "running" state on crash (this was a known issue in the Boss module — issue B1 — and I want to know if the same pattern exists here).
+
+Thank you.

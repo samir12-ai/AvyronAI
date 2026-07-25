@@ -1,0 +1,154 @@
+:::writing{variant=“email” id=“76142” subject=“Audience Engine Reliability + Multi-Source Plan + Full System Validation”}
+Hi Replit Team,
+
+Thanks for the detailed breakdown — it clarified a lot. Before we proceed, we want to move forward in a structured way that prioritizes reliability, not just feature expansion.
+
+Please review the following plan and confirm based on the current codebase what already exists vs. what needs to be implemented.
+
+⸻
+
+1. Priority: Audience Engine Reliability (Before Expanding Sources)
+
+We do NOT want to expand data sources until the current engine is fully stable and trustworthy.
+
+Required adjustments:
+
+A. Comment Quality Weighting
+	•	Currently all comments are treated equally (emoji vs long-form)
+	•	We need a pre-processing layer to:
+	•	filter low-signal comments (emoji, generic praise)
+	•	weight longer / structured comments higher
+
+👉 Question:
+Where is the best insertion point? (before matchPatternClusters()?)
+
+⸻
+
+B. Per-Source Signal Recurrence (Not Just Frequency)
+We want signals to strengthen based on:
+	•	appearing across multiple sources (comments, captions, website)
+
+Not just:
+	•	raw frequency
+
+👉 Question:
+Can matchPatternClusters() be extended to track source labels per match and pass that into computeCalibratedConfidence()?
+
+⸻
+
+C. Bridge Suppression (Critical)
+Currently the Semantic Bridge activates automatically.
+
+We want:
+	•	If primary data confidence is strong → DO NOT activate bridge
+	•	Only use bridge when signal is weak
+
+👉 Question:
+Can we add a gate before bridge activation using existing confidence scoring?
+
+⸻
+
+2. Multi-Source Competitor Model (Controlled Expansion)
+
+We want to move toward:
+
+One competitor → multiple sources
+
+Example:
+	•	Instagram (primary)
+	•	Website (existing)
+	•	Blog (existing)
+	•	TikTok (new)
+	•	Reviews (new)
+
+We DO NOT want to break the current structure.
+
+Proposed direction:
+	•	Extend existing competitor_web_data model with new sourceType values
+	•	Avoid modifying core ci_competitors structure heavily
+
+👉 Questions:
+	•	Is extending competitor_web_data the safest path?
+	•	Or do we need a dedicated competitor_sources table?
+
+⸻
+
+3. TikTok + Reviews (Next Phase — Not Immediate)
+
+We will NOT implement these immediately.
+
+First we need:
+	•	stable engine logic
+	•	proper weighting
+	•	correct signal aggregation
+
+Then we introduce:
+	•	TikTok (content performance validation)
+	•	Reviews (direct audience pain)
+
+👉 Confirm:
+	•	Best insertion point for ingestion (DEEP_PASS router?)
+
+⸻
+
+4. Acceptance Criteria (CRITICAL — Must Be Verified)
+
+This is extremely important for us.
+
+We are facing issues where features appear to work but break under real usage.
+
+We need FULL validation across:
+
+Backend:
+	•	No silent failures in scraping / ingestion
+	•	No inconsistent signal generation across runs
+	•	No partial data states (e.g. missing sources breaking flow)
+	•	Proper fallback handling (no crashes)
+
+Frontend:
+	•	Competitor input flow works cleanly (no confusion, no broken states)
+	•	All maps render correctly across:
+	•	low data
+	•	high data
+	•	No UI inconsistencies when data sources vary
+	•	Stable behavior across refresh / re-entry
+
+Under Load:
+	•	Scraping does not block or stall
+	•	No system-wide failure if one source fails
+	•	Proxy / pool handling remains stable
+	•	No timeouts breaking user flow
+
+⸻
+
+5. What We Need From You
+
+Please respond based on the codebase:
+	1.	Which parts of Section 1 already exist partially?
+	2.	What is the safest way to implement:
+	•	weighting
+	•	recurrence logic
+	•	bridge suppression
+	3.	Confirm correct schema direction for multi-source competitors
+	4.	Identify any risks we are not seeing
+	5.	Confirm how we can properly test:
+	•	end-to-end reliability
+	•	front-end/back-end consistency
+	•	behavior under load
+
+⸻
+
+Goal
+
+We are NOT optimizing for more data.
+
+We are optimizing for:
+
+consistent, reliable decision output under real-world conditions
+
+⸻
+
+Thanks,
+Samir
+Avyron AI
+:::

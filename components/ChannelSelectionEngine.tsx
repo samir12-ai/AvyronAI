@@ -13,6 +13,8 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
 
 interface LayerResult {
@@ -153,6 +155,7 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
   const [data, setData] = useState<ChannelSelectionData | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
@@ -172,6 +175,7 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
       }
       const json = await safeApiJson(res);
       const r = json.result || {};
+      setEnvelope(json?.envelope ?? null);
       setData({
         exists: true,
         id: json.snapshotId,
@@ -553,6 +557,12 @@ export default function ChannelSelectionEngine({ isActive }: { isActive?: boolea
           </View>
         )}
       </LinearGradient>
+
+      {envelope && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={runAnalysis} />
+        </View>
+      )}
 
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>

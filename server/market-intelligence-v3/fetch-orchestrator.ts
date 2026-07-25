@@ -10,7 +10,7 @@ import { computeConfidence } from "./confidence-engine";
 import { computeAllDominance } from "./dominance-module";
 import { computeTokenBudget, applySampling } from "./token-budget";
 import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
-import { computeCompetitorHash } from "./utils";
+import { computeCompetitorHash, computeCompetitorContentHash } from "./utils";
 import { computeVolatilityIndex, buildMarketDiagnosis, buildThreatSignals, buildOpportunitySignals, buildMarketSummary, computeSignalNoiseRatio, computeEvidenceCoverage, persistValidatedSnapshot, ENGINE_VERSION, computeDataFreshnessDays } from "./engine";
 import { MI_THRESHOLDS, MI_CONFIDENCE, INSTAGRAM_API_CEILING } from "./constants";
 import { computeAllContentDNA } from "./content-dna";
@@ -23,12 +23,21 @@ import { applyQualityGate, filterClustersByQuality } from "../shared/signal-qual
 import { logAudit } from "../audit";
 import { acquireStickySession, releaseStickySession, rotateSessionOnBlock, classifyBlock, logProxyTelemetry, getPoolDiagnostics, type StickySessionContext, type BlockClass } from "../competitive-intelligence/proxy-pool-manager";
 import { acquireToken, getBucketState } from "../competitive-intelligence/rate-limiter";
+import { evaluateScrapeAdmission } from "./scrape-volume-cap";
 
 const INCREMENTAL_WINDOW_DAYS = 7;
 
 function safeParseJson(val: string | null | undefined, fallback: any): any {
   if (!val) return fallback;
   try { return JSON.parse(val); } catch { return fallback; }
+}
+
+function _noteAuditWriteFailure(eventName: string, err: unknown): void {
+  console.error(
+    `[MIv3] AUDIT_WRITE_FAILED component=fetch-orchestrator event=${eventName} err=${
+      (err as Error)?.message || String(err)
+    }`,
+  );
 }
 
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
@@ -46,6 +55,21 @@ export const MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT = 1;
 const STAGGER_DELAY_MS = 5000;
 
 const lastJobStartByAccount = new Map<string, number>();
+
+/**
+ * Phase 7 hardening (May 2026): bounded growth of the per-account
+ * stagger-tracking Map. Without periodic eviction, every account that
+ * ever started a fetch job leaves a permanent entry, accumulating
+ * indefinitely on long-running processes. We evict entries older than
+ * 24h on every accessor call (cheap, no timer needed).
+ */
+const ACCOUNT_STAGGER_TTL_MS = 24 * 60 * 60 * 1000;
+function pruneStaleAccountStaggerEntries(now: number = Date.now()): void {
+  const cutoff = now - ACCOUNT_STAGGER_TTL_MS;
+  for (const [accountId, ts] of lastJobStartByAccount) {
+    if (ts < cutoff) lastJobStartByAccount.delete(accountId);
+  }
+}
 
 type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_REACHED" | "COMPLETE" | "ERROR" | "ALL_FAILED" | "COOLDOWN_ACTIVE";
 
@@ -91,6 +115,20 @@ interface FetchJobDiagnostics {
   rateLimitEvents: number;
   perCompetitorStatus: { name: string; fetchStatus: CompetitorFetchStatus; requestsUsed: number; postsCollected: number; commentsCollected: number }[];
   perCompetitorRequestCap: number;
+  /**
+   * 2026-07 Unlocker rebuild — transport truthfulness summary (B1/B4).
+   * `SUSPECT_ZERO_YIELD` = at least one competitor fetch SUCCEEDED at the
+   * transport level yet the whole job yielded ZERO posts. With the Unlocker
+   * API that pattern usually means the zone is serving challenge/empty pages
+   * (a silent-block), NOT that every profile is genuinely empty — operators
+   * must treat it as a scraping-health incident, never as market signal.
+   */
+  transport: {
+    requests: number;
+    successes: number;
+    failures: number;
+    outcome: "OK" | "SUSPECT_ZERO_YIELD";
+  };
 }
 
 export function computeDynamicBudgets(competitorCount: number): { requestBudget: number; runtimeBudget: number } {
@@ -143,7 +181,107 @@ export interface FetchJobStatus {
   diagnostics?: FetchJobDiagnostics;
 }
 
-const activeJobs = new Map<string, Promise<void>>();
+/**
+ * Seal #16 / F1 — activeJobs zombie-watchdog.
+ *
+ * Mirrors `server/boss/concurrency.ts`. Pre-Seal #16 the Map stored a bare
+ * Promise; if `executeFetchJob()` never settled (downstream scraper deadlock,
+ * SDK hang, missing AI timeout), the entry stayed forever AND the
+ * `snapshot-cleanup-worker` IN_FLIGHT_PROTECTION path read it as "still
+ * active" — a single hung job silently shielded its snapshot from reaping
+ * indefinitely. We now stamp every entry with `{promise, startedAt, token}`,
+ * evict entries older than `MI_ACTIVE_JOBS_MAX_AGE_MS` on every insert, and
+ * token-check the cleanup so a late-settling stale promise cannot delete a
+ * fresh successor entry installed under the same lockKey.
+ */
+interface ActiveJobEntry {
+  promise: Promise<void>;
+  startedAt: number;
+  /** Monotonic per-process token captured at install time. The `.finally()`
+   *  cleanup only deletes the Map entry if the live entry's token still
+   *  matches — closes the same race patched in boss/concurrency.ts. */
+  token: number;
+}
+
+const activeJobs = new Map<string, ActiveJobEntry>();
+let nextActiveJobToken = 1;
+let activeJobsZombieEvictions = 0;
+
+const MAX_ACTIVE_JOB_AGE_MS = (() => {
+  const raw = process.env.MI_ACTIVE_JOBS_MAX_AGE_MS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60 * 1000;
+})();
+
+function evictZombieActiveJobs(now: number): void {
+  for (const [k, entry] of activeJobs) {
+    if (now - entry.startedAt > MAX_ACTIVE_JOB_AGE_MS) {
+      activeJobs.delete(k);
+      activeJobsZombieEvictions += 1;
+      console.error(
+        `[FetchOrch] ZOMBIE_ACTIVE_JOB_EVICTED key=${k} ageMs=${
+          now - entry.startedAt
+        } maxAgeMs=${MAX_ACTIVE_JOB_AGE_MS} totalEvictions=${activeJobsZombieEvictions}`,
+      );
+    }
+  }
+}
+
+export function trackActiveJob(lockKey: string, work: () => Promise<void>): Promise<void> {
+  const startedAt = Date.now();
+  evictZombieActiveJobs(startedAt);
+  const myToken = nextActiveJobToken++;
+  const promise = work().finally(() => {
+    const current = activeJobs.get(lockKey);
+    if (current && current.token === myToken) {
+      activeJobs.delete(lockKey);
+    }
+  });
+  activeJobs.set(lockKey, { promise, startedAt, token: myToken });
+  return promise;
+}
+
+/** Seal #16 / F1 — observability hook for the watchdog. Read by
+ *  snapshot-cleanup-worker indirectly via Map size; exported for tests
+ *  + future Prometheus metric exposition. */
+export function _activeJobsStats(): {
+  size: number;
+  zombieEvictions: number;
+  maxAgeMs: number;
+  oldestAgeMs: number | null;
+} {
+  const now = Date.now();
+  let oldest: number | null = null;
+  for (const e of activeJobs.values()) {
+    const age = now - e.startedAt;
+    if (oldest === null || age > oldest) oldest = age;
+  }
+  return {
+    size: activeJobs.size,
+    zombieEvictions: activeJobsZombieEvictions,
+    maxAgeMs: MAX_ACTIVE_JOB_AGE_MS,
+    oldestAgeMs: oldest,
+  };
+}
+
+/** Test-only: insert a synthetic stale entry to exercise the eviction path. */
+export function _injectStaleActiveJobForTest(lockKey: string, ageMs: number): void {
+  activeJobs.set(lockKey, {
+    promise: new Promise<void>(() => {
+      /* never resolves — that is the point */
+    }),
+    startedAt: Date.now() - ageMs,
+    token: nextActiveJobToken++,
+  });
+}
+
+/** Test-only: reset eviction counter + clear map between cases. */
+export function _resetActiveJobsCountersForTest(): void {
+  activeJobsZombieEvictions = 0;
+  activeJobs.clear();
+  nextActiveJobToken = 1;
+}
+
 const creationLocks = new Set<string>();
 
 export async function startFetchJob(accountId: string, campaignId: string): Promise<string> {
@@ -200,11 +338,11 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   }));
   const hash = computeCompetitorHash(competitorInputs);
 
-  const STALE_QUEUED_THRESHOLD_MS = 10 * 60 * 1000;
+  const STALE_QUEUED_THRESHOLD_MS = 25 * 60 * 1000;
   const staleQueuedCutoff = new Date(Date.now() - STALE_QUEUED_THRESHOLD_MS);
 
   const staleQueued = await db.update(miFetchJobs)
-    .set({ status: "FAILED", error: "Auto-expired: stuck in QUEUED for >10 minutes", completedAt: new Date() })
+    .set({ status: "FAILED", error: "Auto-expired: stuck in QUEUED for >25 minutes", completedAt: new Date() })
     .where(and(
       eq(miFetchJobs.accountId, accountId),
       eq(miFetchJobs.campaignId, campaignId),
@@ -230,8 +368,17 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     return existingActive[0].id;
   }
 
+  // P4 isolation seal: dedup by (accountId, competitorHash) ONLY — never
+  // reuse another tenant's in-flight fetch job. A pre-hardening branch reused
+  // any RUNNING/QUEUED job with the same competitorHash regardless of
+  // account, which made one tenant's job durations, snapshots, and stop
+  // reasons observable by an unrelated tenant just because they tracked the
+  // same competitor set. Cross-account public-data sharing is intentionally
+  // dropped here; if reuse is desirable in the future it must happen via a
+  // shared snapshot store that is account-scoped on read.
   const existingDupHash = await db.select().from(miFetchJobs)
     .where(and(
+      eq(miFetchJobs.accountId, accountId),
       eq(miFetchJobs.competitorHash, hash),
       sql`${miFetchJobs.status} IN ('RUNNING', 'QUEUED')`,
     ))
@@ -239,8 +386,24 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     .limit(1);
 
   if (existingDupHash.length > 0) {
-    console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash} (different account/campaign but same competitor set)`);
+    console.log(`[FetchOrch] DEDUP: Reusing job ${existingDupHash[0].id} with same competitorHash=${hash} for account ${accountId} (per-account scope)`);
     return existingDupHash[0].id;
+  }
+
+  // Task #54 / GR22 + GR23 — operator-toggleable scrape volume cap +
+  // global queue depth circuit-breaker. Evaluated BEFORE inserting a new
+  // job row so a tripped cap doesn't add queue weight.
+  const admission = await evaluateScrapeAdmission(accountId, competitors.length);
+  if (admission.outcome !== "admit") {
+    console.warn(
+      `[FetchOrch] ADMISSION_DENIED | account=${accountId} | outcome=${admission.outcome} | reason=${admission.reason || ""}`,
+    );
+    const err: any = new Error(admission.reason || "Scrape job admission denied");
+    err.code = admission.outcome === "volume_cap_exceeded"
+      ? "SCRAPE_VOLUME_CAP_EXCEEDED"
+      : "MI_QUEUE_DEPTH_DEFERRED";
+    err.admission = admission;
+    throw err;
   }
 
   const runningCount = await getRunningJobCountForAccount(accountId);
@@ -277,6 +440,7 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
     return jobId;
   }
 
+  pruneStaleAccountStaggerEntries();
   const lastStart = lastJobStartByAccount.get(accountId);
   if (lastStart) {
     const elapsed = Date.now() - lastStart;
@@ -333,12 +497,11 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   lastJobStartByAccount.set(accountId, Date.now());
   console.log(`[FetchOrch] Job ${jobId} created for ${competitors.length} competitors`);
 
-  const promise = executeFetchJob(jobId, accountId, campaignId, competitors).catch(err => {
-    console.error(`[FetchOrch] Job ${jobId} fatal error:`, err.message);
-  }).finally(() => {
-    activeJobs.delete(lockKey);
-  });
-  activeJobs.set(lockKey, promise);
+  trackActiveJob(lockKey, () =>
+    executeFetchJob(jobId, accountId, campaignId, competitors).catch(err => {
+      console.error(`[FetchOrch] Job ${jobId} fatal error:`, err.message);
+    }),
+  );
 
   return jobId;
 }
@@ -350,7 +513,7 @@ async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Prom
     const websiteFailedRecently = comp.websiteEnrichmentStatus === "FAILED" && comp.websiteScrapedAt && (Date.now() - new Date(comp.websiteScrapedAt).getTime()) < 24 * 60 * 60 * 1000;
     if (comp.websiteUrl && !websiteBlockedCooldown && !websiteFailedRecently && (isWebDataStale(comp.websiteScrapedAt) || comp.websiteEnrichmentStatus === "NONE" || comp.websiteEnrichmentStatus === "FAILED" || (websiteBlocked && !websiteBlockedCooldown))) {
       console.log(`[FetchOrch] Website scrape starting for ${comp.name}: ${comp.websiteUrl}`);
-      const extractions = await scrapeWebsite(comp.id, comp.name, comp.websiteUrl);
+      const extractions = await scrapeWebsite(comp.id, comp.name, comp.websiteUrl, accountId);
       const successCount = extractions.filter(e => e.extractionStatus === "COMPLETE").length;
 
       for (const ext of extractions) {
@@ -392,7 +555,7 @@ async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Prom
     const blogFailedRecently = comp.blogEnrichmentStatus === "FAILED" && comp.blogScrapedAt && (Date.now() - new Date(comp.blogScrapedAt).getTime()) < 24 * 60 * 60 * 1000;
     if (comp.blogUrl && !blogFailedRecently && (isWebDataStale(comp.blogScrapedAt) || comp.blogEnrichmentStatus === "NONE" || comp.blogEnrichmentStatus === "FAILED")) {
       console.log(`[FetchOrch] Blog scrape starting for ${comp.name}: ${comp.blogUrl}`);
-      const blogResult = await scrapeBlog(comp.id, comp.name, comp.blogUrl);
+      const blogResult = await scrapeBlog(comp.id, comp.name, comp.blogUrl, accountId);
 
       await db.insert(competitorWebData).values({
         accountId,
@@ -730,18 +893,32 @@ async function executeFetchJob(
         stage.COMMENTS_FETCH = "SKIPPED";
         stage.CTA_ANALYSIS = "SKIPPED";
         stage.SIGNAL_COMPUTE = "SKIPPED";
-        stage.fetchStatus = "BLOCKED_BY_PLATFORM";
+        // Fix #1a/#1b — ONLY a genuine platform block (a verified 403 /
+        // challenge / login wall from a real scrape attempt) may persist the
+        // 24h BLOCKED_BY_PLATFORM cooldown stamp. Transient failures (timeouts,
+        // proxy/tunnel contention, rate-limit) and the inter-probe cooldown
+        // short-circuit carry blockClass !== "GENUINE_BLOCK" and MUST NOT
+        // re-stamp lastCheckedAt — that unconditional re-stamp on every run was
+        // the self-perpetuation bug that made the 24h window never expire. They
+        // surface as a transient fetch failure and retry on the next cycle.
+        const isGenuineBlock = fetchResult.blockClass === "GENUINE_BLOCK";
+        stage.fetchStatus = isGenuineBlock ? "BLOCKED_BY_PLATFORM" : "FETCH_FAILED";
         const reason = classifyBlockReason(fetchResult);
         limitReasons.push({
           competitorId: comp.id, competitorName: comp.name,
           stage: "POSTS_FETCH", reason, details: fetchResult.message,
         });
-        try {
-          await db.update(ciCompetitors)
-            .set({ lastCheckedAt: new Date(), fetchMethod: "BLOCKED_BY_PLATFORM", updatedAt: new Date() })
-            .where(eq(ciCompetitors.id, comp.id));
-        } catch (blockStampErr: any) {
-          console.warn(`[FetchOrch] Failed to stamp blocked state for ${comp.name}: ${blockStampErr.message}`);
+        if (isGenuineBlock) {
+          try {
+            await db.update(ciCompetitors)
+              .set({ lastCheckedAt: new Date(), fetchMethod: "BLOCKED_BY_PLATFORM", updatedAt: new Date() })
+              .where(eq(ciCompetitors.id, comp.id));
+          } catch (blockStampErr: any) {
+            console.warn(`[FetchOrch] Failed to stamp blocked state for ${comp.name}: ${blockStampErr.message}`);
+          }
+        } else {
+          const blockClassLabel = typeof fetchResult.blockClass === "string" ? fetchResult.blockClass : "unset";
+          console.log(`[FetchOrch] TRANSIENT_FETCH_FAILURE: ${comp.name} — ${fetchResult.message} (blockClass=${blockClassLabel}; no platform-block stamp, will retry next cycle)`);
         }
         await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
         continue;
@@ -842,6 +1019,20 @@ async function executeFetchJob(
     const competitorsSkipped = stageValues.filter(s => s.fetchStatus === "SKIPPED_DUE_TO_BUDGET" || s.fetchStatus === "SKIPPED_DUE_TO_RUNTIME" || s.fetchStatus === "SKIPPED_DUE_TO_PAGES_CEILING" || s.fetchStatus === "PENDING").length;
     const coverageRatio = competitors.length > 0 ? competitorsProcessed / competitors.length : 0;
 
+    // 2026-07 Unlocker rebuild — transport truthfulness (B1/B4). A transport
+    // "success" is a competitor whose fetch completed without a transport
+    // error (FETCH_SUCCESS or NO_POSTS_FOUND). Hoisted above the snapshot
+    // persist so BOTH the job-level diagnostics and the snapshot-level
+    // telemetry share ONE criterion: SUSPECT_ZERO_YIELD requires ≥1 transport
+    // success — an all-failed job is a plain transport failure (loud via
+    // partialCoverage/stopReason), NOT a silent-block suspicion.
+    const transportSuccesses = stageValues.filter(
+      s => s.fetchStatus === "FETCH_SUCCESS" || s.fetchStatus === "NO_POSTS_FOUND"
+    ).length;
+    const transportFailures = stageValues.filter(
+      s => s.fetchStatus === "FETCH_FAILED" || s.fetchStatus === "BLOCKED_BY_PLATFORM" || s.fetchStatus === "RATE_LIMITED"
+    ).length;
+
     const anyAnalysisRan = stageValues.some(
       s => s.SIGNAL_COMPUTE === "COMPLETE" || s.SIGNAL_COMPUTE === "CACHED_ANALYSIS"
     );
@@ -856,7 +1047,7 @@ async function executeFetchJob(
       const willRunDeepPass = anyFetchExecuted && !allCooldown;
       const fastPassDataStatus = willRunDeepPass ? "LIVE" : "COMPLETE";
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE", coverageRatio);
+        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE", coverageRatio, transportSuccesses > 0);
         console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted} | dataStatus=${fastPassDataStatus} | coverageRatio=${coverageRatio.toFixed(2)}`);
       } catch (err: any) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
@@ -877,13 +1068,20 @@ async function executeFetchJob(
     let snapshotIdCreated: string | null = null;
     if (anyAnalysisRan) {
       try {
+        // latest-snapshot lookup must filter to
+        // COMPLETE only; PARTIAL snapshots are deliberately not the canonical
+        // "latest" for downstream synthesis even when the run is recovering.
         const latestSnap = await db.select({ id: miSnapshots.id }).from(miSnapshots)
-          .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"])))
+          .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.status, "COMPLETE")))
           .orderBy(desc(miSnapshots.createdAt)).limit(1);
         if (latestSnap.length > 0) {
           snapshotIdCreated = latestSnap[0].id;
         }
-      } catch { }
+      } catch (latestSnapErr) {
+        console.error(
+          `[FetchOrch] LATEST_SNAPSHOT_LOOKUP_FAILED | jobId=${jobId} | accountId=${accountId} | campaignId=${campaignId} | err=${(latestSnapErr as Error)?.message || latestSnapErr}`,
+        );
+      }
     }
 
     const anyInsufficientData = stageValues.some(
@@ -916,6 +1114,19 @@ async function executeFetchJob(
       commentsCollected: s.commentsFetched,
     }));
 
+    // If ≥1 fetch succeeded but the job yielded ZERO posts overall, classify
+    // SUSPECT_ZERO_YIELD: the Unlocker likely returned challenge/empty pages
+    // (silent block) — that must surface as a scraping-health signal, not as
+    // "market is quiet". transportSuccesses/transportFailures are computed
+    // above (before snapshot persistence) so both surfaces share one criterion.
+    const transportOutcome: "OK" | "SUSPECT_ZERO_YIELD" =
+      transportSuccesses > 0 && totalPosts === 0 ? "SUSPECT_ZERO_YIELD" : "OK";
+    if (transportOutcome === "SUSPECT_ZERO_YIELD") {
+      console.warn(
+        `[FetchOrch] TRANSPORT_SUSPECT_ZERO_YIELD | jobId=${jobId} | accountId=${accountId} | campaignId=${campaignId} | successes=${transportSuccesses} | failures=${transportFailures} | requests=${totalRequests} — transport reported success but zero posts across ALL competitors. Likely Unlocker silent-block/challenge pages; treat as scraping-health incident, not market signal.`,
+      );
+    }
+
     const jobDiagnostics: FetchJobDiagnostics = {
       competitorCount: competitors.length,
       requestsUsed: totalRequests,
@@ -931,6 +1142,12 @@ async function executeFetchJob(
       rateLimitEvents,
       perCompetitorStatus,
       perCompetitorRequestCap,
+      transport: {
+        requests: totalRequests,
+        successes: transportSuccesses,
+        failures: transportFailures,
+        outcome: transportOutcome,
+      },
     };
 
     console.log(`[FetchOrch] JOB_DIAGNOSTICS: ${JSON.stringify(jobDiagnostics)}`);
@@ -972,7 +1189,7 @@ async function executeFetchJob(
           concurrency: CONCURRENCY_FEATURE_FLAG ? 2 : MAX_CONCURRENT_COMPETITORS_PER_JOB,
         },
       },
-    }).catch(() => {});
+    }).catch((err) => _noteAuditWriteFailure("MI_FETCH_JOB_COMPLETE", err));
 
   } catch (err: any) {
     console.error(`[FetchOrch] Job ${jobId} fatal:`, err.message);
@@ -1011,7 +1228,7 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
   return "ERROR";
 }
 
-async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE", coverageRatio: number = 1.0): Promise<void> {
+async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE", coverageRatio: number = 1.0, transportSucceeded: boolean = false): Promise<void> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
@@ -1035,9 +1252,20 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   }
 
   const competitorHash = computeCompetitorHash(competitorInputs);
+  const competitorContentHash = computeCompetitorContentHash(competitorInputs);
   const totalPosts = competitorInputs.reduce((s, c) => s + (c.posts?.length || 0), 0);
   const totalComments = competitorInputs.reduce((s, c) => s + (c.comments?.length || 0), 0);
-  const tokenBudget = computeTokenBudget(competitorInputs.length, totalComments, totalPosts);
+  // Seal #11 / Task #29 / F6.1 — read-through persistence keyed by
+  // (snapshotJobKey, "mi-v3-fetch-orch"). persistSnapshotAfterFetch has
+  // no fetch-job id in scope (it runs after multiple fetch jobs land),
+  // so we key on (accountId, campaignId, fetch-window) — stable across
+  // a worker crash/restart for the SAME persistence cycle.
+  const { getOrComputeBudget } = await import("./token-budget-store");
+  const snapshotJobKey = `persist:${accountId}:${campaignId}:${competitorHash}`;
+  const tokenBudget = await getOrComputeBudget(
+    { jobId: snapshotJobKey, provider: "mi-v3-fetch-orch" },
+    { competitorCount: competitorInputs.length, totalComments, totalPosts },
+  );
   const executionMode = tokenBudget.selectedMode;
 
   for (const comp of competitorInputs) {
@@ -1140,11 +1368,16 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     }
   }
 
+  // version-baseline read tightened to
+  // status='COMPLETE' only. PARTIAL snapshots intentionally do NOT bump the
+  // version baseline because they would let a degraded run set the version
+  // line, causing the next COMPLETE snapshot to inherit a "PARTIAL is now
+  // current" lineage. The result is incomplete-data drift across runs.
   const previousSnapshots = await db.select().from(miSnapshots)
     .where(and(
       eq(miSnapshots.accountId, accountId),
       eq(miSnapshots.campaignId, campaignId),
-      inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
+      eq(miSnapshots.status, "COMPLETE"),
     ))
     .orderBy(desc(miSnapshots.createdAt))
     .limit(1);
@@ -1244,7 +1477,13 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const snapshotPayload = {
     accountId,
     campaignId,
+    // persistSnapshotAfterFetch runs after multiple fetch jobs land, so it has
+    // no single fetch-job id in scope. We reuse `snapshotJobKey` (the same
+    // stable key used for the token-budget read-through above) as the snapshot
+    // jobId. Stable across worker crash/restart for the SAME persistence cycle.
+    jobId: snapshotJobKey,
     competitorHash,
+    competitorContentHash,
     version: newVersion,
     competitorData: JSON.stringify(competitorInputs.map(c => ({ id: c.id, name: c.name }))),
     signalData: JSON.stringify(signalResults),
@@ -1273,6 +1512,12 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       jobStopReason: isPartialCoverage ? jobStopReason : null,
       snapshotSource,
       fetchExecuted,
+      // 2026-07 Unlocker rebuild (B1/B4): a cycle where ≥1 transport fetch
+      // SUCCEEDED yet zero posts were stored is transport-suspect (likely
+      // silent-block), not a quiet market. Same criterion as the job-level
+      // diagnostics — an all-failed cycle is a plain transport failure
+      // (surfaced via partialCoverage/jobStopReason), never SUSPECT.
+      transportOutcome: transportSucceeded && totalPosts === 0 ? "SUSPECT_ZERO_YIELD" : "OK",
     }),
     narrativeSynthesis,
     marketDiagnosis,
@@ -1352,7 +1597,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       marketState,
       confidence: confidence.overall,
     },
-  }).catch(() => {});
+  }).catch((err) => _noteAuditWriteFailure("MI_SNAPSHOT_PERSISTED_POST_FETCH", err));
 
   autoSignalCompletion(accountId, campaignId, signalResults, competitorInputs).catch(err => {
     console.error(`[FetchOrch] AUTO_SIGNAL_COMPLETION error: ${err.message}`);
@@ -1427,9 +1672,15 @@ async function autoSignalCompletion(accountId: string, campaignId: string, signa
   console.log(`[FetchOrch] AUTO_SIGNAL_COMPLETION_COMPLETE: signal deficiency enrichment queued + inventory refreshed for ${accountId}/${campaignId} | deficientCount=${deficientCompetitors.length}`);
 }
 
-export async function getFetchJobStatus(jobId: string): Promise<FetchJobStatus | null> {
-  const [job] = await db.select().from(miFetchJobs)
-    .where(eq(miFetchJobs.id, jobId));
+export async function getFetchJobStatus(jobId: string, accountId?: string): Promise<FetchJobStatus | null> {
+  // P3 isolation seal: when called from an HTTP handler the accountId MUST be
+  // supplied so we never return another tenant's stage statuses, snapshot id,
+  // or fetch metadata. accountId is optional only for in-process callers that
+  // already operate inside a verified account context.
+  const whereClause = accountId
+    ? and(eq(miFetchJobs.id, jobId), eq(miFetchJobs.accountId, accountId))
+    : eq(miFetchJobs.id, jobId);
+  const [job] = await db.select().from(miFetchJobs).where(whereClause);
 
   if (!job) return null;
 
@@ -1538,7 +1789,12 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
       await db.update(ciCompetitors)
         .set({ enrichmentStatus: "ENRICHING", updatedAt: new Date() })
         .where(eq(ciCompetitors.id, comp.id));
-    } catch {}
+    } catch (markEnrichingErr) {
+      // Track #3 / Seal #15 — was silent. A failed pre-mark to ENRICHING
+      // means the row may stay PENDING while the enrichment runs, leaving
+      // observers confused about state. Surface so we can correlate.
+      console.error(`[FetchOrch] MARK_ENRICHING_FAILED | competitorId=${comp.id} | err=${(markEnrichingErr as Error)?.message || markEnrichingErr}`);
+    }
   }
 
   const startTime = Date.now();
@@ -1611,12 +1867,17 @@ async function queueDeepPass(accountId: string, campaignId: string, competitors:
         await db.update(ciCompetitors)
           .set({ enrichmentStatus: "FAILED", updatedAt: new Date() })
           .where(eq(ciCompetitors.id, comp.id));
-      } catch {}
+      } catch (markFailedErr) {
+        // Track #3 / Seal #15 — same stuck-claim risk as the deep-pass
+        // recovery path: a failed mark-FAILED leaves the row stuck in
+        // ENRICHING forever and the next pass will skip it as in-flight.
+        console.error(`[FetchOrch] MARK_FAILED_AFTER_ERROR | competitorId=${comp.id} | err=${(markFailedErr as Error)?.message || markFailedErr}`);
+      }
     }
   }
 
   try {
-    await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
+    await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE", 1.0, enrichedCount > 0);
     console.log(`[FetchOrch] DEEP_PASS snapshot recomputed (COMPLETE) for ${accountId}/${campaignId} | enriched=${enrichedCount} | failed=${failedCount} | skipped=${skippedCount} | duration=${Date.now() - startTime}ms`);
   } catch (err: any) {
     console.error(`[FetchOrch] DEEP_PASS snapshot persistence failed: ${err.message}`);
@@ -1683,11 +1944,11 @@ async function validateInventoryConsistency(accountId: string, campaignId: strin
   }
 }
 
-const GLOBAL_MAX_CONCURRENT_JOBS = 3;
-const QUEUE_PROCESSOR_INTERVAL_MS = 30000;
-const PER_ACCOUNT_JOB_BUDGET_PER_HOUR = 4;
-const BACKPRESSURE_QUEUE_THRESHOLD = 20;
-const MAX_PROMOTIONS_PER_MINUTE = 6;
+const GLOBAL_MAX_CONCURRENT_JOBS = 8;
+const QUEUE_PROCESSOR_INTERVAL_MS = 15000;
+const PER_ACCOUNT_JOB_BUDGET_PER_HOUR = 6;
+const BACKPRESSURE_QUEUE_THRESHOLD = 40;
+const MAX_PROMOTIONS_PER_MINUTE = 12;
 
 const PRIORITY_FAST_PASS = 0;
 const PRIORITY_DEEP_PASS = 5;
@@ -1732,7 +1993,7 @@ function recordPromotion(): void {
 
 const STALE_JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
-const STALE_QUEUED_GLOBAL_THRESHOLD_MS = 15 * 60 * 1000;
+const STALE_QUEUED_GLOBAL_THRESHOLD_MS = 30 * 60 * 1000;
 
 async function recoverStaleRunningJobs(): Promise<number> {
   const now = new Date();
@@ -1837,12 +2098,11 @@ async function processJobQueue(): Promise<void> {
       const lockKey = `${job.accountId}:${job.campaignId}`;
       console.log(`[QueueProcessor] Atomically promoted QUEUED→RUNNING job ${job.id} | priority=${job.priority} | account=${job.accountId} | globalSlots=${slotsAvailable}`);
 
-      const promise = executeFetchJob(job.id, job.accountId, job.campaignId, competitors).catch(err => {
-        console.error(`[QueueProcessor] Job ${job.id} fatal error:`, err.message);
-      }).finally(() => {
-        activeJobs.delete(lockKey);
-      });
-      activeJobs.set(lockKey, promise);
+      trackActiveJob(lockKey, () =>
+        executeFetchJob(job.id, job.accountId, job.campaignId, competitors).catch(err => {
+          console.error(`[QueueProcessor] Job ${job.id} fatal error:`, err.message);
+        }),
+      );
     }
   } catch (err: any) {
     console.error(`[QueueProcessor] Error processing queue:`, err.message);
@@ -1920,7 +2180,13 @@ async function recoverStuckDeepPass(): Promise<void> {
           console.log(`[DeepPassRecovery] DEEP_PASS_DIAGNOSTICS: ${row.name} | baselinePostCount=${baselinePostCount} | realCommentCount=${realComments} | totalCommentCount=${finalComments} | promotionDecision=${promotionDecision} | enrichmentResult=${result.status} | postExpansionAttempted=false | COMMENT_TEXT_OPTIONAL=true`);
         } catch (err: any) {
           console.error(`[DeepPassRecovery] Failed to enrich ${row.name}: ${err.message}`);
-          try { await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'FAILED', updated_at = NOW() WHERE id = ${row.id}`); } catch {}
+          try { await db.execute(sql`UPDATE ci_competitors SET enrichment_status = 'FAILED', updated_at = NOW() WHERE id = ${row.id}`); } catch (markFailedErr) {
+            // Track #3 / Seal #15 — was silent. If we cannot mark a stuck
+            // competitor as FAILED, the row stays RUNNING/PENDING forever
+            // (operator-visible "stuck claim"). Surface explicitly so the
+            // alarm bell rings instead of the row rotting silently.
+            console.error(`[FetchOrch] STUCK_COMPETITOR_MARK_FAILED | competitorId=${row.id} | err=${(markFailedErr as Error)?.message || markFailedErr}`);
+          }
         }
       }
     }
@@ -1958,7 +2224,9 @@ async function recoverStuckDeepPass(): Promise<void> {
 
     for (const { accountId, campaignId } of campaignGroups.values()) {
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE");
+        // No fresh transport ran in this recompute cycle — zero-yield
+        // suspicion cannot apply, so transportSucceeded=false.
+        await persistSnapshotAfterFetch(accountId, campaignId, false, "COMPLETE", "FRESH_DATA", true, "COMPLETE", 1.0, false);
         console.log(`[DeepPassRecovery] Snapshot recomputed for ${accountId}/${campaignId}`);
       } catch (err: any) {
         console.error(`[DeepPassRecovery] Snapshot recompute failed for ${accountId}/${campaignId}: ${err.message}`);

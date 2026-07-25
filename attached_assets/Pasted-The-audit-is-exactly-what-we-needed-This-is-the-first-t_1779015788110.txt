@@ -1,0 +1,207 @@
+The audit is exactly what we needed.
+
+This is the first time the entire system structure, overlaps, authority conflicts, runtime leaks, orchestration hotspots, doctrine violations, and UX/runtime boundary problems have been mapped clearly without drifting into rewrite mentality.
+
+Now I want to move from:
+architectural diagnosis
+→ into
+structured consolidation execution planning.
+
+Very important:
+I do NOT want isolated fixes or opportunistic cleanup PRs.
+
+I want a COMPLETE consolidation execution framework built from the audit findings.
+
+The goal now is:
+
+* stabilization
+* normalization
+* enforcement
+* runtime consistency
+* doctrine alignment
+* composability
+* deterministic boundaries
+* anti-entropy structure
+
+before any further expansion work.
+
+What I need next:
+
+1. Full Consolidation Execution Plan
+   Convert ALL audit findings into:
+
+* phased execution plan
+* dependency graph
+* priority order
+* enforcement requirements
+* testing requirements
+* migration strategy
+* rollback strategy
+* verification criteria
+* runtime safety criteria
+
+I do not want generic recommendations anymore.
+
+I want implementation-grade planning.
+
+2. Task-Level Breakdown
+   For EVERY finding:
+   create:
+
+* task ID
+* objective
+* affected files/modules
+* doctrine impact
+* dependency chain
+* enforcement additions required
+* runtime risks
+* migration risks
+* rollback requirements
+* validation requirements
+* test requirements
+* shadow-mode requirements (if needed)
+* observability requirements
+* completion criteria
+* failure conditions
+
+I want this structured as a real execution backlog, not narrative prose.
+
+3. Enforcement Placement
+   One of the biggest risks right now is silent drift after consolidation.
+
+So for every consolidation task:
+explicitly define:
+
+* where enforcement belongs
+* where validation belongs
+* where continuous verification belongs
+* where degraded propagation must happen
+* where runtime boundaries must hard-fail
+* where doctrine assertions must exist
+* where replayability checks must exist
+* where provenance must be enforced
+* where stale evidence must be blocked
+* where mutation protection must exist
+
+I want enforcement architecture treated as a first-class layer, not a later cleanup.
+
+4. Continuous Validation / Continuous Integrity
+   I want explicit planning for:
+
+* continuous runtime validation
+* structural integrity verification
+* orchestration integrity checks
+* contract completeness verification
+* degraded propagation auditing
+* memory provenance verification
+* AI grounding verification
+* stale-evidence detection
+* retry amplification detection
+* replayability verification
+* hallucination exposure detection
+* runtime drift detection
+
+The system should continuously verify itself after consolidation.
+
+5. Testing Strategy
+   I want deep testing planning for every major area.
+
+Not just unit tests.
+
+Need:
+
+* integration tests
+* orchestration replay tests
+* degradation propagation tests
+* shadow-mode validation
+* migration validation
+* rollback simulation
+* contract fuzzing
+* provenance integrity tests
+* concurrency tests
+* retry amplification tests
+* stale-state tests
+* partial-failure tests
+* deterministic replay tests
+* AI grounding validation tests
+* boundary enforcement tests
+
+Every consolidation phase should have:
+
+* pre-checks
+* execution validation
+* post-checks
+* regression protection
+
+6. Phase-by-Phase Consolidation Plan
+   I want the execution plan broken into major phases.
+
+For example:
+
+* Phase 1 — Canonical Ownership
+* Phase 2 — Memory Unification
+* Phase 3 — Enforcement Consolidation
+* Phase 4 — Orchestrator Decomposition
+* Phase 5 — Contract Tightening
+* Phase 6 — Runtime Safety Hardening
+* Phase 7 — Domain Composition Cleanup
+* Phase 8 — UX Projection Cleanup
+* Phase 9 — Monitor Aggregator / 4-Screen Pivot Readiness
+
+For each phase:
+
+* explicit goals
+* required doctrine decisions
+* blockers
+* sequencing
+* expected runtime risk
+* validation gates
+* production readiness conditions
+
+7. Runtime Safety Requirements
+   The execution plan MUST preserve:
+
+* D1–D5
+* seals
+* MIv3 doctrine
+* AEL/CEL/System Control safety guarantees
+* Memory provenance doctrine
+* signal origin discipline
+* fallback isolation
+* replayability
+* auditability
+* deterministic boundaries
+* anti-hallucination guarantees
+
+No consolidation work should weaken runtime truthfulness or reliability guarantees.
+
+8. Most Important Requirement
+   I do NOT want:
+
+* assumptions
+* skipped surfaces
+* “probably safe”
+* hidden migrations
+* partial enforcement
+* invisible doctrine drift
+
+Every important runtime surface should:
+
+* be mapped
+* validated
+* tested
+* enforced
+* replayable
+* observable
+* auditable
+
+before the next expansion cycle begins.
+
+The audit exposed the structural reality clearly.
+
+Now I want the same level of rigor applied to:
+execution planning,
+enforcement architecture,
+continuous validation,
+testing strategy,
+and phased consolidation rollout.

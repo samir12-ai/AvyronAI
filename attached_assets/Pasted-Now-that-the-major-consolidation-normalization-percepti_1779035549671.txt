@@ -1,0 +1,148 @@
+Now that the major consolidation, normalization, perception-layer, and runtime organization tasks are complete, I want a final comprehensive audit and verification pass across the entire system.
+
+Goal:
+verify that the system is now structurally aligned, operationally consistent, perception-consistent, and ready for controlled beta progression.
+
+This should NOT be another expansion phase.
+
+This is a:
+
+* verification
+* alignment
+* consistency
+* readiness
+* regression
+* doctrine-compliance
+  audit.
+
+I want a COMPLETE end-to-end review confirming that:
+
+* the intended architecture matches the actual runtime behavior
+* the intended UX matches the actual perceived behavior
+* the intended doctrine matches the implemented enforcement
+* the intended monitoring matches what users actually see
+* the intended runtime boundaries are actually respected
+
+Please audit ALL recent work together as one coherent system.
+
+Audit Areas
+
+1. Runtime Organization & Consolidation
+   Verify:
+
+* canonical ownership consistency
+* runtime boundary enforcement
+* orchestration consistency
+* no overlapping truth sources
+* no silent mutation paths
+* no stale snapshot leakage
+* no hidden cross-domain writes
+* no doctrine drift after refactors
+* no broken enforcement paths
+* no orphaned runtime flows
+* no abandoned legacy logic still influencing execution
+
+2. Perception Layer Consistency
+   Verify:
+
+* Watchtower accuracy
+* Activity Timeline correctness
+* no fake activity
+* no architecture leakage
+* customer-safe phrasing consistency
+* event translation correctness
+* confidence visibility consistency
+* baseline-building states correctness
+* evidence-aware empty states correctness
+* competitor monitoring visibility correctness
+* freshness visibility correctness
+
+Most important:
+verify that the system now FEELS operationally alive and continuously aware — not like a static reporting dashboard.
+
+3. Agent Action Source Audit
+   Trace:
+
+* where Agent Action cards get their signals from
+* which engines/systems feed them
+* which runtime conditions trigger them
+* which conditions produce low-signal states
+* whether the UX explanations correctly match the actual runtime state
+
+I want verification that:
+the visible agent behavior accurately reflects the real backend state.
+
+4. Competitor Pipeline Visibility Audit
+   Verify:
+
+* competitor counts accurate
+* scan timestamps accurate
+* “nothing changed” states work correctly
+* monitoring continuity surfaces correctly
+* stale competitor conditions surface correctly
+* weak coverage conditions surface correctly
+* market-stable conditions surface correctly
+
+5. Freshness / Rerun / Time-Window Audit
+   Verify again:
+
+* reruns use fresh data
+* monthly refreshes do not leak stale snapshots
+* baseline resets work correctly
+* re-anchor behavior works correctly
+* freshness states surface correctly
+* time windows behave correctly in UX and runtime
+
+6. UX vs Runtime Alignment
+   Audit:
+
+* where runtime intelligence still exists but remains hidden
+* where UX overstates intelligence
+* where UX understates intelligence
+* where confidence communication is misleading
+* where monitoring visibility is still weak
+* where user trust could break due to misunderstanding
+
+7. Beta Readiness Reassessment
+   After all recent work:
+   reassess:
+
+* actual launch blockers
+* remaining P0/P1 risks
+* remaining silent-failure risks
+* onboarding readiness
+* perception readiness
+* runtime readiness
+* operational readiness
+* user trust risks
+* controlled-beta readiness
+
+Most important:
+I want a brutally honest final state assessment.
+
+Not:
+“the architecture is impressive.”
+
+I want:
+
+* what is truly stable
+* what is truly usable
+* what users will actually feel
+* what could still fail in production
+* what absolutely must be fixed before beta
+* what can safely wait until post-beta
+
+Final Deliverable
+Please produce:
+
+* a complete audit report
+* a launch-readiness summary
+* remaining blockers
+* remaining risks
+* remaining perception gaps
+* remaining runtime gaps
+* recommended final stabilization priorities before controlled beta launch
+
+Goal:
+confirm that the system now behaves the way we intended it to behave —
+both technically and perceptually.

@@ -1,4 +1,21 @@
 import { aiChat } from "../ai-client";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
+import { logSafe } from "../log-redact";
+import { wrapUntrustedText, UNTRUSTED_INPUT_SYSTEM_RULE } from "../market-intelligence-v3/prompt-safety";
+
+function u(text: unknown, source: string): string {
+  const s = String(text ?? "").trim();
+  if (!s) return "";
+  return wrapUntrustedText(s, { source });
+}
+
+// typed accessor for Drizzle table internals
+// (replaces ad-hoc `(table as any)?._?.name` casts in log emission).
+type DrizzleTableInternals = { _?: { name?: string } };
+function tableName(t: unknown): string {
+  return ((t as DrizzleTableInternals)?._?.name) ?? "unknown";
+}
+import type { AnalyticalPackage } from "../analytical-enrichment-layer/types";
 import { db } from "../db";
 import {
   positioningSnapshots,
@@ -11,8 +28,9 @@ import {
   audienceSnapshots,
   miSnapshots,
   businessDataLayer,
+  orchestratorJobs,
 } from "@shared/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { computeAdaptiveRhythm, type AdaptiveRhythm } from "../adaptive-rhythm/engine";
 import { buildMemoryContext, applyMemoryConstraints, type MemoryOverride } from "../orchestrator/memory-context";
 
@@ -46,13 +64,16 @@ export interface BuildPlanOutput {
   memoryOverrides?: MemoryOverride[];
 }
 
+export type BuildPlanBlockReason = "STALE_LINEAGE" | "AI_RESPONSE_INVALID";
+
 export interface BuildPlanResult {
-  status: "SUCCESS" | "ACTIONABILITY_FAILED" | "INSUFFICIENT_DATA" | "ERROR";
+  status: "SUCCESS" | "ACTIONABILITY_FAILED" | "INSUFFICIENT_DATA" | "BLOCKED" | "INCOMPLETE" | "ERROR";
   plan: BuildPlanOutput | null;
   actionabilityScore: number;
   failedBlocks: string[];
   attempts: number;
   error?: string;
+  reason?: BuildPlanBlockReason;
 }
 
 interface EngineSnapshot {
@@ -67,13 +88,44 @@ const ACTIONABILITY_RULES = [
   { name: "usability", test: (v: string) => !/\b(various|multiple|different|many|several|some)\b/i.test(v) || v.length > 50 },
 ];
 
-function safeParseSnapshot(raw: any): any | null {
+type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
+type SnapshotRow = { data: unknown };
+
+type SafeParseResult =
+  | { ok: true; value: Json | null }
+  | { ok: false; reason: string };
+
+const _snapshotParseFailures = { count: 0, lastReason: null as string | null };
+export function _getSnapshotParseFailureStats(): { count: number; lastReason: string | null } {
+  return { count: _snapshotParseFailures.count, lastReason: _snapshotParseFailures.lastReason };
+}
+
+/**
+ * Phase 6 / Task #69 step 7 — typed-error replacement of the silent
+ * `} catch { return null; }` swallow. Parse failures are now logged AND
+ * counted in a process-local counter so the operator surface (and the
+ * eventual /metrics scrape) can detect a wave of corrupt snapshot rows
+ * instead of a silent fallback to null. Callers that only need the
+ * legacy `Json | null` shape can use `safeParseSnapshot()` (which
+ * unwraps via `tryParseSnapshot()`); new code SHOULD prefer the
+ * Result-shaped variant so the failure reason is preserved.
+ */
+function tryParseSnapshot(raw: SnapshotRow | { data: Json } | null | undefined): SafeParseResult {
   try {
-    if (typeof raw === "string") return JSON.parse(raw);
-    return raw;
-  } catch {
-    return null;
+    if (typeof raw === "string") return { ok: true, value: JSON.parse(raw) };
+    return { ok: true, value: (raw ?? null) as Json | null };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    _snapshotParseFailures.count++;
+    _snapshotParseFailures.lastReason = reason;
+    console.error(logSafe(`[BuildPlanLayer] SNAPSHOT_PARSE_FAILED | reason=${reason.slice(0, 200)}`));
+    return { ok: false, reason };
   }
+}
+
+function safeParseSnapshot(raw: SnapshotRow | { data: Json } | null | undefined): Json | null {
+  const r = tryParseSnapshot(raw);
+  return r.ok ? r.value : null;
 }
 
 function enforceActionability(output: BuildPlanOutput): { passed: boolean; score: number; failedBlocks: string[] } {
@@ -134,94 +186,138 @@ function enforceActionability(output: BuildPlanOutput): { passed: boolean; score
   return { passed: score >= 0.85 && structureOk, score, failedBlocks };
 }
 
-async function getLatestSnapshot(table: any, accountId: string, campaignId: string): Promise<any | null> {
+/**
+ * every snapshot read must declare a
+ * sourceJobId. The previous "latest by (accountId, campaignId)" pattern silently
+ * stitched together engine outputs from DIFFERENT runs whenever a single engine
+ * had failed and the orchestrator retried — producing build-plans whose
+ * positioning came from run A and whose offer came from run B, with no audit
+ * trail. When a `sourceJobId` is provided, every snapshot table is scoped by
+ * jobId so cross-run blending becomes structurally impossible. The legacy
+ * "latest" path is retained only when explicitly opted into (no runId provided)
+ * and emits a STALE_LINEAGE warning so the choice is visible in logs.
+ */
+async function getLatestSnapshot(
+  table: any,
+  accountId: string,
+  campaignId: string,
+  sourceJobId?: string | null,
+): Promise<any | null> {
   try {
+    const conditions = [eq(table.accountId, accountId), eq(table.campaignId, campaignId)];
+    if (sourceJobId && "jobId" in table) {
+      conditions.push(eq(table.jobId, sourceJobId));
+    }
     const [snap] = await db
       .select()
       .from(table)
-      .where(and(eq(table.accountId, accountId), eq(table.campaignId, campaignId)))
+      .where(and(...conditions))
       .orderBy(desc(table.createdAt))
       .limit(1);
+    if (!snap && sourceJobId) {
+      console.warn(logSafe(`[BuildPlanLayer] SNAPSHOT_MISS_FOR_RUN | account=${accountId} campaign=${campaignId} jobId=${sourceJobId} table=${tableName(table)}`));
+    } else if (!sourceJobId) {
+      // Phase 6 / Task #69 step 6 — BPL-001 fix. Previously a warn-only
+      // breadcrumb; now also recorded in a process-local counter so
+      // /metrics and the Continuity panel can detect a wave of
+      // sourceJobId-less reads (which indicates an upstream caller has
+      // bypassed the run-id wiring entirely). The snapshot is still
+      // returned for D4 back-compat with legacy readers; the new counter
+      // makes the silent-bypass surface non-silent.
+      _staleLineageReads.count++;
+      _staleLineageReads.lastTable = tableName(table);
+      _staleLineageReads.lastAccountId = accountId;
+      console.warn(logSafe(`[BuildPlanLayer] STALE_LINEAGE_READ | severity=high | account=${accountId} campaign=${campaignId} table=${tableName(table)} totalSinceBoot=${_staleLineageReads.count} — no sourceJobId provided; latest snapshot may belong to a different run. Caller MUST pass sourceJobId for runtime-truth correctness.`));
+    }
     return snap || null;
-  } catch {
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    _snapshotReadErrors.count++;
+    _snapshotReadErrors.lastReason = reason;
+    console.error(logSafe(`[BuildPlanLayer] SNAPSHOT_READ_ERROR | account=${accountId} campaign=${campaignId} table=${tableName(table)} | reason=${reason.slice(0, 200)}`));
     return null;
   }
+}
+
+// Phase 6 / Task #69 steps 6 + 7 — operator-visible counters.
+const _staleLineageReads = { count: 0, lastTable: null as string | null, lastAccountId: null as string | null };
+const _snapshotReadErrors = { count: 0, lastReason: null as string | null };
+
+export function _getBuildPlanLayerStats(): {
+  staleLineageReads: { count: number; lastTable: string | null; lastAccountId: string | null };
+  snapshotReadErrors: { count: number; lastReason: string | null };
+  snapshotParseFailures: { count: number; lastReason: string | null };
+} {
+  return {
+    staleLineageReads: { ..._staleLineageReads },
+    snapshotReadErrors: { ..._snapshotReadErrors },
+    snapshotParseFailures: { ..._snapshotParseFailures },
+  };
 }
 
 async function collectValidatedEngineOutputs(
   accountId: string,
   campaignId: string,
-  depthGateStatus?: Record<string, string>
+  depthGateStatus?: Record<string, string>,
+  sourceJobId?: string | null,
 ): Promise<EngineSnapshot[]> {
   const snapshots: EngineSnapshot[] = [];
 
   const GATED_PASS_STATES = ["SIGNAL_PASSED", "DEPTH_PASSED"];
 
-  const miSnap = await getLatestSnapshot(miSnapshots, accountId, campaignId);
+  const miSnap = await getLatestSnapshot(miSnapshots, accountId, campaignId, sourceJobId);
   if (miSnap) {
     snapshots.push({ engineId: "market_intelligence", data: miSnap });
   }
 
-  const audienceSnap = await getLatestSnapshot(audienceSnapshots, accountId, campaignId);
+  const audienceSnap = await getLatestSnapshot(audienceSnapshots, accountId, campaignId, sourceJobId);
   if (audienceSnap) {
     snapshots.push({ engineId: "audience", data: audienceSnap });
   }
 
-  const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId);
-  if (posSnap) {
-    const status = depthGateStatus?.positioning;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "positioning", data: posSnap, depthGateStatus: status });
+  // D5 honesty: a missing depth-gate status is
+  // CONTRACT_INCOMPLETE, NOT silently treated as PASS. The previous
+  // `!status || GATED_PASS_STATES.includes(status)` admitted snapshots
+  // whose depth-gate evaluation was absent — silently substituting
+  // "no verdict" for "pass". We now require an explicit gated-pass
+  // verdict; missing/non-pass snapshots are excluded from build-plan
+  // synthesis and logged as CONTRACT_INCOMPLETE for visibility.
+  const includeIfGatedPass = (
+    engineId: string,
+    snap: any,
+    status: string | undefined,
+  ): void => {
+    if (status && GATED_PASS_STATES.includes(status)) {
+      snapshots.push({ engineId, data: snap, depthGateStatus: status });
+      return;
     }
-  }
+    if (!status) {
+      console.warn(logSafe(`[BuildPlanLayer] CONTRACT_INCOMPLETE | engine=${engineId} | reason=missing_depth_gate_status | account=${accountId} campaign=${campaignId}`));
+      return;
+    }
+    console.log(logSafe(`[BuildPlanLayer] DEPTH_GATE_NOT_PASS | engine=${engineId} | status=${status}`));
+  };
 
-  const diffSnap = await getLatestSnapshot(differentiationSnapshots, accountId, campaignId);
-  if (diffSnap) {
-    const status = depthGateStatus?.differentiation;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "differentiation", data: diffSnap, depthGateStatus: status });
-    }
-  }
+  const posSnap = await getLatestSnapshot(positioningSnapshots, accountId, campaignId, sourceJobId);
+  if (posSnap) includeIfGatedPass("positioning", posSnap, depthGateStatus?.positioning);
 
-  const mechSnap = await getLatestSnapshot(mechanismSnapshots, accountId, campaignId);
-  if (mechSnap) {
-    const status = depthGateStatus?.mechanism;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "mechanism", data: mechSnap, depthGateStatus: status });
-    }
-  }
+  const diffSnap = await getLatestSnapshot(differentiationSnapshots, accountId, campaignId, sourceJobId);
+  if (diffSnap) includeIfGatedPass("differentiation", diffSnap, depthGateStatus?.differentiation);
 
-  const offerSnap = await getLatestSnapshot(offerSnapshots, accountId, campaignId);
-  if (offerSnap) {
-    const status = depthGateStatus?.offer;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "offer", data: offerSnap, depthGateStatus: status });
-    }
-  }
+  const mechSnap = await getLatestSnapshot(mechanismSnapshots, accountId, campaignId, sourceJobId);
+  if (mechSnap) includeIfGatedPass("mechanism", mechSnap, depthGateStatus?.mechanism);
 
-  const funnelSnap = await getLatestSnapshot(funnelSnapshots, accountId, campaignId);
-  if (funnelSnap) {
-    const status = depthGateStatus?.funnel;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "funnel", data: funnelSnap, depthGateStatus: status });
-    }
-  }
+  const offerSnap = await getLatestSnapshot(offerSnapshots, accountId, campaignId, sourceJobId);
+  if (offerSnap) includeIfGatedPass("offer", offerSnap, depthGateStatus?.offer);
 
-  const awarenessSnap = await getLatestSnapshot(awarenessSnapshots, accountId, campaignId);
-  if (awarenessSnap) {
-    const status = depthGateStatus?.awareness;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "awareness", data: awarenessSnap, depthGateStatus: status });
-    }
-  }
+  const funnelSnap = await getLatestSnapshot(funnelSnapshots, accountId, campaignId, sourceJobId);
+  if (funnelSnap) includeIfGatedPass("funnel", funnelSnap, depthGateStatus?.funnel);
 
-  const persuasionSnap = await getLatestSnapshot(persuasionSnapshots, accountId, campaignId);
-  if (persuasionSnap) {
-    const status = depthGateStatus?.persuasion;
-    if (!status || GATED_PASS_STATES.includes(status)) {
-      snapshots.push({ engineId: "persuasion", data: persuasionSnap, depthGateStatus: status });
-    }
-  }
+  const awarenessSnap = await getLatestSnapshot(awarenessSnapshots, accountId, campaignId, sourceJobId);
+  if (awarenessSnap) includeIfGatedPass("awareness", awarenessSnap, depthGateStatus?.awareness);
+
+  const persuasionSnap = await getLatestSnapshot(persuasionSnapshots, accountId, campaignId, sourceJobId);
+  if (persuasionSnap) includeIfGatedPass("persuasion", persuasionSnap, depthGateStatus?.persuasion);
 
   return snapshots;
 }
@@ -242,67 +338,91 @@ function safeArr(val: any): any[] {
 function buildEngineContext(snapshots: EngineSnapshot[]): string {
   const parts: string[] = [];
 
+  // Task #70 / Phase 7 / Step 4 — Awareness → Funnel authority precedence.
+  // Compute the declarative overlap-region resolution BEFORE any [Awareness]
+  // / [Funnel] lines are emitted, then inject the deterministic precedence
+  // summary so the LLM cannot re-decide which engine wins on overlap fields.
+  const awarenessData = snapshots.find(s => s.engineId === "awareness")?.data;
+  const funnelData = snapshots.find(s => s.engineId === "funnel")?.data;
+  if (awarenessData || funnelData) {
+    const { summarizeAuthorityPrecedence } = require("./awareness-funnel-authority") as
+      typeof import("./awareness-funnel-authority");
+    const awarenessResult = awarenessData ? (safeParse(awarenessData.result) || awarenessData) : null;
+    const funnelResult = funnelData ? (safeParse(funnelData.result) || funnelData) : null;
+    const { text, resolutions } = summarizeAuthorityPrecedence({
+      awareness: awarenessResult ? { ...awarenessResult, ...(awarenessResult.primaryRoute ?? {}) } : null,
+      funnel: funnelResult,
+    });
+    const contended = Object.values(resolutions).filter(
+      r => r.state === "awareness_wins" || r.state === "funnel_wins",
+    ).length;
+    console.log(`[BuildPlanLayer] AWARENESS_FUNNEL_AUTHORITY | overlapFields=${Object.keys(resolutions).length} | contended=${contended}`);
+    parts.push(text);
+  }
+
   for (const snap of snapshots) {
     const data = snap.data;
     switch (snap.engineId) {
       case "market_intelligence": {
         const competitors = safeArr(data.competitorData).slice(0, 5).map((c: any) => c.name || c.handle || "unknown").join(", ");
         const signals = safeArr(data.signalData).slice(0, 5).map((s: any) => s.text || s.signal || "").join("; ");
-        parts.push(`[Market Intelligence] Competitors: ${competitors}. Key signals: ${signals}. Market state: ${data.marketState || "active"}`);
+        parts.push(`[Market Intelligence] Competitors: ${u(competitors, "mi.competitors")}. Key signals: ${u(signals, "mi.signals")}. Market state: ${u(data.marketState || "active", "mi.marketState")}`);
         break;
       }
       case "audience": {
         const pains = safeArr(data.audiencePains).slice(0, 3).map((p: any) => typeof p === "string" ? p : p.pain || p.label || p.name || "").join("; ");
         const desires = safeArr(data.desireMap).slice(0, 3).map((d: any) => typeof d === "string" ? d : d.desire || d.label || d.name || "").join("; ");
         const segments = safeArr(data.audienceSegments).slice(0, 2).map((s: any) => typeof s === "string" ? s : s.name || s.segment || "").join(", ");
-        parts.push(`[Audience] Top pains: ${pains}. Top desires: ${desires}. Segments: ${segments}`);
+        parts.push(`[Audience] Top pains: ${u(pains, "audience.pains")}. Top desires: ${u(desires, "audience.desires")}. Segments: ${u(segments, "audience.segments")}`);
         break;
       }
       case "positioning": {
         const result = safeParse(data.result) || data;
         const narrative = result.narrative || result.narrativeDirection || data.narrativeDirection || "";
         const territories = safeArr(result.territories || data.territories).slice(0, 2).map((t: any) => typeof t === "string" ? t : t.name || t.territory || "").join(", ");
-        parts.push(`[Positioning] Narrative: ${narrative}. Territories: ${territories}`);
+        parts.push(`[Positioning] Narrative: ${u(narrative, "positioning.narrative")}. Territories: ${u(territories, "positioning.territories")}`);
         break;
       }
       case "differentiation": {
         const result = safeParse(data.result) || data;
         const claims = safeArr(result.validatedClaims || result.claimStructures || data.claimStructures).slice(0, 3).map((c: any) => typeof c === "string" ? c : c.claim || c.title || "").join("; ");
         const mode = result.authorityMode?.mode || result.authorityMode || data.authorityMode || "";
-        parts.push(`[Differentiation] Claims: ${claims}. Authority mode: ${typeof mode === "object" ? mode.mode || "" : mode}`);
+        const modeStr = typeof mode === "object" ? mode.mode || "" : mode;
+        parts.push(`[Differentiation] Claims: ${u(claims, "differentiation.claims")}. Authority mode: ${u(modeStr, "differentiation.authorityMode")}`);
         break;
       }
       case "mechanism": {
         const result = safeParse(data.result) || data;
         const name = result.mechanismName || result.name || data.mechanismName || "";
         const explanation = result.mechanismExplanation || result.explanation || result.howItWorks || "";
-        parts.push(`[Mechanism] Name: ${name}. Explanation: ${typeof explanation === "string" ? explanation.substring(0, 200) : ""}`);
+        const explStr = typeof explanation === "string" ? explanation.substring(0, 200) : "";
+        parts.push(`[Mechanism] Name: ${u(name, "mechanism.name")}. Explanation: ${u(explStr, "mechanism.explanation")}`);
         break;
       }
       case "offer": {
         const result = safeParse(data.result) || data;
         const headline = result.offerHeadline || result.headline || data.offerHeadline || "";
         const value = result.primaryValueProp || result.valueProposition || "";
-        parts.push(`[Offer] Headline: ${typeof headline === "string" ? headline : ""}.  Value: ${typeof value === "string" ? value : ""}`);
+        parts.push(`[Offer] Headline: ${u(typeof headline === "string" ? headline : "", "offer.headline")}.  Value: ${u(typeof value === "string" ? value : "", "offer.value")}`);
         break;
       }
       case "funnel": {
         const result = safeParse(data.result) || data;
         const stages = safeArr(result.stages || result.funnelStages || data.stages).slice(0, 3).map((s: any) => `${s.name || s.stage || ""}: ${s.objective || s.description || ""}`).join(" → ");
-        parts.push(`[Funnel] ${stages}`);
+        parts.push(`[Funnel] ${u(stages, "funnel.stages")}`);
         break;
       }
       case "awareness": {
         const result = safeParse(data.result) || data;
         const route = result.primaryRoute?.routeName || result.primaryRoute?.name || "";
-        parts.push(`[Awareness] Primary route: ${route}`);
+        parts.push(`[Awareness] Primary route: ${u(route, "awareness.primaryRoute")}`);
         break;
       }
       case "persuasion": {
         const result = safeParse(data.result) || data;
         const route = result.primaryRoute?.routeName || result.primaryRoute?.name || "";
         const alt = result.alternativeRoute?.routeName || "";
-        parts.push(`[Persuasion] Primary: ${route}${alt ? `, Alternative: ${alt}` : ""}`);
+        parts.push(`[Persuasion] Primary: ${u(route, "persuasion.primaryRoute")}${alt ? `, Alternative: ${u(alt, "persuasion.alternativeRoute")}` : ""}`);
         break;
       }
     }
@@ -318,6 +438,8 @@ function buildBuildPlanPrompt(engineContext: string, rhythm: AdaptiveRhythm, pre
   }
 
   return `You are an Execution Synthesis Engine. Convert analysis into EXACT ACTIONS the user does TODAY.
+
+${UNTRUSTED_INPUT_SYSTEM_RULE}
 
 CRITICAL RULES:
 - NO paragraphs, NO theory, NO abstract KPIs, NO generic percentages
@@ -392,18 +514,76 @@ Return EXACTLY this JSON structure:
 Return ONLY valid JSON. No markdown, no code blocks, no explanation.`;
 }
 
-function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutput | null {
+// strict zod schema for the AI build-plan
+// response. Replaces the prior shape-via-truthy-check + try/catch JSON.parse
+// pattern that silently fell back to `null` on ANY shape violation. Now an
+// invalid response yields a structured ValidationError so the caller can
+// distinguish "AI returned malformed JSON" from "no response".
+import { z } from "zod";
+
+const BuildPlanResponseSchema = z.object({
+  positioning: z.string().min(1),
+  differentiation: z.string().min(1),
+  mechanism: z.object({
+    name: z.string().min(1),
+    explanation: z.string().min(1),
+  }),
+  offer: z.string().min(1),
+  funnel: z.object({
+    top: z.string().min(1),
+    middle: z.string().min(1),
+    bottom: z.string().min(1),
+  }),
+  contentDna: z.object({
+    contentTypes: z.object({
+      problems: z.string().optional().default(""),
+      proof: z.string().optional().default(""),
+      education: z.string().optional().default(""),
+      conversion: z.string().optional().default(""),
+    }).optional().default(() => ({ problems: "", proof: "", education: "", conversion: "" })),
+    contentAngles: z.array(z.any()).optional().default([]),
+    hookStyles: z.array(z.any()).optional().default([]),
+    messagingThemes: z.array(z.any()).optional().default([]),
+    contentMixRatio: z.record(z.any()).optional().default({}),
+  }),
+  kpiRules: z.object({
+    postingFrequency: z.string().optional().default(""),
+    contentMix: z.string().optional().default(""),
+    conversionTargets: z.string().optional().default(""),
+  }),
+  executionActions: z.object({
+    daily: z.array(z.any()).optional(),
+    weekly: z.array(z.any()).optional(),
+    biweekly: z.array(z.any()).optional(),
+  }).optional().default(() => ({ daily: [], weekly: [], biweekly: [] })),
+});
+
+type BuildPlanResponse = z.infer<typeof BuildPlanResponseSchema>;
+type ParseAIResult =
+  | { ok: true; plan: BuildPlanOutput }
+  | { ok: false; kind: "JSON_MALFORMED" | "SHAPE_INVALID"; detail: string };
+
+function parseAIResponse(content: string, rhythm: AdaptiveRhythm): ParseAIResult {
+  let cleaned = content.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+  }
+  let raw: unknown;
   try {
-    let cleaned = content.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-    const parsed = JSON.parse(cleaned);
-
-    if (!parsed.positioning || !parsed.differentiation || !parsed.mechanism || !parsed.offer || !parsed.funnel || !parsed.contentDna || !parsed.kpiRules) {
-      return null;
-    }
-
+    raw = JSON.parse(cleaned);
+  } catch (err: any) {
+    const detail = err?.message ?? "parse_error";
+    console.warn(logSafe(`[BuildPlanLayer] AI_RESPONSE_PARSE_FAILED | reason=invalid_json | error=${detail}`));
+    return { ok: false, kind: "JSON_MALFORMED", detail };
+  }
+  const result = BuildPlanResponseSchema.safeParse(raw);
+  if (!result.success) {
+    const detail = result.error.issues.slice(0, 5).map(i => `${i.path.join(".")}=${i.code}`).join(",");
+    console.warn(logSafe(`[BuildPlanLayer] AI_RESPONSE_SHAPE_INVALID | reason=zod_validation_failed | issues=${detail}`));
+    return { ok: false, kind: "SHAPE_INVALID", detail };
+  }
+  const parsed: BuildPlanResponse = result.data;
+  try {
     const contentAngles = Array.isArray(parsed.contentDna?.contentAngles) ? parsed.contentDna.contentAngles.map(String) : [];
     const hookStyles = Array.isArray(parsed.contentDna?.hookStyles) ? parsed.contentDna.hookStyles.map(String) : [];
     const messagingThemes = Array.isArray(parsed.contentDna?.messagingThemes) ? parsed.contentDna.messagingThemes.map(String) : [];
@@ -411,7 +591,7 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutp
 
     const execActions = parsed.executionActions || {};
 
-    return {
+    const built: BuildPlanOutput = {
       positioning: String(parsed.positioning),
       differentiation: String(parsed.differentiation),
       mechanism: {
@@ -468,7 +648,80 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutp
         conversionTargets: String(parsed.kpiRules?.conversionTargets || ""),
       },
     };
-  } catch {
+    return { ok: true, plan: built };
+  } catch (err: any) {
+    const detail = err?.message ?? "unknown";
+    console.warn(logSafe(`[BuildPlanLayer] AI_RESPONSE_BUILD_FAILED | reason=post_zod_construction_error | error=${detail}`));
+    return { ok: false, kind: "SHAPE_INVALID", detail };
+  }
+}
+
+/**
+ * Reload the per-engine depth-gate verdict map from the run's persisted state.
+ *
+ * The map is produced in-memory as ctx.depthGateStatus during runOrchestrator
+ * and persisted to orchestrator_jobs.depth_gate_status (migration 039). We read
+ * it here — scoped by accountId so a client-suppliable sourceJobId cannot reach
+ * another tenant's run — when no in-process caller supplied the map.
+ *
+ * This is data-source resolution, NOT a D1 semantic fallback: a missing job
+ * row, NULL column, or unparseable payload returns undefined, so the D5
+ * CONTRACT_INCOMPLETE path in collectValidatedEngineOutputs fires — no engine
+ * is ever silently defaulted to a pass state.
+ */
+async function loadPersistedDepthGateStatus(
+  accountId: string,
+  sourceJobId: string,
+): Promise<Record<string, string> | undefined> {
+  try {
+    const [row] = await db
+      .select({ depthGate: orchestratorJobs.depthGateStatus })
+      .from(orchestratorJobs)
+      .where(and(eq(orchestratorJobs.id, sourceJobId), eq(orchestratorJobs.accountId, accountId)))
+      .limit(1);
+    if (!row || !row.depthGate) {
+      console.warn(logSafe(`[BuildPlanLayer] DEPTH_GATE_NOT_PERSISTED | job=${sourceJobId} account=${accountId} — gated engines will be treated as CONTRACT_INCOMPLETE`));
+      return undefined;
+    }
+    const parsed = JSON.parse(row.depthGate);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      console.warn(logSafe(`[BuildPlanLayer] DEPTH_GATE_PARSE_FAILED | job=${sourceJobId} | reason=non_object_payload`));
+      return undefined;
+    }
+    return parsed as Record<string, string>;
+  } catch (err: any) {
+    console.warn(logSafe(`[BuildPlanLayer] DEPTH_GATE_PARSE_FAILED | job=${sourceJobId} | error=${err?.message ?? err}`));
+    return undefined;
+  }
+}
+
+/**
+ * Reload the persisted AnalyticalPackage (AEL) for this run from ael_snapshots
+ * (a raw-SQL table, not a drizzle model). Scoped by job_id + account_id +
+ * campaign_id — the same canonical key the narrative layer reads. Absent or
+ * unreadable → null, which drives the truthful AEL-absent downgrade via
+ * acknowledgeAelInput (B3) rather than a fabricated package.
+ */
+async function loadPersistedAel(
+  accountId: string,
+  campaignId: string,
+  sourceJobId: string,
+): Promise<AnalyticalPackage | null> {
+  try {
+    const res = await db.execute(
+      sql`SELECT package FROM ael_snapshots
+          WHERE job_id = ${sourceJobId} AND account_id = ${accountId} AND campaign_id = ${campaignId}
+          LIMIT 1`,
+    );
+    const raw = res.rows?.[0]?.package;
+    if (!raw) {
+      console.warn(logSafe(`[BuildPlanLayer] AEL_NOT_PERSISTED | job=${sourceJobId} account=${accountId} — proceeding with AEL-absent downgrade`));
+      return null;
+    }
+    const pkg = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return pkg as AnalyticalPackage;
+  } catch (err: any) {
+    console.warn(logSafe(`[BuildPlanLayer] AEL_LOAD_FAILED | job=${sourceJobId} | error=${err?.message ?? err}`));
     return null;
   }
 }
@@ -476,32 +729,71 @@ function parseAIResponse(content: string, rhythm: AdaptiveRhythm): BuildPlanOutp
 export async function runBuildPlanLayer(
   accountId: string,
   campaignId: string,
-  depthGateStatus?: Record<string, string>
+  depthGateStatus?: Record<string, string>,
+  sourceJobId?: string | null,
+  analyticalEnrichment?: AnalyticalPackage | null,
 ): Promise<BuildPlanResult> {
   const MAX_ATTEMPTS = 3;
 
-  const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, depthGateStatus);
+  // hard BLOCK when sourceJobId is absent.
+  // Without it we cannot prove the snapshots belong to the same run, so
+  // synthesis is refused on every code path (no NODE_ENV gate). The
+  // public contract is `{status:"BLOCKED", reason:"STALE_LINEAGE"}` so
+  // downstream consumers and tests have a stable shape to switch on.
+  if (!sourceJobId) {
+    console.error(logSafe(`[BuildPlanLayer] STALE_LINEAGE_BLOCK | account=${accountId} campaign=${campaignId} — refusing build-plan synthesis without sourceJobId (cross-run snapshot stitching forbidden)`));
+    const staleAck = acknowledgeAelInput("BuildPlanLayer", analyticalEnrichment ?? null, accountId);
+    const blockedResult: BuildPlanResult = {
+      status: "BLOCKED",
+      reason: "STALE_LINEAGE",
+      plan: null,
+      actionabilityScore: 0,
+      failedBlocks: ["STALE_LINEAGE_BLOCK"],
+      attempts: 0,
+      error: "STALE_LINEAGE: no sourceJobId provided — refusing to synthesize build plan from unbound snapshots",
+    };
+    return applyPartialAelDowngrade("BuildPlanLayer", blockedResult, staleAck);
+  }
+
+  // Reload the depth-gate map + AEL server-side from the run's persisted state
+  // (bound by sourceJobId + accountId) when an in-process caller did not supply
+  // them. Caller-supplied values win (future in-process orchestrator path); the
+  // DB is the fallback DATA SOURCE carrying the same canonical map — source
+  // resolution, not a D1 semantic fallback. Missing/NULL/unparseable →
+  // undefined/null → the existing D5 CONTRACT_INCOMPLETE / AEL-absent
+  // degradation fires downstream (never a fabricated pass).
+  let resolvedDepthGate = depthGateStatus;
+  if (!resolvedDepthGate) {
+    resolvedDepthGate = await loadPersistedDepthGateStatus(accountId, sourceJobId);
+  }
+  let resolvedAel = analyticalEnrichment ?? null;
+  if (!resolvedAel) {
+    resolvedAel = await loadPersistedAel(accountId, campaignId, sourceJobId);
+  }
+
+  const aelAck = acknowledgeAelInput("BuildPlanLayer", resolvedAel, accountId);
+  const snapshots = await collectValidatedEngineOutputs(accountId, campaignId, resolvedDepthGate, sourceJobId);
 
   if (snapshots.length < 3) {
-    return {
+    return applyPartialAelDowngrade("BuildPlanLayer", {
       status: "INSUFFICIENT_DATA",
       plan: null,
       actionabilityScore: 0,
       failedBlocks: [],
       attempts: 0,
       error: `Only ${snapshots.length} validated engine outputs available. Need at least 3.`,
-    };
+    } as BuildPlanResult, aelAck);
   }
 
   const adaptiveRhythm = await computeAdaptiveRhythm(campaignId, accountId);
 
-  console.log(`[BuildPlanLayer] Adaptive rhythm: reels=${adaptiveRhythm.reelsPerWeek}/wk carousels=${adaptiveRhythm.carouselsPerWeek}/wk stories=${adaptiveRhythm.storiesPerDay}/day posts=${adaptiveRhythm.postsPerWeek}/wk | basis=${adaptiveRhythm.performanceBasis}`);
+  console.log(logSafe(`[BuildPlanLayer] Adaptive rhythm: reels=${adaptiveRhythm.reelsPerWeek}/wk carousels=${adaptiveRhythm.carouselsPerWeek}/wk stories=${adaptiveRhythm.storiesPerDay}/day posts=${adaptiveRhythm.postsPerWeek}/wk | basis=${adaptiveRhythm.performanceBasis}`));
 
   let memoryBlockForConstraints: import("../memory-system/types").MemoryBlock | null = null;
   try {
     memoryBlockForConstraints = await buildMemoryContext(campaignId, accountId);
   } catch (memErr: any) {
-    console.warn(`[BuildPlanLayer] Memory context load failed (non-blocking):`, memErr.message);
+    console.warn(logSafe(`[BuildPlanLayer] Memory context load failed (non-blocking): ${memErr?.message ?? ""}`));
   }
 
   const engineContext = buildEngineContext(snapshots);
@@ -512,7 +804,7 @@ export async function runBuildPlanLayer(
       const prompt = buildBuildPlanPrompt(engineContext, adaptiveRhythm, attempt > 1 ? lastFailedBlocks : undefined);
 
       const response = await aiChat({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 1500,
         temperature: 0.3,
@@ -522,15 +814,31 @@ export async function runBuildPlanLayer(
 
       const content = response.choices?.[0]?.message?.content;
       if (!content) {
-        console.warn(`[BuildPlanLayer] Attempt ${attempt}: Empty AI response`);
+        console.warn(logSafe(`[BuildPlanLayer] Attempt ${attempt}: Empty AI response`));
         continue;
       }
 
-      const plan = parseAIResponse(content, adaptiveRhythm);
-      if (!plan) {
-        console.warn(`[BuildPlanLayer] Attempt ${attempt}: Failed to parse response`);
+      const parseResult = parseAIResponse(content, adaptiveRhythm);
+      if (!parseResult.ok) {
+        // SHAPE_INVALID = zod-shape contract failure → INCOMPLETE (not BLOCKED:
+        // task spec calls for an "incomplete signal", not a hard execution
+        // block). JSON_MALFORMED keeps the retry loop.
+        if (parseResult.kind === "SHAPE_INVALID") {
+          const incompleteShape: BuildPlanResult = {
+            status: "INCOMPLETE",
+            reason: "AI_RESPONSE_INVALID",
+            plan: null,
+            actionabilityScore: 0,
+            failedBlocks: ["AI_RESPONSE_SHAPE_INVALID"],
+            attempts: attempt,
+            error: `AI_RESPONSE_INVALID: ${parseResult.detail}`,
+          };
+          return applyPartialAelDowngrade("BuildPlanLayer", incompleteShape, aelAck);
+        }
+        console.warn(logSafe(`[BuildPlanLayer] Attempt ${attempt}: ${parseResult.kind} (${parseResult.detail}) — retrying`));
         continue;
       }
+      const plan = parseResult.plan;
 
       if (memoryBlockForConstraints && (memoryBlockForConstraints.reinforceSlots.length > 0 || memoryBlockForConstraints.avoidSlots.length > 0)) {
         try {
@@ -541,58 +849,59 @@ export async function runBuildPlanLayer(
           if (overrides.length > 0) {
             plan.contentDna.weeklyStructure = { reels: adjusted.reelsPerWeek ?? ws.reels, carousels: adjusted.carouselsPerWeek ?? ws.carousels, stories: adjusted.storiesPerDay ?? ws.stories };
             plan.memoryOverrides = overrides;
-            console.log(`[BuildPlanLayer] MEMORY_CONSTRAINTS_APPLIED | overrides=${overrides.length} | fields=${overrides.map(o => o.field).join(",")}`);
+            console.log(logSafe(`[BuildPlanLayer] MEMORY_CONSTRAINTS_APPLIED | overrides=${overrides.length} | fields=${overrides.map(o => o.field).join(",")}`));
           }
         } catch (memApplyErr: any) {
-          console.warn(`[BuildPlanLayer] Memory constraint application failed (non-blocking):`, memApplyErr.message);
+          console.warn(logSafe(`[BuildPlanLayer] Memory constraint application failed (non-blocking): ${memApplyErr?.message ?? ""}`));
         }
       }
 
       const actionability = enforceActionability(plan);
-      console.log(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`);
+      console.log(logSafe(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`));
 
       if (actionability.passed) {
-        return {
+        const successResult: BuildPlanResult = {
           status: "SUCCESS",
           plan,
           actionabilityScore: actionability.score,
           failedBlocks: [],
           attempts: attempt,
         };
+        return applyPartialAelDowngrade("BuildPlanLayer", successResult, aelAck);
       }
 
       lastFailedBlocks = actionability.failedBlocks;
 
       if (attempt === MAX_ATTEMPTS) {
-        return {
+        return applyPartialAelDowngrade("BuildPlanLayer", {
           status: "ACTIONABILITY_FAILED",
           plan,
           actionabilityScore: actionability.score,
           failedBlocks: actionability.failedBlocks,
           attempts: attempt,
-        };
+        } as BuildPlanResult, aelAck);
       }
     } catch (err: any) {
-      console.error(`[BuildPlanLayer] Attempt ${attempt} error:`, err.message);
+      console.error(logSafe(`[BuildPlanLayer] Attempt ${attempt} error: ${err?.message ?? ""}`));
       if (attempt === MAX_ATTEMPTS) {
-        return {
+        return applyPartialAelDowngrade("BuildPlanLayer", {
           status: "ERROR",
           plan: null,
           actionabilityScore: 0,
           failedBlocks: [],
           attempts: attempt,
           error: err.message,
-        };
+        } as BuildPlanResult, aelAck);
       }
     }
   }
 
-  return {
+  return applyPartialAelDowngrade("BuildPlanLayer", {
     status: "ERROR",
     plan: null,
     actionabilityScore: 0,
     failedBlocks: [],
     attempts: MAX_ATTEMPTS,
     error: "All attempts exhausted",
-  };
+  } as BuildPlanResult, aelAck);
 }

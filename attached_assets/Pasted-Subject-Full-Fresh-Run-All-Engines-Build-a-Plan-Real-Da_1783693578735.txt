@@ -1,0 +1,22 @@
+Subject: Full Fresh Run — All Engines + Build a Plan, Real Data, MarketMindAI Campaign
+
+The AI token limit issue is resolved on my side — quota is available again. Time for the definitive full run we've been building toward.
+
+TARGET: the real MarketMindAI campaign (campaign_1773576062201_6t0oxi, the one with the 10 competitors and the product anchor set).
+
+STEP 1 — FRESH DATA FIRST
+1. Trigger a real fetch cycle through the normal pipeline for all competitors (the spurious cooldown stamps are cleared, so this should actually hit the network now). Confirm per platform: posts fetched, posts stored, timestamps proving they're new. TikTok may still time out (known deferred issue) and reviews may still be empty (collector pending on Bright Data's side) — that's fine, report them truthfully, don't block the run on them.
+2. Confirm the MI content hash CHANGED after the fetch (the Fix #2 proof on real data): old snapshot contentHash vs new one.
+
+STEP 2 — FULL RE-ANALYSIS, NOTHING REUSED
+3. Run a COMPLETE fresh analysis: all 13 engines end to end, INCLUDING Build a Plan regenerated from scratch. Nothing served from stale cache — every engine must consume the new MI snapshot. If any engine reports mode=reused despite the new data, that's a freshness bug — stop and report it.
+4. This is also the first-ever full run with everything we built active at once: doctrine + product anchor + gate battery + retry loops + the 5 previously NOT_REACHED engines. If the old gate cascade blocks the chain again, fix the blocker and re-run until the chain completes — the 5 NOT_REACHED engines finally executing live is one of the goals of this run.
+
+STEP 3 — THE FULL REPORT
+5. aiPathReport for the run: every engine × mode (ai/fallback/deterministic) × attempts × failedGates, doctrineResolution (must be "anchored"), engineCoverage and attemptSuccessRate.
+6. ANCHOR_EVIDENCE confirmation: all engines + judges show present=yes from the first prompt — including the 5 engines we've never seen run live.
+7. The actual outputs: the new audience segments, positioning claims, offer, channel recommendation, and the regenerated Build a Plan document — so we can judge the quality of the strategy itself, not just the mechanics.
+8. Data freshness stamp: which MI snapshot ID + timestamp each engine consumed, proving everything postdates today's fetch.
+9. Watchtower state after the run: what Q1 and Q2 currently display for this campaign — no fixes, just report what shows (we're opening the Q1 file next).
+
+If anything fails mid-chain, report the failure loudly with the engine name and gate reason — do not silently fall back and call it done.

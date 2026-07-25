@@ -1,0 +1,183 @@
+Hi team,
+
+I want a full system-wide scraping audit across Avyron.
+
+The goal is to verify exactly what scraping is working, what is partially working, what is blocked, what is degraded, and what is silently failing or at risk of stalling.
+
+This audit must cover every scraping/source-ingestion path in the system, not only the competitor pipeline.
+
+==================================================
+AUDIT OBJECTIVES
+================
+
+Please verify:
+
+* which scrapers are fully working
+* which scrapers are partially working
+* which scrapers are blocked
+* which scrapers are returning stale/empty data
+* which scrapers are failing provider-side
+* which scrapers are failing internally
+* which scrapers are relying on fallback behavior
+* which scrapers are producing usable intelligence
+* which scrapers are producing weak or misleading signals
+* which scraping paths are not wired into downstream pipelines
+* which failures are visible to operators
+* which failures are still too quiet
+
+Nothing should be assumed healthy without evidence.
+
+==================================================
+SCOPE
+=====
+
+Audit all scraping and ingestion sources, including but not limited to:
+
+* Instagram
+* TikTok
+* websites
+* blogs
+* Google Reviews
+* competitor pages
+* user-owned pages
+* campaign/content performance sources
+* market intelligence sources
+* Bright Data
+* Apify
+* any proxy/provider fallback
+* any internal scraping adapters
+* any source-normalization layer
+* any scrape queues/workers
+* any source health tracking
+
+==================================================
+BLOCK / DEGRADATION DETECTION
+=============================
+
+I want explicit classification for each source:
+
+* WORKING
+* PARTIALLY_WORKING
+* BLOCKED
+* RATE_LIMITED
+* PROVIDER_DOWN
+* EMPTY_RESULT
+* STALE_RESULT
+* AUTH_REQUIRED
+* CAPTCHA_OR_ANTI_BOT
+* SCHEMA_CHANGED
+* NOT_WIRED
+* UNKNOWN
+
+For every source, report:
+
+* current status
+* evidence used
+* last successful scrape
+* last failed scrape
+* failure reason
+* retry behavior
+* fallback behavior
+* downstream impact
+* operator visibility
+* recovery path
+
+==================================================
+NO-SILENT-STALL REQUIREMENT
+===========================
+
+This is the most important part.
+
+The scraping layer must never silently stop.
+
+Please audit and fix any path where:
+
+* a scrape fails without visible logging
+* a provider block is swallowed
+* empty data is treated as success
+* stale data is reused without warning
+* retries stop without escalation
+* queues stall silently
+* workers die silently
+* fallback data hides a real provider failure
+* downstream engines continue as if scraping succeeded
+* source freshness is not checked
+* blocked sources are not surfaced
+* scraping cadence is not monitored
+* ingestion produces “success” without usable evidence
+
+If a source is blocked, degraded, stale, or empty, the system must say so explicitly.
+
+==================================================
+RUNTIME / INFRASTRUCTURE AUDIT
+==============================
+
+Also inspect:
+
+* scraper timeouts
+* zombie scraping jobs
+* dangling browser instances
+* browser.close cleanup paths
+* proxy failure handling
+* provider quota handling
+* retry storms
+* rate-limit loops
+* memory leaks
+* queue backpressure
+* concurrent scrape safety
+* stuck jobs
+* long-running scrape instability
+* partial persistence
+* duplicate ingestion
+* DB/runtime divergence
+* stale source references
+* source freshness thresholds
+
+No scraper should be able to hang the system, leak runtime, or poison downstream intelligence.
+
+==================================================
+DOWNSTREAM INTEGRITY
+====================
+
+Please verify how scraping status affects downstream systems:
+
+* market intelligence
+* competitor analysis
+* user performance evaluation
+* cluster production
+* strategy recommendations
+* confidence scoring
+* evidence weighting
+* dashboard status
+* audit logs
+
+If scraping data is missing, blocked, stale, or weak, downstream engines must degrade confidence and surface the reason.
+
+They must not produce confident conclusions from bad source evidence.
+
+==================================================
+DELIVERABLES
+============
+
+Please provide:
+
+1. Full scraping source inventory
+2. Status table per source
+3. Working vs blocked vs degraded classification
+4. Evidence for each classification
+5. List of silent-failure risks found
+6. Fixes applied
+7. Remaining unresolved risks
+8. Provider/blocking analysis
+9. Runtime/resource-risk analysis
+10. Downstream impact analysis
+11. Operator visibility assessment
+12. Recommended monitoring additions
+13. Tests added or updated
+14. Architect review result
+
+No “probably working” conclusions.
+
+Every source must be verified, classified, or explicitly marked UNKNOWN with a reason.
+
+Thanks.

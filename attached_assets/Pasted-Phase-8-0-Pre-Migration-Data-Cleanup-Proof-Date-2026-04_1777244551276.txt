@@ -1,0 +1,117 @@
+Phase 8.0 — Pre-Migration Data Cleanup Proof
+Date: 2026-04-26 Triggered by: Sam, 2026-04-25 — "code + schema only, NOT a data source. Confirm once cleanup is fully verified." Hard rule under audit: No fake/test data may transfer into Avyron AI Main, including via the source bundle, the live DB, or any harness residue.
+
+1. Doctrine restated
+Remix is a TESTING fork. Main is production. What transfers: code, contracts, schema definitions, routes, enforcement logic, AI overlay, dashboard files, harness code. What does NOT transfer: any database row, any seeded campaign, any harness output, any boss_runs, any pipeline_* row. The database is NOT migrated.
+
+This proof verifies all four parts of that doctrine hold simultaneously: bundle is clean, harnesses self-clean, live DB is clean, and the bundle remains clean after the harnesses re-run.
+
+2. Three audits, three results
+Audit A — Source bundle (phase8.0-remix-source-bundle.tar.gz)
+Test: does the package contain any data file or hardcoded production identifier?
+
+Check	Method	Result
+File-type inventory	tar -tzf … | awk -F. '{print "."$NF}' | sort -u	Only .ts (56), .html (2), .md (1), .txt (1). No .sql, .json, .csv, .dump, .sqlite, .db, .seed, .fixture.
+Hidden data files	tar -tzf … | grep -iE '\.(sql|json|csv|dump|sqlite|db|seed|fixture)'	NONE
+Hardcoded UUIDs in source	grep -rE "(account_id|campaign_id)\s*[:=]\s*['\"][a-z0-9\-]{8,}['\"]" (excluding default(gen_random_uuid), test-, harness-, scenario- prefixes)	NONE
+MANIFEST integrity	sha256sum -c against MANIFEST.txt	All 58 files report OK
+Conclusion: the bundle is data-clean by construction. Even if Main's receiving agent unpacks it on a freshly initialized Postgres, no rows will appear — the bundle ships zero data and zero seed scripts.
+
+Audit B — Harness self-cleanup behavior
+Test: does each harness leave the database in the same state it found it?
+
+Procedure: wipe live DB to zero → run harness → query all 12 tables → expect 0 in every row.
+
+Harness	Cleanup mechanism	First test (BEFORE fixes)	After fix	Final state
+integrity-harness.ts	cleanup() called pre-run AND in finally block (lines 430, 434). Bug found: lines 404–405 deleted from legacy tables strategy_dna / dna_versions (which don't exist), wrapped in .catch(() => {}) so failures were swallowed silently, leaving pipeline_dna rows behind.	left 1 row in pipeline_dna, 2 rows in pipeline_dna_versions	rewrote cleanup to use the actual pipeline_dna / pipeline_dna_versions tables via db.delete(), removed the silent .catch()	0 rows in all 12 tables
+e2e-system-test.ts	cleanup(campaignId) called per-scenario at line 421 (and per-campaign at 659–660 for S8). Bug found: no end-of-run sweep — every scenario's data persisted after the harness exited.	left 76 rows total across 9 tables (6 boss_runs, 7 pipeline_runs, 13 snapshots, 6 signals, 9 change events, 8 acquisitions, 12 eval_windows, 6 dna, 6 dna_versions, 5 user_truth)	added sweepE2EResidue() + try/finally wrapper around main() body. Sweep collects every distinct campaign_id LIKE 'e2e-%' from 9 source tables and calls existing cleanup() for each, so it works even if a scenario throws.	0 rows in all 12 tables
+real-scenario-harness.ts	None needed — verified via static read	pure compute (uses interpretCompetitorPosts() and decideQ2() only; never touches db)	no fix required	0 rows in all 12 tables
+Both bug fixes are now part of the bundle (re-packaged as MANIFEST entry timestamp 2026-04-26).
+
+Audit C — Live DB cleanup
+Test: is the Remix DB empty of all pipeline_* and boss_runs rows after harness runs complete?
+
+Phase	Action	Total rows in 12 tables
+Pre-cleanup baseline	(residue from weeks of harness runs: behavior_*, e2e-*, harness_*, p6r-*, camp_demo)	1,342
+BEGIN; DELETE FROM ... × 12; COMMIT;	wipe all 12 tables in dependency-safe order	0
+Run integrity harness (after cleanup-bug fix)	npx tsx server/pipeline/integrity-harness.ts	0 (15/15 verified, leaves no residue)
+Run e2e harness (after sweep fix)	PIPELINE_AI_OVERLAY_ENABLED=true npx tsx server/pipeline/e2e-system-test.ts	0 (8/8 PASS, sweep wipes all e2e-* campaigns)
+Run real-scenario harness	npx tsx server/pipeline/real-scenario-harness.ts	0 (5/5 PASS, no DB writes occurred)
+Final live-DB state (verified post-all-harnesses):
+
+       table_name       | rows
+------------------------+------
+ boss_runs              |    0
+ pipeline_acquisitions  |    0
+ pipeline_change_events |    0
+ pipeline_clusters      |    0
+ pipeline_dna           |    0
+ pipeline_dna_versions  |    0
+ pipeline_eval_windows  |    0
+ pipeline_rejections    |    0
+ pipeline_runs          |    0
+ pipeline_signals       |    0
+ pipeline_snapshots     |    0
+ pipeline_user_truth    |    0
+(12 rows)
+
+3. Cross-checks against Sam's "do NOT transfer" list
+Item from the letter	How verified clean
+fake campaigns	Live DB has 0 rows in any pipeline table; bundle has no seed scripts.
+test runs (boss_runs)	SELECT COUNT(*) FROM boss_runs → 0.
+test snapshots (pipeline_snapshots)	SELECT COUNT(*) FROM pipeline_snapshots → 0.
+test signals / change events	pipeline_signals → 0, pipeline_change_events → 0.
+test acquisitions	pipeline_acquisitions → 0.
+test rejections	pipeline_rejections → 0. (Note: in production these are an audit trail and stay populated; for migration-baseline purposes they are wiped per Sam's explicit list.)
+test user truth	pipeline_user_truth → 0.
+test DNA records	pipeline_dna → 0, pipeline_dna_versions → 0.
+test clusters	pipeline_clusters → 0.
+harness artifacts	All three harnesses now self-clean to zero, verified end-to-end above.
+4. Cross-checks against Sam's "what SHOULD be transferred" list
+Item	Where in the bundle
+source code	server/pipeline/, server/boss/ (47 .ts files, 8.6k LOC)
+contracts	shared/contracts/ (9 files)
+schema definitions	shared/schema-additions.ts (12-table DDL block, 283 lines)
+routes/endpoints	server/pipeline/routes.ts (26 routes, 703 LOC)
+enforcement logic	server/pipeline/{validate-and-accept, readers, errors, rejection-log}.ts
+AI overlay logic	server/pipeline/ai-overlay/ (8 files)
+dashboard files	server/templates/{pipeline-overlay, pipeline-overlay-login}.html
+test harness code (NOT data)	server/pipeline/{e2e-system-test, integrity-harness, real-scenario-harness}.ts — now patched to leave zero residue
+Everything Sam wanted transferred is in the bundle. Nothing he forbade is in the bundle.
+
+5. Sam's pre-migration verification list
+Verification item	Status
+pipeline_* tables contain NO test rows	✓ confirmed (Audit C)
+boss_runs has no test scenarios	✓ confirmed (Audit C)
+no fake campaign/account IDs exist	✓ confirmed (Audit C — all 0 rows)
+no leftover harness artifacts remain	✓ confirmed (Audit B — all three harnesses self-clean to zero)
+no DB dump is being used for migration	✓ confirmed (Audit A — bundle has zero data files)
+6. What changed in the source code (delta from previous bundle)
+Two files were patched to enforce self-cleanup discipline. Both fixes are PURE bug fixes — they do not change harness assertions, scenarios, or pass/fail criteria.
+
+server/pipeline/integrity-harness.ts
+Added imports: pipelineDna, pipelineDnaVersions, eq, inArray.
+Replaced the broken legacy-table cleanup (lines 404–405) with proper Drizzle deletes against pipeline_dna + pipeline_dna_versions scoped by accountId = HARNESS_ACCT_A.
+Removed the silent .catch(() => {}) swallow — if cleanup fails now it surfaces.
+server/pipeline/e2e-system-test.ts
+Added sql to the drizzle-orm import.
+Added new function sweepE2EResidue() that collects every campaign_id LIKE 'e2e-%' from 9 source tables and calls the existing per-campaign cleanup() for each.
+Wrapped main() body in try/finally so the sweep runs even if a scenario throws. Moved process.exit after the finally block so the cleanup completes before the process terminates.
+Both fixes are now in the rebuilt bundle. Main will inherit them when it receives the bundle.
+
+7. Re-bundle integrity
+After the harness fixes were applied, the source bundle was regenerated. Re-verified:
+
+Property	Value
+File count (excluding MANIFEST.txt + README.md)	58
+Total entries (incl. dirs, MANIFEST, README)	60
+Tarball size	111 KB
+MANIFEST timestamp	2026-04-26T00:00:00Z
+MANIFEST integrity	All 58 file SHAs report OK against sha256sum -c
+Data files in bundle	0
+8. Sign-off
+The Remix project is now in the state the migration requires: source code + contract + schema + harnesses, with zero rows in any pipeline_* or boss_runs table, and zero data files in the source bundle.
+All three harnesses have been audited and (where buggy) fixed. They now leave the DB at zero on exit.
+The bundle at server/audits/phase8.0-remix-source-bundle.tar.gz is the authoritative artifact for handoff. The updated harness files are inside it.
+The migration manifest at server/audits/phase8.0-remix-to-main-migration-manifest.md remains accurate — it describes code+schema migration only, with no DB transfer.
+Cleanup verified. Remix is ready for code+schema handoff to Main. No data contamination risk.

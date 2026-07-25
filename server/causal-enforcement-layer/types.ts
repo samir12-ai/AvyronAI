@@ -9,6 +9,19 @@ export interface CausalConstraintRule {
 export interface ComplianceResult {
   engineId: string;
   passed: boolean;
+  /**
+   * Explicit verdict so downstream callers can distinguish
+   * a legitimate PASS/FAIL evaluation from "we could not evaluate at all"
+   * (e.g. AEL missing). INCOMPLETE is treated as a hard fail by gates that
+   * require positive confirmation.
+   */
+  verdict?: "PASS" | "FAIL" | "INCOMPLETE";
+  /**
+   * Machine-readable reason code accompanying verdict.
+   * Used by audit/snapshot consumers that cannot parse free-text enforcementLog.
+   * Values: AEL_MISSING | AEL_PARTIAL | NO_MATCHING_RULES | OK | <violation-code>.
+   */
+  reason?: string;
   score: number;
   violations: ComplianceViolation[];
   appliedRules: string[];

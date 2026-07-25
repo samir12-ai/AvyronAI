@@ -1,0 +1,214 @@
+Hi Replit Team,
+
+This audit is exactly what we needed — it confirms that the system is already well-built, and that the gap is purely in the decision layer between existing components.
+
+We do NOT want to rebuild anything.  
+We want to use what already exists and connect it correctly.
+
+Please proceed with implementation based on the following, strictly grounded in the current codebase.
+
+---
+
+# 🔴 1. Execution Compliance (Use Existing Data — No New Sources)
+
+You already collect:
+- publishedPosts (last 7 days)
+- calendarEntries (status breakdown)
+- requiredWork
+
+These are sufficient.
+
+---
+
+## Required:
+
+Introduce a deterministic compliance check using this existing data.
+
+It should clearly answer:
+- Did the user execute?
+- Is cadence sufficient?
+- Is there enough signal?
+
+---
+
+## Important:
+
+This should NOT be:
+- prompt-based
+- AI-based
+
+It must be:
+- deterministic
+- computed before insight classification
+
+---
+
+# 🔴 2. Replace Keyword-Based Classification
+
+Currently:
+- classification is based on text (regex)
+
+This must change.
+
+---
+
+## Required:
+
+Use real system state for classification:
+
+- If no published content → user_execution  
+- If low cadence → user_execution  
+- If no usable signal → measurement_gap  
+- If market volatility / CI signal → market_shift  
+- Only if execution is compliant AND results underperform → strategy_gap  
+
+---
+
+## Important:
+
+- The data is already available in the worker
+- Do NOT rely on AI text for classification anymore
+- Keep keyword matching only as fallback (if needed)
+
+---
+
+# 🔴 3. Strategy Rebuild Gate (Critical)
+
+Right now:
+- trigger_plan_rerun executes unconditionally
+
+This must be gated.
+
+---
+
+## Required:
+
+Before any rebuild:
+
+Check:
+- execution compliance  
+- AND performance outcome  
+
+---
+
+## Allow rebuild ONLY if:
+
+1. User executed AND results underperformed  
+OR  
+2. Market shift is significant  
+
+---
+
+## If NOT:
+
+- Block rebuild
+- Return structured response explaining:
+  → execution must happen first
+
+---
+
+# 🔴 4. Enforce Execution-First Routing (Backend, Not Just UI)
+
+Currently:
+- routing is frontend message-based only
+
+This is not sufficient.
+
+---
+
+## Required:
+
+In backend tool handling:
+
+If:
+- insightType = user_execution or measurement_gap  
+
+Then:
+- prevent plan rebuild
+- redirect toward execution path
+
+---
+
+## Important:
+
+This must be enforced server-side  
+(not only in UI or agent prompt)
+
+---
+
+# 🔴 5. Connect Agent to Existing Execution Pipeline
+
+We confirmed execution system is fully built:
+
+- activation
+- calendar generation
+- content generation
+- publish worker
+
+---
+
+## Required:
+
+Expose these as agent tools:
+
+- activate execution plan  
+- generate content  
+- retry failed content  
+
+---
+
+## Important:
+
+- Do NOT build new logic
+- Just wrap existing endpoints
+- Respect plan approval constraint (do not bypass)
+
+---
+
+# 🔴 6. Do Not Rebuild — Only Connect
+
+We are NOT building new systems.
+
+We are:
+
+- using existing worker data  
+- using existing execution pipeline  
+- using existing strategy system  
+
+And adding:
+
+- compliance layer  
+- classification layer  
+- routing guard  
+- tool exposure  
+
+---
+
+# 🎯 Final Goal
+
+We want the system to behave like:
+
+- No execution → execution action  
+- Weak signal → measurement action  
+- Market shift → strategy update  
+- Proven failure → strategy rebuild  
+
+---
+
+# 🚀 Next Step
+
+Please proceed with implementation in this order:
+
+1. Compliance check (using existing worker data)  
+2. Replace classification logic (data-driven)  
+3. Add rebuild gate in tool handler  
+4. Enforce backend routing rules  
+5. Add execution tools to agent  
+
+---
+
+Once this is done, we’ll validate behavior end-to-end.
+
+Thanks,  
+Samir  
+Avyron AI

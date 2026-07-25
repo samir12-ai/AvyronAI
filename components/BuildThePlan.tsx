@@ -22,6 +22,7 @@ import { useCampaign } from '@/context/CampaignContext';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
 import PlanDocumentView from '@/components/PlanDocumentView';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
+import { colorForExecutionStatus, VERDICT_COLORS } from '@/lib/verdict-colors';
 
 type Phase = 0 | 1 | 2 | 3 | 4 | 5;
 type BlueprintStatus = 'DRAFT' | 'GATE_PASSED' | 'EXTRACTION_COMPLETE' | 'EXTRACTION_FALLBACK' | 'CONFIRMED' | 'ANALYSIS_COMPLETE' | 'VALIDATED' | 'ORCHESTRATED';
@@ -1434,16 +1435,20 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     </View>
   );
 
+  // Task #71 / Phase 8 — engine source labels demoted to outcome-framed
+  // copy on the customer surface. Keys are canonical engine identifiers
+  // (D2) so the data binding is unchanged; only the display string is
+  // softened to remove operator vocabulary.
   const ENGINE_SOURCE_LABELS: Record<string, string> = {
-    offer_engine: 'Offer Engine',
-    positioning_engine: 'Positioning Engine',
-    persuasion_engine: 'Persuasion Engine',
-    audience_engine: 'Audience Engine',
-    funnel_engine: 'Funnel Engine',
-    differentiation_engine: 'Differentiation Engine',
-    awareness_engine: 'Awareness Engine',
-    channel_selection: 'Channel Selection',
-    market_intelligence: 'Market Intelligence',
+    offer_engine: 'Offer & pricing',
+    positioning_engine: 'Market position',
+    persuasion_engine: 'Buying triggers',
+    audience_engine: 'Audience intel',
+    funnel_engine: 'Buying path',
+    differentiation_engine: 'What sets you apart',
+    awareness_engine: 'Discovery routes',
+    channel_selection: 'Channel mix',
+    market_intelligence: 'Market intel',
   };
 
   const renderExtractionField = (label: string, fieldKey: string, fieldData: FieldWithConfidence | any, icon: string) => {
@@ -2049,36 +2054,51 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
     );
 
     if (loading) {
+      // Task #71 / Phase 8 — outcome-framed section labels (engine names
+      // removed from customer surface). Keys remain canonical (D2).
       const sectionLabels: Record<string, string> = {
-        market_intelligence: 'Market Intelligence',
-        sgl: 'Signal Governor',
-        audience: 'Audience Engine',
-        offer: 'Offer Engine',
-        mechanism: 'Mechanism Engine',
-        pricing: 'Pricing Engine',
-        messaging: 'Messaging Engine',
-        funnel: 'Funnel Engine',
-        creative: 'Creative Engine',
-        iteration: 'Iteration Engine',
-        retention: 'Retention Engine',
+        market_intelligence: 'Market intel',
+        sgl: 'Signal review',
+        audience: 'Audience intel',
+        offer: 'Offer & pricing',
+        mechanism: 'How it works',
+        pricing: 'Pricing',
+        messaging: 'Messaging',
+        funnel: 'Buying path',
+        creative: 'Creative',
+        iteration: 'What to test next',
+        retention: 'Keeping customers',
       };
+      // Seal #6 / Task #24 (validator-#3): colors now sourced from the
+      // canonical helper `colorForExecutionStatus()`. Legacy SUCCESS / COMPLETE
+      // are still listed as legacy keys so pre-canonical snapshots render
+      // without flashing green. RUNNING / SKIPPED are local UI states (not
+      // part of the canonical executionStatus enum) and keep their literal
+      // colors. NEEDS_INPUT is blue (operator action), PENDING is slate
+      // (queued) — matches the spec asserted in __tests__/verdict-colors.test.ts.
       const sectionColors: Record<string, string> = {
-        PENDING: '#6B7280',
-        RUNNING: '#3B82F6',
-        SUCCESS: '#10B981',
-        PARTIAL: '#F59E0B',
-        ERROR: '#EF4444',
-        BLOCKED: '#EF4444',
+        PENDING: VERDICT_COLORS.slate,
+        RUNNING: VERDICT_COLORS.blue,
+        COMPLETED: colorForExecutionStatus('COMPLETED'),
+        SUCCESS: colorForExecutionStatus(null, 'SUCCESS'),   // legacy → amber
+        COMPLETE: colorForExecutionStatus(null, 'SUCCESS'),  // legacy → amber
+        PARTIAL: colorForExecutionStatus('PARTIAL'),
+        ERROR: colorForExecutionStatus('ERROR'),
+        BLOCKED: colorForExecutionStatus('BLOCKED'),
+        BLOCKED_BY_INTEGRITY: colorForExecutionStatus('BLOCKED_BY_INTEGRITY'),
         SKIPPED: '#9CA3AF',
-        NEEDS_INPUT: '#F59E0B',
+        NEEDS_INPUT: colorForExecutionStatus('NEEDS_INPUT'),
       };
       const sectionIcons: Record<string, string> = {
         PENDING: 'ellipse-outline',
         RUNNING: 'sync',
-        SUCCESS: 'checkmark-circle',
+        COMPLETED: 'checkmark-circle',
+        SUCCESS: 'alert-circle-outline',  // legacy → warning icon
+        COMPLETE: 'alert-circle-outline', // legacy → warning icon
         PARTIAL: 'alert-circle-outline',
         ERROR: 'close-circle',
         BLOCKED: 'ban',
+        BLOCKED_BY_INTEGRITY: 'ban',
         SKIPPED: 'remove-circle-outline',
         NEEDS_INPUT: 'pause-circle',
       };
@@ -2818,7 +2838,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
               <View style={[s.execCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 20 }]}>
                 <Ionicons name="analytics-outline" size={32} color={colors.textMuted} />
                 <Text style={[s.execItemDesc, { color: colors.textSecondary, marginTop: 8, textAlign: 'center' }]}>
-                  No performance data available.
+                  Performance tuning activates once posts are published and Meta is connected. Market scans and insights are still running in the background.
                 </Text>
               </View>
             )}

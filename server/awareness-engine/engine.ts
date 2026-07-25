@@ -17,6 +17,15 @@ import {
   MIN_QUALIFYING_SIGNALS,
 } from "../shared/signal-lineage";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
+import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
+import { buildGroundingContract } from "../shared/grounding-contract";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
@@ -24,6 +33,11 @@ import {
   buildDepthGateResult,
   type DepthGateResult,
 } from "../causal-enforcement-layer/engine";
+// Phase 4-A — Commercial Reasoning Core (awareness depth interpreter).
+// See `.local/plans/phase-4-commercial-reasoning-core.md` §8a + §5.
+// Default-off via COMMERCIAL_REASONER_ENABLED — when off, interpretAwarenessDepth
+// short-circuits to the deterministic floor (byte-identical legacy behavior).
+import { interpretAwarenessDepth } from "../commercial-reasoning/awareness-depth-interpreter";
 import type {
   AwarenessPositioningInput,
   AwarenessDifferentiationInput,
@@ -53,15 +67,41 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
 }
 
-function safeNumber(v: any, fallback: number): number {
-  if (typeof v === "number" && !isNaN(v)) return v;
-  const parsed = Number(v);
-  return isNaN(parsed) ? fallback : parsed;
+// Input-boundary validator. `safeNumber`/`safeString` removed: silent
+// fallback at the contract boundary hides missing critical inputs.
+// validateAwarenessInputs() at engine entry guarantees audience.
+// maturityIndex, audience.awarenessLevel, and mi.overallConfidence are
+// present and well-typed; non-critical optional fields use per-field
+// nullish coalescing with explicit literal defaults.
+import { z } from "zod";
+
+const AwarenessAudienceInputSchema = z.object({
+  maturityIndex: z.number().finite(),
+  awarenessLevel: z.string().min(1),
+});
+const AwarenessMIInputSchema = z.object({
+  overallConfidence: z.number().finite(),
+});
+
+interface AwarenessInputValidation {
+  ok: boolean;
+  missingCritical: string[];
 }
 
-function safeString(v: any, fallback: string): string {
-  if (typeof v === "string" && v.trim()) return v.trim();
-  return fallback;
+function validateAwarenessInputs(
+  audience: any,
+  mi: any,
+): AwarenessInputValidation {
+  const missing: string[] = [];
+  const audR = AwarenessAudienceInputSchema.safeParse(audience);
+  if (!audR.success) {
+    for (const issue of audR.error.issues) missing.push(`audience.${issue.path.join(".")}`);
+  }
+  const miR = AwarenessMIInputSchema.safeParse(mi);
+  if (!miR.success) {
+    for (const issue of miR.error.issues) missing.push(`mi.${issue.path.join(".")}`);
+  }
+  return { ok: missing.length === 0, missingCritical: missing };
 }
 
 function safeJsonParse(text: any): any {
@@ -114,11 +154,11 @@ export function assessDataReliability(
   const narrativeStability = (hasNarrative ? 0.4 : 0) + (hasEnemy ? 0.3 : 0) + (hasMechanism ? 0.3 : 0);
   if (narrativeStability < 0.5) advisories.push("Weak narrative stability: positioning or differentiation incomplete");
 
-  const miConfidence = safeNumber(mi.overallConfidence, 0);
+  const miConfidence = (mi.overallConfidence ?? 0);
   const competitorValidity = clamp(miConfidence, 0, 1);
   if (miConfidence < 0.4) advisories.push(`Low competitor data validity: MI confidence ${miConfidence.toFixed(2)}`);
 
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const maturity = (audience.maturityIndex ?? 0.5);
   const marketMaturityConfidence = maturity > 0.1 ? clamp(0.5 + maturity * 0.5, 0, 1) : 0.3;
 
   const overallReliability = (
@@ -165,8 +205,9 @@ export function sanitizeBoundary(text: string): { clean: boolean; violations: st
   return { clean: violations.length === 0, violations };
 }
 
+// signature kept; helper below is used in primary route construction
 function detectMarketMaturity(mi: AwarenessMIInput, audience: AwarenessAudienceInput): string {
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const maturity = (audience.maturityIndex ?? 0.5);
   if (maturity < 0.3) return "emerging";
   if (maturity < 0.6) return "growing";
   if (maturity < 0.8) return "mature";
@@ -174,7 +215,7 @@ function detectMarketMaturity(mi: AwarenessMIInput, audience: AwarenessAudienceI
 }
 
 function detectBuyerReadiness(audience: AwarenessAudienceInput): string {
-  const awareness = safeString(audience.awarenessLevel, "problem_aware").toLowerCase();
+  const awareness = (audience.awarenessLevel ?? "problem_aware").toLowerCase();
   if (awareness.includes("most") || awareness.includes("ready")) return "most_aware";
   if (awareness.includes("product")) return "product_aware";
   if (awareness.includes("solution")) return "solution_aware";
@@ -189,7 +230,7 @@ function detectTrustLevel(audience: AwarenessAudienceInput, mi: AwarenessMIInput
   else if (objections > 2) trust -= 0.1;
   const threats = (mi.threatSignals || []).length;
   if (threats > 3) trust -= 0.15;
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const maturity = (audience.maturityIndex ?? 0.5);
   if (maturity > 0.7) trust += 0.1;
   return clamp(trust, 0, 1);
 }
@@ -270,7 +311,7 @@ export function layer2_awarenessReadinessMapping(
   const warnings: string[] = [];
   let score = 1.0;
 
-  const rawLevel = safeString(audience.awarenessLevel, "problem_aware").toLowerCase();
+  const rawLevel = (audience.awarenessLevel ?? "problem_aware").toLowerCase();
   let mappedStage = "problem_aware";
 
   if (rawLevel.includes("unaware") || rawLevel === "none") {
@@ -293,7 +334,7 @@ export function layer2_awarenessReadinessMapping(
 
   findings.push(`Audience mapped to readiness stage: ${mappedStage} [selected:${mappedStage}]`);
 
-  const maturity = safeNumber(audience.maturityIndex, 0.5);
+  const maturity = (audience.maturityIndex ?? 0.5);
   if (mappedStage === "unaware" && maturity > 0.7) {
     warnings.push("Audience classified as unaware in a mature market — possible misclassification");
     score -= 0.15;
@@ -398,10 +439,10 @@ export function layer4_narrativeEntryAlignment(
   const warnings: string[] = [];
   let score = 1.0;
 
-  const narrative = safeString(positioning.narrativeDirection, "");
-  const enemy = safeString(positioning.enemyDefinition, "");
+  const narrative = (positioning.narrativeDirection ?? "");
+  const enemy = (positioning.enemyDefinition ?? "");
   const mechanism = differentiation.mechanismFraming?.description || differentiation.mechanismFraming?.name || "";
-  const offerOutcome = offer.coreOutcome || "";
+  const offerOutcomeText = offer.coreOutcome || "";
 
   if (entryRoute === "myth_breaker_entry" && !enemy) {
     warnings.push("Myth-breaker entry selected but no positioning enemy defined — narrative misalignment");
@@ -433,7 +474,7 @@ export function layer4_narrativeEntryAlignment(
     findings.push(`Positioning narrative present — entry route can reference strategic direction`);
   }
 
-  if (mechanism && offerOutcome) {
+  if (mechanism && offerOutcomeText) {
     findings.push(`Offer mechanism and outcome available for awareness alignment`);
   } else if (!mechanism) {
     warnings.push("No differentiation mechanism — awareness entry lacks mechanism backing");
@@ -663,7 +704,17 @@ function selectEntryRoute(layer1: LayerResult): string {
   return extractSelected(layer1, "");
 }
 
-function selectReadinessStage(layer2: LayerResult): string {
+function selectReadinessStage(layer2: LayerResult, audience: AwarenessAudienceInput): string {
+  const canonical = (audience.awarenessLevel ?? "").toLowerCase().trim();
+  const VALID = new Set(["unaware", "problem_aware", "solution_aware", "product_aware", "most_aware"]);
+  if (canonical && VALID.has(canonical)) {
+    return canonical;
+  }
+  if (canonical.includes("unaware") || canonical === "none") return "unaware";
+  if (canonical.includes("most") || canonical.includes("ready")) return "most_aware";
+  if (canonical.includes("product")) return "product_aware";
+  if (canonical.includes("solution")) return "solution_aware";
+  if (canonical.includes("problem")) return "problem_aware";
   return extractSelected(layer2, "problem_aware");
 }
 
@@ -671,7 +722,7 @@ function selectTriggerClass(layer3: LayerResult): string {
   return extractSelected(layer3, "");
 }
 
-function buildAlternativeRoute(primaryEntry: string, audience: AwarenessAudienceInput, mi: AwarenessMIInput): { entry: string; trigger: string; readiness: string } {
+function buildAlternativeRoute(primaryEntry: string, audience: AwarenessAudienceInput, mi: AwarenessMIInput, canonicalReadiness: string): { entry: string; trigger: string; readiness: string } {
   const alternatives: Record<string, string> = {
     pain_entry: "diagnostic_entry",
     opportunity_entry: "authority_entry",
@@ -681,9 +732,8 @@ function buildAlternativeRoute(primaryEntry: string, audience: AwarenessAudience
     diagnostic_entry: "opportunity_entry",
   };
   const altEntry = alternatives[primaryEntry] || primaryEntry;
-  const readiness = detectBuyerReadiness(audience);
   const altTrigger = (mi.threatSignals || []).length > 2 ? "competitor_weakness" : "missed_opportunity";
-  return { entry: altEntry, trigger: altTrigger, readiness };
+  return { entry: altEntry, trigger: altTrigger, readiness: canonicalReadiness };
 }
 
 function buildRejectedRoute(primaryEntry: string, audience: AwarenessAudienceInput, mi: AwarenessMIInput): { entry: string; trigger: string; readiness: string; reason: string } {
@@ -733,13 +783,66 @@ export async function runAwarenessEngine(
   upstreamLineage: SignalLineageEntry[] = [],
   funnel: AwarenessFunnelInput = EMPTY_FUNNEL,
   analyticalEnrichment?: any,
+  upstreamSignals?: { buyerPsychology?: any; trustMechanism?: any; gameDimension?: any; valueArchitecture?: any } | null,
+  // Phase 4-A — optional commercial-reasoning persistence context. When
+  // supplied, the LLM reasoner's snapshot is UPSERT'd into
+  // commercial_reasoning_snapshots. When absent, the gate logic still
+  // runs but persistence is skipped (best-effort).
+  commercialReasoningCtx?: {
+    campaignId: string;
+    runId: string;
+    // Phase 4-B Progressive BCL — caller (orchestrator) supplies the
+    // pre-built Stage-1 profile + resolved industry slug so the
+    // interpreter doesn't redundantly re-load `business_data_layer` and
+    // ContentDNA, and so industry-allowlist resolution matches the
+    // orchestrator's intent.
+    industry?: string | null;
+    businessProfile?: import("../commercial-reasoning/business-context-layer").BusinessProfile | null;
+  } | null,
+  // Anchor doctrine (criteria A + B + F): strategic run context + Product DNA
+  // for the F5a fallback. The pre-rendered anchor block is computed ONCE here
+  // and threaded into the myth-breaker + narrative-reframe sub-engines.
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
 ): Promise<AwarenessResult> {
   const startTime = Date.now();
   const structuralWarnings: string[] = [];
+  // strict input boundary:
+  // safeNumber/safeString must NOT silently default on missing critical
+  // fields. We reset the per-run fallback report, then run a zod validator
+  // against the canonical AwarenessAudienceInput / MI shapes. If a
+  // critical field (audience.maturityIndex, audience.awarenessLevel,
+  // mi.overallConfidence) is missing or non-finite, emit PARTIAL with
+  // the structured `missingCritical` list — downstream readers see the
+  // contract gap instead of a phantom default.
+  const inputCheck = validateAwarenessInputs(audience, mi);
 
+  const aelAck = acknowledgeAelInput("AwarenessEngine-V3", analyticalEnrichment ?? null, accountId);
   if (analyticalEnrichment) {
     const aelBlock = formatAELForPrompt(analyticalEnrichment);
-    console.log(`[AwarenessEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(analyticalEnrichment).filter(k => analyticalEnrichment[k] && (Array.isArray(analyticalEnrichment[k]) ? analyticalEnrichment[k].length > 0 : true)).length}`);
+    console.log(`[AwarenessEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(analyticalEnrichment).filter(k => analyticalEnrichment[k] && (Array.isArray(analyticalEnrichment[k]) ? analyticalEnrichment[k].length > 0 : true)).length} | partial=${aelAck.partial}`);
+  }
+
+  if (!inputCheck.ok) {
+    // missing critical inputs MUST emit
+    // INCOMPLETE (not PARTIAL). PARTIAL is reserved for "engine produced
+    // output but some optional dimensions were weak"; INCOMPLETE means the
+    // contract boundary was breached and the engine refused to substitute
+    // any defaults. Architect-required spec match.
+    console.warn(`[AwarenessEngine-V3] INPUT_VALIDATION_INCOMPLETE | missingCritical=${inputCheck.missingCritical.join(",")}`);
+    return {
+      status: STATUS.INCOMPLETE,
+      statusMessage: `Input validation failed: ${inputCheck.missingCritical.join(", ")} — engine returned INCOMPLETE (no silent defaults; strict contract boundary).`,
+      primaryRoute: emptyRoute("input_validation_incomplete"),
+      alternativeRoute: emptyRoute("input_validation_incomplete"),
+      rejectedRoute: emptyRoute("input_validation_incomplete", "Critical input fields missing"),
+      layerResults: [],
+      structuralWarnings: [`INPUT_VALIDATION_INCOMPLETE: missingCritical=${inputCheck.missingCritical.join(",")}`],
+      boundaryCheck: { passed: true, violations: [] },
+      dataReliability: { signalDensity: 0, signalDiversity: 0, narrativeStability: 0, competitorValidity: 0, marketMaturityConfidence: 0, overallReliability: 0, isWeak: true, advisories: ["Input validation partial — strict boundary failed"] },
+      confidenceNormalized: false,
+      executionTimeMs: Date.now() - startTime,
+    };
   }
 
   const qualifyingSignals = extractQualifyingSignals(upstreamLineage);
@@ -771,7 +874,8 @@ export async function runAwarenessEngine(
   const primaryEntry = selectEntryRoute(l1);
 
   const l2 = layer2_awarenessReadinessMapping(audience, mi);
-  const readinessStage = selectReadinessStage(l2);
+  const readinessStage = selectReadinessStage(l2, audience);
+  console.log(`[AwarenessEngine-V3] CANONICAL_AWARENESS | source=audience.awarenessLevel | value=${readinessStage} | (no parallel inference)`);
 
   const l3 = layer3_attentionTriggerMapping(audience, mi, differentiation);
   const triggerClass = selectTriggerClass(l3);
@@ -787,7 +891,11 @@ export async function runAwarenessEngine(
 
   let overallScore = 0;
   for (const lr of layerResults) {
-    const weight = LAYER_WEIGHTS[lr.layerName] || 0.1;
+    // no 0.1 phantom weight for unknown layers.
+    // LAYER_WEIGHTS is the source of truth — an unrecognised layer
+    // contributes nothing to the overall awareness score (honest zero
+    // beats a synthetic 0.1 default that lets undeclared layers leak in).
+    const weight = LAYER_WEIGHTS[lr.layerName] ?? 0;
     overallScore += lr.score * weight;
   }
 
@@ -808,12 +916,133 @@ export async function runAwarenessEngine(
     rejectionReason: null,
   };
 
-  const alt = buildAlternativeRoute(primaryEntry, audience, mi);
+  // Anchor doctrine (criteria A + B + F): compute the pre-rendered anchor
+  // block ONCE for the awareness sub-engines (myth-breaker designer +
+  // narrative-reframe designer/judge). F5a: when the doctrine anchor is
+  // absent, derive one from Product DNA — deriveAnchorFromProductDna returns
+  // null unless differentiator + problem + name + type all exist (D5).
+  let awDoctrineBlock = "";
+  if (strategic) {
+    awDoctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[AwarenessEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let awAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!awAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      awAnchor = derivedAnchor;
+      console.log("[AwarenessEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let awAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    awAnchorSource = "doctrine";
+  } else if (awAnchor) {
+    awAnchorSource = "dna";
+  }
+  const awDnaAnchorBlock = awAnchorSource === "dna" && awAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve every output to THIS product) ===
+Product name: ${awAnchor.name}
+Product type: ${awAnchor.type}${awAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${awAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${awAnchor.coreProblemSolved}
+Differentiating feature: ${awAnchor.differentiatingFeature}
+`
+    : "";
+  const awAnchorGroundingRule = awAnchor
+    ? "\nANCHOR GROUNDING: Every belief contradiction and narrative reframe MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.\n"
+    : "";
+  const awAnchorBlockText = `${awDoctrineBlock}${awDnaAnchorBlock}${awAnchorGroundingRule}`;
+  const awGroundingContract = buildGroundingContract(awAnchor, (analyticalEnrichment ?? null) as any);
+
+  // ── INTELLIGENCE UPGRADE: Myth-breaker reasoning ──
+  try {
+    const { generateMythBreaker } = await import("./myth-breaker-llm");
+    const segments0 = (audience.audienceSegments || [])[0] as any;
+    const sophisticationTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+    const rejectedClaimPatterns: string[] = [];
+    for (const seg of (audience.audienceSegments || []) as any[]) {
+      const profile = seg?.sophisticationProfile;
+      if (profile?.rejectedClaimPatterns) {
+        for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
+      }
+    }
+    const audienceBeliefs = (audience.audienceSegments || []).flatMap((s: any) => s.beliefProfile || []);
+    const objectionStatements = Object.keys(audience.objectionMap || {}).slice(0, 8);
+    const mythBreaker = await generateMythBreaker({
+      analyticalEnrichment: analyticalEnrichment ?? null,
+      audienceObjections: objectionStatements,
+      audienceBeliefs,
+      audiencePains: (audience.audiencePains || []).slice(0, 8),
+      marketDiagnosis: (mi as any).marketDiagnosis || null,
+      enemyDefinition: null,
+      contrastAxis: null,
+      awarenessStage: readinessStage,
+      sophisticationTier,
+      rejectedClaimPatterns,
+      accountId,
+      doctrineBlock: awAnchorBlockText.length > 0 ? awAnchorBlockText : null,
+      anchorSource: awAnchorSource,
+      groundingContractBlock: awGroundingContract,
+    });
+    if (mythBreaker) {
+      primaryRoute.mythBreaker = mythBreaker;
+      console.log(`[AwarenessEngine-V3] MYTH_BREAKER_ATTACHED | rcRefs=${mythBreaker.rootCauseRefs.join(",") || "(none)"} | statement="${mythBreaker.mythBreakerStatement.slice(0, 80)}"`);
+    }
+  } catch (mbErr: any) {
+    console.error(`[AwarenessEngine-V3] MYTH_BREAKER_FAILED | ${mbErr.message}`);
+  }
+
+  // ── INTELLIGENCE UPGRADE: Narrative Reframe Engineer (Phase 5) ──
+  // Re-engineers the buyer's mental model — current model → false bridge → new
+  // model → bridge mechanism. Consumes upstream P4 buyerPsychology so the
+  // reframe targets the buyer's ACTUAL current beliefs, not a generic myth.
+  // Safe fallback: returns null on AI failure → engine continues with legacy
+  // route + myth-breaker.
+  try {
+    const { engineerNarrativeReframe } = await import("./narrative-reframe");
+    const bp = upstreamSignals?.buyerPsychology;
+    const trust = upstreamSignals?.trustMechanism;
+    const game = upstreamSignals?.gameDimension;
+    const segments0 = (audience.audienceSegments || [])[0] as any;
+    const fallbackTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+    const reframe = await engineerNarrativeReframe({
+      awarenessStage: readinessStage,
+      primaryEntryRoute: primaryEntry,
+      triggerClass,
+      positioningStatement: (positioning as any)?.positioningStatement || (positioning as any)?.statement || null,
+      coreOffer: (offer as any)?.coreOffer || (offer as any)?.offerName || null,
+      audiencePains: (audience.audiencePains || []).slice(0, 8),
+      audienceObjections: Object.keys(audience.objectionMap || {}).slice(0, 6),
+      buyerBeliefModel: bp?.beliefModel || null,
+      buyerRejectionHistory: bp?.topRejectionPatterns || [],
+      buyerDecisionTrigger: bp?.decisionTrigger?.triggeringEvent || null,
+      buyerIdentityAspiration: bp?.identityAspiration?.aspirationalIdentity || null,
+      buyerSophisticationTier: bp?.sophisticationTier ?? fallbackTier,
+      trustMechanism: trust?.mechanism || trust?.transferMechanism || null,
+      gameDimension: game?.ourDimension || game?.ourGame || null,
+      accountId,
+      doctrineBlock: awAnchorBlockText.length > 0 ? awAnchorBlockText : null,
+      anchorSource: awAnchorSource,
+    });
+    if (reframe) {
+      (primaryRoute as any).narrativeReframe = reframe;
+      console.log(`[AwarenessEngine-V3] NARRATIVE_REFRAME_ATTACHED | movement=${reframe.bridgeMechanism.movement} | judge=${reframe.judgeVerdict} | retries=${reframe.retryCount}`);
+    } else {
+      console.log(`[AwarenessEngine-V3] NARRATIVE_REFRAME_FALLBACK | reframe=null, continuing with legacy route`);
+    }
+  } catch (nrErr: any) {
+    console.error(`[AwarenessEngine-V3] NARRATIVE_REFRAME_FAILED | ${nrErr.message}`);
+  }
+
+  const alt = buildAlternativeRoute(primaryEntry, audience, mi, readinessStage);
   const altL7 = layer7_genericAwarenessDetector("", alt.entry, alt.trigger);
   const alternativeRoute: AwarenessRoute = {
     routeName: `${alt.entry.replace(/_/g, " ")} awareness route`,
     entryMechanismType: alt.entry,
-    targetReadinessStage: alt.readiness,
+    targetReadinessStage: readinessStage,
     triggerClass: alt.trigger,
     trustRequirement: buildTrustRequirement(alt.entry, trustLevel),
     funnelCompatibility: buildFunnelCompatibility(alt.entry, funnel),
@@ -826,7 +1055,7 @@ export async function runAwarenessEngine(
   const rejectedRoute: AwarenessRoute = {
     routeName: `${rej.entry.replace(/_/g, " ")} awareness route`,
     entryMechanismType: rej.entry,
-    targetReadinessStage: rej.readiness,
+    targetReadinessStage: readinessStage,
     triggerClass: rej.trigger,
     trustRequirement: buildTrustRequirement(rej.entry, trustLevel),
     funnelCompatibility: "incompatible — route rejected",
@@ -877,31 +1106,88 @@ export async function runAwarenessEngine(
     }
   }
 
-  const celDepth = enforceEngineDepthCompliance(
-    "awareness",
-    [
-      primaryRoute.routeName || "",
-      primaryRoute.entryMechanismType || "",
-      primaryRoute.targetReadinessStage || "",
-      primaryRoute.triggerClass || "",
-      primaryRoute.trustRequirement || "",
-      primaryRoute.funnelCompatibility || "",
-      ...primaryRoute.frictionNotes,
-    ],
-    analyticalEnrichment || null,
-  );
+  // Depth gate must score the engine's ACTUAL substantive output — the
+  // grounded myth-breaker + narrative-reframe reasoning — not just the
+  // shallow route-classification labels. Excluding them scores a strawman:
+  // the reasoning that genuinely references AEL root causes never reaches
+  // the cosine matcher. (Shape-agnostic extraction; shallow content still
+  // fails cosine matching against real root-cause text — the 0.20 gate and
+  // SEMANTIC_MATCH_THRESHOLD are unchanged.)
+  const _mb = primaryRoute.mythBreaker as any;
+  const _nr = (primaryRoute as any).narrativeReframe;
+  const asText = (v: any): string =>
+    typeof v === "string"
+      ? v
+      : v && typeof v === "object"
+        ? Object.values(v).filter((x) => typeof x === "string").join(" ")
+        : "";
+  const celSourceTexts = [
+    primaryRoute.routeName || "",
+    primaryRoute.entryMechanismType || "",
+    primaryRoute.targetReadinessStage || "",
+    primaryRoute.triggerClass || "",
+    primaryRoute.trustRequirement || "",
+    primaryRoute.funnelCompatibility || "",
+    ...primaryRoute.frictionNotes,
+    ...(_mb
+      ? [
+          _mb.mythBreakerStatement || "",
+          _mb.beliefToContradict || "",
+          _mb.contradictionLogic || "",
+        ]
+      : []),
+    ...(_nr
+      ? [
+          asText(_nr.currentModel),
+          asText(_nr.newModel),
+          asText(_nr.bridgeMechanism),
+          asText(_nr.discomfortCost),
+        ]
+      : []),
+  ];
+  // Phase 4-A — route the depth gate through the commercial reasoner.
+  // The reasoner ALWAYS computes the deterministic floor first (returned
+  // as result.deterministicFloor); when the env kill-switch is off OR any
+  // integrity gate fails, the reasoner falls back to that floor and
+  // behaviour is byte-identical to pre-Phase-4.
+  const commercialReasoning = await interpretAwarenessDepth({
+    accountId,
+    campaignId: commercialReasoningCtx?.campaignId ?? `awareness-standalone:${accountId}`,
+    runId: commercialReasoningCtx?.runId ?? `awareness-standalone:${Date.now()}`,
+    ael: analyticalEnrichment ?? null,
+    awarenessRouteSourceTexts: celSourceTexts,
+    industry: commercialReasoningCtx?.industry ?? null,
+    businessProfile: commercialReasoningCtx?.businessProfile ?? null,
+  });
+  const celDepth = commercialReasoning.deterministicFloor;
+  const reasonerLifted =
+    commercialReasoning.fellBackTo === "none" &&
+    commercialReasoning.gateDecision.allow === true;
+  if (commercialReasoning.fellBackTo === "none") {
+    console.log(
+      `[AwarenessEngine-V3] COMMERCIAL_REASONER: verdict=${commercialReasoning.integrityVerdict} reason=${commercialReasoning.gateDecision.reason} allow=${commercialReasoning.gateDecision.allow}`,
+    );
+  } else {
+    console.log(
+      `[AwarenessEngine-V3] COMMERCIAL_REASONER_FALLBACK: reason=${commercialReasoning.gateDecision.reason} floorAllow=${celDepth.passed}`,
+    );
+  }
 
   let depthGateResult: DepthGateResult | null = null;
 
-  if (analyticalEnrichment && isDepthBlocking(celDepth)) {
-    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`]);
+  if (
+    analyticalEnrichment &&
+    isDepthBlocking(celDepth, celSourceTexts) &&
+    !reasonerLifted
+  ) {
+    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`], celSourceTexts);
     for (const logEntry of celDepth.enforcementLog) {
       console.log(`[AwarenessEngine-V3] CEL_DEPTH: ${logEntry}`);
     }
     console.log(`[AwarenessEngine-V3] DEPTH_GATE: DEPTH_FAILED — non-generative engine, cannot retry | depthScore=${celDepth.causalDepthScore}`);
     primaryRoute.awarenessStrengthScore = 0;
     alternativeRoute.awarenessStrengthScore = 0;
-    return {
+    return applyPartialAelDowngrade("AwarenessEngine-V3", {
       status: "DEPTH_FAILED",
       statusMessage: `Depth gate failed: depthScore=${celDepth.causalDepthScore} — non-generative engine, cannot regenerate`,
       primaryRoute,
@@ -916,7 +1202,7 @@ export async function runAwarenessEngine(
       engineVersion: ENGINE_VERSION,
       celDepthCompliance: celDepth,
       depthGateResult,
-    };
+    }, aelAck);
   }
 
   if (celDepth.violations.length > 0) {
@@ -931,9 +1217,9 @@ export async function runAwarenessEngine(
     console.log(`[AwarenessEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
   }
 
-  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`]);
+  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`], celSourceTexts);
 
-  return {
+  const __awarenessResult = {
     status: STATUS.COMPLETE,
     statusMessage: confidenceNormalized
       ? `Analysis complete — confidence normalized due to data reliability (${reliability.overallReliability.toFixed(2)})`
@@ -951,6 +1237,7 @@ export async function runAwarenessEngine(
     celDepthCompliance: celDepth,
     depthGateResult,
   };
+  return applyPartialAelDowngrade("AwarenessEngine-V3", __awarenessResult, aelAck);
 }
 
 function emptyRoute(name: string, reason: string | null = null): AwarenessRoute {

@@ -1,11 +1,12 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { ciCompetitors } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { getCompetitorDataCoverage } from "./data-acquisition";
 
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 const REQUIRED_EVIDENCE_FIELDS = [
   "profileLink",
   "postingFrequency",
@@ -42,9 +43,19 @@ export function registerCiCompetitorRoutes(app: Express) {
         .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true), eq(ciCompetitors.isDemo, false)))
         .orderBy(sql`${ciCompetitors.createdAt} DESC`);
 
+      const ids = competitors.map(c => c.id);
+      const extraUrlsMap: Record<string, { tiktokUrl: string | null; googleMapsUrl: string | null }> = {};
+      if (ids.length > 0) {
+        const extraRes = await db.execute(sql`SELECT id, tiktok_url, google_maps_url FROM ci_competitors WHERE id IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`);
+        for (const row of extraRes.rows as any[]) {
+          extraUrlsMap[row.id] = { tiktokUrl: row.tiktok_url ?? null, googleMapsUrl: row.google_maps_url ?? null };
+        }
+      }
+
       const enriched = await Promise.all(competitors.map(async c => {
         const validation = validateEvidence(c);
         const coverage = await getCompetitorDataCoverage(c.id, accountId);
+        const extra = extraUrlsMap[c.id] ?? { tiktokUrl: null, googleMapsUrl: null };
         return {
           id: c.id,
           accountId: c.accountId,
@@ -66,6 +77,8 @@ export function registerCiCompetitorRoutes(app: Express) {
           notes: c.notes,
           websiteUrl: c.websiteUrl,
           blogUrl: c.blogUrl,
+          tiktokUrl: extra.tiktokUrl,
+          googleMapsUrl: extra.googleMapsUrl,
           isActive: c.isActive,
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
@@ -87,6 +100,13 @@ export function registerCiCompetitorRoutes(app: Express) {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
+      // P0-4 (launch-closure Wave 1): assert campaignId belongs to caller
+      // before inserting competitor records under (accountId, campaignId).
+      // Without this, attacker could create competitor entries pointing at
+      // a victim's campaignId — strategic pollution surface.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });
@@ -101,18 +121,49 @@ export function registerCiCompetitorRoutes(app: Express) {
       const { name, platform, profileLink, businessType, primaryObjective,
         postingFrequency, contentTypeRatio, engagementRatio, ctaPatterns,
         discountFrequency, hookStyles, messagingTone, socialProofPresence,
-        screenshotUrls, notes, websiteUrl, blogUrl } = req.body;
+        screenshotUrls, notes, websiteUrl, blogUrl, tiktokUrl, googleMapsUrl, tier } = req.body;
 
       if (!name || !profileLink || !businessType || !primaryObjective) {
         return res.status(400).json({ error: "name, profileLink, businessType, primaryObjective are required" });
       }
+
+      // Seal #5 / F8.1 — sanitize ALL user-supplied URLs before persistence.
+      // Bad URLs become persisted attack surface (logged, fed to scrapers, fed
+      // to LLM context). Reject up-front. Empty/null are allowed (optional fields).
+      // Seal #5 / F8.1 (validator-#4 closure): typed sanitized URL bag
+      // replaces the prior `(req.body as any)` mutation pattern. Casts to
+      // `any` in security-sensitive paths are forbidden by review policy —
+      // they erase type protection on the very fields that need it most.
+      type SanitizedUrls = {
+        profileLink: string;
+        websiteUrl: string | null;
+        blogUrl: string | null;
+        tiktokUrl: string | null;
+        googleMapsUrl: string | null;
+      };
+      const { validateUserUrl } = await import("./scrape-safety");
+      let safeUrls: SanitizedUrls;
+      try {
+        safeUrls = {
+          profileLink: validateUserUrl(profileLink),
+          websiteUrl: websiteUrl ? validateUserUrl(websiteUrl) : null,
+          blogUrl: blogUrl ? validateUserUrl(blogUrl) : null,
+          tiktokUrl: tiktokUrl ? validateUserUrl(tiktokUrl) : null,
+          googleMapsUrl: googleMapsUrl ? validateUserUrl(googleMapsUrl) : null,
+        };
+      } catch (urlErr: any) {
+        return res.status(400).json({ error: `Invalid URL: ${urlErr.message}` });
+      }
+      // F7.8 — accept optional tier ('A'|'B'); default 'B'. Tier-A competitors
+      // refresh on a 24h cooldown (priority); tier-B on the standard 72h.
+      const tierValue = tier === "A" ? "A" : "B";
 
       const [competitor] = await db.insert(ciCompetitors).values({
         accountId,
         campaignId,
         name,
         platform: platform || "instagram",
-        profileLink,
+        profileLink: safeUrls.profileLink,
         businessType,
         primaryObjective,
         postingFrequency: postingFrequency !== undefined && postingFrequency !== null && postingFrequency !== '' ? (isNaN(parseInt(postingFrequency)) ? null : parseInt(postingFrequency)) : null,
@@ -125,8 +176,11 @@ export function registerCiCompetitorRoutes(app: Express) {
         socialProofPresence: socialProofPresence || null,
         screenshotUrls: screenshotUrls || null,
         notes: notes || null,
-        websiteUrl: websiteUrl || null,
-        blogUrl: blogUrl || null,
+        websiteUrl: safeUrls.websiteUrl,
+        blogUrl: safeUrls.blogUrl,
+        tiktokUrl: safeUrls.tiktokUrl,
+        googleMapsUrl: safeUrls.googleMapsUrl,
+        tier: tierValue,
         isDemo: false,
         enrichmentStatus: "PENDING",
         fetchMethod: null,
@@ -135,8 +189,19 @@ export function registerCiCompetitorRoutes(app: Express) {
         dataFreshnessDays: null,
       }).returning();
 
+      // Seal #5 / F8.1 (architect-#10 fix): the post-insert raw SQL update
+      // previously used the UNSANITIZED `tiktokUrl`/`googleMapsUrl` from the
+      // closure, re-introducing attack surface. Use the sanitized values that
+      // validateUserUrl already verified. Insert above also writes these
+      // fields, so this update is now defensive-only.
+      const safeTiktok = safeUrls.tiktokUrl;
+      const safeMaps = safeUrls.googleMapsUrl;
+      if (safeTiktok || safeMaps) {
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${safeTiktok}, google_maps_url = ${safeMaps} WHERE id = ${competitor.id}`);
+      }
+
       const validation = validateEvidence(competitor);
-      res.json({ competitor: { ...competitor, evidenceComplete: validation.complete, missingFields: validation.missing } });
+      res.json({ competitor: { ...competitor, tiktokUrl: safeTiktok, googleMapsUrl: safeMaps, evidenceComplete: validation.complete, missingFields: validation.missing } });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -146,21 +211,39 @@ export function registerCiCompetitorRoutes(app: Express) {
     try {
       const { id } = req.params;
       const accountId = resolveAccountId(req);
+      // Body-level campaignId ownership is asserted just-in-time below,
+      // immediately after the campaignId is parsed off req.body. The PUT
+      // mutates `ci_competitors` rows and the WHERE clause also filters by
+      // accountId+campaignId, but explicit assert is required by W5 doctrine.
       const enabled = await featureFlagService.isEnabled("competitive_intelligence_enabled", accountId);
       if (!enabled) {
         return res.status(403).json({ error: "Competitive intelligence is disabled" });
       }
 
+      // Seal #5 / F8.1 (architect-#10 fix): validate URL fields on PUT path
+      // too. Previously POST validated but PUT wrote raw user input.
+      const { validateUserUrl: _validateUserUrlPut } = await import("./scrape-safety");
+      const URL_FIELDS = new Set(["profileLink", "websiteUrl", "blogUrl", "tiktokUrl", "googleMapsUrl"]);
+
       const updates: any = { updatedAt: new Date() };
       const fields = ["name", "platform", "profileLink", "businessType", "primaryObjective",
         "postingFrequency", "contentTypeRatio", "engagementRatio", "ctaPatterns",
         "discountFrequency", "hookStyles", "messagingTone", "socialProofPresence",
-        "screenshotUrls", "notes", "websiteUrl", "blogUrl"];
+        "screenshotUrls", "notes", "websiteUrl", "blogUrl", "tiktokUrl", "googleMapsUrl"];
 
       for (const f of fields) {
         if (req.body[f] !== undefined) {
           if (f === "postingFrequency") { const v = req.body[f]; updates[f] = v !== undefined && v !== null && v !== '' ? (isNaN(parseInt(v)) ? null : parseInt(v)) : null; }
           else if (f === "engagementRatio") { const v = req.body[f]; updates[f] = v !== undefined && v !== null && v !== '' ? (isNaN(parseFloat(v)) ? null : parseFloat(v)) : null; }
+          else if (URL_FIELDS.has(f)) {
+            const raw = req.body[f];
+            if (raw === null || raw === "" || raw === undefined) {
+              updates[f] = null;
+            } else {
+              try { updates[f] = _validateUserUrlPut(raw); }
+              catch (urlErr: any) { return res.status(400).json({ error: `Invalid URL on ${f}: ${urlErr.message}` }); }
+            }
+          }
           else updates[f] = req.body[f];
         }
       }
@@ -170,6 +253,17 @@ export function registerCiCompetitorRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      // W5 (architect re-review #6): explicit ownership assert at the boundary.
+      // The UPDATE WHERE clause below also filters by accountId AND campaignId,
+      // but strict doctrine requires explicit ownership truth before any
+      // tenant-scoped DB mutation.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
+
       const [updated] = await db.update(ciCompetitors)
         .set(updates)
         .where(and(eq(ciCompetitors.id, id), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)))
@@ -177,8 +271,25 @@ export function registerCiCompetitorRoutes(app: Express) {
 
       if (!updated) return res.status(404).json({ error: "Competitor not found" });
 
+      // Seal #5 / F8.1 (validator-#2 fix): use SANITIZED `updates` values
+      // (already through validateUserUrl above), not raw req.body, so the
+      // post-update sync cannot reintroduce non-canonical input.
+      const hasTiktok = req.body.tiktokUrl !== undefined;
+      const hasGmaps = req.body.googleMapsUrl !== undefined;
+      const safeTiktokPut = updates.tiktokUrl ?? null;
+      const safeGmapsPut = updates.googleMapsUrl ?? null;
+      if (hasTiktok && hasGmaps) {
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${safeTiktokPut}, google_maps_url = ${safeGmapsPut} WHERE id = ${id}`);
+      } else if (hasTiktok) {
+        await db.execute(sql`UPDATE ci_competitors SET tiktok_url = ${safeTiktokPut} WHERE id = ${id}`);
+      } else if (hasGmaps) {
+        await db.execute(sql`UPDATE ci_competitors SET google_maps_url = ${safeGmapsPut} WHERE id = ${id}`);
+      }
+      const extraRes = await db.execute(sql`SELECT tiktok_url, google_maps_url FROM ci_competitors WHERE id = ${id}`);
+      const extra = (extraRes.rows as any[])[0] ?? {};
+
       const validation = validateEvidence(updated);
-      res.json({ competitor: { ...updated, evidenceComplete: validation.complete, missingFields: validation.missing } });
+      res.json({ competitor: { ...updated, tiktokUrl: extra.tiktok_url ?? null, googleMapsUrl: extra.google_maps_url ?? null, evidenceComplete: validation.complete, missingFields: validation.missing } });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

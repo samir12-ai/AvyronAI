@@ -1,0 +1,106 @@
+Hi,
+
+I want to streamline validation and avoid manually inspecting each engine or taking screenshots.
+
+Please implement a **single-run automated report** that executes the full system and returns a **complete structured output covering all engines**.
+
+### Objective
+
+Run the entire orchestrator flow and generate a **final consolidated report** that includes:
+
+---
+
+### 1. Full Engine Outputs (All Engines)
+
+For every engine:
+
+* Engine name
+* Status (PASS / PARTIAL / FAIL / BLOCKED)
+* Key output summary (not raw dump, but structured)
+* Warnings (if any)
+* Confidence score
+
+---
+
+### 2. System-Level Summary
+
+* Overall system status
+* Final decision (from Control Layer if active)
+* Execution mode (FULL / TEST / RESTRICTED / HALTED / REVIEW)
+* Key risks detected
+* Critical blockers (if any)
+
+---
+
+### 3. Control Layer Verdict (if implemented)
+
+* Verdict: PASS / DOWNGRADE / REPAIR / BLOCK
+* Block reasons (with codes)
+* Downgrades applied
+* Repair actions executed (if any)
+* Contradictions detected
+
+---
+
+### 4. Confidence & Signal Integrity
+
+* Signal composition:
+
+  * Real ratio
+  * Trusted ratio
+* Integrity score
+* Data reliability (from iteration engine)
+
+---
+
+### 5. Strategic Outputs (Important Only)
+
+* Top optimization targets (iteration engine)
+* Failed strategy flags
+* Budget decision (final after any downgrade)
+* Selected channels (with funnel mapping)
+
+---
+
+### 6. Memory Influence (Short Summary)
+
+* Top REINFORCE signals applied
+* Top AVOID signals applied
+* Any major memory-driven bias
+
+---
+
+### 7. Final Report Format
+
+Return this as:
+
+* Clean structured JSON
+* AND a readable summary (human-friendly)
+
+---
+
+### Important Notes
+
+* I do NOT want raw logs
+* I do NOT want partial outputs
+* I want a **clean, decision-ready report**
+* This should run with a single call (no manual inspection)
+
+---
+
+### Goal
+
+I want to evaluate the system in one view:
+→ What it decided
+→ Why it decided it
+→ How confident it is
+→ Whether it is safe to execute
+
+---
+
+If needed, create a dedicated endpoint like:
+`/api/system/full-report/:campaignId`
+
+Let me know once it's ready so I can test it.
+
+Thanks.

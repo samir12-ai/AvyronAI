@@ -18,10 +18,14 @@ import {
 } from "@shared/schema";
 import { eq, and, or, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
+import { casUpdateStrategicPlan, casUpdateStrategicPlanByVersion } from "../strategic-core/cas-helper";
 import { computeFulfillment } from "../fulfillment-engine";
 import { buildCausalNarrative } from "../narrative-layer";
+import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
 
 import { resolveAccountId } from "../auth";
+import { resolveRunId } from "./run-resolver";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
     try {
@@ -44,6 +48,19 @@ export function registerOrchestratorV2Routes(app: Express) {
       }
 
       const accountId = resolveAccountId(req);
+
+      // W5 (P0-4 cleanup): use centralized assertCampaignBelongsTo helper
+      // instead of inline raw SQL. Same semantics (WHERE accountId AND
+      // selectedCampaignId LIMIT 1 against campaign_selections) — produces
+      // 404 CAMPAIGN_NOT_FOUND on mismatch (anti-enumeration, never confirms
+      // existence to a non-owner). Replaces the prior inline check that
+      // returned a generic 404 "Campaign not found" payload.
+      try {
+        await assertCampaignBelongsTo(accountId, String(campaignId));
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
 
       if (!pausedJobId) {
         const existing = await db.execute(
@@ -71,12 +88,15 @@ export function registerOrchestratorV2Routes(app: Express) {
           accountId,
           campaignId: String(campaignId),
           status: "RUNNING",
+          // Task #67 / T-S5-C3: seed from the canonical 15-engine priority
+          // matrix. The prior literal 11-id seed contained fictional engine
+          // ids ("sgl","pricing","creative","messaging") that did not match
+          // any actual engine — so the initial sectionStatuses row diverged
+          // from the orchestrator's own `ENGINE_PRIORITY_ORDER`-driven
+          // updates seconds later, leaving the UI flickering between two
+          // disjoint shapes.
           sectionStatuses: JSON.stringify(
-            Array.from({ length: 11 }, (_, i) => {
-              const ids = ["market_intelligence","sgl","audience","offer","mechanism","pricing","messaging","funnel","creative","iteration","retention"];
-              const names = ["Market Intelligence","Signal Governor","Audience","Offer","Mechanism","Pricing","Messaging","Funnel","Creative","Iteration","Retention"];
-              return { id: ids[i], name: names[i], status: "PENDING" };
-            })
+            ENGINE_PRIORITY_ORDER.map(e => ({ id: e.id, name: e.name, status: "PENDING" }))
           ),
         });
       }
@@ -109,7 +129,10 @@ export function registerOrchestratorV2Routes(app: Express) {
 
   app.get("/api/orchestrator/status/:jobId", async (req: Request, res: Response) => {
     try {
-      const status = await getOrchestratorStatus(req.params.jobId);
+      // P3 isolation seal: scope status lookup by accountId so jobIds belonging
+      // to other tenants return 404 instead of leaking section statuses.
+      const accountId = resolveAccountId(req);
+      const status = await getOrchestratorStatus(req.params.jobId, accountId);
       if (!status) {
         return res.status(404).json({ error: "Job not found" });
       }
@@ -122,6 +145,15 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/orchestrator/latest/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
+      // explicit ownership assert at the boundary.
+      // getLatestOrchestratorRun is account-scoped, but doctrine requires
+      // explicit ownership truth before any cross-module call.
+      try {
+        await assertCampaignBelongsTo(accountId, req.params.campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
       const job = await getLatestOrchestratorRun(accountId, req.params.campaignId);
       if (!job) {
         return res.json({ hasRun: false });
@@ -151,20 +183,92 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/plans/active/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const [plan] = await db
-        .select()
-        .from(strategicPlans)
+      // explicit ownership assert at the boundary.
+      // The downstream resolveRunId + DB queries below scope by accountId in
+      // their WHERE clauses, but strict doctrine requires explicit ownership
+      // truth before any cross-module call.
+      try {
+        await assertCampaignBelongsTo(accountId, req.params.campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
+
+      let resolved;
+      try {
+        resolved = await resolveRunId(req.params.campaignId, accountId, (req.query.runId as string) || null);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
+      }
+
+      const [latestJob] = await db
+        .select({
+          id: orchestratorJobs.id,
+          status: orchestratorJobs.status,
+          error: orchestratorJobs.error,
+          planId: orchestratorJobs.planId,
+          sectionStatuses: orchestratorJobs.sectionStatuses,
+          createdAt: orchestratorJobs.createdAt,
+        })
+        .from(orchestratorJobs)
         .where(
           and(
-            eq(strategicPlans.accountId, accountId),
-            eq(strategicPlans.campaignId, req.params.campaignId),
+            eq(orchestratorJobs.campaignId, req.params.campaignId),
+            eq(orchestratorJobs.accountId, accountId)
           )
         )
-        .orderBy(desc(strategicPlans.createdAt))
+        .orderBy(desc(orchestratorJobs.createdAt))
         .limit(1);
 
+      let plan: any = null;
+      if (resolved.runId && resolved.planId) {
+        const [p] = await db
+          .select()
+          .from(strategicPlans)
+          .where(
+            and(
+              eq(strategicPlans.accountId, accountId),
+              eq(strategicPlans.campaignId, req.params.campaignId),
+              eq(strategicPlans.id, resolved.planId),
+            )
+          )
+          .limit(1);
+        plan = p || null;
+      }
+
+      // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): defensive null coalesce on optional jobId field — no semantic substitution
+      const pipelineStatus = latestJob?.status || null;
+      const pipelineBlocked = pipelineStatus === "BLOCKED";
+      const pipelineFailed = pipelineStatus === "FAILED" || pipelineStatus === "ERROR";
+      const pipelineBlockReason = pipelineBlocked ? (latestJob?.error || null) : null;
+      const isPlanFromLatestRun = plan && latestJob?.planId ? (plan.id === latestJob.planId) : false;
+      const isPlanStale = plan && (pipelineBlocked || pipelineFailed) && !isPlanFromLatestRun;
+
+      let completedEngines: string[] = [];
+      let blockedEngines: string[] = [];
+      try {
+        const sections = latestJob?.sectionStatuses ? JSON.parse(latestJob.sectionStatuses) : [];
+        completedEngines = sections.filter((s: any) => s.status === "SUCCESS").map((s: any) => s.id);
+        blockedEngines = sections.filter((s: any) => s.status === "BLOCKED" || s.status === "DEPTH_CASCADE_BLOCKED").map((s: any) => s.id);
+      } catch {}
+
       if (!plan) {
-        return res.json({ hasPlan: false });
+        return res.json({
+          runId: resolved.runId,
+          isLatest: resolved.isLatest,
+          isStale: resolved.isStale,
+          completedAt: resolved.completedAt,
+          hasPlan: false,
+          pipelineState: latestJob ? {
+            status: pipelineStatus,
+            isBlocked: pipelineBlocked,
+            isFailed: pipelineFailed,
+            blockReason: pipelineBlockReason,
+            completedEngines,
+            blockedEngines,
+            lastRunAt: latestJob.createdAt,
+          } : null,
+        });
       }
 
       const planData = plan.planJson ? JSON.parse(plan.planJson) : null;
@@ -198,12 +302,12 @@ export function registerOrchestratorV2Routes(app: Express) {
       const safeJson = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
 
       const [goalDecomp] = await db.select().from(goalDecompositions)
-        .where(and(eq(goalDecompositions.campaignId, req.params.campaignId), eq(goalDecompositions.accountId, accountId)))
-        .orderBy(desc(goalDecompositions.createdAt)).limit(1);
+        .where(and(eq(goalDecompositions.campaignId, req.params.campaignId), eq(goalDecompositions.accountId, accountId), eq(goalDecompositions.jobId, resolved.runId!)))
+        .limit(1);
 
       const [simulation] = await db.select().from(growthSimulations)
-        .where(and(eq(growthSimulations.campaignId, req.params.campaignId), eq(growthSimulations.accountId, accountId)))
-        .orderBy(desc(growthSimulations.createdAt)).limit(1);
+        .where(and(eq(growthSimulations.campaignId, req.params.campaignId), eq(growthSimulations.accountId, accountId), eq(growthSimulations.jobId, resolved.runId!)))
+        .limit(1);
 
       const tasks = await db.select().from(executionTasks)
         .where(eq(executionTasks.planId, plan.id));
@@ -211,8 +315,35 @@ export function registerOrchestratorV2Routes(app: Express) {
       const assumptions = await db.select().from(planAssumptions)
         .where(eq(planAssumptions.planId, plan.id));
 
+      let liveRhythm: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number } | null = null;
+      try {
+        const rhythm = await computeAdaptiveRhythm(req.params.campaignId, accountId);
+        liveRhythm = {
+          reelsPerWeek: rhythm.reelsPerWeek,
+          carouselsPerWeek: rhythm.carouselsPerWeek,
+          storiesPerDay: rhythm.storiesPerDay,
+          postsPerWeek: rhythm.postsPerWeek,
+        };
+      } catch {}
+
+      const approvedRhythm: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek?: number; approvedAt?: string } | null =
+        plan.approvedRhythmJson ? safeJson(plan.approvedRhythmJson) : null;
+
+      const rhythmDelta = (liveRhythm && approvedRhythm) ? {
+        reels: liveRhythm.reelsPerWeek - (approvedRhythm.reelsPerWeek || 0),
+        carousels: liveRhythm.carouselsPerWeek - (approvedRhythm.carouselsPerWeek || 0),
+        stories: liveRhythm.storiesPerDay - (approvedRhythm.storiesPerDay || 0),
+      } : null;
+
       res.json({
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
         hasPlan: true,
+        liveRhythm,
+        approvedRhythm,
+        rhythmDelta,
         plan: {
           id: plan.id,
           status: plan.status,
@@ -292,6 +423,17 @@ export function registerOrchestratorV2Routes(app: Express) {
           impactSeverity: a.impactSeverity,
           source: a.source,
         })),
+        pipelineState: {
+          status: pipelineStatus,
+          isBlocked: pipelineBlocked,
+          isFailed: pipelineFailed,
+          blockReason: pipelineBlockReason,
+          isPlanFromLatestRun,
+          isPlanStale,
+          completedEngines,
+          blockedEngines,
+          lastRunAt: latestJob?.createdAt || null,
+        },
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -315,22 +457,66 @@ export function registerOrchestratorV2Routes(app: Express) {
       }
 
       const warnings: string[] = [];
+      const blockReasons: Array<{ code: string; message: string; detail?: any }> = [];
+
+      // ===== PLAN-RUN BINDING CHECK =====
+      // A plan is run-bound iff it carries a jobId AND that jobId matches the
+      // most recent COMPLETED orchestrator run for the campaign. If a newer
+      // run has completed since the plan was generated, the plan is OUTDATED
+      // — its requiredWork/calendar reflect old engine outputs and approving
+      // it would lock in a strategy that disagrees with the latest analysis.
+      // Hard-block (even with forceApprove=false) is the correct behavior here
+      // because the system already supports re-running the orchestrator to
+      // produce a fresh plan; force-approving a stale plan defeats the purpose.
+      const [latestCompletedJob] = await db
+        .select({ id: orchestratorJobs.id, planId: orchestratorJobs.planId, completedAt: orchestratorJobs.completedAt })
+        .from(orchestratorJobs)
+        .where(and(
+          eq(orchestratorJobs.campaignId, plan.campaignId),
+          eq(orchestratorJobs.accountId, plan.accountId),
+          eq(orchestratorJobs.status, "COMPLETED"),
+        ))
+        .orderBy(desc(orchestratorJobs.completedAt))
+        .limit(1);
+
+      if (plan.jobId && latestCompletedJob && latestCompletedJob.id !== plan.jobId) {
+        blockReasons.push({
+          code: "PLAN_OUTDATED",
+          message: `Plan is from a previous pipeline run (${plan.jobId}). A newer run has completed (${latestCompletedJob.id}). Regenerate the plan from the latest run before approving.`,
+          detail: {
+            planJobId: plan.jobId,
+            latestJobId: latestCompletedJob.id,
+            latestCompletedAt: latestCompletedJob.completedAt,
+          },
+        });
+      }
 
       if (plan.rootBundleId) {
         const integrity = await validateRootIntegrity(planId);
         if (!integrity.valid) {
           warnings.push(...integrity.issues);
+          blockReasons.push({
+            code: "ROOT_INTEGRITY_FAILED",
+            message: `Root bundle integrity check failed: ${integrity.issues.join("; ")}`,
+            detail: { issues: integrity.issues },
+          });
         }
 
         const staleness = await detectStaleness(plan.campaignId, plan.accountId);
         if (staleness.isStale) {
           warnings.push(`Root staleness detected: ${staleness.reason}`);
+          blockReasons.push({
+            code: "ROOT_STALE",
+            message: `Root bundle is stale: ${staleness.reason}`,
+            detail: { reason: staleness.reason },
+          });
         }
       }
 
       const [work] = await db.select().from(requiredWork)
         .where(eq(requiredWork.planId, planId)).limit(1);
 
+      let deviationDetail: any = null;
       if (work) {
         const calCounts = await db.select({
           reels: sql<number>`count(case when content_type = 'REEL' then 1 end)`,
@@ -358,26 +544,65 @@ export function registerOrchestratorV2Routes(app: Express) {
         );
 
         if (!deviation.passesThreshold) {
+          deviationDetail = deviation;
           warnings.push(`Calendar deviation exceeds threshold: max ${deviation.maxDeviation}% (limit 5%)`);
+          blockReasons.push({
+            code: "EXECUTION_DEVIATION",
+            message: `Calendar contents drifted from required work plan (max ${deviation.maxDeviation}% deviation, limit 5%). This indicates real execution drift — content was added/removed outside the plan.`,
+            detail: deviation,
+          });
         }
       }
 
-      if (warnings.length > 0 && !forceApprove) {
+      // PLAN_OUTDATED is a structural lifecycle problem and must NOT be
+      // bypassed by forceApprove. Other blockers (root integrity, calendar
+      // deviation) can still be force-approved by an explicit operator.
+      const hasPlanOutdated = blockReasons.some(b => b.code === "PLAN_OUTDATED");
+      const shouldBlock = (hasPlanOutdated || blockReasons.length > 0) && (!forceApprove || hasPlanOutdated);
+
+      if (shouldBlock) {
         return res.status(409).json({
           success: false,
           blocked: true,
           warnings,
-          message: "Plan approval blocked due to integrity issues. Set force=true to override.",
+          blockReasons,
+          message: hasPlanOutdated
+            ? "Plan approval blocked: plan is outdated relative to the latest pipeline run. Regenerate the plan and try again. Force-approve is not permitted for outdated plans."
+            : "Plan approval blocked due to integrity issues. Set force=true to override (not recommended for execution drift without investigating root cause).",
         });
       }
 
-      const updated = await db.update(strategicPlans)
-        .set({ status: "APPROVED", updatedAt: new Date() })
-        .where(and(eq(strategicPlans.id, planId), or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW"))))
-        .returning({ id: strategicPlans.id });
+      // atomic CAS: bind to plan.version AND status predicate in
+      // a single UPDATE so a concurrent writer that flipped the row to
+      // APPROVED/REJECTED between the SELECT above and this write is
+      // detected (no rows updated → 409).
+      try {
+        await casUpdateStrategicPlanByVersion(
+          planId,
+          plan.version,
+          { status: "APPROVED", updatedAt: new Date() },
+          or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW")),
+        );
+      } catch (casErr: any) {
+        if (casErr?.code === "CONCURRENT_MODIFICATION") {
+          return res.status(409).json({ error: "Plan was modified concurrently or already approved/rejected" });
+        }
+        throw casErr;
+      }
 
-      if (!updated.length) {
-        return res.status(409).json({ error: "Plan was already approved or changed by another request" });
+      let rhythmSnapshot: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; approvedAt: string } | null = null;
+      try {
+        const rhythm = await computeAdaptiveRhythm(plan.campaignId, plan.accountId);
+        rhythmSnapshot = {
+          reelsPerWeek: rhythm.reelsPerWeek,
+          carouselsPerWeek: rhythm.carouselsPerWeek,
+          storiesPerDay: rhythm.storiesPerDay,
+          postsPerWeek: rhythm.postsPerWeek,
+          approvedAt: new Date().toISOString(),
+        };
+        await casUpdateStrategicPlan(planId, { approvedRhythmJson: JSON.stringify(rhythmSnapshot) });
+      } catch (snapshotErr: any) {
+        console.warn("[ApproveRoute] Failed to capture rhythm snapshot (non-blocking):", snapshotErr.message);
       }
 
       await db.insert(planApprovals).values({
@@ -386,9 +611,10 @@ export function registerOrchestratorV2Routes(app: Express) {
         decision: "APPROVED",
         reason: req.body.reason || (warnings.length > 0 ? `Force-approved with warnings: ${warnings.join("; ")}` : "Approved by user"),
         decidedBy: "client",
+        rhythmSnapshotJson: rhythmSnapshot ? JSON.stringify(rhythmSnapshot) : null,
       });
 
-      res.json({ success: true, status: "APPROVED", warnings });
+      res.json({ success: true, status: "APPROVED", warnings, approvedRhythm: rhythmSnapshot });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -402,9 +628,14 @@ export function registerOrchestratorV2Routes(app: Express) {
       const [plan] = await db.select({ id: strategicPlans.id }).from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "Plan not found" });
 
-      await db.update(strategicPlans)
-        .set({ status: "REJECTED", updatedAt: new Date() })
-        .where(eq(strategicPlans.id, planId));
+      try {
+        await casUpdateStrategicPlan(planId, { status: "REJECTED", updatedAt: new Date() });
+      } catch (casErr: any) {
+        if (casErr?.code === "CONCURRENT_MODIFICATION") {
+          return res.status(409).json({ error: "Plan was modified concurrently by another request" });
+        }
+        throw casErr;
+      }
 
       await db.insert(planApprovals).values({
         planId,
@@ -423,9 +654,23 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/system-context/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const context = await loadSystemContext(accountId, req.params.campaignId);
+      const requestedRunId = (req.query.runId as string) || null;
+      // explicit ownership assert at the boundary.
+      // Downstream loadSystemContext does scope reads by accountId, but the
+      // strict doctrine requires explicit ownership truth before any cross-
+      // module call.
+      try {
+        await assertCampaignBelongsTo(accountId, req.params.campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
+      const context = await loadSystemContext(accountId, req.params.campaignId, requestedRunId);
       res.json(context);
     } catch (error: any) {
+      if (typeof error?.message === "string" && error.message.startsWith("RUN_NOT_FOUND")) {
+        return res.status(404).json({ error: error.message });
+      }
       res.status(500).json({ error: error.message });
     }
   });
@@ -434,6 +679,13 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
+      // explicit ownership assert at the boundary.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
 
       const fulfillment = await computeFulfillment(campaignId, accountId);
 
@@ -487,9 +739,10 @@ export function registerOrchestratorV2Routes(app: Express) {
         remaining: fulfillment.total.remaining,
         progressPercent: fulfillment.progressPercent,
         branches: {
-          STORIES: fulfillment.byBranch.STORIES,
-          POSTS: fulfillment.byBranch.POSTS,
           REELS: fulfillment.byBranch.REELS,
+          POSTS: fulfillment.byBranch.POSTS,
+          STORIES: fulfillment.byBranch.STORIES,
+          CAROUSELS: fulfillment.byBranch.CAROUSELS,
         },
         byStatus: fulfillment.byStatus,
         todayWork: pendingToday.map(e => ({
@@ -511,7 +764,7 @@ export function registerOrchestratorV2Routes(app: Express) {
           reels: { required: fulfillment.byBranch.REELS.required, fulfilled: fulfillment.byBranch.REELS.fulfilled, remaining: fulfillment.byBranch.REELS.remaining, perWeek: work.reelsPerWeek },
           posts: { required: fulfillment.byBranch.POSTS.required, fulfilled: fulfillment.byBranch.POSTS.fulfilled, remaining: fulfillment.byBranch.POSTS.remaining, perWeek: work.postsPerWeek },
           stories: { required: fulfillment.byBranch.STORIES.required, fulfilled: fulfillment.byBranch.STORIES.fulfilled, remaining: fulfillment.byBranch.STORIES.remaining, perDay: work.storiesPerDay },
-          carousels: { required: work.totalCarousels, perWeek: work.carouselsPerWeek },
+          carousels: { required: fulfillment.byBranch.CAROUSELS.required, fulfilled: fulfillment.byBranch.CAROUSELS.fulfilled, remaining: fulfillment.byBranch.CAROUSELS.remaining, perWeek: work.carouselsPerWeek },
           videos: { required: work.totalVideos, perWeek: work.videosPerWeek },
         },
       });
@@ -555,7 +808,9 @@ export function registerOrchestratorV2Routes(app: Express) {
           PUBLISHED: "publishedCount",
         };
 
-        const oldField = statusToField[item.status || ""];
+        // F2.2/D1: presence ternary, not coalesce. Preserves prior
+        // semantics — missing status → no decrement, increment still runs.
+        const oldField = item.status ? statusToField[item.status] : undefined;
         const newField = statusToField[status];
 
         const updates: Record<string, any> = {};
@@ -573,9 +828,9 @@ export function registerOrchestratorV2Routes(app: Express) {
         }
 
         if (status === "PUBLISHED" && item.status !== "PUBLISHED") {
-          await db.update(strategicPlans)
-            .set({ totalPublished: sql`${strategicPlans.totalPublished} + 1` })
-            .where(eq(strategicPlans.id, item.planId));
+          await casUpdateStrategicPlan(item.planId, {
+            totalPublished: sql`${strategicPlans.totalPublished} + 1`,
+          });
         }
       }
 
@@ -590,6 +845,13 @@ export function registerOrchestratorV2Routes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const campaignId = req.params.campaignId;
+      // explicit ownership assert at the boundary.
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
       const job = await getLatestOrchestratorRun(accountId, campaignId);
       if (!job) {
         return res.json({ hasSummaries: false, engines: [] });
@@ -635,9 +897,12 @@ export function registerOrchestratorV2Routes(app: Express) {
 
         let miOutput: any = null;
         try {
+          // F2.1: tenant filter (defense-in-depth on top of boundary assert).
           const miRes = await db.execute(
             sql`SELECT competitor_data, signal_data, market_state, overall_confidence, dominance_data
-                FROM mi_snapshots WHERE campaign_id = ${campaignId} ORDER BY created_at DESC LIMIT 1`
+                FROM mi_snapshots
+                WHERE campaign_id = ${campaignId} AND account_id = ${accountId}
+                ORDER BY created_at DESC LIMIT 1`
           );
           const row = miRes.rows?.[0];
           if (row) {
@@ -692,6 +957,18 @@ export function registerOrchestratorV2Routes(app: Express) {
       const campaignId = req.query.campaignId as string;
       if (!campaignId) return res.status(400).json({ error: "campaignId required" });
 
+      // query.campaignId requires explicit
+      // ownership truth at the boundary. Downstream calls fan out to other
+      // local routes; without this assert, an attacker could enumerate
+      // foreign campaigns via this aggregator.
+      const accountId = resolveAccountId(req);
+      try {
+        await assertCampaignBelongsTo(accountId, campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
+
       const base = `http://localhost:${process.env.PORT || 5000}`;
       const q = `?campaignId=${encodeURIComponent(campaignId)}`;
 
@@ -725,12 +1002,14 @@ export function registerOrchestratorV2Routes(app: Express) {
         safe(`${base}/api/strategy/retention-engine/latest${q}`),
       ]);
 
-      // Pull MI snapshot from DB
+      // F2.1: tenant filter (defense-in-depth on top of boundary assert).
       let miRow: any = null;
       try {
         const miRes = await db.execute(
           sql`SELECT id, status, overall_confidence, narrative_synthesis, market_diagnosis, market_state, created_at
-              FROM mi_snapshots WHERE campaign_id = ${campaignId} ORDER BY created_at DESC LIMIT 1`
+              FROM mi_snapshots
+              WHERE campaign_id = ${campaignId} AND account_id = ${accountId}
+              ORDER BY created_at DESC LIMIT 1`
         );
         miRow = miRes.rows?.[0] ?? null;
       } catch { /* ignore */ }
@@ -740,11 +1019,46 @@ export function registerOrchestratorV2Routes(app: Express) {
         return (Math.round(val * 1000) / 10).toFixed(1) + "%";
       }
 
+      // F2.6: canonical status only; no fabrication from id/exists presence.
+      type CanonStatus = "COMPLETE" | "PARTIAL" | "UNKNOWN" | "MISSING";
+      function summarizeStatus(snap: any): { status: CanonStatus; degraded: boolean } {
+        if (snap == null) return { status: "MISSING", degraded: false };
+        const raw = snap?.status;
+        if (raw === "COMPLETE" || raw === "PARTIAL" || raw === "UNKNOWN" || raw === "MISSING") {
+          return { status: raw as CanonStatus, degraded: false };
+        }
+        return { status: "UNKNOWN", degraded: true };
+      }
+      function summarizeMiStatus(row: any): { status: CanonStatus; degraded: boolean } {
+        if (row == null) return { status: "MISSING", degraded: false };
+        const raw = row?.status;
+        if (raw === "COMPLETE" || raw === "PARTIAL" || raw === "UNKNOWN" || raw === "MISSING") {
+          return { status: raw as CanonStatus, degraded: false };
+        }
+        return { status: "UNKNOWN", degraded: true };
+      }
+      const miSt = summarizeMiStatus(miRow);
+      const audSt = summarizeStatus(audience);
+      const posSt = summarizeStatus(positioning);
+      const difSt = summarizeStatus(differentiation);
+      const mecSt = summarizeStatus(mechanism);
+      const offSt = summarizeStatus(offer);
+      const awaSt = summarizeStatus(awareness);
+      const funSt = summarizeStatus(funnel);
+      const perSt = summarizeStatus(persuasion);
+      const intSt = summarizeStatus(integrity);
+      const stvSt = summarizeStatus(statVal);
+      const budSt = summarizeStatus(budget?.snapshot);
+      const chnSt = summarizeStatus(channel);
+      const itrSt = summarizeStatus(iteration);
+      const retSt = summarizeStatus(retention?.snapshot);
+
       const rows = [
         {
           num: "01",
           engine: "Market Intelligence",
-          status: miRow?.status ?? "—",
+          status: miSt.status,
+          _provenance: { degraded: miSt.degraded },
           keyOutput: miRow?.market_diagnosis
             ? String(miRow.market_diagnosis).slice(0, 300)
             : miRow?.narrative_synthesis
@@ -756,7 +1070,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "02",
           engine: "Audience",
-          status: audience?.id ? "COMPLETE" : "—",
+          status: audSt.status,
+          _provenance: { degraded: audSt.degraded },
           keyOutput: (() => {
             const awarenessLvl = audience?.awarenessLevel?.level ?? audience?.awarenessLevel;
             const maturityLvl = audience?.maturityIndex?.level ?? audience?.maturityIndex;
@@ -789,7 +1104,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "03",
           engine: "Positioning",
-          status: positioning?.status ?? (positioning?.id ? "COMPLETE" : "—"),
+          status: posSt.status,
+          _provenance: { degraded: posSt.degraded },
           keyOutput: [
             positioning?.territory?.name ? `Territory: ${positioning.territory.name}` : null,
             positioning?.narrativeDirection ? `Direction: ${positioning.narrativeDirection}` : null,
@@ -801,7 +1117,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "04",
           engine: "Differentiation",
-          status: differentiation?.status ?? "—",
+          status: difSt.status,
+          _provenance: { degraded: difSt.degraded },
           keyOutput: [
             differentiation?.differentiationPillars?.length
               ? `${differentiation.differentiationPillars.length} pillars: ${differentiation.differentiationPillars.slice(0, 2).map((p: any) => p.name).join(", ")}`
@@ -825,7 +1142,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "05",
           engine: "Mechanism",
-          status: mechanism?.status ?? (mechanism?.exists ? "COMPLETE" : "—"),
+          status: mecSt.status,
+          _provenance: { degraded: mecSt.degraded },
           keyOutput: mechanism?.primaryMechanism
             ? [
                 `Name: ${mechanism.primaryMechanism.mechanismName}`,
@@ -843,7 +1161,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "06",
           engine: "Offer",
-          status: offer?.status ?? "—",
+          status: offSt.status,
+          _provenance: { degraded: offSt.degraded },
           keyOutput: offer?.primaryOffer
             ? [
                 offer.primaryOffer.offerName ? `Offer: ${offer.primaryOffer.offerName}` : null,
@@ -864,7 +1183,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "07",
           engine: "Awareness",
-          status: awareness?.status ?? (awareness?.exists ? "COMPLETE" : "—"),
+          status: awaSt.status,
+          _provenance: { degraded: awaSt.degraded },
           keyOutput: awareness?.primaryRoute
             ? [
                 `Route: ${awareness.primaryRoute.routeName}`,
@@ -887,7 +1207,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "08",
           engine: "Funnel",
-          status: funnel?.status ?? "—",
+          status: funSt.status,
+          _provenance: { degraded: funSt.degraded },
           keyOutput: funnel?.primaryFunnel
             ? [
                 `Funnel: ${funnel.primaryFunnel.funnelName}`,
@@ -903,7 +1224,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "09",
           engine: "Persuasion",
-          status: persuasion?.status ?? (persuasion?.exists ? "COMPLETE" : "—"),
+          status: perSt.status,
+          _provenance: { degraded: perSt.degraded },
           keyOutput: persuasion?.primaryRoute
             ? [
                 `Mode: ${persuasion.primaryRoute.persuasionMode}`,
@@ -922,7 +1244,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "10",
           engine: "Integrity",
-          status: integrity?.status ?? (integrity?.exists ? "COMPLETE" : "—"),
+          status: intSt.status,
+          _provenance: { degraded: intSt.degraded },
           keyOutput: [
             integrity?.overallIntegrityScore != null
               ? `Integrity score: ${score(integrity.overallIntegrityScore)}`
@@ -930,11 +1253,19 @@ export function registerOrchestratorV2Routes(app: Express) {
             integrity?.safeToExecute != null
               ? `Safe to execute: ${integrity.safeToExecute ? "YES" : "NO"}`
               : null,
-            integrity?.layerResults?.filter((l: any) => l.passed === false)?.length
-              ? `${integrity.layerResults.filter((l: any) => !l.passed).length} layer(s) failed`
-              : integrity?.layerResults?.length
-                ? `All ${integrity.layerResults.length} layers passed`
-                : null,
+            // CLP-15: compound check — passed===false on an EVALUATED layer is
+            // a real failure. INSUFFICIENT_EVIDENCE is reported separately.
+            (() => {
+              const rows: any[] = integrity?.layerResults ?? [];
+              if (!rows.length) return null;
+              const failed = rows.filter((l: any) => l?.evaluationState === "EVALUATED" && l?.passed === false).length;
+              const insufficient = rows.filter((l: any) => l?.evaluationState && l.evaluationState !== "EVALUATED").length;
+              const evaluated = rows.length - insufficient;
+              if (failed > 0 || insufficient > 0) {
+                return `${failed} failed, ${insufficient} insufficient (of ${rows.length} layers)`;
+              }
+              return `All ${evaluated} layers passed`;
+            })(),
           ].filter(Boolean).join(" | ") || "No data",
           score: integrity?.overallIntegrityScore != null ? score(integrity.overallIntegrityScore) : "—",
           notes: integrity?.statusMessage ?? "",
@@ -942,7 +1273,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "11",
           engine: "Statistical Validation",
-          status: statVal?.status ?? (statVal?.exists ? "COMPLETE" : "—"),
+          status: stvSt.status,
+          _provenance: { degraded: stvSt.degraded },
           keyOutput: statVal?.result
             ? [
                 `State: ${statVal.result.validationState}`,
@@ -962,7 +1294,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "12",
           engine: "Budget Governor",
-          status: budget?.snapshot?.status ?? "—",
+          status: budSt.status,
+          _provenance: { degraded: budSt.degraded },
           keyOutput: budget?.snapshot?.result?.decision
             ? [
                 `Action: ${budget.snapshot.result.decision.action}`,
@@ -979,7 +1312,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "13",
           engine: "Channel Selection",
-          status: channel?.status ?? "—",
+          status: chnSt.status,
+          _provenance: { degraded: chnSt.degraded },
           keyOutput: channel?.result?.primaryChannel
             ? [
                 `Primary: ${channel.result.primaryChannel.channelName}`,
@@ -1000,7 +1334,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "14",
           engine: "Iteration",
-          status: iteration?.status ?? (iteration?.exists ? "COMPLETE" : "—"),
+          status: itrSt.status,
+          _provenance: { degraded: itrSt.degraded },
           keyOutput: [
             iteration?.nextTestHypotheses?.length
               ? `${iteration.nextTestHypotheses.length} test hypothesis: ${iteration.nextTestHypotheses[0]?.hypothesis ?? ""}`
@@ -1015,7 +1350,8 @@ export function registerOrchestratorV2Routes(app: Express) {
         {
           num: "15",
           engine: "Retention",
-          status: retention?.snapshot?.status ?? "—",
+          status: retSt.status,
+          _provenance: { degraded: retSt.degraded },
           keyOutput: retention?.snapshot?.result?.retentionLoops?.length
             ? [
                 `${retention.snapshot.result.retentionLoops.length} retention loop(s)`,
@@ -1039,9 +1375,19 @@ export function registerOrchestratorV2Routes(app: Express) {
   app.get("/api/narrative/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const narrative = await buildCausalNarrative(req.params.campaignId, accountId);
+      // explicit ownership assert at the boundary.
+      try {
+        await assertCampaignBelongsTo(accountId, req.params.campaignId);
+      } catch (e) {
+        if (handleOwnershipError(e, res)) return;
+        throw e;
+      }
+      const narrative = await buildCausalNarrative(req.params.campaignId, accountId, (req.query.runId as string) || null);
       res.json(narrative);
     } catch (error: any) {
+      if (typeof error?.message === "string" && error.message.startsWith("RUN_NOT_FOUND")) {
+        return res.status(404).json({ error: error.message });
+      }
       res.status(500).json({ error: error.message });
     }
   });

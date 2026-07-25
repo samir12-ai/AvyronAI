@@ -1,0 +1,223 @@
+Hi Replit Team,
+
+Following the recent progress on Market Intelligence and scraping (Instagram, TikTok, Google Reviews, etc.), I’d like to align on a more structured intelligence model before we proceed further.
+
+The goal is to ensure we are not just collecting data, but building a **true multi-source intelligence system** — and to verify what is already implemented vs what still needs to be built.
+
+---
+
+## 🧠 Core Concept (Important)
+
+Each platform represents a different type of “truth” — not all signals should be treated equally:
+
+* Instagram → Market positioning (how companies present themselves)
+* TikTok → Validation layer (what actually gets attention)
+* Google Reviews → Pain layer (real user problems)
+* Website → Strategic intent (what companies aim to communicate)
+* Comments → Feedback loop (how users react)
+
+The system should not treat these as independent streams, but as a **cross-signal intelligence layer**, where:
+
+> Truth = agreement across multiple weighted signals
+
+---
+
+## ⚙️ Expected Architecture (Conceptually)
+
+```
+Scraping (multi-platform)
+   ↓
+Signal extraction (per source)
+   ↓
+Normalization (pain / hook / topic)
+   ↓
+Cross-source validation (agreement + weights)
+   ↓
+Confidence scoring
+   ↓
+Used in strategy / memory / rhythm decisions
+```
+
+---
+
+## 🔴 TikTok Specific — Validation Layer Requirement
+
+TikTok should not be treated as raw input only.
+
+It must act as a **validation engine**, meaning:
+
+> Only content that actually performs should influence decisions.
+
+### Required Logic
+
+Before using any TikTok content as a signal, we need:
+
+#### 1. Success Qualification Layer
+
+The system must determine whether a video is:
+
+* High-performing
+* Mid-performing
+* Low-performing
+
+Based on **relative performance**, not absolute metrics.
+
+#### 2. Relative Performance (Key Principle)
+
+Performance should be evaluated against the creator’s baseline:
+
+* views vs average views
+* engagement rate vs average
+* shares/comments ratios
+
+Not:
+
+❌ “This video has high views → it’s good”
+But:
+✅ “This video outperformed this creator’s baseline”
+
+#### 3. Composite Success Score
+
+A weighted score combining:
+
+* views (relative)
+* engagement rate
+* shares
+* comments
+* recency
+
+#### 4. Signal Usage Rules
+
+* High-performing → strong validation signal
+* Mid-performing → weak signal
+* Low-performing → excluded or used as negative signal
+
+And most importantly:
+
+> Repetition only matters if it appears in high-performing content
+
+---
+
+## 🔍 Key Questions (Based on Actual Code)
+
+Before we build anything new, we want to confirm what already exists in the system:
+
+### 1. TikTok Performance Qualification
+
+* Do we currently compute any **relative performance score per TikTok video**?
+* Is there any concept of:
+
+  * creator baseline
+  * outperforming vs underperforming classification?
+
+Or are all scraped TikTok posts treated equally?
+
+---
+
+### 2. Cross-Signal Intelligence
+
+* Do we currently have any logic that:
+
+  * merges signals across sources (reviews + TikTok + comments)?
+  * detects agreement between sources?
+  * assigns confidence scores based on multi-source overlap?
+
+Or are all sources processed independently?
+
+---
+
+### 3. Signal Weighting
+
+* Is there any weighting system between sources (e.g. reviews > TikTok > captions)?
+* Or are all signals treated uniformly?
+
+---
+
+### 4. Google Reviews Usage
+
+* Are reviews currently used to:
+
+  * extract pain points?
+  * build objection maps?
+* Is there any structured output like:
+
+  * pain clusters
+  * objection clusters
+  * frequency scoring?
+
+---
+
+### 5. Comments Layer
+
+* Are comments currently:
+
+  * filtered (noise removal)?
+  * analyzed for objections / confusion / validation?
+
+Or are they only stored/raw?
+
+---
+
+### 6. Website / Intent Layer
+
+* Are we extracting:
+
+  * value propositions
+  * positioning statements
+  * messaging structure?
+
+Or only storing raw HTML/text?
+
+---
+
+### 7. Integration with Decision Systems
+
+Where are these signals actually used today?
+
+* Adaptive Rhythm Engine?
+* Dual Analysis?
+* Plan Synthesis?
+* Memory Mutation?
+
+And how:
+
+* as baseline?
+* as weighting?
+* or just descriptive context?
+
+---
+
+## 🎯 Goal
+
+We want to confirm:
+
+1. What parts of this intelligence model are already implemented in code
+2. What parts are missing (especially TikTok validation + cross-signal logic)
+3. Whether a dedicated **Cross-Signal Decision Engine** is needed
+4. Whether a **TikTok Success Qualification Layer** already exists or needs to be built
+
+---
+
+## 🧠 Key Principle Moving Forward
+
+We are not aiming for:
+
+“more scraping”
+
+We are aiming for:
+
+> Structured intelligence → validated signals → confident decisions
+
+---
+
+If possible, please point to:
+
+* relevant files / functions
+* where performance is computed (if exists)
+* where signals are merged (if exists)
+
+This will help us avoid rebuilding existing logic and align the next phase correctly.
+
+Thanks,
+Samir
+Avyron AI

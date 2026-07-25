@@ -1,0 +1,215 @@
+Team,
+
+Phase 2 showed the first real empirical proof that several intelligence layers are genuinely adaptive and not purely template-driven.
+
+That is a major milestone.
+
+But before we move further, I want the next phase focused on commercial usefulness validation — not just engine execution coverage.
+
+==================================================
+
+1. VERIFY ALL DEEP ENGINES — NOT ONLY THE FIRST 3
+   ==================================================
+
+The latest audit successfully validated:
+
+* Audience
+* Positioning
+* Differentiation
+
+across all 3 industries.
+
+Good.
+
+Now I want the same level of empirical verification for the remaining deep engines:
+
+* Mechanism
+* Offer
+* Funnel
+* Awareness
+* Persuasion
+* Narrative
+* Build Plan
+* Budget
+* Channel
+* AEL
+* CEL
+* Statistical Validation
+
+Do not stop at:
+“the engines executed.”
+
+I want to know:
+
+* are they adaptive?
+* are they commercially useful?
+* are they materially different across industries?
+* are they strategically grounded?
+* are they context-sensitive?
+* are they operator-useful?
+* are they reasoning from evidence or templates?
+
+==================================================
+2. VERIFY BUILD-PLAN SECTION END-TO-END
+=======================================
+
+The Build Plan layer is one of the most important commercial surfaces in the entire platform.
+
+Audit it deeply.
+
+I want verification of:
+
+* plan realism
+* execution usefulness
+* recommendation sequencing
+* strategic coherence
+* dependency awareness
+* budget realism
+* campaign realism
+* channel realism
+* tactical prioritization
+* contradiction handling
+
+Also verify:
+
+* whether plans are truly generated from upstream engine reasoning
+  OR
+* partially templated/fallback assembled
+
+We need proof that the Build Plan is genuinely intelligence-driven.
+
+==================================================
+3. VERIFY MANUAL USER DATA IS ACTUALLY USED
+===========================================
+
+This is critical.
+
+I want a dedicated audit proving the system genuinely uses:
+
+* manual campaign metrics
+* Product DNA
+* business profile inputs
+* manual strategic inputs
+* goals
+* audience data
+* positioning data
+* offer inputs
+* user-entered constraints
+* uploaded business context
+
+Not just storing them.
+
+I want proof they materially affect:
+
+* reasoning
+* recommendations
+* confidence
+* prioritization
+* outputs
+* strategic direction
+* narrative generation
+* build plans
+* execution plans
+* budget logic
+* scoring systems
+
+==================================================
+4. DETECT “FAKE PERSONALIZATION”
+================================
+
+We must identify places where the system:
+
+* references user data
+  BUT
+* does not materially adapt the reasoning.
+
+That is fake personalization.
+
+Example:
+mentioning Product DNA in wording
+without actually changing strategy logic.
+
+I want this audited aggressively.
+
+==================================================
+5. BUSINESS-OWNER SATISFACTION VALIDATION
+=========================================
+
+The next phase should evaluate the system from the perspective of a real business owner.
+
+Key question:
+Would a real operator feel:
+
+* understood?
+* strategically guided?
+* commercially helped?
+* differentiated?
+* intelligently analyzed?
+
+Or would they feel:
+
+* generic AI output
+* consultant filler
+* surface-level personalization
+* repeated strategy patterns
+
+This is now the core success metric.
+
+==================================================
+6. REQUIRED OUTPUTS
+===================
+
+Create:
+
+.local/plans/deep-engine-commercial-validation.md
+
+Include:
+
+* per-engine usefulness scoring
+* adaptation scoring
+* evidence-grounding scoring
+* personalization scoring
+* operator usefulness scoring
+* strategic realism scoring
+
+Also create:
+
+.local/plans/manual-data-utilization-audit.md
+
+Show:
+
+* every manual input
+* where it propagates
+* where it affects reasoning
+* where it does NOT affect reasoning
+* fake-personalization risks
+* weak integration points
+
+And update:
+
+* intelligence-diff-matrix.json
+* intelligence-hardening-seal.md
+
+==================================================
+FINAL GOAL
+==========
+
+The target is not:
+“15 engines technically ran.”
+
+The target is:
+a business owner genuinely feeling:
+“This system understands my business and gives me strategically useful direction.”
+
+We already hardened:
+
+* infrastructure
+* runtime truth
+* isolation
+* integrity
+
+Now prove:
+the intelligence itself creates real commercial value.
+
+Best,
+[Your Name]

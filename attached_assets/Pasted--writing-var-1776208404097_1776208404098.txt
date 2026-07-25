@@ -1,0 +1,186 @@
+تمام — هذا إيميل قوي ومركز، هدفه يفتح تحقيق تقني فعلي مبني على الكود وليس آراء 👇
+
+⸻
+
+:::writing{variant=“email” id=“48291” subject=“Full System Audit Findings + Request for Signal Layer Verification (Code-Level)”}
+Hi,
+
+After completing a full end-to-end audit across all engines (Market Intelligence, Audience, Positioning, Differentiation, Mechanism, Offer, Awareness, Funnel, Persuasion, Budget, Iteration, Retention, Integrity, Validation, plus Dashboard/Agent), we’ve identified a consistent pattern of issues that appear to originate from a deeper architectural layer.
+
+I want to explicitly clarify:
+This is not a request for changes yet — this is a code-level verification request to understand how the system is actually handling signal grounding and inference.
+
+⸻
+
+Summary of Observed System Behavior
+
+Across all engines, we are seeing:
+	•	High confidence outputs (Budget scaling, Integrity SAFE, Persuasion strength)
+	•	Fully structured strategies (Funnel, Offer, Narrative, Content DNA)
+	•	But clear contradictions with runtime reality:
+	•	No actual content execution
+	•	No tracking data
+	•	Very low funnel conversion (~0.02%)
+	•	High refund rate (~50%)
+
+Additionally:
+	•	Validation engine reports “validated” states
+	•	But also shows:
+	•	Unmapped signals
+	•	SIGNAL_GROUNDING_FAILURE
+	•	Several core elements are not tied to real signals:
+	•	Awareness triggers
+	•	Persuasion drivers
+	•	Proof structures
+	•	Entry mechanisms
+
+⸻
+
+Key Hypothesis (Needs Verification)
+
+It appears that the system is not strictly distinguishing between:
+	1.	Real signals (from actual data / user behavior)
+	2.	Competitor-derived signals
+	3.	Inferred/constructed signals (AI reasoning, fallback logic)
+
+And more importantly:
+
+There may be no enforced dependency ensuring that every decision is grounded in a real signal.
+
+⸻
+
+Request: Verify Existing Layers (From Code)
+
+I need you to confirm — based strictly on the codebase — whether the following layers exist, and how they are implemented:
+
+⸻
+
+1. Signal Classification Layer
+	•	Do we explicitly classify signals into types such as:
+	•	real_signal
+	•	competitor_signal
+	•	inferred_signal
+	•	fallback_signal
+	•	Where is this classification implemented?
+	•	Is this persisted or only runtime?
+	•	Which files/modules handle this?
+
+⸻
+
+2. Signal Grounding / Provenance Layer
+	•	For every:
+	•	persuasion driver
+	•	awareness trigger
+	•	proof element
+	•	positioning claim
+
+👉 Is there a required link to a source signal?
+	•	Is there a structure like:
+	•	sourceSignalId
+	•	sourceType
+	•	confidenceOrigin
+	•	Where is this enforced in code?
+
+⸻
+
+3. Signal Dependency Enforcement
+	•	Do engines enforce:
+“no output without valid signal backing”?
+	•	Or can engines generate:
+	•	fallback decisions
+	•	inferred strategies
+without signal validation?
+	•	Specifically check:
+	•	cross-signal-decision.ts
+	•	plan-synthesis.ts
+	•	signal-engine.ts
+
+⸻
+
+4. Unmapped Signal Handling
+
+We saw:
+	•	“8 unmapped signals”
+	•	SIGNAL_GROUNDING_FAILURE
+
+Questions:
+	•	What triggers this state in code?
+	•	Why does it not block downstream engines?
+	•	Is it only logged or should it affect execution?
+
+⸻
+
+5. Validation Engine Scope
+	•	Does validation check:
+	•	completeness of signal coverage?
+OR only:
+	•	consistency of existing mapped elements?
+	•	Does it detect:
+missing signals?
+	•	Or only validates what already exists?
+
+⸻
+
+6. Confidence System
+	•	How is confidence computed?
+	•	Does it differentiate between:
+	•	real vs inferred vs competitor signals?
+	•	Or is confidence applied uniformly?
+
+⸻
+
+7. Fallback / Degraded Mode Behavior
+	•	When fallback is triggered (AI fallback, low data, etc.):
+	•	Are outputs tagged as degraded?
+	•	Do downstream systems respect that?
+	•	Or can degraded outputs:
+	•	flow into plan
+	•	reach budget decisions
+	•	affect memory
+
+⸻
+
+8. Content DNA Mode
+	•	Is there any concept of:
+	•	“borrowed mode” (competitor-based)
+	•	vs “native mode” (own data)?
+	•	Or is competitor-derived data treated as equivalent to real signals?
+
+⸻
+
+9. Reality Feedback Loop
+	•	Where in code do we connect:
+	•	execution → performance → signal update?
+	•	Is there a closed loop:
+	•	content → performance → signal refinement → decision update?
+	•	Or is this currently partial / not enforced?
+
+⸻
+
+Expected Output
+
+Please answer strictly based on the code:
+	•	Confirm whether each layer exists or not
+	•	Point to exact files/modules
+	•	Clarify whether enforcement is:
+	•	strict
+	•	partial
+	•	or not implemented
+
+⸻
+
+Important
+
+Do NOT implement changes yet.
+Do NOT propose solutions yet.
+
+We are only establishing:
+
+What actually exists vs what is assumed to exist.
+
+⸻
+
+Once we confirm this, we’ll decide the next step.
+
+Thanks
+:::

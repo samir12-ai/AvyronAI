@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot } from "@shared/schema";
+import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews } from "@shared/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { scrapeInstagramProfile, scrapeCommentsForPosts, extractHandleFromUrl, type ScrapedPost, type ScrapedComment } from "./profile-scraper";
 import { lookupSharedProfile, upsertSharedProfile, linkCompetitorToSharedProfile, reuseFromSharedPool } from "./shared-profile-store";
@@ -343,7 +343,64 @@ const MIN_COMMENTS_THRESHOLD = MI_THRESHOLDS.MIN_COMMENTS_SAMPLE;
 
 export { TARGET_POSTS_FAST, TARGET_POSTS_DEEP, MAX_COMMENT_POSTS_DEEP, MAX_COMMENTS_PER_POST_DEEP, CACHE_REUSE_WINDOW_MS };
 
-const activeFetches = new Map<string, Promise<FetchResult>>();
+// F6.9 — each in-flight fetch carries an AbortController + 45s wall-clock
+// watchdog. On timeout the entry is aborted+evicted and resolved with
+// INSUFFICIENT_DATA so a fresh attempt can run. The signal is threaded
+// into _executeFetch so cancellable paths short-circuit via FETCH_ABORTED.
+export const FETCH_WATCHDOG_TIMEOUT_MS = parseInt(
+  process.env.FETCH_WATCHDOG_TIMEOUT_MS || "45000",
+  10,
+);
+interface ActiveFetch {
+  promise: Promise<FetchResult>;
+  abortController: AbortController;
+  startedAt: number;
+}
+const activeFetches = new Map<string, ActiveFetch>();
+
+/**
+ * Race a promise against a wall-clock timeout. On timeout, abort the
+ * controller, run onTimeout(), and resolve with the fallback value.
+ * Always clears the timer in finally so we never leak handles.
+ *
+ * Exported for behavioral testing (architect-required: must validate
+ * timer cleanup + leak prevention under forced timeout, not via regex).
+ */
+export async function withWatchdog<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  abortController: AbortController,
+  onTimeout: () => T,
+): Promise<{ value: T; timedOut: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  const watchdogPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      try { abortController.abort(); } catch {}
+      resolve(onTimeout());
+    }, timeoutMs);
+  });
+  try {
+    const value = await Promise.race([promise, watchdogPromise]);
+    return { value, timedOut };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export function cancelFetch(accountId: string, competitorId: string): boolean {
+  const lockKey = `${accountId}:${competitorId}`;
+  const entry = activeFetches.get(lockKey);
+  if (!entry) return false;
+  try { entry.abortController.abort(); } catch {}
+  activeFetches.delete(lockKey);
+  return true;
+}
+
+export function getActiveFetchCount(): number {
+  return activeFetches.size;
+}
 
 export interface FetchResult {
   competitorId: string;
@@ -358,6 +415,11 @@ export interface FetchResult {
   fetchMethod: string;
   status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "COOLDOWN" | "INSUFFICIENT_DATA";
   message: string;
+  // Fix #1 — set ONLY on status "BLOCKED". Lets the fetch-orchestrator gate the
+  // 24h platform-block stamp: only "GENUINE_BLOCK" (a verified auth/challenge/
+  // 403 wall) may persist it; "TRANSIENT" (timeout / contention / cooldown echo)
+  // must never re-stamp. Absent ⇒ treated as non-genuine (no stamp).
+  blockClass?: "GENUINE_BLOCK" | "TRANSIENT";
   rawFetchedCount?: number;
   paginationPages?: number;
   paginationStopReason?: string;
@@ -369,7 +431,7 @@ export interface FetchResult {
 
 export async function fetchCompetitorData(
   competitorId: string,
-  accountId: string = "default",
+  accountId: string,
   forceRefresh: boolean = false,
   proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
   collectionMode: CollectionMode = "FAST_PASS",
@@ -378,16 +440,66 @@ export async function fetchCompetitorData(
   const lockKey = `${accountId}:${competitorId}`;
   const existing = activeFetches.get(lockKey);
   if (existing) {
-    console.log(`[DataAcq] Concurrent fetch detected for ${lockKey}, reusing in-flight`);
-    return existing;
+    // F6.9 watchdog — if the in-flight entry has been alive longer than
+    // FETCH_WATCHDOG_TIMEOUT_MS, treat it as dead, abort, evict, and
+    // start a fresh fetch. This is the safety net for the case where
+    // _executeFetch's inner await never resolves.
+    if (Date.now() - existing.startedAt > FETCH_WATCHDOG_TIMEOUT_MS) {
+      console.warn(`[DataAcq] WATCHDOG_EVICT | ${lockKey} | ageMs=${Date.now() - existing.startedAt} | aborting and restarting`);
+      try { existing.abortController.abort(); } catch {}
+      activeFetches.delete(lockKey);
+    } else {
+      console.log(`[DataAcq] Concurrent fetch detected for ${lockKey}, reusing in-flight`);
+      return existing.promise;
+    }
   }
 
-  const promise = _executeFetch(competitorId, accountId, forceRefresh, proxyCtx, collectionMode, fetchOptions);
-  activeFetches.set(lockKey, promise);
+  const abortController = new AbortController();
+  // Thread the abort signal into _executeFetch so cancellable awaits
+  // (scraper, DB checkpoints) can observe signal.aborted and bail.
+  const innerPromise = _executeFetch(
+    competitorId, accountId, forceRefresh, proxyCtx, collectionMode, fetchOptions,
+    abortController.signal,
+  );
+  const racedTask = withWatchdog<FetchResult>(
+    innerPromise,
+    FETCH_WATCHDOG_TIMEOUT_MS,
+    abortController,
+    () => {
+      console.warn(`[DataAcq] FETCH_TIMEOUT | ${lockKey} | timeoutMs=${FETCH_WATCHDOG_TIMEOUT_MS} | returning INSUFFICIENT_DATA`);
+      return {
+        competitorId,
+        postsCollected: 0,
+        commentsCollected: 0,
+        ctaCoverage: 0,
+        ctaTypes: [],
+        followers: null,
+        engagementRate: null,
+        postingFrequency: null,
+        contentMix: null,
+        fetchMethod: "watchdog_timeout",
+        status: "INSUFFICIENT_DATA" as const,
+        message: `Fetch exceeded ${FETCH_WATCHDOG_TIMEOUT_MS}ms watchdog`,
+      };
+    },
+  ).then(({ value }) => value);
+
+  activeFetches.set(lockKey, { promise: racedTask, abortController, startedAt: Date.now() });
   try {
-    return await promise;
+    return await racedTask;
   } finally {
     activeFetches.delete(lockKey);
+  }
+}
+
+/** Throws FETCH_ABORTED if the abort signal has been triggered. Called
+ *  at every major checkpoint inside _executeFetch so the watchdog can
+ *  actually preempt long-running scraper work. */
+function checkAborted(signal: AbortSignal | undefined, where: string): void {
+  if (signal?.aborted) {
+    const e: any = new Error(`FETCH_ABORTED at ${where}`);
+    e.code = "FETCH_ABORTED";
+    throw e;
   }
 }
 
@@ -398,12 +510,14 @@ async function _executeFetch(
   proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
   collectionMode: CollectionMode = "FAST_PASS",
   fetchOptions?: FetchOptions,
+  signal?: AbortSignal,
 ): Promise<FetchResult> {
+  checkAborted(signal, "executeFetch:entry");
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
 
   if (!competitor) {
-    return { competitorId, postsCollected: 0, commentsCollected: 0, ctaCoverage: 0, ctaTypes: [], followers: null, engagementRate: null, postingFrequency: null, contentMix: null, fetchMethod: "NONE", status: "BLOCKED", message: "Competitor not found" };
+    return { competitorId, postsCollected: 0, commentsCollected: 0, ctaCoverage: 0, ctaTypes: [], followers: null, engagementRate: null, postingFrequency: null, contentMix: null, fetchMethod: "NONE", status: "BLOCKED", blockClass: "TRANSIENT", message: "Competitor not found" };
   }
 
   if (collectionMode === "DEEP_PASS") {
@@ -447,13 +561,25 @@ async function _executeFetch(
     }
   }
 
-  const BLOCKED_PLATFORM_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  // Fix #1b — recovery probe replaces the blind 24h lock-out. A competitor
+  // previously stamped BLOCKED_BY_PLATFORM is NOT held for a full 24h with zero
+  // attempts. The self-perpetuation bug (every failed run re-stamping
+  // lastCheckedAt) is fixed in the fetch-orchestrator (only a GENUINE_BLOCK
+  // re-stamps). Here we additionally re-probe: once the block is older than
+  // BLOCKED_PROBE_INTERVAL_MS we fall through and actually attempt a scrape. A
+  // genuine still-blocked result re-stamps upstream (resetting this window); a
+  // recovery overwrites fetchMethod on the successful-fetch update, clearing the
+  // flag. Only a very recent block short-circuits, to avoid hammering a real
+  // wall on every scheduled run. The short-circuit returns status BLOCKED
+  // WITHOUT blockClass "GENUINE_BLOCK" so it can NEVER re-stamp (that would
+  // reintroduce self-perpetuation through the cooldown echo).
+  const BLOCKED_PROBE_INTERVAL_MS = 6 * 60 * 60 * 1000;
   if (!forceRefresh && collectionMode !== "DEEP_PASS" && competitor.fetchMethod === "BLOCKED_BY_PLATFORM" && competitor.lastCheckedAt) {
     const elapsedSinceBlock = Date.now() - new Date(competitor.lastCheckedAt).getTime();
-    if (elapsedSinceBlock < BLOCKED_PLATFORM_COOLDOWN_MS) {
-      const hoursLeft = Math.ceil((BLOCKED_PLATFORM_COOLDOWN_MS - elapsedSinceBlock) / (60 * 60 * 1000));
-      const hoursAgo = Math.round(elapsedSinceBlock / (60 * 60 * 1000) * 10) / 10;
-      console.log(`[DataAcq] BLOCKED_COOLDOWN: ${competitor.name} was platform-blocked ${hoursAgo}h ago. Cooling down for ${hoursLeft}h more.`);
+    const hoursAgo = Math.round(elapsedSinceBlock / (60 * 60 * 1000) * 10) / 10;
+    if (elapsedSinceBlock < BLOCKED_PROBE_INTERVAL_MS) {
+      const minutesLeft = Math.ceil((BLOCKED_PROBE_INTERVAL_MS - elapsedSinceBlock) / (60 * 1000));
+      console.log(`[DataAcq] BLOCKED_COOLDOWN: ${competitor.name} was platform-blocked ${hoursAgo}h ago. Next recovery probe in ${minutesLeft}m.`);
       return {
         competitorId,
         postsCollected: 0,
@@ -466,9 +592,11 @@ async function _executeFetch(
         contentMix: null,
         fetchMethod: "BLOCKED_COOLDOWN",
         status: "BLOCKED",
-        message: `Platform blocked ${hoursAgo}h ago — cooling down for ${hoursLeft}h more.`,
+        blockClass: "TRANSIENT",
+        message: `Platform blocked ${hoursAgo}h ago — next recovery probe in ${minutesLeft}m.`,
       };
     }
+    console.log(`[DataAcq] BLOCKED_COOLDOWN_PROBE: ${competitor.name} was platform-blocked ${hoursAgo}h ago (>= ${Math.round(BLOCKED_PROBE_INTERVAL_MS / (60 * 60 * 1000))}h probe interval). Attempting recovery scrape.`);
   }
 
   if (!forceRefresh && collectionMode !== "DEEP_PASS") {
@@ -511,8 +639,13 @@ async function _executeFetch(
         }
       }
 
-      if (elapsed < FETCH_COOLDOWN_MS) {
-        const hoursLeft = Math.ceil((FETCH_COOLDOWN_MS - elapsed) / (60 * 60 * 1000));
+      // Seal #5 / F7.8 — tier-aware cooldown. Tier-A = priority competitor
+      // (24h refresh); Tier-B = standard (72h). Falls back to 72h if the
+      // tier column is unset or unrecognized.
+      const competitorTier = (competitor as any).tier === "A" ? "A" : "B";
+      const tierCooldownMs = competitorTier === "A" ? 24 * 60 * 60 * 1000 : FETCH_COOLDOWN_MS;
+      if (elapsed < tierCooldownMs) {
+        const hoursLeft = Math.ceil((tierCooldownMs - elapsed) / (60 * 60 * 1000));
 
         const livePostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
           .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
@@ -527,7 +660,8 @@ async function _executeFetch(
         if (!coverageMet) {
           console.log(`[DataAcq] COOLDOWN_BYPASS: Coverage insufficient for ${competitor.name} (${postsCollected}/${MIN_POSTS_THRESHOLD} posts). Allowing re-fetch despite ${hoursLeft}h cooldown remaining.`);
         } else {
-          console.log(`[DataAcq] 72h cooldown active for ${competitor.name}, ${hoursLeft}h remaining. Coverage met (${postsCollected} posts, ${commentsCollected} comments).`);
+          const tierLabel = competitorTier === "A" ? "24h (tier A)" : "72h (tier B)";
+          console.log(`[DataAcq] ${tierLabel} cooldown active for ${competitor.name}, ${hoursLeft}h remaining. Coverage met (${postsCollected} posts, ${commentsCollected} comments).`);
 
           return {
             competitorId,
@@ -541,7 +675,7 @@ async function _executeFetch(
             contentMix: latestMetrics[0].contentMix,
             fetchMethod: latestMetrics[0].fetchMethod || "CACHED",
             status: "COOLDOWN",
-            message: `72h refresh cooldown active. ${hoursLeft}h remaining.`,
+            message: `${tierLabel} refresh cooldown active. ${hoursLeft}h remaining.`,
           };
         }
       }
@@ -593,16 +727,50 @@ async function _executeFetch(
 
   console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""} | maxPosts=${maxPosts}`);
 
+  checkAborted(signal, "executeFetch:beforeProfileScrape");
   const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts, accountId);
+  checkAborted(signal, "executeFetch:afterProfileScrape");
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
-    console.log(`[DataAcq] Scrape blocked for ${competitor.name}`);
+    // Fix #1 — split "healthy empty" from a genuine/transient block. When the
+    // scraper's transport reached the platform and returned zero posts
+    // (failureClass === "NONE"), this is NOT a block — it is a competitor with
+    // no fetchable recent posts. Report INSUFFICIENT_DATA carrying whatever is
+    // already stored, and emit NO blockClass so the orchestrator never persists
+    // a 24h platform-block stamp. Only a classified transport failure
+    // (GENUINE_BLOCK / TRANSIENT) returns status BLOCKED with blockClass, and
+    // only GENUINE_BLOCK is allowed to stamp downstream.
+    const existingStoredForEmpty = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+    const existingStoredEmptyCount = Number(existingStoredForEmpty[0]?.count || 0);
+
+    if (scrapeResult.failureClass === "NONE") {
+      // Report what is already stored (posts AND comments) rather than zeroing.
+      // The success/processed path writes these counts onto ciCompetitors, so a
+      // hard 0 here would erase the recorded comment count while the comments
+      // remain in the DB. Mirrors postsCollected = existingStoredEmptyCount.
+      const existingCommentsForEmpty = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
+        .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+      const existingCommentsEmptyCount = Number(existingCommentsForEmpty[0]?.count || 0);
+      console.log(`[DataAcq] HEALTHY_EMPTY: ${competitor.name} — transport reached platform, 0 new posts (stored=${existingStoredEmptyCount}, comments=${existingCommentsEmptyCount}). Not a block.`);
+      return {
+        competitorId,
+        postsCollected: existingStoredEmptyCount, commentsCollected: existingCommentsEmptyCount, ctaCoverage: 0, ctaTypes: [],
+        followers: scrapeResult.followers, engagementRate: null, postingFrequency: null, contentMix: null,
+        fetchMethod: scrapeResult.collectionMethodUsed,
+        status: "INSUFFICIENT_DATA",
+        message: `No fetchable recent posts (transport OK). ${existingStoredEmptyCount} post(s) already stored.`,
+      };
+    }
+
+    console.log(`[DataAcq] Scrape blocked for ${competitor.name} | blockClass=${scrapeResult.failureClass}`);
     return {
       competitorId,
       postsCollected: 0, commentsCollected: 0, ctaCoverage: 0, ctaTypes: [],
       followers: null, engagementRate: null, postingFrequency: null, contentMix: null,
       fetchMethod: scrapeResult.collectionMethodUsed,
       status: "BLOCKED",
+      blockClass: scrapeResult.failureClass,
       message: "Scraping blocked. All methods failed. Using cached data if available.",
     };
   }
@@ -1169,6 +1337,9 @@ export async function enrichCompetitorWithComments(competitorId: string, account
 
   try {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — attempting profile re-scrape for embedded comments`);
+    // NOTE: enrichCompetitorWithComments runs OUTSIDE the watchdog'd
+    // _executeFetch path (called by enrich-only flows that have no
+    // AbortSignal), so checkAborted is intentionally not invoked here.
     const profileRescrape = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, 30, accountId);
     const embeddedComments = profileRescrape.embeddedComments || [];
 
@@ -1214,6 +1385,7 @@ export async function enrichCompetitorWithComments(competitorId: string, account
       }));
 
       const commentsNeeded = Math.max(MIN_COMMENTS_THRESHOLD - existingComments, 50);
+      // See note above — no AbortSignal threaded into this path.
       const scrapeResult = await scrapeCommentsForPosts(postsForScraping, proxyCtx, commentsNeeded);
 
       const allScrapedComments = scrapeResult.results.flatMap(r => r.comments);
@@ -1300,7 +1472,7 @@ export async function enrichCompetitorWithComments(competitorId: string, account
   return { commentsGenerated: totalComments, status };
 }
 
-export async function getCompetitorDataCoverage(competitorId: string, accountId: string = "default") {
+export async function getCompetitorDataCoverage(competitorId: string, accountId: string) {
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
 
@@ -1364,7 +1536,7 @@ export async function getCompetitorDataCoverage(competitorId: string, accountId:
   };
 }
 
-export async function getStoredPostsForMIv3(competitorId: string, accountId: string = "default") {
+export async function getStoredPostsForMIv3(competitorId: string, accountId: string) {
   const posts = await db.select().from(ciCompetitorPosts)
     .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
     .orderBy(desc(ciCompetitorPosts.createdAt))
@@ -1377,14 +1549,14 @@ export async function getStoredPostsForMIv3(competitorId: string, accountId: str
     comments: p.comments || 0,
     views: p.views || undefined,
     mediaType: p.mediaType || "IMAGE",
-    hashtags: p.hashtags ? JSON.parse(p.hashtags) : [],
+    hashtags: p.hashtags ? (() => { try { return JSON.parse(p.hashtags!); } catch { return p.hashtags!.split(/[\s,]+/).filter(Boolean); } })() : [],
     timestamp: p.timestamp?.toISOString() || new Date().toISOString(),
     hasCTA: p.hasCTA || false,
     hasOffer: p.hasOffer || false,
   }));
 }
 
-export async function getStoredCommentsForMIv3(competitorId: string, accountId: string = "default") {
+export async function getStoredCommentsForMIv3(competitorId: string, accountId: string) {
   const comments = await db.select().from(ciCompetitorComments)
     .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)))
     .orderBy(desc(ciCompetitorComments.createdAt))
@@ -1397,6 +1569,71 @@ export async function getStoredCommentsForMIv3(competitorId: string, accountId: 
     timestamp: c.timestamp?.toISOString() || new Date().toISOString(),
     isSynthetic: c.isSynthetic ?? false,
     source: c.source ?? "scraped",
+  }));
+}
+
+export async function getStoredTikTokPostsForMIv3(competitorId: string, accountId: string) {
+  const posts = await db.select().from(ciCompetitorPosts)
+    .where(and(
+      eq(ciCompetitorPosts.competitorId, competitorId),
+      eq(ciCompetitorPosts.accountId, accountId),
+      eq(ciCompetitorPosts.platform, "tiktok"),
+    ))
+    .orderBy(desc(ciCompetitorPosts.createdAt))
+    .limit(50);
+
+  return posts.map(p => ({
+    id: p.id,
+    postId: p.postId,
+    caption: p.caption || "",
+    hookText: p.hookText || null,
+    hookSource: (p as any).hookSource || null,
+    transcript: (p as any).transcript || null,
+    likes: p.likes || 0,
+    comments: p.comments || 0,
+    views: p.views || 0,
+    shares: 0,
+    hashtags: p.hashtags || "",
+    timestamp: p.timestamp?.toISOString() || new Date().toISOString(),
+  }));
+}
+
+export async function getStoredTikTokCommentsForMIv3(competitorId: string, accountId: string) {
+  const comments = await db.select().from(ciCompetitorComments)
+    .where(and(
+      eq(ciCompetitorComments.competitorId, competitorId),
+      eq(ciCompetitorComments.accountId, accountId),
+      sql`${ciCompetitorComments.source} IN ('tiktok_scraped', 'tiktok_apify')`,
+    ))
+    .orderBy(desc(ciCompetitorComments.createdAt))
+    .limit(200);
+
+  return comments.map(c => ({
+    postId: c.postId,
+    commentId: c.commentId || c.id,
+    username: c.username || "anonymous",
+    text: c.commentText || "",
+    sentiment: c.sentiment ?? null,
+  }));
+}
+
+export async function getStoredReviewsForMIv3(competitorId: string, accountId: string) {
+  const reviews = await db.select().from(ciCompetitorReviews)
+    .where(and(
+      eq(ciCompetitorReviews.competitorId, competitorId),
+      eq(ciCompetitorReviews.accountId, accountId),
+    ))
+    .orderBy(desc(ciCompetitorReviews.createdAt))
+    .limit(100);
+
+  return reviews.map(r => ({
+    id: r.id,
+    reviewId: r.reviewId || r.id,
+    text: r.reviewText || "",
+    rating: r.rating ?? 0,
+    platform: r.platform || "google",
+    reviewDate: r.reviewDate?.toISOString() || null,
+    isSynthetic: r.isSynthetic ?? false,
   }));
 }
 
@@ -1593,7 +1830,7 @@ export async function cleanupExpiredSyntheticComments(): Promise<{ deleted: numb
   return { deleted, competitorsAffected, reEnriched, diagnostics };
 }
 
-export async function fetchAllCompetitors(accountId: string = "default", campaignId: string): Promise<FetchResult[]> {
+export async function fetchAllCompetitors(accountId: string, campaignId: string): Promise<FetchResult[]> {
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 

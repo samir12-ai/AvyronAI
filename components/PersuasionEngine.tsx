@@ -14,6 +14,7 @@ import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { useColorScheme } from 'react-native';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
 
 interface LayerResult {
   layerName: string;
@@ -173,6 +174,9 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
   const { selectedCampaignId } = useCampaign();
+  // Phase 8 defense-in-depth: this component is mounted by the customer-pivot
+  // "What convinces buyers" tab AND by the operator strategies branch.
+  const operator = useOperatorSurface();
   const [data, setData] = useState<PersuasionData | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -221,7 +225,12 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
 
   const runAnalysis = useCallback(async () => {
     if (!selectedCampaignId || !awarenessSnapshotId) {
-      Alert.alert('Missing Dependency', 'A completed Awareness Engine analysis is required before running the Persuasion Engine.');
+      Alert.alert(
+        operator.enabled ? 'Missing Dependency' : 'One more step first',
+        operator.enabled
+          ? 'A completed Awareness Engine analysis is required before running the Persuasion Engine.'
+          : 'Please finish the buyer-awareness step first — it sets up the inputs this analysis needs.'
+      );
       return;
     }
     setAnalyzing(true);
@@ -504,12 +513,57 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
             {route.objectionPriorities.length > 0 && (
               <View style={styles.routeSection}>
                 <Text style={[styles.routeSectionTitle, { color: colors.textMuted }]}>Objection Priorities</Text>
-                {route.objectionPriorities.map((obj, i) => (
-                  <View key={i} style={styles.listItem}>
-                    <Ionicons name="alert-circle" size={12} color="#F59E0B" />
-                    <Text style={[styles.listItemText, { color: colors.text }]}>{obj}</Text>
-                  </View>
-                ))}
+                {route.objectionPriorities.map((obj: any, i: number) => {
+                  // T005: structured form { tag:{category,awarenessStage}, objection:{canonical,frequency,evidence,confidence} }
+                  // Legacy strings still accepted.
+                  if (typeof obj === 'string') {
+                    return (
+                      <View key={i} style={styles.listItem}>
+                        <Ionicons name="alert-circle" size={12} color="#F59E0B" />
+                        <Text style={[styles.listItemText, { color: colors.text }]}>{obj}</Text>
+                      </View>
+                    );
+                  }
+                  const tag = obj?.tag || {};
+                  const objection = obj?.objection || {};
+                  const category = String(tag.category || 'objection');
+                  const stage = String(tag.awarenessStage || '');
+                  const canonical = String(objection.canonical || '');
+                  const frequency = typeof objection.frequency === 'number' ? objection.frequency : null;
+                  const confidence = typeof objection.confidence === 'number' ? objection.confidence : null;
+                  const evidence: string[] = Array.isArray(objection.evidence) ? objection.evidence : [];
+                  return (
+                    <View key={i} style={[styles.listItem, { flexDirection: 'column', alignItems: 'flex-start', gap: 4, marginBottom: 8 }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <View style={[styles.tag, { backgroundColor: '#F59E0B' + '20' }]}>
+                          <Text style={[styles.tagText, { color: '#92400E', fontSize: 9, fontWeight: '700' }]}>
+                            {category.toUpperCase()}{stage && stage !== 'unknown' ? ` · ${stage}` : ''}
+                          </Text>
+                        </View>
+                        {frequency != null && (
+                          <View style={[styles.tag, { backgroundColor: '#6366F1' + '15' }]}>
+                            <Text style={[styles.tagText, { color: '#6366F1', fontSize: 9 }]}>freq {frequency}</Text>
+                          </View>
+                        )}
+                        {confidence != null && (
+                          <View style={[styles.tag, { backgroundColor: '#10B981' + '15' }]}>
+                            <Text style={[styles.tagText, { color: '#10B981', fontSize: 9 }]}>conf {(confidence * 100).toFixed(0)}%</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.listItemText, { color: colors.text, marginLeft: 0 }]}>{canonical}</Text>
+                      {evidence.length > 0 && (
+                        <View style={{ marginLeft: 8, marginTop: 2 }}>
+                          {evidence.slice(0, 2).map((e, ei) => (
+                            <Text key={ei} style={{ fontSize: 10, color: colors.textMuted, fontStyle: 'italic' }} numberOfLines={2}>
+                              "{e}"
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             )}
 
@@ -652,10 +706,12 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
       <LinearGradient colors={['#EC4899', '#F472B6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.headerGradient}>
         <View style={styles.headerRow}>
           <Ionicons name="megaphone" size={20} color="#fff" />
-          <Text style={styles.headerTitle}>Persuasion Engine V3</Text>
+          <Text style={styles.headerTitle}>{operator.enabled ? 'Persuasion Engine V3' : 'What convinces buyers'}</Text>
         </View>
         <Text style={styles.headerSubtitle}>
-          8-layer persuasion logic architecture — influence drivers, objection mapping, and trust sequencing
+          {operator.enabled
+            ? '8-layer persuasion logic architecture — influence drivers, objection mapping, and trust sequencing'
+            : 'The reasons buyers say yes — what to lean on, what objections to handle, and how to build trust.'}
         </Text>
       </LinearGradient>
 
@@ -663,7 +719,9 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
         <View style={[styles.dependencyWarning, { backgroundColor: '#F59E0B' + '15' }]}>
           <Ionicons name="alert-circle" size={16} color="#F59E0B" />
           <Text style={[styles.dependencyText, { color: '#F59E0B' }]}>
-            Run Awareness Engine first to enable Persuasion analysis
+            {operator.enabled
+              ? 'Run Awareness Engine first to enable Persuasion analysis'
+              : 'Finish the buyer-awareness step first to unlock this analysis'}
           </Text>
         </View>
       )}
@@ -761,9 +819,13 @@ export default function PersuasionEngine({ isActive }: { isActive?: boolean }) {
       {!hasData && !loading && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
           <Ionicons name="megaphone-outline" size={48} color={colors.textMuted} />
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No Persuasion Analysis Yet</Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            {operator.enabled ? 'No Persuasion Analysis Yet' : 'No persuasion analysis yet'}
+          </Text>
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Run the Awareness Engine first, then analyze persuasion logic to generate influence architecture.
+            {operator.enabled
+              ? 'Run the Awareness Engine first, then analyze persuasion logic to generate influence architecture.'
+              : 'Finish the buyer-awareness step first, then analyze what actually convinces your buyers to act.'}
           </Text>
         </View>
       )}

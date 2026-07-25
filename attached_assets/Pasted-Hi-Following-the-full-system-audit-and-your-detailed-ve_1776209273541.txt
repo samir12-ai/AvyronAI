@@ -1,0 +1,159 @@
+Hi,
+
+Following the full system audit and your detailed verification report, we now need to move forward with a strict enforcement phase.
+
+This is not exploratory — this is to ensure the system does not repeat the same structural issues we’ve identified.
+
+---
+
+## Core Issue (Confirmed)
+
+From the audit and your code-level report, the main issue is not missing layers, but:
+
+> Signal identity is not consistently preserved across the system
+
+This leads to:
+
+- Inferred signals being treated as real
+- Competitor-derived insights propagating as if they were native signals
+- Loss of provenance when signals move across engines
+- Mixed-signal outputs reaching decision layers (Budget, Plan, etc.)
+
+---
+
+## Required Direction
+
+We need to enforce strict signal integrity and isolation across the entire system.
+
+This must be:
+
+- System-wide (all users, all accounts, all future data)
+- Not limited to the current account or dataset
+- Applied across every engine and every propagation path
+
+---
+
+## 1. Signal Identity Enforcement (Mandatory)
+
+Every signal must carry a persistent identity across all stages:
+
+- Origin type (at minimum distinguish between):
+  - real (observed user data)
+  - competitor (external/benchmark)
+  - inferred (AI-derived)
+  - fallback/degraded
+
+This identity must:
+
+- Survive through:
+  - signal extraction
+  - signal-engine
+  - positioning / persuasion / awareness
+  - plan synthesis
+  - execution decisions
+
+- Never be dropped or replaced during transformations
+
+---
+
+## 2. Propagation Isolation (Critical)
+
+We must eliminate any possibility of signal leakage between layers.
+
+Specifically:
+
+- A signal’s origin must not be:
+  - lost
+  - merged implicitly
+  - reinterpreted as another type
+
+- No transformation step should:
+  - convert inferred → real
+  - convert competitor → native
+  - collapse multiple signal types into a single undifferentiated output
+
+If any such propagation currently happens, it must be identified and blocked.
+
+---
+
+## 3. Enforcement at Engine Boundaries
+
+Each engine must enforce input constraints:
+
+- Reject or downgrade signals that:
+  - lack valid provenance
+  - originate from inferred/fallback sources without sufficient grounding
+
+- Ensure that:
+  - downstream engines cannot operate on unverified or mixed signals without explicit tagging
+
+---
+
+## 4. Validation Tightening
+
+Current behavior allows:
+
+- Unmapped signals to pass based on ratio thresholds
+
+This is no longer acceptable for critical paths.
+
+We need:
+
+- Explicit handling of unmapped signals at every stage
+- Clear separation between:
+  - validated outputs
+  - provisional / hypothesis outputs
+
+These must not be treated equivalently downstream.
+
+---
+
+## 5. System-Wide Scope (Important)
+
+This must NOT be implemented as:
+
+- A patch for the current campaign
+- Or a localized fix in one engine
+
+Instead:
+
+- It must apply globally across:
+  - all engines
+  - all users
+  - all future campaigns
+  - all signal flows
+
+---
+
+## 6. What We Need From You
+
+Before implementation, we need you to:
+
+1. Confirm where in the current code:
+   - signal identity is lost or not preserved
+   - propagation merges or drops provenance
+
+2. Identify:
+   - all transformation points where signal type is not carried forward
+
+3. Clarify:
+   - which engines currently operate without strict signal-type awareness
+
+4. Outline:
+   - how enforcement can be applied without breaking existing pipelines
+
+---
+
+## Important Constraints
+
+- Do NOT apply partial fixes
+- Do NOT isolate to a single engine
+- Do NOT assume current tagging is sufficient
+
+We need a consistent, enforced model across the entire system
+
+---
+
+Once we have your code-level mapping of these gaps, we’ll proceed with implementation.
+
+Thanks

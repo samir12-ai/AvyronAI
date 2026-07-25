@@ -16,6 +16,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
+import {
+  colorForExecutionStatus,
+  labelForExecutionStatus,
+  isCanonicalExecutionStatus,
+} from '@/lib/verdict-colors';
 import PlanDocumentView from '@/components/PlanDocumentView';
 import EngineTableModal from '@/components/EngineTableModal';
 
@@ -53,6 +58,15 @@ const P = {
 interface EngineSection {
   id: string;
   name: string;
+  /**
+   * Canonical F1 execution status (Seal #6 / D2). Authoritative when present.
+   * One of: COMPLETED | PARTIAL | BLOCKED | BLOCKED_BY_INTEGRITY | NEEDS_INPUT | ERROR | PENDING.
+   */
+  executionStatus?: string | null;
+  /**
+   * @deprecated Legacy free-form status (D4). Kept as a fall-through for
+   * pre-canonical snapshots. Legacy SUCCESS is rendered amber, never green.
+   */
   status: string;
   summary?: string | null;
 }
@@ -67,6 +81,91 @@ interface OrchestratorJob {
   createdAt?: string;
   completedAt?: string;
   error?: string;
+}
+
+interface CommercialJudgement {
+  recommendedExecutionMode?: string;
+  commercialReadinessAssessment?: string;
+  biggestRisk?: string;
+  conditionsToUpgrade?: string[];
+  principalCall?: string;
+  whatHumanReviewerWouldAsk?: string[];
+  reasoningSteps?: string[];
+  judgeVerdict?: string;
+  judgeReason?: string;
+}
+
+interface BlockReason {
+  code?: string;
+  description?: string;
+  source?: string;
+  severity?: 'critical' | 'high';
+  message?: string;
+}
+
+interface RecoveryIssue {
+  blockCode?: string;
+  rootCauseCategory?: string;
+  ownerEngine?: string;
+  diagnosis?: string;
+  repairAction?: string;
+  successCriteria?: string;
+  requiredProof?: string[];
+  nextPossibleMode?: string;
+  priority?: number;
+  severity?: 'critical' | 'high';
+  source?: string;
+}
+
+interface CausalDiagnosisStep {
+  cause?: string;
+  symptom?: string;
+  downstreamEffect?: string;
+  repair?: string;
+  evidenceCitations?: string[];
+}
+
+interface RecoveryIntelligence {
+  commercialDisease?: string;
+  diseaseStatement?: string;
+  causalDiagnosis?: CausalDiagnosisStep[];
+  strategicRecoveryThesis?: string;
+  priorityLogic?: string;
+  highestLeverageFix?: string;
+  buyerPsychologyConstraint?: string;
+  nextModeRationale?: string;
+  judgeVerdict?: string;
+  retryCount?: number;
+  modelUsed?: string;
+  generatedAt?: string;
+  upstreamSignalsUsed?: string[];
+}
+
+interface RecoveryPlan {
+  currentVerdict?: string;
+  currentExecutionMode?: string;
+  blockCodes?: string[];
+  rootCauseSummary?: string;
+  issues?: RecoveryIssue[];
+  priorityOrder?: string[];
+  globalRecoveryPlan?: string[];
+  rerunRequirements?: string[];
+  humanReviewNeeded?: boolean;
+  generatedAt?: string;
+  source?: string;
+  intelligence?: RecoveryIntelligence | null;
+}
+
+interface ControlVerdict {
+  hasVerdict: boolean;
+  verdict?: {
+    verdict?: string;
+    executionMode?: string;
+    blockReasons?: BlockReason[];
+    commercialJudgement?: CommercialJudgement | null;
+    recoveryPlan?: RecoveryPlan | null;
+    createdAt?: string;
+  };
 }
 
 interface ActivePlan {
@@ -107,9 +206,12 @@ const ENGINE_ORDER = [
 ];
 
 function EngineRow({
-  id, name, status, index, isRunning, runningIdx, isDark, summary,
+  id, name, status, executionStatus, index, isRunning, runningIdx, isDark, summary,
 }: {
-  id: string; name: string; status: string; index: number;
+  id: string; name: string; status: string;
+  /** Canonical F1 execution status (Seal #6). Drives color/icon when present. */
+  executionStatus?: string | null;
+  index: number;
   isRunning: boolean; runningIdx: number; isDark: boolean; summary?: string | null;
 }) {
   const meta = ENGINE_META[id] || { icon: 'cube-outline' as any, color: P.blue, shortName: name };
@@ -140,6 +242,12 @@ function EngineRow({
   let statusLabel = 'Pending';
   let statusIcon: keyof typeof Ionicons.glyphMap = 'ellipse-outline';
 
+  // Seal #6 / Task #24: route every "done" pixel through the canonical helper.
+  // Legacy SUCCESS without canonical executionStatus → amber 'Done*' (never
+  // green). Pipeline-specific tags (DEPTH_FAILED / DEPTH_CASCADE_BLOCKED /
+  // SIGNAL_INSUFFICIENT) keep their amber/coral semantics — they are NOT
+  // legacy-success aliases.
+  const isCanonical = isCanonicalExecutionStatus(executionStatus);
   if (isCurrentlyRunning) {
     statusColor = P.blue;
     statusLabel = 'Running';
@@ -148,15 +256,11 @@ function EngineRow({
     statusColor = textMuted;
     statusLabel = 'Queued';
     statusIcon = 'time-outline';
-  } else if (status === 'SUCCESS') {
-    statusColor = P.green;
-    statusLabel = 'Done';
-    statusIcon = 'checkmark-circle';
-  } else if (status === 'FAILED' || status === 'DEPTH_FAILED') {
+  } else if (status === 'DEPTH_FAILED') {
     statusColor = P.coral;
     statusLabel = 'Failed';
     statusIcon = 'close-circle';
-  } else if (status === 'BLOCKED' || status === 'DEPTH_CASCADE_BLOCKED') {
+  } else if (status === 'DEPTH_CASCADE_BLOCKED') {
     statusColor = P.amber;
     statusLabel = 'Blocked';
     statusIcon = 'alert-circle-outline';
@@ -164,13 +268,34 @@ function EngineRow({
     statusColor = P.amber;
     statusLabel = 'Low Signal';
     statusIcon = 'warning-outline';
-  } else if (status) {
-    statusColor = P.teal;
-    statusLabel = 'Complete';
-    statusIcon = 'checkmark-done-circle-outline';
+  } else if (executionStatus || status) {
+    statusColor = colorForExecutionStatus(executionStatus, status);
+    const baseLabel = labelForExecutionStatus(executionStatus, status);
+    // Map enum → user-friendly verb
+    if (isCanonical && executionStatus === 'COMPLETED') {
+      statusLabel = 'Done';
+      statusIcon = 'checkmark-circle';
+    } else if (baseLabel === 'PARTIAL') {
+      statusLabel = isCanonical ? 'Partial' : 'Done*';
+      statusIcon = 'warning-outline';
+    } else if (baseLabel === 'BLOCKED' || baseLabel === 'BLOCKED_BY_INTEGRITY') {
+      statusLabel = 'Blocked';
+      statusIcon = 'remove-circle';
+    } else if (baseLabel === 'ERROR' || baseLabel === 'FAILED' || baseLabel === 'FAILURE') {
+      statusLabel = 'Failed';
+      statusIcon = 'close-circle';
+    } else if (baseLabel === 'PENDING' || baseLabel === 'NEEDS_INPUT') {
+      statusLabel = baseLabel === 'PENDING' ? 'Queued' : 'Needs Input';
+      statusIcon = 'time-outline';
+    } else {
+      statusLabel = baseLabel;
+      statusIcon = 'ellipse-outline';
+    }
   }
 
-  const terminalSuccess = ['SUCCESS', 'COMPLETED', 'COMPLETE'].includes(status.toUpperCase());
+  // "Terminal success" (gates summary visibility) requires CANONICAL COMPLETED.
+  // Legacy SUCCESS no longer earns a summary preview — D4 enforcement.
+  const terminalSuccess = isCanonical && executionStatus === 'COMPLETED';
   const showSummary = !isRunning && !isPending && !!summary && terminalSuccess;
 
   return (
@@ -234,6 +359,8 @@ export default function OrchestratorPanel() {
 
   const [job, setJob] = useState<OrchestratorJob | null>(null);
   const [activePlan, setActivePlan] = useState<ActivePlan | null>(null);
+  const [controlVerdict, setControlVerdict] = useState<ControlVerdict | null>(null);
+  const [showJudgement, setShowJudgement] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState(0);
@@ -286,18 +413,29 @@ export default function OrchestratorPanel() {
   const fetchActivePlan = useCallback(async () => {
     if (!selectedCampaignId) return;
     try {
-      const url = getApiUrl(`/api/plans/active/${encodeURIComponent(selectedCampaignId)}`);
-      const res = await authFetch(url);
+      const u = new URL(getApiUrl(`/api/plans/active/${encodeURIComponent(selectedCampaignId)}`));
+      const res = await authFetch(u.toString());
       if (!res.ok) return;
       const data: ActivePlan = await res.json();
       setActivePlan(data);
     } catch {}
   }, [selectedCampaignId]);
 
+  const fetchControlVerdict = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    try {
+      const url = getApiUrl(`/api/system-control/latest/${encodeURIComponent(selectedCampaignId)}`);
+      const res = await authFetch(url);
+      if (!res.ok) return;
+      const data: ControlVerdict = await res.json();
+      setControlVerdict(data);
+    } catch {}
+  }, [selectedCampaignId]);
+
   useEffect(() => {
     if (!selectedCampaignId) { setLoading(false); return; }
     setLoading(true);
-    Promise.all([fetchLatest(), fetchActivePlan()]).finally(() => setLoading(false));
+    Promise.all([fetchLatest(), fetchActivePlan(), fetchControlVerdict()]).finally(() => setLoading(false));
   }, [selectedCampaignId]);
 
   useEffect(() => {
@@ -305,12 +443,13 @@ export default function OrchestratorPanel() {
       pollRef.current = setInterval(async () => {
         await fetchLatest();
         await fetchActivePlan();
+        await fetchControlVerdict();
       }, 3000);
     } else {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [running, fetchLatest, fetchActivePlan]);
+  }, [running, fetchLatest, fetchActivePlan, fetchControlVerdict]);
 
   const handleRunPipeline = useCallback(async () => {
     if (!selectedCampaignId || running) return;
@@ -334,8 +473,20 @@ export default function OrchestratorPanel() {
   const sectionMap: Record<string, EngineSection> = {};
   for (const s2 of sections) sectionMap[s2.id] = s2;
 
-  const completedCount = sections.filter(s2 => s2.status === 'SUCCESS').length;
-  const failedCount = sections.filter(s2 => s2.status !== 'SUCCESS').length;
+  // Seal #6 / D4: only canonical COMPLETED earns "completed". Legacy SUCCESS
+  // is no longer counted — a pre-canonical snapshot cannot inflate the
+  // pass-rate. Failed = anything that's NOT canonical-COMPLETED AND has SOME
+  // status emitted (so unstarted PENDING rows aren't counted as failed).
+  const completedCount = sections.filter(
+    s2 => isCanonicalExecutionStatus(s2.executionStatus) && s2.executionStatus === 'COMPLETED',
+  ).length;
+  const failedCount = sections.filter(s2 => {
+    const canonical = isCanonicalExecutionStatus(s2.executionStatus);
+    if (canonical && s2.executionStatus === 'COMPLETED') return false;
+    if (canonical && s2.executionStatus === 'PENDING') return false;
+    if (!canonical && (!s2.status || s2.status === 'PENDING')) return false;
+    return true;
+  }).length;
 
   const runningIdx = running
     ? Math.min(
@@ -393,7 +544,13 @@ export default function OrchestratorPanel() {
               <Text style={[s.statusBadgeText, { color: P.green }]}>Complete</Text>
             </View>
           )}
-          {!running && job?.status === 'FAILED' && (
+          {!running && job?.status === 'BLOCKED' && (
+            <View style={[s.statusBadge, { backgroundColor: P.amber + '20', borderColor: P.amber + '40' }]}>
+              <Ionicons name="alert-circle" size={12} color={P.amber} />
+              <Text style={[s.statusBadgeText, { color: P.amber }]}>Blocked</Text>
+            </View>
+          )}
+          {!running && (job?.status === 'FAILED' || job?.status === 'ERROR') && (
             <View style={[s.statusBadge, { backgroundColor: P.coral + '20', borderColor: P.coral + '40' }]}>
               <Ionicons name="close-circle" size={12} color={P.coral} />
               <Text style={[s.statusBadgeText, { color: P.coral }]}>Failed</Text>
@@ -458,15 +615,614 @@ export default function OrchestratorPanel() {
         </Pressable>
       </LinearGradient>
 
+      {!running && job?.status === 'BLOCKED' && (() => {
+        const v = controlVerdict?.verdict;
+        const cj = v?.commercialJudgement || null;
+        const blockReasons = (v?.blockReasons || []).filter(b => b && (b.description || b.message || b.code));
+        const amberBg = isDark ? '#1A1400' : '#FFFBEB';
+        const amberBgSoft = isDark ? '#2A1F00' : '#FEF3C7';
+        const amberBorder = P.amber + '40';
+        const principalBg = isDark ? '#1F1500' : '#FFF7E0';
+        return (
+          <View style={[s.planCard, { backgroundColor: amberBg, borderColor: amberBorder, paddingVertical: 14 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+              <View style={[s.planIconWrap, { backgroundColor: P.amber + '20' }]}>
+                <Ionicons name="warning-outline" size={18} color={P.amber} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.planCardTitle, { color: P.amber }]}>Pipeline Blocked</Text>
+                {!cj && (
+                  <Text style={[{ fontSize: 12, lineHeight: 18, marginTop: 4, color: textSec }]} numberOfLines={4}>
+                    {job.error || 'Pipeline was blocked — check engine results for details'}
+                  </Text>
+                )}
+                {sections.length > 0 && (
+                  <Text style={[{ fontSize: 11, marginTop: 4, color: textMuted }]}>
+                    {completedCount} of 15 engines completed before block
+                    {v?.executionMode ? ` · mode: ${v.executionMode}` : ''}
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {blockReasons.length > 0 && (
+              <View style={{ marginTop: 12, gap: 6 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: P.amber, letterSpacing: 0.4 }}>
+                  BLOCK REASONS · {blockReasons.length}
+                </Text>
+                {blockReasons.slice(0, 6).map((b, i) => {
+                  const text = b.description || b.message;
+                  const sevColor = b.severity === 'critical' ? P.coral : P.amber;
+                  return (
+                    <View key={i} style={{
+                      flexDirection: 'row', gap: 8, alignItems: 'flex-start',
+                      backgroundColor: amberBgSoft, borderRadius: 8, padding: 8,
+                      borderLeftWidth: 3, borderLeftColor: sevColor,
+                    }}>
+                      <Ionicons name="alert-circle" size={13} color={sevColor} style={{ marginTop: 1 }} />
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {b.code && (
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: sevColor, letterSpacing: 0.3 }}>
+                              {b.code}
+                            </Text>
+                          )}
+                          {b.severity && (
+                            <Text style={{
+                              fontSize: 9, fontWeight: '700', color: sevColor,
+                              backgroundColor: sevColor + '20',
+                              paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
+                              letterSpacing: 0.4, textTransform: 'uppercase',
+                            }}>
+                              {b.severity}
+                            </Text>
+                          )}
+                          {b.source && (
+                            <Text style={{ fontSize: 10, color: textMuted }}>· {b.source}</Text>
+                          )}
+                        </View>
+                        {text && (
+                          <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary, marginTop: 2 }}>
+                            {text}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+                {blockReasons.length > 6 && (
+                  <Text style={{ fontSize: 11, color: textMuted, fontStyle: 'italic' }}>
+                    +{blockReasons.length - 6} more
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {cj?.principalCall && (
+              <View style={{
+                marginTop: 14,
+                backgroundColor: principalBg,
+                borderRadius: 10, padding: 12,
+                borderWidth: 1, borderColor: P.amber + '50',
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                  <Ionicons name="person-circle-outline" size={15} color={P.amber} />
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: P.amber, letterSpacing: 0.5 }}>
+                    PRINCIPAL CALL · CMO DIRECTIVE
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 13, lineHeight: 19, color: textPrimary, fontWeight: '500' }}>
+                  {cj.principalCall}
+                </Text>
+              </View>
+            )}
+
+            {cj?.commercialReadinessAssessment && (
+              <View style={{ marginTop: 12 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: textSec, letterSpacing: 0.4, marginBottom: 4 }}>
+                  COMMERCIAL READINESS
+                </Text>
+                <Text style={{ fontSize: 12, lineHeight: 18, color: textPrimary }}>
+                  {cj.commercialReadinessAssessment}
+                </Text>
+              </View>
+            )}
+
+            {cj?.biggestRisk && (
+              <View style={{
+                marginTop: 12,
+                flexDirection: 'row', gap: 8, alignItems: 'flex-start',
+                backgroundColor: isDark ? '#1F0A0A' : '#FEF2F2',
+                borderRadius: 8, padding: 10,
+                borderLeftWidth: 3, borderLeftColor: P.coral,
+              }}>
+                <Ionicons name="flame-outline" size={14} color={P.coral} style={{ marginTop: 1 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: P.coral, letterSpacing: 0.4, marginBottom: 2 }}>
+                    BIGGEST RISK
+                  </Text>
+                  <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary }}>
+                    {cj.biggestRisk}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {Array.isArray(cj?.conditionsToUpgrade) && cj.conditionsToUpgrade.length > 0 && (
+              <View style={{ marginTop: 12 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: P.green, letterSpacing: 0.4, marginBottom: 6 }}>
+                  CONDITIONS TO UPGRADE · {cj.conditionsToUpgrade.length}
+                </Text>
+                {cj.conditionsToUpgrade.map((c, i) => (
+                  <View key={i} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                    <Ionicons name="square-outline" size={13} color={P.green} style={{ marginTop: 2 }} />
+                    <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: textPrimary }}>{c}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {(Array.isArray(cj?.whatHumanReviewerWouldAsk) && cj.whatHumanReviewerWouldAsk.length > 0
+              || Array.isArray(cj?.reasoningSteps) && cj.reasoningSteps.length > 0) && (
+              <Pressable
+                onPress={() => setShowJudgement(v => !v)}
+                style={{
+                  marginTop: 12,
+                  flexDirection: 'row', alignItems: 'center', gap: 6,
+                  paddingVertical: 8, paddingHorizontal: 10,
+                  borderRadius: 8,
+                  backgroundColor: isDark ? '#0F1419' : '#F4F7F5',
+                  borderWidth: 1, borderColor: cardBorder,
+                  alignSelf: 'flex-start',
+                }}
+              >
+                <Ionicons
+                  name={showJudgement ? 'chevron-up' : 'chevron-down'}
+                  size={13}
+                  color={textSec}
+                />
+                <Text style={{ fontSize: 11, fontWeight: '600', color: textSec }}>
+                  {showJudgement ? 'Hide reviewer detail' : 'Show reviewer detail'}
+                </Text>
+              </Pressable>
+            )}
+
+            {showJudgement && Array.isArray(cj?.whatHumanReviewerWouldAsk) && cj.whatHumanReviewerWouldAsk.length > 0 && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: textSec, letterSpacing: 0.4, marginBottom: 6 }}>
+                  WHAT A HUMAN REVIEWER WOULD ASK
+                </Text>
+                {cj.whatHumanReviewerWouldAsk.map((q, i) => (
+                  <View key={i} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                    <Ionicons name="help-circle-outline" size={13} color={P.blue} style={{ marginTop: 2 }} />
+                    <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: textPrimary }}>{q}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {showJudgement && Array.isArray(cj?.reasoningSteps) && cj.reasoningSteps.length > 0 && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: textSec, letterSpacing: 0.4, marginBottom: 6 }}>
+                  REASONING TRACE · {cj.reasoningSteps.length} STEPS
+                </Text>
+                {cj.reasoningSteps.map((step, i) => (
+                  <View key={i} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: textMuted, minWidth: 18, fontVariant: ['tabular-nums'] }}>
+                      {i + 1}.
+                    </Text>
+                    <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: textSec }}>{step}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {(() => {
+              const rp = v?.recoveryPlan || null;
+              if (!rp || !Array.isArray(rp.issues) || rp.issues.length === 0) return null;
+              const issues = rp.issues;
+              const recoveryBg = isDark ? '#0F1A14' : '#F0FDF4';
+              const issueBg = isDark ? '#0A1F14' : '#ECFDF5';
+              const proofBg = isDark ? '#0F1419' : '#F4F7F5';
+              return (
+                <View style={{
+                  marginTop: 16,
+                  backgroundColor: recoveryBg,
+                  borderRadius: 10,
+                  padding: 12,
+                  borderWidth: 1,
+                  borderColor: P.green + '40',
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name="medkit-outline" size={15} color={P.green} />
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: P.green, letterSpacing: 0.5 }}>
+                      RECOVERY PLAN · {issues.length} ISSUE{issues.length === 1 ? '' : 'S'} · {(rp.source || 'deterministic').toUpperCase()}
+                    </Text>
+                    {rp.humanReviewNeeded && (
+                      <Text style={{
+                        fontSize: 9, fontWeight: '700', color: P.amber,
+                        backgroundColor: P.amber + '20',
+                        paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
+                        letterSpacing: 0.4, textTransform: 'uppercase',
+                      }}>
+                        Human review
+                      </Text>
+                    )}
+                  </View>
+
+                  {rp.rootCauseSummary && (
+                    <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary, marginBottom: 10 }}>
+                      {rp.rootCauseSummary}
+                    </Text>
+                  )}
+
+                  {(() => {
+                    const intel = rp.intelligence || null;
+                    if (!intel || !intel.diseaseStatement) return null;
+                    const intelBg = isDark ? '#16121F' : '#F5F3FF';
+                    const intelBorder = isDark ? '#3D2A60' : '#C4B5FD';
+                    const intelAccent = '#8B5CF6';
+                    const stepBg = isDark ? '#1A1525' : '#FAF5FF';
+                    return (
+                      <View style={{
+                        marginBottom: 12,
+                        backgroundColor: intelBg,
+                        borderRadius: 10,
+                        padding: 12,
+                        borderWidth: 1,
+                        borderColor: intelBorder,
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                          <Ionicons name="bulb-outline" size={15} color={intelAccent} />
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: intelAccent, letterSpacing: 0.5 }}>
+                            RECOVERY INTELLIGENCE · STRATEGIST OVERLAY
+                          </Text>
+                          {intel.commercialDisease && (
+                            <Text style={{
+                              fontSize: 9, fontWeight: '700', color: intelAccent,
+                              backgroundColor: intelAccent + '22',
+                              paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4,
+                              letterSpacing: 0.4, textTransform: 'uppercase',
+                            }}>
+                              {intel.commercialDisease.replace(/_/g, ' ')}
+                            </Text>
+                          )}
+                          {intel.judgeVerdict && (
+                            <Text style={{
+                              fontSize: 9, fontWeight: '600',
+                              color: intel.judgeVerdict === 'ACCEPTED' ? P.green : textMuted,
+                              letterSpacing: 0.3,
+                            }}>
+                              judge:{intel.judgeVerdict}{intel.retryCount ? `·r${intel.retryCount}` : ''}
+                            </Text>
+                          )}
+                        </View>
+
+                        <View style={{ marginBottom: 10 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                            COMMERCIAL DISEASE
+                          </Text>
+                          <Text style={{ fontSize: 13, lineHeight: 18, color: textPrimary, fontWeight: '600' }}>
+                            {intel.diseaseStatement}
+                          </Text>
+                        </View>
+
+                        {intel.strategicRecoveryThesis && (
+                          <View style={{ marginBottom: 10 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              STRATEGIC RECOVERY THESIS
+                            </Text>
+                            <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary }}>
+                              {intel.strategicRecoveryThesis}
+                            </Text>
+                          </View>
+                        )}
+
+                        {Array.isArray(intel.causalDiagnosis) && intel.causalDiagnosis.length > 0 && (
+                          <View style={{ marginBottom: 10 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 6 }}>
+                              CAUSAL CHAIN · {intel.causalDiagnosis.length} STEP{intel.causalDiagnosis.length === 1 ? '' : 'S'}
+                            </Text>
+                            {intel.causalDiagnosis.map((step, si) => (
+                              <View key={si} style={{
+                                backgroundColor: stepBg,
+                                borderRadius: 7,
+                                padding: 9,
+                                marginBottom: 6,
+                                borderLeftWidth: 2,
+                                borderLeftColor: intelAccent,
+                              }}>
+                                {step.cause && (
+                                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: intelAccent, minWidth: 50 }}>CAUSE</Text>
+                                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textPrimary }}>{step.cause}</Text>
+                                  </View>
+                                )}
+                                {step.symptom && (
+                                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: P.amber, minWidth: 50 }}>SYMPTOM</Text>
+                                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textSec }}>{step.symptom}</Text>
+                                  </View>
+                                )}
+                                {step.downstreamEffect && (
+                                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: P.coral, minWidth: 50 }}>EFFECT</Text>
+                                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textSec }}>{step.downstreamEffect}</Text>
+                                  </View>
+                                )}
+                                {step.repair && (
+                                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 3 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: '700', color: P.green, minWidth: 50 }}>REPAIR</Text>
+                                    <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textPrimary }}>{step.repair}</Text>
+                                  </View>
+                                )}
+                                {Array.isArray(step.evidenceCitations) && step.evidenceCitations.length > 0 && (
+                                  <Text style={{ fontSize: 9, color: textMuted, marginTop: 2, fontFamily: 'monospace' as any }}>
+                                    {step.evidenceCitations.join(' · ')}
+                                  </Text>
+                                )}
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
+                        {intel.highestLeverageFix && (
+                          <View style={{ marginBottom: 10, backgroundColor: P.green + '15', borderRadius: 7, padding: 9, borderLeftWidth: 3, borderLeftColor: P.green }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: P.green, letterSpacing: 0.4, marginBottom: 3 }}>
+                              HIGHEST-LEVERAGE FIX
+                            </Text>
+                            <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary, fontWeight: '500' }}>
+                              {intel.highestLeverageFix}
+                            </Text>
+                          </View>
+                        )}
+
+                        {intel.buyerPsychologyConstraint && (
+                          <View style={{ marginBottom: 8 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              BUYER PSYCHOLOGY CONSTRAINT
+                            </Text>
+                            <Text style={{ fontSize: 11, lineHeight: 16, color: textSec }}>
+                              {intel.buyerPsychologyConstraint}
+                            </Text>
+                          </View>
+                        )}
+
+                        {intel.priorityLogic && (
+                          <View style={{ marginBottom: 8 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              PRIORITY LOGIC
+                            </Text>
+                            <Text style={{ fontSize: 11, lineHeight: 16, color: textSec }}>
+                              {intel.priorityLogic}
+                            </Text>
+                          </View>
+                        )}
+
+                        {intel.nextModeRationale && (
+                          <View>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              NEXT-MODE RATIONALE
+                            </Text>
+                            <Text style={{ fontSize: 11, lineHeight: 16, color: textSec }}>
+                              {intel.nextModeRationale}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
+
+                  {issues.map((iss, idx) => {
+                    const sevColor = iss.severity === 'critical' ? P.coral : P.amber;
+                    return (
+                      <View key={idx} style={{
+                        backgroundColor: issueBg,
+                        borderRadius: 8,
+                        padding: 10,
+                        marginBottom: 8,
+                        borderLeftWidth: 3,
+                        borderLeftColor: sevColor,
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                          <Text style={{
+                            fontSize: 10, fontWeight: '700', color: textPrimary,
+                            backgroundColor: isDark ? '#1A2A20' : '#D1FAE5',
+                            paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4,
+                            fontVariant: ['tabular-nums'],
+                          }}>
+                            #{iss.priority || idx + 1}
+                          </Text>
+                          {iss.ownerEngine && (
+                            <Text style={{
+                              fontSize: 10, fontWeight: '700', color: P.blue,
+                              backgroundColor: P.blue + '20',
+                              paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4,
+                              letterSpacing: 0.3,
+                            }}>
+                              {iss.ownerEngine}
+                            </Text>
+                          )}
+                          {iss.rootCauseCategory && (
+                            <Text style={{
+                              fontSize: 9, fontWeight: '600', color: textSec,
+                              backgroundColor: isDark ? '#1A1F26' : '#E5E7EB',
+                              paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4,
+                              letterSpacing: 0.3, textTransform: 'uppercase',
+                            }}>
+                              {iss.rootCauseCategory.replace(/_/g, ' ')}
+                            </Text>
+                          )}
+                          {iss.blockCode && (
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: sevColor, letterSpacing: 0.3 }}>
+                              {iss.blockCode}
+                            </Text>
+                          )}
+                        </View>
+
+                        {iss.diagnosis && (
+                          <View style={{ marginBottom: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 2 }}>
+                              DIAGNOSIS
+                            </Text>
+                            <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary }}>
+                              {iss.diagnosis}
+                            </Text>
+                          </View>
+                        )}
+
+                        {iss.repairAction && (
+                          <View style={{ marginBottom: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: P.green, letterSpacing: 0.4, marginBottom: 2 }}>
+                              REPAIR ACTION
+                            </Text>
+                            <Text style={{ fontSize: 12, lineHeight: 17, color: textPrimary }}>
+                              {iss.repairAction}
+                            </Text>
+                          </View>
+                        )}
+
+                        {iss.successCriteria && (
+                          <View style={{ marginBottom: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 2 }}>
+                              SUCCESS CRITERIA
+                            </Text>
+                            <Text style={{ fontSize: 11, lineHeight: 16, color: textSec }}>
+                              {iss.successCriteria}
+                            </Text>
+                          </View>
+                        )}
+
+                        {Array.isArray(iss.requiredProof) && iss.requiredProof.length > 0 && (
+                          <View style={{ marginTop: 4, marginBottom: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: textMuted, letterSpacing: 0.4, marginBottom: 3 }}>
+                              REQUIRED PROOF
+                            </Text>
+                            {iss.requiredProof.map((p, pi) => (
+                              <View key={pi} style={{ flexDirection: 'row', gap: 6, alignItems: 'flex-start', marginBottom: 2 }}>
+                                <Ionicons name="document-text-outline" size={11} color={textMuted} style={{ marginTop: 2 }} />
+                                <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: textSec }}>{p}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
+                        {iss.nextPossibleMode && (
+                          <View style={{
+                            marginTop: 4,
+                            alignSelf: 'flex-start',
+                            backgroundColor: P.green + '20',
+                            paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5,
+                            flexDirection: 'row', alignItems: 'center', gap: 4,
+                          }}>
+                            <Ionicons name="arrow-forward-circle-outline" size={11} color={P.green} />
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: P.green, letterSpacing: 0.3 }}>
+                              NEXT MODE: {iss.nextPossibleMode}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  {Array.isArray(rp.globalRecoveryPlan) && rp.globalRecoveryPlan.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: P.green, letterSpacing: 0.4, marginBottom: 6 }}>
+                        GLOBAL RECOVERY SEQUENCE
+                      </Text>
+                      {rp.globalRecoveryPlan.map((step, i) => (
+                        <View key={i} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: P.green, minWidth: 18, fontVariant: ['tabular-nums'] }}>
+                            {i + 1}.
+                          </Text>
+                          <Text style={{ flex: 1, fontSize: 12, lineHeight: 17, color: textPrimary }}>{step}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {Array.isArray(rp.rerunRequirements) && rp.rerunRequirements.length > 0 && (
+                    <View style={{
+                      marginTop: 10,
+                      backgroundColor: proofBg,
+                      borderRadius: 8,
+                      padding: 10,
+                    }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: textSec, letterSpacing: 0.4, marginBottom: 6 }}>
+                        RE-RUN REQUIREMENTS · {rp.rerunRequirements.length}
+                      </Text>
+                      {rp.rerunRequirements.map((r, i) => (
+                        <View key={i} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                          <Ionicons name="checkbox-outline" size={13} color={textSec} style={{ marginTop: 1 }} />
+                          <Text style={{ flex: 1, fontSize: 11, lineHeight: 16, color: textSec }}>{r}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })()}
+          </View>
+        );
+      })()}
+
+      {!running && (job?.status === 'FAILED' || job?.status === 'ERROR') && job?.error && (
+        <View style={[s.planCard, { backgroundColor: isDark ? '#1A0A0A' : '#FEF2F2', borderColor: P.coral + '40' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+            <View style={[s.planIconWrap, { backgroundColor: P.coral + '20' }]}>
+              <Ionicons name="close-circle-outline" size={18} color={P.coral} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.planCardTitle, { color: P.coral }]}>Pipeline Failed</Text>
+              <Text style={[{ fontSize: 12, lineHeight: 18, marginTop: 4, color: textSec }]} numberOfLines={4}>
+                {job.error}
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
       {activePlan?.hasPlan && (
-        <View style={[s.planCard, { backgroundColor: isDark ? '#0A1F12' : '#ECFDF5', borderColor: P.green + '30' }]}>
+        <View style={[s.planCard, {
+          backgroundColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+            ? (isDark ? '#1A1400' : '#FFFBEB')
+            : (isDark ? '#0A1F12' : '#ECFDF5'),
+          borderColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+            ? P.amber + '30'
+            : P.green + '30',
+        }]}>
+          {(job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR') && (
+            <View style={{
+              backgroundColor: isDark ? P.amber + '15' : P.amber + '10',
+              borderRadius: 6,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              marginBottom: 10,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+            }}>
+              <Ionicons name="time-outline" size={13} color={P.amber} />
+              <Text style={{ fontSize: 11, color: P.amber, fontWeight: '600' }}>
+                Showing last successful plan — current pipeline is {job?.status === 'BLOCKED' ? 'blocked' : 'failed'}
+              </Text>
+            </View>
+          )}
           <View style={s.planCardRow}>
             <View style={s.planCardLeft}>
-              <View style={[s.planIconWrap, { backgroundColor: P.green + '20' }]}>
-                <Ionicons name="document-text-outline" size={18} color={P.green} />
+              <View style={[s.planIconWrap, {
+                backgroundColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+                  ? P.amber + '20' : P.green + '20'
+              }]}>
+                <Ionicons name="document-text-outline" size={18}
+                  color={(job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR') ? P.amber : P.green}
+                />
               </View>
               <View>
-                <Text style={[s.planCardTitle, { color: textPrimary }]}>Strategic Plan Ready</Text>
+                <Text style={[s.planCardTitle, { color: textPrimary }]}>
+                  {(job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+                    ? 'Previous Plan' : 'Strategic Plan Ready'}
+                </Text>
                 <Text style={[s.planCardSub, { color: textSec }]}>
                   {activePlan.calendar?.total || 0} calendar entries
                   {activePlan.studio?.total ? ` · ${activePlan.studio.total} content pieces` : ''}
@@ -475,10 +1231,19 @@ export default function OrchestratorPanel() {
             </View>
             <Pressable
               onPress={() => setShowPlan(true)}
-              style={[s.viewPlanBtn, { backgroundColor: P.green + '20', borderColor: P.green + '40' }]}
+              style={[s.viewPlanBtn, {
+                backgroundColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+                  ? P.amber + '20' : P.green + '20',
+                borderColor: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR')
+                  ? P.amber + '40' : P.green + '40',
+              }]}
             >
-              <Text style={[s.viewPlanText, { color: P.green }]}>View</Text>
-              <Ionicons name="chevron-forward" size={14} color={P.green} />
+              <Text style={[s.viewPlanText, {
+                color: (job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR') ? P.amber : P.green
+              }]}>View</Text>
+              <Ionicons name="chevron-forward" size={14}
+                color={(job?.status === 'BLOCKED' || job?.status === 'FAILED' || job?.status === 'ERROR') ? P.amber : P.green}
+              />
             </Pressable>
           </View>
           {activePlan.goalDecomposition?.goalLabel && (
@@ -523,12 +1288,19 @@ export default function OrchestratorPanel() {
           {ENGINE_ORDER.map((engineId, idx) => {
             const sec = sectionMap[engineId];
             const name = sec?.name || (ENGINE_META[engineId]?.shortName) || engineId;
-            const status = sec?.status || (running && runningIdx > idx ? 'SUCCESS' : '');
+            // Seal #6: in-flight rows that have already been passed by the
+            // running cursor get the CANONICAL COMPLETED placeholder — not
+            // legacy 'SUCCESS' — so their pixels go through the canonical
+            // green path. Real backend sections override via `sec?.executionStatus`.
+            const status = sec?.status || (running && runningIdx > idx ? 'COMPLETED' : '');
+            const executionStatus = sec?.executionStatus
+              ?? (running && runningIdx > idx ? 'COMPLETED' : null);
             return (
               <EngineRow
                 key={engineId}
                 id={engineId}
                 name={name}
+                executionStatus={executionStatus}
                 status={status}
                 index={idx}
                 isRunning={running}

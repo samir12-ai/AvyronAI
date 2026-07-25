@@ -1,5 +1,5 @@
 entrypoint = "README.md"
-modules = ["nodejs-22", "postgresql-16"]
+modules = ["nodejs-22", "python-3.11", "postgresql-16"]
 
 [nix]
 channel = "stable-24_05"
@@ -7,12 +7,16 @@ packages = ["ffmpeg", "chromium"]
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["sh", "-c", "npm run expo:static:build && npm run server:build"]
-run = ["npm", "run", "server:prod"]
+build = ["sh", "-c", "npm run expo:static:build && node scripts/server-build.js"]
+run = ["sh", "-c", "PORT=8081 npm run server:prod"]
 
 [[ports]]
 localPort = 5000
 externalPort = 5000
+
+[[ports]]
+localPort = 5099
+externalPort = 3003
 
 [[ports]]
 localPort = 8081
@@ -29,6 +33,10 @@ externalPort = 3000
 [[ports]]
 localPort = 8084
 externalPort = 3001
+
+[[ports]]
+localPort = 8091
+externalPort = 4200
 
 [env]
 PORT = "5000"
@@ -52,6 +60,22 @@ args = "Start App"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "Start Frontend"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Audit Runner"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Phase A Validation"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Real Campaign Run"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "TSC Check"
 
 [[workflows.workflow]]
 name = "Start App"
@@ -88,3 +112,64 @@ outputType = "console"
 task = "shell.exec"
 args = "npm run expo:dev"
 waitForPort = 8081
+
+[[workflows.workflow]]
+name = "Audit Runner"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "SYNTHETIC_AUDIT_MODE=1 ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REASONER_ENABLED=1 COMMERCIAL_REASONER_ALLOWED_INDUSTRIES=b2b_saas,dtc_ecom,local_services npx tsx .local/scripts/run-audit-pipelines.ts && npx tsx .local/scripts/judge-engine-outputs.ts --out .local/validation/judge-scores__treatment_v4.json && npx tsx .local/scripts/compare-control-vs-treatment.ts --control .local/validation/judge-scores__control.json --treatment .local/validation/judge-scores__treatment_v4.json > .local/validation/compare-output-v4.md && echo '=== V4 AUDIT COMPLETE ==='"
+
+[[workflows.workflow]]
+name = "Phase A Validation"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "SYNTHETIC_AUDIT_MODE=1 ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REASONER_ENABLED=1 COMMERCIAL_REASONER_ALLOWED_INDUSTRIES=b2b_saas,dtc_ecom,local_services npx tsx .local/scripts/run-audit-pipelines.ts b2b_saas"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "Real Campaign Run"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "ENGINE_TIMEOUT_MS_OVERRIDE=420000 COMMERCIAL_REASONER_ENABLED=1 COMMERCIAL_REASONER_ALLOWED_INDUSTRIES=b2b_saas,dtc_ecom,local_services COMMERCIAL_REASONER_CURRENT_INDUSTRY=b2b_saas npx tsx .local/scripts/run-real-campaign.ts"
+
+[[workflows.workflow]]
+name = "TSC Check"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsc --noEmit 2>&1 | tee /tmp/tsc-baseline.txt; echo \"===TSC_DONE exit=${PIPESTATUS[0]} count=$(grep -c 'error TS' /tmp/tsc-baseline.txt)===\" | tee -a /tmp/tsc-baseline.txt"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[userenv]
+
+[userenv.shared]
+BRIGHT_DATA_COUNTRY = "ae"
+BRIGHT_DATA_ZONE = "web_unlocker2"
+
+[userenv.production]
+PUBLIC_BASE_URL = "https://avyronai.com"
+ALLOWED_PUBLIC_HOSTS = "avyronai.com"
+BOOT_AUTO_MIGRATE = "true"
+
+[userenv.development]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 180000

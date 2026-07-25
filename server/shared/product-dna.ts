@@ -14,7 +14,7 @@ export interface ProductDNA {
   priceRange: string;
 }
 
-export async function loadProductDNA(campaignId: string, accountId: string = "default"): Promise<ProductDNA | null> {
+export async function loadProductDNA(campaignId: string, accountId: string): Promise<ProductDNA | null> {
   const [bizData] = await db.select().from(businessDataLayer)
     .where(and(
       eq(businessDataLayer.campaignId, campaignId),

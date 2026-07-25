@@ -1,5 +1,13 @@
 import { aiChat } from "../ai-client";
+import {
+  buildDoctrineBlock,
+  deriveAnchorFromProductDna,
+  type RunStrategicContext,
+  type ProductAnchor,
+  type ProductDnaLike,
+} from "../shared/strategic-doctrine";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { buildGroundingContract, checkGroundingContract } from "../shared/grounding-contract";
 import {
   buildCausalDirectiveForPrompt,
   enforceEngineDepthCompliance,
@@ -90,10 +98,23 @@ function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<strin
     return p.canonical || p.pain || p.description || p.text || "";
   }).filter(Boolean);
 
+  // T3.A — Runtime Truth Track: derived objections inherit `inferred_synthesis`
+  // provenance and an explicit `evidenceCount: 0`. The numeric values are
+  // preserved for back-compat with downstream legacy consumers, but the
+  // provenance tag lets `summarizeConfidenceIntegrity` and build-plan-layer
+  // gates distinguish "actually observed at this confidence" from
+  // "default-floor synthesised from a regex match on a pain string."
   for (const painText of painTexts) {
     for (const { painPattern, objection } of OBJECTION_DERIVATION_PATTERNS) {
       if (painPattern.test(painText) && !derived[objection]) {
-        derived[objection] = { frequency: 0.5, severity: 0.5, source: "derived_from_pain", originalPain: painText };
+        derived[objection] = {
+          frequency: 0.5,
+          severity: 0.5,
+          source: "derived_from_pain",
+          originalPain: painText,
+          _provenance: "inferred_synthesis",
+          _evidenceCount: 0,
+        };
       }
     }
   }
@@ -104,7 +125,13 @@ function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<strin
     if (!driverText) continue;
     const lower = driverText.toLowerCase();
     if (/\b(fear|anxiety|worry|concern|hesitat|reluct)\b/.test(lower) && !derived[driverText]) {
-      derived[`Hesitation: ${driverText}`] = { frequency: 0.4, severity: 0.4, source: "derived_from_emotion" };
+      derived[`Hesitation: ${driverText}`] = {
+        frequency: 0.4,
+        severity: 0.4,
+        source: "derived_from_emotion",
+        _provenance: "inferred_synthesis",
+        _evidenceCount: 0,
+      };
     }
   }
 
@@ -118,7 +145,13 @@ function deriveObjectionsFromAudienceData(audience: AudienceInput): Record<strin
     if (/\b(proven|guarantee|evidence|certainty|assurance)\b/.test(lower)) {
       const obj = `Demand for proof: ${desireText}`;
       if (!derived[obj]) {
-        derived[obj] = { frequency: 0.5, severity: 0.5, source: "derived_from_desire" };
+        derived[obj] = {
+          frequency: 0.5,
+          severity: 0.5,
+          source: "derived_from_desire",
+          _provenance: "inferred_synthesis",
+          _evidenceCount: 0,
+        };
       }
     }
   }
@@ -987,6 +1020,9 @@ export async function layer11_aiRefinement(
   domainContext?: { domainFailures: string[]; operationalProblems: string[]; proofRequirements: string[] },
   mechanismCore?: MechanismCore | null,
   profile?: ProfileInput | null,
+  strategic?: RunStrategicContext | null,
+  productDna?: ProductDnaLike | null,
+  attemptNumber?: number,
 ): Promise<{ refinedPillars: DifferentiationPillar[]; refinedClaims: ClaimStructure[]; refinedMechanism: MechanismCandidate }> {
   const topPillars = pillars.slice(0, MAX_PILLARS);
   const topClaims = claims.slice(0, MAX_PILLARS);
@@ -1011,6 +1047,46 @@ Every pillar description and claim MUST be grounded in one of the domain failure
       ? "flow, conversion path, checkout sequence, delivery pipeline, fulfillment chain"
       : "system, pipeline, tool, platform, framework, workflow";
 
+  // Anchor doctrine (criteria A + B): inject the strategic doctrine block when
+  // threaded; when the doctrine anchor is absent, derive an anchor from Product
+  // DNA (F5a) and render it explicitly. Never fabricated — deriveAnchorFromProductDna
+  // returns null unless differentiator + problem + name + type all exist (D5).
+  let doctrineBlock = "";
+  if (strategic) {
+    doctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[DifferentiationEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+  let diffAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
+  if (!diffAnchor && productDna) {
+    const derivedAnchor = deriveAnchorFromProductDna(productDna);
+    if (derivedAnchor) {
+      diffAnchor = derivedAnchor;
+      console.log("[DifferentiationEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+    }
+  }
+  // Explicit if/else source classification — no semantic-fallback chains (D1).
+  let diffAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    diffAnchorSource = "doctrine";
+  } else if (diffAnchor) {
+    diffAnchorSource = "dna";
+  }
+  const dnaAnchorBlock = diffAnchorSource === "dna" && diffAnchor
+    ? `
+=== PRODUCT ANCHOR (derived from Product DNA — resolve every pillar and claim to THIS product) ===
+Product name: ${diffAnchor.name}
+Product type: ${diffAnchor.type}${diffAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${diffAnchor.keyAttributes.join("; ")}` : ""}
+Core problem solved: ${diffAnchor.coreProblemSolved}
+Differentiating feature: ${diffAnchor.differentiatingFeature}
+`
+    : "";
+  const anchorGroundingRule = diffAnchor
+    ? "\nANCHOR GROUNDING: Every refined pillar and claim MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the AEL causal grounding rules below; it never replaces the [RC#]/[BB#]/[CC#] requirements.\n"
+    : "";
+  const groundingContractBlock = buildGroundingContract(diffAnchor, analyticalEnrichment || null);
+  console.log(`[DifferentiationEngine-V3] ANCHOR_EVIDENCE | engine=differentiation | site=first_prompt | attempt=${attemptNumber ?? 1} | present=${diffAnchor ? "yes" : "no"} | source=${diffAnchorSource}`);
+
   const mechanismCoreBlock = mechanismCore && mechanismCore.mechanismSteps.length > 0
     ? `
 MECHANISM STRUCTURE (anchor pillars to these):
@@ -1024,7 +1100,7 @@ Promise: ${mechanismCore.mechanismPromise}
     : "";
 
   const prompt = `You are refining differentiation language. You must improve wording to be clearer, more distinctive, and causally grounded.
-${aelBlock}${causalDirective}${aelStructuredBlock}${domainContextBlock}${mechanismCoreBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${aelBlock}${causalDirective}${aelStructuredBlock}${groundingContractBlock}${domainContextBlock}${mechanismCoreBlock}${depthRejectionContext ? `\n${depthRejectionContext}\n` : ""}
 STRICT RULES:
 - Do NOT invent new strategy, audience segments, offers, or execution plans
 - Do NOT add pricing, packaging, guarantees, CTAs, or channel recommendations
@@ -1073,7 +1149,8 @@ Return JSON:
 {
   "pillars": [{ "name": "refined name", "description": "refined description incorporating root cause language, barrier resolution, and mechanism anchor with contrast", "rootCauseUsed": "RC1: <quote the deep cause text>", "barrierResolved": "BB1: <quote the barrier text>" }],
   "claims": [{ "claim": "refined claim text showing cause→effect reasoning from causal chains, with contrast framing", "rootCauseUsed": "RC1", "barrierResolved": "BB1" }],
-  "mechanismDescription": "refined mechanism description grounded in root causes"
+  "mechanismDescription": "refined mechanism description grounded in root causes",
+  "groundingRefs": ["RC1"]
 }`;
 
   try {
@@ -1092,6 +1169,18 @@ Return JSON:
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in AI response");
     const parsed = JSON.parse(jsonMatch[0]);
+
+    const diffGroundingRefs: string[] = Array.isArray(parsed.groundingRefs)
+      ? parsed.groundingRefs.filter((r: any) => typeof r === "string" && r.trim().length > 0).map((r: string) => r.trim())
+      : [];
+    checkGroundingContract({
+      engine: "differentiation",
+      site: "layer11_refinement",
+      groundingRefs: diffGroundingRefs,
+      ael: analyticalEnrichment || null,
+      accountId,
+      attemptNumber,
+    });
 
     const aelRefs = (parsed.pillars || []).map((p: any, i: number) => ({
       pillar: i + 1,
@@ -1272,6 +1361,8 @@ export async function runDifferentiationEngine(
   accountId: string,
   profile?: ProfileInput | null,
   analyticalEnrichment?: any,
+  strategic?: RunStrategicContext,
+  productDna?: ProductDnaLike | null,
 ): Promise<DifferentiationResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -1390,7 +1481,7 @@ export async function runDifferentiationEngine(
         proofRequirements: (positioning as any).proofRequirements || [],
       };
       console.log(`[DifferentiationEngine-V3] L11 PROMPT_HARDENED | mechanismCore=${l8MechanismCore.mechanismSteps.length > 0} | businessCategory=${inferBusinessCategory(profile)} | maxPillars=${MAX_PILLARS}`);
-      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, depthRejectionContext || undefined, domainCtx, l8MechanismCore, profile);
+      const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, depthRejectionContext || undefined, domainCtx, l8MechanismCore, profile, strategic || null, productDna || null, depthAttempt);
       finalPillars = l11.refinedPillars;
       finalClaims = l11.refinedClaims;
       finalMechanism = l11.refinedMechanism;
@@ -1438,19 +1529,20 @@ export async function runDifferentiationEngine(
       finalMechanism.description = applySoftSanitization(finalMechanism.description, BOUNDARY_SOFT_PATTERNS);
     }
 
+    const celSourceTexts = [
+      ...finalPillars.map(p => `${p.name} ${p.description}`),
+      ...finalClaims.map(c => c.claim),
+      finalMechanism.description,
+    ];
     celDepth = enforceEngineDepthCompliance(
       "differentiation",
-      [
-        ...finalPillars.map(p => `${p.name} ${p.description}`),
-        ...finalClaims.map(c => c.claim),
-        finalMechanism.description,
-      ],
+      celSourceTexts,
       analyticalEnrichment || null,
     );
 
-    if (!analyticalEnrichment || !isDepthBlocking(celDepth)) {
+    if (!analyticalEnrichment || !isDepthBlocking(celDepth, celSourceTexts)) {
       depthGateLog.push(`Attempt ${depthAttempt}: PASSED (depthScore=${celDepth.causalDepthScore})`);
-      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
       if (celDepth.violations.length > 0) {
         for (const logEntry of celDepth.enforcementLog) {
           console.log(`[DifferentiationEngine-V3] CEL_DEPTH: ${logEntry}`);
@@ -1463,9 +1555,11 @@ export async function runDifferentiationEngine(
 
     depthGateLog.push(`Attempt ${depthAttempt}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
     console.log(`[DifferentiationEngine-V3] DEPTH_GATE: Attempt ${depthAttempt} BLOCKED | depthScore=${celDepth.causalDepthScore} | violations=${celDepth.violations.length}`);
+    const dd = celDepth.depthDiagnostics;
+    console.log(`[DifferentiationEngine-V3] DEPTH_DIAGNOSTICS | attempt=${depthAttempt} | rootCauseGrounding=${dd.hasRootCauseGrounding} | causalChainUsage=${dd.hasCausalChainUsage} | barrierResolution=${dd.hasBarrierResolution} | behavioralImpact=${dd.hasBehavioralImpact} | genericTerms=${dd.genericTermCount} | shallowPatterns=${dd.shallowPatternCount} | rcRefs=${celDepth.rootCauseReferences} | ccRefs=${celDepth.causalChainReferences} | bbRefs=${celDepth.barrierReferences}`);
 
     if (depthAttempt >= depthGateMaxAttempts) {
-      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog);
+      depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
       console.log(`[DifferentiationEngine-V3] DEPTH_GATE: FINAL FAILURE after ${depthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
       const failedResult = buildEmptyResult("DEPTH_FAILED", `Depth gate failed after ${depthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`, Date.now() - startTime);
       failedResult.confidenceScore = 0;
@@ -1500,7 +1594,7 @@ export async function runDifferentiationEngine(
           operationalProblems: (positioning as any).operationalProblems || [],
           proofRequirements: (positioning as any).proofRequirements || [],
         };
-        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, combinedRejection || undefined, domainCtx2, l8MechanismCore, profile);
+        const l11 = await layer11_aiRefinement(l9Pillars, l10Claims, l8Mechanism, l6Authority.mode, accountId, analyticalEnrichment, combinedRejection || undefined, domainCtx2, l8MechanismCore, profile, strategic || null, productDna || null, groundingAttempt);
         finalPillars = l11.refinedPillars;
         finalClaims = l11.refinedClaims;
         finalMechanism = l11.refinedMechanism;

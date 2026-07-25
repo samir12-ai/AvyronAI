@@ -1,0 +1,18 @@
+AUDIT ONLY — do NOT modify any code. Report findings only.
+
+I need to understand exactly how much of the user-facing strategy output is real AI reasoning vs. pre-written template text, and what strategic/marketing doctrine (if any) is already embedded in the AI prompts.
+
+PART 1 — TEMPLATE VS. REAL AI MAP
+1. List every place where template/pre-written text is a possible output path shown to the user. Start with server/commercial-reasoning/template-phrases.ts and server/narrative-layer.ts, then search the whole codebase for other template/fallback text sources.
+2. For each place, answer: (a) is the template the PRIMARY path or a FALLBACK when the LLM fails? (b) what conditions trigger the fallback (timeout, parse error, budget limit, missing data)? (c) when the fallback fires, is it logged anywhere, or silent?
+3. Trace one full user journey: when a user opens the Intelligence/Strategy output, which sentences on screen came from an LLM call and which came from templates? Give a rough percentage split per screen (Watchtower narrative, engine outputs, plan document).
+
+PART 2 — EXISTING DOCTRINE INVENTORY
+4. Extract and quote the actual system prompts sent to the LLM in: narrative-layer.ts, commercial-reasoning/llm-call.ts, audience-engine, positioning-engine, offer-engine, and the ai-overlay files. I want to see the real instructions the AI receives.
+5. Is there any centralized marketing/strategy doctrine (target segment → segment problems → product design → pricing → channels → delivery → relationship) embedded anywhere in these prompts, or in shared context like SharedStrategicContext / strategy-root? Or does each engine have its own ad-hoc prompt with no shared foundation?
+6. Report where the prompts constrain the AI to enrichment-only (rewording) vs. where the AI is actually asked to reason and produce strategy.
+
+PART 3 — WHY OUTPUT FEELS TEMPLATED
+7. Based on parts 1-2, give your diagnosis: is the "templated feel" caused by (a) LLM calls failing/timing out and silently falling back, (b) prompts that only ask the AI to reword pre-computed text, (c) missing strategic doctrine in the prompts, or (d) a combination? Rank the causes by impact.
+
+OUTPUT FORMAT: file + line references for every claim. End with a summary table: output surface / source (AI vs template) / fallback trigger / logged or silent.

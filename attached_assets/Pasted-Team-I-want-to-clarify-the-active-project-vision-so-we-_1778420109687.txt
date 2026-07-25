@@ -1,0 +1,86 @@
+Team,
+
+I want to clarify the active project vision so we stop drifting back toward the old T001–T007 rebuild mindset.
+
+The current direction is NOT:
+
+* rebuilding reliability architecture
+* adding parallel detection systems
+* expanding enforcement layers
+* introducing broad new reliability infrastructure
+
+T001–T007 should now be treated as:
+
+* historical baseline work
+* already largely shipped/sealed
+* only revisitable later as:
+
+  * verification gaps
+  * documentation gaps
+  * extension opportunities
+
+The active vision now is different.
+
+We are building:
+a commercially intelligent recovery system.
+
+Meaning:
+the orchestrator should intelligently decide:
+
+* when missing information truly matters
+* when retry is worth attempting
+* when confidence should downgrade
+* and when the system should safely continue
+
+The key principle:
+not every missing field deserves a BLOCK.
+
+The system should behave like a smart operator, not a fragile validator.
+
+The recent verification work proved exactly why this doctrine matters.
+
+We assumed `offer.painAlignment` was a valid critical retry pilot.
+Verification showed:
+
+* the field is not actually emitted
+* the gate is effectively dead
+* and the same commercial concept is already protected by 5 existing enforcement layers
+
+This was a success of the doctrine, not a failure.
+
+The system correctly prevented us from:
+
+* building retry behavior on top of assumptions
+* forcing artificial signals into engines
+* expanding architecture unnecessarily
+
+Important clarification:
+we do NOT want the system to force reality to match old audits.
+
+Instead:
+
+* audits must adapt to runtime reality
+* pilots must be based on real signals
+* activation only happens after verification
+
+Current doctrine remains:
+
+audit → justify → shadow → activate
+
+Next step:
+
+* finish sealing the verification document
+* stop revisiting T001–T007 rebuild discussions
+* present a clean next-step decision:
+
+  * drop the pilot
+  * remap the pilot
+  * wire a truly missing emission
+  * or pause the R-track temporarily
+
+No activation yet.
+No architecture expansion yet.
+No new reliability layers.
+
+Best,
+[Your Name]

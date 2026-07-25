@@ -19,6 +19,7 @@ export interface FulfillmentResult {
     REELS: BranchFulfillment;
     POSTS: BranchFulfillment;
     STORIES: BranchFulfillment;
+    CAROUSELS: BranchFulfillment;
   };
   byStatus: {
     draft: number;
@@ -36,9 +37,10 @@ export interface FulfillmentResult {
 
 export async function computeFulfillment(
   campaignId: string,
-  accountId: string = "default"
+  accountId: string
 ): Promise<FulfillmentResult> {
   const activePlanStatuses = [
+    "DRAFT",
     "APPROVED",
     "GENERATED_TO_CALENDAR",
     "CREATIVE_GENERATED",
@@ -81,12 +83,14 @@ export async function computeFulfillment(
   }
 
   const reelReq = (workRec?.totalReels || 0) + (workRec?.totalVideos || 0);
-  const postReq = (workRec?.totalPosts || 0) + (workRec?.totalCarousels || 0);
+  const postReq = workRec?.totalPosts || 0;
   const storyReq = workRec?.totalStories || 0;
+  const carouselReq = workRec?.totalCarousels || 0;
   const requiredByBranch = {
     REELS: reelReq || workRec?.reelItems || 0,
     POSTS: postReq || workRec?.postItems || 0,
     STORIES: storyReq || workRec?.storyItems || 0,
+    CAROUSELS: carouselReq,
   };
   const totalRequired = workRec?.totalContentPieces || 0;
 
@@ -103,10 +107,11 @@ export async function computeFulfillment(
       )
     );
 
-  const fulfilledByBranch: Record<FulfillmentBranch, number> = {
+  const fulfilledByBranch: Record<FulfillmentBranch | "CAROUSELS", number> = {
     REELS: 0,
     POSTS: 0,
     STORIES: 0,
+    CAROUSELS: 0,
   };
   const statusCounts = {
     draft: 0,
@@ -117,15 +122,19 @@ export async function computeFulfillment(
   };
 
   for (const item of siRows) {
-    const branch = getBranchForMediaType(item.contentType);
-    fulfilledByBranch[branch]++;
+    const type = (item.contentType || "").toUpperCase();
+    if (type === "REEL" || type === "VIDEO") fulfilledByBranch.REELS++;
+    else if (type === "CAROUSEL") fulfilledByBranch.CAROUSELS++;
+    else if (type === "STORY") fulfilledByBranch.STORIES++;
+    else fulfilledByBranch.POSTS++;
     countStatus(statusCounts, item.status);
   }
 
   const totalFulfilled =
     fulfilledByBranch.REELS +
     fulfilledByBranch.POSTS +
-    fulfilledByBranch.STORIES;
+    fulfilledByBranch.STORIES +
+    fulfilledByBranch.CAROUSELS;
 
   const totalRemaining = Math.max(0, totalRequired - totalFulfilled);
 
@@ -144,26 +153,22 @@ export async function computeFulfillment(
       REELS: {
         required: requiredByBranch.REELS,
         fulfilled: fulfilledByBranch.REELS,
-        remaining: Math.max(
-          0,
-          requiredByBranch.REELS - fulfilledByBranch.REELS
-        ),
+        remaining: Math.max(0, requiredByBranch.REELS - fulfilledByBranch.REELS),
       },
       POSTS: {
         required: requiredByBranch.POSTS,
         fulfilled: fulfilledByBranch.POSTS,
-        remaining: Math.max(
-          0,
-          requiredByBranch.POSTS - fulfilledByBranch.POSTS
-        ),
+        remaining: Math.max(0, requiredByBranch.POSTS - fulfilledByBranch.POSTS),
       },
       STORIES: {
         required: requiredByBranch.STORIES,
         fulfilled: fulfilledByBranch.STORIES,
-        remaining: Math.max(
-          0,
-          requiredByBranch.STORIES - fulfilledByBranch.STORIES
-        ),
+        remaining: Math.max(0, requiredByBranch.STORIES - fulfilledByBranch.STORIES),
+      },
+      CAROUSELS: {
+        required: requiredByBranch.CAROUSELS,
+        fulfilled: fulfilledByBranch.CAROUSELS,
+        remaining: Math.max(0, requiredByBranch.CAROUSELS - fulfilledByBranch.CAROUSELS),
       },
     },
     byStatus: statusCounts,

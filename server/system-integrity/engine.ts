@@ -67,10 +67,13 @@ function checkOutputTraceability(output: any, sglTraceToken: string | null, engi
   return true;
 }
 
+const SYSTEM_METADATA_PATTERN = /^\[.*(?:purified|mapped|system|sanitized|signal).*\]$/i;
+
 function detectLeakage(output: any): { found: boolean; details: string[] } {
   const texts = extractTextContent(output);
   const details: string[] = [];
   for (const text of texts.slice(0, 100)) {
+    if (SYSTEM_METADATA_PATTERN.test(text.trim())) continue;
     const result = checkSignalLeakage(text);
     if (!result.clean) {
       details.push(`Leakage in text: "${text.slice(0, 60)}..." — patterns: [${result.leaks.join(",")}]`);
@@ -339,6 +342,11 @@ export function runSystemIntegrityValidation(
     reportId,
     timestamp: new Date().toISOString(),
     overallStatus,
+    // Phase 3 (Task #66) — canonical integrity VERDICT field. Mirrors
+    // overallStatus during the transition window so the live
+    // requireIntegrityVerdict() boundary resolves OK on every report
+    // emitted from this validator. See system-control/integrity-verdict.ts.
+    integrityVerdict: overallStatus,
     engineChecks,
     crossEngineAlignment: crossAlignments,
     signalFlowVerified,

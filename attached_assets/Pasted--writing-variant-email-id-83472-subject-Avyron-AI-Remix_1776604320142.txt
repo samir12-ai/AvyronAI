@@ -1,0 +1,274 @@
+:::writing{variant=“email” id=“83472” subject=“Avyron AI Remix — Data Pipeline & System Architecture Execution Plan”}
+Hey,
+
+I’m sending you the full structured plan for the Remix version. This is NOT about intelligence or agents yet — this phase is strictly about data integrity, pipeline reliability, and system architecture stability.
+
+Read carefully. Execution needs to be precise, strict, and validated at every step.
+
+⸻
+
+🔴 Core Objective (Phase 1)
+
+Build a clean, deterministic, and validated data pipeline where:
+	•	Data flows correctly end-to-end without corruption
+	•	Every object is traceable (no anonymous data)
+	•	No runtime inconsistencies
+	•	No mixing of user vs competitor data
+	•	No analysis runs on outdated or partial data
+
+We are NOT optimizing intelligence yet.
+We are building the foundation layer only.
+
+⸻
+
+⚠️ Critical Non-Negotiable Rules
+
+These are HARD constraints:
+	1.	NO runtime mismatch
+	•	No agent or process should run on outdated runtime context
+	•	Every run must be isolated and clearly identified
+	2.	NO processing on stale data
+	•	Never analyze old snapshots as if they are new
+	•	All analysis must explicitly reference its snapshot + time window
+	3.	NO data without identity
+Every object MUST include:
+	•	run_id
+	•	snapshot_id
+	•	entity_id
+	•	lane (user / competitor / bridge / shared)
+	•	schema_version
+	4.	NO direct raw data usage
+	•	Raw data must be normalized → snapshotted → then analyzed
+	5.	NO cross-lane contamination
+	•	Competitor data must NEVER affect user truth directly
+	•	Only structured signals pass through the bridge
+	6.	NO silent failures or hidden mutations
+	•	Everything must be validated and traceable
+	7.	STRICT validation required
+	•	Data acceptance must be hard, not permissive
+	•	Reject incomplete or inconsistent data
+
+⸻
+
+🧠 System Architecture Overview
+
+1. Shared Layer
+	•	Data Collector (scraping only)
+	•	Normalization Layer
+	•	Snapshot Builder
+	•	Validation Layer
+	•	Control Layer
+
+2. User Lane
+	•	User Snapshot Agent
+	•	User Signal Agent
+	•	Manual Input (weekly truth)
+	•	DNA Hypothesis Agent
+	•	Cluster Assignment Agent
+	•	Weekly Outcome Evaluator
+
+3. Competitor Lane
+	•	Competitor Snapshot Agent
+	•	Competitor Signal Agent
+	•	Market Intelligence Adapter (competitor-only mode)
+	•	Competitor Change Detection
+
+4. Bridge Layer
+	•	Signal Translation
+	•	Relevance Mapping (NO raw data transfer)
+
+5. Governance
+	•	Boss Agent (orchestrator only)
+	•	Dashboard Output Layer
+
+⸻
+
+🔁 Pipeline Flow (Simplified)
+
+User Side (every ~6 hours)
+	1.	Create run
+	2.	Scrape user data
+	3.	Normalize
+	4.	Create snapshot
+	5.	Validate snapshot
+	6.	Extract signals
+	7.	Store outputs
+
+⸻
+
+Competitor Side (every ~48 hours)
+	1.	Create run
+	2.	Scrape competitor data
+	3.	Normalize
+	4.	Create snapshot
+	5.	Run competitor-only analysis (isolated)
+	6.	Extract signals
+	7.	Detect changes vs previous snapshot
+	8.	Generate change events
+	9.	Pass structured signals through bridge
+
+⸻
+
+Weekly Layer
+	1.	Accept manual input (leads, qualified, calls, etc.)
+	2.	Link to content clusters
+	3.	Evaluate DNA performance
+	4.	Output structured recommendations
+
+⸻
+
+🧱 Mandatory Data Contracts
+
+You must define and enforce:
+
+Snapshot Contract
+	•	snapshot_id
+	•	entity_id
+	•	entity_type
+	•	lane
+	•	source
+	•	collected_at
+	•	payload
+	•	schema_version
+
+Signal Contract
+	•	signal_id
+	•	source_snapshot_id
+	•	type
+	•	value
+	•	confidence
+	•	evidence
+
+Change Event Contract
+	•	change_event_id
+	•	baseline_snapshot_id
+	•	current_snapshot_id
+	•	change_dimension
+	•	severity
+	•	evidence
+
+DNA Contract
+	•	dna_id
+	•	hypothesis
+	•	status
+	•	score history
+	•	linked clusters
+
+Cluster Contract
+	•	cluster_id
+	•	dna_id
+	•	window_id
+	•	content_ids
+	•	evaluation status
+
+⸻
+
+🚨 Validation Layer (Very Important)
+
+Validation must:
+	•	Reject missing IDs
+	•	Reject mixed data sources
+	•	Reject incomplete snapshots
+	•	Reject outdated references
+	•	Reject schema mismatches
+	•	Reject anything without evidence chain
+
+This is NOT optional. This is the system backbone.
+
+⸻
+
+🧭 Execution Instructions
+
+Step 1 — Audit First (MANDATORY)
+
+Before building anything:
+	•	Check what already exists
+	•	Identify reusable components
+	•	DO NOT rebuild what already works
+	•	Document gaps vs existing system
+
+👉 Do NOT start coding before this audit.
+
+⸻
+
+Step 2 — Build Pipeline Only
+
+Focus ONLY on:
+	•	Data flow
+	•	Snapshots
+	•	Contracts
+	•	Validation
+	•	Transport logic
+
+DO NOT:
+	•	Improve intelligence
+	•	Add smart decision logic
+	•	Over-engineer agents
+
+⸻
+
+Step 3 — Work in Phases
+
+Split your work into clear phases. Example:
+	•	Phase 1: Data Contracts + Snapshot System
+	•	Phase 2: Collector + Normalization
+	•	Phase 3: User Lane Pipeline
+	•	Phase 4: Competitor Lane Pipeline
+	•	Phase 5: Bridge + Validation Layer
+	•	Phase 6: Orchestration (Boss + Control)
+
+You can reorganize, but must work in structured phases.
+
+⸻
+
+Step 4 — Strict Validation Before Moving Forward
+
+After each phase:
+	•	Validate data flow
+	•	Validate lineage
+	•	Validate isolation
+	•	Validate no leakage
+
+No phase is considered complete without validation.
+
+⸻
+
+⚡ Important Mindset
+	•	This is a Remix version → safe to experiment
+	•	But execution must still be clean and strict
+	•	No shortcuts in data handling
+	•	No “we’ll fix it later” in pipeline logic
+
+We optimize intelligence later.
+
+Right now:
+👉 We build a system that cannot break, cannot mix data, and cannot lie
+
+⸻
+
+🔒 Final Notes
+	•	No data leakage
+	•	No runtime confusion
+	•	No weak validation
+	•	No silent assumptions
+	•	Everything traceable
+
+⸻
+
+📌 After Completion
+
+Once this phase is fully stable:
+	•	Then we move to Agent behavior
+	•	Then intelligence
+	•	Then adaptive loops
+
+⸻
+
+If you see anything missing in this plan, add it before execution.
+
+Start with the audit, then move step by step.
+
+This needs to be built clean, structured, and production-grade from day one.
+
+— Samir
+:::

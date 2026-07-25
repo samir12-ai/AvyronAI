@@ -1,3 +1,5 @@
+import type { EngineAiPathEmission } from "../shared/ai-path-telemetry";
+
 export interface MarketLanguageMap {
   rawPainPhrases: string[];
   rawDesirePhrases: string[];
@@ -70,10 +72,18 @@ export interface DeliveryLayer {
   complexityLevel: number;
 }
 
+export interface ProofGrounding {
+  proofType: string;
+  groundingText: string;
+  sourceObjections: string[];
+  sourcePillars: string[];
+}
+
 export interface ProofLayer {
   alignedProofTypes: string[];
   proofStrength: number;
   proofGaps: string[];
+  proofGrounding: ProofGrounding[];
 }
 
 export interface RiskReductionLayer {
@@ -82,12 +92,39 @@ export interface RiskReductionLayer {
   buyerConfidenceScore: number;
 }
 
+export interface OfferIdentityReasoning {
+  identityPayoff: string;
+  commercialReasoning: string;
+  valueTranslation: string;
+  groundedSignals: string[];
+  reasoningSteps: string[];
+  rejectedAlternatives: Array<{ alternative: string; reasonRejected: string }>;
+  modelUsed: string;
+  generatedAt: string;
+  groundingRefs?: string[];
+}
+
+export interface OfferValueArchitecture {
+  outcomeChain: Array<{ feature: string; functional: string; emotional: string; identity: string }>;
+  identityShift: { fromIdentity: string; toIdentity: string; identityCost: string };
+  commercialLeverage: { pointInChain: "feature" | "functional" | "emotional" | "identity"; leverageMechanism: string; leverageProof: string };
+  objectionEconomics: Array<{ objection: string; revenueAtStakeIfUnresolved: string; neutralizingMechanism: string; costOfNeutralizing: string }>;
+  primaryValueWedge: string;
+  reasoningSteps: string[];
+  groundedInTrustMechanism: string | null;
+  groundedInGameDimension: string | null;
+  judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN";
+  judgeReason: string;
+  retryCount: number;
+}
+
 export interface OfferCandidate {
   offerName: string;
   coreOutcome: string;
   mechanismDescription: string;
   deliverables: string[];
   proofAlignment: string[];
+  proofGrounding: ProofGrounding[];
   audienceFitExplanation: string;
   offerStrengthScore: number;
   riskNotes: string[];
@@ -104,6 +141,8 @@ export interface OfferCandidate {
   integrityResult: { passed: boolean; failures: string[] };
   frictionLevel: number;
   depthScores: OfferDepthScores;
+  identityReasoning?: OfferIdentityReasoning;
+  valueArchitecture?: OfferValueArchitecture;
 }
 
 export interface OfferDepthScores {
@@ -120,6 +159,8 @@ export interface OfferDepthScores {
 export interface OfferResult {
   status: string;
   statusMessage: string | null;
+  /** Phase 4 — AI-proposal path telemetry emitted by the engine this run. */
+  aiPathTelemetry?: EngineAiPathEmission;
   primaryOffer: OfferCandidate;
   alternativeOffer: OfferCandidate;
   rejectedOffer: { offer: OfferCandidate; rejectionReason: string };
@@ -139,4 +180,11 @@ export interface OfferResult {
     groundingRatio: number;
     strippedClaims: string[];
   };
+  /**
+   * DNA Enrichment Gate (Path B) surface signal. Present only when the offer
+   * interchangeability gate was exercised; `required=true` means it was STILL
+   * failing at retry exhaustion and the orchestrator should raise the operator
+   * prompt. The orchestrator (not the engine) writes the DB.
+   */
+  dnaEnrichment?: import("../shared/dna-enrichment").DnaEnrichmentSignal;
 }

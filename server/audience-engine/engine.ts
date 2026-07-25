@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, growthCampaigns } from "@shared/schema";
+import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorReviews, growthCampaigns } from "@shared/schema";
 import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
 import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import {
@@ -18,6 +18,11 @@ import {
   CONFIDENCE_WEIGHTS,
   OBJECTION_CONTEXT_RULES,
   MIN_EVIDENCE_PER_SIGNAL,
+  BRIDGE_SUPPRESS_THRESHOLD,
+  COMMENT_QUALITY_WEIGHTS,
+  LOW_SIGNAL_COMMENT_PHRASES,
+  MAX_EXPECTED_SOURCE_TYPES,
+  SOURCE_QUALITY_WEIGHTS,
   type PatternCluster,
   type MarketScope,
 } from "./constants";
@@ -26,6 +31,12 @@ import { pruneOldSnapshots, assessDataReliability as sharedAssessDataReliability
 import { aiChat } from "../ai-client";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity, type SemanticBridgeResult } from "./semantic-bridge";
+import { scoreAudienceSophistication, type AudienceSophisticationOutput } from "./sophistication-llm";
+import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import { emissionFromBattery, type BatteryAttemptLike, type EngineAiPathEmission } from "../shared/ai-path-telemetry";
+import { safeJsonParse, buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
+import { buildGroundingContract, checkGroundingContract, groundingRefsSchema } from "../shared/grounding-contract";
+import { z } from "zod";
 
 interface EvidenceMeta {
   evidenceCount: number;
@@ -108,11 +119,19 @@ export interface StructuredSignals {
   psychological_drivers: StructuredSignalCluster[];
 }
 
-export type EngineStatus = "COMPLETE" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE" | "MISSING_DEPENDENCY";
+// `PARTIAL` added: emitted when the engine
+// produced usable output but signal coverage was below the qualifying
+// threshold (or only some downstream maps populated). Distinct from
+// INSUFFICIENT_SIGNALS (no usable output) and DEFENSIVE_MODE (low-trust).
+// Downstream consumers (System Control, snapshot reuse) treat PARTIAL as
+// "use with caution" — never as COMPLETE.
+export type EngineStatus = "COMPLETE" | "PARTIAL" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE" | "MISSING_DEPENDENCY";
 
 export interface AudienceEngineV3Result {
   status: EngineStatus;
   statusMessage: string | null;
+  /** Phase 4 — AI-proposal path telemetry emitted by the engine this run. */
+  aiPathTelemetry?: EngineAiPathEmission;
   defensiveMode: boolean;
   languageSignals: LanguageSignals;
   painMap: SignalItem[];
@@ -145,6 +164,8 @@ export interface AudienceEngineV3Result {
   engineVersion: number;
   executionTimeMs: number;
   snapshotId: string;
+  audienceSophistication?: import("./sophistication-llm").AudienceSophisticationOutput | null;
+  buyerPsychologyProfile?: import("./buyer-psychology").BuyerPsychologyProfile | null;
 }
 
 function sanitizeTexts(texts: string[]): { clean: string[]; removed: number } {
@@ -167,6 +188,125 @@ function sanitizeTexts(texts: string[]): { clean: string[]; removed: number } {
   return { clean, removed };
 }
 
+type CommentQuality = "HIGH" | "MEDIUM" | "LOW" | "NOISE";
+
+interface LabeledText {
+  text: string;
+  source: string;
+  qualityWeight: number;
+}
+
+const EMOJI_ONLY_REGEX = /^[\p{Emoji}\p{Z}\s!?.,"']+$/u;
+const SUBSTANTIVE_MARKER_REGEX = /\?|how|why|what|when|where|help|problem|issue|struggle|tried|can't|doesn't|not working|advice|question|difficult|challenge|frustrat|confus|overwhelm/i;
+
+function classifyCommentQuality(text: string): CommentQuality {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (trimmed.length < 8) return "NOISE";
+  if (EMOJI_ONLY_REGEX.test(trimmed)) return "NOISE";
+
+  const isLowPhrase = (LOW_SIGNAL_COMMENT_PHRASES as readonly string[]).some(p =>
+    lower.includes(p) && trimmed.length < 40
+  );
+  if (isLowPhrase) return "LOW";
+
+  if (SUBSTANTIVE_MARKER_REGEX.test(lower)) return "HIGH";
+  if (trimmed.length > 80) return "HIGH";
+  if (trimmed.length > 30) return "MEDIUM";
+
+  return "LOW";
+}
+
+function buildLabeledComments(comments: string[]): {
+  labeled: LabeledText[];
+  noiseCount: number;
+  lowCount: number;
+  highCount: number;
+  mediumCount: number;
+} {
+  const labeled: LabeledText[] = [];
+  let noiseCount = 0;
+  let lowCount = 0;
+  let highCount = 0;
+  let mediumCount = 0;
+
+  for (const text of comments) {
+    const quality = classifyCommentQuality(text);
+    if (quality === "NOISE") {
+      noiseCount++;
+      continue;
+    }
+    const qualityWeight =
+      quality === "HIGH"
+        ? COMMENT_QUALITY_WEIGHTS.HIGH
+        : quality === "MEDIUM"
+        ? COMMENT_QUALITY_WEIGHTS.MEDIUM
+        : COMMENT_QUALITY_WEIGHTS.LOW;
+
+    if (quality === "HIGH") highCount++;
+    else if (quality === "MEDIUM") mediumCount++;
+    else lowCount++;
+
+    labeled.push({ text, source: "comment", qualityWeight });
+  }
+
+  return { labeled, noiseCount, lowCount, highCount, mediumCount };
+}
+
+function buildLabeledCaptions(captions: string[]): LabeledText[] {
+  return captions.map(text => ({ text, source: "caption", qualityWeight: SOURCE_QUALITY_WEIGHTS.CAPTION }));
+}
+
+function buildLabeledReviews(reviews: string[]): LabeledText[] {
+  const labeled: LabeledText[] = [];
+  for (const text of reviews) {
+    const quality = classifyCommentQuality(text);
+    if (quality === "NOISE") continue;
+    const baseWeight =
+      quality === "HIGH"
+        ? COMMENT_QUALITY_WEIGHTS.HIGH
+        : quality === "MEDIUM"
+        ? COMMENT_QUALITY_WEIGHTS.MEDIUM
+        : COMMENT_QUALITY_WEIGHTS.LOW;
+    labeled.push({ text, source: "review", qualityWeight: baseWeight * SOURCE_QUALITY_WEIGHTS.REVIEW });
+  }
+  return labeled;
+}
+
+function buildLabeledTiktok(tiktokTexts: string[]): LabeledText[] {
+  return tiktokTexts
+    .filter(t => t.trim().length >= 5)
+    .map(text => ({ text, source: "tiktok", qualityWeight: SOURCE_QUALITY_WEIGHTS.TIKTOK }));
+}
+
+function computePrimaryDataStrength(
+  labeledComments: LabeledText[],
+  labeledCaptions: LabeledText[],
+): number {
+  const totalLabeled = labeledComments.length + labeledCaptions.length;
+  if (totalLabeled === 0) return 0;
+
+  const highQualityComments = labeledComments.filter(t => t.qualityWeight >= COMMENT_QUALITY_WEIGHTS.HIGH).length;
+  const uniqueSources = new Set<string>();
+  if (labeledComments.length > 0) uniqueSources.add("comment");
+  if (labeledCaptions.length > 0) uniqueSources.add("caption");
+
+  const volumeScore = Math.min(1, totalLabeled / 80);
+  const qualityScore = labeledComments.length > 0
+    ? Math.min(1, highQualityComments / Math.max(labeledComments.length, 1))
+    : 0.4;
+  const sourceScore = Math.min(1, uniqueSources.size / 2);
+  const captionScore = Math.min(1, labeledCaptions.length / 20);
+
+  return (
+    volumeScore * 0.35 +
+    qualityScore * 0.25 +
+    sourceScore * 0.20 +
+    captionScore * 0.20
+  );
+}
+
 const MARKET_DETECTION_KEYWORDS: Record<MarketScope, string[]> = {
   fitness: ["workout", "exercise", "gym", "training", "muscle", "body", "weight loss", "bulk", "lean", "cardio", "تمرين", "رياضة", "جيم"],
   health: ["health", "nutrition", "diet", "wellness", "medical", "therapy", "condition", "صحة", "تغذية", "علاج"],
@@ -186,17 +326,14 @@ interface MarketScopeMetadata {
   scopeAmbiguityFlag: boolean;
 }
 
-let _lastMarketScopeMetadata: MarketScopeMetadata = {
-  scopeConfidence: 0,
-  matchedKeywordDensity: 0,
-  scopeAmbiguityFlag: false,
-};
-
 function getMarketScopeMetadata(): MarketScopeMetadata {
-  return { ..._lastMarketScopeMetadata };
+  return { scopeConfidence: 0, matchedKeywordDensity: 0, scopeAmbiguityFlag: false };
 }
 
-function detectMarketScope(texts: string[], businessContext: { industry: string; coreOffer: string }): MarketScope[] {
+function detectMarketScope(
+  texts: string[],
+  businessContext: { industry: string; coreOffer: string },
+): { markets: MarketScope[]; metadata: MarketScopeMetadata } {
   const allText = [...texts.slice(0, 200), businessContext.industry, businessContext.coreOffer].join(" ").toLowerCase();
   const totalWords = allText.split(/\s+/).length || 1;
   const scores: Record<MarketScope, number> = {} as any;
@@ -218,8 +355,10 @@ function detectMarketScope(texts: string[], businessContext: { industry: string;
 
   const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]).filter(([, v]) => v > 0);
   if (sorted.length === 0) {
-    _lastMarketScopeMetadata = { scopeConfidence: 0, matchedKeywordDensity: 0, scopeAmbiguityFlag: false };
-    return ["universal"];
+    return {
+      markets: ["universal"],
+      metadata: { scopeConfidence: 0, matchedKeywordDensity: 0, scopeAmbiguityFlag: false },
+    };
   }
 
   const topScore = sorted[0][1];
@@ -231,10 +370,11 @@ function detectMarketScope(texts: string[], businessContext: { industry: string;
   const densityFactor = Math.min(1, totalKeywordMatches / 10);
   const scopeConfidence = Math.round(Math.min(1, Math.max(0, separationFactor * 0.5 + densityFactor * 0.5)) * 1000) / 1000;
 
-  _lastMarketScopeMetadata = { scopeConfidence, matchedKeywordDensity, scopeAmbiguityFlag };
-
   const detected = sorted.filter(([, v]) => v >= topScore * 0.3).map(([k]) => k as MarketScope);
-  return detected.length > 0 ? detected : ["universal"];
+  return {
+    markets: detected.length > 0 ? detected : ["universal"],
+    metadata: { scopeConfidence, matchedKeywordDensity, scopeAmbiguityFlag },
+  };
 }
 
 function filterClustersByMarket(clusters: PatternCluster[], detectedMarkets: MarketScope[]): PatternCluster[] {
@@ -292,8 +432,192 @@ function applyObjectionContextRules(
   return result;
 }
 
+function buildNarrativeObjectionSignals(
+  latestSnapshot: any,
+  miSnapshotId: string | null,
+): SignalItem[] {
+  if (!latestSnapshot?.objectionMapData) return [];
+  let miObjMap: any = null;
+  try {
+    miObjMap = typeof latestSnapshot.objectionMapData === "string"
+      ? JSON.parse(latestSnapshot.objectionMapData)
+      : latestSnapshot.objectionMapData;
+  } catch { return []; }
+  const narrativeObjections: any[] = Array.isArray(miObjMap?.objections) ? miObjMap.objections : [];
+  if (narrativeObjections.length === 0) return [];
+
+  const signals: SignalItem[] = [];
+  for (const obj of narrativeObjections) {
+    const canonical = typeof obj?.objection === "string" ? obj.objection.trim() : "";
+    if (!canonical) continue;
+    const supporting: any[] = Array.isArray(obj.supportingEvidence) ? obj.supportingEvidence : [];
+    const competitorSources: string[] = Array.isArray(obj.competitorSources) ? obj.competitorSources : [];
+    const evidenceTexts = supporting
+      .map((e: any) => (typeof e?.caption === "string" ? e.caption.slice(0, 200) : ""))
+      .filter((s: string) => s.length > 0)
+      .slice(0, 3);
+    const evidenceCount = Math.max(supporting.length, evidenceTexts.length);
+    const frequency = Math.max(supporting.length, competitorSources.length, 1);
+    const confidenceScore = typeof obj.narrativeConfidence === "number" ? obj.narrativeConfidence : 0.3;
+    const matchedPatterns = supporting
+      .map((e: any) => (typeof e?.matchedPattern === "string" ? `narrative:${e.matchedPattern}` : null))
+      .filter((s: string | null): s is string => !!s)
+      .slice(0, 5);
+    signals.push({
+      canonical,
+      frequency,
+      evidence: evidenceTexts,
+      evidenceCount,
+      confidenceScore,
+      sourceSignals: ["narrative_objection_extractor", obj.signalType || "objection", obj.patternCategory || "unclassified", ...matchedPatterns],
+      inputSnapshotId: miSnapshotId,
+    });
+  }
+  return signals;
+}
+
+function mergeNarrativeObjectionsIntoMap(
+  existing: SignalItem[],
+  narrative: SignalItem[],
+): { merged: SignalItem[]; added: number; reinforced: number } {
+  if (narrative.length === 0) return { merged: existing, added: 0, reinforced: 0 };
+  const byKey = new Map<string, SignalItem>();
+  for (const s of existing) {
+    byKey.set(s.canonical.toLowerCase(), { ...s });
+  }
+  let added = 0;
+  let reinforced = 0;
+  for (const narr of narrative) {
+    const key = narr.canonical.toLowerCase();
+    const prev = byKey.get(key);
+    if (prev) {
+      prev.frequency += narr.frequency;
+      prev.evidenceCount += narr.evidenceCount;
+      for (const ev of narr.evidence) {
+        if (prev.evidence.length < 3 && !prev.evidence.includes(ev)) prev.evidence.push(ev);
+      }
+      prev.confidenceScore = Math.max(prev.confidenceScore, narr.confidenceScore);
+      for (const src of narr.sourceSignals) {
+        if (!prev.sourceSignals.includes(src)) prev.sourceSignals.push(src);
+      }
+      reinforced++;
+    } else {
+      byKey.set(key, { ...narr });
+      added++;
+    }
+  }
+  const merged = Array.from(byKey.values()).sort((a, b) => b.confidenceScore - a.confidenceScore);
+  return { merged, added, reinforced };
+}
+
 function applyEvidenceIntegrityFilter(signals: SignalItem[]): SignalItem[] {
-  return signals.filter(s => s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL);
+  return signals.map(s => {
+    if (s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL) {
+      return s;
+    }
+    if (s.evidenceCount >= 1 || s.frequency >= 1) {
+      const evidenceRatio = Math.min(s.evidenceCount, s.frequency) / MIN_EVIDENCE_PER_SIGNAL;
+      // no synthetic confidence floor. If the
+      // raw signal already carries 0 confidence, the downgrade emits 0 — we
+      // never invent a 0.05 minimum. Honest zero is better than a fabricated
+      // pulse that downstream gates can clear.
+      const downgradedConfidence = s.confidenceScore * evidenceRatio * 0.6;
+      return {
+        ...s,
+        confidenceScore: downgradedConfidence,
+        sourceSignals: [...s.sourceSignals, "evidence_downgraded"],
+      };
+    }
+    return null;
+  }).filter((s): s is SignalItem => s !== null);
+}
+
+function inferPainsFromObjections(objectionMap: SignalItem[], inputSnapshotId: string | null): SignalItem[] {
+  const inferred: SignalItem[] = [];
+  for (const obj of objectionMap) {
+    const painCanonical = `Problem behind objection: ${obj.canonical}`;
+    inferred.push({
+      canonical: painCanonical,
+      frequency: Math.max(1, Math.round(obj.frequency * 0.7)),
+      evidence: obj.evidence.slice(0, 2),
+      evidenceCount: Math.max(1, Math.round(obj.evidenceCount * 0.7)),
+      // no 0.1 floor — inferred confidence is a strict multiple of the
+      // source objection's confidence. If the source is zero, the inference is zero.
+      confidenceScore: obj.confidenceScore * 0.6,
+      sourceSignals: [...obj.sourceSignals, "inferred_from_objection"],
+      inputSnapshotId,
+    });
+  }
+  return inferred;
+}
+
+function inferPainsFromEmotionalDrivers(drivers: SignalItem[], inputSnapshotId: string | null): SignalItem[] {
+  const inferred: SignalItem[] = [];
+  for (const driver of drivers) {
+    const painCanonical = `Unresolved need: ${driver.canonical}`;
+    inferred.push({
+      canonical: painCanonical,
+      frequency: Math.max(1, Math.round(driver.frequency * 0.5)),
+      evidence: driver.evidence.slice(0, 2),
+      evidenceCount: Math.max(1, Math.round(driver.evidenceCount * 0.5)),
+      // no 0.1 floor — see inferPainsFromObjections.
+      confidenceScore: driver.confidenceScore * 0.5,
+      sourceSignals: [...driver.sourceSignals, "inferred_from_emotional_driver"],
+      inputSnapshotId,
+    });
+  }
+  return inferred;
+}
+
+function mergePainLayers(
+  directPains: SignalItem[],
+  objectionInferred: SignalItem[],
+  driverInferred: SignalItem[],
+  bridgePains: SignalItem[],
+): { finalPainMap: SignalItem[]; painSources: { direct: number; objectionInferred: number; driverInferred: number; bridge: number } } {
+  const seen = new Set<string>();
+  const final: SignalItem[] = [];
+
+  for (const p of directPains) {
+    seen.add(p.canonical.toLowerCase());
+    final.push(p);
+  }
+
+  for (const p of bridgePains) {
+    const key = p.canonical.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      final.push(p);
+    }
+  }
+
+  for (const p of objectionInferred) {
+    const key = p.canonical.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      final.push(p);
+    }
+  }
+
+  for (const p of driverInferred) {
+    const key = p.canonical.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      final.push(p);
+    }
+  }
+
+  final.sort((a, b) => b.confidenceScore - a.confidenceScore);
+
+  return {
+    finalPainMap: final,
+    painSources: {
+      direct: directPains.length,
+      objectionInferred: objectionInferred.filter(p => final.includes(p)).length,
+      driverInferred: driverInferred.filter(p => final.includes(p)).length,
+      bridge: bridgePains.filter(p => final.includes(p)).length,
+    },
+  };
 }
 
 function computeSegmentSimilarity(segA: AudienceSegment, segB: AudienceSegment): number {
@@ -404,7 +728,7 @@ function computeCalibratedConfidence(
   competitorCount: number,
 ): number {
   const freqScore = totalTexts > 0 ? Math.min(1, frequency / Math.max(totalTexts * 0.1, 1)) : 0;
-  const diversityScore = Math.min(1, sourceTypes.length / 3);
+  const diversityScore = Math.min(1, sourceTypes.length / MAX_EXPECTED_SOURCE_TYPES);
   const competitorScore = Math.min(1, competitorCount / MI_COST_LIMITS.MAX_COMPETITORS);
 
   const raw =
@@ -416,26 +740,41 @@ function computeCalibratedConfidence(
 }
 
 function matchPatternClusters(
-  texts: string[],
+  labeledTexts: LabeledText[],
   clusters: PatternCluster[],
   inputSnapshotId: string | null,
-  sourceTypes: string[],
   competitorCount: number,
 ): SignalItem[] {
-  const results: Map<string, { count: number; evidence: string[]; matchedPatterns: Set<string> }> = new Map();
+  const results: Map<string, {
+    weightedCount: number;
+    rawCount: number;
+    evidence: string[];
+    matchedPatterns: Set<string>;
+    hitSources: Set<string>;
+  }> = new Map();
 
   for (const cluster of clusters) {
-    results.set(cluster.canonical, { count: 0, evidence: [], matchedPatterns: new Set() });
+    results.set(cluster.canonical, {
+      weightedCount: 0,
+      rawCount: 0,
+      evidence: [],
+      matchedPatterns: new Set(),
+      hitSources: new Set(),
+    });
   }
 
-  for (const text of texts) {
+  const totalWeightedTexts = labeledTexts.reduce((sum, t) => sum + t.qualityWeight, 0);
+
+  for (const { text, source, qualityWeight } of labeledTexts) {
     const lower = text.toLowerCase();
     for (const cluster of clusters) {
       for (const pattern of cluster.patterns) {
         if (lower.includes(pattern)) {
           const entry = results.get(cluster.canonical)!;
-          entry.count++;
+          entry.weightedCount += qualityWeight;
+          entry.rawCount++;
           entry.matchedPatterns.add(pattern);
+          entry.hitSources.add(source);
           if (entry.evidence.length < 3) {
             entry.evidence.push(text.slice(0, 150));
           }
@@ -446,14 +785,19 @@ function matchPatternClusters(
   }
 
   return Array.from(results.entries())
-    .filter(([, v]) => v.count > 0)
-    .sort((a, b) => b[1].count - a[1].count)
+    .filter(([, v]) => v.rawCount > 0)
+    .sort((a, b) => b[1].weightedCount - a[1].weightedCount)
     .map(([canonical, data]) => ({
       canonical,
-      frequency: data.count,
+      frequency: Math.round(data.weightedCount),
       evidence: data.evidence,
-      evidenceCount: data.count,
-      confidenceScore: computeCalibratedConfidence(data.count, texts.length, sourceTypes, competitorCount),
+      evidenceCount: data.rawCount,
+      confidenceScore: computeCalibratedConfidence(
+        data.weightedCount,
+        totalWeightedTexts,
+        Array.from(data.hitSources),
+        competitorCount,
+      ),
       sourceSignals: Array.from(data.matchedPatterns),
       inputSnapshotId,
     }));
@@ -464,8 +808,10 @@ function analyzeLanguage(
   captions: string[],
   inputSnapshotId: string | null,
   competitorCount: number,
+  reviews: string[] = [],
+  tiktokTexts: string[] = [],
 ): LanguageSignals {
-  const allText = [...comments, ...captions];
+  const allText = [...comments, ...captions, ...reviews, ...tiktokTexts];
   const result: LanguageSignals = {
     problemExpressions: { count: 0, samples: [] },
     questionPatterns: { count: 0, samples: [] },
@@ -516,6 +862,8 @@ function analyzeLanguage(
   const sourceTypes = [];
   if (comments.length > 0) sourceTypes.push("comments");
   if (captions.length > 0) sourceTypes.push("captions");
+  if (reviews.length > 0) sourceTypes.push("reviews");
+  if (tiktokTexts.length > 0) sourceTypes.push("tiktok");
   result.confidenceScore = computeCalibratedConfidence(total, allText.length, sourceTypes, competitorCount);
   result.sourceSignals = sourceTypes;
 
@@ -817,6 +1165,33 @@ function computeSegmentDensity(
   }));
 }
 
+// T8 (item 6, constraint "all LLM outputs through safeJsonParse + Zod"): schema
+// shapes for the audience LLM candidates. Data-field defaults (never decision/
+// verdict/outcome fields) keep parsing resilient without a semantic fallback.
+const SegmentCandidateSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  painProfile: z.array(z.string()).default([]),
+  desireProfile: z.array(z.string()).default([]),
+  objectionProfile: z.array(z.string()).default([]),
+  motivationProfile: z.array(z.string()).default([]),
+  estimatedPercentage: z.coerce.number().catch(0),
+  groundingRefs: groundingRefsSchema,
+});
+const SegmentArraySchema = z.array(SegmentCandidateSchema);
+
+const AdsTargetingCandidateSchema = z.object({
+  suggestedInterests: z.array(z.string()).default([]),
+  suggestedBehaviors: z.array(z.string()).default([]),
+  suggestedAgeRange: z
+    .object({ min: z.coerce.number().catch(18), max: z.coerce.number().catch(55) })
+    .default({ min: 18, max: 55 }),
+  suggestedGender: z.string().default("all"),
+  suggestedLocations: z.array(z.string()).default([]),
+  rationale: z.string().default(""),
+});
+const AdsTargetingArraySchema = z.array(AdsTargetingCandidateSchema);
+
 async function constructSegments(
   painMap: SignalItem[],
   desireMap: SignalItem[],
@@ -828,7 +1203,28 @@ async function constructSegments(
   commentSamples: string[],
   accountId: string,
   inputSnapshotId: string | null,
+  strategic?: RunStrategicContext,
+  aiPathSink?: { emission: EngineAiPathEmission | null },
 ): Promise<AudienceSegment[]> {
+  // Deterministic last-resort segment — shared by the retry-exhaustion path and
+  // the outer catch so a failure is NEVER silent (mode=fallback, always logged).
+  const deterministicFallback = (): AudienceSegment[] => [{
+    name: "Primary Audience",
+    description: "Main audience segment based on available data",
+    painProfile: painMap.slice(0, 3).map(p => p.canonical),
+    desireProfile: desireMap.slice(0, 3).map(d => d.canonical),
+    objectionProfile: objectionMap.slice(0, 2).map(o => o.canonical),
+    motivationProfile: emotionalDrivers.slice(0, 2).map(e => e.canonical),
+    estimatedPercentage: 100,
+    evidenceCount: painMap.length + desireMap.length,
+    confidenceScore: 0.3,
+    sourceSignals: ["painMap", "desireMap"],
+    inputSnapshotId,
+  }];
+  // Phase 4: one battery attempt recorded per generation that reached the
+  // doctrine battery (the structural pre-gate is NOT part of the battery).
+  // Declared before the try so the catch fallback can emit telemetry too.
+  const segmentBatteryAttempts: BatteryAttemptLike[] = [];
   try {
     let multiSourceSection = "";
     try {
@@ -846,8 +1242,65 @@ async function constructSegments(
 
     const productDnaBlock = (businessContext as any).productDna ? formatProductDNAForPrompt((businessContext as any).productDna) : "";
 
-    const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
+    // T11: inject the strategic doctrine (product anchor + prior validated
+    // decisions) so the AI proposes segments grounded in THIS product. Omitted
+    // cleanly when no strategic context was threaded — never a fake doctrine (D5).
+    let doctrineBlock = "";
+    if (strategic) {
+      doctrineBlock = buildDoctrineBlock(strategic);
+    } else {
+      console.log("[AudienceEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+    }
+    // F5a (parity with positioning engine): when strategic doctrine is absent,
+    // derive the judge's product anchor from Product DNA so the
+    // interchangeability judge tests segments against THIS product's real
+    // differentiator instead of the weaker anchor-free test. Guard: only when
+    // a genuine differentiator + core problem exist — an anchor fabricated
+    // from empty strings would flip the judge to the strict test with hollow
+    // context (worse than the weak test). Explicit if/else selection — no
+    // semantic-fallback chains (D1).
+    let productAnchor = strategic ? strategic.doctrine.productAnchor : null;
+    const dnaForAnchor = (businessContext as any).productDna;
+    if (!productAnchor && dnaForAnchor) {
+      let dnaDifferentiator = "";
+      if (dnaForAnchor.strategicAdvantage && String(dnaForAnchor.strategicAdvantage).trim().length > 0) {
+        dnaDifferentiator = String(dnaForAnchor.strategicAdvantage).trim();
+      } else if (dnaForAnchor.uniqueMechanism && String(dnaForAnchor.uniqueMechanism).trim().length > 0) {
+        dnaDifferentiator = String(dnaForAnchor.uniqueMechanism).trim();
+      }
+      const dnaProblem = dnaForAnchor.coreProblemSolved ? String(dnaForAnchor.coreProblemSolved).trim() : "";
+      const dnaName = dnaForAnchor.coreOffer ? String(dnaForAnchor.coreOffer).trim() : "";
+      const dnaType = dnaForAnchor.businessType ? String(dnaForAnchor.businessType).trim() : "";
+      if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && dnaName.length > 0 && dnaType.length > 0) {
+        productAnchor = {
+          name: dnaName,
+          type: dnaType,
+          keyAttributes: dnaForAnchor.productCategory ? [dnaForAnchor.productCategory] : [],
+          coreProblemSolved: dnaProblem,
+          differentiatingFeature: dnaDifferentiator,
+        };
+        console.log(`[AudienceEngine-V3] SEGMENT_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from Product DNA`);
+      }
+    }
+    const priorDecisions = strategic ? strategic.priorDecisions : [];
+    // T003: anchor-usage evidence (audit trail — engine × site × attempt × source).
+    let audienceAnchorSource: "doctrine" | "dna" | "none" = "none";
+    if (strategic && strategic.doctrine.productAnchor) {
+      audienceAnchorSource = "doctrine";
+    } else if (productAnchor) {
+      audienceAnchorSource = "dna";
+    }
+    console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=first_prompt | attempt=1 | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
 
+    // Grounding contract (RULES 1-3). Audience has NO AEL in scope, so RULE 2
+    // renders the "no AEL available" branch (groundingRefs: []) truthfully;
+    // RULE 1 (name the differentiating feature) and RULE 3 (interchangeability
+    // self-check) still reinforce the existing gate battery. Additive only.
+    const audEffectiveAnchor = (strategic && strategic.doctrine.productAnchor) ? strategic.doctrine.productAnchor : (productAnchor || null);
+    const audGroundingContract = buildGroundingContract(audEffectiveAnchor as any, null);
+
+    const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
+${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${audGroundingContract ? `\n${audGroundingContract}\n` : ""}
 BUSINESS: ${businessContext.industry} — ${businessContext.coreOffer}
 ${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
 
@@ -878,25 +1331,131 @@ Return a JSON array of 2-4 segments. Each segment:
   "desireProfile": ["desire1", "desire2"],
   "objectionProfile": ["objection1"],
   "motivationProfile": ["motivation1", "motivation2"],
-  "estimatedPercentage": number (must total ~100)
+  "estimatedPercentage": number (must total ~100),
+  "groundingRefs": []
 }
 
 Return ONLY the JSON array, no markdown.`;
 
-    const response = await aiChat({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
-      max_tokens: 2000,
-      endpoint: "audience-engine-v3-segments",
+    // T8 (item 6): retry loop built from scratch around the segment call —
+    // 3 total attempts, temperature escalation 0.3 → 0.4 → 0.5, structured
+    // rejection feedback injected each pass. Gates: Zod structural + breadth
+    // gate (item 9) on name+description. Code is the sole judge; the AI proposes.
+    const SEGMENT_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
+    const SEGMENT_MAX_ATTEMPTS = 3;
+    let acceptedSegments: z.infer<typeof SegmentArraySchema> | null = null;
+    let segmentRejectionFeedback = "";
+    for (let attempt = 0; attempt < SEGMENT_MAX_ATTEMPTS; attempt++) {
+      const attemptTemp = SEGMENT_TEMPERATURE_LADDER[Math.min(attempt, SEGMENT_TEMPERATURE_LADDER.length - 1)];
+      const attemptPrompt = segmentRejectionFeedback
+        ? `${prompt}\n\n--- RETRY DIRECTIVE ---\n${segmentRejectionFeedback}`
+        : prompt;
+      try {
+        const response = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: attemptPrompt }],
+          temperature: attemptTemp,
+          max_tokens: 2000,
+          endpoint: "audience-engine-v3-segments",
+          accountId,
+        });
+        const content = response.choices[0]?.message?.content?.trim() || "[]";
+        const candidate = safeJsonParse<z.infer<typeof SegmentArraySchema>>(content, SegmentArraySchema);
+        if (!candidate || candidate.length < 2) {
+          segmentRejectionFeedback = `Rejected by structural gate: ${!candidate ? "output was not valid JSON or failed schema validation" : `only ${candidate.length} segment(s) returned`}. Return a JSON array of 2-4 well-formed segments. Fix exactly this.`;
+          console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: STRUCTURAL_REJECT`);
+          continue;
+        }
+        // FULL GATE BATTERY (T12): structural Zod already held above; each
+        // segment must now clear breadth + interchangeability + contradiction.
+        // A single failing segment rejects the whole batch and retries with
+        // focused feedback. Short-circuiting at the first failing segment caps
+        // judge-call fan-out (bounded by SEGMENT_MAX_ATTEMPTS). The judges log
+        // every verdict — including NOT_RUN abstentions — so nothing is silent.
+        let batteryFeedback = "";
+        let failedSegName = "";
+        let failedGate = "";
+        // Partial-keep (B1/B3): on the FINAL attempt only, judge ALL segments
+        // instead of short-circuiting at the first failure (bounded fan-out:
+        // ≤4 segments). A segment that individually passed the FULL battery is
+        // strictly more truthful than the deterministic template — on
+        // exhaustion we keep passed segments and discard rejected ones,
+        // visibly. Earlier attempts keep the short-circuit to cap judge calls.
+        const isFinalAttempt = attempt === SEGMENT_MAX_ATTEMPTS - 1;
+        const passedSegments: typeof candidate = [];
+        const discardedInfo: string[] = [];
+        console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=judge | attempt=${attempt + 1} | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
+        for (const seg of candidate) {
+          const battery = await runCandidateGateBattery({
+            kind: "segment",
+            candidateText: `${seg.name}: ${seg.description}`,
+            productAnchor,
+            priorDecisions,
+            accountId,
+          });
+          if (!battery.passed) {
+            if (batteryFeedback.length === 0) {
+              failedSegName = seg.name;
+              failedGate = battery.failedGate ? battery.failedGate : "";
+              batteryFeedback = `segment "${seg.name}" — ${battery.rejectionFeedback}`;
+            }
+            discardedInfo.push(`"${seg.name}" gate=${battery.failedGate ? battery.failedGate : "unknown"}`);
+            if (!isFinalAttempt) break;
+          } else {
+            passedSegments.push(seg);
+          }
+        }
+        segmentBatteryAttempts.push({
+          passed: batteryFeedback.length === 0,
+          failedGate: failedGate,
+          rejectionFeedback: batteryFeedback,
+        });
+        if (batteryFeedback && isFinalAttempt && passedSegments.length >= 1) {
+          // Renormalize estimatedPercentage: the prompt demands ~100 across
+          // the batch; discarding siblings breaks the share-of-market
+          // semantic that canonicalizeSegments and display consumers assume.
+          const totalPct = passedSegments.reduce((s, seg) => s + (Number(seg.estimatedPercentage) || 0), 0);
+          acceptedSegments = passedSegments.map(seg => ({
+            ...seg,
+            estimatedPercentage: totalPct > 0
+              ? Math.round(((Number(seg.estimatedPercentage) || 0) / totalPct) * 100)
+              : Math.round(100 / passedSegments.length),
+          }));
+          console.log(`[AudienceEngine-V3] SEGMENT_GATE_PARTIAL_KEEP | kept=${passedSegments.length} discarded=${discardedInfo.length} | discarded: ${discardedInfo.join(", ")} | first rejection: ${batteryFeedback.slice(0, 300)}`);
+          break;
+        }
+        if (batteryFeedback) {
+          segmentRejectionFeedback = `Rejected by gate battery:\n${batteryFeedback}\nFix exactly this and return a fresh JSON array of 2-4 segments, each a specific group defined by a shared, verifiable, situation-specific problem tied to the product.`;
+          console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: BATTERY_REJECT | gate=${failedGate} | segment="${failedSegName}"`);
+          continue;
+        }
+        acceptedSegments = candidate;
+        console.log(`[AudienceEngine-V3] SEGMENT_GATE: PASSED | attempt=${attempt + 1}/${SEGMENT_MAX_ATTEMPTS} | segments=${candidate.length} | temp=${attemptTemp} | gates=breadth+interchangeability+contradiction`);
+        break;
+      } catch (attemptErr: any) {
+        segmentRejectionFeedback = `Rejected by parser: previous output could not be processed (${attemptErr.message}). Return ONLY a valid JSON array. Fix exactly this.`;
+        console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: AI_ERROR | ${attemptErr.message}`);
+      }
+    }
+
+    if (!acceptedSegments) {
+      console.error(`[AudienceEngine-V3] SEGMENT_GATE: EXHAUSTED after ${SEGMENT_MAX_ATTEMPTS} attempts — using deterministic fallback (mode=fallback, never silent)`);
+      if (aiPathSink) aiPathSink.emission = emissionFromBattery(false, segmentBatteryAttempts);
+      return deterministicFallback();
+    }
+
+    const audGroundingRefs = acceptedSegments.flatMap((s: any) => Array.isArray(s.groundingRefs) ? s.groundingRefs.map(String) : []);
+    checkGroundingContract({
+      engine: "audience_segments",
+      site: "segment_generation",
+      groundingRefs: audGroundingRefs,
+      ael: null,
       accountId,
     });
 
-    const content = response.choices[0]?.message?.content?.trim() || "[]";
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned) as any[];
-
-    return parsed.map(seg => {
+    const finalSegments = acceptedSegments;
+    if (aiPathSink) aiPathSink.emission = emissionFromBattery(true, segmentBatteryAttempts);
+    return finalSegments.map(seg => {
       const segPains = (seg.painProfile || []) as string[];
       const segDesires = (seg.desireProfile || []) as string[];
       const segObjections = (seg.objectionProfile || []) as string[];
@@ -912,7 +1471,7 @@ Return ONLY the JSON array, no markdown.`;
       const signalCoverage = totalProfileItems > 0 ? Math.min(1, painDesireMatchCount / totalProfileItems) : 0;
       const painDesireDensity = Math.min(1, (painMap.length + desireMap.length) / 10);
 
-      const allOtherSegments = parsed.filter((s: any) => s.name !== seg.name);
+      const allOtherSegments = finalSegments.filter((s: any) => s.name !== seg.name);
       let avgSim = 0;
       if (allOtherSegments.length > 0) {
         let simSum = 0;
@@ -945,19 +1504,8 @@ Return ONLY the JSON array, no markdown.`;
     });
   } catch (err: any) {
     console.error("[AudienceEngine-V3] Segment construction failed:", err.message);
-    return [{
-      name: "Primary Audience",
-      description: "Main audience segment based on available data",
-      painProfile: painMap.slice(0, 3).map(p => p.canonical),
-      desireProfile: desireMap.slice(0, 3).map(d => d.canonical),
-      objectionProfile: objectionMap.slice(0, 2).map(o => o.canonical),
-      motivationProfile: emotionalDrivers.slice(0, 2).map(e => e.canonical),
-      estimatedPercentage: 100,
-      evidenceCount: painMap.length + desireMap.length,
-      confidenceScore: 0.3,
-      sourceSignals: ["painMap", "desireMap"],
-      inputSnapshotId,
-    }];
+    if (aiPathSink) aiPathSink.emission = emissionFromBattery(false, segmentBatteryAttempts);
+    return deterministicFallback();
   }
 }
 
@@ -997,6 +1545,20 @@ async function translateToAdsTargeting(
   accountId: string,
   inputSnapshotId: string | null,
 ): Promise<AdsTargetingHint[]> {
+  // Deterministic last-resort targeting — shared by the retry-exhaustion path
+  // and the outer catch so a failure is NEVER silent (mode=fallback, logged).
+  const adsFallback = (): AdsTargetingHint[] => [{
+    suggestedInterests: [businessContext.industry],
+    suggestedBehaviors: ["Engaged shoppers"],
+    suggestedAgeRange: { min: 18, max: 55 },
+    suggestedGender: "all",
+    suggestedLocations: [businessContext.location || "United States"],
+    rationale: "Fallback targeting based on business context",
+    evidenceCount: 0,
+    confidenceScore: 0.2,
+    sourceSignals: ["fallback"],
+    inputSnapshotId,
+  }];
   try {
     const prompt = `You are a Meta Ads targeting expert. Translate audience segments into Meta Ads Manager targeting suggestions.
 
@@ -1019,40 +1581,64 @@ For each segment, return:
 
 Return ONLY a JSON array matching the segments count. Use real Meta Ads targeting options.`;
 
-    const response = await aiChat({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-      max_tokens: 1500,
-      endpoint: "audience-engine-v3-ads-targeting",
-      accountId,
-    });
-
-    const content = response.choices[0]?.message?.content?.trim() || "[]";
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned) as any[];
-
-    return parsed.map(hint => sanitizeAdsTargetingHint({
-      ...hint,
-      evidenceCount: segments.length,
-      confidenceScore: 0.6,
-      sourceSignals: ["audienceSegments", "maturityIndex"],
-      inputSnapshotId,
-    }));
+    // T8 (item 6): retry loop around the ads-targeting call — 3 total attempts,
+    // temperature escalation 0.3 → 0.4 → 0.5, structured rejection feedback each
+    // pass. Validation is STRUCTURAL ONLY (Zod schema + one-object-per-segment +
+    // non-empty interests) — the breadth gate does NOT apply because Meta targeting
+    // language (broad interests/behaviors/locations) is legitimately non-specific.
+    const ADS_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
+    const ADS_MAX_ATTEMPTS = 3;
+    let adsRejectionFeedback = "";
+    for (let attempt = 0; attempt < ADS_MAX_ATTEMPTS; attempt++) {
+      const attemptTemp = ADS_TEMPERATURE_LADDER[Math.min(attempt, ADS_TEMPERATURE_LADDER.length - 1)];
+      const attemptPrompt = adsRejectionFeedback
+        ? `${prompt}\n\n--- RETRY DIRECTIVE ---\n${adsRejectionFeedback}`
+        : prompt;
+      try {
+        const response = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: attemptPrompt }],
+          temperature: attemptTemp,
+          max_tokens: 1500,
+          endpoint: "audience-engine-v3-ads-targeting",
+          accountId,
+        });
+        const content = response.choices[0]?.message?.content?.trim() || "[]";
+        const parsed = safeJsonParse<z.infer<typeof AdsTargetingArraySchema>>(content, AdsTargetingArraySchema);
+        if (!parsed) {
+          adsRejectionFeedback = `Rejected by structural gate: output was not valid JSON or failed schema validation. Return a JSON array with one targeting object per segment. Fix exactly this.`;
+          console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE attempt ${attempt + 1}/${ADS_MAX_ATTEMPTS}: SCHEMA_REJECT`);
+          continue;
+        }
+        if (parsed.length !== segments.length) {
+          adsRejectionFeedback = `Rejected by structural gate: returned ${parsed.length} targeting object(s) but there are ${segments.length} segment(s). Return exactly one object per segment, in the same order. Fix exactly this.`;
+          console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE attempt ${attempt + 1}/${ADS_MAX_ATTEMPTS}: COUNT_MISMATCH | got=${parsed.length} expected=${segments.length}`);
+          continue;
+        }
+        const emptyInterestIdx = parsed.findIndex(h => h.suggestedInterests.length === 0);
+        if (emptyInterestIdx !== -1) {
+          adsRejectionFeedback = `Rejected by structural gate: targeting object #${emptyInterestIdx + 1} has no suggestedInterests. Every segment needs at least one real Meta interest category. Fix exactly this.`;
+          console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE attempt ${attempt + 1}/${ADS_MAX_ATTEMPTS}: EMPTY_INTERESTS | idx=${emptyInterestIdx}`);
+          continue;
+        }
+        console.log(`[AudienceEngine-V3] ADS_TARGETING_GATE: PASSED | attempt=${attempt + 1}/${ADS_MAX_ATTEMPTS} | hints=${parsed.length} | temp=${attemptTemp}`);
+        return parsed.map(hint => sanitizeAdsTargetingHint({
+          ...hint,
+          evidenceCount: segments.length,
+          confidenceScore: 0.6,
+          sourceSignals: ["audienceSegments", "maturityIndex"],
+          inputSnapshotId,
+        }));
+      } catch (attemptErr: any) {
+        adsRejectionFeedback = `Rejected by parser: previous output could not be processed (${attemptErr.message}). Return ONLY a valid JSON array. Fix exactly this.`;
+        console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE attempt ${attempt + 1}/${ADS_MAX_ATTEMPTS}: AI_ERROR | ${attemptErr.message}`);
+      }
+    }
+    console.error(`[AudienceEngine-V3] ADS_TARGETING_GATE: EXHAUSTED after ${ADS_MAX_ATTEMPTS} attempts — using deterministic fallback (mode=fallback, never silent)`);
+    return adsFallback();
   } catch (err: any) {
     console.error("[AudienceEngine-V3] Ads targeting failed:", err.message);
-    return [{
-      suggestedInterests: [businessContext.industry],
-      suggestedBehaviors: ["Engaged shoppers"],
-      suggestedAgeRange: { min: 18, max: 55 },
-      suggestedGender: "all",
-      suggestedLocations: [businessContext.location || "United States"],
-      rationale: "Fallback targeting based on business context",
-      evidenceCount: 0,
-      confidenceScore: 0.2,
-      sourceSignals: ["fallback"],
-      inputSnapshotId,
-    }];
+    return adsFallback();
   }
 }
 
@@ -1201,18 +1787,42 @@ function buildEmptyResult(
   };
 }
 
-export async function runAudienceEngine(accountId: string, campaignId: string): Promise<AudienceEngineV3Result> {
+export async function runAudienceEngine(accountId: string, campaignId: string, miSnapshotIdParam?: string, jobId?: string, strategic?: RunStrategicContext): Promise<AudienceEngineV3Result> {
   const startTime = Date.now();
-  console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}`);
+  console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}${miSnapshotIdParam ? ` | run-scoped MI=${miSnapshotIdParam}` : " | unscoped (will resolve latest)"}`);
 
-  const [latestSnapshot] = await db.select().from(miSnapshots)
-    .where(and(
-      eq(miSnapshots.accountId, accountId),
-      eq(miSnapshots.campaignId, campaignId),
-      inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-    ))
-    .orderBy(desc(miSnapshots.createdAt))
-    .limit(1);
+  let latestSnapshot: any = null;
+  if (miSnapshotIdParam) {
+    const [byId] = await db.select().from(miSnapshots)
+      .where(and(
+        eq(miSnapshots.id, miSnapshotIdParam),
+        eq(miSnapshots.accountId, accountId),
+        eq(miSnapshots.campaignId, campaignId),
+      ))
+      .limit(1);
+    latestSnapshot = byId || null;
+    if (!latestSnapshot) {
+      console.log(`[AudienceEngine-V3] RUN_SCOPED_MI_NOT_FOUND | id=${miSnapshotIdParam} — failing fast (no latest fallback in scoped mode)`);
+      const executionTimeMs = Date.now() - startTime;
+      return buildEmptyResult(
+        "MISSING_DEPENDENCY",
+        `Run-scoped MI snapshot ${miSnapshotIdParam} not found for campaign ${campaignId}`,
+        { postsAnalyzed: 0, commentsAnalyzed: 0, competitorsAnalyzed: 0, sanitizedCount: 0, miSnapshotId: miSnapshotIdParam, miSnapshotAge: null },
+        executionTimeMs,
+        "",
+      );
+    }
+  } else {
+    const [byLatest] = await db.select().from(miSnapshots)
+      .where(and(
+        eq(miSnapshots.accountId, accountId),
+        eq(miSnapshots.campaignId, campaignId),
+        inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
+      ))
+      .orderBy(desc(miSnapshots.createdAt))
+      .limit(1);
+    latestSnapshot = byLatest || null;
+  }
 
   const miSnapshotId = latestSnapshot?.id || null;
   const miSnapshotAge = latestSnapshot?.createdAt
@@ -1259,27 +1869,41 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const competitorIds = competitors.map(c => c.id);
   const competitorCount = competitorIds.length;
 
-  let posts: { caption: string | null }[] = [];
+  let posts: { caption: string | null; platform: string }[] = [];
   let rawComments: { commentText: string | null }[] = [];
+  let rawReviews: { reviewText: string }[] = [];
 
   if (competitorIds.length > 0) {
     const idList = sql.join(competitorIds.map(id => sql`${id}`), sql`, `);
 
-    posts = await db.select({ caption: ciCompetitorPosts.caption })
-      .from(ciCompetitorPosts)
-      .where(sql`${ciCompetitorPosts.competitorId} IN (${idList})`)
-      .orderBy(desc(ciCompetitorPosts.createdAt))
-      .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE);
+    [posts, rawComments, rawReviews] = await Promise.all([
+      db.select({ caption: ciCompetitorPosts.caption, platform: ciCompetitorPosts.platform })
+        .from(ciCompetitorPosts)
+        .where(sql`${ciCompetitorPosts.competitorId} IN (${idList})`)
+        .orderBy(desc(ciCompetitorPosts.createdAt))
+        .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE),
 
-    rawComments = await db.select({ commentText: ciCompetitorComments.commentText })
-      .from(ciCompetitorComments)
-      .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL)`)
-      .orderBy(desc(ciCompetitorComments.createdAt))
-      .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE);
+      db.select({ commentText: ciCompetitorComments.commentText })
+        .from(ciCompetitorComments)
+        .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL)`)
+        .orderBy(desc(ciCompetitorComments.createdAt))
+        .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE),
+
+      db.select({ reviewText: ciCompetitorReviews.reviewText })
+        .from(ciCompetitorReviews)
+        .where(sql`${ciCompetitorReviews.competitorId} IN (${idList}) AND ${ciCompetitorReviews.isSynthetic} = false`)
+        .orderBy(desc(ciCompetitorReviews.createdAt))
+        .limit(300),
+    ]);
   }
 
-  const rawCaptions = posts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
+  const instagramPosts = posts.filter(p => !p.platform || p.platform === "instagram");
+  const tiktokPosts = posts.filter(p => p.platform === "tiktok");
+
+  const rawCaptions = instagramPosts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
+  const rawTiktokTexts = tiktokPosts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
   const rawCommentTexts = rawComments.map(c => c.commentText).filter((c): c is string => !!c && c.length > 3);
+  const rawReviewTexts = rawReviews.map(r => r.reviewText).filter(t => t.length > 5);
 
   const captionSanitized = sanitizeTexts(rawCaptions);
   const commentSanitized = sanitizeTexts(rawCommentTexts);
@@ -1287,36 +1911,66 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   const commentTexts = commentSanitized.clean;
   const totalSanitized = captionSanitized.removed + commentSanitized.removed;
 
-  console.log(`[AudienceEngine-V3] Data: ${competitorCount} competitors, ${captions.length} captions, ${commentTexts.length} comments (sanitized ${totalSanitized} synthetic signals)`);
+  const commentClassification = buildLabeledComments(commentTexts);
+  const labeledComments = commentClassification.labeled;
+  const labeledCaptions = buildLabeledCaptions(captions);
+  const labeledReviews = buildLabeledReviews(rawReviewTexts);
+  const labeledTiktok = buildLabeledTiktok(rawTiktokTexts);
+  const labeledAllTexts: LabeledText[] = [...labeledComments, ...labeledCaptions, ...labeledReviews, ...labeledTiktok];
+  const primaryDataStrength = computePrimaryDataStrength(labeledComments, labeledCaptions);
+
+  console.log(
+    `[AudienceEngine-V3] Data: ${competitorCount} competitors, ${captions.length} captions, ${commentTexts.length} comments` +
+    ` | reviews=${labeledReviews.length} tiktok=${labeledTiktok.length}` +
+    ` (sanitized ${totalSanitized} synthetic | noise-filtered ${commentClassification.noiseCount}` +
+    ` | HIGH=${commentClassification.highCount} MED=${commentClassification.mediumCount} LOW=${commentClassification.lowCount})` +
+    ` | primaryStrength=${primaryDataStrength.toFixed(3)}`
+  );
 
   const baseInputSummary = {
     postsAnalyzed: captions.length,
     commentsAnalyzed: commentTexts.length,
     competitorsAnalyzed: competitorCount,
     sanitizedCount: totalSanitized,
+    reviewsAnalyzed: labeledReviews.length,
+    tiktokAnalyzed: labeledTiktok.length,
+    commentQuality: {
+      noise: commentClassification.noiseCount,
+      low: commentClassification.lowCount,
+      medium: commentClassification.mediumCount,
+      high: commentClassification.highCount,
+    },
+    primaryDataStrength,
     miSnapshotId,
     miSnapshotAge,
     detectedMarkets: [] as string[],
   };
 
+  const datasetTooSmall =
+    competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
+    captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS;
+
   let bridgeResult: SemanticBridgeResult | null = null;
   if (latestSnapshot) {
-    bridgeResult = executeSemanticBridge(latestSnapshot);
-    const bridgeValidation = validateBridgeIntegrity(bridgeResult);
-    if (!bridgeValidation.valid) {
-      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_VALIDATION_FAIL | issues=${bridgeValidation.issues.join("; ")}`);
-      bridgeResult = null;
+    if (!datasetTooSmall && primaryDataStrength >= BRIDGE_SUPPRESS_THRESHOLD) {
+      console.log(
+        `[AudienceEngine-V3] BRIDGE_SUPPRESSED | primaryStrength=${primaryDataStrength.toFixed(3)} >= threshold=${BRIDGE_SUPPRESS_THRESHOLD} | primary data is sufficient`
+      );
     } else {
-      console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_ACTIVE | pains=${bridgeResult.painSignals.length} | desires=${bridgeResult.desireSignals.length} | objections=${bridgeResult.objectionSignals.length} | integrity=${bridgeResult.bridgeIntegrity}`);
+      bridgeResult = executeSemanticBridge(latestSnapshot);
+      const bridgeValidation = validateBridgeIntegrity(bridgeResult);
+      if (!bridgeValidation.valid) {
+        console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_VALIDATION_FAIL | issues=${bridgeValidation.issues.join("; ")}`);
+        bridgeResult = null;
+      } else {
+        console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_ACTIVE | pains=${bridgeResult.painSignals.length} | desires=${bridgeResult.desireSignals.length} | objections=${bridgeResult.objectionSignals.length} | integrity=${bridgeResult.bridgeIntegrity} | reason=${datasetTooSmall ? "dataset_too_small" : "primary_weak"}`);
+      }
     }
   }
 
   const bridgeCanRescue = bridgeResult && bridgeResult.bridgeIntegrity && bridgeResult.totalPassed >= AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI;
 
-  if (
-    competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
-    captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS
-  ) {
+  if (datasetTooSmall) {
     if (bridgeCanRescue) {
       console.log(`[AudienceEngine-V3] DATASET_TOO_SMALL bypassed — Semantic Bridge provides ${bridgeResult!.totalPassed} quality-gated signals from MIv3 contentDnaData (bridge-only mode)`);
     } else {
@@ -1325,7 +1979,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
       const executionTimeMs = Date.now() - startTime;
       const [inserted] = await db.insert(audienceSnapshots).values({
-        accountId, campaignId, miSnapshotId,
+        accountId, campaignId, jobId, miSnapshotId,
         engineVersion: AUDIENCE_ENGINE_VERSION,
         inputSummary: JSON.stringify({ ...baseInputSummary, status: "DATASET_TOO_SMALL", statusMessage: msg }),
         executionTimeMs,
@@ -1359,38 +2013,54 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   }
 
   const allText = [...commentTexts, ...captions];
-  const sourceTypes = [];
-  if (commentTexts.length > 0) sourceTypes.push("comments");
-  if (captions.length > 0) sourceTypes.push("captions");
 
-  const detectedMarkets = detectMarketScope(allText, businessContext);
+  const { markets: detectedMarkets, metadata: scopeMetadata } = detectMarketScope(allText, businessContext);
   baseInputSummary.detectedMarkets = detectedMarkets;
-  const scopeMetadata = getMarketScopeMetadata();
   console.log(`[AudienceEngine-V3] Market scope detected: ${detectedMarkets.join(", ")} | scopeConfidence=${scopeMetadata.scopeConfidence} | ambiguity=${scopeMetadata.scopeAmbiguityFlag}`);
 
   const scopedPainClusters = filterClustersByMarket(PAIN_CLUSTERS, detectedMarkets);
   const scopedDesireClusters = filterClustersByMarket(DESIRE_CLUSTERS, detectedMarkets);
   const scopedObjectionClusters = filterClustersByMarket(OBJECTION_CLUSTERS, detectedMarkets);
 
-  const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId, competitorCount);
-  const rawPainMap = matchPatternClusters(allText, scopedPainClusters, miSnapshotId, sourceTypes, competitorCount);
-  const rawDesireMap = matchPatternClusters(allText, scopedDesireClusters, miSnapshotId, sourceTypes, competitorCount);
-  let rawObjectionMap = matchPatternClusters(allText, scopedObjectionClusters, miSnapshotId, sourceTypes, competitorCount);
-  const rawTransformationMap = matchPatternClusters(allText, TRANSFORMATION_PATTERNS, miSnapshotId, sourceTypes, competitorCount);
-  const rawEmotionalDrivers = matchPatternClusters(allText, EMOTIONAL_DRIVER_PATTERNS, miSnapshotId, sourceTypes, competitorCount);
+  const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId, competitorCount, rawReviewTexts, rawTiktokTexts);
+  const rawPainMap = matchPatternClusters(labeledAllTexts, scopedPainClusters, miSnapshotId, competitorCount);
+  const rawDesireMap = matchPatternClusters(labeledAllTexts, scopedDesireClusters, miSnapshotId, competitorCount);
+  let rawObjectionMap = matchPatternClusters(labeledAllTexts, scopedObjectionClusters, miSnapshotId, competitorCount);
+  const rawTransformationMap = matchPatternClusters(labeledAllTexts, TRANSFORMATION_PATTERNS, miSnapshotId, competitorCount);
+  const rawEmotionalDrivers = matchPatternClusters(labeledAllTexts, EMOTIONAL_DRIVER_PATTERNS, miSnapshotId, competitorCount);
 
   rawObjectionMap = applyObjectionContextRules(rawObjectionMap, allText);
 
-  let painMap = applyEvidenceIntegrityFilter(rawPainMap);
+  let directPainMap = applyEvidenceIntegrityFilter(rawPainMap);
   let desireMap = applyEvidenceIntegrityFilter(rawDesireMap);
   let objectionMap = applyEvidenceIntegrityFilter(rawObjectionMap);
   const transformationMap = applyEvidenceIntegrityFilter(rawTransformationMap);
   const emotionalDrivers = applyEvidenceIntegrityFilter(rawEmotionalDrivers);
 
+  const narrativeObjectionSignals = buildNarrativeObjectionSignals(latestSnapshot, miSnapshotId);
+  if (narrativeObjectionSignals.length > 0) {
+    const narrMerge = mergeNarrativeObjectionsIntoMap(objectionMap, narrativeObjectionSignals);
+    objectionMap = narrMerge.merged;
+    console.log(`[AudienceEngine-V3] NARRATIVE_OBJECTIONS_MERGED | ingested=${narrativeObjectionSignals.length} | added=${narrMerge.added} | reinforced=${narrMerge.reinforced} | total=${objectionMap.length}`);
+  }
+
+  let bridgePainSignals: SignalItem[] = [];
   let totalBridgeConflicts = 0;
   if (bridgeResult && bridgeResult.bridgeIntegrity) {
-    const painMerge = mergeBridgedIntoAudienceMap(painMap, bridgeResult.painSignals, miSnapshotId);
-    painMap = painMerge.merged;
+    const painMerge = mergeBridgedIntoAudienceMap(directPainMap, bridgeResult.painSignals, miSnapshotId);
+    directPainMap = painMerge.merged;
+    bridgePainSignals = bridgeResult.painSignals.map((bs: any) => ({
+      canonical: bs.canonical,
+      frequency: bs.frequency || 1,
+      evidence: bs.evidence || [],
+      evidenceCount: bs.evidenceCount || 1,
+      // no 0.1 floor and no 0.3 phantom-default. A bridge signal that
+      // carries no confidence emits zero; downstream gates decide whether to
+      // surface it or drop it.
+      confidenceScore: (typeof bs.confidenceScore === "number" ? bs.confidenceScore : 0) * 0.7,
+      sourceSignals: [...(bs.sourceSignals || []), "bridge_signal"],
+      inputSnapshotId: miSnapshotId,
+    }));
     totalBridgeConflicts += painMerge.conflictsResolved;
 
     const desireMerge = mergeBridgedIntoAudienceMap(desireMap, bridgeResult.desireSignals, miSnapshotId);
@@ -1404,8 +2074,16 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     if (totalBridgeConflicts > 0) {
       console.log(`[AudienceEngine-V3] CONFLICT_RESOLUTION | conflictsResolved=${totalBridgeConflicts} | anchor=MIv3_QUALITY_GATED`);
     }
-    console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_MERGED | pains=${painMap.length} | desires=${desireMap.length} | objections=${objectionMap.length}`);
+    console.log(`[AudienceEngine-V3] SEMANTIC_BRIDGE_MERGED | pains=${directPainMap.length} | desires=${desireMap.length} | objections=${objectionMap.length}`);
   }
+
+  const qualifiedObjections = objectionMap.filter(o => o.confidenceScore >= 0.25 && o.evidenceCount >= 1);
+  const qualifiedDrivers = emotionalDrivers.filter(d => d.confidenceScore >= 0.25 && d.evidenceCount >= 1);
+  const objectionInferredPains = inferPainsFromObjections(qualifiedObjections, miSnapshotId).slice(0, 5);
+  const driverInferredPains = inferPainsFromEmotionalDrivers(qualifiedDrivers, miSnapshotId).slice(0, 3);
+  const { finalPainMap, painSources } = mergePainLayers(directPainMap, objectionInferredPains, driverInferredPains, bridgePainSignals);
+  let painMap = finalPainMap;
+  console.log(`[AudienceEngine-V3] PAIN_LAYERED_CONSTRUCTION | direct=${painSources.direct} | objectionInferred=${painSources.objectionInferred} | driverInferred=${painSources.driverInferred} | bridge=${painSources.bridge} | final=${painMap.length}`);
 
   let miObjectionDensity = 0;
   let miObjectionCount = 0;
@@ -1453,6 +2131,10 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   let audienceSegments: AudienceSegment[] = [];
   let adsTargetingHints: AdsTargetingHint[] = [];
+  // Phase 4: constructSegments (the doctrine-battery path) writes its emission
+  // here so the main return can surface it. Ads targeting is structural-only
+  // (breadth gate N/A) and is intentionally excluded from AI-path telemetry.
+  const audienceAiPathSink: { emission: EngineAiPathEmission | null } = { emission: null };
 
   if (totalSignalMatches < AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI) {
     console.log(`[AudienceEngine-V3] INSUFFICIENT SIGNALS for AI layers — ${totalSignalMatches} signal matches (need ≥${AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI})`);
@@ -1462,7 +2144,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     const rawSegments = await constructSegments(
       painMap, desireMap, objectionMap, emotionalDrivers,
       maturityIndex, awarenessLevel,
-      businessContext, commentTexts, accountId, miSnapshotId,
+      businessContext, commentTexts, accountId, miSnapshotId, strategic,
+      audienceAiPathSink,
     );
 
     audienceSegments = canonicalizeSegments(rawSegments);
@@ -1471,6 +2154,111 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     adsTargetingHints = await translateToAdsTargeting(
       audienceSegments, maturityIndex, businessContext, accountId, miSnapshotId,
     );
+  }
+
+  // ── INTELLIGENCE UPGRADE: Sophistication Tier Scoring (Schwartz tradition) ──
+  let audienceSophistication: AudienceSophisticationOutput | null = null;
+  if (audienceSegments.length > 0) {
+    try {
+      const competitorClaimsForSophistication: string[] = [];
+      try {
+        const latestMi = await db
+          .select({ marketDiagnosis: miSnapshots.marketDiagnosis, opportunitySignals: miSnapshots.opportunitySignals })
+          .from(miSnapshots)
+          .where(eq(miSnapshots.id, miSnapshotId || ""))
+          .limit(1);
+        if (latestMi[0]) {
+          const opps = JSON.parse((latestMi[0].opportunitySignals as any) || "[]");
+          for (const o of opps.slice(0, 8)) {
+            const c = typeof o === "string" ? o : (o.signal || o.text || o.claim || "");
+            if (c) competitorClaimsForSophistication.push(c);
+          }
+        }
+      } catch { /* ignore */ }
+
+      audienceSophistication = await scoreAudienceSophistication({
+        industry: businessContext.industry,
+        coreOffer: businessContext.coreOffer,
+        segments: audienceSegments.map(s => ({
+          name: s.name,
+          description: (s as any).description,
+          painProfile: s.painProfile || [],
+          desireProfile: s.desireProfile || [],
+          objectionProfile: s.objectionProfile || [],
+        })),
+        comments: commentTexts,
+        objections: objectionMap.slice(0, 12).map(o => o.canonical),
+        marketDiagnosis: null,
+        competitorClaims: competitorClaimsForSophistication,
+        accountId,
+      });
+
+      if (audienceSophistication) {
+        for (const segment of audienceSegments) {
+          const profile = audienceSophistication.segments.find(p =>
+            p.segmentName.toLowerCase().trim() === segment.name.toLowerCase().trim(),
+          );
+          if (profile) {
+            (segment as any).sophisticationProfile = profile;
+          }
+        }
+        console.log(`[AudienceEngine-V3] SOPHISTICATION_ATTACHED | globalTier=${audienceSophistication.globalTier} | segmentsScored=${audienceSophistication.segments.length}/${audienceSegments.length} | burnt=${audienceSophistication.marketIsBurnt}`);
+      }
+    } catch (sophErr: any) {
+      console.error(`[AudienceEngine-V3] SOPHISTICATION_FAILED | ${sophErr.message}`);
+    }
+  }
+
+  // ── PHASE 4 MARKETING-LOGIC UPGRADE: Buyer Psychology Profiler ──
+  // Reasons about belief model + rejection history + decision trigger + identity aspiration
+  // for the highest-density segment. Sophistication tier becomes a byproduct of belief-model
+  // maturity, not the primary output. Cialdini leverages are psychology-matched, not category-default.
+  let buyerPsychologyProfile: import("./buyer-psychology").BuyerPsychologyProfile | null = null;
+  if (totalSignalMatches >= AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI && audienceSegments.length > 0) {
+    try {
+      const { profileBuyerPsychology } = await import("./buyer-psychology");
+      const targetSegment: any = audienceSegments[0];
+      const rejectedClaimPatterns: string[] = [];
+      const segProfile = (targetSegment as any)?.sophisticationProfile;
+      if (segProfile?.rejectedClaimPatterns) {
+        for (const p of segProfile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
+      }
+      const competitorClaimsForPsych: string[] = [];
+      try {
+        const latestMi2 = await db.select()
+          .from(miSnapshots)
+          .where(eq(miSnapshots.id, miSnapshotId || ""))
+          .limit(1);
+        if (latestMi2[0]) {
+          const opps = JSON.parse((latestMi2[0].opportunitySignals as any) || "[]");
+          for (const o of opps.slice(0, 8)) {
+            const c = typeof o === "string" ? o : (o.signal || o.text || o.claim || "");
+            if (c) competitorClaimsForPsych.push(c);
+          }
+        }
+      } catch { /* ignore */ }
+
+      buyerPsychologyProfile = await profileBuyerPsychology({
+        segmentName: targetSegment.name || "Primary Segment",
+        segmentDescription: (targetSegment as any).description || "",
+        audiencePains: painMap.slice(0, 8).map(p => p.canonical),
+        audienceDesires: desireMap.slice(0, 8).map(d => d.canonical),
+        audienceObjections: objectionMap.slice(0, 8).map(o => o.canonical),
+        buyerComments: commentTexts.slice(0, 8),
+        competitorClaims: competitorClaimsForPsych,
+        rejectedClaimPatterns,
+        industry: businessContext.industry || "",
+        coreOffer: businessContext.coreOffer || "",
+        accountId,
+      });
+      if (buyerPsychologyProfile) {
+        console.log(`[AudienceEngine-V3] BUYER_PSYCHOLOGY_ATTACHED | tier=${buyerPsychologyProfile.sophisticationByproduct.tier} | aspirational="${buyerPsychologyProfile.identityAspiration.aspirationalIdentity.slice(0, 50)}" | leverages=[${buyerPsychologyProfile.cialdiniLeverages.join(",")}] | retries=${buyerPsychologyProfile.retryCount}`);
+      } else {
+        console.log(`[AudienceEngine-V3] BUYER_PSYCHOLOGY_FALLBACK | profiler returned null — engine continuing with legacy output`);
+      }
+    } catch (psychErr: any) {
+      console.error(`[AudienceEngine-V3] BUYER_PSYCHOLOGY_FAILED | ${psychErr.message} — engine continuing with legacy output`);
+    }
   }
 
   const segmentDensity = computeSegmentDensity(painMap, desireMap, audienceSegments, miSnapshotId);
@@ -1489,6 +2277,23 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   } else if (isDefensiveMode) {
     status = "DEFENSIVE_MODE";
     statusMessage = "Low signal environment detected — Audience intelligence limited — More market data required";
+  } else {
+    // PARTIAL emission: engine produced usable
+    // output but coverage is incomplete. Triggers when (a) signals are above
+    // the AI floor but below the doubled "rich coverage" mark, OR (b) any of
+    // the core maps came back empty, OR (c) no audience segments resolved.
+    // Snapshot-reuse + System Control read this status verbatim.
+    const richSignalFloor = AUDIENCE_THRESHOLDS.MIN_SIGNAL_MATCHES_FOR_AI * 2;
+    const coreMaps = [painMap, desireMap, objectionMap];
+    const anyEmpty = coreMaps.some((m) => !Array.isArray(m) || m.length === 0);
+    if (totalSignalMatches < richSignalFloor || anyEmpty || (audienceSegments?.length ?? 0) === 0) {
+      status = "PARTIAL";
+      const reasons: string[] = [];
+      if (totalSignalMatches < richSignalFloor) reasons.push(`signals=${totalSignalMatches}<${richSignalFloor}`);
+      if (anyEmpty) reasons.push("core_map_empty");
+      if ((audienceSegments?.length ?? 0) === 0) reasons.push("no_segments");
+      statusMessage = `PARTIAL audience output — coverage incomplete (${reasons.join("; ")}); downstream engines must treat as low-confidence`;
+    }
   }
 
   const inputSummary = {
@@ -1506,17 +2311,17 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
 
   const audienceLineage: SignalLineageEntry[] = [];
   painMap.forEach((p: any, i: number) => {
-    if (p.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_pain", p.canonical, i));
+    if (p.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_pain", p.canonical, i, "competitor"));
   });
   desireMap.forEach((d: any, i: number) => {
-    if (d.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_desire", d.canonical, i));
+    if (d.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_desire", d.canonical, i, "competitor"));
   });
   objectionMap.forEach((o: any, i: number) => {
-    if (o.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_objection", o.canonical, i));
+    if (o.canonical) audienceLineage.push(createSourceLineageEntry("audience", "audience_objection", o.canonical, i, "competitor"));
   });
   (emotionalDrivers || []).forEach((d: any, i: number) => {
     const text = typeof d === "string" ? d : (d?.driver || d?.description || d?.canonical || "");
-    if (text) audienceLineage.push(createSourceLineageEntry("audience", "emotional_driver", text, i));
+    if (text) audienceLineage.push(createSourceLineageEntry("audience", "emotional_driver", text, i, "competitor"));
   });
   if (bridgeResult && bridgeResult.bridgeIntegrity) {
     const allBridgedSignals = [...bridgeResult.painSignals, ...bridgeResult.desireSignals, ...bridgeResult.objectionSignals];
@@ -1526,6 +2331,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
         `bridge_${bs.category}_${bs.bridgeSource}`,
         `${bs.canonical} [parent:${bs.parentSignalId}]`,
         i,
+        "competitor",
       ));
     });
   }
@@ -1538,7 +2344,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   console.log(`[AudienceEngine-V3] STRUCTURED_SIGNALS | pains=${structuredSignals.pain_clusters.length} | desires=${structuredSignals.desire_clusters.length} | patterns=${structuredSignals.pattern_clusters.length} | rootCauses=${structuredSignals.root_causes.length} | psychDrivers=${structuredSignals.psychological_drivers.length}`);
 
   const [inserted] = await db.insert(audienceSnapshots).values({
-    accountId, campaignId, miSnapshotId,
+    accountId, campaignId, jobId, miSnapshotId,
     engineVersion: AUDIENCE_ENGINE_VERSION,
     languageSignals: JSON.stringify(languageSignals),
     audiencePains: JSON.stringify(painMap),
@@ -1575,6 +2381,9 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
   return {
     status,
     statusMessage,
+    aiPathTelemetry: audienceAiPathSink.emission
+      ? audienceAiPathSink.emission
+      : { mode: "fallback", attempts: 0, failedGates: [], fallbackReason: "segments_not_constructed" },
     defensiveMode: isDefensiveMode,
     languageSignals,
     painMap,
@@ -1594,17 +2403,24 @@ export async function runAudienceEngine(accountId: string, campaignId: string): 
     executionTimeMs,
     snapshotId: inserted.id,
     freshnessMetadata: miFreshnessMetadata,
+    productDna: productDna || null,
+    dataReliability,
+    confidenceScore: dataReliability.overallReliability,
+    audienceSophistication,
+    buyerPsychologyProfile,
   };
 }
 
-export async function getLatestAudienceSnapshot(accountId: string, campaignId: string) {
-  const [snapshot] = await db.select().from(audienceSnapshots)
-    .where(and(
-      eq(audienceSnapshots.accountId, accountId),
-      eq(audienceSnapshots.campaignId, campaignId),
-    ))
-    .orderBy(desc(audienceSnapshots.createdAt))
-    .limit(1);
+export async function getLatestAudienceSnapshot(accountId: string, campaignId: string, runId?: string | null) {
+  const baseFilters = [
+    eq(audienceSnapshots.accountId, accountId),
+    eq(audienceSnapshots.campaignId, campaignId),
+  ];
+  if (runId) baseFilters.push(eq(audienceSnapshots.jobId, runId));
+  const query = db.select().from(audienceSnapshots).where(and(...baseFilters));
+  const [snapshot] = runId
+    ? await query.limit(1)
+    : await query.orderBy(desc(audienceSnapshots.createdAt)).limit(1);
 
   if (!snapshot) return null;
 

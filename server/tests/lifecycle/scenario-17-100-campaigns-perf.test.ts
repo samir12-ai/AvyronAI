@@ -1,0 +1,68 @@
+/**
+ * Seal #18 / Track #5 — Scenario 17: 100 campaigns × 4 weekly ticks ≤60s.
+ *
+ * Soft wall-clock check. Seeds 100 plans approved at the same epoch,
+ * runs 4 weekly ticks, asserts each tick invoked all 100 campaigns
+ * AND total wall-clock is comfortably under 60s.
+ */
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+
+vi.mock("../../db", async () => (await import("./_harness")).__dbModuleMock);
+vi.mock("../../boss", async () => (await import("./_harness")).__bossModuleMock);
+vi.mock("../../boss/concurrency", async () => (await import("./_harness")).__concurrencyModuleMock);
+vi.mock("../../audit", async () => (await import("./_harness")).__auditModuleMock);
+vi.mock("../../logger", async () => (await import("./_harness")).__loggerModuleMock);
+
+import {
+  setupHarness,
+  teardownHarness,
+  assertCanonicalSurfaces,
+  seedApprovedPlan,
+  runOneTick,
+  dbState,
+  WEEK_MS,
+  assertMetric,
+} from "./_harness";
+
+beforeEach(() => setupHarness());
+afterEach(() => teardownHarness());
+
+describe("Scenario 17 — 100 campaigns × 4 weekly ticks completes in <60s", () => {
+  it("each weekly tick invokes runBoss for all 100 campaigns", async () => {
+    const T0 = new Date("2026-05-01T00:00:00Z");
+    for (let i = 0; i < 100; i++) {
+      seedApprovedPlan({
+        accountId: `acct_${i}`,
+        campaignId: `camp_${i}`,
+        planId: `plan_${i}`,
+        approvedAt: T0,
+      });
+    }
+
+    // performance.now() is intentionally NOT faked by the harness
+    // (vi.useFakeTimers({ toFake: ["Date"] }) only replaces Date) so it
+    // reports REAL wall-clock for this perf gate.
+    const start = performance.now();
+    for (let week = 1; week <= 4; week++) {
+      const tickAt = new Date(T0.getTime() + week * WEEK_MS);
+      const r = await runOneTick(tickAt);
+      expect(r.campaignsScanned).toBe(100);
+      expect(r.runsInvoked).toBe(100);
+    }
+    const wallClockMs = performance.now() - start;
+
+    expect(dbState.bossRuns.length).toBe(400);
+    expect(dbState.evalWindows.length).toBe(400);
+    assertMetric("continuity_runs_invoked_total", 400);
+    expect(wallClockMs).toBeLessThan(60_000);
+
+    assertCanonicalSurfaces({
+      bossRuns: 400,
+      evalWindows: 400,
+      anchorResets: 0,
+      ticks: 4,
+      claims: 400,
+      auditEvents: {},
+    });
+  }, 90_000);
+});

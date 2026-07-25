@@ -1,0 +1,196 @@
+Hi,
+
+Now that the signal identity enforcement layer is in place, I do not want to jump directly into fixing individual engines in isolation.
+
+Before we touch Offer, Funnel, Persuasion, Positioning, or any other engine-level logic, I want a full cross-engine alignment audit based strictly on the current codebase and actual system behavior.
+
+The goal is to verify how all engines connect to each other, where outputs are weakening, where meaning is lost, where engines are misaligned, and where the system is still producing contradictions even though the underlying infrastructure is now stronger.
+
+This is a verification and diagnosis phase, not an implementation phase.
+
+---
+
+## Objective
+
+Audit the relationships between engines, not just the engines individually.
+
+I want to know:
+
+- whether each engine is receiving the right upstream inputs
+- whether each engine is interpreting those inputs correctly
+- whether outputs are being translated correctly into downstream engines
+- where the system loses coherence between layers
+- where one engine is stronger than the next engine that consumes it
+- where the system creates contradictions across strategy, persuasion, funnel, budget, retention, and dashboard behavior
+
+---
+
+## Focus of the Audit
+
+Please analyze the full chain across the major strategic engines, including at minimum:
+
+- Market Intelligence
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Awareness
+- Funnel
+- Persuasion
+- Integrity
+- Statistical Validation
+- Budget Governor
+- Iteration
+- Retention
+- Dashboard / Agent / execution-facing outputs
+
+---
+
+## What I Need You to Verify
+
+### 1. Input-to-Output Alignment Between Engines
+
+For each engine pair, verify whether the downstream engine is actually using the upstream engine correctly.
+
+Examples:
+- Is Funnel correctly consuming Offer?
+- Is Persuasion correctly consuming Positioning + Awareness?
+- Is Offer correctly consuming Mechanism?
+- Is Awareness correctly translating Audience + MI?
+- Is Budget correctly reflecting Funnel / Persuasion / Validation reality?
+- Is Retention exposing contradictions that upstream engines missed?
+
+I want to know where the handoff is:
+- strong
+- weak
+- lossy
+- contradictory
+
+---
+
+### 2. Meaning Preservation Across the Chain
+
+Check whether meaning survives as signals move from one engine to another.
+
+Examples:
+- Does Positioning preserve what Audience discovered?
+- Does Offer preserve what Positioning intended?
+- Does Funnel preserve what Offer promises?
+- Does Persuasion reinforce the same logic or drift away from it?
+- Does Budget understand the same reality that Funnel and Retention are showing?
+
+I want to know where:
+- abstraction increases too much
+- outputs become generic
+- critical meaning is diluted
+- the next engine no longer reflects the original strategic intent
+
+---
+
+### 3. Contradiction Mapping
+
+Please identify all major contradictions across engines.
+
+Examples of the kind of contradiction I mean:
+- Funnel says weak fit, Budget says scale
+- Integrity says safe, Retention shows major refund issues
+- Awareness says proof-led, but Offer does not carry proof strongly enough
+- Persuasion is structured, but not conversion-effective
+- Content DNA is coherent, but still borrowed from competitor patterns
+
+Map these contradictions clearly.
+
+---
+
+### 4. Engine Dependency Weaknesses
+
+I want to know whether some engines are too independent.
+
+Examples:
+- Are some engines producing internally coherent output without being tightly constrained by upstream truth?
+- Are some engines only checking structural consistency instead of actual strategic continuity?
+- Are there engines that receive the right inputs but do not weight them strongly enough?
+
+---
+
+### 5. Missing Translation Layers
+
+A major concern is that some engines may be logically correct but poorly translated for the next stage.
+
+Please identify where the system may need a translation layer rather than a logic rewrite.
+
+Examples:
+- Mechanism is structurally strong but not human-readable enough for Offer
+- Positioning may be strategically correct but not believable enough for Persuasion
+- Awareness may detect the right entry route, but Funnel may not translate it into an effective path
+
+I want to know where the issue is:
+- bad logic
+- weak translation
+- weak handoff
+- or weak execution downstream
+
+---
+
+### 6. Dashboard / Agent Reality Check
+
+Please include the dashboard / agent layer in the audit.
+
+I want you to verify whether the execution-facing outputs are aligned with what the strategic engines are claiming.
+
+Examples:
+- Does “What to do today” actually reflect the strongest validated strategic path?
+- Does the agent expose reality gaps that the engines are not accounting for?
+- Does the dashboard show strategic confidence that is not matched by execution readiness?
+
+---
+
+## Expected Output
+
+Please return a structured report with:
+
+### A. Cross-Engine Alignment Matrix
+For each major engine relationship:
+- upstream engine
+- downstream engine
+- status: aligned / weak / contradictory / lossy
+- why
+
+### B. Major Contradictions
+List the most important contradictions across the system.
+
+### C. Major Weak Handoffs
+Where outputs are not translating well into the next engine.
+
+### D. Root-Level Observations
+What appears to be the real cause behind the cross-engine problems.
+
+### E. Clarifying Questions (if needed)
+If there are areas where code is ambiguous, list the exact questions you need answered.
+
+---
+
+## Important Constraints
+
+- Do NOT implement changes yet
+- Do NOT patch individual engines yet
+- Do NOT give generic recommendations
+
+I want this grounded in:
+- actual code
+- actual flow
+- actual dependencies
+- actual contradictions
+
+---
+
+## Final Goal
+
+Before we start fixing Offer / Funnel / Persuasion / Positioning, I want a precise diagnosis of:
+
+> where the engines stop supporting each other properly
+
+Once we have that, we can fix the right layer instead of patching symptoms.
+
+Thanks

@@ -10,6 +10,12 @@ import {
 } from "../competitive-intelligence/proxy-pool-manager";
 import { MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT } from "../market-intelligence-v3/fetch-orchestrator";
 
+// 2026-07 Unlocker rebuild — sessions are LOGICAL bookkeeping only and exist
+// only when the scraping transport is configured. Fake credentials let the
+// sticky-session tests run hermetically; nothing here performs network I/O.
+process.env.BRIGHT_DATA_API_KEY = process.env.BRIGHT_DATA_API_KEY || "test-unlocker-key";
+process.env.BRIGHT_DATA_ZONE = process.env.BRIGHT_DATA_ZONE || "test_zone";
+
 describe("Section 1: Proxy Rate Test — Token Bucket Rate Limiter", () => {
   beforeEach(() => {
     resetAllBuckets();
@@ -123,10 +129,6 @@ describe("Section 3: Session Stickiness Test — Sticky Proxy Sessions", () => {
   });
 
   it("same proxy session used across entire pipeline for one competitor", () => {
-    if (!process.env.BRIGHT_DATA_PROXY_HOST) {
-      console.log("[Test] Skipping — no proxy config");
-      return;
-    }
     const ctx1 = acquireStickySession("stickiness_test", "camp1", "compHash1");
     expect(ctx1).not.toBeNull();
 
@@ -139,7 +141,6 @@ describe("Section 3: Session Stickiness Test — Sticky Proxy Sessions", () => {
   });
 
   it("session does NOT rotate on non-block errors", () => {
-    if (!process.env.BRIGHT_DATA_PROXY_HOST) return;
     const ctx = acquireStickySession("stickiness_test", "camp1", "compHash2");
     expect(ctx).not.toBeNull();
 
@@ -153,7 +154,6 @@ describe("Section 3: Session Stickiness Test — Sticky Proxy Sessions", () => {
   });
 
   it("session rotates ONLY on PROXY_BLOCKED or RATE_LIMIT", () => {
-    if (!process.env.BRIGHT_DATA_PROXY_HOST) return;
     const ctx = acquireStickySession("stickiness_test", "camp1", "compHash3");
     expect(ctx).not.toBeNull();
     const originalId = ctx!.session.sessionId;
@@ -303,7 +303,7 @@ describe("Section 7: Integration Invariants", () => {
     expect(directFetchCalls.length).toBe(0);
   });
 
-  it("all scraper HTTP paths are rate-limited (WEB_API, HTML_PARSE, HEADLESS_RENDER, pagination)", async () => {
+  it("all scraper HTTP paths are rate-limited (WEB_API, HTML_PARSE, pagination)", async () => {
     const source = await import("fs").then(fs =>
       fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
     );
@@ -311,7 +311,9 @@ describe("Section 7: Integration Invariants", () => {
     expect(source).toContain("acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:i.ig:");
     expect(source).toContain("acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page2:");
     expect(source).toContain("acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `HTML_PARSE:");
-    expect(source).toContain("acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `HEADLESS_RENDER:");
+    // HEADLESS_RENDER stage retired in the 2026-07 Unlocker rebuild — the
+    // Unlocker API renders server-side; the stage must stay retired loudly.
+    expect(source).not.toContain("HEADLESS_RENDER:");
   });
 
   it("rate bucket state is logged at job completion", async () => {
@@ -466,10 +468,9 @@ describe("Section 7: Fetch Hardening — Fair Allocation, Coverage, Dynamic Budg
 
   it("coverage data is included in getFetchJobStatus response", async () => {
     const source = await readSource();
-    const getStatusFn = source.substring(
-      source.indexOf("export async function getFetchJobStatus"),
-      source.indexOf("export async function getFetchJobStatus") + 2000
-    );
+    const fnStart = source.indexOf("export async function getFetchJobStatus");
+    const fnEnd = source.indexOf("async function queueDeepPass");
+    const getStatusFn = source.substring(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 4000);
     expect(getStatusFn).toContain("coverage:");
     expect(getStatusFn).toContain("competitorsTotal");
     expect(getStatusFn).toContain("competitorsProcessed");

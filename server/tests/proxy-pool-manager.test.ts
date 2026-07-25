@@ -22,6 +22,12 @@ const TEST_ACCOUNT_B = "test_account_b";
 const TEST_CAMPAIGN = "test_campaign_1";
 const TEST_COMP_HASH = "abc123def456";
 
+// 2026-07 Unlocker rebuild — sessions are LOGICAL bookkeeping only and exist
+// only when the scraping transport is configured. Fake credentials let the
+// pool tests run hermetically; nothing here performs network I/O.
+process.env.BRIGHT_DATA_API_KEY = process.env.BRIGHT_DATA_API_KEY || "test-unlocker-key";
+process.env.BRIGHT_DATA_ZONE = process.env.BRIGHT_DATA_ZONE || "test_zone";
+
 describe("Proxy Pool Manager — Torture Tests", () => {
   beforeEach(() => {
     clearPool(TEST_ACCOUNT_A);
@@ -366,7 +372,7 @@ describe("Proxy Pool Manager — Torture Tests", () => {
   });
 
   describe("J) INVARIANT 1 — Sticky Session Integrity Across All Fallback Paths", () => {
-    it("WEB_API, HTML_PARSE, HEADLESS_RENDER must share identical proxySessionId and ipHash", () => {
+    it("WEB_API, HTML_PARSE, PAGINATION_PAGE_2 must share identical proxySessionId and ipHash", () => {
       const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "invariant_1_comp");
       expect(ctx).not.toBeNull();
       if (!ctx) return;
@@ -376,7 +382,7 @@ describe("Proxy Pool Manager — Torture Tests", () => {
 
       logProxyTelemetry(ctx, "WEB_API", 200, null, 100, true);
       logProxyTelemetry(ctx, "HTML_PARSE", 200, null, 80, true);
-      logProxyTelemetry(ctx, "HEADLESS_RENDER", 200, null, 5000, true);
+      logProxyTelemetry(ctx, "PAGINATION_PAGE_2", 200, null, 120, true);
 
       const telemetry = getTelemetryForJob(TEST_ACCOUNT_A, "invariant_1_comp");
       expect(telemetry.length).toBe(3);
@@ -392,7 +398,7 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       const stages = telemetry.map(e => e.stageName);
       expect(stages).toContain("WEB_API");
       expect(stages).toContain("HTML_PARSE");
-      expect(stages).toContain("HEADLESS_RENDER");
+      expect(stages).toContain("PAGINATION_PAGE_2");
 
       releaseStickySession(ctx);
     });
@@ -401,49 +407,40 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
-      expect(source).toContain("attemptWebProfileApi(handle, proxyCtx, maxPosts)");
-      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx)");
-      expect(source).toContain("attemptHeadlessRender(profileUrl, handle, proxyCtx)");
+      expect(source).toContain("attemptWebProfileApi(handle, proxyCtx, maxPosts, bareTarget)");
+      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget)");
 
       expect(source).not.toContain("getProxyDispatcher()");
       expect(source).not.toContain("getSessionDispatcher()");
     });
   });
 
-  describe("J2) INVARIANT 2 — Playwright Proxy Uses Session Credentials", () => {
-    it("HEADLESS_RENDER reads session-specific username from proxyCtx, not base getProxyConfig", () => {
+  describe("J2) INVARIANT 2 — Unlocker transport (2026-07 rebuild: no per-session proxy identity)", () => {
+    it("profile-scraper routes every HTTP request through transportFetch → poolFetch", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
-      expect(source).toContain("proxyCtx?.session.sessionUsername");
-      expect(source).toContain("proxyCtx?.session.sessionPassword");
-      expect(source).toContain("proxyCtx?.session.proxyHost");
-      expect(source).toContain("proxyCtx?.session.proxyPort");
-
-      const fnMatch = source.match(/async function attemptHeadlessRender[\s\S]*?^}/m);
-      expect(fnMatch).not.toBeNull();
-      const headlessFnBody = fnMatch![0];
-      expect(headlessFnBody).not.toContain("getProxyConfig()");
-      expect(headlessFnBody).toContain("proxyCtx?.session.sessionUsername");
+      expect(source).toContain("function transportFetch");
+      // T006 — bare path threads an explicit backoff target into poolFetch.
+      expect(source).toContain("proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url, bareTarget ? { target: bareTarget } : undefined)");
+      // Headless rendering is retired — the Unlocker has no browser transport.
+      expect(source).not.toContain("async function attemptHeadlessRender");
+      expect(source).not.toContain("sessionUsername");
+      expect(source).not.toContain("session.dispatcher");
     });
 
-    it("ProxySession stores session-specific credentials for Playwright", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "playwright_creds");
+    it("ProxySession is a logical session — no proxy identity fields attached", () => {
+      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "logical_session");
       expect(ctx).not.toBeNull();
       if (!ctx) return;
 
-      expect(ctx.session.sessionUsername).toBeDefined();
-      expect(ctx.session.sessionPassword).toBeDefined();
-      expect(ctx.session.proxyHost).toBeDefined();
-      expect(ctx.session.proxyPort).toBeDefined();
-
-      const isWebUnlocker = ctx.session.proxyPort === "33335";
-      if (isWebUnlocker) {
-        expect(ctx.session.sessionUsername).not.toContain("-session-");
-      } else {
-        expect(ctx.session.sessionUsername).toContain("-session-");
-        expect(ctx.session.sessionUsername).toContain(ctx.session.sessionId);
-      }
+      expect(ctx.session.sessionId).toBeDefined();
+      expect(ctx.session.ipHash).toBeDefined();
+      expect((ctx.session as any).sessionUsername).toBeUndefined();
+      expect((ctx.session as any).sessionPassword).toBeUndefined();
+      expect((ctx.session as any).proxyHost).toBeUndefined();
+      expect((ctx.session as any).dispatcher).toBeUndefined();
+      expect(typeof ctx.poolFetch).toBe("function");
 
       releaseStickySession(ctx);
     });
@@ -474,15 +471,15 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       releaseStickySession(ctx);
     });
 
-    it("pagination code uses feedFetchOptions with i.instagram.com and mobile UA, no mid-page session creation", () => {
+    it("pagination goes through transportFetch against i.instagram.com, no mid-page session creation", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
       const paginationBlock = source.split("paginationAttempted = true")[1]?.split("if (paginationSuccess)")[0] || "";
       expect(paginationBlock.length).toBeGreaterThan(100);
-      expect(paginationBlock).toContain("fetch(feedUrl, feedFetchOptions)");
+      expect(paginationBlock).toContain("transportFetch(feedUrl, proxyCtx, bareTarget)");
       expect(paginationBlock).toContain("i.instagram.com/api/v1/feed/user/");
-      expect(paginationBlock).toContain("fetch(nextFeedUrl, feedFetchOptions)");
+      expect(paginationBlock).toContain("transportFetch(nextFeedUrl, proxyCtx, bareTarget)");
       expect(paginationBlock).not.toContain("www.instagram.com/api/v1/feed");
       expect(paginationBlock).not.toContain("getSessionDispatcher");
       expect(paginationBlock).not.toContain("getProxyDispatcher");
@@ -513,7 +510,6 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       expect(source).toContain('logProxyTelemetry(proxyCtx, "PAGINATION_PAGE_2"');
       expect(source).toContain('logProxyTelemetry(proxyCtx, `PAGINATION_PAGE_${paginationPages}`');
       expect(source).toContain('logProxyTelemetry(proxyCtx, "HTML_PARSE"');
-      expect(source).toContain('logProxyTelemetry(proxyCtx, "HEADLESS_RENDER"');
     });
 
     it("fetch orchestrator instruments telemetry for POSTS_FETCH", () => {
@@ -571,32 +567,32 @@ describe("Proxy Pool Manager — Torture Tests", () => {
       expect(source).toContain("MIN_SYNTHETIC_COMMENTS_PER_POST");
     });
 
-    it("profile-scraper uses pool-managed sessions exclusively (old proxy system deleted)", () => {
+    it("profile-scraper uses pool-managed Unlocker transport exclusively (old proxy system deleted)", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
-      expect(source).toContain("proxyCtx?.session.dispatcher");
       expect(source).toContain("proxyCtx?.session.sessionId");
+      expect(source).not.toContain("session.dispatcher");
       expect(source).not.toContain("function getProxyDispatcher");
       expect(source).not.toContain("function getSessionDispatcher");
       expect(source).not.toContain("function getProxyConfig");
-      expect(source).toContain("import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getProxyConfig }");
+      expect(source).toContain("import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getScrapingConfig, poolFetch }");
     });
 
     it("attemptHtmlPageParse accepts proxyCtx parameter", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
-      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx)");
+      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget)");
       expect(source).toMatch(/attemptHtmlPageParse\(.*proxyCtx\?: StickySessionContext/);
     });
 
-    it("attemptHeadlessRender accepts proxyCtx parameter", () => {
+    it("headless rendering is retired loudly, not silently (2026-07 Unlocker rebuild)", () => {
       const source = require("fs").readFileSync(
         "server/competitive-intelligence/profile-scraper.ts", "utf-8"
       );
-      expect(source).toContain("attemptHeadlessRender(profileUrl, handle, proxyCtx)");
-      expect(source).toMatch(/attemptHeadlessRender\(.*proxyCtx\?: StickySessionContext/);
+      expect(source).not.toContain("async function attemptHeadlessRender");
+      expect(source).toContain("HEADLESS_RENDER_SKIPPED");
     });
   });
 });

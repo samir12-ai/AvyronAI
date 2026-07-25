@@ -1,0 +1,352 @@
+Hi Avyron Team,
+
+P-1 is complete. The Performance Loop data foundation is now live: plan lineage flows into published posts, outcome snapshots can be captured at 24h / 72h / 7d, and the system is ready for future scoring.
+
+The next step is W-1: Watchtower Orchestrator and Snapshot Retention.
+
+Important: the previous P-1 discovery showed that some assumptions in the handoff did not match the actual codebase. Therefore, do not assume table names, call paths, or existing behavior from the specification. Verify everything directly against the current code and live database before implementing.
+
+## Objective
+
+Make Watchtower detect real competitor and market changes over time, store them as structured events, and verify that the complete flow works on a real campaign using real scraped competitor data.
+
+The required flow is:
+
+Competitor scraping → historical snapshots → old-vs-new comparison → classified market change event → campaign-visible Watchtower signal.
+
+This session is limited to data collection, retention, change detection, and verification. Do not build the AI interpretation layer or user recommendations yet.
+
+## Phase 1 — Full Discovery and Live-System Audit
+
+Do not change code during this phase.
+
+### 1. Confirm the current scraping architecture
+
+Find and report:
+
+* Every competitor scraping entry point.
+* Every scheduled worker, queue, or manual route that starts scraping.
+* Which platforms and sources are currently scraped.
+* Which competitor fields are collected.
+* Where scraped posts, profiles, offers, captions, engagement, posting frequency, pricing URLs, and other signals are stored.
+* Which fields are computed temporarily and discarded.
+* Whether failed scraping jobs retry, remain queued, or become zombie jobs.
+* Whether deduplication can accidentally reuse stale scraping results.
+
+Print exact file and line references.
+
+### 2. Verify scraping against a real campaign
+
+Choose one real existing campaign that has real competitors attached.
+
+Run the complete scraping flow and provide evidence for each competitor:
+
+* Campaign ID.
+* Competitor ID and name.
+* Source URL or account.
+* Number of posts or records requested.
+* Number successfully fetched.
+* Timestamp of the fetch.
+* Freshness of the newest scraped item.
+* Any failed sources and exact failure reason.
+* Whether the results came from a fresh fetch or snapshot reuse.
+* The database rows written or updated.
+
+Do not use fixtures, mocks, fake competitors, or manually fabricated records for this verification.
+
+If the real campaign has broken competitor URLs or disconnected sources, report them clearly and continue with every valid real competitor available.
+
+### 3. Confirm snapshot retention behavior
+
+For each scraped competitor, determine whether a new scrape:
+
+* inserts a new historical snapshot,
+* updates an existing row,
+* overwrites the previous state,
+* or reuses a cached snapshot.
+
+Show the exact schema and write path.
+
+Confirm whether the system can retrieve:
+
+* the latest snapshot,
+* the immediately previous snapshot,
+* and a historical timeline for the same competitor.
+
+### 4. Audit the existing diff logic
+
+Find every function that compares two competitor states.
+
+Report:
+
+* Function signature.
+* Current callers.
+* Inputs and outputs.
+* Which changes it can detect honestly.
+* Which fields are missing.
+* Whether it currently produces persisted events.
+* Whether offer language, posting frequency, dominance scores, phrase saturation, pricing changes, or engagement changes are already supported.
+
+### 5. Audit existing event storage
+
+Inspect `pipeline_change_events` and any other relevant event tables.
+
+Confirm whether the current schema can store:
+
+* campaign ID,
+* competitor ID,
+* event kind,
+* previous value,
+* current value,
+* delta,
+* source snapshot IDs,
+* severity,
+* detected timestamp,
+* validation timestamp,
+* evidence references.
+
+If an existing table is not appropriate, explain why before proposing a new migration.
+
+### 6. Confirm current campaign health
+
+Before implementation, run or inspect one real full campaign pipeline and report:
+
+* Campaign ID.
+* Timestamp.
+* Current verdict.
+* Block reasons.
+* Scraping status.
+* Number of active competitors.
+* Any degraded or reused data.
+* Whether the campaign output is based on fresh evidence.
+
+Do not rely only on verdict history. Show the exact latest run and its evidence.
+
+Provide a complete Phase 1 findings table before writing code.
+
+## Phase 2 — Architect Review
+
+Prepare an implementation plan based only on the verified Phase 1 findings.
+
+The plan must cover:
+
+1. Append-only competitor snapshot history.
+2. Backward-compatible latest-snapshot reads.
+3. Watchtower orchestration after successful competitor fetch cycles.
+4. Deterministic change classification.
+5. Two-fetch validation for high-severity changes.
+6. Structured evidence linking each event to the exact source snapshots.
+7. Failure logging and retry behavior.
+8. Migration and schema-floor changes.
+9. Real-campaign verification strategy.
+
+Architect review must PASS before implementation.
+
+Do not proceed with unresolved HIGH findings.
+
+## Phase 3 — Implementation
+
+### A. Historical competitor snapshots
+
+Implement append-only snapshot history for each competitor fetch.
+
+Requirements:
+
+* Every fresh successful fetch creates a timestamped historical record.
+* Existing callers that need the latest snapshot continue to work.
+* Snapshot reuse must be marked explicitly.
+* Fresh fetches and reused snapshots must never be indistinguishable.
+* Store source timestamps and fetch timestamps separately where applicable.
+* Add configurable retention: 90 days full-fidelity history, with a documented later compression path if compression is not implemented in this session.
+* Do not silently overwrite prior competitor state.
+
+### B. Watchtower Orchestrator
+
+Create or complete the Watchtower orchestration layer.
+
+After a successful competitor fetch cycle:
+
+1. Load the newest snapshot.
+2. Load the immediately previous comparable snapshot.
+3. Run the existing diff primitive where possible.
+4. Materialize detected differences as structured market change events.
+5. Attach both snapshot IDs and evidence references.
+6. Associate the event with the correct competitor and campaign.
+
+The orchestrator must work with real campaign scraping results, not only direct test calls.
+
+### C. Deterministic classification
+
+Initial classification must be code-based, not AI-based.
+
+Use verified available data only.
+
+Expected categories where supported:
+
+* `offer_language_change`
+* `posting_frequency_shift`
+* `dominance_shift`
+* `phrase_saturation_change`
+* `pricing_page_change`
+* `engagement_pattern_shift`
+* `competitor_profile_change`
+
+Severity model:
+
+* Non-trivial offer change: candidate alarm.
+* Confirmed pricing-page change: candidate alarm.
+* Dominance delta of at least 10 points: watch.
+* Posting frequency shift beyond one standard deviation of that competitor’s own trailing baseline: watch.
+* New phrase family repeated across at least three competitors: watch.
+* Minor changes: info.
+
+Do not lower any threshold to force events to appear.
+
+If the available real data cannot honestly support one of these categories, mark it UNAVAILABLE and do not fabricate it.
+
+### D. Two-fetch validation
+
+A candidate alarm must not become a confirmed alarm on the first observation.
+
+Required behavior:
+
+* First observation: candidate event with `validated_at = null`.
+* Same material change confirmed in the next independent fresh fetch: promote and set `validated_at`.
+* Reversion before confirmation: do not promote.
+* Snapshot reuse does not count as a second confirmation.
+* Manual duplicate execution does not count as an independent confirmation.
+
+### E. Failure behavior
+
+All failures must be loud and structured.
+
+Required tags include:
+
+* `WATCHTOWER_ORCHESTRATOR_FAILED`
+* `COMPETITOR_SNAPSHOT_WRITE_FAILED`
+* `COMPETITOR_DIFF_FAILED`
+* `MARKET_EVENT_PERSIST_FAILED`
+* `SCRAPING_FRESHNESS_UNVERIFIED`
+* `SCRAPING_SNAPSHOT_REUSED`
+* `SCRAPING_SOURCE_FAILED`
+
+A competitor-specific failure must not corrupt the full campaign cycle.
+
+No silent catches, no `|| null` swallowing, and no fake successful state.
+
+## Phase 4 — Real Campaign Verification
+
+Verification must use at least one real existing campaign and real competitor scraping.
+
+### Check 1 — Fresh scraping
+
+Trigger a fresh competitor fetch for the selected campaign.
+
+Provide:
+
+* logs,
+* fetched competitor records,
+* timestamps,
+* source freshness,
+* database evidence,
+* and proof that the run was not a reused snapshot.
+
+### Check 2 — Historical retention
+
+Run two independent fresh fetches.
+
+Confirm:
+
+* two distinct historical snapshots exist,
+* the older snapshot remains unchanged,
+* the latest-snapshot reader returns the newest record,
+* and the previous-snapshot reader returns the correct immediately prior record.
+
+### Check 3 — Real diff creation
+
+Use a naturally occurring real competitor difference where available.
+
+If no real difference occurs during the verification window, use a controlled test harness against copied snapshot data, but do not modify or fabricate the production competitor source.
+
+Confirm a structured market change event is written with:
+
+* campaign ID,
+* competitor ID,
+* kind,
+* old value,
+* new value,
+* delta,
+* source snapshot IDs,
+* detected timestamp,
+* severity,
+* and evidence references.
+
+### Check 4 — Alarm validation
+
+Demonstrate:
+
+* first observation creates a candidate alarm,
+* a second independent fresh fetch confirms it,
+* and a reversion does not incorrectly promote it.
+
+### Check 5 — Scraping failure visibility
+
+Force or use one real failing competitor source.
+
+Confirm:
+
+* the failure is logged with the exact reason,
+* other competitors continue processing,
+* the campaign does not report the failed source as fresh,
+* and no fake empty snapshot is treated as valid evidence.
+
+### Check 6 — End-to-end campaign visibility
+
+For the selected real campaign, show the complete chain:
+
+Real competitor source → fresh scraped data → historical snapshots → detected diff → stored Watchtower event.
+
+Also report whether this event is currently visible anywhere in the application. If not, state clearly that UI surfacing remains for a later Watchtower step.
+
+### Check 7 — Regression safety
+
+Run the real campaign pipeline again after implementation and report:
+
+* exact latest verdict,
+* exact block reasons,
+* scraping status,
+* Watchtower events generated,
+* degraded states,
+* timestamp,
+* and campaign ID.
+
+Confirm that no judge, gate, threshold, CEL scorer, Integrity engine, System Control logic, or verdict machinery changed.
+
+### Check 8 — TypeScript and runtime
+
+* Compare TypeScript error multisets against the current 718 baseline.
+* Net-new TypeScript errors must equal zero.
+* Apply the migration.
+* Restart the backend.
+* Confirm all workers and schedulers start cleanly.
+* Confirm there are no retry storms or zombie scraping jobs.
+
+## Done Conditions
+
+This session is complete only when:
+
+* Architect review passes.
+* Real campaign scraping is verified with fresh evidence.
+* Historical competitor snapshots are append-only.
+* The Watchtower orchestrator runs automatically after scraping.
+* Market change events are persisted with evidence references.
+* Candidate alarms require two independent fresh fetches.
+* Scraping failures are visible and do not create fake success.
+* The latest real campaign verdict and block reasons are quoted.
+* TypeScript net-new errors equal zero.
+* All verification checks include concrete database rows, logs, timestamps, and file references.
+* No gate, judge, threshold, CEL, Integrity, System Control, or verdict logic was modified — this is a Watchtower data and scraping verification session only.
+
+Final one-line summary format:
+
+“Watchtower W-1 fuel path complete: real campaign scraping verified, competitor history retained, old-vs-new changes materialized as evidence-backed market events, ready for the next Watchtower step.”

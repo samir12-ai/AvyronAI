@@ -1,0 +1,22 @@
+Subject: Verify Fresh Data Flow — Reanalyze Path + Overall Data Health Check
+
+Bright Data is now fully enabled on our side (Unlocker zone + SERP zone with Google Reviews collector active). Before we rely on any analysis results, I need proof that the system is actually consuming FRESH data — not silently reusing stale snapshots. Diagnose and report, fix only what blocks freshness.
+
+PART 1 — LIVE FETCH CONFIRMATION
+1. Trigger a real competitor fetch cycle through the normal pipeline (pool manager → Unlocker/SERP) for the active campaign's competitors. Report per platform (Instagram / TikTok / website / reviews): HTTP outcomes, items fetched, items stored in DB, and the fetch job status. Zero-yield on any platform must show as SUSPECT_ZERO_YIELD, not success.
+2. Confirm reviews specifically: the two-step SERP flow now returns actual review TEXTS (the collector was just enabled — this is its first real test). Paste a sample of 2-3 stored review texts with their timestamps.
+
+PART 2 — REANALYZE FRESHNESS PATH (the critical question)
+3. Trace what happens when the user clicks Reanalyze on an engine TODAY: does it re-run MI v3 signal extraction on the NEWLY fetched posts, or does it reuse the old MI snapshot from before the scraping rebuild? Show the snapshot IDs and their created_at timestamps that the reanalyze actually reads.
+4. Check the cache/inputHash logic: fresh posts in the DB should change the MI snapshot, which should change downstream engine input hashes, forcing fresh engine runs. Verify this chain actually triggers — if engines report mode=reused despite new data, that's a freshness bug: find where the hash fails to incorporate new data.
+5. Confirm the data each engine consumed: for one reanalyze run, report per engine which MI snapshot ID + audience snapshot ID it read, with timestamps, proving they postdate the new fetch.
+
+PART 3 — OVERALL DATA HEALTH REPORT
+6. Data inventory for the active campaign: how many posts/reviews/signals are now in the DB, broken down by platform and by age (pre-rebuild vs post-rebuild). How much of what the engines currently see is stale vs fresh?
+7. Signal quality snapshot: of the newly fetched items, how many produced MI signals vs got filtered/failed? Any parse failures or empty extractions — logged loudly or swallowed?
+8. Pool health: paste the operator pool status (pools, cooldowns active, failure rates) after the fetch cycle — first real look at the upgraded multi-pool system under load.
+9. Cost sanity: approximate Bright Data request counts for this cycle (Unlocker vs SERP) so we can project monthly cost.
+
+REPORT FORMAT: findings with evidence (IDs, timestamps, counts), then a verdict per part: FRESH-CONFIRMED / STALE-DETECTED (with root cause) / BLOCKED. If anything consumes stale data on reanalyze, propose the fix and wait for my confirmation.
+
+Note: keep AI token usage minimal — the weekly quota is nearly exhausted. Fetching, storage, and freshness tracing don't need LLM calls; if full engine reruns would burn quota, verify the freshness chain up to the engine input hashes and flag the rest for next week.

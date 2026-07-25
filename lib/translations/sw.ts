@@ -486,7 +486,7 @@ const lang: TranslationKeys = {
     step1Title: 'Pakia Klipu',
     step1Desc: 'Chagua klipu zako za video ghafi kutoka kifaa chako',
     step2Title: 'AI Inahariri Video Yako',
-    step2Desc: 'GPT-5.2 inachambua klipu na kuunda maamuzi ya uhariri wa kitaalamu',
+    step2Desc: 'Avyron AI inachambua klipu na kuunda maamuzi ya uhariri wa kitaalamu',
     step3Title: 'Pata Video Yako',
     step3Desc: 'Pakua video ya mwisho iliyohaririwa na mipito na athari',
     clip: 'Klipu',

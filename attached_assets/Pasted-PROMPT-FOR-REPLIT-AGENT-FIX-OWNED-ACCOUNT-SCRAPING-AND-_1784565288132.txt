@@ -1,0 +1,155 @@
+PROMPT FOR REPLIT AGENT — FIX OWNED-ACCOUNT SCRAPING AND UNBLOCK P-2
+
+Context:
+
+P-2 scoring, weekly business outcomes, AI interpretation, and judgment infrastructure are implemented.
+
+However, real production verification is blocked because the owned-account scraper has not captured a single real post from:
+
+* Campaign: `campaign_1773576062201_6t0oxi`
+* Account: `a2d87878-a1e9-41ea-a8a5-90beff569673`
+* Owned profile: `https://www.instagram.com/avyron_ai/`
+
+The latest fresh scrape attempt failed through the full current chain:
+
+* `web_profile_info` returned HTTP 200 but no usable user JSON.
+* `i.instagram.com` returned HTTP 502.
+* HTML parsing returned the page but no post data.
+* The headless path is retired.
+* No fallback data was substituted.
+* `owned_posts` currently contains zero real rows.
+
+The immediate goal is to repair the real owned-page scraping fuel path so public posts and visible metrics reach P-2.
+
+This is a scraping repair and live-verification session only.
+
+Do not modify:
+
+* content-scoring rules
+* business-scoring rules
+* performance interpretation contracts
+* judges
+* gates
+* verdict thresholds
+* CEL
+* Integrity
+* System Control
+* Watchtower classification
+* campaign verdict logic
+
+Current TypeScript baseline: 718 errors.
+Current schema floor: 45.
+
+## Required End-to-End Flow
+
+Real Instagram owned profile
+→ fresh post discovery
+→ real post records
+→ public metric snapshots
+→ lineage resolution
+→ deterministic content scorer
+→ honest `TESTING`, `UNKNOWN`, or stronger verdict based on the real evidence
+
+The repair is not complete merely because a scraper function returns success. Real posts must be persisted and consumed by the production scorer.
+
+# Phase 1 — Root-Cause Audit
+
+Do not modify code during this phase.
+
+## 1. Trace the exact current owned-profile scrape path
+
+Print exact file and line references for:
+
+* owned-account scrape entry point
+* target registration
+* freshness gate
+* cooldown and degraded-state logic
+* profile-info fetch
+* Instagram endpoint fetch
+* HTML parser
+* any proxy or external scraping provider
+* post normalization
+* owned-post persistence
+* snapshot persistence
+* lineage resolver invocation
+* scorer invocation
+
+Show the complete call graph from scheduler or manual route to `owned_posts`.
+
+## 2. Explain why competitor scraping has data but owned scraping does not
+
+Compare the working competitor ingestion path with the owned-account path.
+
+Report:
+
+* whether they call the same Instagram scraper
+* whether they use different target identifiers
+* whether competitor records were collected before Instagram changed its responses
+* whether competitor data came from cached/shared profiles or truly fresh fetches
+* whether any existing provider or adapter can already return Instagram posts successfully
+* whether the owned-account path skips a working adapter
+* whether the parser expects outdated embedded JSON structures
+* whether cookies, headers, locale, redirects, rate limits, or anti-bot responses differ
+
+Do not assume the external source is permanently unavailable until every existing internal adapter is audited.
+
+## 3. Inspect the actual failed responses safely
+
+For the real `avyron_ai` target, capture diagnostic metadata without logging sensitive data:
+
+* final URL
+* status code
+* content type
+* response size
+* redirect chain
+* recognized page markers
+* whether login-wall, challenge, rate-limit, consent, or empty-shell HTML was returned
+* which expected JSON marker was missing
+
+Never log credentials, cookies, tokens, or full private headers.
+
+## 4. Audit available production-safe source options
+
+Evaluate, in this order:
+
+1. Repair the existing working source or parser.
+2. Reuse an existing project scraper/provider already used elsewhere.
+3. Add a provider adapter behind the existing scraper contract.
+4. Use a browser-based path only if architect-approved and operationally safe.
+
+For each viable option, report:
+
+* reliability
+* public metrics available
+* freshness
+* cost
+* rate limits
+* retry behavior
+* operational risk
+* whether it supports Instagram public profiles without user OAuth
+* whether it violates any platform or project constraints
+
+Do not hardwire Avyron to one provider. Preserve an adapter boundary.
+
+## 5. Verify target identity and ownership mapping
+
+Confirm that:
+
+* `avyron_ai` resolves to the correct Instagram profile
+* the stored URL and normalized username are correct
+* the profile is public and accessible outside a logged-in session
+* no username normalization bug exists
+* the returned posts are associated with the correct Avyron account
+* ownership scoping prevents other accounts from querying these records
+
+## Phase 1 output
+
+Provide a findings table containing:
+
+* exact root cause
+* failing component
+* working alternatives
+* selected repair
+* expected metrics
+* unavoidable unavailable metrics
+* ...

@@ -1,0 +1,110 @@
+Hi,
+
+I think we should stop treating the current issue as a SaaS-only tuning problem.
+
+The deeper issue is that the LLM is still analyzing engine evidence without first building a complete understanding of the business itself.
+
+The next step should be to add a Business Context Layer before any LLM commercial reasoning.
+
+Goal:
+Before the LLM interprets awareness, strategy, positioning, or market evidence, it should first understand:
+
+* what the business actually sells,
+* who the customer is,
+* what type of buying journey exists,
+* what the user’s manual inputs say,
+* what category/subcategory the business belongs to,
+* what commercial lens should be used,
+* and which reasoning framework fits that business.
+
+Recommended flow:
+
+Manual user data
+→ Business Context Layer
+→ Business Profile / Commercial Lens
+→ Engine evidence
+→ LLM reasoning
+→ integrity gates
+→ deterministic floor fallback
+→ strategy output
+
+This should not replace the current reliability architecture.
+The deterministic floor, canonical truth, evidence validation, kill-switch, AT gates, and anti-phantom protections must remain authoritative.
+
+What to build:
+
+1. Add a Business Context Layer
+
+It should consume available manual user inputs and existing system/context fields, then produce a structured business profile such as:
+
+* industry
+* sub-industry
+* business model
+* target customer
+* buyer type
+* offer type
+* pricing / purchase complexity if available
+* funnel type
+* commercial lens
+* likely growth bottlenecks
+* relevant reasoning framework
+
+Example:
+
+Instead of only:
+b2b_saas
+
+It should infer something closer to:
+B2B SaaS / SMB productivity tool / onboarding-sensitive / trust-based purchase / activation-friction risk / ROI-proof needed
+
+2. Use that profile before LLM reasoning
+
+The commercial reasoner should not receive engine evidence alone.
+It should receive the business profile first, then analyze the evidence through the selected commercial lens.
+
+3. Let the system select the lens automatically
+
+Examples:
+
+* SaaS → activation, churn, onboarding, time-to-value, ROI proof, switching cost
+* Ecommerce → offer clarity, conversion, product desire, retention, trust, price resistance
+* Local services → reputation, urgency, location intent, trust, anxiety reduction, proof
+* Agency / consulting → authority, differentiation, lead quality, proof, buying confidence
+
+4. Keep this additive and safe
+
+Do not rebuild engines.
+Do not remove deterministic logic.
+Do not make LLM the source of truth.
+Do not weaken existing gates.
+This should be an additive context layer that improves how the LLM reasons.
+
+5. Add tests
+
+Please add tests proving:
+
+* the layer uses manual user data when available,
+* it can infer a more specific commercial lens than the broad industry slug,
+* the LLM prompt receives the business profile before evidence,
+* fallback behavior works when manual data is missing,
+* hallucinated or unsupported business assumptions are not allowed,
+* deterministic floor still wins if integrity gates fail.
+
+6. Run measurement after implementation
+
+After the change lands, run a fresh control vs treatment measurement and compare against the previous Phase 4-A results.
+
+The main success criteria:
+
+* B2B SaaS improves because the LLM is no longer reasoning from generic evidence alone
+* local_services remains protected
+* dtc_ecom does not regress
+* no hallucinated business assumptions
+* no phantom evidence
+* deterministic floor remains authoritative
+
+The goal is not “make SaaS prompts better.”
+The goal is:
+make the LLM understand the business first, select the right commercial reasoning lens, and only then analyze engine evidence.
+
+Once this is implemented and tested, we can review the results before deciding whether to expand rollout.

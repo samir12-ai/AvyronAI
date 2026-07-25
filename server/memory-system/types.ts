@@ -8,7 +8,8 @@ export type MemoryClass =
   | "self_improvement"
   | "industry_baseline"
   | "exploration_budget"
-  | "agent_action";
+  | "agent_action"
+  | "market_signal";
 
 export type MemoryDirection = "reinforce" | "avoid" | "neutral";
 export type EnforcementStrength = "none" | "soft" | "moderate" | "strong";

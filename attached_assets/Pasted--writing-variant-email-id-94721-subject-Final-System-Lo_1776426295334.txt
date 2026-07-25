@@ -1,0 +1,173 @@
+:::writing{variant=“email” id=“94721” subject=“Final System Lockdown — Full Consistency, Data Integrity, and Frontend Truth Alignment”}
+Hi,
+
+We are at the final stage.
+
+The system logic, orchestration, and run-bound consistency are now working correctly. However, before we consider this fully stable and production-safe, we need to lock the system end-to-end and eliminate any remaining sources of inconsistency, legacy leakage, or mixed behavior.
+
+This is a full system hardening pass, not a partial fix.
+
+⸻
+
+Objective
+
+Ensure that:
+
+The frontend can only ever consume clean, run-bound, post-fix data, with zero possibility of:
+
+	•	legacy data leakage
+	•	mixed-run states
+	•	outdated endpoint behavior
+	•	pre-fix logic influencing current outputs
+
+⸻
+
+1. COMPLETE RUN-BOUND ENFORCEMENT (FINAL VERIFICATION)
+
+Re-verify all of the following from code and behavior:
+	•	Every snapshot table is:
+	•	stamped with job_id
+	•	indexed on (campaign_id, job_id)
+	•	Every insert path uses RunContext.jobId (no exceptions)
+	•	No engine or route writes snapshots without job binding
+	•	No table still relies on campaign_id + latest logic
+
+⸻
+
+2. FULL ENDPOINT AUDIT (NO LEGACY FALLBACKS)
+
+Audit ALL endpoints again (not just the 6 already fixed):
+	•	Ensure:
+	•	all endpoints accept ?runId=
+	•	all reads are pinned to job_id = runId
+	•	all responses include:
+	•	runId
+	•	isLatest
+	•	isStale
+	•	completedAt
+	•	Explicitly confirm:
+	•	ZERO usage of ORDER BY created_at DESC LIMIT 1
+	•	ZERO fallback to “latest” anywhere
+
+If any endpoint still behaves this way → fix it.
+
+⸻
+
+3. FRONTEND CONTRACT ENFORCEMENT
+
+We do NOT want the frontend to accidentally consume inconsistent data.
+
+Ensure:
+	•	All dashboard surfaces use a single resolved runId
+	•	No component independently calls endpoints without passing runId
+	•	No component uses old endpoints or legacy fetch patterns
+	•	useRunAnchor (or equivalent) is the ONLY source of truth
+
+⸻
+
+4. LEGACY DATA HANDLING
+
+We must eliminate risk from pre-fix data.
+
+Evaluate:
+	•	Are old rows (without proper job binding or created under broken logic) still present?
+	•	Can they ever be selected by any endpoint?
+
+Action:
+
+If safe:
+	•	remove or archive all pre-fix snapshot data
+
+If deletion is risky:
+	•	hard-exclude them from queries (e.g. require job_id NOT NULL and valid)
+
+No legacy row should ever surface in dashboard responses.
+
+⸻
+
+5. REMAINING TABLES (CRITICAL GAP CLOSURE)
+
+You already identified remaining risks. Close them:
+	•	goalDecompositions
+	•	growthSimulations
+	•	ael_snapshots (used in narrative)
+
+Apply the same pattern:
+	•	add job_id
+	•	backfill
+	•	index
+	•	bind reads to runId
+
+No partial compliance.
+
+⸻
+
+6. SYSTEM-WIDE BEHAVIOR VALIDATION
+
+Re-run full validation with this scenario:
+
+Test Case:
+	1.	Run A completes
+	2.	Run B starts (partial)
+	3.	Inject fake/newer rows (Frankenstein case)
+	4.	Refresh dashboard
+
+Must prove:
+	•	No mixed-run data appears
+	•	All endpoints return same runId
+	•	Stale detection works correctly
+	•	No legacy data leaks
+	•	No endpoint silently falls back
+
+⸻
+
+7. FINAL LOGIC CONSISTENCY CHECK
+
+After all structural fixes:
+	•	Re-run at least 2 campaigns
+	•	Confirm:
+	•	engines still behave correctly
+	•	no regression in logic
+	•	no degradation in outputs
+	•	no broken contracts between engines
+
+⸻
+
+8. NON-NEGOTIABLE RULES
+
+Do NOT:
+	•	reintroduce fallback logic
+	•	silently “fix” missing runId by using latest
+	•	patch UI to hide backend inconsistencies
+	•	leave partial tables unbound
+
+Everything must be:
+
+strict, explicit, and verifiable
+
+⸻
+
+9. ACCEPTANCE CRITERIA
+
+This task is complete only when:
+	•	all data is run-bound
+	•	all endpoints are run-bound
+	•	frontend uses a single runId
+	•	no legacy data can surface
+	•	no mixed-run state is possible
+	•	validation proves consistency under failure scenarios
+
+⸻
+
+Final Note
+
+We are not improving the system anymore.
+
+We are locking it.
+
+After this, the system should behave as a single coherent source of truth from engines → database → API → frontend.
+
+Proceed carefully and complete this end-to-end.
+
+Thanks.
+:::

@@ -1,0 +1,119 @@
+Hi Replit Team,
+
+Before we proceed with upgrading the Audience Engine, we want to align the proposed changes strictly with the current implementation — to avoid rebuilding logic that may already exist or conflict with the existing architecture.
+
+Below is the direction we’re considering. We need your response based on the actual codebase behavior and constraints.
+
+---
+
+## 1. Multi-Source Competitor Input (Extension of Current Model)
+
+We want to evolve competitor input from a single-source model to a multi-source profile per competitor, for example:
+
+- Instagram (existing primary)
+- TikTok (content performance validation)
+- Website (already partially used via MIv3)
+- Reviews (e.g. Google Maps / external review platforms)
+
+Key question:
+- Does the current MI / scraping pipeline support attaching multiple sources per competitor entity?
+- Or is each competitor currently tied to a single platform/source in the schema?
+
+If not supported:
+- Where would be the correct insertion point? (CI ingestion layer vs MI snapshot builder)
+
+---
+
+## 2. Signal Aggregation Logic (Replacing Volume Dependence)
+
+We want to move away from:
+- Comment count thresholds (e.g. ≥ 50)
+
+Toward:
+- Pattern strength detection, based on:
+  - recurrence of the same pain/desire
+  - consistency across sources
+
+Example:
+- Same pain appearing across captions + comments + TikTok hooks → strong signal
+- Single-source signal → weak
+
+Questions:
+- Does any current layer already compute cross-source agreement or signal recurrence beyond keyword matching?
+- Where is the best place to implement this:
+  - Inside matchPatternClusters()?
+  - After map construction (post-processing layer)?
+  - Or within the Semantic Bridge?
+
+---
+
+## 3. Source Weighting / Signal Quality
+
+We want to introduce weighting such as:
+- Longer comments > short comments
+- Structured reviews > generic comments
+- High-performing content (TikTok) > low-engagement content
+
+Questions:
+- Is there any existing weighting system in:
+  - evidence scoring
+  - MIv3 semanticSignals quality score
+- Can the current evidence[] structure support weights, or is it purely frequency-based?
+
+---
+
+## 4. Removing Mixed Inference Behavior (Stability Requirement)
+
+Current behavior mixes:
+- real comments
+- captions
+- bridge (MIv3 GPT signals)
+- inferred segments (fallback)
+
+We want to avoid unstable blending and move toward:
+- deterministic output when signal is strong
+- controlled fallback only when signal is weak
+
+Questions:
+- Where exactly is the decision made to activate:
+  - Semantic Bridge
+  - GPT-based segment construction
+- Can this be gated explicitly (e.g. disable bridge under certain conditions)?
+
+---
+
+## 5. Competitor Profile Structure (UX + Data Model)
+
+We are considering a structure where each competitor has:
+- name
+- primary source (required)
+- optional sources (Instagram, TikTok, website, reviews)
+
+Questions:
+- Does the current schema support this natively?
+- Or would this require extending the competitor model and CI ingestion logic?
+
+---
+
+## Goal
+
+We are not trying to increase data volume —  
+We are trying to improve decision reliability and consistency.
+
+Specifically:
+- avoid dependence on inconsistent comment volume
+- reduce inference drift
+- base insights on repeatable patterns across signals
+
+---
+
+Please respond based on the current code:
+- what already exists
+- what partially exists
+- what would require structural changes
+
+This will help us evolve the system correctly without breaking the current architecture.
+
+Thanks,  
+Samir  
+Avyron AI

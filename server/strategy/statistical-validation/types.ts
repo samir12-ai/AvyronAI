@@ -29,6 +29,7 @@ export interface ValidationOfferInput {
   mechanismDescription: string;
   deliverables: string[];
   proofAlignment: string[];
+  proofGrounding?: Array<{ proofType: string; groundingText: string; sourceObjections?: string[]; sourcePillars?: string[] }>;
   offerStrengthScore: number;
   riskNotes: string[];
   frictionLevel: number;
@@ -153,4 +154,6 @@ export interface StatisticalValidationResult {
   signalBackedClaimRatio: number;
   unmappedSignals: string[];
   lowConfidenceSignals: string[];
+  originTypeDistribution?: import("../../shared/signal-lineage").SignalComposition;
+  commercialJudgement?: import("./validation-judgement").ValidationJudgement | null;
 }

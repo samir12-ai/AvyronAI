@@ -24,6 +24,9 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -40,6 +43,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
   app.post("/api/integrity-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, funnelSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -324,6 +328,7 @@ export function registerIntegrityEngineRoutes(app: Express) {
       }
 
       const [saved] = await db.insert(integritySnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         funnelSnapshotId: funnelSnapshot.id,
@@ -363,31 +368,114 @@ export function registerIntegrityEngineRoutes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.json({ exists: false, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(integritySnapshots)
         .where(and(
           eq(integritySnapshots.campaignId, campaignId),
           eq(integritySnapshots.accountId, accountId),
-          eq(integritySnapshots.engineVersion, ENGINE_VERSION),
+          eq(integritySnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(integritySnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ exists: false });
+        return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
+      }
+
+      // Phase C3 — emit LiveSnapshotEnvelope. The integrity_snapshots table
+      // does not persist `zeroLeakage`/`traceabilityComplete`/`failureReasons`
+      // /`overallStatus` as separate columns, so we derive them deterministically
+      // from the already-persisted layerResults + flaggedInconsistencies +
+      // safeToExecute. This matches the contract's read paths until/unless the
+      // schema is extended.
+      //
+      // Integrity contract hardening (May 2026): `overallStatus` is the
+      // canonical VERDICT (PASS|PARTIAL|FAIL). It MUST NOT be derived from the
+      // engine-execution `status` column (which carries COMPLETE|INTEGRITY_FAILED).
+      // Mapping below mirrors the engine's own derivation in engine.ts.
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const layerResultsParsed = safeJsonParse(latest.layerResults) || [];
+        const structuralWarningsParsed = safeJsonParse(latest.structuralWarnings) || [];
+        const flaggedInconsistenciesParsed = safeJsonParse(latest.flaggedInconsistencies) || [];
+        const boundaryCheckParsed = safeJsonParse(latest.boundaryCheck) || { passed: true, violations: [] };
+        const failedLayers = Array.isArray(layerResultsParsed)
+          ? layerResultsParsed.filter((l: any) => l && (l.status === "FAIL" || l.status === "FAILED" || l.passed === false))
+          : [];
+        const failedCount = failedLayers.length;
+        const failureReasons: string[] = [
+          ...failedLayers.map((l: any) => typeof l?.reason === "string" ? l.reason : (typeof l?.layer === "string" ? `${l.layer}_FAILED` : "LAYER_FAILED")),
+          ...(Array.isArray(flaggedInconsistenciesParsed) ? flaggedInconsistenciesParsed.map((i: any) => typeof i === "string" ? i : (i?.reason || i?.code || "INCONSISTENCY")) : []),
+        ].filter((r) => typeof r === "string" && r.length > 0);
+        const zeroLeakage = Array.isArray(flaggedInconsistenciesParsed) && flaggedInconsistenciesParsed.length === 0;
+        const traceabilityComplete = boundaryCheckParsed?.passed === true && failedCount === 0;
+        const structuralWarningsCount = Array.isArray(structuralWarningsParsed) ? structuralWarningsParsed.length : 0;
+
+        // Canonical verdict derivation — mirrors integrity-engine/engine.ts:706-719.
+        // Never trust `latest.status` (engine-execution semantics, NOT a verdict).
+        let overallStatus: "PASS" | "PARTIAL" | "FAIL";
+        if (boundaryCheckParsed?.passed !== true || failedCount >= 3 || latest.safeToExecute !== true) {
+          overallStatus = "FAIL";
+        } else if (failedCount > 0 || structuralWarningsCount > 0) {
+          overallStatus = "PARTIAL";
+        } else {
+          overallStatus = "PASS";
+        }
+
+        const integrityOutput = {
+          overallIntegrityScore: latest.overallIntegrityScore,
+          safeToExecute: latest.safeToExecute,
+          status: latest.status,            // engine-execution status (display only)
+          overallStatus,                    // legacy verdict field (back-compat for FE SystemIntegrityPanel)
+          integrityVerdict: overallStatus,  // H4 (2026-05-10): canonical verdict under a semantically-explicit name (same value as overallStatus)
+          zeroLeakage,
+          traceabilityComplete,
+          failureReasons,
+          structuralWarnings: structuralWarningsParsed,
+          flaggedInconsistencies: flaggedInconsistenciesParsed,
+          layerResults: layerResultsParsed,
+        };
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("integrity", integrityOutput, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=integrity snap=${latest.id} err=${e?.message ?? String(e)}`);
       }
 
       res.json({
         exists: true,
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
         id: latest.id,
         campaignId: latest.campaignId,
         status: latest.status,
         statusMessage: latest.statusMessage,
         engineVersion: latest.engineVersion,
+        envelope,
         overallIntegrityScore: latest.overallIntegrityScore,
         safeToExecute: latest.safeToExecute,
         layerResults: safeJsonParse(latest.layerResults),

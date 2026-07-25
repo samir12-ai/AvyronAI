@@ -1,0 +1,68 @@
+Infrastructure Audit — Patch 2/5
+Scope: Campaign + Strategy + Audit + Autopilot + Business Data + Content DNA + Brand Config routes (20 files)
+
+Files to audit:
+- server/campaign-routes.ts
+- server/campaign-data-layer.ts
+- server/audit-routes.ts
+- server/audit.ts
+- server/autopilot-routes.ts
+- server/business-data-routes.ts
+- server/content-dna-routes.ts
+- server/brand-config-routes.ts
+- server/strategy-routes.ts
+- server/strategy-root-routes.ts
+- server/plan-gate.ts
+- server/goal-math.ts
+- server/decision-attribution.ts
+- server/conflict-resolver.ts
+- server/root-bundle.ts
+- server/task-composer.ts
+- server/outcome-tracker.ts
+- server/ui-state-routes.ts
+- server/diagnose/routes.ts
+- server/strategic-core/ (all files — list each individually)
+
+Risk categories to check:
+
+1. AUTH & ROUTE PROTECTION
+   - Does every route require authMiddleware and campaign ownership check?
+   - Are there any endpoints that accept campaignId without 
+     assertCampaignBelongsTo verification?
+   - Does audit-routes.ts restrict access to admin-only where appropriate?
+   - Does autopilot-routes.ts gate autopilot actions behind proper ownership?
+
+2. ERROR DISCLOSURE
+   - Do any catch blocks return raw err.message to the client?
+   - Does diagnose/routes.ts expose internal diagnosis details to non-admins?
+
+3. UNBOUNDED QUERIES
+   - Do campaign-data-layer.ts or audit.ts have queries without .limit()?
+   - Can audit logs grow unbounded without pagination?
+
+4. DATA INTEGRITY
+   - Does plan-gate.ts properly block unauthorized plan progression?
+   - Does goal-math.ts handle edge cases (zero values, negative numbers, 
+     divide-by-zero) safely?
+   - Does conflict-resolver.ts handle concurrent writes safely?
+
+5. TENANT ISOLATION
+   - Does campaign-routes.ts scope all queries by accountId?
+   - Can a user access or modify another account's campaign data through 
+     strategy-routes.ts or brand-config-routes.ts?
+   - Does outcome-tracker.ts scope results by accountId + campaignId?
+
+6. SILENT FAILURES
+   - Do audit.ts or campaign-data-layer.ts have bare catch{} blocks?
+   - Does task-composer.ts silently discard composition errors?
+
+Please provide:
+A) Per-file verdict table
+B) Summary by category
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Can a user access or modify another account's campaign, strategy, 
+       or brand config?
+   Q2: Do any routes expose raw error details to non-admin users?
+   Q3: Does plan-gate.ts correctly block unauthorized plan progression 
+       in all cases?

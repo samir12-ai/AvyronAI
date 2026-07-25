@@ -1,3 +1,9 @@
+import { z } from "zod";
+import type { FailedGate } from "../../shared/candidate-gate-battery";
+import type { JudgeVerdict } from "../../shared/interchangeability-judge";
+import type { ContradictionJudgeVerdict } from "../../shared/contradiction-judge";
+import type { EngineDecisionSummary } from "../../shared/strategic-doctrine";
+
 export interface ChannelAudienceInput {
   audienceSegments: any[];
   emotionalDrivers: any[];
@@ -192,4 +198,62 @@ export interface ChannelSelectionResult {
   decisionGateScoring: DecisionGateScoring | null;
   structurallyRepaired: boolean;
   correctionAuditTrail: CorrectionAuditEntry[];
+  commercialOrchestration?: import("./channel-orchestration").ChannelOrchestration | null;
+  /** viable[1]'s scoring layers — exposed so the AI-proposes wrapper can keep
+   *  layerResults correct when it reorders primary/secondary (T15). */
+  secondaryLayerResults?: LayerResult[];
+  /** Present when runChannelSelectionWithAIProposal ran the gate-validated AI
+   *  proposer over this deterministic result (T15). Absent = pure deterministic. */
+  aiChannelProposal?: AiChannelProposal;
+  /** The validated channel decision summary appended to priorDecisions so
+   *  downstream contradiction gates can defend it (T15). */
+  channelDecisionSummary?: EngineDecisionSummary;
+}
+
+// ---------------------------------------------------------------------------
+// AI-Proposes / Code-Validates channel layer (Phase 3 / T15).
+// The AI proposes WHICH of the deterministically-viable channels leads plus a
+// product-specific rationale; the candidate gate battery (breadth →
+// interchangeability(channel_rationale) → contradiction) is the sole judge. The
+// deterministic runChannelSelectionEngine pick is the RECORDED fallback.
+// ---------------------------------------------------------------------------
+
+// D3 strict enums — no z.string() for decision/verdict-shaped fields.
+export const AiChannelProposalModeSchema = z.enum(["ai", "fallback"]);
+export type AiChannelProposalMode = z.infer<typeof AiChannelProposalModeSchema>;
+
+export const AiChannelFallbackReasonSchema = z.enum([
+  "no_doctrine",
+  "insufficient_viable",
+  "gates_exhausted",
+  "proposer_failed",
+]);
+export type AiChannelFallbackReason = z.infer<typeof AiChannelFallbackReasonSchema>;
+
+/** One recorded proposer attempt — every attempt (incl. NOT_RUN judge verdicts
+ *  and invalid off-whitelist picks) is persisted, never swallowed (B2/B4). */
+export interface AiChannelGateAttempt {
+  attempt: number;
+  proposedPrimary: string;
+  /** false when the pick was off-whitelist (no battery run) or a gate rejected it. */
+  passed: boolean;
+  /** null when passed OR when rejected before the battery (off-whitelist pick). */
+  failedGate: FailedGate | null;
+  interchangeabilityVerdict: JudgeVerdict;
+  contradictionVerdict: ContradictionJudgeVerdict;
+  rejectionFeedback: string;
+}
+
+export interface AiChannelProposal {
+  mode: AiChannelProposalMode;
+  /** null when mode==="ai"; a strict reason when mode==="fallback". */
+  fallbackReason: AiChannelFallbackReason | null;
+  /** The AI's validated primary pick (null on fallback). */
+  proposedPrimary: string | null;
+  /** Product-specific rationale that survived the battery ("" on fallback). */
+  rationale: string;
+  /** true when the validated AI pick differs from the deterministic primary. */
+  swappedFromDeterministic: boolean;
+  attempts: number;
+  gateTrace: AiChannelGateAttempt[];
 }

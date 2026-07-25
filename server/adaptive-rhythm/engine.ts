@@ -8,6 +8,8 @@ import {
 import { eq, and, desc } from "drizzle-orm";
 import { loadMemoryBlock } from "../memory-system/manager";
 import { computeLegacyExplorationBudget } from "../exploration-budget/engine";
+import { policyEnforcedMemoryCheck } from "../decision-policy";
+import { upsertOperationalState, getOperationalState } from "../memory-system/operational-state-store";
 
 export interface AdaptiveRhythm {
   reelsPerWeek: number;
@@ -156,26 +158,23 @@ export async function computeAdaptiveRhythm(
     explorationBudget = await computeLegacyExplorationBudget(campaignId, accountId, memBlock, totalWeeklySlots).catch(() => null);
   }
 
-  const [prevRhythmMem] = await db
-    .select()
-    .from(strategyMemory)
-    .where(
-      and(
-        eq(strategyMemory.accountId, accountId),
-        eq(strategyMemory.campaignId, campaignId),
-        eq(strategyMemory.memoryType, "content_rhythm"),
-        eq(strategyMemory.engineName, "adaptive-rhythm"),
-      ),
-    )
-    .orderBy(desc(strategyMemory.updatedAt))
-    .limit(1);
+  // Task #64 / Phase 1 — content_rhythm is operational state, owned by the
+  // engine_operational_state table (singleton per account/campaign).
+  const prevRhythmState = await getOperationalState(accountId, campaignId, "content_rhythm");
 
   let prevRhythm: { reels: number; carousels: number; stories: number; posts: number } | null = null;
-  if (prevRhythmMem?.details) {
-    try {
-      prevRhythm = JSON.parse(prevRhythmMem.details);
-    } catch {
-      prevRhythm = null;
+  if (prevRhythmState?.payload && typeof prevRhythmState.payload === "object" && prevRhythmState.payload !== null) {
+    const payload = prevRhythmState.payload as Record<string, unknown>;
+    const num = (k: string): number | null => {
+      const v = payload[k];
+      return typeof v === "number" && Number.isFinite(v) ? v : null;
+    };
+    const reels = num("reels");
+    const carousels = num("carousels");
+    const stories = num("stories");
+    const posts = num("posts");
+    if (reels !== null && carousels !== null && stories !== null && posts !== null) {
+      prevRhythm = { reels, carousels, stories, posts };
     }
   }
 
@@ -347,42 +346,21 @@ export async function computeAdaptiveRhythm(
   });
   const rhythmLabel = `Reels ${reelsPerWeek}/wk · Carousels ${carouselsPerWeek}/wk · Stories ${storiesPerDay}/day · Posts ${postsPerWeek}/wk`;
 
+  // Task #64 / Phase 1 — operational singleton upsert. No policy gate
+  // (operational state is authoritative by writer, not confidence-bounded).
   try {
-    if (prevRhythmMem) {
-      await db
-        .update(strategyMemory)
-        .set({
-          label: rhythmLabel,
-          details: newDetails,
-          performance: reasoning,
-          score: confidenceScore,
-          isWinner: true,
-          confidenceScore,
-          direction: "reinforce",
-          lastValidatedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(strategyMemory.id, prevRhythmMem.id));
-    } else {
-      const memId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-      await db.insert(strategyMemory).values({
-        id: memId,
-        accountId,
-        campaignId,
-        memoryType: "content_rhythm",
-        label: rhythmLabel,
-        details: newDetails,
-        performance: reasoning,
-        score: confidenceScore,
-        engineName: "adaptive-rhythm",
-        isWinner: true,
-        confidenceScore,
-        direction: "reinforce",
-        lastValidatedAt: new Date(),
-      });
-    }
+    await upsertOperationalState({
+      accountId,
+      campaignId,
+      stateType: "content_rhythm",
+      engineName: "adaptive-rhythm",
+      label: rhythmLabel,
+      payload: { reels: reelsPerWeek, carousels: carouselsPerWeek, stories: storiesPerDay, posts: postsPerWeek },
+      rationale: reasoning,
+      confidenceScore,
+    });
   } catch (memErr: any) {
-    console.warn(`[AdaptiveRhythm] Memory write failed (non-blocking):`, memErr.message);
+    console.warn(`[AdaptiveRhythm] Operational state write failed (non-blocking):`, memErr.message);
   }
 
   const explorationNote = explorationBudget

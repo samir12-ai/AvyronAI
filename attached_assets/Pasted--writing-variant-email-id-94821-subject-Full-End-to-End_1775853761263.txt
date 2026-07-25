@@ -1,0 +1,192 @@
+:::writing{variant=“email” id=“94821” subject=“Full End-to-End Validation Checklist — Audience Engine & System Stability (No Data Changes)”}
+Hi Replit Team,
+
+Great work on shipping the Audience Engine reliability upgrades — this is a major step forward.
+
+Before we move to any new features (TikTok, reviews, etc.), we need a complete end-to-end validation pass across the entire system to ensure everything is stable, consistent, and production-ready under real conditions.
+
+This validation must be done strictly using the current dataset.
+Do NOT add or modify any user data.
+If any temporary data is required for testing, it must be fully removed afterward.
+
+⸻
+
+🔴 CRITICAL RULES
+	1.	No permanent data changes
+	2.	No schema changes
+	3.	No feature additions
+	4.	Only:
+	•	validation
+	•	debugging
+	•	fixing inconsistencies or bugs
+
+⸻
+
+✅ PHASE 1 — Audience Engine Validation (Core)
+
+Run multiple full executions of the Audience Engine on the existing campaign(s).
+
+Verify:
+
+1. Signal Quality System
+	•	Comments are correctly classified:
+	•	NOISE / LOW / MED / HIGH
+	•	Emoji-only and low-signal comments are filtered correctly
+	•	HIGH-quality comments contribute more weight than LOW ones
+
+2. Weighted Matching Behavior
+	•	Strong signals (repeated meaningful comments) dominate output
+	•	Weak/generic signals do not dominate maps
+	•	No inflation from repeated captions
+
+3. Source Tracking
+	•	Each signal correctly tracks:
+	•	comments
+	•	captions
+	•	Source diversity affects confidence as expected
+
+4. Bridge Suppression
+	•	When primaryStrength ≥ threshold:
+	•	Semantic Bridge is NOT used
+	•	When data is weak:
+	•	Bridge activates correctly (rescue mode only)
+
+5. Diagnostics Output
+	•	Logs must show:
+	•	HIGH / MED / LOW / NOISE counts
+	•	primaryStrength value
+	•	Snapshot must include inputSummary
+
+⸻
+
+✅ PHASE 2 — Consistency Across Runs
+
+Run the same campaign multiple times.
+
+Verify:
+	•	Results are stable (not random)
+	•	Same input → similar output maps
+	•	No fluctuation caused by:
+	•	ordering
+	•	timing
+	•	partial data
+
+⸻
+
+✅ PHASE 3 — Edge Case Testing
+
+Test the engine behavior under different real conditions:
+
+Case A — Low Comment Volume
+	•	Ensure:
+	•	system still produces output
+	•	no crashes
+	•	bridge activates only if needed
+
+Case B — High Noise Dataset
+	•	Many emoji / short comments
+	•	Ensure:
+	•	filtering works
+	•	signal quality still holds
+
+Case C — Caption-Dominant Data
+	•	Few comments, strong captions
+	•	Ensure:
+	•	captions still produce valid signals
+	•	no over-reliance on bridge
+
+⸻
+
+✅ PHASE 4 — Backend Stability
+
+Verify:
+	•	No runtime errors in logs
+	•	No silent failures
+	•	No undefined/null crashes
+	•	No inconsistent DB reads/writes
+	•	All queries return valid structures
+
+⸻
+
+✅ PHASE 5 — Frontend Validation
+
+Verify:
+	•	Audience maps render correctly:
+	•	Pain
+	•	Desire
+	•	Intent
+	•	No empty or broken states
+	•	No UI glitches when:
+	•	data is low
+	•	data is high
+	•	Refresh does not break state
+	•	Re-entering campaign shows consistent data
+
+⸻
+
+✅ PHASE 6 — End-to-End Flow
+
+Test full flow:
+	1.	Load campaign
+	2.	Run Audience Engine
+	3.	Generate maps
+	4.	Render in UI
+	5.	Refresh
+	6.	Re-open
+
+Verify:
+	•	No data loss
+	•	No re-computation inconsistencies
+	•	No mismatch between backend and frontend
+
+⸻
+
+✅ PHASE 7 — Load / Stress Behavior
+
+Simulate multiple runs (parallel or sequential).
+
+Verify:
+	•	No blocking behavior
+	•	No queue failures
+	•	No timeouts
+	•	No degradation in output quality
+	•	System remains responsive
+
+⸻
+
+⚠️ FINAL CHECK
+
+If you discover:
+	•	unstable behavior
+	•	inconsistent outputs
+	•	incorrect weighting
+	•	bridge activating incorrectly
+	•	UI/backend mismatch
+
+👉 Fix it directly before reporting back.
+
+⸻
+
+🎯 GOAL
+
+We are NOT testing features.
+We are validating:
+
+Can we trust the system to behave correctly and consistently under real conditions?
+
+⸻
+
+📌 DELIVERABLE
+
+Please return:
+	1.	Confirmation that all phases passed
+	2.	Any issues found
+	3.	What was fixed (if anything)
+	4.	Any risks or edge cases still remaining
+
+⸻
+
+Thanks,
+Samir
+Avyron AI
+:::

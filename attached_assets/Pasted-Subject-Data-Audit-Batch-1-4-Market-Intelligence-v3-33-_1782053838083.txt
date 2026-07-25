@@ -1,0 +1,120 @@
+Subject: Data Audit Batch 1/4 — Market Intelligence v3 (33 files)
+
+Hi,
+
+The Security, Intelligence, and Continuity audits are complete. Now starting the DATA module audit, split into 4 batches for thoroughness.
+
+This is BATCH 1 of 4: Market Intelligence v3 — the engine responsible for scraping and analyzing market/competitor signals. This is the core differentiator of the product (the "moving market mirror"), so it needs a careful line-by-line review.
+
+Please export the following 33 files as a single ZIP archive.
+
+---
+
+FILES TO EXPORT (33 files — server/market-intelligence-v3/):
+
+1. fetch-orchestrator.ts
+2. engine.ts
+3. engine-state.ts
+4. signal-engine.ts
+5. signal-normalizer.ts
+6. cross-signal-decision.ts
+7. confidence-engine.ts
+8. narrative-clustering.ts
+9. narrative-objection-extractor.ts
+10. reviews-intelligence.ts
+11. similarity-engine.ts
+12. trajectory-engine.ts
+13. demand-pressure.ts
+14. website-scraper.ts
+15. tiktok-qualification.ts
+16. isolation-guard.ts
+17. scrape-volume-cap.ts
+18. token-budget.ts
+19. token-budget-store.ts
+20. market-baselines.ts
+21. content-dna.ts
+22. constants.ts
+23. types.ts
+24. utils.ts
+25. index.ts
+26. routes.ts
+27. admin-routes.ts
+28. dominance-module.ts
+29. intent-engine.ts
+30. prompt-safety.ts
+31. refresh-system.ts
+32. source-types.ts
+
+(Note: fetch-orchestrator.ts was previously noted as clean in ok.md — please re-confirm it in this pass for completeness.)
+
+---
+
+AUDIT INSTRUCTIONS:
+
+Do a thorough line-by-line review of each file (read every line, NOT a keyword scan). Focus on these DATA-specific risks:
+
+1. TENANT ISOLATION (most important)
+   - Is every scrape, fetch, and snapshot scoped to a single account/campaign?
+   - Can data from one account ever leak into another's market intelligence?
+   - Does isolation-guard.ts actually enforce isolation, or is it bypassable?
+   - Are there any module-global mutable arrays/objects shared across requests (like the Offer Engine F1 cross-tenant bug)?
+
+2. DATA QUALITY & GROUNDING
+   - When scraped data is weak, thin, or from a single source, is it flagged (evidenceQuality / confidence) or silently treated as solid?
+   - Does confidence-engine.ts produce honest confidence, or can it fake high confidence on poor data?
+   - Are freshness/staleness timestamps validated (no NaN / bad-date → wrong age)?
+
+3. SCRAPE SAFETY
+   - Is website-scraper.ts protected against SSRF (private IPs, internal hosts, DNS rebinding)?
+   - Are scrape volume caps (scrape-volume-cap.ts) actually enforced, or bypassable?
+   - Is token-budget enforced before expensive AI calls?
+
+4. SILENT FAILURE
+   - Any empty catch {} or .catch(() => []) that swallows scrape/parse errors?
+   - If a data source fails, is it logged and flagged, or silently dropped while the engine continues on partial data?
+
+5. LLM OUTPUT SAFETY
+   - Any JSON.parse on LLM output without try/catch and without schema (Zod) validation?
+   - Is prompt-safety.ts effective against prompt injection from scraped competitor content?
+
+6. UNBOUNDED QUERIES
+   - Any DB query without .limit() that could load huge result sets?
+
+7. ERROR DISCLOSURE
+   - Do routes.ts / admin-routes.ts return raw err.message to the client?
+   - Are admin-routes properly gated behind admin auth?
+
+---
+
+OUTPUT FORMAT:
+
+For each file:
+
+## [Filename]
+**Verdict:** PASS / FAIL
+**Lines reviewed:** [total]
+
+### Issues found:
+| ID | Severity | Line | Description | Fix |
+|----|----------|------|-------------|-----|
+
+(If clean: "No issues found.")
+
+Severity:
+- CRITICAL — blocks launch, data corruption, or cross-tenant leak
+- HIGH — important before launch
+- MEDIUM — fix after launch
+- LOW — minor / future note
+
+---
+
+After all files, a SUMMARY TABLE:
+
+| File | Verdict | Critical | High | Medium | Low |
+|------|---------|----------|------|--------|-----|
+
+Plus the top 3 most urgent fixes, and explicitly answer these two questions:
+1. Can market intelligence data leak between accounts? (yes/no + evidence)
+2. Can the confidence engine report high confidence on weak/single-source data? (yes/no + evidence)
+
+Thank you.

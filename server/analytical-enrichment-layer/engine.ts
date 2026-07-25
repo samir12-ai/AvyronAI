@@ -1,4 +1,6 @@
 import { aiChat } from "../ai-client";
+import { logSafe } from "../log-redact";
+import { recordInferencePartial } from "../operations-guardian/ai-pressure-stats";
 import {
   AnalyticalPackage,
   AELInput,
@@ -8,15 +10,51 @@ import {
 const LOG_PREFIX = "[AEL-v2]";
 const AEL_VERSION = 2;
 
+// Task #59 / Phase 1C — feed the Guardian aggregator at every isPartial=true
+// return. Returning the same string keeps the pre-existing partialReason
+// value unchanged; the side-effect is the recorder call. Wrapped because
+// a recorder failure must NEVER break AEL output (Seal #15: logged is OK,
+// silent is not).
+function notePartialReason(reason: string): string {
+  try {
+    recordInferencePartial(reason);
+  } catch (err) {
+    console.error("[OperationsGuardian] AEL_PARTIAL_RECORD_FAILED", { reason, err });
+  }
+  return reason;
+}
+
 function buildInputSummary(input: AELInput) {
-  const hasMI = !!(input.mi && (input.mi.signalClusters || input.mi.marketState || input.mi.signals));
-  const hasAudience = !!(input.audience && (input.audience.painMap || input.audience.pains || input.audience.segments));
-  const hasProductDNA = !!(input.productDNA && input.productDNA.coreOffer);
-  const hasCompetitiveData = !!(input.competitiveData && (input.competitiveData.competitors?.length > 0 || input.competitiveData.posts?.length > 0));
+  // MI runtime shape (MIv3DiagnosticResult): top-level dominanceData/trajectoryData/threatSignals/opportunitySignals/narrativeObjectionMap,
+  // and `output` containing marketState/marketDiagnosis/competitorIntentMap, plus signal_data via output.audienceIntentSignals.
+  const mi = input.mi;
+  const miMarketState = mi?.marketState ?? mi?.output?.marketState;
+  const miSignals =
+    mi?.signalClusters ??
+    mi?.signals ??
+    mi?.output?.audienceIntentSignals ??
+    mi?.threatSignals ??
+    mi?.opportunitySignals;
+  const miHasNarrative = !!(mi?.output?.marketDiagnosis || mi?.output?.narrativeSynthesis || mi?.narrativeObjectionMap);
+  const miHasCompetitive = !!(mi?.dominanceData?.length > 0 || mi?.output?.competitorIntentMap?.length > 0);
+  const hasMI = !!(mi && (miMarketState || (Array.isArray(miSignals) && miSignals.length > 0) || miHasNarrative || miHasCompetitive));
+
+  const hasAudience = !!(input.audience && (input.audience.audiencePains || input.audience.painMap || input.audience.pains || input.audience.segments || input.audience.audienceSegments));
+  const hasProductDNA = !!(input.productDNA && (input.productDNA.coreOffer || input.productDNA.businessType));
+  const hasCompetitiveData = !!(
+    input.competitiveData && (
+      (Array.isArray(input.competitiveData.competitors) && input.competitiveData.competitors.length > 0) ||
+      (Array.isArray(input.competitiveData.posts) && input.competitiveData.posts.length > 0)
+    )
+  );
 
   let signalCount = 0;
-  if (input.mi?.signalClusters) signalCount += input.mi.signalClusters.length;
-  if (input.mi?.signals) signalCount += input.mi.signals.length;
+  if (Array.isArray(mi?.signalClusters)) signalCount += mi.signalClusters.length;
+  if (Array.isArray(mi?.signals)) signalCount += mi.signals.length;
+  if (Array.isArray(mi?.threatSignals)) signalCount += mi.threatSignals.length;
+  if (Array.isArray(mi?.opportunitySignals)) signalCount += mi.opportunitySignals.length;
+  if (Array.isArray(mi?.output?.audienceIntentSignals)) signalCount += mi.output.audienceIntentSignals.length;
+  if (Array.isArray(mi?.output?.competitorIntentMap)) signalCount += mi.output.competitorIntentMap.length;
 
   return { hasMI, hasAudience, hasProductDNA, hasCompetitiveData, signalCount };
 }
@@ -26,21 +64,40 @@ function buildContextBlock(input: AELInput): string {
 
   if (input.mi) {
     const mi = input.mi;
+    const out = mi.output || {};
     sections.push("=== MARKET INTELLIGENCE RAW DATA ===");
-    if (mi.marketState) sections.push(`Market State: ${JSON.stringify(mi.marketState).slice(0, 1200)}`);
-    if (mi.signalClusters) sections.push(`Signal Clusters (${mi.signalClusters.length}): ${JSON.stringify(mi.signalClusters.slice(0, 8)).slice(0, 2000)}`);
+    const marketState = mi.marketState ?? out.marketState;
+    if (marketState) sections.push(`Market State: ${JSON.stringify(marketState).slice(0, 1200)}`);
+    if (out.marketDiagnosis) sections.push(`Market Diagnosis: ${JSON.stringify(out.marketDiagnosis).slice(0, 1200)}`);
+    const signalClusters = mi.signalClusters ?? mi.signals ?? out.audienceIntentSignals;
+    if (Array.isArray(signalClusters) && signalClusters.length > 0) {
+      sections.push(`Signal Clusters (${signalClusters.length}): ${JSON.stringify(signalClusters.slice(0, 8)).slice(0, 2000)}`);
+    }
+    if (Array.isArray(mi.threatSignals) && mi.threatSignals.length > 0) {
+      sections.push(`Threat Signals (${mi.threatSignals.length}): ${JSON.stringify(mi.threatSignals.slice(0, 10)).slice(0, 1200)}`);
+    }
+    if (Array.isArray(mi.opportunitySignals) && mi.opportunitySignals.length > 0) {
+      sections.push(`Opportunity Signals (${mi.opportunitySignals.length}): ${JSON.stringify(mi.opportunitySignals.slice(0, 10)).slice(0, 1200)}`);
+    }
     if (mi.trajectoryData) sections.push(`Market Trajectory: ${JSON.stringify(mi.trajectoryData).slice(0, 800)}`);
-    if (mi.intentData) sections.push(`Buyer Intent Signals: ${JSON.stringify(mi.intentData).slice(0, 800)}`);
-    if (mi.narrativeObjections) sections.push(`Market Objections & Resistance: ${JSON.stringify(mi.narrativeObjections).slice(0, 800)}`);
+    const intentData = mi.intentData ?? out.competitorIntentMap;
+    if (intentData) sections.push(`Buyer/Competitor Intent Signals: ${JSON.stringify(intentData).slice(0, 800)}`);
+    const narrativeObjections = mi.narrativeObjections ?? mi.narrativeObjectionMap;
+    if (narrativeObjections) sections.push(`Market Objections & Resistance: ${JSON.stringify(narrativeObjections).slice(0, 800)}`);
     if (mi.dominanceData) sections.push(`Competitive Dominance Patterns: ${JSON.stringify(mi.dominanceData).slice(0, 800)}`);
     if (mi.competitorPosts || mi.posts) sections.push(`Competitor Content Sample: ${JSON.stringify((mi.competitorPosts || mi.posts || []).slice(0, 5)).slice(0, 1000)}`);
     if (mi.comments || mi.audienceComments) sections.push(`Audience Comments: ${JSON.stringify((mi.comments || mi.audienceComments || []).slice(0, 10)).slice(0, 1200)}`);
+    if (mi.telemetry) {
+      const t = mi.telemetry;
+      sections.push(`Pipeline Trace: competitorsCount=${t.competitorsCount ?? 0} | postSampleSize=${t.postSampleSize ?? 0} | commentSampleSize=${t.commentSampleSize ?? 0} | postsProcessed=${t.postsProcessed ?? 0} | commentsProcessed=${t.commentsProcessed ?? 0} | executionMode=${t.executionMode}`);
+    }
   }
 
   if (input.audience) {
     const aud = input.audience;
     sections.push("\n=== AUDIENCE DATA ===");
-    if (aud.painMap || aud.pains) sections.push(`Pain Data: ${JSON.stringify(aud.painMap || aud.pains).slice(0, 1200)}`);
+    const painData = aud.audiencePains || aud.painMap || aud.pains;
+    if (painData) sections.push(`Pain Data: ${JSON.stringify(painData).slice(0, 1200)}`);
     if (aud.desireMap || aud.desires) sections.push(`Desire Data: ${JSON.stringify(aud.desireMap || aud.desires).slice(0, 1000)}`);
     if (aud.objectionMap || aud.objections) sections.push(`Objection Data: ${JSON.stringify(aud.objectionMap || aud.objections).slice(0, 800)}`);
     if (aud.awarenessLevel) sections.push(`Awareness Level: ${JSON.stringify(aud.awarenessLevel)}`);
@@ -80,7 +137,19 @@ export async function buildAnalyticalPackage(input: AELInput): Promise<Analytica
 
   if (!inputSummary.hasMI && !inputSummary.hasAudience) {
     console.log(`${LOG_PREFIX} SKIP | No MI or Audience data available — returning empty package`);
-    return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary };
+    // the empty-input branch must also flag
+    // the package as partial so System Control can detect it. Pre-#28 this
+    // returned EMPTY without `isPartial=true`, letting downstream consumers
+    // believe a clean COMPLETE package was emitted.
+    return {
+      ...EMPTY_ANALYTICAL_PACKAGE,
+      status: "INCOMPLETE",
+      generatedAt: new Date().toISOString(),
+      inputSummary,
+      isPartial: true,
+      partialReason: notePartialReason("EMPTY_ANALYTICAL_PACKAGE"),
+      partialDetail: "no MI or Audience input available",
+    };
   }
 
   const contextBlock = buildContextBlock(input);
@@ -216,20 +285,21 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
 
   try {
     const response = await aiChat({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       max_tokens: 4000,
       temperature: 0.4,
+      timeoutMs: 90000,
     });
 
     const content = response.choices?.[0]?.message?.content || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.warn(`${LOG_PREFIX} PARSE_FAIL | No JSON found in response`);
-      return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary };
+      console.warn(logSafe(`${LOG_PREFIX} PARSE_FAIL | No JSON found in response`));
+      return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: notePartialReason("AEL_PARSE_FAILURE"), partialDetail: "AEL response contained no parseable JSON" };
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
@@ -257,8 +327,8 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
     return pkg;
   } catch (err: any) {
     const elapsed = Date.now() - startTime;
-    console.warn(`${LOG_PREFIX} BUILD_ERROR | campaign=${input.campaignId} | elapsed=${elapsed}ms | error=${err.message}`);
-    return { ...EMPTY_ANALYTICAL_PACKAGE, generatedAt: new Date().toISOString(), inputSummary };
+    console.error(logSafe(`${LOG_PREFIX} BUILD_ERROR | campaign=${input.campaignId} | elapsed=${elapsed}ms | error=${err.message}`));
+    return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: notePartialReason("AEL_BUILD_ERROR"), partialDetail: `AEL build failed: ${err.message}` };
   }
 }
 
@@ -317,6 +387,10 @@ export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
   if (totalInsights === 0) return "";
 
   const sections: string[] = [];
+  if (pkg.isPartial === true) {
+    sections.push("\n⚠ AEL_PARTIAL_NOTICE: Analytical enrichment is DEGRADED (partialReason=" + (pkg.partialReason || "unknown") + ").");
+    sections.push("Treat all derived inferences as PROVISIONAL. Do not rely on root-cause depth as load-bearing evidence.\n");
+  }
   sections.push("\n═══ DEEP ANALYTICAL CONTEXT (AEL v2 — Causal Interpretation) ═══");
   sections.push("These are INTERPRETED insights — root causes beneath surface signals.");
   sections.push("Use them to DEEPEN your analysis. Your engine logic remains the sole decision-maker.\n");
@@ -408,4 +482,101 @@ export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
 
 export function getAELVersion(): number {
   return AEL_VERSION;
+}
+
+/**
+ * Phase 3 fix — persist the AnalyticalPackage to `ael_snapshots`.
+ *
+ * Previously the orchestrator built the package and stashed it on
+ * `ctx.analyticalEnrichment` (in-memory only). The narrative layer
+ * issues a raw SQL read against `ael_snapshots` to ground its WHY/HOW
+ * steps, which silently returned zero rows because nothing ever wrote.
+ * Migration 033 created the table; this helper is the single write
+ * site. Called from runOrchestrator right after buildAnalyticalPackage.
+ *
+ * Idempotent: UNIQUE(account, campaign, job) so orchestrator re-runs
+ * with the same jobId UPSERT instead of stacking duplicates.
+ *
+ * Fail-loud-but-don't-block: a persistence failure is logged with the
+ * AEL_PERSIST_FAILED tag (operator-visible signal per Seal #15/#16)
+ * but does not throw — the in-memory `ctx.analyticalEnrichment` keeps
+ * downstream CEL working even if the DB write fails.
+ */
+export async function persistAELSnapshot(args: {
+  accountId: string;
+  campaignId: string;
+  jobId: string;
+  pkg: AnalyticalPackage;
+}): Promise<void> {
+  const { accountId, campaignId, jobId, pkg } = args;
+  if (!accountId || !campaignId || !jobId || !pkg) {
+    console.error(`${LOG_PREFIX} AEL_PERSIST_SKIPPED | missing required args | hasAccount=${!!accountId} hasCampaign=${!!campaignId} hasJob=${!!jobId} hasPkg=${!!pkg}`);
+    return;
+  }
+  try {
+    const { db } = await import("../db");
+    const { sql } = await import("drizzle-orm");
+    const id = `ael_${jobId}`;
+
+    // D1/D5 + B1/B4: root_causes / causal_chains / buying_barriers are REQUIRED
+    // array fields on AnalyticalPackage. A silent `|| []` lets a MISSING
+    // (undefined / non-array) field masquerade on reload as a real
+    // "analyzed, found none" result — a fake-success substitution. Distinguish
+    // a legitimately-empty array (valid) from a missing field (loud): coerce
+    // only genuine arrays, record any field that was absent, and mark the whole
+    // snapshot PARTIAL so downstream AEL-absent degradation fires truthfully.
+    const missingArrayFields: string[] = [];
+    const requireArray = (val: unknown, field: string): unknown[] => {
+      if (Array.isArray(val)) return val;
+      missingArrayFields.push(field);
+      return [];
+    };
+    const rootCauses = requireArray(pkg.root_causes, "root_causes");
+    const causalChains = requireArray(pkg.causal_chains, "causal_chains");
+    const buyingBarriers = requireArray(pkg.buying_barriers, "buying_barriers");
+
+    const fieldsMissing = missingArrayFields.length > 0;
+    if (fieldsMissing) {
+      console.error(
+        `${LOG_PREFIX} AEL_FIELD_MISSING | campaign=${campaignId} | job=${jobId} | missing=[${missingArrayFields.join(",")}] — persisting snapshot as PARTIAL (an empty array is NOT a substitute for a missing required field)`,
+      );
+    }
+
+    const persistIsPartial = !!pkg.isPartial || fieldsMissing;
+    let persistPartialReason: string | null;
+    if (pkg.partialReason) {
+      persistPartialReason = pkg.partialReason;
+    } else if (fieldsMissing) {
+      persistPartialReason = `AEL_FIELDS_MISSING:${missingArrayFields.join("+")}`;
+    } else {
+      persistPartialReason = null;
+    }
+
+    await db.execute(sql`
+      INSERT INTO ael_snapshots (
+        id, account_id, campaign_id, job_id,
+        root_causes, causal_chains, buying_barriers,
+        package, is_partial, partial_reason
+      ) VALUES (
+        ${id}, ${accountId}, ${campaignId}, ${jobId},
+        ${JSON.stringify(rootCauses)}::jsonb,
+        ${JSON.stringify(causalChains)}::jsonb,
+        ${JSON.stringify(buyingBarriers)}::jsonb,
+        ${JSON.stringify(pkg)}::jsonb,
+        ${persistIsPartial},
+        ${persistPartialReason}
+      )
+      ON CONFLICT (account_id, campaign_id, job_id) DO UPDATE SET
+        root_causes = EXCLUDED.root_causes,
+        causal_chains = EXCLUDED.causal_chains,
+        buying_barriers = EXCLUDED.buying_barriers,
+        package = EXCLUDED.package,
+        is_partial = EXCLUDED.is_partial,
+        partial_reason = EXCLUDED.partial_reason,
+        created_at = now()
+    `);
+    console.log(`${LOG_PREFIX} AEL_PERSISTED | id=${id} | campaign=${campaignId} | job=${jobId} | rootCauses=${rootCauses.length} | causalChains=${causalChains.length} | buyingBarriers=${buyingBarriers.length} | partial=${persistIsPartial}`);
+  } catch (err: any) {
+    console.error(`${LOG_PREFIX} AEL_PERSIST_FAILED | campaign=${campaignId} | job=${jobId} | err=${err?.message || err}`);
+  }
 }

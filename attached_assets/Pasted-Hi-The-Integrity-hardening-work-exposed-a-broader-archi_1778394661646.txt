@@ -1,0 +1,196 @@
+Hi,
+
+The Integrity hardening work exposed a broader architectural rule that now needs to become system-wide doctrine.
+
+The issue was not only a field mismatch.
+
+The deeper issue is that the system still contains semantic ambiguity patterns where a single field (usually `status`) can mean multiple things depending on context.
+
+Example:
+
+* engine execution state
+* business verdict
+* integrity verdict
+* validation state
+* snapshot trust state
+
+This creates dangerous fallback behavior where legacy fields can accidentally satisfy live decision logic.
+
+The Integrity fix solved this correctly by:
+
+* separating execution status from integrity verdict
+* introducing a canonical verdict field
+* removing legacy fallback
+* enforcing strict enum validation
+* blocking live usage when canonical fields are missing
+
+I now want the same doctrine applied system-wide.
+
+---
+
+# Required Initiative
+
+Please run a full:
+
+> Semantic Contract Hardening Audit
+
+across the entire orchestrator ecosystem.
+
+This is not a telemetry-only task.
+
+The goal is:
+
+> no semantic fallback for live reasoning anywhere in the system.
+
+---
+
+# System-Wide Rules
+
+## 1. No Semantic Fallback
+
+Disallow patterns like:
+
+```ts
+overallStatus ?? status
+validationResult ?? result
+verdict ?? status
+x || result
+```
+
+for any live decision path.
+
+If the canonical field is missing:
+
+* return `CONTRACT_INCOMPLETE`
+* block live reasoning
+* never silently substitute another field
+
+---
+
+## 2. Every Meaning Must Have Its Own Canonical Field
+
+Examples:
+
+```ts
+engineStatus
+integrityVerdict
+commercialVerdict
+validationState
+snapshotTrustState
+```
+
+A generic `status` field must never carry multiple semantic meanings.
+
+---
+
+## 3. Strict Enums Only
+
+Every strategic/verdict field must use strict enums.
+
+Examples:
+
+```ts
+integrityVerdict = PASS | PARTIAL | FAIL
+validationState = VALIDATED | PROVISIONAL | WEAK | REJECTED
+engineStatus = SUCCESS | ERROR | TIMEOUT
+snapshotTrustState = FRESH_VERIFIED | STALE | CONTRACT_INCOMPLETE
+```
+
+No free-form strings for canonical decision fields.
+
+---
+
+## 4. Legacy Fields Are Historical Only
+
+Legacy fields may still exist for:
+
+* historical rendering
+* backwards-compatible display
+* migrations
+
+But they must never satisfy:
+
+* contracts
+* orchestration
+* verdict logic
+* recovery planning
+* budget/channel decisions
+* trust evaluation
+
+---
+
+# Required Audit
+
+Please audit all orchestrator/strategy/system-control/recovery/snapshot consumers for:
+
+```ts
+?? status
+?? result
+|| status
+|| result
+fallback-to-legacy patterns
+```
+
+especially around:
+
+* System Control
+* Recovery Intelligence
+* Snapshot Trust
+* Contract Registry
+* Build Plan
+* Commercial Judgement
+* Validation
+* Budget Governor
+* Channel Selection
+* Iteration
+* Retention
+* Funnel
+* Mechanism
+* Differentiation
+* Persuasion
+* Integrity
+
+---
+
+# Required Deliverables
+
+For each semantic field:
+
+1. Canonical field name
+2. Semantic meaning
+3. Allowed enum values
+4. Current consumers
+5. Existing fallback paths
+6. Required migration
+7. Legacy removal plan
+8. Test coverage
+
+---
+
+# Required Enforcement
+
+Add tests proving:
+
+* legacy fields cannot satisfy contracts
+* wrong vocabulary is rejected
+* missing canonical fields produce CONTRACT_INCOMPLETE
+* execution status cannot masquerade as strategic verdicts
+* stale snapshots cannot satisfy live reasoning
+
+---
+
+# Important
+
+The Integrity fix proved the doctrine works.
+
+Now we need consistency across the whole system.
+
+The objective is:
+
+> every live decision in the system must be driven only by canonical, explicit, contract-complete semantic fields.
+
+No ambiguity.
+No semantic fallbacks.
+No accidental PASS from historical or mismatched data.
+
+Thanks.

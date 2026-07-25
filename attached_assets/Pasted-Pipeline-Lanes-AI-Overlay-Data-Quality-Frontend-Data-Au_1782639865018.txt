@@ -1,0 +1,81 @@
+Pipeline Lanes + AI Overlay + Data Quality + Frontend — Data Audit Patch 4/4 (Final)
+Scope: 4 sub-modules, ~43 files total
+Auditor: Replit Agent
+Date: 2026-06-28
+
+Files to audit:
+
+GROUP 1 — Pipeline Lanes (server/pipeline/lanes/ — all 14 files)
+Please list each file individually in your verdict table.
+
+GROUP 2 — Pipeline AI Overlay (server/pipeline/ai-overlay/ — 8 files):
+- server/pipeline/ai-overlay/assemble.ts
+- server/pipeline/ai-overlay/client.ts
+- server/pipeline/ai-overlay/competitor.ts
+- server/pipeline/ai-overlay/dna.ts
+- server/pipeline/ai-overlay/explanation.ts
+- server/pipeline/ai-overlay/q2-reasoning.ts
+- server/pipeline/ai-overlay/types.ts
+- server/pipeline/ai-overlay/user-interpretation.ts
+
+GROUP 3 — Data Quality (15 files):
+- server/shared/multi-source-loader.ts
+- server/shared/embedding.ts
+- server/shared/openai-embeddings.ts
+- server/shared/text-sanitizer.ts
+- server/shared/text-policy.ts
+- server/shared/engine-health.ts
+- server/data-source/resolver.ts
+- server/data-source/benchmarks.ts
+- server/data-source/statistical-validity.ts
+- server/data-source/validation.ts
+- server/data-source/routes.ts
+- server/data-source/transition-log.ts
+- server/baselines.ts
+- server/confidence.ts
+- server/risk-classifier.ts
+
+GROUP 4 — Frontend Data Components (4 files):
+- components/CompetitiveIntelligence.tsx
+- components/MarketDatabaseAdmin.tsx
+- components/SystemIntegrityPanel.tsx
+- app/(tabs)/monitor.tsx
+
+Risk categories to check (in priority order):
+
+1. LANE INTEGRITY & TENANT ISOLATION
+   - Do all lane files (user.ts, competitor.ts, etc.) scope their DB reads by accountId AND campaignId?
+   - Can a lane from one account's run interfere with a lane from another account's run?
+   - Are lane outputs validated before being passed to the bridge?
+
+2. DATA QUALITY ENFORCEMENT
+   - Does multi-source-loader.ts enforce minimum source count or quality thresholds before returning data?
+   - Does statistical-validity.ts actually block low-sample or statistically invalid results from passing?
+   - Does confidence.ts enforce ceilings when data quality is low, or is it purely advisory?
+   - Does risk-classifier.ts surface risk levels to downstream consumers or is it advisory only?
+
+3. AI OVERLAY SAFETY
+   - Do ai-overlay files (especially q2-reasoning.ts, explanation.ts) do JSON.parse on LLM output without try/catch or schema validation?
+   - If the LLM overlay fails, does the pipeline degrade gracefully or does the whole run fail?
+   - Is LLM output used for decisions (Q1, Q2 verdicts) or only for enrichment/explanation?
+
+4. SILENT FAILURES in data quality pipeline
+   - Do resolver.ts, validation.ts, or engine-health.ts have bare catch{} blocks that silently pass weak data?
+   - If a data source transitions (transition-log.ts), is the transition recorded or can it be lost?
+
+5. ERROR DISCLOSURE on data-source routes
+   - Do data-source/routes.ts catch blocks return err.message directly to the client?
+
+6. FRONTEND DATA SAFETY
+   - Do CompetitiveIntelligence.tsx or monitor.tsx display raw error messages from API responses?
+   - Is any sensitive competitive data (competitor names, scraped content) exposed in browser console logs?
+   - Do any frontend components make API calls without proper auth token?
+
+Please provide:
+A) A per-file verdict table grouped by the 4 groups above
+B) A summary table by category
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Does the data quality layer (confidence.ts, statistical-validity.ts, risk-classifier.ts) actually block weak data from reaching the strategy engines, or is it purely advisory?
+   Q2: If an AI overlay (q2-reasoning, explanation) fails or returns malformed JSON, what happens to the pipeline run?
+   Q3: Do the frontend components expose any sensitive data in console logs or error states?

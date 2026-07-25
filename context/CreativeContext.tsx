@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
+import { useAuth } from './AuthContext';
 
 export interface CreativeContextData {
   source: 'CI';
@@ -39,6 +40,8 @@ interface CreativeContextValue {
 const CreativeCtx = createContext<CreativeContextValue | null>(null);
 
 export function CreativeContextProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const authUserId = user?.id ?? null;
   const [creativeContext, setCreativeContextState] = useState<CreativeContextData | null>(null);
 
   const setCreativeContext = useCallback((ctx: CreativeContextData | null) => {
@@ -48,6 +51,13 @@ export function CreativeContextProvider({ children }: { children: ReactNode }) {
   const clearCreativeContext = useCallback(() => {
     setCreativeContextState(null);
   }, []);
+
+  // SECURITY: competitor intelligence is account-scoped. Clear it on any
+  // change of auth identity (login, logout, switchToAccount) so the next
+  // user cannot see the previous account's selected competitor snapshot.
+  useEffect(() => {
+    setCreativeContextState(null);
+  }, [authUserId]);
 
   return (
     <CreativeCtx.Provider value={{ creativeContext, setCreativeContext, clearCreativeContext }}>

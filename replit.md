@@ -1,98 +1,168 @@
 # Avyron AI
 
 ## Overview
-Avyron AI is a cross-platform marketing automation application designed to streamline marketing workflows, enhance brand presence, and provide strategic insights using AI. Its core purpose is to automate content generation, campaign management, post scheduling, and analytics across various platforms. The project aims to be a comprehensive, autonomous marketing solution focused on revenue generation and controlled content execution for businesses, offering a competitive edge through advanced AI capabilities and strategic intelligence.
+Avyron AI is a cross-platform marketing automation application designed to streamline marketing workflows, enhance brand presence, and provide strategic insights using AI. Its core purpose is to automate content generation, campaign management, post scheduling, and analytics across various platforms.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Core Design Principles
-The project utilizes a monorepo structure, TypeScript for type safety, and platform abstraction for cross-platform compatibility (iOS, Android, Web). It features dynamic theming, extensive indexing, Zod-based request validation, self-healing snapshot resolution, system-wide fail-safe enforcement, and guarantees non-empty outputs from all engines. Cross-engine isolation validation prevents prohibited write targets.
+**Frontend** — Expo SDK + React Native, Expo Router, React Context, TanStack React Query, React Native Reanimated, i18n-js.
 
-### Frontend
-The frontend is built with Expo SDK, React Native, Expo Router for navigation, React Context API for global state management, and TanStack React Query for server state. It includes a custom component library, React Native Reanimated for animations, and i18n-js for internationalization. Engine components use a "lazy mount, keep alive" rendering pattern.
+**Backend** — Express.js + Node.js + TypeScript, RESTful APIs. Dual AI engine (OpenAI GPT + Google Gemini). Autonomous engine with guardrails and a decision feedback loop.
 
-### Backend
-The backend employs Express.js with Node.js and TypeScript, exposing RESTful APIs. It integrates a dual-AI engine (OpenAI GPT and Google Gemini) for content and strategy, specialized models for AI image/design, and an autonomous engine for marketing decisions with guardrails and a decision feedback loop.
+**Data Storage** — Client-side AsyncStorage. Server-side PostgreSQL with Drizzle ORM (schema floor enforced on boot, `REQUIRED_SCHEMA_VERSION = 45`).
 
-### Data Storage
-Client-side data is stored using AsyncStorage. Server-side data, including user information and chat conversations, is managed in PostgreSQL with Drizzle ORM. Snapshot lifecycle management operates in DATA_ARCHIVING mode with dual-window retention and latest-per-campaign protection.
+**Core principles** — Monorepo, TypeScript everywhere, platform abstraction (iOS/Android/Web), dynamic theming, Zod request validation, system-wide fail-safe enforcement, cross-engine isolation validation.
 
-### Key Features
-- **Dashboard**: Displays revenue-focused KPIs, campaign metrics, a Strategic Narrative causal chain card (NarrativeCard), and an inline AI chat box (DashboardChat). Header uses the AvyronLogo SVG component. The full-screen agent chat is still accessible via FAB button.
-- **Causal Narrative Layer**: A deterministic, read-only, stateless post-processing layer (`server/narrative-layer.ts`) that transforms engine outputs into a 5-step causal chain (Market Problem → Why It Happens → What We Do → How We Fix It → What To Execute). Includes a Human Translation Layer (`humanize()`) that applies ~25 regex replacements to simplify jargon, shorten verbose phrasing, strip template artifacts, and cap output at 120 chars — same meaning, clearer words. Served via `GET /api/narrative/:campaignId`. No AI calls, no DB writes.
-- **Content Creation**: AI Writer for text and AI Designer for image generation.
-- **AI Management**: AI Audience Engine (always visible), Auto Publish (Coming Soon placeholder), Market DB, and a Performance Intelligence Layer. Leads section removed. Advanced Mode toggle removed — all features always accessible.
-- **Strategic Engines**: Includes Positioning, Differentiation (V8), Mechanism (with AEL causal grounding), Offer, Funnel, Integrity, Awareness, and Persuasion (V4) Engines, designed to generate comprehensive strategic plans. The Offer Engine uses a deterministic skeleton architecture when a Strategy Root is active, ensuring strategic alignment.
-- **Strategy Root System**: A unified source of truth binding all strategic engines via a single enforced root hash, ensuring data consistency and staleness detection.
-- **Product DNA**: A source-of-truth layer injected into all strategic engines for identity context in AI prompts.
-- **Competitive Intelligence (MIv3)**: A 6-layer pipeline for real-data competitor analysis with multi-source intelligence and signal normalization.
-- **Authority Hierarchy Enforcement**: Strict Awareness → Funnel → Persuasion authority hierarchy with cross-engine validation to prevent contradictions.
-- **Analytical Enrichment Layer (AEL v2)**: A deep causal interpretation layer that produces WHY-level analysis, including root causes, causal chains, buying barriers, and priority-ranked insights.
-- **Causal Enforcement Layer (CEL)**: A post-generation compliance layer that programmatically enforces alignment between AEL root causes and all downstream engine outputs based on specific constraint rules.
-- **Structured Signal Flow (Audience → Positioning)**: The Audience Engine outputs structured signals with enforced evidence quality, which are then consumed by the Positioning Engine.
-- **Positioning Compression Layer**: A 3-phase deterministic compression system in the Positioning Engine that forces sharper, single-territory output. Phase 1: specificity scoring with system-noun, failure-verb, and cross-industry generic penalties. Phase 2: `compressTerritories()` merges overlapping territories (≥60% token overlap) and prompt rules enforce system-failure framing. Phase 3: `evaluateCompressionQuality()` post-generation validator penalizes broad/emotional territories that lack operational specificity.
-- **Territory Upstream Filter (Layer 10)**: `filterAudienceTerritories()` — a hard pre-LLM filter in territory selection that rejects audience-level territory names (emotional/psychological labels) and data artifacts (analytical labels with signal counts). Uses 3 marker lists: SYSTEM_NOUNS (40+ structural terms), FAILURE_VERBS (27+ failure conditions), AUDIENCE_ONLY (70+ emotional/audience terms). Also detects data labels via regex. Falls back to best available candidates if all territories are filtered out. Post-filter `classifyTerritoryLevel()` and `validateTerritorySpecificity()` provide secondary validation with retry gate (max 1 retry with rejection context).
-- **Layer 7 System Territory Translation**: `translateToSystemTerritory(label, signalType, productDna)` — deterministic (no LLM) translation layer that converts audience-level canonical labels from the Audience Engine into system-level operational territory names before they enter Layer 7 opportunity gap detection. Uses exact-match lookup tables for pain/desire/root_cause/psych_driver signals, `inferDomainNoun(productDna)` for domain-aware framing (marketing/platform/service delivery/conversion/care delivery/learning/financial/operational), and `buildGenericSystemTerritory()` as fallback that strips audience emotion words and appends type-specific suffixes (process breakdown, mechanism gap, etc.).
-- **Positioning Signal Direct Composition**: The Positioning Engine directly composes positioning from specific signal clusters pre-mapped to territories.
-- **Differentiation Compression Layer**: Phase 1: `compressDifferentiationPillars()` merges overlapping pillars using Jaccard token similarity with business-type-aware thresholds, caps at `MAX_PILLARS=3`. Phase 2: Prompt hardening in `layer11_aiRefinement()` — mechanism anchoring (passes `mechanismCore.mechanismSteps` into prompt), business-type-conditional vocabulary (SaaS→system/pipeline, service→process/method, ecommerce→flow/conversion), explicit contrast requirement ("We do X, while the market does Y"), anti-generic constraint rejecting cross-industry language. Scoring penalties (not hard rejection) for missing contrast/mechanism linkage. Phase 2b: AEL injection strengthening — `buildStructuredAELBlock()` formats root causes [RC#], causal chains [CC#], and barriers [BB#] as numbered identifiers the LLM must reference; prompt requires verbatim AEL language in pillar descriptions and claims; output schema includes `rootCauseUsed` and `barrierResolved` fields; `AEL_GROUNDING_RESULT` log tracks reference compliance.
-- **Mechanism Engine AEL Causal Grounding**: Same `buildStructuredAELBlock()` pattern applied to the Mechanism Engine — injects [RC#]/[CC#]/[BB#] identifiers into the mechanism generation prompt, requires verbatim AEL language in mechanism description/steps/logic, adds `rootCauseUsed` and `barrierResolved` output fields, and logs `AEL_GROUNDING_RESULT` for compliance tracking. Mechanism steps must follow cause→intervention→outcome chains grounded in AEL causal chains.
-- **Differentiation Signal Grounding Enforcement**: A stability guard that validates the proofability and trust alignment of differentiation claims, rejecting and re-prompting with specific grounding rejection context if criteria are not met.
-- **Signal Governance Layer (SGL v2)**: A unified signal source-of-truth that all downstream engines consume from, featuring signal purification to remove raw user comments and ensure signal traceability.
-- **System Integrity Validator (SIV)**: An end-to-end verification layer that runs after all engines complete, validating signal reception, output traceability, and cross-engine alignment.
-- **AI Orchestrator**: A single-entry orchestration engine running 15 engines in priority order with checkpoint persistence, generating coherent 9-section strategic plans via AI synthesis. The OrchestratorPanel component (Build Plan tab in AI Management) shows real-time pipeline status, all 15 engine results with colored status indicators, and a View button to open the full strategic plan document.
-- **BuildPlanLayer (Execution Synthesis Layer)**: A final execution layer that converts engine analysis into actionable decisions and daily/weekly instructions, including content DNA and specific execution actions.
-- **Execution Activation Layer**: Auto-triggers the content production pipeline upon plan approval, enforcing content queue minimums and scheduling completeness.
-- **Fortress Completion Engines (V3 Strategy Layer)**: Includes Statistical Validation Engine, Budget Governor Engine, Channel Selection Engine (V4), Iteration Engine, and Retention Engine.
-- **Adaptive Data Source System**: Supports `campaign_metrics` and `benchmark` modes with adaptive switching rules and a Statistical Validity Layer.
-- **Snapshot Trust & Freshness System**: Provides temporal decay scoring, schema validation, and freshness classification for data.
-- **Concurrency Hardening**: Includes lock timeouts, batched deduplication, stale recovery safeguards, atomic plan approval (WHERE status IN DRAFT/READY_FOR_REVIEW prevents double-approval race), and INSERT...WHERE NOT EXISTS orchestrator run guard (prevents duplicate pipeline runs per campaign within 30min window).
-- **Scalability & Thundering Herd Protection**: Features a global job queue, per-account job budgets, shared market data cache, request deduplication, and a rate gate. Database has 90 indexes across all critical tables for query performance under load.
-- **Production Readiness**: Load tested at 200 concurrent users with 0% failure rate (p50=490ms, p95=858ms, p99=888ms). All 9 strategy engines validated for snapshot consistency. Failure recovery tested: invalid IDs return proper 404s, duplicate runs blocked with 409, all endpoints wrapped in try/catch.
-- **Audit & Control System**: A 5-panel dashboard for auditing feeds, AI usage, gate status, decisions, publish history, and job management.
+**Feature inventory** — Full list archived in [`.local/docs/seals/replit-md-prune-2026-07-20.md`](.local/docs/seals/replit-md-prune-2026-07-20.md) §1 (includes P-1 Publish Lineage + Outcome Tracker, July 2026).
 
 ## External Dependencies
 
-### AI Services
-- OpenAI API
-- Google Gemini
+- **AI**: OpenAI API (`OPENAI_API_KEY`), Google Gemini.
+- **Data acquisition**: Bright Data Unlocker API (zone-based; IG/TikTok/Website/Blog) via single client `server/competitive-intelligence/brightdata-client.ts` (ESLint-enforced import boundary). Google review texts require separate `BRIGHT_DATA_SERP_ZONE` (Unlocker refuses raw Google HTML). Apify = TikTok fallback.
+- **Database**: PostgreSQL via Drizzle ORM. Migration runner: `server/migrations/runner.ts` (advisory lock, `npm run db:migrate`).
+- **Auth**: JWT email/password (access 14d legacy grace; refresh 30d with rotation). Account lockout 5 attempts / 15 min. Stripe webhook for subscriptions. Per-account AI rate limit 50/hr/route.
+- **Other**: Video Credits System, static landing/pricing served by Express, social platforms (IG/FB/Twitter/LinkedIn/TikTok).
 
-### Database
-- PostgreSQL
+---
 
-### User Authentication
-- JWT-based email/password auth (`server/auth.ts`)
-- 7-day free trial on registration, subscription statuses: trial → active → expired
-- Auth routes: POST /api/auth/register, POST /api/auth/login, GET /api/auth/me, POST /api/auth/seen-intro, GET /api/auth/subscription-status
-- Stripe webhook: POST /api/stripe/webhook (requires STRIPE_WEBHOOK_SECRET or x-internal-key header)
-- Frontend auth context (`context/AuthContext.tsx`) with JWT token persistence via AsyncStorage
-- Route gating in `app/_layout.tsx` AuthGate: unauthenticated → /login, new user → /intro, expired trial → /upgrade, active → /(tabs)
-- Environment variables: JWT_SECRET, STRIPE_WEBHOOK_SECRET, EXPO_PUBLIC_STRIPE_PAYMENT_LINK
+## Active doctrine (live rules — non-negotiable)
 
-### Video Credits System
-- `videoCredits` column on users table (integer, default 0)
-- Credits allocated per plan via webhook: growth=2, ultra=5. Webhook also supports `addCredits` for top-ups.
-- Backend enforcement: `/api/veo/generate-video` requires `userId`, checks credits > 0, deducts 1 credit per generation
-- Credit balance endpoint: GET `/api/veo/credits?userId=...`
-- Frontend: Generate Video button shows credit count, disables with lock icon when 0, alerts user to upgrade
-- After generation starts, `refreshUser()` updates credit count in AuthContext
-- Files: `server/veo-routes.ts`, `server/auth.ts`, `app/(tabs)/create.tsx`, `context/AuthContext.tsx`, `shared/schema.ts`
+### D1–D5 Semantic Contract Hardening
 
-### Website (Landing + Pricing)
-- Landing page served at `/` on port 5000 (Express backend) — `server/templates/landing-page.html`
-- Pricing page served at `/pricing` on port 5000 — `server/templates/pricing.html`
-- Clean SaaS design using Inter font, brand purple (#7C3AED) accents, white background
-- Landing page sections: Hero, How It Works (3 steps), Product (4 cards), What You Get, Pricing Preview, Final CTA
-- Pricing page: 3 plans (One Shot $80, Growth $250, Ultra $500), video credits add-on, FAQ, bottom CTA
-- All "Start Free Trial" CTAs link to the app on port 8081
-- BASE_URL_PLACEHOLDER replaced at serve-time with the actual domain
-- Responsive design with mobile breakpoints
+- **D1** — No semantic fallback. `?? status`, `|| verdict`, `?? outcome` FORBIDDEN on any live decision path. ESLint rule `semantic/no-semantic-fallback`.
+- **D2** — Every meaning has its own canonical field. Generic `status` carries execution semantics ONLY.
+- **D3** — Strict `z.enum([...])` for every verdict-shaped field, never `z.string()`.
+- **D4** — Legacy fields are display/migration only; MAY NOT satisfy contracts.
+- **D5** — Missing canonical → `CONTRACT_INCOMPLETE`. Never silently substitute.
 
-### Social Platforms
-- Instagram
-- Facebook
-- Twitter
-- LinkedIn
-- TikTok
+Canonical fields: `validationState` ∈ {validated|provisional|weak|rejected}, `decision.action` ∈ {test|scale|hold|halt}, `primaryChannel.decisionGate.outcome` ∈ {recommended|support_channel|exploratory}, `integrityVerdict` ∈ {PASS|PARTIAL|FAIL}, `executionStatus` ∈ {COMPLETED|PARTIAL|BLOCKED|ERROR|NEEDS_INPUT|BLOCKED_BY_INTEGRITY}.
+
+Contract reference: `INTEGRITY_CONTRACT` in `server/orchestrator/contract-registry/registry.ts`. Inline ESLint suppression allowlist size: 4.
+
+> Detail + suppression policy: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §2. History: [`.local/docs/seals/semantic-contract-hardening-h1-h7.md`](.local/docs/seals/semantic-contract-hardening-h1-h7.md).
+
+### Continuity Architecture (Seals #13–#19)
+
+**Founding doctrine: operational silence is a system failure category.**
+
+Core invariants:
+- **INVARIANT-RETRY** — Failed OR partial boss runs MUST NEVER be suppressed. `SUCCESS_STATUSES = new Set(["completed"])`; `partial`/`failed` both DELETE the claim row.
+- **MULTI-REPLICA-SAFE** — DB claim handshake via `tryClaimWindow()` `ON CONFLICT DO NOTHING RETURNING`.
+- **CHAIN-STATE-EXPLICIT** — Chains without introspection wiring MUST classify `UNKNOWN`, never silently `HEALTHY`. `ChainState` = `HEALTHY|DEGRADED|DEAD|UNKNOWN`. Registry now has 11 chains (chain #11 = `revisit_scheduler`, P-1).
+- **NO-TENANT-LEAK** — Public `/healthz/continuity` MUST NOT expose per-tenant fields; admin token required for full report.
+- **NO SILENT CATCHES** — `} catch {}` / `.catch(() => {})` forbidden. Use `_logSilentLoad` / `_noteAuditWriteFailure` or `console.error("[Component] EVENT_TAG ...")`.
+- **NO BARE LLM CALLS** — every AI call MUST race against a wall-clock timeout (`AI_OPENAI_HARD_TIMEOUT_MS`, `AI_GEMINI_HARD_TIMEOUT_MS`, default 60s).
+- **8-AUDIT GATE (Seal #19)** — every new chain/scheduler/lock/in-flight Map MUST pass an 8-audit pass.
+
+**Steady-state expectation = 0**: `_bossInFlightStats().zombieEvictions`, `_continuityTickInflightStats().zombieEvictions`, `_activeJobsStats().zombieEvictions`, `agent_context_section_load_failed`, `[MIv3] AUDIT_WRITE_FAILED`, `[Orchestrator] STUCK_JOB_UPDATE_FAILED`, `continuity_dead_cycles_total`.
+
+> Operator surface, lifecycle tests, env knobs, alert thresholds: [`.local/docs/seals/replit-md-prune-2026-07-20.md`](.local/docs/seals/replit-md-prune-2026-07-20.md) §2. Operator handoff: [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md).
+
+### Orchestrator / Replay / UX / Memory — live invariants
+
+Detail archived in [`.local/docs/seals/intelligence-architecture-archive.md`](.local/docs/seals/intelligence-architecture-archive.md) and [`.local/docs/seals/replit-md-prune-2026-07-20.md`](.local/docs/seals/replit-md-prune-2026-07-20.md) §3. Hard rules:
+
+- **Replay (P4-A)**: All `server/orchestrator/**` LLM calls through `withReplayRecorder(...)`. ESLint `orchestrator-replay/no-bare-llm-call-in-replay` enforced. Recording OFF by default.
+- **Decomposition (P4-E)**: Legacy `runOrchestrator` is the ONLY working path (scaffold throws `SCAFFOLD_NOT_WIRED`). Line ceiling 5000 (ESLint). Per-sibling-module ceiling 200. `ORCH_USE_<MODULE>` env reads banned.
+- **UX projection (P8)**: Customer JSX MUST NOT contain internal engine names or doctrinal tokens. Verdict rendering via `presentRunTruthfulness()`. CI: `npm run lint:vocab`.
+- **Canonical fact ownership (P1)**: `strategy_memory` written ONLY through `memoryStore`. ESLint `canonical-fact/no-direct-strategy-memory-write`. One write gate: `policyEnforcedMemoryCheck`.
+- **Memory unification (P2)**: Reinforce by FK; `boundRowCount=0` → `MEMORY_UNBOUND` + CV-11. Outcome rows immutable once evaluated. Single read-time decay. CV-11 steady-state 0.
+
+### Perception Layer
+
+Allowlist-translator at `shared/perception-translator.ts` — fail-closed, unknown inputs return `null`. Endpoints: `GET /api/perception/watchtower`, `/activity`, `/monitoring`, `/reasoning` (all under `requireCampaign`). Customer payload contains NO internal UUIDs/status strings. See [`.local/docs/seals/replit-md-prune-2026-07-20.md`](.local/docs/seals/replit-md-prune-2026-07-20.md) §4 for full surface.
+
+### Narrative LLM v2
+
+v2 grounded-LLM rewrite (`server/narrative-layer.ts:~376`) default-on (since May 2026, sunset target was 2026-07-01). `EXPO_PUBLIC_NARRATIVE_LLM_V2=0` = ops revert. Failure → `llm_v2_failed_template_fallback`. See [`.local/docs/seals/replit-md-prune-2026-07-20.md`](.local/docs/seals/replit-md-prune-2026-07-20.md) §5 for sunset criteria.
+
+### Beta Safety Doctrine
+
+- **B1** Truthfulness over confidence.
+- **B2** Visibility over silence.
+- **B3** Safe degradation over fake success.
+- **B4** Explicit classification over hidden ambiguity.
+- **B5** Operational continuity over feature velocity.
+
+Beta-readiness package: [`.local/docs/beta-readiness/`](.local/docs/beta-readiness/) (mirrored to [`docs/beta-readiness/`](docs/beta-readiness/)). Cap env vars: `BETA_ADMISSIONS_FROZEN`, `BETA_ACCOUNT_CAP`.
+
+### performance_snapshots row contract (P-1)
+
+`checkpoint='sync'` rows carry full economics. `checkpoint IN ('24h','72h','7d')` rows carry engagement metrics only — economics are **explicit NULL by design** (null = not captured, 0 = platform said 0 — B1). Any reader aggregating this table MUST filter by checkpoint class. Idempotency is DB-level: unique partial index on `(post_id, checkpoint)` + `onConflictDoNothing()`.
+
+### Scraping-First Performance Loop (P-2)
+
+`server/performance-loop/` — owned-post tracking + lineage, deterministic content scoring (`owned_content_scores`), weekly business outcome scoring (`weekly_business_scores`), contracted AI interpretation. Migrations 044/045 (schema floor 45). Live rules:
+
+- **NULL≠zero everywhere**: missing metrics/rates stay NULL; rate/delta helpers return null on missing or zero denominators. Never coerce to 0.
+- **Verdicts are earned**: `businessVerdict=UNKNOWN` with `<2` prior baseline weeks; `attributionConfidence` strict-enum, never defaulted.
+- **Interpretation is judge-gated**: deterministic evidence judge (verdict preservation, invented-metric ban, causation guard); both attempts rejected → `PERFORMANCE_INTERPRETATION_UNAVAILABLE`, no template fallback.
+- **FAILED snapshots never satisfy freshness** — in BOTH the outer campaign gate (`needsUserChannelScrape`) and the inner per-profile gate (`snapshot_data::json->>'scrapeStatus' IS DISTINCT FROM 'FAILED'`). A failure never suppresses the retry.
+- **Backoff grace window**: one run stamps `graceSince` once and may retry a target that failed within its own window (fallback chain completes in-run); `cooldownUntil` is never mutated by the bypass — cross-run cooling stays intact.
+
+---
+
+## Required Replit Secrets
+
+Env validator (`server/env-validator.ts`) refuses to boot on any missing required secret. Set via Replit Secrets — never via `.replit` `[userenv.shared]` (history-leak risk).
+
+| Secret | Required | Purpose |
+|--------|----------|---------|
+| `DATABASE_URL` | always | Postgres connection string. |
+| `JWT_SECRET` | prod (dev: warn) | Auth signing key. `SESSION_SECRET` accepted as alias; changing either invalidates sessions. |
+| `OPENAI_API_KEY` | always | OpenAI client. `AI_INTEGRATIONS_OPENAI_API_KEY` accepted as alias. |
+| `BRIGHT_DATA_API_KEY` | all-or-nothing with `BRIGHT_DATA_ZONE` | Unlocker API key. Both unset → scraping SAFE-OFF; one set without other → boot-fatal. |
+| `BRIGHT_DATA_ZONE` | all-or-nothing with `BRIGHT_DATA_API_KEY` | Unlocker zone name. |
+| `BRIGHT_DATA_COUNTRY` | optional | 2-letter ISO; malformed → boot-fatal. |
+| `BRIGHT_DATA_SERP_ZONE` | optional | Separate SERP API zone for Google review texts. Unset → reviews degraded (`GOOGLE_RAW_HTML_UNSUPPORTED`). |
+| `STRIPE_WEBHOOK_SECRET` | recommended | Webhook route rejects all events (503, fail-closed) and subscription sync disabled until set. |
+| `PUBLIC_BASE_URL` | always (dev derives) | Canonical absolute base URL. `https://` enforced in prod. |
+| `ALLOWED_PUBLIC_HOSTS` | optional | Comma-separated additional hostname suffixes. |
+| `METRICS_ADMIN_TOKEN` | recommended | Infrastructure-only: gates `/metrics` and `/healthz/*`. Does NOT grant `/api/admin/*` access. |
+| `OPERATOR_ADMIN_TOKEN` | recommended | Product-admin: gates all `/api/admin/*` operator endpoints. Must be separate from `METRICS_ADMIN_TOKEN`. |
+| `SENTRY_DSN` | recommended | Error reporting. Absent → no-op. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | Reserved for OpenTelemetry. |
+| `JWT_LEGACY_CUTOFF_ISO` | optional | Override auto-persisted JWT legacy-grace cutoff. |
+| `AI_RATE_LIMIT_PER_HOUR` | optional | Override 50/hr/account/route AI rate limit. |
+| `BOSS_INFLIGHT_MAX_AGE_MS` | optional | Boss watchdog ceiling (default 30min). |
+| `CONTINUITY_TICK_MAX_AGE_MS` | optional | Continuity tick watchdog (default 15min). |
+| `AI_GEMINI_HARD_TIMEOUT_MS` | optional | Gemini wall-clock timeout (default 60s). |
+| `MI_ACTIVE_JOBS_MAX_AGE_MS` | optional | MIv3 activeJobs watchdog (default 30min). |
+| `REVISIT_SCHEDULER_DISABLED` | optional | Set `true` or `1` to disable the 30-min outcome revisit scheduler. |
+
+## Observability
+
+- `GET /healthz` — unauth liveness. `GET /metrics` — Prometheus, admin-gated. `GET /healthz/continuity` — public counters; admin token reveals per-tenant.
+- Logger: `server/logger.ts` (pino-compatible, `traceId`, `stripSecrets()`). Sentry: no-op when `SENTRY_DSN` unset.
+- Boot order: `validateEnv → initOTel → initSentry → ArtifactGuard → loggerMiddleware → /healthz → /metrics → /api → runMigrations() → workers`.
+- Full prose: [`.local/docs/seals/replit-md-prune-2026-07-20.md`](.local/docs/seals/replit-md-prune-2026-07-20.md) §6.
+
+## GDPR account deletion
+
+`server/account-lifecycle.ts` — two-phase reversible delete (30d quarantine). Phase 1 masks PII + inserts tombstone; Phase 2 reaper runs daily. `CASCADE_EXEMPT`: `audit_log_archive`, `account_tombstones`, `schema_migrations`, `auth_lockouts`, `messages`. Full prose: [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) §7.
+
+---
+
+## Seal archive index
+
+| File | Contents |
+|------|----------|
+| [`.local/docs/seals/replit-md-prune-2026-05-22.md`](.local/docs/seals/replit-md-prune-2026-05-22.md) | May 2026 prune (§1–§12: auth, D1–D5, continuity, perception, narrative, beta, GDPR, marketing engines, OBS-C, features, migrations, observability) |
+| [`.local/docs/seals/replit-md-prune-2026-07-20.md`](.local/docs/seals/replit-md-prune-2026-07-20.md) | July 2026 prune (§1–§6: feature list + P-1, continuity operator surface, orch/replay/UX/memory, perception, narrative sunset, observability boot) |
+| [`.local/docs/seals/semantic-contract-hardening-h1-h7.md`](.local/docs/seals/semantic-contract-hardening-h1-h7.md) | D1–D5 history, Seal #9 closures, suppression allowlist |
+| [`.local/docs/seals/intelligence-architecture-archive.md`](.local/docs/seals/intelligence-architecture-archive.md) | Replay / Decomposition / UX / Memory full prose |
+| [`.local/docs/seals/intelligence-hardening-seal.md`](.local/docs/seals/intelligence-hardening-seal.md) | Historical hardening seal |
+| [`.local/docs/seals/seal-13-track1-continuity.md`](.local/docs/seals/seal-13-track1-continuity.md) | Hourly scheduler, idempotent invocation, schema 021 |
+| [`.local/docs/seals/seal-14-track2-multireplica.md`](.local/docs/seals/seal-14-track2-multireplica.md) | DB claim handshake, 10-chain registry, supervisor, 12 Prometheus metrics, schema 022 |
+| [`.local/docs/seals/seal-15-track3-silent-degradation.md`](.local/docs/seals/seal-15-track3-silent-degradation.md) | 9 closed silent-degradation findings + 4 deferred + 6 behavioural tests |
+| [`.local/docs/seals/seal-16-followups.md`](.local/docs/seals/seal-16-followups.md) | F1 activeJobs watchdog + F2 Gemini AbortController |
+| [`.local/docs/seals/seal-17-track4-observability.md`](.local/docs/seals/seal-17-track4-observability.md) | Grafana dashboard + Continuity panel + admin endpoints |
+| [`.local/docs/seals/seal-18-track5-lifecycle-tests.md`](.local/docs/seals/seal-18-track5-lifecycle-tests.md) | 18 lifecycle scenarios + harness + flake checker |
+| [`.local/docs/seals/seal-19-track6-audits.md`](.local/docs/seals/seal-19-track6-audits.md) | 8-audit verdict matrix |
+| [`.local/docs/seals/seal-20-track7-doctrine-lock.md`](.local/docs/seals/seal-20-track7-doctrine-lock.md) | Doctrine lock + operator handoff |
+| [`.local/docs/audits/revisit-scheduler-8-audit-2026-07.md`](.local/docs/audits/revisit-scheduler-8-audit-2026-07.md) | Revisit scheduler 8-audit gate (P-1, July 2026, all 8 PASS) |
+| [`.local/docs/operator-handoff-continuity.md`](.local/docs/operator-handoff-continuity.md) | Operator one-pager: dashboard URLs, alerts, env-var reference, heartbeat-red decision tree |
+| [`.local/docs/seal-13-to-17-plan.md`](.local/docs/seal-13-to-17-plan.md) | Original Tracks #1–#7 design plan |

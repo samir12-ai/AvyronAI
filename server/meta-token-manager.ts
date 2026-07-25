@@ -98,7 +98,15 @@ export async function fetchPages(userToken: string): Promise<PageTokenResult> {
             igBusinessId = page.instagram_business_account.id;
             igUsername = igData.username;
           }
-        } catch {}
+        } catch (igLookupErr) {
+          // Seal #15: an IG-username lookup failure used to silently leave
+          // igUsername undefined, masking real Meta-API outages. Surface it.
+          console.error("[MetaTokenManager] IG_USERNAME_LOOKUP_FAILED", {
+            pageId: page?.id,
+            igBusinessId: page?.instagram_business_account?.id,
+            error: (igLookupErr as Error)?.message,
+          });
+        }
       }
 
       pages.push({

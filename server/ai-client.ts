@@ -1,5 +1,98 @@
 import OpenAI from "openai";
 import { GoogleGenAI, Modality } from "@google/genai";
+import { recordAiCost } from "./observability/otel";
+import { logger } from "./logger";
+import { recordAICallOutcome } from "./operations-guardian/ai-pressure-stats";
+import { getCurrentRecorder, _nextLlmCallOrder } from "./orchestrator/replay/recorder";
+import { hashValue } from "./orchestrator/replay/hash";
+import { getActiveStrictLlmMock } from "./orchestrator/replay/llm-strict-mock";
+
+/**
+ * Task #89 / Phase 4-A — Replay LLM interception + strict-mock short-circuit.
+ *
+ * Doctrine REPLAY-LLM-INTERCEPT: every successful AI call originating
+ * inside a runOrchestrator scope is captured into the active cassette
+ * via `getCurrentRecorder()?.recordLlmCall(...)`. Without this hook,
+ * cassettes from real orchestrator runs have empty `llmCalls`, and
+ * the player can't strict-mock subsequent replays. This function is
+ * a no-op outside an orchestrator scope.
+ *
+ * Doctrine REPLAY-LLM-STRICT-INJECT: when `getActiveStrictLlmMock()`
+ * returns a mock (set by the player / replay-cli), aiChat/aiGemini
+ * route through `mock.resolve(provider, model, payload)` BEFORE doing
+ * any network call. That makes `replay:run --against current` truly
+ * hermetic — zero network, zero token spend.
+ *
+ * Prompt fingerprint contract (UNIFIED): both `recordReplayLlmCall`
+ * (recorder side) and `StrictLlmMock.promptHashFor` (player side) use
+ * `hashValue(payload)` over the SAME canonical payload object. The
+ * payload is built ONCE per call in aiChat/aiGemini so the recorder's
+ * promptHash and the mock's lookup key are bit-identical.
+ */
+function recordReplayLlmCall(
+  provider: "openai" | "gemini",
+  model: string,
+  payload: unknown,
+  response: unknown,
+): void {
+  const rec = getCurrentRecorder();
+  if (!rec) return;
+  try {
+    rec.recordLlmCall({
+      callOrder: _nextLlmCallOrder(),
+      provider,
+      model,
+      promptHash: hashValue(payload),
+      response,
+    });
+  } catch (err) {
+    // Seal #15: no silent catches. Recorder errors must never break the
+    // AI call but MUST be visible to operators.
+    console.error("[Replay] LLM_CALL_RECORD_FAILED", {
+      provider,
+      model,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function buildOpenAIPayload(rest: Omit<AIChatOptions, "accountId" | "endpoint" | "timeoutMs">): Record<string, unknown> {
+  const isGpt5 = rest.model.startsWith("gpt-5");
+  const tokenParam = isGpt5
+    ? { max_completion_tokens: rest.max_tokens }
+    : { max_tokens: rest.max_tokens };
+  return {
+    model: rest.model,
+    messages: rest.messages as unknown,
+    ...tokenParam,
+    temperature: rest.temperature,
+    response_format: rest.response_format,
+    ...(rest.seed !== undefined ? { seed: rest.seed } : {}),
+  };
+}
+
+/**
+ * Seal #7 (F10.6/F10.7) — per-call USD cost estimation. Model rates are the
+ * public OpenAI/Gemini list prices ($/1K tokens) at the time of writing.
+ * Worth-tracking precision: nearest cent. When pricing changes, update here.
+ * Unknown models default to 0 — we still record so cardinality stays right.
+ */
+const MODEL_COST_USD_PER_1K_TOKENS: Record<string, number> = {
+  "gpt-4.1": 0.005,
+  "gpt-4o": 0.005,
+  "gpt-4o-mini": 0.00015,
+  "gpt-5": 0.01,
+  "gpt-5-mini": 0.0005,
+  "gemini-1.5-pro": 0.00125,
+  "gemini-1.5-flash": 0.000075,
+  "gemini-2.0-flash": 0.0001,
+  "gemini-2.5-flash": 0.0001,
+};
+
+function estimateCostUsd(model: string, totalTokens: number): number {
+  const ratePer1k = MODEL_COST_USD_PER_1K_TOKENS[model] ?? 0;
+  return (totalTokens / 1000) * ratePer1k;
+}
 
 const DEFAULT_MAX_TOKENS = 800;
 const HARD_TIMEOUT_MS = 45000;
@@ -7,12 +100,16 @@ const HARD_TIMEOUT_MS = 45000;
 export const PRIMARY_CHAT_MODEL = "gpt-4.1";
 
 let openaiInstance: OpenAI | null = null;
+let openaiApiKey: string | undefined;
 let geminiInstance: GoogleGenAI | null = null;
+let geminiApiKey: string | undefined;
 
 export function getOpenAI(): OpenAI {
-  if (!openaiInstance) {
+  const currentKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  if (!openaiInstance || currentKey !== openaiApiKey) {
+    openaiApiKey = currentKey;
     openaiInstance = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey: currentKey,
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
       timeout: HARD_TIMEOUT_MS,
       maxRetries: 0,
@@ -22,9 +119,11 @@ export function getOpenAI(): OpenAI {
 }
 
 export function getGemini(): GoogleGenAI {
-  if (!geminiInstance) {
+  const currentKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  if (!geminiInstance || currentKey !== geminiApiKey) {
+    geminiApiKey = currentKey;
     geminiInstance = new GoogleGenAI({
-      apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
+      apiKey: currentKey,
       httpOptions: {
         apiVersion: "",
         baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
@@ -42,8 +141,10 @@ export interface AIChatOptions {
   max_tokens: number;
   temperature?: number;
   response_format?: any;
+  seed?: number;
   accountId: string;
   endpoint?: string;
+  timeoutMs?: number;
 }
 
 export interface AIGeminiOptions {
@@ -74,6 +175,17 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
 
   const { accountId, endpoint = "unknown", ...rest } = options;
 
+  // Task #89 / P4-A REPLAY-LLM-STRICT-INJECT — when a strict mock is bound
+  // to the async context (player / replay-cli), short-circuit BEFORE any
+  // budget reservation or network call so the candidate run is fully
+  // hermetic. A mock miss surfaces as `LlmMockMissError` so the player
+  // classifies it STRUCTURAL.
+  const __mock = getActiveStrictLlmMock();
+  if (__mock) {
+    const payload = buildOpenAIPayload(rest);
+    return __mock.resolve("openai", rest.model, payload) as OpenAI.Chat.Completions.ChatCompletion;
+  }
+
   const budgetCheck = await checkAndReserveBudget(accountId, rest.max_tokens);
   if (!budgetCheck.allowed) {
     throw new AICallError(`AI budget exceeded for account ${accountId}: ${budgetCheck.reason}`, "AI_BUDGET_EXCEEDED");
@@ -82,28 +194,63 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
   const startTime = Date.now();
   let success = false;
   let actualTokens = 0;
+  let outcomeKind: "success" | "timeout" | "failed" | null = null;
 
   try {
     const openai = getOpenAI();
-    const isGpt5 = rest.model.startsWith("gpt-5");
-    const tokenParam = isGpt5
-      ? { max_completion_tokens: rest.max_tokens }
-      : { max_tokens: rest.max_tokens };
-    const result = await openai.chat.completions.create({
-      model: rest.model,
-      messages: rest.messages as any,
-      ...tokenParam,
-      temperature: rest.temperature,
-      response_format: rest.response_format,
-    } as any);
+    // Task #89 / P4-A — payload built via shared helper so the recorder
+    // promptHash and the strict-mock lookup key are computed over the
+    // exact same canonical object.
+    const payload = buildOpenAIPayload(rest);
+    const callOptions = options.timeoutMs && options.timeoutMs > HARD_TIMEOUT_MS
+      ? { timeout: options.timeoutMs }
+      : undefined;
+    const result = callOptions
+      ? await openai.chat.completions.create(payload as any, callOptions)
+      : await openai.chat.completions.create(payload as any);
 
     success = true;
     actualTokens = result.usage?.total_tokens || rest.max_tokens;
+    // Task #89 / P4-A — capture into active replay cassette (no-op outside
+    // orchestrator scope or when gate OFF).
+    recordReplayLlmCall("openai", rest.model, payload, result);
+    // Seal #7 / F10.7 — emit ai_cost_usd_total + traceId-aware log.
+    const costUsd = estimateCostUsd(rest.model, actualTokens);
+    recordAiCost("openai", rest.model, costUsd);
+    logger.info({
+      msg: "ai.openai.call",
+      accountId,
+      endpoint,
+      model: rest.model,
+      tokens: actualTokens,
+      costUsd: Number(costUsd.toFixed(6)),
+      durationMs: Date.now() - startTime,
+    });
     return result;
   } catch (err: any) {
+    const isTimeout =
+      (err instanceof AICallError && err.code === "AI_TIMEOUT") ||
+      (err && (err.name === "APITimeoutError" || /timeout/i.test(String(err.message ?? ""))));
+    outcomeKind = isTimeout ? "timeout" : "failed";
     if (err instanceof AICallError) throw err;
     throw new AICallError(err.message || "AI call failed", "AI_CALL_FAILED");
   } finally {
+    const latencyMs = Date.now() - startTime;
+    try {
+      if (success) {
+        recordAICallOutcome({ provider: "openai", outcome: "success", latencyMs });
+      } else if (outcomeKind) {
+        recordAICallOutcome({ provider: "openai", outcome: outcomeKind, latencyMs });
+      }
+    } catch (recordErr) {
+      // Seal #15 doctrine: no silent catches. The aggregator is best-effort
+      // observability — a recorder failure must never break the AI call,
+      // but it MUST be visible in logs.
+      console.error("[OperationsGuardian] AI_OUTCOME_RECORD_FAILED", {
+        provider: "openai",
+        recordErr,
+      });
+    }
     await reconcileBudgetReservation({
       accountId,
       endpoint,
@@ -111,7 +258,7 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
       maxTokens: rest.max_tokens,
       actualTokens,
       success,
-      durationMs: Date.now() - startTime,
+      durationMs: latencyMs,
     }).catch(() => {});
   }
 }
@@ -121,6 +268,14 @@ export async function aiGemini(options: AIGeminiOptions) {
 
   const maxTokens = config?.maxOutputTokens || DEFAULT_MAX_TOKENS;
 
+  // Task #89 / P4-A REPLAY-LLM-STRICT-INJECT — short-circuit before any
+  // network call. Lookup payload mirrors the shape used by
+  // recordReplayLlmCall below so the hash matches bit-for-bit.
+  const __mock = getActiveStrictLlmMock();
+  if (__mock) {
+    return __mock.resolve("gemini", model, { model, contents, config });
+  }
+
   const budgetCheck = await checkAndReserveBudget(accountId, maxTokens);
   if (!budgetCheck.allowed) {
     throw new AICallError(`AI budget exceeded for account ${accountId}: ${budgetCheck.reason}`, "AI_BUDGET_EXCEEDED");
@@ -129,25 +284,95 @@ export async function aiGemini(options: AIGeminiOptions) {
   const startTime = Date.now();
   let success = false;
   let actualTokens = 0;
+  let outcomeKind: "success" | "timeout" | "failed" | null = null;
 
   try {
     const gemini = getGemini();
-    const result = await gemini.models.generateContent({
-      model,
-      contents,
-      config: {
-        ...config,
-        maxOutputTokens: maxTokens,
-      },
+    // Track #3 / Seal #15 — Gemini call previously had NO wall-clock timeout.
+    // The OpenAI path uses HARD_TIMEOUT_MS (45s); Gemini was relying entirely
+    // on the underlying fetch defaults, which can hang indefinitely on a
+    // half-open socket. A hung Gemini call also holds the per-account
+    // pg_advisory_lock in checkAndReserveBudget, so a single hang blocks
+    // ALL subsequent AI calls for the same account. We now race against a
+    // wall-clock timer; on timeout we throw an AICallError so the outer
+    // catch + finally still run (lock release, budget reconciliation).
+    const GEMINI_HARD_TIMEOUT_MS = (() => {
+      const raw = process.env.AI_GEMINI_HARD_TIMEOUT_MS;
+      const parsed = raw ? Number(raw) : NaN;
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
+    })();
+    // Seal #16 / F2 — wall-clock timeout MUST also abort the underlying
+    // @google/genai SDK fetch via AbortController. Pre-Seal #16 the
+    // Promise.race only released our await; the SDK request kept running
+    // until its own (much longer) network timeout, leaking sockets and
+    // continuing to charge tokens against the account quota.
+    const abortController = new AbortController();
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        abortController.abort();
+        reject(
+          new AICallError(
+            `Gemini call exceeded ${GEMINI_HARD_TIMEOUT_MS}ms wall-clock timeout`,
+            "AI_TIMEOUT",
+          ),
+        );
+      }, GEMINI_HARD_TIMEOUT_MS);
+    });
+    const result = await Promise.race([
+      gemini.models.generateContent({
+        model,
+        contents,
+        config: {
+          ...config,
+          maxOutputTokens: maxTokens,
+          abortSignal: abortController.signal,
+        },
+      }),
+      timeoutPromise,
+    ]).finally(() => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
     });
 
     success = true;
     actualTokens = (result as any)?.usageMetadata?.totalTokenCount || maxTokens;
+    // Task #89 / P4-A — capture into active replay cassette (no-op outside
+    // orchestrator scope or when gate OFF).
+    recordReplayLlmCall("gemini", model, { model, contents, config }, result);
+    // Seal #7 / F10.7 — emit ai_cost_usd_total + traceId-aware log.
+    const costUsd = estimateCostUsd(model, actualTokens);
+    recordAiCost("gemini", model, costUsd);
+    logger.info({
+      msg: "ai.gemini.call",
+      accountId,
+      endpoint,
+      model,
+      tokens: actualTokens,
+      costUsd: Number(costUsd.toFixed(6)),
+      durationMs: Date.now() - startTime,
+    });
     return result;
   } catch (err: any) {
+    const isTimeout =
+      (err instanceof AICallError && err.code === "AI_TIMEOUT") ||
+      (err && /timeout|aborted/i.test(String(err.message ?? "")));
+    outcomeKind = isTimeout ? "timeout" : "failed";
     if (err instanceof AICallError) throw err;
     throw new AICallError(err.message || "Gemini call failed", "AI_CALL_FAILED");
   } finally {
+    const latencyMs = Date.now() - startTime;
+    try {
+      if (success) {
+        recordAICallOutcome({ provider: "gemini", outcome: "success", latencyMs });
+      } else if (outcomeKind) {
+        recordAICallOutcome({ provider: "gemini", outcome: outcomeKind, latencyMs });
+      }
+    } catch (recordErr) {
+      console.error("[OperationsGuardian] AI_OUTCOME_RECORD_FAILED", {
+        provider: "gemini",
+        recordErr,
+      });
+    }
     await reconcileBudgetReservation({
       accountId,
       endpoint,
@@ -155,7 +380,7 @@ export async function aiGemini(options: AIGeminiOptions) {
       maxTokens,
       actualTokens,
       success,
-      durationMs: Date.now() - startTime,
+      durationMs: latencyMs,
     }).catch(() => {});
   }
 }
@@ -248,6 +473,38 @@ export function getWeeklyTokenBudget(accountId?: string): number {
 }
 
 export { WEEKLY_TOKEN_BUDGET, ACCOUNT_BUDGET_OVERRIDES };
+
+/**
+ * Task #89 / Phase 4-A test-only helpers — let the E2E record→replay
+ * suite swap the OpenAI / Gemini clients for stubs that return canned
+ * responses without making a network call. Production code MUST NOT
+ * import these; they exist purely to keep the hermeticity contract of
+ * server/tests/orchestrator-replay/llm-end-to-end.test.ts provable
+ * without a real provider key. Naming follows the `__*ForTests`
+ * convention so a reviewer can grep for accidental production usage.
+ */
+export function __setOpenAIClientForTests(client: OpenAI): void {
+  openaiInstance = client;
+  // Sync the cached api-key to whatever the current env says so
+  // `getOpenAI()`'s `currentKey !== openaiApiKey` cache-bust check does
+  // NOT replace our stub with a real client on the next call.
+  openaiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+}
+
+export function __resetOpenAIClientForTests(): void {
+  openaiInstance = null;
+  openaiApiKey = undefined;
+}
+
+export function __setGeminiClientForTests(client: GoogleGenAI): void {
+  geminiInstance = client;
+  geminiApiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+}
+
+export function __resetGeminiClientForTests(): void {
+  geminiInstance = null;
+  geminiApiKey = undefined;
+}
 
 export async function getWeeklyTokenUsage(accountId: string): Promise<number> {
   try {

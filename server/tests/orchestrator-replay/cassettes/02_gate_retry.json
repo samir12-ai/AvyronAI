@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic",
+  "pathShape": "gate_retry",
+  "capturedAt": "2026-05-17T00:00:00.000Z",
+  "input": { "campaignId": "syn-camp-02", "accountId": "syn-acct-02", "forceRefresh": true },
+  "contextResolved": {
+    "sscPresent": true,
+    "contextKeys": ["mi", "audience"],
+    "inputHashes": { "mi": "h-mi-02" }
+  },
+  "engineOutputs": [
+    { "order": 0, "engineId": "mi", "engineName": "MI", "tier": "T0", "status": "RETRIED", "durationMs": 150, "output": { "attempt": 1 } },
+    { "order": 1, "engineId": "mi", "engineName": "MI", "tier": "T0", "status": "COMPLETED", "durationMs": 220, "output": { "attempt": 2 } },
+    { "order": 2, "engineId": "audience", "engineName": "Audience", "tier": "T0", "status": "COMPLETED", "durationMs": 200, "output": { "ok": true } }
+  ],
+  "synthesisInput": { "engineCount": 2, "controlVerdictPresent": true, "ledgerEntryCount": 0, "fingerprint": "fp-02" },
+  "planPersist": { "planId": "plan-02", "source": "primary", "degraded": false },
+  "systemControlVerdict": { "integrityVerdict": "PASS", "executionMode": "FULL", "blockReasons": [] },
+  "budgetLedger": [],
+  "inFlightEvents": [],
+  "llmCalls": [],
+  "finalResult": {
+    "jobId": "syn-job-02",
+    "status": "COMPLETED",
+    "completedEngines": ["mi", "audience"],
+    "planId": "plan-02",
+    "durationMs": 900,
+    "ledgerEntryCount": 0
+  }
+}

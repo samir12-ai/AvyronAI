@@ -94,6 +94,10 @@ interface PerfEntry {
 const EMPTY_PERF: PerfEntry = { avgReach: '', savesRate: '', avgEngagementRate: '' };
 
 function ContentPerformanceSection({ campaignId, colors, isDark }: { campaignId: string; colors: any; isDark: boolean }) {
+  const [summaryByFormat, setSummaryByFormat] = useState<Record<string, any>>({});
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editMode, setEditMode] = useState(false);
   const [entries, setEntries] = useState<Record<string, PerfEntry>>({
     reel: { ...EMPTY_PERF },
     carousel: { ...EMPTY_PERF },
@@ -103,24 +107,35 @@ function ContentPerformanceSection({ campaignId, colors, isDark }: { campaignId:
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  const [lastLogged, setLastLogged] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await authFetch(getApiUrl(`/api/performance/summary/${campaignId}`));
-        const json = await safeApiJson(res);
-        if (json.totalFormatsTracked > 0) {
-          const latest = Object.values(json.summaryByFormat as Record<string, any>)
-            .filter(Boolean)
-            .sort((a: any, b: any) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime())[0];
-          if (latest?.lastUpdated) {
-            setLastLogged(new Date(latest.lastUpdated).toLocaleDateString());
-          }
+  const loadSummary = useCallback(async () => {
+    try {
+      const res = await authFetch(getApiUrl(`/api/performance/summary/${campaignId}`));
+      const json = await safeApiJson(res);
+      const byFmt = json.summaryByFormat ?? {};
+      setSummaryByFormat(byFmt);
+      const sorted = Object.values(byFmt)
+        .filter(Boolean)
+        .sort((a: any, b: any) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+      if (sorted.length > 0 && (sorted[0] as any).lastUpdated) {
+        setLastUpdated(new Date((sorted[0] as any).lastUpdated).toLocaleDateString());
+      }
+      const prefilled: Record<string, PerfEntry> = { reel: { ...EMPTY_PERF }, carousel: { ...EMPTY_PERF }, story: { ...EMPTY_PERF }, post: { ...EMPTY_PERF } };
+      for (const [fmt, data] of Object.entries(byFmt)) {
+        if (data) {
+          prefilled[fmt] = {
+            avgReach: (data as any).avgReach ? String(Math.round((data as any).avgReach)) : '',
+            savesRate: (data as any).savesRate ? String(Math.round((data as any).savesRate * 100)) : '',
+            avgEngagementRate: (data as any).avgEngagementRate ? String(Math.round((data as any).avgEngagementRate * 100)) : '',
+          };
         }
-      } catch {}
-    })();
+      }
+      setEntries(prefilled);
+    } catch {}
+    setLoading(false);
   }, [campaignId]);
+
+  useEffect(() => { loadSummary(); }, [loadSummary]);
 
   const updateEntry = (fmt: string, field: keyof PerfEntry, value: string) => {
     setEntries(prev => ({ ...prev, [fmt]: { ...prev[fmt], [field]: value } }));
@@ -152,12 +167,12 @@ function ContentPerformanceSection({ campaignId, colors, isDark }: { campaignId:
             savesRate: parseFloat(e.savesRate) / 100 || 0,
             avgEngagementRate: parseFloat(e.avgEngagementRate) / 100 || 0,
             totalPublished: 0,
-            source: 'manual',
+            source: 'manual_correction',
           }),
         });
       }).filter(Boolean);
 
-      if (promises.length === 0) { setError('Enter at least one format'); setSaving(false); return; }
+      if (promises.length === 0) { setError('Enter at least one format to correct'); setSaving(false); return; }
       const responses = await Promise.all(promises);
       const failed = (responses as any[]).filter((r) => r && !r.ok);
       if (failed.length > 0) {
@@ -165,7 +180,8 @@ function ContentPerformanceSection({ campaignId, colors, isDark }: { campaignId:
         throw new Error(firstErr.error || 'One or more formats failed to save');
       }
       setSaved(true);
-      setLastLogged(new Date().toLocaleDateString());
+      setEditMode(false);
+      await loadSummary();
       Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: any) {
       setError(err.message || 'Failed to save');
@@ -174,84 +190,158 @@ function ContentPerformanceSection({ campaignId, colors, isDark }: { campaignId:
     }
   };
 
+  const hasAnyData = Object.values(summaryByFormat).some(Boolean);
+  const amber = '#F59E0B';
+
   return (
-    <View style={[s.channelsSection, { borderColor: '#F59E0B30', backgroundColor: isDark ? '#1A1300' : '#FFFBEB', marginTop: 16, marginBottom: 4 }]}>
-      <View style={s.goalSectionHeader}>
-        <Ionicons name="bar-chart-outline" size={16} color="#F59E0B" />
-        <Text style={[s.goalSectionTitle, { color: colors.text }]}>Content Performance</Text>
-        {saved && <Ionicons name="checkmark-circle" size={14} color={colors.success} />}
+    <View style={[s.channelsSection, { borderColor: amber + '30', backgroundColor: isDark ? '#1A1300' : '#FFFBEB', marginTop: 16, marginBottom: 4 }]}>
+      <View style={[s.goalSectionHeader, { justifyContent: 'space-between' }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Ionicons name="bar-chart-outline" size={16} color={amber} />
+          <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>Content Performance</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {hasAnyData && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' }} />
+              <Text style={{ color: '#10B981', fontSize: 10, fontWeight: '600' }}>AUTO</Text>
+            </View>
+          )}
+          <Pressable
+            onPress={() => { setEditMode(v => !v); setSaved(false); setError(''); }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: editMode ? (amber + '30') : (isDark ? '#1E2736' : '#F1F5F9') }}
+          >
+            <Ionicons name={editMode ? 'close' : 'pencil'} size={11} color={editMode ? amber : colors.textMuted} />
+            <Text style={{ fontSize: 11, color: editMode ? amber : colors.textMuted, fontWeight: '600' }}>
+              {editMode ? 'Cancel' : 'Correct'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
+
       <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
-        Log your actual content performance weekly. The adaptive system uses this data to adjust your content rhythm and memory constraints.
-        {lastLogged ? ` Last logged: ${lastLogged}.` : ' No data logged yet.'}
+        {editMode
+          ? 'Override scraped values below if the data looks incorrect.'
+          : 'Scraped automatically from your channels each week. Tap Correct only if the data is wrong.'}
+        {!editMode && lastUpdated ? ` Last updated: ${lastUpdated}.` : ''}
       </Text>
 
-      {PERF_FORMATS.map(({ key, label, icon }) => (
-        <View key={key} style={{ marginBottom: 12 }}>
-          <View style={[s.fieldLabelRow, { marginBottom: 6 }]}>
-            <Ionicons name={icon} size={14} color="#F59E0B" />
-            <Text style={[s.fieldLabel, { color: colors.text, fontSize: 12 }]}>{label}</Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TextInput
-              style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 9 : 7, fontSize: 13 }]}
-              placeholder="Avg Reach"
-              placeholderTextColor={colors.textMuted}
-              value={entries[key].avgReach}
-              onChangeText={v => updateEntry(key, 'avgReach', v)}
-              keyboardType="numeric"
-            />
-            <TextInput
-              style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 9 : 7, fontSize: 13 }]}
-              placeholder="Saves %"
-              placeholderTextColor={colors.textMuted}
-              value={entries[key].savesRate}
-              onChangeText={v => updateEntry(key, 'savesRate', v)}
-              keyboardType="numeric"
-            />
-            <TextInput
-              style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 9 : 7, fontSize: 13 }]}
-              placeholder="Eng. %"
-              placeholderTextColor={colors.textMuted}
-              value={entries[key].avgEngagementRate}
-              onChangeText={v => updateEntry(key, 'avgEngagementRate', v)}
-              keyboardType="numeric"
-            />
-          </View>
+      {loading ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 }}>
+          <ActivityIndicator size="small" color={amber} />
+          <Text style={{ color: colors.textMuted, fontSize: 13 }}>Loading performance data...</Text>
         </View>
-      ))}
-
-      {error ? (
-        <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30', marginBottom: 8 }]}>
-          <Ionicons name="warning-outline" size={14} color={colors.error} />
-          <Text style={[s.errorText, { color: colors.error }]}>{error}</Text>
+      ) : !hasAnyData && !editMode ? (
+        <View style={{ alignItems: 'center', paddingVertical: 20, gap: 6 }}>
+          <Ionicons name="time-outline" size={28} color={colors.textMuted} />
+          <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>Awaiting first scrape</Text>
+          <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 17 }}>
+            The system will automatically populate this after your channels are connected and the scraping pipeline runs.
+          </Text>
+        </View>
+      ) : !editMode ? (
+        <View style={{ gap: 8, marginTop: 4 }}>
+          {PERF_FORMATS.map(({ key, label, icon }) => {
+            const d = summaryByFormat[key];
+            return (
+              <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: isDark ? '#1E2736' : '#F1F5F9' }}>
+                <Ionicons name={icon} size={13} color={amber} />
+                <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600', width: 60 }}>{label}</Text>
+                {d ? (
+                  <View style={{ flex: 1, flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 10 }}>Reach</Text>
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
+                        {d.avgReach >= 1000 ? `${(d.avgReach / 1000).toFixed(1)}K` : String(Math.round(d.avgReach))}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 10 }}>Saves</Text>
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
+                        {(d.savesRate * 100).toFixed(1)}%
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 10 }}>Eng.</Text>
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
+                        {(d.avgEngagementRate * 100).toFixed(1)}%
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={{ color: colors.textMuted, fontSize: 12, fontStyle: 'italic' }}>No data yet</Text>
+                )}
+              </View>
+            );
+          })}
         </View>
       ) : null}
 
-      <Pressable
-        onPress={handleSave}
-        disabled={saving}
-        style={[s.channelsSaveBtn, { opacity: saving ? 0.5 : 1 }]}
-      >
-        <LinearGradient
-          colors={saved ? ['#10B981', '#059669'] : ['#F59E0B', '#D97706']}
-          style={s.channelsSaveBtnGrad}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : saved ? (
-            <>
-              <Ionicons name="checkmark-circle" size={16} color="#fff" />
-              <Text style={s.channelsSaveBtnText}>Performance Logged</Text>
-            </>
-          ) : (
-            <>
-              <Ionicons name="bar-chart-outline" size={16} color="#fff" />
-              <Text style={s.channelsSaveBtnText}>Log Performance</Text>
-            </>
-          )}
-        </LinearGradient>
-      </Pressable>
+      {editMode && (
+        <View style={{ marginTop: 8, gap: 10 }}>
+          {PERF_FORMATS.map(({ key, label, icon }) => (
+            <View key={key} style={{ marginBottom: 4 }}>
+              <View style={[s.fieldLabelRow, { marginBottom: 5 }]}>
+                <Ionicons name={icon} size={13} color={amber} />
+                <Text style={[s.fieldLabel, { color: colors.text, fontSize: 12 }]}>{label}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TextInput
+                  style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 8 : 6, fontSize: 13 }]}
+                  placeholder="Reach"
+                  placeholderTextColor={colors.textMuted}
+                  value={entries[key].avgReach}
+                  onChangeText={v => updateEntry(key, 'avgReach', v)}
+                  keyboardType="numeric"
+                />
+                <TextInput
+                  style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 8 : 6, fontSize: 13 }]}
+                  placeholder="Saves %"
+                  placeholderTextColor={colors.textMuted}
+                  value={entries[key].savesRate}
+                  onChangeText={v => updateEntry(key, 'savesRate', v)}
+                  keyboardType="numeric"
+                />
+                <TextInput
+                  style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 8 : 6, fontSize: 13 }]}
+                  placeholder="Eng. %"
+                  placeholderTextColor={colors.textMuted}
+                  value={entries[key].avgEngagementRate}
+                  onChangeText={v => updateEntry(key, 'avgEngagementRate', v)}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+          ))}
+
+          {error ? (
+            <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30', marginBottom: 4 }]}>
+              <Ionicons name="warning-outline" size={14} color={colors.error} />
+              <Text style={[s.errorText, { color: colors.error }]}>{error}</Text>
+            </View>
+          ) : null}
+
+          <Pressable
+            onPress={handleSave}
+            disabled={saving}
+            style={[s.channelsSaveBtn, { opacity: saving ? 0.5 : 1 }]}
+          >
+            <LinearGradient
+              colors={saved ? ['#10B981', '#059669'] : [amber, '#D97706']}
+              style={s.channelsSaveBtnGrad}
+            >
+              {saving ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
+                  <Text style={s.channelsSaveBtnText}>Save Corrections</Text>
+                </>
+              )}
+            </LinearGradient>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }

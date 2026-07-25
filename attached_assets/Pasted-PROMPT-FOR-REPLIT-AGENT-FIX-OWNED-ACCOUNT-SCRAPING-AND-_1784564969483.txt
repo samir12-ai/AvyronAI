@@ -1,0 +1,451 @@
+PROMPT FOR REPLIT AGENT — FIX OWNED-ACCOUNT SCRAPING AND UNBLOCK P-2
+
+Context:
+
+P-2 scoring, weekly business outcomes, AI interpretation, and judgment infrastructure are implemented.
+
+However, real production verification is blocked because the owned-account scraper has not captured a single real post from:
+
+* Campaign: `campaign_1773576062201_6t0oxi`
+* Account: `a2d87878-a1e9-41ea-a8a5-90beff569673`
+* Owned profile: `https://www.instagram.com/avyron_ai/`
+
+The latest fresh scrape attempt failed through the full current chain:
+
+* `web_profile_info` returned HTTP 200 but no usable user JSON.
+* `i.instagram.com` returned HTTP 502.
+* HTML parsing returned the page but no post data.
+* The headless path is retired.
+* No fallback data was substituted.
+* `owned_posts` currently contains zero real rows.
+
+The immediate goal is to repair the real owned-page scraping fuel path so public posts and visible metrics reach P-2.
+
+This is a scraping repair and live-verification session only.
+
+Do not modify:
+
+* content-scoring rules
+* business-scoring rules
+* performance interpretation contracts
+* judges
+* gates
+* verdict thresholds
+* CEL
+* Integrity
+* System Control
+* Watchtower classification
+* campaign verdict logic
+
+Current TypeScript baseline: 718 errors.
+Current schema floor: 45.
+
+## Required End-to-End Flow
+
+Real Instagram owned profile
+→ fresh post discovery
+→ real post records
+→ public metric snapshots
+→ lineage resolution
+→ deterministic content scorer
+→ honest `TESTING`, `UNKNOWN`, or stronger verdict based on the real evidence
+
+The repair is not complete merely because a scraper function returns success. Real posts must be persisted and consumed by the production scorer.
+
+# Phase 1 — Root-Cause Audit
+
+Do not modify code during this phase.
+
+## 1. Trace the exact current owned-profile scrape path
+
+Print exact file and line references for:
+
+* owned-account scrape entry point
+* target registration
+* freshness gate
+* cooldown and degraded-state logic
+* profile-info fetch
+* Instagram endpoint fetch
+* HTML parser
+* any proxy or external scraping provider
+* post normalization
+* owned-post persistence
+* snapshot persistence
+* lineage resolver invocation
+* scorer invocation
+
+Show the complete call graph from scheduler or manual route to `owned_posts`.
+
+## 2. Explain why competitor scraping has data but owned scraping does not
+
+Compare the working competitor ingestion path with the owned-account path.
+
+Report:
+
+* whether they call the same Instagram scraper
+* whether they use different target identifiers
+* whether competitor records were collected before Instagram changed its responses
+* whether competitor data came from cached/shared profiles or truly fresh fetches
+* whether any existing provider or adapter can already return Instagram posts successfully
+* whether the owned-account path skips a working adapter
+* whether the parser expects outdated embedded JSON structures
+* whether cookies, headers, locale, redirects, rate limits, or anti-bot responses differ
+
+Do not assume the external source is permanently unavailable until every existing internal adapter is audited.
+
+## 3. Inspect the actual failed responses safely
+
+For the real `avyron_ai` target, capture diagnostic metadata without logging sensitive data:
+
+* final URL
+* status code
+* content type
+* response size
+* redirect chain
+* recognized page markers
+* whether login-wall, challenge, rate-limit, consent, or empty-shell HTML was returned
+* which expected JSON marker was missing
+
+Never log credentials, cookies, tokens, or full private headers.
+
+## 4. Audit available production-safe source options
+
+Evaluate, in this order:
+
+1. Repair the existing working source or parser.
+2. Reuse an existing project scraper/provider already used elsewhere.
+3. Add a provider adapter behind the existing scraper contract.
+4. Use a browser-based path only if architect-approved and operationally safe.
+
+For each viable option, report:
+
+* reliability
+* public metrics available
+* freshness
+* cost
+* rate limits
+* retry behavior
+* operational risk
+* whether it supports Instagram public profiles without user OAuth
+* whether it violates any platform or project constraints
+
+Do not hardwire Avyron to one provider. Preserve an adapter boundary.
+
+## 5. Verify target identity and ownership mapping
+
+Confirm that:
+
+* `avyron_ai` resolves to the correct Instagram profile
+* the stored URL and normalized username are correct
+* the profile is public and accessible outside a logged-in session
+* no username normalization bug exists
+* the returned posts are associated with the correct Avyron account
+* ownership scoping prevents other accounts from querying these records
+
+## Phase 1 output
+
+Provide a findings table containing:
+
+* exact root cause
+* failing component
+* working alternatives
+* selected repair
+* expected metrics
+* unavoidable unavailable metrics
+* external dependency or cost
+* migration requirements
+* retry and cooldown risks
+
+Architect review must PASS before implementation.
+
+Do not proceed while any HIGH finding is unresolved.
+
+# Phase 2 — Implement the Scraping Repair
+
+## A. Preserve the scraper adapter contract
+
+Implement the selected source through an adapter that returns a normalized result:
+
+* profile identity
+* external post ID
+* canonical post URL
+* caption
+* publish timestamp
+* media type
+* hook text where derivable
+* likes where public
+* comments where public
+* views where public
+* any other genuinely public metric
+* source adapter
+* source timestamp if supplied
+* fetch timestamp
+* freshness state
+* raw evidence reference or hash
+
+The rest of P-2 must not depend on provider-specific payload fields.
+
+## B. Multi-source fallback behavior
+
+The fallback chain must:
+
+* attempt only reviewed sources
+* identify which source succeeded
+* distinguish fresh fetch from reused data
+* stop after a valid result
+* avoid retry storms
+* respect target cooldowns
+* allow an in-session fallback chain to finish
+* allow future retries after a failed snapshot
+* never treat an empty page as a successful zero-post account
+* never persist fabricated empty evidence
+
+Required statuses:
+
+* `FRESH`
+* `REUSED`
+* `PARTIAL`
+* `FAILED`
+* `BLOCKED_EXTERNAL`
+
+## C. Validation of scrape completeness
+
+A fetch is not successful merely because HTTP returned 200.
+
+For this known real account, success must require:
+
+* profile identity matches `avyron_ai`
+* at least one real post is returned when the public profile visibly contains posts
+* every post has an external ID or canonical URL
+* duplicate posts are removed
+* publish timestamps are honest or marked unavailable
+* metric absence remains NULL
+* profile-level counts and post-level records are not confused
+
+If the profile can be read but posts cannot, persist `PARTIAL`, not `FRESH`.
+
+## D. Owned-post persistence
+
+Persist real posts append-only or through an identity record plus append-only observations, consistent with the existing P-2 schema.
+
+Confirm:
+
+* one identity row per external post
+* multiple historical observation rows
+* no overwriting of historical metrics
+* unique constraints prevent duplicate observations
+* fresh fetch timestamps are preserved
+* source adapter is preserved
+* failed fetches do not create fake post rows
+
+## E. Revisit compatibility
+
+Newly discovered posts must enter the existing observation/revisit flow.
+
+Confirm:
+
+* first observation is captured immediately
+* later observations use actual age
+* 24h / 72h / 7d maturity labels are not fabricated
+* a late-discovered post becomes `OBSERVED_LATE` where appropriate
+* duplicate scheduler execution does not duplicate snapshots
+* missing metrics remain NULL
+
+## F. Lineage compatibility
+
+Run the existing lineage resolver after persistence.
+
+Each real post must become one of:
+
+* `planned_direct`
+* `planned_matched`
+* `manual_matched`
+* `unplanned`
+* `ambiguous`
+* `unmatched`
+
+Do not force a planned match because the profile belongs to Avyron.
+
+Report method and confidence for each match.
+
+## G. Failure logging
+
+Required structured logs:
+
+* `OWNED_ACCOUNT_SCRAPE_FAILED`
+* `OWNED_ACCOUNT_SCRAPE_PARTIAL`
+* `OWNED_ACCOUNT_SOURCE_BLOCKED`
+* `OWNED_ACCOUNT_EMPTY_RESULT_REJECTED`
+* `OWNED_ACCOUNT_ADAPTER_FAILED`
+* `OWNED_ACCOUNT_SNAPSHOT_REUSED`
+* `OWNED_POST_PERSIST_FAILED`
+* `OWNED_POST_LINEAGE_MISSING`
+* `OWNED_POST_LINEAGE_AMBIGUOUS`
+
+No silent catches.
+No `|| null` swallowing.
+No full response-body leakage into logs.
+
+# Phase 3 — Real Avyron Verification
+
+Final acceptance must use the real `avyron_ai` Instagram profile. Fixtures may test edge cases but cannot satisfy these checks.
+
+## Check 1 — Fresh real scrape
+
+Trigger a fresh scrape and print:
+
+* campaign ID
+* account ID
+* profile URL
+* normalized username
+* adapter used
+* scrape run ID
+* timestamp
+* freshness status
+* number of real posts returned
+* proof the data was not a reused snapshot
+
+## Check 2 — Real post evidence
+
+For every post returned, print:
+
+* external post ID
+* canonical URL
+* caption excerpt
+* publish timestamp
+* media type
+* likes
+* comments
+* views
+* metric availability
+* source adapter
+* persisted owned-post ID
+
+Only real public posts from `avyron_ai` are acceptable.
+
+## Check 3 — Database persistence
+
+Show the actual rows from:
+
+* owned profile table
+* `owned_posts`
+* owned-post snapshot or observation table
+
+Confirm:
+
+* posts are not duplicated
+* observations are append-only
+* missing metrics are NULL
+* failed historical snapshots remain distinguishable from successful ones
+
+## Check 4 — Second independent observation
+
+Run a second fresh observation when the source permits.
+
+Confirm:
+
+* the same post identity is reused
+* a new observation row is appended
+* the first observation remains unchanged
+* metrics and timestamps are independently recorded
+* duplicate execution is rejected safely
+
+If the external provider enforces a legitimate cooldown, verify this using the shortest production-safe interval without falsifying a fresh observation.
+
+## Check 5 — Lineage result
+
+Print lineage state, matching method, confidence, and linked plan fields for each real post.
+
+Unplanned or unmatched is an acceptable honest result.
+
+## Check 6 — Real scorer execution
+
+Run the production content scorer after the posts are persisted.
+
+Print:
+
+* scorer run ID
+* real posts considered
+* real snapshot IDs
+* dimensions evaluated
+* baseline availability
+* exclusions
+* verdicts
+
+Expected honest outcomes:
+
+* fewer than 3 comparable posts: `TESTING`
+* insufficient baseline: `UNKNOWN`
+* no forced winner
+
+The repair is successful even if the real result is `TESTING` or `UNKNOWN`, provided real posts are now entering the scorer correctly.
+
+## Check 7 — Combined P-2 status
+
+Print:
+
+* owned-page scraping status
+* post-ingestion status
+* snapshot-history status
+* lineage status
+* content-scoring status
+* weekly business-scoring status
+* AI interpretation status
+
+Do not run AI interpretation if deterministic content evidence is still unavailable.
+
+## Check 8 — Failure recovery
+
+Force one adapter to fail while another valid adapter remains available.
+
+Confirm:
+
+* the fallback runs within the same session
+* the successful source is recorded
+* the failure does not poison future runs
+* no retry storm occurs
+* no fake empty result is persisted
+
+## Check 9 — Regression safety
+
+Run the real campaign pipeline and report:
+
+* campaign ID
+* timestamp
+* verdict
+* block reasons
+* degraded states
+* Watchtower state
+* Performance Loop state
+
+Confirm no existing judge, gate, threshold, CEL, Integrity, System Control, Watchtower classification, or verdict logic changed.
+
+## Check 10 — TypeScript and runtime
+
+* Compare TypeScript error multisets against the 718 baseline.
+* Net-new errors must equal zero.
+* Apply only numbered forward migrations if needed.
+* Restart the backend.
+* Confirm scraper, revisit scheduler, and scorer start cleanly.
+* Confirm no stuck jobs or retry storms.
+* Clean all synthetic test records.
+
+# Done Conditions
+
+This repair is complete only when:
+
+* At least one real `avyron_ai` Instagram post is fetched from a fresh production source.
+* The real post is persisted in `owned_posts`.
+* At least one real public metric observation is persisted.
+* Empty or blocked pages are not treated as successful zero-post results.
+* A later observation can be appended without overwriting history.
+* Lineage resolution runs honestly.
+* The production content scorer consumes the real posts.
+* The resulting verdict is reported honestly, including `TESTING` or `UNKNOWN`.
+* Failure recovery and fallback behavior are verified.
+* TypeScript net-new errors equal zero.
+* No scoring, judge, gate, Watchtower, or verdict threshold is weakened.
+
+Final one-line summary format:
+
+“Owned-account scraping repaired: real Avyron Instagram posts now flow from fresh public sources into append-only observations, lineage resolution, and the production Performance Loop without Meta OAuth or fabricated fallback data.”

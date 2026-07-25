@@ -1,0 +1,134 @@
+Hi,
+
+I want to clarify the Integrity issue.
+
+I do not want this handled only through validation or telemetry.
+
+If the system is still able to read an old legacy field, then the problem is not fully solved.
+
+The goal is:
+
+> no old field fallback for live decisions.
+
+---
+
+## Problem
+
+Integrity currently has a semantic mismatch between:
+
+* engine execution status
+  Example: `SUCCESS / ERROR / TIMEOUT`
+
+and
+
+* integrity verdict
+  Example: `PASS / PARTIAL / FAIL`
+
+Some code paths still rely on legacy fallback between:
+
+* `status`
+* `overallStatus`
+
+This is dangerous because `status` can mean two different things.
+
+---
+
+## Required Fix
+
+Please normalize Integrity output so the meaning is explicit.
+
+Use separate fields:
+
+```ts
+engineStatus: "SUCCESS" | "ERROR" | "TIMEOUT" | ...
+integrityVerdict: "PASS" | "PARTIAL" | "FAIL"
+```
+
+or keep:
+
+```ts
+status
+overallStatus
+```
+
+only if:
+
+* `status` is strictly engine execution status
+* `overallStatus` is strictly the integrity verdict
+* every consumer reads `overallStatus` for the integrity verdict
+* no consumer uses `status` as a fallback for verdict logic
+
+---
+
+## Hard Rule
+
+Remove the legacy fallback.
+
+Do not allow:
+
+```ts
+overallStatus ?? status
+```
+
+or:
+
+```ts
+status as integrity verdict
+```
+
+for live decision logic.
+
+If `overallStatus` / `integrityVerdict` is missing:
+
+* mark the contract as `CONTRACT_INCOMPLETE`
+* block live usage
+* do not silently read `status`
+* do not allow System Control to pass
+
+---
+
+## Required Work
+
+Please:
+
+1. Audit every Integrity consumer
+2. Identify where `status` is used as an integrity verdict
+3. Replace with the canonical integrity verdict field only
+4. Update the contract registry
+5. Remove the legacy path
+6. Add tests proving old `status` fallback cannot satisfy the contract
+7. Run full reliability suite
+8. Run MarketMindAI full pipeline after fix
+
+---
+
+## Required Tests
+
+Add tests for:
+
+1. Integrity emits `overallStatus = PASS` and `status = SUCCESS`
+   Expected: valid.
+
+2. Integrity emits `status = PASS` but no `overallStatus`
+   Expected: `CONTRACT_INCOMPLETE`.
+
+3. Integrity emits `status = SUCCESS` but no `overallStatus`
+   Expected: `CONTRACT_INCOMPLETE`.
+
+4. System Control tries to use legacy `status` as verdict
+   Expected: blocked.
+
+5. Full healthy run
+   Expected: uses canonical field only.
+
+---
+
+## Important
+
+This is not a warning-only issue.
+
+The system must not depend on old fields for live reasoning.
+
+Old fields can be displayed historically if needed, but they must never satisfy live contract enforcement.
+
+Thanks.

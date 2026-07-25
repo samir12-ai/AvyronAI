@@ -14,7 +14,10 @@ import Colors from '@/constants/colors';
 import { useCampaign } from '@/context/CampaignContext';
 import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { normalizeEngineSnapshot, isEngineReady } from '@/lib/engine-snapshot';
+import type { LiveSnapshotEnvelope } from '@/lib/envelope';
+import { EnvelopeBadge } from '@/components/EnvelopeBadge';
 import { useColorScheme } from 'react-native';
+import { useOperatorSurface } from '@/hooks/useOperatorSurface';
 
 interface Territory {
   name: string;
@@ -98,8 +101,13 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
   const { selectedCampaignId } = useCampaign();
+  // Phase 8 defense-in-depth: this component is mounted by the customer-pivot
+  // "Where you stand" tab AND by the operator strategies branch. Engine-named
+  // copy MUST be gated.
+  const operator = useOperatorSurface();
 
   const [snapshot, setSnapshot] = useState<PositioningSnapshot | null>(null);
+  const [envelope, setEnvelope] = useState<LiveSnapshotEnvelope | null>(null);
   const [miNormalized, setMiNormalized] = useState<ReturnType<typeof normalizeEngineSnapshot>>(null);
   const [audNormalized, setAudNormalized] = useState<ReturnType<typeof normalizeEngineSnapshot>>(null);
   const [miEngineState, setMiEngineState] = useState<string | null>(null);
@@ -120,6 +128,7 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
         const d = await safeApiJson(posRes);
         const norm = normalizeEngineSnapshot(d, 'positioning');
         setSnapshot(norm?.snapshot || d);
+        setEnvelope(d?.envelope ?? null);
       }
       if (miRes.ok) {
         const d = await safeApiJson(miRes);
@@ -204,10 +213,20 @@ export default function PositioningStrategy({ isActive }: { isActive?: boolean }
             <Ionicons name="compass" size={18} color="#FFFFFF" />
           )}
           <Text style={s.analyzeText}>
-            {analyzing ? 'Analyzing...' : snapshot ? 'Re-analyze Positioning' : 'Run Positioning Engine'}
+            {analyzing
+              ? 'Analyzing...'
+              : snapshot
+                ? (operator.enabled ? 'Re-analyze Positioning' : 'Re-analyze')
+                : (operator.enabled ? 'Run Positioning Engine' : 'Analyze where you stand')}
           </Text>
         </LinearGradient>
       </Pressable>
+
+      {envelope && (
+        <View style={{ marginTop: 8 }}>
+          <EnvelopeBadge envelope={envelope} onRerun={hasDependencies ? runAnalysis : undefined} />
+        </View>
+      )}
 
       {!hasDependencies && (
         <View style={[s.depWarning, { backgroundColor: isDark ? '#1A1A2E' : '#FFF8E1' }]}>

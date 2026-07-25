@@ -1,0 +1,315 @@
+Hi Replit Team,
+
+Great work on Phase 1 + Phase 2 — the system now clearly operates as a **decision-aware intelligence pipeline**, not just signal processing.
+
+Based on the current implementation (TikTok qualification, Reviews intelligence, 5-source normalization, and cross-signal decision layer), we now want to move into **Phase 2.5: Decision Layer Hardening**.
+
+The goal of this phase is not to add new capabilities, but to make the existing decisions:
+
+* more reliable
+* less prone to false positives
+* explainable
+* production-ready for downstream use (memory, strategy, agents)
+
+---
+
+# 🧠 Core Objective
+
+Upgrade the decision layer from:
+
+“signals matched across sources”
+
+to:
+
+“signals validated with explainable evidence, bounded confidence, and controlled agreement logic”
+
+---
+
+# 🚀 Phase 2.5 Scope
+
+## 1. Agreement Logic Hardening
+
+Current agreement logic (Jaccard-based) is a good baseline, but too permissive.
+
+We need a stronger multi-check agreement model.
+
+### Required Improvements:
+
+For each signal comparison:
+
+* distinguish between:
+
+  * DIRECT_AGREEMENT
+  * INDIRECT_AGREEMENT
+  * WEAK_OVERLAP
+  * CONFLICT
+
+* incorporate:
+
+  * keyword overlap (exact / near match)
+  * normalized phrase matching
+  * category-level alignment (pain vs objection vs hook)
+  * source-role compatibility (e.g. Reviews confirming pain vs Instagram suggesting positioning)
+
+Important:
+Two loosely related phrases must NOT be treated as direct validation.
+
+---
+
+## 2. Per-Signal Confidence Model
+
+Currently, confidence is mostly global.
+
+We need confidence at the **individual decision level**.
+
+### Each decision object must include:
+
+* confidenceScore (0–1)
+* confidenceBand:
+
+  * HIGH
+  * MEDIUM
+  * LOW
+
+### Confidence must consider:
+
+* number of sources
+* source diversity
+* source weights (existing system)
+* signal quality (from quality gate)
+* freshness
+* agreement strength
+* TikTok qualification strength
+* review cluster dominance
+* comment objection frequency
+
+---
+
+## 3. Decision Traceability (Explainability Layer)
+
+Every decision must be explainable.
+
+### Add to each decision object:
+
+* decisionReason
+* agreementType
+* matchedSources
+* matchedEvidence[]
+* confidenceFactors
+
+### Example:
+
+{
+"type": "VALIDATED_PAIN",
+"label": "high cost",
+"sources": ["reviews", "comments", "tiktok"],
+"confidenceScore": 0.89,
+"confidenceBand": "HIGH",
+"agreementType": "DIRECT_AGREEMENT",
+"decisionReason": "Pain appears in reviews, repeated in comments, and reinforced by high-performing TikTok hooks",
+"matchedEvidence": [
+{"source":"reviews","snippet":"too expensive for what they offer"},
+{"source":"comments","snippet":"why is it so costly?"},
+{"source":"tiktok","snippet":"stop overpaying for bad marketing"}
+]
+}
+
+If evidence is weak or missing, the system must not assign HIGH confidence.
+
+---
+
+## 4. TikTok Qualification Reliability Guard
+
+Strengthen the TikTok validation layer:
+
+* enforce minimum baseline requirements:
+
+  * minimum post count
+  * minimum engagement level
+
+* add:
+
+  * baselineReliability
+  * lowDataPenalty
+  * qualificationNotes
+
+If baseline is weak:
+
+* downgrade TikTok contribution to decision confidence
+* expose reason in output
+
+---
+
+## 5. Reviews Cluster Reliability Guard
+
+Strengthen Reviews intelligence:
+
+* add:
+
+  * clusterDominanceScore
+  * frequencyBand
+  * lowVolumePenalty
+  * recency weighting
+
+Low-volume clusters must not appear artificially dominant.
+
+---
+
+## 6. Decision Objects as First-Class Output
+
+Decision objects must:
+
+* be persisted clearly inside snapshot payload
+* be returned via API (not just diagnostics)
+* be directly usable by:
+
+  * Dual Analysis
+  * Plan Synthesis
+  * Memory Mutation
+
+Do not replace narrative output — extend it.
+
+---
+
+## 7. Downstream Readiness (Non-Breaking)
+
+Start integrating decision outputs into downstream logic WITHOUT breaking existing behavior:
+
+* Dual Analysis:
+
+  * prioritize HIGH-confidence validated signals
+
+* Plan Synthesis:
+
+  * use validated pain/hook signals
+
+* Memory Mutation:
+
+  * store only HIGH-confidence decisions
+
+---
+
+# ✅ Acceptance Criteria (Strict)
+
+## Agreement Quality
+
+* system must clearly distinguish:
+
+  * direct vs indirect vs weak vs conflict
+* loosely related phrases must NOT be marked as direct agreement
+
+---
+
+## Per-Signal Confidence
+
+Each decision must include:
+
+* confidenceScore
+* confidenceBand
+* confidenceFactors
+
+Not only global confidence.
+
+---
+
+## Traceability
+
+Each decision must expose:
+
+* sources
+* evidence snippets
+* reasoning
+
+No HIGH confidence allowed without strong evidence.
+
+---
+
+## TikTok Reliability
+
+If creator baseline is weak:
+
+* TikTok signals must be downgraded
+* reason must be visible in qualificationNotes
+
+---
+
+## Reviews Reliability
+
+If review volume is low:
+
+* cluster confidence must drop
+* dominance must not be misleading
+
+---
+
+## Graceful Degradation
+
+System must continue to operate under:
+
+* Instagram + Website only
+* Instagram + TikTok
+* Instagram + Reviews
+* full multi-source
+
+BUT:
+
+* confidence must degrade correctly
+* missing sources must be explicitly noted
+
+---
+
+## Backend Verification
+
+Logs/debug must show:
+
+* agreement type distribution (direct / indirect / weak / conflict)
+* confidence distribution
+* downgraded TikTok signals (with reason)
+* downgraded review clusters (with reason)
+
+---
+
+## Frontend / Debug Verification
+
+UI (or debug view) must expose:
+
+* decision type
+* confidence band
+* contributing sources
+* evidence snippets
+* agreement type
+* downgrade reasons
+
+---
+
+# 🚫 Out of Scope
+
+* multi-agent runtime
+* MCP full implementation
+* knowledge graph
+* autonomous campaign execution
+
+---
+
+# 🎯 Final Goal
+
+We are not adding new intelligence.
+
+We are making existing decisions:
+
+* trustworthy
+* explainable
+* robust under imperfect data
+
+---
+
+Please confirm:
+
+1. feasibility based on current implementation
+2. any constraints or risks
+3. suggested execution order (if different)
+4. exact files where each part should be implemented
+
+Thanks,
+Samir
+Avyron AI

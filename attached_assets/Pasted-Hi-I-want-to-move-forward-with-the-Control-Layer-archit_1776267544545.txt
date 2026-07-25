@@ -1,0 +1,220 @@
+Hi,
+
+I want to move forward with the Control Layer architecture next, but I want to do it carefully and in a way that does not interfere with the existing adaptive/agent system.
+
+At this stage, I do not want to redesign or disturb the adaptive system.  
+Please treat the current adaptive/agent behavior as something we should preserve unless there is a clear code-level reason to touch it.
+
+The focus now is strictly:
+
+> build a Control Layer above the current system,  
+> integrate self-correcting behavior inside it in a controlled way,  
+> and validate whether this architecture is correct based on the codebase.
+
+---
+
+## Core Principle
+
+The adaptive/agent system should remain as-is.
+
+I do not want to:
+- duplicate its logic
+- weaken it
+- create overlapping loops
+- introduce noise by having two systems doing the same job
+
+So the new layer must only cover what the current agent system does not already handle.
+
+---
+
+## Proposed Direction
+
+My current thinking is to introduce a System Control Layer that sits above the existing engine flow and acts as the final system authority.
+
+This Control Layer would:
+
+1. Read the full system state
+   - all critical engine outputs
+   - plan synthesis output
+   - integrity result
+   - budget result
+   - channel/funnel status
+   - execution readiness signals
+
+2. Act as the final authority
+   - not another advisory engine
+   - not another summary layer
+   - but the actual place where the final system verdict is enforced
+
+3. Resolve cross-engine contradictions
+   Examples:
+   - Budget says scale, but channel conversion path is missing
+   - Plan is approved, but upstream context is incomplete
+   - Funnel score passes, but structural completeness is weak
+   - Strategy is coherent, but execution assumptions are not grounded
+
+4. Output a unified final verdict
+   Something like:
+   - PASS
+   - DOWNGRADE
+   - REPAIR
+   - BLOCK
+
+5. Contain self-correcting behavior inside it
+   But only as a controlled execution mechanism, not as a free-form intelligence loop.
+
+---
+
+## Self-Correcting Behavior — Intended Scope
+
+I do want self-correcting inside the Control Layer, but only in a strict, bounded form.
+
+Meaning:
+
+- it should not become a second adaptive system
+- it should not replace memory logic
+- it should not create a competing monitoring loop
+- it should not invent solutions freely
+
+Instead, it should only do things like:
+
+- force re-validation
+- trigger targeted re-runs of specific engines
+- downgrade a decision
+- convert warnings into hard blocks where needed
+- require human review when the system is not structurally safe
+
+So in my mind:
+
+> the Control Layer is the authority  
+> self-correcting is only its execution arm
+
+---
+
+## What I Want to Preserve
+
+Please assume the following should remain untouched unless code analysis proves otherwise:
+
+- adaptive rhythm logic
+- iteration engine behavior
+- strategic memory write/read/decay/flip logic
+- exploration budget logic
+- existing agent monitoring and learning behavior
+
+I do not want the new architecture to duplicate or fight these systems.
+
+---
+
+## What I Think the Control Layer Should Own
+
+Please validate whether this is correct based on the code:
+
+### A. Final system-level judgment
+A single final decision after all engines have produced outputs.
+
+### B. Structural validation
+Not just score-based checks, but questions like:
+- is there a real conversion path?
+- is the funnel structurally complete enough for the requested action?
+- are upstream dependencies actually present?
+- is the plan strategically executable?
+
+### C. Cross-engine enforcement
+If two engines are technically valid in isolation but contradictory in combination, the Control Layer should resolve that.
+
+### D. Execution authority
+It should be the final gate before execution behavior is allowed downstream.
+
+### E. Targeted correction
+When safe and deterministic, it should trigger controlled correction paths rather than just logging warnings.
+
+---
+
+## What I Need From You
+
+Please review this proposed architecture directly against the codebase and answer the following:
+
+### 1. Is this architecture directionally correct?
+Not “yes/no” only — I want a technical judgment grounded in the code.
+
+### 2. Does this conflict with the existing agent/adaptive system?
+Please identify precisely:
+- where overlap would happen
+- where duplication risk exists
+- where noise/conflict could be introduced
+
+### 3. What parts of this should belong to the Control Layer, and what parts should remain in the current Agent system?
+Please separate them clearly.
+
+### 4. Where exactly should the Control Layer sit in the current flow?
+Please answer with actual code paths / files / insertion points.
+
+### 5. What should the Control Layer consume as inputs?
+List the exact engine outputs / records / flags / gates it should read.
+
+### 6. What outputs should it produce?
+For example:
+- final verdict
+- corrected execution mode
+- required repair actions
+- blocking reasons
+- re-run instructions
+
+Please define this from the code perspective.
+
+### 7. Which current warnings should be upgraded to hard blocks?
+Please identify the exact places in code where advisory behavior should become enforced behavior.
+
+### 8. What self-correcting actions are safe to automate?
+I want a code-grounded answer here.
+Examples:
+- rerun channel selection
+- rerun funnel synthesis
+- downgrade scale → test
+- mark plan for review
+- block execution
+
+And also:
+- which actions should not be automated?
+
+### 9. Should the Control Layer wrap existing gates, replace them, or consume them into one final gate?
+I want your recommendation based on the current codebase.
+
+### 10. What is the cleanest implementation path?
+Please propose a build path that minimizes:
+- noise
+- duplicated logic
+- overlap with agent/adaptive systems
+- architectural mess
+
+---
+
+## Output Format Requested
+
+Please return this as a technical architecture response, not a short opinion.
+
+I want:
+
+- code-grounded reasoning
+- exact file references where relevant
+- clean separation between:
+  - what already exists
+  - what should be added
+  - what should stay untouched
+- a proposed implementation shape for the Control Layer
+
+---
+
+## Final Goal
+
+The goal is not to redesign the adaptive system.
+
+The goal is:
+
+> add a strong Control Layer above the current system,  
+> preserve the adaptive/agent system as-is,  
+> and integrate a bounded self-correcting mechanism without duplication or noise.
+
+Please answer based on the actual codebase so we can determine whether this plan is technically sound before implementation.
+
+Thanks.

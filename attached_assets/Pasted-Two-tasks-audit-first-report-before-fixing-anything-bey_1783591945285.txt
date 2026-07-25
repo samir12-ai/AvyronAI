@@ -1,0 +1,18 @@
+Two tasks — audit first, report before fixing anything beyond task 1 verification.
+
+TASK 1 — Product anchor field is missing/unfindable in the UI
+The user cannot find the Product Identity (product_anchor) section anywhere. Verify in the running preview:
+1. Open the campaign CREATION flow — does the Product Identity section (name, type, keyAttributes, coreProblemSolved, differentiatingFeature) actually render? Screenshot/describe exactly where it appears and what it looks like.
+2. Open the campaign LIST modal for an EXISTING campaign — does the EditProductIdentityForm render? Same: where exactly?
+3. If either does not render: find why (conditional hidden, component not mounted, feature flag, routing). If both render: describe the exact click path so the user can find them, and assess whether the placement is too buried — the user actively looked and failed to find it.
+4. Confirm: when the user's CURRENT campaign has no anchor set, the UI gives some visible hint that adding Product Identity improves analysis quality (degraded mode is currently invisible to the user — should it be surfaced?).
+
+TASK 2 — Systematic audit: do Offer and Channel Selection have the same gaps just fixed in Positioning and Audience?
+The same two defects were found and fixed in positioning and audience:
+  DEFECT A: the gate battery / interchangeability judge was not receiving the product anchor context, so it judged blind.
+  DEFECT B (audience): batch-level rejection — one failing candidate caused ALL candidates in the batch to be discarded, including ones that passed; fixed with partial-keep on final attempt.
+Audit the OFFER engine and CHANNEL SELECTION engine (ai-channel-proposal.ts) for both defects:
+5. Does each engine's gate battery call pass the full product anchor context to the judge? Show the call sites.
+6. Does each engine discard passing candidates when a sibling fails, or does it keep partial successes? Show the accept/reject loop.
+7. Check the retry feedback each engine injects: does it include the product anchor / strategic advantage guidance (as now done in positioning F5), or is it still generic?
+8. Report findings per engine with file/line. If defects exist, propose the same fixes as applied to positioning/audience — do NOT apply until I confirm.

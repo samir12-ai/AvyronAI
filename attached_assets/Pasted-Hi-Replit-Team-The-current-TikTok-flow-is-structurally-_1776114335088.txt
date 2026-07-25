@@ -1,0 +1,188 @@
+Hi Replit Team,
+
+The current TikTok flow is structurally correct and aligns well with the overall pipeline (scrape → extract → store → qualify → signal extraction → merge).
+
+However, in its current state, TikTok is functioning primarily as an **attention analysis source**, not as a true **validation engine** — which is the intended role within Avyron.
+
+We need to upgrade this layer to ensure TikTok provides not only “what performs” but also “why it performs” and “how the audience reacts.”
+
+---
+
+# 🧠 Objective
+
+Convert TikTok from:
+
+attention-based signal source
+
+to:
+
+full validation engine with:
+
+* performance validation
+* audience feedback
+* messaging understanding
+
+---
+
+# 🔴 Required Changes
+
+## 1. Add Comments Extraction (Critical)
+
+Currently, no comments are being scraped or used.
+
+This is a major gap.
+
+### Required:
+
+* Extract comments for each TikTok post
+* Prefer:
+
+  * top comments
+  * or limited set per post (to control cost)
+
+### Must capture:
+
+* comment text
+* optionally likes/replies if available
+
+### Purpose:
+
+Comments are required to extract:
+
+* objections
+* confusion
+* validation signals
+* audience language
+
+Without this, TikTok cannot function as a validation engine.
+
+---
+
+## 2. Improve Hook Detection (Do NOT rely on caption first line)
+
+Current logic:
+
+> hook = first line of caption
+
+This is not accurate for TikTok.
+
+### Required:
+
+* Do NOT treat caption first line as the primary hook
+* If transcript is available:
+
+  * extract hook from first 3–5 seconds of spoken content
+
+### If transcript is not available:
+
+* clearly mark hook as “caption-based proxy”
+* do NOT treat it as fully reliable hook signal
+
+---
+
+## 3. Add Transcript / Spoken Content Layer (Strongly Recommended)
+
+To properly analyze:
+
+* hooks
+* storytelling
+* pain framing
+* CTA structure
+
+we need spoken content, not just captions.
+
+### Required:
+
+* Enable subtitle / transcript extraction if available
+* If not available natively:
+
+  * add optional integration layer (can be staged)
+
+### Important:
+
+Transcript should feed into:
+
+* hook detection
+* signal extraction
+* pattern detection
+
+---
+
+## 4. Ensure Comments + Transcript Flow Through Existing Pipeline
+
+Do NOT create a parallel system.
+
+Instead:
+
+* comments → pass into signal extraction layer
+* transcript → pass into signal extraction layer
+
+So they contribute to:
+
+* hooks
+* pain signals
+* messaging patterns
+* validation strength
+
+---
+
+## 5. Update Qualification Context (Minor Adjustment)
+
+Current qualification is solid (views, engagement, shares, recency).
+
+However:
+
+* ensure that only **qualified (HIGH/MID)** posts are used for:
+
+  * comment analysis
+  * signal extraction
+
+This prevents noise from low-performing content.
+
+---
+
+# ⚠️ Important Constraints
+
+* Do NOT break existing pipeline
+* Do NOT redesign architecture
+* Extend current system only
+* Maintain cost awareness (limit comments volume where needed)
+
+---
+
+# 🧪 Expected Output
+
+Please implement and confirm:
+
+1. where comments are extracted and stored
+2. how many comments per post are used
+3. whether transcript is available and how it is integrated
+4. how hook detection logic has been updated
+5. how comments + transcript flow into signal extraction
+6. any limitations (API constraints, missing data, etc.)
+
+---
+
+# 🎯 Final Goal
+
+TikTok should provide:
+
+* what works (performance)
+* why it works (content + hook + structure)
+* how people react (comments)
+
+---
+
+# 🧠 Key Principle
+
+TikTok is not just a content source.
+
+It is a validation system — and must reflect both attention and audience response.
+
+---
+
+Please proceed with these updates.
+
+Thanks,
+Samir
+Avyron AI

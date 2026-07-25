@@ -1,0 +1,76 @@
+Hi,
+
+The real pipeline validation confirms that the system logic, SSC enforcement, and control layer are working correctly overall. The BLOCK behavior on weak positioning is valid and expected.
+
+However, there is one critical issue that needs to be fixed before we consider the system fully clean:
+
+---
+
+## 🔴 Issue: False `CONFIDENCE_CHAIN_VIOLATION`
+
+In the real run, the system reported:
+
+> CONFIDENCE_CHAIN_VIOLATION — market_intelligence and audience exceed floor(0.20) + 0.20
+
+This is incorrect.
+
+### Why this is a problem:
+
+* The `confidenceFloor` dropped to **0.20 after the Positioning engine**
+* Market Intelligence and Audience engines executed **before** this drop
+* They should **not be retroactively evaluated** against a floor that did not exist at their execution time
+
+This creates a false violation and breaks the intended logic of confidence inheritance.
+
+---
+
+## ✅ Correct Behavior
+
+Confidence validation must be **time-aware and sequential**, not retroactive.
+
+Each engine should be validated against:
+
+> the `confidenceFloor` at the moment it executed
+
+NOT against a later floor derived from downstream failures.
+
+---
+
+## 🔧 Required Fix
+
+Update the `CONFIDENCE_CHAIN_VIOLATION` logic to:
+
+* Validate each `ConfidenceChainEntry` against:
+
+  * its own `inheritedFloor` at execution time
+* Do NOT compare earlier engines against a lower floor introduced later
+* Ensure the check is **forward-only**, never backward
+
+---
+
+## ✅ Expected Outcome After Fix
+
+* No violation for Market Intelligence or Audience in this scenario
+* Only downstream engines (after Positioning) would be subject to the lowered floor
+* Confidence chain remains logically consistent and aligned with execution order
+
+---
+
+## 🚫 Important
+
+* Do not change the confidence model itself
+* Do not relax thresholds
+* This is strictly a **validation logic correction**, not a behavioral change
+
+---
+
+Once this is fixed, rerun the same pipeline and confirm:
+
+* `CONFIDENCE_CHAIN_VIOLATION` is no longer triggered incorrectly
+* All other block reasons remain intact and valid
+
+---
+
+This is the final cleanup step before moving forward.
+
+Proceed with the fix and validation.

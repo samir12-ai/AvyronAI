@@ -11,6 +11,7 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 import type { ProfileInput } from "./types";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -21,6 +22,7 @@ export function registerDifferentiationRoutes(app: Express) {
   app.post("/api/differentiation-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, positioningSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -196,6 +198,7 @@ export function registerDifferentiationRoutes(app: Express) {
       }
 
       const [saved] = await db.insert(differentiationSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         miSnapshotId,
@@ -246,26 +249,36 @@ export function registerDifferentiationRoutes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let resolved;
+      try { resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!resolved.runId) return res.json({ exists: false, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(differentiationSnapshots)
         .where(and(
           eq(differentiationSnapshots.campaignId, campaignId),
           eq(differentiationSnapshots.accountId, accountId),
-          eq(differentiationSnapshots.engineVersion, ENGINE_VERSION),
+          eq(differentiationSnapshots.jobId, resolved.runId),
         ))
-        .orderBy(desc(differentiationSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ exists: false });
+        return res.json({ exists: false, runId: resolved.runId, isLatest: resolved.isLatest, isStale: resolved.isStale });
       }
 
       res.json({
         exists: true,
+        runId: resolved.runId,
+        isLatest: resolved.isLatest,
+        isStale: resolved.isStale,
+        completedAt: resolved.completedAt,
         id: latest.id,
         campaignId: latest.campaignId,
         status: latest.status,

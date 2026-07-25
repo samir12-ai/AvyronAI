@@ -1,0 +1,264 @@
+Hi,
+
+I want a **full code-level logic audit** of the system.
+
+This is **not** a request for another runtime explanation, another partial validation, or another “the run blocked early so we could not inspect downstream logic” response.
+
+This time I do **not** need a full pipeline run in order to understand the engine logic.
+
+I need you to audit the logic **directly from the codebase** and explain how each engine actually works internally.
+
+No excuses.
+No dependency on whether the latest run completed.
+No falling back to “could not evaluate because pipeline blocked.”
+
+---
+
+# Objective
+
+Give me a **complete engine-by-engine logic audit from the code itself** so we can understand:
+
+* how each engine thinks
+* how it forms decisions
+* what it consumes
+* what it outputs
+* where its internal weak points are
+* where logic can drift, overfit, hallucinate, or silently degrade
+
+This is a **code audit**, not a runtime-only audit.
+
+---
+
+# Required Scope
+
+Audit **all 15 engines** and the critical cross-system logic around them.
+
+That includes:
+
+1. Market Intelligence
+2. Audience
+3. Positioning
+4. Differentiation
+5. Mechanism
+6. Offer
+7. Funnel
+8. Awareness
+9. Persuasion
+10. Integrity
+11. Statistical Validation
+12. Channel Selection
+13. Budget Governor
+14. Iteration
+15. Retention
+
+Also include the important cross-cutting logic:
+
+* orchestrator flow
+* SSC usage
+* problem registry usage
+* confidence handling
+* signal grounding
+* lineage propagation
+* system control enforcement
+
+---
+
+# What I Want For EACH Engine
+
+For every engine, provide a structured audit with these exact sections:
+
+## 1. Purpose
+
+* What the engine is supposed to solve
+
+## 2. Inputs
+
+* Exact upstream inputs it consumes
+* Whether it reads from SSC, snapshots, raw structured signals, or derived fields
+
+## 3. Internal Logic Pipeline
+
+Break down the engine’s logic step by step from code.
+
+Not vague summaries.
+
+I want:
+
+* major functions
+* layers
+* scoring logic
+* gating logic
+* fallback logic
+* AI-generation logic if present
+* grounding logic if present
+
+## 4. Output Contract
+
+* What fields it emits
+* Which fields are authoritative
+* Which fields are advisory only
+* Which fields downstream engines depend on
+
+## 5. Confidence Logic
+
+* How confidence is actually computed
+* Whether it reflects logic quality, data quality, or both
+* Whether this confidence is safe / unsafe / misleading
+
+## 6. Failure Modes
+
+List the engine’s real internal failure modes from code, for example:
+
+* silent fallback
+* stale input usage
+* ungrounded AI expansion
+* generic output risk
+* post-hoc warnings without enforcement
+* confidence inflation
+* hidden partial degradation
+* dependence on missing lineage
+
+## 7. Enforcement Behavior
+
+* Does this engine actually enforce anything?
+* Or just emit warnings?
+* What can make it return PARTIAL / BLOCKED / PROVISIONAL / etc.?
+
+## 8. Root Logic Weaknesses
+
+I want the real weaknesses in the engine logic itself, not runtime excuses.
+
+Examples:
+
+* over-reliance on post-hoc validation
+* too much LLM freedom
+* weak signal mapping
+* multi-source truth inside engine
+* missing deterministic anchors
+* weak grounding contract
+* scoring formula instability
+
+## 9. Severity
+
+For each identified weakness:
+
+* low
+* medium
+* high
+* critical
+
+---
+
+# Important Rules
+
+## 1. No Runtime Excuses
+
+Do not tell me:
+
+* the pipeline blocked
+* downstream engines were not reached
+* latest run did not complete
+* this depends on fresh data
+
+That is not relevant for this task.
+
+You have the code.
+Audit the logic from the code.
+
+## 2. No “cannot evaluate” unless literally impossible from code
+
+If the code exists, audit it.
+
+## 3. No summaries without internals
+
+I do not want:
+
+* “engine appears fine”
+* “logic seems correct”
+* “works as intended”
+
+I want code-based explanation of why.
+
+## 4. No hiding behind validation language
+
+Do not replace logic analysis with:
+
+* “tests pass”
+* “output looked good”
+* “run succeeded”
+
+This is not enough.
+
+---
+
+# Additional Cross-System Audit Required
+
+At the end, add a separate section covering:
+
+## A. Single-Source-of-Truth Risks
+
+Where multiple truth sources still exist in code
+
+## B. Signal Loss Risks
+
+Where signals can still be:
+
+* dropped
+* transformed incorrectly
+* detached from outputs
+
+## C. Confidence Contract Risks
+
+Where confidence values are:
+
+* ambiguous
+* inflated
+* non-monotonic
+* mixing data and logic unsafely
+
+## D. AI Freedom Risks
+
+Which engines still allow AI to over-generate beyond structured evidence
+
+## E. Hidden Fallback Risks
+
+Which engines silently degrade but still look complete
+
+## F. Enforcement Gaps
+
+Where the system detects a problem but still lets the engine pass
+
+---
+
+# Required Output Format
+
+I want:
+
+1. **Per-engine audit**
+2. **Cross-system logic audit**
+3. **Top critical issues list**
+4. **Priority order of fixes**
+
+The priority order must be based on:
+
+* root cause value
+* system-wide impact
+* risk of recurring hidden logic failure
+
+---
+
+# Final Requirement
+
+This audit must be based on:
+
+* actual code paths
+* actual scoring / gating / fallback behavior
+* actual engine contracts
+
+Not assumptions.
+Not runtime-only evidence.
+Not excuses.
+
+Treat this as a direct logic dissection of the system.
+
+Proceed.

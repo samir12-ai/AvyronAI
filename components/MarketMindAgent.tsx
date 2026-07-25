@@ -95,6 +95,25 @@ type AgentBrief = {
   simulation: SimulationSummary | null;
   executionTasksSummary: TaskSummary | null;
   assumptionsSummary: AssumptionSummary | null;
+  pipelineState: {
+    jobId?: string;
+    pipelineStatus: string;
+    isBlocked: boolean;
+    isFailed: boolean;
+    isRunning: boolean;
+    isTerminal: boolean;
+    blockReason: string | null;
+    errorMessage: string | null;
+    completedEngines: string[];
+    blockedEngines: string[];
+    failedEngines: string[];
+    totalEngines: number;
+    completedCount: number;
+    planId: string | null;
+    durationMs: number | null;
+    lastRunAt: string | null;
+    completedAt: string | null;
+  } | null;
 };
 
 type Props = {
@@ -242,24 +261,67 @@ export const MarketMindAgent = forwardRef<MarketMindAgentRef, Props>(function Ma
   }
 
   const progress = brief.planProgress;
+  const ps = brief.pipelineState;
+  const showPipelineWarning = ps && (ps.isBlocked || ps.isFailed);
 
   return (
-    <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+    <View style={[st.card, { backgroundColor: cardBg, borderColor: showPipelineWarning ? (P.amber + '40') : cardBorder }]}>
       <View style={st.headerRow}>
         <View style={st.headerLeft}>
-          <RNAnimated.View style={[st.agentDot, { backgroundColor: P.mint, opacity: pulseAnim }]} />
+          <RNAnimated.View style={[st.agentDot, { backgroundColor: showPipelineWarning ? P.amber : P.mint, opacity: pulseAnim }]} />
           <View>
             <Text style={[st.title, { color: textPrimary }]}>Avyron Agent</Text>
             <Text style={[st.statusLine, { color: textMuted }]}>{brief.campaignStatus}</Text>
           </View>
         </View>
         <View style={st.headerRight}>
-          <View style={[st.engineBadge, { backgroundColor: P.mint + '15' }]}>
-            <Ionicons name="flash" size={10} color={P.mint} />
-            <Text style={[st.engineBadgeText, { color: P.mint }]}>{brief.engineCount}</Text>
-          </View>
+          {showPipelineWarning ? (
+            <View style={[st.engineBadge, { backgroundColor: P.amber + '15' }]}>
+              <Ionicons name="alert-circle" size={10} color={P.amber} />
+              <Text style={[st.engineBadgeText, { color: P.amber }]}>
+                {ps.completedCount}/{ps.totalEngines}
+              </Text>
+            </View>
+          ) : (
+            <View style={[st.engineBadge, { backgroundColor: P.mint + '15' }]}>
+              <Ionicons name="flash" size={10} color={P.mint} />
+              <Text style={[st.engineBadgeText, { color: P.mint }]}>{brief.engineCount}</Text>
+            </View>
+          )}
         </View>
       </View>
+
+      {showPipelineWarning && (
+        <View style={{
+          backgroundColor: isDark ? P.amber + '10' : '#FFFBEB',
+          borderRadius: 8,
+          padding: 10,
+          marginBottom: 10,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 8,
+        }}>
+          <Ionicons name="warning-outline" size={16} color={P.amber} style={{ marginTop: 1 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 12, fontWeight: '700' as const, color: P.amber }}>
+              Pipeline {ps.isBlocked ? 'Blocked' : 'Failed'}
+            </Text>
+            {ps.blockReason && (
+              <Text style={{ fontSize: 11, color: textMuted, marginTop: 2 }} numberOfLines={2}>
+                {ps.blockReason}
+              </Text>
+            )}
+            {ps.errorMessage && (
+              <Text style={{ fontSize: 11, color: textMuted, marginTop: 2 }} numberOfLines={2}>
+                {ps.errorMessage}
+              </Text>
+            )}
+            <Text style={{ fontSize: 10, color: textMuted, marginTop: 4 }}>
+              {ps.completedCount} of {ps.totalEngines} engines completed
+            </Text>
+          </View>
+        </View>
+      )}
 
       <View style={[st.actionBox, { backgroundColor: isDark ? '#0F1A15' : '#F0FFF4', borderColor: isDark ? '#1A3025' : '#C6F6D5' }]}>
         <Ionicons name="arrow-forward-circle" size={14} color={P.green} style={{ marginTop: 1 }} />

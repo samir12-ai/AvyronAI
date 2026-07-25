@@ -9,6 +9,8 @@ import {
   computeStabilitySignal,
 } from "./scoring";
 import { runMemoryMutation } from "../memory-mutation/engine";
+import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 
 const CONTENT_TYPES = ["reel", "carousel", "story", "post"] as const;
 const VALID_SOURCES = ["manual", "meta-api"] as const;
@@ -20,7 +22,16 @@ function clampRate(val: number): number {
 
 export function registerPerformanceFeedbackRoutes(app: Express) {
   app.post("/api/performance/ingest", async (req: any, res) => {
-    const accountId = req.user?.accountId || req.accountId || "default";
+    // P3 isolation seal: drop the `|| "default"` fallback. Any request that
+    // reaches this handler without a verified account context must be
+    // rejected — otherwise unauthenticated requests collapsed every tenant's
+    // performance snapshots into a shared "default" bucket.
+    let accountId: string;
+    try {
+      accountId = resolveAccountId(req);
+    } catch {
+      return res.status(401).json({ error: "Authentication required" });
+    }
     const {
       campaignId,
       contentType,
@@ -39,8 +50,18 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
       notes,
     } = req.body;
 
-    if (!campaignId || !contentType || !periodLabel) {
-      return res.status(400).json({ error: "campaignId, contentType, and periodLabel are required" });
+    // P0-4 + V1 follow-up: ownership FIRST so a cross-tenant probe with a
+    // partially-valid body cannot distinguish "route exists / 400 missing
+    // field" from "route does not exist / 404". Only campaignId presence is
+    // checked here; the rest of the validation runs after the gate.
+    if (!campaignId) {
+      return res.status(400).json({ error: "campaignId is required" });
+    }
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+
+    if (!contentType || !periodLabel) {
+      return res.status(400).json({ error: "contentType and periodLabel are required" });
     }
     if (!CONTENT_TYPES.includes(contentType as ContentType)) {
       return res.status(400).json({ error: `contentType must be one of: ${CONTENT_TYPES.join(", ")}` });
@@ -127,11 +148,20 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
   });
 
   app.post("/api/memory/mutate", async (req: any, res) => {
-    const accountId = req.user?.accountId || req.accountId || "default";
+    // P3 isolation seal: same fix as /api/performance/ingest.
+    let accountId: string;
+    try {
+      accountId = resolveAccountId(req);
+    } catch {
+      return res.status(401).json({ error: "Authentication required" });
+    }
     const { campaignId } = req.body;
     if (!campaignId) {
       return res.status(400).json({ error: "campaignId is required" });
     }
+    // P0-4: body-level campaignId must belong to the authed account.
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
     try {
       const result = await runMemoryMutation(accountId, campaignId);
       return res.json({ success: true, ...result });
@@ -142,8 +172,18 @@ export function registerPerformanceFeedbackRoutes(app: Express) {
   });
 
   app.get("/api/performance/summary/:campaignId", async (req: any, res) => {
-    const accountId = req.user?.accountId || req.accountId || "default";
+    // P3 isolation seal: same fix as /api/performance/ingest.
+    let accountId: string;
+    try {
+      accountId = resolveAccountId(req);
+    } catch {
+      return res.status(401).json({ error: "Authentication required" });
+    }
     const { campaignId } = req.params;
+
+    // P0-4: param-level campaignId must belong to the authed account.
+    try { await assertCampaignBelongsTo(accountId, campaignId); }
+    catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
     const summaryByFormat: Record<string, any> = {};
 

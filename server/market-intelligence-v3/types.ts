@@ -202,6 +202,11 @@ export interface EngagementQuality {
   engagementQualityRatio: number;
 }
 
+export interface TaggedSignal {
+  text: string;
+  originType: import("../shared/signal-lineage").SignalOriginType;
+}
+
 export interface MIv3Output {
   marketState: string;
   dominantIntentType: IntentCategory;
@@ -212,6 +217,8 @@ export interface MIv3Output {
   marketDiagnosis: string | null;
   threatSignals: string[];
   opportunitySignals: string[];
+  taggedThreatSignals?: TaggedSignal[];
+  taggedOpportunitySignals?: TaggedSignal[];
   confidence: ConfidenceResult;
   missingSignalFlags: string[];
   dataFreshnessDays: number;
@@ -246,7 +253,7 @@ export interface MIDiagnostics {
   echoChamberRisk: number;
 }
 
-export type CacheInvalidationReason = "ENGINE_UPGRADE" | "COMPETITOR_SET_CHANGED" | "INCOMPLETE_SNAPSHOT" | "STALE" | null;
+export type CacheInvalidationReason = "ENGINE_UPGRADE" | "COMPETITOR_SET_CHANGED" | "CONTENT_CHANGED" | "INCOMPLETE_SNAPSHOT" | "STALE" | null;
 
 export interface MIv3DiagnosticResult {
   output: MIv3Output;
@@ -266,6 +273,9 @@ export interface MIv3DiagnosticResult {
   signalDiagnostics: import("../../server/engine-hardening/types").SignalDiagnostics | null;
   narrativeOverlap: import("../../server/engine-hardening/types").NarrativeOverlapResult | null;
   narrativeObjectionMap: import("./narrative-objection-extractor").NarrativeObjectionMap | null;
+  crossSignalDecisions: import("./cross-signal-decision").CrossSignalDecisionResult | null;
+  tiktokQualification: import("./tiktok-qualification").TikTokQualificationResult | null;
+  reviewsIntelligence: import("./reviews-intelligence").ReviewsIntelligenceResult | null;
   cached: boolean;
   cacheInvalidationReason: CacheInvalidationReason;
   snapshotSource: "FRESH_DATA" | "CACHED_DATA";

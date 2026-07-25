@@ -1261,9 +1261,9 @@ export function runChannelSelectionEngine(
             postReconstructionViolations.push(`Very low persuasion compatibility (${(c.candidate.persuasionCompatibility * 100).toFixed(0)}%) — channel limited to ${assignment.assignedRole} role only`);
           }
 
-          const postGateOutcome: DecisionGateOutcome = postReconstructionViolations.length === 0 ? "support_channel" : "exploratory";
+          const postGateOutcomeValue: DecisionGateOutcome = postReconstructionViolations.length === 0 ? "support_channel" : "exploratory";
           c.candidate.decisionGate = {
-            outcome: postGateOutcome,
+            outcome: postGateOutcomeValue,
             reason: `Post-reconstruction validation: "${c.candidate.channelName}" assigned to ${roleName} stage (role fit: ${(assignment.roleFitScore * 100).toFixed(0)}%)${postReconstructionViolations.length > 0 ? ` with ${postReconstructionViolations.length} advisory note(s)` : ""}`,
             violations: postReconstructionViolations,
           };
@@ -1448,6 +1448,7 @@ export function runChannelSelectionEngine(
     decisionGateScoring: gateScoring,
     structurallyRepaired,
     correctionAuditTrail,
+    secondaryLayerResults: viable[1]?.layers || [],
   };
 }
 

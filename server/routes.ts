@@ -5,7 +5,6 @@ import { aiChat, aiGemini, Modality } from "./ai-client";
 import { validateRoutingIntegrity } from "./shared/engine-health";
 import multer from "multer";
 import path from "path";
-import { registerPhotographyRoutes } from "./photography-routes";
 import { registerVideoRoutes } from "./video-routes";
 import { registerStrategyRoutes } from "./strategy-routes";
 import { registerAutopilotRoutes } from "./autopilot-routes";
@@ -18,12 +17,16 @@ import { registerMarketIntelligenceV3 } from "./market-intelligence-v3";
 import { registerAudienceEngineRoutes } from "./audience-engine/routes";
 import { registerPositioningEngineRoutes } from "./positioning-engine/routes";
 import { registerStrategicCoreRoutes } from "./strategic-core";
+import { versionHandler } from "./lib/version-handler";
 import { registerCampaignRoutes, requireCampaign } from "./campaign-routes";
 import { registerDataSourceRoutes } from "./data-source/routes";
 import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from "./meta-status";
 import { registerAuditRoutes } from "./audit-routes";
 import { registerBusinessDataRoutes } from "./business-data-routes";
 import { registerDashboardRoutes } from "./dashboard-routes";
+import { registerPerceptionRoutes } from "./perception-routes";
+import { registerMonitorEarlyWarningRoutes } from "./monitor/early-warning/routes";
+import { registerDiagnoseRoutes } from "./diagnose/routes";
 import { registerUIStateRoutes } from "./ui-state-routes";
 import { registerDifferentiationRoutes } from "./differentiation-engine/routes";
 import { registerMechanismEngineRoutes } from "./mechanism-engine/routes";
@@ -48,11 +51,17 @@ import { registerAELRoutes } from "./analytical-enrichment-layer/routes";
 import { registerCELRoutes } from "./causal-enforcement-layer/routes";
 import { registerBuildPlanLayerRoutes } from "./build-plan-layer/routes";
 import { registerIntegrityRoutes } from "./system-integrity/routes";
+import { registerSystemControlRoutes } from "./system-control/routes";
+import { registerFullReportRoutes } from "./system-control/full-report";
 import { registerExplorationBudgetRoutes } from "./exploration-budget/routes";
 import { storeTokensAfterOAuth, runAllHealthChecks } from "./meta-token-manager";
+import * as crypto from "crypto";
 import { redactToken } from "./meta-crypto";
 import { initMetaMetrics } from "./meta-metrics";
-import { registerAuthRoutes, resolveAccountId } from "./auth";
+import { registerAuthRoutes, resolveAccountId, isAdminAccount } from "./auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
+import { aiRateLimitPerAccount } from "./middleware/ai-rate-limit";
+import { aiSpendCapPerAccount } from "./middleware/ai-spend-cap";
 import { registerStagingAdminRoutes } from "./staging-admin-routes";
 import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
@@ -64,6 +73,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
   registerStagingAdminRoutes(app);
 
+  // F9.10 — public version endpoint. Handler extracted to
+  // ./lib/version-handler.ts so behavior tests mount the EXACT same
+  // function (not a copy).
+  app.get("/api/version", versionHandler);
+
+  app.get("/api/proxy/health", async (req: any, res) => {
+    // Seal #2 (Task #20) F1.6 — admin-only. Architect re-review pass-3
+    // tightened from "stripped 200 for non-admin" to explicit deny:
+    //   - unauthenticated  → 401
+    //   - authed non-admin → 403
+    //   - authed admin     → full payload
+    // Done BEFORE any sensitive field is referenced. Probes that need
+    // a 200 should hit /api/health (no proxy detail) instead.
+    if (!req.accountId) {
+      return res.status(401).json({ error: "AUTH_REQUIRED" });
+    }
+    if (!isAdminAccount(req.accountId)) {
+      return res.status(403).json({ error: "ADMIN_ONLY" });
+    }
+    try {
+      // 2026-07 Unlocker rebuild: transport is the Bright Data Unlocker REST
+      // API (no proxy host/port/CONNECT tunnel to probe). Connectivity test
+      // goes through the pool manager's single client choke point.
+      const { getScrapingConfig, testScrapingConnectivity } = await import("./competitive-intelligence/proxy-pool-manager");
+      if (!getScrapingConfig()) {
+        return res.json({
+          status: "NOT_CONFIGURED",
+          message: "Bright Data Unlocker API not configured — scraping is safe-off (SCRAPING_UNCONFIGURED)",
+          configured: false,
+          requiredSecrets: ["BRIGHT_DATA_API_KEY", "BRIGHT_DATA_ZONE"],
+          optionalSecrets: ["BRIGHT_DATA_COUNTRY"],
+          tests: [],
+        });
+      }
+
+      const result = await testScrapingConnectivity();
+      res.json({
+        status: result.ok ? "HEALTHY" : "UNHEALTHY",
+        configured: true,
+        transport: "Bright Data Unlocker API",
+        ...result,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ status: "ERROR", error: err.message });
+    }
+  });
+
   app.get("/api/engines/health", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
@@ -71,6 +128,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId query parameter required" });
       }
+      // W1-T4 (P0-4): defense-in-depth campaignId ownership assert.
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       const result = await validateRoutingIntegrity(accountId, campaignId);
       res.json(result);
     } catch (err: any) {
@@ -78,12 +138,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/generate-content", async (req, res) => {
+  app.post("/api/generate-content", aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req, res) => {
     try {
       const { topic, contentType, platform, brandName, tone, targetAudience, industry, aiEngine, campaignId } = req.body;
 
       if (!topic) {
         return res.status(400).json({ error: "Topic is required" });
+      }
+
+      // W1-T4 (P0-4): if a campaignId is supplied, it MUST belong to the
+      // authed account. The downstream `getLatestContentDna(campaignId, accountId)`
+      // is already accountId-scoped (no data leak), but a foreign campaignId
+      // should be rejected explicitly so attackers cannot probe campaign-id
+      // existence by observing AI-output variance.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(resolveAccountId(req), String(campaignId)); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       }
 
       let dnaGuidance = "";
@@ -187,7 +257,7 @@ Requirements:
     });
   });
 
-  app.post("/api/generate-ad", async (req, res) => {
+  app.post("/api/generate-ad", aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req, res) => {
     try {
       const { brandName, industry, tone, targetAudience, platforms, aiEngine } = req.body;
 
@@ -269,9 +339,16 @@ Make sure the content works well across all the specified platforms.`;
     }
   });
 
-  app.post("/api/generate-reel-script", async (req, res) => {
+  app.post("/api/generate-reel-script", aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req, res) => {
     try {
       const { topic, platform, brandName, tone, targetAudience, industry, reelDuration, reelGoal, ciContext, campaignId } = req.body;
+
+      // W1-T4 (P0-4): if a campaignId is supplied, it MUST belong to the
+      // authed account. Same rationale as /api/generate-content above.
+      if (campaignId) {
+        try { await assertCampaignBelongsTo(resolveAccountId(req), String(campaignId)); }
+        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
+      }
 
       if (ciContext) {
         return res.status(410).json({
@@ -431,7 +508,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     }
   });
 
-  app.post("/api/generate-poster", upload.array('photos', 3), async (req, res) => {
+  app.post("/api/generate-poster", aiRateLimitPerAccount(), aiSpendCapPerAccount(), upload.array('photos', 3), async (req, res) => {
     try {
       const { topic, style, text, brandName, industry, aspectRatio, mood, mode } = req.body;
 
@@ -587,6 +664,15 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     return `${forwardedProto}://${forwardedHost || req.get('host')}`;
   }
 
+  function htmlEscape(s: string): string {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;');
+  }
+
   app.get("/api/auth/facebook", (req, res) => {
     const META_APP_ID = process.env.META_APP_ID || '';
     const REDIRECT_URI = `${getPublicBaseUrl(req)}/api/auth/facebook/callback`;
@@ -610,7 +696,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <div class="success">Login Successful!</div>
           <p class="info">Welcome! You can close this window.</p>
           <script>
-            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, '*');
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 2000);
           </script>
         </body>
@@ -633,7 +719,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, '*');
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_SUCCESS', user: { id: 'demo_fb', name: 'Facebook User' } }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login successful! You can close this window.</p>
@@ -660,13 +746,8 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <script>
             window.opener?.postMessage({ 
               type: 'FACEBOOK_AUTH_SUCCESS', 
-              user: { 
-                id: '${userData.id}', 
-                name: '${userData.name}',
-                email: '${userData.email || ''}',
-                picture: '${userData.picture?.data?.url || ''}'
-              } 
-            }, '*');
+              user: ${JSON.stringify({ id: userData.id, name: userData.name, email: userData.email || '', picture: userData.picture?.data?.url || '' })}
+            }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login successful! You can close this window.</p>
@@ -678,7 +759,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_ERROR' }, '*');
+            window.opener?.postMessage({ type: 'FACEBOOK_AUTH_ERROR' }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login failed. Please try again.</p>
@@ -711,7 +792,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <div class="success">Login Successful!</div>
           <p class="info">Welcome! You can close this window.</p>
           <script>
-            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, '*');
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 2000);
           </script>
         </body>
@@ -734,7 +815,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, '*');
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS', user: { id: 'demo_ig', name: 'Instagram User' } }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login successful! You can close this window.</p>
@@ -777,11 +858,8 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <script>
             window.opener?.postMessage({ 
               type: 'INSTAGRAM_AUTH_SUCCESS', 
-              user: { 
-                id: '${accountsData.data?.[0]?.id || 'ig_user'}', 
-                name: '${igUsername}'
-              } 
-            }, '*');
+              user: ${JSON.stringify({ id: accountsData.data?.[0]?.id || 'ig_user', name: igUsername })}
+            }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login successful! You can close this window.</p>
@@ -793,7 +871,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_ERROR' }, '*');
+            window.opener?.postMessage({ type: 'INSTAGRAM_AUTH_ERROR' }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 1000);
           </script>
           <p>Login failed. Please try again.</p>
@@ -871,7 +949,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           </div>
           <script>
             setTimeout(() => {
-              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'APP_NOT_CONFIGURED' }, '*');
+              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'APP_NOT_CONFIGURED' }, ${JSON.stringify(getPublicBaseUrl(req))});
               window.close();
             }, 5000);
           </script>
@@ -898,17 +976,17 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .err{color:#FF6B6B;font-size:20px;margin-bottom:12px;} .desc{color:#666;margin-bottom:20px;} .hint{background:#FFF3CD;padding:16px;border-radius:10px;color:#856404;text-align:left;font-size:14px;}</style></head>
         <body>
           <div class="err">Connection Failed</div>
-          <p class="desc">${error_description || fbError}</p>
+          <p class="desc">${htmlEscape(String(error_description || fbError))}</p>
           <div class="hint">
             <strong>Common fixes:</strong><br/>
             1. Make sure your Meta app is set to <strong>Live</strong> mode (not Development)<br/>
             2. In your Meta app settings, add this domain to <strong>Valid OAuth Redirect URIs</strong>:<br/>
-            <code>${REDIRECT_URI}</code><br/>
+            <code>${htmlEscape(REDIRECT_URI)}</code><br/>
             3. Make sure "Facebook Login" product is added to your Meta app<br/>
             4. Check that the App ID and App Secret match your Meta app
           </div>
           <script>
-            setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: '${String(fbError).replace(/'/g, "\\'")}' }, '*'); }, 3000);
+            setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: ${JSON.stringify(String(fbError))} }, ${JSON.stringify(getPublicBaseUrl(req))}); }, 3000);
           </script>
         </body>
         </html>
@@ -921,7 +999,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'MISSING_CREDENTIALS' }, '*');
+            window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'MISSING_CREDENTIALS' }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 2000);
           </script>
           <p>Configuration error. Please check META_APP_ID and META_APP_SECRET.</p>
@@ -945,9 +1023,9 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .err{color:#FF6B6B;font-size:20px;margin-bottom:12px;} .desc{color:#666;}</style></head>
           <body>
             <div class="err">Authentication Error</div>
-            <p class="desc">${tokenData.error.message || 'Failed to get access token'}</p>
+            <p class="desc">${htmlEscape(String(tokenData.error.message || 'Failed to get access token'))}</p>
             <script>
-              setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, '*'); window.close(); }, 4000);
+              setTimeout(() => { window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, ${JSON.stringify(getPublicBaseUrl(req))}); window.close(); }, 4000);
             </script>
           </body>
           </html>
@@ -960,7 +1038,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <html><body>
             <p>No access token received. Please try again.</p>
             <script>
-              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'NO_TOKEN' }, '*');
+              window.opener?.postMessage({ type: 'META_AUTH_ERROR', error: 'NO_TOKEN' }, ${JSON.stringify(getPublicBaseUrl(req))});
               setTimeout(() => window.close(), 3000);
             </script>
           </body></html>
@@ -979,7 +1057,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
             <div class="ok">Meta Business Suite Connected</div>
             <p>Tokens stored securely on the server. You can close this window.</p>
             <script>
-              window.opener?.postMessage({ type: 'META_AUTH_SUCCESS', status: '${storeResult.status}' }, '*');
+              window.opener?.postMessage({ type: 'META_AUTH_SUCCESS', status: ${JSON.stringify(storeResult.status)} }, ${JSON.stringify(getPublicBaseUrl(req))});
               setTimeout(() => window.close(), 2000);
             </script>
           </body>
@@ -992,9 +1070,9 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
           <head><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:500px;margin:0 auto;text-align:center;} .warn{color:#F59E0B;font-size:20px;margin-bottom:12px;}</style></head>
           <body>
             <div class="warn">Partial Connection</div>
-            <p>${storeResult.status === 'NO_PAGES' ? 'No Facebook Pages found. You need admin access to at least one Facebook Page.' : (storeResult.error || 'Token processing failed.')}</p>
+            <p>${htmlEscape(storeResult.status === 'NO_PAGES' ? 'No Facebook Pages found. You need admin access to at least one Facebook Page.' : (storeResult.error || 'Token processing failed.'))}</p>
             <script>
-              window.opener?.postMessage({ type: 'META_AUTH_PARTIAL', status: '${storeResult.status}', error: '${(storeResult.error || '').replace(/'/g, "\\'")}' }, '*');
+              window.opener?.postMessage({ type: 'META_AUTH_PARTIAL', status: ${JSON.stringify(storeResult.status)}, error: ${JSON.stringify(storeResult.error || '')} }, ${JSON.stringify(getPublicBaseUrl(req))});
               setTimeout(() => window.close(), 5000);
             </script>
           </body>
@@ -1007,7 +1085,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
         <html>
         <body>
           <script>
-            window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, '*');
+            window.opener?.postMessage({ type: 'META_AUTH_ERROR' }, ${JSON.stringify(getPublicBaseUrl(req))});
             setTimeout(() => window.close(), 2000);
           </script>
           <p>Connection failed. Please try again.</p>
@@ -1112,7 +1190,7 @@ Generate exactly 4-6 scenes. Write the FULL SCRIPT — every word spoken. Camera
     }
   });
 
-  app.post("/api/generate-calendar", async (req, res) => {
+  app.post("/api/generate-calendar", aiRateLimitPerAccount(), aiSpendCapPerAccount(), async (req, res) => {
     try {
       const { brandName, industry, tone, targetAudience, platforms, goals, products, month, year } = req.body;
 
@@ -1418,11 +1496,19 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
     }
   });
 
-  app.use("/uploads/photography", express.static(path.join(process.cwd(), "uploads", "photography")));
-  app.use("/uploads/videos", express.static(path.join(process.cwd(), "uploads", "videos")));
-  app.use("/uploads/video-output", express.static(path.join(process.cwd(), "uploads", "video-output")));
+  // Hardening: force-download disposition and deny content-sniffing on all
+  // user-uploaded files. This prevents any file that slipped through (e.g. a
+  // pre-existing SVG) from executing as a script on the avyronai.com origin.
+  const uploadStaticOpts: Parameters<typeof express.static>[1] = {
+    setHeaders(res) {
+      res.setHeader("Content-Disposition", "attachment");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'none'");
+    },
+  };
+  app.use("/uploads/videos", express.static(path.join(process.cwd(), "uploads", "videos"), uploadStaticOpts));
+  app.use("/uploads/video-output", express.static(path.join(process.cwd(), "uploads", "video-output"), uploadStaticOpts));
 
-  registerPhotographyRoutes(app);
   registerVideoRoutes(app);
   registerStrategyRoutes(app);
   registerAutopilotRoutes(app);
@@ -1441,6 +1527,9 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerAuditRoutes(app);
   registerBusinessDataRoutes(app);
   registerDashboardRoutes(app);
+  registerPerceptionRoutes(app);
+  registerMonitorEarlyWarningRoutes(app);
+  registerDiagnoseRoutes(app);
   registerUIStateRoutes(app);
   registerDifferentiationRoutes(app);
   registerMechanismEngineRoutes(app);
@@ -1465,6 +1554,8 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerCELRoutes(app);
   registerBuildPlanLayerRoutes(app);
   registerIntegrityRoutes(app);
+  registerSystemControlRoutes(app);
+  registerFullReportRoutes(app);
   registerExplorationBudgetRoutes(app);
 
   initMetaMetrics();
@@ -1494,7 +1585,6 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
       const encodedSig = parts[0];
       const payload = parts[1];
 
-      const crypto = require("crypto");
       const expectedSig = crypto
         .createHmac("sha256", META_APP_SECRET)
         .update(payload)

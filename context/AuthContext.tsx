@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getApiUrl } from '@/lib/query-client';
+import { getApiUrl, queryClient } from '@/lib/query-client';
+import { getAuthToken, setAuthToken, clearAuthToken } from '@/lib/secure-token-storage';
 
 export interface SavedAccount {
   userId: string;
@@ -33,6 +34,7 @@ interface AuthContextValue {
   isAccessActive: boolean;
   savedAccounts: SavedAccount[];
   showAccountSwitcher: boolean;
+  isAddingAccount: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -42,11 +44,46 @@ interface AuthContextValue {
   removeSavedAccount: (userId: string) => Promise<void>;
   openAccountSwitcher: () => void;
   closeAccountSwitcher: () => void;
+  setIsAddingAccount: (value: boolean) => void;
 }
 
-const AUTH_TOKEN_KEY = 'avyron_auth_token';
+// P0-3 (launch-closure Wave 1): JWT lives in expo-secure-store (Keychain /
+// EncryptedSharedPreferences). The legacy AUTH_TOKEN_KEY is read once for
+// migration and then deleted by `getAuthToken()` (see lib/secure-token-storage).
+// User profile JSON stays in AsyncStorage — it is non-secret display data.
+// SavedAccount metadata stays in AsyncStorage but tokens for saved accounts
+// are now stored separately in SecureStore under per-userId keys.
 const AUTH_USER_KEY = 'avyron_auth_user_v2';
-const SAVED_ACCOUNTS_KEY = 'avyron_saved_accounts_v1';
+const SAVED_ACCOUNTS_KEY = 'avyron_saved_accounts_v2';
+const LEGACY_SAVED_ACCOUNTS_KEY = 'avyron_saved_accounts_v1';
+const SAVED_ACCOUNT_TOKEN_PREFIX = 'avyron_saved_token_';
+
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+
+// Per-userId token helpers for the saved-accounts roster.
+async function readSavedToken(userId: string): Promise<string | null> {
+  try {
+    if (Platform.OS === 'web') {
+      return await SecureStore.getItemAsync(SAVED_ACCOUNT_TOKEN_PREFIX + userId);
+    }
+    const usable = await SecureStore.isAvailableAsync().catch(() => false);
+    if (!usable) return null;
+    return await SecureStore.getItemAsync(SAVED_ACCOUNT_TOKEN_PREFIX + userId);
+  } catch { return null; }
+}
+async function writeSavedToken(userId: string, token: string): Promise<void> {
+  try {
+    if (Platform.OS !== 'web') {
+      const usable = await SecureStore.isAvailableAsync().catch(() => false);
+      if (!usable) return;
+    }
+    await SecureStore.setItemAsync(SAVED_ACCOUNT_TOKEN_PREFIX + userId, token);
+  } catch {}
+}
+async function deleteSavedToken(userId: string): Promise<void> {
+  try { await SecureStore.deleteItemAsync(SAVED_ACCOUNT_TOKEN_PREFIX + userId); } catch {}
+}
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -67,15 +104,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [isAddingAccount, setIsAddingAccount] = useState(false);
 
   useEffect(() => {
     loadStoredAuth();
   }, []);
 
+  // Mirror React-state token into the storage layer's in-memory cache +
+  // persisted slot whenever it changes. This is the safety net for sessions
+  // that started before persistent storage worked on web (where the JWT
+  // briefly lived only in React state and HMR preserved it across the fix
+  // landing). Idempotent — fresh logins also flow through here.
+  useEffect(() => {
+    if (token) {
+      setAuthToken(token).catch((e) => {
+        console.warn('[Auth] re-persist token failed:', e);
+      });
+    }
+  }, [token]);
+
+  // P0-3: SavedAccount roster is stored token-less in AsyncStorage
+  // (`SAVED_ACCOUNTS_KEY` v2). The actual token for each saved account lives
+  // in SecureStore under `SAVED_ACCOUNT_TOKEN_PREFIX + userId`. On read we
+  // hydrate the token back so the in-memory shape stays the same. On first
+  // run we migrate the legacy v1 blob (which inlined plaintext tokens),
+  // promote each token to SecureStore, and delete the legacy key.
   const loadSavedAccounts = async (): Promise<SavedAccount[]> => {
     try {
-      const raw = await AsyncStorage.getItem(SAVED_ACCOUNTS_KEY);
-      return raw ? JSON.parse(raw) : [];
+      let raw = await AsyncStorage.getItem(SAVED_ACCOUNTS_KEY);
+      if (!raw) {
+        const legacyRaw = await AsyncStorage.getItem(LEGACY_SAVED_ACCOUNTS_KEY);
+        if (legacyRaw) {
+          const legacyList: SavedAccount[] = JSON.parse(legacyRaw);
+          // Promote tokens to SecureStore, then strip them from AsyncStorage.
+          for (const acc of legacyList) {
+            if (acc.token) await writeSavedToken(acc.userId, acc.token);
+          }
+          const stripped = legacyList.map(({ token: _t, ...rest }) => ({ ...rest, token: '' as string }));
+          await AsyncStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(stripped));
+          await AsyncStorage.removeItem(LEGACY_SAVED_ACCOUNTS_KEY);
+          raw = JSON.stringify(stripped);
+        }
+      }
+      const list: SavedAccount[] = raw ? JSON.parse(raw) : [];
+      // Hydrate tokens from SecureStore back into the in-memory roster.
+      const hydrated = await Promise.all(list.map(async (a) => ({
+        ...a,
+        token: (await readSavedToken(a.userId)) || '',
+      })));
+      return hydrated;
     } catch {
       return [];
     }
@@ -83,7 +160,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const persistSavedAccounts = async (accounts: SavedAccount[]) => {
     try {
-      await AsyncStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(accounts));
+      // Persist token-less metadata only.
+      const stripped = accounts.map(({ token: _t, ...rest }) => ({ ...rest, token: '' as string }));
+      await AsyncStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(stripped));
       setSavedAccounts(accounts);
     } catch {}
   };
@@ -96,13 +175,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       accounts.push(account);
     }
+    if (account.token) await writeSavedToken(account.userId, account.token);
     await persistSavedAccounts(accounts);
   };
 
   const loadStoredAuth = async () => {
     try {
       const [storedToken, storedUser, storedAccounts] = await Promise.all([
-        AsyncStorage.getItem(AUTH_TOKEN_KEY),
+        getAuthToken(),
         AsyncStorage.getItem(AUTH_USER_KEY),
         loadSavedAccounts(),
       ]);
@@ -131,8 +211,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             await clearAuth();
           }
-        } catch {
-          // offline or timeout - use cached user
+        } catch (err) {
+          // Offline or timeout — keep cached user but surface the failure.
+          // Seal #15/#16 silent-failure doctrine: this used to be a silent
+          // `} catch {}` which masked a misconfigured EXPO_PUBLIC_DOMAIN
+          // (manifests as the dashboard hanging on the splash screen).
+          const message = err instanceof Error ? err.message : String(err);
+          // eslint-disable-next-line no-console
+          console.error(`[Auth] ME_VERIFY_FAILED_USING_CACHED ${message}`);
         }
       }
     } catch (error) {
@@ -145,7 +231,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearAuth = async () => {
     setUser(null);
     setToken(null);
-    await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, AUTH_USER_KEY]);
+    await clearAuthToken();
+    await AsyncStorage.removeItem(AUTH_USER_KEY);
+    // P1 isolation seal: blow away every cached server response and pending
+    // mutation so the next authed user can never read the previous user's
+    // React Query cache (cross-tenant leakage surface #1).
+    try {
+      queryClient.cancelQueries();
+      queryClient.clear();
+    } catch (e) {
+      console.warn('[Auth] queryClient.clear failed during clearAuth:', e);
+    }
   };
 
   const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
@@ -162,10 +258,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: data.error || 'Login failed' };
       }
 
+      // SECURITY: persist identity to AsyncStorage BEFORE flipping React
+      // state so `lib/storage.ts` nsKey reads always resolve to the new uid.
+      await setAuthToken(data.token);
+      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
       setToken(data.token);
       setUser(data.user);
-      await AsyncStorage.setItem(AUTH_TOKEN_KEY, data.token);
-      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
       await upsertSavedAccount(userToSavedAccount(data.user, data.token));
       return { success: true };
     } catch (error) {
@@ -187,10 +285,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: data.error || 'Registration failed' };
       }
 
+      // SECURITY: persist identity to AsyncStorage BEFORE flipping React
+      // state so `lib/storage.ts` nsKey reads always resolve to the new uid.
+      await setAuthToken(data.token);
+      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
       setToken(data.token);
       setUser(data.user);
-      await AsyncStorage.setItem(AUTH_TOKEN_KEY, data.token);
-      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
       await upsertSavedAccount(userToSavedAccount(data.user, data.token));
       return { success: true };
     } catch (error) {
@@ -203,6 +303,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const accounts = await loadSavedAccounts();
       const remaining = accounts.filter(a => a.userId !== user.id);
       await persistSavedAccounts(remaining);
+      // P0-3: also wipe the SecureStore-resident saved token for this user.
+      await deleteSavedToken(user.id);
     }
     await clearAuth();
   }, [user]);
@@ -233,10 +335,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAdmin: false,
       };
 
+      // P1 isolation seal: clear cache BEFORE swapping tokens so no in-flight
+      // query can settle into the new account's cache slot with old-account data.
+      try {
+        queryClient.cancelQueries();
+        queryClient.clear();
+      } catch (e) {
+        console.warn('[Auth] queryClient.clear failed during switchToAccount:', e);
+      }
+      // SECURITY: persist the new identity to AsyncStorage BEFORE flipping
+      // React state. `lib/storage.ts` namespaces every per-user key by the uid
+      // it reads from AUTH_USER_KEY — if state flipped first, any storage read
+      // triggered by the re-render would resolve to the previous user's
+      // namespace and leak/clobber data across accounts.
+      await setAuthToken(account.token);
+      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(resolvedUser));
       setToken(account.token);
       setUser(resolvedUser);
-      await AsyncStorage.setItem(AUTH_TOKEN_KEY, account.token);
-      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(resolvedUser));
       setShowAccountSwitcher(false);
     } catch (error) {
       console.error('[Auth] Switch account error:', error);
@@ -247,6 +362,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accounts = await loadSavedAccounts();
     const remaining = accounts.filter(a => a.userId !== userId);
     await persistSavedAccounts(remaining);
+    // P0-3: drop the SecureStore-resident token for this saved account.
+    await deleteSavedToken(userId);
   }, []);
 
   const markIntroSeen = useCallback(async () => {
@@ -281,7 +398,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
         await upsertSavedAccount(userToSavedAccount(data.user, token));
       }
-    } catch {}
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.error(`[Auth] REFRESH_USER_FAILED ${message}`);
+    }
   }, [token]);
 
   const openAccountSwitcher = useCallback(() => setShowAccountSwitcher(true), []);
@@ -313,6 +434,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAccessActive,
     savedAccounts,
     showAccountSwitcher,
+    isAddingAccount,
     login,
     register,
     logout,
@@ -322,7 +444,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     removeSavedAccount,
     openAccountSwitcher,
     closeAccountSwitcher,
-  }), [user, token, isLoading, trialDaysRemaining, isAccessActive, savedAccounts, showAccountSwitcher, login, register, logout, markIntroSeen, refreshUser, switchToAccount, removeSavedAccount, openAccountSwitcher, closeAccountSwitcher]);
+    setIsAddingAccount,
+  }), [user, token, isLoading, trialDaysRemaining, isAccessActive, savedAccounts, showAccountSwitcher, isAddingAccount, login, register, logout, markIntroSeen, refreshUser, switchToAccount, removeSavedAccount, openAccountSwitcher, closeAccountSwitcher]);
 
   return (
     <AuthContext.Provider value={value}>

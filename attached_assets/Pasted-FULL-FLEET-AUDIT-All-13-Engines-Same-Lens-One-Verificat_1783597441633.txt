@@ -1,0 +1,45 @@
+FULL-FLEET AUDIT — All 13 Engines, Same Lens, One Verification Run
+
+We've now found the same defect family in 4 engines, one at a time (positioning, audience, offer, channel selection). No more piecemeal discovery: audit ALL 13 engines in one pass, fix what's broken, then prove everything with a single end-to-end run.
+
+SCOPE — every engine in the orchestrator sequence:
+1. market_intelligence
+2. audience
+3. positioning
+4. differentiation
+5. mechanism
+6. offer
+7. awareness
+8. funnel
+9. integrity
+10. persuasion
+11. channel_selection
+12. iteration
+13. retention
+Plus ALL secondary AI judges/designers attached to them (value-architect, category-game, channel-orchestration, myth-breaker, narrative-reframe, trust-transfer, and any other designer/judge LLM call site — enumerate them all).
+
+PART 1 — AUDIT MATRIX (report first, with file/line evidence)
+For EACH engine and EACH secondary judge, answer:
+A. ANCHOR: Does its LLM prompt (FIRST attempt, not just retries) receive the product anchor / doctrine block? Does its judge/gate receive it? Or is it judging blind?
+B. FALLBACK: Does it have the F5a DNA-fallback when no anchor is locked, or does it silently run unanchored?
+C. RETRY: Does it have a retry-with-feedback loop (up to 3 attempts)? Is the rejection feedback specific (names the gate, the ungrounded token, the anchor steering) or generic?
+D. BATCH: If it generates multiple candidates, does one failing candidate discard passing siblings (the audience Defect B), or does it keep partial successes?
+E. CALIBRATION: Is its quality gate calibrated so harshly it conflicts with other gates (the positioning designer-vs-judge deadlock)? Flag any gate that rejected >50% of attempts in recent runs.
+F. EVIDENCE: Does it emit ANCHOR_EVIDENCE log lines? If not, add them.
+Note: some engines are deterministic (no LLM) — for those, just record "no LLM call sites" in the matrix and move on. Do not invent AI where none belongs.
+
+Deliver the matrix: engine/judge × A × B × C × D × E × F, each cell PASS / FAIL(file:line) / N-A.
+
+PART 2 — FIX
+Apply the established fixes to every FAIL: anchor into first prompt + judge, DNA fallback, specific retry feedback with anchor steering, partial-keep on batches, calibration adjustment where a gate deadlocks. Follow the same patterns already approved (F5/F5a/partial-keep). Differentiation is the known immediate blocker — fix it first so the pipeline can complete.
+
+PART 3 — SEED THE TEST DATA YOURSELF, THEN PROVE IT
+You prepare everything the verification needs — do not wait on us:
+1. Create/complete a test campaign with a FULL, realistic product anchor (all 5 fields, specific not generic), a complete business profile / Product DNA, and whatever inputs the engines require (business data, competitors list, connected-channel placeholders, synthetic MI data if scraping is still down). Document what you seeded.
+2. Run ONE full end-to-end orchestrator run — all 13 engines, no engine skipped. If any engine fails its gate and blocks the chain, fix the cause and re-run until the chain completes.
+3. Deliver the final evidence table from that SINGLE run: engine × anchor-in-first-prompt (yes/no/n-a) × anchor-in-judge × mode (ai/fallback/deterministic) × attempts × failedGates. Include the aiPathReport JSON and doctrineResolution.
+4. Then clear the anchor and re-run once: confirm every LLM engine switches to DNA-fallback/degraded cleanly, the degraded flag shows in aiPathReport, and the dashboard banner appears.
+
+DONE CONDITION: the Part 3 evidence table shows every LLM engine at anchor-in-first-prompt=yes AND anchor-in-judge=yes (or n-a for deterministic engines), from one uninterrupted run. Anything less is not done.
+
+Constraints: no changes to Q1/Q2 verdict logic, no pricing generation, max 3 attempts per engine, existing gates remain the sole judges, nothing silent.

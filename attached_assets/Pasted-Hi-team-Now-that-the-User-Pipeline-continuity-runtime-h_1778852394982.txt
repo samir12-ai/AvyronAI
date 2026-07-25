@@ -1,0 +1,230 @@
+Hi team,
+
+Now that the User Pipeline continuity/runtime hardening work has been completed across Seals #13–#20, I want a full production-grade audit focused specifically on the Competitor Pipeline.
+
+This audit must be treated as a critical operational verification pass.
+
+The goal is not only to check whether competitor ingestion “works,” but to verify that the entire competitor intelligence lifecycle is operationally reliable, semantically correct, continuity-safe, and resistant to silent degradation.
+
+==================================================
+AUDIT OBJECTIVES
+================
+
+Validate that the Competitor Pipeline:
+
+* continuously operates correctly
+* maintains cadence correctly
+* ingests data reliably
+* handles degradation safely
+* classifies evidence correctly
+* recovers from failures correctly
+* prevents stale intelligence drift
+* surfaces operational failures explicitly
+* does not silently stall, corrupt state, or degrade
+
+This must be audited under real runtime and orchestration conditions.
+
+==================================================
+AREAS TO AUDIT
+==============
+
+1. Full Competitor Lifecycle Integrity
+
+---
+
+Audit the complete lifecycle flow:
+
+* competitor discovery
+* source ingestion
+* scraping
+* normalization
+* signal extraction
+* cluster generation
+* market intelligence classification
+* signal quality gating
+* storage persistence
+* retry handling
+* degradation handling
+* stale-data handling
+* downstream orchestration consumption
+
+Verify there are no hidden lifecycle gaps, orphaned ingestion states, incomplete chains, invalid transitions, or silent skips.
+
+==================================================
+
+2. Scraper & Source Reliability
+
+---
+
+Audit all source pipelines including:
+
+* Instagram
+* TikTok
+* Website
+* Blog
+* Google Reviews
+* external providers (Bright Data / Apify / others)
+
+Verify:
+
+* timeout handling
+* provider fallback behavior
+* retry stability
+* stale scraper recovery
+* failed scrape recovery
+* degraded-source classification
+* source freshness validation
+* duplicate ingestion prevention
+* queue handling
+* rate-limit handling
+* partial-source degradation behavior
+
+I want confirmation that source failure cannot silently poison downstream intelligence.
+
+==================================================
+
+3. Runtime Stability & Silent-Degradation Sweep
+
+---
+
+Aggressively audit for:
+
+* zombie scraper jobs
+* dangling async tasks
+* stuck ingestion workers
+* stalled queues
+* lock persistence
+* scheduler drift
+* retry amplification
+* memory leaks
+* event-loop blocking
+* swallowed exceptions
+* partial commits
+* stale runtime references
+* orphaned active jobs
+* runtime/DB divergence
+* dead ingestion chains incorrectly marked healthy
+
+All silent operational degradation categories must be inspected explicitly.
+
+==================================================
+
+4. Market Intelligence & Semantic Integrity
+
+---
+
+Audit:
+
+* signal-quality thresholds
+* canonical field usage
+* strict enum enforcement
+* snapshot lineage
+* cluster lineage
+* stale evidence handling
+* missing evidence handling
+* confidence classification
+* evidence weighting
+* downstream intelligence consistency
+* no semantic fallbacks
+* contract completeness enforcement
+
+Verify the competitor pipeline still fully complies with D1–D5 doctrine after all runtime/continuity work.
+
+==================================================
+
+5. Continuity & Cadence Verification
+
+---
+
+Verify:
+
+* ingestion cadence continuity
+* scheduler continuity
+* worker heartbeat continuity
+* dead-cycle detection
+* retry guarantees
+* degraded-state transitions
+* HEALTHY / DEGRADED / DEAD classification correctness
+* watchdog behavior
+* long-gap recovery behavior
+* provider outage handling
+
+The competitor pipeline must never silently stop updating market reality.
+
+==================================================
+
+6. Observability & Operator Visibility
+
+---
+
+Verify:
+
+* dashboard accuracy
+* scraper health visibility
+* ingestion metrics integrity
+* queue visibility
+* degraded-source visibility
+* stale-data visibility
+* audit log completeness
+* retry visibility
+* provider failure visibility
+* operator alert correctness
+
+If competitor intelligence becomes stale or degraded, operators must immediately know:
+
+* what failed
+* where
+* since when
+* impact severity
+* affected sources
+* recovery path
+
+==================================================
+
+7. Stress / Recovery Validation
+
+---
+
+I want explicit testing for:
+
+* provider outages
+* scraper timeouts
+* queue overload
+* worker restart recovery
+* scheduler restart recovery
+* DB interruption recovery
+* partial ingestion recovery
+* delayed async completion
+* retry recovery
+* source throttling
+* stale-source recovery
+* empty-source scenarios
+* high-frequency ingestion conditions
+* watchdog intervention correctness
+
+==================================================
+DELIVERABLES
+============
+
+Please provide:
+
+* full audit report
+* categorized findings
+* severity classification
+* unresolved risks
+* deferred risks with justification
+* operational concerns
+* runtime concerns
+* scalability concerns
+* doctrine compliance status
+* scraper/provider reliability assessment
+* recommendations
+* explicit pass/fail status per audit category
+
+I also want architect review after implementation and audit completion.
+
+No “probably fine” conclusions.
+
+Every operational assumption should be verified behaviorally or explicitly classified as unverified.
+
+Thanks.

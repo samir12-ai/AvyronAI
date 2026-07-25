@@ -774,9 +774,11 @@ export async function runIterationEngine(
   }
 
   let hypotheses = generateHypotheses(performance, funnel, creative, persuasion);
+  let syntheticFallbackUsed = false;
   if (hypotheses.length === 0) {
     hypotheses = generateBenchmarkExplorationHypotheses().slice(0, 2);
-    structuralWarnings.push("No data-driven hypotheses generated — baseline exploration hypotheses injected");
+    syntheticFallbackUsed = true;
+    structuralWarnings.push("SYNTHETIC FALLBACK: No data-driven hypotheses generated — baseline exploration hypotheses injected");
   }
   const targets = generateOptimizationTargets(performance, funnel);
   const failedFlags = detectFailedStrategies(performance, creative);
@@ -874,10 +876,23 @@ export async function runIterationEngine(
 
   const confidenceScore = clamp(rawConfidence);
 
-  const status = guardLayer.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
-  const statusMessage = status === STATUS.PROVISIONAL
+  // Seal #9 (F10.2 / D1 documented exemption): `status` here is the engine's
+  // own canonical F1 execution-status assignment based on a guard-layer pass —
+  // NOT a substitute for a missing canonical contract field from another
+  // engine (which is what D1 forbids). The value is the source of truth that
+  // downstream consumers read, not a fallback for one. Same rationale applies
+  // to `retention-engine/engine.ts` and the broader engine-internals
+  // exemption documented in `eslint.config.js`.
+  // eslint-disable-next-line semantic/no-semantic-fallback
+  let status: string = guardLayer.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
+  let statusMessage: string = status === STATUS.PROVISIONAL
     ? "Iteration plan generated with guard warnings — operating in conservative mode"
     : `Iteration analysis complete: ${filteredHypotheses.length} test hypotheses, ${targets.length} optimization targets`;
+  if (syntheticFallbackUsed && status === STATUS.COMPLETE) {
+    status = STATUS.PROVISIONAL;
+    statusMessage = `Iteration in synthetic fallback mode — no data-driven hypotheses available, ${filteredHypotheses.length} baseline exploration hypotheses injected`;
+    console.log(`[IterationEngine] SYNTHETIC_FALLBACK_STATUS | demoting COMPLETE → PROVISIONAL | hypotheses=${filteredHypotheses.length} (synthetic)`);
+  }
 
   const acceptability = assessStrategyAcceptability(
     confidenceScore,

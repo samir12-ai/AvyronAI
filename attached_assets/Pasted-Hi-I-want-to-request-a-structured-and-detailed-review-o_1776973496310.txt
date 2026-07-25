@@ -1,0 +1,184 @@
+Hi,
+
+I want to request a structured and detailed review of the current system — specifically focused on engine logic, decision-making, and AI usage across the architecture.
+
+This is not a request for infrastructure changes. The system structure is already stable. The goal is to upgrade the intelligence layer inside the engines.
+
+---
+
+### 1) Core Objective
+
+We are building an adaptive marketing system, not a generic analysis tool.
+
+At its core, the system must answer two questions:
+- Is the current user DNA actually working?
+- Has the market shifted enough to require re-evaluation?
+
+Your review should focus on how well the current engine logic supports these decisions, not just data processing or output generation.
+
+---
+
+### 2) What I Need From You
+
+I need a deep, code-aware breakdown of how the system currently operates from a logic perspective.
+
+Please provide a structured analysis covering:
+
+---
+
+### 3) Engine-by-Engine Logic Breakdown
+
+For each engine in the system:
+
+- What inputs does the engine consume?
+- How are these inputs processed internally (logic, rules, transformations)?
+- What decisions or classifications does the engine make?
+- What outputs are generated (format + meaning)?
+- How do these outputs influence:
+  - other engines
+  - final Q1 / Q2 decisions
+  - overall system behavior
+
+Most importantly:
+
+> Explain how each engine actually “thinks” — not just what it outputs.
+
+---
+
+### 4) AI Usage Mapping
+
+I want full clarity on where AI is currently used and where it is not.
+
+For each part of the system:
+
+- Where is AI being used?
+- What is the exact role of AI in that step?
+  - classification?
+  - summarization?
+  - pattern detection?
+  - reasoning?
+- Where is AI NOT being used (rule-based / deterministic logic)?
+
+Also:
+- Identify any areas where AI is being used without strong logic constraints
+- Identify areas where AI should not be used but currently is
+- Identify areas where AI should be introduced but is missing
+
+---
+
+### 5) Input → Output Flow (Full Traceability)
+
+I want a clear mapping of:
+
+- All major input types entering the system:
+  - user data
+  - competitor data
+  - signals
+  - clusters
+  - events
+
+For each input type:
+- Where does it go first?
+- Which engines consume it?
+- How is it transformed across the pipeline?
+
+Then:
+
+For each output type:
+- What generated it?
+- What logic produced it?
+- What downstream impact it has?
+
+---
+
+### 6) Logic Depth Evaluation
+
+For each engine, evaluate:
+
+- Is the logic:
+  - generic (descriptive only)?
+  - analytical (pattern-based)?
+  - or marketing-intelligent (commercial reasoning)?
+
+Specifically check:
+- Does the engine understand why something works, or only that it works?
+- Does it assign commercial meaning, or just labels?
+
+---
+
+### 7) Missing Logic (Critical)
+
+Identify what is currently missing in terms of:
+
+- buyer psychology logic
+- persuasion logic
+- value translation logic
+- positioning logic
+- offer logic
+
+Where exactly are the gaps?
+
+---
+
+### 8) Output Quality Assessment
+
+Evaluate current outputs:
+
+- Are they:
+  - descriptive?
+  - analytical?
+  - or commercially meaningful?
+
+Examples of weak outputs:
+- “pattern increasing”
+- “audience prefers X”
+
+Examples of strong outputs (target):
+- “this works due to trust-transfer logic”
+- “this messaging reduces perceived risk for this buyer type”
+- “this is identity-based positioning, not feature-based”
+
+---
+
+### 9) Constraints
+
+Do NOT:
+- redesign the pipeline
+- modify infrastructure
+- suggest architectural rebuilds
+
+Focus only on:
+> engine intelligence, logic depth, and decision quality
+
+---
+
+### 10) Goal
+
+The goal of this review is to help us move from:
+
+> a structurally strong system
+
+to:
+
+> a system that thinks like a high-level marketer
+
+---
+
+### 11) Final Deliverable
+
+Please return a clear, structured document that includes:
+
+- Engine-by-engine breakdown
+- AI usage map
+- Input/output traceability
+- Logic depth evaluation
+- Identified gaps
+- Specific recommendations for improving engine intelligence
+
+---
+
+This is a critical step toward building a system that produces real marketing reasoning, not just smart analysis.
+
+Let me know if anything needs clarification.
+
+Thanks.

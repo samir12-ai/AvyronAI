@@ -1,7 +1,10 @@
 import { db } from "../db";
 import { strategicPlans, requiredWork, calendarEntries, businessDataLayer } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
+import { createAttributionEntries } from "../decision-attribution";
+import { casUpdateStrategicPlan } from "../strategic-core/cas-helper";
+// eslint-disable-next-line orchestrator-replay/no-bare-llm-call-in-replay -- replay-safe: aiChat auto-records via getCurrentRecorder()?.recordLlmCall() (ai-client.ts), and synthesizePlan is only invoked from runOrchestrator (index.ts ~L4895) AFTER enterRecorderScope() binds the recorder to this async context (~L3821). Routing through commercial-reasoning/llm-call.ts would force JSON-mode + a 45s timeout (behavior change).
 import { aiChat } from "../ai-client";
 import { lockRootBundle } from "../root-bundle";
 import { decomposeGoal, generateSimulation, normalizeGoal, computeFunnelMath, checkFeasibility } from "../goal-math";
@@ -15,8 +18,27 @@ import type { MemoryBlock } from "../memory-system/types";
 import type { ExplorationSlot } from "../exploration-budget/engine";
 import type { OrchestratorConfig } from "./index";
 import type { EngineId, EngineStepResult } from "./priority-matrix";
+import {
+  filterDecisionsForPlan,
+  buildDecisionEnforcementReport,
+  serializeDecisionReportForLog,
+  type DecisionEnforcementReport,
+} from "../decision-policy";
+import { computeSignalComposition, formatCompositionLog, type SignalComposition } from "../shared/signal-lineage";
+
+export type PlanSource = "decision_driven" | "degraded_no_decisions" | "degraded_ai_failed" | "deterministic_fallback";
 
 export interface SynthesizedPlan {
+  planSource: PlanSource;
+  degraded: boolean;
+  lockedDecisionLabels?: string[];
+  synthesisVerification?: {
+    passed: boolean;
+    totalLocked: number;
+    preserved: number;
+    missing: string[];
+    verifiedAt: string;
+  };
   strategicSummary: {
     strategy: string;
     targetAudience: string;
@@ -67,12 +89,181 @@ export interface SynthesizedPlan {
     contentPillarToDna?: Array<{ pillar: string; dnaElements: string[]; hookApproach: string; ctaStyle: string }>;
     weeklyDnaApplication?: string;
   };
+  signalComposition?: import("../shared/signal-lineage").SignalComposition;
   memoryOverrides?: Array<{ field: string; originalValue: number; correctedValue: number; memoryLabel: string }>;
   explorationPlan?: {
     explorationPercent: number;
     totalExplorationCount: number;
     rationale: string;
     slots: ExplorationSlot[];
+  };
+  /**
+   * Parallel rejection-surface for commercial-reasoning
+   * modules. Populated by the orchestrator from the in-memory rejection
+   * registry after all engines run. Each entry tells plan synthesis
+   * (and any downstream auditor) that a commercial-reasoning module
+   * fell back to legacy output. The plan is still emitted (modules
+   * return null and engines continue), but `validationState` should be
+   * downgraded by readers on non-empty rejection list.
+   */
+  commercialReasoningRejected?: Array<{
+    module: string;
+    reason: "FINAL_REJECTED" | "JUDGE_ERROR" | "DESIGN_INVALID";
+    detail: string;
+    emittedAt: number;
+  }>;
+  /**
+   * Propagation flag set when AEL ran in degraded
+   * (`isPartial`) mode. All engine outputs that consumed the partial
+   * AEL inherit this provenance so plan synthesis and downstream
+   * decision layers can distinguish a fully-grounded plan from one
+   * built on degraded enrichment.
+   */
+  _provenance?: {
+    aelPartialPropagated?: boolean;
+    aelPartialReason?: string;
+    commercialReasoningDegraded?: boolean;
+  };
+  /**
+   * Synthesis-level validationState downgrade. When
+   * any commercial-reasoning rejection is recorded for the run OR AEL
+   * was partial (F3.10), validationState is set to "weak" so downstream
+   * gates see the degradation.
+   */
+  validationState?: "validated" | "provisional" | "weak" | "rejected";
+}
+
+function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any): SynthesizedPlan {
+  const reasoning = budgetOutput?.decision?.reasoning || "Budget governor halted execution";
+  const killReasons = budgetOutput?.killReasons || [];
+  return {
+    planSource: "degraded_ai_failed",
+    degraded: true,
+    strategicSummary: {
+      strategy: "HALTED — Budget governor blocked execution",
+      targetAudience: campaign?.targetAudience || "N/A",
+      growthObjective: campaign?.objective || "N/A",
+      rationale: `Execution halted: ${reasoning}. ${killReasons.length > 0 ? "Kill reasons: " + killReasons.join("; ") : ""}`,
+    },
+    monthlyObjective: {
+      objective: "Strategy under review — no execution permitted",
+      type: "hold",
+      targetMetric: "N/A",
+      targetValue: "0",
+    },
+    kpiStructure: {
+      primaryKPI: { name: "N/A", target: "0", cadence: "N/A" },
+      secondaryKPI: { name: "N/A", target: "0", cadence: "N/A" },
+      performanceExpectations: "Execution halted by budget governor. Review strategy before resuming.",
+    },
+    contentDistribution: {
+      reelsPerWeek: 0,
+      postsPerWeek: 0,
+      storiesPerDay: 0,
+      carouselsPerWeek: 0,
+      videosPerWeek: 0,
+      rationale: "No content production — strategy halted",
+      contentPillars: [],
+    },
+    creativeTesting: { tests: [] },
+    budgetAllocation: {
+      totalBudget: "0",
+      breakdown: [],
+    },
+    kpiMonitoring: {
+      metrics: [],
+      reportingCadence: "paused",
+    },
+    competitiveWatch: { targets: [] },
+    riskTriggers: {
+      triggers: [{ trigger: "Budget halt active", condition: "Automatic", action: "Review strategy fundamentals before resuming", severity: "critical" }],
+      escalationPath: ["Review offer strength", "Review funnel conversion", "Re-run budget governor"],
+    },
+  };
+}
+
+async function persistPlan(plan: SynthesizedPlan, config: OrchestratorConfig, rootBundle: any, explorationSlots: any[]): Promise<string> {
+  // Task #93 / Phase 4-E — cutover counter removed. Single-persist
+  // discipline lives in `synthesisDegradationBuilder` (OD-1).
+  const [dbPlan] = await db.insert(strategicPlans).values({
+    accountId: config.accountId,
+    blueprintId: "orchestrator-v2",
+    campaignId: config.campaignId,
+    jobId: config.jobId,
+    planJson: JSON.stringify(plan),
+    planSummary: plan.strategicSummary.strategy,
+    status: "DRAFT",
+    executionStatus: plan.degraded ? "HALTED" : "IDLE",
+    totalCalendarEntries: 0,
+    totalStudioItems: 0,
+    totalPublished: 0,
+    totalFailed: 0,
+    totalCanceled: 0,
+    rootBundleId: rootBundle?.id || null,
+    rootBundleVersion: rootBundle?.version || null,
+  }).returning();
+
+  await db.insert(requiredWork).values({
+    planId: dbPlan.id,
+    campaignId: config.campaignId,
+    accountId: config.accountId,
+    periodDays: 30,
+    reelsPerWeek: plan.contentDistribution.reelsPerWeek,
+    postsPerWeek: plan.contentDistribution.postsPerWeek,
+    storiesPerDay: plan.contentDistribution.storiesPerDay,
+    carouselsPerWeek: plan.contentDistribution.carouselsPerWeek,
+    videosPerWeek: plan.contentDistribution.videosPerWeek,
+    totalReels: 0,
+    totalPosts: 0,
+    totalStories: 0,
+    totalCarousels: 0,
+    totalVideos: 0,
+    totalContentPieces: 0,
+    explorationSlotsPerWeek: 0,
+    generatedCount: 0,
+    readyCount: 0,
+    scheduledCount: 0,
+    publishedCount: 0,
+    failedCount: 0,
+    rootBundleId: rootBundle?.id || null,
+    rootBundleVersion: rootBundle?.version || null,
+  });
+
+  console.log(`[PlanSynthesis] Persisted ${plan.degraded ? "HALT" : ""} plan ${dbPlan.id}`);
+  return dbPlan.id;
+}
+
+function applyBudgetHoldRestriction(plan: SynthesizedPlan): SynthesizedPlan {
+  const dist = plan.contentDistribution;
+  const restricted = {
+    ...dist,
+    reelsPerWeek: Math.max(1, Math.floor(dist.reelsPerWeek * 0.5)),
+    postsPerWeek: Math.max(1, Math.floor(dist.postsPerWeek * 0.5)),
+    storiesPerDay: Math.max(0, Math.floor(dist.storiesPerDay * 0.5)),
+    carouselsPerWeek: Math.max(0, Math.floor(dist.carouselsPerWeek * 0.5)),
+    videosPerWeek: Math.max(0, Math.floor(dist.videosPerWeek * 0.5)),
+    rationale: `[HOLD-RESTRICTED] ${dist.rationale || ""} — Content volume reduced by 50% due to budget hold decision`,
+  };
+  return { ...plan, contentDistribution: restricted };
+}
+
+function applyIntegrityDegradation(plan: SynthesizedPlan, mode: "restricted" | "degraded"): SynthesizedPlan {
+  const multiplier = mode === "degraded" ? 0.3 : 0.6;
+  const label = mode === "degraded" ? "DEGRADED-SAFE" : "INTEGRITY-RESTRICTED";
+  const dist = plan.contentDistribution;
+  const restricted = {
+    ...dist,
+    reelsPerWeek: Math.max(1, Math.floor(dist.reelsPerWeek * multiplier)),
+    postsPerWeek: Math.max(1, Math.floor(dist.postsPerWeek * multiplier)),
+    storiesPerDay: Math.max(0, Math.floor(dist.storiesPerDay * multiplier)),
+    carouselsPerWeek: Math.max(0, Math.floor(dist.carouselsPerWeek * multiplier)),
+    videosPerWeek: Math.max(0, Math.floor(dist.videosPerWeek * multiplier)),
+    rationale: `[${label}] ${dist.rationale || ""} — Content volume reduced due to integrity concerns`,
+  };
+  return {
+    ...plan,
+    contentDistribution: restricted,
+    degraded: mode === "degraded" ? true : plan.degraded,
   };
 }
 
@@ -83,37 +274,51 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
   if (mi?.status === "SUCCESS" && mi.output) {
     const out = mi.output.output || mi.output;
     const competitors = out.competitors?.length || 0;
-    const marketState = out.marketState || "unknown";
-    sections.push(`Market Intelligence: ${competitors} competitors analyzed, market state: ${marketState}`);
+    const marketStateLabel = out.marketState || "unknown";
+    sections.push(`Market Intelligence: ${competitors} competitors analyzed, market state: ${marketStateLabel}`);
+
+    const decisions = mi.output.crossSignalDecisions;
+    if (decisions?.decisions?.length > 0) {
+      const validated = decisions.decisions.filter((d: any) => d.confidenceLevel === "HIGH" || d.confidenceLevel === "MEDIUM");
+      const pains = validated.filter((d: any) => d.type === "VALIDATED_PAIN").map((d: any) => d.signalText);
+      const hooks = validated.filter((d: any) => d.type === "VALIDATED_HOOK").map((d: any) => d.signalText);
+      const objections = validated.filter((d: any) => d.type === "CONFIRMED_OBJECTION").map((d: any) => d.signalText);
+      if (pains.length > 0) sections.push(`  Validated Pain Signals: ${pains.slice(0, 5).join("; ")}`);
+      if (hooks.length > 0) sections.push(`  Validated Hook Signals: ${hooks.slice(0, 5).join("; ")}`);
+      if (objections.length > 0) sections.push(`  Confirmed Objections: ${objections.slice(0, 5).join("; ")}`);
+    }
   }
+
+  const nonMiSections: string[] = [];
+  nonMiSections.push(`[ENGINE_OUTPUTS — These are engine-concluded structural decisions. They are NOT cross-signal validated market decisions. Use them for structural plan assembly only, not as market truth signals.]`);
 
   const audience = results.get("audience");
   if (audience?.status === "SUCCESS" && audience.output) {
-    const pains = audience.output.painProfiles?.length || 0;
+    const pains = (audience.output.audiencePains || audience.output.painProfiles)?.length || 0;
     const segments = audience.output.audienceSegments?.length || 0;
-    sections.push(`Audience: ${pains} pain profiles, ${segments} segments identified`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Audience: ${pains} pain profiles, ${segments} segments identified`);
   }
 
   const positioning = results.get("positioning");
   if (positioning?.status === "SUCCESS" && positioning.output) {
     const territories = positioning.output.territories?.length || 0;
-    sections.push(`Positioning: ${territories} territories mapped`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Positioning: ${territories} territories mapped`);
   }
 
   const offer = results.get("offer");
   if (offer?.status === "SUCCESS" && offer.output) {
-    sections.push(`Offer Engine: structured offer constructed`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Offer Engine: structured offer constructed`);
   }
 
   const funnel = results.get("funnel");
   if (funnel?.status === "SUCCESS" && funnel.output) {
-    sections.push(`Funnel: trust path and conversion flow defined`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Funnel: trust path and conversion flow defined`);
   }
 
   const budget = results.get("budget_governor");
   if (budget?.status === "SUCCESS" && budget.output) {
     const decision = budget.output.decision || "APPROVED";
-    sections.push(`Budget Governor: ${decision}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Budget Governor: ${decision}`);
   }
 
   const channel = results.get("channel_selection");
@@ -122,7 +327,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const primary = out.primaryChannel?.channelName || out.primaryChannel?.name || "unknown";
     const secondary = out.secondaryChannel?.channelName || out.secondaryChannel?.name || "none";
     const rejected = out.rejectedChannels?.length || 0;
-    sections.push(`Channel Selection: primary "${primary}", secondary "${secondary}", ${rejected} rejected`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Channel Selection: primary "${primary}", secondary "${secondary}", ${rejected} rejected`);
   }
 
   const diff = results.get("differentiation");
@@ -132,7 +337,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const claims = out.claimStructures?.length || 0;
     const proofAssets = out.proofArchitecture?.length || 0;
     const authorityMode = out.authorityMode?.mode || out.authorityMode || "unknown";
-    sections.push(`Differentiation: ${pillars} pillars, ${claims} claim structures, ${proofAssets} proof assets, authority mode: ${authorityMode}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Differentiation: ${pillars} pillars, ${claims} claim structures, ${proofAssets} proof assets, authority mode: ${authorityMode}`);
   }
 
   const integrity = results.get("integrity");
@@ -141,7 +346,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const score = out.confidenceScore ?? "N/A";
     const warnings = out.structuralWarnings?.length || 0;
     const stable = out.stabilityResult?.stable ?? "unknown";
-    sections.push(`Integrity: confidence ${score}, ${warnings} structural warnings, stable: ${stable}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Integrity: confidence ${score}, ${warnings} structural warnings, stable: ${stable}`);
   }
 
   const awareness = results.get("awareness");
@@ -150,7 +355,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const primaryRoute = out.primaryRoute?.routeName || out.primaryRoute?.name || "unknown";
     const layers = out.layerResults?.length || 0;
     const confidence = out.confidenceScore ?? "N/A";
-    sections.push(`Awareness: primary route "${primaryRoute}", ${layers} layer results, confidence ${confidence}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Awareness: primary route "${primaryRoute}", ${layers} layer results, confidence ${confidence}`);
   }
 
   const persuasion = results.get("persuasion");
@@ -159,17 +364,17 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const primaryRoute = out.primaryRoute?.routeName || out.primaryRoute?.name || "unknown";
     const altRoute = out.alternativeRoute?.routeName || "none";
     const layers = out.layerResults?.length || 0;
-    sections.push(`Persuasion: primary route "${primaryRoute}", alternative "${altRoute}", ${layers} layer results`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Persuasion: primary route "${primaryRoute}", alternative "${altRoute}", ${layers} layer results`);
   }
 
   const statVal = results.get("statistical_validation");
   if (statVal?.status === "SUCCESS" && statVal.output) {
     const out = statVal.output.output || statVal.output;
-    const state = out.validationState || "unknown";
+    const validationStateLabel = out.validationState || "unknown";
     const claimConfidence = out.claimConfidenceScore ?? "N/A";
     const warnings = out.structuralWarnings?.length || 0;
     const claimValidations = out.claimValidations?.length || 0;
-    sections.push(`Statistical Validation: state ${state}, claim confidence ${claimConfidence}, ${claimValidations} claims validated, ${warnings} warnings`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Statistical Validation: state ${validationStateLabel}, claim confidence ${claimConfidence}, ${claimValidations} claims validated, ${warnings} warnings`);
   }
 
   const iteration = results.get("iteration");
@@ -179,7 +384,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const targets = out.optimizationTargets?.length || 0;
     const failedFlags = out.failedStrategyFlags?.length || 0;
     const planSteps = out.iterationPlan?.length || 0;
-    sections.push(`Iteration: ${hypotheses} test hypotheses, ${targets} optimization targets, ${planSteps} plan steps, ${failedFlags} failed strategy flags`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Iteration: ${hypotheses} test hypotheses, ${targets} optimization targets, ${planSteps} plan steps, ${failedFlags} failed strategy flags`);
   }
 
   const retention = results.get("retention");
@@ -190,10 +395,124 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
     const ltvPaths = out.ltvExpansionPaths?.length || 0;
     const upsells = out.upsellTriggers?.length || 0;
     const confidence = out.confidenceScore ?? "N/A";
-    sections.push(`Retention: ${loops} retention loops, ${churnRisks} churn risk flags, ${ltvPaths} LTV paths, ${upsells} upsell triggers, confidence ${confidence}`);
+    nonMiSections.push(`[ENGINE_OUTPUT] Retention: ${loops} retention loops, ${churnRisks} churn risk flags, ${ltvPaths} LTV paths, ${upsells} upsell triggers, confidence ${confidence}`);
   }
 
+  sections.push(...nonMiSections);
   return sections.join("\n");
+}
+
+export interface LockedLabel {
+  label: string;
+  /** Top-level plan field where this label is expected to appear (e.g. "positioning", "mechanism", "offer", "differentiation"). When set, verifySynthesisPreservation restricts its search to plan[scope]. */
+  scope?: string;
+}
+
+function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): LockedLabel[] {
+  const out: LockedLabel[] = [];
+
+  const positioning = results.get("positioning");
+  if (positioning?.status === "SUCCESS" && positioning.output) {
+    const primary = (positioning.output.territories || [])[0];
+    if (primary?.name) out.push({ label: primary.name, scope: "positioning" });
+  }
+
+  const mechanism = results.get("mechanism");
+  if (mechanism?.status === "SUCCESS") {
+    const m = mechanism.output?.output || mechanism.output;
+    const mechName = m?.primaryMechanism?.mechanismName || m?.mechanismName;
+    if (mechName) out.push({ label: mechName, scope: "mechanism" });
+  }
+
+  const offer = results.get("offer");
+  if (offer?.status === "SUCCESS") {
+    const o = offer.output?.output || offer.output;
+    if (o?.offerName) out.push({ label: o.offerName, scope: "offer" });
+  }
+
+  const diff = results.get("differentiation");
+  if (diff?.status === "SUCCESS") {
+    const d = diff.output?.output || diff.output;
+    if (d?.pillars?.length > 0) {
+      for (const p of d.pillars) {
+        const name = p.name || p.pillarName;
+        if (name) out.push({ label: name, scope: "differentiation" });
+      }
+    }
+  }
+
+  return out;
+}
+
+// Locked-decision preservation: collect every string leaf in the plan tree
+// into a normalized Set; preservation = exact set membership (no substring).
+export function collectPlanStringSet(
+  node: unknown,
+  out: Set<string>,
+  depth: number,
+): void {
+  if (node == null || depth > 12) return;
+  if (typeof node === "string") {
+    const norm = node.toLowerCase().trim();
+    if (norm.length > 0) out.add(norm);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const v of node) collectPlanStringSet(v, out, depth + 1);
+    return;
+  }
+  if (typeof node === "object") {
+    for (const v of Object.values(node as Record<string, unknown>)) {
+      collectPlanStringSet(v, out, depth + 1);
+    }
+  }
+}
+
+// field-addressed preservation. Each locked decision is checked
+// against the specific plan subtree it should appear in (scope). Generic
+// string[] still works (legacy global scan). Membership is exact-leaf
+// (no substring) so "Outcome-First" never matches "Our Outcome-First …".
+export function verifySynthesisPreservation(
+  plan: SynthesizedPlan,
+  lockedLabels: Array<string | LockedLabel>,
+): SynthesizedPlan["synthesisVerification"] {
+  if (lockedLabels.length === 0) {
+    return { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
+  }
+
+  const { lockedDecisionLabels: _labels, synthesisVerification: _verif, planSource: _src, degraded: _deg, ...contentOnly } = plan;
+  // Pre-compute scoped string sets on demand (cached per-scope).
+  const scopeSetCache = new Map<string, Set<string>>();
+  function setForScope(scope: string | undefined): Set<string> {
+    const key = scope ?? "__global__";
+    let s = scopeSetCache.get(key);
+    if (!s) {
+      s = new Set<string>();
+      const root = scope ? (contentOnly as Record<string, unknown>)[scope] : contentOnly;
+      collectPlanStringSet(root, s, 0);
+      scopeSetCache.set(key, s);
+    }
+    return s;
+  }
+
+  const missing: string[] = [];
+  let preserved = 0;
+  for (const item of lockedLabels) {
+    const { label, scope } = typeof item === "string" ? { label: item, scope: undefined } : item;
+    const normalized = label.toLowerCase().trim();
+    if (normalized.length < 3) continue;
+    const set = setForScope(scope);
+    if (set.has(normalized)) preserved++;
+    else missing.push(label);
+  }
+
+  return {
+    passed: missing.length === 0,
+    totalLocked: lockedLabels.length,
+    preserved,
+    missing,
+    verifiedAt: new Date().toISOString(),
+  };
 }
 
 function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): string {
@@ -218,8 +537,9 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): strin
   const mechanism = results.get("mechanism");
   if (mechanism?.status === "SUCCESS" && mechanism.output) {
     const out = mechanism.output.output || mechanism.output;
-    if (out.mechanismName) lines.push(`  Mechanism name: "${out.mechanismName}"`);
-    if (out.mechanismType) lines.push(`  Mechanism type: "${out.mechanismType}"`);
+    const mech = out.primaryMechanism || out;
+    if (mech.mechanismName) lines.push(`  Mechanism name: "${mech.mechanismName}"`);
+    if (mech.mechanismType) lines.push(`  Mechanism type: "${mech.mechanismType}"`);
   }
 
   const offer = results.get("offer");
@@ -245,7 +565,9 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): strin
   const persuasion = results.get("persuasion");
   if (persuasion?.status === "SUCCESS" && persuasion.output) {
     const out = persuasion.output.output || persuasion.output;
-    if (out.persuasionMode) lines.push(`  Persuasion mode: "${out.persuasionMode}"`);
+    const route = out.primaryRoute || out;
+    const persuasionMode = route.persuasionMode || out.persuasionMode;
+    if (persuasionMode) lines.push(`  Persuasion mode: "${persuasionMode}"`);
     const primaryRouteName = out.primaryRoute?.routeName || out.primaryRoute?.name;
     if (primaryRouteName) lines.push(`  Persuasion primary route: "${primaryRouteName}"`);
   }
@@ -278,10 +600,11 @@ async function generatePlanWithAI(
   campaign: any,
   goalMathContext?: { goal: any; funnel: any; feasibility: any; archetype: any } | null,
   lockedDecisions?: string,
-  accountId: string = "default",
+  accountId: string,
   memoryContextBlock?: string,
   campaignId: string = "",
   precomputedRhythm?: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; reasoning: string; performanceBasis: string } | null,
+  signalComposition?: SignalComposition | null,
 ): Promise<SynthesizedPlan> {
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
@@ -346,13 +669,27 @@ INSTRUCTION: Use these exact counts in contentDistribution. Do not derive rhythm
 `
     : "";
 
+  const compositionBlock = signalComposition && signalComposition.total > 0
+    ? `SIGNAL COMPOSITION (epistemic origin of strategy inputs):
+  Total signals: ${signalComposition.total}
+  Real (performance data): ${(signalComposition.realRatio * 100).toFixed(0)}%
+  Competitor-derived: ${(signalComposition.competitorRatio * 100).toFixed(0)}%
+  AI-inferred: ${(signalComposition.inferredRatio * 100).toFixed(0)}%
+  Fallback: ${(signalComposition.fallbackRatio * 100).toFixed(0)}%
+  Unknown (legacy/untagged): ${(signalComposition.unknownRatio * 100).toFixed(0)}%
+  Trusted (real + competitor): ${(signalComposition.trustedRatio * 100).toFixed(0)}%
+NOTE: "unknown" signals are NOT trusted — they represent legacy data with no verified origin. If strategy is heavily competitor-derived, inferred, or unknown, flag this in riskTriggers and recommend gathering own performance data early.
+
+`
+    : "";
+
   const prompt = `You are a marketing strategist assembling an execution plan from engine outputs. Your job is to ASSEMBLE, not to re-derive strategy.
 
 Business Type: ${businessType}
 Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
-${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}
+${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}${compositionBlock}
 Engine Analysis Results (use for volume, timing, and structural decisions):
 ${engineInsights}
 
@@ -424,7 +761,11 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
     if (!content) throw new Error("Empty AI response");
     return JSON.parse(content) as SynthesizedPlan;
   } catch (err: any) {
-    console.warn(`[PlanSynthesis] AI synthesis failed, using deterministic fallback: ${err.message}`);
+    console.error(
+      `[PlanSynthesis] SYNTHESIS_DEGRADED_AI_FAILED | AI synthesis failed: ${err.message}. ` +
+      `Falling back to degraded plan — plan will be EXPLICITLY MARKED as degraded. ` +
+      `No raw signals or hardcoded generic defaults will silently substitute for decisions.`,
+    );
     return buildDeterministicPlan(businessData, campaign, objective, campaignId, accountId);
   }
 }
@@ -438,18 +779,29 @@ async function buildDeterministicPlan(businessData: any, campaign: any, objectiv
     reelsPerWeek: 4, carouselsPerWeek: 2, storiesPerDay: 2, postsPerWeek: 1,
     reasoning: "default balanced distribution", performanceBasis: "default_balanced",
   };
+  let rhythmSource = "hardcoded_defaults_no_decisions";
   try {
     rhythm = await computeAdaptiveRhythm(campaignId, accountId);
+    rhythmSource = rhythm.performanceBasis;
   } catch (err: any) {
-    console.warn(`[PlanSynthesis] AdaptiveRhythm fallback failed, using default:`, err.message);
+    console.error(
+      `[PlanSynthesis] SYNTHESIS_DEGRADED_NO_RHYTHM | AdaptiveRhythm failed: ${err.message}. ` +
+      `Using hardcoded defaults — content distribution NOT driven by decisions or performance data.`,
+    );
   }
 
+  const degradedMarker = "[DEGRADED — AI synthesis failed. This plan uses adaptive rhythm where available but contains no cross-signal validated market decisions. Do not treat this as a decision-driven plan.]";
+
   return {
+    planSource: "degraded_ai_failed" as PlanSource,
+    degraded: true,
+    lockedDecisionLabels: [],
+    synthesisVerification: { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() },
     strategicSummary: {
-      strategy: `${objective.toLowerCase()}-focused growth strategy for ${businessType}`,
+      strategy: `${degradedMarker} ${objective.toLowerCase()}-focused growth strategy for ${businessType}`,
       targetAudience: `Primary audience in ${location} seeking ${businessType} solutions`,
       growthObjective: `Increase ${objective.toLowerCase()} through structured content and engagement`,
-      rationale: "Based on market analysis, audience insights, and competitive positioning",
+      rationale: `Degraded plan — AI synthesis unavailable. Rhythm source: ${rhythmSource}. No validated decisions applied.`,
     },
     monthlyObjective: {
       objective: `Drive ${objective.toLowerCase()} growth`,
@@ -628,6 +980,7 @@ function generateCalendarSlots(
           rootBundleId,
           rootBundleVersion,
           isExploration: false,
+
         });
       }
 
@@ -644,6 +997,7 @@ function generateCalendarSlots(
           rootBundleId,
           rootBundleVersion,
           isExploration: false,
+
         });
       }
     }
@@ -693,6 +1047,7 @@ function generateCalendarSlots(
           isExploration: true,
           explorationIntent: expSlot.intent,
           explorationHypothesis: expSlot.hypothesis,
+
         });
       }
     }
@@ -707,7 +1062,15 @@ export async function synthesizePlan(
   results: Map<EngineId, EngineStepResult>,
   memoryContextBlock?: string,
   memoryBlock?: import("../memory-system/types").MemoryBlock | null,
-): Promise<{ planId: string; plan: SynthesizedPlan }> {
+): Promise<{
+  planId: string;
+  plan: SynthesizedPlan;
+  // Task #70 / Phase 7 — third writer to the BudgetDecisionLedger
+  // (B1 silent collision fix). Populated only when plan-synthesis took
+  // the BUDGET_HALT branch — the orchestrator pushes this into the
+  // structured ledger view returned on OrchestratorRunResult.
+  synthesisHaltOverride?: import("./budget-decision-ledger").SynthesisHaltOverrideEntry;
+}> {
   const [bizData] = await db
     .select()
     .from(businessDataLayer)
@@ -738,7 +1101,7 @@ export async function synthesizePlan(
   let goalDecomp: any = null;
 
   try {
-    goalDecomp = await decomposeGoal(config.campaignId, config.accountId, rootBundle?.id || null, rootBundle?.version || null);
+    goalDecomp = await decomposeGoal(config.campaignId, config.accountId, rootBundle?.id || null, rootBundle?.version || null, config.jobId);
     const archetype = resolveArchetype(bizData?.businessType || "");
     goalMathContext = {
       goal: goalDecomp.goal,
@@ -759,8 +1122,132 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] Plan gate check failed (non-blocking):`, gateErr.message);
   }
 
+  const budgetGovResult = results.get("budget_governor");
+  // Task #70 / Phase 7 — read the authoritative budget action from the
+  // BudgetDecisionLedger entry the orchestrator stamped onto the budget
+  // output (NOT the mutable `decision.action` mirror). When no ledger
+  // entry was stamped (no system-control downgrade fired), the resolver
+  // falls back to the budget governor's emitted action and tags the
+  // source as `budget_governor_emit` so this read is fully attributable.
+  const { resolveBudgetActionFromLedger } = await import("./budget-decision-ledger");
+  const _resolved = resolveBudgetActionFromLedger(budgetGovResult?.output);
+  const budgetDecision = _resolved.action;
+  const budgetKillFlag = budgetGovResult?.output?.killFlag === true;
+  if (budgetGovResult) {
+    console.log(`[PlanSynthesis] BUDGET_ACTION_RESOLVED | action=${budgetDecision ?? "null"} | source=${_resolved.source}`);
+  }
+
+  if (budgetDecision === "halt" || budgetKillFlag) {
+    console.warn(`[PlanSynthesis] BUDGET_HALT_ENFORCED | decision=${budgetDecision} killFlag=${budgetKillFlag} — skipping full plan synthesis, producing halt plan`);
+    const haltPlan = buildHaltPlan(budgetGovResult?.output, bizData, campaign);
+    const planId = await persistPlan(haltPlan, config, rootBundle, []);
+    // Task #70 / Phase 7 — third ledger writer. Records that plan-synthesis
+    // forced a halt distinctly from any prior system-control downgrade, so
+    // the structured BudgetDecisionLedger view exposes a separate slot.
+    //
+    // Fail-loud contract (code-review round 3): the recorder is a pure
+    // builder. The ONLY failure mode is InvalidBudgetDowngradeError on a
+    // bad observedAction enum (D3 violation upstream) — that MUST surface
+    // loud, not silently drop the writer slot. We pre-coerce to a valid
+    // BudgetAction so the call cannot legitimately throw under normal
+    // operation; any thrown error is therefore a real contract violation
+    // and we re-throw after audit-logging.
+    const { recordSynthesisHaltOverride } = await import("./budget-decision-ledger");
+    const observed: import("./budget-decision-ledger").BudgetAction =
+      budgetDecision === "hold" || budgetDecision === "test" || budgetDecision === "scale"
+        ? budgetDecision
+        : "halt";
+    let synthesisHaltOverride: import("./budget-decision-ledger").SynthesisHaltOverrideEntry;
+    try {
+      synthesisHaltOverride = recordSynthesisHaltOverride({
+        jobId: config.jobId || "unknown",
+        observedAction: observed,
+        reason: budgetKillFlag ? "budgetKillFlag=true" : `budgetDecision=${budgetDecision}`,
+      });
+    } catch (shErr: any) {
+      console.error(`[PlanSynthesis] SYNTHESIS_HALT_LEDGER_FAILED | jobId=${config.jobId || "unknown"} | observed=${observed} | error=${shErr?.message ?? String(shErr)} | re-throwing to preserve writer attribution`);
+      throw shErr;
+    }
+    return { planId, plan: haltPlan, synthesisHaltOverride };
+  }
+
+  const integrityResult = results.get("integrity");
+  let safeToExecute = integrityResult?.output?.safeToExecute !== false;
+  const integrityScore = integrityResult?.output?.overallIntegrityScore ?? 1.0;
+  let integrityDegradation: "none" | "restricted" | "degraded" = "none";
+
+  const crossEngineFailures: string[] = [];
+  const offerResult = results.get("offer");
+  if (offerResult && (offerResult.status === "ERROR" || offerResult.status === "BLOCKED" || offerResult.status === "SIGNAL_BLOCKED")) {
+    crossEngineFailures.push(`Offer engine ${offerResult.status}`);
+  }
+  const celResults = ctx.celResults;
+  if (celResults && Array.isArray(celResults)) {
+    const celFailed = celResults.some((c: any) => c.passed === false || c.overallPassed === false);
+    if (celFailed) {
+      crossEngineFailures.push("CEL enforcement failed");
+    }
+  }
+  const funnelResult = results.get("funnel");
+  if (funnelResult && (funnelResult.status === "ERROR" || funnelResult.status === "BLOCKED" || funnelResult.status === "SIGNAL_BLOCKED")) {
+    crossEngineFailures.push(`Funnel engine ${funnelResult.status}`);
+  }
+  const positioningResult = results.get("positioning");
+  if (positioningResult && (positioningResult.status === "ERROR" || positioningResult.status === "BLOCKED" || positioningResult.status === "SIGNAL_BLOCKED")) {
+    crossEngineFailures.push(`Positioning engine ${positioningResult.status}`);
+  }
+
+  if (crossEngineFailures.length > 0 && safeToExecute) {
+    safeToExecute = false;
+    console.warn(`[PlanSynthesis] CROSS_ENGINE_INTEGRITY_OVERRIDE | safeToExecute forced to false | failures: ${crossEngineFailures.join(", ")}`);
+  }
+
+  if (!safeToExecute) {
+    integrityDegradation = "degraded";
+    const reason = crossEngineFailures.length > 0
+      ? `Cross-engine failures: ${crossEngineFailures.join(", ")}`
+      : `Integrity engine: safeToExecute=false`;
+    console.warn(`[PlanSynthesis] INTEGRITY_DEGRADED_MODE | ${reason} | score=${integrityScore.toFixed(2)} — plan will be generated in degraded-safe mode`);
+  } else if (integrityScore < 0.6) {
+    integrityDegradation = "restricted";
+    console.warn(`[PlanSynthesis] INTEGRITY_RESTRICTED_MODE | score=${integrityScore.toFixed(2)} — plan content volume will be reduced`);
+  }
+
   const engineInsights = extractEngineInsights(results);
   const lockedDecisions = extractLockedDecisions(results);
+  const lockedLabels = extractLockedDecisionLabels(results);
+
+  const miResult = results.get("market_intelligence");
+  const crossSignalDecisions: any[] = miResult?.output?.crossSignalDecisions?.decisions ?? [];
+  const filterResult = filterDecisionsForPlan(crossSignalDecisions);
+  const synthesisNotes: string[] = [];
+
+  let synthesisPath: DecisionEnforcementReport["synthesisPath"] = "DECISION_DRIVEN";
+  if (crossSignalDecisions.length === 0) {
+    synthesisPath = "DEGRADED_NO_DECISIONS";
+    synthesisNotes.push("No cross-signal decisions available from market intelligence — plan will rely on engine outputs only");
+    console.warn(`[PlanSynthesis] DEGRADED_NO_DECISIONS | No cross-signal decisions available. Plan will not be fully decision-driven.`);
+  } else if (filterResult.eligible.length === 0) {
+    synthesisPath = "DEGRADED_NO_DECISIONS";
+    synthesisNotes.push(`All ${crossSignalDecisions.length} decision(s) rejected by policy — ${filterResult.violations.map(v => v.reason).join("; ")}`);
+    console.warn(`[PlanSynthesis] DEGRADED_NO_DECISIONS | All decisions rejected by policy: ${filterResult.violations.map(v => v.reason).join("; ")}`);
+  } else {
+    synthesisNotes.push(`${filterResult.eligible.length} eligible decision(s) entering synthesis`);
+    if (filterResult.rejected.length > 0) {
+      synthesisNotes.push(`${filterResult.rejected.length} decision(s) rejected by policy`);
+    }
+    if (filterResult.blocked.length > 0) {
+      synthesisNotes.push(`${filterResult.blocked.length} decision(s) blocked (CONFLICTED or WEAK)`);
+    }
+  }
+
+  const enforcementReport = buildDecisionEnforcementReport(
+    crossSignalDecisions,
+    filterResult,
+    synthesisPath,
+    synthesisNotes,
+  );
+  console.log(serializeDecisionReportForLog(enforcementReport));
 
   let precomputedRhythm = null;
   try {
@@ -769,7 +1256,156 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] Precomputed rhythm failed (non-blocking):`, rhythmErr.message);
   }
 
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm);
+  const signalComp: SignalComposition | null = ctx.signalComposition || (results.get("statistical_validation")?.output?.originTypeDistribution) || null;
+  if (signalComp) {
+    console.log(`[PlanSynthesis] SIGNAL_COMPOSITION_INJECTED | ${formatCompositionLog(signalComp)}`);
+  }
+
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm, signalComp);
+
+  const alreadyDegraded = synthesized.degraded === true || synthesized.planSource === "degraded_ai_failed";
+
+  const verification = verifySynthesisPreservation(synthesized, lockedLabels);
+
+  if (signalComp) {
+    synthesized.signalComposition = signalComp;
+  }
+
+  if (alreadyDegraded) {
+    synthesized.planSource = synthesized.planSource ?? "degraded_ai_failed";
+    synthesized.degraded = true;
+    synthesized.lockedDecisionLabels = [];
+    synthesized.synthesisVerification = { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
+    if (!synthesized.signalComposition) {
+      synthesized.signalComposition = { total: 0, real: 0, competitor: 0, inferred: 0, fallback: 0, unknown: 0, dominantType: "fallback", realRatio: 0, competitorRatio: 0, inferredRatio: 0, fallbackRatio: 1, unknownRatio: 0, trustedRatio: 0 };
+    }
+    console.warn(
+      `[PlanSynthesis] PLAN_ALREADY_DEGRADED | planSource=${synthesized.planSource} — AI fallback was used, preserving degraded provenance.`,
+    );
+  } else {
+    const planSource: PlanSource = synthesisPath === "DECISION_DRIVEN" ? "decision_driven" : "degraded_no_decisions";
+    synthesized.planSource = planSource;
+    synthesized.degraded = planSource !== "decision_driven";
+
+    synthesized.synthesisVerification = verification;
+    synthesized.lockedDecisionLabels = lockedLabels.map(l => l.label);
+
+    if (!verification.passed) {
+      console.warn(
+        `[PlanSynthesis] SYNTHESIS_VERIFICATION_FAILED | locked=${verification.totalLocked} preserved=${verification.preserved} ` +
+        `missing=[${verification.missing.join(", ")}] — locked decisions were NOT fully preserved in AI output.`,
+      );
+      synthesized.degraded = true;
+      if (synthesized.planSource === "decision_driven") {
+        synthesized.planSource = "degraded_no_decisions";
+      }
+    } else if (verification.totalLocked > 0) {
+      console.log(
+        `[PlanSynthesis] SYNTHESIS_VERIFICATION_PASSED | locked=${verification.totalLocked} preserved=${verification.preserved} — all locked decisions preserved in output.`,
+      );
+    }
+  }
+
+  if (synthesisPath !== "DECISION_DRIVEN") {
+    console.warn(
+      `[PlanSynthesis] PLAN_INTEGRITY_WARNING | planId=pending path=${synthesisPath} ` +
+      `eligible=${enforcementReport.eligible} total=${enforcementReport.totalDecisions} — ` +
+      `this plan was NOT fully driven by validated decisions.`,
+    );
+  }
+
+  if (budgetDecision === "hold") {
+    const preDist = { ...synthesized.contentDistribution };
+    const holdPlan = applyBudgetHoldRestriction(synthesized);
+    Object.assign(synthesized, holdPlan);
+    console.log(`[PlanSynthesis] BUDGET_HOLD_ENFORCED | reels: ${preDist.reelsPerWeek}→${synthesized.contentDistribution.reelsPerWeek} posts: ${preDist.postsPerWeek}→${synthesized.contentDistribution.postsPerWeek}`);
+  }
+
+  if (integrityDegradation !== "none") {
+    const preDist = { ...synthesized.contentDistribution };
+    const degradedPlan = applyIntegrityDegradation(synthesized, integrityDegradation);
+    Object.assign(synthesized, degradedPlan);
+    console.log(`[PlanSynthesis] INTEGRITY_ENFORCEMENT_APPLIED | mode=${integrityDegradation} reels: ${preDist.reelsPerWeek}→${synthesized.contentDistribution.reelsPerWeek}`);
+  }
+
+  if (signalComp) {
+    const trustedRatio = signalComp.trustedRatio ?? 0;
+    if (trustedRatio < 0.3) {
+      synthesized.signalTrustWarning = {
+        level: "low",
+        trustedRatio,
+        dominantType: signalComp.dominantType,
+        advisory: "Less than 30% of strategy signals come from trusted sources (real performance data or verified competitor intelligence). Plan reliability is significantly reduced.",
+      };
+      synthesized.degraded = true;
+      if (synthesized.planSource === "decision_driven") {
+        synthesized.planSource = "degraded_no_decisions";
+      }
+      console.log(`[PlanSynthesis] LOW_TRUST_SIGNAL_ENFORCEMENT | trustedRatio=${(trustedRatio * 100).toFixed(0)}% — plan flagged as degraded, dominant signal type: ${signalComp.dominantType}`);
+    } else if (trustedRatio < 0.5) {
+      synthesized.signalTrustWarning = {
+        level: "moderate",
+        trustedRatio,
+        dominantType: signalComp.dominantType,
+        advisory: "Trusted signal coverage is below 50%. Plan decisions may be influenced by inferred or fallback assumptions.",
+      };
+      console.log(`[PlanSynthesis] MODERATE_TRUST_SIGNAL_WARNING | trustedRatio=${(trustedRatio * 100).toFixed(0)}% — advisory attached to plan`);
+    }
+  }
+
+  const iterationResult = results.get("iteration");
+  if (iterationResult?.status === "SUCCESS" && iterationResult.output) {
+    const iterOut = iterationResult.output.output || iterationResult.output;
+    const failedFlags: any[] = iterOut.failedStrategyFlags || [];
+    const optimizationTargets: any[] = iterOut.optimizationTargets || [];
+
+    if (failedFlags.length > 0) {
+      const failedStrategies = failedFlags.map((f: any) => f.strategy || f.name || f.flag || "unknown").join(", ");
+      const planChannels = (synthesized.channels || []).map((c: any) => typeof c === "string" ? c.toLowerCase() : (c.name || "").toLowerCase());
+      const conflicting = failedFlags.filter((f: any) => {
+        const name = (f.strategy || f.name || "").toLowerCase();
+        return planChannels.some((ch: string) => ch.includes(name) || name.includes(ch));
+      });
+
+      if (conflicting.length > 0) {
+        synthesized.iterationConflicts = {
+          count: conflicting.length,
+          conflicts: conflicting.map((f: any) => ({
+            strategy: f.strategy || f.name || "unknown",
+            reason: f.reason || f.description || "Previously failed",
+          })),
+          advisory: `Plan includes ${conflicting.length} strategy/channel(s) that were flagged as failed in iteration analysis: ${failedStrategies}`,
+        };
+        console.log(`[PlanSynthesis] ITERATION_CONFLICT_DETECTED | ${conflicting.length} plan elements conflict with iteration failure flags: ${failedStrategies}`);
+      }
+    }
+
+    if (optimizationTargets.length > 0) {
+      synthesized.iterationOptimizationHints = optimizationTargets.slice(0, 5).map((t: any) => ({
+        target: t.target || t.metric || t.name || "unknown",
+        direction: t.direction || t.recommendation || "improve",
+        priority: t.priority || "medium",
+      }));
+      console.log(`[PlanSynthesis] ITERATION_OPTIMIZATION_HINTS | ${optimizationTargets.length} optimization targets attached to plan`);
+    }
+  }
+
+  const retentionResult = results.get("retention");
+  if (retentionResult?.status === "SUCCESS" && retentionResult.output) {
+    const retOut = retentionResult.output.output || retentionResult.output;
+    const churnRisks: any[] = retOut.churnRiskFlags || [];
+    if (churnRisks.length > 0) {
+      synthesized.retentionInsights = {
+        churnRiskCount: churnRisks.length,
+        topRisks: churnRisks.slice(0, 3).map((r: any) => ({
+          risk: r.risk || r.description || r.flag || "unknown",
+          severity: r.severity || r.level || "medium",
+        })),
+        advisory: `Retention analysis identified ${churnRisks.length} churn risk(s) that should be addressed in post-conversion strategy.`,
+      };
+      console.log(`[PlanSynthesis] RETENTION_INSIGHTS_INJECTED | ${churnRisks.length} churn risks attached to plan`);
+    }
+  }
 
   if (memoryBlock && (memoryBlock.reinforceSlots.length > 0 || memoryBlock.avoidSlots.length > 0)) {
     try {
@@ -781,7 +1417,11 @@ export async function synthesizePlan(
         console.log(`[PlanSynthesis] MEMORY_CONSTRAINTS_APPLIED | overrides=${overrides.length} | fields=${overrides.map(o => o.field).join(",")}`);
       }
     } catch (memErr: any) {
-      console.warn(`[PlanSynthesis] Memory constraint enforcement failed (non-blocking):`, memErr.message);
+      console.error(
+        `[PlanSynthesis] ENFORCEMENT_FAILURE_MEMORY_CONSTRAINTS | Memory enforcement FAILED: ${memErr.message}. ` +
+        `The synthesized plan is being used WITHOUT memory constraint correction. ` +
+        `This is an enforcement failure — plan may violate high-confidence memory constraints.`,
+      );
     }
   }
 
@@ -908,6 +1548,7 @@ export async function synthesizePlan(
     accountId: config.accountId,
     blueprintId: "orchestrator-v2",
     campaignId: config.campaignId,
+    jobId: config.jobId,
     planJson: JSON.stringify(synthesized),
     planSummary: synthesized.strategicSummary.strategy,
     status: "DRAFT",
@@ -922,35 +1563,14 @@ export async function synthesizePlan(
   }).returning();
 
   const explorationSlotsPerWeek = synthesized.explorationPlan?.totalExplorationCount ?? 0;
-  const weeks = Math.ceil(periodDays / 7);
-  const totalExplorationPieces = explorationSlotsPerWeek * weeks;
 
-  await db.insert(requiredWork).values({
-    planId: plan.id,
-    campaignId: config.campaignId,
-    accountId: config.accountId,
-    periodDays,
-    reelsPerWeek: volume.reelsPerWeek,
-    postsPerWeek: volume.postsPerWeek,
-    storiesPerDay: volume.storiesPerDay,
-    carouselsPerWeek: volume.carouselsPerWeek,
-    videosPerWeek: volume.videosPerWeek,
-    totalReels: volume.totalReels,
-    totalPosts: volume.totalPosts,
-    totalStories: volume.totalStories,
-    totalCarousels: volume.totalCarousels,
-    totalVideos: volume.totalVideos,
-    totalContentPieces: volume.totalContentPieces + totalExplorationPieces,
-    explorationSlotsPerWeek,
-    generatedCount: 0,
-    readyCount: 0,
-    scheduledCount: 0,
-    publishedCount: 0,
-    failedCount: 0,
-    rootBundleId: rootBundle?.id || null,
-    rootBundleVersion: rootBundle?.version || null,
-  });
-
+  // Generate calendar slots FIRST so requiredWork.total* can be derived from the
+  // exact slots that will be persisted (single source of truth). This eliminates
+  // formula-drift between deriveContentVolume() (weekly × ceil(days/7)) and
+  // generateCalendarSlots() (per-day, per-weekday gating with Sunday skip and
+  // partial last-week edges) AND ensures exploration slots — which inject
+  // per-type content — are counted in the same per-type buckets used by the
+  // calendar deviation check at approval time.
   const calendarSlots = generateCalendarSlots(
     synthesized,
     periodDays,
@@ -962,11 +1582,58 @@ export async function synthesizePlan(
     explorationSlotList,
   );
 
+  const slotCounts = { REEL: 0, POST: 0, STORY: 0, CAROUSEL: 0, VIDEO: 0 } as Record<string, number>;
+  for (const s of calendarSlots) {
+    const t = (s.contentType || "").toUpperCase();
+    if (t in slotCounts) slotCounts[t]++;
+  }
+
+  await db.insert(requiredWork).values({
+    planId: plan.id,
+    campaignId: config.campaignId,
+    accountId: config.accountId,
+    periodDays,
+    reelsPerWeek: volume.reelsPerWeek,
+    postsPerWeek: volume.postsPerWeek,
+    storiesPerDay: volume.storiesPerDay,
+    carouselsPerWeek: volume.carouselsPerWeek,
+    videosPerWeek: volume.videosPerWeek,
+    totalReels: slotCounts.REEL,
+    totalPosts: slotCounts.POST,
+    totalStories: slotCounts.STORY,
+    totalCarousels: slotCounts.CAROUSEL,
+    totalVideos: slotCounts.VIDEO,
+    totalContentPieces: calendarSlots.length,
+    explorationSlotsPerWeek,
+    generatedCount: 0,
+    readyCount: 0,
+    scheduledCount: 0,
+    publishedCount: 0,
+    failedCount: 0,
+    rootBundleId: rootBundle?.id || null,
+    rootBundleVersion: rootBundle?.version || null,
+  });
+
   if (calendarSlots.length > 0) {
-    await db.insert(calendarEntries).values(calendarSlots);
-    await db.update(strategicPlans)
-      .set({ totalCalendarEntries: calendarSlots.length })
-      .where(eq(strategicPlans.id, plan.id));
+    const inserted = await db.insert(calendarEntries).values(calendarSlots).returning({ id: calendarEntries.id, contentType: calendarEntries.contentType });
+    // CAS via casUpdateStrategicPlan helper.
+    await casUpdateStrategicPlan(plan.id, { totalCalendarEntries: calendarSlots.length });
+
+    const byType = new Map<string, string[]>();
+    for (const entry of inserted) {
+      const t = entry.contentType.toUpperCase();
+      if (!byType.has(t)) byType.set(t, []);
+      byType.get(t)!.push(entry.id);
+    }
+
+    for (const [contentType, entryIds] of byType) {
+      const attrResult = await createAttributionEntries(entryIds, contentType, config.campaignId, config.accountId);
+      if (attrResult.primaryDecisionId) {
+        await db.update(calendarEntries)
+          .set({ sourceDecisionId: attrResult.primaryDecisionId })
+          .where(inArray(calendarEntries.id, entryIds));
+      }
+    }
   }
 
   console.log(`[PlanSynthesis] Created plan ${plan.id} with ${calendarSlots.length} calendar entries, ${volume.totalContentPieces} required content pieces, root v${rootBundle?.version || "none"}`);
@@ -980,8 +1647,15 @@ export async function synthesizePlan(
   }
 
   try {
-    await composeTasks(plan.id, config.campaignId, config.accountId, synthesized, periodDays, rootBundle?.id || null);
-    console.log(`[PlanSynthesis] Execution tasks generated for plan ${plan.id}`);
+    const taskContext: import("../task-composer").TaskComposerContext = {
+      budgetDecision: budgetDecision || undefined,
+      budgetKillFlag: budgetKillFlag,
+      integrityScore: integrityScore,
+      safeToExecute: safeToExecute,
+      signalTrustedRatio: signalComp?.trustedRatio ?? undefined,
+    };
+    await composeTasks(plan.id, config.campaignId, config.accountId, synthesized, periodDays, rootBundle?.id || null, taskContext);
+    console.log(`[PlanSynthesis] Execution tasks generated for plan ${plan.id} | budgetDecision=${budgetDecision} integrity=${integrityDegradation}`);
   } catch (taskErr: any) {
     console.warn(`[PlanSynthesis] Task composition failed (non-blocking):`, taskErr.message);
   }
@@ -996,7 +1670,8 @@ export async function synthesizePlan(
         goalMathContext.funnel,
         goalMathContext.feasibility,
         bizData,
-        rootBundle?.id || null
+        rootBundle?.id || null,
+        config.jobId
       );
       console.log(`[PlanSynthesis] Growth simulation generated for plan ${plan.id}`);
     } catch (simErr: any) {

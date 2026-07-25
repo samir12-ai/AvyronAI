@@ -1,0 +1,183 @@
+:::writing{variant=“email” id=“66741” subject=“Critical Fix Required — Offer Engine Root Binding & Consistency Across Orchestrator and Routes”}
+Hi,
+
+The investigation is complete, and we now have a clear, code-level root cause for the inconsistencies we’ve been seeing between Positioning, Offer, and Execution.
+
+This is not a theoretical or architectural issue — it is a concrete implementation gap that must be fixed cleanly.
+
+⸻
+
+Core Issue
+
+The Offer Engine is being executed in two different modes depending on the caller, due to inconsistent handling of strategyRoot.
+
+1. Orchestrator Path
+	•	Calls runOfferEngine(...) with:
+
+strategyRoot = undefined
+
+
+	•	This forces the engine into:
+	•	free_generation mode
+	•	strict lexical validators (blocking)
+	•	Result:
+	•	POSITIONING_MISMATCH
+	•	low confidence
+	•	unstable outputs
+
+⸻
+
+2. Manual Route Path (/api/offer/analyze)
+	•	Calls runOfferEngine(...) with:
+
+strategyRoot = activeRoot
+
+
+	•	This enables:
+	•	deterministic skeleton-based generation
+	•	validators downgrade to advisory
+	•	Result:
+	•	strong, stable output
+
+⸻
+
+Resulting System Behavior
+
+This mismatch explains everything we observed:
+	•	Strong upstream layers (Positioning / Mechanism)
+	•	Awareness constraints correctly detected
+	•	Offer:
+	•	fails in orchestrator
+	•	succeeds in manual route
+	•	“Invalid root” warnings while still producing full offers
+
+⸻
+
+Required Fixes
+
+1. Orchestrator MUST pass strategyRoot
+
+File:
+server/orchestrator/index.ts
+
+Action:
+	•	Load the active strategy root
+	•	Pass it into:
+
+runOfferEngine(..., strategyRoot)
+
+
+
+This is mandatory.
+
+No fallback, no optional behavior.
+
+⸻
+
+2. Persist strategyRootId in offerSnapshots
+
+File:
+server/orchestrator/index.ts
+
+Action:
+	•	When inserting into offerSnapshots, include:
+
+strategyRootId: strategyRoot.id
+
+
+
+This ensures:
+	•	correct invalidation
+	•	proper linkage
+	•	consistency with other layers
+
+⸻
+
+3. Fix Manual Route Behavior (Critical Consistency Issue)
+
+File:
+server/offer-engine/routes.ts
+
+Current Problem:
+	•	validateRootBinding and validatePostGeneration:
+	•	log warnings
+	•	but still allow:
+
+status: "COMPLETE"
+bindingValid: false
+
+
+
+Required Change:
+
+If root binding or post-generation validation fails:
+	•	DO NOT return COMPLETE
+	•	Instead return:
+	•	PARTIAL
+	•	or INVALID_ROOT_BINDING
+
+Important:
+	•	Do not silently allow invalid offers to appear as valid
+	•	Do not fully block analysis (manual debugging still useful)
+
+⸻
+
+4. Unify Offer Engine Contract Across All Entry Points
+
+After fixes:
+	•	Orchestrator path
+	•	Manual route
+	•	Any future entry point
+
+Must all:
+	•	pass strategyRoot
+	•	produce consistent generation mode
+	•	follow the same validation semantics
+
+⸻
+
+Expected Outcome
+
+After applying these fixes:
+	•	Offer Engine behavior becomes deterministic
+	•	No divergence between orchestrator and manual runs
+	•	No false POSITIONING_MISMATCH due to missing root
+	•	No “valid-looking” offers with invalid bindings
+	•	Downstream layers (Plan / Approval) receive consistent input
+
+⸻
+
+Validation Required
+
+After implementation, confirm:
+	1.	Same input snapshots → same Offer output (regardless of entry path)
+	2.	No POSITIONING_MISMATCH caused by missing root
+	3.	Manual route:
+	•	invalid root → not marked as COMPLETE
+	4.	offerSnapshots always linked to strategyRootId
+
+⸻
+
+Important Notes
+	•	Do not introduce new layers or redesign the system
+	•	Do not patch symptoms
+	•	Do not change validation thresholds
+
+This is a contract consistency fix, not a feature change.
+
+⸻
+
+Deliverables
+
+Please return:
+	1.	Files changed
+	2.	Exact fixes applied
+	3.	Before vs after behavior (brief)
+	4.	Confirmation of validation results
+
+⸻
+
+Proceed with implementation.
+
+Thanks.
+:::

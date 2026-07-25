@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic",
+  "pathShape": "blocked_by_integrity",
+  "capturedAt": "2026-05-17T00:00:00.000Z",
+  "input": { "campaignId": "syn-camp-05", "accountId": "syn-acct-05", "forceRefresh": false },
+  "contextResolved": {
+    "sscPresent": true,
+    "contextKeys": ["mi"],
+    "inputHashes": { "mi": "h-mi-05" }
+  },
+  "engineOutputs": [
+    { "order": 0, "engineId": "mi", "engineName": "MI", "tier": "T0", "status": "COMPLETED", "durationMs": 200, "output": {} }
+  ],
+  "synthesisInput": { "engineCount": 1, "controlVerdictPresent": true, "ledgerEntryCount": 0, "fingerprint": "fp-05" },
+  "planPersist": { "planId": "plan-05", "source": "fallback", "degraded": true },
+  "systemControlVerdict": {
+    "integrityVerdict": "FAIL",
+    "executionMode": "BLOCKED",
+    "blockReasons": ["mi_gate_rejection", "low_evidence_count"]
+  },
+  "budgetLedger": [],
+  "inFlightEvents": [],
+  "llmCalls": [],
+  "finalResult": {
+    "jobId": "syn-job-05",
+    "status": "BLOCKED_BY_INTEGRITY",
+    "completedEngines": ["mi"],
+    "blockReason": "integrity_fail",
+    "durationMs": 250,
+    "controlVerdict": {
+      "integrityVerdict": "FAIL",
+      "executionMode": "BLOCKED",
+      "blockReasons": ["mi_gate_rejection", "low_evidence_count"]
+    },
+    "ledgerEntryCount": 0
+  }
+}

@@ -1,0 +1,134 @@
+Team,
+
+Excellent progress so far.
+
+Leakage / tenant isolation is now structurally sealed and runtime-truth hardening has advanced significantly.
+
+At this point, I do NOT want constant stop-and-go updates after every small patch.
+
+I want you to continue through all remaining Runtime Truth / Intelligence Integrity work in sequence, then deliver one consolidated completion report at the end.
+
+## Current status already sealed
+
+* Cross-account leakage defense
+* Cross-campaign leakage defense
+* Frontend cache isolation
+* AsyncStorage namespacing
+* Ownership enforcement
+* WRONG_ACCOUNT / WRONG_CAMPAIGN trust gates
+* Snapshot lineage foundations
+* Confidence-default integrity fixes
+* Confidence degradation pathways
+* Runtime-truth downgrade logic
+* CEL/AEL cache hardening
+* Live regression verification
+
+The remaining work is now primarily:
+
+* truth lineage maturity
+* confidence integrity completion
+* benchmark/manual/scraped separation
+* runtime provenance completion
+* contract tightening
+* repair-before-block maturity
+* intelligence honesty
+
+## Continue all remaining phases
+
+Priority order:
+
+1. Complete inferred-vs-direct lineage sealing
+
+* every signal keeps permanent origin tracking
+* no inferred signal silently upgrades into direct truth
+* downstream engines must explicitly opt into inferred/benchmark usage
+
+2. Complete benchmark/manual/scraped/live separation
+
+* backend and frontend must distinguish:
+
+  * benchmark
+  * inferred
+  * manual
+  * scraped
+  * Meta live
+* no shared ambiguous truth states
+
+3. Complete confidence integrity
+
+* sparse-data caps
+* benchmark confidence ceilings
+* minimum evidence thresholds
+* confidence-source weighting
+* prevent fake moderate confidence from thin evidence
+
+4. Complete sourceJobId/runtime provenance sealing
+
+* eliminate remaining latest-based reads
+* remove legacy lineage ambiguity
+* ensure every runtime truth read has:
+
+  * sourceJobId
+  * sourceAccountId
+  * sourceCampaignId
+
+5. Continue contract tightening
+
+* remove loose schemas
+* reduce passthrough contracts
+* explicit CONTRACT_INCOMPLETE behavior
+* remove semantic weakening paths
+
+6. Finish repair-before-block maturity
+
+* mixed repairable/non-repairable handling
+* actionable user next steps
+* smarter operational repair flows
+* no opaque dead-end BLOCK states
+
+7. Production reliability review
+
+* concurrent runs
+* queue pressure
+* long-run memory behavior
+* cache pressure
+* scraping saturation
+* runtime accumulation risks
+
+8. Strategic intelligence review
+   Evaluate:
+
+* realism
+* operator usefulness
+* commercial sharpness
+* generic vs strategic reasoning
+* execution practicality
+* confidence calibration
+* persuasion sophistication
+
+## Important execution rules
+
+* Do NOT rebuild existing systems.
+* Do NOT introduce parallel architectures.
+* Do NOT create fake reassurance layers.
+* Do NOT silently weaken truthfulness.
+* Do NOT stop after every small patch.
+
+Continue phase-by-phase internally:
+patch → verify → regression → seal
+
+Then deliver ONE final consolidated report covering:
+
+* everything completed
+* every remaining risk
+* all regression results
+* all runtime-truth improvements
+* final production readiness assessment
+
+Requested final deliverable:
+`.local/plans/runtime-truth-final-consolidated-report.md`
+
+I want one serious closure report at the end, not fragmented incremental updates.
+
+Best,
+[Your Name]

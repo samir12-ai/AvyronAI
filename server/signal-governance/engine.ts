@@ -46,7 +46,7 @@ export function purifyEvidence(rawEvidence: string[]): string[] {
   }
 
   if (discarded > 0 && purified.length === 0) {
-    purified.push(`[${discarded} raw source(s) purified — structured signal only]`);
+    purified.push(`[${discarded} source input(s) purified — structured signal only]`);
   }
 
   return purified;
@@ -142,15 +142,27 @@ export function initializeSignalGovernance(
     structuredSignals.psychological_drivers, "psychological_driver", sourceEngine, traceToken
   );
 
-  const objectionSignals: GovernedSignal[] = objectionMap
+  // T3.A — Runtime Truth Track: distinguish "explicit confidence supplied"
+  // from "no confidence value at all." Pre-T3.A `o.confidence || 0.5` silently
+  // promoted unscored objections past the SIGNAL_CONFIDENCE_FLOOR (which is
+  // 0.50). They now require an explicit numeric confidence at or above the
+  // floor; absent confidences are dropped with a count surfaced in the
+  // governance log so downstream confidence-integrity verdicts can detect
+  // default-floor objection contamination.
+  const objectionsWithExplicitConf = objectionMap.filter(o => typeof o.confidence === "number" && Number.isFinite(o.confidence));
+  const objectionsAbsentConf = objectionMap.length - objectionsWithExplicitConf.length;
+  if (objectionsAbsentConf > 0) {
+    console.warn(`[SGL] DEFAULT_FLOOR_OBJECTIONS_DROPPED | count=${objectionsAbsentConf} | reason=no_explicit_confidence (pre-T3.A defaulted to 0.5)`);
+  }
+  const objectionSignals: GovernedSignal[] = objectionsWithExplicitConf
     .filter(o => typeof o.label === "string" && o.label.trim().length > 0)
-    .filter(o => (o.confidence || 0.5) >= SIGNAL_CONFIDENCE_FLOOR)
+    .filter(o => (o.confidence as number) >= SIGNAL_CONFIDENCE_FLOOR)
     .filter(o => !isRawComment(o.label))
     .map((obj, idx) => ({
       signalId: `SGL_OBJECTION_${String(idx + 1).padStart(3, "0")}`,
       category: "objection" as const,
       text: sanitizeSignalText(obj.label),
-      confidence: obj.confidence || 0.5,
+      confidence: obj.confidence as number,
       evidence: purifyEvidence(obj.evidence || []),
       sourceEngine,
       sourceLayer: "surface",
@@ -267,6 +279,46 @@ export function resolveSignalsForEngine(
   const coverage = buildEngineCoverageReport(cleanSignals, requiredCategories);
 
   if (!coverage.coverageSufficient) {
+    // P203 — SYNTHETIC_AUDIT_MODE escape hatch. ONLY honored when
+    // NODE_ENV !== "production" so production traffic can never quietly
+    // bypass coverage gating. When honored, the gate downgrades from
+    // BLOCK to ADVISORY: we still log the gap and stamp the consumption
+    // entry so System Control can see the verdict was synthetic-mode
+    // forgiven, but downstream engines proceed with whatever signals
+    // are available. B3 (safe degradation over fake success) — the
+    // verdict is not silently rewritten to PASS; the audit machinery
+    // exposes this via `synthetic_audit_mode: true` on the final
+    // controlVerdict so any reader knows the run cannot stand in for
+    // production-quality decisions.
+    const syntheticMode =
+      process.env.SYNTHETIC_AUDIT_MODE === "1" && process.env.NODE_ENV !== "production";
+
+    if (syntheticMode) {
+      console.warn(
+        `[SGL] COVERAGE_ADVISORY | engine=${engineId} | mode=SYNTHETIC_AUDIT_MODE | ` +
+        `signals=${cleanSignals.length} | missing=[${coverage.missingCategories.join(",")}] | ` +
+        `required=[${requiredCategories.join(",")}] | gate=ADVISORY (would BLOCK in production)`
+      );
+      const rankedSignals = [...cleanSignals].sort((a, b) => b.confidence - a.confidence);
+      for (const signal of rankedSignals) {
+        if (!signal.consumedBy.includes(engineId)) signal.consumedBy.push(engineId);
+      }
+      state.consumptionLog.push({
+        engineId,
+        signalsConsumed: rankedSignals.map(s => s.signalId),
+        coverageReport: coverage,
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        signals: rankedSignals,
+        coverage,
+        traceToken: state.traceToken,
+        engineId,
+        blocked: false,
+        insufficientCategories: coverage.missingCategories,
+      };
+    }
+
     console.error(
       `[SGL] COVERAGE_BLOCKED | engine=${engineId} | ` +
       `signals=${cleanSignals.length} | missing=[${coverage.missingCategories.join(",")}] | ` +

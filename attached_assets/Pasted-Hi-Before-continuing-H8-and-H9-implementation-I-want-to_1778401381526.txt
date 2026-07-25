@@ -1,0 +1,446 @@
+Hi,
+
+Before continuing H8 and H9 implementation, I want to clarify the direction very precisely.
+
+The goal is NOT to build a brand-new enforcement system.
+
+The goal is to refine, strengthen, and unify the logic that already exists across the system.
+
+We already have:
+
+* contract enforcement
+* snapshot trust
+* labels
+* signal mapping
+* retries
+* recovery logic
+* confidence inheritance
+* semantic hardening
+* contradiction detection
+* orchestrator enforcement
+* system-control enforcement
+
+Do not rebuild these from scratch.
+
+Instead:
+
+> extend the existing architecture so the entire system follows one unified weighted reliability logic.
+
+---
+
+# Most Important Rule
+
+This must apply SYSTEM-WIDE.
+
+Not only inside the pipeline.
+
+Not only inside orchestrator.
+
+Not only inside contracts.
+
+Anywhere in the entire system that uses:
+
+* snapshots
+* labels
+* signals
+* fields
+* verdicts
+* confidence
+* retries
+* trust states
+* engine outputs
+* downstream reasoning
+* recovery
+* plans
+* build logic
+* dashboards
+* agent streams
+* user tracking
+* iteration logic
+* campaign learning
+* execution planning
+
+must follow the SAME reliability and weighting doctrine.
+
+No separate mini-logics.
+
+No isolated enforcement styles.
+
+No “strict in one place / permissive in another”.
+
+Everything should operate under the same weighted trust model.
+
+---
+
+# Core Goal
+
+The system should behave like a senior operator.
+
+Not like a fragile validator.
+
+Meaning:
+
+* critical missing truth → BLOCK
+* important weak evidence → confidence downgrade
+* optional missing detail → continue safely
+* stale or historical evidence → historical only
+* conflicting evidence → reconciliation
+* weak confidence labels → lower trust
+* strong labels → stronger trust but NOT automatic pass
+
+The system should remain commercially intelligent, not mechanically strict.
+
+---
+
+# Existing System First (Do Not Rebuild)
+
+Before implementing anything new:
+
+Please audit all existing systems related to:
+
+* contract enforcement
+* snapshot trust
+* label confidence
+* signal mapping
+* confidence inheritance
+* retry logic
+* contradiction detection
+* recovery intelligence
+* engine retries
+* confidence weighting
+* commercial reasoning modules
+* orchestrator gating
+* system-control gating
+* frontend truthfulness badges
+* agent pipeline
+* user tracking pipeline
+
+We already built many pieces of this.
+
+Do NOT duplicate them.
+
+Instead:
+
+* identify what already exists
+* identify what partially exists
+* identify what is missing
+* identify what should be extended
+* identify what should be unified
+
+The goal is:
+
+> one reliability doctrine across the entire ecosystem.
+
+---
+
+# Weighted Field Enforcement
+
+Every engine output field must have:
+
+```ts
+{
+  fieldId: string,
+  importance:
+    | "critical"
+    | "important"
+    | "supporting"
+    | "optional",
+
+  weight: number,
+
+  missingBehavior:
+    | "RETRY_THEN_BLOCK"
+    | "BLOCK"
+    | "CONFIDENCE_DOWNGRADE"
+    | "WARN_ONLY"
+}
+```
+
+Not all fields should be treated equally.
+
+---
+
+# Weighted Signal Enforcement
+
+Every mapped signal must also carry weighting.
+
+```ts
+{
+  signalId: string,
+  sourceEngine: string,
+  sourceFields: string[],
+
+  importance:
+    | "critical"
+    | "important"
+    | "supporting"
+    | "optional",
+
+  weight: number,
+
+  signalConfidence?: number,
+  labelConfidence?: number,
+
+  missingBehavior:
+    | "BLOCK"
+    | "CONFIDENCE_DOWNGRADE"
+    | "WARN_ONLY"
+}
+```
+
+The system should understand:
+
+* which signals matter most
+* which fields support which signals
+* which evidence is weak
+* which evidence is stale
+* which evidence is direct vs inferred
+
+---
+
+# Labels Must Be Part Of The Logic
+
+We already have labels attached to many outputs/signals.
+
+Please audit all existing labels.
+
+For every label:
+
+* what engine emits it
+* what signal it feeds
+* whether it already has confidence
+* whether it already has evidence count
+* whether it already has lineage
+* whether downstream systems consume it
+* whether it affects verdicts or planning
+
+Then:
+
+USE the existing label confidence.
+
+Do not ignore it.
+
+Examples:
+
+* high-confidence label → stronger signal trust
+* low-confidence label → signal downgrade
+* stale label → historical only
+* contradictory labels → reconciliation
+* missing label confidence → partial trust
+
+Do not flatten all labels equally.
+
+---
+
+# Retry Logic (Very Important)
+
+We already have retry and repair systems.
+
+Extend them intelligently.
+
+If a CRITICAL field is missing or invalid:
+
+1. detect exact missing field
+2. retry ONLY the affected engine
+3. re-retrieve / regenerate the missing field
+4. recompute the affected signals
+5. retry downstream reasoning if needed
+6. if still invalid → CONTRACT_INCOMPLETE + BLOCK
+
+This is important:
+
+> do NOT rerun the whole pipeline unnecessarily.
+
+Retry only the affected dependency chain.
+
+---
+
+# Retry Weighting
+
+Retry behavior should also respect weighting.
+
+Examples:
+
+### Critical field
+
+* aggressive retry
+* retry allowed
+* retry downstream dependency chain
+* block if unresolved
+
+### Important field
+
+* maybe one retry
+* otherwise downgrade confidence
+
+### Optional field
+
+* no retry needed
+
+---
+
+# Prevent Distortion
+
+Please add protection against these common distortions:
+
+* weak evidence becoming strong confidence
+* optional fields collapsing the engine
+* inferred signals overriding stronger direct evidence
+* duplicate signals double-counting confidence
+* old snapshots increasing trust
+* UI labels satisfying live contracts
+* retries artificially inflating confidence
+* stale labels being treated as live evidence
+* one engine poisoning downstream reasoning unnecessarily
+
+---
+
+# H8 Alignment
+
+H8 should continue semantic hardening:
+
+* no semantic fallback
+* no ambiguous status
+* no legacy field satisfying live reasoning
+* no accidental PASS from incomplete data
+* no stale snapshot satisfying contracts
+
+This weighting system must EXTEND H8, not bypass it.
+
+---
+
+# H9 Alignment
+
+H9 should become the unified typed interpretation layer.
+
+The DB is storage only.
+
+Every read should pass through:
+
+```ts
+readCanonicalSnapshot(engineId, runId)
+```
+
+and return:
+
+```ts
+{
+  data,
+  contractStatus,
+  snapshotTrustState,
+  fieldCoverageScore,
+  signalCoverageScore,
+  weightedConfidenceAdjustment,
+  finalConfidence,
+  missingCriticalFields,
+  degradedImportantFields,
+  staleSignals,
+  retriesPerformed,
+  warnings,
+  isLiveEvidence
+}
+```
+
+H9 should become the canonical normalization layer for:
+
+* snapshots
+* fields
+* signals
+* labels
+* trust
+* retries
+* confidence weighting
+
+---
+
+# Entire System Must Follow The Same Logic
+
+This is extremely important.
+
+Anywhere in the system that touches:
+
+* snapshots
+* fields
+* signals
+* labels
+* confidence
+* retries
+* trust states
+* contracts
+
+must use the SAME weighting + enforcement logic.
+
+No isolated implementations.
+
+No local hacks.
+
+No separate trust systems.
+
+Everything should use the same canonical weighted reliability model.
+
+---
+
+# Required Audit Before Coding
+
+Before implementation:
+
+Please produce a full audit covering:
+
+1. existing contract enforcement
+2. existing snapshot trust
+3. existing label confidence
+4. existing signal mapping
+5. existing retries
+6. existing confidence inheritance
+7. existing weighting logic
+8. all places consuming snapshots/signals/labels
+9. all places doing enforcement
+10. all places doing retries
+11. what already exists
+12. what should be extended
+13. what should be unified
+14. what should NOT be rebuilt
+
+---
+
+# Required Tests
+
+Please create hard tests for:
+
+1. critical field missing → retry → success
+2. critical field missing → retry fails → block
+3. important field missing → downgrade confidence
+4. optional field missing → continue
+5. stale label → historical only
+6. weak label confidence → weaker signal
+7. duplicate signals → no double count
+8. inferred signal cannot override stronger direct evidence
+9. retries do not inflate confidence
+10. stale snapshot cannot satisfy live reasoning
+11. partial field coverage produces reasonable confidence reduction
+12. missing non-critical fields do not destroy the whole engine
+13. missing critical fields cannot silently pass
+14. H8 semantic protections still hold
+15. H9 canonical snapshot reader returns correct weighted trust state
+
+---
+
+# Final Goal
+
+Do not create a fragile validator.
+
+Do not create a permissive system either.
+
+Create a commercially intelligent reliability system:
+
+* truthful
+* weighted
+* retry-aware
+* confidence-aware
+* snapshot-aware
+* label-aware
+* signal-aware
+* semantically strict
+* operationally smart
+
+Thanks.

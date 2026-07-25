@@ -1,0 +1,140 @@
+Hi,
+
+Positioning Engine is now considered **functionally fixed at the logic level**.
+
+We are moving to the next phase:
+
+> **Full system audit to validate logic consistency across all remaining engines**
+
+No new features.
+No UI changes.
+No optimizations.
+
+This phase is strictly:
+
+> **Logic verification and root-cause detection per engine**
+
+---
+
+# Objective
+
+Now that Positioning is stable, we need to:
+
+> **Run a complete end-to-end audit and identify any remaining logic issues inside downstream engines**
+
+We are not checking outputs visually.
+We are validating:
+
+* reasoning correctness
+* signal usage
+* internal decision consistency
+
+---
+
+# Required Action
+
+Run full pipeline on:
+
+* MarketMindAI
+* SWA Media (after MI refresh)
+
+---
+
+# Required Report (STRICT FORMAT)
+
+## 1. Per Engine Analysis (ALL engines after Positioning)
+
+For each engine:
+
+* Status (SUCCESS / PARTIAL / BLOCKED)
+* Key output summary
+* engineConfidence
+* dataConfidence (if applicable)
+* Input dependency check:
+
+  * did it use upstream data correctly?
+* Internal logic issues (if any)
+* Any contradictions or weak reasoning detected
+
+---
+
+## 2. Signal Flow Validation
+
+Across the pipeline:
+
+* Are signals being:
+
+  * lost?
+  * diluted?
+  * misused?
+* Does each engine:
+
+  * build on previous output?
+  * or ignore it?
+
+---
+
+## 3. Cross-Engine Consistency
+
+Check:
+
+* Positioning → Offer → Funnel → Persuasion → Channel Selection
+
+Confirm:
+
+* No logical contradictions
+* No narrative drift
+* No structural breaks
+
+---
+
+## 4. Output Integrity (Post-Positioning)
+
+* Are downstream engines still grounded in signals?
+* Any hallucination or abstraction reintroduced?
+* Any engine generating beyond available data?
+
+---
+
+## 5. Problem Detection
+
+List all detected issues:
+
+For each issue:
+
+* Engine name
+* Problem type
+* Root cause (not symptom)
+* Severity (low / medium / critical)
+
+---
+
+## 6. Pipeline Behavior
+
+* Total engines completed
+* First point of degradation (if any)
+* Does system remain coherent until end?
+
+---
+
+# Important Constraints
+
+* Do NOT fix anything yet
+* Do NOT patch outputs
+* Do NOT add guards or rules
+
+This is a **pure diagnostic phase**
+
+---
+
+# Goal
+
+> Identify remaining logic flaws in downstream engines now that Positioning is stable
+
+---
+
+Once report is ready, we will go engine-by-engine and fix logic at the root level.
+
+Proceed.
+
+Thanks.

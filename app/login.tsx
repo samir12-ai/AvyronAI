@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,14 +18,22 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 export default function LoginScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
-  const { login, register } = useAuth();
+  const { login, register, setIsAddingAccount } = useAuth();
   const { addAccount } = useLocalSearchParams<{ addAccount?: string }>();
   const isAddingAccount = addAccount === '1';
+  const { t } = useLanguage();
+
+  useEffect(() => {
+    return () => {
+      setIsAddingAccount(false);
+    };
+  }, []);
 
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -36,7 +44,7 @@ export default function LoginScreen() {
 
   const handleSubmit = async () => {
     if (!email.trim() || !password.trim()) {
-      setError('Please fill in all fields');
+      setError(t('loginPage.errorRequired'));
       return;
     }
 
@@ -53,16 +61,18 @@ export default function LoginScreen() {
     if (result.success) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (isAddingAccount) {
+        setIsAddingAccount(false);
         router.replace('/(tabs)');
       }
     } else {
-      setError(result.error || 'Something went wrong');
+      setError(result.error || t('loginPage.errorGeneric'));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
 
   const handleCancel = () => {
     Haptics.selectionAsync();
+    setIsAddingAccount(false);
     router.back();
   };
 
@@ -100,22 +110,22 @@ export default function LoginScreen() {
               <AvyronLogo size={54} />
             </View>
             <Text style={styles.brandName}>Avyron</Text>
-            <Text style={styles.brandSub}>AI INTELLIGENCE</Text>
+            <Text style={styles.brandSub}>{t('loginPage.brandSub')}</Text>
           </View>
 
           {isAddingAccount && (
             <Pressable onPress={handleCancel} style={styles.cancelRow}>
               <Ionicons name="arrow-back" size={18} color="#9CA3AF" />
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={styles.cancelText}>{t('loginPage.cancel')}</Text>
             </Pressable>
           )}
 
           <View style={styles.formCard}>
             <Text style={styles.formTitle}>
-              {isAddingAccount ? 'Add account' : mode === 'login' ? 'Welcome back' : 'Get started'}
+              {isAddingAccount ? t('loginPage.addAccount') : mode === 'login' ? t('loginPage.welcomeBack') : t('loginPage.getStarted')}
             </Text>
             <Text style={styles.formSubtitle}>
-              {isAddingAccount ? 'Sign in to another account' : mode === 'login' ? 'Sign in to your account' : 'Create your free account'}
+              {isAddingAccount ? t('loginPage.addAccountDesc') : mode === 'login' ? t('loginPage.welcomeBackDesc') : t('loginPage.getStartedDesc')}
             </Text>
 
             {error ? (
@@ -126,14 +136,14 @@ export default function LoginScreen() {
             ) : null}
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email</Text>
+              <Text style={styles.inputLabel}>{t('loginPage.email')}</Text>
               <View style={styles.inputWrap}>
                 <Ionicons name="mail-outline" size={18} color="#6B7280" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   value={email}
                   onChangeText={setEmail}
-                  placeholder="you@example.com"
+                  placeholder={t('loginPage.emailPlaceholder')}
                   placeholderTextColor="#4B5563"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -144,14 +154,14 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Password</Text>
+              <Text style={styles.inputLabel}>{t('loginPage.password')}</Text>
               <View style={styles.inputWrap}>
                 <Ionicons name="lock-closed-outline" size={18} color="#6B7280" style={styles.inputIcon} />
                 <TextInput
                   style={[styles.input, { flex: 1 }]}
                   value={password}
                   onChangeText={setPassword}
-                  placeholder={mode === 'signup' ? 'Min 6 characters' : 'Enter password'}
+                  placeholder={mode === 'signup' ? t('loginPage.passwordPlaceholderSignup') : t('loginPage.passwordPlaceholderLogin')}
                   placeholderTextColor="#4B5563"
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
@@ -179,26 +189,24 @@ export default function LoginScreen() {
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
                   <Text style={styles.submitText}>
-                    {mode === 'login' ? 'Sign In' : 'Create Account'}
+                    {mode === 'login' ? t('loginPage.signIn') : t('loginPage.createAccount')}
                   </Text>
                 )}
               </LinearGradient>
             </Pressable>
 
             {mode === 'signup' && (
-              <Text style={styles.trialNote}>
-                7-day free trial · Full access · No credit card required
-              </Text>
+              <Text style={styles.trialNote}>{t('loginPage.trialNote')}</Text>
             )}
           </View>
 
           <View style={styles.toggleRow}>
             <Text style={styles.toggleText}>
-              {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
+              {mode === 'login' ? t('loginPage.toggleToSignup') : t('loginPage.toggleToLogin')}
             </Text>
             <Pressable onPress={toggleMode} testID="toggle-mode">
               <Text style={styles.toggleLink}>
-                {mode === 'login' ? 'Sign Up' : 'Sign In'}
+                {mode === 'login' ? t('loginPage.linkSignUp') : t('loginPage.linkSignIn')}
               </Text>
             </Pressable>
           </View>

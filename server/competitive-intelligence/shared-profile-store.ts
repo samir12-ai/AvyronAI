@@ -218,7 +218,8 @@ export async function reuseFromSharedPool(
     .where(
       and(
         eq(ciCompetitorComments.competitorId, sourceCompetitor.id),
-        eq(ciCompetitorComments.accountId, sourceCompetitor.accountId)
+        eq(ciCompetitorComments.accountId, sourceCompetitor.accountId),
+        eq(ciCompetitorComments.isSynthetic, false)
       )
     );
 

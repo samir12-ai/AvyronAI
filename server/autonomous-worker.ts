@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, pool } from "./db";
 import {
   accountState,
   jobQueue,
@@ -15,7 +15,8 @@ import {
 } from "@shared/schema";
 import { ACTIVE_PLAN_STATUSES_SQL } from "./plan-constants";
 
-import { eq, and, sql, desc, gte, lte, ne } from "drizzle-orm";
+import { eq, and, sql, desc, gte, lte, ne, notInArray } from "drizzle-orm";
+import { NON_STRATEGIC_MEMORY_TYPES_ARR } from "./decision-policy";
 
 const LEGACY_CAMPAIGN = "unscoped_legacy";
 import { logAudit } from "./audit";
@@ -26,6 +27,9 @@ import { classifyDecisionRisk } from "./risk-classifier";
 import { snapshotPreMetrics, evaluatePendingOutcomes, getRecentOutcomesForPrompt, computeSuccessRates } from "./outcome-tracker";
 import { calculateConfidence, computeDecisionSuccessRate, getLast2Outcomes, checkSafeModeExitConditions } from "./confidence";
 import { aiChat } from "./ai-client";
+import { validateAgentDecisionBinding } from "./decision-policy";
+import { traceContext } from "./trace-context";
+import { randomUUID } from "node:crypto";
 
 const WORKER_INTERVAL_MS = 5 * 60 * 1000;
 const CYCLE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
@@ -128,7 +132,10 @@ async function runStrategyAnalysis(
           .where(and(
             eq(strategyMemory.accountId, accountId),
             eq(strategyMemory.campaignId, activeCampaignId),
-            ne(strategyMemory.campaignId, LEGACY_CAMPAIGN)
+            ne(strategyMemory.campaignId, LEGACY_CAMPAIGN),
+            // Exclude operational/non-strategic memory types
+            // (content_rhythm, exploration_budget) from the AI-context read.
+            notInArray(strategyMemory.memoryType, NON_STRATEGIC_MEMORY_TYPES_ARR),
           ))
           .orderBy(desc(strategyMemory.updatedAt))
           .limit(20)
@@ -314,10 +321,33 @@ async function checkIdleAccount(accountId: string, days: number): Promise<boolea
       sql`${performanceSnapshots.accountId} = ${accountId} AND ${performanceSnapshots.fetchedAt} >= ${threshold}`
     )
     .limit(1);
-  return recentPosts.length === 0 && recentSnapshots.length === 0;
+
+  // Not idle if there's recent publishing or performance activity
+  if (recentPosts.length > 0 || recentSnapshots.length > 0) return false;
+
+  // Not idle if the account has an active strategic plan (pre-publish phase).
+  // Accounts in strategy/approval phase have no published posts yet but are
+  // actively being worked on and must receive autonomous analysis.
+  const activePlan = await db.select({ id: strategicPlans.id })
+    .from(strategicPlans)
+    .where(
+      sql`${strategicPlans.accountId} = ${accountId} AND ${strategicPlans.status} IN ('DRAFT', 'READY_FOR_REVIEW', 'APPROVED')`
+    )
+    .limit(1);
+
+  if (activePlan.length > 0) return false;
+
+  return true;
 }
 
 async function processAccount(accountId: string) {
+  // Never start a new account-level job after shutdown has begun.
+  // Combined with the workerTick gates this guarantees no NEW DB writes
+  // begin after SIGTERM; in-flight account work still gets its grace
+  // window from the 5s unref'd timer in the signal handler.
+  if (isShuttingDown) {
+    return;
+  }
   const jobId = await acquireLock(accountId);
   if (!jobId) {
     console.log(`[Worker] Account ${accountId} is locked, skipping`);
@@ -366,6 +396,8 @@ async function processAccount(accountId: string) {
 
     const activeCampaign = await getActiveCampaignId(accountId);
     let activePlanContext: { planId: string; planSummary: string; calendarProgress: string } | null = null;
+    let capturedPlanEntries: Array<{ status: string }> = [];
+    let capturedPlanWork: { totalContentPieces?: number | null } | undefined = undefined;
 
     if (activeCampaign) {
       let planQuery = await db
@@ -420,6 +452,8 @@ async function processAccount(accountId: string) {
         planSummary: plan.planSummary || "Active execution plan",
         calendarProgress: `Total required: ${totalReq}, Calendar entries: ${planEntries.length}, Draft: ${draftCount}, Generated: ${generatedCount}, Failed: ${failedCount}`,
       };
+      capturedPlanEntries = planEntries;
+      capturedPlanWork = planWork[0];
     } else {
       console.log(`[Worker] Account ${accountId}: No active campaign — autopilot BLOCKED`);
       await releaseLock(jobId, "completed");
@@ -430,7 +464,10 @@ async function processAccount(accountId: string) {
     }
 
     const baselines = await computeRollingBaselines(accountId);
-    const guardrailResult = await runAllGuardrails(accountId);
+    const guardrailResult = await runAllGuardrails(accountId, activeCampaign || undefined);
+    const compliance = activeCampaign
+      ? await computeExecutionCompliance(accountId, activeCampaign, capturedPlanEntries, capturedPlanWork, baselines)
+      : null;
     await evaluatePendingOutcomes(accountId);
 
     const volThreshold = await getVolatilityThreshold(accountId);
@@ -440,17 +477,17 @@ async function processAccount(accountId: string) {
     const currentAcct = await db.select().from(accountState)
       .where(eq(accountState.accountId, accountId))
       .limit(1);
-    const acctState = currentAcct[0] || state[0];
-    const currentMode = acctState.state || "ACTIVE";
-    let prevRecoveryCycles = acctState.recoveryCyclesStable || 0;
+    const acctRecord = currentAcct[0] || state[0];
+    const currentMode = acctRecord.state || "ACTIVE";
+    let prevRecoveryCycles = acctRecord.recoveryCyclesStable || 0;
 
     const confidenceResult = calculateConfidence({
-      volatilityIndex: acctState.volatilityIndex || 0,
+      volatilityIndex: acctRecord.volatilityIndex || 0,
       volatilityThreshold: volThreshold,
       decisionSuccessRate: decSuccessRate,
       totalDecisions: decTotal,
-      driftFlag: acctState.driftFlag || false,
-      guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
+      driftFlag: acctRecord.driftFlag || false,
+      guardrailTriggers24h: acctRecord.guardrailTriggers24h || 0,
       currentState: currentMode,
     });
 
@@ -477,10 +514,10 @@ async function processAccount(accountId: string) {
 
     if (currentMode === "SAFE_MODE") {
       const exitCheck = checkSafeModeExitConditions({
-        volatilityIndex: acctState.volatilityIndex || 0,
+        volatilityIndex: acctRecord.volatilityIndex || 0,
         volatilityThreshold: volThreshold,
-        guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
-        driftFlag: acctState.driftFlag || false,
+        guardrailTriggers24h: acctRecord.guardrailTriggers24h || 0,
+        driftFlag: acctRecord.driftFlag || false,
         last2Outcomes,
       });
 
@@ -534,10 +571,10 @@ async function processAccount(accountId: string) {
         prevRecoveryCycles = 0;
       } else {
         const exitCheck = checkSafeModeExitConditions({
-          volatilityIndex: acctState.volatilityIndex || 0,
+          volatilityIndex: acctRecord.volatilityIndex || 0,
           volatilityThreshold: volThreshold,
-          guardrailTriggers24h: acctState.guardrailTriggers24h || 0,
-          driftFlag: acctState.driftFlag || false,
+          guardrailTriggers24h: acctRecord.guardrailTriggers24h || 0,
+          driftFlag: acctRecord.driftFlag || false,
           last2Outcomes,
         });
 
@@ -610,9 +647,9 @@ async function processAccount(accountId: string) {
     const refreshedState = await db.select().from(accountState)
       .where(eq(accountState.accountId, accountId))
       .limit(1);
-    const finalState = refreshedState[0] || acctState;
-    const activeMode = finalState.state || "ACTIVE";
-    const finalConfidence = finalState.confidenceScore || confidenceResult.score;
+    const finalRecord = refreshedState[0] || acctRecord;
+    const activeMode = finalRecord.state || "ACTIVE";
+    const finalConfidence = finalRecord.confidenceScore || confidenceResult.score;
 
     const canAutoExecute = activeMode === "ACTIVE" || activeMode === "FULL_AUTOPILOT" || activeMode === "RECOVERY_MODE";
     const isRecovery = activeMode === "RECOVERY_MODE";
@@ -672,8 +709,8 @@ async function processAccount(accountId: string) {
                   parsed,
                 );
                 totalSignalsWritten += written;
-              } catch (parseErr: any) {
-                console.warn(`[Worker] Failed to parse channel snapshot for signal ingest: ${parseErr.message}`);
+              } catch (parseErr) {
+                console.warn(`[Worker] Failed to parse channel snapshot for signal ingest: ${(parseErr as Error).message}`);
               }
             }
 
@@ -681,13 +718,13 @@ async function processAccount(accountId: string) {
               console.log(`[Worker] Channel signal ingest complete: ${totalSignalsWritten} format signal(s) written. Triggering memory mutation.`);
               // Fire-and-forget: channel data is now the primary mutation input
               runMemoryMutation(accountId, activeCampaignId).catch((err: any) =>
-                console.warn(`[Worker] Channel-triggered memory mutation error: ${err.message}`),
+                console.warn(`[Worker] Channel-triggered memory mutation error: ${(err as Error).message}`),
               );
             } else {
               console.log(`[Worker] No channel format signals written (insufficient per-type data) — skipping channel mutation trigger.`);
             }
-          } catch (signalErr: any) {
-            console.warn(`[Worker] Channel signal ingest/mutation error (non-blocking): ${signalErr.message}`);
+          } catch (signalErr) {
+            console.warn(`[Worker] Channel signal ingest/mutation error (non-blocking): ${(signalErr as Error).message}`);
           }
         }
         // Build delta context from the latest snapshot per channel (uses deltaFromPrevious JSON)
@@ -729,13 +766,31 @@ async function processAccount(accountId: string) {
           if (lines.length > 0) userChannelDeltaContext = lines.join("\n");
         }
       }
-    } catch (scrapeErr: any) {
-      console.error(`[Worker] User channel scrape/delta error for ${accountId}:`, scrapeErr.message);
+    } catch (scrapeErr) {
+      console.error(`[Worker] User channel scrape/delta error for ${accountId}:`, (scrapeErr as Error).message);
     }
 
     const aiDecisions = await runStrategyAnalysis(accountId, baselines, guardrailResult, outcomeContext, activePlanContext, userChannelDeltaContext);
 
     for (const decision of aiDecisions) {
+      const planIdBinding = activePlanContext?.planId ?? null;
+      const bindingCheck = validateAgentDecisionBinding(decision, planIdBinding);
+      if (!bindingCheck.bound) {
+        console.error(
+          `[Worker] DECISION_REJECTED_UNBOUND | account=${accountId} action="${decision.action.slice(0, 80)}" — ${bindingCheck.reason}. ` +
+          `Decision will NOT be persisted. This enforces the requirement that all agent actions reference a validated plan.`,
+        );
+        await logAudit(accountId, "BLOCKED_DECISION", {
+          details: {
+            action: decision.action,
+            reason: bindingCheck.reason,
+            enforcementLayer: "decision-policy-binding",
+            mode: activeMode,
+          },
+        });
+        continue;
+      }
+
       const riskResult = classifyDecisionRisk(
         {
           action: decision.action,
@@ -746,8 +801,8 @@ async function processAccount(accountId: string) {
         guardrailResult,
         {
           state: activeMode,
-          volatilityIndex: finalState.volatilityIndex || 0,
-          driftFlag: finalState.driftFlag || false,
+          volatilityIndex: finalRecord.volatilityIndex || 0,
+          driftFlag: finalRecord.driftFlag || false,
         }
       );
 
@@ -791,8 +846,13 @@ async function processAccount(accountId: string) {
         }
       }
 
+      const insightType = compliance
+        ? classifyInsightTypeFromState(compliance, finalRecord.volatilityIndex || 0, finalRecord.driftFlag || false, decision.trigger, decision.action)
+        : classifyInsightType(decision.trigger, decision.action);
+
       const inserted = await db.insert(strategyDecisions).values({
         accountId,
+        campaignId: activeCampaign || undefined,
         trigger: decision.trigger,
         action: decision.action,
         reason: decision.reason,
@@ -803,19 +863,20 @@ async function processAccount(accountId: string) {
         riskLevel: riskResult.riskLevel,
         autoGenerated: true,
         autoExecutable: riskResult.autoExecutable && !blocked,
+        insightType,
       }).returning();
 
       const decisionId = inserted[0]?.id;
       if (!decisionId) continue;
 
-      const canExec = riskResult.autoExecutable && !blocked && finalState.autopilotOn && canAutoExecute;
+      const canExec = riskResult.autoExecutable && !blocked && finalRecord.autopilotOn && canAutoExecute;
 
       if (canExec) {
         await db.update(strategyDecisions)
           .set({ status: "executed", executedAt: new Date() })
           .where(eq(strategyDecisions.id, decisionId));
 
-        await snapshotPreMetrics(decisionId, accountId, decisionType);
+        await snapshotPreMetrics(decisionId, accountId, decisionType, activeCampaign || undefined);
 
         await logAudit(accountId, "AUTO_EXECUTION", {
           decisionId,
@@ -931,21 +992,317 @@ function categorizeDecisionType(action: string): string {
   return "general";
 }
 
+type InsightType = "user_execution" | "market_shift" | "strategy_gap" | "measurement_gap";
+
+function classifyInsightType(trigger: string, action: string): InsightType {
+  const t = (trigger + " " + action).toLowerCase();
+
+  const isMarketShift =
+    t.includes("competitor") ||
+    t.includes("market") ||
+    t.includes("format share") ||
+    t.includes("positioning") ||
+    t.includes("competitive") ||
+    t.includes("velocity") ||
+    t.includes("industry") ||
+    t.includes("rival");
+
+  if (isMarketShift) return "market_shift";
+
+  const isStrategyGap =
+    t.includes("strategy") ||
+    t.includes("plan") ||
+    t.includes("misalign") ||
+    t.includes("contradict") ||
+    t.includes("mismatch") ||
+    t.includes("rebuild") ||
+    t.includes("repositi") ||
+    t.includes("funnel") ||
+    t.includes("offer");
+
+  if (isStrategyGap) return "strategy_gap";
+
+  const isMeasurementGap =
+    t.includes("no data") ||
+    t.includes("no signal") ||
+    t.includes("insufficient") ||
+    t.includes("measurement") ||
+    t.includes("baseline") ||
+    t.includes("tracking") ||
+    t.includes("signal quality") ||
+    t.includes("no performance") ||
+    t.includes("incomplete");
+
+  if (isMeasurementGap) return "measurement_gap";
+
+  return "user_execution";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXECUTION COMPLIANCE — deterministic, data-driven. No AI involved.
+// Uses data already collected by processAccount (plan entries + baselines).
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ExecutionCompliance {
+  state: "COMPLIANT" | "LOW_CADENCE" | "NO_EXECUTION";
+  publishedCount7d: number;
+  cadenceFloor: number;
+  calendarTotal: number;
+  calendarGenerated: number;
+  hasPerformanceData: boolean;
+  explanation: string;
+}
+
+async function computeExecutionCompliance(
+  accountId: string,
+  campaignId: string,
+  planEntries: Array<{ status: string }>,
+  planWork: { totalContentPieces?: number | null } | undefined,
+  baselines: { rollingRoas: number; rollingCtr: number; rollingSpend: number },
+): Promise<ExecutionCompliance> {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  // Task #64 / Phase 1 — content_rhythm moved out of strategy_memory.
+  const { getOperationalState } = await import("./memory-system/operational-state-store");
+  const [recentPublished, rhythmState] = await Promise.all([
+    db
+      .select({ id: publishedPosts.id })
+      .from(publishedPosts)
+      .where(
+        sql`${publishedPosts.accountId} = ${accountId} AND ${publishedPosts.status} = 'published' AND ${publishedPosts.publishedAt} >= ${sevenDaysAgo}`,
+      )
+      .limit(50),
+    getOperationalState(accountId, campaignId, "content_rhythm"),
+  ]);
+
+  const publishedCount7d = recentPublished.length;
+
+  let cadenceFloor = 3;
+  if (rhythmState?.payload && typeof rhythmState.payload === "object" && rhythmState.payload !== null) {
+    try {
+      const rhythm = rhythmState.payload as Record<string, unknown>;
+      const num = (k: string): number => {
+        const v = rhythm[k];
+        return typeof v === "number" && Number.isFinite(v) ? v : 0;
+      };
+      const weeklyTarget =
+        (num("reelsPerWeek") || num("reels")) +
+        (num("carouselsPerWeek") || num("carousels")) +
+        (num("postsPerWeek") || num("posts"));
+      if (weeklyTarget > 0) {
+        cadenceFloor = Math.max(1, Math.floor(weeklyTarget * 0.4));
+      }
+    } catch {}
+  }
+
+  const calendarTotal = planEntries.length;
+  const calendarGenerated = planEntries.filter(
+    (e) =>
+      e.status === "AI_GENERATED" ||
+      e.status === "GENERATED" ||
+      e.status === "PUBLISHED",
+  ).length;
+  const hasPerformanceData = baselines.rollingSpend > 0 || baselines.rollingRoas > 0;
+
+  let state: ExecutionCompliance["state"];
+  let explanation: string;
+
+  if (publishedCount7d === 0) {
+    state = "NO_EXECUTION";
+    explanation = `No published posts in the last 7 days. Execution has not started or has stopped completely.`;
+  } else if (publishedCount7d < cadenceFloor) {
+    state = "LOW_CADENCE";
+    explanation = `${publishedCount7d} post(s) published in 7 days vs. cadence floor of ${cadenceFloor}. Execution is below minimum threshold.`;
+  } else {
+    state = "COMPLIANT";
+    explanation = `${publishedCount7d} post(s) published in 7 days (cadence floor: ${cadenceFloor}). Execution is on track.`;
+  }
+
+  return {
+    state,
+    publishedCount7d,
+    cadenceFloor,
+    calendarTotal,
+    calendarGenerated,
+    hasPerformanceData,
+    explanation,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE-DRIVEN INSIGHT CLASSIFIER
+// Uses real system state as the primary signal.
+// Text matching (classifyInsightType) is kept only as a final-step refinement.
+// Decision tree:
+//   1. No execution → user_execution (always)
+//   2. Low cadence → user_execution (execution, not strategy)
+//   3. Executed but no performance data → measurement_gap
+//   4. Market signals active (volatility / drift) → market_shift
+//   5. Compliant + data + stable market → text refinement between
+//      measurement_gap and strategy_gap, defaulting to strategy_gap
+// ─────────────────────────────────────────────────────────────────────────────
+
+function classifyInsightTypeFromState(
+  compliance: ExecutionCompliance,
+  volatilityIndex: number,
+  driftFlag: boolean,
+  triggerText: string,
+  actionText: string,
+): InsightType {
+  if (compliance.state === "NO_EXECUTION") return "user_execution";
+  if (compliance.state === "LOW_CADENCE") return "user_execution";
+
+  if (!compliance.hasPerformanceData) return "measurement_gap";
+
+  if (volatilityIndex > 0.35 || driftFlag) return "market_shift";
+
+  const t = (triggerText + " " + actionText).toLowerCase();
+  const hasMeasurementSignal =
+    t.includes("no data") ||
+    t.includes("no signal") ||
+    t.includes("measurement") ||
+    t.includes("tracking") ||
+    t.includes("baseline") ||
+    t.includes("insufficient signal");
+
+  if (hasMeasurementSignal) return "measurement_gap";
+
+  return "strategy_gap";
+}
+
+/** Number of accounts processed in parallel per worker tick. */
+const WORKER_CONCURRENCY = 3;
+
+// F6.4 — Postgres SESSION-scoped advisory lock + ±30s tick jitter so only
+// one replica runs a tick at a time. Acquire AND release MUST share the
+// SAME pinned PoolClient (lock is session-scoped); workerTick checks out
+// one client for its lifetime and releases it in finally.
+const WORKER_TICK_LOCK_KEY = 0x4F574EAF;
+const WORKER_TICK_JITTER_MS = 30_000;
+let workerJitterTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function tryAcquireWorkerLockOn(client: import("pg").PoolClient): Promise<boolean> {
+  try {
+    const r = await client.query<{ got: boolean }>(
+      `SELECT pg_try_advisory_lock(${WORKER_TICK_LOCK_KEY}) AS got`,
+    );
+    return r.rows[0]?.got === true;
+  } catch (err) {
+    console.error("[Worker] Advisory-lock acquire failed:", (err as Error)?.message || err);
+    return false;
+  }
+}
+
+async function releaseWorkerLockOn(client: import("pg").PoolClient): Promise<void> {
+  try {
+    const r = await client.query<{ released: boolean }>(
+      `SELECT pg_advisory_unlock(${WORKER_TICK_LOCK_KEY}) AS released`,
+    );
+    if (r.rows[0]?.released !== true) {
+      console.error("[Worker] Advisory-lock release returned false (lock not held by this session)");
+    }
+  } catch (err) {
+    console.error("[Worker] Advisory-lock release failed:", (err as Error)?.message || err);
+  }
+}
+
+// T006 — hourly scraping-pool status summary, piggybacked on the 5-min
+// worker tick (runs inside the advisory lock, so exactly one replica logs
+// it). B2: cooling targets and persistence failures become a grep-able
+// heartbeat line instead of silent in-memory state.
+let lastPoolSummaryAt = 0;
+const POOL_SUMMARY_INTERVAL_MS = 60 * 60 * 1000;
+
+async function maybeLogPoolStatusSummary(): Promise<void> {
+  if (Date.now() - lastPoolSummaryAt < POOL_SUMMARY_INTERVAL_MS) return;
+  lastPoolSummaryAt = Date.now();
+  try {
+    const { getPoolStatusReport } = await import("./competitive-intelligence/proxy-pool-manager");
+    const report = getPoolStatusReport();
+    const platformParts = Object.entries(report.platforms).map(
+      ([platform, s]) => `${platform}: inflight=${s.inflight} cooling=${s.coolingTargets}/${s.trackedTargets}`,
+    );
+    console.log(
+      `[Worker] POOL_STATUS_SUMMARY | pools=${report.activeAccountPools} | ${platformParts.join(" | ")} | persistFailures=${report.persistence.persistFailures} | hydrateFailures=${report.persistence.hydrateFailures}`,
+    );
+  } catch (err) {
+    console.error("[Worker] POOL_STATUS_SUMMARY_FAILED:", (err as Error)?.message || err);
+  }
+}
+
 async function workerTick() {
+  // Per-tick traceId so worker logs/Sentry carry the same observability
+  // contract as HTTP requests.
+  return traceContext.run({ traceId: `worker-autonomous-${randomUUID()}` }, async () => {
+    let client: import("pg").PoolClient | null = null;
+    try {
+      client = await pool.connect();
+    } catch (err) {
+      console.error("[Worker] Could not acquire pool client for advisory lock:", (err as Error)?.message || err);
+      return;
+    }
+    try {
+      const acquired = await tryAcquireWorkerLockOn(client);
+      if (!acquired) {
+        console.log("[Worker] Tick skipped — another replica holds the advisory lock");
+        const { recordWorkerTick } = await import("./observability/otel");
+        recordWorkerTick("autonomous", "skipped");
+        return;
+      }
+      try {
+        await workerTickBody();
+      } finally {
+        await releaseWorkerLockOn(client);
+      }
+    } finally {
+      // Releasing the client back to the pool ALSO drops any
+      // session-held advisory locks as a defense-in-depth, so even if
+      // releaseWorkerLockOn fails we cannot leak the lock past the next
+      // pool checkout cycle.
+      try { client.release(); } catch (e) {
+        console.error("[Worker] PoolClient release failed:", (e as Error)?.message || e);
+      }
+    }
+  });
+}
+
+async function workerTickBody() {
+  // Explicit shutdown gate at the top of every tick AND between batches.
+  // Without these two checks the
+  // `installShutdownHandlers()` flag was inert against in-flight ticks.
+  if (isShuttingDown) {
+    const { recordWorkerTick } = await import("./observability/otel");
+    recordWorkerTick("autonomous", "skipped");
+    return;
+  }
+  await maybeLogPoolStatusSummary();
   try {
     const accountIds = await getAccountsDueForProcessing();
+    const { recordWorkerTick, setWorkerQueueDepth } = await import("./observability/otel");
+    setWorkerQueueDepth("autonomous", accountIds.length);
 
     if (accountIds.length === 0) {
+      recordWorkerTick("autonomous", "skipped");
       return;
     }
 
-    console.log(`[Worker] Processing ${accountIds.length} account(s): ${accountIds.join(", ")}`);
+    console.log(`[Worker] Processing ${accountIds.length} account(s) across ${WORKER_CONCURRENCY} parallel lane(s): ${accountIds.join(", ")}`);
 
-    for (const accountId of accountIds) {
-      await processAccount(accountId);
+    for (let i = 0; i < accountIds.length; i += WORKER_CONCURRENCY) {
+      if (isShuttingDown) {
+        console.log(`[Worker] Shutdown detected mid-tick — skipping remaining ${accountIds.length - i} account(s).`);
+        recordWorkerTick("autonomous", "skipped");
+        return;
+      }
+      const batch = accountIds.slice(i, i + WORKER_CONCURRENCY);
+      await Promise.all(batch.map((accountId) => processAccount(accountId)));
     }
+    recordWorkerTick("autonomous", "ok");
+    setWorkerQueueDepth("autonomous", 0);
   } catch (error) {
     console.error("[Worker] Tick error:", error);
+    const { recordWorkerTick } = await import("./observability/otel");
+    recordWorkerTick("autonomous", "error");
   }
 }
 
@@ -971,20 +1328,27 @@ async function ensureDefaultConfig() {
   }
 }
 
-const CI_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const SHARED_POOL_STALE_HOURS = 12;
+const CI_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CI_MAX_INTERVAL_MS = 48 * 60 * 60 * 1000; // 48 hours
+const SHARED_POOL_STALE_HOURS = 24;
 const SHARED_POOL_MAX_SCRAPES_PER_RUN = 3;
 const FOUNDER_ACCOUNT_ID = "a2d87878-a1e9-41ea-a8a5-90beff569673";
-let ciTimer: ReturnType<typeof setInterval> | null = null;
-let sharedPoolRunning = false;
+let ciTimer: ReturnType<typeof setTimeout> | null = null;
 
-async function runSharedPoolRefresh() {
-  if (sharedPoolRunning) {
+/** Returns a random interval between CI_MIN and CI_MAX to avoid fixed-pattern scheduling. */
+function getNextCIIntervalMs(): number {
+  return CI_MIN_INTERVAL_MS + Math.random() * (CI_MAX_INTERVAL_MS - CI_MIN_INTERVAL_MS);
+}
+// F6.10 — Promise-based concurrency gate so SIGTERM can await in-flight
+// shared-pool refresh before the process exits.
+let sharedPoolRunningPromise: Promise<void> | null = null;
+
+async function runSharedPoolRefresh(): Promise<void> {
+  if (sharedPoolRunningPromise) {
     console.log("[CI Worker] Shared pool refresh already running — skipping this tick");
-    return;
+    return sharedPoolRunningPromise;
   }
-  sharedPoolRunning = true;
-
+  sharedPoolRunningPromise = (async () => {
   try {
     const { getStaleSharedProfiles, fanOutSharedReuse } = await import("./competitive-intelligence/shared-profile-store");
     const { fetchCompetitorData } = await import("./competitive-intelligence/data-acquisition");
@@ -1067,33 +1431,186 @@ async function runSharedPoolRefresh() {
     }
 
     console.log(`[CI Worker] Shared pool refresh complete — ${scraped} handle(s) re-scraped this cycle`);
+
+    try {
+      const { scrapeTiktokForCompetitor } = await import("./competitive-intelligence/tiktok-scraper");
+      const { db: workerDb } = await import("./db");
+      const { ciCompetitors: ciComp } = await import("@shared/schema");
+      const { eq: eqOp, and: andOp, sql: sqlOp } = await import("drizzle-orm");
+
+      const tiktokCompetitors = await workerDb.execute(
+        sqlOp`SELECT id, account_id, campaign_id, name FROM ci_competitors WHERE tiktok_url IS NOT NULL AND tiktok_url != '' AND is_active = true LIMIT 20`
+      );
+
+      let tiktokScraped = 0;
+      for (const comp of (tiktokCompetitors as any).rows || tiktokCompetitors || []) {
+        if (tiktokScraped >= 5) break;
+        try {
+          const result = await scrapeTiktokForCompetitor(comp.id, comp.account_id, comp.campaign_id);
+          // F7.3 (validator-#3 propagation): surface degraded outcomes so
+          // downstream coverage gates / freshness telemetry can distinguish
+          // empty-OK runs from genuinely-failed scrapes. Persisting
+          // degradation onto MI v3 snapshot _provenance is tracked as a
+          // follow-up (no MI snapshot is written from this worker today).
+          const _degTag = result.degraded ? `DEGRADED(${result.degradedReason})` : "OK";
+          console.log(`[CI Worker] TikTok scrape: competitor=${comp.name} | campaign=${comp.campaign_id} | ${_degTag} | fetched=${result.postsFetched} | inserted=${result.postsInserted} | source=${result.source}`);
+          tiktokScraped++;
+        } catch (tktErr) {
+          console.error(`[CI Worker] TikTok scrape error for ${comp.name} (campaign=${comp.campaign_id}): ${(tktErr as Error).message}`);
+        }
+        await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      }
+
+      if (tiktokScraped > 0) {
+        console.log(`[CI Worker] TikTok auto-scrape complete: ${tiktokScraped} competitor(s) processed`);
+      }
+    } catch (tiktokErr) {
+      console.error(`[CI Worker] TikTok auto-scraping module error (non-blocking): ${(tiktokErr as Error).message}`);
+    }
+
+    try {
+      const { db: workerDb } = await import("./db");
+      const { sql: sqlOp } = await import("drizzle-orm");
+
+      const reviewCompetitors = await workerDb.execute(
+        sqlOp`SELECT id, account_id, campaign_id, name FROM ci_competitors WHERE google_maps_url IS NOT NULL AND google_maps_url != '' AND is_active = true LIMIT 20`
+      );
+
+      let reviewsScraped = 0;
+      for (const comp of (reviewCompetitors as any).rows || reviewCompetitors || []) {
+        if (reviewsScraped >= 5) break;
+        try {
+          const reviewsRoute = await import("./competitive-intelligence/reviews-tiktok-routes");
+          if (typeof (reviewsRoute as any).scrapeReviewsForCompetitor === "function") {
+            const result = await (reviewsRoute as any).scrapeReviewsForCompetitor(comp.id, comp.account_id, comp.campaign_id);
+            console.log(`[CI Worker] Reviews scrape: competitor=${comp.name} | result=${JSON.stringify(result).slice(0, 200)}`);
+            reviewsScraped++;
+          } else {
+            console.log(`[CI Worker] Reviews scrape: scrapeReviewsForCompetitor not exported — skipping`);
+            break;
+          }
+        } catch (revErr) {
+          console.error(`[CI Worker] Reviews scrape error for ${comp.name}: ${(revErr as Error).message}`);
+        }
+        await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      }
+
+      if (reviewsScraped > 0) {
+        console.log(`[CI Worker] Reviews auto-scrape complete: ${reviewsScraped} competitor(s) processed`);
+      }
+    } catch (reviewErr) {
+      console.error(`[CI Worker] Reviews auto-scraping module error (non-blocking): ${(reviewErr as Error).message}`);
+    }
   } catch (error) {
     console.error("[CI Worker] Shared pool refresh error:", error);
+  }
+  })();
+  try {
+    await sharedPoolRunningPromise;
   } finally {
-    sharedPoolRunning = false;
+    sharedPoolRunningPromise = null;
   }
 }
 
-export function startAutonomousWorker() {
-  console.log("[Worker] Starting autonomous worker (5-min interval, 6h cycle threshold)");
-  ensureDefaultConfig().catch(err => console.error("[Worker] Failed to seed defaults:", err));
-  workerTick();
-  workerTimer = setInterval(workerTick, WORKER_INTERVAL_MS);
-
-  setTimeout(() => runSharedPoolRefresh(), 60000);
-  ciTimer = setInterval(runSharedPoolRefresh, CI_CHECK_INTERVAL_MS);
-  console.log("[CI Worker] Shared pool refresh worker started (6h interval, initial run in 60s)");
+export function isSharedPoolRefreshRunning(): boolean {
+  return sharedPoolRunningPromise !== null;
 }
 
-export function stopAutonomousWorker() {
+/**
+ * Schedules the next CI refresh with a randomized 24–48h interval.
+ * Using recursive setTimeout (rather than setInterval) ensures each cycle
+ * picks a fresh random delay, breaking fixed-pattern scheduling.
+ */
+function scheduleCIRefresh() {
+  const nextMs = getNextCIIntervalMs();
+  const nextHours = (nextMs / 3600000).toFixed(1);
+  console.log(`[CI Worker] Next shared pool refresh in ${nextHours}h`);
+  ciTimer = setTimeout(async () => {
+    await runSharedPoolRefresh();
+    scheduleCIRefresh();
+  }, nextMs);
+}
+
+export function startAutonomousWorker() {
+  console.log(`[Worker] Starting autonomous worker (5-min tick, 6h cycle threshold, ${WORKER_CONCURRENCY} parallel lanes)`);
+  installShutdownHandlers();
+  ensureDefaultConfig().catch(err => console.error("[Worker] Failed to seed defaults:", err));
+  workerTick();
+  // Seal #11 / Task #29 / F6.4 — jittered self-rescheduling tick.
+  // Replaces fixed setInterval so two replicas booted within seconds of
+  // each other don't tick on the exact same wall-clock boundary forever.
+  const scheduleNextTick = () => {
+    if (isShuttingDown) return;
+    const jitter = (Math.random() * 2 - 1) * WORKER_TICK_JITTER_MS; // ±30s
+    const delay = WORKER_INTERVAL_MS + jitter;
+    workerJitterTimer = setTimeout(async () => {
+      await workerTick();
+      scheduleNextTick();
+    }, delay);
+  };
+  scheduleNextTick();
+
+  setTimeout(async () => {
+    await runSharedPoolRefresh();
+    scheduleCIRefresh();
+  }, 60000);
+  console.log("[CI Worker] Shared pool refresh worker started (24–48h randomized interval, initial run in 60s)");
+}
+
+export async function stopAutonomousWorker(): Promise<void> {
   if (workerTimer) {
     clearInterval(workerTimer);
     workerTimer = null;
     console.log("[Worker] Autonomous worker stopped");
   }
+  if (workerJitterTimer) {
+    clearTimeout(workerJitterTimer);
+    workerJitterTimer = null;
+  }
   if (ciTimer) {
-    clearInterval(ciTimer);
+    clearTimeout(ciTimer);
     ciTimer = null;
     console.log("[CI Worker] Competitive intelligence checker stopped");
   }
+  // F6.10 — await any in-flight shared-pool refresh before exit.
+  if (sharedPoolRunningPromise) {
+    console.log("[CI Worker] Awaiting in-flight shared pool refresh before exit…");
+    try {
+      await sharedPoolRunningPromise;
+    } catch (err) {
+      console.error("[CI Worker] In-flight refresh errored during shutdown:", (err as Error)?.message || err);
+    }
+  }
+}
+
+// F6.11 — SIGTERM/SIGINT handler. Sets isShuttingDown, stops timers, then
+// gives in-flight ticks ~5s to reach their releaseLock finally-block.
+// Idempotent. Read by workerTick/processAccount to short-circuit new work.
+let isShuttingDown = false;
+export function isWorkerShuttingDown(): boolean {
+  return isShuttingDown;
+}
+let signalHandlersInstalled = false;
+export function installShutdownHandlers() {
+  if (signalHandlersInstalled) return;
+  signalHandlersInstalled = true;
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[Worker] Received ${signal} — initiating graceful shutdown.`);
+    // Fire-and-await: stopAutonomousWorker is now async (awaits in-flight
+    // shared-pool refresh per F6.10). Must not throw out of the signal
+    // handler.
+    stopAutonomousWorker().catch((err: any) => {
+      console.error(`[Worker] Error during stopAutonomousWorker on ${signal}:`, (err as Error)?.message || err);
+    });
+    // Give in-flight ticks ~5s to finish their finally-block work
+    // (releaseLock, audit writes). Replit's default kill window is 15s so
+    // we stay well inside it.
+    setTimeout(() => {
+      console.log(`[Worker] Graceful shutdown grace period elapsed (${signal}).`);
+    }, 5000).unref();
+  };
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
 }

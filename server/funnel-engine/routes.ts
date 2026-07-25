@@ -16,6 +16,9 @@ import { buildFreshnessMetadata, logFreshnessTraceability } from "../shared/snap
 import { getActiveRoot, validateRootBinding } from "../shared/strategy-root";
 
 import { resolveAccountId } from "../auth";
+import { resolveOrManualJobId } from "../orchestrator/job-id";
+import { wrapAsEnvelope } from "../orchestrator/contract-registry";
+import { computeStalenessCoefficient } from "../shared/snapshot-trust";
 function safeJsonParse(text: any): any {
   if (!text) return null;
   if (typeof text !== "string") return text;
@@ -26,6 +29,7 @@ export function registerFunnelEngineRoutes(app: Express) {
   app.post("/api/funnel-engine/analyze", async (req: Request, res: Response) => {
     try {
       const { campaignId, offerSnapshotId, awarenessSnapshotId, validationSessionId } = req.body;
+      const __jobId = resolveOrManualJobId(req.body.jobId);
       const accountId = resolveAccountId(req);
 
       if (!campaignId) {
@@ -343,6 +347,7 @@ export function registerFunnelEngineRoutes(app: Express) {
       }
 
       const [saved] = await db.insert(funnelSnapshots).values({
+        jobId: __jobId,
         accountId,
         campaignId,
         offerSnapshotId: activeOfferSnapshot.id,
@@ -386,31 +391,74 @@ export function registerFunnelEngineRoutes(app: Express) {
     try {
       const campaignId = req.query.campaignId as string;
       const accountId = resolveAccountId(req);
+      const requestedRunId = (req.query.runId as string) || null;
 
       if (!campaignId) {
         return res.status(400).json({ error: "campaignId is required" });
       }
 
+      const { resolveRunId } = await import("../orchestrator/run-resolver");
+      let __resolved;
+      try { __resolved = await resolveRunId(campaignId, accountId, requestedRunId); }
+      catch (e: any) { return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false }); }
+      if (!__resolved.runId) return res.json({ exists: false, runId: null, isLatest: true, isStale: false });
+
       const [latest] = await db.select().from(funnelSnapshots)
         .where(and(
           eq(funnelSnapshots.campaignId, campaignId),
           eq(funnelSnapshots.accountId, accountId),
-          eq(funnelSnapshots.engineVersion, ENGINE_VERSION),
+          eq(funnelSnapshots.jobId, __resolved.runId),
         ))
-        .orderBy(desc(funnelSnapshots.createdAt))
         .limit(1);
 
       if (!latest) {
-        return res.json({ exists: false });
+        return res.json({ exists: false, runId: __resolved.runId, isLatest: __resolved.isLatest, isStale: __resolved.isStale });
+      }
+
+      // Phase C3 — emit LiveSnapshotEnvelope. Build output covering the
+      // funnel contract's required paths (primaryFunnel, funnelStrengthScore,
+      // trustPathAnalysis.gaps, confidenceScore).
+      let envelope: ReturnType<typeof wrapAsEnvelope> | null = null;
+      try {
+        const funnelOutput = {
+          primaryFunnel: safeJsonParse(latest.primaryFunnel),
+          alternativeFunnel: safeJsonParse(latest.alternativeFunnel),
+          funnelStrengthScore: latest.funnelStrengthScore,
+          trustPathAnalysis: safeJsonParse(latest.trustPathAnalysis),
+          frictionMap: safeJsonParse(latest.frictionMap),
+          confidenceScore: latest.confidenceScore,
+        };
+        const staleness = computeStalenessCoefficient(latest);
+        envelope = wrapAsEnvelope("funnel", funnelOutput, {
+          snapshotId: latest.id,
+          campaignId,
+          runId: __resolved.runId,
+          currentJobId: __resolved.runId,
+          provenance: {
+            sourceJobId: latest.jobId ?? null,
+            createdAt: latest.createdAt ? new Date(latest.createdAt).toISOString() : null,
+            wasReused: latest.jobId != null && latest.jobId !== __resolved.runId,
+            freshnessClass: staleness.freshnessClass,
+            ageInDays: staleness.ageInDays,
+            schemaVersion: typeof latest.engineVersion === "number" ? latest.engineVersion : null,
+          },
+        });
+      } catch (e: any) {
+        console.log(`[ContractEnvelope] BUILD_FAILED engine=funnel snap=${latest.id} err=${e?.message ?? String(e)}`);
       }
 
       res.json({
         exists: true,
+        runId: __resolved.runId,
+        isLatest: __resolved.isLatest,
+        isStale: __resolved.isStale,
+        completedAt: __resolved.completedAt,
         id: latest.id,
         campaignId: latest.campaignId,
         status: latest.status,
         statusMessage: latest.statusMessage,
         engineVersion: latest.engineVersion,
+        envelope,
         primaryFunnel: safeJsonParse(latest.primaryFunnel),
         alternativeFunnel: safeJsonParse(latest.alternativeFunnel),
         rejectedFunnel: safeJsonParse(latest.rejectedFunnel),

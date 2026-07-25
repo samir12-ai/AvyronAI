@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic",
+  "pathShape": "clean",
+  "capturedAt": "2026-05-17T00:00:00.000Z",
+  "input": { "campaignId": "syn-camp-01", "accountId": "syn-acct-01", "forceRefresh": false },
+  "contextResolved": {
+    "sscPresent": true,
+    "contextKeys": ["mi", "audience", "positioning"],
+    "inputHashes": { "mi": "h-mi-01", "audience": "h-aud-01" }
+  },
+  "engineOutputs": [
+    { "order": 0, "engineId": "mi", "engineName": "Market Intelligence", "tier": "T0", "status": "COMPLETED", "durationMs": 200, "output": { "ok": true } },
+    { "order": 1, "engineId": "audience", "engineName": "Audience", "tier": "T0", "status": "COMPLETED", "durationMs": 180, "output": { "ok": true } },
+    { "order": 2, "engineId": "positioning", "engineName": "Positioning", "tier": "T1", "status": "COMPLETED", "durationMs": 240, "output": { "ok": true } }
+  ],
+  "synthesisInput": { "engineCount": 3, "controlVerdictPresent": true, "ledgerEntryCount": 0, "fingerprint": "fp-01" },
+  "planPersist": { "planId": "plan-01", "source": "primary", "degraded": false },
+  "systemControlVerdict": { "integrityVerdict": "PASS", "executionMode": "FULL", "blockReasons": [] },
+  "budgetLedger": [],
+  "inFlightEvents": [
+    { "jobId": "syn-job-01", "event": "register", "at": 1, "status": "RUNNING" },
+    { "jobId": "syn-job-01", "event": "settle", "at": 800, "status": "COMPLETED" }
+  ],
+  "llmCalls": [],
+  "finalResult": {
+    "jobId": "syn-job-01",
+    "status": "COMPLETED",
+    "completedEngines": ["mi", "audience", "positioning"],
+    "planId": "plan-01",
+    "durationMs": 800,
+    "controlVerdict": { "integrityVerdict": "PASS", "executionMode": "FULL", "blockReasons": [] },
+    "ledgerEntryCount": 0
+  }
+}

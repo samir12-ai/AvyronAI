@@ -118,4 +118,5 @@ export interface IterationResult {
   executionTimeMs: number;
   engineVersion: number;
   strategyAcceptability?: import("../../shared/strategy-acceptability").StrategyAcceptability;
+  commercialIterationStrategy?: import("./iteration-strategy").IterationStrategy | null;
 }

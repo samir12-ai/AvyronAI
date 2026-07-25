@@ -1,0 +1,100 @@
+Hi,
+
+I reviewed the latest audit logs and the picture is now much clearer.
+
+The core issue is no longer the reasoning architecture itself.
+The issue is that the Business Context Layer is still not being fully exercised across the orchestration lifecycle because the synthetic audit pipeline is blocking too early.
+
+The important signal is this:
+
+* Stage 1 BCL is working correctly across all industries
+* The first real BCL-influenced b2b_saas run produced a measurable +5 lift
+* The integrity envelope continues to hold
+* The harness fail-loud protections behaved correctly
+* The remaining bottleneck is orchestration/audit coverage, not BCL correctness
+
+The audit also strongly confirms another important point:
+most of the business understanding we need already exists inside the current engines and snapshots.
+We do NOT need to depend on large amounts of new manual user input.
+
+The next phase should focus on fully operationalizing progressive BCL enrichment across the orchestration lifecycle and then re-running a true intelligence audit once engines 7–10 can actually execute.
+
+Priority work:
+
+1. Fix the synthetic audit bottleneck
+   Right now Offer Engine BLOCKS too early because synthetic Differentiation signals are too weak.
+
+Please audit and improve the synthetic seed coverage so:
+
+* Differentiation can generate meaningful outputs
+* Offer Engine no longer BLOCKS prematurely
+* Engines 7–10 execute consistently during audits
+* Awareness / Funnel / Persuasion / Integrity can actually receive BCL enrichment
+
+Without this, we cannot measure Stage 2 or Stage 3 properly.
+
+2. Continue progressive BCL enrichment
+   Keep the staged architecture:
+
+Stage 1:
+boot-time business identity
+
+Stage 2:
+mid-pipeline enrichment from:
+
+* audience
+* positioning
+* differentiation
+* mechanism
+* offer
+* MI
+
+Stage 3:
+late-stage commercial understanding from:
+
+* funnel
+* persuasion
+* integrity
+* bottlenecks
+* trust gaps
+* friction maps
+
+Unknown fields must remain explicitly unknown.
+No hallucinated business assumptions.
+
+3. Apply BCL progressively across engine reasoning paths
+   Not only awareness.
+   As the orchestration stabilizes, begin propagating BCL context across the engines that benefit from business-aware interpretation.
+
+4. Add stronger observability
+   I want visibility for:
+
+* stage firing counts
+* enrichment provenance
+* injection counts
+* contradiction handling
+* missing-field rates
+* engine-level BCL consumption
+* downstream propagation
+
+5. Re-run the intelligence audit after the orchestration bottleneck is fixed
+   The next audit should specifically measure:
+
+* business-context understanding
+* cross-engine reasoning consistency
+* commercial depth
+* reduction of generic outputs
+* strategy coherence
+* stability under sparse data
+* propagation quality between engines
+
+Important:
+Do not make rollout claims yet.
+The current v4 comparator numbers are harness-invalidated for Stage 2/3 because the orchestration stopped before the BCL-dependent engines executed.
+
+The priority now is:
+make the orchestration complete successfully with progressive BCL enabled so we can finally measure the actual intelligence impact end-to-end.
+
+The direction itself looks correct.
+The audit evidence strongly suggests that “business-first reasoning” is the right architecture.
+Now we need the orchestration and audit harness to fully exercise it across the entire pipeline.

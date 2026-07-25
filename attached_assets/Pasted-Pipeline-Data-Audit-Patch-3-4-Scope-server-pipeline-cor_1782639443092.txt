@@ -1,0 +1,61 @@
+Pipeline — Data Audit Patch 3/4
+Scope: server/pipeline/ — core files (excluding lanes/ and ai-overlay/ which are Patch 4)
+Note: server/user-channel-scraper.ts was pre-audited clean. server/pipeline/run-lock.ts and server/pipeline/runs.ts were audited under Continuity and are considered clean.
+
+Files to audit:
+- server/pipeline/bridge.ts
+- server/pipeline/cluster-producer.ts
+- server/pipeline/cluster-comparator.ts
+- server/pipeline/readers.ts
+- server/pipeline/validate-and-accept.ts
+- server/pipeline/integrity-harness.ts
+- server/pipeline/dna.ts
+- server/pipeline/_tokenize.ts
+- server/pipeline/errors.ts
+- server/pipeline/ids.ts
+- server/pipeline/rejection-log.ts
+- server/pipeline/routes.ts
+- server/pipeline/real-scenario-harness.ts
+- server/pipeline/e2e-system-test.ts
+
+Risk categories to check (in priority order):
+
+1. TENANT ISOLATION — Most critical for pipeline
+   - Does bridge.ts mix user data and competitor data from different accounts at any point?
+   - Are all DB queries in readers.ts scoped by accountId AND campaignId?
+   - Can any pipeline result from account A influence a pipeline run for account B?
+   - Are cluster IDs, DNA IDs, or signal IDs globally unique or per-account?
+
+2. DATA INTEGRITY GATES
+   - Does validate-and-accept.ts actually reject low-quality or incomplete data, or does it pass everything?
+   - Does integrity-harness.ts catch contradictions or corrupted pipeline states before they propagate?
+   - What happens when bridge.ts receives partial data (competitor data missing, user data missing)? Does it degrade gracefully or silently proceed?
+
+3. SILENT FAILURES
+   - Do cluster-producer.ts, cluster-comparator.ts, or dna.ts have bare catch{} blocks that silently discard computation errors?
+   - If readers.ts fails to load a required data source, does it log the failure or return empty silently?
+   - Does rejection-log.ts always write rejection reasons, or can rejections go unrecorded?
+
+4. UNBOUNDED QUERIES
+   - Do readers.ts or routes.ts have any DB queries without .limit()?
+   - Can pipeline runs accumulate unlimited rows in any table?
+
+5. ERROR DISCLOSURE on routes
+   - Do routes.ts catch blocks return err.message directly to the client?
+
+6. AUTH & ROUTE PROTECTION
+   - Are all routes in routes.ts protected by authMiddleware and campaign ownership checks?
+   - Can pipeline results be fetched without authentication?
+
+7. TEST/HARNESS CODE IN PRODUCTION
+   - Do real-scenario-harness.ts or e2e-system-test.ts contain any code that runs in production?
+   - Are they properly gated (e.g. NODE_ENV check, feature flag)?
+
+Please provide:
+A) A per-file verdict table: File | Verdict (CLEAN/NEEDS_FIX/ACCEPTABLE) | Severity | Issue (line) | Category | Notes
+B) A summary table by category
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Can a pipeline run for account A ever read or write data belonging to account B?
+   Q2: Does the bridge handle missing competitor or user data gracefully, or does it silently produce weak output?
+   Q3: Is any harness/test code reachable in production?

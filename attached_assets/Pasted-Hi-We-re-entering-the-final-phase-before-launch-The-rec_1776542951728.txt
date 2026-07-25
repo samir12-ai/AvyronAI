@@ -1,0 +1,125 @@
+Hi,
+
+We’re entering the final phase before launch.
+
+The recent fixes (Offer contract + Strategy Root) are in place, but before moving forward, we need two things completed thoroughly and rigorously:
+
+---
+
+## 1. Follow-up Items (Must Be Closed)
+
+Please review and resolve all remaining follow-ups in depth, including:
+
+- Strategy Root write path hardening (race condition between ACTIVE → SUPERSEDED)
+- Any remaining legacy field usage (painMap / pains / aliases)
+- Consistency across all writers and readers of shared objects
+- Any silent failure paths that still log instead of fail
+
+Do not treat these as minor — verify them properly from code, not assumptions.
+
+---
+
+## 2. Full System Audit (End-to-End)
+
+We need a complete audit of the system before launch.
+
+This is not a bug fix task — this is a deep verification of system integrity.
+
+### A. Core Foundations
+Audit the fundamental layers the system relies on:
+- Data contracts between engines
+- Snapshot integrity (no partial / inconsistent data)
+- Strategy Root correctness and lifecycle
+- Memory / state correctness (no contamination or drift)
+
+---
+
+### B. Engine Alignment (Critical)
+For all engines (MI → Audience → Positioning → Differentiation → Mechanism → Offer → Funnel → etc.):
+
+- Are they solving the same core problem, or drifting?
+- Are outputs aligned to one consistent strategy?
+- Are they operating as one system, or acting independently?
+
+We need confirmation that:
+> the pipeline behaves as a single coordinated system, not disconnected generators.
+
+---
+
+### C. Generation Consistency
+Check every engine’s output:
+
+- Is it grounded in upstream inputs?
+- Or is it generating independently / freely?
+- Any outputs being created outside the intended pipeline logic?
+
+We want to eliminate:
+- orphan generation
+- uncontrolled LLM drift
+- outputs not tied to the strategy root
+
+---
+
+### D. Problem Registration & Resolution Loop
+Audit the full loop:
+
+- Is problem detection working correctly?
+- Are problems actually influencing downstream decisions?
+- Is the system resolving issues or just reporting them?
+
+---
+
+### E. Pipeline Integrity
+Verify:
+
+- No engine bypasses the pipeline
+- No data is generated or consumed outside the defined flow
+- All outputs trace back to a single runId / strategy root
+
+---
+
+### F. Output Quality & Coherence
+Across the system:
+
+- Are all outputs consistent with each other?
+- Do they form one unified strategy?
+- Are there contradictions between engines?
+
+---
+
+### G. Failure Modes
+Identify:
+
+- Any scenario where the system produces output despite broken inputs
+- Any silent degradation paths
+- Any place where invalid data can pass through
+
+---
+
+## 3. Deliverable
+
+We need a structured audit report that includes:
+
+- Clear findings (not general statements)
+- Any inconsistencies or risks
+- Confirmation of what is fully stable
+- Anything that could break during real usage
+
+---
+
+## Goal
+
+Before launch, we need full confidence that:
+
+- The system behaves as a single coordinated intelligence system
+- All engines are aligned
+- No hidden inconsistencies remain
+- No part of the pipeline operates outside the intended design
+
+---
+
+Once this is complete and validated, we’ll proceed toward launch (pending Stripe approval).
+
+Take your time on this — this is the final verification layer.
+
+Thanks.

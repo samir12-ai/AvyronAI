@@ -1,0 +1,165 @@
+Hi Replit Team,
+
+I want to review a specific architectural direction before we add anything new.
+
+After looking at some adjacent system patterns, I think there are a few ideas that are highly relevant for Avyron — but only if they fit our actual codebase and current architecture.
+
+I do **not** want to rebuild concepts that may already exist in the system under different names or spread across multiple modules.
+
+So I want this answered strictly from the current implementation.
+
+---
+
+# Objective
+
+Please audit whether Avyron already has, partially has, or is missing the following layers:
+
+1. a **Cleaning / Lint Layer**
+2. **deterministic validation and enforcement**
+3. **explicit structure enforcement between layers**
+4. optionally, any useful form of **linking / trace structure** between memory, decisions, actions, and outcomes
+
+The most important one right now is the **Cleaning Layer**.
+
+---
+
+# 1. Cleaning / Noise Reduction Layer (Highest Priority)
+
+This is the part I want to understand first.
+
+We are scraping and processing signals from multiple sources, and I want to know:
+
+### Do we currently have a real cleaning layer that removes or normalizes noisy input before it reaches intelligence / decisions?
+
+Please check for things like:
+
+* duplicate or near-duplicate extracted signals
+* malformed scraped text
+* noisy captions / garbage fragments
+* low-quality review text
+* comment spam / junk patterns
+* repeated boilerplate from websites
+* extraction artifacts that should not become signals or memory
+
+I know we already have some filtering in comments and signal quality gating, but I want a clear answer:
+
+### Is there a system-wide cleaning layer, or only local filters in a few modules?
+
+If it is partial, please identify:
+
+* what is already cleaned
+* what is not cleaned
+* where noise can still leak downstream into:
+
+  * signals
+  * decisions
+  * memory
+
+If missing, I want your recommendation for the cleanest way to implement it **within the current architecture**, not as a parallel system.
+
+---
+
+# 2. Deterministic Validation & Enforcement
+
+Please confirm what parts of the current system are already enforced deterministically rather than left to prompts or soft behavior.
+
+Examples I want you to audit:
+
+* policy gates
+* confidence thresholds
+* memory write blocking
+* decision enforcement
+* fallback visibility
+* attribution rules
+* outcome validation
+
+Please answer clearly:
+
+### Which validation rules are already hard-coded and deterministic?
+
+### Which ones still depend on loose downstream interpretation?
+
+---
+
+# 3. Structure Enforcement Between Layers
+
+I want to confirm whether the system is truly enforcing the intended layer boundaries:
+
+data → signals → decisions → actions → outcomes → memory
+
+Please audit whether there are still any weak spots where:
+
+* signals can leak directly into actions
+* system state can be mistaken for learned truth
+* operational state can contaminate learning state
+* raw extracted artifacts can bypass the intended layer path
+
+This is very important because historically this kind of cross-layer mixing has caused major confusion.
+
+---
+
+# 4. Linking / Trace Structure
+
+This is a lower priority than cleaning, but still important.
+
+Please confirm whether the system already has enough structured linkage between:
+
+* decisions
+* actions
+* outcomes
+* memory
+
+I do **not** mean a full knowledge graph.
+
+I mean:
+
+* enough structured linkage to preserve traceability
+* enough explicit references so the system stays organized
+* enough separation so one layer does not silently collapse into another
+
+If some of this already exists, please point to the exact files/tables/functions.
+
+---
+
+# 5. Key Questions
+
+Please answer these directly from the code:
+
+1. Do we already have a meaningful Cleaning Layer, or only scattered filters?
+2. If partial, where exactly are the gaps?
+3. What noise currently has the highest chance of leaking into memory or decisions?
+4. Are there any existing modules that already behave like a lint / cleaning layer under a different name?
+5. What is the best way to add a proper cleaning layer without duplicating existing logic?
+6. Which parts of deterministic enforcement are already strong, and which parts still need tightening?
+7. Are there any remaining structural mixing risks between operational state, decisions, and memory?
+
+---
+
+# Expected Response
+
+Please structure the answer as:
+
+1. What already exists
+2. What is partial
+3. What is missing
+4. Exact file/function references
+5. Recommended implementation approach inside the current architecture
+
+---
+
+# Final Note
+
+The purpose here is not to add complexity.
+
+It is to make sure that:
+
+* noisy input is cleaned before it becomes intelligence
+* deterministic rules are used where they should be
+* structure is preserved across the full system
+* we do not rebuild what we already have
+
+The cleaning layer is especially important, so please give that section extra attention.
+
+Thanks,
+Samir
+Avyron AI

@@ -1,0 +1,89 @@
+Infrastructure Audit — Patch 1/5
+Scope: Boot Server + Observability + Replit Integrations (23 files)
+Pre-audited clean (exclude): server/index.ts, server/ai-client.ts, 
+server/log-redact.ts, server/startup-artifact-guard.ts, server/env-validator.ts, 
+server/migrations/runner.ts
+
+Files to audit:
+
+GROUP 1 — Boot Server (6 files):
+- server/bootstrap.ts
+- server/db.ts
+- server/logger.ts
+- server/trace-context.ts
+- server/feature-flags.ts
+- server/storage.ts
+
+GROUP 2 — Observability (6 files):
+- server/observability/otel.ts
+- server/observability/sentry.ts
+- server/meta-metrics.ts
+- server/meta-status.ts
+- server/meta-token-manager.ts
+- server/meta-error-classifier.ts
+
+GROUP 3 — Replit Integrations (11 files):
+- server/replit_integrations/chat/index.ts
+- server/replit_integrations/chat/routes.ts
+- server/replit_integrations/chat/storage.ts
+- server/replit_integrations/audio/client.ts
+- server/replit_integrations/audio/index.ts
+- server/replit_integrations/audio/routes.ts
+- server/replit_integrations/image/client.ts
+- server/replit_integrations/image/index.ts
+- server/replit_integrations/image/routes.ts
+- server/replit_integrations/batch/index.ts
+- server/replit_integrations/batch/utils.ts
+
+Risk categories to check:
+
+1. SECRET & CREDENTIAL HANDLING
+   - Does db.ts construct the DB connection string safely? 
+     Are credentials logged anywhere during connection?
+   - Does storage.ts (server-side) handle any credentials or API keys?
+   - Do Replit integrations (chat, audio, image) log API keys or tokens?
+   - Does meta-token-manager.ts store or log Meta tokens in plaintext?
+
+2. ERROR DISCLOSURE
+   - Do replit_integrations routes return raw err.message to the client?
+   - Does meta-error-classifier.ts leak internal error details?
+
+3. AUTH ON REPLIT INTEGRATION ROUTES
+   - Do chat/routes.ts, audio/routes.ts, image/routes.ts require 
+     authentication before processing requests?
+   - Can unauthenticated users trigger AI generation (audio, image, chat)?
+
+4. BOOT SAFETY
+   - Does bootstrap.ts fail loudly if critical dependencies are missing?
+   - Does db.ts handle connection failures gracefully without crashing 
+     the entire server silently?
+   - Does feature-flags.ts have safe defaults if the flag store is unavailable?
+     (fail-open vs fail-closed per flag type)
+
+5. OBSERVABILITY SAFETY
+   - Does logger.ts redact sensitive fields before writing to logs?
+     (tokens, passwords, emails — cross-check with log-redact.ts)
+   - Does sentry.ts scrub PII before sending error reports to Sentry?
+   - Does otel.ts include any sensitive request data in traces?
+   - Does meta-token-manager.ts ever include tokens in metric labels or traces?
+
+6. RATE LIMITING on Replit Integration routes
+   - Do chat/routes.ts, audio/routes.ts, image/routes.ts have rate limiting?
+   - Can a single user trigger unlimited AI generation requests?
+
+7. SILENT FAILURES in Replit Integrations
+   - Do integration clients (audio/client.ts, image/client.ts) have bare 
+     catch{} blocks that silently discard errors?
+   - If an integration is unavailable, does it fail gracefully or hang?
+
+Please provide:
+A) Per-file verdict table grouped by the 3 groups
+B) Summary by category
+C) Top fixes prioritized by severity
+D) Explicit answers to:
+   Q1: Can unauthenticated users trigger audio/image/chat AI generation 
+       via Replit integration routes?
+   Q2: Does the observability stack (Sentry, OTel, logger) accidentally 
+       capture or transmit sensitive user data?
+   Q3: Does db.ts handle connection failures safely, or can a DB outage 
+       cause silent corruption?

@@ -10,7 +10,8 @@ import {
   audienceSnapshots,
   positioningSnapshots,
 } from "@shared/schema";
-import { eq, and, sql, ne } from "drizzle-orm";
+import { eq, and, sql, ne, inArray } from "drizzle-orm";
+import { createAttributionEntries } from "../decision-attribution";
 import { logAudit } from "../audit";
 import { aiChat } from "../ai-client";
 import {
@@ -63,9 +64,23 @@ async function transitionState(planId: string, from: string, to: string, account
     return false;
   }
 
-  await db.update(strategicPlans)
-    .set({ executionStatus: to, updatedAt: new Date() })
-    .where(eq(strategicPlans.id, planId));
+  // Seal #10 / Task #28 / F8.3 — CAS-style transition: include the source
+  // state in the WHERE clause so a concurrent writer that already advanced
+  // the plan past `from` is detected (no rows updated). The pre-existing
+  // atomic-lock at L320 already does this for ACTIVATING; we extend the
+  // pattern to all subsequent transitions.
+  const updated = await db.update(strategicPlans)
+    .set({ executionStatus: to, updatedAt: new Date(), version: sql`${strategicPlans.version} + 1` })
+    .where(and(
+      eq(strategicPlans.id, planId),
+      eq(strategicPlans.executionStatus, from),
+    ))
+    .returning({ id: strategicPlans.id });
+
+  if (updated.length === 0) {
+    console.warn(`[ExecutionActivation] CONCURRENT_TRANSITION_BLOCKED | plan=${planId} | from=${from} → to=${to} (another writer changed state first)`);
+    return false;
+  }
 
   await logAudit(accountId, "EXECUTION_STATE_TRANSITION", {
     details: { planId, from, to },
@@ -160,7 +175,7 @@ function generateCalendarSlots(
   accountId: string,
   work: any,
   startDate: Date,
-  periodDays: number
+  periodDays: number,
 ): any[] {
   const slots: any[] = [];
   const contentQueue: { type: string; count: number }[] = [];
@@ -211,7 +226,7 @@ async function generateCreativeForEntry(
   planContext: string,
 ): Promise<{ caption: string; creativeBrief: string; ctaCopy: string }> {
   const response = await aiChat({
-    model: "gpt-4o-mini",
+    model: "gpt-4.1-mini",
     messages: [
       {
         role: "system",
@@ -316,11 +331,20 @@ export async function activateExecution(planId: string): Promise<ActivationResul
     };
   }
 
+  // F8.3 — CAS: bind to plan.version + previousState so a concurrent
+  // activator that already advanced past `previousState` is detected
+  // (zero rows updated).
+  const planRow = await db.select({ version: strategicPlans.version })
+    .from(strategicPlans)
+    .where(eq(strategicPlans.id, planId))
+    .limit(1);
+  const planVersion = planRow[0]?.version ?? 1;
   const lockResult = await db.update(strategicPlans)
-    .set({ executionStatus: EXECUTION_STATES.ACTIVATING, updatedAt: new Date() })
+    .set({ executionStatus: EXECUTION_STATES.ACTIVATING, updatedAt: new Date(), version: sql`${strategicPlans.version} + 1` })
     .where(and(
       eq(strategicPlans.id, planId),
       eq(strategicPlans.executionStatus, previousState),
+      eq(strategicPlans.version, planVersion),
     ))
     .returning({ id: strategicPlans.id });
 
@@ -455,9 +479,26 @@ export async function activateExecution(planId: string): Promise<ActivationResul
       const slots = generateCalendarSlots(planId, plan.campaignId, plan.accountId, totals, new Date(), periodDays);
 
       if (slots.length > 0) {
-        await db.insert(calendarEntries).values(slots);
-        calendarEntriesGenerated = slots.length;
-        activationLog.push(`CALENDAR: Generated ${slots.length} calendar slots`);
+        const inserted = await db.insert(calendarEntries).values(slots).returning({ id: calendarEntries.id, contentType: calendarEntries.contentType });
+        calendarEntriesGenerated = inserted.length;
+
+        const byType = new Map<string, string[]>();
+        for (const entry of inserted) {
+          const t = entry.contentType.toUpperCase();
+          if (!byType.has(t)) byType.set(t, []);
+          byType.get(t)!.push(entry.id);
+        }
+
+        for (const [contentType, entryIds] of byType) {
+          const attrResult = await createAttributionEntries(entryIds, contentType, plan.campaignId, plan.accountId);
+          if (attrResult.primaryDecisionId) {
+            await db.update(calendarEntries)
+              .set({ sourceDecisionId: attrResult.primaryDecisionId })
+              .where(inArray(calendarEntries.id, entryIds));
+          }
+        }
+
+        activationLog.push(`CALENDAR: Generated ${inserted.length} calendar slots with weighted attribution`);
       } else {
         activationLog.push("CALENDAR_WARNING: Zero slots generated — distribution may be empty");
       }
@@ -572,6 +613,7 @@ export async function activateExecution(planId: string): Promise<ActivationResul
     const contentQueueItems: ContentQueueItem[] = finalEntries.map(e => ({
       id: e.id,
       contentType: e.contentType || "unknown",
+      // eslint-disable-next-line semantic/no-semantic-fallback -- D1-safe: `status` here is the calendar-entry workflow status (DRAFT/SCHEDULED/PUBLISHED), a content-state field with "DRAFT" as the schema default for new rows. NOT a verdict-shape semantic substitution.
       status: e.status || "DRAFT",
       scheduledDate: e.scheduledDate,
       scheduledTime: e.scheduledTime,
@@ -688,6 +730,7 @@ export async function getActivationStatus(planId: string): Promise<ActivationSta
   const contentQueueItems: ContentQueueItem[] = entries.map(e => ({
     id: e.id,
     contentType: e.contentType || "unknown",
+    // eslint-disable-next-line semantic/no-semantic-fallback -- D1-safe: `status` here is the calendar-entry workflow status (DRAFT/SCHEDULED/PUBLISHED), a content-state field with "DRAFT" as the schema default for new rows. NOT a verdict-shape semantic substitution.
     status: e.status || "DRAFT",
     scheduledDate: e.scheduledDate,
     scheduledTime: e.scheduledTime,

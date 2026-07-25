@@ -1,0 +1,128 @@
+Hi Replit Team,
+
+Based on the architecture audit, I want to move forward immediately with the following items.
+
+These are now priority fixes before launch because they directly affect signal cleanliness, learning correctness, and protection against contaminated attribution.
+
+---
+
+# Priority Items to Implement
+
+## 1. Cleaning Layer (Required)
+
+This is the highest priority.
+
+We need a unified, shared cleaning layer for raw text inputs before they reach semantic extraction or decision logic.
+
+Please implement a centralized text sanitization layer and wire it into the existing architecture, not as a separate parallel system.
+
+### Required coverage:
+
+* TikTok captions
+* Instagram captions
+* Google Reviews text
+* Website extracted blocks
+
+### Goals:
+
+* strip hashtag walls
+* strip promo boilerplate
+* strip repeated emoji floods
+* remove obvious platform artifacts
+* filter generic/template review text
+* remove website boilerplate such as cookie notices, nav/footer/legal clutter
+
+### Important:
+
+This must happen before signal extraction, not after.
+
+Please reuse and consolidate existing logic where possible:
+
+* comment spam filtering
+* website clean text checks
+* normalization / dedup helpers
+
+I do not want duplicated cleaning logic scattered across modules.
+
+---
+
+## 2. Fallback Isolation (Required)
+
+We need to isolate fallback and degraded plans from the normal learning and attribution pipeline.
+
+Right now, a fallback or degraded plan can still move through execution and potentially contaminate learning if it performs well for unrelated reasons.
+
+### Required:
+
+* add a structured field such as:
+
+  * planSource
+  * and/or degraded boolean
+
+### Must distinguish between:
+
+* normal decision-driven plans
+* deterministic fallback plans
+* degraded plans
+
+### Required behavior:
+
+* fallback/degraded plans must be clearly marked in structured form, not only in text
+* they must not be treated the same as validated plans
+* they must not create misleading attribution or memory reinforcement as if they were decision-driven outputs
+
+If they are allowed to execute, they must remain isolated from normal learning logic unless explicitly intended.
+
+---
+
+## 3. Post-Synthesis Verification (Also implement)
+
+I want this included as well.
+
+We currently rely on prompt instructions telling the model not to rephrase or substitute locked decisions, but I want a deterministic verification step after synthesis.
+
+### Required:
+
+* verify that locked decisions / required validated constraints are actually preserved in the final synthesized plan
+* if not preserved:
+
+  * mark the plan accordingly
+  * degrade or block it appropriately
+  * log the failure explicitly
+
+This should not rely only on prompt obedience.
+
+---
+
+# Expected Output
+
+Please implement all three items and return with:
+
+1. exact files changed
+2. what was added in each file
+3. how the cleaning layer was integrated
+4. how fallback/degraded plans are isolated
+5. how synthesis verification works
+6. what was tested end-to-end
+7. any edge cases or limitations that still remain
+
+---
+
+# Final Note
+
+These changes are important because:
+
+* the system is now structurally disciplined
+* but input cleanliness and fallback contamination are still real risks
+
+We need to make sure that:
+
+* noisy raw input does not become intelligence
+* degraded/fallback behavior does not become learning truth
+* synthesized output is deterministically checked, not only trusted
+
+Please go ahead and implement all three.
+
+Thanks,
+Samir
+Avyron AI

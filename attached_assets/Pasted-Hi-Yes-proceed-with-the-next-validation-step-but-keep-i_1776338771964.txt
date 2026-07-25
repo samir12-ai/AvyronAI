@@ -1,0 +1,95 @@
+Hi,
+
+Yes — proceed with the next validation step, but keep it focused.
+
+I want a **stress-test validation** of the current system logic using these two campaigns:
+
+* **MarketMindAI**
+* **SWA Media**
+
+The purpose is to confirm that the system is now behaving correctly across more than one real campaign before we move into any new architecture work.
+
+---
+
+## Objective
+
+Validate that the current system:
+
+* reasons consistently across engines
+* propagates shared meaning correctly
+* distinguishes weak data from weak engine logic correctly
+* blocks only when it should
+* does not generate false contradictions or false blocks
+
+---
+
+## Required Validation Scenarios
+
+Run both campaigns through the current full pipeline and test for:
+
+### 1. Weak Data, Strong Logic
+
+Confirm the system continues when data confidence is weak but engine logic is still sound.
+
+### 2. Strong Data, Weak Logic
+
+Confirm the system retries / halts when engine logic is weak, even if data is strong.
+
+### 3. Contradictory Signal Scenario
+
+Confirm contradictions are detected, traced, and handled correctly through SSC and Problem Registry.
+
+### 4. Structurally Broken Scenario
+
+Confirm the system blocks when a critical problem cannot be resolved.
+
+### 5. Strong / Healthy Scenario
+
+Confirm the system can complete cleanly when the logic is valid and aligned.
+
+---
+
+## Evidence Required
+
+For **each campaign** provide:
+
+* full engine-by-engine result
+* SSC trace summary
+* confidence chain summary
+* problem registry lifecycle
+* gate triggers and retry behavior
+* final verdict
+* exact block reasons if blocked
+* explanation of whether the block was valid or false
+
+---
+
+## Important
+
+Do not modify the code during this validation step.
+
+This is not another build phase.
+This is a proof phase.
+
+We are validating whether the current system logic is truly stable before moving to anything else.
+
+---
+
+## What I Need At The End
+
+I want a clear comparison between:
+
+* **MarketMindAI**
+* **SWA Media**
+
+And I want the final conclusion to answer:
+
+1. Is the system now logically consistent across both campaigns?
+2. Are blocks happening only for valid reasons?
+3. Is weak data being tolerated correctly?
+4. Is weak engine logic being stopped correctly?
+5. Are we ready to move forward, or is there still instability?
+
+Proceed with this validation only.
+
+Thanks.

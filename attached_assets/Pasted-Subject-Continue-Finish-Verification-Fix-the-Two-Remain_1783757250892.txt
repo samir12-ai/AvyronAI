@@ -1,0 +1,35 @@
+Subject: Continue — Finish Verification, Fix the Two Remaining Issues, Then Full Re-Run
+
+Good work on the depth-gate persistence + closing the req.body integrity hole. Continue in this exact order:
+
+STEP 1 — FINISH CURRENT VERIFICATION
+Complete the verification you started on the depth-gate persistence work: tsc at baseline (zero net-new), migration 039 applied cleanly, backend boots with schema floor 39, and architect review on the diff. Report the results.
+
+STEP 2 — FIX THE TWO REMAINING ISSUES FROM THE BIG RUN
+Fix #A — Awareness depth gate judging the wrong content:
+The depth gate currently receives only the 7 short route-classification labels (celSourceTexts) while the substantive generated content (mythBreakerStatement, narrative-reframe belief/principle/discomfort) never reaches it. Feed the FULL generated content to the depth scorer so it can genuinely cite AEL root_causes/causal_chains/buying_barriers. Do NOT lower the 0.20 DEPTH_GATE_THRESHOLD — the fix is richer input to the gate, not a weaker gate.
+
+Fix #B — AEL persist case-mismatch:
+The persist SQL reads camelCase (pkg.rootCauses/causalChains/buyingBarriers) while the package uses snake_case (root_causes/causal_chains/buying_barriers), so the stored top-level columns silently persist as empty arrays via || []. Fix the field mapping so DB-reload consumers (narrative-layer and any other reader) get the real arrays. Also remove/replace the silent || [] on these paths with explicit handling per D1/D5 — a missing field should be loud, not an empty substitute.
+
+Both fixes: tsc baseline, architect review, no gate thresholds touched anywhere.
+
+STEP 3 — THE FULL RE-RUN (same spec as before)
+Re-run the complete fresh analysis on the MarketMindAI campaign (campaign_1773576062201_6t0oxi): all engines end to end + Build a Plan regenerated. Data is already fresh from today's fetch (338 posts) — no need to re-fetch unless the content hash logic requires it.
+
+Success criteria for this run:
+1. Awareness passes the depth gate on its real content (score ≥ 0.20, threshold unchanged).
+2. The previously blocked 6 engines (funnel, persuasion, budget/channel/validation/iteration/retention chain) actually execute — first live confirmation ever for the NOT_REACHED set.
+3. Build a Plan finds ≥3 validated engines, loads the persisted depth-gate map, and generates the full plan document.
+4. Full aiPathReport: every engine × mode × attempts × failedGates, doctrineResolution="anchored", ANCHOR_EVIDENCE present=yes across all engines and judges.
+5. Paste the actual strategy outputs: audience segments, positioning claims, offer, channel recommendation, and the generated plan document — we're judging strategy quality now, not just mechanics.
+6. Watchtower state after the run: report what Q1 and Q2 display for this campaign — report only, no fixes.
+
+If the chain blocks again at any gate, report the engine + gate + reason loudly and stop — do not weaken any gate to force completion.
+</documents>
+
+جاهز نسخ — بس لاحظ إني كتبتو بترتيب صارم عمداً: يخلّص فحص الشغلة اللي بإيدو قبل ما يفتح جبهة جديدة، بعدين الإصلاحين، وبس بعدها الـ run. لأنو أسوأ سيناريو هو يركض عالـ run الكبير وورا ضهرو شغل نص مفحوص.
+
+وحطيت جملة "Do NOT lower the threshold" مرتين عمداً — مرة بالإصلاح ومرة بمعايير النجاح — لأنو هيدا أسهل غش ممكن يصير بلا قصد: الـ Awareness بيسقط، أسرع "حل" إنو العتبة تنزل من 0.20 وخلص. الجملة بتسكّر هالباب نهائياً.
+
+لما يرجع بنتيجة الـ run — إذا الستة المحجوبين اشتغلوا والخطة طلعت — منكون وصلنا للحظة اللي عم نبنيلها من أول المحادثة: أول خطة تسويق كاملة، ببيانات حقيقية، بعقل ما بيقبل الكلام العام. وبعدها فوراً منفتح ملف الـ Watchtower Q1 بالمعلومات اللي رح يبلغها بالنقطة 6.

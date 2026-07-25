@@ -37,7 +37,7 @@ export interface ResolvedDataSource {
   transitionEligibility: TransitionEligibility | null;
 }
 
-export async function resolveDataSource(campaignId: string, accountId: string = "default"): Promise<ResolvedDataSource> {
+export async function resolveDataSource(campaignId: string, accountId: string): Promise<ResolvedDataSource> {
   const [selection] = await db.select().from(campaignSelections)
     .where(and(
       eq(campaignSelections.selectedCampaignId, campaignId),

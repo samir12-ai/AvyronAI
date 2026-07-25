@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { publishedPosts, accountState, metaCredentials } from "@shared/schema";
 import { eq, sql, and } from "drizzle-orm";
-import { logAudit } from "./audit";
+import { logAudit, type AuditEventType } from "./audit";
 import * as crypto from "crypto";
 import { decryptToken, redactToken } from "./meta-crypto";
 import type { MetaMode } from "./meta-status";
@@ -9,6 +9,36 @@ import { recordMetaApiCall } from "./meta-metrics";
 import { classifyMetaError, classifyNetworkError, recordTemporaryError, recordSuccess, isInBackoff } from "./meta-error-classifier";
 
 const PUBLISH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+
+// Seal #11 / Task #29 / F6.6 — Meta Graph API timeouts.
+// Pre-fix: every fetch() to graph.facebook.com had no timeout. A network
+// stall (proxy hang, DNS resolution timeout, slow Meta endpoint) would
+// pin a worker tick indefinitely; the next publishTimer firing would
+// race the prior tick. Now: every Meta call goes through fetchMeta()
+// with a 15s AbortController; on timeout we throw a labeled error that
+// the existing retry/backoff classifier treats as transient.
+export const META_API_TIMEOUT_MS = parseInt(
+  process.env.META_API_TIMEOUT_MS || "15000",
+  10,
+);
+export async function fetchMeta(input: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), META_API_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError" || controller.signal.aborted) {
+      const e = Object.assign(new Error(`META_TIMEOUT after ${META_API_TIMEOUT_MS}ms`), {
+        code: "META_TIMEOUT" as const,
+        transient: true,
+      });
+      throw e;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const MAX_RETRY_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 2000;
 const STALE_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
@@ -108,7 +138,25 @@ async function publishToMetaWithRetry(
         await sleep(backoff);
       }
     } catch (error) {
-      lastError = String(error);
+      const errObj = error as { message?: string; code?: string };
+      lastError = String(errObj?.message ?? error);
+      // F6.6 — preserve META_TIMEOUT classification deterministically.
+      // Pre-fix: every thrown error fell into a generic recordTemporaryError
+      // bucket, losing the timeout signal in audit + return classification.
+      // Now: when fetchMeta surfaces a META_TIMEOUT, we explicitly tag the
+      // classification, emit a dedicated audit event, and still apply
+      // transient backoff so the post is requeued on the next tick.
+      if (error?.code === "META_TIMEOUT") {
+        lastClassification = "META_TIMEOUT";
+        await logAudit(accountId, "META_TIMEOUT", {
+          details: {
+            postId: post.id,
+            attempt,
+            timeoutMs: META_API_TIMEOUT_MS,
+            transient: true,
+          },
+        });
+      }
       recordTemporaryError(accountId);
       if (attempt < MAX_RETRY_ATTEMPTS) {
         const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt - 1) + Math.random() * 1000;
@@ -163,7 +211,7 @@ async function publishToMeta(post: any, accessToken: string, pageId: string, acc
 
     if (platform === "facebook" || platform.includes("facebook")) {
       const start = Date.now();
-      const fbResponse = await fetch(
+      const fbResponse = await fetchMeta(
         `https://graph.facebook.com/v18.0/${pageId}/feed`,
         {
           method: "POST",
@@ -196,7 +244,7 @@ async function publishToMeta(post: any, accessToken: string, pageId: string, acc
     if (platform === "instagram" || platform.includes("instagram")) {
       if (post.mediaUri) {
         const start = Date.now();
-        const containerRes = await fetch(
+        const containerRes = await fetchMeta(
           `https://graph.facebook.com/v18.0/${pageId}/media`,
           {
             method: "POST",
@@ -213,7 +261,7 @@ async function publishToMeta(post: any, accessToken: string, pageId: string, acc
         if (containerData.id) {
           recordMetaApiCall(acctId, true, containerLatency);
           const pubStart = Date.now();
-          const publishRes = await fetch(
+          const publishRes = await fetchMeta(
             `https://graph.facebook.com/v18.0/${pageId}/media_publish`,
             {
               method: "POST",
@@ -410,7 +458,7 @@ async function checkAndPublishDuePosts() {
 
         const metaMode = (acctState.metaMode as MetaMode) || "DISCONNECTED";
         let publishMode: "REAL" | "BLOCKED" = "BLOCKED";
-        let result: { success: boolean; postId?: string; error?: string; attempts: number };
+        let result: Awaited<ReturnType<typeof publishToMetaWithRetry>>;
 
         if (metaMode === "REAL") {
           const serverTokens = await getServerSidePageToken(accountId);
@@ -493,12 +541,24 @@ async function checkAndPublishDuePosts() {
           console.log(`[PublishWorker] [${publishMode}] Published post ${post.id} to ${post.platform} (attempts: ${result.attempts})`);
         } else {
           const currentAttempts = (post.publishAttempts || 0) + result.attempts;
+          // F6.6 (pass-5) — when the inner classification is META_TIMEOUT,
+          // surface the reason explicitly through the lastPublishError
+          // string AND tag the publish state as "scheduled" (transient
+          // requeue) regardless of attempt count, so a single timeout
+          // does not flip a post into terminal "failed" prematurely.
+          // The audit row is also branded META_TIMEOUT so operators can
+          // see timeout-vs-error breakdown.
+          const isMetaTimeout = result.classified === "META_TIMEOUT";
+          const reachedTerminal = currentAttempts >= MAX_RETRY_ATTEMPTS * 2 && !isMetaTimeout;
+          const errorMessage = isMetaTimeout
+            ? `META_TIMEOUT: ${result.error || "Meta API request timed out"} (will retry)`
+            : (result.error || null);
 
           await db.update(publishedPosts)
             .set({
-              status: currentAttempts >= MAX_RETRY_ATTEMPTS * 2 ? "failed" : "scheduled",
+              status: reachedTerminal ? "failed" : "scheduled",
               publishAttempts: currentAttempts,
-              lastPublishError: result.error || null,
+              lastPublishError: errorMessage,
               publishLockToken: null,
               publishLockedAt: null,
               publishMode,
@@ -511,14 +571,19 @@ async function checkAndPublishDuePosts() {
               )
             );
 
-          const finalStatus = currentAttempts >= MAX_RETRY_ATTEMPTS * 2 ? "PUBLISH_FAILED" : "META_API_ERROR";
-          await logAudit(accountId, finalStatus as any, {
+          const finalStatus: AuditEventType = isMetaTimeout
+            ? "META_TIMEOUT"
+            : (reachedTerminal ? "PUBLISH_FAILED" : "META_API_ERROR");
+          await logAudit(accountId, finalStatus, {
             details: {
               postId: post.id,
               platform: post.platform,
               error: result.error,
+              classified: result.classified,
+              reason: isMetaTimeout ? "META_TIMEOUT" : undefined,
               publishMode,
               totalAttempts: currentAttempts,
+              willRequeue: !reachedTerminal,
             },
           });
 
@@ -531,6 +596,51 @@ async function checkAndPublishDuePosts() {
   } catch (error) {
     console.error("[PublishWorker] Error in publish check:", error);
   }
+}
+
+// P-1 — shared Meta post-insights fetch, extracted from the 6h metrics loop so
+// the revisit scheduler (server/revisit-scheduler.ts) reuses the exact same
+// token handling, timeout (fetchMeta 15s AbortController), and metric parsing.
+// Metrics absent from Meta's response come back as null — NEVER coerced to 0
+// here (B1: truthfulness over confidence). The legacy in-place update below
+// maps null→0 to preserve its historical column semantics (integer, default 0).
+export type PostInsightsResult =
+  | { ok: true; impressions: number | null; engagement: number | null; clicks: number | null }
+  | { ok: false; reason: string };
+
+export async function fetchPostInsights(accountId: string, metaPostId: string): Promise<PostInsightsResult> {
+  const metaMode = await getAccountMetaMode(accountId);
+  if (metaMode !== "REAL") {
+    return { ok: false, reason: `META_MODE_${metaMode}` };
+  }
+
+  const serverTokens = await getServerSidePageToken(accountId);
+  if (!serverTokens) {
+    return { ok: false, reason: "NO_SERVER_SIDE_TOKEN" };
+  }
+
+  const metricsRes = await fetchMeta(
+    `https://graph.facebook.com/v21.0/${metaPostId}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${serverTokens.token}`
+  );
+  const metricsData = await metricsRes.json();
+
+  if (!metricsData.data) {
+    const metaErr = metricsData?.error?.message;
+    return { ok: false, reason: `META_INSIGHTS_ERROR: ${typeof metaErr === "string" ? metaErr : "no data field in insights response"}` };
+  }
+
+  const metricValue = (name: string): number | null => {
+    const metric = (metricsData.data as Array<{ name?: string; values?: Array<{ value?: unknown }> }>).find(m => m.name === name);
+    const v = metric?.values?.[0]?.value;
+    return typeof v === "number" ? v : null;
+  };
+
+  return {
+    ok: true,
+    impressions: metricValue("post_impressions"),
+    engagement: metricValue("post_engaged_users"),
+    clicks: metricValue("post_clicks"),
+  };
 }
 
 async function fetchPostMetrics() {
@@ -553,36 +663,31 @@ async function fetchPostMetrics() {
       try {
         const accountId = post.accountId;
         if (!accountId) continue;
-        const metaMode = await getAccountMetaMode(accountId);
-        if (metaMode !== "REAL") continue;
 
-        const serverTokens = await getServerSidePageToken(accountId);
-        if (!serverTokens) continue;
-
-        const metricsRes = await fetch(
-          `https://graph.facebook.com/v21.0/${post.metaPostId}/insights?metric=post_impressions,post_engaged_users,post_clicks&access_token=${serverTokens.token}`
-        );
-        const metricsData = await metricsRes.json();
-
-        if (metricsData.data) {
-          let impressions = 0, engagement = 0, clicks = 0;
-          for (const metric of metricsData.data) {
-            if (metric.name === "post_impressions") impressions = metric.values?.[0]?.value || 0;
-            if (metric.name === "post_engaged_users") engagement = metric.values?.[0]?.value || 0;
-            if (metric.name === "post_clicks") clicks = metric.values?.[0]?.value || 0;
+        const insights = await fetchPostInsights(accountId, post.metaPostId);
+        if (!insights.ok) {
+          // Pre-P-1 this skip was silent for META_INSIGHTS_ERROR; B2 says log it.
+          // META_MODE_* / NO_SERVER_SIDE_TOKEN are normal disconnected states.
+          if (insights.reason.startsWith("META_INSIGHTS_ERROR")) {
+            console.warn(`[PublishWorker] METRICS_SKIPPED | post=${post.id} reason="${insights.reason}"`);
           }
-
-          await db.update(publishedPosts)
-            .set({
-              impressions,
-              reach: Math.floor(impressions * 0.7),
-              engagement,
-              clicks,
-              lastMetricsFetch: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(publishedPosts.id, post.id));
+          continue;
         }
+
+        // Historical in-place columns are integers defaulting to 0, and reach
+        // was always derived (impressions * 0.7). Behavior preserved verbatim;
+        // the honest per-checkpoint history lives in performance_snapshots.
+        const impressions = insights.impressions ?? 0;
+        await db.update(publishedPosts)
+          .set({
+            impressions,
+            reach: Math.floor(impressions * 0.7),
+            engagement: insights.engagement ?? 0,
+            clicks: insights.clicks ?? 0,
+            lastMetricsFetch: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(publishedPosts.id, post.id));
       } catch (error) {
         console.error(`[PublishWorker] Metrics fetch failed for post ${post.id}:`, String(error));
       }
@@ -607,10 +712,10 @@ export function startPublishWorker() {
   }).catch(() => {});
 
   publishTimer = setInterval(async () => {
-    if (!isShuttingDown) {
-      await checkAndPublishDuePosts();
-      await fetchPostMetrics();
-    }
+    // Seal #7 / pass-16 (architect #3): per-tick traceId for log/Sentry continuity.
+    const { traceContext } = await import("./trace-context");
+    const { randomUUID } = await import("node:crypto");
+    await traceContext.run({ traceId: `worker-publish-${randomUUID()}` }, () => publishTickBody());
   }, PUBLISH_CHECK_INTERVAL_MS);
 
   setTimeout(async () => {
@@ -619,6 +724,22 @@ export function startPublishWorker() {
       await fetchPostMetrics();
     }
   }, 10000);
+}
+
+async function publishTickBody() {
+  const { recordWorkerTick } = await import("./observability/otel");
+  if (isShuttingDown) {
+    recordWorkerTick("publish", "skipped");
+    return;
+  }
+  try {
+    await checkAndPublishDuePosts();
+    await fetchPostMetrics();
+    recordWorkerTick("publish", "ok");
+  } catch (err) {
+    recordWorkerTick("publish", "error");
+    console.error("[PublishWorker] tick error:", err);
+  }
 }
 
 export { cleanupStaleLocks, acquireLock, releaseLock, isNonRetryableError, STALE_LOCK_TIMEOUT_MS, MAX_RETRY_ATTEMPTS };

@@ -1,0 +1,680 @@
+PROMPT FOR REPLIT AGENT — P-2: Performance Scoring + Contracted AI Interpretation
+
+Context:
+
+P-1 is complete: plan lineage now flows into published posts, outcome snapshots can be captured at 24h / 72h / 7d, missing and partial lineage states are logged honestly, and publishing remains non-blocking.
+
+W-1 is also complete: real competitor scraping was verified, append-only competitor history is live, and evidence-backed Watchtower events can now be materialized.
+
+The next step is P-2: make Avyron determine what is actually working in the customer’s own content.
+
+The architecture for this session is non-negotiable:
+
+Code measures and proves.
+AI interprets and designs the next test.
+Code judges the AI output before anything reaches the user.
+
+Do not replace AI with rigid templates. Do not allow AI to invent scores, change verdicts, or declare causation from weak evidence.
+
+The final verification must use a real existing Avyron campaign with real published posts and real collected metrics. Fixtures and synthetic records may be used only for supplementary edge-case tests, never as the final acceptance evidence.
+
+Current guardrails:
+
+* Current TypeScript baseline: 718 errors.
+* Current schema floor: 43.
+* No existing gate, judge, threshold, CEL scorer, Integrity engine, System Control, Watchtower logic, or verdict machinery may be weakened.
+* Missing metrics are null, never zero.
+* No global industry benchmarks.
+* No silent semantic fallbacks.
+* No generic recommendation templates.
+* All claims must be traceable to real posts and snapshot rows.
+
+## Session Objective
+
+Build the first honest Performance Loop scoring layer so Avyron can answer:
+
+* Which hook styles are currently working?
+* Which content angles are currently working?
+* Which content types are currently working?
+* Which dimensions are underperforming?
+* Where is the evidence insufficient?
+* What should be tested next to learn more?
+
+The required flow is:
+
+Real published posts
+→ lineage
+→ mature performance snapshots
+→ deterministic scoring
+→ evidence-backed verdict
+→ AI interpretation under contract
+→ judge acceptance or rejection
+→ specific next experiment
+
+## Phase 1 — Truth Audit and Real Campaign Eligibility
+
+Do not modify code in this phase.
+
+### 1. Audit the real scoring inputs
+
+Inspect the current schemas and readers for:
+
+* `published_posts`
+* `performance_snapshots`
+* calendar and plan lineage
+* 24h / 72h / 7d checkpoint rows
+* sync checkpoint rows
+* any existing performance or attribution tables
+
+Report the exact fields currently available for:
+
+* post ID
+* platform
+* content type
+* hook style
+* content angle
+* planned slot
+* plan ID
+* campaign ID
+* publish timestamp
+* likes
+* comments
+* saves
+* shares
+* views
+* reach
+* impressions
+* clicks
+* profile visits
+* DMs or leads
+* captured timestamp
+* checkpoint maturity
+
+For every metric, classify it as:
+
+* POPULATED
+* PARTIALLY_POPULATED
+* EMPTY
+* UNAVAILABLE
+
+Do not design scoring around fields that are empty in the real database.
+
+### 2. Find the best real campaign for verification
+
+Inspect all real existing campaigns and identify the strongest eligible campaign for P-2 verification.
+
+For each candidate campaign, report:
+
+* campaign ID and name
+* account ID
+* platform
+* number of published posts
+* number of posts with full lineage
+* number with partial lineage
+* number of 24h snapshots
+* number of 72h snapshots
+* number of 7d snapshots
+* metrics available per snapshot
+* number of unique hook styles
+* number of unique content angles
+* number of unique content types
+* whether any dimension has at least 3 comparable posts
+
+Select the campaign with the strongest real evidence.
+
+Prefer `campaign_1773576062201_6t0oxi` only if it contains genuine eligible performance data. Do not select it merely because it was used for Watchtower verification.
+
+### 3. Confirm whether honest scoring is currently possible
+
+For the selected real campaign, answer:
+
+* Can hooks be scored honestly?
+* Can angles be scored honestly?
+* Can content types be scored honestly?
+* Which metrics can serve as primary outcome metrics?
+* Which checkpoints are sufficiently mature?
+* Are posts comparable within the same platform?
+* Are there enough samples to avoid declaring a winner from one post?
+
+If no real campaign currently has sufficient outcome data, do not fake P-2 completion.
+
+Instead, identify the exact missing production connection and provide the smallest correction required to make a real campaign eligible. Controlled test data cannot replace this done-condition.
+
+### 4. Audit existing reusable judgment infrastructure
+
+Locate and report the exact reusable components for:
+
+* grounding contract
+* interchangeability judge
+* evidence references
+* AI output retry
+* fail-closed degradation
+* self-checks
+* structured audit logging
+
+Explain whether the current judge can be reused directly or should be extended with a Performance Interpretation Contract.
+
+Do not fork a parallel generic judge without justification.
+
+### 5. Audit existing performance logic
+
+Search for all current functions that:
+
+* calculate rates
+* aggregate post performance
+* compare against baselines
+* calculate confidence
+* score hooks, angles, or content types
+* generate performance recommendations
+
+Report what is reusable and what is unsafe, dead, generic, or template-based.
+
+### Phase 1 output
+
+Provide a complete findings table before implementation, including:
+
+* real campaign selected
+* actual usable metrics
+* actual sample sizes
+* eligible scoring dimensions
+* unavailable dimensions
+* existing reusable code
+* schema or lineage gaps
+* risks of false conclusions
+
+Architect review must PASS before Phase 2.
+
+Do not proceed with unresolved HIGH findings.
+
+## Phase 2 — Deterministic Scoring Layer
+
+The scoring truth must be generated by code, not AI.
+
+### A. Comparable cohort rules
+
+Never compare unrelated posts blindly.
+
+At minimum, comparisons must respect:
+
+* same account
+* same platform
+* compatible metric availability
+* compatible snapshot maturity
+* comparable analysis window
+
+Do not mix a 24h post with a 7d post in the same scoring cohort without explicit normalization and maturity labeling.
+
+Do not compare Instagram and TikTok directly unless a reviewed normalization model exists. Default to platform-specific baselines.
+
+### B. Snapshot maturity
+
+Use the most mature honest checkpoint available.
+
+Preferred order:
+
+1. 7d
+2. 72h
+3. 24h
+
+Every scored result must expose its maturity:
+
+* `MATURE_7D`
+* `PROVISIONAL_72H`
+* `EARLY_24H`
+
+Do not silently treat early results as final.
+
+The same post must not be counted multiple times through its 24h, 72h, and 7d snapshots. Select one checkpoint per post for a given scoring run.
+
+### C. Self-baseline only
+
+All scoring must compare against the customer’s own historical performance.
+
+No global benchmarks.
+No invented “good engagement rate.”
+No cross-customer benchmarks.
+No Dubai-market averages unless a later verified dataset explicitly supports them.
+
+The baseline must be:
+
+* account-specific
+* platform-specific
+* time-bounded
+* built from comparable posts
+* versioned or timestamped
+
+Exclude the evaluated post from its own baseline where mathematically appropriate.
+
+### D. Metric registry
+
+Implement a reviewed metric registry that identifies:
+
+* which metrics are available per platform
+* numerator
+* denominator
+* minimum denominator requirements
+* whether the metric is primary, secondary, or unavailable
+* whether higher or lower is better
+* null-handling rules
+
+Examples may include:
+
+* save rate
+* share rate
+* comment rate
+* engagement per reach
+* view-to-action rate
+* click rate
+
+These are examples only. Use only metrics genuinely populated in the selected real campaign.
+
+A missing denominator returns unavailable, not zero.
+
+### E. Scoring dimensions
+
+Score only dimensions supported by real lineage:
+
+* hook style
+* content angle
+* content type
+
+`mixBucket` does not exist at post level in the current schema and must not be invented.
+
+`plannedSlot` may be analyzed as a separate exploratory dimension only if the data is sufficient and the architect approves it.
+
+For each dimension value, output:
+
+* sample size
+* posts included
+* checkpoint maturity distribution
+* primary metric
+* baseline value
+* dimension value
+* absolute delta
+* relative delta
+* consistency across posts
+* confidence level
+* verdict
+* evidence references
+
+### F. Verdicts
+
+Use these factual verdicts:
+
+* `WINNING`
+* `NEUTRAL`
+* `UNDERPERFORMING`
+* `TESTING`
+* `UNKNOWN`
+
+Rules:
+
+* Fewer than 3 comparable posts: `TESTING`.
+* No honest usable metric: `UNKNOWN`.
+* A single viral post cannot create `WINNING`.
+* A single failed post cannot create `UNDERPERFORMING`.
+* Winning and underperforming require both meaningful effect and consistency.
+* Exact reviewed thresholds must be config-driven and documented.
+* Do not lower thresholds to force a winner.
+* If evidence is mixed, return `NEUTRAL` or `TESTING`.
+
+AI may not change these verdicts.
+
+### G. Confounding analysis
+
+The code layer must expose potential confounders, such as:
+
+* the winning angle appears only in Reels
+* the winning hook appears only at one posting time
+* all high-performing posts use the founder’s face
+* one post contributes most of the total result
+* samples span different maturity checkpoints
+* different dimensions overlap too strongly
+
+Do not claim causation where only correlation exists.
+
+If the winning result is driven by one outlier, downgrade confidence rather than hiding it.
+
+### H. Persistence and query surface
+
+Persist scoring runs append-only with:
+
+* campaign ID
+* account ID
+* scoring run ID
+* baseline timestamp
+* evaluated window
+* dimension
+* dimension value
+* verdict
+* confidence
+* sample size
+* metric definition
+* score details
+* evidence post IDs
+* evidence snapshot IDs
+* created timestamp
+* scorer version
+
+Expose query surfaces for:
+
+* latest campaign scorecard
+* historical scorecards
+* score for one hook
+* score for one angle
+* score for one content type
+* evidence behind any verdict
+
+Do not overwrite previous scorecards.
+
+## Phase 3 — AI Performance Interpretation Under Contract
+
+AI is valuable here, but it operates only after deterministic scoring is complete.
+
+### A. AI input contract
+
+The AI receives only:
+
+* deterministic scorecards
+* baseline details
+* included post evidence
+* relevant captions and hooks
+* confounding signals
+* maturity labels
+* campaign/product grounding
+* supported Watchtower events where relevant
+
+Do not give it permission to calculate or replace scores.
+
+### B. AI responsibilities
+
+The AI may:
+
+* explain the likely business meaning of a factual verdict
+* identify patterns across captions, hooks, and creative approaches
+* group semantically similar labels for interpretation
+* distinguish whether the apparent winner may actually depend on format or hook
+* propose the next controlled content experiment
+* explain what additional evidence is needed
+
+The AI must not:
+
+* change `TESTING` into `WINNING`
+* invent metrics
+* invent customer reactions
+* claim causation as fact
+* use global benchmarks
+* produce generic marketing advice
+* recommend a fixed template
+* hide insufficient evidence
+* cite a post or metric that was not supplied
+
+### C. Performance Interpretation Contract
+
+Create or extend a formal contract requiring every interpretation to include:
+
+1. **What is proven**
+
+   * Exact code verdict.
+   * Metric and delta.
+   * Sample size.
+   * Maturity.
+   * Evidence post and snapshot references.
+
+2. **What is only a hypothesis**
+
+   * Clearly labeled.
+   * Supported by observable content differences.
+   * No causal language presented as fact.
+
+3. **What could be confounding the result**
+
+   * Format.
+   * timing.
+   * audience.
+   * outlier.
+   * hook/angle overlap.
+   * insufficient maturity.
+
+4. **What to test next**
+
+   * One controlled experiment.
+   * Change one major variable where possible.
+   * Define what remains constant.
+   * Define the measurement checkpoint.
+   * Define what result would strengthen or weaken the hypothesis.
+
+5. **Why this is specific to this campaign**
+
+   * Reference the actual product, audience, angle, posts, and evidence.
+   * It must not apply unchanged to a generic competitor.
+
+### D. AI output judge
+
+The judge must reject an interpretation if:
+
+* it contradicts the deterministic verdict
+* it omits evidence references
+* it treats a hypothesis as proven
+* it ignores sample-size weakness
+* it gives generic advice
+* it proposes the same test that could apply to any business
+* it invents a reason for performance
+* it recommends scaling a `TESTING` dimension as if proven
+* it ignores identified confounders
+* it uses unavailable metrics
+
+Use the existing interchangeability pattern.
+
+If rejected:
+
+* regenerate within a strict retry limit
+* log `PERFORMANCE_INTERPRETATION_REJECTED`
+* include rejection reasons
+* no retry storm
+
+If all retries fail:
+
+* show the deterministic scorecard only
+* visibly mark interpretation as unavailable
+* never use a silent template fallback
+
+### E. No template disease
+
+Do not generate fixed skeleton recommendations such as:
+
+* “Create 3 more posts using the winning angle.”
+* “Post more educational content.”
+* “Use stronger hooks.”
+* “Double down on what works.”
+
+The next experiment must come from the actual evidence.
+
+Example of acceptable specificity:
+
+“The proof-angle posts are currently 28% above this account’s Instagram baseline, but all three also use founder-led opening shots. Test the same customer-result claim once with the founder-led opening and once with a customer-quote opening, keeping format, CTA, publishing window, and offer constant. Compare the 72h save rate before calling the angle itself the cause.”
+
+This is an example of required specificity, not a reusable output template.
+
+## Phase 4 — Real Campaign Verification
+
+Final acceptance must be demonstrated on the real campaign selected in Phase 1.
+
+### Check 1 — Real input evidence
+
+Print:
+
+* campaign ID
+* account ID
+* real published post IDs
+* real lineage
+* real snapshot IDs
+* real checkpoint timestamps
+* non-null metrics used
+* excluded posts and exclusion reasons
+
+### Check 2 — Deterministic post selection
+
+Confirm:
+
+* one mature snapshot per post
+* no duplicate checkpoint counting
+* early posts labeled honestly
+* null metrics excluded, not converted to zero
+* platforms not mixed incorrectly
+
+### Check 3 — Baseline calculation
+
+Print the real account/platform baseline:
+
+* included posts
+* evaluation window
+* metric formula
+* baseline result
+* timestamp
+* baseline version
+
+Recalculate manually for a sample and confirm the code result matches.
+
+### Check 4 — Dimension scoring
+
+For at least one real supported dimension, print:
+
+* dimension and value
+* sample size
+* included posts
+* baseline
+* measured value
+* delta
+* consistency
+* confidence
+* verdict
+
+If the campaign has fewer than 3 comparable posts for a dimension, confirm the system returns `TESTING`, not a fabricated winner.
+
+### Check 5 — Outlier resistance
+
+Demonstrate that one unusually strong or weak post cannot create a false `WINNING` or `UNDERPERFORMING` verdict.
+
+### Check 6 — AI interpretation
+
+Generate an interpretation for the real campaign.
+
+Confirm it:
+
+* preserves the code verdict
+* names the actual evidence
+* distinguishes proof from hypothesis
+* identifies confounders
+* proposes a specific controlled test
+* is product-specific
+* passes the interchangeability judge
+
+### Check 7 — Judge rejection
+
+Force the AI to produce or supply a test response that:
+
+* claims causation without proof
+* contradicts a `TESTING` verdict
+* or gives generic advice
+
+Confirm the judge rejects it with `PERFORMANCE_INTERPRETATION_REJECTED`.
+
+### Check 8 — Degraded path
+
+Force interpretation failure after the allowed retries.
+
+Confirm:
+
+* deterministic scoring remains visible
+* interpretation is explicitly unavailable
+* no template advice appears
+* no fake success is reported
+
+### Check 9 — Historical persistence
+
+Run scoring twice after a new eligible snapshot arrives.
+
+Confirm:
+
+* both scoring runs remain stored
+* the old scorecard is not overwritten
+* changed verdicts retain their evidence and scorer version
+
+### Check 10 — Real campaign end-to-end result
+
+Show the complete chain:
+
+Real campaign
+→ real published posts
+→ real lineage
+→ real snapshots
+→ real baseline
+→ code verdict
+→ AI interpretation
+→ judge decision
+→ specific next experiment
+
+### Check 11 — Regression safety
+
+Run the latest real campaign pipeline and report:
+
+* exact campaign ID
+* timestamp
+* verdict
+* block reasons
+* degraded states
+* Watchtower state
+* Performance Loop state
+
+Confirm that no existing gate, judge, threshold, CEL, Integrity, System Control, Watchtower event classification, or campaign verdict logic was weakened.
+
+### Check 12 — TypeScript, migrations, and runtime
+
+* Compare TypeScript error multisets against the 718 baseline.
+* Net-new TypeScript errors must equal zero.
+* Use forward-only numbered migrations.
+* Apply schema-floor changes.
+* Restart the backend.
+* Confirm scoring workers start cleanly.
+* Confirm no retry storms.
+* Confirm no zombie scoring runs.
+* Confirm loud logs on all failure paths.
+
+Required structured tags:
+
+* `PERFORMANCE_SCORING_FAILED`
+* `PERFORMANCE_BASELINE_UNAVAILABLE`
+* `PERFORMANCE_METRIC_UNAVAILABLE`
+* `PERFORMANCE_EVIDENCE_INSUFFICIENT`
+* `PERFORMANCE_LINEAGE_PARTIAL`
+* `PERFORMANCE_INTERPRETATION_REJECTED`
+* `PERFORMANCE_INTERPRETATION_UNAVAILABLE`
+* `PERFORMANCE_SCORE_PERSIST_FAILED`
+
+## Done Conditions
+
+This session is complete only when:
+
+* Phase 1 proves which real metrics and campaigns are genuinely eligible.
+* Architect review passes before implementation.
+* Deterministic scoring is live.
+* Self-baselines are used exclusively.
+* Missing metrics remain unavailable, not zero.
+* Posts are compared within honest cohorts.
+* Hooks, angles, and content types are scored only where lineage supports them.
+* Low sample sizes return `TESTING`.
+* AI cannot alter deterministic verdicts.
+* AI interpretations cite real evidence.
+* Hypotheses are clearly separated from proven results.
+* Confounding factors are exposed.
+* The next experiment is campaign-specific and not templated.
+* The interchangeability judge rejects generic interpretations.
+* Failed AI interpretation degrades visibly to the deterministic scorecard.
+* Final acceptance is demonstrated on a real Avyron campaign using real posts and real metrics.
+* TypeScript net-new errors equal zero.
+* No existing gate, judge, threshold, CEL, Integrity, System Control, Watchtower, or verdict logic was weakened.
+
+Final one-line summary format:
+
+“Performance Loop P-2 complete: real campaign outcomes scored against self-baselines, AI interpretation constrained by evidence and judges, campaign-specific next experiment produced without template fallback.”

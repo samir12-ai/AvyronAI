@@ -20,7 +20,8 @@ import {
 } from "./constants";
 import { enforceBoundaryWithSanitization } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
-import type { SignalLineageEntry } from "../../shared/signal-lineage";
+import { computeSignalComposition, formatCompositionLog, type SignalLineageEntry } from "../../shared/signal-lineage";
+import { computeSemanticLineageMatches, type SemanticLineageMatch, type GroundingType } from "./semantic-lineage";
 import type {
   ValidationMIInput,
   ValidationAudienceInput,
@@ -397,26 +398,76 @@ interface ExtractedClaim {
   hopDepth: number;
   mappingConfidence: number;
   belowConfidenceThreshold: boolean;
+  groundingScore: number;
+  groundingType: GroundingType;
+  matchedSignalText: string | null;
 }
 
-function extractClaims(
+async function extractClaims(
   offer: ValidationOfferInput,
   persuasion: ValidationPersuasionInput,
   awareness: ValidationAwarenessInput,
   signalClusters: SignalCluster[],
   upstreamLineage: SignalLineageEntry[] = [],
-): { claims: ExtractedClaim[]; unmappedSignals: string[]; lowConfidenceSignals: string[] } {
+): Promise<{ claims: ExtractedClaim[]; unmappedSignals: string[]; lowConfidenceSignals: string[] }> {
+  const pending: { text: string; source: string }[] = [];
+  const push = (text: string | undefined | null, source: string) => {
+    if (!text) return;
+    pending.push({ text, source });
+  };
+
+  push(offer.coreOutcome, "offer_outcome");
+  push(offer.mechanismDescription, "offer_mechanism");
+  const proofGrounding = (offer as any).proofGrounding;
+  if (Array.isArray(proofGrounding) && proofGrounding.length > 0) {
+    for (const pg of proofGrounding.slice(0, 3)) {
+      const text = pg?.groundingText || pg?.proofType;
+      const sourceTag = classifyProofSubType(pg?.proofType || text || "");
+      if (text) push(text, sourceTag);
+    }
+  } else {
+    for (const proof of (offer.proofAlignment || []).slice(0, 3)) {
+      if (proof) push(proof, classifyProofSubType(proof));
+    }
+  }
+  for (const driver of (persuasion.primaryInfluenceDrivers || []).slice(0, 3)) {
+    if (driver) push(`Influence driver: ${driver}`, classifyPersuasionDriverSubType(driver));
+  }
+  if (awareness.triggerClass) {
+    push(`Trigger: ${awareness.triggerClass}`, classifyAwarenessTriggerSubType(awareness.triggerClass));
+  }
+  if (awareness.entryMechanismType) {
+    push(`Entry: ${awareness.entryMechanismType}`, classifyAwarenessEntrySubType(awareness.entryMechanismType));
+  }
+
+  const semanticMatches: SemanticLineageMatch[] = upstreamLineage.length > 0
+    ? await computeSemanticLineageMatches(pending.map(p => p.text), upstreamLineage)
+    : pending.map(() => ({ entry: null, score: 0, type: "none" as GroundingType, matchedSignalText: null }));
+
   const claims: ExtractedClaim[] = [];
   const unmappedSignals: string[] = [];
   const lowConfidenceSignals: string[] = [];
-  let claimIndex = 0;
-  const hasLineage = upstreamLineage.length > 0;
 
-  const addClaim = (claimText: string, source: string) => {
-    if (!claimText) return;
-    const { supporting, mappedViaEquivalence, mappingConfidence } = matchClaimToSignalCluster(claimText, signalClusters, source);
-    const lineageMatch = hasLineage ? findLineageMatch(claimText, upstreamLineage) : null;
-    const traceId = generateSignalTraceId(source, claimIndex);
+  for (let i = 0; i < pending.length; i++) {
+    const { text: claimText, source } = pending[i];
+    const { supporting: lexicalSupporting, mappedViaEquivalence, mappingConfidence: lexicalMappingConfidence } = matchClaimToSignalCluster(claimText, signalClusters, source);
+    const sm = semanticMatches[i];
+    const lineageMatch = sm.entry;
+    const traceId = generateSignalTraceId(source, i);
+
+    let supporting: SignalProvenance | null = lexicalSupporting;
+    let mappingConfidence = lexicalMappingConfidence;
+    if (!supporting && lineageMatch && (sm.type === "direct" || sm.type === "inferred")) {
+      supporting = {
+        signalId: lineageMatch.parentSignalId || `${lineageMatch.originEngine}_lineage_${i}`,
+        signalSource: lineageMatch.signalCategory || lineageMatch.originEngine,
+        signalOriginEngine: lineageMatch.originEngine,
+        signalStrength: sm.type === "direct" ? clamp(sm.score, 0.5, 1) : clamp(sm.score, 0.3, 0.7),
+        evidenceReference: (sm.matchedSignalText || lineageMatch.signalText || "").slice(0, 120),
+      };
+      mappingConfidence = Math.max(mappingConfidence, sm.score);
+    }
+
     const signalPath = buildSignalPath(source, supporting, lineageMatch);
     const isHypothesis = supporting === null && lineageMatch === null;
     const belowConfidenceThreshold = mappingConfidence > 0 && mappingConfidence < SIGNAL_MAPPING_CONFIDENCE_THRESHOLD;
@@ -440,31 +491,10 @@ function extractClaims(
       hopDepth: lineageMatch?.hopDepth ?? 0,
       mappingConfidence,
       belowConfidenceThreshold,
+      groundingScore: sm.score,
+      groundingType: sm.type,
+      matchedSignalText: sm.matchedSignalText,
     });
-    claimIndex++;
-  };
-
-  addClaim(offer.coreOutcome, "offer_outcome");
-  addClaim(offer.mechanismDescription, "offer_mechanism");
-  for (const proof of (offer.proofAlignment || []).slice(0, 3)) {
-    if (proof) {
-      const proofSubType = classifyProofSubType(proof);
-      addClaim(proof, proofSubType);
-    }
-  }
-  for (const driver of (persuasion.primaryInfluenceDrivers || []).slice(0, 3)) {
-    if (driver) {
-      const driverSubType = classifyPersuasionDriverSubType(driver);
-      addClaim(`Influence driver: ${driver}`, driverSubType);
-    }
-  }
-  if (awareness.triggerClass) {
-    const triggerSubType = classifyAwarenessTriggerSubType(awareness.triggerClass);
-    addClaim(`Trigger: ${awareness.triggerClass}`, triggerSubType);
-  }
-  if (awareness.entryMechanismType) {
-    const entrySubType = classifyAwarenessEntrySubType(awareness.entryMechanismType);
-    addClaim(`Entry: ${awareness.entryMechanismType}`, entrySubType);
   }
 
   return { claims, unmappedSignals, lowConfidenceSignals };
@@ -490,7 +520,11 @@ function validateClaim(
   const contradictingSignals: string[] = [];
 
   let evidenceType: ClaimValidation["evidenceType"] = "assumption";
-  let evidenceStrength = 0.2;
+  // P0-5 (launch-closure W2-T1): zero-evidence base must score zero.
+  // The previous 0.2 baseline let a claim with no signal support score as
+  // "weakly grounded" purely from the assumption bucket. Now every accretion
+  // below has to earn its score from real signal matches.
+  let evidenceStrength = 0;
 
   let isNarrativeBased = false;
   for (const pattern of NARRATIVE_CLAIM_PATTERNS) {
@@ -508,6 +542,13 @@ function validateClaim(
     }
   }
 
+  if (signalProvenance && signalProvenance.signalStrength >= 0.5) {
+    isNarrativeBased = false;
+    isAssumptionBased = false;
+  } else if (hasLineageAnchor && signalProvenance && signalProvenance.signalStrength >= 0.3) {
+    isAssumptionBased = false;
+  }
+
   for (const opp of (mi.opportunitySignals || [])) {
     const oppStr = extractSignalText(opp);
     if (oppStr && hasOverlap(lower, oppStr.toLowerCase())) {
@@ -518,7 +559,7 @@ function validateClaim(
 
   for (const threat of (mi.threatSignals || [])) {
     const threatStr = extractSignalText(threat);
-    if (threatStr && hasOverlap(lower, threatStr.toLowerCase())) {
+    if (threatStr && isSemanticallyContradicting(lower, threatStr.toLowerCase())) {
       contradictingSignals.push(threatStr.slice(0, 100));
       evidenceStrength -= 0.1;
     }
@@ -526,7 +567,7 @@ function validateClaim(
 
   const objectionKeys = Object.keys(audience.objectionMap || {});
   for (const key of objectionKeys) {
-    if (hasOverlap(lower, key.toLowerCase())) {
+    if (isSemanticallyContradicting(lower, key.toLowerCase())) {
       contradictingSignals.push(`Objection: ${key}`);
       evidenceStrength -= 0.05;
     }
@@ -683,6 +724,60 @@ function hasOverlap(a: string, b: string): boolean {
     if (wordsB.has(w)) matches++;
   }
   return matches >= 2;
+}
+
+// Polarity dictionaries used to detect semantic opposition (not mere topic overlap).
+// A contradiction requires (a) substantial topical overlap AND (b) opposing polarity
+// between the claim and the counter-signal (threat / objection).
+const POSITIVE_POLARITY_TERMS = [
+  "grow", "growth", "increase", "improve", "rising", "rise", "expand", "expansion",
+  "strong", "strength", "emerging", "novel", "unique", "differenti", "advantage",
+  "opportunity", "proof", "validated", "proven", "effective", "high",
+];
+const NEGATIVE_POLARITY_TERMS = [
+  "declin", "decreas", "drop", "shrink", "erosion", "erod", "fail", "failing", "failure",
+  "weaken", "weak", "satur", "commoditi", "lose", "losing", "loss", "risk",
+  "threat", "impossible", "stuck", "stagnant", "fatigue", "breakdown", "break",
+  "no proof", "no evidence", "lack", "missing", "insufficient",
+];
+
+function containsAny(text: string, terms: string[]): boolean {
+  for (const t of terms) {
+    if (text.includes(t)) return true;
+  }
+  return false;
+}
+
+function countSharedContentWords(a: string, b: string): number {
+  const wordsA = a.split(/\s+/).filter(w => w.length > 3);
+  const wordsB = new Set(b.split(/\s+/).filter(w => w.length > 3));
+  let matches = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) matches++;
+  }
+  return matches;
+}
+
+// A semantic contradiction requires meaningful shared vocabulary (>=3 content words)
+// AND opposing polarity. Topical co-occurrence alone (the previous hasOverlap check)
+// produced false positives — e.g., a proof-based claim sharing the word "differentiation"
+// with a threat about angle saturation, or a claim that ADDRESSES an objection being
+// flagged merely because it shares vocabulary with the objection.
+function isSemanticallyContradicting(claim: string, counterSignal: string): boolean {
+  const shared = countSharedContentWords(claim, counterSignal);
+  if (shared < 3) return false;
+
+  const claimPositive = containsAny(claim, POSITIVE_POLARITY_TERMS);
+  const claimNegative = containsAny(claim, NEGATIVE_POLARITY_TERMS);
+  const signalPositive = containsAny(counterSignal, POSITIVE_POLARITY_TERMS);
+  const signalNegative = containsAny(counterSignal, NEGATIVE_POLARITY_TERMS);
+
+  // Opposite polarity: one side asserts positive, the other asserts negative
+  // about the same topic.
+  if (claimPositive && signalNegative && !claimNegative) return true;
+  if (claimNegative && signalPositive && !signalNegative) return true;
+
+  return false;
 }
 
 function layer_evidenceDensity(
@@ -1139,17 +1234,19 @@ export async function runStatisticalValidationEngine(
 
   const signalClusters = buildSignalClusters(mi, audience);
 
-  let { claims: extractedClaims, unmappedSignals, lowConfidenceSignals } = extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
+  let { claims: extractedClaims, unmappedSignals, lowConfidenceSignals } = await extractClaims(offer, persuasion, awareness, signalClusters, upstreamLineage);
   if (upstreamLineage.length > 0) {
-    const orphanedClaims = extractedClaims.filter(c => c.parentSignalId === null && c.signalProvenance === null);
+    const directCount = extractedClaims.filter(c => c.groundingType === "direct").length;
+    const inferredCount = extractedClaims.filter(c => c.groundingType === "inferred").length;
+    const orphanedClaims = extractedClaims.filter(c => c.groundingType === "none" && c.signalProvenance === null);
     const lineageLinked = extractedClaims.length - orphanedClaims.length;
-    console.log(`[StatisticalValidation] LINEAGE_RESOLUTION | claims=${extractedClaims.length} | lineageLinked=${lineageLinked} | orphaned=${orphanedClaims.length} | upstreamEntries=${upstreamLineage.length}`);
+    console.log(`[StatisticalValidation] LINEAGE_RESOLUTION | claims=${extractedClaims.length} | lineageLinked=${lineageLinked} | orphaned=${orphanedClaims.length} | direct=${directCount} | inferred=${inferredCount} | upstreamEntries=${upstreamLineage.length}`);
 
     if (orphanedClaims.length > 0) {
       for (const oc of orphanedClaims) {
-        console.log(`[StatisticalValidation] LINEAGE_REJECTED | traceId=${oc.signalTraceId} | source=${oc.source} | claim="${oc.claim.slice(0, 60)}" — no valid signal lineage`);
+        console.log(`[StatisticalValidation] LINEAGE_REJECTED | traceId=${oc.signalTraceId} | source=${oc.source} | groundingScore=${oc.groundingScore.toFixed(3)} | claim="${oc.claim.slice(0, 60)}" — no semantic match above threshold`);
       }
-      extractedClaims = extractedClaims.filter(c => c.parentSignalId !== null || c.signalProvenance !== null);
+      extractedClaims = extractedClaims.filter(c => c.groundingType !== "none" || c.signalProvenance !== null);
       console.log(`[StatisticalValidation] LINEAGE_GATE | rejected=${orphanedClaims.length} orphaned claims | remaining=${extractedClaims.length} signal-backed claims`);
     }
   }
@@ -1299,7 +1396,12 @@ export async function runStatisticalValidationEngine(
   }
 
   const lineageAnchoredCount = claimValidations.filter(c => c.parentSignalId !== null || c.originEngine !== null).length;
+  const originTypeDistribution = computeSignalComposition(upstreamLineage);
   console.log(`[StatisticalValidation] GROUNDING_METRICS | total=${claimValidations.length} | signalBacked=${signalBackedClaimCount} | lineageAnchored=${lineageAnchoredCount} | hypotheses=${hypotheses.length} | ratio=${signalBackedClaimRatio.toFixed(2)} | state=${validationState}`);
+  console.log(`[StatisticalValidation] ORIGIN_TYPE_DISTRIBUTION | ${formatCompositionLog(originTypeDistribution)}`);
+  console.log(`[StatisticalValidation] LAYER_SCORES | ${layers.map(l => `${l.layerName}=${l.score.toFixed(2)}${l.passed ? "" : "*"}`).join(" | ")}`);
+  console.log(`[StatisticalValidation] CONFIDENCE_TRACE | weighted=${weightedScore.toFixed(3)} | minConstrained=${minConstrainedConfidence.toFixed(3)} | raw=${rawConfidence.toFixed(3)} | normalized=${confidenceNormalized} | postNormalize=${(confidenceNormalized ? normalizeConfidence(rawConfidence, reliability) : rawConfidence).toFixed(3)} | avgEvidenceStrength=${evidenceStrength.toFixed(3)} | final=${claimConfidenceScore.toFixed(3)}`);
+  console.log(`[StatisticalValidation] RELIABILITY_TRACE | overall=${reliability.overallReliability.toFixed(3)} | isWeak=${reliability.isWeak} | signalDensity=${reliability.signalDensity.toFixed(2)} | signalDiversity=${reliability.signalDiversity.toFixed(2)} | narrativeStability=${reliability.narrativeStability.toFixed(2)} | competitorValidity=${reliability.competitorValidity.toFixed(2)} | marketMaturity=${reliability.marketMaturityConfidence.toFixed(2)}`);
 
   const confidenceExplanation = buildConfidenceExplanation(
     claimConfidenceScore,
@@ -1355,5 +1457,6 @@ export async function runStatisticalValidationEngine(
     signalBackedClaimRatio,
     unmappedSignals,
     lowConfidenceSignals,
+    originTypeDistribution,
   };
 }

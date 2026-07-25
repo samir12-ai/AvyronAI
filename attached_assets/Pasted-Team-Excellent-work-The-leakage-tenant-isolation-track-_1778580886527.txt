@@ -1,0 +1,98 @@
+Team,
+
+Excellent work.
+
+The leakage / tenant isolation track is now considered structurally SEALED with live regression proof, not just code-level assumptions.
+
+The most important outcome from this phase is that the regression suite exposed several real information leaks that were not obvious during static review alone, and all of them were closed during verification.
+
+## What was fixed during the live regression cycle
+
+1. system-control routes
+
+* all 5 routes are now ownership-gated
+* cross-tenant campaignId/headline echo removed
+* denial responses no longer leak foreign identifiers
+
+2. full-report route
+
+* ownership gate added
+* denial body no longer reveals foreign campaign existence
+
+3. auth-helpers denial responses
+
+* removed attacker-supplied campaignId/accountId echoes
+* responses are now opaque (“Campaign not found”)
+
+4. performance ingest route
+
+* ownership validation now occurs BEFORE body validation
+* removed the 400-vs-404 side-channel leak
+
+## Regression verification
+
+Live regression suite:
+`.local/tests/leakage-regression-v1.ts`
+
+Final result:
+13/13 PASS against the live backend.
+
+Verified scenarios include:
+
+* foreign orchestrator polling
+* foreign campaign injection
+* fetch-status probing
+* cross-tenant dedup inheritance attempts
+* denial-body information leakage
+* performance-ingest probing
+* system-control route probing
+* cache-poisoned snapshot attempts
+
+The system is now verified against:
+
+* cross-account leakage
+* cross-campaign leakage
+* denial-response identifier leaks
+* route-existence side channels
+* stale tenant truth inheritance
+
+## Important clarification
+
+Leakage / tenant isolation is now considered SEALED.
+
+However:
+this does NOT mean the broader Runtime Truth Track is complete.
+
+The next major track remains:
+
+* inferred vs direct signal lineage
+* benchmark vs real/manual/scraped separation
+* confidence integrity
+* runtime truth provenance
+* contract tightening
+
+That is now the primary remaining intelligence/truthfulness frontier.
+
+## Key takeaway
+
+This phase proved the value of live regression verification.
+
+The code looked structurally safe before the tests,
+but the live regression suite still exposed:
+
+* identifier echo leaks
+* ordering leaks
+* ownership-gate gaps
+* denial-response disclosure
+
+The final sealed state is now backed by:
+
+* static review
+* runtime verification
+* ownership probing
+* live regression testing
+
+Excellent closure on the isolation/security side.
+
+Best,
+[Your Name]

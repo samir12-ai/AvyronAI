@@ -38,10 +38,15 @@ import type {
 import { MI_CONFIDENCE, ENGINE_VERSION, INSTAGRAM_API_CEILING } from "./constants";
 import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard";
 import { logAudit } from "../audit";
-import { computeCompetitorHash, parseJsonSafe } from "./utils";
-import { getStoredPostsForMIv3, getStoredCommentsForMIv3 } from "../competitive-intelligence/data-acquisition";
+import { computeCompetitorHash, computeCompetitorContentHash, parseJsonSafe } from "./utils";
+import { getStoredPostsForMIv3, getStoredCommentsForMIv3, getStoredTikTokPostsForMIv3, getStoredTikTokCommentsForMIv3, getStoredReviewsForMIv3 } from "../competitive-intelligence/data-acquisition";
 import { logSignalDiagnostics, detectNarrativeOverlap } from "../engine-hardening";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
+import { qualifyTikTokPosts, type TikTokQualificationResult } from "./tiktok-qualification";
+import { extractReviewsIntelligence, type ReviewsIntelligenceResult } from "./reviews-intelligence";
+import { buildTikTokSignals, buildReviewsSignals, classifyTikTokSignals, classifyReviewsSignals } from "./signal-normalizer";
+import { runCrossSignalDecisionLayer, type CrossSignalDecisionResult } from "./cross-signal-decision";
+import { computeSourceAvailability } from "./source-types";
 
 export { computeCompetitorHash } from "./utils";
 export { ENGINE_VERSION } from "./constants";
@@ -70,15 +75,34 @@ function convertProblemStatementToObjection(snippet: string, competitorName: str
 
   if (!objectionLabel) return null;
 
+  // Phase 6 / Task #69 step 2 — D5 anti-fabrication. Single-evidence inferred
+  // objections previously emitted hardcoded 0.15 / 0.45 confidences that
+  // looked statistically grounded but were pure constants. Derive the two
+  // scores directly from the (single) supporting evidence and the textual
+  // strength of the snippet, and tag the row as inferred_synthesis so the
+  // Confidence Integrity gate (T3.A) and Signal Lineage gate (T1.A) see
+  // this signal for what it is: a one-shot LLM-pattern hit, not a sampled
+  // distribution. Magic numbers gone; numbers are now mechanical.
+  const supportCount = 1; // exactly one evidence row by construction below
+  const snippetSignalLength = Math.min(snippet.length, 240);
+  // frequencyScore: 1 evidence ⇒ floor 1/N where N=upper-bound corpus size
+  // we treat as 20 (the largest typical content-DNA hook sample); never 0.
+  const frequencyScore = Number((supportCount / 20).toFixed(3));
+  // narrativeConfidence: proportional to snippet length saturated at 240 chars,
+  // scaled into [0.15, 0.50] so a one-shot inferred row can never outrank a
+  // real frequency-grounded objection (which must clear 0.50).
+  const narrativeConfidence = Number((0.15 + (snippetSignalLength / 240) * 0.35).toFixed(3));
+
   return {
     objection: objectionLabel,
-    frequencyScore: 0.15,
-    narrativeConfidence: 0.45,
+    frequencyScore,
+    narrativeConfidence,
     supportingEvidence: [{ caption: snippet.slice(0, 120), competitorName, matchedPattern: "content_dna_hook" }],
     competitorSources: [competitorName],
     patternCategory: "problem_statement",
     signalType: "objection",
-  };
+    signalOrigin: "inferred_synthesis",
+  } as NarrativeObjectionItem;
 }
 
 const SNAPSHOT_FRESHNESS_HOURS = 24;
@@ -186,6 +210,46 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
     snapshotPayload.analysisVersion = ENGINE_VERSION;
   }
 
+  // Seal #5 / F7.3 (validator-#4 closure) — surface scrape degradation onto
+  // the snapshot itself, not just worker logs. Caller may set
+  // `snapshotPayload._provenance = { degraded, reason }` (e.g. when all
+  // competitors had 0 posts after scrape). We embed it inside `telemetry`
+  // JSON so no schema migration is required and downstream consumers
+  // (system-control, freshness gates) can detect degraded inputs.
+  if (snapshotPayload._provenance) {
+    const prov = snapshotPayload._provenance;
+    let tel: any = {};
+    if (typeof snapshotPayload.telemetry === "string") {
+      try { tel = JSON.parse(snapshotPayload.telemetry); } catch { tel = {}; }
+    } else if (snapshotPayload.telemetry && typeof snapshotPayload.telemetry === "object") {
+      tel = snapshotPayload.telemetry;
+    }
+    tel._provenance = { degraded: !!prov.degraded, reason: prov.reason || null };
+    snapshotPayload.telemetry = JSON.stringify(tel);
+    delete snapshotPayload._provenance;
+    if (prov.degraded) {
+      console.log(`[MIv3] SNAPSHOT_PROVENANCE_DEGRADED | caller=${caller} | reason=${prov.reason || "unspecified"}`);
+    }
+  }
+
+  // Fix #2 — content-aware reuse fingerprint. Callers set
+  // `competitorContentHash` (from computeCompetitorContentHash, which folds in
+  // post volume + freshest post timestamp). We embed it inside `telemetry` JSON
+  // so the reuse gate (getCachedSnapshot) can detect that newly scraped posts
+  // should invalidate a prior snapshot even when the competitor SET is
+  // unchanged. It is NOT a real column — deleted before insert.
+  if (typeof snapshotPayload.competitorContentHash === "string" && snapshotPayload.competitorContentHash.length > 0) {
+    let telC: any = {};
+    if (typeof snapshotPayload.telemetry === "string") {
+      try { telC = JSON.parse(snapshotPayload.telemetry); } catch { telC = {}; }
+    } else if (snapshotPayload.telemetry && typeof snapshotPayload.telemetry === "object") {
+      telC = snapshotPayload.telemetry;
+    }
+    telC.contentHash = snapshotPayload.competitorContentHash;
+    snapshotPayload.telemetry = JSON.stringify(telC);
+  }
+  delete snapshotPayload.competitorContentHash;
+
   if (snapshotPayload.status === "COMPLETE") {
     const completionCheck = validateSnapshotCompleteness(snapshotPayload);
     if (!completionCheck.valid) {
@@ -219,11 +283,11 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
   }
 
   const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
-  await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20, snapshotPayload.accountId || "default");
+  await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20, snapshotPayload.accountId);
 
   try {
     const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
-    const inv = await invalidateDownstreamOnRegeneration(snapshotPayload.campaignId, snapshotPayload.accountId || "default", "mi");
+    const inv = await invalidateDownstreamOnRegeneration(snapshotPayload.campaignId, snapshotPayload.accountId, "mi");
     if (inv.supersededRoots > 0) {
       console.log(`[MIv3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
     }
@@ -278,7 +342,7 @@ interface CacheResult {
   invalidationReason: import("./types").CacheInvalidationReason;
 }
 
-async function getCachedSnapshot(accountId: string, campaignId: string, competitorHash: string): Promise<CacheResult> {
+async function getCachedSnapshot(accountId: string, campaignId: string, competitorHash: string, contentHash: string): Promise<CacheResult> {
   const snapshots = await db.select().from(miSnapshots)
     .where(and(
       eq(miSnapshots.accountId, accountId),
@@ -295,6 +359,18 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
   if (snapshot.competitorHash && snapshot.competitorHash !== competitorHash) {
     console.log(`[MIv3] Snapshot invalidated: competitor set changed (${snapshot.competitorHash} → ${competitorHash})`);
     return { snapshot: null, invalidationReason: "COMPETITOR_SET_CHANGED" };
+  }
+
+  // Fix #2 — content-aware invalidation. Even when the competitor SET is
+  // unchanged, newly scraped posts must invalidate a stale snapshot. The prior
+  // snapshot's content fingerprint lives in telemetry.contentHash. A missing
+  // stored hash (pre-fix snapshot) is treated as a mismatch → one recompute
+  // (D5: never silently reuse when the canonical fingerprint is absent).
+  const telCached = parseJsonSafe<{ contentHash?: unknown }>(snapshot.telemetry, {});
+  const storedContentHash = typeof telCached.contentHash === "string" ? telCached.contentHash : "";
+  if (storedContentHash !== contentHash) {
+    console.log(`[MIv3] Snapshot invalidated: competitor content changed (${storedContentHash.length > 0 ? storedContentHash : "none"} → ${contentHash})`);
+    return { snapshot: null, invalidationReason: "CONTENT_CHANGED" };
   }
 
   const snapshotVersion = snapshot.analysisVersion || 0;
@@ -721,6 +797,7 @@ export class MarketIntelligenceV3 {
     campaignId: string,
     forceRefresh: boolean = false,
     goalMode: GoalMode = "STRATEGY_MODE",
+    jobId?: string,
   ): Promise<MIv3DiagnosticResult> {
     const lockKey = `${accountId}:${campaignId}`;
     const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
@@ -739,7 +816,7 @@ export class MarketIntelligenceV3 {
       }
     }
 
-    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode);
+    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode, jobId);
     activeLocks.set(lockKey, runPromise);
 
     try {
@@ -756,6 +833,7 @@ export class MarketIntelligenceV3 {
     campaignId: string,
     forceRefresh: boolean,
     goalMode: GoalMode = "STRATEGY_MODE",
+    jobId?: string,
   ): Promise<MIv3DiagnosticResult> {
     if (!goalMode || goalMode === "STRATEGY_MODE") {
       const campaignRows = await db.select().from(growthCampaigns).where(eq(growthCampaigns.id, campaignId)).limit(1);
@@ -771,7 +849,11 @@ export class MarketIntelligenceV3 {
       accountId,
       campaignId,
       caller: ISOLATION_ALLOWED_CALLER,
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error(
+        `[MIv3] AUDIT_WRITE_FAILED component=engine event=MARKET_OVERVIEW_DIAGNOSTIC_RUN err=${(err as Error)?.message || String(err)}`,
+      );
+    });
 
     const allCompetitors = await getCompetitorData(accountId, campaignId);
     const competitors = allCompetitors.filter(c => {
@@ -782,25 +864,59 @@ export class MarketIntelligenceV3 {
       }
       return true;
     });
+    // Seal #5 / F7.3 (validator-#4 closure) — track scrape-degradation at the
+    // snapshot level. If ≥50% of registered competitors had 0 posts after the
+    // scrape pass, the snapshot is built on degraded inputs and downstream
+    // consumers must know. Captured here, surfaced via persistValidatedSnapshot
+    // → telemetry._provenance.degraded.
+    const degradedRatio = allCompetitors.length > 0
+      ? (allCompetitors.length - competitors.length) / allCompetitors.length
+      : 0;
+    const provenanceDegraded = allCompetitors.length > 0 && degradedRatio >= 0.5;
+    const provenanceReason = competitors.length === 0 && allCompetitors.length > 0
+      ? "ALL_COMPETITORS_EMPTY"
+      : provenanceDegraded
+        ? `PARTIAL_SCRAPE_FAILURE_${Math.round(degradedRatio * 100)}PCT`
+        : null;
     if (competitors.length === 0 && allCompetitors.length > 0) {
       console.log(`[MIv3] SCRAPING_RESILIENCE: all ${allCompetitors.length} competitors have 0 posts — cannot proceed`);
+    } else if (provenanceDegraded) {
+      console.log(`[MIv3] SCRAPING_RESILIENCE: degraded inputs | competitors=${allCompetitors.length} | empty=${allCompetitors.length - competitors.length} | reason=${provenanceReason}`);
     }
     const competitorHash = computeCompetitorHash(competitors);
+    const competitorContentHash = computeCompetitorContentHash(competitors);
 
     let cacheInvalidationReason: import("./types").CacheInvalidationReason = null;
 
     if (!forceRefresh) {
-      const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash);
+      const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash, competitorContentHash);
       if (cacheResult.snapshot) {
-        console.log(`[MIv3] Returning cached snapshot ${cacheResult.snapshot.id}`);
-        return buildResultFromSnapshot(cacheResult.snapshot);
+        const cached = cacheResult.snapshot;
+        if (jobId && cached.jobId !== jobId) {
+          const { id: _omitId, createdAt: _omitCreatedAt, ...cloneable } = cached as any;
+          const [stamped] = await db.insert(miSnapshots).values({
+            ...cloneable,
+            jobId,
+          }).returning();
+          console.log(`[MIv3] Cache hit reused snapshot ${cached.id} → cloned as ${stamped.id} stamped with jobId=${jobId}`);
+          return buildResultFromSnapshot(stamped);
+        }
+        console.log(`[MIv3] Returning cached snapshot ${cached.id}`);
+        return buildResultFromSnapshot(cached);
       }
       cacheInvalidationReason = cacheResult.invalidationReason;
     }
 
     const totalPosts = competitors.reduce((s, c) => s + (c.posts?.length || 0), 0);
     const totalComments = competitors.reduce((s, c) => s + (c.comments?.length || 0), 0);
-    const tokenBudget = computeTokenBudget(competitors.length, totalComments, totalPosts);
+    // Seal #11 / Task #29 / F6.1 — read-through persistence keyed by
+    // (jobId, "mi-v3"). On crash-restart the recomputed budget is replaced
+    // by the originally-persisted projection so selectedMode is stable.
+    const { getOrComputeBudget } = await import("./token-budget-store");
+    const tokenBudget = await getOrComputeBudget(
+      jobId ? { jobId, provider: "mi-v3" } : null,
+      { competitorCount: competitors.length, totalComments, totalPosts },
+    );
     const executionMode = tokenBudget.selectedMode;
 
     for (const comp of competitors) {
@@ -928,12 +1044,103 @@ export class MarketIntelligenceV3 {
     }
     console.log(`[MIv3] NARRATIVE_OBJECTIONS | total=${narrativeObjectionMap.totalObjectionsDetected} | multiCompetitor=${narrativeObjectionMap.objectionsFromMultipleCompetitors} | density=${narrativeObjectionMap.objectionDensity} | captions=${narrativeObjectionMap.captionsScanned} | problemStatements=${narrativeObjectionMap.problemStatementsExtracted} | clusters=${narrativeObjectionMap.clusteredObjections.length} | contentDnaBridge=${contentDnaProblemObjections}`);
 
+    let tiktokQualification: TikTokQualificationResult | null = null;
+    let reviewsIntelligence: ReviewsIntelligenceResult | null = null;
+    let crossSignalDecisions: CrossSignalDecisionResult | null = null;
+
+    try {
+      const allTikTokPosts: Array<{ competitorId: string; posts: Awaited<ReturnType<typeof getStoredTikTokPostsForMIv3>> }> = [];
+      const allTikTokComments: Array<{ postId: string; text: string; sentiment: number | null }> = [];
+      const allReviews: Array<{ competitorId: string; reviews: Awaited<ReturnType<typeof getStoredReviewsForMIv3>> }> = [];
+
+      for (const comp of competitors) {
+        const [tiktokPosts, tiktokComments, reviews] = await Promise.all([
+          getStoredTikTokPostsForMIv3(comp.id, accountId),
+          getStoredTikTokCommentsForMIv3(comp.id, accountId),
+          getStoredReviewsForMIv3(comp.id, accountId),
+        ]);
+        if (tiktokPosts.length > 0) allTikTokPosts.push({ competitorId: comp.id, posts: tiktokPosts });
+        if (tiktokComments.length > 0) allTikTokComments.push(...tiktokComments);
+        if (reviews.length > 0) allReviews.push({ competitorId: comp.id, reviews });
+      }
+
+      const totalTikTokPosts = allTikTokPosts.reduce((s, t) => s + t.posts.length, 0);
+      const totalReviews = allReviews.reduce((s, r) => s + r.reviews.length, 0);
+      console.log(`[MIv3] EXTENDED_SOURCES | tiktokCompetitors=${allTikTokPosts.length} | tiktokPosts=${totalTikTokPosts} | reviewCompetitors=${allReviews.length} | reviews=${totalReviews}`);
+
+      if (totalTikTokPosts > 0) {
+        const allTikTokFlat = allTikTokPosts.flatMap(t => t.posts);
+        tiktokQualification = qualifyTikTokPosts(allTikTokFlat);
+        console.log(`[MIv3] TIKTOK_QUALIFICATION | total=${tiktokQualification.totalPosts} | HIGH=${tiktokQualification.highPerformingCount} | MID=${tiktokQualification.midPerformingCount} | LOW=${tiktokQualification.lowPerformingCount} | filtered=${tiktokQualification.filteredPostIds.length}`);
+      }
+
+      if (totalReviews > 0) {
+        const allReviewsFlat = allReviews.flatMap(r => r.reviews);
+        reviewsIntelligence = extractReviewsIntelligence(allReviewsFlat);
+        console.log(`[MIv3] REVIEWS_INTELLIGENCE | processed=${reviewsIntelligence.totalReviewsProcessed} | painSignals=${reviewsIntelligence.painSignals.length} | objections=${reviewsIntelligence.objections.length} | clusters=${reviewsIntelligence.clusters.length} | avgRating=${reviewsIntelligence.avgRating.toFixed(2)}`);
+      }
+
+      const sourceAvail = computeSourceAvailability({
+        profileLink: competitors[0]?.profileLink || null,
+        websiteUrl: competitors[0]?.websiteUrl || null,
+        blogUrl: competitors[0]?.blogUrl || null,
+        postsCollected: allPosts.length,
+        tiktokPostCount: totalTikTokPosts,
+        reviewCount: totalReviews,
+      });
+
+      const tiktokSignals = totalTikTokPosts > 0
+        ? buildTikTokSignals(tiktokQualification, allTikTokPosts.flatMap(t => t.posts), allTikTokComments)
+        : null;
+      const reviewsSignals = totalReviews > 0
+        ? buildReviewsSignals(reviewsIntelligence)
+        : null;
+
+      const tiktokClassified = tiktokSignals ? classifyTikTokSignals(tiktokSignals) : [];
+      const reviewsClassified = reviewsSignals ? classifyReviewsSignals(reviewsSignals) : [];
+
+      if (tiktokClassified.length > 0 || reviewsClassified.length > 0) {
+        console.log(`[MIv3] EXTENDED_SIGNALS | tiktokSignals=${tiktokClassified.length} | reviewsSignals=${reviewsClassified.length}`);
+      }
+
+      const multiSourceForDecision = {
+        instagram: {
+          hooks: allPosts.slice(0, 15).map(p => (p.caption || "").split("\n")[0] || "").filter(h => h.length > 5),
+          painInferences: narrativeObjectionMap.objections.filter(o => o.signalType === "pain").map(o => o.objection),
+          ctaPatterns: competitors.flatMap(c => (c.ctaPatterns || "").split(",").filter(Boolean)).slice(0, 10),
+          contentThemes: [],
+          engagementPatterns: [],
+        },
+        website: null,
+        blog: null,
+        tiktok: tiktokSignals,
+        reviews: reviewsSignals,
+        sourceAvailability: sourceAvail,
+        classifiedSignals: [...tiktokClassified, ...reviewsClassified],
+        reconciliationNotes: [],
+        signalConfidence: 0,
+      };
+
+      crossSignalDecisions = runCrossSignalDecisionLayer(
+        multiSourceForDecision,
+        narrativeObjectionMap,
+        reviewsIntelligence,
+        tiktokQualification,
+      );
+
+      console.log(`[MIv3] CROSS_SIGNAL_DECISIONS | total=${crossSignalDecisions.decisions.length} | VALIDATED_PAIN=${crossSignalDecisions.validatedPains.length} | VALIDATED_HOOK=${crossSignalDecisions.validatedHooks.length} | CONFIRMED_OBJECTION=${crossSignalDecisions.confirmedObjections.length} | WEAK=${crossSignalDecisions.weakSignals.length} | coverage=${(crossSignalDecisions.sourceCoverage.coverageRatio * 100).toFixed(0)}% | aggregateConfidence=${crossSignalDecisions.aggregateConfidence}`);
+    } catch (extErr: any) {
+      console.error(`[MIv3] Extended source processing failed (non-blocking): ${extErr.message}`);
+    }
+
     const gatedClusters = qualityGate.gatePass ? clusterQuality.filteredClusters : signalClusters;
     if (!qualityGate.gatePass) {
       console.log(`[MIv3] QUALITY_GATE_DEGRADED | Gate failed — using unfiltered clusters for threat/opportunity computation but marking snapshot as PARTIAL`);
     }
     const threatSignals = buildThreatSignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, gatedClusters);
     const opportunitySignals = buildOpportunitySignals(confidence, trajectory, intents, deviations, marketBaseline.isCalibrated, gatedClusters);
+    const taggedThreatSignals = threatSignals.map(t => ({ text: t, originType: "competitor" as const }));
+    const taggedOpportunitySignals = opportunitySignals.map(o => ({ text: o, originType: "competitor" as const }));
     const similarityData = computeSimilarityDiagnosis(competitors, signalResults);
 
     const numericalSignals = signalResults.reduce((s, r) => s + Object.values(r.signals).filter(v => Math.abs(v) > 0.01).length, 0);
@@ -1076,22 +1283,24 @@ export class MarketIntelligenceV3 {
     const miLineage: SignalLineageEntry[] = [];
     opportunitySignals.forEach((sig: any, i: number) => {
       const text = typeof sig === "string" ? sig : (sig?.signal || sig?.description || sig?.message || "");
-      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_opportunity", text, i));
+      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_opportunity", text, i, "competitor"));
     });
     threatSignals.forEach((sig: any, i: number) => {
       const text = typeof sig === "string" ? sig : (sig?.signal || sig?.description || sig?.message || "");
-      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_threat", text, i));
+      if (text) miLineage.push(createSourceLineageEntry("market_intelligence", "market_threat", text, i, "competitor"));
     });
     const narObjections = narrativeObjectionMap?.objections || [];
     narObjections.forEach((obj: any, i: number) => {
-      if (obj?.objection) miLineage.push(createSourceLineageEntry("market_intelligence", "narrative_objection", obj.objection, i));
+      if (obj?.objection) miLineage.push(createSourceLineageEntry("market_intelligence", "narrative_objection", obj.objection, i, "competitor"));
     });
-    console.log(`[MIv3] LINEAGE_GENERATED | entries=${miLineage.length} | opportunities=${opportunitySignals.length} | threats=${threatSignals.length} | narrativeObj=${narObjections.length}`);
+    console.log(`[MIv3] LINEAGE_GENERATED | entries=${miLineage.length} | originType=competitor | opportunities=${opportunitySignals.length} | threats=${threatSignals.length} | narrativeObj=${narObjections.length}`);
 
     const snapshotPayload = {
       accountId,
       campaignId,
+      jobId,
       competitorHash,
+      competitorContentHash,
       version: (previousSnapshot?.version || 0) + 1,
       competitorData: JSON.stringify(competitors.map(c => ({ id: c.id, name: c.name }))),
       signalData: JSON.stringify(signalResults),
@@ -1104,6 +1313,10 @@ export class MarketIntelligenceV3 {
       snapshotSource: "FRESH_DATA" as const,
       fetchExecuted: true,
       telemetry: JSON.stringify({ ...telemetry, snapshotSource: "FRESH_DATA", fetchExecuted: true }),
+      // Seal #5 / F7.3 (validator-#4 closure) — pass scrape-degradation hint
+      // to persistValidatedSnapshot, which folds it into telemetry._provenance
+      // and emits SNAPSHOT_PROVENANCE_DEGRADED log.
+      _provenance: provenanceDegraded ? { degraded: true, reason: provenanceReason } : undefined,
       narrativeSynthesis,
       marketDiagnosis,
       threatSignals: JSON.stringify(threatSignals),
@@ -1130,6 +1343,23 @@ export class MarketIntelligenceV3 {
             mergedDuplicates: clusterQuality.mergedDuplicates,
           },
         },
+        crossSignalDecisions: crossSignalDecisions || null,
+        tiktokQualification: tiktokQualification ? {
+          totalPosts: tiktokQualification.totalPosts,
+          highPerformingCount: tiktokQualification.highPerformingCount,
+          midPerformingCount: tiktokQualification.midPerformingCount,
+          lowPerformingCount: tiktokQualification.lowPerformingCount,
+          filteredPostIds: tiktokQualification.filteredPostIds,
+          baselineReliability: tiktokQualification.baselineReliability,
+        } : null,
+        reviewsIntelligence: reviewsIntelligence ? {
+          totalReviewsProcessed: reviewsIntelligence.totalReviewsProcessed,
+          painSignals: reviewsIntelligence.painSignals.length,
+          objections: reviewsIntelligence.objections.length,
+          clusters: reviewsIntelligence.clusters.length,
+          avgRating: reviewsIntelligence.avgRating,
+          reliabilityGuard: reviewsIntelligence.reliabilityGuard,
+        } : null,
       }),
       objectionMapData: JSON.stringify(narrativeObjectionMap),
       signalLineage: JSON.stringify(miLineage),
@@ -1186,6 +1416,8 @@ export class MarketIntelligenceV3 {
       marketDiagnosis,
       threatSignals,
       opportunitySignals,
+      taggedThreatSignals,
+      taggedOpportunitySignals,
       confidence,
       missingSignalFlags: missingFlags,
       dataFreshnessDays,
@@ -1220,6 +1452,9 @@ export class MarketIntelligenceV3 {
       signalDiagnostics,
       narrativeOverlap,
       narrativeObjectionMap,
+      crossSignalDecisions,
+      tiktokQualification,
+      reviewsIntelligence,
       cached: false,
       cacheInvalidationReason,
       snapshotSource: "FRESH_DATA" as const,
@@ -1332,6 +1567,28 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     signalDiagnostics: null,
     narrativeOverlap: null,
     narrativeObjectionMap: parseJsonSafe(snapshot.objectionMapData, null),
+    crossSignalDecisions: (() => {
+      const diag = parseJsonSafe(snapshot.diagnosticsData, null);
+      const stored = diag?.crossSignalDecisions;
+      if (!stored || !stored.decisions) return null;
+      if (stored.validatedPains && Array.isArray(stored.validatedPains)) return stored;
+      return {
+        ...stored,
+        validatedPains: stored.decisions.filter((d: any) => d.type === "VALIDATED_PAIN"),
+        validatedHooks: stored.decisions.filter((d: any) => d.type === "VALIDATED_HOOK"),
+        confirmedObjections: stored.decisions.filter((d: any) => d.type === "CONFIRMED_OBJECTION"),
+        weakSignals: stored.decisions.filter((d: any) => d.type === "WEAK_SIGNAL"),
+        conflictedSignals: stored.decisions.filter((d: any) => d.type === "CONFLICTED_SIGNAL"),
+      };
+    })(),
+    tiktokQualification: (() => {
+      const diag = parseJsonSafe(snapshot.diagnosticsData, null);
+      return diag?.tiktokQualification || null;
+    })(),
+    reviewsIntelligence: (() => {
+      const diag = parseJsonSafe(snapshot.diagnosticsData, null);
+      return diag?.reviewsIntelligence || null;
+    })(),
     cached: true,
     cacheInvalidationReason: null,
     snapshotSource: (snapshot.snapshotSource as "FRESH_DATA" | "CACHED_DATA") || "FRESH_DATA",

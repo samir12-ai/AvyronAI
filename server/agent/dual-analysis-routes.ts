@@ -13,7 +13,10 @@ import type { Express, Request, Response } from "express";
 import { db } from "../db";
 import { miSnapshots, userChannelSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { wrapUntrustedText as _wrapUntrustedText, UNTRUSTED_INPUT_SYSTEM_RULE as _UNTRUSTED_RULE, detectInjectionTokens as _detectInjection } from "../market-intelligence-v3/prompt-safety";
+import { validateHandle as _validateHandle, validateUserUrl as _validateUserUrl } from "../competitive-intelligence/scrape-safety";
 import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 import { aiChat } from "../ai-client";
 
 export type DualAnalysisClassification =
@@ -92,18 +95,68 @@ function buildCompetitorContext(mi: any): string {
   if (mi.marketDiagnosis) parts.push(`• Market Diagnosis: ${mi.marketDiagnosis}`);
   if (mi.threatSignals) parts.push(`• Threat Signals: ${mi.threatSignals}`);
   if (mi.opportunitySignals) parts.push(`• Opportunity Signals: ${mi.opportunitySignals}`);
+
+  const decisions = mi.crossSignalDecisions;
+  if (decisions && decisions.decisions?.length > 0) {
+    const highConf = decisions.decisions.filter((d: any) => d.confidenceLevel === "HIGH" || d.confidenceLevel === "MEDIUM");
+    if (highConf.length > 0) {
+      parts.push(`\nVALIDATED CROSS-SIGNAL DECISIONS (${highConf.length} high/medium confidence):`);
+      for (const d of highConf.slice(0, 8)) {
+        parts.push(`  [${d.type}] ${d.signalText} — confidence=${(d.confidenceScore * 100).toFixed(0)}% (${d.agreementType}, sources: ${d.sources?.join(", ")})`);
+      }
+    }
+  }
+
   return parts.join("\n");
 }
 
 function buildUserContext(snaps: any[]): string {
+  // Seal #5 / F7.5 — wrap user-supplied handle/url in <scraped_text untrusted>
+  // so the prompt-safety system rule prevents injection ("Ignore previous
+  // instructions and …" embedded in a handle no longer derails the model).
   return snaps.map(snap => {
     const delta = snap.deltaFromPrevious ? JSON.parse(snap.deltaFromPrevious) : null;
     const data = snap.snapshotData ? JSON.parse(snap.snapshotData) : null;
     if (!data) return `Platform: ${snap.platform} — data unavailable`;
 
     const lines = [`USER CHANNEL — ${snap.platform.toUpperCase()} (${data.scrapeMode} scrape):`];
-    if (data.handle) lines.push(`• Handle: @${data.handle}`);
-    if (data.url) lines.push(`• URL: ${data.url}`);
+    // Seal #5 / F8.1 + F7.5 (validator-#2 hardening): even though `data.handle`
+    // and `data.url` come from previously persisted snapshots (not the current
+    // request body), we re-validate at the LLM-ingest boundary so a poisoned
+    // snapshot from a pre-Seal-#5 scrape can't slip prompt-injection or an
+    // SSRF-style URL into the prompt. Validation failures + injection-token
+    // hits are logged, the field is dropped, and a `[redacted: <reason>]`
+    // marker is emitted so the model sees the degradation.
+    if (data.handle) {
+      try {
+        const safeHandle = _validateHandle(String(data.handle));
+        const inj = _detectInjection(safeHandle);
+        if (inj.suspicious) {
+          console.warn(`[DualAnalysis] F7.5 injection token in snapshot.handle — dropped (account=${snap.accountId ?? "?"} platform=${snap.platform})`);
+          lines.push(`• Handle: [redacted: prompt-injection signal]`);
+        } else {
+          lines.push(`• Handle: ${_wrapUntrustedText(`@${safeHandle}`, { field: "handle" })}`);
+        }
+      } catch (e: any) {
+        console.warn(`[DualAnalysis] F8.1 invalid handle in snapshot — dropped (${e.message})`);
+        lines.push(`• Handle: [redacted: invalid format]`);
+      }
+    }
+    if (data.url) {
+      try {
+        const safeUrl = _validateUserUrl(String(data.url));
+        const inj = _detectInjection(safeUrl);
+        if (inj.suspicious) {
+          console.warn(`[DualAnalysis] F7.5 injection token in snapshot.url — dropped (account=${snap.accountId ?? "?"} platform=${snap.platform})`);
+          lines.push(`• URL: [redacted: prompt-injection signal]`);
+        } else {
+          lines.push(`• URL: ${_wrapUntrustedText(safeUrl, { field: "url" })}`);
+        }
+      } catch (e: any) {
+        console.warn(`[DualAnalysis] F8.1 invalid url in snapshot — dropped (${e.message})`);
+        lines.push(`• URL: [redacted: invalid format]`);
+      }
+    }
     lines.push(`• Posts in window: ${data.postCount}`);
     if (data.followers != null) lines.push(`• Followers: ${data.followers.toLocaleString()}`);
     if (data.avgEngagement != null) lines.push(`• Avg engagement per post: ${data.avgEngagement}`);
@@ -202,7 +255,9 @@ async function runDualAnalysis(
     };
   }
 
-  const prompt = `You are a dual-signal marketing strategy analyst. Your job is to compare competitor market intelligence with the user's own channel performance and classify the situation.
+  const prompt = `${_UNTRUSTED_RULE}
+
+You are a dual-signal marketing strategy analyst. Your job is to compare competitor market intelligence with the user's own channel performance and classify the situation.
 
 AVAILABLE DATA:
 ${competitorContext}
@@ -287,7 +342,20 @@ export function registerDualAnalysisRoutes(app: Express) {
   app.post("/api/agent/dual-analysis/:campaignId", async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
+      // Doctrine W5 (architect-#9 HIGH defence): the route handler reads
+      // campaignId from req.params ONLY; req.body.campaignId is ignored.
+      // We explicitly reject body-shadowing to prevent client confusion
+      // between intent and the asserted value.
+      if (req.body && typeof req.body === "object" && "campaignId" in req.body
+          && req.body.campaignId !== campaignId) {
+        return res.status(400).json({
+          error: "BadRequest",
+          message: "campaignId in body does not match path; path is canonical for this route",
+        });
+      }
       const accountId = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const result = await runDualAnalysis(accountId, campaignId);
       res.json({ success: true, analysis: result });
@@ -302,6 +370,8 @@ export function registerDualAnalysisRoutes(app: Express) {
     try {
       const { campaignId } = req.params;
       const accountId = resolveAccountId(req);
+      try { await assertCampaignBelongsTo(accountId, campaignId); }
+      catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
       const result = await runDualAnalysis(accountId, campaignId);
       res.json({ success: true, analysis: result });

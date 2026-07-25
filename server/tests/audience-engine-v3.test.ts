@@ -211,7 +211,7 @@ describe("Audience Engine V3 — Market Scope Detection (T003)", () => {
       "weight loss tips",
     ];
     const result = detectMarketScope(fitnessTexts, { industry: "Fitness Coaching", coreOffer: "Online Training" });
-    expect(result).toContain("fitness");
+    expect(result.markets).toContain("fitness");
   });
 
   it("detects marketing market from brand-related text", () => {
@@ -223,13 +223,13 @@ describe("Audience Engine V3 — Market Scope Detection (T003)", () => {
       "build your audience",
     ];
     const result = detectMarketScope(marketingTexts, { industry: "Digital Marketing", coreOffer: "Marketing Services" });
-    expect(result).toContain("marketing");
+    expect(result.markets).toContain("marketing");
   });
 
   it("returns universal for unrecognizable content", () => {
     const genericTexts = ["hello world", "something random"];
     const result = detectMarketScope(genericTexts, { industry: "General", coreOffer: "General" });
-    expect(result).toContain("universal");
+    expect(result.markets).toContain("universal");
   });
 
   it("fitness-scoped clusters are filtered out for marketing market", () => {
@@ -479,7 +479,7 @@ describe("Audience Engine V3 — Adversarial Inputs", () => {
   it("market detection handles adversarial input", () => {
     const weirdTexts = ["🔥🔥🔥", "AAAAAAA", "123456", "      "];
     const result = detectMarketScope(weirdTexts, { industry: "", coreOffer: "" });
-    expect(result).toContain("universal");
+    expect(result.markets).toContain("universal");
   });
 });
 

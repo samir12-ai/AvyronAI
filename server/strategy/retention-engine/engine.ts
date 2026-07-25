@@ -124,15 +124,15 @@ function buildRetentionPrompt(input: RetentionInput): string {
   const offer = input.offerStructure;
 
   const touchpointSummary = journey.touchpoints.length > 0
-    ? journey.touchpoints.map(tp => `- ${tp.stage} (${tp.channel}): engagement=${tp.engagementScore.toFixed(2)}, dropoff=${tp.dropoffRate.toFixed(2)}`).join("\n")
+    ? journey.touchpoints.map(tp => `- ${tp.stage || tp.type || 'unknown'} (${tp.channel}): engagement=${(tp.engagementScore ?? 0).toFixed(2)}, dropoff=${(tp.dropoffRate ?? 0).toFixed(2)}`).join("\n")
     : "No touchpoint data available";
 
   const motivationSummary = input.purchaseMotivations.length > 0
-    ? input.purchaseMotivations.map(m => `- ${m.motivation} (strength: ${m.strength.toFixed(2)}, category: ${m.category})`).join("\n")
+    ? input.purchaseMotivations.map(m => `- ${m.motivation} (strength: ${(m.strength ?? 0).toFixed(2)}, category: ${m.category})`).join("\n")
     : "No purchase motivation data available";
 
   const objectionSummary = input.postPurchaseObjections.length > 0
-    ? input.postPurchaseObjections.map(o => `- ${o.objection} (severity: ${o.severity.toFixed(2)}, frequency: ${o.frequency.toFixed(2)})`).join("\n")
+    ? input.postPurchaseObjections.map(o => `- ${o.objection} (severity: ${(o.severity ?? 0).toFixed(2)}, frequency: ${(o.frequency ?? 0).toFixed(2)})`).join("\n")
     : "No post-purchase objection data available";
 
   const rawInputs = (journey as any).rawInputs;
@@ -522,6 +522,12 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
     };
   }
 
+  // Seal #9 (F10.2 / D1 documented exemption): canonical F1 execution-status
+  // assignment from a guard-layer pass — same rationale as
+  // `iteration-engine/engine.ts`. This is the AUTHORING site of the canonical
+  // status, not a fallback substitute for one missing on an upstream
+  // contract.
+  // eslint-disable-next-line semantic/no-semantic-fallback
   const status = guardResult.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
   const dedupedWarnings = deduplicateWarnings(warnings);
 
