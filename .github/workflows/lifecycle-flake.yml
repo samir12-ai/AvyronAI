@@ -43,6 +43,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --include=dev
 
+      - name: Install Vitest for CI
+        run: npm install --no-save --package-lock=false --legacy-peer-deps vitest@4.1.10
+
       - name: Lifecycle flake check
         env:
           NODE_ENV: test
@@ -55,3 +58,5 @@ jobs:
         with:
           name: lifecycle-flake-logs
           path: /tmp/lifecycle-flake/
+      name: lifecycle-flake-logs
+      path: /tmp/lifecycle-flake/
