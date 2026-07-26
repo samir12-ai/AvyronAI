@@ -1,0 +1,109 @@
+TRUTH AUDIT REQUEST — Scraping Lineage: Current State
+
+Context: We are pausing P-1 Closure temporarily. Before we decide what to build next in the scraping layer, I need to understand what is ACTUALLY happening today with scraped posts, classification, and the link between scraped posts and the rest of the system.
+
+This is Truth Audit only. NO code changes. NO fixes. NO refactoring. Report only.
+
+Doctrine reminders (non-negotiable):
+- Every claim must be backed by quoted evidence: file path + line number, DB row inspection, or actual log output.
+- "Logical inference" is NOT verification. If you cannot show it, do not claim it.
+- If something is unclear or you cannot verify it, say so explicitly — do not fill in gaps.
+
+Please answer the following questions with evidence, in this exact order:
+
+═══════════════════════════════════════════
+PART A — OWNED POSTS (posts from Samir's account, scraped back by the ladder Bright Data → Apify)
+═══════════════════════════════════════════
+
+A1. When a post is published through the Studio, what identifiers are persisted at publish time?
+    - Show the exact insertion into publish_history (file + line).
+    - Which columns receive the Instagram shortcode / URL / media ID?
+    - Show one real row from publish_history to prove it.
+
+A2. When the scraper returns an owned post later, what is the matching logic that links the scraped post back to the original publish_history row?
+    - Show the exact matching code (file + line).
+    - Is the match by shortcode? URL? something else?
+    - If there is no matching logic, say so explicitly.
+
+A3. If the match succeeds, what fields from publish_history flow onto the scraped post record?
+    - Specifically: content_type, hook_style, angle, mix_bucket, planned_slot, campaign_id.
+    - Show the propagation code.
+    - Show one real owned_posts row where these fields are populated.
+
+A4. If the match fails (e.g. the 4 historical posts from @avyron_ai that predate the tracker), what happens?
+    - Are they stored with NULL lineage fields?
+    - Are they tagged (e.g. "unplanned", "baseline", "orphan")?
+    - Show one such real row.
+
+A5. Is there any classifier that runs on owned posts to INFER hook_style / angle / content_type from the caption + media?
+    - If yes: which engine, which file, what confidence output?
+    - If no: state clearly that owned posts get their lineage ONLY from publish_history match.
+
+═══════════════════════════════════════════
+PART B — COMPETITOR POSTS
+═══════════════════════════════════════════
+
+B1. When the scraper returns a competitor post, is it classified at all?
+    - Show the classification entry point (file + line).
+    - What fields are produced (hook_style? angle? offer_type? something else)?
+    - Show one real classified competitor_posts row (or wherever competitor posts live).
+
+B2. Where do these classifications end up? Trace the data flow:
+    - Do they feed the Content DNA?
+    - Do they feed the Watchtower?
+    - Do they feed the Performance Loop?
+    - Show the actual join / query that consumes them.
+
+B3. Since Bright Data lost Instagram support around July 19, what is the current state of competitor Instagram data specifically?
+    - Are competitor_posts rows still being written for Instagram? Empty? Stale?
+    - Show DB counts by platform for the last 14 days.
+    - Is any degradation marker surfaced to the user, or does the UI show competitor Instagram as normal while data is silently empty?
+
+═══════════════════════════════════════════
+PART C — CONTENT DNA
+═══════════════════════════════════════════
+
+C1. What is the actual definition of Content DNA in the current codebase?
+    - Which table(s) hold it?
+    - What fields make up a DNA record?
+    - Show one real DNA row.
+
+C2. What inputs feed Content DNA generation?
+    - Owned posts only?
+    - Competitor posts only?
+    - Both?
+    - Show the input query.
+
+C3. How does Content DNA connect to the Performance Loop scoring?
+    - Which fields in DNA correspond to which fields the scorer reads?
+    - Show the exact scorer query and the DNA emitter side-by-side.
+
+═══════════════════════════════════════════
+PART D — THE ACTUAL GAP
+═══════════════════════════════════════════
+
+D1. Given everything above, describe in plain terms:
+    - What a scraped owned post CAN currently tell the Performance Loop.
+    - What a scraped owned post CANNOT currently tell the Performance Loop.
+    - What a scraped competitor post CAN currently tell the Watchtower.
+    - What a scraped competitor post CANNOT currently tell the Watchtower.
+
+D2. Where exactly does a scraped post get "lost" in terms of lineage?
+    - Is it lost at scrape time (data never captured)?
+    - Is it lost at storage time (captured but not persisted)?
+    - Is it lost at read time (persisted but downstream doesn't join to it)?
+    - Point at the exact break with file + line evidence.
+
+═══════════════════════════════════════════
+DELIVERABLE
+═══════════════════════════════════════════
+
+A markdown report titled scrape-lineage-truth-audit-2026-07-26.md with:
+- One section per question above (A1..D2).
+- Every claim backed by quoted code snippet, file:line, DB row output, or log output.
+- Explicit "UNKNOWN — could not verify" for anything you cannot show live.
+- No recommendations. No proposed fixes. Only the current state.
+
+Do not touch any files. Do not run migrations. Do not modify configuration. Read-only audit.
+
+Once this report is delivered and I have reviewed it, we will decide together what to build.
