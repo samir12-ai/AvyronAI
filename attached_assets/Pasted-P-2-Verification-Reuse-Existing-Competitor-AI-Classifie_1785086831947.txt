@@ -1,0 +1,68 @@
+P-2 Verification — Reuse Existing Competitor AI Classifier (Verification Only)
+
+Do NOT implement anything.
+Do NOT modify code.
+Do NOT build a new classifier.
+
+Before we design a new Content DNA classifier, I want to verify whether Avyron already has an AI classifier inside the Competitor Analysis pipeline that can be reused.
+
+Search the entire codebase and identify every AI-powered competitor analysis/classification component.
+
+For each component report:
+
+1. File
+2. Function
+3. AI model used
+4. Prompt/template used (high level only)
+5. Input
+6. Output schema
+7. Which fields it classifies
+8. Which database tables it writes to
+9. Which parts of the system consume its output
+
+Specifically answer:
+
+- Does Competitor Analysis already classify:
+  - Hook
+  - Angle
+  - Narrative
+  - CTA
+  - Offer
+  - Positioning
+  - Awareness stage
+  - Audience
+  - Strengths / Weaknesses
+  - Content format
+  - Emotional trigger
+  - Any other strategic attributes
+
+- Is this classification produced by an LLM or by regex/rules?
+
+- Is the output already structured (JSON/object), or only natural language?
+
+- Can this classifier be executed on a single scraped competitor post?
+
+- Or is it designed only to analyze an entire competitor/business?
+
+Most importantly answer:
+
+Can this existing AI classifier become the single source of truth for competitor post classification and Content DNA?
+
+If YES:
+
+Explain exactly what would need to change to reuse it instead of building another classifier.
+
+If NO:
+
+Explain exactly why it cannot be reused.
+
+Finally provide:
+
+1. Reuse feasibility (YES / PARTIAL / NO)
+2. Technical reasons
+3. Estimated implementation complexity for reuse
+4. Whether reusing it is a better architectural decision than creating a second classifier.
+
+Important:
+Do not suggest creating a new classifier unless you have verified that the existing one cannot be reused.
+Base every conclusion on the actual codebase, not assumptions.
