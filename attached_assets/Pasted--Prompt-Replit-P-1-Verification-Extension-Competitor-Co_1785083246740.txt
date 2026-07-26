@@ -1,0 +1,71 @@
+هذا Prompt واضح ومحدد لـ Replit:
+
+---
+
+**P-1 Verification Extension – Competitor Coverage & Scheduler Validation**
+
+The previous audit surfaced several findings. Before we proceed with any fixes, I want you to verify two assumptions that could completely change the priority.
+
+### 1. Competitor Scraping Coverage
+
+Do **not** inspect only a single competitor (e.g. Good Burger).
+
+Verify the scraping pipeline across **at least 3–5 different competitors**.
+
+For each competitor report:
+
+* Last successful scrape timestamp
+* Current status
+* Number of posts stored
+* Whether Instagram scraping still works
+* Whether Apify fallback is being used
+* Whether the competitor is marked BLOCKED_BY_PLATFORM
+* Whether the pipeline stops before storing data or after storing data
+
+I want to know whether the issue is:
+
+* isolated,
+* affects some competitors,
+* or affects the entire competitor pipeline.
+
+---
+
+### 2. Scheduled Jobs Verification
+
+Verify that the production scheduler is actually running all recurring jobs.
+
+Specifically check:
+
+* nightly jobs
+* hourly jobs
+* competitor refresh jobs
+* market monitoring jobs
+* any pipeline responsible for updating competitor intelligence
+
+For each scheduled job report:
+
+* Is it currently registered?
+* Is it actually executing?
+* Last execution time
+* Last success
+* Last failure
+* If it uses an API, confirm the API is actually being called.
+* If it depends on credentials, verify the credentials exist.
+* If it silently skips execution, explain why.
+
+Do **not** assume that a registered cron means it is working.
+
+Verify actual execution.
+
+---
+
+### Deliverable
+
+Produce a concise report containing:
+
+1. Competitor Coverage Summary
+2. Scheduler Health Summary
+3. Any discrepancies discovered
+4. Whether these findings change the priorities from the previous audit.
+
+**Important:** This is a verification task only. Do **not** modify any code. Do **not** implement fixes. Only inspect, verify with evidence, and report findings.
