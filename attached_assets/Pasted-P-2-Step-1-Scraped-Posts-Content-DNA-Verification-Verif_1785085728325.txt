@@ -1,0 +1,62 @@
+P-2 Step 1 — Scraped Posts → Content DNA Verification (Verification Only)
+
+We are now starting Phase P-2 (Performance Loop).
+
+Do NOT implement fixes.
+Do NOT modify code.
+This is a verification and architecture audit only.
+
+Our objective is to verify the complete learning pipeline for SCRAPED POSTS (competitor posts), NOT owned/published posts.
+
+I want you to trace one scraped Instagram post from the moment it enters the system until the moment it should become reusable knowledge.
+
+For the selected scraped post(s), verify the complete chain:
+
+Scraped Post
+    ↓
+AI Classification
+(Hook / Angle / Narrative / CTA / Content Type / any other classifiers)
+    ↓
+Content DNA
+    ↓
+Persistent Storage
+    ↓
+Availability to Performance Loop
+    ↓
+Availability to Strategy Engine
+
+For every stage answer:
+
+1. Which file performs this step?
+2. Which function performs this step?
+3. Which database table stores the result?
+4. Which columns are written?
+5. Which AI model/classifier is responsible?
+6. Is the information persisted or only kept in memory?
+7. Is anything lost before reaching the next stage?
+8. Does the next stage actually read this data?
+
+Specifically verify:
+
+- Does every scraped competitor post receive AI classification?
+- Which classifications are actually generated today?
+- Which classifications are persisted?
+- Which classifications disappear after runtime?
+- Is Content DNA written into the content_dna table, another table, JSON snapshots, or nowhere?
+- Which component consumes the stored DNA afterwards?
+- Is the Strategy Engine reading the same data that the classifier produced?
+- Is the Performance Loop able to reuse this information later?
+
+Finally produce:
+
+1. A complete pipeline diagram.
+2. Every broken link in the chain.
+3. Which broken link prevents Performance Loop learning.
+4. Rank the broken links by importance.
+5. Recommend the single highest-priority fix before continuing P-2.
+
+Important:
+Do not fix anything.
+Do not speculate.
+Verify using the actual code paths and database schema.
+Provide evidence for every conclusion.
