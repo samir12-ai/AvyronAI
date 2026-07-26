@@ -133,9 +133,13 @@ interface FetchJobDiagnostics {
 
 export function computeDynamicBudgets(competitorCount: number): { requestBudget: number; runtimeBudget: number } {
   const BASE_REQUESTS_PER_COMPETITOR = 10;
-  const BASE_RUNTIME_PER_COMPETITOR_MS = 100_000;
+  // Raised from 100_000 → 150_000 (2026-07-26): Apify Instagram runs can take
+  // up to 120s; the per-competitor budget must comfortably exceed that.
+  const BASE_RUNTIME_PER_COMPETITOR_MS = 150_000;
   const MIN_RUNTIME_MS = 10 * 60 * 1000;
-  const MAX_RUNTIME_CEILING_MS = 25 * 60 * 1000;
+  // Raised from 25 min → 30 min (2026-07-26): worst-case 13 competitors × 120s
+  // Apify = 26 min, which was clipping the last 1-2 competitors under 25 min.
+  const MAX_RUNTIME_CEILING_MS = 30 * 60 * 1000;
 
   const requestBudget = Math.min(BASE_REQUESTS_PER_COMPETITOR * competitorCount, MAX_REQUESTS_PER_JOB);
   const runtimeBudget = Math.min(

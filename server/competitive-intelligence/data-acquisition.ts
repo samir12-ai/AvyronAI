@@ -2,6 +2,7 @@ import { db } from "../db";
 import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews } from "@shared/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { scrapeInstagramProfile, scrapeCommentsForPosts, extractHandleFromUrl, type ScrapedPost, type ScrapedComment } from "./profile-scraper";
+import { scrapeInstagramForCompetitor } from "./instagram-provider";
 import { lookupSharedProfile, upsertSharedProfile, linkCompetitorToSharedProfile, reuseFromSharedPool } from "./shared-profile-store";
 import { acquireStickySession, releaseStickySession, type StickySessionContext } from "./proxy-pool-manager";
 import * as crypto from "crypto";
@@ -728,7 +729,12 @@ async function _executeFetch(
   console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""} | maxPosts=${maxPosts}`);
 
   checkAborted(signal, "executeFetch:beforeProfileScrape");
-  const scrapeResult = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts, accountId);
+  // 2026-07-26: Instagram competitor acquisition now routes exclusively through
+  // the Instagram provider (Apify). Bright Data is no longer part of this path.
+  // Non-Instagram platforms (future) fall through to the legacy scraper.
+  const scrapeResult = (competitor.platform || "instagram").toLowerCase() === "instagram"
+    ? await scrapeInstagramForCompetitor(normalizedHandle || competitor.profileLink || "", maxPosts, accountId)
+    : await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts, accountId);
   checkAborted(signal, "executeFetch:afterProfileScrape");
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
@@ -793,6 +799,17 @@ async function _executeFetch(
       lastFetchAt: new Date(),
       fetchMethod: scrapeResult.collectionMethodUsed,
     });
+
+    // Clear any BLOCKED_BY_PLATFORM stamp when the scrape actually succeeded
+    // (DATA_DEGRADATION_GUARD preserves stored data but the transport was healthy).
+    await db.update(ciCompetitors)
+      .set({
+        fetchMethod: scrapeResult.collectionMethodUsed || collectionMode || "FAST_PASS",
+        lastCheckedAt: new Date(),
+        updatedAt: new Date(),
+        ...(scrapeResult.followers != null ? { followers: scrapeResult.followers } : {}),
+      })
+      .where(eq(ciCompetitors.id, competitorId));
 
     return {
       competitorId,

@@ -1,0 +1,285 @@
+# Competitor Instagram Recovery — Implementation Prompt (Scoped)
+
+Implement this task with the smallest possible scope. The objective is to fully restore **competitor Instagram acquisition** so the Performance Loop can continue on reliable market data.
+
+---
+
+# Product Decisions (Locked)
+
+## 1. Instagram provider
+
+For **competitor Instagram scraping only**, Bright Data is no longer part of the execution path.
+
+Treat Bright Data as deprecated for Instagram.
+
+Apify becomes the **primary and only** Instagram acquisition provider.
+
+Do **not** attempt Bright Data first.
+
+Do **not** implement Bright Data → Apify fallback.
+
+Do **not** spend implementation effort trying to revive the Bright Data Instagram path.
+
+Leave Bright Data untouched for every other acquisition source (Google Reviews, websites, blogs, etc.).
+
+---
+
+## 2. Scope
+
+Do **not** work on:
+
+* Content DNA
+* meta_post_id
+* Studio publishing
+* owned publishing lineage
+* owned-post classifier
+* Watchtower
+* UI work
+* stale-data user messaging
+* unrelated Performance Loop features
+
+Stay completely focused on restoring competitor Instagram acquisition.
+
+---
+
+## 3. Architecture
+
+Even though Apify becomes the only Instagram provider, keep the provider abstraction clean.
+
+The architecture should remain:
+
+```
+Instagram Acquisition
+        ↓
+Instagram Provider
+        ↓
+Apify
+```
+
+Do not hardcode Apify throughout the codebase.
+
+A future provider should still be replaceable from one integration point.
+
+---
+
+# Existing Pipeline
+
+Before making changes, trace the existing competitor Instagram acquisition flow and preserve all orchestration behavior.
+
+This includes:
+
+* scheduler entry
+* manual trigger entry
+* competitor eligibility
+* pool selection
+* cooldown logic
+* scrape claims
+* in-flight protection
+* retry rules
+* concurrency
+* watchdog cleanup
+* runtime limits
+* normalization
+* deduplication
+* persistence
+* metrics snapshots
+* MI completion
+
+Only replace the Instagram acquisition provider.
+
+Do **not** redesign the rest of the pipeline.
+
+---
+
+# Apify Integration Requirements
+
+Integrate Apify into the existing competitor acquisition lifecycle.
+
+Apify must respect the existing orchestration system.
+
+It must **not** bypass:
+
+* cooldowns
+* claim protection
+* concurrency
+* scheduling
+* retries
+* watchdog cleanup
+* deduplication
+
+The scheduler should behave exactly as before.
+
+The only difference should be that Instagram data now comes from Apify instead of Bright Data.
+
+---
+
+# Data Requirements
+
+The normalized Instagram posts must continue flowing through the existing canonical pipeline.
+
+Required flow:
+
+```
+Apify
+↓
+Validation
+↓
+Normalization
+↓
+Canonical Instagram Post
+↓
+Deduplication
+↓
+Database
+↓
+Metrics Snapshot
+↓
+MI Completion
+↓
+Existing downstream engines
+```
+
+Do not introduce parallel tables or provider-specific pipelines.
+
+---
+
+# Preserve Existing Schema
+
+Continue writing into the existing competitor post storage.
+
+Preserve:
+
+* competitor_id
+* platform_post_id
+* caption
+* timestamp
+* likes
+* comments
+* views (when available)
+* hashtags
+* CTA fields
+* media/content type
+* provider/source lineage
+
+Do not invent metrics when unavailable.
+
+Follow existing null conventions.
+
+---
+
+# Deduplication
+
+Existing unique constraints remain authoritative.
+
+Running Apify repeatedly must never duplicate Instagram posts already stored.
+
+---
+
+# Runtime
+
+Inspect the current runtime budget.
+
+Adjust only what is necessary for a normal Apify execution.
+
+Do not remove runtime protection.
+
+Do not allow infinite waits.
+
+Verify that:
+
+* APIFY_API_KEY is correctly loaded
+* secrets are never logged
+* failures are classified correctly
+
+---
+
+# Weekly Performance Loop Inputs
+
+While touching this area, verify that the existing weekly business inputs remain connected.
+
+Specifically verify the path for:
+
+* leads
+* qualified leads
+* booked calls
+* paying customers
+
+Report:
+
+* where the inputs enter the system
+* where they are stored
+* how they attach to the campaign/workspace
+* what reads them later
+
+Do not redesign this feature.
+
+Simply verify that the Instagram changes do not disconnect it.
+
+---
+
+# Live Verification (Mandatory)
+
+Do not rely only on code inspection.
+
+Run a real competitor Instagram scrape.
+
+Prove all of the following:
+
+1. competitor selected normally
+2. cooldown respected
+3. claim acquired
+4. Apify executed
+5. recent Instagram posts returned
+6. posts normalized
+7. posts persisted
+8. no duplicate rows created
+9. provider lineage recorded correctly
+10. MI run completed successfully
+11. claim released correctly
+12. immediate rerun respects cooldown
+
+---
+
+# Database Evidence
+
+Provide before/after evidence including:
+
+* competitor ID
+* latest post timestamp before
+* latest post timestamp after
+* row count before
+* row count after
+* duplicate count
+* provider value
+* final scrape state
+
+---
+
+# TypeScript
+
+Run focused TypeScript verification for every changed file.
+
+Separate:
+
+* pre-existing errors
+* newly introduced errors
+
+Do not perform unrelated cleanup.
+
+---
+
+# Final Report
+
+Finish with:
+
+1. files changed
+2. concise architecture summary
+3. file:line references
+4. database verification
+5. live execution proof
+6. weekly-input verification
+7. remaining blockers (if any)
+
+The objective of this task is simple:
+
+**Restore competitor Instagram acquisition using Apify as the single provider while preserving the existing acquisition pipeline and ensuring the Performance Loop continues receiving fresh competitor market data.**
