@@ -2099,9 +2099,7 @@ export const competitorPostClassifications = pgTable(
     primaryGoal: text("primary_goal").notNull().default("UNKNOWN"),
 
     // 0.000–1.000 confidence score from the classifier.
-    confidenceScore: numeric("confidence_score", { precision: 4, scale: 3 })
-      .notNull()
-      .default("0"),
+    confidenceScore: doublePrecision("confidence_score").notNull().default(0),
 
     // Prompt version — scope queries to a specific classifier run.
     classifierVersion: text("classifier_version").notNull(),

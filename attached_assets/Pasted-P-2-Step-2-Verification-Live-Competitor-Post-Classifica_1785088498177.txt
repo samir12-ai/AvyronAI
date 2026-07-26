@@ -1,0 +1,262 @@
+P-2 Step 2 Verification — Live Competitor Post Classification Test
+
+The competitor post classifier has now been implemented.
+
+Do NOT add new features in this task.
+
+Do NOT connect it to the Performance Loop yet.
+
+This task is only to verify that the new classifier works correctly on real scraped competitor posts and persists valid results.
+
+---
+
+Primary Goal
+
+Verify the full live path:
+
+Existing scraped competitor post
+
+→ classifyCompetitorPost()
+
+→ GPT-4.1-mini structured classification
+
+→ schema validation
+
+→ competitor_post_classifications persistence
+
+→ database verification
+
+---
+
+Step 1 — Inspect Before Running
+
+First inspect the newly created implementation:
+
+* server/competitor-post-classifier/types.ts
+* server/competitor-post-classifier/classifier.ts
+* server/competitor-post-classifier/batch.ts
+* server/competitor-post-classifier/index.ts
+* server/migrations/sql/046_competitor_post_classifications.sql
+* shared/schema.ts
+* server/migrations/runner.ts
+
+Confirm that:
+
+* imports resolve correctly
+* the migration version is 46
+* the classifier uses the existing aiChat infrastructure
+* GPT-4.1-mini is used
+* no Market Intelligence logic was modified
+* no Performance Loop integration was added
+
+Do not rewrite the architecture unless a blocking defect exists.
+
+---
+
+Step 2 — Run Migration 046
+
+Run the normal database migration command.
+
+Verify:
+
+* schema version becomes 46
+* competitor_post_classifications exists
+* all expected columns exist
+* indexes exist
+* CHECK constraints exist
+* existing ci_competitor_posts data is unchanged
+* no existing tables or rows were deleted
+
+Report the schema version before and after migration.
+
+---
+
+Step 3 — Select Real Test Posts
+
+Select 5 existing real posts from ci_competitor_posts.
+
+The test set should be diverse where possible:
+
+1. A post with a clear CTA
+2. A post with no CTA
+3. An educational or how-to post
+4. A promotional or offer-led post
+5. A vague, short, or difficult-to-classify post
+
+Prefer posts from at least 2 different competitors.
+
+For each selected post report:
+
+* post ID
+* competitor ID or competitor name
+* caption excerpt
+* likes
+* comments
+* views
+* media type
+* existing hookText
+* why it was selected
+
+Do not create fake posts unless there are not enough real posts in the database.
+
+---
+
+Step 4 — Run Classification
+
+Run classifyAndPersistPost() or the smallest appropriate batch call on only the selected test posts.
+
+Do not classify the entire database yet.
+
+Capture for each post:
+
+* whether the AI call succeeded
+* retry count
+* execution duration
+* model used
+* classification output
+* persistence result
+* any validation failure
+* any UNKNOWN values
+* any AI or budget error
+
+---
+
+Step 5 — Verify Database Persistence
+
+Query competitor_post_classifications for the selected posts.
+
+Verify:
+
+* one row exists per post for the current classifier version
+* post_id matches the source post
+* competitor_id matches
+* classifier_version is correct
+* confidence_score is between 0 and 1
+* classified_at is populated
+* enum values satisfy DB constraints
+* primary_hook and primary_angle are nullable where appropriate
+
+Run the exact same classification command again.
+
+Confirm idempotency:
+
+* no duplicate row is created for the same post and classifier version
+* the existing row is safely updated or preserved according to the intended design
+* the unique index works
+
+---
+
+Step 6 — Quality Review
+
+Manually compare the source caption with the AI classification.
+
+For every tested post evaluate:
+
+* Hook accuracy
+* Hook archetype accuracy
+* Primary angle accuracy
+* Narrative accuracy
+* CTA type accuracy
+* Offer type accuracy
+* Emotional trigger accuracy
+* Awareness stage accuracy
+* Positioning style accuracy
+* Content format intent accuracy
+* Primary goal accuracy
+* Confidence score realism
+
+Mark each dimension as:
+
+* CORRECT
+* ACCEPTABLE
+* QUESTIONABLE
+* WRONG
+* UNKNOWN_APPROPRIATE
+* UNKNOWN_UNNECESSARY
+
+Do not mark the test as passed only because valid JSON was returned.
+
+The semantic classifications must also make sense.
+
+---
+
+Step 7 — Cost and Operational Safety
+
+Report:
+
+* number of AI calls
+* approximate input tokens
+* approximate output tokens
+* approximate cost per post
+* approximate cost for 100 posts
+* total execution time
+* whether concurrency=5 is safe for the current AI budget and rate limits
+
+Do not classify 100 posts.
+
+Only estimate the projected cost using the test results.
+
+---
+
+Pass Criteria
+
+The verification passes only if:
+
+* Migration 046 succeeds
+* No existing data is damaged
+* At least 4 of 5 posts classify successfully
+* Results persist correctly
+* Re-running does not create duplicates
+* The schema validator rejects or corrects invalid values
+* UNKNOWN is used only where inference is genuinely weak
+* Most important classifications are semantically reasonable
+* Cost per post is acceptable
+* No blocking integration defect exists
+
+---
+
+If a Blocking Defect Is Found
+
+You may make the smallest necessary fix only when the defect prevents this verification from completing.
+
+Examples:
+
+* broken import
+* incorrect Drizzle column mapping
+* SQL constraint mismatch
+* JSON parser incompatibility
+* idempotent upsert failure
+* missing accountId handling
+* incorrect model call signature
+
+Do not expand scope.
+
+After any fix, rerun the full verification.
+
+---
+
+Final Deliverable
+
+Provide one clear report containing:
+
+1. Migration result
+2. Schema verification
+3. Test posts selected
+4. Classification output per post
+5. Persistence verification
+6. Idempotency result
+7. Semantic quality review
+8. UNKNOWN analysis
+9. Cost and runtime estimate
+10. Bugs found and fixes made
+11. Final verdict:
+
+* PASS
+* PASS WITH NON-BLOCKING ISSUES
+* FAIL
+
+12. Exact recommended next step
+
+Do not connect the classifier to the Performance Loop in this task.
+
+Stop after verification and wait for the next P-2 instruction.
