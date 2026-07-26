@@ -1,0 +1,150 @@
+P-2 Step 2 — Build the Competitor Post AI Classifier
+
+We are now starting the first implementation step of Phase P-2.
+
+Architectural decision:
+
+We are NOT replacing the existing Market Intelligence pipeline.
+
+The current Market Intelligence aggregation and reasoning remain exactly as they are.
+
+Instead, we are introducing a NEW reusable service whose first consumer will be the Performance Loop.
+
+Goal
+
+Build a reusable AI service that classifies every scraped competitor post individually.
+
+This service will become the foundation for:
+
+- Performance Loop
+- Future Content DNA improvements
+- Future Strategy improvements
+- Future Watchtower features
+
+It must NOT be tightly coupled to Performance Loop.
+
+Performance Loop will simply consume it.
+
+------------------------------------------------
+
+Requirements
+
+Input:
+
+A single row from ci_competitor_posts.
+
+Example available fields:
+
+- caption
+- hashtags
+- mediaType
+- hookText
+- likes
+- comments
+- views
+- permalink
+
+Output:
+
+A structured JSON object.
+
+Do NOT generate writing.
+
+Do NOT suggest captions.
+
+Do NOT rewrite the post.
+
+Only classify it.
+
+------------------------------------------------
+
+The classifier should identify things such as:
+
+- Primary Hook
+- Hook Archetype
+- Primary Angle
+- Narrative
+- CTA Type
+- Offer Type
+- Emotional Trigger
+- Awareness Stage
+- Positioning Style
+- Content Format Intent
+- Primary Goal
+- Confidence Score
+
+If some dimensions are impossible to infer,
+
+return UNKNOWN instead of hallucinating.
+
+------------------------------------------------
+
+Reuse existing infrastructure wherever possible.
+
+Reuse:
+
+- GPT-4.1-mini
+- aiChat wrapper
+- retry logic
+- timeout handling
+- schema validation
+- JSON parsing
+- budget management
+
+Do NOT duplicate existing AI infrastructure.
+
+------------------------------------------------
+
+The classifier must be implemented as a reusable service.
+
+Example architecture:
+
+classifyCompetitorPost(post)
+
+↓
+
+Structured Classification
+
+↓
+
+Any future engine can consume it.
+
+NOT:
+
+PerformanceLoopClassifier()
+
+------------------------------------------------
+
+Persistence
+
+Design an appropriate persistence model.
+
+Choose whichever is architecturally cleaner:
+
+- extending ci_competitor_posts
+
+OR
+
+- creating a dedicated competitor_post_classifications table
+
+Explain your choice.
+
+------------------------------------------------
+
+Do NOT modify the existing Market Intelligence logic.
+
+Do NOT replace regex Content DNA.
+
+This is an additive capability.
+
+------------------------------------------------
+
+Deliverables
+
+1. Architecture
+2. Files created
+3. Files modified
+4. Database changes
+5. Classification schema
+6. Why this design is reusable across Avyron
+7. Wait for implementation verification before continuing to the next P-2 step.

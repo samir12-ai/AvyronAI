@@ -2067,6 +2067,65 @@ export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
 
 export type CiCompetitorPost = typeof ciCompetitorPosts.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// competitor_post_classifications — AI-generated per-post classifications.
+// Created by migration 046. Separate from ci_competitor_posts so that:
+//   - scrape rows remain immutable source truth
+//   - re-classification (new classifierVersion) inserts new rows, old stay
+//   - any consumer LEFT JOINs cleanly; unclassified = no row, not null columns
+// ---------------------------------------------------------------------------
+export const competitorPostClassifications = pgTable(
+  "competitor_post_classifications",
+  {
+    id: varchar("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    postId: varchar("post_id").notNull(),
+    competitorId: varchar("competitor_id").notNull(),
+
+    // Free-text dimensions — null = classifier could not extract.
+    primaryHook: text("primary_hook"),
+    primaryAngle: text("primary_angle"),
+
+    // Enumerated dimensions — text columns, validated by DB CHECK constraints.
+    hookArchetype: text("hook_archetype").notNull().default("UNKNOWN"),
+    narrative: text("narrative").notNull().default("UNKNOWN"),
+    ctaType: text("cta_type").notNull().default("UNKNOWN"),
+    offerType: text("offer_type").notNull().default("UNKNOWN"),
+    emotionalTrigger: text("emotional_trigger").notNull().default("UNKNOWN"),
+    awarenessStage: text("awareness_stage").notNull().default("UNKNOWN"),
+    positioningStyle: text("positioning_style").notNull().default("UNKNOWN"),
+    contentFormatIntent: text("content_format_intent").notNull().default("UNKNOWN"),
+    primaryGoal: text("primary_goal").notNull().default("UNKNOWN"),
+
+    // 0.000–1.000 confidence score from the classifier.
+    confidenceScore: numeric("confidence_score", { precision: 4, scale: 3 })
+      .notNull()
+      .default("0"),
+
+    // Prompt version — scope queries to a specific classifier run.
+    classifierVersion: text("classifier_version").notNull(),
+
+    classifiedAt: timestamp("classified_at").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => ({
+    // Unique: one classification per (post, version) — upsert-safe.
+    postVersionIdx: uniqueIndex("competitor_post_classifications_post_version_idx").on(
+      table.postId,
+      table.classifierVersion,
+    ),
+    // Fast lookup: all classified posts for a given competitor + version.
+    competitorIdx: index("competitor_post_classifications_competitor_idx").on(
+      table.competitorId,
+      table.classifierVersion,
+    ),
+  }),
+);
+
+export type CompetitorPostClassificationRow =
+  typeof competitorPostClassifications.$inferSelect;
+
 export const ciCompetitorComments = pgTable("ci_competitor_comments", {
   id: varchar("id")
     .primaryKey()
