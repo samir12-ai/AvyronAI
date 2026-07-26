@@ -1,0 +1,113 @@
+FIX ARCHITECTURE REQUEST — Three Root Problems in the Scraping Lineage Layer
+
+Context: Your Truth Audit (scrape-lineage-truth-audit-2026-07-26.md) surfaced three root problems, not one. Before we fix anything, I need an architect-reviewed FIX DESIGN for each — no code changes yet. Design proposals only.
+
+Doctrine reminders:
+- Truth Audit → architect-approved design → implementation → live verification. We are at step 2.
+- No gate/judge/threshold weakening.
+- No silent fallbacks. Any degraded state must be surfaced to the user via the existing dashboard warning system.
+- "Fix the root, not the symptom." Warnings on the outlet are unacceptable when the inlet is unenforced.
+
+═══════════════════════════════════════════
+PROBLEM 1 — Identity capture is deferred, not enforced at publish time
+═══════════════════════════════════════════
+
+Evidence from your audit:
+- `published_posts.meta_post_id` is written only by a post-publish Meta sync, NOT at publish time.
+- `shortcode` column does not exist on the table.
+- Lineage fields (`hookStyle`, `contentAngle`, etc.) arrive in a follow-up UPDATE, not the INSERT.
+- Resolver Step 1 (highest-confidence match) always misses when the sync job is delayed or failed.
+
+Design requirements:
+- Identity must be captured at the moment of publish, not reconciled later.
+- If Meta returns the post ID synchronously → persist immediately in the same transaction as the Studio insert.
+- If Meta's response is asynchronous → the publish must be marked `awaiting_identity` with a hard SLA (e.g. 60 seconds). If the SLA lapses without an ID, the row is flagged and a dashboard warning fires.
+- The design must eliminate the case where a post exists in `published_posts` without either a resolved ID or an explicit `awaiting_identity` marker.
+
+Deliverable for Problem 1:
+- Proposed schema changes (which columns added, which constraints).
+- Publish-path sequence diagram (Studio → DB → Meta → identity resolution).
+- Failure mode table: what happens if Meta returns an error, times out, or returns a malformed response.
+- Migration strategy for existing rows.
+- Which existing warning system in `dna_enrichment_requests` / `DnaEnrichmentCard` this hooks into (or why a new one is needed).
+
+═══════════════════════════════════════════
+PROBLEM 2 — The `content_dna` table is empty and disconnected from the Performance Loop
+═══════════════════════════════════════════
+
+Evidence from your audit:
+- `content_dna` table: 0 rows.
+- In-memory DNA is computed and flows into `mi_snapshots.content_dna_data` JSON — never persisted to `content_dna`.
+- Persistent `content_dna` table is read by orchestrator, execution-activation, commercial-reasoning — all currently reading from an empty table.
+- Competitor post classifications (hook / narrative / CTA archetype) computed in `content-dna.ts` are never written back to `ci_competitor_posts` rows.
+- Owned posts do not enter DNA computation at all.
+- Performance Loop scorer has zero connection to either the JSON blob or the table.
+
+This is the highest-severity finding in the audit. Every strategic decision the system has been making since May 2026 has been sourced from an empty table or a stale JSON blob.
+
+Design requirements:
+- Decide the source-of-truth: either the `content_dna` table becomes the only store and the JSON blob is deprecated, or the JSON blob is canonical and the table is dropped. Not both.
+- Whichever wins, the in-memory classifications MUST be persisted to it at the point of computation.
+- The Performance Loop scorer must have a defined, non-empty read path.
+- Owned posts must enter DNA computation, not just competitor posts. Design the entry point.
+- If a computation runs and produces no writeable output, that must fire a warning — not be silent.
+
+Deliverable for Problem 2:
+- Decision on source-of-truth with reasoning.
+- Schema alignment: which fields exist on the winning store, which on the loser, what gets migrated.
+- Write path: exactly where classifications are persisted (file:line pointers to the insertion sites).
+- Read path: exactly how the Performance Loop scorer queries DNA (proposed query).
+- Backfill strategy: how do we populate DNA for the existing 140 Instagram competitor rows and any owned posts that already exist.
+- Deprecation plan for the losing store.
+
+═══════════════════════════════════════════
+PROBLEM 3 — Instagram competitor data has been dead since May 15 with no user-facing signal
+═══════════════════════════════════════════
+
+Evidence from your audit:
+- All 13 Instagram competitors: `BLOCKED_BY_PLATFORM`.
+- Zero `ci_competitor_posts` rows in the last 14 days. Newest row: 2026-05-15.
+- Root cause: Bright Data lost Instagram support around July 19. (Prior to that, other issues.)
+- Degradation is visible internally to Operations Guardian.
+- Users see no notice. The UI presents competitive intelligence as normal while sourced from 73-day-old data.
+
+Design requirements — two independent decisions:
+
+Decision 3a — Repair the fuel:
+- Option A: Extend the competitor watchdog from 45s to 120s and enable the Apify Instagram fallback (already proven working on owned path) on the competitor path.
+- Option B: Keep Bright Data only, accept that Instagram competitor scraping stays dead until Bright Data restores support.
+- Option C: A hybrid — Apify for a subset of high-priority competitors, Bright Data attempts continue.
+- Whatever the choice: expected cost per week at current competitor count and cadence.
+
+Decision 3b — Surface the degradation to the user:
+- Any competitor data older than N days must show a freshness warning in the UI. Propose N.
+- The competitive intelligence panels must display the last successful fetch timestamp per platform per competitor.
+- If a platform is entirely blocked, the panel must say so — not render zeros or last-known-values as if fresh.
+
+Deliverable for Problem 3:
+- Recommendation on 3a with cost estimate.
+- Design for the freshness/degradation UI surface (which existing component gets extended, what the copy says, when the warning escalates from "watching" to "stale" to "unavailable").
+- Interaction with the existing Operations Guardian internal signal — should the same signal now drive the user-facing UI?
+
+═══════════════════════════════════════════
+NON-NEGOTIABLE CONSTRAINTS ACROSS ALL THREE
+═══════════════════════════════════════════
+
+1. No implementation. Design proposals with file:line references only.
+2. Architect review required BEFORE any implementation begins.
+3. Each design must state which existing subsystems it touches and confirm no gate, judge, threshold, verdict, or scoring rule is weakened.
+4. Each design must include the live verification plan: how we will PROVE the fix works with quoted logs / DB inspection. "Logical inference" is not verification.
+5. tsc net-new target: 0 vs current baseline (720).
+6. All three designs delivered in a single markdown document: scrape-lineage-fix-design-2026-07-26.md.
+
+═══════════════════════════════════════════
+DELIVERABLE ORDER
+═══════════════════════════════════════════
+
+- Section 1: Problem 2 design (highest severity — the empty table)
+- Section 2: Problem 1 design (root cause of lineage loss)
+- Section 3: Problem 3 design (fuel + user visibility)
+- Section 4: Sequencing recommendation — which to build first, second, third, with dependency reasoning.
+- Section 5: Explicit list of anything you could not design cleanly and needs a decision from me before proceeding.
+
+Once you deliver this, I review, we align, THEN implementation prompts begin — one problem at a time.
