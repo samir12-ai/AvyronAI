@@ -1,0 +1,228 @@
+P-2 Step 5 — Platform Integration Audit + Live Campaign Verification (Economic Mode)
+
+The competitor classification layer (competitor-post-v2) has successfully completed full corpus backfill and verification. It is now considered production-ready.
+
+Your task is NOT to redesign the classifier.
+
+Your task is to safely integrate it across the platform, verify every dependency, and validate the entire flow using the real MarketMindAI campaign.
+
+==================================================
+Phase 1 — Platform Integration Audit
+==================================================
+
+Audit every platform component that currently consumes competitor data.
+
+At minimum inspect:
+
+- Market Intelligence
+- Watchtower
+- Performance Loop
+- Strategy Engine
+- Dashboard APIs
+- Scheduled jobs
+- Orchestrators
+- Background services
+- Any routes serving competitor insights
+
+For every consumer:
+
+- Identify how competitor data is currently loaded.
+- Identify whether it still depends on:
+  - regex
+  - legacy parsing
+  - duplicated logic
+  - aggregated-only analysis
+  - any outdated implementation
+
+Whenever possible:
+
+Replace legacy logic with reads from:
+
+competitor_post_classifications
+
+Do NOT duplicate classification logic.
+
+There must be only ONE source of truth.
+
+==================================================
+Phase 2 — End-to-End Root Audit
+==================================================
+
+Trace the complete execution path.
+
+Scraper
+↓
+
+ci_competitor_posts
+↓
+
+competitor_post_classifications
+↓
+
+Consumer
+↓
+
+API
+↓
+
+Frontend
+
+Verify every stage.
+
+Check:
+
+- joins
+- filters
+- classifier version
+- confidence filtering
+- database relations
+- cache behavior
+- scheduled jobs
+- API responses
+- frontend rendering
+
+Confirm there are:
+
+- no broken routes
+- no orphan reads
+- no old schema references
+- no legacy regex paths still affecting outputs
+
+Document every root and route modified.
+
+==================================================
+Phase 3 — Core Signal Evaluation
+==================================================
+
+Review every current classification dimension.
+
+Current dimensions:
+
+- Hook Archetype
+- Primary Angle
+- Core Marketing Promise
+- Narrative
+- CTA Type
+- Emotional Trigger
+- Awareness Stage
+- Positioning Style
+- Content Format Intent
+- Primary Goal
+
+For EACH dimension evaluate:
+
+- Classification accuracy
+- Business usefulness
+- Strategic value
+- Stability
+- Scalability
+- Ability to generate long-term competitive intelligence
+
+Then classify every dimension as one of:
+
+- Core Signal
+- Secondary Signal
+- Experimental Signal
+- Remove
+
+If you discover stronger marketing dimensions that would improve:
+
+- Market Intelligence
+- Watchtower
+- Performance Loop
+- Strategy Engine
+
+propose them.
+
+Do NOT implement them.
+
+Provide only architectural recommendations.
+
+==================================================
+Phase 4 — MarketMindAI Live Verification
+==================================================
+
+Run a complete end-to-end verification using the real campaign:
+
+MarketMindAI
+
+Verify that the campaign now benefits from the new competitor classification layer.
+
+Validate:
+
+- competitor ingestion
+- competitor classifications
+- Market Intelligence outputs
+- Watchtower outputs
+- Performance Loop
+- strategy generation
+- dashboards
+- APIs
+- frontend
+
+Look for:
+
+- inconsistencies
+- stale caches
+- duplicated logic
+- outdated regex paths
+- missing joins
+- unexpected outputs
+- incorrect insights
+
+If any issue is discovered:
+
+Fix it immediately.
+
+Continue testing until the complete flow is verified.
+
+==================================================
+Phase 5 — Final Architecture Review
+==================================================
+
+Determine whether competitor_post_classifications has become the platform-wide Single Source of Truth.
+
+If not:
+
+Document exactly what still prevents it.
+
+Do NOT redesign the architecture.
+
+Only identify remaining gaps.
+
+==================================================
+Deliverable
+==================================================
+
+Produce a complete technical report including:
+
+1. Integration Audit Summary
+
+2. Roots Modified
+
+3. Routes Modified
+
+4. Platform Components Updated
+
+5. MarketMindAI End-to-End Verification
+
+6. Remaining Legacy Dependencies
+
+7. Core Signal Evaluation
+
+8. Recommended Core Signals
+
+9. Recommended Secondary Signals
+
+10. Experimental Signals
+
+11. Future Architecture Recommendations
+
+12. Final PASS / FAIL Verdict
+
+Only return PASS if:
+
+- Every major platform component successfully consumes competitor_post_classifications.
+- No critical consumer still relies on legacy competitor analysis.
+- MarketMindAI successfully completes an end-to-end validation using the new shared classification layer.
+- The platform has a verified, production-ready Single Source of Truth for competitor intelligence.

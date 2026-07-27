@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns, competitorWebData } from "@shared/schema";
+import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns, competitorWebData, competitorPostClassifications } from "@shared/schema";
 type CiCompetitorRow = typeof ciCompetitors.$inferSelect;
 import { inArray, eq, and, desc, sql } from "drizzle-orm";
 import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode, type FetchOptions, type ScrapeMode } from "../competitive-intelligence/data-acquisition";
@@ -1389,7 +1389,33 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
   const previousSnapshot = previousSnapshots[0] || null;
   const newVersion = (previousSnapshot?.version || 0) + 1;
 
-  const { buildWebsiteSignals, buildBlogSignals, buildInstagramSignals, classifyWebsiteSignals, classifyBlogSignals, classifyInstagramSignals, reconcileMultiSourceSignals } = await import("./signal-normalizer");
+  const { buildWebsiteSignals, buildBlogSignals, buildInstagramSignals, classifyWebsiteSignals, classifyBlogSignals, classifyInstagramSignals, buildClassificationSignals, reconcileMultiSourceSignals } = await import("./signal-normalizer");
+
+  // Load AI-classified post signals for all competitors in one query.
+  // These augment the regex-based signals with per-post AI intelligence.
+  // We use "competitor-post-v2" (the current classifier version) and filter
+  // to confidence >= 0.50 to exclude near-empty posts.
+  const allCompetitorIds = competitors.map((c) => c.id);
+  const allAiClassifications =
+    allCompetitorIds.length > 0
+      ? await db
+          .select()
+          .from(competitorPostClassifications)
+          .where(
+            and(
+              inArray(competitorPostClassifications.competitorId, allCompetitorIds),
+              eq(competitorPostClassifications.classifierVersion, "competitor-post-v2"),
+            ),
+          )
+      : [];
+  // Group by competitor so the per-competitor loop can look up its slice cheaply.
+  const classificationsByCompetitor = new Map<string, typeof allAiClassifications>();
+  for (const row of allAiClassifications) {
+    const arr = classificationsByCompetitor.get(row.competitorId) ?? [];
+    arr.push(row);
+    classificationsByCompetitor.set(row.competitorId, arr);
+  }
+  console.log(`[FetchOrch] AI_CLASSIFICATION_SIGNALS_LOADED | competitors=${allCompetitorIds.length} | totalRows=${allAiClassifications.length}`);
   const { computeSourceAvailability: buildSourceAvail } = await import("./source-types");
   let multiSourceSignalsJson: string | null = null;
   let sourceAvailabilityJson: string | null = null;
@@ -1454,6 +1480,12 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
       for (const ext of webExtractions) classified.push(...classifyWebsiteSignals(ext));
       if (blogExtraction) classified.push(...classifyBlogSignals(blogExtraction));
       if (contentDnaForComp) classified.push(...classifyInstagramSignals(contentDnaForComp));
+      // Augment with AI-classified signals — more accurate than regex for
+      // hook archetypes, positioning style, core promise, CTA, and triggers.
+      const compAiClassifications = classificationsByCompetitor.get(c.id) ?? [];
+      if (compAiClassifications.length > 0) {
+        classified.push(...buildClassificationSignals(compAiClassifications));
+      }
 
       const reconciled = reconcileMultiSourceSignals(igSignals, webSignals, blogSigs, classified, sourceAvail);
       perCompetitorMultiSource[c.id] = {

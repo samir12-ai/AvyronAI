@@ -1,6 +1,6 @@
 import { Express, Request, Response } from "express";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import {
   contentDna,
   miSnapshots,
@@ -15,6 +15,8 @@ import {
   iterationSnapshots,
   strategicPlans,
   businessDataLayer,
+  ciCompetitors,
+  competitorPostClassifications,
 } from "../shared/schema";
 import { aiChat } from "./ai-client";
 import { requireCampaign } from "./campaign-routes";
@@ -204,6 +206,81 @@ async function gatherEngineContext(campaignId: string, accountId: string) {
         error: (sectionErr as Error)?.message,
       });
     }
+  }
+
+  // BL-2 Fix: inject AI-classified competitor post intelligence.
+  // The classifier (competitor-post-v2) has tagged every scraped competitor
+  // post with structured dimensions: hook archetype, core marketing promise,
+  // emotional trigger, positioning style, and CTA type.
+  // This data was previously absent from the Content DNA synthesis prompt.
+  try {
+    const campaignCompetitors = await db
+      .select({ id: ciCompetitors.id, name: ciCompetitors.name })
+      .from(ciCompetitors)
+      .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
+
+    if (campaignCompetitors.length > 0) {
+      const compIds = campaignCompetitors.map((c) => c.id);
+      const classifications = await db
+        .select({
+          competitorId: competitorPostClassifications.competitorId,
+          hookArchetype: competitorPostClassifications.hookArchetype,
+          coreMarketingPromise: competitorPostClassifications.coreMarketingPromise,
+          emotionalTrigger: competitorPostClassifications.emotionalTrigger,
+          positioningStyle: competitorPostClassifications.positioningStyle,
+          ctaType: competitorPostClassifications.ctaType,
+          primaryGoal: competitorPostClassifications.primaryGoal,
+          confidenceScore: competitorPostClassifications.confidenceScore,
+        })
+        .from(competitorPostClassifications)
+        .where(
+          and(
+            inArray(competitorPostClassifications.competitorId, compIds),
+            eq(competitorPostClassifications.classifierVersion, "competitor-post-v2"),
+          ),
+        );
+
+      // Filter to confidence >= 0.50 and aggregate per competitor.
+      const HIGH_CONF = 0.50;
+      type AggDim = Record<string, number>;
+      type CompAgg = { name: string; total: number; hooks: AggDim; promises: AggDim; triggers: AggDim; positioning: AggDim; ctas: AggDim; };
+      const byComp = new Map<string, CompAgg>();
+      for (const comp of campaignCompetitors) {
+        byComp.set(comp.id, { name: comp.name, total: 0, hooks: {}, promises: {}, triggers: {}, positioning: {}, ctas: {} });
+      }
+      for (const row of classifications) {
+        const conf = typeof row.confidenceScore === "number" ? row.confidenceScore : Number(row.confidenceScore ?? 0);
+        if (conf < HIGH_CONF) continue;
+        const agg = byComp.get(row.competitorId);
+        if (!agg) continue;
+        agg.total++;
+        const inc = (d: AggDim, k: string | null) => { if (k && k !== "UNKNOWN" && k !== "NONE") d[k] = (d[k] || 0) + 1; };
+        inc(agg.hooks, row.hookArchetype);
+        inc(agg.promises, row.coreMarketingPromise);
+        inc(agg.triggers, row.emotionalTrigger);
+        inc(agg.positioning, row.positioningStyle);
+        inc(agg.ctas, row.ctaType);
+      }
+
+      const top = (d: AggDim, n = 3) =>
+        Object.entries(d).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => `${k}(${v})`).join(", ");
+
+      const lines: string[] = [`COMPETITOR CONTENT INTELLIGENCE (AI-Classified, ${classifications.length} posts):`];
+      for (const agg of byComp.values()) {
+        if (agg.total === 0) continue;
+        lines.push(`\n${agg.name} (${agg.total} classified posts):`);
+        if (Object.keys(agg.hooks).length > 0)     lines.push(`  Hook archetypes:    ${top(agg.hooks)}`);
+        if (Object.keys(agg.promises).length > 0)  lines.push(`  Core promise:       ${top(agg.promises)}`);
+        if (Object.keys(agg.triggers).length > 0)  lines.push(`  Emotional triggers: ${top(agg.triggers)}`);
+        if (Object.keys(agg.positioning).length > 0) lines.push(`  Positioning:        ${top(agg.positioning)}`);
+        if (Object.keys(agg.ctas).length > 0)      lines.push(`  CTA types:          ${top(agg.ctas)}`);
+      }
+      if (lines.length > 1) parts.push(lines.join("\n"));
+    }
+  } catch (classifErr) {
+    console.error("[ContentDnaRoutes] COMPETITOR_CLASSIFICATION_SECTION_FAILED", {
+      error: (classifErr as Error)?.message,
+    });
   }
 
   return { contextString: parts.join("\n\n---\n\n"), businessProfile: biz || null };

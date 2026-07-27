@@ -15,6 +15,7 @@ import type {
 import type { CompetitorContentDNA } from "./types";
 import type { TikTokQualificationResult } from "./tiktok-qualification";
 import type { ReviewsIntelligenceResult } from "./reviews-intelligence";
+import type { CompetitorPostClassificationRow } from "@shared/schema";
 
 const SIGNAL_WEIGHTS: Record<SignalClass, Record<SourceType, number>> = {
   positioning: { website: 0.5, instagram: 0.2, blog: 0.1, tiktok: 0.1, reviews: 0.1 },
@@ -24,6 +25,55 @@ const SIGNAL_WEIGHTS: Record<SignalClass, Record<SourceType, number>> = {
   proof: { website: 0.35, instagram: 0.2, blog: 0.15, tiktok: 0.1, reviews: 0.2 },
   cta: { website: 0.35, instagram: 0.25, blog: 0.1, tiktok: 0.2, reviews: 0.1 },
 };
+
+/**
+ * Convert AI-classified competitor post rows into ClassifiedSignal[]
+ * for use alongside the regex-derived signals in the multi-source pipeline.
+ *
+ * Only includes rows with confidence >= 0.50. UNKNOWN and NONE values are
+ * skipped — they carry no actionable signal. One signal per meaningful
+ * dimension per post, so a post with hookArchetype=BOLD_CLAIM and
+ * positioningStyle=AUTHORITY contributes two signals.
+ *
+ * Uses sourceType="instagram" because all posts in this corpus are Instagram.
+ * When TikTok classification is added in a future version, pass sourceType
+ * as a parameter instead.
+ */
+export function buildClassificationSignals(
+  classifications: CompetitorPostClassificationRow[],
+): ClassifiedSignal[] {
+  const signals: ClassifiedSignal[] = [];
+  const src: SourceType = "instagram";
+  const MIN_CONFIDENCE = 0.50;
+
+  for (const c of classifications) {
+    const conf = typeof c.confidenceScore === "number"
+      ? c.confidenceScore
+      : Number(c.confidenceScore ?? 0);
+    if (conf < MIN_CONFIDENCE) continue;
+
+    if (c.hookArchetype && c.hookArchetype !== "UNKNOWN") {
+      signals.push({ signalClass: "content", sourceType: src, text: `Hook: ${c.hookArchetype}`, confidence: conf });
+    }
+    if (c.positioningStyle && c.positioningStyle !== "UNKNOWN") {
+      signals.push({ signalClass: "positioning", sourceType: src, text: `Positioning: ${c.positioningStyle}`, confidence: conf });
+    }
+    if (c.coreMarketingPromise && c.coreMarketingPromise !== "UNKNOWN") {
+      signals.push({ signalClass: "offer", sourceType: src, text: `Promise: ${c.coreMarketingPromise}`, confidence: conf });
+    }
+    if (c.ctaType && c.ctaType !== "NONE" && c.ctaType !== "UNKNOWN") {
+      signals.push({ signalClass: "cta", sourceType: src, text: `CTA: ${c.ctaType}`, confidence: conf });
+    }
+    if (c.emotionalTrigger && c.emotionalTrigger !== "UNKNOWN") {
+      signals.push({ signalClass: "content", sourceType: src, text: `Trigger: ${c.emotionalTrigger}`, confidence: conf });
+    }
+    if (c.narrative && c.narrative !== "UNKNOWN") {
+      signals.push({ signalClass: "content", sourceType: src, text: `Narrative: ${c.narrative}`, confidence: conf });
+    }
+  }
+
+  return signals;
+}
 
 export function classifyWebsiteSignals(extraction: WebsiteExtraction): ClassifiedSignal[] {
   const signals: ClassifiedSignal[] = [];
