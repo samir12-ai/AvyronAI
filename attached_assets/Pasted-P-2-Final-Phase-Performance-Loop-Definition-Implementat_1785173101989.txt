@@ -1,0 +1,379 @@
+P-2 Final Phase — Performance Loop Definition, Implementation Audit, and Live Sales-Based Experiment
+
+The competitor intelligence foundation is now complete and verified.
+
+Do not add new competitor intelligence features.
+
+Do not modify the scraper, classifier, Market Intelligence, Watchtower, or Pipeline Boss unless a blocking integration defect is discovered.
+
+The goal of this task is to define exactly what the Performance Loop is, audit what already exists, complete only the missing core logic, and run one real controlled experiment using the MarketMindAI campaign.
+
+==================================================
+
+1. Product Definition
+   ==================================================
+
+The Performance Loop is not a generic analytics dashboard.
+
+Its purpose is:
+
+To learn which marketing decisions increase the client’s sales, preserve successful decisions, reject weak decisions, and improve the next strategy cycle using both client results and market intelligence.
+
+The primary success metric is:
+
+SALES
+
+Sales are entered manually by the user for each reporting period.
+
+Other metrics may help explain the result, but they must not replace sales as the final success criterion.
+
+==================================================
+2. Performance Loop Inputs
+==========================
+
+Audit which of these inputs already exist and where they are stored.
+
+Required inputs:
+
+A. Client outcome inputs
+
+* Sales
+* Reporting period start date
+* Reporting period end date
+
+Supporting inputs where available:
+
+* Ad spend
+* Number of published posts
+* Leads
+* Purchases
+* Revenue
+* Notes about exceptional events, promotions, holidays, stock issues, or campaign changes
+
+B. Client strategy inputs
+
+The Loop must know what Avyron recommended during the tested period, including where available:
+
+* Recommended hook archetypes
+* Recommended primary angles
+* Recommended core marketing promises
+* Recommended emotional triggers
+* Recommended positioning styles
+* Recommended CTAs
+* Recommended content formats
+* Recommended campaign goals
+* Approved and rejected strategic angles
+
+C. Actual client execution
+
+The Loop must determine what the client actually published or executed during the same period.
+
+Where user post classifications already exist, consume them.
+
+Where they do not exist, document the exact gap.
+
+Do not invent or infer execution data that is not stored.
+
+D. Market context
+
+Consume existing intelligence from:
+
+* Market Intelligence
+* Watchtower
+* Pipeline Boss
+* competitor_post_classifications
+
+Use market context only to explain performance and improve decisions.
+
+Market activity is not the success metric.
+
+==================================================
+3. Core Learning Logic
+======================
+
+The Loop must compare:
+
+Recommended strategy
+vs.
+Actual client execution
+vs.
+Sales outcome
+vs.
+Market changes
+
+The Loop should produce evidence-based conclusions such as:
+
+* A recommended angle was applied and sales increased.
+* A recommended angle was applied and sales decreased.
+* Sales increased, but the client did not follow the recommendation.
+* Sales decreased while the client followed the plan.
+* Results are inconclusive because several variables changed simultaneously.
+* A market shift may have affected the result.
+* There is insufficient evidence to make a causal claim.
+
+Do not automatically attribute every sales change to content.
+
+The system must distinguish:
+
+* correlation
+* probable contribution
+* strong evidence
+* insufficient evidence
+
+==================================================
+4. Strategic Memory
+===================
+
+Audit the existing approved/rejected angle and learning persistence.
+
+The Loop must maintain durable memory for each campaign.
+
+For every tested strategic decision, store or verify storage of:
+
+* decision or angle
+* tested period
+* whether it was actually executed
+* sales before
+* sales after
+* supporting context
+* confidence
+* verdict
+
+Allowed verdicts:
+
+* WINNER
+* LOSER
+* INCONCLUSIVE
+* NOT_EXECUTED
+* NEEDS_MORE_DATA
+
+Rules:
+
+* Preserve WINNER decisions for future strategy generation.
+* Avoid repeating LOSER decisions without new evidence.
+* Do not mark a decision as LOSER when it was not executed.
+* Do not mark a decision as WINNER from only vanity metrics.
+* Do not overwrite historical results when a new period is submitted.
+
+==================================================
+5. Decision Output
+==================
+
+The Performance Loop output must be a strategic decision, not only a metric summary.
+
+Every completed cycle should answer:
+
+1. What happened to sales?
+2. Which planned decisions were actually executed?
+3. Which decisions likely contributed?
+4. What should be preserved?
+5. What should be rejected?
+6. What remains uncertain?
+7. What should change in the next cycle?
+
+The next-cycle recommendation may adjust only evidence-supported variables, such as:
+
+* Hooks
+* Primary angles
+* Core marketing promises
+* Emotional triggers
+* Positioning
+* CTA
+* Content mix
+* Offer framing
+
+Do not allow the Loop to rewrite the entire strategy from one data point.
+
+==================================================
+6. Existing Implementation Audit
+================================
+
+Audit the full current Performance Loop implementation before modifying code.
+
+Inspect at minimum:
+
+* performance-loop services
+* routes
+* database tables
+* weekly truth or manual metrics routes
+* scorers
+* judges
+* interpretation logic
+* campaign strategy storage
+* approved/rejected angle persistence
+* frontend reporting
+* scheduled jobs
+* any Phase 6 validation harness
+
+Document:
+
+* what already works
+* what is partially implemented
+* what is duplicated
+* what is disconnected
+* what is missing
+* what is misleadingly named but does not perform the required function
+
+Do not rebuild working components.
+
+Make only the smallest changes required to complete the defined Loop.
+
+==================================================
+7. Live Experiment — MarketMindAI
+=================================
+
+Run one complete controlled experiment using:
+
+Campaign: MarketMindAI
+
+Use real campaign data where available.
+
+Do not create fake production conclusions.
+
+If historical sales inputs already exist, use them.
+
+If no usable sales comparison exists, create a clearly labelled test cycle using manually supplied test values only to verify system behavior, not to claim real campaign performance.
+
+Experiment structure:
+
+Period A — Baseline
+
+* identify the active strategy
+* identify recommended angles
+* identify actual client posts or execution
+* record sales
+
+Period B — Test
+
+* select one or a very small number of strategic variables
+* keep the experiment scope narrow
+* record whether the recommendation was executed
+* record sales
+* record any major context changes
+
+Then run the complete Loop:
+
+Strategy recommendation
+→ Actual execution verification
+→ User sales input
+→ Scoring
+→ Judging
+→ Interpretation
+→ Strategic memory
+→ Next-cycle decision
+
+==================================================
+8. Required Test Scenarios
+==========================
+
+Verify at least these scenarios through unit, integration, or controlled test data:
+
+Scenario 1:
+Recommendation executed and sales increase.
+
+Expected:
+Likely WINNER, subject to confidence and context.
+
+Scenario 2:
+Recommendation executed and sales decrease.
+
+Expected:
+Likely LOSER or NEEDS_MORE_DATA depending on evidence.
+
+Scenario 3:
+Recommendation not executed and sales decrease.
+
+Expected:
+NOT_EXECUTED.
+The recommendation must not be blamed.
+
+Scenario 4:
+Sales increase but several strategic variables changed together.
+
+Expected:
+INCONCLUSIVE or probable contributors.
+Do not claim certainty.
+
+Scenario 5:
+Likes and reach increase but sales decrease.
+
+Expected:
+Commercial failure.
+Do not classify as success.
+
+Scenario 6:
+Reach decreases but sales increase.
+
+Expected:
+Commercial success, with explanation.
+
+Scenario 7:
+No sales input submitted.
+
+Expected:
+Loop remains incomplete and does not fabricate a verdict.
+
+==================================================
+9. End-to-End Verification
+==========================
+
+Trace the complete path:
+
+User sales input
+→ database persistence
+→ campaign and period matching
+→ recommended strategy retrieval
+→ actual execution retrieval
+→ market context retrieval
+→ scoring
+→ judgment
+→ interpretation
+→ winner/loser persistence
+→ next-cycle recommendation
+→ API response
+→ frontend display
+
+Confirm:
+
+* correct campaign isolation
+* correct reporting period matching
+* no duplicated cycles
+* no overwritten history
+* no cross-account leakage
+* no unsupported causal claims
+* no reliance on vanity metrics as the final success measure
+
+==================================================
+10. Deliverable
+===============
+
+Return a concise but complete report containing:
+
+1. Final definition of the Performance Loop
+2. Existing implementation audit
+3. Inputs currently available
+4. Missing inputs or integration gaps
+5. Files modified
+6. Database tables used
+7. Scoring and judgment rules
+8. Strategic memory behavior
+9. MarketMindAI experiment
+10. All seven test-scenario results
+11. End-to-end execution trace
+12. Remaining gaps
+13. Final PASS / FAIL verdict
+
+PASS only if:
+
+* Sales are the primary success metric.
+* Recommendations are matched to actual execution.
+* Non-executed recommendations are not judged.
+* Winners, losers, and inconclusive tests persist correctly.
+* Historical learning is preserved.
+* Market context is used for explanation, not as a substitute for results.
+* A complete MarketMindAI cycle runs from sales input to next-cycle strategic decision.
+* The system does not claim causality when evidence is insufficient.
+
+After completing this task, stop.
+
+Do not open another platform architecture phase.

@@ -42,6 +42,7 @@ import WatchtowerStrip from '@/components/WatchtowerStrip';
 import BlockedReasonsCard from '@/components/BlockedReasonsCard';
 import DnaEnrichmentCard from '@/components/DnaEnrichmentCard';
 import TruthSubmissionCard from '@/components/TruthSubmissionCard';
+import PerformanceCycleCard from '@/components/PerformanceCycleCard';
 import ActivityTimeline from '@/components/ActivityTimeline';
 import { MarketMindAgent } from '@/components/MarketMindAgent';
 import InitializationExperience from '@/components/InitializationExperience';
@@ -207,6 +208,7 @@ function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
         forceOpen={truthForceOpen}
         onClose={() => setTruthForceOpen(false)}
       />
+      <PerformanceCycleCard campaignId={campaignId} isDark={isDark} />
       <RunTruthfulnessBanner campaignId={campaignId} isDark={isDark} />
       <ProductIdentityDegradedBanner campaignId={campaignId} isDark={isDark} />
       <MarketMindAgent campaignId={campaignId} isDark={isDark} />

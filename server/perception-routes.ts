@@ -32,9 +32,12 @@ import {
   funnelSnapshots,
   awarenessSnapshots,
   integritySnapshots,
+  performanceCycleReports,
+  performanceDecisionVerdicts,
 } from "@shared/schema";
 import { acceptUserTruth } from "./pipeline/lanes/user/user-truth";
 import { evaluateWindowState } from "./pipeline/eval-windows";
+import { runPerformanceCycle } from "./performance-loop/cycle-runner";
 import { PipelineValidationError } from "./pipeline/errors";
 import { eq, and, desc, gte, sql, count, ne, max, inArray } from "drizzle-orm";
 import {
@@ -293,6 +296,24 @@ export function registerPerceptionRoutes(app: Express) {
         leadChannel: typeof body.leadChannel === "string" ? body.leadChannel : null,
         attributionKnown: typeof body.attributionKnown === "boolean" ? body.attributionKnown : null,
       });
+      // P-2 Final — truth submission is the trigger that closes the
+      // Performance Loop: fire-and-forget cycle run (scoring → decision
+      // verdicts → strategic memory → next-cycle recommendation) for the
+      // window that just received truth. Never blocks or fails the submit.
+      const cycleWindowId = result.window.id;
+      setImmediate(() => {
+        runPerformanceCycle({ accountId, campaignId, windowId: cycleWindowId })
+          .then((cycle) =>
+            console.log(
+              `${LOG_PREFIX} performance cycle ${cycle.status} window=${cycleWindowId} ` +
+              `verdicts=${cycle.verdicts.length} reasons=${cycle.reasons.join("|") || "none"}`,
+            ),
+          )
+          .catch((err) =>
+            console.error(`${LOG_PREFIX} performance cycle failed window=${cycleWindowId}:`, err?.message ?? err),
+          );
+      });
+
       return res.status(201).json({
         success: true,
         superseded: result.superseded,
@@ -304,6 +325,106 @@ export function registerPerceptionRoutes(app: Express) {
       }
       console.error(`${LOG_PREFIX} user-truth submit failed:`, err?.message ?? err);
       return res.status(500).json({ success: false, code: "TRUTH_SUBMIT_FAILED" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /api/perception/performance-cycle?campaignId=...
+  //
+  // P-2 Final — customer-facing weekly review artifact. Returns the latest
+  // COMPLETE performance cycle: per-decision verdicts (WINNER / LOSER /
+  // INCONCLUSIVE / NOT_EXECUTED / NEEDS_MORE_DATA), sales movement, the
+  // 7-question review, and the next-cycle recommendation.
+  //
+  // Wrapper rule: no internal UUIDs (windowId/planId/cycleRunId) in the
+  // payload. Week number + period dates identify the cycle for the customer.
+  // Synthetic verification cycles carry isTestCycle=true + their label.
+  // -------------------------------------------------------------------------
+  app.get("/api/perception/performance-cycle", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const reportRows = await db
+        .select()
+        .from(performanceCycleReports)
+        .where(and(
+          eq(performanceCycleReports.accountId, accountId),
+          eq(performanceCycleReports.campaignId, campaignId),
+        ))
+        .orderBy(desc(performanceCycleReports.createdAt))
+        .limit(1);
+      const report = reportRows[0];
+      if (!report) {
+        return res.json({ success: true, state: "no_cycle_yet", cycle: null });
+      }
+      const verdictRows = await db
+        .select()
+        .from(performanceDecisionVerdicts)
+        .where(and(
+          eq(performanceDecisionVerdicts.accountId, accountId),
+          eq(performanceDecisionVerdicts.campaignId, campaignId),
+          eq(performanceDecisionVerdicts.windowId, report.windowId),
+        ));
+      const parse = (s: string | null) => {
+        if (!s) return null;
+        try { return JSON.parse(s); } catch { return null; }
+      };
+      // Shape normalization — stored JSON is versioned but the customer
+      // surface must never crash on a legacy/malformed row. Arrays are
+      // coerced to string[], objects to plain records, everything else null.
+      const strList = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+      const rawNext = parse(report.nextCycleRecommendation) as Record<string, unknown> | null;
+      const nextStep = rawNext && typeof rawNext === "object" && !Array.isArray(rawNext)
+        ? {
+            keepDoing: strList(rawNext.keepDoing),
+            stopDoing: strList(rawNext.stopDoing),
+            retryWithBetterData: strList(rawNext.retryWithBetterData),
+            executeWhatWasPlanned: strList(rawNext.executeWhatWasPlanned),
+            nextExperiment: typeof rawNext.nextExperiment === "string" ? rawNext.nextExperiment : null,
+            rationale: typeof rawNext.rationale === "string" ? rawNext.rationale : "",
+          }
+        : null;
+      const rawCounts = parse(report.verdictCounts);
+      const verdictCounts = rawCounts && typeof rawCounts === "object" && !Array.isArray(rawCounts)
+        ? Object.fromEntries(Object.entries(rawCounts).filter(([, n]) => typeof n === "number"))
+        : {};
+      const rawReview = parse(report.sevenAnswers);
+      const review = rawReview && typeof rawReview === "object" && !Array.isArray(rawReview) ? rawReview : null;
+      const periodStart = verdictRows[0]?.windowStart ?? null;
+      const periodEnd = verdictRows[0]?.windowEnd ?? null;
+      return res.json({
+        success: true,
+        state: "ready",
+        cycle: {
+          weekNumber: report.windowIndex + 1,
+          periodStart: periodStart ? periodStart.toISOString() : null,
+          periodEnd: periodEnd ? periodEnd.toISOString() : null,
+          platform: report.platform,
+          sales: { before: report.salesBefore, after: report.salesAfter },
+          businessVerdict: report.businessVerdict,
+          attributionConfidence: report.attributionConfidence,
+          decisions: verdictRows.map((v) => ({
+            dimension: v.decisionDimension,
+            value: v.decisionValue,
+            executed: v.executed,
+            postCount: v.executedPostCount,
+            verdict: v.verdict,
+            reason: v.verdictReason,
+            evidenceStrength: v.evidenceStrength,
+            confidence: v.confidence,
+            confounders: strList(parse(v.confounders)),
+          })),
+          verdictCounts,
+          nextStep,
+          review,
+          isTestCycle: report.testLabel != null,
+          testLabel: report.testLabel,
+          generatedAt: report.createdAt ? report.createdAt.toISOString() : null,
+        },
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} performance-cycle read failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "PERFORMANCE_CYCLE_READ_FAILED" });
     }
   });
 

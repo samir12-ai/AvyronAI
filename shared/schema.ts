@@ -3085,6 +3085,115 @@ export const weeklyBusinessScores = pgTable("weekly_business_scores", {
 export type OwnedContentScore = typeof ownedContentScores.$inferSelect;
 export type WeeklyBusinessScore = typeof weeklyBusinessScores.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// P-2 Final Phase — Performance Loop decision verdicts + cycle reports.
+//
+// Doctrine (locked by the P-2 Final brief):
+//   - Sales (pipeline_user_truth.paying_customers, user-entered COUNT) is the
+//     ONLY primary success metric. Vanity metrics never decide a verdict.
+//   - Allowed verdicts: WINNER / LOSER / INCONCLUSIVE / NOT_EXECUTED /
+//     NEEDS_MORE_DATA. A recommendation that was never executed is
+//     NOT_EXECUTED — never blamed for a sales change.
+//   - Append-only. A window's verdicts are frozen at the first COMPLETE cycle
+//     run (unique index). Superseding truth later does NOT rewrite history.
+//   - NULL is never coerced to 0. Missing sales input → NEEDS_MORE_DATA.
+// ---------------------------------------------------------------------------
+
+/** P-2 Final decision verdicts (strict enum, mirrors the brief exactly). */
+export const DECISION_VERDICTS = ["WINNER", "LOSER", "INCONCLUSIVE", "NOT_EXECUTED", "NEEDS_MORE_DATA"] as const;
+export type DecisionVerdict = (typeof DECISION_VERDICTS)[number];
+
+/** Honest evidence-strength ladder (correlation ≠ causation doctrine). */
+export const EVIDENCE_STRENGTHS = ["strong_evidence", "probable_contribution", "correlation", "insufficient_evidence"] as const;
+export type EvidenceStrength = (typeof EVIDENCE_STRENGTHS)[number];
+
+export const performanceDecisionVerdicts = pgTable("performance_decision_verdicts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  cycleRunId: varchar("cycle_run_id").notNull(),
+  windowId: varchar("window_id").notNull(),
+  windowIndex: integer("window_index").notNull(),
+  planId: varchar("plan_id").notNull(),
+  platform: text("platform").notNull(),
+  /** hook_style | content_angle | content_type (CONTENT_SCORE_DIMENSIONS). */
+  decisionDimension: text("decision_dimension").notNull(),
+  decisionValue: text("decision_value").notNull(),
+  /** Where the recommendation came from (e.g. planned_artifact). */
+  decisionSource: text("decision_source").notNull(),
+  executed: boolean("executed").notNull(),
+  executedPostCount: integer("executed_post_count").notNull().default(0),
+  windowStart: timestamp("window_start").notNull(),
+  windowEnd: timestamp("window_end").notNull(),
+  /** paying_customers COUNT from user truth. NULL = not provided (never 0). */
+  salesBefore: integer("sales_before"),
+  salesAfter: integer("sales_after"),
+  salesDeltaRel: doublePrecision("sales_delta_rel"),
+  /** JSON: funnel counts before/after (leads/qualified/booked) — context only. */
+  funnelContext: text("funnel_context"),
+  /** JSON: deterministic content verdicts for this dimension value — context only. */
+  contentContext: text("content_context"),
+  /** JSON: Watchtower change events inside the window — confounder context. */
+  marketContext: text("market_context"),
+  confounders: text("confounders").notNull().default("[]"),
+  verdict: text("verdict").notNull(),
+  verdictReason: text("verdict_reason").notNull(),
+  evidenceStrength: text("evidence_strength").notNull(),
+  /** NULL when no honest confidence exists (NOT_EXECUTED / NEEDS_MORE_DATA). */
+  confidence: doublePrecision("confidence"),
+  attributionConfidence: text("attribution_confidence"),
+  /** written | skipped:<reason> | blocked:<reason> — strategy_memory write-through audit. */
+  memoryWriteStatus: text("memory_write_status"),
+  /** Non-null marks a clearly-labelled synthetic/system-verification cycle. */
+  testLabel: text("test_label"),
+  verdictVersion: text("verdict_version").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqDecision: uniqueIndex("perf_decision_verdicts_uniq")
+    .on(table.campaignId, table.windowId, table.decisionDimension, table.decisionValue),
+  campaignIdx: index("perf_decision_verdicts_campaign_idx")
+    .on(table.accountId, table.campaignId, table.windowIndex),
+}));
+
+export type PerformanceDecisionVerdict = typeof performanceDecisionVerdicts.$inferSelect;
+
+export const performanceCycleReports = pgTable("performance_cycle_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull(),
+  campaignId: varchar("campaign_id").notNull(),
+  cycleRunId: varchar("cycle_run_id").notNull(),
+  windowId: varchar("window_id").notNull(),
+  windowIndex: integer("window_index").notNull(),
+  planId: varchar("plan_id").notNull(),
+  platform: text("platform").notNull(),
+  /** Only COMPLETE cycles persist — incomplete runs return in-memory status only. */
+  status: text("status").notNull(),
+  salesBefore: integer("sales_before"),
+  salesAfter: integer("sales_after"),
+  businessVerdict: text("business_verdict"),
+  attributionConfidence: text("attribution_confidence"),
+  decisionsTotal: integer("decisions_total").notNull().default(0),
+  verdictCounts: text("verdict_counts").notNull().default("{}"),
+  /** JSON arrays of decision summaries for the next cycle. */
+  preserve: text("preserve").notNull().default("[]"),
+  reject: text("reject").notNull().default("[]"),
+  uncertain: text("uncertain").notNull().default("[]"),
+  notExecuted: text("not_executed").notNull().default("[]"),
+  /** JSON: single next experiment (from judged interpretation) or null. */
+  nextCycleRecommendation: text("next_cycle_recommendation"),
+  interpretationStatus: text("interpretation_status"),
+  /** JSON: answers to the brief's 7 evaluation questions. */
+  sevenAnswers: text("seven_answers").notNull().default("{}"),
+  testLabel: text("test_label"),
+  cycleVersion: text("cycle_version").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  uniqWindow: uniqueIndex("perf_cycle_reports_window_uniq").on(table.campaignId, table.windowId),
+  campaignIdx: index("perf_cycle_reports_campaign_idx").on(table.accountId, table.campaignId, table.createdAt),
+}));
+
+export type PerformanceCycleReport = typeof performanceCycleReports.$inferSelect;
+
 export const buildPlanSnapshots = pgTable("build_plan_snapshots", {
   id: varchar("id")
     .primaryKey()

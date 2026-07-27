@@ -54,6 +54,9 @@ export default function TruthSubmissionCard({ campaignId, isDark = true, forceOp
       queryClient.invalidateQueries({ queryKey: ['/api/perception/blocked-reasons', campaignId] });
       queryClient.invalidateQueries({ queryKey: ['/api/perception/watchtower', campaignId] });
       queryClient.invalidateQueries({ queryKey: ['/api/perception/activity', campaignId] });
+      // Weekly review is generated asynchronously after truth lands — the
+      // card polls, but invalidate so it picks up the new cycle promptly.
+      queryClient.invalidateQueries({ queryKey: ['/api/perception/performance-cycle', campaignId] });
       onSubmitted?.();
     },
     onError: (err: any) => {
