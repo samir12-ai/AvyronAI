@@ -1,0 +1,181 @@
+P-2 Step 3 — Add the Core Marketing Promise Dimension
+
+The competitor post AI classifier has passed verification.
+
+Do NOT redesign the architecture.
+
+Do NOT modify the Market Intelligence pipeline.
+
+Do NOT modify the Performance Loop yet.
+
+This task is an enhancement of the existing classifier only.
+
+---
+
+Background
+
+During verification, the current classifier correctly identifies:
+
+* Hook
+* Hook Archetype
+* Narrative
+* CTA Type
+* Offer Type
+* Emotional Trigger
+* Awareness Stage
+* Positioning Style
+* Content Format Intent
+
+However, one critical marketing dimension is still missing.
+
+The classifier understands HOW the post communicates.
+
+It still does not capture WHAT the post is fundamentally promising.
+
+That missing dimension is the Core Marketing Promise.
+
+---
+
+Goal
+
+Extend the existing classifier with one additional structured dimension.
+
+Core Marketing Promise
+
+This should represent the main customer value proposition communicated by the post.
+
+Examples:
+
+* Save Time
+* Save Money
+* Better Quality
+* Premium Experience
+* Family Experience
+* Convenience
+* Trust & Reliability
+* Social Status
+* Exclusivity
+* Better Taste
+* Better Health
+* Entertainment
+* Community
+* Personal Growth
+* Simplicity
+
+If no clear promise exists,
+
+return UNKNOWN.
+
+Do NOT hallucinate.
+
+---
+
+Important distinction
+
+This is NOT:
+
+* Hook
+* Angle wording
+* Emotional Trigger
+* CTA
+
+Instead it answers:
+
+"What is the customer actually being promised?"
+
+Examples:
+
+"Fast delivery"
+
+↓
+
+Core Marketing Promise
+
+= Convenience
+
+---
+
+"Award winning burgers"
+
+↓
+
+Core Marketing Promise
+
+= Trust & Quality
+
+---
+
+"Spend time with your family"
+
+↓
+
+Core Marketing Promise
+
+= Family Experience
+
+---
+
+"50% Discount"
+
+↓
+
+Core Marketing Promise
+
+= Save Money
+
+---
+
+Reuse the existing classifier.
+
+Reuse:
+
+* GPT-4.1-mini
+* aiChat wrapper
+* retry logic
+* schema validation
+* batch runner
+* persistence layer
+
+Do NOT duplicate code.
+
+---
+
+Persistence
+
+Extend the existing competitor_post_classifications table.
+
+Do NOT create another table.
+
+Version the classifier appropriately if required.
+
+---
+
+Batch Compatibility
+
+The existing batch runner must continue working without architectural changes.
+
+---
+
+Verification
+
+Run the classifier on at least 5 existing real competitor posts.
+
+Verify that the new Core Marketing Promise field:
+
+* is populated when appropriate
+* returns UNKNOWN only when appropriate
+* remains semantically consistent with the rest of the classification
+* persists correctly
+* survives reruns without duplication
+
+---
+
+Deliverables
+
+1. Files modified
+2. Database changes
+3. Prompt changes
+4. Classification examples
+5. Verification results
+6. Whether this dimension improves future Performance Loop learning
+7. Final recommendation before integrating the classifier into P-2.

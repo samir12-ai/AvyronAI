@@ -29,6 +29,7 @@ import {
   POSITIONING_STYLES,
   CONTENT_FORMAT_INTENTS,
   PRIMARY_GOALS,
+  CORE_MARKETING_PROMISES,
   type CompetitorPostInput,
   type CompetitorPostClassification,
   type HookArchetype,
@@ -40,6 +41,7 @@ import {
   type PositioningStyle,
   type ContentFormatIntent,
   type PrimaryGoal,
+  type CoreMarketingPromise,
 } from "./types";
 
 const LOG = "[CompetitorPostClassifier]";
@@ -72,8 +74,11 @@ Return ONLY valid JSON matching this exact schema. No commentary, no explanation
   "positioningStyle": one of ${JSON.stringify(POSITIONING_STYLES)},
   "contentFormatIntent": one of ${JSON.stringify(CONTENT_FORMAT_INTENTS)},
   "primaryGoal": one of ${JSON.stringify(PRIMARY_GOALS)},
+  "coreMarketingPromise": one of ${JSON.stringify(CORE_MARKETING_PROMISES)},
   "confidenceScore": a number between 0.0 and 1.0 representing your overall classification confidence
-}`;
+}
+
+coreMarketingPromise captures WHAT the post is fundamentally promising to the customer — the underlying value proposition (e.g. "Save Time", "Better Quality", "Family Experience"). It is NOT the hook, angle wording, emotional trigger, or CTA. Ask: "What is the customer actually being promised?" Return UNKNOWN only when no clear promise exists.`;
 }
 
 function buildUserContent(post: CompetitorPostInput): string {
@@ -142,6 +147,7 @@ function validateClassificationShape(raw: unknown): string[] | null {
   checkEnum("positioningStyle", POSITIONING_STYLES);
   checkEnum("contentFormatIntent", CONTENT_FORMAT_INTENTS);
   checkEnum("primaryGoal", PRIMARY_GOALS);
+  checkEnum("coreMarketingPromise", CORE_MARKETING_PROMISES);
 
   const conf = r["confidenceScore"];
   if (typeof conf !== "number" || conf < 0 || conf > 1) {
@@ -236,6 +242,7 @@ export async function classifyCompetitorPost(
       positioningStyle: r["positioningStyle"] as PositioningStyle,
       contentFormatIntent: r["contentFormatIntent"] as ContentFormatIntent,
       primaryGoal: r["primaryGoal"] as PrimaryGoal,
+      coreMarketingPromise: r["coreMarketingPromise"] as CoreMarketingPromise,
       confidenceScore: r["confidenceScore"] as number,
       classifierVersion: CLASSIFIER_VERSION,
     };

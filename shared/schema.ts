@@ -2101,6 +2101,10 @@ export const competitorPostClassifications = pgTable(
     // 0.000–1.000 confidence score from the classifier.
     confidenceScore: doublePrecision("confidence_score").notNull().default(0),
 
+    // The fundamental customer value proposition the post is making.
+    // Added in migration 047 (classifier v2). v1 rows default to UNKNOWN.
+    coreMarketingPromise: text("core_marketing_promise").notNull().default("UNKNOWN"),
+
     // Prompt version — scope queries to a specific classifier run.
     classifierVersion: text("classifier_version").notNull(),
 

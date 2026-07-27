@@ -61,7 +61,8 @@ async function persistClassification(
       positioningStyle: classification.positioningStyle,
       contentFormatIntent: classification.contentFormatIntent,
       primaryGoal: classification.primaryGoal,
-      confidenceScore: String(classification.confidenceScore),
+      coreMarketingPromise: classification.coreMarketingPromise,
+      confidenceScore: classification.confidenceScore,
       classifierVersion: classification.classifierVersion,
       classifiedAt: new Date(),
     })
@@ -82,7 +83,8 @@ async function persistClassification(
         positioningStyle: classification.positioningStyle,
         contentFormatIntent: classification.contentFormatIntent,
         primaryGoal: classification.primaryGoal,
-        confidenceScore: String(classification.confidenceScore),
+        coreMarketingPromise: classification.coreMarketingPromise,
+        confidenceScore: classification.confidenceScore,
         classifiedAt: new Date(),
       },
     });

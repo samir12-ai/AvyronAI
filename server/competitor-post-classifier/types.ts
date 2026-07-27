@@ -14,7 +14,7 @@
 // Classifier version — bump when the prompt or schema changes meaningfully.
 // Old rows remain queryable; consumers can filter by classifierVersion.
 // ---------------------------------------------------------------------------
-export const CLASSIFIER_VERSION = "competitor-post-v1";
+export const CLASSIFIER_VERSION = "competitor-post-v2";
 
 // ---------------------------------------------------------------------------
 // Enumerated dimension values.
@@ -130,6 +130,26 @@ export const PRIMARY_GOALS = [
 ] as const;
 export type PrimaryGoal = (typeof PRIMARY_GOALS)[number];
 
+export const CORE_MARKETING_PROMISES = [
+  "SAVE_TIME",
+  "SAVE_MONEY",
+  "BETTER_QUALITY",
+  "PREMIUM_EXPERIENCE",
+  "FAMILY_EXPERIENCE",
+  "CONVENIENCE",
+  "TRUST_AND_RELIABILITY",
+  "SOCIAL_STATUS",
+  "EXCLUSIVITY",
+  "BETTER_TASTE",
+  "BETTER_HEALTH",
+  "ENTERTAINMENT",
+  "COMMUNITY",
+  "PERSONAL_GROWTH",
+  "SIMPLICITY",
+  "UNKNOWN",
+] as const;
+export type CoreMarketingPromise = (typeof CORE_MARKETING_PROMISES)[number];
+
 // ---------------------------------------------------------------------------
 // Input — the subset of ci_competitor_posts columns the classifier uses.
 // Kept explicit so callers don't pass DB rows with stale shape accidentally.
@@ -174,6 +194,13 @@ export interface CompetitorPostClassification {
 
   /** 0.0–1.0. Low when caption is empty, very short, or uninterpretable. */
   confidenceScore: number;
+
+  /**
+   * The fundamental customer value proposition the post is making.
+   * Answers "What is the customer actually being promised?" — not the hook,
+   * angle wording, emotional trigger, or CTA, but the underlying promise.
+   */
+  coreMarketingPromise: CoreMarketingPromise;
 
   classifierVersion: string;
 }
