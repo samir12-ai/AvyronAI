@@ -1,0 +1,123 @@
+P-3 Final Validation — Fresh Competitor Post End-to-End Check
+
+Do not add new features.
+
+The goal is to verify that the full competitor intelligence pipeline works automatically for newly published competitor posts, not only for the historical backfilled corpus.
+
+Use the live MarketMindAI campaign and its existing competitors.
+
+==================================================
+Step 1 — Verify Fresh Scraping
+==============================
+
+Run the real Instagram competitor scraping flow using Apify.
+
+For each active competitor:
+
+* identify the latest post currently stored in ci_competitor_posts
+* scrape the competitor profile
+* check whether newer posts exist
+* confirm any new posts are inserted into ci_competitor_posts
+* confirm existing posts are not duplicated
+
+Report:
+
+* competitors checked
+* new posts discovered
+* posts inserted
+* posts skipped as existing
+* scraping failures
+* competitors returning no new posts
+
+Do not use synthetic posts unless no real competitor has published a new post.
+
+==================================================
+Step 2 — Verify Automatic Classification
+========================================
+
+For every newly inserted competitor post, verify that the normal production flow automatically runs competitor-post-v2 classification.
+
+Confirm:
+
+* one competitor_post_classifications row is created
+* classifier_version = competitor-post-v2
+* competitor_id matches the source post
+* confidence_score is valid
+* no duplicate classification rows
+* failed classifications are retried
+* UNKNOWN values are allowed and do not block the pipeline
+
+The test must verify automatic classification through the normal scraper/orchestrator flow.
+
+Do not manually run the backfill classifier as the primary test.
+
+==================================================
+Step 3 — Verify Downstream Consumption
+======================================
+
+Trace each new post through:
+
+Apify scraper
+→ ci_competitor_posts
+→ competitor_post_classifications
+→ Market Intelligence signal pipeline
+→ Content DNA context
+→ Pipeline Boss semantic themes
+→ Watchtower semantic data
+
+Confirm that the new classification is available to every downstream consumer.
+
+Watchtower does not need to produce a shift alert if there is insufficient historical data, but the new post must be included in its semantic comparison dataset.
+
+==================================================
+Step 4 — Scheduler Verification
+===============================
+
+Inspect the production competitor scraping scheduler.
+
+Confirm:
+
+* it uses the Apify Instagram provider
+* it runs automatically on the intended schedule
+* it does not use Bright Data for Instagram
+* successful scraping triggers or schedules classification
+* a classification failure does not permanently lose the post
+* subsequent runs resume missing classifications
+* the scheduler processes all active competitors, not only one test competitor
+
+Document the exact scheduler entry point and execution path.
+
+==================================================
+Step 5 — Idempotency Check
+==========================
+
+Run the same scrape flow again.
+
+Confirm:
+
+* existing posts are not duplicated
+* existing competitor-post-v2 rows are not duplicated
+* only genuinely new posts are processed
+* downstream signal counts do not inflate from duplicate processing
+
+==================================================
+Deliverable
+===========
+
+Return a concise report containing:
+
+1. Competitors checked
+2. New posts found
+3. Posts inserted
+4. Posts automatically classified
+5. Downstream consumers verified
+6. Scheduler path verified
+7. Duplicate/idempotency results
+8. Errors found and fixes applied
+9. Final PASS / FAIL verdict
+
+PASS only if a newly scraped competitor post automatically travels through the complete production pipeline without manual backfill intervention.
+
+Do not modify the Performance Loop in this task.
+
+After this validation passes, stop and report readiness to return to and complete the Performance Loop.

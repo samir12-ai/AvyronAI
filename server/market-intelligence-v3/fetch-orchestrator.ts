@@ -1156,6 +1156,28 @@ async function executeFetchJob(
 
     console.log(`[FetchOrch] JOB_DIAGNOSTICS: ${JSON.stringify(jobDiagnostics)}`);
 
+    // Post-scrape classification: fire-and-forget so any ci_competitor_posts rows
+    // inserted during this job receive a competitor-post-v2 classification without
+    // blocking job completion. Non-fatal: a failure here is logged but never
+    // surfaces as a job error — posts will be caught on the next classification run.
+    if (competitorsProcessed > 0) {
+      import("../competitor-post-classifier").then(({ runBatchClassification }) => {
+        runBatchClassification({ accountId, limit: 100 })
+          .then((r) =>
+            console.log(
+              `[FetchOrch] POST_SCRAPE_CLASSIFICATION jobId=${jobId} attempted=${r.attempted} succeeded=${r.succeeded} failed=${r.failed} skipped=${r.skipped}`,
+            ),
+          )
+          .catch((err: Error) =>
+            console.error(
+              `[FetchOrch] POST_SCRAPE_CLASSIFICATION_FAILED jobId=${jobId} reason=${err.message} (non-fatal — posts will retry on next classification run)`,
+            ),
+          );
+      }).catch((err: Error) =>
+        console.error(`[FetchOrch] POST_SCRAPE_CLASSIFICATION_IMPORT_FAILED reason=${err.message}`),
+      );
+    }
+
     await db.update(miFetchJobs).set({
       status: finalJobStatus,
       stageStatuses: JSON.stringify(stages),

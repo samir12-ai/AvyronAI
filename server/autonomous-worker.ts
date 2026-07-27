@@ -1416,6 +1416,30 @@ async function runSharedPoolRefresh(): Promise<void> {
             canonicalComp.accountId
           );
           console.log(`[CI Worker] @${normalizedHandle} fan-out: fanned=${fanned} accounts, skipped=${skipped}`);
+
+          // Post-scrape classification: fire-and-forget so any posts inserted by
+          // this scrape receive a competitor-post-v2 classification. Scoped to the
+          // canonical competitor so only its unclassified posts are processed.
+          // Non-fatal: a failure here is logged but never halts the refresh cycle.
+          import("./competitor-post-classifier").then(({ runBatchClassification }) => {
+            runBatchClassification({
+              accountId: canonicalComp.accountId,
+              competitorId: canonicalComp.competitorId,
+              limit: 50,
+            })
+              .then((r) =>
+                console.log(
+                  `[CI Worker] POST_SCRAPE_CLASSIFICATION @${normalizedHandle} attempted=${r.attempted} succeeded=${r.succeeded} failed=${r.failed} skipped=${r.skipped}`,
+                ),
+              )
+              .catch((err: Error) =>
+                console.error(
+                  `[CI Worker] POST_SCRAPE_CLASSIFICATION_FAILED @${normalizedHandle} reason=${err.message} (non-fatal)`,
+                ),
+              );
+          }).catch((err: Error) =>
+            console.error(`[CI Worker] POST_SCRAPE_CLASSIFICATION_IMPORT_FAILED @${normalizedHandle} reason=${err.message}`),
+          );
         } else {
           console.warn(`[CI Worker] @${normalizedHandle} scrape did not succeed (status=${fetchResult.status}) — skipping fan-out`);
         }
