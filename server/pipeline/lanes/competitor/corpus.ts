@@ -35,7 +35,7 @@
  * for the explanation route to surface.
  */
 import { db } from "../../../db";
-import { ciCompetitors, ciCompetitorPosts } from "@shared/schema";
+import { ciCompetitors, ciCompetitorPosts, competitorPostClassifications } from "@shared/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { interpretCompetitorPosts } from "./interpret";
 import type { CompetitorInterpretation } from "./interpret";
@@ -63,6 +63,13 @@ export interface CorpusReadResult {
   lookbackDays: number;
   windowStart: string;
   windowEnd: string;
+  /**
+   * Posts that received AI-classified semantic theme tokens (from
+   * competitor_post_classifications). When > 0, the interpreter is
+   * operating on marketing-intent signals rather than hashtag frequencies.
+   * Optional so callers built before this field was added don't break.
+   */
+  semanticTokensInjected?: number;
 }
 
 /**
@@ -105,6 +112,41 @@ export function extractThemeTokens(hashtagsBlob: string | null | undefined): str
   return out;
 }
 
+/**
+ * Build semantic theme tokens from a competitor_post_classifications row.
+ *
+ * Each token is prefixed with its dimension so the pattern-detection layer
+ * can identify multi-competitor trends in marketing intent rather than
+ * hashtag frequency. Format: "hook:bold_claim", "promise:better_taste", etc.
+ *
+ * UNKNOWN and NONE values are excluded — they carry no signal.
+ * Token values are lowercased so pattern grouping is case-insensitive.
+ *
+ * Dimension priority (CORE → SECONDARY per Phase 3 evaluation):
+ *   hook, angle, promise, trigger, positioning, goal (all CORE ≥ 67% fill)
+ */
+export function extractSemanticThemeTokens(classification: {
+  hookArchetype: string | null;
+  primaryAngle: string | null;
+  coreMarketingPromise: string | null;
+  emotionalTrigger: string | null;
+  positioningStyle: string | null;
+  primaryGoal: string | null;
+}): string[] {
+  const tokens: string[] = [];
+  const SKIP = new Set(["UNKNOWN", "NONE", ""]);
+  const add = (prefix: string, val: string | null | undefined) => {
+    if (val && !SKIP.has(val)) tokens.push(`${prefix}:${val.toLowerCase()}`);
+  };
+  add("hook",        classification.hookArchetype);
+  add("angle",       classification.primaryAngle);
+  add("promise",     classification.coreMarketingPromise);
+  add("trigger",     classification.emotionalTrigger);
+  add("positioning", classification.positioningStyle);
+  add("goal",        classification.primaryGoal);
+  return tokens;
+}
+
 function normalizeChannel(platform: string | null | undefined): CompetitorChannel | null {
   if (!platform) return null;
   const p = platform.trim().toLowerCase();
@@ -117,7 +159,7 @@ async function loadPostsFromDb(
   accountId: string,
   campaignId: string,
   cutoff: Date,
-): Promise<{ posts: CompetitorPost[]; excludedNoHashtags: number; excludedChannel: number }> {
+): Promise<{ posts: CompetitorPost[]; excludedNoHashtags: number; excludedChannel: number; semanticTokensInjected: number }> {
   const competitors = await db
     .select({ id: ciCompetitors.id })
     .from(ciCompetitors)
@@ -130,7 +172,7 @@ async function loadPostsFromDb(
     );
 
   if (competitors.length === 0) {
-    return { posts: [], excludedNoHashtags: 0, excludedChannel: 0 };
+    return { posts: [], excludedNoHashtags: 0, excludedChannel: 0, semanticTokensInjected: 0 };
   }
   const competitorIds = competitors.map((c) => c.id);
 
@@ -142,6 +184,7 @@ async function loadPostsFromDb(
   // (legacy rows), so rows without a posting timestamp still contribute.
   const rows = await db
     .select({
+      id: ciCompetitorPosts.id,
       competitorId: ciCompetitorPosts.competitorId,
       platform: ciCompetitorPosts.platform,
       hashtags: ciCompetitorPosts.hashtags,
@@ -156,9 +199,65 @@ async function loadPostsFromDb(
       ),
     );
 
+  // Bulk-load AI classifications for all posts in one query (no N+1).
+  // We use "competitor-post-v2" and confidence >= 0.50 to match the SSOT
+  // threshold established in P-2 Step 5.
+  const postIds = rows.map((r) => r.id).filter((id): id is string => !!id);
+  const classificationsByPostId = new Map<string, {
+    hookArchetype: string | null;
+    primaryAngle: string | null;
+    coreMarketingPromise: string | null;
+    emotionalTrigger: string | null;
+    positioningStyle: string | null;
+    primaryGoal: string | null;
+  }>();
+  if (postIds.length > 0) {
+    try {
+      const classRows = await db
+        .select({
+          postId: competitorPostClassifications.postId,
+          hookArchetype: competitorPostClassifications.hookArchetype,
+          primaryAngle: competitorPostClassifications.primaryAngle,
+          coreMarketingPromise: competitorPostClassifications.coreMarketingPromise,
+          emotionalTrigger: competitorPostClassifications.emotionalTrigger,
+          positioningStyle: competitorPostClassifications.positioningStyle,
+          primaryGoal: competitorPostClassifications.primaryGoal,
+          confidenceScore: competitorPostClassifications.confidenceScore,
+        })
+        .from(competitorPostClassifications)
+        .where(
+          and(
+            inArray(competitorPostClassifications.postId, postIds),
+            eq(competitorPostClassifications.classifierVersion, "competitor-post-v2"),
+          ),
+        );
+      for (const c of classRows) {
+        if (!c.postId) continue;
+        const conf = typeof c.confidenceScore === "number"
+          ? c.confidenceScore
+          : Number(c.confidenceScore ?? 0);
+        if (conf < 0.50) continue;
+        classificationsByPostId.set(c.postId, {
+          hookArchetype: c.hookArchetype,
+          primaryAngle: c.primaryAngle,
+          coreMarketingPromise: c.coreMarketingPromise,
+          emotionalTrigger: c.emotionalTrigger,
+          positioningStyle: c.positioningStyle,
+          primaryGoal: c.primaryGoal,
+        });
+      }
+    } catch (err) {
+      // Non-fatal: if classification load fails, fall back to hashtag-only tokens.
+      console.error(
+        `[CorpusReader] SEMANTIC_CLASSIFICATION_LOAD_FAILED reason=${(err as Error).message} — falling back to hashtag tokens`,
+      );
+    }
+  }
+
   const posts: CompetitorPost[] = [];
   let excludedNoHashtags = 0;
   let excludedChannel = 0;
+  let semanticTokensInjected = 0;
 
   for (const r of rows) {
     const channel = normalizeChannel(r.platform);
@@ -166,7 +265,24 @@ async function loadPostsFromDb(
       excludedChannel++;
       continue;
     }
-    const themeTokens = extractThemeTokens(r.hashtags);
+
+    const classification = r.id ? classificationsByPostId.get(r.id) : undefined;
+    const hashtagTokens = extractThemeTokens(r.hashtags);
+
+    let themeTokens: string[];
+    if (classification) {
+      // AI-classified path: semantic tokens are primary, hashtag tokens are
+      // secondary (prefixed with "tag:" to keep them distinct in pattern detection).
+      const semanticTokens = extractSemanticThemeTokens(classification);
+      themeTokens = semanticTokens.length > 0
+        ? [...semanticTokens, ...hashtagTokens.map((t) => `tag:${t}`)]
+        : hashtagTokens; // classification exists but all dimensions UNKNOWN — hashtag fallback
+      if (semanticTokens.length > 0) semanticTokensInjected++;
+    } else {
+      // Unclassified post: pure hashtag path (backward-compatible behavior).
+      themeTokens = hashtagTokens;
+    }
+
     if (themeTokens.length === 0) {
       excludedNoHashtags++;
       // Still pushed — the post counts toward totals (helps corpus density)
@@ -180,7 +296,7 @@ async function loadPostsFromDb(
     });
   }
 
-  return { posts, excludedNoHashtags, excludedChannel };
+  return { posts, excludedNoHashtags, excludedChannel, semanticTokensInjected };
 }
 
 export async function readCompetitorCorpus(
@@ -193,6 +309,7 @@ export async function readCompetitorCorpus(
   let posts: CompetitorPost[];
   let excludedNoHashtags = 0;
   let excludedChannel = 0;
+  let semanticTokensInjected = 0;
 
   if (inp.postsOverride) {
     posts = [...inp.postsOverride];
@@ -201,6 +318,7 @@ export async function readCompetitorCorpus(
     posts = loaded.posts;
     excludedNoHashtags = loaded.excludedNoHashtags;
     excludedChannel = loaded.excludedChannel;
+    semanticTokensInjected = loaded.semanticTokensInjected;
   }
 
   const interpretation = interpretCompetitorPosts(posts);
@@ -209,6 +327,7 @@ export async function readCompetitorCorpus(
     interpretation,
     postsUsed: posts.length,
     postsExcluded: { unsupportedChannel: excludedChannel, noHashtags: excludedNoHashtags },
+    semanticTokensInjected,
     lookbackDays,
     windowStart: cutoff.toISOString(),
     windowEnd: now.toISOString(),

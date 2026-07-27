@@ -33,10 +33,228 @@
  */
 
 import { db } from "../db";
-import { pipelineSnapshots, pipelineChangeEvents } from "@shared/schema";
-import { and, eq, isNull, isNotNull, desc } from "drizzle-orm";
+import { pipelineSnapshots, pipelineChangeEvents, competitorPostClassifications, ciCompetitorPosts } from "@shared/schema";
+import { and, eq, isNull, isNotNull, desc, sql } from "drizzle-orm";
 
 const LOG_PREFIX = "[Watchtower]";
+
+// ── semantic change kinds ─────────────────────────────────────────────────────
+// These are detected via competitor_post_classifications, not snapshot payloads.
+// The set is used by maintainOpenCandidates to route semantic candidates to the
+// async semantic re-classifier instead of the sync payload classifier.
+const SEMANTIC_CHANGE_KINDS = new Set([
+  "hook_archetype_shift",
+  "promise_shift",
+  "emotional_trigger_shift",
+  "positioning_shift",
+  "primary_goal_shift",
+  "cta_strategy_shift",
+]);
+
+/** Rolling window for semantic diffs: 30 days on each side of the snapshot. */
+const SEMANTIC_WINDOW_DAYS = 30;
+/** Minimum posts in each window before we trust the distribution. */
+const SEMANTIC_MIN_POSTS = 3;
+/** Percentage-point share change that triggers a "same top value, shifting weight" alert. */
+const SEMANTIC_SHIFT_THRESHOLD_PP = 0.20;
+
+interface SemanticClassificationRow {
+  hookArchetype: string | null;
+  coreMarketingPromise: string | null;
+  emotionalTrigger: string | null;
+  positioningStyle: string | null;
+  primaryGoal: string | null;
+  ctaType: string | null;
+  postTimestamp: Date | null;
+}
+
+interface SemanticDimensionDef {
+  kind: string;
+  label: string;
+  getter: (r: SemanticClassificationRow) => string | null;
+}
+
+const SEMANTIC_DIMENSIONS: SemanticDimensionDef[] = [
+  { kind: "hook_archetype_shift",    label: "Hook archetype",       getter: (r) => r.hookArchetype },
+  { kind: "promise_shift",           label: "Core marketing promise", getter: (r) => r.coreMarketingPromise },
+  { kind: "emotional_trigger_shift", label: "Emotional trigger",    getter: (r) => r.emotionalTrigger },
+  { kind: "positioning_shift",       label: "Positioning style",    getter: (r) => r.positioningStyle },
+  { kind: "primary_goal_shift",      label: "Primary goal",         getter: (r) => r.primaryGoal },
+  { kind: "cta_strategy_shift",      label: "CTA strategy",         getter: (r) => r.ctaType },
+];
+
+function buildSemanticDistribution(
+  rows: SemanticClassificationRow[],
+  getter: (r: SemanticClassificationRow) => string | null,
+): Record<string, number> {
+  const dist: Record<string, number> = {};
+  for (const row of rows) {
+    const val = getter(row);
+    if (!val || val === "UNKNOWN" || val === "NONE") continue;
+    dist[val] = (dist[val] || 0) + 1;
+  }
+  return dist;
+}
+
+function topSemanticValue(dist: Record<string, number>): string | null {
+  const entries = Object.entries(dist).sort((a, b) => b[1] - a[1]);
+  return entries.length > 0 ? entries[0][0] : null;
+}
+
+function semanticShare(dist: Record<string, number>, value: string): number {
+  const total = Object.values(dist).reduce((a, b) => a + b, 0);
+  return total > 0 ? (dist[value] ?? 0) / total : 0;
+}
+
+/**
+ * Async semantic diff: compare competitor_post_classifications distributions
+ * across two 30-day rolling windows anchored at the previous and current
+ * snapshot timestamps.
+ *
+ * Fires when:
+ *  (a) The top value for a dimension changed (most significant — severity=major).
+ *  (b) The top value is the same but its share moved ≥ 20pp (severity=medium/mild).
+ *
+ * Returns [] (no events) when:
+ *  - No classifications exist for this competitor.
+ *  - Either window has fewer than SEMANTIC_MIN_POSTS (thin data, can't trust distribution).
+ *
+ * Isolation guarantee: any DB error returns [] and logs a structured tag so the
+ * boss run is never blocked (W-1 isolation contract).
+ */
+async function classifySemanticChanges(
+  competitorId: string,
+  previousSnapTime: Date,
+  currentSnapTime: Date,
+  baselineSnapshotId: string,
+  currentSnapshotId: string,
+): Promise<WatchtowerChange[]> {
+  const changes: WatchtowerChange[] = [];
+  const ids = { baselineSnapshotId, currentSnapshotId };
+
+  const windowMs = SEMANTIC_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const prevWindowStart = new Date(previousSnapTime.getTime() - windowMs);
+  const currWindowStart = new Date(currentSnapTime.getTime() - windowMs);
+
+  // Single query — load all v2 classifications for this competitor joined with
+  // post timestamp. Filter confidence in-memory to avoid a numeric cast issue.
+  let rows: SemanticClassificationRow[];
+  try {
+    const raw = await db
+      .select({
+        hookArchetype: competitorPostClassifications.hookArchetype,
+        coreMarketingPromise: competitorPostClassifications.coreMarketingPromise,
+        emotionalTrigger: competitorPostClassifications.emotionalTrigger,
+        positioningStyle: competitorPostClassifications.positioningStyle,
+        primaryGoal: competitorPostClassifications.primaryGoal,
+        ctaType: competitorPostClassifications.ctaType,
+        confidenceScore: competitorPostClassifications.confidenceScore,
+        postTimestamp: ciCompetitorPosts.timestamp,
+      })
+      .from(competitorPostClassifications)
+      .innerJoin(
+        ciCompetitorPosts,
+        eq(competitorPostClassifications.postId, ciCompetitorPosts.id),
+      )
+      .where(
+        and(
+          eq(competitorPostClassifications.competitorId, competitorId),
+          eq(competitorPostClassifications.classifierVersion, "competitor-post-v2"),
+        ),
+      );
+    // Confidence filter in-memory (confidenceScore is a numeric column; Drizzle
+    // may return it as string or number depending on driver mode).
+    rows = raw
+      .filter((r) => {
+        const conf = typeof r.confidenceScore === "number"
+          ? r.confidenceScore
+          : Number(r.confidenceScore ?? 0);
+        return conf >= 0.50;
+      })
+      .map((r) => ({
+        hookArchetype: r.hookArchetype,
+        coreMarketingPromise: r.coreMarketingPromise,
+        emotionalTrigger: r.emotionalTrigger,
+        positioningStyle: r.positioningStyle,
+        primaryGoal: r.primaryGoal,
+        ctaType: r.ctaType,
+        postTimestamp: r.postTimestamp,
+      }));
+  } catch (err) {
+    console.error(
+      `${LOG_PREFIX} SEMANTIC_DIFF_FAILED competitorId=${competitorId} reason=classification_load_failed detail=${(err as Error).message}`,
+    );
+    return [];
+  }
+
+  if (rows.length === 0) return [];
+
+  // Split into two rolling windows using the post's publication timestamp.
+  const beforeRows = rows.filter((r) => {
+    if (!r.postTimestamp) return false;
+    return r.postTimestamp >= prevWindowStart && r.postTimestamp <= previousSnapTime;
+  });
+  const afterRows = rows.filter((r) => {
+    if (!r.postTimestamp) return false;
+    return r.postTimestamp >= currWindowStart && r.postTimestamp <= currentSnapTime;
+  });
+
+  if (beforeRows.length < SEMANTIC_MIN_POSTS || afterRows.length < SEMANTIC_MIN_POSTS) {
+    console.log(
+      `${LOG_PREFIX} SEMANTIC_DIFF_THIN_DATA competitorId=${competitorId} beforePosts=${beforeRows.length} afterPosts=${afterRows.length} minRequired=${SEMANTIC_MIN_POSTS}`,
+    );
+    return [];
+  }
+
+  for (const dim of SEMANTIC_DIMENSIONS) {
+    const beforeDist = buildSemanticDistribution(beforeRows, dim.getter);
+    const afterDist  = buildSemanticDistribution(afterRows,  dim.getter);
+
+    const beforeTop = topSemanticValue(beforeDist);
+    const afterTop  = topSemanticValue(afterDist);
+    if (!beforeTop || !afterTop) continue;
+
+    const beforeShare = semanticShare(beforeDist, beforeTop);
+    const afterShare  = semanticShare(afterDist,  afterTop);
+
+    if (beforeTop !== afterTop) {
+      // Top value completely changed — highest signal.
+      const beforeShareOfNew = semanticShare(beforeDist, afterTop);
+      changes.push({
+        kind: dim.kind,
+        severity: "major",
+        evidence: [
+          `${dim.label}: ${beforeTop} → ${afterTop}`,
+          `"${afterTop}" share: ${Math.round(beforeShareOfNew * 100)}% → ${Math.round(afterShare * 100)}% (+${Math.round((afterShare - beforeShareOfNew) * 100)}pp)`,
+          `window: ${beforeRows.length} posts (before) | ${afterRows.length} posts (after)`,
+        ],
+        prevValue: { top: beforeTop, share: Math.round(beforeShare * 100), distribution: beforeDist },
+        currValue: { top: afterTop,  share: Math.round(afterShare  * 100), distribution: afterDist  },
+        ...ids,
+      });
+    } else {
+      // Same top value — check for meaningful share drift.
+      const shareChange = afterShare - beforeShare;
+      if (Math.abs(shareChange) >= SEMANTIC_SHIFT_THRESHOLD_PP) {
+        const direction = shareChange > 0 ? "increased" : "decreased";
+        changes.push({
+          kind: dim.kind,
+          severity: Math.abs(shareChange) >= 0.35 ? "medium" : "mild",
+          evidence: [
+            `${dim.label}: ${beforeTop} ${direction} by ${Math.round(Math.abs(shareChange) * 100)}pp`,
+            `share: ${Math.round(beforeShare * 100)}% → ${Math.round(afterShare * 100)}%`,
+            `window: ${beforeRows.length} posts (before) | ${afterRows.length} posts (after)`,
+          ],
+          prevValue: { top: beforeTop, share: Math.round(beforeShare * 100), distribution: beforeDist },
+          currValue: { top: afterTop,  share: Math.round(afterShare  * 100), distribution: afterDist  },
+          ...ids,
+        });
+      }
+    }
+  }
+
+  return changes;
+}
 
 export interface WatchtowerOrchestratorInput {
   accountId: string;
@@ -242,7 +460,7 @@ interface OpenCandidateRow {
  */
 async function maintainOpenCandidates(
   input: WatchtowerOrchestratorInput,
-  currentSnap: { id: string },
+  currentSnap: { id: string; createdAt: Date | null },
   currentPayload: Record<string, unknown>,
 ): Promise<void> {
   const { campaignId, competitorId } = input;
@@ -302,10 +520,11 @@ async function maintainOpenCandidates(
     }
 
     // Load the candidate's original baseline snapshot.
-    let baselineRow: { id: string; payload: string | null } | undefined;
+    // createdAt is needed for semantic candidate re-classification (time windows).
+    let baselineRow: { id: string; payload: string | null; createdAt: Date | null } | undefined;
     try {
       [baselineRow] = await db
-        .select({ id: pipelineSnapshots.id, payload: pipelineSnapshots.payload })
+        .select({ id: pipelineSnapshots.id, payload: pipelineSnapshots.payload, createdAt: pipelineSnapshots.createdAt })
         .from(pipelineSnapshots)
         .where(eq(pipelineSnapshots.id, candidate.baselineSnapshotId))
         .limit(1);
@@ -316,32 +535,58 @@ async function maintainOpenCandidates(
       continue;
     }
 
-    const baselinePayload = baselineRow
-      ? safeParsePayload(baselineRow.payload, `baseline:${candidate.baselineSnapshotId}`)
-      : null;
-    if (!baselinePayload) {
-      // Baseline snapshot pruned or unparseable — cannot verify persistence.
-      // Leave the candidate open (it expires from the 30d window naturally);
-      // never promote on unverifiable evidence (B1/B3).
-      console.error(
-        `${LOG_PREFIX} CANDIDATE_BASELINE_UNAVAILABLE eventId=${candidate.id} kind=${candidate.kind} baselineSnapshotId=${candidate.baselineSnapshotId}`,
-      );
-      continue;
-    }
-
+    // Semantic candidates are re-checked by comparing classification
+    // distributions across the two time windows — they don't use snapshot payloads.
     let vsBaseline: WatchtowerChange[];
-    try {
-      vsBaseline = classifyWatchtowerChanges(
-        currentPayload,
-        baselinePayload,
-        currentSnap.id,
-        candidate.baselineSnapshotId,
-      );
-    } catch (err) {
-      console.error(
-        `${LOG_PREFIX} COMPETITOR_DIFF_FAILED eventId=${candidate.id} reason=confirmation_classification_threw detail=${(err as Error).message}`,
-      );
-      continue;
+    if (SEMANTIC_CHANGE_KINDS.has(candidate.kind)) {
+      const baselineCreatedAt = baselineRow?.createdAt;
+      const currentCreatedAt = currentSnap.createdAt;
+      if (!baselineCreatedAt || !currentCreatedAt) {
+        console.error(
+          `${LOG_PREFIX} SEMANTIC_CANDIDATE_TIMESTAMPS_MISSING eventId=${candidate.id} kind=${candidate.kind} — leaving open to expire`,
+        );
+        continue;
+      }
+      try {
+        vsBaseline = await classifySemanticChanges(
+          competitorId,
+          baselineCreatedAt,
+          currentCreatedAt,
+          candidate.baselineSnapshotId,
+          currentSnap.id,
+        );
+      } catch (err) {
+        console.error(
+          `${LOG_PREFIX} COMPETITOR_DIFF_FAILED eventId=${candidate.id} reason=semantic_confirmation_threw detail=${(err as Error).message}`,
+        );
+        continue;
+      }
+    } else {
+      const baselinePayload = baselineRow
+        ? safeParsePayload(baselineRow.payload, `baseline:${candidate.baselineSnapshotId}`)
+        : null;
+      if (!baselinePayload) {
+        // Baseline snapshot pruned or unparseable — cannot verify persistence.
+        // Leave the candidate open (it expires from the 30d window naturally);
+        // never promote on unverifiable evidence (B1/B3).
+        console.error(
+          `${LOG_PREFIX} CANDIDATE_BASELINE_UNAVAILABLE eventId=${candidate.id} kind=${candidate.kind} baselineSnapshotId=${candidate.baselineSnapshotId}`,
+        );
+        continue;
+      }
+      try {
+        vsBaseline = classifyWatchtowerChanges(
+          currentPayload,
+          baselinePayload,
+          currentSnap.id,
+          candidate.baselineSnapshotId,
+        );
+      } catch (err) {
+        console.error(
+          `${LOG_PREFIX} COMPETITOR_DIFF_FAILED eventId=${candidate.id} reason=confirmation_classification_threw detail=${(err as Error).message}`,
+        );
+        continue;
+      }
     }
 
     const match = vsBaseline.find((c) => c.kind === candidate.kind);
@@ -555,9 +800,10 @@ export async function runWatchtowerOrchestrator(
     return;
   }
 
-  let changes: WatchtowerChange[];
+  // Payload-based classification (sync): posting frequency, patterns, offer language.
+  let payloadChanges: WatchtowerChange[];
   try {
-    changes = classifyWatchtowerChanges(
+    payloadChanges = classifyWatchtowerChanges(
       currentPayload,
       previousPayload,
       currentSnap.id,
@@ -570,6 +816,28 @@ export async function runWatchtowerOrchestrator(
     return;
   }
 
+  // Semantic classification (async): hook archetype, promise, trigger, positioning,
+  // goal, CTA strategy — driven by competitor_post_classifications distributions.
+  // Non-blocking: a failure produces [] so the payload-based changes still emit.
+  let semanticChanges: WatchtowerChange[] = [];
+  if (currentSnap.createdAt && previousSnap.createdAt) {
+    try {
+      semanticChanges = await classifySemanticChanges(
+        competitorId,
+        previousSnap.createdAt,
+        currentSnap.createdAt,
+        previousSnap.id,
+        currentSnap.id,
+      );
+    } catch (err) {
+      console.error(
+        `${LOG_PREFIX} SEMANTIC_DIFF_FAILED competitorId=${competitorId} reason=top_level_threw detail=${(err as Error).message}`,
+      );
+    }
+  }
+
+  const changes = [...payloadChanges, ...semanticChanges];
+
   if (changes.length === 0) {
     console.log(
       `${LOG_PREFIX} NO_CHANGES_DETECTED competitorId=${competitorId} campaign=${campaignId}`,
@@ -577,8 +845,10 @@ export async function runWatchtowerOrchestrator(
     return;
   }
 
+  const semanticKinds = semanticChanges.map((c) => c.kind);
+  const payloadKinds  = payloadChanges.map((c) => c.kind);
   console.log(
-    `${LOG_PREFIX} CHANGES_DETECTED competitorId=${competitorId} campaign=${campaignId} count=${changes.length} kinds=${changes.map((c) => c.kind).join(",")}`,
+    `${LOG_PREFIX} CHANGES_DETECTED competitorId=${competitorId} campaign=${campaignId} count=${changes.length} payloadKinds=${payloadKinds.join(",") || "none"} semanticKinds=${semanticKinds.join(",") || "none"}`,
   );
 
   for (const change of changes) {

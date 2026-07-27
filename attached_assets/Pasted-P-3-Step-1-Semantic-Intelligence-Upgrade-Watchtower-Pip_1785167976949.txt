@@ -1,0 +1,165 @@
+P-3 Step 1 — Semantic Intelligence Upgrade (Watchtower + Pipeline Boss)
+
+The competitor classification layer (competitor-post-v2) is now the platform's verified Single Source of Truth for competitor content intelligence.
+
+P-2 is complete.
+
+Your task is to complete the remaining architecture by upgrading the last two consumers that still depend primarily on regex and hashtag-derived signals.
+
+This is NOT a classifier task.
+
+Do NOT modify the classifier.
+
+Do NOT change the database schema.
+
+Only consume the existing classification layer.
+
+==================================================
+Objective
+==================================================
+
+Replace shallow competitor intelligence with semantic competitor intelligence.
+
+The platform should detect:
+
+- strategic shifts
+- messaging shifts
+- positioning shifts
+- promise shifts
+- emotional shifts
+
+instead of only:
+
+- hashtags
+- keyword changes
+- posting frequency
+
+==================================================
+Part 1 — Watchtower Semantic Intelligence
+==================================================
+
+Audit the complete Watchtower pipeline.
+
+Identify every place where Watchtower currently compares:
+
+- regex outputs
+- snapshot strings
+- keyword lists
+- hashtag distributions
+
+Replace or augment those comparisons using:
+
+competitor_post_classifications
+
+Watchtower should detect changes such as:
+
+- Hook Archetype distribution changes
+- Core Marketing Promise shifts
+- Emotional Trigger shifts
+- Positioning Style shifts
+- Primary Goal changes
+- CTA strategy changes
+
+Examples:
+
+"Competitor shifted from BETTER_QUALITY to PREMIUM_EXPERIENCE."
+
+"Competitor increased ASPIRATION messaging by 42%."
+
+"Competitor is now using SOCIAL_PROOF hooks instead of BOLD_CLAIM."
+
+"CTA strategy changed from NONE to LINK_IN_BIO."
+
+Produce higher-level strategic alerts rather than keyword alerts.
+
+Keep the existing regex implementation only as a fallback.
+
+==================================================
+Part 2 — Pipeline Boss Intelligence Upgrade
+==================================================
+
+Audit the competitor corpus pipeline.
+
+Identify where hashtag-derived themes are currently generated.
+
+Replace or augment them with AI-derived marketing signals from:
+
+competitor_post_classifications
+
+Theme generation should primarily rely on:
+
+- Hook Archetype
+- Primary Angle
+- Core Marketing Promise
+- Emotional Trigger
+- Positioning Style
+- Primary Goal
+
+Hashtags may remain only as supporting metadata.
+
+The resulting competitor themes should represent marketing intent rather than keyword frequency.
+
+==================================================
+Part 3 — Semantic Validation
+==================================================
+
+Run the full system using the live MarketMindAI campaign.
+
+Verify that:
+
+Watchtower now produces semantic alerts.
+
+Pipeline Boss now produces semantic themes.
+
+No existing functionality regressed.
+
+Regex fallbacks still function when classifications are unavailable.
+
+Compare outputs before and after the upgrade.
+
+Highlight improvements.
+
+==================================================
+Part 4 — Performance & Stability
+==================================================
+
+Ensure the new integrations:
+
+- do not increase unnecessary database queries
+- bulk-load classifications where possible
+- avoid N+1 queries
+- reuse existing caches
+- preserve scheduler performance
+
+Optimize if necessary.
+
+==================================================
+Deliverable
+==================================================
+
+Produce a complete engineering report including:
+
+1. Watchtower audit
+
+2. Pipeline Boss audit
+
+3. Files modified
+
+4. Semantic alerts now supported
+
+5. Theme generation improvements
+
+6. Performance analysis
+
+7. Before vs After examples
+
+8. Remaining architecture gaps
+
+9. Final PASS / FAIL verdict
+
+PASS only if:
+
+- Watchtower primarily detects semantic marketing changes instead of keyword changes.
+- Pipeline Boss primarily generates AI-derived strategic themes instead of hashtag-derived themes.
+- competitor_post_classifications remains the single source of truth.
+- No regressions are introduced.
