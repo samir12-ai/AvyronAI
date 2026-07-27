@@ -485,3 +485,9 @@ id = "isewvGiFidHqx5XhnAUJo"
 uri = "file://docs/ai-proposes-code-validates-full-report.md"
 type = "text"
 title = "AI Proposes, Code Validates — Full Report (Phases 0–4)"
+
+[[outputs]]
+id = "QYE-6brMYVeq-gKHVroga"
+uri = "file://.local/validation/p2-step5-integration-report.md"
+type = "text"
+title = "P-2 Step 5 — Platform Integration Report"
