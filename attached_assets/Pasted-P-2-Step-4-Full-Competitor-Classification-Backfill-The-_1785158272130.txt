@@ -1,0 +1,256 @@
+P-2 Step 4 — Full Competitor Classification Backfill
+
+The competitor post classifier v2 has passed live verification.
+
+Do NOT modify the classifier schema.
+
+Do NOT modify the Market Intelligence pipeline.
+
+Do NOT connect the classifier to the Performance Loop in this task.
+
+This task is only to classify the complete existing competitor post corpus using classifier version competitor-post-v2 and verify the quality and operational safety of the backfill.
+
+---
+
+Goal
+
+Run the existing versioned batch classifier across all currently unclassified competitor posts.
+
+Current database context:
+
+* ci_competitor_posts contains approximately 140 posts
+* 5 posts have already been classified using competitor-post-v2
+* Existing competitor-post-v1 rows must remain untouched
+* The batch must classify only posts missing the current classifier version
+
+Expected unclassified count should therefore be approximately 135, but query the database and report the exact number before running.
+
+---
+
+Step 1 — Pre-Run Verification
+
+Query and report:
+
+* Total ci_competitor_posts rows
+* Total competitor-post-v1 classification rows
+* Total competitor-post-v2 classification rows
+* Exact count of posts missing competitor-post-v2
+* Number of competitors represented
+* Post count per competitor
+* Media type distribution:
+
+  * REEL
+  * CAROUSEL
+  * IMAGE
+  * VIDEO
+  * UNKNOWN or other values
+
+Verify that the existing batch runner excludes posts that already have a row for competitor-post-v2.
+
+Do not assume the limit should equal 140.
+
+Use the exact unclassified count or allow the runner to select all missing current-version rows.
+
+---
+
+Step 2 — Run Full Backfill
+
+Run the existing runBatchClassification() implementation using:
+
+* classifier version competitor-post-v2
+* concurrency = 5
+* only posts missing competitor-post-v2
+* all competitors
+* existing budget and retry protections
+
+Do not create a new batch system.
+
+Capture:
+
+* posts selected
+* successful classifications
+* failed classifications
+* skipped classifications
+* retries
+* total AI calls
+* elapsed time
+* approximate token usage
+* approximate total cost
+* errors grouped by type
+
+A failure on one post must not abort the entire corpus.
+
+---
+
+Step 3 — Persistence Verification
+
+After completion, verify:
+
+* Every eligible ci_competitor_posts row has one competitor-post-v2 classification
+* No duplicate (post_id, classifier_version) rows exist
+* competitor-post-v1 rows are unchanged
+* All enum values satisfy DB constraints
+* All confidence scores remain between 0 and 1
+* competitor_id matches the source post
+* classifier_version is competitor-post-v2
+* classified_at is populated
+* UNKNOWN values are persisted normally and not treated as failures
+
+Report the expected versus actual classification counts.
+
+---
+
+Step 4 — Corpus Quality Review
+
+Select a stratified sample of at least 12 classified posts.
+
+The sample must include where available:
+
+* At least 4 different competitors
+* At least 4 REEL posts
+* At least 2 CAROUSEL posts
+* At least 1 promotional post
+* At least 1 educational/review post
+* At least 1 emotional/community post
+* At least 1 post with a clear CTA
+* At least 1 post with no CTA
+* At least 1 short or vague caption
+* At least 1 high-engagement post
+* At least 1 low-engagement post
+
+For each sampled post report:
+
+* competitor
+* post ID
+* media type
+* caption excerpt
+* engagement metrics
+* hook archetype
+* primary angle
+* core marketing promise
+* narrative
+* CTA type
+* emotional trigger
+* awareness stage
+* positioning style
+* content format intent
+* primary goal
+* confidence score
+
+Manually evaluate the most important dimensions:
+
+* primary angle
+* core marketing promise
+* hook archetype
+* CTA type
+* emotional trigger
+* narrative
+
+Mark each as:
+
+* CORRECT
+* ACCEPTABLE
+* QUESTIONABLE
+* WRONG
+* UNKNOWN_APPROPRIATE
+* UNKNOWN_UNNECESSARY
+
+---
+
+Step 5 — Distribution Sanity Check
+
+Produce corpus-level distributions for:
+
+* Core Marketing Promise
+* Hook Archetype
+* Narrative
+* CTA Type
+* Emotional Trigger
+* Awareness Stage
+* Positioning Style
+* Content Format Intent
+* Primary Goal
+* Confidence score bands:
+
+  * below 0.50
+  * 0.50–0.69
+  * 0.70–0.84
+  * 0.85 and above
+
+Break down Core Marketing Promise by competitor.
+
+Flag suspicious outcomes such as:
+
+* One label assigned to nearly every post
+* Excessive UNKNOWN rates on rich captions
+* Almost no UNKNOWN values on vague captions
+* Identical distributions across unrelated competitors
+* CTA Type NONE despite clear CTA language
+* Confidence scores staying unrealistically high
+* Core Marketing Promise contradicting the caption
+
+Do not interpret popularity as performance yet.
+
+This task has no engagement weighting or Performance Loop integration.
+
+---
+
+Step 6 — Failure Review
+
+For every failed post report:
+
+* post ID
+* competitor
+* caption length
+* error type
+* retry count
+* whether the failure is retryable
+* whether the post can safely remain unclassified
+
+Retry only according to the existing retry policy.
+
+Do not manually force invalid classifications into the database.
+
+---
+
+Pass Criteria
+
+PASS only if:
+
+* At least 95% of eligible posts classify successfully
+* No duplicate version rows are created
+* v1 rows remain unchanged
+* Database constraints remain valid
+* Rich captions generally receive useful classifications
+* Vague captions use UNKNOWN appropriately
+* No label-collapse pattern is detected
+* Cost remains operationally acceptable
+* No blocking defect exists
+
+---
+
+Final Deliverable
+
+Provide:
+
+1. Pre-run corpus counts
+2. Batch execution summary
+3. Success and failure counts
+4. Runtime and cost
+5. Persistence verification
+6. Twelve-post semantic quality review
+7. Classification distributions
+8. UNKNOWN rate analysis
+9. Any suspicious bias or label-collapse patterns
+10. Bugs found and minimal fixes made
+11. Final verdict:
+
+* PASS
+* PASS WITH NON-BLOCKING ISSUES
+* FAIL
+
+12. Exact readiness statement for Performance Loop integration
+
+Do not connect anything to the Performance Loop yet.
+
+Stop after the full-corpus backfill verification.

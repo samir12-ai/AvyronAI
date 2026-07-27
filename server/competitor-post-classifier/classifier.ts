@@ -75,6 +75,8 @@ Return ONLY valid JSON matching this exact schema. No commentary, no explanation
   "contentFormatIntent": one of ${JSON.stringify(CONTENT_FORMAT_INTENTS)},
   "primaryGoal": one of ${JSON.stringify(PRIMARY_GOALS)},
   "coreMarketingPromise": one of ${JSON.stringify(CORE_MARKETING_PROMISES)},
+
+IMPORTANT — narrative field: this describes the STORYTELLING STRUCTURE of the post (how the content is framed), NOT the product lifecycle stage or awareness level. "PRODUCT_AWARE", "PRODUCT_LAUNCH", "PRODUCT_DEMO", "SOLUTION_AWARE" are NOT valid values and must never be used. If the narrative structure is ambiguous, return UNKNOWN. The awarenessStage field (not narrative) captures where the audience is in the buyer journey.
   "confidenceScore": a number between 0.0 and 1.0 representing your overall classification confidence
 }
 
@@ -182,11 +184,38 @@ export async function classifyCompetitorPost(
   let lastRaw: string = "";
   let lastErrors: string[] = [];
 
+  // Map field name → its allowed enum for richer self-correction messages.
+  const FIELD_ALLOWED: Record<string, readonly string[]> = {
+    hookArchetype: HOOK_ARCHETYPES,
+    narrative: NARRATIVE_FRAMEWORKS,
+    ctaType: CTA_TYPES,
+    offerType: OFFER_TYPES,
+    emotionalTrigger: EMOTIONAL_TRIGGERS,
+    awarenessStage: AWARENESS_STAGES,
+    positioningStyle: POSITIONING_STYLES,
+    contentFormatIntent: CONTENT_FORMAT_INTENTS,
+    primaryGoal: PRIMARY_GOALS,
+    coreMarketingPromise: CORE_MARKETING_PROMISES,
+  };
+
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const userContent =
-      attempt === 2 && lastErrors.length > 0
-        ? `${buildUserContent(post)}\n\n[SELF-CORRECTION] Your previous response had schema errors: ${lastErrors.join("; ")}. Fix them and return only valid JSON.`
-        : buildUserContent(post);
+    let userContent: string;
+    if (attempt === 2 && lastErrors.length > 0) {
+      // Build a correction block that re-states the exact allowed values for
+      // every field that failed, so the model cannot re-invent another wrong
+      // value on the second try.
+      const corrections = lastErrors.map((err) => {
+        const fieldMatch = err.match(/^(\w+):/);
+        const field = fieldMatch ? fieldMatch[1] : null;
+        const allowed = field ? FIELD_ALLOWED[field] : null;
+        return allowed
+          ? `  ${err}. Allowed values for ${field}: ${JSON.stringify(allowed)}`
+          : `  ${err}`;
+      });
+      userContent = `${buildUserContent(post)}\n\n[SELF-CORRECTION] Your previous response had schema errors. Correct ONLY the listed fields and return the full valid JSON:\n${corrections.join("\n")}`;
+    } else {
+      userContent = buildUserContent(post);
+    }
 
     const response = await aiChat({
       model: "gpt-4.1-mini",
