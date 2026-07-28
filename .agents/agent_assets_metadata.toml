@@ -491,3 +491,9 @@ id = "QYE-6brMYVeq-gKHVroga"
 uri = "file://.local/validation/p2-step5-integration-report.md"
 type = "text"
 title = "P-2 Step 5 — Platform Integration Report"
+
+[[outputs]]
+id = "Nf6nPLXArfeg08qvZfBae"
+uri = "file://.local/validation/p3-interpretation-report.md"
+type = "text"
+title = "P-3 AI Interpretation Layer — Validation Report (PASS)"
