@@ -1,0 +1,273 @@
+P-5 Architecture Audit — Unified Intelligence Memory (Design First)
+
+DO NOT start coding immediately.
+
+This task is an architectural review first.
+
+The objective is to determine whether Avyron's long-term memory architecture is complete, whether there are duplicated responsibilities, and whether any critical intelligence is currently forgotten over time.
+
+The goal is NOT to build another memory table.
+
+The goal is to design the final Memory Architecture for Avyron.
+
+==================================================
+Mission
+=======
+
+Audit every persistent intelligence layer inside Avyron.
+
+Determine:
+
+• What is remembered?
+
+• What is forgotten?
+
+• What should never be forgotten?
+
+• Which memories overlap?
+
+• Which memories should be merged?
+
+• Which memories are missing entirely?
+
+The deliverable is an architectural proposal before any implementation.
+
+==================================================
+Current Memory Systems
+======================
+
+Review ALL existing memory systems, including but not limited to:
+
+• Market Memory
+
+• Strategy Memory
+
+• Performance Memory
+
+• Performance Decision Verdicts
+
+• Historical Performance Reports
+
+• Content DNA snapshots
+
+• Business Data Layer
+
+• Goal Decompositions
+
+• Competitor intelligence history
+
+• Watchtower history
+
+• Any additional long-lived storage used for reasoning
+
+Identify:
+
+Purpose
+
+Owner
+
+Lifetime
+
+Update frequency
+
+Consumers
+
+Redundancies
+
+Missing relationships
+
+==================================================
+Architecture Questions
+======================
+
+Answer questions such as:
+
+Should these remain independent?
+
+Should some become one graph?
+
+Should memories reference each other?
+
+Should they share one evidence registry?
+
+How should historical retrieval work?
+
+How should Reasoning retrieve memories?
+
+Should retrieval be chronological?
+
+Semantic?
+
+Evidence based?
+
+Hybrid?
+
+==================================================
+Memory Lifecycle
+================
+
+For every memory type define:
+
+Creation
+
+Update
+
+Versioning
+
+Superseding
+
+Expiration
+
+Archiving
+
+Deletion policy
+
+Confidence evolution
+
+Relationship to evidence
+
+Relationship to historical snapshots
+
+==================================================
+Missing Memory
+==============
+
+Look for intelligence that Avyron currently loses.
+
+Examples:
+
+Recurring market behaviour
+
+Failed strategic hypotheses
+
+Historical competitor evolution
+
+Long-term content evolution
+
+Decision outcomes
+
+Reasoning accuracy
+
+Repeated customer problems
+
+Changing business priorities
+
+Campaign evolution
+
+DO NOT automatically implement these.
+
+First determine whether they belong in existing memories or require new structures.
+
+==================================================
+Evidence Architecture
+=====================
+
+Audit how evidence flows.
+
+Can one evidence object support:
+
+Market Memory
+
+Performance Memory
+
+Strategy Memory
+
+Reasoning Cards
+
+Decision Engine
+
+Historical analysis
+
+Avoid duplicated evidence storage.
+
+==================================================
+Retrieval Architecture
+======================
+
+Design how future engines retrieve memories.
+
+Support:
+
+Chronological retrieval
+
+Semantic retrieval
+
+Evidence retrieval
+
+Pattern retrieval
+
+Relationship traversal
+
+The architecture should scale to years of history.
+
+==================================================
+Future Compatibility
+====================
+
+The architecture must support future engines such as:
+
+Decision Engine
+
+Strategic Planner
+
+Campaign Generator
+
+Learning Engine
+
+Autonomous Optimization
+
+without redesigning the memory layer again.
+
+==================================================
+Deliverables
+============
+
+Return:
+
+1. Complete inventory of every memory system.
+
+2. Responsibility of each memory.
+
+3. Missing intelligence.
+
+4. Overlapping memories.
+
+5. Proposed unified memory architecture.
+
+6. Memory relationship diagram.
+
+7. Retrieval architecture.
+
+8. Evidence architecture.
+
+9. Risks of the current design.
+
+10. Migration recommendations (if any).
+
+11. Implementation roadmap.
+
+12. Explicit recommendation:
+
+* Keep current architecture.
+* Refactor existing memories.
+* Merge memories.
+* Introduce a memory graph.
+* No additional memory required.
+
+==================================================
+IMPORTANT
+=========
+
+This is an architecture review.
+
+Do NOT optimize for minimal code changes.
+
+Optimize for the cleanest long-term architecture.
+
+If the current design is already correct, explicitly say so.
+
+If it is flawed, explain why with concrete evidence.
+
+Only after this design is approved will implementation begin.
+
+PASS only if the proposed memory architecture can support every current engine and future strategic engines without requiring another fundamental redesign.
