@@ -1,0 +1,163 @@
+# P-6.11 Instagram Comment Recovery — Retry Using the New Apify Actors
+
+The previous audit (P-6.10) confirmed:
+
+* Stored comments are authentic.
+* Bright Data comment acquisition has been transport-dead since ~July 19.
+* The previous Apify Profile Actor does **not** return comment threads.
+
+New Apify actors have now been added.
+
+Do not assume they work.
+
+Verify them using real production data.
+
+Do not modify the Audience Engine.
+
+Do not modify SGL.
+
+Do not modify the confidence model.
+
+This task is strictly to determine whether the new Apify actors can replace the broken Bright Data comment acquisition.
+
+---
+
+# Mission
+
+Test every newly added Apify actor that claims to support Instagram comments.
+
+Determine whether any actor can reliably provide real comment threads suitable for MarketMind.
+
+---
+
+# Part 1 — Discover Available Actors
+
+List every newly configured Instagram-related Apify actor.
+
+For each actor report:
+
+* Actor name
+* Actor ID
+* Intended purpose
+* Supports comments? (claimed)
+* Authentication requirements
+* Cookies/session required?
+* Estimated limits
+
+---
+
+# Part 2 — Live Production Test
+
+Choose one competitor currently monitored by MarketMind.
+
+Use several recent posts.
+
+Run every newly available actor against exactly the same posts.
+
+For every actor report:
+
+* Run status
+* Posts discovered
+* Comments returned
+* Total comment count
+* Usernames
+* Comment IDs
+* Comment timestamps
+* Replies (if available)
+* Like counts (if available)
+
+Include the raw response structure.
+
+---
+
+# Part 3 — Data Quality Audit
+
+For every actor determine:
+
+* Are comment texts returned?
+* Are usernames real?
+* Are Instagram comment IDs returned?
+* Are timestamps present?
+* Are replies available?
+* Are deleted/hidden comments handled?
+* Are comments complete or preview-only?
+
+Determine whether the output is sufficient for Audience analysis.
+
+---
+
+# Part 4 — Compatibility Audit
+
+Compare the returned schema against MarketMind's existing comment pipeline.
+
+Determine:
+
+* Can the returned payload be consumed with minimal changes?
+* Which fields already match?
+* Which mappings would be required?
+* Any missing mandatory fields?
+
+Do not implement the integration.
+
+Only evaluate compatibility.
+
+---
+
+# Part 5 — Reliability
+
+Evaluate:
+
+* Runtime
+* Success rate
+* Pagination support
+* Rate limits
+* Authentication stability
+* Error handling
+* Suitability for scheduled production runs
+
+---
+
+# Part 6 — Comparison
+
+Compare:
+
+| Capability          | Bright Data (old) | Previous Apify Actor | New Actor A | New Actor B | ... |
+| ------------------- | ----------------- | -------------------- | ----------- | ----------- | --- |
+| Comment text        |                   |                      |             |             |     |
+| Usernames           |                   |                      |             |             |     |
+| Comment IDs         |                   |                      |             |             |     |
+| Replies             |                   |                      |             |             |     |
+| Timestamps          |                   |                      |             |             |     |
+| Reliability         |                   |                      |             |             |     |
+| Production suitable |                   |                      |             |             |     |
+
+---
+
+# Final Verdict
+
+Answer the following:
+
+1. Can any of the new Apify actors fully replace Bright Data for Instagram comments?
+2. Which actor is the best candidate?
+3. Does it return enough evidence for MarketMind's Audience Engine?
+4. Would only minor integration changes be required, or is a larger redesign needed?
+
+Support every conclusion with live production evidence.
+
+Do not speculate.
+
+Do not implement integration yet.
+
+Return only evidence-backed findings.
+
+If a production-ready actor is identified, clearly state:
+
+```text
+APIFY COMMENT REPLACEMENT VERIFIED
+```
+
+Otherwise state:
+
+```text
+NO PRODUCTION-READY COMMENT REPLACEMENT FOUND
+```
