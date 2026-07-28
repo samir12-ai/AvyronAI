@@ -1,0 +1,385 @@
+P-3 Enhancement — Watchtower Distribution Intelligence Layer
+
+The semantic Watchtower is now operational and verified.
+
+Do not replace the existing semantic change detection.
+
+Do not redesign the current promotion pipeline.
+
+Instead, extend Watchtower so it fully utilizes competitor_post_classifications as a market intelligence dataset rather than only a semantic change detector.
+
+==================================================
+Background
+==========
+
+Watchtower currently detects semantic shifts correctly.
+
+Examples:
+
+Promise Shift
+
+Emotion Shift
+
+Narrative Shift
+
+CTA Shift
+
+Awareness Shift
+
+etc.
+
+However, competitor_post_classifications contains significantly richer information than change detection alone.
+
+The platform should also understand the structure of the market itself.
+
+==================================================
+Goal
+====
+
+Create a Distribution Intelligence Layer above the existing semantic change detection.
+
+Watchtower should answer questions such as:
+
+What dominates the market?
+
+What is growing?
+
+What is declining?
+
+What patterns are emerging?
+
+What patterns are disappearing?
+
+without introducing additional LLM analysis.
+
+Use existing competitor_post_classifications only.
+
+==================================================
+
+1. Classification Distribution Engine
+   ==================================================
+
+For every semantic dimension already classified, calculate market distributions.
+
+At minimum:
+
+Primary Hook
+
+Primary Angle
+
+Core Promise
+
+Emotional Trigger
+
+Positioning Style
+
+Narrative
+
+Awareness Stage
+
+Offer Type
+
+CTA
+
+Goal
+
+Content Format Intent
+
+Produce distributions such as:
+
+Educational
+
+42%
+
+Question
+
+31%
+
+Story
+
+27%
+
+==================================================
+2. Adoption Detection
+=====================
+
+Track adoption over time.
+
+Examples:
+
+Question Hooks
+
+Week 1
+
+18%
+
+Week 2
+
+29%
+
+Week 3
+
+47%
+
+Week 4
+
+63%
+
+Generate:
+
+Adoption Rate
+
+Growth %
+
+Acceleration
+
+==================================================
+3. Declining Pattern Detection
+==============================
+
+Detect semantic concepts losing adoption.
+
+Example:
+
+Educational Hooks
+
+68%
+
+↓
+
+44%
+
+↓
+
+21%
+
+↓
+
+9%
+
+Identify:
+
+Declining Pattern
+
+without requiring explicit competitor changes.
+
+==================================================
+4. Emerging Pattern Detection
+=============================
+
+Detect rapidly growing semantic concepts.
+
+Examples:
+
+Customer Proof Narrative
+
+Community Positioning
+
+Urgency Promise
+
+Founder Story
+
+Educational Carousel
+
+Requirements:
+
+minimum adoption threshold
+
+minimum competitor count
+
+minimum confidence
+
+noise filtering
+
+==================================================
+5. Dominant Pattern Detection
+=============================
+
+Determine current market leaders for every semantic dimension.
+
+Examples:
+
+Most common hook
+
+Most common promise
+
+Most common emotion
+
+Most common positioning
+
+Most common CTA
+
+Most common awareness stage
+
+Most common narrative
+
+Most common offer
+
+==================================================
+6. Time Window Comparison
+=========================
+
+Support rolling comparisons.
+
+Examples:
+
+Last 7 days
+
+Last 30 days
+
+Last 90 days
+
+Current period vs previous period
+
+Avoid rebuilding historical snapshots unless necessary.
+
+Reuse existing classified data whenever possible.
+
+==================================================
+7. Market Intelligence Output
+=============================
+
+Each distribution insight should include:
+
+Semantic dimension
+
+Current leader
+
+Adoption %
+
+Trend
+
+Confidence
+
+Sample size
+
+Competitor count
+
+Time window
+
+Evidence
+
+==================================================
+8. Integration
+==============
+
+Distribution Intelligence should become an additional Watchtower module.
+
+Do not replace:
+
+Semantic Shift Detection.
+
+Both engines should coexist.
+
+Example:
+
+Semantic Shift
+
+↓
+
+Distribution Analysis
+
+↓
+
+Watchtower Output
+
+==================================================
+9. Performance Requirements
+===========================
+
+No additional LLM calls.
+
+Use deterministic aggregation only.
+
+Reuse competitor_post_classifications.
+
+Avoid duplicate calculations.
+
+Prefer SQL aggregation where practical.
+
+==================================================
+10. Live Validation
+===================
+
+Run against an existing campaign.
+
+Prefer:
+
+MarketMindAI
+
+or another campaign with sufficient classified history.
+
+Verify:
+
+Current market distributions
+
+Dominant patterns
+
+Emerging patterns
+
+Declining patterns
+
+Adoption calculations
+
+If production data is insufficient,
+
+create a controlled deterministic scenario
+
+clearly marked as simulation.
+
+==================================================
+11. Customer Presentation
+=========================
+
+The dashboard should be able to show examples such as:
+
+Market Snapshot
+
+Most Common Hook
+
+Question (61%)
+
+Fastest Growing Narrative
+
+Customer Proof
+
+Rapid Adoption
+
+Urgency Promise
+
++31%
+
+Declining Pattern
+
+Educational Hooks
+
+−24%
+
+These are market observations only.
+
+No strategic recommendations.
+
+==================================================
+12. Deliverable
+===============
+
+Return:
+
+1. Architecture changes.
+2. Distribution engine design.
+3. SQL aggregation approach.
+4. Files modified.
+5. Live campaign validation.
+6. Controlled validation.
+7. Performance impact.
+8. Remaining gaps.
+9. PASS / FAIL.
+
+PASS only if:
+
+* Watchtower continues using competitor_post_classifications as the single semantic source of truth.
+* No duplicate AI analysis is introduced.
+* Market distributions are calculated correctly.
+* Adoption, dominant, emerging, and declining semantic patterns are detected.
+* Live validation confirms correct behavior.
+* The new Distribution Intelligence Layer complements—not replaces—the existing Semantic Shift Detection engine.

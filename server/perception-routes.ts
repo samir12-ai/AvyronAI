@@ -40,6 +40,10 @@ import { acceptUserTruth } from "./pipeline/lanes/user/user-truth";
 import { evaluateWindowState } from "./pipeline/eval-windows";
 import { runPerformanceCycle } from "./performance-loop/cycle-runner";
 import { PipelineValidationError } from "./pipeline/errors";
+import {
+  computeMarketDistributionSnapshot,
+  normalizeWindow,
+} from "./watchtower/distribution-intelligence";
 import { eq, and, desc, gte, sql, count, ne, max, inArray, isNotNull } from "drizzle-orm";
 import {
   translateQ1Verdict,
@@ -50,6 +54,8 @@ import {
   translateContinuityDecision,
   translateBlockedReasons,
   translateSignalKind,
+  humanizeSemanticValue,
+  translateDistributionTrend,
   buildMonitoringLines,
   Q1_PENDING_FIRST_RUN,
   Q2_PENDING_FIRST_RUN,
@@ -1034,5 +1040,86 @@ export function registerPerceptionRoutes(app: Express) {
     }
   });
 
-  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals");
+  // -------------------------------------------------------------------------
+  // GET /api/perception/market-snapshot?campaignId=...&window=30
+  //
+  // Distribution Intelligence Layer (P-3 Enhancement). Deterministic market
+  // structure computed from competitor_post_classifications: per-dimension
+  // distributions, dominant patterns, emerging / declining patterns, and
+  // weekly adoption series. ZERO LLM calls; results cached 5 min in-process.
+  //
+  // window: 7 | 30 | 90 (days). Anything else falls back to 30.
+  //
+  // Customer-safe: no internal UUIDs, values humanized, market observations
+  // only — no strategic recommendations.
+  // -------------------------------------------------------------------------
+  app.get("/api/perception/market-snapshot", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { campaignId } = (req as any).campaignContext;
+      const windowDays = normalizeWindow(req.query.window);
+
+      const snap = await computeMarketDistributionSnapshot(campaignId, windowDays);
+
+      return res.json({
+        success: true,
+        state: snap.dataStatus === "insufficient" ? "building_baseline" : "ready",
+        windowDays: snap.windowDays,
+        generatedAt: snap.generatedAt,
+        totalPosts: snap.totalPosts,
+        totalCompetitors: snap.totalCompetitors,
+        dataStatus: snap.dataStatus,
+        insights: snap.insights.map((i) => ({
+          dimension: i.dimension,
+          dimensionLabel: i.dimensionLabel,
+          leader: i.leader ? humanizeSemanticValue(i.leader) : null,
+          leaderShare: i.leaderShare,
+          previousLeader: i.previousLeader ? humanizeSemanticValue(i.previousLeader) : null,
+          trend: i.trend,
+          trendLabel: translateDistributionTrend(i.trend),
+          trendDeltaPp: i.trendDeltaPp,
+          distribution: i.distribution.map((d) => ({
+            value: humanizeSemanticValue(d.value),
+            share: d.share,
+            count: d.count,
+          })),
+          sampleSize: i.sampleSize,
+          competitorCount: i.competitorCount,
+          confidence: i.confidence,
+          windowDays: i.windowDays,
+          evidence: i.evidence,
+        })),
+        emerging: snap.emerging.map((p) => ({
+          dimensionLabel: p.dimensionLabel,
+          value: humanizeSemanticValue(p.value),
+          currentShare: p.currentShare,
+          previousShare: p.previousShare,
+          deltaPp: p.deltaPp,
+          competitorCount: p.competitorCount,
+          evidence: p.evidence,
+        })),
+        declining: snap.declining.map((p) => ({
+          dimensionLabel: p.dimensionLabel,
+          value: humanizeSemanticValue(p.value),
+          currentShare: p.currentShare,
+          previousShare: p.previousShare,
+          deltaPp: p.deltaPp,
+          competitorCount: p.competitorCount,
+          evidence: p.evidence,
+        })),
+        adoption: snap.adoption.map((a) => ({
+          dimensionLabel: a.dimensionLabel,
+          value: humanizeSemanticValue(a.value),
+          direction: a.direction,
+          growthPp: a.growthPp,
+          accelerationPp: a.accelerationPp,
+          points: a.points.map((pt) => ({ bucketStart: pt.bucketStart, share: pt.share, posts: pt.posts })),
+        })),
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} market-snapshot failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "MARKET_SNAPSHOT_FAILED" });
+    }
+  });
+
+  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals, GET /api/perception/market-snapshot");
 }

@@ -56,6 +56,29 @@ export function translateSignalSeverity(severity: string | null | undefined): st
   }
 }
 
+// ── Semantic value humanizer ─────────────────────────────────────────────────
+// Formats classifier value codes for customer display. This is a pure
+// FORMATTING transform (BOLD_CLAIM → "Bold claim"), not copy synthesis —
+// the value itself is data observed from the market, so the allowlist rule
+// (which governs internal statuses) does not apply here.
+export function humanizeSemanticValue(value: string | null | undefined): string {
+  if (!value) return "";
+  const spaced = value.replace(/_/g, " ").trim().toLowerCase();
+  return spaced.length > 0 ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : "";
+}
+
+// ── Distribution trend labels ─────────────────────────────────────────────────
+export function translateDistributionTrend(trend: string | null | undefined): string {
+  switch (trend) {
+    case "rising":               return "Rising";
+    case "falling":              return "Falling";
+    case "stable":               return "Stable";
+    case "new_leader":           return "New leader";
+    case "insufficient_history": return "Building history";
+    default:                     return "Building history";
+  }
+}
+
 export interface WatchtowerLine {
   tone: WatchtowerTone;
   headline: string;        // short, < 60 chars

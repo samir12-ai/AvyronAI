@@ -155,6 +155,74 @@ export function useMarketSignals(campaignId: string | null | undefined, limit = 
   });
 }
 
+// ── Market snapshot (Distribution Intelligence Layer) ─────────────────────────
+export interface MarketDistributionEntry {
+  value: string;
+  share: number;
+  count: number;
+}
+
+export interface MarketInsight {
+  dimension: string;
+  dimensionLabel: string;
+  leader: string | null;
+  leaderShare: number;
+  previousLeader: string | null;
+  trend: "rising" | "falling" | "stable" | "new_leader" | "insufficient_history";
+  trendLabel: string;
+  trendDeltaPp: number;
+  distribution: MarketDistributionEntry[];
+  sampleSize: number;
+  competitorCount: number;
+  confidence: "high" | "medium" | "low";
+  windowDays: number;
+  evidence: string[];
+}
+
+export interface MarketPattern {
+  dimensionLabel: string;
+  value: string;
+  currentShare: number;
+  previousShare: number;
+  deltaPp: number;
+  competitorCount: number;
+  evidence: string[];
+}
+
+export interface MarketAdoptionSeries {
+  dimensionLabel: string;
+  value: string;
+  direction: "emerging" | "declining";
+  growthPp: number;
+  accelerationPp: number;
+  points: Array<{ bucketStart: string; share: number; posts: number }>;
+}
+
+export interface MarketSnapshotResponse {
+  success: true;
+  state: "ready" | "building_baseline";
+  windowDays: number;
+  generatedAt: string;
+  totalPosts: number;
+  totalCompetitors: number;
+  dataStatus: "ok" | "thin" | "insufficient";
+  insights: MarketInsight[];
+  emerging: MarketPattern[];
+  declining: MarketPattern[];
+  adoption: MarketAdoptionSeries[];
+}
+
+export function useMarketSnapshot(campaignId: string | null | undefined, windowDays: 7 | 30 | 90 = 30) {
+  const active = useIsAppActive();
+  return useQuery<MarketSnapshotResponse>({
+    queryKey: ["/api/perception/market-snapshot", campaignId, windowDays],
+    queryFn: () => fetchJson<MarketSnapshotResponse>(`/api/perception/market-snapshot?campaignId=${campaignId}&window=${windowDays}`),
+    enabled: !!campaignId,
+    staleTime: 5 * 60_000,
+    refetchInterval: active ? 5 * 60_000 : false,
+  });
+}
+
 export function useDnaEnrichment(campaignId: string | null | undefined) {
   const active = useIsAppActive();
   return useQuery<DnaEnrichmentPendingResponse>({
