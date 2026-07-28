@@ -1,0 +1,187 @@
+# P-6.7 Competitor Coverage Audit — Why Does Audience See Only One Competitor?
+
+The previous investigation concluded that:
+
+```
+competitorCount = 1
+```
+
+This limits confidence to approximately **0.3933**, preventing `root_causes` from ever being generated.
+
+However, the production campaign contains **10 configured competitors**.
+
+This creates a major contradiction.
+
+Do not implement fixes.
+
+Do not modify thresholds.
+
+Do not speculate.
+
+Determine why the pipeline believes there is only one competitor.
+
+Every conclusion must be supported by production data, code, execution traces, and database evidence.
+
+---
+
+# Mission
+
+Trace the lifecycle of all competitors from campaign configuration to the Audience Engine.
+
+Determine exactly where the other competitors disappear.
+
+---
+
+# Investigation
+
+## 1. Campaign Configuration
+
+For the investigated campaign:
+
+Return:
+
+* Total configured competitors
+* Competitor IDs
+* Competitor names
+* Status
+* Platform
+* Enabled/Disabled
+
+Confirm whether exactly 10 competitors exist.
+
+---
+
+## 2. Orchestrator Input
+
+Inspect the beginning of the V2 orchestrator.
+
+Determine:
+
+* How many competitors are loaded?
+* Which query loads them?
+* Which filters are applied?
+* Which competitors survive those filters?
+
+Show the exact competitor list entering the orchestrator.
+
+---
+
+## 3. Data Availability Audit
+
+For every competitor:
+
+Return:
+
+* Latest scrape
+* Latest classified post
+* Number of posts
+* Freshness
+* Eligibility
+* BLOCKED_BY_PLATFORM?
+* Missing snapshots?
+* Missing classifications?
+
+Explain why each competitor is either accepted or rejected.
+
+---
+
+## 4. Audience Engine Input
+
+Immediately before `computeCalibratedConfidence()` executes:
+
+Return:
+
+* competitorCount
+* List of competitors included
+* List of competitors excluded
+
+For every excluded competitor explain:
+
+* Which rule excluded it?
+* Which file made that decision?
+* Which condition failed?
+
+---
+
+## 5. competitorCount Audit
+
+Trace exactly where this value is computed.
+
+Show:
+
+```text
+Configured competitors
+
+↓
+
+Loaded competitors
+
+↓
+
+Eligible competitors
+
+↓
+
+Audience competitors
+
+↓
+
+competitorCount
+```
+
+Identify every transformation.
+
+---
+
+## 6. Filter Audit
+
+Audit every possible filter that can remove competitors.
+
+Examples:
+
+* Freshness
+* Active status
+* Missing posts
+* Classification completeness
+* Snapshot availability
+* Platform blocks
+* Time window
+* Confidence requirements
+* Any hidden eligibility rule
+
+Determine which filter removed each competitor.
+
+---
+
+## 7. Root Cause
+
+Answer one question only:
+
+**Why does `computeCalibratedConfidence()` receive `competitorCount = 1` when the campaign contains 10 configured competitors?**
+
+Support the answer using:
+
+* database evidence
+* production logs
+* code references
+* execution traces
+
+No assumptions.
+
+No hypotheses.
+
+Only evidence.
+
+---
+
+# Deliverables
+
+Return:
+
+1. Campaign competitor inventory.
+2. Competitors loaded by the orchestrator.
+3. Competitors rejected and why.
+4. Exact computation of `competitorCount`.
+5. Every filter applied.
+6. Earliest point where the 9 competitors disappear.
+7. Single evidence-backed root cause.
