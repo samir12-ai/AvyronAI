@@ -1,0 +1,162 @@
+# P-6.5 Forensic Investigation — Explain How Avyron Generated Plans If strategy_roots Never Existed
+
+The previous forensic report concluded:
+
+* `strategy_roots` has **0 rows globally**.
+* `buildStrategyRoot()` has never executed.
+* The complete SGL → Mechanism → Strategy Root pipeline has never completed.
+
+However, Avyron has successfully generated strategic plans, audience analyses, competitor analyses, positioning, recommendations, and other customer-facing outputs for months.
+
+These two facts appear contradictory.
+
+Do NOT provide hypotheses.
+
+Do NOT speculate.
+
+Prove the answer from the actual production code, execution history, logs, and database.
+
+---
+
+## Mission
+
+Explain exactly how Avyron has been producing customer strategic plans if `strategy_roots` has never been written.
+
+---
+
+## Investigation
+
+### 1. Trace Every Plan Ever Generated
+
+Inspect every historical strategic plan.
+
+For each plan determine:
+
+* Campaign
+* Creation date
+* Pipeline used
+* Orchestrator version
+* Engines executed
+* Final approval path
+
+---
+
+### 2. Execution Trace
+
+For one historical plan, reconstruct the complete execution chain.
+
+Example:
+
+```text
+Business Data
+
+↓
+
+Market Intelligence
+
+↓
+
+...
+
+↓
+
+Plan Approved
+```
+
+Show every engine actually executed.
+
+Show every engine skipped.
+
+Show exactly which outputs contributed to the final plan.
+
+---
+
+### 3. strategy_roots Dependency
+
+Determine precisely:
+
+Which customer-facing features actually require `strategy_roots`?
+
+Examples:
+
+* Audience Analysis
+* Positioning
+* Mechanism
+* Offer
+* Funnel
+* Persuasion
+* Final Plan
+* Reasoning Cards
+
+For each feature answer:
+
+Uses strategy_roots?
+
+YES / NO
+
+If NO,
+
+identify the real source of the data.
+
+---
+
+### 4. Legacy vs Current Pipeline
+
+Determine whether Avyron has:
+
+* one pipeline,
+
+or
+
+* multiple execution paths.
+
+If multiple exist:
+
+Explain:
+
+* which path produced previous customer plans,
+* which path depends on `strategy_roots`,
+* when each path is selected,
+* why.
+
+---
+
+### 5. Production Evidence
+
+Support every conclusion using:
+
+* production logs,
+* orchestrator history,
+* database records,
+* code references.
+
+Do not infer.
+
+---
+
+### 6. Final Explanation
+
+Answer one question only:
+
+**How has Avyron successfully generated strategic plans for months if the report concludes that `strategy_roots` has never been written?**
+
+Provide the exact production execution path.
+
+No assumptions.
+
+No theories.
+
+Only evidence-backed conclusions.
+
+---
+
+## Deliverables
+
+Return:
+
+1. Historical execution path.
+2. Current execution path.
+3. Differences between them.
+4. Exact role of `strategy_roots`.
+5. Whether the previous forensic conclusion was incomplete, misleading, or fully correct.
+6. Final evidence-backed explanation of the apparent contradiction.
