@@ -1,0 +1,160 @@
+# P-6.4 Forensic Investigation — Has Strategy Roots Ever Worked?
+
+Do NOT implement any fixes.
+
+Do NOT modify architecture.
+
+Do NOT change thresholds.
+
+This is a production forensic investigation only.
+
+---
+
+## Context
+
+The latest investigation concluded that **strategy_roots has zero rows for the MarketMindAI campaign** because the Mechanism Engine never reached COMPLETED.
+
+This raises a much bigger architectural question:
+
+**Has this pipeline ever successfully completed for any campaign in Avyron's history?**
+
+Before changing the Audience Engine, SGL, or Integrity, we must determine whether this is:
+
+* a campaign-specific issue,
+* or a pipeline that has never successfully executed.
+
+---
+
+## Mission
+
+Search the entire production database and the complete codebase.
+
+Determine whether **ANY campaign** has ever successfully produced a `strategy_roots` record.
+
+Do not limit the investigation to MarketMindAI.
+
+---
+
+## Investigation
+
+### 1. Global Database Audit
+
+Inspect the entire database.
+
+Report:
+
+* Total `strategy_roots` rows.
+* Campaign IDs.
+* Creation timestamps.
+* Latest updates.
+* Related strategic plans.
+
+If zero rows exist globally,
+
+state this explicitly.
+
+---
+
+### 2. Historical Execution
+
+Search all orchestration history.
+
+Determine whether the Mechanism Engine has ever reached:
+
+```text
+COMPLETED
+```
+
+for any campaign.
+
+Report:
+
+* campaign
+* execution
+* timestamp
+* reason
+
+---
+
+### 3. Pipeline Reachability
+
+Trace the only write path:
+
+```text
+Mechanism Engine
+
+↓
+
+COMPLETED
+
+↓
+
+buildStrategyRoot()
+
+↓
+
+strategy_roots
+```
+
+Determine whether this code path has ever executed in production.
+
+Support the answer with logs, execution history, and database evidence.
+
+---
+
+### 4. Feature History
+
+Determine:
+
+Was `strategy_roots` introduced after existing campaigns were created?
+
+Or has it existed since the beginning?
+
+Could historical campaigns have legitimately never populated it?
+
+---
+
+### 5. Root Cause
+
+If global rows = 0:
+
+Determine why.
+
+Possible causes include:
+
+* unreachable pipeline
+* impossible thresholds
+* integrity gating
+* SGL logic
+* implementation bug
+* another verified cause
+
+Do not speculate.
+
+Use production evidence only.
+
+---
+
+### 6. Final Verdict
+
+Choose exactly one:
+
+* The pipeline works; MarketMindAI is an isolated case.
+* The pipeline has never successfully produced strategy_roots.
+* The feature exists but has never been reachable.
+* Another evidence-backed conclusion.
+
+---
+
+## Deliverables
+
+Return:
+
+1. Global database statistics.
+2. Global strategy_roots history.
+3. Mechanism Engine execution history.
+4. Production evidence.
+5. Root cause.
+6. Whether the current architecture requires fixing, or whether only MarketMindAI requires attention.
+
+Do NOT propose solutions until you prove whether this feature has ever worked anywhere in Avyron.
