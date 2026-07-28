@@ -13,13 +13,10 @@
  *
  * Better to crash visibly at startup than to serve a half-broken app.
  *
- * Bright Data (2026-07 Unlocker rebuild) is deliberately NOT in REQUIRED:
- * scraping is designed to run SAFE-OFF (SCRAPING_UNCONFIGURED fail-fast)
- * when BRIGHT_DATA_API_KEY + BRIGHT_DATA_ZONE are absent. The contract is
- * all-or-nothing: setting exactly one of the pair IS boot-fatal (a
- * half-configured transport would look configured to operators while every
- * request fails), and a malformed BRIGHT_DATA_COUNTRY is boot-fatal
- * (geo-targeting must never silently no-op — B1/B2).
+ * Acquisition (P-6.12 Apify migration, 2026-07-28) is deliberately NOT in
+ * REQUIRED: scraping is designed to run SAFE-OFF (fail-fast with explicit
+ * unconfigured errors) when APIFY_API_KEY is absent. Bright Data was removed
+ * entirely — any BRIGHT_DATA_* vars still set are warned about and IGNORED.
  */
 
 /**
@@ -94,8 +91,15 @@ const RECOMMENDED: Array<{ key: string; description: string }> = [
  */
 const DEFAULT_ALLOWED_SUFFIXES = [".replit.app", ".replit.dev", ".replit.co"];
 
-/** Legacy proxy-tunnel vars superseded by the 2026-07 Unlocker API rebuild. */
+/**
+ * ALL Bright Data vars are legacy since P-6.12 (2026-07-28): the transport
+ * was removed from the codebase entirely — nothing reads these even when set.
+ */
 const LEGACY_BRIGHT_DATA_KEYS = [
+  "BRIGHT_DATA_API_KEY",
+  "BRIGHT_DATA_ZONE",
+  "BRIGHT_DATA_COUNTRY",
+  "BRIGHT_DATA_SERP_ZONE",
   "BRIGHT_DATA_PROXY_USERNAME",
   "BRIGHT_DATA_PROXY_PASSWORD",
   "BRIGHT_DATA_PROXY_HOST",
@@ -104,58 +108,36 @@ const LEGACY_BRIGHT_DATA_KEYS = [
 ];
 
 /**
- * 2026-07 Unlocker rebuild — Bright Data env contract.
+ * P-6.12 Apify migration — acquisition env contract.
  *
- *   both BRIGHT_DATA_API_KEY + BRIGHT_DATA_ZONE set  → configured (ok)
- *   both missing                                     → SAFE-OFF (warn only;
- *       every scrape fails fast as SCRAPING_UNCONFIGURED — never boot-fatal)
- *   exactly one set                                  → BOOT-FATAL (half-
- *       configured transport looks "configured" while every request fails)
- *   BRIGHT_DATA_COUNTRY set but not 2-letter ISO     → BOOT-FATAL (geo
- *       targeting must never silently no-op)
- *   any legacy BRIGHT_DATA_PROXY_* still set         → warn (ignored)
+ *   APIFY_API_KEY set      → acquisition configured (ok)
+ *   APIFY_API_KEY missing  → SAFE-OFF (warn only; every scrape fails fast
+ *       with an explicit unconfigured/degraded result — never boot-fatal,
+ *       and nothing fabricates data)
+ *   any BRIGHT_DATA_* set  → warn (IGNORED — the Bright Data transport was
+ *       deleted; no half-configured state can exist, so nothing here is
+ *       boot-fatal anymore)
+ *
+ * The function name is kept for call-site stability; it now validates the
+ * Apify contract and flags Bright Data leftovers.
  */
 export function validateBrightDataContract(env: NodeJS.ProcessEnv): { fatal: string[]; warns: string[] } {
   const fatal: string[] = [];
   const warns: string[] = [];
-  const apiKey = env.BRIGHT_DATA_API_KEY?.trim();
-  const zone = env.BRIGHT_DATA_ZONE?.trim();
-  const country = env.BRIGHT_DATA_COUNTRY?.trim();
 
-  if (apiKey && !zone) {
-    fatal.push(
-      "BRIGHT_DATA_ZONE — BRIGHT_DATA_API_KEY is set but BRIGHT_DATA_ZONE is missing. The pair is all-or-nothing: set both to enable scraping, or unset both to run scraping safe-off (SCRAPING_UNCONFIGURED).",
-    );
-  } else if (!apiKey && zone) {
-    fatal.push(
-      "BRIGHT_DATA_API_KEY — BRIGHT_DATA_ZONE is set but BRIGHT_DATA_API_KEY is missing. The pair is all-or-nothing: set both to enable scraping, or unset both to run scraping safe-off (SCRAPING_UNCONFIGURED).",
-    );
-  } else if (!apiKey && !zone) {
+  // P-6.12 — Apify is the live acquisition transport. Absent key = SAFE-OFF
+  // (fail-fast scrapes with explicit unconfigured errors), never boot-fatal.
+  const apifyKey = env.APIFY_API_KEY?.trim();
+  if (!apifyKey) {
     warns.push(
-      "BRIGHT_DATA_API_KEY / BRIGHT_DATA_ZONE — not set. Scraping is SAFE-OFF: every scrape request fails fast as SCRAPING_UNCONFIGURED until both are set (Bright Data Unlocker API).",
-    );
-  }
-
-  if (country && !/^[a-zA-Z]{2}$/.test(country)) {
-    fatal.push(
-      `BRIGHT_DATA_COUNTRY — "${country}" is not a 2-letter ISO-3166 code (e.g. "us", "ae"). Fix or unset it (optional; when unset the zone's server-side geo policy applies).`,
-    );
-  }
-
-  // Optional SERP API zone — restores Google review TEXTS (unavailable on the
-  // Unlocker zone). Shares BRIGHT_DATA_API_KEY. Never boot-fatal: unset → the
-  // reviews scraper stays truthfully degraded (GOOGLE_RAW_HTML_UNSUPPORTED).
-  const serpZone = env.BRIGHT_DATA_SERP_ZONE?.trim();
-  if (serpZone && !apiKey) {
-    warns.push(
-      "BRIGHT_DATA_SERP_ZONE — set, but BRIGHT_DATA_API_KEY is missing. The SERP zone shares the account Bearer key; without it, Google review-text scraping cannot run. Set BRIGHT_DATA_API_KEY.",
+      "APIFY_API_KEY — not set. Acquisition is SAFE-OFF: every scrape request fails fast with an explicit unconfigured/degraded result until it is set (Apify actor transport). Nothing fabricates data while it is absent.",
     );
   }
 
   const legacySet = LEGACY_BRIGHT_DATA_KEYS.filter((k) => env[k]?.trim());
   if (legacySet.length) {
     warns.push(
-      `${legacySet.join(", ")} — legacy Bright Data proxy-tunnel variable(s) are IGNORED since the 2026-07 Unlocker API rebuild. Remove them; the live contract is BRIGHT_DATA_API_KEY + BRIGHT_DATA_ZONE (+ optional BRIGHT_DATA_COUNTRY).`,
+      `${legacySet.join(", ")} — Bright Data variable(s) are IGNORED since the P-6.12 Apify migration (2026-07-28). The Bright Data transport was removed from the codebase; remove these vars. The live acquisition contract is APIFY_API_KEY.`,
     );
   }
 

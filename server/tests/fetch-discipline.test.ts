@@ -5,16 +5,13 @@ import {
   releaseStickySession,
   rotateSessionOnBlock,
   classifyBlock,
-  clearPool,
-  type StickySessionContext,
 } from "../competitive-intelligence/proxy-pool-manager";
 import { MAX_CONCURRENT_FETCH_JOBS_PER_ACCOUNT } from "../market-intelligence-v3/fetch-orchestrator";
 
-// 2026-07 Unlocker rebuild — sessions are LOGICAL bookkeeping only and exist
-// only when the scraping transport is configured. Fake credentials let the
-// sticky-session tests run hermetically; nothing here performs network I/O.
-process.env.BRIGHT_DATA_API_KEY = process.env.BRIGHT_DATA_API_KEY || "test-unlocker-key";
-process.env.BRIGHT_DATA_ZONE = process.env.BRIGHT_DATA_ZONE || "test_zone";
+// P-6.12 Apify migration — the proxy pool is a RETIRED shim. Sticky sessions
+// no longer exist (Apify actors manage their own proxies); the shim keeps the
+// call-site API but always returns null. No env fakes needed — nothing here
+// reads Bright Data credentials anymore.
 
 describe("Section 1: Proxy Rate Test — Token Bucket Rate Limiter", () => {
   beforeEach(() => {
@@ -123,46 +120,21 @@ describe("Section 2: Sequential Pipeline Test — Competitor Batching", () => {
   });
 });
 
-describe("Section 3: Session Stickiness Test — Sticky Proxy Sessions", () => {
-  beforeEach(() => {
-    clearPool("stickiness_test");
+describe("Section 3: P-6.12 — Sticky proxy sessions are RETIRED (Apify manages proxies)", () => {
+  it("acquireStickySession always returns null — no session state can exist", () => {
+    expect(acquireStickySession("stickiness_test", "camp1", "compHash1")).toBeNull();
+    // Repeat acquisition must not lazily create anything.
+    expect(acquireStickySession("stickiness_test", "camp1", "compHash1")).toBeNull();
   });
 
-  it("same proxy session used across entire pipeline for one competitor", () => {
-    const ctx1 = acquireStickySession("stickiness_test", "camp1", "compHash1");
-    expect(ctx1).not.toBeNull();
-
-    const ctx2 = acquireStickySession("stickiness_test", "camp1", "compHash1");
-    expect(ctx2).not.toBeNull();
-    expect(ctx2!.session.sessionId).toBe(ctx1!.session.sessionId);
-    expect(ctx2!.session.ipHash).toBe(ctx1!.session.ipHash);
-
-    releaseStickySession(ctx1!);
+  it("rotateSessionOnBlock never fabricates a session, regardless of block class", () => {
+    expect(rotateSessionOnBlock(null as any, "CHECKPOINT")).toBeNull();
+    expect(rotateSessionOnBlock(null as any, "PROXY_BLOCKED")).toBeNull();
+    expect(rotateSessionOnBlock(null as any, "RATE_LIMIT")).toBeNull();
   });
 
-  it("session does NOT rotate on non-block errors", () => {
-    const ctx = acquireStickySession("stickiness_test", "camp1", "compHash2");
-    expect(ctx).not.toBeNull();
-
-    const rotated = rotateSessionOnBlock(ctx!, "CHECKPOINT");
-    expect(rotated).toBeNull();
-
-    const rotated2 = rotateSessionOnBlock(ctx!, "OTHER");
-    expect(rotated2).toBeNull();
-
-    releaseStickySession(ctx!);
-  });
-
-  it("session rotates ONLY on PROXY_BLOCKED or RATE_LIMIT", () => {
-    const ctx = acquireStickySession("stickiness_test", "camp1", "compHash3");
-    expect(ctx).not.toBeNull();
-    const originalId = ctx!.session.sessionId;
-
-    const rotated = rotateSessionOnBlock(ctx!, "PROXY_BLOCKED");
-    expect(rotated).not.toBeNull();
-    expect(rotated!.session.sessionId).not.toBe(originalId);
-
-    releaseStickySession(rotated || ctx!);
+  it("releaseStickySession is a safe no-op (legacy call sites must not throw)", () => {
+    expect(() => releaseStickySession(null as any)).not.toThrow();
   });
 });
 
@@ -211,18 +183,25 @@ describe("Section 4: Block Recovery Test — Intelligent Backoff", () => {
 });
 
 describe("Section 5: Request Bundling — Single Request, Maximum Local Processing", () => {
-  it("scraper parses all fields from single response (no separate caption/engagement calls)", async () => {
+  it("scraper parses all fields from single actor response (no separate caption/engagement calls)", async () => {
+    // P-6.12: field mapping moved to instagram-apify-scraper — one actor run
+    // returns posts with all fields; no follow-up per-field requests exist.
     const source = await import("fs").then(fs =>
-      fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
+      fs.readFileSync("server/competitive-intelligence/instagram-apify-scraper.ts", "utf-8")
     );
-    const parseFn = source.includes("parsePostFromGraphQL") || source.includes("parsePostFromV1Feed");
-    expect(parseFn).toBe(true);
-
     expect(source).toContain("caption:");
     expect(source).toContain("likes:");
     expect(source).toContain("comments:");
     expect(source).toContain("views:");
     expect(source).toContain("mediaType:");
+
+    // The old multi-stage GraphQL/V1-feed parsers must stay deleted from
+    // profile-scraper (single-transport tripwire).
+    const profileSrc = await import("fs").then(fs =>
+      fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
+    );
+    expect(profileSrc).not.toContain("parsePostFromGraphQL");
+    expect(profileSrc).not.toContain("parsePostFromV1Feed");
   });
 
   it("data-acquisition detects CTAs locally without separate API calls", async () => {
@@ -289,10 +268,13 @@ describe("Section 7: Integration Invariants", () => {
     const orchTokenCount = (orchSource.match(/await acquireToken\(/g) || []).length;
     expect(orchTokenCount).toBeGreaterThanOrEqual(1);
 
+    // P-6.12: profile-scraper no longer makes per-stage Instagram HTTP calls
+    // (single Apify actor run instead), so the per-stage token ladder is gone.
+    // It must keep its own inter-request pacing + per-account batch cap.
     const scraperSource = fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8");
-    expect(scraperSource).toContain('import { acquireToken } from "./rate-limiter"');
-    const scraperTokenCount = (scraperSource.match(/await acquireToken\(/g) || []).length;
-    expect(scraperTokenCount).toBeGreaterThanOrEqual(5);
+    expect(scraperSource).not.toContain('import { acquireToken } from "./rate-limiter"');
+    expect(scraperSource).toContain("rateLimitMap");
+    expect(scraperSource).toContain("checkBatchLimit");
   });
 
   it("no direct fetch calls remain in fetch-orchestrator outside the limiter", async () => {
@@ -303,17 +285,19 @@ describe("Section 7: Integration Invariants", () => {
     expect(directFetchCalls.length).toBe(0);
   });
 
-  it("all scraper HTTP paths are rate-limited (WEB_API, HTML_PARSE, pagination)", async () => {
+  it("P-6.12: multi-stage scrape ladder is retired — single Apify actor transport", async () => {
+    // The WEB_API → V1_FEED → HTML_PARSE token ladder guarded direct
+    // Instagram HTTP calls. Those calls no longer exist; the only transport
+    // is the Apify actor (its own API is paced by rateLimitMap +
+    // checkBatchLimit + the actor platform itself).
     const source = await import("fs").then(fs =>
       fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
     );
-    expect(source).toContain("acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:www:");
-    expect(source).toContain("acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `WEB_API:i.ig:");
-    expect(source).toContain("acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `V1_FEED:page2:");
-    expect(source).toContain("acquireToken(proxyCtx.accountId, proxyCtx.campaignId, `HTML_PARSE:");
-    // HEADLESS_RENDER stage retired in the 2026-07 Unlocker rebuild — the
-    // Unlocker API renders server-side; the stage must stay retired loudly.
+    expect(source).not.toContain("`WEB_API:");
+    expect(source).not.toContain("`V1_FEED:");
+    expect(source).not.toContain("`HTML_PARSE:");
     expect(source).not.toContain("HEADLESS_RENDER:");
+    expect(source).toContain("scrapeInstagramViaApify");
   });
 
   it("rate bucket state is logged at job completion", async () => {

@@ -99,7 +99,7 @@ export function registerReviewsTiktokRoutes(app: Express) {
         timestamp: p.timestamp ? new Date(p.timestamp) : undefined,
       })).filter(p => p.caption.length > 0);
 
-      const { inserted } = await ingestTiktokPosts(competitorId, accountId, sanitized);
+      const { inserted } = await ingestTiktokPosts(competitorId, accountId, sanitized, "manual");
       res.json({ success: true, received: sanitized.length, inserted });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

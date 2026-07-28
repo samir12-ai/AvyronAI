@@ -97,11 +97,22 @@ export async function scrapeInstagramForCompetitor(
       failureClass: "NONE",
     };
   } catch (err: any) {
-    const message = typeof err?.message === "string" ? err.message : String(err);
-    // Classify: only unambiguous auth/403/challenge walls become GENUINE_BLOCK;
-    // everything else (timeout, breaker-open, network) is TRANSIENT.
-    const failureClass = classifyScrapeFailure(message);
-    console.error(`[InstagramProvider] Apify scrape failed for @${handle}: ${message} (class=${failureClass})`);
+    const rawMessage = typeof err?.message === "string" ? err.message : String(err);
+    // P-6.12 guard — Apify PROVIDER errors must never look like an Instagram
+    // platform block. scrapeInstagramViaApify throws "Apify API 403: ..." on a
+    // bad/expired token, "BREAKER_OPEN: ..." and "Apify run ... exceeded budget"
+    // on transport trouble; none of these say anything about the TARGET
+    // platform, so classifying their 401/403 tokens as GENUINE_BLOCK would
+    // stamp a false 24h BLOCKED_BY_PLATFORM cooldown and suppress healthy
+    // retries. Provider-origin errors are always TRANSIENT; only messages that
+    // are NOT provider-shaped go through classifyScrapeFailure. The message is
+    // also sanitized (403/429 → 4xx) so downstream substring block-detectors
+    // scanning warnings can't misread it either (same pattern as
+    // profile-scraper's APIFY_ACTOR catch).
+    const isProviderError = /^(Apify API |Apify run |BREAKER_OPEN|APIFY_API_KEY)/i.test(rawMessage);
+    const message = rawMessage.replace(/\b(403|429)\b/g, "4xx").replace(/rate.?limit(ed)?/gi, "throttled");
+    const failureClass = isProviderError ? "TRANSIENT" : classifyScrapeFailure(rawMessage);
+    console.error(`[InstagramProvider] Apify scrape failed for @${handle}: ${message} (class=${failureClass}${isProviderError ? ", provider-origin" : ""})`);
 
     return {
       success: false,

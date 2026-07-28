@@ -1,0 +1,864 @@
+# P-6.12 Multi-Platform Acquisition Migration — Replace Bright Data with Apify Across Avyron
+
+Previous production investigations established that Bright Data is no longer a reliable acquisition provider for Avyron.
+
+For Instagram specifically:
+
+* Bright Data has returned empty HTTP 200 responses with `client_10020`.
+* Instagram post acquisition already works through Apify.
+* The Apify Instagram Comment Scraper was live-tested successfully.
+* It returned authentic public comments with:
+
+  * Instagram-native comment IDs
+  * usernames
+  * text
+  * timestamps
+  * likes
+  * pagination
+* The new Apify actor produced significantly deeper comment coverage than the former Bright Data implementation.
+
+Bright Data must no longer remain as an active provider or fallback anywhere in Avyron’s acquisition architecture.
+
+This migration must not be limited to Instagram.
+
+The target architecture must support:
+
+* Instagram
+* TikTok
+* Google sources
+* Google Reviews
+* Google Maps / Business Profiles
+* Websites
+* Trustpilot
+* Any future acquisition platform
+
+Apify should become Avyron’s unified external acquisition provider wherever an appropriate verified actor is available.
+
+For Google and any other platform whose actors have not yet been configured, prepare the architecture and identify the required actors, but do not fabricate an integration or enable an unverified provider.
+
+---
+
+# Mission
+
+Migrate Avyron from a fragmented Bright Data acquisition architecture to a clean, provider-controlled Apify architecture across all supported platforms.
+
+After migration:
+
+```text
+Platform
+↓
+Platform-specific Apify actor
+↓
+Unified normalized acquisition model
+↓
+Filtering and validation
+↓
+Database
+↓
+Avyron intelligence engines
+```
+
+Bright Data must not remain:
+
+* as the primary provider
+* as a fallback
+* as a hidden retry
+* inside scheduled jobs
+* inside platform-specific helpers
+* inside legacy routes
+* inside onboarding
+* inside refresh jobs
+* inside dead but still callable code
+
+The most critical implementation area is comment and review filtering.
+
+Avyron must preserve meaningful audience language while removing actual noise and spam.
+
+---
+
+# Critical Rules
+
+Do not:
+
+* modify Audience Engine reasoning logic
+* change SGL thresholds
+* change the confidence model
+* fabricate missing data
+* generate synthetic comments or reviews
+* keep Bright Data as a fallback
+* silently switch to another unverified provider
+* activate Google actors that have not yet been configured
+* redesign unrelated intelligence engines
+* introduce duplicate platform implementations
+
+Reuse existing Apify infrastructure before creating anything new.
+
+---
+
+# Phase 1 — Complete Provider Audit
+
+Search the entire repository for every Bright Data dependency.
+
+Search by:
+
+* provider names
+* environment variables
+* base URLs
+* Unlocker references
+* proxy references
+* `poolFetch`
+* fallback chains
+* retry ladders
+* platform-specific scrapers
+* scheduler workers
+* orchestrator jobs
+* onboarding routes
+* manual refresh routes
+* historical refresh jobs
+* testing utilities
+* feature flags
+* documentation
+* comments describing Bright Data behavior
+
+For every occurrence return:
+
+| Location | Platform | Purpose | Active? | Replacement available? | Required action |
+| -------- | -------- | ------- | ------: | ---------------------: | --------------- |
+
+Classify each reference as:
+
+* active production path
+* fallback
+* unreachable legacy path
+* shared utility
+* configuration only
+* documentation only
+
+Do not remove a shared utility if it is still used by a non-acquisition feature unrelated to this migration.
+
+---
+
+# Phase 2 — Inventory Existing Apify Actors
+
+Inspect all Apify actors currently configured in the account and codebase.
+
+For every actor return:
+
+* actor name
+* actor ID
+* platform
+* intended responsibility
+* code path using it
+* authentication requirements
+* input schema
+* output schema
+* pagination behavior
+* pricing model
+* production verification status
+
+Expected categories include:
+
+## Instagram
+
+* Profile / post scraper
+* Comment scraper
+
+## TikTok
+
+* Profile scraper
+* Video/post scraper
+* Comment scraper, if configured
+
+## Google
+
+The user will add the Google actors later.
+
+For now:
+
+* identify the Google acquisition capabilities Avyron requires
+* identify all current Google/Bright Data paths
+* prepare the provider interfaces and configuration slots
+* list the exact actor responsibilities still missing
+
+Do not choose or activate Google actors without live verification.
+
+## Additional Platforms
+
+Audit:
+
+* Trustpilot
+* website scraping
+* Google Reviews
+* Google Maps
+* any other active source
+
+Determine which already has an Apify replacement and which still requires an actor.
+
+---
+
+# Phase 3 — Unified Provider Architecture
+
+Use or evolve the existing provider abstraction.
+
+Do not scatter direct actor calls throughout the repository.
+
+Create or complete a structure equivalent to:
+
+```text
+AcquisitionProvider
+├── InstagramProvider
+│   ├── scrapeProfiles()
+│   ├── scrapePosts()
+│   └── scrapeComments()
+├── TikTokProvider
+│   ├── scrapeProfiles()
+│   ├── scrapePosts()
+│   └── scrapeComments()
+├── GoogleProvider
+│   ├── scrapeBusinessProfile()
+│   ├── scrapeReviews()
+│   └── scrapeSearchResults()
+├── TrustpilotProvider
+│   └── scrapeReviews()
+└── WebsiteProvider
+    └── scrapePages()
+```
+
+Each platform may use different Apify actors, but downstream Avyron code must receive normalized internal records.
+
+Do not expose raw actor-specific schemas to Audience Engine, Market Intelligence, Watchtower, or other consumers.
+
+---
+
+# Phase 4 — Instagram Migration
+
+## Instagram Posts
+
+Confirm all Instagram profile and post acquisition paths use Apify.
+
+Audit:
+
+* onboarding scrape
+* competitor refresh
+* manual refresh
+* scheduled refresh
+* nightly scheduler
+* historical ingestion
+* retry jobs
+* Watchtower acquisition
+* Market Intelligence acquisition
+
+Remove all Bright Data Instagram post paths and fallbacks.
+
+## Instagram Comments
+
+Replace the complete Bright Data comment ladder:
+
+* GraphQL comment endpoint
+* V1 media endpoint
+* HTML preview-comments path
+* Unlocker transport
+* Bright Data-specific retries
+* empty-200 handling
+* Bright Data pools
+
+Use the verified actor:
+
+```text
+apify/instagram-comment-scraper
+Actor ID: SbK00X0JYCPblD2wp
+```
+
+Map its output into Avyron’s existing comment model.
+
+Preserve:
+
+* Instagram comment ID
+* post ID supplied by the caller
+* competitor ID
+* campaign/account ownership
+* username
+* text
+* comment timestamp
+* likes
+* replies count where available
+* scrape timestamp
+* actor/run metadata
+* source classification
+
+Deleted posts and actor error items must be handled per URL without failing an entire campaign refresh.
+
+---
+
+# Phase 5 — TikTok Migration
+
+Audit every TikTok acquisition path.
+
+Determine:
+
+* which actors are already configured
+* whether posts/videos are currently acquired through Apify
+* whether TikTok comments are acquired
+* whether any Bright Data path remains
+* whether comment text, username, ID, timestamp, and engagement fields are available
+
+For each verified TikTok actor:
+
+1. Run a live test.
+2. Inspect raw output.
+3. Normalize the data.
+4. Replace the matching Bright Data path.
+5. Remove Bright Data fallback logic.
+
+Do not claim TikTok migration is complete without a live actor run and persistence verification.
+
+If no TikTok comment actor is configured:
+
+* preserve the provider interface
+* report the missing actor
+* do not generate fake comment enrichment
+* do not mark the channel as fully migrated
+
+---
+
+# Phase 6 — Google Migration Preparation
+
+The user will add Google actors after this implementation phase.
+
+Do not prematurely implement an unverified Google scraper.
+
+For now:
+
+## Audit Existing Google Paths
+
+Find every acquisition path related to:
+
+* Google Reviews
+* Google Maps
+* Google Business Profiles
+* Google Search results
+* local business data
+* review text
+* review ratings
+* review timestamps
+* reviewer information
+
+Identify every Bright Data dependency.
+
+## Prepare Apify Integration Slots
+
+Prepare configuration and provider contracts for:
+
+```text
+GOOGLE_BUSINESS_ACTOR_ID
+GOOGLE_REVIEWS_ACTOR_ID
+GOOGLE_SEARCH_ACTOR_ID
+```
+
+Use the project’s existing environment-variable conventions.
+
+Do not require all three actors if one verified actor eventually covers multiple responsibilities.
+
+## Google Activation Gate
+
+Google migration may only be marked complete after:
+
+* the user adds the actors
+* each actor is live-tested
+* raw data is inspected
+* field mapping is verified
+* review filtering is validated
+* database persistence is confirmed
+
+Until then, report:
+
+```text
+GOOGLE APIFY MIGRATION PREPARED — ACTOR VERIFICATION PENDING
+```
+
+Do not fall back to Bright Data during this waiting state.
+
+The platform must surface a clear provider-unavailable or acquisition-pending state instead of silently using the dead provider.
+
+---
+
+# Phase 7 — Comment and Review Filtering
+
+This is the highest-priority quality requirement.
+
+Audit the filtering logic used for:
+
+* Instagram comments
+* TikTok comments
+* Google reviews
+* Trustpilot reviews
+* future audience text sources
+
+The filter must remove actual noise without deleting useful customer language.
+
+---
+
+## 7.1 Preserve Meaningful Short Comments
+
+Do not automatically discard a comment because it is short.
+
+Examples of strategically meaningful short comments:
+
+* “How much?”
+* “Where?”
+* “Need this”
+* “Too expensive”
+* “Is it halal?”
+* “Do you deliver?”
+* “Available in Dubai?”
+* “Size?”
+* “Sold out again?”
+* “Why so expensive?”
+
+These may represent:
+
+* purchase intent
+* pricing objections
+* distribution friction
+* product demand
+* availability issues
+* trust questions
+* buying-stage signals
+
+Length alone must not determine usefulness.
+
+---
+
+## 7.2 Preserve Emoji Signals Where Appropriate
+
+Do not discard all emoji-only comments automatically.
+
+Differentiate between:
+
+* generic low-information engagement:
+
+  * `🔥`
+  * `😍`
+  * `👏`
+* emotionally meaningful reactions:
+
+  * `🤢`
+  * `💸`
+  * `😡`
+  * `😭`
+  * `🤔`
+  * `👎`
+* repeated emoji patterns that may indicate audience sentiment
+
+Emoji-only comments may receive a lower analytical weight, but they should not all be deleted before sentiment and engagement analysis.
+
+---
+
+## 7.3 Owner and Brand Replies
+
+Identify comments made by:
+
+* the monitored competitor
+* the account owner
+* official brand accounts
+
+Do not treat owner replies as independent audience evidence.
+
+Preserve them because they may reveal:
+
+* objection handling
+* customer-service behavior
+* delivery policies
+* pricing answers
+* offer clarification
+* brand tone
+* repeated customer questions
+
+Store or classify:
+
+```text
+authorType = audience | owner | brand | unknown
+```
+
+Audience confidence calculations must distinguish owner replies from customer statements.
+
+---
+
+## 7.4 Spam and Bot Filtering
+
+Remove or reduce the weight of:
+
+* follow-for-follow messages
+* crypto promotions
+* unrelated sales pitches
+* repeated promotional templates
+* giveaway spam
+* mass-tagging with no meaningful text
+* suspicious duplicated comments
+* obvious automated engagement
+* link spam
+* irrelevant adult content
+* repeated generic bot phrases
+
+Filtering must be evidence-based.
+
+Do not classify legitimate repeated questions such as “How much?” as bot spam only because multiple users ask the same thing.
+
+Repeated audience questions may be strategically important.
+
+---
+
+## 7.5 Duplicate Handling
+
+Deduplicate by stable platform comment ID first.
+
+Do not deduplicate solely by text.
+
+The same text from different real users may represent meaningful frequency.
+
+Examples:
+
+```text
+“How much?”
+“How much?”
+“How much?”
+```
+
+Three distinct users asking the same question should count as three occurrences, not one duplicate.
+
+Only collapse records when they represent the same platform comment or confirmed ingestion duplication.
+
+---
+
+## 7.6 Language Handling
+
+Preserve multilingual comments.
+
+The target markets may contain:
+
+* Arabic
+* English
+* Turkish
+* Arabizi
+* mixed-language comments
+* transliterated brand/product names
+
+Do not discard comments because language detection is uncertain.
+
+Preserve the original text.
+
+Add detected-language metadata only as an enrichment field.
+
+Do not translate and overwrite the original comment.
+
+---
+
+## 7.7 Timestamp and Freshness
+
+Persist the platform-native timestamp whenever available.
+
+Maintain separately:
+
+* comment creation timestamp
+* scrape timestamp
+
+Do not replace the original comment timestamp with the acquisition time.
+
+The pipeline must support:
+
+* freshness analysis
+* change detection
+* trend windows
+* historical comparisons
+* emerging objections
+* recurring pains
+
+---
+
+## 7.8 Filtering Decision Trace
+
+Every removed or down-weighted comment/review must have a reason code.
+
+Example:
+
+```text
+ACCEPTED
+DUPLICATE_ID
+EMPTY_TEXT
+OWNER_REPLY
+GENERIC_EMOJI
+PROMOTIONAL_SPAM
+BOT_PATTERN
+UNRELATED_CONTENT
+UNSUPPORTED_LANGUAGE
+DELETED_CONTENT
+LOW_INFORMATION
+```
+
+Owner replies should normally be preserved with a separate author classification rather than deleted.
+
+Store sufficient filtering statistics per acquisition run:
+
+* raw records
+* accepted records
+* rejected records
+* down-weighted records
+* duplicates
+* owner replies
+* spam
+* empty records
+* error items
+
+---
+
+# Phase 8 — Normalized Data Contracts
+
+Define or reuse normalized models such as:
+
+```text
+NormalizedPost
+NormalizedComment
+NormalizedReview
+NormalizedProfile
+```
+
+A normalized comment/review should support:
+
+* platform
+* platform-native ID
+* parent post/place/business ID
+* competitor ID
+* account ID
+* campaign ID
+* author username/name
+* author type
+* original text
+* original language
+* timestamp
+* likes/helpful count
+* replies count
+* source actor
+* actor run ID
+* scrape timestamp
+* synthetic flag
+* filtering status
+* filtering reason
+* provenance
+
+````
+
+Do not force every platform to provide fields it does not expose.
+
+Use nullable optional fields where appropriate while preserving mandatory identity and text fields.
+
+---
+
+# Phase 9 — Scheduling and Runtime Budgets
+
+Apify actor runtimes can vary significantly.
+
+The verified Instagram Comment Scraper showed runtime variance from seconds to several minutes.
+
+Audit and update:
+
+- scheduled jobs
+- worker runtime budgets
+- watchdog timers
+- per-post limits
+- per-campaign limits
+- pagination limits
+- retry policy
+- concurrency
+- cost controls
+
+A slow actor run must not be mistaken for a failed actor run.
+
+Do not introduce unlimited waits.
+
+Use bounded platform-specific budgets.
+
+Deleted or unavailable individual URLs should not fail the entire campaign.
+
+---
+
+# Phase 10 — Cost Controls
+
+Implement transparent acquisition controls.
+
+Support limits such as:
+
+- maximum posts per competitor
+- maximum comments per post
+- maximum reviews per business
+- maximum total records per refresh
+- incremental scraping since last successful run
+- skipping already-persisted platform IDs
+
+Avoid paying repeatedly for comments or reviews already stored.
+
+Report:
+
+- records requested
+- records received
+- new records inserted
+- existing records skipped
+- estimated actor cost
+- actual actor cost when available
+
+Do not reduce evidence quality solely to minimize cost without documenting the trade-off.
+
+---
+
+# Phase 11 — Bright Data Removal
+
+After all currently verified Apify paths are integrated:
+
+Remove Instagram and verified TikTok Bright Data code completely.
+
+For Google and other channels awaiting actors:
+
+- remove Bright Data execution
+- retain a clear provider-pending state
+- do not silently fall back
+
+Remove or deprecate:
+
+- Bright Data Instagram/TikTok/Google acquisition helpers
+- Unlocker-specific code
+- platform fallback ladders
+- dead retry logic
+- Bright Data feature flags
+- unused acquisition environment variables
+- platform-specific Bright Data documentation
+
+Do not remove unrelated Bright Data use without proving that it is part of Avyron’s external data-acquisition system.
+
+The final audit must show zero callable Bright Data acquisition paths.
+
+---
+
+# Phase 12 — Production Validation
+
+## Instagram Validation
+
+Run a real refresh on MarketMind.
+
+Verify:
+
+- profiles acquired through Apify
+- posts acquired through Apify
+- comments acquired through the comment actor
+- timestamps persisted
+- comment IDs deduplicated
+- filtering statistics produced
+- meaningful short comments preserved
+- spam removed
+- owner replies classified
+- Audience Engine consumes the new comments
+- no Bright Data path executes
+
+## TikTok Validation
+
+Run every configured TikTok actor against a real monitored account.
+
+Verify:
+
+- actor success
+- post/video persistence
+- comment persistence if supported
+- filtering
+- no Bright Data path executes
+
+## Google Validation
+
+Do not run until actors are added.
+
+Return the exact configuration and live-test steps required after the user adds them.
+
+---
+
+# Regression Validation
+
+Confirm that the migration does not break:
+
+- competitor onboarding
+- manual refresh
+- scheduled refresh
+- Market Intelligence
+- Audience Engine
+- classification
+- Watchtower
+- Market Memory
+- SGL
+- Strategy Root generation
+- existing historical records
+- API response contracts
+- database migrations
+- account/campaign data isolation
+
+Historical Bright Data records must remain readable.
+
+Do not relabel old records as Apify records.
+
+---
+
+# Required Tests
+
+Add or update tests for:
+
+- Apify response mapping
+- deleted-post error items
+- pagination
+- duplicate platform IDs
+- same-text comments from different users
+- owner replies
+- emoji-only comments
+- multilingual comments
+- spam filtering
+- timestamp persistence
+- missing optional fields
+- actor timeout
+- partial campaign success
+- scheduled execution
+- provider-pending state
+- Google actor configuration without activation
+
+---
+
+# Final Deliverables
+
+Return:
+
+1. Complete Bright Data repository inventory.
+2. Existing Apify actor inventory.
+3. Platform-by-platform migration status.
+4. Instagram post migration results.
+5. Instagram comment migration results.
+6. TikTok migration results.
+7. Google migration preparation status.
+8. Exact Google actors/configuration still required.
+9. Comment and review filtering rules.
+10. Filtering before/after statistics.
+11. Normalized schema changes.
+12. Scheduling/runtime changes.
+13. Cost-control implementation.
+14. Exact files changed.
+15. Tests added and their results.
+16. Production refresh evidence.
+17. Proof that no callable Bright Data acquisition fallback remains.
+18. Remaining platforms awaiting verified Apify actors.
+19. Final verdict using one of:
+
+```text
+APIFY ACQUISITION MIGRATION COMPLETE — ACTIVE PLATFORMS VERIFIED
+````
+
+```text
+APIFY ACQUISITION MIGRATION PARTIAL — VERIFIED PLATFORMS MIGRATED, ACTORS PENDING
+```
+
+```text
+APIFY ACQUISITION MIGRATION BLOCKED — PRODUCTION ISSUE IDENTIFIED
+```
+
+Google must remain explicitly marked as pending until the user adds and verifies its actors.

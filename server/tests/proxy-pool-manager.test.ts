@@ -1,598 +1,195 @@
-import { describe, it, expect, beforeEach } from "vitest";
+/**
+ * P-6.12 Apify migration — proxy pool RETIREMENT contract.
+ *
+ * The Bright Data proxy pool (sticky sessions, LRU registries, target
+ * backoff, pool persistence) is DELETED. proxy-pool-manager.ts remains only
+ * as an inert shim so ~40 historical call sites keep compiling; every one of
+ * them null-guards the session and proceeds onto the Apify transport.
+ *
+ * This suite proves three things:
+ *  1. The shim is truly inert — no state, no sessions, no config, no BD env reads.
+ *  2. classifyBlock (the one REAL survivor, still used to classify Apify
+ *     errors) keeps its exact pre-migration behavior.
+ *  3. Zero-callable-Bright-Data tripwires: the deleted transport files stay
+ *     deleted and no production source can reach Bright Data.
+ */
+import { describe, it, expect } from "vitest";
+import { execSync } from "child_process";
+import { existsSync, readFileSync } from "fs";
 import {
   acquireStickySession,
-  releaseStickySession,
   rotateSessionOnBlock,
-  classifyBlock,
+  releaseStickySession,
   logProxyTelemetry,
+  classifyBlock,
+  getScrapingConfig,
+  getSerpConfig,
   getPoolDiagnostics,
-  getTelemetryForJob,
-  clearPool,
-  isSessionQuarantined,
-  getRetryDelay,
-  MAX_RETRIES_PER_STAGE,
-  SESSION_TTL_MS,
-  QUARANTINE_THRESHOLD,
+  getPoolStatusReport,
+  SCRAPE_PLATFORMS,
   type StickySessionContext,
-  type BlockClass,
 } from "../competitive-intelligence/proxy-pool-manager";
 
-const TEST_ACCOUNT_A = "test_account_a";
-const TEST_ACCOUNT_B = "test_account_b";
-const TEST_CAMPAIGN = "test_campaign_1";
-const TEST_COMP_HASH = "abc123def456";
+const REPO = "/home/runner/workspace";
+const SHIM_PATH = `${REPO}/server/competitive-intelligence/proxy-pool-manager.ts`;
 
-// 2026-07 Unlocker rebuild — sessions are LOGICAL bookkeeping only and exist
-// only when the scraping transport is configured. Fake credentials let the
-// pool tests run hermetically; nothing here performs network I/O.
-process.env.BRIGHT_DATA_API_KEY = process.env.BRIGHT_DATA_API_KEY || "test-unlocker-key";
-process.env.BRIGHT_DATA_ZONE = process.env.BRIGHT_DATA_ZONE || "test_zone";
+// ── Section A: inert session lifecycle ───────────────────────────────────────
 
-describe("Proxy Pool Manager — Torture Tests", () => {
-  beforeEach(() => {
-    clearPool(TEST_ACCOUNT_A);
-    clearPool(TEST_ACCOUNT_B);
+describe("A) Session lifecycle is inert — always null, never throws", () => {
+  it("acquireStickySession returns null for every historical call arity", () => {
+    // Call sites vary: (accountId), (accountId, campaignId, competitorHash),
+    // and autonomous-worker's single-arg form. The permissive rest signature
+    // must accept all of them and always return null.
+    expect(acquireStickySession("acct")).toBeNull();
+    expect(acquireStickySession("acct", "camp")).toBeNull();
+    expect(acquireStickySession("acct", "camp", "compHash")).toBeNull();
+    expect(acquireStickySession()).toBeNull();
   });
 
-  describe("A) Sticky Session Pagination Test", () => {
-    it("should maintain the same proxySessionId across all pages of pagination", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, TEST_COMP_HASH);
-      expect(ctx).not.toBeNull();
-      if (!ctx) return;
-
-      const sessionIdAtStart = ctx.session.sessionId;
-      const ipHashAtStart = ctx.session.ipHash;
-
-      for (let page = 1; page <= 5; page++) {
-        expect(ctx.session.sessionId).toBe(sessionIdAtStart);
-        expect(ctx.session.ipHash).toBe(ipHashAtStart);
-
-        logProxyTelemetry(ctx, `PAGINATION_PAGE_${page}`, 200, null, 100, true);
-      }
-
-      const telemetry = getTelemetryForJob(TEST_ACCOUNT_A, TEST_COMP_HASH);
-      const sessionIds = new Set(telemetry.map(e => e.proxySessionId));
-      expect(sessionIds.size).toBe(1);
-      expect(sessionIds.has(sessionIdAtStart)).toBe(true);
-
-      const ipHashes = new Set(telemetry.map(e => e.ipHash));
-      expect(ipHashes.size).toBe(1);
-      expect(ipHashes.has(ipHashAtStart)).toBe(true);
-
-      releaseStickySession(ctx);
-    });
-
-    it("should return the same session for repeated acquire calls with the same binding key", () => {
-      const ctx1 = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, TEST_COMP_HASH);
-      const ctx2 = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, TEST_COMP_HASH);
-      expect(ctx1).not.toBeNull();
-      expect(ctx2).not.toBeNull();
-      if (!ctx1 || !ctx2) return;
-      expect(ctx1.session.sessionId).toBe(ctx2.session.sessionId);
-      releaseStickySession(ctx1);
-    });
+  it("repeated acquisition creates NO lazy state (diagnostics stay zero)", () => {
+    for (let i = 0; i < 25; i++) {
+      expect(acquireStickySession(`acct-${i}`, "camp", `comp-${i}`)).toBeNull();
+    }
+    const diag = getPoolDiagnostics("acct-0");
+    expect(diag.totalSessions).toBe(0);
+    expect(diag.activeSessions).toBe(0);
+    expect(diag.stickyBindings).toBe(0);
+    expect(getPoolStatusReport().activeAccountPools).toBe(0);
   });
 
-  describe("B) Proxy Block Storm Test", () => {
-    it("should rotate sessions on block and complete within bounded retries", () => {
-      let ctx: StickySessionContext | null = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, TEST_COMP_HASH);
-      expect(ctx).not.toBeNull();
-      if (!ctx) return;
-
-      const initialSession = ctx.session.sessionId;
-
-      const rotated1 = rotateSessionOnBlock(ctx, "PROXY_BLOCKED");
-      expect(rotated1).not.toBeNull();
-      if (!rotated1) return;
-      expect(rotated1.session.sessionId).not.toBe(initialSession);
-      expect(rotated1.attemptNumber).toBe(2);
-
-      const rotated2 = rotateSessionOnBlock(rotated1, "RATE_LIMIT");
-      expect(rotated2).not.toBeNull();
-      if (!rotated2) return;
-      expect(rotated2.session.sessionId).not.toBe(rotated1.session.sessionId);
-      expect(rotated2.attemptNumber).toBe(3);
-
-      const rotated3 = rotateSessionOnBlock(rotated2, "PROXY_BLOCKED");
-      expect(rotated3).toBeNull();
-
-      releaseStickySession(rotated2);
-    });
-
-    it("should not rotate on non-block errors (AUTH_REQUIRED, CHECKPOINT)", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, TEST_COMP_HASH);
-      expect(ctx).not.toBeNull();
-      if (!ctx) return;
-
-      const rotated = rotateSessionOnBlock(ctx, "AUTH_REQUIRED");
-      expect(rotated).toBeNull();
-
-      const rotated2 = rotateSessionOnBlock(ctx, "CHECKPOINT");
-      expect(rotated2).toBeNull();
-
-      releaseStickySession(ctx);
-    });
-
-    it("should have a bounded maximum of 3 attempts", () => {
-      expect(MAX_RETRIES_PER_STAGE).toBe(3);
-    });
+  it("rotateSessionOnBlock always reports rotation exhausted (null)", () => {
+    const fake = null as unknown as StickySessionContext;
+    expect(rotateSessionOnBlock(fake, "PROXY_BLOCKED")).toBeNull();
+    expect(rotateSessionOnBlock(fake, "RATE_LIMIT")).toBeNull();
+    expect(rotateSessionOnBlock(fake, "CHECKPOINT")).toBeNull();
+    expect(rotateSessionOnBlock(fake, "OTHER")).toBeNull();
   });
 
-  describe("C) Quarantine Test", () => {
-    it("should quarantine a session after 2 blocks within 10 minutes", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "quarantine_direct");
-      expect(ctx).not.toBeNull();
-      if (!ctx) return;
+  it("releaseStickySession and logProxyTelemetry are safe no-ops", () => {
+    const fake = null as unknown as StickySessionContext;
+    expect(() => releaseStickySession(fake)).not.toThrow();
+    expect(() => logProxyTelemetry(fake, "STAGE", 200, null, 12, true)).not.toThrow();
+    expect(() => logProxyTelemetry(fake, "STAGE", 403, "PROXY_BLOCKED", 12, false)).not.toThrow();
+  });
+});
 
-      const sessionId = ctx.session.sessionId;
+// ── Section B: retired configuration surface ────────────────────────────────
 
-      rotateSessionOnBlock(ctx, "PROXY_BLOCKED");
-
-      const quarantinedAfter1 = isSessionQuarantined(TEST_ACCOUNT_A, sessionId);
-      expect(quarantinedAfter1).toBe(false);
-
-      const ctx2 = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "quarantine_direct_2");
-      if (ctx2) {
-        const sid = ctx2.session.sessionId;
-        rotateSessionOnBlock(ctx2, "PROXY_BLOCKED");
-        rotateSessionOnBlock(ctx2, "PROXY_BLOCKED");
-        const quarantinedAfter2 = isSessionQuarantined(TEST_ACCOUNT_A, sid);
-        expect(quarantinedAfter2).toBe(true);
-
-        const diag = getPoolDiagnostics(TEST_ACCOUNT_A);
-        expect(diag.quarantinedSessions).toBeGreaterThanOrEqual(1);
-
-        releaseStickySession(ctx2);
-      }
-
-      releaseStickySession(ctx);
-    });
-
-    it("should not select quarantined sessions for new requests", () => {
-      const ctx1 = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "quarantine_test");
-      if (!ctx1) return;
-
-      rotateSessionOnBlock(ctx1, "PROXY_BLOCKED");
-      rotateSessionOnBlock(ctx1, "PROXY_BLOCKED");
-
-      const quarantinedId = ctx1.session.sessionId;
-
-      const ctx2 = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "new_comp_after_quarantine");
-      if (ctx2) {
-        expect(ctx2.session.sessionId).not.toBe(quarantinedId);
-        releaseStickySession(ctx2);
-      }
-
-      releaseStickySession(ctx1);
-    });
-
-    it("quarantine threshold is exactly 2", () => {
-      expect(QUARANTINE_THRESHOLD).toBe(2);
-    });
+describe("B) Configuration surface is retired — BD env can NEVER re-arm it", () => {
+  it("getScrapingConfig returns null even with a fully-set BD environment", () => {
+    const prev = {
+      key: process.env.BRIGHT_DATA_API_KEY,
+      zone: process.env.BRIGHT_DATA_ZONE,
+      country: process.env.BRIGHT_DATA_COUNTRY,
+    };
+    try {
+      process.env.BRIGHT_DATA_API_KEY = "bd-key-test";
+      process.env.BRIGHT_DATA_ZONE = "test_zone";
+      process.env.BRIGHT_DATA_COUNTRY = "ae";
+      expect(getScrapingConfig()).toBeNull();
+      expect(getSerpConfig()).toBeNull();
+    } finally {
+      if (prev.key === undefined) delete process.env.BRIGHT_DATA_API_KEY;
+      else process.env.BRIGHT_DATA_API_KEY = prev.key;
+      if (prev.zone === undefined) delete process.env.BRIGHT_DATA_ZONE;
+      else process.env.BRIGHT_DATA_ZONE = prev.zone;
+      if (prev.country === undefined) delete process.env.BRIGHT_DATA_COUNTRY;
+      else process.env.BRIGHT_DATA_COUNTRY = prev.country;
+    }
   });
 
-  describe("D) Cross-Account Isolation Test", () => {
-    it("account A blocks should not affect account B", () => {
-      const ctxA = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, TEST_COMP_HASH);
-      const ctxB = acquireStickySession(TEST_ACCOUNT_B, TEST_CAMPAIGN, TEST_COMP_HASH);
+  it("shim source never reads BRIGHT_DATA_* env vars", () => {
+    const src = readFileSync(SHIM_PATH, "utf-8");
+    expect(src).not.toMatch(/process\.env\.BRIGHT_DATA/);
+  });
+});
 
-      expect(ctxA).not.toBeNull();
-      expect(ctxB).not.toBeNull();
-      if (!ctxA || !ctxB) return;
+// ── Section C: status report keeps its operator-facing shape ────────────────
 
-      expect(ctxA.session.sessionId).not.toBe(ctxB.session.sessionId);
-
-      rotateSessionOnBlock(ctxA, "PROXY_BLOCKED");
-      rotateSessionOnBlock(ctxA, "PROXY_BLOCKED");
-
-      const diagA = getPoolDiagnostics(TEST_ACCOUNT_A);
-      const diagB = getPoolDiagnostics(TEST_ACCOUNT_B);
-
-      expect(diagA.quarantinedSessions).toBeGreaterThanOrEqual(1);
-      expect(diagB.quarantinedSessions).toBe(0);
-
-      const ctxBNew = acquireStickySession(TEST_ACCOUNT_B, TEST_CAMPAIGN, "fresh_comp");
-      expect(ctxBNew).not.toBeNull();
-      if (ctxBNew) {
-        expect(ctxBNew.session.sessionId).not.toBe(ctxA.session.sessionId);
-        releaseStickySession(ctxBNew);
-      }
-
-      releaseStickySession(ctxA);
-      releaseStickySession(ctxB);
-    });
-
-    it("pool state is completely isolated per account", () => {
-      const ctxA = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "iso_test");
-      const ctxB = acquireStickySession(TEST_ACCOUNT_B, TEST_CAMPAIGN, "iso_test");
-
-      if (ctxA) logProxyTelemetry(ctxA, "TEST", 200, null, 50, true);
-      if (ctxA) logProxyTelemetry(ctxA, "TEST", 200, null, 50, true);
-      if (ctxB) logProxyTelemetry(ctxB, "TEST", 200, null, 50, true);
-
-      const telA = getTelemetryForJob(TEST_ACCOUNT_A);
-      const telB = getTelemetryForJob(TEST_ACCOUNT_B);
-
-      expect(telA.length).toBe(2);
-      expect(telB.length).toBe(1);
-
-      expect(telA.every(e => e.accountId === TEST_ACCOUNT_A)).toBe(true);
-      expect(telB.every(e => e.accountId === TEST_ACCOUNT_B)).toBe(true);
-
-      clearPool(TEST_ACCOUNT_A);
-      const diagA = getPoolDiagnostics(TEST_ACCOUNT_A);
-      const diagB = getPoolDiagnostics(TEST_ACCOUNT_B);
-
-      expect(diagA.totalSessions).toBe(0);
-      expect(diagB.totalSessions).toBeGreaterThanOrEqual(1);
-
-      if (ctxA) releaseStickySession(ctxA);
-      if (ctxB) releaseStickySession(ctxB);
-    });
+describe("C) getPoolStatusReport — truthful retired report, stable shape", () => {
+  it("reports retired:true with transport apify", () => {
+    const report = getPoolStatusReport();
+    expect(report.retired).toBe(true);
+    expect(report.transport).toBe("apify");
+    expect(typeof report.generatedAt).toBe("string");
+    expect(Number.isNaN(Date.parse(report.generatedAt))).toBe(false);
   });
 
-  describe("E) No-Hang Test", () => {
-    it("should reach terminal state even under continuous blocks", () => {
-      let ctx: StickySessionContext | null = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "hang_test");
-      expect(ctx).not.toBeNull();
-      if (!ctx) return;
+  it("keeps per-platform counters (zeroed) for all four platforms — admin endpoint shape", () => {
+    const report = getPoolStatusReport();
+    expect(SCRAPE_PLATFORMS).toEqual(["instagram", "tiktok", "reviews", "website"]);
+    for (const platform of SCRAPE_PLATFORMS) {
+      expect(report.platforms[platform]).toEqual({ inflight: 0, coolingTargets: 0, trackedTargets: 0 });
+    }
+    expect(report.backoffEntries).toEqual([]);
+    expect(report.persistence).toEqual({ persistFailures: 0, hydrateFailures: 0, hydratedScopes: 0 });
+  });
+});
 
-      let terminated = false;
-      let attempts = 0;
+// ── Section D: classifyBlock — the REAL survivor keeps exact behavior ───────
 
-      while (attempts < 10) {
-        attempts++;
-        const rotated = rotateSessionOnBlock(ctx, "PROXY_BLOCKED");
-        if (!rotated) {
-          terminated = true;
-          break;
-        }
-        ctx = rotated;
-      }
-
-      expect(terminated).toBe(true);
-      expect(attempts).toBeLessThanOrEqual(MAX_RETRIES_PER_STAGE);
-
-      releaseStickySession(ctx);
-    });
-
-    it("should never have unbounded retry loops", () => {
-      const source = require("fs").readFileSync(
-        "server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8"
-      );
-      expect(source).not.toContain("while (true)");
-      expect(source).not.toContain("while(true)");
-
-      expect(source).toContain("MAX_RETRIES");
-      expect(source).toContain("attempt <= MAX_RETRIES");
-    });
+describe("D) classifyBlock — unchanged classification (now applied to Apify errors)", () => {
+  it("classifies 429 / rate-limit text as RATE_LIMIT", () => {
+    expect(classifyBlock(429, "")).toBe("RATE_LIMIT");
+    expect(classifyBlock(null, "rate limit exceeded")).toBe("RATE_LIMIT");
+    expect(classifyBlock(null, "wait a few minutes")).toBe("RATE_LIMIT");
   });
 
-  describe("F) Rotation Rules Enforcement", () => {
-    it("rotation ONLY allowed on PROXY_BLOCKED and RATE_LIMIT", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "rotation_rules");
-      if (!ctx) return;
-
-      const allowedBlocks: BlockClass[] = ["PROXY_BLOCKED", "RATE_LIMIT"];
-      const deniedBlocks: BlockClass[] = ["AUTH_REQUIRED", "CHECKPOINT", "OTHER"];
-
-      for (const block of allowedBlocks) {
-        const fresh = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, `allowed_${block}`);
-        if (fresh) {
-          const rotated = rotateSessionOnBlock(fresh, block);
-          expect(rotated).not.toBeNull();
-          if (rotated) releaseStickySession(rotated);
-        }
-      }
-
-      for (const block of deniedBlocks) {
-        const fresh = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, `denied_${block}`);
-        if (fresh) {
-          const rotated = rotateSessionOnBlock(fresh, block);
-          expect(rotated).toBeNull();
-          releaseStickySession(fresh);
-        }
-      }
-
-      releaseStickySession(ctx);
-    });
+  it("classifies 403 / blocked text as PROXY_BLOCKED", () => {
+    expect(classifyBlock(403, "")).toBe("PROXY_BLOCKED");
+    expect(classifyBlock(null, "forbidden")).toBe("PROXY_BLOCKED");
+    expect(classifyBlock(null, "blocked")).toBe("PROXY_BLOCKED");
   });
 
-  describe("G) Telemetry Completeness", () => {
-    it("every telemetry entry has all required fields", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "telemetry_test");
-      if (!ctx) return;
-
-      logProxyTelemetry(ctx, "WEB_API", 200, null, 150, true);
-      logProxyTelemetry(ctx, "PAGINATION_PAGE_1", 403, "PROXY_BLOCKED", 250, false);
-
-      const entries = getTelemetryForJob(TEST_ACCOUNT_A, "telemetry_test");
-      expect(entries.length).toBe(2);
-
-      for (const entry of entries) {
-        expect(entry.accountId).toBe(TEST_ACCOUNT_A);
-        expect(entry.campaignId).toBe(TEST_CAMPAIGN);
-        expect(entry.competitorHash).toBe("telemetry_test");
-        expect(entry.proxySessionId).toBeTruthy();
-        expect(entry.ipHash).toBeTruthy();
-        expect(entry.stageName).toBeTruthy();
-        expect(typeof entry.attemptNumber).toBe("number");
-        expect(typeof entry.durationMs).toBe("number");
-        expect(typeof entry.success).toBe("boolean");
-        expect(typeof entry.timestamp).toBe("number");
-      }
-
-      const successEntry = entries.find(e => e.success);
-      expect(successEntry?.httpStatus).toBe(200);
-      expect(successEntry?.blockClass).toBeNull();
-
-      const blockEntry = entries.find(e => !e.success);
-      expect(blockEntry?.httpStatus).toBe(403);
-      expect(blockEntry?.blockClass).toBe("PROXY_BLOCKED");
-
-      releaseStickySession(ctx);
-    });
-
-    it("classifyBlock correctly identifies block types", () => {
-      expect(classifyBlock(403, "blocked")).toBe("PROXY_BLOCKED");
-      expect(classifyBlock(429, "")).toBe("RATE_LIMIT");
-      expect(classifyBlock(null, "rate limit")).toBe("RATE_LIMIT");
-      expect(classifyBlock(401, "")).toBe("AUTH_REQUIRED");
-      expect(classifyBlock(null, "require_login")).toBe("AUTH_REQUIRED");
-      expect(classifyBlock(null, "checkpoint")).toBe("CHECKPOINT");
-      expect(classifyBlock(null, "proxy connection failed")).toBe("PROXY_BLOCKED");
-      expect(classifyBlock(200, "timeout")).toBe("OTHER");
-    });
+  it("classifies 401 / login walls as AUTH_REQUIRED", () => {
+    expect(classifyBlock(401, "")).toBe("AUTH_REQUIRED");
+    expect(classifyBlock(null, "require_login")).toBe("AUTH_REQUIRED");
+    expect(classifyBlock(null, "authentication failed")).toBe("AUTH_REQUIRED");
   });
 
-  describe("H) Concurrency Guards", () => {
-    it("concurrency constants are properly set", () => {
-      const source = require("fs").readFileSync(
-        "server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8"
-      );
-      expect(source).toContain("MAX_CONCURRENT_COMPETITORS_PER_JOB = 1");
-      expect(source).toContain("CONCURRENCY_FEATURE_FLAG = false");
-    });
-
-    it("competitors run sequentially (for loop, not Promise.all)", () => {
-      const source = require("fs").readFileSync(
-        "server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8"
-      );
-      expect(source).toContain("for (const comp of competitors)");
-      const promiseAllCompetitors = source.match(/Promise\.all\(.*competitors.*map/s);
-      expect(promiseAllCompetitors).toBeNull();
-    });
+  it("classifies challenge/checkpoint walls as CHECKPOINT", () => {
+    expect(classifyBlock(null, "checkpoint_required")).toBe("CHECKPOINT");
+    expect(classifyBlock(null, "challenge_required")).toBe("CHECKPOINT");
   });
 
-  describe("I) Session TTL", () => {
-    it("session TTL is between 10-15 minutes", () => {
-      expect(SESSION_TTL_MS).toBeGreaterThanOrEqual(10 * 60 * 1000);
-      expect(SESSION_TTL_MS).toBeLessThanOrEqual(15 * 60 * 1000);
-    });
+  it("everything else is OTHER (5xx, empty, unknown text)", () => {
+    expect(classifyBlock(500, "")).toBe("OTHER");
+    expect(classifyBlock(null, "")).toBe("OTHER");
+    expect(classifyBlock(null, "socket hang up")).toBe("OTHER");
+  });
+});
+
+// ── Section E: zero-callable-Bright-Data tripwires ──────────────────────────
+
+describe("E) Zero-callable-BD tripwires — the transport stays deleted", () => {
+  it("deleted transport files do not exist", () => {
+    expect(existsSync(`${REPO}/server/competitive-intelligence/brightdata-client.ts`)).toBe(false);
+    expect(existsSync(`${REPO}/server/competitive-intelligence/pool-config.ts`)).toBe(false);
+    expect(existsSync(`${REPO}/server/competitive-intelligence/pool-persistence.ts`)).toBe(false);
+    expect(existsSync(`${REPO}/server/competitive-intelligence/target-backoff.ts`)).toBe(false);
   });
 
-  describe("J) INVARIANT 1 — Sticky Session Integrity Across All Fallback Paths", () => {
-    it("WEB_API, HTML_PARSE, PAGINATION_PAGE_2 must share identical proxySessionId and ipHash", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "invariant_1_comp");
-      expect(ctx).not.toBeNull();
-      if (!ctx) return;
-
-      const sessionId = ctx.session.sessionId;
-      const ipHash = ctx.session.ipHash;
-
-      logProxyTelemetry(ctx, "WEB_API", 200, null, 100, true);
-      logProxyTelemetry(ctx, "HTML_PARSE", 200, null, 80, true);
-      logProxyTelemetry(ctx, "PAGINATION_PAGE_2", 200, null, 120, true);
-
-      const telemetry = getTelemetryForJob(TEST_ACCOUNT_A, "invariant_1_comp");
-      expect(telemetry.length).toBe(3);
-
-      for (const entry of telemetry) {
-        expect(entry.proxySessionId).toBe(sessionId);
-        expect(entry.ipHash).toBe(ipHash);
-        expect(entry.accountId).toBe(TEST_ACCOUNT_A);
-        expect(entry.campaignId).toBe(TEST_CAMPAIGN);
-        expect(entry.competitorHash).toBe("invariant_1_comp");
-      }
-
-      const stages = telemetry.map(e => e.stageName);
-      expect(stages).toContain("WEB_API");
-      expect(stages).toContain("HTML_PARSE");
-      expect(stages).toContain("PAGINATION_PAGE_2");
-
-      releaseStickySession(ctx);
-    });
-
-    it("scrapeInstagramProfile threads the same proxyCtx to all fallback paths", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
-      );
-      expect(source).toContain("attemptWebProfileApi(handle, proxyCtx, maxPosts, bareTarget)");
-      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget)");
-
-      expect(source).not.toContain("getProxyDispatcher()");
-      expect(source).not.toContain("getSessionDispatcher()");
-    });
+  it("no production source imports the deleted modules", () => {
+    // Doc comments may mention the retired module names; IMPORTS may not.
+    const out = execSync(
+      `grep -rln 'from ["'"'"'][^"'"'"']*\\(brightdata-client\\|pool-config\\|pool-persistence\\|target-backoff\\)\\|require([^)]*\\(brightdata-client\\|pool-config\\|pool-persistence\\|target-backoff\\)' ${REPO}/server ${REPO}/shared --include='*.ts' | grep -v '/tests/' || true`,
+      { encoding: "utf-8" },
+    ).trim();
+    expect(out).toBe("");
   });
 
-  describe("J2) INVARIANT 2 — Unlocker transport (2026-07 rebuild: no per-session proxy identity)", () => {
-    it("profile-scraper routes every HTTP request through transportFetch → poolFetch", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
-      );
-      expect(source).toContain("function transportFetch");
-      // T006 — bare path threads an explicit backoff target into poolFetch.
-      expect(source).toContain("proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url, bareTarget ? { target: bareTarget } : undefined)");
-      // Headless rendering is retired — the Unlocker has no browser transport.
-      expect(source).not.toContain("async function attemptHeadlessRender");
-      expect(source).not.toContain("sessionUsername");
-      expect(source).not.toContain("session.dispatcher");
-    });
-
-    it("ProxySession is a logical session — no proxy identity fields attached", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "logical_session");
-      expect(ctx).not.toBeNull();
-      if (!ctx) return;
-
-      expect(ctx.session.sessionId).toBeDefined();
-      expect(ctx.session.ipHash).toBeDefined();
-      expect((ctx.session as any).sessionUsername).toBeUndefined();
-      expect((ctx.session as any).sessionPassword).toBeUndefined();
-      expect((ctx.session as any).proxyHost).toBeUndefined();
-      expect((ctx.session as any).dispatcher).toBeUndefined();
-      expect(typeof ctx.poolFetch).toBe("function");
-
-      releaseStickySession(ctx);
-    });
+  it("no production source calls the Bright Data API surface (poolFetch/unlockerRequest)", () => {
+    const out = execSync(
+      `grep -rln 'unlockerRequest\\|api\\.brightdata\\.com\\|brd\\.superproxy' ${REPO}/server ${REPO}/shared --include='*.ts' | grep -v '/tests/' || true`,
+      { encoding: "utf-8" },
+    ).trim();
+    expect(out).toBe("");
   });
 
-  describe("J3) INVARIANT 3 — Pagination Session Stability", () => {
-    it("all pagination pages share the same proxy session (no mid-stream rotation)", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "pagination_stability");
-      expect(ctx).not.toBeNull();
-      if (!ctx) return;
-
-      const sessionId = ctx.session.sessionId;
-      const ipHash = ctx.session.ipHash;
-
-      logProxyTelemetry(ctx, "WEB_API", 200, null, 100, true);
-      logProxyTelemetry(ctx, "PAGINATION_PAGE_2", 200, null, 100, true);
-      logProxyTelemetry(ctx, "PAGINATION_PAGE_3", 200, null, 100, true);
-      logProxyTelemetry(ctx, "PAGINATION_PAGE_4", 200, null, 100, true);
-
-      const telemetry = getTelemetryForJob(TEST_ACCOUNT_A, "pagination_stability");
-      expect(telemetry.length).toBe(4);
-
-      for (const entry of telemetry) {
-        expect(entry.proxySessionId).toBe(sessionId);
-        expect(entry.ipHash).toBe(ipHash);
-      }
-
-      releaseStickySession(ctx);
-    });
-
-    it("pagination goes through transportFetch against i.instagram.com, no mid-page session creation", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
-      );
-      const paginationBlock = source.split("paginationAttempted = true")[1]?.split("if (paginationSuccess)")[0] || "";
-      expect(paginationBlock.length).toBeGreaterThan(100);
-      expect(paginationBlock).toContain("transportFetch(feedUrl, proxyCtx, bareTarget)");
-      expect(paginationBlock).toContain("i.instagram.com/api/v1/feed/user/");
-      expect(paginationBlock).toContain("transportFetch(nextFeedUrl, proxyCtx, bareTarget)");
-      expect(paginationBlock).not.toContain("www.instagram.com/api/v1/feed");
-      expect(paginationBlock).not.toContain("getSessionDispatcher");
-      expect(paginationBlock).not.toContain("getProxyDispatcher");
-      expect(paginationBlock).not.toContain("acquireStickySession");
-    });
-
-    it("rotation only allowed on PROXY_BLOCKED or RATE_LIMIT (never between pages)", () => {
-      const ctx = acquireStickySession(TEST_ACCOUNT_A, TEST_CAMPAIGN, "no_rotation_test");
-      if (!ctx) return;
-
-      expect(rotateSessionOnBlock(ctx, "AUTH_REQUIRED")).toBeNull();
-      expect(rotateSessionOnBlock(ctx, "CHECKPOINT")).toBeNull();
-      expect(rotateSessionOnBlock(ctx, "OTHER")).toBeNull();
-
-      const rotated = rotateSessionOnBlock(ctx, "PROXY_BLOCKED");
-      expect(rotated).not.toBeNull();
-
-      releaseStickySession(rotated || ctx);
-    });
-  });
-
-  describe("K) Telemetry Coverage — All Request Paths", () => {
-    it("profile-scraper instruments telemetry for all stages", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
-      );
-      expect(source).toContain('logProxyTelemetry(proxyCtx, "WEB_API"');
-      expect(source).toContain('logProxyTelemetry(proxyCtx, "PAGINATION_PAGE_2"');
-      expect(source).toContain('logProxyTelemetry(proxyCtx, `PAGINATION_PAGE_${paginationPages}`');
-      expect(source).toContain('logProxyTelemetry(proxyCtx, "HTML_PARSE"');
-    });
-
-    it("fetch orchestrator instruments telemetry for POSTS_FETCH", () => {
-      const source = require("fs").readFileSync(
-        "server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8"
-      );
-      expect(source).toContain('logProxyTelemetry(proxyCtx, "POSTS_FETCH"');
-    });
-  });
-
-  describe("L) Orchestrator Integration", () => {
-    it("fetch orchestrator imports and uses proxy pool manager", () => {
-      const source = require("fs").readFileSync(
-        "server/market-intelligence-v3/fetch-orchestrator.ts", "utf-8"
-      );
-      expect(source).toContain("acquireStickySession");
-      expect(source).toContain("releaseStickySession");
-      expect(source).toContain("rotateSessionOnBlock");
-      expect(source).toContain("logProxyTelemetry");
-      expect(source).toContain("getPoolDiagnostics");
-    });
-
-    it("data-acquisition passes proxyCtx through to scraper", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/data-acquisition.ts", "utf-8"
-      );
-      expect(source).toContain("proxyCtx");
-      expect(source).toContain("scrapeInstagramProfile(competitor.profileLink, proxyCtx");
-    });
-
-    it("fetchAllCompetitors acquires pool sessions per competitor", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/data-acquisition.ts", "utf-8"
-      );
-      expect(source).toContain("acquireStickySession(accountId, campaignId, competitorHash)");
-      expect(source).toContain("releaseStickySession(proxyCtx)");
-      expect(source).toContain("proxyCtx ?? undefined");
-    });
-
-    it("fetchAllCompetitors in data-acquisition acquires pool sessions and passes proxyCtx to fetchCompetitorData", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/data-acquisition.ts", "utf-8"
-      );
-      expect(source).toContain("acquireStickySession(accountId, campaignId");
-      expect(source).toContain("releaseStickySession(proxyCtx)");
-      expect(source).toContain("fetchCompetitorData(");
-      expect(source).toContain("proxyCtx ?? undefined");
-    });
-
-    it("synthetic comment generator has minimum 10 per post", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/data-acquisition.ts", "utf-8"
-      );
-      expect(source).toContain("MIN_SYNTHETIC_COMMENTS_PER_POST = 10");
-      expect(source).toContain("MIN_SYNTHETIC_COMMENTS_PER_POST");
-    });
-
-    it("profile-scraper uses pool-managed Unlocker transport exclusively (old proxy system deleted)", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
-      );
-      expect(source).toContain("proxyCtx?.session.sessionId");
-      expect(source).not.toContain("session.dispatcher");
-      expect(source).not.toContain("function getProxyDispatcher");
-      expect(source).not.toContain("function getSessionDispatcher");
-      expect(source).not.toContain("function getProxyConfig");
-      expect(source).toContain("import { logProxyTelemetry, classifyBlock, rotateSessionOnBlock, getRetryDelay, getScrapingConfig, poolFetch }");
-    });
-
-    it("attemptHtmlPageParse accepts proxyCtx parameter", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
-      );
-      expect(source).toContain("attemptHtmlPageParse(profileUrl, handle, proxyCtx, bareTarget)");
-      expect(source).toMatch(/attemptHtmlPageParse\(.*proxyCtx\?: StickySessionContext/);
-    });
-
-    it("headless rendering is retired loudly, not silently (2026-07 Unlocker rebuild)", () => {
-      const source = require("fs").readFileSync(
-        "server/competitive-intelligence/profile-scraper.ts", "utf-8"
-      );
-      expect(source).not.toContain("async function attemptHeadlessRender");
-      expect(source).toContain("HEADLESS_RENDER_SKIPPED");
-    });
+  it("shim itself performs no network I/O except the dynamic Apify probe import", () => {
+    const src = readFileSync(SHIM_PATH, "utf-8");
+    expect(src).toContain("RETIRED SHIM");
+    expect(src).not.toMatch(/\bawait fetch\s*\(/);
+    expect(src).toContain('import("../acquisition/apify-client")');
   });
 });

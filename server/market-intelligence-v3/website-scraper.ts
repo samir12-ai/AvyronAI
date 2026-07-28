@@ -1,68 +1,29 @@
-import { resolveScrapingCountry, poolFetch, TargetBackoffActiveError, type PoolFetchTarget } from "../competitive-intelligence/proxy-pool-manager";
-import { resolveSafeUrl, isBreakerOpen, recordBreakerSuccess, recordBreakerFailure } from "../competitive-intelligence/scrape-safety";
+/**
+ * Website/blog acquisition — PROVIDER_PENDING (P-6.12, 2026-07-28).
+ *
+ * HISTORY: this module used to fetch competitor/user websites through the
+ * Bright Data Unlocker (poolFetch, breaker-gated, host-keyed backoff).
+ * P-6.12 retired Bright Data entirely; no Apify actor has been selected and
+ * live-verified for generic website fetch yet, so this surface fails fast
+ * with a machine-readable PROVIDER_PENDING extraction result (see
+ * server/acquisition/pending-providers, env slot WEBSITE_SCRAPER_ACTOR_ID).
+ * Truthful degradation: extractionStatus="FAILED" with an explicit error —
+ * downstream MI treats it exactly like an unreachable site, and NOTHING
+ * fabricates page content.
+ *
+ * Preserved for the future actor integration:
+ *  - Seal #5 / F7.2 — the SSRF gate (scrape-safety.resolveSafeUrl) still runs
+ *    before anything else, so internal/unsafe URLs are refused even while the
+ *    provider is pending (and stay refused when a transport returns).
+ *  - The full pure-HTML extraction pipeline (extractPageFromHtml + helpers):
+ *    an actor that returns page HTML plugs in directly.
+ */
+import { resolveSafeUrl } from "../competitive-intelligence/scrape-safety";
+import { getWebsiteProviderStatus } from "../acquisition/pending-providers";
 import type { WebsiteExtraction, BlogExtraction } from "./source-types";
 
-// 2026-07 Unlocker rebuild: transport goes through the pool manager's
-// poolFetch (Bright Data Unlocker REST API). The Unlocker performs anti-bot
-// solving server-side, so the per-request wall clock is wider than the old
-// 15s bare-proxy budget. There is NO direct-fetch fallback — unconfigured
-// scraping fails fast as SCRAPING_UNCONFIGURED (thrown by poolFetch).
-const SCRAPE_TIMEOUT_MS = 60000;
-const MAX_PAGES_PER_SITE = 6;
 const MAX_TEXT_PREVIEW = 3000;
 const STALE_THRESHOLD_DAYS = 7;
-
-// Seal #5 / F7.2 — SSRF defense stays in scrape-safety.resolveSafeUrl(). The
-// resolver does DNS lookup, checks the resolved IP against RFC1918, link-local,
-// loopback, IPv6 fc00::/7 + fe80::/10 + ::, decimal/hex IPv4 literals and
-// 0.0.0.0/8. The old pinnedLookup direct-fetch path is gone — every request
-// now leaves via the Unlocker API (Bright Data connects to the target on our
-// behalf), but we still refuse to hand internal/unsafe URLs to the Unlocker.
-
-interface FetchOptions {
-  url: string;
-  timeoutMs?: number;
-  /** T006 — adaptive per-target backoff identity (host-keyed for websites). */
-  target?: PoolFetchTarget;
-}
-
-/** T006 — targetKey for website backoff is the URL host (stable per site). */
-function websiteTargetKey(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-async function fetchViaUnlocker(opts: FetchOptions): Promise<{ html: string; status: number; ok: boolean }> {
-  const timeout = opts.timeoutMs || SCRAPE_TIMEOUT_MS;
-  // Breaker keying: BRIGHT_DATA_COUNTRY is optional in the Unlocker contract —
-  // key the breaker on "any" when unset (zone decides geo server-side).
-  const country = resolveScrapingCountry() ?? "any";
-
-  // Seal #5 / F6.12 — breaker gate before any outbound attempt.
-  const cb = isBreakerOpen("website", country);
-  if (cb.open) {
-    throw new Error(`BREAKER_OPEN: website:${country} (${cb.reason})`);
-  }
-  // F7.2 — SSRF gate before any I/O (throws on internal/unsafe targets).
-  await resolveSafeUrl(opts.url);
-
-  try {
-    const res = await poolFetch(opts.url, { timeoutMs: timeout, target: opts.target });
-    const html = await res.text();
-    // F6.12 — record breaker state on outcome (5xx = upstream failure, 4xx = our request).
-    if (res.status >= 500) recordBreakerFailure("website", country);
-    else recordBreakerSuccess("website", country);
-    return { html, status: res.status, ok: res.ok };
-  } catch (err) {
-    // T006 — a backoff-gated request never left the process; it is not a
-    // breaker-relevant upstream failure.
-    if (!(err instanceof TargetBackoffActiveError)) recordBreakerFailure("website", country);
-    throw err;
-  }
-}
 
 function extractTextContent(html: string): string {
   let text = html
@@ -259,151 +220,11 @@ function detectPageType(url: string, html: string): WebsiteExtraction["pageType"
   return "homepage";
 }
 
-function discoverSubPages(baseUrl: string, html: string): string[] {
-  const linkRegex = /href="([^"]*?)"/gi;
-  const base = new URL(baseUrl);
-  const targetPaths = [/\/pric/i, /\/feature/i, /\/service/i, /\/about/i, /\/solution/i];
-  const discovered: string[] = [];
-  let match;
-
-  while ((match = linkRegex.exec(html)) !== null && discovered.length < MAX_PAGES_PER_SITE) {
-    try {
-      const href = match[1];
-      if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) continue;
-
-      let fullUrl: string;
-      if (href.startsWith("http")) {
-        const parsed = new URL(href);
-        if (parsed.hostname !== base.hostname) continue;
-        fullUrl = href;
-      } else if (href.startsWith("/")) {
-        const resolved = new URL(href, base.origin);
-        if (resolved.hostname !== base.hostname) continue;
-        fullUrl = resolved.toString();
-      } else {
-        continue;
-      }
-
-      for (const pattern of targetPaths) {
-        if (pattern.test(fullUrl) && !discovered.includes(fullUrl)) {
-          discovered.push(fullUrl);
-          break;
-        }
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return discovered.slice(0, MAX_PAGES_PER_SITE - 1);
-}
-
-export async function scrapeWebsite(
-  competitorId: string,
-  competitorName: string,
-  websiteUrl: string,
-  accountId?: string,
-): Promise<WebsiteExtraction[]> {
-  const results: WebsiteExtraction[] = [];
-  const now = new Date().toISOString();
-
-  let normalizedUrl = websiteUrl.trim();
-  if (!normalizedUrl.startsWith("http")) {
-    normalizedUrl = `https://${normalizedUrl}`;
-  }
-
-  // T006 — adaptive backoff identity (host-keyed). Absent accountId → no
-  // backoff tracking (legacy callers keep exact pre-T006 behavior).
-  const target: PoolFetchTarget | undefined = accountId
-    ? { accountId, platform: "website", targetKey: websiteTargetKey(normalizedUrl) }
-    : undefined;
-  // F7.2 — SSRF check now lives inside fetchViaUnlocker() via resolveSafeUrl().
-  // The async resolver throws before any I/O if the URL is unsafe.
-
-  console.log(`[WebScraper] Starting structured extraction for ${competitorName}: ${normalizedUrl}`);
-
-  try {
-    const homeResult = await fetchViaUnlocker({ url: normalizedUrl, target });
-    if (!homeResult.ok) {
-      const isBlocked = homeResult.status === 403 || homeResult.status === 451;
-      const statusLabel = isBlocked ? "ACCESS_BLOCKED" : "FAILED";
-      console.log(`[WebScraper] Homepage fetch failed: HTTP ${homeResult.status} (${statusLabel})`);
-      return [{
-        competitorId,
-        competitorName,
-        sourceUrl: normalizedUrl,
-        pageType: "homepage",
-        headlines: [],
-        subheadlines: [],
-        ctaLabels: [],
-        offerPhrases: [],
-        pricingAnchors: [],
-        proofBlocks: [],
-        testimonialBlocks: [],
-        guarantees: [],
-        featureList: [],
-        navigationLinks: [],
-        topicTitles: [],
-        contentHeadings: [],
-        rawTextPreview: "",
-        extractionStatus: statusLabel,
-        extractionError: `HTTP ${homeResult.status}${isBlocked ? " — site blocks automated access" : ""}`,
-        scrapedAt: now,
-      }];
-    }
-
-    const homeExtraction = extractPage(competitorId, competitorName, normalizedUrl, homeResult.html, now);
-    results.push(homeExtraction);
-
-    const subPages = discoverSubPages(normalizedUrl, homeResult.html);
-    console.log(`[WebScraper] Discovered ${subPages.length} sub-pages for ${competitorName}`);
-
-    for (const pageUrl of subPages) {
-      try {
-        await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-        const pageResult = await fetchViaUnlocker({ url: pageUrl, target });
-        if (pageResult.ok) {
-          results.push(extractPage(competitorId, competitorName, pageUrl, pageResult.html, now));
-        }
-      } catch (err: any) {
-        // F-S2 (scraping audit 2026-05): upgraded from console.log to
-        // console.warn so operators grepping WARN|ERROR see sub-page
-        // failures at the same severity as the outer "critical failure"
-        // path. No behavioral change — log severity only.
-        console.warn(`[WebScraper] SUB_PAGE_FETCH_FAILED url=${pageUrl} err=${err?.message ?? String(err)}`);
-      }
-    }
-
-    console.log(`[WebScraper] Extracted ${results.length} pages for ${competitorName}`);
-    return results;
-  } catch (err: any) {
-    console.log(`[WebScraper] Critical failure for ${competitorName}: ${err.message}`);
-    return [{
-      competitorId,
-      competitorName,
-      sourceUrl: normalizedUrl,
-      pageType: "homepage",
-      headlines: [],
-      subheadlines: [],
-      ctaLabels: [],
-      offerPhrases: [],
-      pricingAnchors: [],
-      proofBlocks: [],
-      testimonialBlocks: [],
-      guarantees: [],
-      featureList: [],
-      navigationLinks: [],
-      topicTitles: [],
-      contentHeadings: [],
-      rawTextPreview: "",
-      extractionStatus: "FAILED",
-      extractionError: err.message,
-      scrapedAt: now,
-    }];
-  }
-}
-
-function extractPage(
+/**
+ * Pure HTML → structured extraction. This is the piece a future website
+ * actor plugs into: fetch HTML however the actor does, then call this.
+ */
+export function extractPageFromHtml(
   competitorId: string,
   competitorName: string,
   url: string,
@@ -435,6 +256,79 @@ function extractPage(
   };
 }
 
+function providerPendingError(): string {
+  const provider = getWebsiteProviderStatus();
+  return `PROVIDER_PENDING: website acquisition has no active provider (${provider.envSlot}${provider.actorId ? `=${provider.actorId} — not yet implemented/verified` : " not set"}). ${provider.detail}`;
+}
+
+export async function scrapeWebsite(
+  competitorId: string,
+  competitorName: string,
+  websiteUrl: string,
+  accountId?: string,
+): Promise<WebsiteExtraction[]> {
+  const now = new Date().toISOString();
+
+  let normalizedUrl = websiteUrl.trim();
+  if (!normalizedUrl.startsWith("http")) {
+    normalizedUrl = `https://${normalizedUrl}`;
+  }
+
+  // F7.2 — SSRF gate stays live while the provider is pending: unsafe/internal
+  // URLs are refused with their own error class, not a PROVIDER_PENDING one.
+  try {
+    await resolveSafeUrl(normalizedUrl);
+  } catch (err: any) {
+    return [{
+      competitorId,
+      competitorName,
+      sourceUrl: normalizedUrl,
+      pageType: "homepage",
+      headlines: [],
+      subheadlines: [],
+      ctaLabels: [],
+      offerPhrases: [],
+      pricingAnchors: [],
+      proofBlocks: [],
+      testimonialBlocks: [],
+      guarantees: [],
+      featureList: [],
+      navigationLinks: [],
+      topicTitles: [],
+      contentHeadings: [],
+      rawTextPreview: "",
+      extractionStatus: "FAILED",
+      extractionError: err?.message ?? String(err),
+      scrapedAt: now,
+    }];
+  }
+
+  const error = providerPendingError();
+  console.warn(`[WebScraper] ${error} (url=${normalizedUrl}, competitor=${competitorName})`);
+  return [{
+    competitorId,
+    competitorName,
+    sourceUrl: normalizedUrl,
+    pageType: "homepage",
+    headlines: [],
+    subheadlines: [],
+    ctaLabels: [],
+    offerPhrases: [],
+    pricingAnchors: [],
+    proofBlocks: [],
+    testimonialBlocks: [],
+    guarantees: [],
+    featureList: [],
+    navigationLinks: [],
+    topicTitles: [],
+    contentHeadings: [],
+    rawTextPreview: "",
+    extractionStatus: "FAILED",
+    extractionError: error,
+    scrapedAt: now,
+  }];
+}
+
 export async function scrapeBlog(
   competitorId: string,
   competitorName: string,
@@ -447,74 +341,30 @@ export async function scrapeBlog(
     normalizedUrl = `https://${normalizedUrl}`;
   }
 
-  // T006 — see scrapeWebsite: host-keyed backoff identity, optional.
-  const target: PoolFetchTarget | undefined = accountId
-    ? { accountId, platform: "website", targetKey: websiteTargetKey(normalizedUrl) }
-    : undefined;
-  // F7.2 — SSRF check now lives inside fetchViaUnlocker() via resolveSafeUrl().
+  const emptyResult = (extractionError: string): BlogExtraction => ({
+    competitorId,
+    competitorName,
+    sourceUrl: normalizedUrl,
+    topicTitles: [],
+    contentHeadings: [],
+    categories: [],
+    educationalThemes: [],
+    rawTextPreview: "",
+    extractionStatus: "FAILED",
+    extractionError,
+    scrapedAt: now,
+  });
 
-  console.log(`[WebScraper] Blog extraction for ${competitorName}: ${normalizedUrl}`);
-
+  // F7.2 — SSRF gate stays live while the provider is pending.
   try {
-    const result = await fetchViaUnlocker({ url: normalizedUrl, target });
-    if (!result.ok) {
-      return {
-        competitorId,
-        competitorName,
-        sourceUrl: normalizedUrl,
-        topicTitles: [],
-        contentHeadings: [],
-        categories: [],
-        educationalThemes: [],
-        rawTextPreview: "",
-        extractionStatus: "FAILED",
-        extractionError: `HTTP ${result.status}`,
-        scrapedAt: now,
-      };
-    }
-
-    const h2s = extractByTag(result.html, "h2", 20);
-    const h3s = extractByTag(result.html, "h3", 20);
-
-    const categoryRegex = /<a[^>]*class="[^"]*(?:category|tag|topic)[^"]*"[^>]*>([^<]+)<\/a>/gi;
-    const categories: string[] = [];
-    let m;
-    while ((m = categoryRegex.exec(result.html)) !== null && categories.length < 15) {
-      categories.push(m[1].trim());
-    }
-
-    const educationalThemes = h2s
-      .filter(h => /how|why|what|guide|tips|step|learn|understand|mistake|avoid/i.test(h))
-      .slice(0, 15);
-
-    return {
-      competitorId,
-      competitorName,
-      sourceUrl: normalizedUrl,
-      topicTitles: h2s,
-      contentHeadings: h3s,
-      categories: [...new Set(categories)],
-      educationalThemes,
-      rawTextPreview: extractTextContent(result.html),
-      extractionStatus: "COMPLETE",
-      scrapedAt: now,
-    };
+    await resolveSafeUrl(normalizedUrl);
   } catch (err: any) {
-    console.log(`[WebScraper] Blog extraction failed for ${competitorName}: ${err.message}`);
-    return {
-      competitorId,
-      competitorName,
-      sourceUrl: normalizedUrl,
-      topicTitles: [],
-      contentHeadings: [],
-      categories: [],
-      educationalThemes: [],
-      rawTextPreview: "",
-      extractionStatus: "FAILED",
-      extractionError: err.message,
-      scrapedAt: now,
-    };
+    return emptyResult(err?.message ?? String(err));
   }
+
+  const error = providerPendingError();
+  console.warn(`[WebScraper] ${error} (blogUrl=${normalizedUrl}, competitor=${competitorName})`);
+  return emptyResult(error);
 }
 
 export function isWebDataStale(scrapedAt: Date | string | null): boolean {

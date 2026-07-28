@@ -1,16 +1,29 @@
+/**
+ * Google reviews acquisition — PROVIDER_PENDING (P-6.12, 2026-07-28).
+ *
+ * HISTORY: this module used to fetch Google Maps/SERP pages through the
+ * Bright Data Unlocker (poolFetch). That transport is fully retired:
+ *  - Raw Google Maps HTML was permanently refused by the provider
+ *    (GOOGLE_RAW_HTML_UNSUPPORTED, verified live 2026-07-09).
+ *  - The SERP-zone two-step flow (search → knowledge.fid → /reviews?fid=)
+ *    required a separate SERP API product that was never provisioned.
+ *
+ * P-6.12 removed Bright Data entirely. No Apify actor has been selected and
+ * live-verified for Google review TEXTS yet, so this surface is in an
+ * explicit PROVIDER_PENDING state (see server/acquisition/pending-providers):
+ * calls fail fast with a machine-readable error and NOTHING fabricates data.
+ *
+ * Preserved for the future actor integration:
+ *  - persistExtractedReviews() — the full persistence layer with the
+ *    Seal #5 / F7.6 (reviewIdHash) and F7.7 (authorHash, no plaintext names)
+ *    guarantees intact.
+ *  - The SERP JSON parsers + URL builders behind _reviewsSerpTestHooks, so
+ *    the live-verification harness keeps exercising the real parser.
+ */
 import { db } from "../db";
 import { ciCompetitorReviews, ciCompetitors } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { getScrapingConfig, getSerpConfig, poolFetch, TargetBackoffActiveError, type PoolFetchTarget } from "./proxy-pool-manager";
-
-// 2026-07 Unlocker rebuild: transport goes through the pool manager's
-// poolFetch (Bright Data Unlocker REST API). The Unlocker performs its own
-// anti-bot solving server-side, which can legitimately take longer than a
-// bare proxied fetch — 60s wall-clock ceiling (BRIGHT_DATA_TIMEOUT_MS
-// default) is enforced inside the client. Google Maps pages are heavy, so
-// keep a slightly tighter per-request budget here.
-const SCRAPE_TIMEOUT_MS = 60000;
-const MAX_RETRIES = 2;
+import { getGoogleReviewsProviderStatus } from "../acquisition/pending-providers";
 
 export interface ReviewScrapedResult {
   competitorId: string;
@@ -20,95 +33,22 @@ export interface ReviewScrapedResult {
   error?: string;
 }
 
-async function fetchViaUnlocker(url: string, target: PoolFetchTarget): Promise<{ html: string; status: number; brdErrorCode: string | null }> {
-  const res = await poolFetch(url, { timeoutMs: SCRAPE_TIMEOUT_MS, target });
-  const html = await res.text();
-  return { html, status: res.status, brdErrorCode: res.headers.get("x-brd-err-code") };
-}
-
 /**
- * Phase 4 live-verification finding (2026-07-09): Bright Data has disabled
- * raw-HTML unlocking for Google domains zone-wide ("This endpoint has been
- * disabled due to low success rate, please add &brd_json=1"). The parsed
- * `brd_json` mode returns place METADATA only (rating, review count) — no
- * review texts — and the `/reviews?fid=` parsed endpoint returns empty on
- * Web Unlocker zones (it needs the separate SERP API product). Review-text
- * scraping is therefore structurally unavailable on this transport, which
- * MUST be reported as its own error class (B4 — explicit classification
- * over hidden ambiguity), not as a generic "no reviews found in HTML".
+ * Phase 4 live-verification finding (2026-07-09), retained as the historical
+ * record of WHY review-text scraping could not stay on the old transport:
+ * Bright Data disabled raw-HTML unlocking for Google domains zone-wide, and
+ * parsed brd_json mode carries no review texts. This constant is no longer
+ * emitted by any live path (the transport it classified is gone) but remains
+ * exported for consumers/tests that reference the error class.
  */
 export const GOOGLE_RAW_HTML_UNSUPPORTED =
   "GOOGLE_RAW_HTML_UNSUPPORTED: Bright Data Unlocker refuses raw Google Maps HTML (provider requires parsed brd_json mode, which carries no review texts). Review scraping is unavailable on the current Bright Data product — a SERP API zone is required for review texts.";
 
-function isGoogleRawHtmlDisabled(brdErrorCode: string | null, body: string): boolean {
-  if (brdErrorCode === "temporarily_unsupported") return true;
-  return /add\s*&?brd_json=1/i.test(body.slice(0, 500));
-}
-
-interface ExtractedReview {
+export interface ExtractedReview {
   text: string;
   rating: number;
   time: number;
   authorName?: string;
-}
-
-function extractReviewsFromHTML(html: string): ExtractedReview[] {
-  const reviews: ExtractedReview[] = [];
-
-  const windowDataMatch = html.match(/window\.APP_INITIALIZATION_STATE\s*=\s*(\[[\s\S]*?\]);\s*(?:window\.|;|<\/script>)/);
-  if (windowDataMatch) {
-    try {
-      const parsed = JSON.parse(windowDataMatch[1]);
-      const extracted = extractFromAppInitState(parsed);
-      if (extracted.length > 0) return extracted;
-    } catch {}
-  }
-
-  const pbMatch = html.match(/\["https:\/\/www\.google\.[^"]*\/maps\/preview\/review[\s\S]*?\]\s*\]/g);
-  if (pbMatch) {
-    for (const block of pbMatch) {
-      try {
-        const parsed = JSON.parse(`[${block}]`);
-        const revs = extractFromPbBlocks(parsed);
-        reviews.push(...revs);
-      } catch {}
-    }
-    if (reviews.length > 0) return reviews;
-  }
-
-  const jsonBlocks = html.match(/\[\[[\s\S]{50,}?\]\]/g) || [];
-  for (const block of jsonBlocks) {
-    try {
-      const parsed = JSON.parse(block);
-      const revs = deepExtractReviews(parsed);
-      reviews.push(...revs);
-    } catch {}
-  }
-
-  if (reviews.length === 0) {
-    const reviewPatterns = [
-      /<span[^>]*class="[^"]*review[^"]*"[^>]*>([\s\S]*?)<\/span>/gi,
-      /data-review-id="[^"]*"[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/gi,
-    ];
-
-    for (const pattern of reviewPatterns) {
-      let match;
-      while ((match = pattern.exec(html)) !== null) {
-        const text = cleanHtml(match[1]);
-        if (text.length > 10 && text.length < 5000) {
-          const ratingMatch = html.slice(Math.max(0, match.index - 500), match.index + match[0].length + 200)
-            .match(/aria-label="(\d)\s*star/i);
-          reviews.push({
-            text,
-            rating: ratingMatch ? parseInt(ratingMatch[1]) : 0,
-            time: Math.floor(Date.now() / 1000),
-          });
-        }
-      }
-    }
-  }
-
-  return dedupeReviews(reviews);
 }
 
 function dedupeReviews(reviews: ExtractedReview[]): ExtractedReview[] {
@@ -120,117 +60,6 @@ function dedupeReviews(reviews: ExtractedReview[]): ExtractedReview[] {
     seen.add(key);
     return true;
   });
-}
-
-function extractFromAppInitState(data: any[]): ExtractedReview[] {
-  const reviews: ExtractedReview[] = [];
-  const str = JSON.stringify(data);
-
-  const reviewArrays = findReviewArrays(data, 0);
-  for (const arr of reviewArrays) {
-    const text = findReviewText(arr);
-    const rating = findRating(arr);
-    const time = findTimestamp(arr);
-    const author = findAuthorName(arr);
-    if (text && text.length > 5) {
-      reviews.push({ text, rating: rating || 0, time: time || Math.floor(Date.now() / 1000), authorName: author });
-    }
-  }
-
-  return reviews;
-}
-
-function findReviewArrays(data: any, depth: number): any[] {
-  if (depth > 12 || !data) return [];
-  const results: any[] = [];
-
-  if (Array.isArray(data)) {
-    const hasTextLikeField = data.some((item, i) =>
-      typeof item === "string" && item.length > 20 && item.length < 5000 && i > 0
-    );
-    const hasRatingLikeField = data.some(item =>
-      typeof item === "number" && item >= 1 && item <= 5
-    );
-
-    if (hasTextLikeField && hasRatingLikeField && data.length >= 3) {
-      results.push(data);
-    }
-
-    for (const item of data) {
-      results.push(...findReviewArrays(item, depth + 1));
-    }
-  }
-
-  return results;
-}
-
-function findReviewText(arr: any[]): string | null {
-  if (!Array.isArray(arr)) return null;
-
-  for (const item of arr) {
-    if (typeof item === "string" && item.length > 20 && item.length < 5000) {
-      if (!/^https?:\/\//.test(item) && !/^[A-Z]{2,}$/.test(item) && !/^\d+$/.test(item)) {
-        return item.trim();
-      }
-    }
-  }
-
-  for (const item of arr) {
-    if (Array.isArray(item)) {
-      const found = findReviewText(item);
-      if (found) return found;
-    }
-  }
-
-  return null;
-}
-
-function findRating(arr: any[]): number | null {
-  if (!Array.isArray(arr)) return null;
-  for (const item of arr) {
-    if (typeof item === "number" && item >= 1 && item <= 5 && Number.isInteger(item)) {
-      return item;
-    }
-  }
-  for (const item of arr) {
-    if (Array.isArray(item)) {
-      const found = findRating(item);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function findTimestamp(arr: any[]): number | null {
-  if (!Array.isArray(arr)) return null;
-  for (const item of arr) {
-    if (typeof item === "number" && item > 1_000_000_000 && item < 2_000_000_000) {
-      return item;
-    }
-  }
-  for (const item of arr) {
-    if (Array.isArray(item)) {
-      const found = findTimestamp(item);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function findAuthorName(arr: any[]): string | undefined {
-  if (!Array.isArray(arr)) return undefined;
-  for (const item of arr) {
-    if (typeof item === "string" && item.length > 1 && item.length < 60) {
-      if (!/^https?:\/\//.test(item) && !/^\d+$/.test(item) && item.length < 40) {
-        return item;
-      }
-    }
-  }
-  return undefined;
-}
-
-function extractFromPbBlocks(data: any): ExtractedReview[] {
-  return deepExtractReviews(data);
 }
 
 function deepExtractReviews(data: any, depth = 0): ExtractedReview[] {
@@ -273,12 +102,12 @@ function deepExtractReviews(data: any, depth = 0): ExtractedReview[] {
 }
 
 /**
- * SERP API path (BRIGHT_DATA_SERP_ZONE configured). Bright Data's SERP zone
- * returns PARSED JSON when the target URL carries `brd_json=1`. Shapes vary by
+ * Parse a SERP-style parsed-JSON reviews payload. Shapes vary by provider and
  * endpoint, so extract defensively: look for arrays of review-like objects
  * under any key, read the common field aliases, and fall back to the generic
- * deep-walk used for raw-HTML embedded JSON. Verified/tuned against live SERP
- * output during Phase 4-SERP.
+ * deep-walk. Verified/tuned against live SERP output during Phase 4-SERP;
+ * retained because a future reviews actor emitting review-object JSON can
+ * reuse it directly.
  */
 function extractReviewsFromSerpJson(body: string): ExtractedReview[] {
   let parsed: unknown;
@@ -348,43 +177,18 @@ function coerceReviewTime(raw: unknown): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function cleanHtml(text: string): string {
-  return text
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildGoogleMapsSearchUrl(query: string): string {
-  const encoded = encodeURIComponent(query + " reviews");
-  return `https://www.google.com/maps/search/${encoded}`;
-}
-
-function buildGoogleMapsPlaceUrl(placeIdentifier: string): string {
-  const encoded = encodeURIComponent(placeIdentifier);
-  return `https://www.google.com/maps/place/${encoded}`;
-}
-
 /**
- * SERP-zone Google search URL. Bright Data returns the full knowledge panel as
- * parsed JSON (brd_json=1); its `knowledge.fid` is the business Feature ID the
- * reviews endpoint requires. Only meaningful on a SERP API zone.
+ * SERP-style Google search URL (parsed-JSON mode). Retained for the test
+ * harness; no live transport calls this anymore.
  */
 function buildGoogleSearchUrl(query: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(query)}&brd_json=1`;
 }
 
 /**
- * SERP-zone Google reviews endpoint. Bright Data translates this virtual URL
- * into Google's reviews RPC and returns parsed JSON. `fid` (Feature ID) comes
- * from a prior search's `knowledge.fid`; the colon is percent-encoded per
- * Bright Data's documented example. `hl`/`sort` are optional refinements.
+ * SERP-style Google reviews endpoint URL. `fid` (Feature ID) comes from a
+ * prior search's `knowledge.fid`. Retained for the test harness; no live
+ * transport calls this anymore.
  */
 function buildGoogleReviewsUrl(fid: string, opts?: { hl?: string; sort?: string }): string {
   const hl = opts?.hl ?? "en";
@@ -414,122 +218,49 @@ function extractFidFromSerpSearch(body: string): string | null {
   return null;
 }
 
-function extractPlaceIdFromHtml(html: string): string | null {
-  const ftidMatch = html.match(/0x[0-9a-f]+:0x[0-9a-f]+/i);
-  if (ftidMatch) return ftidMatch[0];
-
-  const ludocrIdMatch = html.match(/ludocid[=:](\d+)/);
-  if (ludocrIdMatch) return `ludocid:${ludocrIdMatch[1]}`;
-
-  const cidMatch = html.match(/cid[=:](\d+)/);
-  if (cidMatch) return `cid:${cidMatch[1]}`;
-
-  return `search_${Date.now()}`;
-}
-
-interface SerpReviewsOutcome {
-  reviews: ExtractedReview[];
-  /** Feature ID resolved in step 1 (persisted as placeId). Null when unresolved. */
-  fid: string | null;
-  error: string;
-}
-
 /**
- * SERP-zone two-step review fetch (BRIGHT_DATA_SERP_ZONE configured):
- *   1. Google search  → `knowledge.fid` (business Feature ID).
- *   2. /reviews?fid=…  → parsed review texts.
- * Each step retries transient Unlocker/transport errors within MAX_RETRIES.
- *
- * Degrades truthfully (B1/B4 — no fabrication): a missing fid yields
- * `SERP_NO_FID`; an empty step-2 payload yields `SERP_REVIEWS_EMPTY`. The
- * latter is the live signal that the SERP zone's Google-Reviews collector is
- * not returning data (feature/product not enabled on the zone) — classified
- * distinctly from a genuine transport error so operators can act.
+ * Persistence layer for extracted reviews — the piece a future reviews actor
+ * plugs into. Guarantees preserved:
+ *   Seal #5 / F7.6 — review IDs are sha256(placeId|author|fullText|time)
+ *   truncated to 16 hex chars (survives review-text edits; uniqueness from
+ *   the author+time tuple).
+ *   Seal #5 / F7.7 — author NAME is never persisted; only sha256(name)
+ *   truncated to 12 hex chars (`authorHash`) for dedup/pattern analysis.
  */
-async function scrapeReviewsViaSerp(
-  searchQuery: string,
+export async function persistExtractedReviews(
+  competitorId: string,
   accountId: string,
-): Promise<SerpReviewsOutcome> {
-  let fid: string | null = null;
-  let lastError = "";
+  campaignId: string,
+  placeId: string | null,
+  reviews: ExtractedReview[],
+): Promise<number> {
+  const { reviewIdHash, authorHash } = await import("./scrape-safety");
+  let inserted = 0;
+  for (const review of reviews) {
+    const reviewId = reviewIdHash(placeId || "unknown", review.authorName || "anonymous", review.text, review.time);
+    const existing = await db.select({ id: ciCompetitorReviews.id })
+      .from(ciCompetitorReviews)
+      .where(sql`${ciCompetitorReviews.competitorId} = ${competitorId} AND ${ciCompetitorReviews.reviewId} = ${reviewId}`)
+      .limit(1);
 
-  // Step 1 — resolve the Feature ID via a parsed Google search.
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      console.log(`[ReviewsScraper] SERP search ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}"`);
-      const { html, status, brdErrorCode } = await fetchViaUnlocker(
-        buildGoogleSearchUrl(searchQuery),
-        { accountId, platform: "reviews", targetKey: `${searchQuery}::serp_search` },
-      );
-      if (brdErrorCode) {
-        lastError = `UNLOCKER_ERROR ${brdErrorCode} (SERP search)`;
-        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}", attempt ${attempt + 1}`);
-        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
-        continue;
-      }
-      if (status !== 200) {
-        lastError = `HTTP ${status} (SERP search)`;
-        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}"`);
-        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
-        continue;
-      }
-      fid = extractFidFromSerpSearch(html);
-      if (fid) break;
-      lastError = `SERP_NO_FID: Google search returned no knowledge.fid for "${searchQuery}"`;
-      console.warn(`[ReviewsScraper] ${lastError} (attempt ${attempt + 1})`);
-      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
-    } catch (err: any) {
-      if (err instanceof TargetBackoffActiveError) {
-        return { reviews: [], fid: null, error: err.message };
-      }
-      lastError = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
-      console.error(`[ReviewsScraper] SERP search fetch error: ${lastError}`);
-      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
-    }
+    if (existing.length > 0) continue;
+
+    await db.insert(ciCompetitorReviews).values({
+      id: `rev_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      competitorId,
+      accountId,
+      campaignId,
+      reviewId,
+      reviewText: review.text,
+      rating: review.rating,
+      platform: "google",
+      reviewDate: review.time ? new Date(review.time * 1000) : null,
+      isSynthetic: false,
+      authorHash: review.authorName ? authorHash(review.authorName) : null,
+    });
+    inserted++;
   }
-
-  if (!fid) return { reviews: [], fid: null, error: lastError || "SERP_NO_FID" };
-
-  // Step 2 — fetch reviews by Feature ID.
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      console.log(`[ReviewsScraper] SERP reviews ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" (fid=${fid})`);
-      const { html, status, brdErrorCode } = await fetchViaUnlocker(
-        buildGoogleReviewsUrl(fid),
-        { accountId, platform: "reviews", targetKey: `${searchQuery}::serp_reviews` },
-      );
-      if (brdErrorCode) {
-        lastError = `UNLOCKER_ERROR ${brdErrorCode} (SERP reviews)`;
-        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}", attempt ${attempt + 1}`);
-        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
-        continue;
-      }
-      if (status !== 200) {
-        lastError = `HTTP ${status} (SERP reviews)`;
-        console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}"`);
-        if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
-        continue;
-      }
-      const reviews = extractReviewsFromSerpJson(html);
-      if (reviews.length > 0) {
-        console.log(`[ReviewsScraper] Extracted ${reviews.length} reviews for "${searchQuery}" via SERP JSON`);
-        return { reviews, fid, error: "" };
-      }
-      lastError =
-        "SERP_REVIEWS_EMPTY: SERP reviews endpoint returned no review texts — the Google-Reviews collector may not be enabled on this SERP zone";
-      console.warn(`[ReviewsScraper] ${lastError} (fid=${fid}, attempt ${attempt + 1})`);
-      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
-    } catch (err: any) {
-      if (err instanceof TargetBackoffActiveError) {
-        return { reviews: [], fid, error: err.message };
-      }
-      lastError = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
-      console.error(`[ReviewsScraper] SERP reviews fetch error: ${lastError}`);
-      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
-    }
-  }
-
-  return { reviews: [], fid, error: lastError };
+  return inserted;
 }
 
 export async function scrapeReviewsForCompetitor(
@@ -544,181 +275,24 @@ export async function scrapeReviewsForCompetitor(
     placeId: null,
   };
 
-  if (!getScrapingConfig()) {
-    result.error = "SCRAPING_UNCONFIGURED: Bright Data Unlocker API not configured — reviews scraping unavailable. Set BRIGHT_DATA_API_KEY and BRIGHT_DATA_ZONE.";
-    console.error(`[ReviewsScraper] ${result.error}`);
+  // Ownership scoping stays live even while the provider is pending — a
+  // caller probing another tenant's competitor still gets "not found".
+  const [competitor] = await db.select({ name: ciCompetitors.name, url: ciCompetitors.profileLink })
+    .from(ciCompetitors)
+    .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)));
+
+  if (!competitor) {
+    result.error = `Competitor not found: ${competitorId} (campaignId=${campaignId})`;
     return result;
   }
 
-  try {
-    const [competitor] = await db.select({ name: ciCompetitors.name, url: ciCompetitors.profileLink })
-      .from(ciCompetitors)
-      .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)));
-
-    if (!competitor) {
-      result.error = `Competitor not found: ${competitorId} (campaignId=${campaignId})`;
-      return result;
-    }
-
-    const searchQuery = competitor.name || competitor.url || competitorId;
-    let reviews: ExtractedReview[] = [];
-    let placeId: string | null = null;
-    let lastError = "";
-
-    // SERP mode: a dedicated Bright Data SERP API zone (BRIGHT_DATA_SERP_ZONE)
-    // returns parsed review JSON via a two-step Feature-ID flow. Without it,
-    // reviews stay on the Unlocker zone where raw Google HTML is refused →
-    // fast-fail GOOGLE_RAW_HTML_UNSUPPORTED.
-    const serpMode = !!getSerpConfig();
-
-    if (serpMode) {
-      const serp = await scrapeReviewsViaSerp(searchQuery, accountId);
-      reviews = serp.reviews;
-      placeId = serp.fid;
-      lastError = serp.error;
-    } else {
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        try {
-          const searchUrl = attempt === 0
-            ? buildGoogleMapsSearchUrl(searchQuery)
-            : buildGoogleMapsPlaceUrl(searchQuery);
-
-          console.log(`[ReviewsScraper] Attempt ${attempt + 1}/${MAX_RETRIES + 1} for "${searchQuery}" via Unlocker API`);
-          // T006 — adaptive backoff identity: search-query-keyed within the
-          // reviews pool.
-          const { html, status, brdErrorCode } = await fetchViaUnlocker(searchUrl, {
-            accountId,
-            platform: "reviews",
-            targetKey: searchQuery,
-          });
-
-          // Provider-level refusal of raw Google HTML is deterministic policy,
-          // not a transient block — retrying cannot succeed. Fail fast with an
-          // explicit class (B4) instead of burning attempts and reporting a
-          // misleading "No reviews found in HTML response".
-          if (isGoogleRawHtmlDisabled(brdErrorCode, html)) {
-            lastError = GOOGLE_RAW_HTML_UNSUPPORTED;
-            console.error(`[ReviewsScraper] ${GOOGLE_RAW_HTML_UNSUPPORTED} (searchQuery="${searchQuery}")`);
-            break;
-          }
-
-          if (brdErrorCode) {
-            // Any other Unlocker transport error rides in on HTTP 200 with an
-            // x-brd-err-code header — the body is an error string, NOT Maps
-            // HTML. Never feed it to the extractor as if it were content.
-            lastError = `UNLOCKER_ERROR ${brdErrorCode}`;
-            console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}", attempt ${attempt + 1}`);
-            if (attempt < MAX_RETRIES) {
-              await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
-            }
-            continue;
-          }
-
-          if (status === 403 || status === 429) {
-            lastError = `HTTP ${status} — blocked or rate limited`;
-            console.warn(`[ReviewsScraper] ${lastError}, attempt ${attempt + 1}`);
-            if (attempt < MAX_RETRIES) {
-              await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
-            }
-            continue;
-          }
-
-          if (status !== 200) {
-            lastError = `HTTP ${status}`;
-            console.warn(`[ReviewsScraper] Unexpected status ${status} for "${searchQuery}"`);
-            continue;
-          }
-
-          placeId = extractPlaceIdFromHtml(html);
-          reviews = extractReviewsFromHTML(html);
-
-          if (reviews.length > 0) {
-            console.log(`[ReviewsScraper] Extracted ${reviews.length} reviews for "${searchQuery}" via Google Maps HTML`);
-            break;
-          }
-
-          lastError = "No reviews found in HTML response";
-          console.warn(`[ReviewsScraper] ${lastError} for "${searchQuery}" (html length: ${html.length})`);
-          if (attempt < MAX_RETRIES) {
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
-          }
-        } catch (err: any) {
-          // T006 — cooling target cannot recover within this loop; stop early.
-          if (err instanceof TargetBackoffActiveError) {
-            lastError = err.message;
-            console.warn(`[ReviewsScraper] ${err.message} — aborting retry loop for "${searchQuery}"`);
-            break;
-          }
-          const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
-          lastError = safeMsg;
-          console.error(`[ReviewsScraper] Proxy fetch error: ${safeMsg}`);
-          if (attempt < MAX_RETRIES) {
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
-          }
-        }
-      }
-    }
-
-    result.placeId = placeId;
-    result.reviewsFetched = reviews.length;
-
-    if (reviews.length === 0) {
-      // Errors that already carry a full, explicit classification pass through
-      // verbatim — wrapping them in Unlocker-loop retry-count phrasing ("after
-      // N attempts") would be false: the provider refusal breaks out after the
-      // first response, and the SERP path retries each step independently.
-      const isPreClassified =
-        lastError.startsWith("GOOGLE_RAW_HTML_UNSUPPORTED") ||
-        lastError.startsWith("SERP_NO_FID") ||
-        lastError.startsWith("SERP_REVIEWS_EMPTY");
-      result.error = isPreClassified
-        ? lastError
-        : `No reviews extracted after ${MAX_RETRIES + 1} attempts: ${lastError}`;
-      return result;
-    }
-
-    // Seal #5 / F7.6 — review IDs are sha256(placeId|author|fullText|time)
-    // truncated to 16 hex chars. This survives review-text edits made AFTER
-    // the previous prefix-based ID was generated (Google reviewers can edit
-    // the first 20 chars without changing review identity). Uniqueness comes
-    // from the (author + time) tuple in the hash input.
-    // Seal #5 / F7.7 — author NAME is never persisted. We store sha256(name)
-    // truncated to 12 hex chars (`authorHash`) for dedup + reviewer-pattern
-    // analysis. This is one-way; we cannot recover the name.
-    const { reviewIdHash, authorHash } = await import("./scrape-safety");
-    for (const review of reviews) {
-      const reviewId = reviewIdHash(placeId || "unknown", review.authorName || "anonymous", review.text, review.time);
-      const existing = await db.select({ id: ciCompetitorReviews.id })
-        .from(ciCompetitorReviews)
-        .where(sql`${ciCompetitorReviews.competitorId} = ${competitorId} AND ${ciCompetitorReviews.reviewId} = ${reviewId}`)
-        .limit(1);
-
-      if (existing.length > 0) continue;
-
-      await db.insert(ciCompetitorReviews).values({
-        id: `rev_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-        competitorId,
-        accountId,
-        campaignId,
-        reviewId,
-        reviewText: review.text,
-        rating: review.rating,
-        platform: "google",
-        reviewDate: review.time ? new Date(review.time * 1000) : null,
-        isSynthetic: false,
-        authorHash: review.authorName ? authorHash(review.authorName) : null,
-      });
-      result.reviewsInserted++;
-    }
-
-    console.log(`[ReviewsScraper] competitorId=${competitorId} | fetched=${result.reviewsFetched} | inserted=${result.reviewsInserted} | source=proxy`);
-    return result;
-  } catch (err: any) {
-    const safeMsg = (err.message || "").replace(/\/\/[^@]+@/g, "//***@");
-    result.error = safeMsg;
-    console.error(`[ReviewsScraper] ERROR competitorId=${competitorId}: ${safeMsg}`);
-    return result;
-  }
+  // P-6.12 — Bright Data retired; no verified Apify actor for Google review
+  // texts yet. Fail fast with a machine-readable class (B4 — explicit
+  // classification over hidden ambiguity). No fabrication, no silent empty.
+  const provider = getGoogleReviewsProviderStatus();
+  result.error = `PROVIDER_PENDING: Google reviews acquisition has no active provider (${provider.envSlot}${provider.actorId ? `=${provider.actorId} — not yet implemented/verified` : " not set"}). ${provider.detail}`;
+  console.warn(`[ReviewsScraper] ${result.error} (competitorId=${competitorId})`);
+  return result;
 }
 
 export async function scrapeReviewsForCampaign(
@@ -731,9 +305,9 @@ export async function scrapeReviewsForCampaign(
 
   const results: ReviewScrapedResult[] = [];
   for (const comp of competitors) {
-    const result = await scrapeReviewsForCompetitor(comp.id, accountId, campaignId);
-    results.push(result);
-    await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
+    // PROVIDER_PENDING short-circuits inside scrapeReviewsForCompetitor; no
+    // pacing sleep needed since nothing hits the network.
+    results.push(await scrapeReviewsForCompetitor(comp.id, accountId, campaignId));
   }
   return results;
 }

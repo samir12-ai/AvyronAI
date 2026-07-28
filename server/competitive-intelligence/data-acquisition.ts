@@ -1,11 +1,9 @@
 import { db } from "../db";
 import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews } from "@shared/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
-import { scrapeInstagramProfile, scrapeCommentsForPosts, extractHandleFromUrl, type ScrapedPost, type ScrapedComment } from "./profile-scraper";
+import { scrapeCommentsForPosts, extractHandleFromUrl } from "./profile-scraper";
 import { scrapeInstagramForCompetitor } from "./instagram-provider";
 import { lookupSharedProfile, upsertSharedProfile, linkCompetitorToSharedProfile, reuseFromSharedPool } from "./shared-profile-store";
-import { acquireStickySession, releaseStickySession, type StickySessionContext } from "./proxy-pool-manager";
-import * as crypto from "crypto";
 import { MI_THRESHOLDS } from "../market-intelligence-v3/constants";
 
 const EXPLICIT_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
@@ -337,8 +335,6 @@ const MAX_COMMENTS_PER_POST_DEEP = 10;
 const FETCH_COOLDOWN_MS = 72 * 60 * 60 * 1000;
 const CACHE_REUSE_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MAX_POSTS_TO_STORE = 12;
-const MAX_COMMENTS_PER_POST = 20;
-const MAX_COMMENT_POSTS = 12;
 const MIN_POSTS_THRESHOLD = MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR;
 const MIN_COMMENTS_THRESHOLD = MI_THRESHOLDS.MIN_COMMENTS_SAMPLE;
 
@@ -348,8 +344,10 @@ export { TARGET_POSTS_FAST, TARGET_POSTS_DEEP, MAX_COMMENT_POSTS_DEEP, MAX_COMME
 // watchdog. On timeout the entry is aborted+evicted and resolved with
 // INSUFFICIENT_DATA so a fresh attempt can run. The signal is threaded
 // into _executeFetch so cancellable paths short-circuit via FETCH_ABORTED.
+// P-6.12: default raised 45s → 300s. Apify actor runs complete in 13–315s
+// (live-verified P-6.11); a 45s watchdog would abort most healthy actor runs.
 export const FETCH_WATCHDOG_TIMEOUT_MS = parseInt(
-  process.env.FETCH_WATCHDOG_TIMEOUT_MS || "45000",
+  process.env.FETCH_WATCHDOG_TIMEOUT_MS || "300000",
   10,
 );
 interface ActiveFetch {
@@ -434,7 +432,9 @@ export async function fetchCompetitorData(
   competitorId: string,
   accountId: string,
   forceRefresh: boolean = false,
-  proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
+  // Deprecated (P-6.12): sticky proxy sessions retired with Bright Data.
+  // Positional slot kept so existing call sites need no change; value ignored.
+  _legacyProxyCtx?: unknown,
   collectionMode: CollectionMode = "FAST_PASS",
   fetchOptions?: FetchOptions,
 ): Promise<FetchResult> {
@@ -459,7 +459,7 @@ export async function fetchCompetitorData(
   // Thread the abort signal into _executeFetch so cancellable awaits
   // (scraper, DB checkpoints) can observe signal.aborted and bail.
   const innerPromise = _executeFetch(
-    competitorId, accountId, forceRefresh, proxyCtx, collectionMode, fetchOptions,
+    competitorId, accountId, forceRefresh, collectionMode, fetchOptions,
     abortController.signal,
   );
   const racedTask = withWatchdog<FetchResult>(
@@ -508,7 +508,6 @@ async function _executeFetch(
   competitorId: string,
   accountId: string,
   forceRefresh: boolean,
-  proxyCtx?: import("./proxy-pool-manager").StickySessionContext,
   collectionMode: CollectionMode = "FAST_PASS",
   fetchOptions?: FetchOptions,
   signal?: AbortSignal,
@@ -726,15 +725,14 @@ async function _executeFetch(
     }
   }
 
-  console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink})${proxyCtx ? ` | session=${proxyCtx.session.sessionId}` : ""} | maxPosts=${maxPosts}`);
+  console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink}) | maxPosts=${maxPosts}`);
 
   checkAborted(signal, "executeFetch:beforeProfileScrape");
-  // 2026-07-26: Instagram competitor acquisition now routes exclusively through
-  // the Instagram provider (Apify). Bright Data is no longer part of this path.
-  // Non-Instagram platforms (future) fall through to the legacy scraper.
-  const scrapeResult = (competitor.platform || "instagram").toLowerCase() === "instagram"
-    ? await scrapeInstagramForCompetitor(normalizedHandle || competitor.profileLink || "", maxPosts, accountId)
-    : await scrapeInstagramProfile(competitor.profileLink, proxyCtx, maxPosts, accountId);
+  // P-6.12: ALL competitor profile acquisition routes through the Instagram
+  // provider (Apify actor). Bright Data no longer exists in this codebase.
+  // (competitor.platform is instagram-only today; TikTok posts arrive via the
+  // dedicated tiktok-scraper path, not _executeFetch.)
+  const scrapeResult = await scrapeInstagramForCompetitor(normalizedHandle || competitor.profileLink || "", maxPosts, accountId);
   checkAborted(signal, "executeFetch:afterProfileScrape");
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
@@ -939,83 +937,13 @@ async function _executeFetch(
     console.log(`[DataAcq] INCREMENTAL window exhausted for ${competitor.name}: ${dateCutoffSkipped} posts outside ${windowDays}d window, ${postInserts.length} new posts inserted`);
   }
 
-  const rawEmbeddedComments = scrapeResult.embeddedComments || [];
-  const spamResult = filterSpamComments(rawEmbeddedComments);
-  const realComments = spamResult.filtered;
-  if (spamResult.spamCount > 0) {
-    console.log(`[DataAcq] SPAM_FILTER: Filtered ${spamResult.spamCount} spam comments from embedded preview for ${competitor.name} | reasons: ${JSON.stringify(spamResult.spamReasons)}`);
-  }
-
-  const existingCommentIds = new Set<string>();
-  if (realComments.length > 0) {
-    const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId })
-      .from(ciCompetitorComments)
-      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
-    for (const r of existingCRows) {
-      if (r.commentId) existingCommentIds.add(r.commentId);
-    }
-  }
-
-  let realCommentsInserted = 0;
-  for (const rc of realComments) {
-    if (existingCommentIds.has(rc.commentId)) continue;
-    const sentiment = rc.text.length > 0 ? computeBasicSentiment(rc.text) : 0.5;
-    commentInserts.push({
-      competitorId,
-      accountId,
-      postId: rc.postId,
-      commentText: rc.text,
-      commentId: rc.commentId,
-      username: rc.username,
-      sentiment,
-      timestamp: rc.timestamp ? new Date(rc.timestamp) : null,
-      batchId,
-      isSynthetic: false,
-      source: "embedded_preview",
-    });
-    commentsCollected++;
-    realCommentsInserted++;
-  }
-  console.log(`[DataAcq] EMBEDDED_COMMENTS: ${realCommentsInserted} real comments from profile scrape for ${competitor.name} (${rawEmbeddedComments.length} total extracted, ${spamResult.spamCount} spam filtered, ${rawEmbeddedComments.length - spamResult.spamCount - realCommentsInserted} duplicates skipped)`);
-
-  const postsWithRealComments = new Set(realComments.map(c => c.postId));
-
+  // P-6.12: comment acquisition is fully decoupled from the profile scrape.
+  // The Apify profile actor returns no embedded comment threads
+  // (scrapeResult.embeddedComments is always []), and synthetic comment
+  // generation is RETIRED — comments are real-only, acquired by the dedicated
+  // comment actor in enrichCompetitorWithComments (DEEP_PASS enrich flow).
   if (collectionMode !== "FAST_PASS") {
-    const commentPostLimit = collectionMode === "DEEP_PASS" ? MAX_COMMENT_POSTS_DEEP : MAX_COMMENT_POSTS;
-    const commentPerPostLimit = collectionMode === "DEEP_PASS" ? MAX_COMMENTS_PER_POST_DEEP : MAX_COMMENTS_PER_POST;
-    const postsNeedingComments = postsToStore
-      .filter(p => !existingPostIdsWithComments.has(p.postId))
-      .filter(p => !postsWithRealComments.has(p.postId))
-      .filter(p => (p.comments && p.comments > 0) || (p.caption && p.caption.length > 10))
-      .sort((a, b) => {
-        const engA = (a.likes || 0) + (a.comments || 0);
-        const engB = (b.likes || 0) + (b.comments || 0);
-        if (engB !== engA) return engB - engA;
-        const tsA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const tsB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-        return tsB - tsA;
-      })
-      .slice(0, commentPostLimit);
-
-    for (const post of postsNeedingComments) {
-      const fakeComments = generateSyntheticCommentSamples(post);
-      for (const comment of fakeComments.slice(0, commentPerPostLimit)) {
-        commentInserts.push({
-          competitorId,
-          accountId,
-          postId: post.postId,
-          commentText: comment.text,
-          sentiment: comment.sentiment,
-          timestamp: post.timestamp ? new Date(post.timestamp) : null,
-          batchId,
-          isSynthetic: true,
-          source: "synthetic_enrichment",
-        });
-        commentsCollected++;
-      }
-    }
-  } else {
-    console.log(`[DataAcq] FAST_PASS: Skipping synthetic comment generation for ${competitor.name} (${realCommentsInserted} real comments already stored)`);
+    console.log(`[DataAcq] ${collectionMode}: comment acquisition deferred to enrichCompetitorWithComments (real comment actor) for ${competitor.name}`);
   }
 
   await db.transaction(async (tx) => {
@@ -1211,53 +1139,10 @@ async function _executeFetch(
   };
 }
 
-const MIN_SYNTHETIC_COMMENTS_PER_POST = 10;
-
-function generateSyntheticCommentSamples(post: ScrapedPost): { text: string; sentiment: number }[] {
-  const samples: { text: string; sentiment: number }[] = [];
-  const reportedComments = post.comments || 0;
-
-  if (post.caption && post.caption.length > 10) {
-    const sentences = post.caption.split(/[.!?\n]+/).filter(s => s.trim().length > 10);
-    for (const sentence of sentences) {
-      const sentiment = computeBasicSentiment(sentence);
-      samples.push({ text: `[synthetic] ${sentence.trim().substring(0, 200)}`, sentiment });
-    }
-  }
-
-  const targetSamples = Math.min(
-    MAX_COMMENTS_PER_POST,
-    Math.max(MIN_SYNTHETIC_COMMENTS_PER_POST, samples.length, Math.ceil(reportedComments * 0.3))
-  );
-
-  if (samples.length < targetSamples && post.caption && post.caption.length > 8) {
-    const phrases = post.caption.split(/[,;:—–\-\n]+/).filter(s => s.trim().length > 8);
-    for (const phrase of phrases) {
-      if (samples.length >= targetSamples) break;
-      const prefixed = `[synthetic] ${phrase.trim().substring(0, 200)}`;
-      const isDuplicate = samples.some(s => s.text === prefixed);
-      if (!isDuplicate) {
-        samples.push({ text: prefixed, sentiment: computeBasicSentiment(phrase) });
-      }
-    }
-  }
-
-  if (samples.length < targetSamples) {
-    const sentimentVariants = [0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.5, 0.65, 0.35, 0.75];
-    let i = 0;
-    while (samples.length < targetSamples) {
-      const syntheticSentiment = sentimentVariants[i % sentimentVariants.length];
-      const label = syntheticSentiment > 0.6 ? "positive" : syntheticSentiment < 0.4 ? "negative" : "neutral";
-      samples.push({
-        text: `[synthetic-${label}-${samples.length + 1}] engagement signal from ${reportedComments} reported comments`,
-        sentiment: syntheticSentiment,
-      });
-      i++;
-    }
-  }
-
-  return samples;
-}
+// P-6.12: generateSyntheticCommentSamples RETIRED. Synthetic comment
+// generation no longer exists anywhere in acquisition — comments are
+// real-only, from the Apify comment actor. Legacy synthetic-row cleanup
+// (cleanupSyntheticData & friends below) is retained to purge historical rows.
 
 export async function enrichCompetitorWithComments(competitorId: string, accountId: string, options?: { skipCooldown?: boolean }): Promise<{ commentsGenerated: number; status: string }> {
   const [competitor] = await db.select().from(ciCompetitors)
@@ -1338,153 +1223,123 @@ export async function enrichCompetitorWithComments(competitorId: string, account
     return { commentsGenerated: existingComments, status: "NO_ELIGIBLE_POSTS" };
   }
 
-  let proxyCtx: import("./proxy-pool-manager").StickySessionContext | undefined;
-  try {
-    proxyCtx = acquireStickySession(accountId, competitor.campaignId || "unknown", competitorId) ?? undefined;
-  } catch (err: any) {
-    console.log(`[DataAcq] DEEP_PASS_ENRICH: Could not acquire proxy for ${competitor.name}: ${err.message}. Proceeding without proxy.`);
-  }
-
   const batchId = `deeppass_real_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   let realCommentsScraped = 0;
-  let syntheticFallbackCount = 0;
+  let actorRunId: string | null = null;
   const commentInserts: any[] = [];
 
-  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — scraping REAL comments for ${postsNeedingComments.length} posts (existing: ${existingComments} comments, ${realComments} real)`);
+  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — scraping REAL comments for ${postsNeedingComments.length} posts via Apify comment actor (existing: ${existingComments} comments, ${realComments} real)`);
 
   try {
-    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — attempting profile re-scrape for embedded comments`);
+    // P-6.12: comments come EXCLUSIVELY from the Apify comment actor (one
+    // batched run per competitor). The old profile re-scrape for embedded
+    // comments is gone — the profile actor returns no comment threads, and
+    // the Bright Data per-post comment ladder no longer exists.
     // NOTE: enrichCompetitorWithComments runs OUTSIDE the watchdog'd
     // _executeFetch path (called by enrich-only flows that have no
     // AbortSignal), so checkAborted is intentionally not invoked here.
-    const profileRescrape = await scrapeInstagramProfile(competitor.profileLink, proxyCtx, 30, accountId);
-    const embeddedComments = profileRescrape.embeddedComments || [];
-
-    if (embeddedComments.length > 0) {
-      const embSpamResult = filterSpamComments(embeddedComments);
-      const cleanEmbedded = embSpamResult.filtered;
-      if (embSpamResult.spamCount > 0) {
-        console.log(`[DataAcq] SPAM_FILTER: Filtered ${embSpamResult.spamCount} spam from DEEP_PASS embedded for ${competitor.name} | reasons: ${JSON.stringify(embSpamResult.spamReasons)}`);
-      }
-
-      const existingCIds = new Set<string>();
-      const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId })
-        .from(ciCompetitorComments)
-        .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
-      for (const r of existingCRows) {
-        if (r.commentId) existingCIds.add(r.commentId);
-      }
-
-      for (const rc of cleanEmbedded) {
-        if (existingCIds.has(rc.commentId)) continue;
-        commentInserts.push({
-          competitorId,
-          accountId,
-          postId: rc.postId,
-          commentId: rc.commentId,
-          username: rc.username,
-          commentText: rc.text,
-          sentiment: computeBasicSentiment(rc.text),
-          timestamp: rc.timestamp ? new Date(rc.timestamp) : null,
-          batchId,
-          isSynthetic: false,
-          source: "embedded_preview_deeppass",
-        });
-        realCommentsScraped++;
-      }
-    }
-
-    if (realCommentsScraped === 0) {
-      const postsForScraping = postsNeedingComments.map(p => ({
+    const commentsNeeded = Math.max(MIN_COMMENTS_THRESHOLD - existingComments, 50);
+    const scrapeResult = await scrapeCommentsForPosts(
+      postsNeedingComments.map(p => ({
         postId: p.postId,
         shortcode: p.shortcode || "",
-        commentCount: p.comments || 0,
-      }));
+        commentCount: p.comments ?? null,
+      })),
+      { maxTotalComments: commentsNeeded, maxPerPost: MAX_COMMENTS_PER_POST_DEEP },
+    );
+    actorRunId = scrapeResult.meta.runId;
 
-      const commentsNeeded = Math.max(MIN_COMMENTS_THRESHOLD - existingComments, 50);
-      // See note above — no AbortSignal threaded into this path.
-      const scrapeResult = await scrapeCommentsForPosts(postsForScraping, proxyCtx, commentsNeeded);
+    // Unified acquisition filter (P-6.12 Phase 7): dedup/spam/owner
+    // classification with full accounting — rejects are never persisted,
+    // every rejection is counted by reason.
+    const { filterComments, formatFilterStats } = await import("../acquisition/comment-filter");
 
-      const allScrapedComments = scrapeResult.results.flatMap(r => r.comments);
-      const scrapeSpamResult = filterSpamComments(allScrapedComments);
-      if (scrapeSpamResult.spamCount > 0) {
-        console.log(`[DataAcq] SPAM_FILTER: Filtered ${scrapeSpamResult.spamCount} spam from DEEP_PASS direct scrape for ${competitor.name} | reasons: ${JSON.stringify(scrapeSpamResult.spamReasons)}`);
-      }
-
-      for (const comment of scrapeSpamResult.filtered) {
-        commentInserts.push({
-          competitorId,
-          accountId,
-          postId: comment.postId,
-          commentId: comment.commentId,
-          username: comment.username,
-          commentText: comment.text,
-          sentiment: computeBasicSentiment(comment.text),
-          timestamp: comment.timestamp ? new Date(comment.timestamp) : null,
-          batchId,
-          isSynthetic: false,
-          source: "real_scrape",
-        });
-        realCommentsScraped++;
-      }
+    const existingCIds = new Set<string>();
+    const existingCRows = await db.select({ commentId: ciCompetitorComments.commentId })
+      .from(ciCompetitorComments)
+      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+    for (const r of existingCRows) {
+      if (r.commentId) existingCIds.add(r.commentId);
     }
 
-    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — scraped ${realCommentsScraped} real comments (embedded + direct API attempts)`);
+    const ownerHandle = extractHandleFromUrl(competitor.profileLink ?? "");
+    const allScraped = scrapeResult.results.flatMap(r => r.comments);
+    const { accepted, stats } = filterComments(
+      allScraped.map(c => ({
+        commentId: c.commentId,
+        username: c.username,
+        text: c.text,
+        postId: c.postId,
+        timestamp: c.timestamp,
+        likes: c.likes,
+        repliesCount: c.repliesCount ?? null,
+      })),
+      { ownerHandles: ownerHandle ? [ownerHandle] : [], seenCommentIds: existingCIds },
+    );
+    console.log(`[DataAcq] COMMENT_FILTER: ${competitor.name} — ${formatFilterStats(stats)}`);
+
+    for (const { comment, decision } of accepted) {
+      commentInserts.push({
+        competitorId,
+        accountId,
+        postId: comment.postId,
+        commentId: comment.commentId,
+        username: comment.username,
+        commentText: comment.text,
+        sentiment: computeBasicSentiment(comment.text),
+        timestamp: comment.timestamp ? new Date(comment.timestamp) : null,
+        batchId,
+        isSynthetic: false,
+        source: "real_scrape",
+        authorType: decision.authorType,
+        likesCount: comment.likes ?? null,
+        repliesCount: comment.repliesCount ?? null,
+        actorRunId,
+        filterStatus: decision.status,
+        filterReason: decision.reason,
+      });
+      realCommentsScraped++;
+    }
+
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — ${realCommentsScraped} real comments accepted from actor run ${actorRunId ?? "n/a"} (≈$${scrapeResult.meta.estimatedCostUsd})`);
 
     const totalAfterReal = existingComments + realCommentsScraped;
     if (totalAfterReal < MIN_COMMENTS_THRESHOLD) {
-      console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — real comments below optimization target (${totalAfterReal}/${MIN_COMMENTS_THRESHOLD}). Comment text is optional — pipeline continues without blocking.`);
+      console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — real comments below optimization target (${totalAfterReal}/${MIN_COMMENTS_THRESHOLD}). Comment text is optional — pipeline continues without blocking. NO synthetic fallback (retired P-6.12).`);
     }
   } catch (err: any) {
     console.warn(`[DataAcq] DEEP_PASS_ENRICH: Comment scraping failed for ${competitor.name}: ${err.message}. Comment text is optional enrichment — returning success with 0 comments.`);
-  } finally {
-    if (proxyCtx) {
-      try { releaseStickySession(proxyCtx); } catch {}
-    }
   }
 
   if (commentInserts.length > 0) {
     await db.transaction(async (tx) => {
       for (const commentRow of commentInserts) {
-        await tx.insert(ciCompetitorComments).values(commentRow);
+        // Partial unique index (competitor_id, comment_id) makes re-runs idempotent.
+        await tx.insert(ciCompetitorComments).values(commentRow).onConflictDoNothing();
       }
     });
   }
 
-  const totalComments = existingComments + realCommentsScraped + syntheticFallbackCount;
+  // Repurposed stamp (P-6.12): lastSyntheticEnrichmentAt now records the last
+  // PAID comment-actor enrichment attempt, so the existing cooldown gate paces
+  // actor spend. syntheticEnrichmentCount / churn tracking are NOT touched —
+  // nothing synthetic is generated anymore.
+  await db.update(ciCompetitors)
+    .set({ lastSyntheticEnrichmentAt: new Date(), updatedAt: new Date() })
+    .where(eq(ciCompetitors.id, competitorId));
 
-  if (syntheticFallbackCount > 0) {
-    const newEnrichmentCount = (competitor.syntheticEnrichmentCount || 0) + 1;
-    const isHighChurn = detectHighSyntheticChurn(newEnrichmentCount, competitor.lastSyntheticEnrichmentAt, competitor.createdAt);
-
-    await db.update(ciCompetitors)
-      .set({
-        lastSyntheticEnrichmentAt: new Date(),
-        syntheticEnrichmentCount: newEnrichmentCount,
-        syntheticChurnFlag: isHighChurn ? "HIGH_SYNTHETIC_CHURN" : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(ciCompetitors.id, competitorId));
-
-    if (isHighChurn) {
-      console.log(`[DataAcq] CHURN_WARNING: ${competitor.name} flagged HIGH_SYNTHETIC_CHURN (${newEnrichmentCount} enrichments within ${SYNTHETIC_CHURN_WINDOW_DAYS}d)`);
-    }
-  }
-
+  const totalComments = existingComments + realCommentsScraped;
   const status = "ENRICHED";
 
-  const postDistribution: Record<string, { real: number; synthetic: number }> = {};
+  const postDistribution: Record<string, number> = {};
   for (const ci of commentInserts) {
-    const pid = ci.postId;
-    if (!postDistribution[pid]) postDistribution[pid] = { real: 0, synthetic: 0 };
-    if (ci.isSynthetic) postDistribution[pid].synthetic++;
-    else postDistribution[pid].real++;
+    postDistribution[ci.postId] = (postDistribution[ci.postId] || 0) + 1;
   }
   const postsWithNewComments = Object.keys(postDistribution).length;
-  const distributionSummary = Object.entries(postDistribution).map(([pid, counts]) => `${pid.slice(0, 8)}:R${counts.real}/S${counts.synthetic}`).join(", ");
-  console.log(`[DataAcq] COMMENT_DISTRIBUTION: ${competitor.name} — ${postsWithNewComments} posts with comments | ${distributionSummary}`);
+  const distributionSummary = Object.entries(postDistribution).map(([pid, n]) => `${pid.slice(0, 8)}:R${n}`).join(", ");
+  console.log(`[DataAcq] COMMENT_DISTRIBUTION: ${competitor.name} — ${postsWithNewComments} posts with new comments | ${distributionSummary}`);
 
-  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — real=${realCommentsScraped}, synthetic_fallback=${syntheticFallbackCount}, existing=${existingComments}, total=${totalComments} | status=${status}`);
+  console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — real=${realCommentsScraped}, existing=${existingComments}, total=${totalComments} | status=${status}`);
 
   return { commentsGenerated: totalComments, status };
 }
@@ -1654,9 +1509,6 @@ export async function getStoredReviewsForMIv3(competitorId: string, accountId: s
   }));
 }
 
-function computeCompetitorHash(profileLink: string): string {
-  return crypto.createHash("sha256").update(profileLink).digest("hex").slice(0, 16);
-}
 
 export const SYNTHETIC_RETENTION_DAYS = 30;
 export const SYNTHETIC_ENRICHMENT_COOLDOWN_DAYS = 5;
@@ -1853,14 +1705,8 @@ export async function fetchAllCompetitors(accountId: string, campaignId: string)
 
   const results: FetchResult[] = [];
   for (const comp of competitors) {
-    const competitorHash = computeCompetitorHash(comp.profileLink || comp.name);
-    let proxyCtx: StickySessionContext | null = null;
     try {
-      proxyCtx = acquireStickySession(accountId, campaignId, competitorHash);
-      if (proxyCtx) {
-        console.log(`[DataAcq] Pool session acquired for ${comp.name}: session=${proxyCtx.session.sessionId}`);
-      }
-      const result = await fetchCompetitorData(comp.id, accountId, false, proxyCtx ?? undefined);
+      const result = await fetchCompetitorData(comp.id, accountId, false);
       results.push(result);
     } catch (err: any) {
       console.error(`[DataAcq] Failed for ${comp.name}: ${err.message}`);
@@ -1872,8 +1718,6 @@ export async function fetchAllCompetitors(accountId: string, campaignId: string)
         status: "BLOCKED",
         message: `Error: ${err.message}`,
       });
-    } finally {
-      if (proxyCtx) releaseStickySession(proxyCtx);
     }
   }
   return results;

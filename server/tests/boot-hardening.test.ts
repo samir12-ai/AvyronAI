@@ -122,8 +122,8 @@ describe("Seal #7 — env-validator", () => {
   });
 });
 
-// ── 2026-07 Unlocker rebuild — Bright Data env contract ─────────────────────
-describe("Bright Data Unlocker env contract (2026-07 rebuild)", () => {
+// ── P-6.12 Apify migration — acquisition env contract ───────────────────────
+describe("Acquisition env contract (P-6.12 Apify migration)", () => {
   const DEV_BASE = {
     NODE_ENV: "development",
     DATABASE_URL: "postgres://x",
@@ -131,63 +131,61 @@ describe("Bright Data Unlocker env contract (2026-07 rebuild)", () => {
     PUBLIC_BASE_URL: "https://test.replit.dev",
   };
 
-  it("both missing → SAFE-OFF: boots ok with a warning, never fatal", () => {
+  it("APIFY_API_KEY missing → SAFE-OFF: boots ok with a warning, never fatal", () => {
     const r = checkEnv({ ...DEV_BASE } as NodeJS.ProcessEnv);
     expect(r.ok).toBe(true);
     expect(r.missing).toHaveLength(0);
-    expect(r.warnings.some(w => w.startsWith("BRIGHT_DATA_API_KEY"))).toBe(true);
+    expect(r.warnings.some(w => w.startsWith("APIFY_API_KEY"))).toBe(true);
   });
 
-  it("API_KEY without ZONE → boot-fatal (all-or-nothing)", () => {
+  it("APIFY_API_KEY set → configured, boots ok with no acquisition warning", () => {
+    const r = checkEnv({ ...DEV_BASE, APIFY_API_KEY: "apify_api_xxx" } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(true);
+    expect(r.missing).toHaveLength(0);
+    expect(r.warnings.some(w => w.startsWith("APIFY_API_KEY"))).toBe(false);
+  });
+
+  it("BRIGHT_DATA_API_KEY + ZONE set → NEVER fatal, warn-ignored (transport deleted)", () => {
+    // Pre-P-6.12 a half-configured BD pair was boot-fatal. The transport no
+    // longer exists, so no BD var combination may block boot.
+    const r = checkEnv({
+      ...DEV_BASE,
+      APIFY_API_KEY: "apify_api_xxx",
+      BRIGHT_DATA_API_KEY: "bd-key",
+      BRIGHT_DATA_ZONE: "marketmindai",
+    } as NodeJS.ProcessEnv);
+    expect(r.ok).toBe(true);
+    expect(r.missing).toHaveLength(0);
+    // checkEnv reports key names only (validateEnv carries the full
+    // "IGNORED since the P-6.12 Apify migration" message).
+    expect(r.warnings.some(w => w.startsWith("BRIGHT_DATA_"))).toBe(true);
+  });
+
+  it("BD key WITHOUT zone (formerly boot-fatal) → still boots ok", () => {
     const r = checkEnv({ ...DEV_BASE, BRIGHT_DATA_API_KEY: "bd-key" } as NodeJS.ProcessEnv);
-    expect(r.ok).toBe(false);
-    expect(r.missing).toContain("BRIGHT_DATA_ZONE");
-  });
-
-  it("ZONE without API_KEY → boot-fatal (all-or-nothing)", () => {
-    const r = checkEnv({ ...DEV_BASE, BRIGHT_DATA_ZONE: "marketmindai" } as NodeJS.ProcessEnv);
-    expect(r.ok).toBe(false);
-    expect(r.missing).toContain("BRIGHT_DATA_API_KEY");
-  });
-
-  it("both set → configured, boots ok", () => {
-    const r = checkEnv({ ...DEV_BASE, BRIGHT_DATA_API_KEY: "bd-key", BRIGHT_DATA_ZONE: "marketmindai" } as NodeJS.ProcessEnv);
     expect(r.ok).toBe(true);
     expect(r.missing).toHaveLength(0);
   });
 
-  it("malformed BRIGHT_DATA_COUNTRY → boot-fatal (never silently no-ops)", () => {
+  it("malformed BRIGHT_DATA_COUNTRY (formerly boot-fatal) → still boots ok, warned as ignored", () => {
     const r = checkEnv({
       ...DEV_BASE,
-      BRIGHT_DATA_API_KEY: "bd-key",
-      BRIGHT_DATA_ZONE: "marketmindai",
       BRIGHT_DATA_COUNTRY: "United States",
     } as NodeJS.ProcessEnv);
-    expect(r.ok).toBe(false);
-    expect(r.missing).toContain("BRIGHT_DATA_COUNTRY");
-  });
-
-  it("valid 2-letter BRIGHT_DATA_COUNTRY → ok", () => {
-    const r = checkEnv({
-      ...DEV_BASE,
-      BRIGHT_DATA_API_KEY: "bd-key",
-      BRIGHT_DATA_ZONE: "marketmindai",
-      BRIGHT_DATA_COUNTRY: "ae",
-    } as NodeJS.ProcessEnv);
     expect(r.ok).toBe(true);
+    expect(r.missing).toHaveLength(0);
+    expect(r.warnings.some(w => w.includes("BRIGHT_DATA_COUNTRY"))).toBe(true);
   });
 
   it("legacy BRIGHT_DATA_PROXY_* vars → warn-ignored, never fatal", () => {
     const r = checkEnv({
       ...DEV_BASE,
-      BRIGHT_DATA_API_KEY: "bd-key",
-      BRIGHT_DATA_ZONE: "marketmindai",
       BRIGHT_DATA_PROXY_USERNAME: "u",
       BRIGHT_DATA_PROXY_PASSWORD: "p",
       BRIGHT_DATA_PROXY_COUNTRY: "us",
     } as NodeJS.ProcessEnv);
     expect(r.ok).toBe(true);
-    expect(r.warnings.some(w => w.startsWith("BRIGHT_DATA_PROXY_USERNAME"))).toBe(true);
+    expect(r.warnings.some(w => w.includes("BRIGHT_DATA_PROXY_USERNAME"))).toBe(true);
   });
 });
 

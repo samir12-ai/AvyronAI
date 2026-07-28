@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import {
   sha256Hex,
   reviewIdHash,
@@ -103,10 +103,13 @@ describe("Seal #5 / F7.2 — SSRF defense", () => {
     await expect(resolveSafeUrl("file:///etc/passwd")).rejects.toThrow();
   });
 
-  it("website-scraper keeps the resolveSafeUrl SSRF gate on every Unlocker fetch (F7.2 source tripwire)", () => {
+  it("website-scraper keeps the resolveSafeUrl SSRF gate ahead of any transport (F7.2 source tripwire)", () => {
     const src = readFileSync(`${REPO}/server/market-intelligence-v3/website-scraper.ts`, "utf-8");
     expect(src).toMatch(/import .*resolveSafeUrl.*from.*scrape-safety/);
-    expect(src).toMatch(/await resolveSafeUrl\(opts\.url\)/);
+    // P-6.12: the gate runs on the normalized user URL BEFORE any provider
+    // dispatch (currently PROVIDER_PENDING — the gate must survive the
+    // provider swap so a future actor can never receive an unvetted URL).
+    expect(src).toMatch(/await resolveSafeUrl\(normalizedUrl\)/);
     // 2026-07 Unlocker rebuild: the pinnedLookup direct-fetch path is gone —
     // every request goes through poolFetch; no direct dispatcher may return.
     expect(src).not.toMatch(/pinnedLookup\(/);
@@ -390,16 +393,18 @@ describe("Seal #5 / F6.12 — Breaker wired into production call sites", () => {
     expect(src).toMatch(/throw new Error\(`BREAKER_OPEN: apify:default/);
   });
 
-  it("website fetchViaUnlocker gates on breaker + records success/failure (single Unlocker path)", () => {
+  it("P-6.12: website scraper has NO outbound transport — fails fast PROVIDER_PENDING (no breaker needed)", () => {
+    // The Unlocker poolFetch path is deleted. Until a website actor is
+    // verified, the scraper makes zero network calls and returns a
+    // machine-readable PROVIDER_PENDING failure — so there is no transport
+    // for a breaker to guard. Tripwires: no fetch/poolFetch/Unlocker remnants.
     const src = readFileSync(`${REPO}/server/market-intelligence-v3/website-scraper.ts`, "utf-8");
-    expect(src).toMatch(/isBreakerOpen\("website",\s*country\)/);
-    // 2026-07 Unlocker rebuild: ONE transport path (poolFetch). ≥1 success
-    // record and ≥2 failure records (HTTP 5xx + thrown transport error).
-    const successCount = (src.match(/recordBreakerSuccess\("website",\s*country\)/g) || []).length;
-    const failureCount = (src.match(/recordBreakerFailure\("website",\s*country\)/g) || []).length;
-    expect(successCount).toBeGreaterThanOrEqual(1);
-    expect(failureCount).toBeGreaterThanOrEqual(2);
-    expect(src).toMatch(/throw new Error\(`BREAKER_OPEN: website:\$\{country\}/);
+    expect(src).toContain("PROVIDER_PENDING");
+    // Doc comments may reference the retired transport by name; no CALL may.
+    expect(src).not.toMatch(/poolFetch\s*\(/);
+    expect(src).not.toMatch(/fetchViaUnlocker\s*\(/);
+    expect(src).not.toMatch(/\bawait fetch\s*\(/);
+    expect(src).not.toMatch(/isBreakerOpen/);
   });
 });
 
@@ -470,25 +475,32 @@ describe("Seal #5 / F6.7 — outbound HTTP timeouts (2026-07 Unlocker rebuild)",
     const src = readFileSync(`${REPO}/server/competitive-intelligence/tiktok-apify-scraper.ts`, "utf-8");
     expect(src).toMatch(/setTimeout\(\(\) => controller\.abort\(\), 15000\)/);
   });
-  it("website-scraper SCRAPE_TIMEOUT_MS is 60000 (Unlocker wall-clock)", () => {
+  it("P-6.12: website-scraper has no Unlocker wall-clock — no outbound HTTP exists (PROVIDER_PENDING)", () => {
     const src = readFileSync(`${REPO}/server/market-intelligence-v3/website-scraper.ts`, "utf-8");
-    expect(src).toMatch(/const SCRAPE_TIMEOUT_MS = 60000/);
+    expect(src).not.toMatch(/SCRAPE_TIMEOUT_MS/);
+    expect(src).not.toMatch(/\bawait fetch\s*\(/);
+    expect(src).toContain("PROVIDER_PENDING");
   });
-  it("reviews-scraper SCRAPE_TIMEOUT_MS is 60000 (Unlocker wall-clock)", () => {
+  it("P-6.12: reviews-scraper has no Unlocker wall-clock — no outbound HTTP exists (PROVIDER_PENDING)", () => {
     const src = readFileSync(`${REPO}/server/competitive-intelligence/reviews-scraper.ts`, "utf-8");
-    expect(src).toMatch(/const SCRAPE_TIMEOUT_MS = 60000/);
-    // negative: must NOT silently re-introduce the old 40s special-case
-    expect(src).not.toMatch(/const SCRAPE_TIMEOUT_MS = 40000/);
+    expect(src).not.toMatch(/SCRAPE_TIMEOUT_MS/);
+    expect(src).not.toMatch(/\bawait fetch\s*\(/);
+    expect(src).toContain("PROVIDER_PENDING");
   });
-  it("tiktok-scraper TIKTOK_SCRAPE_TIMEOUT_MS is 60000 (Unlocker wall-clock)", () => {
+  it("P-6.12: tiktok-scraper delegates transport to tiktok-apify-scraper (bounded 15s apifyFetch)", () => {
+    // The scraper itself performs no raw HTTP — the only transport is
+    // scrapeTiktokViaApify, whose apifyFetch enforces the 15s AbortController
+    // ceiling asserted above.
     const src = readFileSync(`${REPO}/server/competitive-intelligence/tiktok-scraper.ts`, "utf-8");
-    expect(src).toMatch(/const TIKTOK_SCRAPE_TIMEOUT_MS = 60000/);
-    expect(src).not.toMatch(/const TIKTOK_SCRAPE_TIMEOUT_MS = 45000/);
+    expect(src).not.toMatch(/TIKTOK_SCRAPE_TIMEOUT_MS/);
+    expect(src).not.toMatch(/\bawait fetch\s*\(/);
+    expect(src).toContain("scrapeTiktokViaApify");
   });
-  it("brightdata-client enforces a bounded wall-clock (never bare fetch)", () => {
-    const src = readFileSync(`${REPO}/server/competitive-intelligence/brightdata-client.ts`, "utf-8");
-    expect(src).toMatch(/BRIGHT_DATA_TIMEOUT_MS/);
-    expect(src).toMatch(/controller\.abort\(\)/);
+  it("P-6.12: brightdata-client is DELETED — zero callable Bright Data transport", () => {
+    expect(existsSync(`${REPO}/server/competitive-intelligence/brightdata-client.ts`)).toBe(false);
+    expect(existsSync(`${REPO}/server/competitive-intelligence/pool-config.ts`)).toBe(false);
+    expect(existsSync(`${REPO}/server/competitive-intelligence/pool-persistence.ts`)).toBe(false);
+    expect(existsSync(`${REPO}/server/competitive-intelligence/target-backoff.ts`)).toBe(false);
   });
 });
 

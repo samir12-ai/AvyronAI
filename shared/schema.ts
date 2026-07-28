@@ -2144,6 +2144,18 @@ export const ciCompetitorComments = pgTable("ci_competitor_comments", {
   isSynthetic: boolean("is_synthetic").notNull().default(false),
   source: varchar("source", { length: 64 }).default("scraped"),
   createdAt: timestamp("created_at").defaultNow(),
+  // ── P-6.12 Apify comment acquisition metadata (migration 054) ──────────
+  // NULL on all pre-migration rows (never retroactively relabelled).
+  /** 'owner' | 'audience' | 'unknown' — owner replies are stored but excluded from audience evidence reads. */
+  authorType: varchar("author_type", { length: 16 }),
+  likesCount: integer("likes_count"),
+  repliesCount: integer("replies_count"),
+  /** Apify actor run id — provenance + cost forensics. */
+  actorRunId: varchar("actor_run_id", { length: 80 }),
+  /** ACCEPTED | ACCEPTED_OWNER_REPLY | ACCEPTED_LOW_SIGNAL (rejects are never persisted). */
+  filterStatus: varchar("filter_status", { length: 24 }),
+  /** Machine-readable detail for LOW_SIGNAL acceptances (e.g. EMOJI_ONLY_GENERIC). */
+  filterReason: varchar("filter_reason", { length: 40 }),
 });
 
 export type CiCompetitorComment = typeof ciCompetitorComments.$inferSelect;

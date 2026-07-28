@@ -30,15 +30,23 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     expect(typeof budget.selectedMode).toBe("string");
   });
 
-  it("F6.2 — proxy pool registry exposes bound constants and LRU evict path", async () => {
+  it("F6.2 — P-6.12: proxy pool is a RETIRED shim (no registry, no sessions, no BD transport)", async () => {
+    // F6.2 bounded the pool registry. The pool no longer exists — the shim
+    // must hold no state at all (nothing to bound) and never construct a
+    // session.
     const src = await import("fs").then((fs) =>
       fs.promises.readFile("server/competitive-intelligence/proxy-pool-manager.ts", "utf8"),
     );
-    expect(src).toMatch(/MAX_POOLS\s*=\s*parseInt\(process\.env\.PROXY_MAX_POOLS/);
-    expect(src).toMatch(/MAX_STICKY_BINDINGS\s*=\s*parseInt\(process\.env\.PROXY_MAX_STICKY_BINDINGS\s*\|\|\s*"500"/);
-    expect(src).toMatch(/MAX_SESSIONS_PER_POOL\s*=\s*parseInt\(process\.env\.PROXY_MAX_SESSIONS_PER_POOL\s*\|\|\s*"100"/);
-    expect(src).toMatch(/POOL_TTL_MS\s*=\s*parseInt\(process\.env\.PROXY_POOL_TTL_MS/);
-    expect(src).toMatch(/new LRUCache<string,\s*AccountPool>/);
+    expect(src).toContain("RETIRED SHIM");
+    expect(src).not.toMatch(/new LRUCache/);
+    // The StickySessionContext TYPE keeps a poolFetch member for call-site
+    // compatibility, but no implementation may exist (no function body).
+    expect(src).not.toMatch(/function poolFetch|poolFetch\s*=\s*(async\s*)?\(/);
+    const mod = await import("../competitive-intelligence/proxy-pool-manager");
+    expect(mod.acquireStickySession("acct", "camp", "comp")).toBeNull();
+    const diag = mod.getPoolDiagnostics("acct");
+    expect(diag.totalSessions).toBe(0);
+    expect(diag.activeSessions).toBe(0);
   });
 
   it("F6.3 — db pool is configured with bounded max + statement_timeout", async () => {
@@ -226,9 +234,11 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     const src = await import("fs").then((fs) =>
       fs.promises.readFile("server/competitive-intelligence/data-acquisition.ts", "utf8"),
     );
-    // Architect-tightened to 45s default (env-overridable) — was 60s in pass-1.
+    // P-6.12: default raised 45s → 300s — Apify actor runs are minutes-long
+    // (comment actor live-verified at 13–315s), so a 45s watchdog would kill
+    // every healthy enrichment.
     expect(src).toMatch(/FETCH_WATCHDOG_TIMEOUT_MS\s*=\s*parseInt\(/);
-    expect(src).toMatch(/"45000"/);
+    expect(src).toMatch(/"300000"/);
     expect(src).toMatch(/interface ActiveFetch/);
     expect(src).toMatch(/abortController/);
     expect(src).toMatch(/export function cancelFetch/);
@@ -262,8 +272,8 @@ describe("Seal #11 — scaling & resilience contracts", () => {
     const { withWatchdog, FETCH_WATCHDOG_TIMEOUT_MS } = await import(
       "../competitive-intelligence/data-acquisition"
     );
-    // Sanity: env-tightened to 45s by default per architect requirement.
-    expect(FETCH_WATCHDOG_TIMEOUT_MS).toBe(45_000);
+    // Sanity: P-6.12 default is 300s (Apify actor runs are minutes-long).
+    expect(FETCH_WATCHDOG_TIMEOUT_MS).toBe(300_000);
 
     // Force a never-resolving promise; a tiny watchdog should win and
     // the abort signal should be raised, with no pending timer left.
@@ -363,37 +373,26 @@ describe("Seal #11 — scaling & resilience contracts", () => {
   // Pass-4 architect fixes
   // ---------------------------------------------------------------------
 
-  it("F6.2 (pass-6) — sticky bindings use lru-cache with 24h TTL + bounded size", async () => {
-    // Pass-6 architect rejection of pass-4: pool registry + per-pool
-    // sticky bindings now use lru-cache (strict max+ttl), not Map with
-    // opportunistic eviction.
-    const mod = await import("../competitive-intelligence/proxy-pool-manager");
-    expect(mod.STICKY_BINDING_TTL_MS).toBe(24 * 60 * 60 * 1000);
-
+  it("F6.2 (pass-6) — P-6.12: retired shim holds no sticky bindings and imports no lru-cache", async () => {
+    // The lru-cache bounded registry was the fix for unbounded pool growth.
+    // With the pool deleted, the invariant flips: the shim must hold ZERO
+    // state — no bindings, no registry, no lru-cache import.
     const fs = await import("fs");
     const src = await fs.promises.readFile(
       "server/competitive-intelligence/proxy-pool-manager.ts",
       "utf8",
     );
-    expect(src).toMatch(/import\s*\{\s*LRUCache\s*\}\s*from\s*"lru-cache"/);
-    expect(src).toMatch(/stickyBindings:\s*LRUCache<string,\s*string>/);
-    expect(src).toMatch(/new LRUCache<string,\s*string>\(\{[^}]*ttl:\s*STICKY_BINDING_TTL_MS/s);
-    expect(src).toMatch(/new LRUCache<string,\s*AccountPool>\(\{[^}]*max:\s*MAX_POOLS[^}]*ttl:\s*POOL_TTL_MS/s);
-  });
-
-  it("F6.2 (pass-6) — pool registry strictly evicts beyond max", async () => {
-    // Behavioral proof of strict LRU semantics: writing N+1 entries
-    // forces eviction of the LRU entry, regardless of recency of touches.
+    expect(src).not.toMatch(/from\s*"lru-cache"/);
+    // stickyBindings survives only as a zeroed diagnostics FIELD; no LRU
+    // cache of bindings may exist.
+    expect(src).not.toMatch(/stickyBindings:\s*LRUCache/);
     const mod = await import("../competitive-intelligence/proxy-pool-manager");
-    if (typeof mod._resetPoolsForTesting !== "function") return;
-    mod._resetPoolsForTesting();
-    // Force a small max via env override would require module reset;
-    // instead assert the size grows bounded by MAX_POOLS (10000 default
-    // — test by inserting 5 and verifying count == 5, not unbounded).
+    expect(mod.getPoolDiagnostics("any").stickyBindings).toBe(0);
+    // Repeated acquisition never accumulates state — always null.
     for (let i = 0; i < 5; i++) {
-      mod.acquireStickySession(`acct-${i}`, "camp", "comp");
+      expect(mod.acquireStickySession(`acct-${i}`, "camp", "comp")).toBeNull();
     }
-    expect(mod._poolCountForTesting()).toBeLessThanOrEqual(5);
+    expect(mod.getPoolStatusReport().activeAccountPools).toBe(0);
   });
 
   it("F6.8 (pass-4) — orphan grace gates on first_observed_at, not snapshot age", async () => {

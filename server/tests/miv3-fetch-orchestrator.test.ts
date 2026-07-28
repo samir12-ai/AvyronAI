@@ -1039,25 +1039,22 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
   });
 
   describe("O) Pagination & Cap Detection", () => {
-    it("scraper must attempt v1 feed pagination beyond 12-post ceiling", async () => {
+    it("P-6.12: v1 feed pagination ladder is RETIRED — one Apify actor run returns the full batch", async () => {
+      // The 12-post public-API ceiling + manual pagination existed because
+      // direct Instagram HTTP could only see one page. The Apify profile
+      // actor returns the requested batch in a single run, so the ladder
+      // must stay deleted (no direct IG endpoints can reappear).
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("TARGET_POSTS");
-      expect(source).toContain("MAX_PAGINATION_PAGES");
-      expect(source).toContain("INSTAGRAM_PUBLIC_API_CEILING");
-      expect(source).toContain("has_next_page");
-      expect(source).toContain("feed/user/");
-      expect(source).toContain("PaginationDiagnostics");
-      expect(source).toContain("V1_FEED_API");
+      expect(source).not.toContain("feed/user/");
+      expect(source).not.toContain("has_next_page");
+      expect(source).not.toContain("MAX_PAGINATION_PAGES");
+      expect(source).toContain("scrapeInstagramViaApify");
 
       const targetMatch = source.match(/const TARGET_POSTS\s*=\s*(\d+)/);
       expect(targetMatch).not.toBeNull();
       expect(parseInt(targetMatch![1])).toBe(12);
-
-      const ceilingMatch = source.match(/const INSTAGRAM_PUBLIC_API_CEILING\s*=\s*(\d+)/);
-      expect(ceilingMatch).not.toBeNull();
-      expect(parseInt(ceilingMatch![1])).toBe(12);
     });
 
     it("scraper must have explicit stop reason classification (no SINGLE_PAGE)", async () => {
@@ -1076,51 +1073,52 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("UNKNOWN_FAILURE");
     });
 
-    it("scraper must log full pagination diagnostics", async () => {
+    it("P-6.12: per-page pagination diagnostics are retired with the ladder", async () => {
+      // PAGE_1/FINAL audits instrumented the multi-page HTTP ladder. With a
+      // single actor run there are no pages to audit; the markers must stay
+      // deleted so log greps can never match phantom pagination.
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("PAGE_1 AUDIT");
-      expect(source).toContain("page1PostCount");
-      expect(source).toContain("page1HasNextPage");
-      expect(source).toContain("page1EndCursorPresent");
-      expect(source).toContain("page1HttpStatus");
-      expect(source).toContain("totalMediaCount");
-      expect(source).toContain("paginationAttempted");
-      expect(source).toContain("paginationMethod");
-      expect(source).toContain("paginationHttpStatus");
-      expect(source).toContain("paginationErrorDetail");
-      expect(source).toContain("FINAL_AUDIT");
+      expect(source).not.toContain("PAGE_1 AUDIT");
+      expect(source).not.toContain("FINAL_AUDIT");
+      expect(source).not.toContain("paginationAttempted");
     });
 
-    it("scraper must use pool-managed sticky sessions for pagination continuity", async () => {
+    it("P-6.12: sticky proxy sessions are retired — actor manages its own proxies", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("proxyCtx?.session.sessionId");
-      expect(source).toContain("proxyCtx ? proxyCtx.poolFetch(url) : poolFetch(url)");
+      expect(source).not.toContain("proxyCtx?.session.sessionId");
+      expect(source).not.toContain("poolFetch(url)");
       expect(source).not.toContain("getSessionDispatcher");
       expect(source).not.toContain("getProxyDispatcher");
     });
 
-    it("scraper must deduplicate posts via seenIds", async () => {
+    it("P-6.12: post dedup lives in data-acquisition (existingPostIds + DB onConflictDoNothing)", async () => {
+      // The scraper-side seenIds set deduped across pagination pages, which
+      // no longer exist. Dedup is now enforced where it is durable: against
+      // ALREADY-PERSISTED post IDs plus the DB unique index.
       const source = await import("fs").then(fs =>
-        fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
+        fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      expect(source).toContain("seenIds");
-      expect(source).toContain("seenIds.has");
-      expect(source).toContain("seenIds.add");
+      expect(source).toContain("existingPostIds.has(post.postId)");
+      expect(source).toContain("existingPostIds.add(post.postId)");
+      expect(source).toMatch(/tx\.insert\(ciCompetitorPosts\)\.values\(postRow\)\.onConflictDoNothing\(\)/);
     });
 
-    it("scraper must parse v1 feed API format (parsePostFromV1Feed)", async () => {
+    it("P-6.12: v1 feed parser is deleted — field mapping lives in instagram-apify-scraper", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("parsePostFromV1Feed");
-      expect(source).toContain("item.code");
-      expect(source).toContain("item.caption?.text");
-      expect(source).toContain("item.like_count");
-      expect(source).toContain("item.comment_count");
+      expect(source).not.toContain("parsePostFromV1Feed");
+      expect(source).not.toContain("parsePostFromGraphQL");
+      const apifySource = await import("fs").then(fs =>
+        fs.readFileSync("server/competitive-intelligence/instagram-apify-scraper.ts", "utf-8")
+      );
+      expect(apifySource).toContain("caption:");
+      expect(apifySource).toContain("likes:");
+      expect(apifySource).toContain("comments:");
     });
 
     it("fetch result must include rawFetchedCount and paginationStopReason", async () => {
@@ -1132,12 +1130,15 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("paginationStopReason");
     });
 
-    it("comment generator must produce enough to approach 50 threshold", async () => {
+    it("P-6.12: comment-actor sampling capacity can reach the 50-comment threshold", async () => {
+      // Synthetic generation is retired; REAL comment capacity comes from the
+      // Apify comment actor across sampled posts. The deep-pass caps must
+      // still multiply to >= 50 so MIN_COMMENTS_THRESHOLD stays reachable.
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/data-acquisition.ts", "utf-8")
       );
-      const maxCommentPostsMatch = source.match(/const MAX_COMMENT_POSTS\s*=\s*(\d+)/);
-      const maxCommentsPerPostMatch = source.match(/const MAX_COMMENTS_PER_POST\s*=\s*(\d+)/);
+      const maxCommentPostsMatch = source.match(/MAX_COMMENT_POSTS_DEEP\s*=\s*(\d+)/);
+      const maxCommentsPerPostMatch = source.match(/MAX_COMMENTS_PER_POST_DEEP\s*=\s*(\d+)/);
       expect(maxCommentPostsMatch).not.toBeNull();
       expect(maxCommentsPerPostMatch).not.toBeNull();
       const maxPossible = parseInt(maxCommentPostsMatch![1]) * parseInt(maxCommentsPerPostMatch![1]);
@@ -1172,15 +1173,12 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(source).toContain("persistedPostCount >= postsTarget");
     });
 
-    it("REGRESSION GUARD: paginationAttempted must be true when has_next_page is true", async () => {
+    it("P-6.12: pagination-attempt regression guard retired with the ladder (no phantom markers)", async () => {
       const source = await import("fs").then(fs =>
         fs.readFileSync("server/competitive-intelligence/profile-scraper.ts", "utf-8")
       );
-      expect(source).toContain("paginationAttempted");
-      const attemptBlock = source.slice(source.indexOf("paginationAttempted = true"), source.indexOf("paginationAttempted = true") + 200);
-      expect(attemptBlock).toBeTruthy();
-      expect(source).toContain("has_next_page=true. Attempting v1 feed pagination");
-      expect(source).toContain("diag.paginationAttempted = true");
+      expect(source).not.toContain("paginationAttempted");
+      expect(source).not.toContain("has_next_page=true. Attempting v1 feed pagination");
     });
 
     it("REGRESSION GUARD: no path silently accepts 12 posts as sufficient", async () => {
@@ -2168,9 +2166,12 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(dataAcqSource).toContain("isDuplicate");
     });
 
-    it("FP-12) FAST_PASS skips synthetic comment generation (real embedded comments still stored)", () => {
+    it("FP-12) P-6.12: FAST_PASS still defers comment work — but there is no synthetic path to skip", () => {
+      // FAST_PASS gating survives (comment-actor spend deferred to DEEP_PASS);
+      // the synthetic-generation branch it used to skip is deleted outright.
       expect(dataAcqSource).toContain('collectionMode !== "FAST_PASS"');
-      expect(dataAcqSource).toContain("FAST_PASS: Skipping synthetic comment generation");
+      expect(dataAcqSource).not.toContain("FAST_PASS: Skipping synthetic comment generation");
+      expect(dataAcqSource).not.toContain("isSynthetic: true");
     });
 
     it("FP-13) recoverStuckDeepPass respects enrichmentStatus", () => {
@@ -2193,9 +2194,11 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(coverageFn).toContain("newestPost");
     });
 
-    it("FP-15) Synthetic comments tagged as synthetic and excluded from real signal counts", () => {
-      expect(dataAcqSource).toContain("isSynthetic: true");
-      expect(dataAcqSource).toContain('source: "synthetic_enrichment"');
+    it("FP-15) P-6.12: synthetic generation retired — every insert is real, real-signal checks intact", () => {
+      expect(dataAcqSource).not.toContain("isSynthetic: true");
+      expect(dataAcqSource).not.toContain('source: "synthetic_enrichment"');
+      expect(dataAcqSource).toContain('source: "real_scrape"');
+      // Real-data sufficiency checks still filter on isSynthetic=false.
       expect(dataAcqSource).toContain("isSynthetic, false");
     });
 
@@ -2881,52 +2884,38 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(scraperSource).toContain("embeddedComments");
     });
 
-    it("EC-2) extractCommentsFromNode extracts from edge_media_to_comment, edge_media_to_parent_comment, edge_media_preview_comment", () => {
-      expect(scraperSource).toContain("edge_media_to_parent_comment");
-      expect(scraperSource).toContain("edge_media_to_comment");
-      expect(scraperSource).toContain("edge_media_preview_comment");
+    // P-6.12: embedded-comment extraction is RETIRED. The Apify profile actor
+    // returns no comment threads (live-verified), so the GraphQL/v1-feed
+    // comment-edge parsers and the embedded persistence paths are deleted.
+    // Comments now arrive EXCLUSIVELY via the comment actor + unified filter.
+    it("EC-2..4) P-6.12: comment-edge parsers deleted from profile-scraper", () => {
+      expect(scraperSource).not.toContain("edge_media_to_parent_comment");
+      expect(scraperSource).not.toContain("edge_media_to_comment");
+      expect(scraperSource).not.toContain("edge_media_preview_comment");
+      expect(scraperSource).not.toContain("preview_comments");
     });
 
-    it("EC-3) extractCommentsFromNode also reads preview_comments (v1 feed format)", () => {
-      expect(scraperSource).toContain("preview_comments");
-      expect(scraperSource).toContain("comment_text");
-    });
-
-    it("EC-4) extractCommentsFromNode deduplicates by commentId", () => {
-      expect(scraperSource).toContain("seenIds.has(cid)");
-    });
-
-    it("EC-5) attemptWebProfileApi returns embeddedComments in return type", () => {
+    it("EC-5) P-6.12: embeddedComments survives only as an always-empty compat field", () => {
+      // Type shape kept so consumers compile; every constructor site is [].
       expect(scraperSource).toContain("embeddedComments: ScrapedComment[]");
-      expect(scraperSource).toContain("EMBEDDED_COMMENTS");
+      expect(scraperSource).toContain("embeddedComments: []");
+      expect(scraperSource).not.toContain("EMBEDDED_COMMENTS");
     });
 
-    it("EC-6) data-acquisition persists embedded comments as isSynthetic=false", () => {
-      expect(dataAcqSource).toContain("embeddedComments");
-      expect(dataAcqSource).toContain('isSynthetic: false');
-      expect(dataAcqSource).toContain('source: "embedded_preview"');
+    it("EC-6..9) P-6.12: embedded persistence paths deleted — comment actor is the only comment source", () => {
+      expect(dataAcqSource).not.toContain('source: "embedded_preview"');
+      expect(dataAcqSource).not.toContain('source: "embedded_preview_deeppass"');
+      expect(dataAcqSource).not.toContain("EMBEDDED_COMMENTS:");
+      expect(dataAcqSource).not.toContain("postsWithRealComments");
+      expect(dataAcqSource).toContain("scrapeCommentsForPosts");
+      expect(dataAcqSource).toContain('source: "real_scrape"');
     });
 
-    it("EC-7) embedded comments are persisted during ALL passes (not just DEEP_PASS)", () => {
-      const embeddedSection = dataAcqSource.indexOf("EMBEDDED_COMMENTS:");
-      const fastPassCheck = dataAcqSource.indexOf('collectionMode !== "FAST_PASS"');
-      expect(embeddedSection).toBeGreaterThan(-1);
-      expect(fastPassCheck).toBeGreaterThan(-1);
-      expect(embeddedSection).toBeLessThan(fastPassCheck);
-    });
-
-    it("EC-8) synthetic comments skip posts that already have real embedded comments", () => {
-      expect(dataAcqSource).toContain("postsWithRealComments");
-      expect(dataAcqSource).toContain("!postsWithRealComments.has(p.postId)");
-    });
-
-    it("EC-9) enrichCompetitorWithComments attempts profile re-scrape for embedded comments", () => {
-      expect(dataAcqSource).toContain("profile re-scrape for embedded comments");
-      expect(dataAcqSource).toContain('source: "embedded_preview_deeppass"');
-    });
-
-    it("EC-10) embedded comment dedup uses commentId to prevent duplicates", () => {
-      expect(dataAcqSource).toContain("existingCommentIds.has(rc.commentId)");
+    it("EC-10) P-6.12: comment dedup by platform ID enforced via unified filter seed + DB constraint", () => {
+      // The old per-callsite existingCommentIds check moved into the unified
+      // filter (seenCommentIds pre-seeded from DB) + onConflictDoNothing.
+      expect(dataAcqSource).toContain("seenCommentIds: existingCIds");
+      expect(dataAcqSource).toMatch(/insert\(ciCompetitorComments\)[\s\S]{0,200}onConflictDoNothing/);
     });
 
     it("EC-11) schema includes commentId and username columns for real comment attribution", () => {
@@ -2935,9 +2924,10 @@ describe("MIv3 Fetch Orchestrator — Torture Tests", () => {
       expect(schemaSource).toContain('username: varchar("username"');
     });
 
-    it("EC-12) FAST_PASS stores embedded comments but skips synthetic generation", () => {
-      expect(dataAcqSource).toContain("FAST_PASS: Skipping synthetic comment generation");
-      expect(dataAcqSource).toContain("real comments already stored");
+    it("EC-12) P-6.12: no pass fabricates comments — synthetic generation deleted outright", () => {
+      expect(dataAcqSource).not.toContain("FAST_PASS: Skipping synthetic comment generation");
+      expect(dataAcqSource).not.toContain("isSynthetic: true");
+      expect(dataAcqSource).toContain("generateSyntheticCommentSamples RETIRED");
     });
   });
 

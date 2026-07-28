@@ -2111,7 +2111,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
 
       db.select({ commentText: ciCompetitorComments.commentText, competitorId: ciCompetitorComments.competitorId })
         .from(ciCompetitorComments)
-        .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL)`)
+        .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL) AND ${ciCompetitorComments.authorType} IS DISTINCT FROM 'owner'`)
         .orderBy(desc(ciCompetitorComments.createdAt))
         .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE),
 

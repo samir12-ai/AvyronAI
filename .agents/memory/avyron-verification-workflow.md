@@ -9,6 +9,10 @@ description: How to typecheck and how to verify orchestrator/engine behaviour in
 - The project carries a **large pre-existing tsc error baseline** (hundreds of errors, e.g. in `server/audience-engine`). Judge your change by **net-new errors in the files you touched**, never by the absolute count. Snapshot the baseline before editing, compare after.
 - `npm run lint` is currently broken here — enforce doctrine (D1 no `??`/`||` on decision values, D3 `z.enum`) by targeted `rg` on the lines you changed instead.
 
+- **Line-shift false positives when diffing tsc baselines:** `comm`/`diff` on raw `file:line: error` lines flags pre-existing errors as net-new whenever an edit shifts line numbers (or union ordering changes nondeterministically). Compare **message-text sets** (strip `file(line,col)` prefixes, sort -u) before declaring a regression.
+- `checkEnv` (used by tests) truncates each warning to its **first whitespace token** (`w.split(" ")[0]`); only `validateEnv` carries full messages. Tests asserting on warning text must use `startsWith(<first-token>)`, not full-message matching.
+- **Negative tripwire regexes must use call/implementation form**, not bare identifiers: type signatures, doc comments, and retirement markers legitimately retain retired names. Grep for `identifier\(` / `function identifier` / import statements — a bare-name grep makes "prove X is gone" tests permanently red.
+
 # Behavioural verification without a full orchestrator run
 
 **Why:** a real orchestrator/boss run needs Postgres, Bright Data proxies, live scrapers, and multi-minute per-engine timeouts — not reproducible in a dev shell.

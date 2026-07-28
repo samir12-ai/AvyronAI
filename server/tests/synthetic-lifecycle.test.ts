@@ -95,35 +95,31 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       expect(commentTable).toContain('"scraped"');
     });
 
-    it("2.3) At least one synthetic comment insert sets isSynthetic=true", () => {
+    it("2.3) P-6.12: NO comment insert path sets isSynthetic=true (synthetic generation retired)", () => {
+      // Pre-P-6.12 this asserted a synthetic insert path existed. The Apify
+      // migration deleted synthetic comment generation entirely — every
+      // remaining insert must be a REAL scraped comment.
       const source = readSource();
       const insertBlocks = source.split("commentInserts.push({");
       const insertCount = insertBlocks.length - 1;
-      expect(insertCount).toBeGreaterThanOrEqual(2);
-      const syntheticBlocks = [];
+      expect(insertCount).toBeGreaterThanOrEqual(1);
       for (let i = 1; i < insertBlocks.length; i++) {
-        const block = insertBlocks[i].slice(0, 400);
-        if (block.includes("isSynthetic: true")) {
-          syntheticBlocks.push(block);
-        }
+        const block = insertBlocks[i].slice(0, 600);
+        expect(block).not.toContain("isSynthetic: true");
+        expect(block).toContain("isSynthetic: false");
       }
-      expect(syntheticBlocks.length).toBeGreaterThanOrEqual(1);
+      expect(source).not.toContain("isSynthetic: true");
     });
 
-    it("2.4) generateSyntheticCommentSamples prefixes ALL comments with [synthetic] or [synthetic-]", () => {
+    it("2.4) P-6.12: generateSyntheticCommentSamples is deleted (retired loudly, not silently)", () => {
       const source = readSource();
-      const fnStart = source.indexOf("function generateSyntheticCommentSamples");
-      const fnEnd = source.indexOf("\n}", fnStart + 100);
-      const fnBody = source.slice(fnStart, fnEnd + 2);
-      expect(fnBody).toContain("[synthetic]");
-      expect(fnBody).toContain("[synthetic-");
-      const pushCount = (fnBody.match(/samples\.push/g) || []).length;
-      expect(pushCount).toBeGreaterThanOrEqual(3);
-      const textAssignments = fnBody.match(/text:\s*[`"'][^`"']*|text:\s*prefixed/g) || [];
-      for (const ta of textAssignments) {
-        const hasPrefix = ta.includes("[synthetic") || ta.includes("prefixed");
-        expect(hasPrefix).toBe(true);
-      }
+      // The function must not exist — only the retirement doc-comment may
+      // reference its name.
+      expect(source).not.toMatch(/function generateSyntheticCommentSamples/);
+      expect(source).toContain("generateSyntheticCommentSamples RETIRED");
+      // No synthetic comment text fabrication anywhere.
+      expect(source).not.toContain("[synthetic]");
+      expect(source).not.toMatch(/samples\.push/);
     });
 
     it("2.5) Audience engine filters synthetic at DB level (isSynthetic=false)", () => {
@@ -292,11 +288,11 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       expect(insertMatches.length).toBe(2);
     });
 
-    it("6.7) Synthetic insert paths set isSynthetic=true", () => {
+    it("6.7) P-6.12: no insert path can mark a comment synthetic (generation retired)", () => {
       const source = readSource();
-      const insertBlocks = source.split("tx.insert(ciCompetitorComments)");
-      expect(insertBlocks.length).toBeGreaterThanOrEqual(3);
-      expect(source).toContain("isSynthetic: true");
+      // Both remaining insert paths persist REAL comments only.
+      expect(source).not.toContain("isSynthetic: true");
+      expect(source).toContain("isSynthetic: false");
     });
   });
 
@@ -349,10 +345,14 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       expect(realCheckIdx).toBeLessThan(alreadyEnrichedIdx);
     });
 
-    it("7.6) enrichCompetitorWithComments records lastSyntheticEnrichmentAt on successful enrichment", () => {
+    it("7.6) P-6.12: enrichCompetitorWithComments stamps lastSyntheticEnrichmentAt as the actor-spend cooldown pacer", () => {
+      // Repurposed post-migration: the stamp now paces PAID Apify comment-actor
+      // runs (cooldown between real-scrape enrichments), not synthetic
+      // regeneration. The synthetic churn counter is no longer incremented —
+      // nothing synthetic is generated.
       const fnBody = getEnrichBody();
       expect(fnBody).toContain("lastSyntheticEnrichmentAt: new Date()");
-      expect(fnBody).toContain("syntheticEnrichmentCount:");
+      expect(fnBody).not.toContain("syntheticEnrichmentCount:");
     });
 
     it("7.7) detectHighSyntheticChurn function uses lastSyntheticEnrichmentAt for rolling window", () => {
@@ -366,12 +366,15 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       expect(fnBody).not.toContain("createdAt: Date");
     });
 
-    it("7.8) enrichCompetitorWithComments flags HIGH_SYNTHETIC_CHURN when churn detected", () => {
+    it("7.8) P-6.12: enrich no longer flags churn (nothing synthetic regenerates); cleanup still reads historical flags", () => {
+      // Churn detection guarded against synthetic regeneration loops. With
+      // generation retired, the enrich path cannot churn — but the cleanup
+      // diagnostics still surface competitors flagged on historical data.
       const fnBody = getEnrichBody();
-      expect(fnBody).toContain("HIGH_SYNTHETIC_CHURN");
-      expect(fnBody).toContain("detectHighSyntheticChurn");
-      expect(fnBody).toContain("syntheticChurnFlag");
-      expect(fnBody).toContain("CHURN_WARNING");
+      expect(fnBody).not.toContain("detectHighSyntheticChurn");
+      const source = readSource();
+      expect(source).toContain("HIGH_SYNTHETIC_CHURN");
+      expect(source).toContain("syntheticChurnFlag");
     });
 
     it("7.9) Schema has lastSyntheticEnrichmentAt, syntheticEnrichmentCount, and syntheticChurnFlag columns", () => {
@@ -486,8 +489,11 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
     });
 
     it("8.4) Comment sampling prioritizes engagement then recency", () => {
+      // P-6.12: sampling now lives in enrichCompetitorWithComments
+      // (postsNeedingComments selection feeding the Apify comment actor).
       const source = readSource();
-      const fetchFnStart = source.indexOf("if (collectionMode !== \"FAST_PASS\")");
+      const fetchFnStart = source.indexOf("postsNeedingComments = storedPosts");
+      expect(fetchFnStart).toBeGreaterThan(-1);
       const fetchFnBody = source.slice(fetchFnStart, fetchFnStart + 1000);
       expect(fetchFnBody).toContain("engA");
       expect(fetchFnBody).toContain("engB");
@@ -510,9 +516,12 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       expect(skipBlock).toContain("Post collection skipped");
     });
 
-    it("8.6) Fast Pass still skips synthetic comment generation", () => {
+    it("8.6) P-6.12: synthetic comment generation does not exist on ANY pass", () => {
+      // Stronger than the old FAST_PASS-only skip: the generator is deleted,
+      // so no collection mode can fabricate comments.
       const source = readSource();
-      expect(source).toContain("FAST_PASS: Skipping synthetic comment generation");
+      expect(source).not.toMatch(/function generateSyntheticCommentSamples/);
+      expect(source).not.toContain("isSynthetic: true");
     });
 
     it("8.7) MIN_COMMENTS_THRESHOLD remains at 50 for Deep Pass qualification", () => {
@@ -530,9 +539,11 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
     });
 
     it("8.9) Comment sampling filters out posts with no engagement and empty captions", () => {
+      // P-6.12: a single sampling site remains (the Apify comment-actor
+      // enrichment path) — the old profile re-scrape sampler is gone.
       const source = readSource();
       const sortBlocks = source.split("postsNeedingComments = ");
-      expect(sortBlocks.length).toBeGreaterThanOrEqual(3);
+      expect(sortBlocks.length).toBeGreaterThanOrEqual(2);
       for (let i = 1; i < sortBlocks.length; i++) {
         const block = sortBlocks[i].slice(0, 400);
         expect(block).toContain("caption");
@@ -579,26 +590,39 @@ describe("Synthetic Comment Lifecycle — Deep Pass Integrity", () => {
       expect(source).toContain("repeated_chars");
     });
 
-    it("12.7) Spam filter applied to FAST_PASS embedded comments", () => {
+    it("12.7) P-6.12: embedded-preview comment paths are gone (profile actor returns no comment threads)", () => {
+      // Pre-migration, FAST_PASS/DEEP_PASS could ingest comments embedded in
+      // profile scrapes, each with its own spam-filter call site. The Apify
+      // profile actor returns no comment threads, so those paths no longer
+      // exist — comments arrive ONLY via the comment actor + unified filter.
       const source = readSource();
-      expect(source).toContain("SPAM_FILTER: Filtered");
-      expect(source).toContain("spam comments from embedded preview");
+      expect(source).not.toContain("spam comments from embedded preview");
+      expect(source).not.toContain("spam from DEEP_PASS embedded");
     });
 
-    it("12.8) Spam filter applied to DEEP_PASS embedded comments", () => {
+    it("12.8) P-6.12: unified acquisition filter is applied to comment-actor output", () => {
       const source = readSource();
-      expect(source).toContain("spam from DEEP_PASS embedded");
+      expect(source).toContain('await import("../acquisition/comment-filter")');
+      expect(source).toContain("filterComments(");
+      expect(source).toContain("COMMENT_FILTER:");
+      expect(source).toContain("formatFilterStats(stats)");
     });
 
-    it("12.9) Spam filter applied to DEEP_PASS direct scrape", () => {
+    it("12.9) P-6.12: filter decisions are persisted per comment (filterStatus/filterReason/authorType)", () => {
       const source = readSource();
-      expect(source).toContain("spam from DEEP_PASS direct scrape");
+      const insertIdx = source.indexOf("commentInserts.push({");
+      expect(insertIdx).toBeGreaterThan(-1);
+      const insertBlock = source.slice(insertIdx, insertIdx + 700);
+      expect(insertBlock).toContain("authorType: decision.authorType");
+      expect(insertBlock).toContain("filterStatus: decision.status");
+      expect(insertBlock).toContain("filterReason: decision.reason");
+      expect(insertBlock).toContain("actorRunId");
     });
 
     it("12.10) Comment distribution diagnostic is logged", () => {
       const source = readSource();
       expect(source).toContain("COMMENT_DISTRIBUTION:");
-      expect(source).toContain("posts with comments");
+      expect(source).toContain("posts with new comments");
     });
 
     it("12.11) filterSpamComments returns spamReasons breakdown", () => {

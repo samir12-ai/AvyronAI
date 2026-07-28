@@ -12,15 +12,6 @@ import { db } from "./db";
 import { userPublicProfiles, userChannelSnapshots } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { scrapeWebsite } from "./market-intelligence-v3/website-scraper";
-import {
-  acquireStickySession,
-  releaseStickySession,
-  rotateSessionOnBlock,
-  classifyBlock,
-  getRetryDelay,
-  logProxyTelemetry,
-  type StickySessionContext,
-} from "./competitive-intelligence/proxy-pool-manager";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -235,7 +226,7 @@ function computeDelta(
   };
 }
 
-// ── Instagram scraper (with proxy pool enforcement) ───────────────────────────
+// ── Instagram scraper (Apify actor transport — proxy pool retired P-6.12) ─────
 
 /**
  * P-2: returns the snapshot AND the raw per-post scrape results so the
@@ -260,80 +251,15 @@ export async function scrapeInstagramChannel(
   const maxPosts = isFirstScrape ? INITIAL_SCRAPE_MAX_POSTS : INCREMENTAL_SCRAPE_MAX_POSTS;
   const scrapeMode: "INITIAL" | "INCREMENTAL" = isFirstScrape ? "INITIAL" : "INCREMENTAL";
 
-  // ── Acquire sticky proxy session ──────────────────────────────────────────
-  let proxyCtx: StickySessionContext | null = null;
-  try {
-    proxyCtx = acquireStickySession(accountId, campaignId, `user_ig:${handle}`);
-    if (proxyCtx) {
-      console.log(`[UserChannelScraper] Proxy session acquired: session=${proxyCtx.session.sessionId} handle=@${handle} mode=${scrapeMode}`);
-    } else {
-      console.warn(`[UserChannelScraper] No proxy session available for @${handle} — proceeding without proxy`);
-    }
-  } catch (err: any) {
-    console.warn(`[UserChannelScraper] Failed to acquire proxy session for @${handle}: ${err.message}`);
-    proxyCtx = null;
-  }
+  // P-6.12: sticky proxy sessions / rotation retired with Bright Data. The
+  // Apify actor is the single transport; a failed run is TRANSIENT and simply
+  // retried on the next pacing cycle (no session to rotate).
+  const startMs = Date.now();
+  const result = await scrapeInstagramProfile(handle, undefined, maxPosts, accountId);
+  console.log(`[UserChannelScraper] Scrape complete: handle=@${handle} mode=${scrapeMode} posts=${result.posts.length} durationMs=${Date.now() - startMs}`);
 
-  let result: Awaited<ReturnType<typeof scrapeInstagramProfile>> | null = null;
-
-  try {
-    const startMs = Date.now();
-
-    // ── First attempt ─────────────────────────────────────────────────────
-    result = await scrapeInstagramProfile(handle, proxyCtx ?? undefined, maxPosts, accountId, { allowApifyFallback: true });
-
-    if (proxyCtx) {
-      logProxyTelemetry(
-        proxyCtx,
-        "USER_CHANNEL_SCRAPE",
-        200,
-        null,
-        Date.now() - startMs,
-        result.posts.length > 0,
-      );
-    }
-
-    // ── Block detection & rotation ────────────────────────────────────────
-    if (result.posts.length === 0 && isBlockWarning(result.warnings) && proxyCtx) {
-      const blockClass = classifyBlock(null, result.warnings.join(" "));
-      console.warn(`[UserChannelScraper] Block detected for @${handle}: class=${blockClass} warnings=${result.warnings.join(", ")}`);
-
-      if (proxyCtx) {
-        logProxyTelemetry(proxyCtx, "USER_CHANNEL_SCRAPE_BLOCKED", null, blockClass, Date.now() - startMs, false);
-      }
-
-      const rotated = rotateSessionOnBlock(proxyCtx, blockClass);
-      if (rotated) {
-        console.log(`[UserChannelScraper] Session rotated → new session=${rotated.session.sessionId} attempt=${rotated.attemptNumber}`);
-        proxyCtx = rotated;
-
-        await getRetryDelay(rotated.attemptNumber);
-
-        const retryMs = Date.now();
-        result = await scrapeInstagramProfile(handle, proxyCtx, maxPosts, accountId, { allowApifyFallback: true });
-        logProxyTelemetry(
-          proxyCtx,
-          "USER_CHANNEL_SCRAPE_RETRY",
-          200,
-          result.posts.length > 0 ? null : blockClass,
-          Date.now() - retryMs,
-          result.posts.length > 0,
-        );
-        console.log(`[UserChannelScraper] Retry result: posts=${result.posts.length} success=${result.success}`);
-      } else {
-        console.warn(`[UserChannelScraper] Session rotation denied or max retries reached for @${handle}`);
-      }
-    }
-  } finally {
-    // ── Always release proxy session ──────────────────────────────────────
-    if (proxyCtx) {
-      try {
-        releaseStickySession(proxyCtx);
-        console.log(`[UserChannelScraper] Proxy session released: session=${proxyCtx.session.sessionId} handle=@${handle}`);
-      } catch (releaseErr: any) {
-        console.warn(`[UserChannelScraper] Failed to release proxy session for @${handle}: ${releaseErr.message}`);
-      }
-    }
+  if (result.posts.length === 0 && isBlockWarning(result.warnings)) {
+    console.warn(`[UserChannelScraper] Block-like warnings for @${handle}: ${result.warnings.join(", ")} — will retry on next pacing cycle`);
   }
 
   if (!result || (!result.success && result.posts.length === 0)) {

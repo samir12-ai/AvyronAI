@@ -93,26 +93,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(403).json({ error: "ADMIN_ONLY" });
     }
     try {
-      // 2026-07 Unlocker rebuild: transport is the Bright Data Unlocker REST
-      // API (no proxy host/port/CONNECT tunnel to probe). Connectivity test
-      // goes through the pool manager's single client choke point.
-      const { getScrapingConfig, testScrapingConnectivity } = await import("./competitive-intelligence/proxy-pool-manager");
-      if (!getScrapingConfig()) {
+      // P-6.12 Apify migration (2026-07-28): acquisition transport is Apify
+      // actors. Connectivity test authenticates against the Apify API through
+      // the acquisition client's single choke point.
+      const { testApifyConnectivity, isApifyAcquisitionConfigured } = await import("./acquisition/apify-client");
+      if (!isApifyAcquisitionConfigured()) {
         return res.json({
           status: "NOT_CONFIGURED",
-          message: "Bright Data Unlocker API not configured — scraping is safe-off (SCRAPING_UNCONFIGURED)",
+          message: "Apify not configured — acquisition is safe-off (every scrape fails fast, nothing fabricates data)",
           configured: false,
-          requiredSecrets: ["BRIGHT_DATA_API_KEY", "BRIGHT_DATA_ZONE"],
-          optionalSecrets: ["BRIGHT_DATA_COUNTRY"],
+          requiredSecrets: ["APIFY_API_KEY"],
+          optionalSecrets: [],
           tests: [],
         });
       }
 
-      const result = await testScrapingConnectivity();
+      const result = await testApifyConnectivity();
       res.json({
         status: result.ok ? "HEALTHY" : "UNHEALTHY",
         configured: true,
-        transport: "Bright Data Unlocker API",
+        transport: "Apify actor API",
         ...result,
         timestamp: new Date().toISOString(),
       });
