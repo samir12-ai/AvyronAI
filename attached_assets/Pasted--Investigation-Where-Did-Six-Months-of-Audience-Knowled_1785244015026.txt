@@ -1,0 +1,143 @@
+# Investigation — Where Did Six Months of Audience Knowledge Go?
+
+Do NOT implement any fixes.
+
+Do NOT design new architecture.
+
+Do NOT add Persistent Beliefs yet.
+
+This is a forensic investigation only.
+
+---
+
+## Context
+
+The Audience Engine has existed since the beginning of the project.
+
+The MarketMindAI campaign has existed for months.
+
+Competitor posts, classifications, and historical intelligence already exist.
+
+Yet the latest review concludes that there is **no validated audience baseline** to carry forward.
+
+Before changing the architecture, we must determine whether this is a real design limitation or a data/history problem.
+
+---
+
+## Mission
+
+Trace the complete lifecycle of Audience knowledge from the first day of the project until today.
+
+Determine exactly where the historical audience intelligence disappeared.
+
+---
+
+## Questions
+
+### 1. Was Audience knowledge ever persisted?
+
+Search the entire codebase.
+
+Determine whether:
+
+* approved_objections
+* approved_audience_pains
+* audience beliefs
+* audience snapshots
+
+were ever written to persistent storage.
+
+Show:
+
+* writer modules
+* reader modules
+* database tables
+* file paths
+
+---
+
+### 2. What happened to the historical data?
+
+Verify whether historical Audience knowledge:
+
+* still exists,
+* was overwritten,
+* was deleted,
+* was never generated,
+* was excluded during restore,
+* was lost during migrations.
+
+Support every conclusion with evidence.
+
+---
+
+### 3. Restore Verification
+
+Inspect:
+
+* restored database
+* migrations
+* strategy_roots
+* audience-related tables
+
+Determine whether the restore preserved all historical Audience intelligence.
+
+If data disappeared,
+
+identify exactly when and why.
+
+---
+
+### 4. Read Path Verification
+
+If historical Audience beliefs still exist,
+
+verify whether the current Audience Engine actually reads them.
+
+Determine whether this is simply a broken read path.
+
+---
+
+### 5. Historical Reconstruction
+
+If six months of historical data still exists somewhere:
+
+Can the current system reconstruct the validated Audience baseline without introducing new architecture?
+
+If yes,
+
+identify exactly which existing data would be reused.
+
+Do NOT implement reconstruction.
+
+---
+
+### 6. Final Root Cause
+
+Choose exactly one conclusion:
+
+* Audience knowledge exists but is not being read.
+* Audience knowledge was lost during restore or migration.
+* Audience knowledge was overwritten.
+* Audience knowledge was never persisted.
+* Another root cause (provide evidence).
+
+Do not speculate.
+
+Every conclusion must reference the actual codebase and database.
+
+---
+
+## Deliverables
+
+Return:
+
+1. Complete Audience knowledge lifecycle.
+2. Persistence timeline.
+3. Restore verification.
+4. Database evidence.
+5. Code evidence.
+6. Root cause.
+7. Minimal fix (if needed).
+
+Do NOT propose Persistent Market Beliefs until you prove where the original six months of Audience knowledge went.
