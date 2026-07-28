@@ -212,6 +212,32 @@ export interface MarketSnapshotResponse {
   adoption: MarketAdoptionSeries[];
 }
 
+// ── Market insight (AI Interpretation Layer — grounded, judge-approved) ──────
+export interface MarketInsightResponse {
+  success: true;
+  state: "ready";
+  source: "ai" | "deterministic";
+  headline: string;
+  narrative: string;
+  signalGroups: Array<{ title: string; signals: string[]; observation: string }>;
+  strongestObservations: string[];
+  uncertainObservations: string[];
+  generatedAt: string;
+  windowDays: number;
+  basedOn: { confirmedShifts: number; posts: number; competitors: number };
+}
+
+export function useMarketInsight(campaignId: string | null | undefined, windowDays: 7 | 30 | 90 = 30) {
+  const active = useIsAppActive();
+  return useQuery<MarketInsightResponse>({
+    queryKey: ["/api/perception/market-insight", campaignId, windowDays],
+    queryFn: () => fetchJson<MarketInsightResponse>(`/api/perception/market-insight?campaignId=${campaignId}&window=${windowDays}`),
+    enabled: !!campaignId,
+    staleTime: 15 * 60_000,          // server reuses insight via payload fingerprint; poll gently
+    refetchInterval: active ? 15 * 60_000 : false,
+  });
+}
+
 export function useMarketSnapshot(campaignId: string | null | undefined, windowDays: 7 | 30 | 90 = 30) {
   const active = useIsAppActive();
   return useQuery<MarketSnapshotResponse>({

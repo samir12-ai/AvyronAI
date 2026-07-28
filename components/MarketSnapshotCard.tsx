@@ -15,6 +15,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-nati
 import { Feather } from '@expo/vector-icons';
 import {
   useMarketSnapshot,
+  useMarketInsight,
   type MarketInsight,
   type MarketPattern,
 } from '@/hooks/usePerception';
@@ -115,6 +116,64 @@ function PatternRow({ pattern, direction, isDark }: { pattern: MarketPattern; di
   );
 }
 
+// ── analyst read (AI Interpretation Layer — judge-approved or deterministic) ─
+function AnalystRead({ campaignId, isDark }: { campaignId: string | null | undefined; isDark: boolean }) {
+  const { data } = useMarketInsight(campaignId, 30);
+  const [expanded, setExpanded] = useState(false);
+  const textPrimary = isDark ? '#E8EDF2' : '#1A2332';
+  const textSec     = isDark ? '#8892A4' : '#546478';
+  const blockBg     = isDark ? 'rgba(76, 154, 255, 0.07)' : 'rgba(76, 154, 255, 0.05)';
+  const blockBorder = isDark ? 'rgba(76, 154, 255, 0.22)' : 'rgba(76, 154, 255, 0.18)';
+
+  if (!data?.success || !data.narrative) return null;
+
+  const hasDetail =
+    data.signalGroups.length > 0 || data.strongestObservations.length > 0 || data.uncertainObservations.length > 0;
+
+  return (
+    <Pressable onPress={() => hasDetail && setExpanded(!expanded)} disabled={!hasDetail}>
+      <View style={[styles.analystBlock, { backgroundColor: blockBg, borderColor: blockBorder }]}>
+        <View style={styles.rowHead}>
+          <View style={styles.rowHeadLeft}>
+            <Feather name={data.source === 'ai' ? 'cpu' : 'file-text'} size={12} color="#4C9AFF" />
+            <Text style={[styles.analystTag, { color: '#4C9AFF' }]}>
+              {data.source === 'ai' ? 'Analyst read · grounded in verified signals' : 'Verified summary'}
+            </Text>
+          </View>
+          {hasDetail && <Feather name={expanded ? 'chevron-up' : 'chevron-down'} size={13} color={textSec} />}
+        </View>
+        {data.headline ? (
+          <Text style={[styles.analystHeadline, { color: textPrimary }]}>{data.headline}</Text>
+        ) : null}
+        <Text style={[styles.analystNarrative, { color: textPrimary }]}>{data.narrative}</Text>
+
+        {expanded && (
+          <View style={styles.expandBlock}>
+            {data.signalGroups.map((g, i) => (
+              <View key={i} style={styles.analystGroup}>
+                <Text style={[styles.analystGroupTitle, { color: textPrimary }]}>{g.title}</Text>
+                <Text style={[styles.evidenceText, { color: textSec }]}>{g.observation}</Text>
+              </View>
+            ))}
+            {data.strongestObservations.length > 0 && (
+              <Text style={[styles.analystSectionLabel, { color: textSec }]}>Best supported</Text>
+            )}
+            {data.strongestObservations.map((s, i) => (
+              <Text key={`s-${i}`} style={[styles.evidenceText, { color: textSec }]}>• {s}</Text>
+            ))}
+            {data.uncertainObservations.length > 0 && (
+              <Text style={[styles.analystSectionLabel, { color: textSec }]}>Still uncertain</Text>
+            )}
+            {data.uncertainObservations.map((s, i) => (
+              <Text key={`u-${i}`} style={[styles.evidenceText, { color: textSec }]}>• {s}</Text>
+            ))}
+          </View>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
 // ── main card ─────────────────────────────────────────────────────────────────
 export default function MarketSnapshotCard({ campaignId, isDark }: { campaignId: string | null | undefined; isDark: boolean }) {
   const { data, isLoading } = useMarketSnapshot(campaignId, 30);
@@ -173,6 +232,9 @@ export default function MarketSnapshotCard({ campaignId, isDark }: { campaignId:
           Limited data this period ({data.totalPosts} classified posts) — treat shares as directional.
         </Text>
       )}
+
+      {/* Analyst read — AI interpretation of verified signals (or deterministic summary). */}
+      <AnalystRead campaignId={campaignId} isDark={isDark} />
 
       {/* Emerging / declining patterns first — the movement is the news. */}
       {data.emerging.map((p, i) => (
@@ -237,4 +299,11 @@ const styles = StyleSheet.create({
   patternDelta: { fontSize: 13, fontWeight: '700' },
   showMore: { fontSize: 12, fontWeight: '600', textAlign: 'center', paddingVertical: 4 },
   footer: { fontSize: 10, lineHeight: 14, marginTop: 2 },
+  analystBlock: { borderRadius: 10, borderWidth: 1, padding: 11, gap: 5 },
+  analystTag: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  analystHeadline: { fontSize: 13, fontWeight: '700' },
+  analystNarrative: { fontSize: 12, lineHeight: 17 },
+  analystGroup: { gap: 2, marginBottom: 4 },
+  analystGroupTitle: { fontSize: 12, fontWeight: '700' },
+  analystSectionLabel: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 4 },
 });

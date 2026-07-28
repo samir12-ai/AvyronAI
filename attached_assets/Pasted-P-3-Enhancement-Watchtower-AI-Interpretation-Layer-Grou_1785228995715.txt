@@ -1,0 +1,346 @@
+P-3 Enhancement — Watchtower AI Interpretation Layer (Grounded by Code)
+
+The Watchtower Truth Engine is now complete.
+
+It correctly performs:
+
+* Semantic shift detection
+* Distribution intelligence
+* Market scope detection
+* Adoption analysis
+* Emerging pattern detection
+* Declining pattern detection
+* Dominant pattern detection
+
+All of these are deterministic and must remain the single source of truth.
+
+Do NOT replace any deterministic calculations.
+
+Do NOT move business logic into the LLM.
+
+Instead, build an AI Interpretation Layer that sits ABOVE the verified Watchtower signals.
+
+==================================================
+Architecture
+============
+
+The architecture must become:
+
+Apify
+
+↓
+
+ci_competitor_posts
+
+↓
+
+competitor_post_classifications
+
+↓
+
+Watchtower Truth Engine
+
+↓
+
+Verified Market Signals
+
+↓
+
+AI Market Analyst (LLM)
+
+↓
+
+Grounding / Quality Judge
+
+↓
+
+Customer Insight
+
+The LLM is NOT responsible for discovering market changes.
+
+The LLM is ONLY responsible for interpreting already-verified market signals.
+
+==================================================
+
+1. Inputs to the LLM
+   ==================================================
+
+The LLM must never receive raw competitor posts.
+
+The LLM must never analyze captions directly.
+
+The LLM must receive only structured, verified Watchtower output.
+
+Example payload:
+
+* Time window
+* Campaign
+* Competitor count
+* Scope
+* Severity
+* Confidence
+* Evidence count
+* Semantic dimension
+* Previous market share
+* Current market share
+* Adoption rate
+* Growth
+* Acceleration
+* Emerging patterns
+* Declining patterns
+* Dominant patterns
+* Related semantic shifts
+
+Include enough structured evidence for reasoning.
+
+==================================================
+2. AI Responsibilities
+======================
+
+The AI should answer questions such as:
+
+What overall market story do these signals tell?
+
+Which signals appear connected?
+
+Which changes appear independent?
+
+What business behavior might explain the observed changes?
+
+Are multiple semantic shifts reinforcing the same market direction?
+
+Which observations are strongest?
+
+Which observations remain uncertain?
+
+The AI should synthesize.
+
+It should NOT calculate.
+
+==================================================
+3. Forbidden Behaviors
+======================
+
+The AI must never:
+
+Invent numbers
+
+Invent competitors
+
+Invent trends
+
+Change deterministic values
+
+Upgrade single_competitor into market_wide
+
+Downgrade market_wide
+
+Ignore confidence
+
+Ignore insufficient_history
+
+Claim causation without evidence
+
+Recommend strategy
+
+The output must remain an observation.
+
+==================================================
+4. Grounding Judge
+==================
+
+Every AI interpretation must pass a judge.
+
+The judge should verify:
+
+Grounded in supplied evidence
+
+No fabricated statistics
+
+No fabricated competitors
+
+No unsupported causal claims
+
+No contradiction with deterministic data
+
+No strategic recommendations
+
+Useful
+
+Readable
+
+Non-template
+
+If rejected:
+
+Return the deterministic summary instead.
+
+Never expose rejected AI output.
+
+==================================================
+5. Insight Quality
+==================
+
+Avoid template outputs such as:
+
+"Question hooks increased."
+
+Instead produce reasoning similar to:
+
+"The market appears to be moving toward more conversion-oriented messaging. The increase in question-based hooks is occurring alongside stronger adoption of customer-proof narratives, suggesting competitors are trying to shorten the path between attention and trust. While this convergence is statistically significant, the available evidence does not yet establish that these changes improved commercial outcomes."
+
+Every statement must be supported by deterministic evidence.
+
+==================================================
+6. Signal Grouping
+==================
+
+The AI should connect related signals.
+
+Example:
+
+Question Hooks
+
+*
+
+Customer Proof
+
+*
+
+Urgency
+
+↓
+
+One market observation
+
+instead of three isolated observations.
+
+==================================================
+7. Live Campaign Validation
+===========================
+
+Run against the existing live campaign.
+
+Use:
+
+MarketMindAI
+
+Current production classifications already exist.
+
+Generate:
+
+Verified Market Snapshot
+
+↓
+
+AI Interpretation
+
+↓
+
+Judge Evaluation
+
+↓
+
+Final Customer Insight
+
+Verify that:
+
+The AI references only verified signals.
+
+The judge catches unsupported claims.
+
+The final insight is grounded.
+
+==================================================
+8. Controlled Validation
+========================
+
+Run controlled deterministic scenarios.
+
+Scenario A
+
+Multiple unrelated shifts.
+
+Expected:
+
+AI explains they are independent.
+
+Scenario B
+
+Several reinforcing shifts.
+
+Expected:
+
+AI identifies one coherent market movement.
+
+Scenario C
+
+insufficient_history
+
+Expected:
+
+AI explicitly states that trend confidence is limited.
+
+Scenario D
+
+Inject a deliberately hallucinated interpretation.
+
+Expected:
+
+Judge rejects it.
+
+Fallback returns deterministic summary.
+
+==================================================
+9. Performance
+==============
+
+The deterministic Watchtower remains the source of truth.
+
+The LLM executes only after:
+
+Confirmed market signals exist.
+
+Do not invoke the LLM for every scrape.
+
+Prefer triggering when:
+
+Confirmed semantic shifts
+
+Market-wide adoption
+
+Major emerging patterns
+
+Strong declining patterns
+
+Meaningful signal groups
+
+Maintain existing deterministic performance.
+
+==================================================
+10. Deliverable
+===============
+
+Return:
+
+1. Architecture changes.
+2. AI payload structure.
+3. Prompt design.
+4. Judge rules.
+5. Files modified.
+6. Live MarketMindAI validation.
+7. Controlled validation results.
+8. Hallucination rejection test.
+9. Performance impact.
+10. Remaining gaps.
+11. PASS / FAIL.
+
+PASS only if:
+
+* Deterministic Watchtower remains the single source of truth.
+* The AI performs interpretation only.
+* The judge blocks hallucinations and unsupported claims.
+* Live MarketMindAI produces a grounded customer insight.
+* The fallback mechanism works correctly.
+* No strategic recommendations are generated.
+* The final customer output is materially more insightful than deterministic templates while remaining fully evidence-based.

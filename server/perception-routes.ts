@@ -44,6 +44,7 @@ import {
   computeMarketDistributionSnapshot,
   normalizeWindow,
 } from "./watchtower/distribution-intelligence";
+import { getMarketInsight, toCustomerInsightPayload } from "./watchtower/ai-market-analyst";
 import { eq, and, desc, gte, sql, count, ne, max, inArray, isNotNull } from "drizzle-orm";
 import {
   translateQ1Verdict,
@@ -1121,5 +1122,36 @@ export function registerPerceptionRoutes(app: Express) {
     }
   });
 
-  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals, GET /api/perception/market-snapshot");
+  // -------------------------------------------------------------------------
+  // GET /api/perception/market-insight?campaignId=...&window=30
+  //
+  // AI Interpretation Layer (P-3 Enhancement, grounded by code). Interprets
+  // ONLY verified Watchtower signals (confirmed shifts + distribution
+  // intelligence) — never raw posts. Every AI output passes deterministic
+  // grounding guards + an LLM judge; rejected output is replaced by the
+  // deterministic summary and never exposed. Observations only.
+  //
+  // Cached by payload fingerprint — unchanged signals never re-invoke the LLM.
+  // -------------------------------------------------------------------------
+  app.get("/api/perception/market-insight", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const windowDays = normalizeWindow(req.query.window);
+
+      const insight = await getMarketInsight(campaignId, accountId, windowDays);
+
+      // Customer-safe: toCustomerInsightPayload structurally strips internal
+      // telemetry (deterministicReason) — never serialize `insight` directly.
+      return res.json({
+        success: true,
+        state: "ready",
+        ...toCustomerInsightPayload(insight),
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} market-insight failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "MARKET_INSIGHT_FAILED" });
+    }
+  });
+
+  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals, GET /api/perception/market-snapshot, GET /api/perception/market-insight");
 }
