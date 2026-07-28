@@ -1,0 +1,125 @@
+P-6.1 Live Validation Continuation — Enable Approved Strategic Plan & Complete Production Validation
+
+The previous P-6 validation concluded that the architecture is sound, but two production stages never executed because the live campaign was not eligible for scheduler execution.
+
+This phase is NOT a new feature.
+
+It is NOT a redesign.
+
+Its only purpose is to complete the missing production validation.
+
+## Objective
+
+Use the existing live MarketMindAI campaign.
+
+Generate or approve a Strategic Plan using the existing planning pipeline so the campaign becomes eligible for the scheduler.
+
+Do not fabricate events.
+
+Do not bypass business logic unless required purely for validation and clearly documented.
+
+The goal is to validate the real production pipeline exactly as paying customers would experience it.
+
+---
+
+## Phase 1 — Strategic Plan
+
+Create (or approve) a valid Strategic Plan for the live campaign using the existing implementation.
+
+Verify:
+
+* Campaign status becomes eligible.
+* Scheduler recognizes the campaign.
+* No manual database edits are required unless documented.
+* Approval follows the normal production flow.
+
+---
+
+## Phase 2 — Watchtower Execution
+
+Run Watchtower normally.
+
+Verify:
+
+* Boss run executes.
+* Semantic change detection executes.
+* Candidate events are created.
+* Confirmation logic executes.
+* Market signals are persisted.
+* Noise filtering works.
+* Severity calculation works.
+* Market scope works.
+* Duplicate prevention works.
+
+Document:
+
+* Number of semantic events.
+* Number of confirmed events.
+* Number rejected.
+* Number ignored.
+
+---
+
+## Phase 3 — AI Market Analyst
+
+After Watchtower completes:
+
+Verify:
+
+* AI interpretation runs.
+* Evidence registry is complete.
+* Every insight is grounded.
+* Judge validation succeeds.
+* No hallucinations.
+* Customer insights remain explainable.
+
+---
+
+## Phase 4 — Memory Validation
+
+Confirm:
+
+Market Memory receives only meaningful snapshots.
+
+No duplicate fingerprints.
+
+Reasoning lineage remains intact.
+
+Historical references remain valid.
+
+---
+
+## Phase 5 — Performance Loop
+
+If sufficient production truth data exists:
+
+Run one complete Performance Cycle.
+
+Otherwise:
+
+State exactly which production inputs are still missing (sales, leads, truth window, etc.) and stop without fabricating data.
+
+Do NOT simulate customer outcomes.
+
+---
+
+## Deliverables
+
+Return:
+
+1. Watchtower execution report.
+2. Scheduler execution report.
+3. Market signal statistics.
+4. AI Market Analyst validation.
+5. Memory validation.
+6. Performance Loop status.
+7. Remaining blockers (if any).
+8. Final verdict:
+
+* READY FOR DECISION ENGINE
+
+or
+
+* NOT READY
+
+Only use a NOT READY verdict if a real production blocker still exists after Watchtower has executed successfully.
