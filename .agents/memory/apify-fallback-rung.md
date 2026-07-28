@@ -24,3 +24,6 @@ Two separate leak channels, both must be handled:
 # Verification note
 
 A completed-run gate on `posts.length === 0` (not catch-only) is required when upstream rungs can transport-succeed with 0 posts (Unlocker intercepting IG internal APIs returns synthesized 200/400s).
+
+## No comment fallback exists (P-6.10, 2026-07-28)
+`apify~instagram-profile-scraper` returns `commentsCount`/`isCommentsDisabled` only; `latestComments` is always `[]` and `firstComment` always `""` (verified against live raw output). The comment-scrape 3-rung ladder rides Bright Data ONLY — since ~Jul 19 (client_10020 empty-200s) comment collection is fleet-wide dead with no fallback rung. Restoring comments needs a comments-capable actor (e.g. instagram-comment-scraper), not the profile actor.

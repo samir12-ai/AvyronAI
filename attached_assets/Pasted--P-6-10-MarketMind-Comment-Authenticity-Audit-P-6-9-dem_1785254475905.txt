@@ -1,0 +1,137 @@
+# P-6.10 MarketMind Comment Authenticity Audit
+
+P-6.9 demonstrated that the recalibrated Audience model works correctly when real audience evidence exists.
+
+Before making any architectural decisions, verify that MarketMind is receiving **real audience comments**.
+
+Do not modify any code.
+
+Do not change the confidence model.
+
+Do not change SGL.
+
+Do not implement fixes.
+
+This is an evidence audit only.
+
+---
+
+# Mission
+
+Determine whether the comments currently stored and used by MarketMind are genuine public Instagram comments or whether there is a problem in the acquisition pipeline.
+
+---
+
+# Part 1 — Database Audit
+
+Audit the comments currently stored in the production database.
+
+For every sampled competitor:
+
+Determine:
+
+* Total comments stored.
+* Number of unique comments.
+* Number of duplicated comments.
+* Number of deleted/empty comments.
+* Number of placeholder/system-generated comments.
+* Number of AI-generated or synthetic comments (if any).
+* Average comments per post.
+* Earliest and latest comment timestamps.
+
+Determine whether the stored comments represent real public engagement.
+
+---
+
+# Part 2 — Ground Truth Verification
+
+Select one active Instagram competitor currently monitored by MarketMind.
+
+Open several recent posts manually.
+
+Compare:
+
+Instagram Public Comments
+
+↓
+
+Comments stored in MarketMind
+
+Verify:
+
+* Comment count
+* Comment text
+* Author usernames
+* Timestamps
+* Ordering
+
+Measure the accuracy.
+
+---
+
+# Part 3 — Live Apify Verification
+
+Run a fresh live scrape using the **same Apify actor and production configuration** currently used by MarketMind.
+
+Do not use historical data.
+
+Do not use cached data.
+
+Scrape comments from the selected competitor.
+
+Return:
+
+* Number of posts processed.
+* Number of comments returned.
+* Raw Apify output.
+* Whether comments are included.
+* Whether usernames are included.
+* Whether timestamps are included.
+* Any missing fields.
+
+---
+
+# Part 4 — Pipeline Comparison
+
+Compare:
+
+```text
+Instagram
+
+↓
+
+Apify Output
+
+↓
+
+MarketMind Database
+```
+
+Identify exactly where comments are lost, if they are lost.
+
+Determine whether:
+
+* Instagram has no comments.
+* Apify does not return comments.
+* MarketMind ignores them.
+* Database persistence fails.
+* Filtering removes them.
+
+Support every conclusion with evidence.
+
+---
+
+# Part 5 — Final Verdict
+
+Answer:
+
+1. Are the comments currently used by MarketMind real?
+2. Does the Apify service successfully return comments today?
+3. Is the current production comment pipeline functioning correctly?
+4. If comments are missing, identify the exact stage where they disappear.
+
+Do not recommend fixes.
+
+Do not speculate.
+
+Return only evidence-backed conclusions.

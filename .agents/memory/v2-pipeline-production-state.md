@@ -24,3 +24,6 @@ Synthetic audit accounts (`intel_audit_v1_*`) are test fixtures, not real campai
 ## Remaining gaps before full 15-engine completion
 - Iteration: user must set `primaryKpi` + `dataWindowDays` on the campaign
 - C2: needs more scraped data (comments especially) before audience engine can proceed
+
+## Comment inventory (P-6.10 audit, 2026-07-28)
+All 104 stored comments (C1 only, scraped Apr 2–May 12 2026) verified authentic: IG-native comment pks 104/104, 85 distinct real usernames (4/4 live-verified), 0 synthetic/placeholder/fabricated-id rows. Comment-creation `timestamp` is NULL on every row (rung that succeeded carried no created_at). C2's 0 comments = dead transport, not quiet audience (IG reported 1135 comments on its posts). Report: `.local/validation/p6.10-comment-authenticity-audit.md`.

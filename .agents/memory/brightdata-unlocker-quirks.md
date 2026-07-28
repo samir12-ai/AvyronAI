@@ -33,3 +33,6 @@ description: Provider-level behaviors of the Bright Data Unlocker REST API that 
 
 ## Secret onboarding: detect identical re-pastes
 - A user can "re-save" a secret several times without changing it (stale clipboard, or submitting the dialog empty keeps the old value). Verify with a sha256 fingerprint of the env value (never print the value) — identical fp across saves proves the store is unchanged. Env propagation itself is near-instant (verifiable with a throwaway env var). Breaking the loop: direct the user to the Secrets tab where they can SEE the stored value while editing.
+
+## client_10020 = zone-level empty-200 (P-6.10, 2026-07-28)
+When the Unlocker refuses an IG endpoint it returns HTTP 200 with a **0-byte body** and header `x-brd-err-code: client_10020` — scrapers see `Unexpected end of JSON input`, not a block status. Confirmed live on all three IG comment endpoints (GraphQL query_hash, `?__a=1&__d=dis`, post HTML). Diagnose transport by dumping status + headers + byte count, never by parse errors alone.
