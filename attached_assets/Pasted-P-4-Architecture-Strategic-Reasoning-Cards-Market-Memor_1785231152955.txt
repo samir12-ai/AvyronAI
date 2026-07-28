@@ -1,0 +1,222 @@
+P-4 Architecture — Strategic Reasoning Cards & Market Memory
+
+The Watchtower is now complete.
+
+Its responsibility ends after producing grounded Market Insights.
+
+Do NOT add strategic reasoning inside the Watchtower.
+
+Instead, build a new layer called:
+
+Strategic Reasoning Layer
+
+==================================================
+Architecture
+============
+
+Watchtower
+
+↓
+
+Verified Market Insights
+
+↓
+
+Performance Loop Insights
+
+↓
+
+Business Context
+
+↓
+
+Historical Market Memory
+
+↓
+
+Strategic Reasoning Engine
+
+↓
+
+Reasoning Cards
+
+The Reasoning Layer is responsible for connecting multiple intelligence sources into one coherent business interpretation.
+
+==================================================
+
+1. Inputs
+   ==================================================
+
+The Reasoning Engine must combine:
+
+• Watchtower Market Insights
+
+• Performance Loop outcomes
+
+• Historical Performance Memory
+
+• Historical Market Memory
+
+• Company profile
+
+• Competitor context
+
+• Current business objectives
+
+No raw posts.
+
+No raw classifications.
+
+Only verified outputs from upstream engines.
+
+==================================================
+2. Responsibilities
+===================
+
+The Reasoning Engine should answer:
+
+Why does this matter?
+
+Why now?
+
+Who is affected?
+
+What evidence supports this?
+
+How does this compare with previous market behavior?
+
+Has this happened before?
+
+Is this temporary or recurring?
+
+Is this relevant to this company?
+
+What signals reinforce each other?
+
+==================================================
+3. Market Memory
+================
+
+Every validated Market Insight should be stored.
+
+Store:
+
+Timestamp
+
+Campaign
+
+Window
+
+Signal groups
+
+Dominant themes
+
+Emerging themes
+
+Declining themes
+
+Market movement summary
+
+Confidence
+
+Evidence references
+
+This creates a long-term market history.
+
+==================================================
+4. Historical Reasoning
+=======================
+
+The engine should detect recurring behaviors.
+
+Examples:
+
+"This market moved toward conversion messaging three times during the past twelve months."
+
+"Educational messaging consistently returns after seasonal promotional campaigns."
+
+"The current shift resembles the movement detected in March."
+
+Historical comparisons must rely only on stored Market Memory.
+
+==================================================
+5. Reasoning Cards
+==================
+
+Generate customer-facing cards such as:
+
+Market Direction
+
+Market Momentum
+
+Recurring Pattern
+
+Strategic Context
+
+Competitive Pressure
+
+Evidence Summary
+
+Confidence
+
+Uncertainty
+
+Each card must cite the evidence used.
+
+==================================================
+6. Grounding
+============
+
+Every card must reference:
+
+Market Insight IDs
+
+Performance Insight IDs
+
+Historical Memory IDs
+
+The engine must never invent evidence.
+
+==================================================
+7. Validation
+=============
+
+Run against the live MarketMindAI campaign.
+
+Verify:
+
+Historical memory updates correctly.
+
+Reasoning references historical events.
+
+Cards remain grounded.
+
+No unsupported conclusions.
+
+==================================================
+8. Deliverables
+===============
+
+Return:
+
+Architecture
+
+Memory schema
+
+Reasoning flow
+
+Card definitions
+
+Validation
+
+Live campaign results
+
+PASS / FAIL
+
+PASS only if:
+
+* Watchtower remains focused on market observation.
+* Reasoning combines multiple intelligence layers.
+* Historical Market Memory enables comparisons across time.
+* Every card is fully evidence-based.
+* No strategic recommendations are generated at this layer.

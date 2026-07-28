@@ -49,7 +49,7 @@ const ADVISORY_LOCK_KEY = 8675309;
  * Boot reads schema_migrations.last_applied_version; if < REQUIRED, refuses
  * to serve. This prevents a v1.7 binary from starting against a v1.6 DB.
  */
-export const REQUIRED_SCHEMA_VERSION = 50;
+export const REQUIRED_SCHEMA_VERSION = 52;
 
 interface RunnerOptions {
   /** Defaults to DATABASE_URL. */

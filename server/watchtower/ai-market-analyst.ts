@@ -39,6 +39,7 @@ import {
   translateSignalSeverity,
   humanizeSemanticValue,
 } from "../../shared/perception-translator";
+import { recordMarketInsight } from "../strategic-reasoning/market-memory";
 
 const LOG = "[AIMarketAnalyst]";
 const ANALYST_MODEL = "gpt-4.1-mini";
@@ -575,6 +576,15 @@ export async function getMarketInsight(
       console.error(`${LOG} LLM_FAILED campaign=${campaignId} detail=${(err as Error).message}`);
       insight = { ...buildDeterministicSummary(bundle), deterministicReason: "llm_failed" };
     }
+  }
+
+  // P-4 Market Memory: persist every fresh validated insight (deduped by the
+  // same content fingerprint). Persistence failure must never block serving
+  // the customer insight, but must be loudly visible to operators.
+  try {
+    await recordMarketInsight({ campaignId, accountId, fingerprint, insight, bundle });
+  } catch (err) {
+    console.error(`${LOG} MEMORY_WRITE_FAILED campaign=${campaignId} detail=${(err as Error).message}`);
   }
 
   // Bounded fingerprint cache.

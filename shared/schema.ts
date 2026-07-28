@@ -3716,3 +3716,49 @@ export const scrapeTargetBackoff = pgTable(
 );
 
 export type ScrapeTargetBackoffRow = typeof scrapeTargetBackoff.$inferSelect;
+
+// ── market_memory (migration 051 — P-4 Strategic Reasoning Layer) ────────────
+// Long-term historical record of validated Watchtower Market Insights.
+// One row per unique signal-content fingerprint per campaign+window; the
+// Strategic Reasoning Engine reads this table (and ONLY verified upstream
+// outputs) to compare current market behavior against history. JSON payloads
+// use text columns per house convention.
+export const marketMemory = pgTable(
+  "market_memory",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    windowDays: integer("window_days").notNull(),
+    windowFrom: timestamp("window_from").notNull(),
+    windowTo: timestamp("window_to").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    source: text("source").notNull(), // 'ai' | 'deterministic'
+    headline: text("headline").notNull(),
+    narrative: text("narrative").notNull(),
+    signalGroups: text("signal_groups").notNull().default("[]"),
+    dominantThemes: text("dominant_themes").notNull().default("[]"),
+    emergingThemes: text("emerging_themes").notNull().default("[]"),
+    decliningThemes: text("declining_themes").notNull().default("[]"),
+    confirmedShifts: text("confirmed_shifts").notNull().default("[]"),
+    confidence: text("confidence").notNull(), // high | medium | low
+    dataStatus: text("data_status").notNull(), // ok | thin
+    basedOn: text("based_on").notNull().default("{}"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    fingerprintUniq: uniqueIndex("market_memory_fingerprint_uniq").on(
+      table.accountId,
+      table.campaignId,
+      table.windowDays,
+      table.fingerprint,
+    ),
+    campaignIdx: index("market_memory_campaign_idx").on(
+      table.campaignId,
+      table.windowDays,
+      table.createdAt,
+    ),
+  }),
+);
+
+export type MarketMemoryRow = typeof marketMemory.$inferSelect;

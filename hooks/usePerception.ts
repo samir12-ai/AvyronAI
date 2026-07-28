@@ -238,6 +238,43 @@ export function useMarketInsight(campaignId: string | null | undefined, windowDa
   });
 }
 
+// ── Strategic Reasoning Cards (P-4 — evidence-cited, judge-approved) ─────────
+export interface ReasoningCardItem {
+  cardType:
+    | "market_direction"
+    | "market_momentum"
+    | "recurring_pattern"
+    | "strategic_context"
+    | "competitive_pressure"
+    | "evidence_summary"
+    | "confidence"
+    | "uncertainty";
+  title: string;
+  body: string;
+  evidenceRefs: string[];
+  confidence: "high" | "medium" | "low";
+}
+
+export interface ReasoningCardsResponse {
+  success: true;
+  state: "ready" | "no_history";
+  source: "ai" | "deterministic";
+  cards: ReasoningCardItem[];
+  evidence: Array<{ ref: string; type: string; label: string }>;
+  generatedAt: string;
+}
+
+export function useReasoningCards(campaignId: string | null | undefined) {
+  const active = useIsAppActive();
+  return useQuery<ReasoningCardsResponse>({
+    queryKey: ["/api/perception/reasoning-cards", campaignId],
+    queryFn: () => fetchJson<ReasoningCardsResponse>(`/api/perception/reasoning-cards?campaignId=${campaignId}`),
+    enabled: !!campaignId,
+    staleTime: 30 * 60_000,          // server reuses cards via context fingerprint
+    refetchInterval: active ? 30 * 60_000 : false,
+  });
+}
+
 export function useMarketSnapshot(campaignId: string | null | undefined, windowDays: 7 | 30 | 90 = 30) {
   const active = useIsAppActive();
   return useQuery<MarketSnapshotResponse>({

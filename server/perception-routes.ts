@@ -45,6 +45,7 @@ import {
   normalizeWindow,
 } from "./watchtower/distribution-intelligence";
 import { getMarketInsight, toCustomerInsightPayload } from "./watchtower/ai-market-analyst";
+import { getReasoningCards, toCustomerReasoningPayload } from "./strategic-reasoning/engine";
 import { eq, and, desc, gte, sql, count, ne, max, inArray, isNotNull } from "drizzle-orm";
 import {
   translateQ1Verdict,
@@ -1153,5 +1154,25 @@ export function registerPerceptionRoutes(app: Express) {
     }
   });
 
-  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals, GET /api/perception/market-snapshot, GET /api/perception/market-insight");
+  // -------------------------------------------------------------------------
+  // GET /api/perception/reasoning-cards?campaignId=...
+  //
+  // P-4 Strategic Reasoning Layer. Combines verified Watchtower insights,
+  // Performance Loop outcomes, historical market memory, company profile,
+  // objectives, and competitor context into evidence-cited Reasoning Cards.
+  // Same grounding doctrine as market-insight: LLM interprets only, code
+  // guards + judge gate every output, rejected content is never exposed.
+  // -------------------------------------------------------------------------
+  app.get("/api/perception/reasoning-cards", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const result = await getReasoningCards(campaignId, accountId);
+      return res.json({ success: true, ...toCustomerReasoningPayload(result) });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} reasoning-cards failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "REASONING_CARDS_FAILED" });
+    }
+  });
+
+  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals, GET /api/perception/market-snapshot, GET /api/perception/market-insight, GET /api/perception/reasoning-cards");
 }
