@@ -1,0 +1,320 @@
+P-6 Live Validation — End-to-End Intelligence Validation (MarketMindAI)
+
+The Memory Architecture is now complete.
+
+Do NOT build new features.
+
+Do NOT refactor architecture.
+
+This phase is a real-world validation of the complete intelligence pipeline using the live MarketMindAI campaign.
+
+The objective is to prove that every intelligence layer works together correctly under real production data.
+
+==================================================
+Mission
+=======
+
+Run a complete end-to-end validation using the live MarketMindAI campaign.
+
+Treat this as a production acceptance test.
+
+The goal is to discover architectural weaknesses, incorrect reasoning, missing evidence, duplicated memory, poor customer output, or unexpected behavior before beginning the Decision Engine.
+
+==================================================
+Validation Scope
+================
+
+Validate the entire pipeline:
+
+Competitor Posts
+
+↓
+
+Classification
+
+↓
+
+Watchtower
+
+↓
+
+Distribution Intelligence
+
+↓
+
+Market Memory
+
+↓
+
+Performance Loop
+
+↓
+
+Strategic Reasoning
+
+↓
+
+Reasoning Cards
+
+↓
+
+Customer Output
+
+Every layer must be verified using live data.
+
+==================================================
+
+1. Classification Validation
+   ==================================================
+
+Verify:
+
+Classifications are complete.
+
+No malformed semantic values.
+
+No unexpected UNKNOWN spikes.
+
+No duplicated classifications.
+
+Confidence values remain reasonable.
+
+==================================================
+2. Watchtower Validation
+========================
+
+Verify:
+
+Signals represent real market behavior.
+
+No duplicate signals.
+
+Noise filtering behaves correctly.
+
+Market Scope is correct.
+
+Severity is correct.
+
+Emerging/Dominant/Declining patterns are believable.
+
+==================================================
+3. Distribution Intelligence
+============================
+
+Validate:
+
+Dominant patterns.
+
+Emerging patterns.
+
+Declining patterns.
+
+Adoption calculations.
+
+Momentum calculations.
+
+Historical comparisons.
+
+Window correctness.
+
+==================================================
+4. Market Memory
+================
+
+Verify:
+
+Only meaningful market states are stored.
+
+No duplicate fingerprints.
+
+No unnecessary snapshots.
+
+Historical timeline is coherent.
+
+Memory growth remains controlled.
+
+==================================================
+5. Performance Loop
+===================
+
+Verify:
+
+Performance memories remain grounded.
+
+Decision verdicts connect correctly.
+
+Historical reports remain consistent.
+
+No orphaned records.
+
+==================================================
+6. Strategic Reasoning
+======================
+
+Verify:
+
+Reasoning context combines every required source.
+
+Evidence registry is complete.
+
+Historical retrieval behaves correctly.
+
+No missing references.
+
+No duplicated evidence.
+
+==================================================
+7. Reasoning Cards
+==================
+
+Review every generated card manually.
+
+For every card verify:
+
+Headline is meaningful.
+
+Reasoning is understandable.
+
+Evidence actually supports the claim.
+
+Confidence is justified.
+
+Uncertainty is honest.
+
+No template language.
+
+No repeated reasoning.
+
+No hallucinations.
+
+==================================================
+8. Customer Experience Review
+=============================
+
+Pretend to be a paying customer.
+
+Review:
+
+Would this insight actually help?
+
+Is anything confusing?
+
+Is anything repetitive?
+
+Does the customer understand why the insight matters?
+
+Does the output feel premium?
+
+==================================================
+9. Memory Consistency
+=====================
+
+Verify:
+
+Market Memory
+
+Strategy Memory
+
+Performance Memory
+
+Reasoning Runs
+
+Evidence Registry
+
+remain synchronized.
+
+No broken references.
+
+No stale memory.
+
+No duplicated history.
+
+==================================================
+10. Performance Review
+======================
+
+Measure:
+
+LLM calls.
+
+Average latency.
+
+Cache efficiency.
+
+Memory growth.
+
+Database queries.
+
+Unexpected bottlenecks.
+
+==================================================
+11. Stress Validation
+=====================
+
+Run multiple consecutive validations.
+
+Confirm:
+
+No duplicate memories.
+
+No duplicate reasoning runs.
+
+No evidence corruption.
+
+Stable outputs.
+
+==================================================
+12. Final Acceptance Review
+===========================
+
+Review the platform as a whole.
+
+Answer:
+
+If you were launching Avyron commercially tomorrow,
+
+would you trust this intelligence pipeline with paying customers?
+
+List every weakness honestly.
+
+Do not protect previous implementation decisions.
+
+If something should be redesigned, say so.
+
+==================================================
+Deliverables
+============
+
+Return:
+
+1. Live validation results.
+
+2. Screens or payload examples where useful.
+
+3. Every issue discovered.
+
+4. Severity for every issue.
+
+5. Recommended fixes.
+
+6. Intelligence quality assessment.
+
+7. Customer experience assessment.
+
+8. Performance assessment.
+
+9. Commercial readiness assessment.
+
+10. Final verdict:
+
+READY FOR DECISION ENGINE
+
+or
+
+NOT READY
+
+Do not implement fixes during this phase.
+
+This is a production validation and architecture acceptance review only.
+
+PASS only if the complete intelligence pipeline operates reliably, produces trustworthy customer-facing intelligence, and is judged commercially ready for the next phase.
