@@ -1,0 +1,258 @@
+P-3 Validation — Watchtower Market Scope Verification (Live Campaign)
+
+The Watchtower implementation passed the architectural audit.
+
+Do not redesign the Watchtower.
+
+Do not introduce new features.
+
+The purpose of this task is to verify that the market-level semantic aggregation is logically correct before production.
+
+==================================================
+Background
+==========
+
+The current implementation computes market scope approximately as:
+
+1 competitor
+→ single_competitor
+
+2–3 competitors
+→ several_competitors
+
+4+ competitors
+→ market_wide
+
+However, this requires verification.
+
+There is a possible logical risk:
+
+Multiple competitors may all generate the same event type (for example PROMISE_SHIFT), while shifting toward completely different semantic destinations.
+
+Example:
+
+Competitor A
+
+Premium
+→ Affordable
+
+Competitor B
+
+Fast
+→ Reliable
+
+Competitor C
+
+Luxury
+→ Local
+
+Competitor D
+
+Simple
+→ Advanced
+
+All are PROMISE_SHIFT events.
+
+But they are NOT moving toward the same market direction.
+
+In this case the correct conclusion is NOT:
+
+"Market-wide Promise Shift"
+
+Instead it should identify independent competitor changes.
+
+==================================================
+Validation Goal
+===============
+
+Verify exactly how market scope is computed.
+
+Determine whether market-wide detection requires BOTH:
+
+Same semantic dimension
+
+AND
+
+Same semantic destination (or equivalent semantic direction)
+
+Or whether it currently groups only by event type.
+
+==================================================
+Step 1 — Code Audit
+===================
+
+Inspect the complete promotion pipeline.
+
+Document:
+
+* grouping logic
+* aggregation keys
+* comparison keys
+* promotion criteria
+* scope calculation
+* translator output
+
+Answer explicitly:
+
+Is market_wide produced from:
+
+A)
+
+same event kind only
+
+or
+
+B)
+
+same semantic destination / direction
+
+or
+
+C)
+
+another mechanism
+
+==================================================
+Step 2 — Live Campaign Verification
+===================================
+
+Use an existing real campaign.
+
+Prefer:
+
+MarketMindAI
+
+or another campaign with sufficient semantic history.
+
+Do not fabricate production data.
+
+Trace confirmed Watchtower events.
+
+Explain exactly why each received its scope.
+
+==================================================
+Step 3 — Controlled Test
+========================
+
+Run two controlled validation scenarios.
+
+Scenario A
+
+Create or simulate:
+
+4 competitors
+
+all changing
+
+PROMISE
+
+but toward DIFFERENT promises.
+
+Expected:
+
+No market-wide semantic shift.
+
+Result should be:
+
+Independent competitor events
+or
+Several unrelated changes.
+
+---
+
+Scenario B
+
+Create or simulate:
+
+4 competitors
+
+all moving toward
+
+the SAME semantic destination.
+
+Example:
+
+Trust
+
+↓
+
+Urgency
+
+or
+
+Educational
+
+↓
+
+Question
+
+or
+
+Founder Story
+
+↓
+
+Customer Proof
+
+Expected:
+
+Market-wide semantic shift.
+
+==================================================
+Step 4 — Severity Validation
+============================
+
+Verify whether Scope and Severity are currently treated as the same concept.
+
+Confirm whether the implementation supports separating:
+
+Scope
+
+(single / several / market-wide)
+
+from
+
+Severity
+
+(minor / moderate / major / critical)
+
+If they are currently coupled:
+
+Document the behavior.
+
+Do not redesign unless coupling causes incorrect customer-facing conclusions.
+
+==================================================
+Step 5 — Customer Output
+========================
+
+Review actual dashboard output.
+
+Confirm that customers never receive misleading statements such as:
+
+"Market-wide Promise Shift"
+
+when competitors are actually moving in unrelated semantic directions.
+
+==================================================
+Deliverable
+===========
+
+Return:
+
+1. Current aggregation logic.
+2. Live campaign verification.
+3. Scenario A result.
+4. Scenario B result.
+5. Scope vs Severity findings.
+6. Any incorrect conclusions discovered.
+7. Whether a code change was necessary.
+8. Files modified (if any).
+9. PASS / FAIL.
+
+PASS only if:
+
+* Market-wide signals represent genuine semantic convergence rather than merely identical event types.
+* Customer-facing Watchtower alerts remain truthful.
+* Live campaign verification confirms the production behavior.
+* No misleading market-level conclusions remain.

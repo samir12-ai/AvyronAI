@@ -3374,9 +3374,13 @@ export const pipelineChangeEvents = pgTable("pipeline_change_events", {
   validatedAt: timestamp("validated_at"),
   // Migration 049: market-level scope at promotion time.
   // scope: single_competitor | several_competitors | market_wide
-  // scope_competitor_count: distinct competitors for this campaign+kind confirmed within 60 days.
+  // scope_competitor_count: distinct competitors for this campaign+kind+to_value confirmed within 60 days.
   scope: text("scope"),
   scopeCompetitorCount: integer("scope_competitor_count"),
+  // Migration 050: semantic destination of the confirmed change (e.g. "Trust", "Urgency").
+  // Required so market scope counts only competitors moving toward the SAME destination,
+  // not merely the same change kind.
+  toValue: text("to_value"),
 });
 
 export type PipelineChangeEvent = typeof pipelineChangeEvents.$inferSelect;

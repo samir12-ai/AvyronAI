@@ -644,10 +644,23 @@ async function maintainOpenCandidates(
     // Promote: two independent fresh fetches agree the change persists vs the
     // original baseline. Evidence/severity refreshed to the confirmed state.
     // Also compute market-level scope: how many distinct competitors for this
-    // campaign have confirmed the same kind within the 60-day look-back window
-    // (including this one that's about to be promoted).
+    // campaign have confirmed the SAME kind AND the SAME semantic destination
+    // within the 60-day look-back window (including this one being promoted).
+    // Grouping by kind alone is insufficient — four competitors each doing
+    // PROMISE_SHIFT toward unrelated destinations is NOT a market-wide shift.
     try {
-      // Count other already-confirmed competitors for the same kind + campaign.
+      // Extract the semantic destination (e.g. "Trust", "Urgency") from the
+      // change detected by classifySemanticChanges(). currValue shape is always
+      // { top: string, share: number, distribution: {...} } for semantic kinds.
+      const toValueStr: string | null =
+        match.currValue != null &&
+        typeof match.currValue === "object" &&
+        "top" in (match.currValue as object)
+          ? String((match.currValue as { top: unknown }).top)
+          : null;
+
+      // Count other already-confirmed competitors for the same kind + semantic
+      // destination + campaign within the 60-day look-back window.
       const scopeWindowCutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
       let confirmedOthers = 0;
       try {
@@ -658,6 +671,12 @@ async function maintainOpenCandidates(
             and(
               eq(pipelineChangeEvents.campaignId, input.campaignId),
               eq(pipelineChangeEvents.kind, candidate.kind),
+              // Must share the same semantic destination. If toValue is null on
+              // this row or the stored rows, null-equality yields 0 matches,
+              // which conservatively degrades scope to single_competitor.
+              toValueStr != null
+                ? eq(pipelineChangeEvents.toValue, toValueStr)
+                : isNull(pipelineChangeEvents.toValue),
               isNotNull(pipelineChangeEvents.validatedAt),
               ne(pipelineChangeEvents.competitorId, competitorId),
               sql`${pipelineChangeEvents.validatedAt} >= ${scopeWindowCutoff}`,
@@ -694,10 +713,11 @@ async function maintainOpenCandidates(
           currentSnapshotId: currentSnap.id,
           scope,
           scopeCompetitorCount: totalConfirmedCount,
+          toValue: toValueStr,
         })
         .where(and(eq(pipelineChangeEvents.id, candidate.id), isNull(pipelineChangeEvents.validatedAt)));
       console.log(
-        `${LOG_PREFIX} MARKET_EVENT_CONFIRMED eventId=${candidate.id} competitorId=${competitorId} kind=${candidate.kind} campaign=${input.campaignId} confirmedBy=${currentSnap.id} scope=${scope} scopeCount=${totalConfirmedCount}`,
+        `${LOG_PREFIX} MARKET_EVENT_CONFIRMED eventId=${candidate.id} competitorId=${competitorId} kind=${candidate.kind} campaign=${input.campaignId} confirmedBy=${currentSnap.id} scope=${scope} scopeCount=${totalConfirmedCount} toValue=${toValueStr ?? "null"}`,
       );
     } catch (err) {
       console.error(
