@@ -576,6 +576,42 @@ export async function persistAELSnapshot(args: {
         created_at = now()
     `);
     console.log(`${LOG_PREFIX} AEL_PERSISTED | id=${id} | campaign=${campaignId} | job=${jobId} | rootCauses=${rootCauses.length} | causalChains=${causalChains.length} | buyingBarriers=${buyingBarriers.length} | partial=${persistIsPartial}`);
+
+    // P-5 M4: register each causal item as citable evidence behind its
+    // existing [RC#]/[CC#]/[BB#] prompt alias. UIDs are deterministic and
+    // content-versioned (EV:causal_claim:ael_snapshots:<snapshotId>:<alias>@<hash>)
+    // — computable from the item content via aelEvidenceUid without a lookup,
+    // and a re-persisted snapshot (same jobId, regenerated items) mints NEW
+    // evidence instead of rewriting what older citations point to.
+    // Registration failure never blocks the snapshot.
+    try {
+      const { registerEvidence, versionedSourceId } = await import("../strategic-reasoning/evidence-registry");
+      const causalEntries = [
+        ...rootCauses.map((item, i) => ({ alias: `RC${i + 1}`, label: `Root cause ${i + 1}`, item })),
+        ...causalChains.map((item, i) => ({ alias: `CC${i + 1}`, label: `Causal chain ${i + 1}`, item })),
+        ...buyingBarriers.map((item, i) => ({ alias: `BB${i + 1}`, label: `Buying barrier ${i + 1}`, item })),
+      ];
+      if (causalEntries.length > 0) {
+        await registerEvidence(
+          accountId,
+          campaignId,
+          causalEntries.map((e) => {
+            const detail = JSON.stringify(e.item).slice(0, 2000);
+            return {
+              kind: "causal_claim" as const,
+              sourceTable: "ael_snapshots",
+              sourceId: versionedSourceId(`${id}:${e.alias}`, detail),
+              label: e.label,
+              detail,
+              observedAt: new Date(),
+            };
+          }),
+        );
+        console.log(`${LOG_PREFIX} AEL_EVIDENCE_REGISTERED | id=${id} | items=${causalEntries.length}`);
+      }
+    } catch (regErr: any) {
+      console.error(`${LOG_PREFIX} AEL_EVIDENCE_REGISTER_FAILED | id=${id} | err=${regErr?.message || regErr}`);
+    }
   } catch (err: any) {
     console.error(`${LOG_PREFIX} AEL_PERSIST_FAILED | campaign=${campaignId} | job=${jobId} | err=${err?.message || err}`);
   }

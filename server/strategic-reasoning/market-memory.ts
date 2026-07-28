@@ -119,16 +119,19 @@ export async function getMarketMemoryRows(
 ): Promise<MarketMemoryRow[]> {
   const monthsBack = opts.monthsBack ?? 12;
   const since = new Date(Date.now() - monthsBack * 30 * 86400000);
+  // Coverage time (windowTo), NOT write time (createdAt): backfilled or
+  // late-written rows must sort by the market period they describe, and the
+  // monthsBack horizon bounds what the data covers, not when it was stored.
   const conditions = [
     eq(marketMemory.accountId, accountId),
     eq(marketMemory.campaignId, campaignId),
-    gte(marketMemory.createdAt, since),
+    gte(marketMemory.windowTo, since),
     ...(opts.windowDays !== undefined ? [eq(marketMemory.windowDays, opts.windowDays)] : []),
   ];
   return db
     .select()
     .from(marketMemory)
     .where(and(...conditions))
-    .orderBy(desc(marketMemory.createdAt))
+    .orderBy(desc(marketMemory.windowTo))
     .limit(opts.limit ?? 50);
 }

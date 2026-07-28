@@ -3762,3 +3762,139 @@ export const marketMemory = pgTable(
 );
 
 export type MarketMemoryRow = typeof marketMemory.$inferSelect;
+
+// ============================================================================
+// UNIFIED INTELLIGENCE MEMORY (P-5, migration 053)
+// evidence_registry: thin citation/lineage index over existing stores.
+// reasoning_runs: persisted outcome of every judge-gated interpretation run.
+// business_data_revisions / dna_enrichment_attempts / ci_competitor_revisions:
+// append-only history for the overwrite-in-place L4 belief stores
+// (ci_competitor_revisions is populated by a DB trigger — multi-writer table).
+// JSON payloads use text columns per house convention.
+// ============================================================================
+
+export const evidenceRegistry = pgTable(
+  "evidence_registry",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    evidenceUid: text("evidence_uid").notNull(), // EV:<kind>:<source_table>:<source_id>
+    kind: text("kind").notNull(),
+    sourceTable: text("source_table").notNull(), // real table or 'derived:<analyzer>'
+    sourceId: text("source_id").notNull(),
+    label: text("label").notNull(),
+    detail: text("detail").notNull(),
+    observedAt: timestamp("observed_at").notNull(), // coverage time, not write time
+    supersedesUid: text("supersedes_uid"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    uidUniq: uniqueIndex("evidence_registry_uid_uniq").on(
+      table.accountId,
+      table.campaignId,
+      table.evidenceUid,
+    ),
+    kindIdx: index("evidence_registry_kind_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.kind,
+    ),
+  }),
+);
+export type EvidenceRegistryRow = typeof evidenceRegistry.$inferSelect;
+
+export const reasoningRuns = pgTable(
+  "reasoning_runs",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    layer: text("layer").notNull(), // 'strategic_reasoning' | 'market_analyst'
+    status: text("status").notNull(), // accepted_ai | guards_rejected | judge_rejected | llm_failed | no_trigger
+    contextFingerprint: text("context_fingerprint").notNull(),
+    model: text("model"),
+    output: text("output").notNull(), // JSON: what was actually served
+    rejectedOutput: text("rejected_output"), // JSON: AI output rejected by guards/judge
+    rejectionReasons: text("rejection_reasons"), // JSON array
+    evidenceUids: text("evidence_uids").notNull().default("[]"), // JSON array
+    refMap: text("ref_map"), // JSON: prompt alias (MM-1) -> evidence_uid
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    campaignIdx: index("reasoning_runs_campaign_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.layer,
+      table.createdAt,
+    ),
+  }),
+);
+export type ReasoningRunRow = typeof reasoningRuns.$inferSelect;
+
+export const businessDataRevisions = pgTable(
+  "business_data_revisions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    snapshot: text("snapshot").notNull(), // JSON: full previous row
+    changedFields: text("changed_fields").notNull(), // JSON array
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    campaignIdx: index("business_data_revisions_campaign_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.createdAt,
+    ),
+  }),
+);
+export type BusinessDataRevisionRow = typeof businessDataRevisions.$inferSelect;
+
+export const dnaEnrichmentAttempts = pgTable(
+  "dna_enrichment_attempts",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    engineKind: text("engine_kind").notNull(),
+    event: text("event").notNull(), // 'raised' | 'auto_resolved' | 'operator_resolved'
+    candidateDifferentiator: text("candidate_differentiator"),
+    groundingRefs: text("grounding_refs"), // JSON array
+    rejectionReason: text("rejection_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    campaignIdx: index("dna_enrichment_attempts_campaign_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.engineKind,
+      table.createdAt,
+    ),
+  }),
+);
+export type DnaEnrichmentAttemptRow = typeof dnaEnrichmentAttempts.$inferSelect;
+
+export const ciCompetitorRevisions = pgTable(
+  "ci_competitor_revisions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id"),
+    campaignId: varchar("campaign_id"),
+    competitorId: varchar("competitor_id").notNull(),
+    changedFields: text("changed_fields").notNull(), // JSON array
+    previousValues: text("previous_values").notNull(), // JSON object
+    currentValues: text("current_values").notNull(), // JSON object
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    campaignIdx: index("ci_competitor_revisions_campaign_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.competitorId,
+      table.createdAt,
+    ),
+  }),
+);
+export type CiCompetitorRevisionRow = typeof ciCompetitorRevisions.$inferSelect;

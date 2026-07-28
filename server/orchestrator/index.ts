@@ -357,7 +357,7 @@ async function persistDnaEnrichmentSignal(
       await upsertEnrichmentRequest({ accountId, campaignId, signal });
       console.log(`[Orchestrator] DNA_ENRICHMENT_REQUEST_RAISED | engine=${signal.engineKind} | campaign=${campaignId} | candidates=${signal.candidates.length}`);
     } else {
-      await autoResolveEnrichmentRequest({ campaignId, engineKind: signal.engineKind });
+      await autoResolveEnrichmentRequest({ accountId, campaignId, engineKind: signal.engineKind });
       console.log(`[Orchestrator] DNA_ENRICHMENT_REQUEST_AUTORESOLVED | engine=${signal.engineKind} | campaign=${campaignId}`);
     }
   } catch (e: any) {

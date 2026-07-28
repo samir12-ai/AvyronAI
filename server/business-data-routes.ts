@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { db } from "./db";
-import { businessDataLayer, campaignSelections } from "@shared/schema";
+import { businessDataLayer, businessDataRevisions, campaignSelections } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
 import { resolveAccountId } from "./auth";
@@ -125,6 +125,14 @@ export function registerBusinessDataRoutes(app: Express) {
 
       let result;
       if (existing.length > 0) {
+        // P-5 M2: append-only revision — snapshot the PREVIOUS row before the
+        // overwrite so business-context evolution is never lost.
+        await recordBusinessDataRevision(
+          String(accountId),
+          String(campaignId),
+          existing[0] as Record<string, any>,
+          body as Record<string, any>,
+        );
         const updated = await db
           .update(businessDataLayer)
           .set(dataValues)
@@ -155,6 +163,39 @@ export function registerBusinessDataRoutes(app: Express) {
       res.status(500).json({ error: "Failed to save business data" });
     }
   });
+}
+
+/**
+ * P-5 M2: append-only business-data revision — snapshots the PREVIOUS row
+ * before an overwrite so business-context evolution is never lost. Returns
+ * the revision id, or null when nothing changed. Failure is loud but never
+ * blocks the caller's save.
+ */
+export async function recordBusinessDataRevision(
+  accountId: string,
+  campaignId: string,
+  prior: Record<string, any>,
+  updates: Record<string, any>,
+): Promise<string | null> {
+  const changed = Object.keys(updates).filter(
+    (k) => JSON.stringify(prior[k] ?? null) !== JSON.stringify(updates[k] ?? null),
+  );
+  if (changed.length === 0) return null;
+  try {
+    const inserted = await db
+      .insert(businessDataRevisions)
+      .values({
+        accountId,
+        campaignId,
+        snapshot: JSON.stringify(prior),
+        changedFields: JSON.stringify(changed),
+      })
+      .returning({ id: businessDataRevisions.id });
+    return inserted[0]?.id ?? null;
+  } catch (err: any) {
+    console.error(`[BusinessData] REVISION_WRITE_FAILED campaign=${campaignId} detail=${err?.message || err}`);
+    return null;
+  }
 }
 
 export async function requireBusinessData(req: Request, res: Response, next: NextFunction) {

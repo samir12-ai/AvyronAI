@@ -42,6 +42,8 @@ import {
 import { recordMarketInsight } from "../strategic-reasoning/market-memory";
 
 const LOG = "[AIMarketAnalyst]";
+import { recordReasoningRun } from "../strategic-reasoning/evidence-registry";
+
 const ANALYST_MODEL = "gpt-4.1-mini";
 const JUDGE_MODEL = "gpt-4.1-mini";
 const INSIGHT_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — payload-hash keyed, so cache only matters while signals are unchanged
@@ -539,6 +541,10 @@ export async function getMarketInsight(
   }
 
   let insight: MarketInsight;
+  // P-5: rejected AI output is persisted to reasoning_runs (accuracy
+  // learning), NEVER served. Captured here, written after serving decision.
+  let rejectedInterp: unknown = null;
+  let rejectionReasons: string[] | null = null;
 
   if (!shouldInvokeAnalyst(bundle)) {
     insight = { ...buildDeterministicSummary(bundle), deterministicReason: "no_trigger" };
@@ -548,11 +554,15 @@ export async function getMarketInsight(
       const guards = runDeterministicGuards(bundle, interp);
       if (!guards.ok) {
         console.warn(`${LOG} GUARDS_REJECTED campaign=${campaignId} violations=${JSON.stringify(guards.violations)}`);
+        rejectedInterp = interp;
+        rejectionReasons = guards.violations;
         insight = { ...buildDeterministicSummary(bundle), deterministicReason: "guards_rejected" };
       } else {
         const judge = await judgeInterpretation(bundle, interp, accountId);
         if (judge.verdict !== "PASS") {
           console.warn(`${LOG} JUDGE_REJECTED campaign=${campaignId} violations=${JSON.stringify(judge.violations)}`);
+          rejectedInterp = interp;
+          rejectionReasons = judge.violations;
           insight = { ...buildDeterministicSummary(bundle), deterministicReason: "judge_rejected" };
         } else {
           insight = {
@@ -574,6 +584,7 @@ export async function getMarketInsight(
       }
     } catch (err) {
       console.error(`${LOG} LLM_FAILED campaign=${campaignId} detail=${(err as Error).message}`);
+      rejectionReasons = [(err as Error).message];
       insight = { ...buildDeterministicSummary(bundle), deterministicReason: "llm_failed" };
     }
   }
@@ -586,6 +597,36 @@ export async function getMarketInsight(
   } catch (err) {
     console.error(`${LOG} MEMORY_WRITE_FAILED campaign=${campaignId} detail=${(err as Error).message}`);
   }
+
+  // P-5 M1: persist this fresh run's outcome (accepted OR rejected) to
+  // reasoning_runs so interpretation accuracy is measurable over time.
+  // recordReasoningRun never throws. The analyst's grounding contract is the
+  // verified signal bundle (not the evidence registry), so evidenceUids is
+  // legitimately empty here.
+  await recordReasoningRun({
+    accountId,
+    campaignId,
+    layer: "market_analyst",
+    status:
+      insight.source === "ai"
+        ? "accepted_ai"
+        : ((insight.deterministicReason ?? "no_trigger") as
+            | "no_trigger"
+            | "guards_rejected"
+            | "judge_rejected"
+            | "llm_failed"),
+    contextFingerprint: fingerprint,
+    model: ANALYST_MODEL,
+    output: {
+      source: insight.source,
+      windowDays: insight.windowDays,
+      headline: insight.headline,
+      deterministicReason: insight.deterministicReason ?? null,
+    },
+    rejectedOutput: rejectedInterp,
+    rejectionReasons,
+    evidenceUids: [],
+  });
 
   // Bounded fingerprint cache.
   const nowMs = Date.now();

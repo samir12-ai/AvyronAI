@@ -16,7 +16,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
-import { dnaEnrichmentRequests, type DnaEnrichmentRequest } from "@shared/schema";
+import { dnaEnrichmentRequests, dnaEnrichmentAttempts, type DnaEnrichmentRequest } from "@shared/schema";
 import type { DnaEnrichmentSignal } from "../shared/dna-enrichment";
 
 export type EnrichmentEngineKind = DnaEnrichmentSignal["engineKind"];
@@ -63,6 +63,20 @@ export async function upsertEnrichmentRequest(input: {
         resolvedAt: null,
       },
     });
+
+  // P-5 M2: append-only attempt log. The upsert above overwrites candidate
+  // history on every re-raise; this row preserves each raised candidate +
+  // rejection reason so nothing is silently forgotten. Same no-swallow
+  // contract as the rest of this module.
+  await db.insert(dnaEnrichmentAttempts).values({
+    accountId,
+    campaignId,
+    engineKind: signal.engineKind,
+    event: "raised",
+    candidateDifferentiator: top ? top.differentiator : null,
+    groundingRefs: top ? JSON.stringify(top.groundingRefs) : null,
+    rejectionReason: signal.lastRejectionReason,
+  });
 }
 
 /**
@@ -71,32 +85,57 @@ export async function upsertEnrichmentRequest(input: {
  * warranted (truthful: the problem cleared). No-op when nothing is open.
  */
 export async function autoResolveEnrichmentRequest(input: {
+  accountId: string;
   campaignId: string;
   engineKind: EnrichmentEngineKind;
 }): Promise<void> {
   const now = new Date();
-  await db
+  const resolved = await db
     .update(dnaEnrichmentRequests)
     .set({ status: "resolved", resolvedAt: now, updatedAt: now })
     .where(
       and(
+        eq(dnaEnrichmentRequests.accountId, input.accountId),
         eq(dnaEnrichmentRequests.campaignId, input.campaignId),
         eq(dnaEnrichmentRequests.engineKind, input.engineKind),
+        eq(dnaEnrichmentRequests.status, "open"),
+      ),
+    )
+    .returning({
+      accountId: dnaEnrichmentRequests.accountId,
+      candidateDifferentiator: dnaEnrichmentRequests.candidateDifferentiator,
+      lastRejectionReason: dnaEnrichmentRequests.lastRejectionReason,
+    });
+  // P-5 M2 attempt log (only when a row actually resolved).
+  for (const row of resolved) {
+    await db.insert(dnaEnrichmentAttempts).values({
+      accountId: row.accountId,
+      campaignId: input.campaignId,
+      engineKind: input.engineKind,
+      event: "auto_resolved",
+      candidateDifferentiator: row.candidateDifferentiator,
+      rejectionReason: row.lastRejectionReason,
+    });
+  }
+}
+
+/** All open enrichment requests for a campaign (dashboard reads these). Tenant-scoped. */
+export async function getOpenEnrichmentRequests(accountId: string, campaignId: string): Promise<DnaEnrichmentRequest[]> {
+  return db
+    .select()
+    .from(dnaEnrichmentRequests)
+    .where(
+      and(
+        eq(dnaEnrichmentRequests.accountId, accountId),
+        eq(dnaEnrichmentRequests.campaignId, campaignId),
         eq(dnaEnrichmentRequests.status, "open"),
       ),
     );
 }
 
-/** All open enrichment requests for a campaign (dashboard reads these). */
-export async function getOpenEnrichmentRequests(campaignId: string): Promise<DnaEnrichmentRequest[]> {
-  return db
-    .select()
-    .from(dnaEnrichmentRequests)
-    .where(and(eq(dnaEnrichmentRequests.campaignId, campaignId), eq(dnaEnrichmentRequests.status, "open")));
-}
-
-/** The single open request for a campaign+engine, or null. Used by the resolve route. */
+/** The single open request for a campaign+engine, or null. Used by the resolve route. Tenant-scoped. */
 export async function getOpenEnrichmentRequest(input: {
+  accountId: string;
   campaignId: string;
   engineKind: EnrichmentEngineKind;
 }): Promise<DnaEnrichmentRequest | null> {
@@ -105,6 +144,7 @@ export async function getOpenEnrichmentRequest(input: {
     .from(dnaEnrichmentRequests)
     .where(
       and(
+        eq(dnaEnrichmentRequests.accountId, input.accountId),
         eq(dnaEnrichmentRequests.campaignId, input.campaignId),
         eq(dnaEnrichmentRequests.engineKind, input.engineKind),
         eq(dnaEnrichmentRequests.status, "open"),
@@ -114,20 +154,38 @@ export async function getOpenEnrichmentRequest(input: {
   return rows.length > 0 ? rows[0] : null;
 }
 
-/** Mark a request resolved after the operator confirms/edits (route appends anchor). */
+/** Mark a request resolved after the operator confirms/edits (route appends anchor). Tenant-scoped. */
 export async function markEnrichmentResolved(input: {
+  accountId: string;
   campaignId: string;
   engineKind: EnrichmentEngineKind;
 }): Promise<void> {
   const now = new Date();
-  await db
+  const resolved = await db
     .update(dnaEnrichmentRequests)
     .set({ status: "resolved", resolvedAt: now, updatedAt: now })
     .where(
       and(
+        eq(dnaEnrichmentRequests.accountId, input.accountId),
         eq(dnaEnrichmentRequests.campaignId, input.campaignId),
         eq(dnaEnrichmentRequests.engineKind, input.engineKind),
         eq(dnaEnrichmentRequests.status, "open"),
       ),
-    );
+    )
+    .returning({
+      accountId: dnaEnrichmentRequests.accountId,
+      candidateDifferentiator: dnaEnrichmentRequests.candidateDifferentiator,
+      lastRejectionReason: dnaEnrichmentRequests.lastRejectionReason,
+    });
+  // P-5 M2 attempt log (only when a row actually resolved).
+  for (const row of resolved) {
+    await db.insert(dnaEnrichmentAttempts).values({
+      accountId: row.accountId,
+      campaignId: input.campaignId,
+      engineKind: input.engineKind,
+      event: "operator_resolved",
+      candidateDifferentiator: row.candidateDifferentiator,
+      rejectionReason: row.lastRejectionReason,
+    });
+  }
 }

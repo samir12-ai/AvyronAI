@@ -279,7 +279,7 @@ export function registerCampaignRoutes(app: Express) {
         return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found for this account", requestId });
       }
 
-      const open = await getOpenEnrichmentRequests(campaignId);
+      const open = await getOpenEnrichmentRequests(accountId, campaignId);
       // Customer-safe projection — no internal row ids, accountId, or status strings.
       const requests = open.map((r) => ({
         engineKind: r.engineKind,
@@ -329,7 +329,7 @@ export function registerCampaignRoutes(app: Express) {
 
       // Fail-closed: there MUST be a live open request. Never silently mint/patch
       // a product anchor without an active enrichment prompt for this engine.
-      const open = await getOpenEnrichmentRequest({ campaignId, engineKind });
+      const open = await getOpenEnrichmentRequest({ accountId, campaignId, engineKind });
       if (!open) {
         return res.status(404).json({ code: "NO_OPEN_REQUEST", message: "No open DNA enrichment request for this campaign and engine", requestId });
       }
@@ -374,7 +374,7 @@ export function registerCampaignRoutes(app: Express) {
           set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
         });
 
-      await markEnrichmentResolved({ campaignId, engineKind });
+      await markEnrichmentResolved({ accountId, campaignId, engineKind });
       console.log(`[DnaEnrichment] RESOLVED | campaign=${campaignId} | engine=${engineKind} | account=${accountId}`);
 
       res.json({ success: true, productAnchor: resolvedAnchor, requestId });

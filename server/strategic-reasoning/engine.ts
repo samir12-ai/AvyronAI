@@ -40,11 +40,21 @@ import {
   businessDataLayer,
   goalDecompositions,
   ciCompetitors,
+  businessDataRevisions,
+  ciCompetitorRevisions,
   type MarketMemoryRow,
 } from "../../shared/schema";
 import { aiChat } from "../ai-client";
 import { getMarketInsight } from "../watchtower/ai-market-analyst";
 import { getMarketMemoryRows, type StoredTheme } from "./market-memory";
+import {
+  registerEvidence,
+  recordReasoningRun,
+  derivedSourceId,
+  versionedSourceId,
+  type RegistryEntry,
+  type EvidenceKind,
+} from "./evidence-registry";
 
 const LOG = "[StrategicReasoning]";
 const REASONER_MODEL = "gpt-4.1-mini";
@@ -81,6 +91,8 @@ export interface EvidenceItem {
   dbId: string | null;               // underlying row id (internal only — never serialized to customers)
   label: string;                     // short customer-safe description
   detail: string;                    // verified facts the LLM may interpret
+  /** Coverage time for registry registration (P-5); defaults to now at persist. */
+  observedAt?: Date;
 }
 
 export interface ReasoningCard {
@@ -103,10 +115,20 @@ export interface ReasoningResult {
 
 // ── context assembly (deterministic) ─────────────────────────────────────────
 
-interface HistoricalFindings {
+interface MarketHistoryFindings {
   recurring: Array<{ dimension: string; value: string; occurrences: number; firstSeen: string; lastSeen: string; memoryRefs: string[] }>;
   resemblance: { matchRef: string; matchDate: string; overlapPct: number; sharedThemes: string[] } | null;
   momentum: Array<{ dimension: string; value: string; direction: "building" | "fading"; consecutiveWindows: number; shares: number[] }>;
+}
+
+/**
+ * Market-history findings plus belief-history findings (P-5 M3): deterministic
+ * pattern retrieval over the append-only revision stores (business profile
+ * changes, competitor profile changes). Cited via HIST-B* / HIST-C* evidence.
+ */
+interface HistoricalFindings extends MarketHistoryFindings {
+  businessChanges: Array<{ when: string; fields: string[] }>;
+  competitorChanges: Array<{ when: string; competitor: string; changes: string[] }>;
 }
 
 export interface ReasoningContext {
@@ -128,7 +150,7 @@ const parseThemes = (json: string): StoredTheme[] => {
 const themeKey = (t: StoredTheme) => `${t.dimension}::${t.value}`;
 const monthLabel = (d: Date) => d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-function analyzeHistory(current: MarketMemoryRow, history: MarketMemoryRow[], refFor: (row: MarketMemoryRow) => string): HistoricalFindings {
+function analyzeHistory(current: MarketMemoryRow, history: MarketMemoryRow[], refFor: (row: MarketMemoryRow) => string): MarketHistoryFindings {
   const currentEmerging = parseThemes(current.emergingThemes);
   // All temporal comparisons use windowTo (what the data actually covers),
   // never createdAt (when the row happened to be written — backfills would
@@ -229,7 +251,7 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
     memoryRows = await getMarketMemoryRows(campaignId, accountId, { monthsBack: 12, limit: 40 });
   }
   // Every read is scoped by accountId AND campaignId (tenant isolation).
-  const [reports, verdicts, perfMemory, bizRows, goals, competitors] = await Promise.all([
+  const [reports, verdicts, perfMemory, bizRows, goals, competitors, bizRevs, compRevs] = await Promise.all([
     db.select().from(performanceCycleReports)
       .where(and(eq(performanceCycleReports.accountId, accountId), eq(performanceCycleReports.campaignId, campaignId)))
       .orderBy(desc(performanceCycleReports.createdAt)).limit(3),
@@ -252,6 +274,13 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       messagingTone: ciCompetitors.messagingTone,
     }).from(ciCompetitors)
       .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId))).limit(15),
+    // P-5 M3: append-only belief histories (business + competitor revisions).
+    db.select().from(businessDataRevisions)
+      .where(and(eq(businessDataRevisions.accountId, accountId), eq(businessDataRevisions.campaignId, campaignId)))
+      .orderBy(desc(businessDataRevisions.createdAt)).limit(3),
+    db.select().from(ciCompetitorRevisions)
+      .where(and(eq(ciCompetitorRevisions.accountId, accountId), eq(ciCompetitorRevisions.campaignId, campaignId)))
+      .orderBy(desc(ciCompetitorRevisions.createdAt)).limit(20),
   ]);
 
   const evidence: EvidenceItem[] = [];
@@ -267,8 +296,9 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref,
       type: "market_insight",
       dbId: row.id,
-      label: `Market insight · ${monthLabel(row.createdAt)} (${row.windowDays}-day view)`,
-      detail: `[${row.createdAt.toISOString().slice(0, 10)}, window=${row.windowDays}d, confidence=${row.confidence}, dataStatus=${row.dataStatus}, basedOn=${row.basedOn}] ${row.headline}. ${row.narrative} | Dominant: ${dominant.join("; ") || "none"} | Emerging: ${emerging.join("; ") || "none"} | Declining: ${declining.join("; ") || "none"}`,
+      observedAt: row.windowTo, // coverage time — matches reader ordering (P-5)
+      label: `Market insight · ${monthLabel(row.windowTo)} (${row.windowDays}-day view)`,
+      detail: `[${row.windowTo.toISOString().slice(0, 10)}, window=${row.windowDays}d, confidence=${row.confidence}, dataStatus=${row.dataStatus}, basedOn=${row.basedOn}] ${row.headline}. ${row.narrative} | Dominant: ${dominant.join("; ") || "none"} | Emerging: ${emerging.join("; ") || "none"} | Declining: ${declining.join("; ") || "none"}`,
     });
   });
 
@@ -336,9 +366,48 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
 
   const currentInsight = memoryRows[0] ?? null;
   const refFor = (row: MarketMemoryRow) => memoryRefById.get(row.id) ?? "MM-?";
-  const findings: HistoricalFindings = currentInsight
+  const marketFindings: MarketHistoryFindings = currentInsight
     ? analyzeHistory(currentInsight, memoryRows.slice(1), refFor)
     : { recurring: [], resemblance: null, momentum: [] };
+
+  // P-5 M3: deterministic pattern retrieval over the append-only belief
+  // histories. All values are verbatim from revision rows — no computation
+  // beyond formatting, so everything stays guard-compatible evidence.
+  const parseJsonArray = (s: string): string[] => {
+    try { const v = JSON.parse(s); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
+  };
+  const parseJsonObject = (s: string): Record<string, unknown> => {
+    try { const v = JSON.parse(s); return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}; } catch { return {}; }
+  };
+  const fmtVal = (v: unknown): string => {
+    const s = v == null ? "not set" : typeof v === "string" ? v : JSON.stringify(v);
+    return s.length > 80 ? `${s.slice(0, 77)}…` : s;
+  };
+
+  const bizRevsTop = bizRevs.slice(0, 3);
+  const businessChanges = bizRevsTop.map((r) => ({
+    when: monthLabel(r.createdAt),
+    fields: parseJsonArray(r.changedFields),
+  }));
+
+  const latestCompRev = new Map<string, (typeof compRevs)[number]>();
+  for (const r of compRevs) {
+    if (!latestCompRev.has(r.competitorId)) latestCompRev.set(r.competitorId, r); // desc order → first is latest
+  }
+  const compNameById = new Map(competitors.map((c) => [c.id, c.name]));
+  const compRevsTop = [...latestCompRev.values()].slice(0, 5);
+  const competitorChanges = compRevsTop.map((r) => {
+    const fields = parseJsonArray(r.changedFields);
+    const prev = parseJsonObject(r.previousValues);
+    const curr = parseJsonObject(r.currentValues);
+    return {
+      when: monthLabel(r.createdAt),
+      competitor: compNameById.get(r.competitorId) ?? "a tracked competitor",
+      changes: fields.map((f) => `${f}: "${fmtVal(prev[f])}" → "${fmtVal(curr[f])}"`),
+    };
+  });
+
+  const findings: HistoricalFindings = { ...marketFindings, businessChanges, competitorChanges };
 
   // Historical-analysis findings are themselves evidence (deterministically computed).
   findings.recurring.forEach((r, i) => {
@@ -385,6 +454,29 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       detail: `${memoryRows.length} stored market snapshot(s) analyzed: no recurring themes, no resemblance to past states, and no sustained momentum detected yet. Historical reasoning strengthens as memory accumulates.`,
     });
   }
+
+  // P-5 M3: belief-history findings are citable evidence like any other
+  // finding — they point at their real revision rows.
+  businessChanges.forEach((c, i) => {
+    evidence.push({
+      ref: `HIST-B${i + 1}`,
+      type: "historical_analysis",
+      dbId: bizRevsTop[i].id,
+      observedAt: bizRevsTop[i].createdAt,
+      label: `Business profile change · ${c.when}`,
+      detail: `Company profile updated in ${c.when}; fields changed: ${c.fields.join(", ") || "unrecorded"}.`,
+    });
+  });
+  competitorChanges.forEach((c, i) => {
+    evidence.push({
+      ref: `HIST-C${i + 1}`,
+      type: "historical_analysis",
+      dbId: compRevsTop[i].id,
+      observedAt: compRevsTop[i].createdAt,
+      label: `Competitor profile change · ${c.competitor}`,
+      detail: `${c.competitor} profile changed in ${c.when}: ${c.changes.join("; ") || "fields updated"}.`,
+    });
+  });
 
   return { campaignId, currentInsight, historyCount: memoryRows.length, evidence, findings };
 }
@@ -707,16 +799,24 @@ export async function getReasoningCards(
 
   const evidencePublic = ctx.evidence.map(({ ref, type, label }) => ({ ref, type, label }));
   let result: ReasoningResult;
+  // P-5: rejected AI output is persisted to reasoning_runs (accuracy learning),
+  // NEVER served. Captured here, written by persistReasoningRun below.
+  let rejectedCards: ReasoningCard[] | null = null;
+  let rejectionReasons: string[] | null = null;
   try {
     const cards = await runReasoner(ctx, accountId);
     const guards = runCardGuards(ctx, cards);
     if (!guards.ok) {
       console.warn(`${LOG} GUARDS_REJECTED campaign=${campaignId} violations=${JSON.stringify(guards.violations)}`);
+      rejectedCards = cards;
+      rejectionReasons = guards.violations;
       result = { state: "ready", source: "deterministic", cards: buildDeterministicCards(ctx), evidence: evidencePublic, generatedAt: new Date().toISOString(), deterministicReason: "guards_rejected" };
     } else {
       const judge = await judgeCards(ctx, cards, accountId);
       if (judge.verdict !== "PASS") {
         console.warn(`${LOG} JUDGE_REJECTED campaign=${campaignId} violations=${JSON.stringify(judge.violations)}`);
+        rejectedCards = cards;
+        rejectionReasons = judge.violations;
         result = { state: "ready", source: "deterministic", cards: buildDeterministicCards(ctx), evidence: evidencePublic, generatedAt: new Date().toISOString(), deterministicReason: "judge_rejected" };
       } else {
         result = { state: "ready", source: "ai", cards, evidence: evidencePublic, generatedAt: new Date().toISOString() };
@@ -724,6 +824,7 @@ export async function getReasoningCards(
     }
   } catch (err) {
     console.error(`${LOG} LLM_FAILED campaign=${campaignId} detail=${(err as Error).message}`);
+    rejectionReasons = [(err as Error).message];
     result = { state: "ready", source: "deterministic", cards: buildDeterministicCards(ctx), evidence: evidencePublic, generatedAt: new Date().toISOString(), deterministicReason: "llm_failed" };
   }
 
@@ -740,7 +841,96 @@ export async function getReasoningCards(
   }
 
   console.log(`${LOG} CARDS campaign=${campaignId} source=${result.source}${result.deterministicReason ? ` reason=${result.deterministicReason}` : ""} cards=${result.cards.length} evidence=${ctx.evidence.length} history=${ctx.historyCount}`);
+
+  // P-5 M1: persist the run outcome + lazily register cited evidence.
+  // Never blocks serving (caught internally, loud on failure).
+  await persistReasoningRun(ctx, accountId, campaignId, fingerprint, result, rejectedCards, rejectionReasons);
+
   return result;
+}
+
+// ── P-5 run persistence + evidence registration ──────────────────────────────
+
+const KIND_BY_TYPE: Record<EvidenceItem["type"], EvidenceKind> = {
+  market_insight: "market_insight",
+  performance_report: "performance_report",
+  performance_verdict: "performance_verdict",
+  performance_memory: "performance_memory",
+  business_context: "business_context",
+  objective: "objective",
+  competitor: "competitor",
+  historical_analysis: "historical_finding",
+};
+
+const TABLE_BY_TYPE: Record<EvidenceItem["type"], string> = {
+  market_insight: "market_memory",
+  performance_report: "performance_cycle_reports",
+  performance_verdict: "performance_decision_verdicts",
+  performance_memory: "strategy_memory",
+  business_context: "business_data_layer",
+  objective: "goal_decompositions",
+  competitor: "ci_competitors",
+  historical_analysis: "derived:historical_analysis",
+};
+
+function toRegistryEntry(e: EvidenceItem): RegistryEntry {
+  // Belief-history findings point at their real revision rows; other derived
+  // findings (no backing row) get a content-hash source id. Row-backed ids
+  // are content-versioned (`<rowId>@<hash>`) so evidence from a MUTABLE row
+  // (business_data_layer, ci_competitors, strategy_memory) becomes NEW
+  // registry evidence when the row changes — old citations keep resolving to
+  // the text that existed at run time. Immutable rows hash stably.
+  let sourceTable = TABLE_BY_TYPE[e.type];
+  if (e.ref.startsWith("HIST-B")) sourceTable = "business_data_revisions";
+  else if (e.ref.startsWith("HIST-C")) sourceTable = "ci_competitor_revisions";
+  return {
+    kind: KIND_BY_TYPE[e.type],
+    sourceTable,
+    sourceId: e.dbId ? versionedSourceId(e.dbId, e.detail) : derivedSourceId(`${e.ref}|${e.detail}`),
+    label: e.label,
+    detail: e.detail,
+    observedAt: e.observedAt ?? new Date(),
+  };
+}
+
+/**
+ * Persist one fresh reasoning run: register the evidence the served cards
+ * cite (lazy — only cited facts enter the registry) and record the run with
+ * status, cited UIDs, and any rejected AI output + reasons. `no_history`
+ * early-returns are not recorded — nothing was interpreted. Never throws.
+ */
+async function persistReasoningRun(
+  ctx: ReasoningContext,
+  accountId: string,
+  campaignId: string,
+  fingerprint: string,
+  result: ReasoningResult,
+  rejectedCards: ReasoningCard[] | null,
+  rejectionReasons: string[] | null,
+): Promise<void> {
+  try {
+    const cited = new Set<string>();
+    for (const c of result.cards) for (const r of c.evidenceRefs) cited.add(r);
+    const items = ctx.evidence.filter((e) => cited.has(e.ref));
+    const uids = await registerEvidence(accountId, campaignId, items.map(toRegistryEntry));
+    const refMap: Record<string, string> = {};
+    items.forEach((e, i) => { refMap[e.ref] = uids[i]; });
+    await recordReasoningRun({
+      accountId,
+      campaignId,
+      layer: "strategic_reasoning",
+      status: result.source === "ai" ? "accepted_ai" : (result.deterministicReason ?? "llm_failed"),
+      contextFingerprint: fingerprint,
+      model: REASONER_MODEL,
+      output: { state: result.state, source: result.source, cards: result.cards },
+      rejectedOutput: rejectedCards,
+      rejectionReasons,
+      evidenceUids: uids,
+      refMap,
+    });
+  } catch (err) {
+    console.error(`${LOG} RUN_PERSIST_FAILED campaign=${campaignId} detail=${(err as Error).message}`);
+  }
 }
 
 /** Customer-safe projection — strips internal telemetry; the route serializes ONLY this. */
