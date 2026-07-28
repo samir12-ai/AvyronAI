@@ -1,0 +1,210 @@
+# P-6.2 Architecture Review — Persistent Market Knowledge vs Sparse Data
+
+The current implementation blocks the Strategic Generation Layer (SGL) whenever the Audience Engine cannot extract new objection/root-cause signals from the latest market window.
+
+This behavior is architecturally questionable.
+
+Do **NOT** implement any code in this task.
+
+This is an architecture review only.
+
+---
+
+## Problem
+
+Today the flow behaves as:
+
+```
+Sparse recent market activity
+
+↓
+
+Audience Engine extracts no new objection/root-cause
+
+↓
+
+Confidence = 0
+
+↓
+
+SGL skips multiple engines
+
+↓
+
+Integrity = BLOCKED
+```
+
+However, the campaign has accumulated months of validated intelligence.
+
+The absence of new signals should not erase previously validated market knowledge.
+
+---
+
+## Objective
+
+Determine whether Avyron should transition from a **stateless market interpretation** to a **persistent market belief model**.
+
+Specifically investigate whether the system should continue reasoning from the **last validated market understanding** whenever the market has not materially changed.
+
+This is NOT about inventing proxy evidence.
+
+This is NOT about hallucinating new objections.
+
+---
+
+## Principles
+
+The system must NEVER invent evidence.
+
+If no new objection exists:
+
+Do NOT create one.
+
+Do NOT infer one from unrelated sources.
+
+Do NOT fabricate market behavior.
+
+Instead determine whether previously validated market knowledge should remain active until contradicted by newer evidence.
+
+---
+
+## Questions to Answer
+
+### 1.
+
+Should "No New Evidence" mean:
+
+* Unknown
+
+or
+
+* No Change?
+
+Explain the architectural difference.
+
+---
+
+### 2.
+
+Should validated market beliefs remain active across quiet periods?
+
+If yes:
+
+Describe exactly when they expire.
+
+Possible considerations:
+
+* contradiction
+* freshness decay
+* maximum age
+* confidence decay
+* market reset
+
+---
+
+### 3.
+
+Can the Audience Engine return:
+
+```
+No new objection detected.
+
+Continuing with the last validated objection.
+
+```
+
+instead of
+
+```
+Confidence = 0
+```
+
+Would this preserve grounding?
+
+Would this improve reasoning?
+
+Would it introduce hidden risks?
+
+---
+
+### 4.
+
+Should SGL distinguish between:
+
+* Missing evidence
+
+and
+
+* Stable evidence?
+
+Example:
+
+```
+No evidence because nothing was ever observed.
+
+```
+
+versus
+
+```
+No new evidence because the market remained stable.
+
+```
+
+Should these produce different execution paths?
+
+---
+
+### 5.
+
+Should Integrity block only when knowledge is genuinely missing,
+
+or should it also block when the market is simply quiet?
+
+---
+
+### 6.
+
+Evaluate whether the existing Memory Architecture already provides enough capability to support persistent market beliefs without introducing any new memory systems.
+
+Reuse existing memory whenever possible.
+
+Avoid additional complexity.
+
+---
+
+## Constraints
+
+Do NOT introduce:
+
+* proxy objections
+* synthetic evidence
+* fabricated signals
+* new memory layers
+* graph databases
+* embeddings
+
+Prefer minimal architectural change.
+
+Reuse the existing validated Memory Architecture.
+
+---
+
+## Deliverables
+
+Return:
+
+1. Architectural analysis.
+2. Risks.
+3. Benefits.
+4. Whether this philosophy is compatible with Avyron's grounding doctrine.
+5. Minimal implementation approach (if approved).
+6. Final recommendation:
+
+* Keep current behavior.
+
+or
+
+* Adopt persistent validated market beliefs.
+
+Explain the reasoning in detail before recommending any implementation.
