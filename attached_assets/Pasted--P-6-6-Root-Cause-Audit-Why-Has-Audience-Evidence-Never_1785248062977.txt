@@ -1,0 +1,223 @@
+# P-6.6 Root Cause Audit — Why Has Audience Evidence Never Been Valid?
+
+The previous investigations established the following facts:
+
+* Audience Engine extracts signals (e.g. pains, objections, desires).
+* SGL always sees zero effective coverage.
+* `strategy_roots` has never been written.
+* Every V2 orchestrator run is blocked by integrity.
+* The immediate cause is `dataProv = absent` → confidence = 0.
+
+However, this only explains **where** the pipeline stops.
+
+It does **not** explain **why** evidence has never become valid across six months of production.
+
+This audit must identify the true root cause.
+
+Do not propose fixes.
+
+Do not implement anything.
+
+Do not speculate.
+
+Every conclusion must be backed by code, production data, logs, database contents, and execution traces.
+
+---
+
+# Mission
+
+Determine why, across the entire lifetime of Avyron, the Audience Engine has never produced evidence that satisfies the SGL.
+
+Find the earliest point where valid evidence is lost.
+
+---
+
+# Investigation
+
+## 1. Evidence Lifecycle
+
+Trace one competitor post from beginning to end.
+
+Follow the exact lifecycle:
+
+```text
+Competitor Post
+
+↓
+
+Scraper
+
+↓
+
+Database
+
+↓
+
+Classification
+
+↓
+
+Audience Extraction
+
+↓
+
+Evidence Objects
+
+↓
+
+Provenance Assignment
+
+↓
+
+Confidence Calculation
+
+↓
+
+SGL Coverage
+
+↓
+
+Integrity Decision
+```
+
+For every stage show:
+
+* input
+* output
+* transformation
+* validation
+* where evidence changes
+* where evidence disappears
+
+---
+
+## 2. Provenance Audit
+
+Explain exactly how `dataProv` is assigned.
+
+For every possible provenance type:
+
+* direct_post
+* inferred
+* inferred_synthesis
+* market_signal
+* historical
+* absent
+
+Show:
+
+* the code path,
+* required conditions,
+* why the current data becomes `absent`.
+
+---
+
+## 3. Evidence Coverage Audit
+
+For every Audience signal:
+
+* pain
+* objection
+* desire
+* motivation
+* hesitation
+
+Answer:
+
+* What evidence exists?
+* Why is it insufficient?
+* Which rule rejected it?
+* Which validator made that decision?
+
+---
+
+## 4. Confidence Audit
+
+Trace the confidence calculation step-by-step.
+
+Show:
+
+* raw evidence
+* evidence score
+* provenance impact
+* confidence before normalization
+* confidence after normalization
+* final value passed into SGL
+
+Explain why extracted signals become exactly `0.00`.
+
+---
+
+## 5. Historical Audit
+
+Search every campaign ever executed.
+
+Determine:
+
+* Has any Audience snapshot ever produced non-zero confidence?
+* Has any signal ever had valid provenance?
+* Has any campaign ever reached partial SGL coverage?
+
+If not:
+
+Determine the first commit that made this impossible.
+
+---
+
+## 6. Architectural Intent Audit
+
+Compare:
+
+* original design intent
+* current implementation
+
+Answer:
+
+Is the current behaviour intentional?
+
+Or did later changes accidentally make the validation rules impossible to satisfy?
+
+Support the answer using git history.
+
+---
+
+## 7. Root Cause
+
+Provide exactly one root cause.
+
+Not symptoms.
+
+Not downstream effects.
+
+Identify the earliest architectural decision that guarantees:
+
+```text
+Audience
+
+↓
+
+confidence = 0
+
+↓
+
+SGL Block
+
+↓
+
+strategy_roots never written
+```
+
+---
+
+# Deliverables
+
+Return:
+
+1. Complete evidence lifecycle.
+2. Provenance decision tree.
+3. Confidence calculation trace.
+4. Historical evidence analysis.
+5. Git history of the behaviour.
+6. Earliest point where evidence becomes invalid.
+7. Single evidence-backed root cause.
+8. Confidence (0–100%) that fixing this root cause will unblock the entire V2 pipeline.
