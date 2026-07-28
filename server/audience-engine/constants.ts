@@ -594,3 +594,56 @@ export const CONFIDENCE_WEIGHTS = {
   SOURCE_DIVERSITY: 0.3,
   COMPETITOR_OVERLAP: 0.2,
 } as const;
+
+// ─── audience-confidence-v2 ──────────────────────────────────────────────────
+// P-6.8 recalibration. The v1 model (above) assumed every campaign should have
+// evidence across MAX_EXPECTED_SOURCE_TYPES (5) source types and required a
+// single signal to match 10% of the corpus for a full frequency score. Avyron's
+// designed evidence architecture is caption + comment as PRIMARY evidence;
+// reviews / TikTok / MI-bridge / website are OPTIONAL corroboration. v2 encodes
+// that architecture (same principle as computePrimaryDataStrength, which
+// already normalizes source coverage against the 2 primary sources).
+// v1 is retained unchanged for historical comparison — never re-tune it.
+
+export const AUDIENCE_CONFIDENCE_MODEL_VERSION = "audience-confidence-v2";
+
+/** Sources that constitute valid primary evidence on their own. */
+export const PRIMARY_EVIDENCE_SOURCES = ["caption", "comment"] as const;
+
+/** Sources that strengthen confidence but are never required. */
+export const OPTIONAL_EVIDENCE_SOURCES = ["review", "tiktok", "bridge", "website", "market_signal"] as const;
+
+export const CONFIDENCE_WEIGHTS_V2 = {
+  SIGNAL_FREQUENCY: 0.45,
+  PRIMARY_SOURCE_COVERAGE: 0.3,
+  COMPETITOR_SPREAD: 0.25,
+} as const;
+
+/**
+ * Saturating frequency model: freqScore = w / (w + k) where
+ * k = max(MIN_HALF_SATURATION, CORPUS_FRACTION × totalWeightedTexts).
+ * A signal reaches 0.5 frequency score at k weighted occurrences and
+ * approaches 1.0 asymptotically — meaningful repetition is rewarded without
+ * requiring a cluster to dominate the corpus (v1 required 10% of corpus).
+ * Scales with corpus size so small and large campaigns behave consistently.
+ */
+export const FREQ_SATURATION_V2 = {
+  MIN_HALF_SATURATION: 3,
+  CORPUS_FRACTION: 0.02,
+} as const;
+
+/**
+ * Competitor spread: distinct competitors evidencing the signal, normalized
+ * against max(MIN_NORM, ceil(FRACTION × campaign competitor count)). A signal
+ * observed across ~30% of the competitive set counts as full market spread.
+ */
+export const COMPETITOR_SPREAD_V2 = {
+  MIN_NORM: 2,
+  FRACTION: 0.3,
+} as const;
+
+/** Bonus per optional corroborating source type, additive, capped. */
+export const CORROBORATION_BONUS_V2 = {
+  PER_SOURCE: 0.05,
+  CAP: 0.1,
+} as const;

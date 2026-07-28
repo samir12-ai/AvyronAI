@@ -16,6 +16,13 @@ import {
   LANGUAGE_PATTERNS,
   SYNTHETIC_FILTERS,
   CONFIDENCE_WEIGHTS,
+  AUDIENCE_CONFIDENCE_MODEL_VERSION,
+  PRIMARY_EVIDENCE_SOURCES,
+  OPTIONAL_EVIDENCE_SOURCES,
+  CONFIDENCE_WEIGHTS_V2,
+  FREQ_SATURATION_V2,
+  COMPETITOR_SPREAD_V2,
+  CORROBORATION_BONUS_V2,
   OBJECTION_CONTEXT_RULES,
   MIN_EVIDENCE_PER_SIGNAL,
   BRIDGE_SUPPRESS_THRESHOLD,
@@ -45,10 +52,26 @@ interface EvidenceMeta {
   inputSnapshotId: string | null;
 }
 
+/** audience-confidence-v2 — per-signal component breakdown (full traceability). */
+export interface ConfidenceBreakdownV2 {
+  model: string;
+  frequencyScore: number;
+  primarySourceScore: number;
+  competitorSpreadScore: number;
+  corroborationBonus: number;
+  finalConfidence: number;
+}
+
 interface SignalItem extends EvidenceMeta {
   canonical: string;
   frequency: number;
   evidence: string[];
+  /** audience-confidence-v2 provenance — source types that evidenced this signal. */
+  sourceTypes?: string[];
+  /** audience-confidence-v2 provenance — distinct competitor IDs whose content evidenced this signal. */
+  competitorIds?: string[];
+  /** audience-confidence-v2 provenance — component breakdown of the confidence computation. */
+  confidenceBreakdown?: ConfidenceBreakdownV2;
 }
 
 interface LanguageSignals extends EvidenceMeta {
@@ -109,6 +132,11 @@ export interface StructuredSignalCluster {
   confidence: number;
   evidence: string[];
   sourceLayer: "surface" | "pattern" | "interpretation";
+  /** audience-confidence-v2 provenance (optional — absent on pre-v2 snapshots). */
+  evidenceCount?: number;
+  sourceTypes?: string[];
+  competitorIds?: string[];
+  confidenceBreakdown?: ConfidenceBreakdownV2;
 }
 
 export interface StructuredSignals {
@@ -117,6 +145,8 @@ export interface StructuredSignals {
   pattern_clusters: StructuredSignalCluster[];
   root_causes: StructuredSignalCluster[];
   psychological_drivers: StructuredSignalCluster[];
+  /** Confidence model version used to score these signals (absent = v1). */
+  confidence_model?: string;
 }
 
 // `PARTIAL` added: emitted when the engine
@@ -151,6 +181,8 @@ export interface AudienceEngineV3Result {
     commentsAnalyzed: number;
     competitorsAnalyzed: number;
     sanitizedCount: number;
+    /** Confidence model version used for signal scoring (audience-confidence-v2+). */
+    confidenceModel?: string;
     miSnapshotId: string | null;
     miSnapshotAge: string | null;
     semanticBridge?: {
@@ -188,12 +220,35 @@ function sanitizeTexts(texts: string[]): { clean: string[]; removed: number } {
   return { clean, removed };
 }
 
+/** Item-preserving variant of sanitizeTexts — keeps competitor attribution attached to each text. */
+function sanitizeTextItems<T extends { text: string }>(items: T[]): { clean: T[]; removed: number } {
+  let removed = 0;
+  const clean: T[] = [];
+  for (const item of items) {
+    const lower = item.text.toLowerCase();
+    let isSynthetic = false;
+    for (const filter of SYNTHETIC_FILTERS) {
+      if (lower.includes(filter)) {
+        isSynthetic = true;
+        removed++;
+        break;
+      }
+    }
+    if (!isSynthetic) {
+      clean.push(item);
+    }
+  }
+  return { clean, removed };
+}
+
 type CommentQuality = "HIGH" | "MEDIUM" | "LOW" | "NOISE";
 
 interface LabeledText {
   text: string;
   source: string;
   qualityWeight: number;
+  /** Competitor whose content produced this text (audience-confidence-v2 spread + traceability). */
+  competitorId?: string | null;
 }
 
 const EMOJI_ONLY_REGEX = /^[\p{Emoji}\p{Z}\s!?.,"']+$/u;
@@ -218,7 +273,12 @@ function classifyCommentQuality(text: string): CommentQuality {
   return "LOW";
 }
 
-function buildLabeledComments(comments: string[]): {
+interface SourcedTextItem {
+  text: string;
+  competitorId?: string | null;
+}
+
+function buildLabeledComments(comments: SourcedTextItem[]): {
   labeled: LabeledText[];
   noiseCount: number;
   lowCount: number;
@@ -231,7 +291,7 @@ function buildLabeledComments(comments: string[]): {
   let highCount = 0;
   let mediumCount = 0;
 
-  for (const text of comments) {
+  for (const { text, competitorId } of comments) {
     const quality = classifyCommentQuality(text);
     if (quality === "NOISE") {
       noiseCount++;
@@ -248,19 +308,19 @@ function buildLabeledComments(comments: string[]): {
     else if (quality === "MEDIUM") mediumCount++;
     else lowCount++;
 
-    labeled.push({ text, source: "comment", qualityWeight });
+    labeled.push({ text, source: "comment", qualityWeight, competitorId });
   }
 
   return { labeled, noiseCount, lowCount, highCount, mediumCount };
 }
 
-function buildLabeledCaptions(captions: string[]): LabeledText[] {
-  return captions.map(text => ({ text, source: "caption", qualityWeight: SOURCE_QUALITY_WEIGHTS.CAPTION }));
+function buildLabeledCaptions(captions: SourcedTextItem[]): LabeledText[] {
+  return captions.map(({ text, competitorId }) => ({ text, source: "caption", qualityWeight: SOURCE_QUALITY_WEIGHTS.CAPTION, competitorId }));
 }
 
-function buildLabeledReviews(reviews: string[]): LabeledText[] {
+function buildLabeledReviews(reviews: SourcedTextItem[]): LabeledText[] {
   const labeled: LabeledText[] = [];
-  for (const text of reviews) {
+  for (const { text, competitorId } of reviews) {
     const quality = classifyCommentQuality(text);
     if (quality === "NOISE") continue;
     const baseWeight =
@@ -269,15 +329,15 @@ function buildLabeledReviews(reviews: string[]): LabeledText[] {
         : quality === "MEDIUM"
         ? COMMENT_QUALITY_WEIGHTS.MEDIUM
         : COMMENT_QUALITY_WEIGHTS.LOW;
-    labeled.push({ text, source: "review", qualityWeight: baseWeight * SOURCE_QUALITY_WEIGHTS.REVIEW });
+    labeled.push({ text, source: "review", qualityWeight: baseWeight * SOURCE_QUALITY_WEIGHTS.REVIEW, competitorId });
   }
   return labeled;
 }
 
-function buildLabeledTiktok(tiktokTexts: string[]): LabeledText[] {
+function buildLabeledTiktok(tiktokTexts: SourcedTextItem[]): LabeledText[] {
   return tiktokTexts
-    .filter(t => t.trim().length >= 5)
-    .map(text => ({ text, source: "tiktok", qualityWeight: SOURCE_QUALITY_WEIGHTS.TIKTOK }));
+    .filter(t => t.text.trim().length >= 5)
+    .map(({ text, competitorId }) => ({ text, source: "tiktok", qualityWeight: SOURCE_QUALITY_WEIGHTS.TIKTOK, competitorId }));
 }
 
 function computePrimaryDataStrength(
@@ -385,6 +445,21 @@ function filterClustersByMarket(clusters: PatternCluster[], detectedMarkets: Mar
   });
 }
 
+/**
+ * Union audience-confidence-v2 provenance (sourceTypes/competitorIds) from
+ * `source` into `target` when two signals are merged. The breakdown of the
+ * surviving item is kept as-is (raw model output of the dominant signal);
+ * spread/source scores are not recomputed post-merge.
+ */
+function mergeSignalProvenance(target: SignalItem, source: SignalItem): void {
+  if (source.sourceTypes?.length) {
+    target.sourceTypes = Array.from(new Set([...(target.sourceTypes ?? []), ...source.sourceTypes]));
+  }
+  if (source.competitorIds?.length) {
+    target.competitorIds = Array.from(new Set([...(target.competitorIds ?? []), ...source.competitorIds]));
+  }
+}
+
 function applyObjectionContextRules(
   objectionMap: SignalItem[],
   texts: string[],
@@ -413,12 +488,14 @@ function applyObjectionContextRules(
       existing.evidenceCount += item.evidenceCount;
       existing.evidence = [...existing.evidence, ...item.evidence].slice(0, 3);
       existing.confidenceScore = Math.max(existing.confidenceScore, item.confidenceScore);
+      mergeSignalProvenance(existing, item);
     } else {
       const existingInResult = result.find(r => r.canonical === rule.fallbackCanonical);
       if (existingInResult) {
         existingInResult.frequency += item.frequency;
         existingInResult.evidenceCount += item.evidenceCount;
         existingInResult.evidence = [...existingInResult.evidence, ...item.evidence].slice(0, 3);
+        mergeSignalProvenance(existingInResult, item);
       } else {
         fallbackMerge.set(rule.fallbackCanonical, { ...item, canonical: rule.fallbackCanonical });
       }
@@ -536,6 +613,7 @@ function inferPainsFromObjections(objectionMap: SignalItem[], inputSnapshotId: s
   const inferred: SignalItem[] = [];
   for (const obj of objectionMap) {
     const painCanonical = `Problem behind objection: ${obj.canonical}`;
+    const derivedConfidence = obj.confidenceScore * 0.6;
     inferred.push({
       canonical: painCanonical,
       frequency: Math.max(1, Math.round(obj.frequency * 0.7)),
@@ -543,9 +621,16 @@ function inferPainsFromObjections(objectionMap: SignalItem[], inputSnapshotId: s
       evidenceCount: Math.max(1, Math.round(obj.evidenceCount * 0.7)),
       // no 0.1 floor — inferred confidence is a strict multiple of the
       // source objection's confidence. If the source is zero, the inference is zero.
-      confidenceScore: obj.confidenceScore * 0.6,
+      confidenceScore: derivedConfidence,
       sourceSignals: [...obj.sourceSignals, "inferred_from_objection"],
       inputSnapshotId,
+      // audience-confidence-v2 provenance — inherited from the source objection;
+      // finalConfidence reflects the documented ×0.6 derivation scaling.
+      sourceTypes: obj.sourceTypes,
+      competitorIds: obj.competitorIds,
+      confidenceBreakdown: obj.confidenceBreakdown
+        ? { ...obj.confidenceBreakdown, finalConfidence: Number(derivedConfidence.toFixed(4)) }
+        : undefined,
     });
   }
   return inferred;
@@ -555,15 +640,23 @@ function inferPainsFromEmotionalDrivers(drivers: SignalItem[], inputSnapshotId: 
   const inferred: SignalItem[] = [];
   for (const driver of drivers) {
     const painCanonical = `Unresolved need: ${driver.canonical}`;
+    const derivedConfidence = driver.confidenceScore * 0.5;
     inferred.push({
       canonical: painCanonical,
       frequency: Math.max(1, Math.round(driver.frequency * 0.5)),
       evidence: driver.evidence.slice(0, 2),
       evidenceCount: Math.max(1, Math.round(driver.evidenceCount * 0.5)),
       // no 0.1 floor — see inferPainsFromObjections.
-      confidenceScore: driver.confidenceScore * 0.5,
+      confidenceScore: derivedConfidence,
       sourceSignals: [...driver.sourceSignals, "inferred_from_emotional_driver"],
       inputSnapshotId,
+      // audience-confidence-v2 provenance — inherited from the source driver;
+      // finalConfidence reflects the documented ×0.5 derivation scaling.
+      sourceTypes: driver.sourceTypes,
+      competitorIds: driver.competitorIds,
+      confidenceBreakdown: driver.confidenceBreakdown
+        ? { ...driver.confidenceBreakdown, finalConfidence: Number(derivedConfidence.toFixed(4)) }
+        : undefined,
     });
   }
   return inferred;
@@ -721,7 +814,14 @@ function canonicalizeSegments(segments: AudienceSegment[]): AudienceSegment[] {
   return kept;
 }
 
-function computeCalibratedConfidence(
+/**
+ * audience-confidence-v1 — HISTORICAL, retained for audit/comparison only.
+ * No production call sites remain (superseded by computeCalibratedConfidenceV2
+ * in P-6.8). v1 penalized campaigns for lacking source types they were never
+ * designed to have (MAX_EXPECTED_SOURCE_TYPES = 5 vs. the 2 primary sources)
+ * and required a signal to match 10% of the corpus for full frequency score.
+ */
+export function computeCalibratedConfidence(
   frequency: number,
   totalTexts: number,
   sourceTypes: string[],
@@ -739,6 +839,86 @@ function computeCalibratedConfidence(
   return Math.min(0.95, Math.max(0.05, raw));
 }
 
+/** Normalizes legacy plural source labels to the canonical singular form. */
+const SOURCE_TYPE_ALIASES: Record<string, string> = {
+  comments: "comment",
+  captions: "caption",
+  reviews: "review",
+  tiktoks: "tiktok",
+};
+
+export interface ConfidenceV2Input {
+  /** Quality-weighted occurrence count of the signal. */
+  weightedFrequency: number;
+  /** Quality-weighted size of the analyzed corpus. */
+  totalWeightedTexts: number;
+  /** Source types that evidenced the signal (caption/comment/review/tiktok/...). */
+  sourceTypes: string[];
+  /** Total competitors in the campaign inventory. */
+  competitorCount: number;
+  /** Distinct competitors whose content evidenced this signal. */
+  distinctCompetitors: number;
+}
+
+/**
+ * audience-confidence-v2 (P-6.8).
+ * Primary evidence = caption + comment (Avyron's designed evidence
+ * architecture — same principle as computePrimaryDataStrength). Optional
+ * sources (review, tiktok, MI bridge, website) add a corroboration bonus but
+ * are never required to reach base confidence.
+ *
+ *  - frequencyScore:       saturating w/(w+k) — meaningful repetition, not corpus domination
+ *  - primarySourceScore:   primary source types hit / 2 (caption-only or comment-only = 0.5)
+ *  - competitorSpreadScore: distinct evidencing competitors vs ~30% of the inventory
+ *  - corroborationBonus:   +0.05 per optional source type, capped at +0.10
+ */
+export function computeCalibratedConfidenceV2(input: ConfidenceV2Input): ConfidenceBreakdownV2 {
+  const { weightedFrequency, totalWeightedTexts, competitorCount, distinctCompetitors } = input;
+  const sourceTypes = input.sourceTypes.map(s => SOURCE_TYPE_ALIASES[s] ?? s);
+
+  const halfSaturation = Math.max(
+    FREQ_SATURATION_V2.MIN_HALF_SATURATION,
+    totalWeightedTexts * FREQ_SATURATION_V2.CORPUS_FRACTION,
+  );
+  const frequencyScore = totalWeightedTexts > 0 && weightedFrequency > 0
+    ? weightedFrequency / (weightedFrequency + halfSaturation)
+    : 0;
+
+  const primaryHits = PRIMARY_EVIDENCE_SOURCES.filter(s => sourceTypes.includes(s)).length;
+  const primarySourceScore = Math.min(1, primaryHits / PRIMARY_EVIDENCE_SOURCES.length);
+
+  const spreadNorm = Math.max(
+    COMPETITOR_SPREAD_V2.MIN_NORM,
+    Math.ceil(competitorCount * COMPETITOR_SPREAD_V2.FRACTION),
+  );
+  const competitorSpreadScore = competitorCount > 0
+    ? Math.min(1, distinctCompetitors / spreadNorm)
+    : 0;
+
+  const optionalHits = OPTIONAL_EVIDENCE_SOURCES.filter(s => sourceTypes.includes(s)).length;
+  const corroborationBonus = Math.min(
+    CORROBORATION_BONUS_V2.CAP,
+    optionalHits * CORROBORATION_BONUS_V2.PER_SOURCE,
+  );
+
+  const raw =
+    frequencyScore * CONFIDENCE_WEIGHTS_V2.SIGNAL_FREQUENCY +
+    primarySourceScore * CONFIDENCE_WEIGHTS_V2.PRIMARY_SOURCE_COVERAGE +
+    competitorSpreadScore * CONFIDENCE_WEIGHTS_V2.COMPETITOR_SPREAD +
+    corroborationBonus;
+
+  const finalConfidence = Math.min(0.95, Math.max(0.05, raw));
+
+  return {
+    model: AUDIENCE_CONFIDENCE_MODEL_VERSION,
+    frequencyScore: Number(frequencyScore.toFixed(4)),
+    primarySourceScore: Number(primarySourceScore.toFixed(4)),
+    competitorSpreadScore: Number(competitorSpreadScore.toFixed(4)),
+    corroborationBonus: Number(corroborationBonus.toFixed(4)),
+    finalConfidence: Number(finalConfidence.toFixed(4)),
+  };
+}
+
 function matchPatternClusters(
   labeledTexts: LabeledText[],
   clusters: PatternCluster[],
@@ -751,6 +931,7 @@ function matchPatternClusters(
     evidence: string[];
     matchedPatterns: Set<string>;
     hitSources: Set<string>;
+    hitCompetitors: Set<string>;
   }> = new Map();
 
   for (const cluster of clusters) {
@@ -760,12 +941,13 @@ function matchPatternClusters(
       evidence: [],
       matchedPatterns: new Set(),
       hitSources: new Set(),
+      hitCompetitors: new Set(),
     });
   }
 
   const totalWeightedTexts = labeledTexts.reduce((sum, t) => sum + t.qualityWeight, 0);
 
-  for (const { text, source, qualityWeight } of labeledTexts) {
+  for (const { text, source, qualityWeight, competitorId } of labeledTexts) {
     const lower = text.toLowerCase();
     for (const cluster of clusters) {
       for (const pattern of cluster.patterns) {
@@ -775,6 +957,7 @@ function matchPatternClusters(
           entry.rawCount++;
           entry.matchedPatterns.add(pattern);
           entry.hitSources.add(source);
+          if (competitorId) entry.hitCompetitors.add(competitorId);
           if (entry.evidence.length < 3) {
             entry.evidence.push(text.slice(0, 150));
           }
@@ -787,20 +970,27 @@ function matchPatternClusters(
   return Array.from(results.entries())
     .filter(([, v]) => v.rawCount > 0)
     .sort((a, b) => b[1].weightedCount - a[1].weightedCount)
-    .map(([canonical, data]) => ({
-      canonical,
-      frequency: Math.round(data.weightedCount),
-      evidence: data.evidence,
-      evidenceCount: data.rawCount,
-      confidenceScore: computeCalibratedConfidence(
-        data.weightedCount,
+    .map(([canonical, data]) => {
+      const breakdown = computeCalibratedConfidenceV2({
+        weightedFrequency: data.weightedCount,
         totalWeightedTexts,
-        Array.from(data.hitSources),
+        sourceTypes: Array.from(data.hitSources),
         competitorCount,
-      ),
-      sourceSignals: Array.from(data.matchedPatterns),
-      inputSnapshotId,
-    }));
+        distinctCompetitors: data.hitCompetitors.size,
+      });
+      return {
+        canonical,
+        frequency: Math.round(data.weightedCount),
+        evidence: data.evidence,
+        evidenceCount: data.rawCount,
+        confidenceScore: breakdown.finalConfidence,
+        sourceSignals: Array.from(data.matchedPatterns),
+        inputSnapshotId,
+        sourceTypes: Array.from(data.hitSources),
+        competitorIds: Array.from(data.hitCompetitors),
+        confidenceBreakdown: breakdown,
+      };
+    });
 }
 
 function analyzeLanguage(
@@ -864,7 +1054,13 @@ function analyzeLanguage(
   if (captions.length > 0) sourceTypes.push("captions");
   if (reviews.length > 0) sourceTypes.push("reviews");
   if (tiktokTexts.length > 0) sourceTypes.push("tiktok");
-  result.confidenceScore = computeCalibratedConfidence(total, allText.length, sourceTypes, competitorCount);
+  result.confidenceScore = computeCalibratedConfidenceV2({
+    weightedFrequency: total,
+    totalWeightedTexts: allText.length,
+    sourceTypes,
+    competitorCount,
+    distinctCompetitors: competitorCount,
+  }).finalConfidence;
   result.sourceSignals = sourceTypes;
 
   return result;
@@ -961,7 +1157,13 @@ function detectAwareness(
     level: dominantLevel as AwarenessResult["level"],
     distribution: pct,
     evidenceCount: totalMatched,
-    confidenceScore: computeCalibratedConfidence(totalMatched, comments.length, ["comments"], competitorCount),
+    confidenceScore: computeCalibratedConfidenceV2({
+      weightedFrequency: totalMatched,
+      totalWeightedTexts: comments.length,
+      sourceTypes: ["comment"],
+      competitorCount,
+      distinctCompetitors: competitorCount,
+    }).finalConfidence,
     sourceSignals: ["comments"],
     inputSnapshotId,
   };
@@ -1028,7 +1230,13 @@ function detectMaturity(
     distribution: dist,
     indicators,
     evidenceCount: total,
-    confidenceScore: computeCalibratedConfidence(total, allText.length, sourceTypes, competitorCount),
+    confidenceScore: computeCalibratedConfidenceV2({
+      weightedFrequency: total,
+      totalWeightedTexts: allText.length,
+      sourceTypes,
+      competitorCount,
+      distinctCompetitors: competitorCount,
+    }).finalConfidence,
     sourceSignals: sourceTypes,
     inputSnapshotId,
   };
@@ -1088,7 +1296,13 @@ function classifyIntents(
     purchaseIntent: Math.round((purchaseIntent / totalClassified) * 100),
     totalClassified,
     evidenceCount: totalClassified,
-    confidenceScore: computeCalibratedConfidence(totalClassified, comments.length, ["comments"], competitorCount),
+    confidenceScore: computeCalibratedConfidenceV2({
+      weightedFrequency: totalClassified,
+      totalWeightedTexts: comments.length,
+      sourceTypes: ["comment"],
+      competitorCount,
+      distinctCompetitors: competitorCount,
+    }).finalConfidence,
     sourceSignals: ["comments"],
     inputSnapshotId,
   };
@@ -1659,6 +1873,11 @@ function buildStructuredSignals(
       confidence: item.confidenceScore,
       evidence: item.evidence.slice(0, 3),
       sourceLayer: layer,
+      // audience-confidence-v2 provenance (traceability — P-6.8)
+      evidenceCount: item.evidenceCount,
+      sourceTypes: item.sourceTypes,
+      competitorIds: item.competitorIds,
+      confidenceBreakdown: item.confidenceBreakdown,
     }));
 
   const pain_clusters = toCluster(painMap, "surface");
@@ -1744,7 +1963,14 @@ function buildStructuredSignals(
     "interpretation",
   );
 
-  return { pain_clusters, desire_clusters, pattern_clusters, root_causes, psychological_drivers };
+  return {
+    pain_clusters,
+    desire_clusters,
+    pattern_clusters,
+    root_causes,
+    psychological_drivers,
+    confidence_model: AUDIENCE_CONFIDENCE_MODEL_VERSION,
+  };
 }
 
 const EMPTY_STRUCTURED_SIGNALS: StructuredSignals = {
@@ -1869,27 +2095,27 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   const competitorIds = competitors.map(c => c.id);
   const competitorCount = competitorIds.length;
 
-  let posts: { caption: string | null; platform: string }[] = [];
-  let rawComments: { commentText: string | null }[] = [];
-  let rawReviews: { reviewText: string }[] = [];
+  let posts: { caption: string | null; platform: string; competitorId: string }[] = [];
+  let rawComments: { commentText: string | null; competitorId: string }[] = [];
+  let rawReviews: { reviewText: string; competitorId: string }[] = [];
 
   if (competitorIds.length > 0) {
     const idList = sql.join(competitorIds.map(id => sql`${id}`), sql`, `);
 
     [posts, rawComments, rawReviews] = await Promise.all([
-      db.select({ caption: ciCompetitorPosts.caption, platform: ciCompetitorPosts.platform })
+      db.select({ caption: ciCompetitorPosts.caption, platform: ciCompetitorPosts.platform, competitorId: ciCompetitorPosts.competitorId })
         .from(ciCompetitorPosts)
         .where(sql`${ciCompetitorPosts.competitorId} IN (${idList})`)
         .orderBy(desc(ciCompetitorPosts.createdAt))
         .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE),
 
-      db.select({ commentText: ciCompetitorComments.commentText })
+      db.select({ commentText: ciCompetitorComments.commentText, competitorId: ciCompetitorComments.competitorId })
         .from(ciCompetitorComments)
         .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL)`)
         .orderBy(desc(ciCompetitorComments.createdAt))
         .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE),
 
-      db.select({ reviewText: ciCompetitorReviews.reviewText })
+      db.select({ reviewText: ciCompetitorReviews.reviewText, competitorId: ciCompetitorReviews.competitorId })
         .from(ciCompetitorReviews)
         .where(sql`${ciCompetitorReviews.competitorId} IN (${idList}) AND ${ciCompetitorReviews.isSynthetic} = false`)
         .orderBy(desc(ciCompetitorReviews.createdAt))
@@ -1900,22 +2126,33 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   const instagramPosts = posts.filter(p => !p.platform || p.platform === "instagram");
   const tiktokPosts = posts.filter(p => p.platform === "tiktok");
 
-  const rawCaptions = instagramPosts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
-  const rawTiktokTexts = tiktokPosts.map(p => p.caption).filter((c): c is string => !!c && c.length > 5);
-  const rawCommentTexts = rawComments.map(c => c.commentText).filter((c): c is string => !!c && c.length > 3);
-  const rawReviewTexts = rawReviews.map(r => r.reviewText).filter(t => t.length > 5);
+  const rawCaptionItems = instagramPosts
+    .map(p => ({ text: p.caption, competitorId: p.competitorId }))
+    .filter((i): i is { text: string; competitorId: string } => !!i.text && i.text.length > 5);
+  const rawTiktokItems = tiktokPosts
+    .map(p => ({ text: p.caption, competitorId: p.competitorId }))
+    .filter((i): i is { text: string; competitorId: string } => !!i.text && i.text.length > 5);
+  const rawCommentItems = rawComments
+    .map(c => ({ text: c.commentText, competitorId: c.competitorId }))
+    .filter((i): i is { text: string; competitorId: string } => !!i.text && i.text.length > 3);
+  const rawReviewItems = rawReviews
+    .map(r => ({ text: r.reviewText, competitorId: r.competitorId }))
+    .filter(i => i.text.length > 5);
 
-  const captionSanitized = sanitizeTexts(rawCaptions);
-  const commentSanitized = sanitizeTexts(rawCommentTexts);
-  const captions = captionSanitized.clean;
-  const commentTexts = commentSanitized.clean;
+  const rawTiktokTexts = rawTiktokItems.map(i => i.text);
+  const rawReviewTexts = rawReviewItems.map(i => i.text);
+
+  const captionSanitized = sanitizeTextItems(rawCaptionItems);
+  const commentSanitized = sanitizeTextItems(rawCommentItems);
+  const captions = captionSanitized.clean.map(i => i.text);
+  const commentTexts = commentSanitized.clean.map(i => i.text);
   const totalSanitized = captionSanitized.removed + commentSanitized.removed;
 
-  const commentClassification = buildLabeledComments(commentTexts);
+  const commentClassification = buildLabeledComments(commentSanitized.clean);
   const labeledComments = commentClassification.labeled;
-  const labeledCaptions = buildLabeledCaptions(captions);
-  const labeledReviews = buildLabeledReviews(rawReviewTexts);
-  const labeledTiktok = buildLabeledTiktok(rawTiktokTexts);
+  const labeledCaptions = buildLabeledCaptions(captionSanitized.clean);
+  const labeledReviews = buildLabeledReviews(rawReviewItems);
+  const labeledTiktok = buildLabeledTiktok(rawTiktokItems);
   const labeledAllTexts: LabeledText[] = [...labeledComments, ...labeledCaptions, ...labeledReviews, ...labeledTiktok];
   const primaryDataStrength = computePrimaryDataStrength(labeledComments, labeledCaptions);
 
@@ -1941,6 +2178,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
       high: commentClassification.highCount,
     },
     primaryDataStrength,
+    confidenceModel: AUDIENCE_CONFIDENCE_MODEL_VERSION,
     miSnapshotId,
     miSnapshotAge,
     detectedMarkets: [] as string[],

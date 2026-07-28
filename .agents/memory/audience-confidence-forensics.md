@@ -1,29 +1,30 @@
 ---
-name: Audience confidence forensics
-description: How to correctly attribute audience-engine confidence caps; decompose production values before naming a culprit input.
+name: Audience confidence forensics & v2 recalibration
+description: How to decompose audience confidence values arithmetically, why v1 structurally blocked caption+comment campaigns, and the v2 model that replaced it
 ---
 
-# Audience confidence forensics
+## Forensic method (P-6.7)
+Decompose observed confidence values arithmetically against the model formula before blaming any input. Every production value must reconcile exactly — if it does, the model inputs are proven and the "wrong data" hypothesis dies. Example: 0.3933 = 1/3×0.5 + 1/5×0.3 + 10/12×0.2 proved competitorCount was 10, not 1.
 
-**Rule:** Production confidence values from `computeCalibratedConfidence` decompose exactly
-into their weighted components (frequency 0.5 / source-diversity 0.3 / competitor-overlap 0.2).
-Before attributing a confidence cap to any input (competitor count, corpus size), decompose the
-observed values arithmetically — the decomposition uniquely identifies the actual inputs used.
+**Why:** P-6.6 spent a whole investigation on a wrong premise (competitor filtering) that 5 minutes of arithmetic disproved.
 
-**Why:** P-6.6 wrongly attributed the 0.3933 pain-confidence cap to `competitorCount = 1`,
-inferred from the blueprint's `competitorUrls` (1 entry). P-6.7 disproved this: all observed
-values decompose exactly with competitorScore = 10/12, proving all 10 `ci_competitors` rows
-entered the formula. The real caps were (a) `MAX_EXPECTED_SOURCE_TYPES = 5` while the campaign
-corpus only has 2 source types (captions+comments; reviews/tiktok empty → 60% of diversity
-weight unreachable), and (b) freq normalization requiring a signal to match 10% of the weighted
-corpus for full score.
+Blueprint `competitorUrls` ≠ `ci_competitors` — never infer engine inputs from blueprint fields.
+
+## v1 structural defect (historical)
+v1: freq(hard 10%-of-corpus bar)×0.5 + sourceTypes/5×0.3 + inventory/12×0.2. A caption+comment-only campaign could never exceed 2/5 diversity (60% of that weight unreachable) and distributed pains never hit the 10% bar → 0 root causes → SGL BLOCKED → V2 pipeline never completed. This was the true root cause behind the BLOCKED_BY_INTEGRITY cascade era.
+
+## v2 model (audience-confidence-v2, shipped 2026-07-28)
+`freq(w/(w+k), k=max(3, 2% weighted corpus))×0.45 + primarySources(caption,comment)/2×0.30 + competitorSpread(distinct evidencing / max(2, ceil(30% inventory)))×0.25 + corroboration(+0.05/optional source, cap 0.10)`, clamp [0.05,0.95]. v1 kept exported as HISTORICAL; snapshots stamped with `confidence_model`.
 
 **How to apply:**
-- `blueprint.competitorUrls` (section-composer route gate) and `ci_competitors` (audience
-  engine input) are unrelated structures — never infer one from the other.
-- The audience engine loads competitors with only `isActive = true` as a filter; competitorCount
-  is the raw row count, no downstream filtering.
-- Chain that blocks V2: pains < 0.40 → `buildStructuredSignals` highConfPains empty →
-  root_causes = [] → SGL missing `root_cause` category → BLOCKED_BY_INTEGRITY →
-  strategy_roots never written. (Era-1 runs blocked differently: NULL structured_signals column.)
-- Reports: `.local/validation/p6.5-*.md`, `p6.6-*.md`, `p6.7-*.md`.
+- Score against what the platform *can* collect (2 primary sources), make optional sources additive bonus — never a structural penalty. Same precedent as `computePrimaryDataStrength`.
+- Competitor spread must come from competitors *actually evidencing* the signal (threaded competitorId), not flat inventory.
+- Aggregate corpus-wide metrics (language/awareness/maturity/intent) pass `distinctCompetitors = competitorCount` by construction.
+
+## Traceability gotchas
+- `confidenceBreakdown.finalConfidence` = **raw model output**. The emitted `confidenceScore` can differ: market-scope relevance scaling multiplies post-hoc (×0.4/×0.2/×0 for off-scope pains), root-cause promotion adds +0.1 driver-linkage boost, derived pains scale ×0.5/×0.6. Downstream readers must not treat the breakdown as the final score.
+- Signals born outside pattern matching (MI narrative-merged objections, bridge) carry their own confidence and no v2 breakdown — that's truthful, not a bug.
+- When merging signals, union `sourceTypes`/`competitorIds` (see `mergeSignalProvenance`) or attribution under-reports.
+
+## E2E outcome
+With v2, the full V2 orchestrator completed 13/15 engines for the first time and wrote the first `strategy_roots` row. The pipeline's designed terminal stop is the Iteration Engine's user-input gate (`primaryKpi`, `dataWindowDays` — user-settable campaign fields), not a defect.

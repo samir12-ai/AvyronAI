@@ -1,0 +1,321 @@
+# P-6.8 Implementation — Recalibrate Audience Confidence Model Using Caption & Comment Evidence
+
+The previous investigations established the following:
+
+* The Audience Engine correctly loads all 10 configured competitors.
+* The campaign contains 147 competitor posts and 104 real comments.
+* The Audience Engine extracts valid pain signals.
+* The pipeline fails because the confidence model does not promote any pain into a root cause.
+* This causes:
+
+  * `root_causes = []`
+  * SGL missing `root_cause` coverage
+  * `BLOCKED_BY_INTEGRITY`
+  * downstream engines never executing
+  * `strategy_roots` never being written
+
+The audits also confirmed that the current confidence model assumes a level of evidence diversity that does not reflect how Avyron is intentionally designed.
+
+Avyron's primary audience evidence comes from:
+
+* Competitor captions
+* Audience comments
+
+Other sources (reviews, TikTok, website, etc.) are enrichment sources, not mandatory evidence.
+
+Implement the correction.
+
+Do not bypass SGL.
+
+Do not create synthetic evidence.
+
+Do not reduce integrity standards.
+
+Fix the confidence model so it matches Avyron's intended evidence architecture.
+
+---
+
+# IMPORTANT — Reuse Existing Architecture First
+
+Before writing any new code:
+
+Perform a complete audit of the existing codebase.
+
+Search for:
+
+* existing confidence models
+* previous calibration logic
+* evidence scoring utilities
+* source weighting implementations
+* provenance scoring
+* signal promotion logic
+* frequency normalization utilities
+* preview implementations
+* experimental implementations
+* feature-flagged implementations
+* legacy implementations
+* commented-out code
+* previous Git commits solving similar problems
+
+If an existing implementation already solves this problem:
+
+* Prefer adapting it instead of creating new logic.
+* Explain why it was abandoned.
+* Explain whether it is still compatible.
+* Reuse it whenever architecturally appropriate.
+
+If preview or experimental implementations exist:
+
+Evaluate whether they are superior to the current implementation.
+
+Reuse them whenever possible instead of introducing duplicate logic.
+
+Avoid parallel implementations.
+
+Avoid increasing technical debt.
+
+---
+
+# Architectural Principle
+
+For Audience pain discovery:
+
+```text
+Caption + Comment = Primary Evidence
+```
+
+Reviews, TikTok, Website, Market Signals and any additional channels are supporting evidence only.
+
+A campaign with strong captions and comments must be capable of producing validated pains and root causes.
+
+Optional channels should increase confidence.
+
+Their absence must never invalidate legitimate evidence.
+
+---
+
+# Required Changes
+
+## 1. Replace Fixed Source Expectations
+
+Remove the assumption that every campaign is expected to have five evidence sources.
+
+Instead implement an Audience-specific evidence model.
+
+Primary sources:
+
+* Caption
+* Comment
+
+Optional corroboration:
+
+* Review
+* TikTok
+* Website
+* Market Signals
+* Future sources
+
+Primary evidence should determine whether a pain is valid.
+
+Optional evidence should strengthen confidence.
+
+---
+
+## 2. Recalibrate Source Weighting
+
+Support the following behaviour:
+
+Caption only
+
+↓
+
+Valid evidence
+
+↓
+
+Lower confidence
+
+Comment only
+
+↓
+
+Valid evidence
+
+↓
+
+Lower confidence
+
+Caption + Comment
+
+↓
+
+Strong primary evidence
+
+↓
+
+Highest primary confidence
+
+Caption + Comment + Optional Sources
+
+↓
+
+Additional corroboration bonus
+
+Do not require optional sources to reach the base confidence.
+
+---
+
+## 3. Review Frequency Normalization
+
+Audit the current assumption requiring approximately 10% corpus frequency.
+
+Design a frequency model that generalizes across campaigns of different sizes.
+
+Frequency should reflect meaningful repetition.
+
+It should not require a pain cluster to dominate the entire corpus.
+
+---
+
+## 4. Preserve Confidence Quality
+
+Do not simply lower thresholds.
+
+The confidence model should still distinguish between:
+
+* weak evidence
+* moderate evidence
+* strong evidence
+
+Root causes must continue to require genuinely strong evidence.
+
+---
+
+## 5. Preserve Traceability
+
+Every promoted root cause must retain complete provenance.
+
+Include:
+
+* supporting captions
+* supporting comments
+* competitor IDs
+* occurrence counts
+* source types
+* confidence breakdown
+* final confidence
+* provenance classification
+
+No synthetic evidence.
+
+No fake corroboration.
+
+---
+
+## 6. Version the Confidence Model
+
+Do not overwrite historical behaviour.
+
+Introduce a new confidence model version.
+
+Example:
+
+```text
+audience-confidence-v2
+```
+
+Store the version alongside future audience snapshots.
+
+---
+
+# Validation
+
+Run the corrected model against the production campaign.
+
+Return a complete comparison.
+
+For every pain cluster report:
+
+| Metric                 | Before | After |
+| ---------------------- | -----: | ----: |
+| Frequency Score        |        |       |
+| Source Score           |        |       |
+| Competitor Score       |        |       |
+| Corroboration Bonus    |        |       |
+| Final Confidence       |        |       |
+| Promoted to Root Cause |        |       |
+
+---
+
+# End-to-End Validation
+
+After implementing the correction:
+
+1. Execute the Audience Engine.
+2. Verify root causes are generated.
+3. Verify SGL passes.
+4. Continue the complete V2 orchestrator.
+5. Verify Differentiation executes.
+6. Verify Mechanism executes.
+7. Verify Offer executes.
+8. Verify Funnel executes.
+9. Verify Persuasion executes.
+10. Verify `buildStrategyRoot()` executes.
+11. Verify a record is written into `strategy_roots`.
+12. Continue until the entire V2 pipeline completes or another blocker is reached.
+
+If another blocker appears:
+
+Stop there.
+
+Identify it.
+
+Do not continue implementing additional fixes.
+
+---
+
+# Guardrails
+
+Do NOT:
+
+* bypass SGL
+* hardcode confidence values
+* lower thresholds only for this campaign
+* fabricate source diversity
+* create proxy evidence
+* generate synthetic pains
+* introduce duplicate implementations
+* ignore existing preview implementations
+* modify unrelated engines
+* silently approve degraded runs
+
+---
+
+# Deliverables
+
+Return:
+
+1. Existing implementations discovered.
+2. Preview/experimental implementations discovered.
+3. Whether they were reused.
+4. Old confidence model.
+5. New confidence model.
+6. Architectural justification.
+7. Exact code changes.
+8. Before/after production validation.
+9. Root causes generated.
+10. SGL result.
+11. Downstream execution result.
+12. Whether `strategy_roots` was finally written.
+13. Any newly discovered blocker.
+14. Final verdict:
+
+```
+AUDIENCE CONFIDENCE RECALIBRATED — V2 PIPELINE UNBLOCKED
+```
+
+or
+
+```
+AUDIENCE CONFIDENCE RECALIBRATED — NEXT BLOCKER IDENTIFIED
+```
