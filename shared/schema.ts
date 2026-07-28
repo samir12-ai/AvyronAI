@@ -3372,6 +3372,11 @@ export const pipelineChangeEvents = pgTable("pipeline_change_events", {
   // validatedAt: null = candidate (first observation); non-null = confirmed by a
   //   second independent fresh fetch. Two-fetch gate per W-1 spec §D.
   validatedAt: timestamp("validated_at"),
+  // Migration 049: market-level scope at promotion time.
+  // scope: single_competitor | several_competitors | market_wide
+  // scope_competitor_count: distinct competitors for this campaign+kind confirmed within 60 days.
+  scope: text("scope"),
+  scopeCompetitorCount: integer("scope_competitor_count"),
 });
 
 export type PipelineChangeEvent = typeof pipelineChangeEvents.$inferSelect;

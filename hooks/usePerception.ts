@@ -3,6 +3,7 @@ import { AppState, type AppStateStatus } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { getApiUrl, authFetch } from "@/lib/query-client";
 import type { WatchtowerLine, ActivityEvent, BlockedReason } from "@shared/perception-translator";
+export type { WatchtowerLine, ActivityEvent, BlockedReason } from "@shared/perception-translator";
 
 // Battery doctrine — pause polling when the app is backgrounded. React
 // Query will resume on next foreground (refetch fires immediately if the
@@ -123,6 +124,35 @@ export interface DnaEnrichmentPendingItem {
 export interface DnaEnrichmentPendingResponse {
   success: true;
   requests: DnaEnrichmentPendingItem[];
+}
+
+// ── Market signals (confirmed Watchtower semantic shift events) ───────────────
+export interface MarketSignal {
+  kind: string;
+  label: string;
+  severity: "mild" | "medium" | "major";
+  scope: "single_competitor" | "several_competitors" | "market_wide";
+  scopeCompetitorCount: number;
+  competitor: string | null;
+  evidence: string[];
+  detectedAt: string | null;
+}
+
+export interface MarketSignalsResponse {
+  success: true;
+  state: "ready" | "no_signals";
+  signals: MarketSignal[];
+}
+
+export function useMarketSignals(campaignId: string | null | undefined, limit = 10) {
+  const active = useIsAppActive();
+  return useQuery<MarketSignalsResponse>({
+    queryKey: ["/api/perception/market-signals", campaignId, limit],
+    queryFn: () => fetchJson<MarketSignalsResponse>(`/api/perception/market-signals?campaignId=${campaignId}&limit=${limit}`),
+    enabled: !!campaignId,
+    staleTime: 5 * 60_000,
+    refetchInterval: active ? 5 * 60_000 : false,
+  });
 }
 
 export function useDnaEnrichment(campaignId: string | null | undefined) {

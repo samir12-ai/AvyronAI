@@ -43,6 +43,7 @@ import BlockedReasonsCard from '@/components/BlockedReasonsCard';
 import DnaEnrichmentCard from '@/components/DnaEnrichmentCard';
 import TruthSubmissionCard from '@/components/TruthSubmissionCard';
 import PerformanceCycleCard from '@/components/PerformanceCycleCard';
+import MarketSignalsCard from '@/components/MarketSignalsCard';
 import ActivityTimeline from '@/components/ActivityTimeline';
 import { MarketMindAgent } from '@/components/MarketMindAgent';
 import InitializationExperience from '@/components/InitializationExperience';
@@ -196,6 +197,7 @@ function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
   return (
     <>
       <WatchtowerStrip campaignId={campaignId} isDark={isDark} />
+      <MarketSignalsCard campaignId={campaignId} isDark={isDark} />
       <BlockedReasonsCard
         campaignId={campaignId}
         isDark={isDark}

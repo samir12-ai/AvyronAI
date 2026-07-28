@@ -1,0 +1,250 @@
+P-3 Final Phase — Watchtower Semantic Intelligence Audit & Completion
+
+The competitor semantic classification platform is now the single source of truth.
+
+Do not create a second semantic analysis pipeline.
+
+Do not analyze raw competitor captions or media if the required semantic signal already exists in `competitor_post_classifications`.
+
+==================================================
+Goal
+====
+
+Audit the current Watchtower implementation and complete it so that it operates primarily on semantic competitor classifications rather than raw scraped content.
+
+The purpose of Watchtower is:
+
+Detect meaningful market changes.
+
+Not generate strategy.
+
+Not rewrite recommendations.
+
+Not duplicate Market Intelligence.
+
+==================================================
+
+1. Audit Current Watchtower
+   ==================================================
+
+Inspect:
+
+* services
+* schedulers
+* routes
+* alert generation
+* notification pipeline
+* trend detection
+* market shift detection
+* database reads
+* APIs
+* frontend cards
+
+Document:
+
+* what currently works
+* what still depends on raw captions
+* what already consumes competitor_post_classifications
+* duplicated AI analysis
+* duplicated classification
+* unnecessary LLM calls
+
+==================================================
+2. Classification Integration
+=============================
+
+The semantic source of truth is:
+
+competitor_post_classifications
+
+Use fields including:
+
+* primary_hook
+* primary_angle
+* core_promise
+* emotional_trigger
+* positioning_style
+* CTA
+* awareness_stage
+* offer_type
+* goal
+* narrative
+* content_format
+* confidence
+
+Watchtower should compare semantic values across time windows.
+
+==================================================
+3. Semantic Shift Detection
+===========================
+
+Detect changes such as:
+
+Hook Shift
+
+Educational
+→ Question
+
+Promise Shift
+
+Better Quality
+→ Faster Results
+
+Emotion Shift
+
+Trust
+→ Urgency
+
+CTA Shift
+
+Book Now
+→ DM Us
+
+Positioning Shift
+
+Premium
+→ Affordable
+
+Awareness Shift
+
+Problem Aware
+→ Solution Aware
+
+Offer Shift
+
+Discount
+→ Bundle
+
+Narrative Shift
+
+Founder Story
+→ Customer Proof
+
+==================================================
+4. Market-Level Detection
+=========================
+
+Detect whether changes affect:
+
+* one competitor
+* several competitors
+* market leaders
+* the entire market
+
+Classify:
+
+Minor Shift
+
+Moderate Shift
+
+Major Shift
+
+Market Shift
+
+==================================================
+5. Noise Filtering
+==================
+
+Do not alert on:
+
+single random posts
+
+temporary experiments
+
+isolated anomalies
+
+Require sufficient evidence before promoting a market alert.
+
+==================================================
+6. Output
+=========
+
+Each Watchtower signal should include:
+
+What changed
+
+Who changed
+
+When it changed
+
+Confidence
+
+Evidence
+
+Scope
+
+Severity
+
+No strategic recommendations.
+
+Only market intelligence signals.
+
+==================================================
+7. Remove Duplicate Intelligence
+================================
+
+Audit for duplicated AI work.
+
+If Watchtower is independently classifying captions that already exist in competitor_post_classifications:
+
+remove the duplication.
+
+Reuse the existing semantic data.
+
+==================================================
+8. Verification
+===============
+
+Trace:
+
+Apify
+
+↓
+
+ci_competitor_posts
+
+↓
+
+competitor_post_classifications
+
+↓
+
+Watchtower
+
+↓
+
+Alerts
+
+↓
+
+API
+
+↓
+
+Frontend
+
+Verify:
+
+* no duplicate semantic analysis
+* no unnecessary LLM calls
+* semantic fields drive alerts
+* market-level shifts work
+* all active competitors participate
+* scheduler remains non-blocking
+
+==================================================
+9. Deliverable
+==============
+
+Return:
+
+1. Audit
+2. Files modified
+3. Duplicate logic removed
+4. New semantic detections
+5. Market-shift examples
+6. Performance impact
+7. Remaining gaps
+8. PASS / FAIL
+
+PASS only if Watchtower becomes a semantic monitoring engine that uses competitor_post_classifications as its primary intelligence source.

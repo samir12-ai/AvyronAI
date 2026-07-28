@@ -19,6 +19,7 @@ import {
   bossRuns,
   planAnchorResets,
   continuityTicks,
+  pipelineChangeEvents,
   ciCompetitors,
   ciCompetitorPosts,
   miFetchJobs,
@@ -39,7 +40,7 @@ import { acceptUserTruth } from "./pipeline/lanes/user/user-truth";
 import { evaluateWindowState } from "./pipeline/eval-windows";
 import { runPerformanceCycle } from "./performance-loop/cycle-runner";
 import { PipelineValidationError } from "./pipeline/errors";
-import { eq, and, desc, gte, sql, count, ne, max, inArray } from "drizzle-orm";
+import { eq, and, desc, gte, sql, count, ne, max, inArray, isNotNull } from "drizzle-orm";
 import {
   translateQ1Verdict,
   translateQ2Verdict,
@@ -48,6 +49,7 @@ import {
   translateReanchorReason,
   translateContinuityDecision,
   translateBlockedReasons,
+  translateSignalKind,
   buildMonitoringLines,
   Q1_PENDING_FIRST_RUN,
   Q2_PENDING_FIRST_RUN,
@@ -949,5 +951,88 @@ export function registerPerceptionRoutes(app: Express) {
     }
   });
 
-  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning");
+  // -------------------------------------------------------------------------
+  // GET /api/perception/market-signals?campaignId=...&limit=20
+  //
+  // Returns confirmed Watchtower semantic shift events (validatedAt IS NOT
+  // NULL) for the campaign. Each signal carries:
+  //   what    — human-readable kind label from the translator
+  //   who     — competitor name (NOT the UUID)
+  //   when    — validatedAt ISO string
+  //   scope   — single_competitor | several_competitors | market_wide
+  //   severity — mild | medium | major
+  //   evidence — notes array from the WatchtowerEvidence JSON blob
+  //   scopeCompetitorCount — how many competitors confirmed the same kind
+  //
+  // D5 / P-3 brief: no strategic recommendations, no internal IDs in payload.
+  // Kind codes → human-readable labels via translateSignalKind (translator).
+  // -------------------------------------------------------------------------
+  app.get("/api/perception/market-signals", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+
+      const rows = await db
+        .select({
+          id: pipelineChangeEvents.id,
+          kind: pipelineChangeEvents.kind,
+          severity: pipelineChangeEvents.severity,
+          evidence: pipelineChangeEvents.evidence,
+          validatedAt: pipelineChangeEvents.validatedAt,
+          scope: pipelineChangeEvents.scope,
+          scopeCompetitorCount: pipelineChangeEvents.scopeCompetitorCount,
+          competitorId: pipelineChangeEvents.competitorId,
+          competitorName: ciCompetitors.name,
+        })
+        .from(pipelineChangeEvents)
+        .leftJoin(ciCompetitors, eq(pipelineChangeEvents.competitorId, ciCompetitors.id))
+        .where(
+          and(
+            eq(pipelineChangeEvents.campaignId, campaignId),
+            isNotNull(pipelineChangeEvents.validatedAt),
+            isNotNull(pipelineChangeEvents.kind),
+          ),
+        )
+        .orderBy(desc(pipelineChangeEvents.validatedAt))
+        .limit(limit);
+
+      const signals = rows
+        .map((row) => {
+          if (!row.kind) return null;
+          const label = translateSignalKind(row.kind);
+          if (!label) return null; // drop unrecognized kinds
+          const evidenceNotes: string[] = (() => {
+            if (!row.evidence) return [];
+            try {
+              const parsed = JSON.parse(row.evidence);
+              return Array.isArray(parsed?.notes)
+                ? (parsed.notes as unknown[]).filter((n): n is string => typeof n === "string")
+                : [];
+            } catch { return []; }
+          })();
+          return {
+            kind: row.kind,
+            label,
+            severity: row.severity ?? "mild",
+            scope: row.scope ?? "single_competitor",
+            scopeCompetitorCount: row.scopeCompetitorCount ?? 1,
+            competitor: row.competitorName ?? null,
+            evidence: evidenceNotes,
+            detectedAt: row.validatedAt instanceof Date ? row.validatedAt.toISOString() : row.validatedAt,
+          };
+        })
+        .filter((s): s is NonNullable<typeof s> => s !== null);
+
+      return res.json({
+        success: true,
+        state: signals.length > 0 ? "ready" : "no_signals",
+        signals,
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} market-signals failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "MARKET_SIGNALS_FAILED" });
+    }
+  });
+
+  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals");
 }

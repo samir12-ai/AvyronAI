@@ -11,6 +11,51 @@
 
 export type WatchtowerTone = "stable" | "watching" | "shift" | "issue" | "unknown";
 
+// ── Market signal kind labels ─────────────────────────────────────────────────
+// Maps Watchtower kind codes (stored in pipeline_change_events.kind) to
+// customer-readable labels. Allowlist only — unknown codes return null.
+// P-3 brief: what changed, not what to do about it.
+export function translateSignalKind(kind: string | null | undefined): string | null {
+  switch (kind) {
+    // Semantic (competitor_post_classifications-driven)
+    case "hook_archetype_shift":    return "Hook style shift";
+    case "promise_shift":           return "Value proposition shift";
+    case "emotional_trigger_shift": return "Emotional appeal shift";
+    case "positioning_shift":       return "Brand positioning shift";
+    case "primary_goal_shift":      return "Content goal shift";
+    case "cta_strategy_shift":      return "Call-to-action shift";
+    case "narrative_shift":         return "Narrative framework shift";
+    case "awareness_stage_shift":   return "Audience awareness shift";
+    case "offer_type_shift":        return "Offer type shift";
+    case "content_format_shift":    return "Content format shift";
+    // Payload-based
+    case "posting_frequency_shift":  return "Posting cadence shift";
+    case "competitor_profile_change": return "Competitor profile change";
+    case "offer_language_change":     return "Offer language change";
+    default: return null;
+  }
+}
+
+// ── Market signal scope labels ────────────────────────────────────────────────
+export function translateSignalScope(scope: string | null | undefined): string {
+  switch (scope) {
+    case "single_competitor":  return "One competitor";
+    case "several_competitors": return "Several competitors";
+    case "market_wide":        return "Market-wide";
+    default:                   return "One competitor";
+  }
+}
+
+// ── Market signal severity labels ─────────────────────────────────────────────
+export function translateSignalSeverity(severity: string | null | undefined): string {
+  switch (severity) {
+    case "major":  return "Major shift";
+    case "medium": return "Moderate shift";
+    case "mild":   return "Minor shift";
+    default:       return "Minor shift";
+  }
+}
+
 export interface WatchtowerLine {
   tone: WatchtowerTone;
   headline: string;        // short, < 60 chars

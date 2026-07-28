@@ -33,8 +33,8 @@
  */
 
 import { db } from "../db";
-import { pipelineSnapshots, pipelineChangeEvents, competitorPostClassifications, ciCompetitorPosts } from "@shared/schema";
-import { and, eq, isNull, isNotNull, desc, sql } from "drizzle-orm";
+import { pipelineSnapshots, pipelineChangeEvents, competitorPostClassifications, ciCompetitorPosts, ciCompetitors } from "@shared/schema";
+import { and, eq, isNull, isNotNull, desc, sql, count, ne } from "drizzle-orm";
 
 const LOG_PREFIX = "[Watchtower]";
 
@@ -49,6 +49,11 @@ const SEMANTIC_CHANGE_KINDS = new Set([
   "positioning_shift",
   "primary_goal_shift",
   "cta_strategy_shift",
+  // Added P-3: 4 previously-untracked enumerated dimensions
+  "narrative_shift",
+  "awareness_stage_shift",
+  "offer_type_shift",
+  "content_format_shift",
 ]);
 
 /** Rolling window for semantic diffs: 30 days on each side of the snapshot. */
@@ -65,6 +70,11 @@ interface SemanticClassificationRow {
   positioningStyle: string | null;
   primaryGoal: string | null;
   ctaType: string | null;
+  // Added P-3
+  narrative: string | null;
+  awarenessStage: string | null;
+  offerType: string | null;
+  contentFormatIntent: string | null;
   postTimestamp: Date | null;
 }
 
@@ -75,12 +85,17 @@ interface SemanticDimensionDef {
 }
 
 const SEMANTIC_DIMENSIONS: SemanticDimensionDef[] = [
-  { kind: "hook_archetype_shift",    label: "Hook archetype",       getter: (r) => r.hookArchetype },
+  { kind: "hook_archetype_shift",    label: "Hook archetype",         getter: (r) => r.hookArchetype },
   { kind: "promise_shift",           label: "Core marketing promise", getter: (r) => r.coreMarketingPromise },
-  { kind: "emotional_trigger_shift", label: "Emotional trigger",    getter: (r) => r.emotionalTrigger },
-  { kind: "positioning_shift",       label: "Positioning style",    getter: (r) => r.positioningStyle },
-  { kind: "primary_goal_shift",      label: "Primary goal",         getter: (r) => r.primaryGoal },
-  { kind: "cta_strategy_shift",      label: "CTA strategy",         getter: (r) => r.ctaType },
+  { kind: "emotional_trigger_shift", label: "Emotional trigger",      getter: (r) => r.emotionalTrigger },
+  { kind: "positioning_shift",       label: "Positioning style",      getter: (r) => r.positioningStyle },
+  { kind: "primary_goal_shift",      label: "Primary goal",           getter: (r) => r.primaryGoal },
+  { kind: "cta_strategy_shift",      label: "CTA strategy",           getter: (r) => r.ctaType },
+  // Added P-3: previously-untracked enumerated dimensions
+  { kind: "narrative_shift",         label: "Narrative framework",    getter: (r) => r.narrative },
+  { kind: "awareness_stage_shift",   label: "Awareness stage",        getter: (r) => r.awarenessStage },
+  { kind: "offer_type_shift",        label: "Offer type",             getter: (r) => r.offerType },
+  { kind: "content_format_shift",    label: "Content format",         getter: (r) => r.contentFormatIntent },
 ];
 
 function buildSemanticDistribution(
@@ -148,6 +163,11 @@ async function classifySemanticChanges(
         positioningStyle: competitorPostClassifications.positioningStyle,
         primaryGoal: competitorPostClassifications.primaryGoal,
         ctaType: competitorPostClassifications.ctaType,
+        // Added P-3
+        narrative: competitorPostClassifications.narrative,
+        awarenessStage: competitorPostClassifications.awarenessStage,
+        offerType: competitorPostClassifications.offerType,
+        contentFormatIntent: competitorPostClassifications.contentFormatIntent,
         confidenceScore: competitorPostClassifications.confidenceScore,
         postTimestamp: ciCompetitorPosts.timestamp,
       })
@@ -178,6 +198,10 @@ async function classifySemanticChanges(
         positioningStyle: r.positioningStyle,
         primaryGoal: r.primaryGoal,
         ctaType: r.ctaType,
+        narrative: r.narrative,
+        awarenessStage: r.awarenessStage,
+        offerType: r.offerType,
+        contentFormatIntent: r.contentFormatIntent,
         postTimestamp: r.postTimestamp,
       }));
   } catch (err) {
@@ -619,7 +643,42 @@ async function maintainOpenCandidates(
 
     // Promote: two independent fresh fetches agree the change persists vs the
     // original baseline. Evidence/severity refreshed to the confirmed state.
+    // Also compute market-level scope: how many distinct competitors for this
+    // campaign have confirmed the same kind within the 60-day look-back window
+    // (including this one that's about to be promoted).
     try {
+      // Count other already-confirmed competitors for the same kind + campaign.
+      const scopeWindowCutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+      let confirmedOthers = 0;
+      try {
+        const [row] = await db
+          .select({ cnt: count() })
+          .from(pipelineChangeEvents)
+          .where(
+            and(
+              eq(pipelineChangeEvents.campaignId, input.campaignId),
+              eq(pipelineChangeEvents.kind, candidate.kind),
+              isNotNull(pipelineChangeEvents.validatedAt),
+              ne(pipelineChangeEvents.competitorId, competitorId),
+              sql`${pipelineChangeEvents.validatedAt} >= ${scopeWindowCutoff}`,
+            ),
+          );
+        confirmedOthers = Number(row?.cnt ?? 0);
+      } catch {
+        // Non-fatal — scope degrades to single_competitor
+      }
+      const totalConfirmedCount = confirmedOthers + 1; // include the one being promoted now
+      // Classify scope:
+      //   1 competitor                          → single_competitor
+      //   2–3 competitors                       → several_competitors
+      //   4+ competitors (≥ market-wide signal) → market_wide
+      const scope: string =
+        totalConfirmedCount >= 4
+          ? "market_wide"
+          : totalConfirmedCount >= 2
+            ? "several_competitors"
+            : "single_competitor";
+
       const confirmedEvidence: WatchtowerEvidence = {
         notes: match.evidence,
         prev: match.prevValue,
@@ -633,10 +692,12 @@ async function maintainOpenCandidates(
           severity: match.severity,
           evidence: JSON.stringify(confirmedEvidence),
           currentSnapshotId: currentSnap.id,
+          scope,
+          scopeCompetitorCount: totalConfirmedCount,
         })
         .where(and(eq(pipelineChangeEvents.id, candidate.id), isNull(pipelineChangeEvents.validatedAt)));
       console.log(
-        `${LOG_PREFIX} MARKET_EVENT_CONFIRMED eventId=${candidate.id} competitorId=${competitorId} kind=${candidate.kind} campaign=${input.campaignId} confirmedBy=${currentSnap.id}`,
+        `${LOG_PREFIX} MARKET_EVENT_CONFIRMED eventId=${candidate.id} competitorId=${competitorId} kind=${candidate.kind} campaign=${input.campaignId} confirmedBy=${currentSnap.id} scope=${scope} scopeCount=${totalConfirmedCount}`,
       );
     } catch (err) {
       console.error(
