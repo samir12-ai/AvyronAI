@@ -1,0 +1,294 @@
+# P-6.13 Full Intelligence Pipeline Validation — Execute All Engines + Watchtower
+
+The acquisition migration (P-6.12) is complete for all verified platforms.
+
+Instagram Posts: Apify ✅
+
+Instagram Comments: Apify ✅
+
+TikTok Posts: Apify ✅
+
+Bright Data has been retired from all active acquisition paths.
+
+The remaining objective is no longer acquisition.
+
+This validation is intended to verify that the entire Avyron intelligence stack can execute successfully using the new production data.
+
+This is a validation only.
+
+Do not redesign engines.
+
+Do not refactor logic.
+
+Do not optimize prompts.
+
+Do not modify scoring.
+
+Only repair actual defects encountered during execution.
+
+---
+
+# Mission
+
+Run the complete Avyron intelligence pipeline on a real campaign from start to finish.
+
+Exercise every engine using the newly acquired production data.
+
+Where required, inject temporary validation values for product-gated inputs so the execution can continue.
+
+These temporary values are strictly for validation and must never become production defaults.
+
+---
+
+# Validation Rules
+
+Use a real production campaign.
+
+Use real competitor data.
+
+Use real Instagram posts.
+
+Use real Instagram comments.
+
+Use real TikTok data where already available.
+
+Do not fabricate audience data.
+
+If an engine requires user-entered business metrics that are intentionally unavailable during validation (for example `primaryKpi` or `dataWindowDays`), inject clearly marked temporary validation values only for this run.
+
+The objective is to validate execution, not business accuracy.
+
+Never persist these temporary values as customer data.
+
+---
+
+# Phase 1 — Pipeline Execution
+
+Run the pipeline exactly as production would.
+
+Execute every engine in sequence.
+
+For every engine report:
+
+* Started
+* Input received
+* Output generated
+* Runtime
+* PASS / FAIL
+* Any warnings
+
+Do not stop after the first failure.
+
+Continue wherever safe so every engine is evaluated.
+
+---
+
+# Phase 2 — Temporary Validation Inputs
+
+If execution stops only because required business metrics are missing:
+
+Inject temporary validation values such as:
+
+* primaryKpi
+* dataWindowDays
+* reporting window
+
+Mark every injected value as:
+
+VALIDATION_ONLY
+
+Ensure these values:
+
+* are not written to production customer records
+* are not cached
+* are not reused in future runs
+
+The purpose is only to verify downstream engine execution.
+
+---
+
+# Phase 3 — Cross-Engine Validation
+
+Verify that outputs from each engine are correctly consumed by the next.
+
+Examples:
+
+Audience
+
+↓
+
+SGL
+
+↓
+
+Strategy Roots
+
+↓
+
+Offer
+
+↓
+
+Messaging
+
+↓
+
+Funnel
+
+↓
+
+Content Strategy
+
+↓
+
+Performance
+
+↓
+
+Iteration
+
+Confirm:
+
+* schema compatibility
+* no missing fields
+* no serialization issues
+* no stale legacy paths
+
+---
+
+# Phase 4 — Watchtower Validation
+
+Execute Watchtower using the same campaign.
+
+Verify:
+
+* competitor monitoring
+* change detection
+* alert generation
+* event persistence
+* pipeline triggers
+* notification payload generation
+
+If no real market changes exist:
+
+Inject a temporary simulated competitor change event.
+
+Examples:
+
+* new Instagram post
+* pricing change
+* bio update
+* new offer
+* CTA modification
+
+Mark every injected event:
+
+VALIDATION_ONLY
+
+Do not pollute production history.
+
+Confirm that Watchtower detects the change and propagates it through its normal processing path.
+
+---
+
+# Phase 5 — Production Integrity
+
+Verify:
+
+* account isolation
+* campaign isolation
+* no duplicated inserts
+* no duplicate comments
+* no duplicate posts
+* historical records preserved
+* synthetic data remains disabled
+* provenance maintained
+* actor_run_id preserved
+* owner replies excluded from Audience evidence
+* filtering statistics generated
+
+---
+
+# Phase 6 — Performance
+
+Measure:
+
+* runtime per engine
+* total pipeline runtime
+* Watchtower runtime
+* database queries
+* external actor usage
+* memory usage (if available)
+
+Highlight any bottlenecks.
+
+---
+
+# Phase 7 — Failure Audit
+
+If any engine fails:
+
+Report:
+
+* engine name
+* root cause
+* stack trace (if applicable)
+* blocking severity
+* minimal required fix
+
+Only implement fixes for genuine defects.
+
+Do not introduce architectural changes during this validation.
+
+---
+
+# Phase 8 — Final Health Score
+
+Produce a table:
+
+| Engine | Status | Runtime | Notes |
+| ------ | ------ | ------- | ----- |
+
+Include every intelligence engine.
+
+Also include:
+
+| Component      | Status |
+| -------------- | ------ |
+| Acquisition    |        |
+| Audience       |        |
+| SGL            |        |
+| Strategy Roots |        |
+| Watchtower     |        |
+| Market Memory  |        |
+| Scheduler      |        |
+| Alerts         |        |
+| Database       |        |
+| APIs           |        |
+
+---
+
+# Success Criteria
+
+Validation is successful only if:
+
+* Every engine executes successfully.
+* Temporary validation values are used only where product-gated inputs are missing.
+* Watchtower detects and processes at least one validation event.
+* No Bright Data execution path is invoked.
+* No synthetic audience data is created.
+* No production customer data is modified by validation-only inputs.
+
+Return an evidence-backed report with logs, timings, outputs, and any fixes applied.
+
+If successful, conclude with:
+
+```text
+FULL INTELLIGENCE PIPELINE VERIFIED
+```
+
+Otherwise conclude with:
+
+```text
+PIPELINE VALIDATION INCOMPLETE
+```
