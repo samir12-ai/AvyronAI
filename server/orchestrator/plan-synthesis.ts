@@ -131,6 +131,14 @@ export interface SynthesizedPlan {
    * gates see the degradation.
    */
   validationState?: "validated" | "provisional" | "weak" | "rejected";
+  _synthesisIntegrity?: {
+    lockedDecisionCoverage: number;
+    contradictions: string[];
+    degradedEngines: string[];
+    blockedEngines: string[];
+    strategyRootPresent: boolean;
+    verdict: 'FULLY_GROUNDED' | 'PARTIALLY_GROUNDED' | 'UNGROUNDED';
+  };
 }
 
 function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any): SynthesizedPlan {
@@ -267,8 +275,19 @@ function applyIntegrityDegradation(plan: SynthesizedPlan, mode: "restricted" | "
   };
 }
 
-function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string {
+function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): string {
   const sections: string[] = [];
+
+  if (strategyRoot) {
+    sections.push(`[STRATEGY_ROOT] Use these approved elements verbatim:\n` +
+      `  Pains: ${(strategyRoot.approvedPains || []).map((p: any) => typeof p === 'string' ? p : p.pain).slice(0, 3).join("; ")}\n` +
+      `  Objections: ${(strategyRoot.approvedObjections || []).map((o: any) => typeof o === 'string' ? o : o.objection).slice(0, 3).join("; ")}\n` +
+      `  Desires: ${(strategyRoot.approvedDesires || []).slice(0, 3).join("; ")}\n` +
+      `  Transformation: ${strategyRoot.approvedTransformationAxis || "none"}\n` +
+      `  Mechanism: ${strategyRoot.approvedMechanism?.name || "none"} (${strategyRoot.approvedMechanism?.type || "none"})\n` +
+      `  Claim: ${strategyRoot.approvedClaim || "none"}\n` +
+      `  Axes: Primary "${strategyRoot.primaryAxis || 'none'}", Contrast "${strategyRoot.contrastAxis || 'none'}"`);
+  }
 
   const mi = results.get("market_intelligence");
   if (mi?.status === "SUCCESS" && mi.output) {
@@ -294,108 +313,96 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>): string
 
   const audience = results.get("audience");
   if (audience?.status === "SUCCESS" && audience.output) {
-    const pains = (audience.output.audiencePains || audience.output.painProfiles)?.length || 0;
-    const segments = audience.output.audienceSegments?.length || 0;
-    nonMiSections.push(`[ENGINE_OUTPUT] Audience: ${pains} pain profiles, ${segments} segments identified`);
+    const out = audience.output.output || audience.output;
+    const pains = (out.audiencePains || out.painProfiles || []).map((p: any) => p.name || p.painName || "unknown").slice(0, 3).join(", ");
+    const segments = (out.audienceSegments || []).map((s: any) => s.name || s.segmentName || "unknown").slice(0, 3).join(", ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Audience: Pains [${pains}], Segments [${segments}]`);
   }
 
   const positioning = results.get("positioning");
   if (positioning?.status === "SUCCESS" && positioning.output) {
-    const territories = positioning.output.territories?.length || 0;
-    nonMiSections.push(`[ENGINE_OUTPUT] Positioning: ${territories} territories mapped`);
-  }
-
-  const offer = results.get("offer");
-  if (offer?.status === "SUCCESS" && offer.output) {
-    nonMiSections.push(`[ENGINE_OUTPUT] Offer Engine: structured offer constructed`);
-  }
-
-  const funnel = results.get("funnel");
-  if (funnel?.status === "SUCCESS" && funnel.output) {
-    nonMiSections.push(`[ENGINE_OUTPUT] Funnel: trust path and conversion flow defined`);
-  }
-
-  const budget = results.get("budget_governor");
-  if (budget?.status === "SUCCESS" && budget.output) {
-    const decision = budget.output.decision || "APPROVED";
-    nonMiSections.push(`[ENGINE_OUTPUT] Budget Governor: ${decision}`);
-  }
-
-  const channel = results.get("channel_selection");
-  if (channel?.status === "SUCCESS" && channel.output) {
-    const out = channel.output.output || channel.output;
-    const primary = out.primaryChannel?.channelName || out.primaryChannel?.name || "unknown";
-    const secondary = out.secondaryChannel?.channelName || out.secondaryChannel?.name || "none";
-    const rejected = out.rejectedChannels?.length || 0;
-    nonMiSections.push(`[ENGINE_OUTPUT] Channel Selection: primary "${primary}", secondary "${secondary}", ${rejected} rejected`);
+    const out = positioning.output.output || positioning.output;
+    const territories = (out.territories || []).map((t: any) => t.name || t.territoryName || "unknown").slice(0, 2).join(", ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Positioning: Territories [${territories}], Enemy "${out.enemyDefinition || 'none'}", Contrast "${out.contrastAxis || 'none'}", Narrative "${out.narrativeDirection || 'none'}"`);
   }
 
   const diff = results.get("differentiation");
   if (diff?.status === "SUCCESS" && diff.output) {
     const out = diff.output.output || diff.output;
-    const pillars = out.pillars?.length || 0;
-    const claims = out.claimStructures?.length || 0;
-    const proofAssets = out.proofArchitecture?.length || 0;
-    const authorityMode = out.authorityMode?.mode || out.authorityMode || "unknown";
-    nonMiSections.push(`[ENGINE_OUTPUT] Differentiation: ${pillars} pillars, ${claims} claim structures, ${proofAssets} proof assets, authority mode: ${authorityMode}`);
+    const pillars = (out.pillars || []).map((p: any) => p.name || p.pillarName || "unknown").slice(0, 3).join(", ");
+    const claims = (out.claimStructures || []).map((c: any) => c.claimText || c.claim || "unknown").slice(0, 2).join(" | ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Differentiation: Pillars [${pillars}], Claims [${claims}], Proof Types ${(out.proofArchitecture || []).length}, Authority Mode "${out.authorityMode?.mode || out.authorityMode || 'unknown'}"`);
   }
 
-  const integrity = results.get("integrity");
-  if (integrity?.status === "SUCCESS" && integrity.output) {
-    const out = integrity.output.output || integrity.output;
-    const score = out.confidenceScore ?? "N/A";
-    const warnings = out.structuralWarnings?.length || 0;
-    const stable = out.stabilityResult?.stable ?? "unknown";
-    nonMiSections.push(`[ENGINE_OUTPUT] Integrity: confidence ${score}, ${warnings} structural warnings, stable: ${stable}`);
+  const offer = results.get("offer");
+  if (offer?.status === "SUCCESS" && offer.output) {
+    const out = offer.output.output || offer.output;
+    nonMiSections.push(`[ENGINE_OUTPUT] Offer: Name "${out.offerName || 'unknown'}", Outcome "${out.coreOutcome || 'unknown'}", Price "${out.priceStructure || 'none'}", Guarantee "${out.guarantee || 'none'}", Mechanism "${out.mechanismDescription || 'none'}"`);
+  }
+
+  const funnel = results.get("funnel");
+  if (funnel?.status === "SUCCESS" && funnel.output) {
+    const out = funnel.output.output || funnel.output;
+    nonMiSections.push(`[ENGINE_OUTPUT] Funnel: Stages [Top: ${out.topStage || 'none'}, Mid: ${out.middleStage || 'none'}, Bot: ${out.bottomStage || 'none'}], Trust Score ${out.trustPathScore || 'N/A'}, Type "${out.funnelType || 'unknown'}", Flow "${out.conversionFlow || 'none'}"`);
   }
 
   const awareness = results.get("awareness");
   if (awareness?.status === "SUCCESS" && awareness.output) {
     const out = awareness.output.output || awareness.output;
-    const primaryRoute = out.primaryRoute?.routeName || out.primaryRoute?.name || "unknown";
-    const layers = out.layerResults?.length || 0;
-    const confidence = out.confidenceScore ?? "N/A";
-    nonMiSections.push(`[ENGINE_OUTPUT] Awareness: primary route "${primaryRoute}", ${layers} layer results, confidence ${confidence}`);
+    const mechanisms = (out.layerMechanisms || out.layerResults || []).map((m: any) => m.mechanism || m.name || "unknown").slice(0, 3).join(", ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Awareness: Primary Route "${out.primaryRoute?.routeName || out.primaryRoute?.name || 'unknown'}", Layer Mechanisms [${mechanisms}]`);
   }
 
   const persuasion = results.get("persuasion");
   if (persuasion?.status === "SUCCESS" && persuasion.output) {
     const out = persuasion.output.output || persuasion.output;
-    const primaryRoute = out.primaryRoute?.routeName || out.primaryRoute?.name || "unknown";
-    const altRoute = out.alternativeRoute?.routeName || "none";
-    const layers = out.layerResults?.length || 0;
-    nonMiSections.push(`[ENGINE_OUTPUT] Persuasion: primary route "${primaryRoute}", alternative "${altRoute}", ${layers} layer results`);
+    const mechanisms = (out.layerMechanisms || out.layerResults || []).map((m: any) => m.mechanism || m.name || "unknown").slice(0, 3).join(", ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Persuasion: Primary Route "${out.primaryRoute?.routeName || out.primaryRoute?.name || 'unknown'}", Alt Route "${out.alternativeRoute?.routeName || 'none'}", Mode "${out.persuasionMode || 'unknown'}", Mechanisms [${mechanisms}]`);
+  }
+
+  const integrity = results.get("integrity");
+  if (integrity?.status === "SUCCESS" && integrity.output) {
+    const out = integrity.output.output || integrity.output;
+    const warnings = (out.structuralWarnings || []).map((w: any) => w.warning || w.text || "warning").slice(0, 2).join(" | ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Integrity: Confidence ${out.confidenceScore ?? 'N/A'}, Stability ${out.stabilityResult?.stable ?? 'unknown'}, Warnings [${warnings}]`);
   }
 
   const statVal = results.get("statistical_validation");
   if (statVal?.status === "SUCCESS" && statVal.output) {
     const out = statVal.output.output || statVal.output;
-    const validationStateLabel = out.validationState || "unknown";
-    const claimConfidence = out.claimConfidenceScore ?? "N/A";
-    const warnings = out.structuralWarnings?.length || 0;
-    const claimValidations = out.claimValidations?.length || 0;
-    nonMiSections.push(`[ENGINE_OUTPUT] Statistical Validation: state ${validationStateLabel}, claim confidence ${claimConfidence}, ${claimValidations} claims validated, ${warnings} warnings`);
+    const claimRes = (out.claimValidations || []).map((c: any) => `${c.claim}: ${c.result || 'unknown'}`).slice(0, 2).join(" | ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Statistical Validation: State ${out.validationState || 'unknown'}, Claim Confidence ${out.claimConfidenceScore ?? 'N/A'}, Results [${claimRes}]`);
   }
 
   const iteration = results.get("iteration");
   if (iteration?.status === "SUCCESS" && iteration.output) {
     const out = iteration.output.output || iteration.output;
-    const hypotheses = out.nextTestHypotheses?.length || 0;
-    const targets = out.optimizationTargets?.length || 0;
-    const failedFlags = out.failedStrategyFlags?.length || 0;
-    const planSteps = out.iterationPlan?.length || 0;
-    nonMiSections.push(`[ENGINE_OUTPUT] Iteration: ${hypotheses} test hypotheses, ${targets} optimization targets, ${planSteps} plan steps, ${failedFlags} failed strategy flags`);
+    const hypotheses = (out.nextTestHypotheses || []).map((h: any) => h.hypothesis || h.text || "unknown").slice(0, 2).join(" | ");
+    const targets = (out.optimizationTargets || []).map((t: any) => `${t.name || t.target} (${t.direction || 'improve'})`).slice(0, 3).join(", ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Iteration: Hypotheses [${hypotheses}], Targets [${targets}]`);
   }
 
   const retention = results.get("retention");
   if (retention?.status === "SUCCESS" && retention.output) {
     const out = retention.output.output || retention.output;
-    const loops = out.retentionLoops?.length || 0;
-    const churnRisks = out.churnRiskFlags?.length || 0;
-    const ltvPaths = out.ltvExpansionPaths?.length || 0;
-    const upsells = out.upsellTriggers?.length || 0;
-    const confidence = out.confidenceScore ?? "N/A";
-    nonMiSections.push(`[ENGINE_OUTPUT] Retention: ${loops} retention loops, ${churnRisks} churn risk flags, ${ltvPaths} LTV paths, ${upsells} upsell triggers, confidence ${confidence}`);
+    const loops = (out.retentionLoops || []).map((l: any) => l.description || l.name || "unknown").slice(0, 2).join(" | ");
+    const risks = (out.churnRiskFlags || []).map((r: any) => r.description || r.risk || "unknown").slice(0, 2).join(" | ");
+    const paths = (out.ltvExpansionPaths || []).map((p: any) => p.path || p.name || "unknown").slice(0, 2).join(", ");
+    const triggers = (out.upsellTriggers || []).map((t: any) => t.trigger || t.name || "unknown").slice(0, 2).join(", ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Retention: Loops [${loops}], Risks [${risks}], LTV Paths [${paths}], Upsell Triggers [${triggers}]`);
+  }
+
+  const budget = results.get("budget_governor");
+  if (budget?.status === "SUCCESS" && budget.output) {
+    const out = budget.output.output || budget.output;
+    nonMiSections.push(`[ENGINE_OUTPUT] Budget Governor: Decision "${out.decision || out.action || 'APPROVED'}", Reasoning "${out.reasoning || 'none'}", Risk Factors ${(out.riskFactors || []).join(", ") || 'none'}`);
+  }
+
+  const channel = results.get("channel_selection");
+  if (channel?.status === "SUCCESS" && channel.output) {
+    const out = channel.output.output || channel.output;
+    const rej = (out.rejectedChannels || []).map((c: any) => c.name || c).join(", ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Channel Selection: Primary "${out.primaryChannel?.channelName || out.primaryChannel?.name || 'unknown'}" (Role: ${out.primaryChannel?.role || 'none'}), Secondary "${out.secondaryChannel?.channelName || out.secondaryChannel?.name || 'none'}", Rejected [${rej}]`);
   }
 
   sections.push(...nonMiSections);
@@ -408,7 +415,7 @@ export interface LockedLabel {
   scope?: string;
 }
 
-function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): LockedLabel[] {
+function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): LockedLabel[] {
   const out: LockedLabel[] = [];
 
   const positioning = results.get("positioning");
@@ -439,6 +446,32 @@ function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>): 
         if (name) out.push({ label: name, scope: "differentiation" });
       }
     }
+  }
+
+  const channel = results.get("channel_selection");
+  if (channel?.status === "SUCCESS") {
+    const c = channel.output?.output || channel.output;
+    const name = c?.primaryChannel?.channelName || c?.primaryChannel?.name;
+    if (name) out.push({ label: name, scope: "channel_selection" });
+  }
+
+  const awareness = results.get("awareness");
+  if (awareness?.status === "SUCCESS") {
+    const a = awareness.output?.output || awareness.output;
+    const name = a?.primaryRoute?.routeName || a?.primaryRoute?.name;
+    if (name) out.push({ label: name, scope: "awareness" });
+  }
+
+  const persuasion = results.get("persuasion");
+  if (persuasion?.status === "SUCCESS") {
+    const p = persuasion.output?.output || persuasion.output;
+    const name = p?.primaryRoute?.routeName || p?.primaryRoute?.name;
+    if (name) out.push({ label: name, scope: "persuasion" });
+  }
+
+  if (strategyRoot) {
+    if (strategyRoot.approvedClaim) out.push({ label: strategyRoot.approvedClaim, scope: "strategyRoot" });
+    if (strategyRoot.approvedMechanism?.name) out.push({ label: strategyRoot.approvedMechanism.name, scope: "strategyRoot" });
   }
 
   return out;
@@ -515,12 +548,57 @@ export function verifySynthesisPreservation(
   };
 }
 
-function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): string {
+export function validateSynthesisIntegrity(
+  plan: SynthesizedPlan,
+  results: Map<EngineId, EngineStepResult>,
+  strategyRoot?: any
+): NonNullable<SynthesizedPlan["_synthesisIntegrity"]> {
+  const missingLabels = plan.synthesisVerification?.missing || [];
+  const totalLocked = plan.synthesisVerification?.totalLocked || 0;
+  const coverage = totalLocked > 0 ? (totalLocked - missingLabels.length) / totalLocked : 1;
+  
+  const degradedEngines: string[] = [];
+  const blockedEngines: string[] = [];
+  for (const [id, res] of results.entries()) {
+    if (res.status === "ERROR" || res.status === "BLOCKED" || res.status === "SIGNAL_BLOCKED") blockedEngines.push(id);
+    else if (res.status === "DEGRADED") degradedEngines.push(id);
+  }
+
+  const contradictions: string[] = [];
+  const strategyRootPresent = !!strategyRoot;
+  
+  let verdict: 'FULLY_GROUNDED' | 'PARTIALLY_GROUNDED' | 'UNGROUNDED' = 'FULLY_GROUNDED';
+  if (blockedEngines.length > 0 || missingLabels.length > 0 || degradedEngines.length > 0) {
+    verdict = 'PARTIALLY_GROUNDED';
+  }
+
+  return {
+    lockedDecisionCoverage: coverage,
+    contradictions,
+    degradedEngines,
+    blockedEngines,
+    strategyRootPresent,
+    verdict
+  };
+}
+function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): string {
   const lines: string[] = [];
+
+  if (strategyRoot) {
+    if (strategyRoot.approvedPains?.length > 0) {
+      lines.push(`  Strategy Root Pains: ${(strategyRoot.approvedPains || []).map((p: any) => typeof p === 'string' ? p : p.pain).join(", ")}`);
+    }
+    if (strategyRoot.approvedObjections?.length > 0) {
+      lines.push(`  Strategy Root Objections: ${(strategyRoot.approvedObjections || []).map((o: any) => typeof o === 'string' ? o : o.objection).join(", ")}`);
+    }
+    if (strategyRoot.approvedTransformationAxis) lines.push(`  Transformation: "${strategyRoot.approvedTransformationAxis}"`);
+    if (strategyRoot.approvedClaim) lines.push(`  Claim: "${strategyRoot.approvedClaim}"`);
+    if (strategyRoot.approvedMechanism?.name) lines.push(`  Mechanism: "${strategyRoot.approvedMechanism.name}"`);
+  }
 
   const positioning = results.get("positioning");
   if (positioning?.status === "SUCCESS" && positioning.output) {
-    const out = positioning.output;
+    const out = positioning.output.output || positioning.output;
     const territories = out.territories || [];
     const primary = territories[0];
     if (primary) {
@@ -562,6 +640,13 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): strin
     if (authorityMode && authorityMode !== "unknown") lines.push(`  Authority mode: "${authorityMode}"`);
   }
 
+  const awareness = results.get("awareness");
+  if (awareness?.status === "SUCCESS" && awareness.output) {
+    const out = awareness.output.output || awareness.output;
+    const primaryRouteName = out.primaryRoute?.routeName || out.primaryRoute?.name;
+    if (primaryRouteName) lines.push(`  Awareness primary route: "${primaryRouteName}"`);
+  }
+
   const persuasion = results.get("persuasion");
   if (persuasion?.status === "SUCCESS" && persuasion.output) {
     const out = persuasion.output.output || persuasion.output;
@@ -589,6 +674,24 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>): strin
     if (out.trustPathScore !== undefined) lines.push(`  Trust path score: ${out.trustPathScore}`);
     const funnelLabel = out.funnelType || out.funnelName;
     if (funnelLabel) lines.push(`  Funnel type: "${funnelLabel}"`);
+  }
+
+  const iteration = results.get("iteration");
+  if (iteration?.status === "SUCCESS" && iteration.output) {
+    const out = iteration.output.output || iteration.output;
+    if (out.optimizationTargets && out.optimizationTargets.length > 0) {
+      const targets = out.optimizationTargets.map((t: any) => t.name || t.target).filter(Boolean);
+      if (targets.length > 0) lines.push(`  Iteration optimization targets: ${targets.map((n: string) => `"${n}"`).join(", ")}`);
+    }
+  }
+
+  const retention = results.get("retention");
+  if (retention?.status === "SUCCESS" && retention.output) {
+    const out = retention.output.output || retention.output;
+    if (out.retentionLoops && out.retentionLoops.length > 0) {
+      const loops = out.retentionLoops.map((l: any) => l.description || l.name).filter(Boolean);
+      if (loops.length > 0) lines.push(`  Retention loops: ${loops.map((n: string) => `"${n}"`).join(", ")}`);
+    }
   }
 
   return lines.join("\n");
@@ -647,6 +750,8 @@ The plan must explain WHY each content type volume was chosen based on the goal 
     ? `LOCKED DECISIONS — These are verbatim strategic outputs from upstream engines. You MUST reference these exact values in your plan. Do NOT rephrase, paraphrase, generalize, or substitute synonyms for any value below. The mechanism name, positioning territory, offer name, differentiation pillars, and channel assignments must appear exactly as stated:
 ${lockedDecisions}
 
+CRITICAL ASSEMBLY RULE: Every locked decision is IMMUTABLE. You must use the EXACT text provided. If a locked decision conflicts with another input, flag the conflict in riskTriggers but do NOT modify the locked decision. Evidence references and audience pains from Strategy Root must appear verbatim in the targetAudience and rationale sections.
+
 `
     : "";
 
@@ -690,7 +795,7 @@ Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
 ${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}${compositionBlock}
-Engine Analysis Results (use for volume, timing, and structural decisions):
+Engine Analysis Results (GROUNDED INTELLIGENCE — these are validated outputs from the 15-engine intelligence pipeline. Your job is to ASSEMBLE these into a coherent plan. Do NOT ignore, rephrase, contradict, or replace any engine output with your own analysis. Every section of the plan must trace back to a specific engine output below):
 ${engineInsights}
 
 Generate a complete execution plan with these 9 sections. Return ONLY valid JSON matching this exact structure:
@@ -1213,9 +1318,23 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] INTEGRITY_RESTRICTED_MODE | score=${integrityScore.toFixed(2)} — plan content volume will be reduced`);
   }
 
-  const engineInsights = extractEngineInsights(results);
-  const lockedDecisions = extractLockedDecisions(results);
-  const lockedLabels = extractLockedDecisionLabels(results);
+  // Load Strategy Root for synthesis integration
+  let activeStrategyRoot: any = null;
+  try {
+    const { getActiveRoot } = await import("../shared/strategy-root");
+    activeStrategyRoot = await getActiveRoot(config.campaignId, config.accountId);
+    if (activeStrategyRoot) {
+      console.log(`[PlanSynthesis] STRATEGY_ROOT_LOADED | rootId=${activeStrategyRoot.id} | hash=${activeStrategyRoot.rootHash}`);
+    } else {
+      console.warn(`[PlanSynthesis] NO_ACTIVE_STRATEGY_ROOT | campaign=${config.campaignId}`);
+    }
+  } catch (srErr: any) {
+    console.warn(`[PlanSynthesis] Strategy root load failed (non-blocking):`, srErr.message);
+  }
+
+  const engineInsights = extractEngineInsights(results, activeStrategyRoot);
+  const lockedDecisions = extractLockedDecisions(results, activeStrategyRoot);
+  const lockedLabels = extractLockedDecisionLabels(results, activeStrategyRoot);
 
   const miResult = results.get("market_intelligence");
   const crossSignalDecisions: any[] = miResult?.output?.crossSignalDecisions?.decisions ?? [];
@@ -1266,6 +1385,13 @@ export async function synthesizePlan(
   const alreadyDegraded = synthesized.degraded === true || synthesized.planSource === "degraded_ai_failed";
 
   const verification = verifySynthesisPreservation(synthesized, lockedLabels);
+  
+  const integrityCheck = validateSynthesisIntegrity(synthesized, results, activeStrategyRoot);
+  synthesized._synthesisIntegrity = integrityCheck;
+  
+  if (integrityCheck.blockedEngines.length > 0 || integrityCheck.degradedEngines.length > 0) {
+    synthesized.validationState = "provisional";
+  }
 
   if (signalComp) {
     synthesized.signalComposition = signalComp;
