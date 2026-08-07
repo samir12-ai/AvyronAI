@@ -143,13 +143,26 @@ export default function RootLayout() {
     ...Ionicons.font,
   });
 
+  // Safety valve: if useFonts never resolves (silent hang in Replit's sandboxed
+  // environment or slow CDN) the app would be permanently stuck on the loading
+  // screen. After 3 s we treat fonts as ready regardless so the auth gate can
+  // run and redirect to login / tabs.
+  const [fontsTimedOut, setFontsTimedOut] = React.useState(false);
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
+    if (fontsLoaded || fontError) return;
+    const t = setTimeout(() => setFontsTimedOut(true), 3000);
+    return () => clearTimeout(t);
   }, [fontsLoaded, fontError]);
 
-  if (!fontsLoaded && !fontError) {
+  const fontsReady = fontsLoaded || !!fontError || fontsTimedOut;
+
+  useEffect(() => {
+    if (fontsReady) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsReady]);
+
+  if (!fontsReady) {
     return <LoadingScreen />;
   }
 
