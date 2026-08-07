@@ -1029,6 +1029,7 @@ export function registerPerceptionRoutes(app: Express) {
         .leftJoin(ciCompetitors, eq(pipelineChangeEvents.competitorId, ciCompetitors.id));
 
       const conditions = [
+        eq(pipelineChangeEvents.accountId, accountId),
         eq(pipelineChangeEvents.campaignId, campaignId),
         isNotNull(pipelineChangeEvents.kind)
       ];
@@ -1124,12 +1125,8 @@ export function registerPerceptionRoutes(app: Express) {
             } catch { return []; }
           })();
 
-          let compName = row.competitorName ?? null;
-          let compIds = row.competitorId ? [row.competitorId] : [];
-          if (row.id === 'c4f1cb57-3b2d-4209-9d10-1061ef996a6b') {
-            compName = 'ocoya';
-            compIds = ['3a604594-4ef0-454a-90d9-6bf1caeca750'];
-          }
+          const compName = row.competitorName ?? null;
+          const compIds = row.competitorId ? [row.competitorId] : [];
 
           return {
             id: row.id,
@@ -1163,6 +1160,7 @@ export function registerPerceptionRoutes(app: Express) {
       // Behavior B: Apply impact, competitor, and category filters to tab counts,
       // but explicitly EXCLUDE the status filter so tabs do not zero themselves out.
       const countConditions = [
+        eq(pipelineChangeEvents.accountId, accountId),
         eq(pipelineChangeEvents.campaignId, campaignId),
         isNotNull(pipelineChangeEvents.kind)
       ];
@@ -1249,14 +1247,14 @@ export function registerPerceptionRoutes(app: Express) {
         SELECT DISTINCT cc.name as competitor_name
         FROM ${pipelineChangeEvents} pce
         LEFT JOIN ${ciCompetitors} cc ON pce.competitor_id = cc.id
-        WHERE pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL AND cc.name IS NOT NULL
+        WHERE pce.account_id = ${accountId} AND pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL AND cc.name IS NOT NULL
       `);
       const competitorFilters = filterOptionsResult.rows.map(r => r.competitor_name as string);
       
       const kindOptionsResult = await db.execute(sql`
         SELECT DISTINCT kind
         FROM ${pipelineChangeEvents}
-        WHERE campaign_id = ${campaignId} AND kind IS NOT NULL
+        WHERE account_id = ${accountId} AND campaign_id = ${campaignId} AND kind IS NOT NULL
       `);
       // Translate kinds to categories
       const categoryFilters = Array.from(new Set(
@@ -1280,7 +1278,7 @@ export function registerPerceptionRoutes(app: Express) {
           pce.kind,
           COUNT(*) as kind_count
         FROM ${pipelineChangeEvents} pce
-        WHERE pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
+        WHERE pce.account_id = ${accountId} AND pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
           AND pce.status IN ('candidate', 'confirmed')
         GROUP BY pce.kind
         ORDER BY kind_count DESC
@@ -1293,7 +1291,7 @@ export function registerPerceptionRoutes(app: Express) {
           COUNT(pce.id) as event_count
         FROM ${pipelineChangeEvents} pce
         LEFT JOIN ${ciCompetitors} cc ON pce.competitor_id = cc.id
-        WHERE pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
+        WHERE pce.account_id = ${accountId} AND pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
           AND pce.status IN ('candidate', 'confirmed')
           AND cc.is_active = true
         GROUP BY cc.name
@@ -1307,7 +1305,7 @@ export function registerPerceptionRoutes(app: Express) {
           DATE(pce.created_at) as event_date,
           COUNT(*) as event_count
         FROM ${pipelineChangeEvents} pce
-        WHERE pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
+        WHERE pce.account_id = ${accountId} AND pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
           AND pce.created_at >= NOW() - INTERVAL '7 days'
         GROUP BY DATE(pce.created_at)
         ORDER BY event_date ASC

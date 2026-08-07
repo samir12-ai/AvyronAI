@@ -382,8 +382,11 @@ export function useStrategicBrief(campaignId: string | null | undefined, eventId
     queryFn: () => fetchJson<StrategicBriefResponse>(`/api/strategic-briefs/event/${eventId}?campaignId=${campaignId}`),
     enabled: !!campaignId && !!eventId,
     staleTime: 10 * 1000, // Poll more frequently while building
-    refetchInterval: (data) => {
-      const status = data?.data?.status;
+    refetchInterval: (query) => {
+      // React Query v5: callback receives the Query object, not the data directly.
+      // Data lives at query.state.data — using the old v4 (data) => signature
+      // silently disables polling (status always undefined → always returns false).
+      const status = (query.state.data as StrategicBriefResponse | undefined)?.data?.status;
       if (status === "queued" || status === "generating" || status === "validating") {
         return active ? 3000 : false; // Poll every 3s if app active and job in progress
       }

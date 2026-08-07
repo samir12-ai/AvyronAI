@@ -25,6 +25,7 @@ import {
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startRevisitScheduler, stopRevisitScheduler } from "./revisit-scheduler";
 import { startWatchtowerScheduler, stopWatchtowerScheduler } from "./watchtower/scheduler";
+import { recoverStaleBriefJobs } from "./watchtower/strategic-brief-runner";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { stopQueueProcessor as stopMiQueueProcessor } from "./market-intelligence-v3/fetch-orchestrator";
 import { runAllHealthChecks } from "./meta-token-manager";
@@ -1614,6 +1615,13 @@ function setupErrorHandler(app: express.Application) {
     await flushSentry(2000);
     process.exit(1);
   }
+
+  // Recover any strategic-brief jobs left in generating/validating state
+  // from a previous process that was terminated mid-execution. Non-blocking:
+  // a failure here must never prevent the server from starting.
+  recoverStaleBriefJobs().catch((err) =>
+    logger.error({ component: "brief-recovery", err: String(err) }, "boot stale-brief recovery failed"),
+  );
 
   server.listen(
     {

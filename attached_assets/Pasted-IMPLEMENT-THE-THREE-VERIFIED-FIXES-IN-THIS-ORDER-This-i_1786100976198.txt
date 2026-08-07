@@ -1,0 +1,179 @@
+IMPLEMENT THE THREE VERIFIED FIXES IN THIS ORDER.
+
+This is no longer an audit. The root causes are confirmed.
+
+Implement, test, and verify each phase before continuing.
+
+==================================================
+PHASE 1 — FIX STRATEGIC BRIEF FRONTEND POLLING
+==================================================
+
+Confirmed root cause:
+
+The project uses @tanstack/react-query v5, but useStrategicBrief in hooks/usePerception.ts uses the old v4 refetchInterval callback signature.
+
+Current broken pattern:
+
+refetchInterval: (data) => {
+  const status = data?.data?.status;
+  ...
+}
+
+In React Query v5 the callback receives the Query object.
+
+Required fix:
+
+refetchInterval: (query) => {
+  const status = query.state.data?.data?.status;
+
+  if (
+    status === "queued" ||
+    status === "generating" ||
+    status === "validating"
+  ) {
+    return active ? 3000 : false;
+  }
+
+  return false;
+}
+
+Requirements:
+
+- Preserve existing tenant scoping.
+- Do not trigger generation on page open.
+- Poll only while status is queued/generating/validating.
+- Stop polling immediately when status becomes ready, failed, or insufficient_evidence.
+- Ensure clicking Generate performs an immediate refetch, then polling continues automatically.
+- Audit the repository for other refetchInterval callbacks still using the v4 signature and fix only confirmed incompatible cases.
+
+Verification:
+
+1. Select a confirmed MarketMindAI event.
+2. Trigger Generate.
+3. Confirm the UI transitions visibly through:
+   awaiting_analysis
+   → queued/generating
+   → validating if observable
+   → ready
+4. Confirm the transition happens without page reload.
+5. Confirm polling stops after ready.
+6. Confirm refresh displays the persisted ready brief without launching another LLM call.
+7. Confirm no duplicate brief row is created.
+
+==================================================
+PHASE 2 — ENABLE STALE BRIEF JOB RECOVERY
+==================================================
+
+Confirmed gap:
+
+recoverStaleBriefJobs() exists in server/watchtower/strategic-brief-runner.ts but is never called.
+
+Implement safe startup registration.
+
+Requirements:
+
+- Call recoverStaleBriefJobs() once during backend startup after DB connectivity and migrations are confirmed.
+- Do not block server boot indefinitely.
+- Log:
+  - number of stale jobs found
+  - exact job IDs reclaimed
+  - final recovery outcome
+- Reclaim only jobs stuck in generating or validating beyond the existing timeout threshold.
+- Do not touch ready, failed, insufficient_evidence, or genuinely active recent jobs.
+- Preserve attempt counts and safe failure lineage.
+- Avoid duplicate recovery if multiple startup paths execute.
+
+Verification:
+
+1. Create an isolated test job in generating state with an old updatedAt.
+2. Restart or invoke the startup recovery path.
+3. Confirm the job is reclaimed and completes or safely requeues.
+4. Confirm a recent active job is not touched.
+5. Confirm a ready job is not touched.
+6. Confirm no duplicate execution occurs.
+
+Do not alter real MarketMindAI records for this test.
+
+==================================================
+PHASE 3 — FIX WATCHTOWER TENANT-SCOPING LEAK
+==================================================
+
+Confirmed issue:
+
+The market-signals/watchtower list query filters by campaignId but can surface a stray event under accountId='default'.
+
+That card appears in the UI but later fails tenant validation in the strategic brief endpoint.
+
+Required fix:
+
+- Enforce accountId AND campaignId scoping consistently in all Watchtower list/detail/count/filter queries.
+- Do not weaken tenant isolation.
+- Do not add special cases for accountId='default'.
+- Do not hardcode any event IDs, competitor IDs, campaign IDs, or names.
+- Ensure tab counts use the same tenant boundary as event rows.
+- Ensure competitor/type/impact/status filters remain correct after the scope fix.
+- Ensure the legitimate MarketMindAI account sees only its own events.
+- The stray default-account event must no longer appear in the legitimate account UI.
+
+Verification:
+
+1. Query the MarketMindAI Watchtower list using the legitimate account.
+2. Confirm no accountId='default' event appears.
+3. Verify list rows, tab counts, event detail, and strategic brief endpoints agree.
+4. Verify another account cannot access or infer MarketMindAI event existence.
+5. Re-run existing Watchtower route tests and add regression coverage for same campaignId across two accountIds.
+
+==================================================
+FINAL END-TO-END VERIFICATION
+==================================================
+
+After all three phases pass:
+
+Use the real MarketMindAI campaign safely.
+
+Do not seed fake production data.
+Do not delete or overwrite historical rows.
+Do not manipulate Watchtower lifecycle timestamps.
+
+Verify:
+
+1. Open Reasoning & Evidence.
+2. Select a legitimate confirmed MarketMindAI event.
+3. Trigger Strategic Brief generation only if no ready brief exists.
+4. Observe automatic frontend status progression without refresh.
+5. Confirm final brief renders:
+   - executive summary
+   - strategic interpretation
+   - affected strategy areas
+   - recommendation
+   - final validated confidence
+   - claim-level judge results
+   - evidence lineage
+6. Refresh the page and confirm:
+   - same ready brief loads
+   - no new LLM call
+   - no duplicate DB row
+7. Confirm the stray default-account event is absent.
+8. Confirm backend restart recovery is registered and operational.
+
+Run:
+
+- focused hook tests
+- Watchtower route tenant tests
+- strategic brief runner/recovery tests
+- TypeScript check for touched files
+- browser verification
+
+Provide a final report with:
+
+- files changed
+- exact fixes
+- tests run
+- before/after behavior
+- database row counts for the tested event
+- proof polling stopped after ready
+- proof no duplicate generation occurred
+- proof tenant leak is closed
+- proof stale recovery is registered
+
+Do not declare PASS unless all three fixes work end-to-end.
