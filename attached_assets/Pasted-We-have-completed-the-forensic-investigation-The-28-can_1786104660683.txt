@@ -1,0 +1,247 @@
+We have completed the forensic investigation.
+
+The 28 candidate Watchtower events have been proven to be synthetic migration artifacts.
+
+Now implement the cleanup.
+
+IMPORTANT
+
+This is a REAL database operation.
+
+Work slowly.
+
+Verify every step before moving to the next.
+
+Never perform a destructive action without proving it is safe first.
+
+==================================================
+OBJECTIVE
+==================================================
+
+Remove ONLY the synthetic Watchtower seed artifacts.
+
+Do NOT modify any real Watchtower events.
+
+Do NOT modify confirmed events.
+
+Do NOT modify Strategic Briefs.
+
+Do NOT modify real snapshots.
+
+==================================================
+PHASE 1 — PRE-FLIGHT VERIFICATION
+==================================================
+
+Before deleting anything verify again:
+
+1. Every target row has:
+
+run_id LIKE 'run_migrated_%'
+
+2. Every target row has:
+
+status = 'candidate'
+
+3. Every target row has:
+
+validated_at IS NOT NULL
+
+4. Every target row references only:
+
+snap_base_*
+
+or
+
+snap_conf_*
+
+5. Verify none of them have:
+
+- Strategic Brief
+- FK dependency
+- Audit dependency
+- Engine dependency
+
+Print the verification.
+
+If ANY row fails these conditions,
+
+STOP.
+
+==================================================
+PHASE 2 — DATABASE BACKUP
+==================================================
+
+Before deletion create a rollback manifest.
+
+Store:
+
+event id
+
+competitor
+
+kind
+
+run_id
+
+baseline_snapshot_id
+
+current_snapshot_id
+
+created_at
+
+validated_at
+
+status
+
+Do NOT skip this step.
+
+==================================================
+PHASE 3 — DELETE SYNTHETIC EVENTS
+==================================================
+
+Delete ONLY the verified synthetic rows.
+
+Nothing else.
+
+Never use broad DELETE statements.
+
+Use the verified IDs only.
+
+==================================================
+PHASE 4 — CLEAN SYNTHETIC SNAPSHOTS
+==================================================
+
+Remove ONLY orphan synthetic snapshots matching:
+
+snap_base_*
+
+snap_conf_*
+
+ONLY if:
+
+they are not referenced by any remaining pipeline_change_event.
+
+Do NOT delete any UUID snapshots.
+
+Do NOT delete any real pipeline snapshots.
+
+==================================================
+PHASE 5 — POST CLEANUP VERIFICATION
+==================================================
+
+Verify:
+
+pipeline_change_events
+
+candidate = 0
+
+confirmed = unchanged
+
+archived = unchanged
+
+expired = unchanged
+
+Verify:
+
+watchtower_strategic_briefs
+
+unchanged
+
+Verify:
+
+pipeline_snapshots
+
+only real UUID snapshots remain
+
+Verify:
+
+no FK violations
+
+==================================================
+PHASE 6 — WATCHTOWER HEALTH CHECK
+==================================================
+
+Verify:
+
+Scheduler
+
+Scraping
+
+Snapshot generation
+
+Classification
+
+Confirmation
+
+Lifecycle
+
+All PASS.
+
+==================================================
+PHASE 7 — REAL PIPELINE TEST
+==================================================
+
+Do NOT fabricate data.
+
+Use the real MarketMindAI campaign.
+
+Trigger ONE normal Watchtower monitoring cycle exactly as the production system normally does.
+
+Do NOT insert events manually.
+
+Do NOT modify timestamps.
+
+Do NOT bypass lifecycle rules.
+
+Verify:
+
+1.
+
+New candidates are created only from real snapshot comparisons.
+
+2.
+
+Every new candidate has:
+
+validated_at = NULL
+
+3.
+
+baselineSnapshotId is a real UUID snapshot.
+
+4.
+
+currentSnapshotId is a real UUID snapshot.
+
+5.
+
+runId is a real Watchtower runId.
+
+6.
+
+No synthetic IDs appear anywhere.
+
+==================================================
+PHASE 8 — FINAL REPORT
+==================================================
+
+Provide:
+
+- rows deleted
+- snapshots deleted
+- confirmed events remaining
+- strategic briefs remaining
+- scheduler health
+- lifecycle health
+- proof that the first real candidates are now generated from real snapshots
+- before/after counts
+
+Only declare SUCCESS after all verification passes.
+
+If anything unexpected appears,
+
+STOP immediately,
+
+report it,
+
+and do not continue automatically.
