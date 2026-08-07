@@ -1,8 +1,16 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable, Image } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  Pressable,
+  Platform,
+} from 'react-native';
 import { useAuth } from '@/context/AuthContext';
 import { WatchtowerController } from '@/services/watchtower/watchtower-controller';
-import { WatchtowerSectionState, WatchtowerEvent } from '@/types/watchtower';
+import { WatchtowerSectionState } from '@/types/watchtower';
 import WatchtowerEventListItem from '@/components/watchtower/WatchtowerEventListItem';
 import WatchtowerEventDetail from '@/components/watchtower/WatchtowerEventDetail';
 import FilterDropdown from '@/components/watchtower/FilterDropdown';
@@ -10,13 +18,15 @@ import { Feather } from '@expo/vector-icons';
 import { useAppShellController } from '@/hooks/useAppShellController';
 import { formatWatchtowerDate } from '@/utils/watchtower-date-formatter';
 
+const TABS = ['All Changes', 'High Impact', 'Confirmed', 'First Observation', 'Archived'] as const;
+
 export default function WatchtowerPage() {
   const { user } = useAuth();
   const shellController = useAppShellController();
   const [state, setState] = useState<WatchtowerSectionState | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('All Changes');
-  
+
   const [selectedCompetitor, setSelectedCompetitor] = useState<string>('All Competitors');
   const [selectedType, setSelectedType] = useState<string>('All Types');
   const [selectedImpact, setSelectedImpact] = useState<string>('All Impact');
@@ -26,589 +36,671 @@ export default function WatchtowerPage() {
 
   useEffect(() => {
     let isMounted = true;
-    
     async function load() {
       const data = await controller.fetchWatchtowerState({
         tab: activeTab,
         competitor: selectedCompetitor,
         category: selectedType,
-        impact: selectedImpact
+        impact: selectedImpact,
       });
-      
-      if (!isMounted) return; // Prevent race conditions by dropping stale requests
-
+      if (!isMounted) return;
       setState(data);
-      
-      // Selection Safety
-      if (data.events && data.events.length > 0) {
-        // Only select the first event if the currently selected one is no longer in the list
-        if (!selectedEventId || !data.events.some(e => e.identity.cardId === selectedEventId)) {
+      if (data.events?.length > 0) {
+        if (!selectedEventId || !data.events.some((e) => e.identity.cardId === selectedEventId)) {
           setSelectedEventId(data.events[0].identity.cardId);
         }
       } else {
         setSelectedEventId(null);
       }
     }
-    
     load();
-    
-    return () => {
-      isMounted = false; // Abort stale responses
-    };
+    return () => { isMounted = false; };
   }, [controller, activeTab, selectedCompetitor, selectedType, selectedImpact]);
 
   if (!state) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
-        <Text style={styles.loadingText}>Monitoring market signals...</Text>
+        <View style={styles.loadingPulse}>
+          <ActivityIndicator size="large" color="#7C3AED" />
+        </View>
+        <Text style={styles.loadingTitle}>Scanning market signals</Text>
+        <Text style={styles.loadingSubtitle}>Analyzing competitor activity across all channels…</Text>
       </View>
     );
   }
 
-  const selectedEvent = state.events.find(e => e.identity.cardId === selectedEventId) || null;
-
-  // Format time since last scan
-  const displayLastScan = state.lastScanTimestamp 
+  const selectedEvent = state.events.find((e) => e.identity.cardId === selectedEventId) || null;
+  const displayLastScan = state.lastScanTimestamp
     ? formatWatchtowerDate(state.lastScanTimestamp)
-    : 'Scan unavailable';
+    : '—';
+
+  const confirmedCount = state.tabCounts?.['Confirmed'] ?? 0;
+  const highImpactCount = state.tabCounts?.['High Impact'] ?? 0;
 
   return (
-    <View style={styles.container}>
-      <View style={{ flex: 1 }}>
-        
-        {/* TOP HEADER */}
-        <View style={styles.pageHeader}>
-          <View style={styles.headerTopRow}>
-            
-            <View style={styles.titleCol}>
-              <View style={styles.titleContainer}>
-                <Feather name="target" size={28} color="#8B5CF6" style={{ marginRight: 14 }} /> 
-                <Text style={styles.pageTitle}>Intelligence War Room</Text>
-              </View>
-              <Text style={styles.pageSubtitle} numberOfLines={1}>
-                Monitoring market activity. Awaiting first observation and confirmation before strategic response.
-              </Text>
-            </View>
-
-            <View style={styles.headerControls}>
-              {/* Workspace Dropdown */}
-              <Pressable style={styles.headerDropdown} onPress={shellController.openAccountSwitcher}>
-                <Text style={styles.headerDropdownText}>{shellController.activeWorkspace?.name || 'Workspace'}</Text>
-                <Feather name="chevron-down" size={16} color="#9CA3AF" />
-              </Pressable>
-
-              {/* Last Scan (Replaces static Date Range) */}
-              <View style={styles.headerDate}>
-                <Text style={styles.headerDateText}>Last scan: {displayLastScan}</Text>
-                <Feather name="clock" size={14} color="#9CA3AF" style={{ marginLeft: 8 }} />
-              </View>
-
-              {/* Bell Notification */}
-              <Pressable style={styles.headerBell}>
-                <Feather name="bell" size={18} color="#D1D5DB" />
-                {shellController.badges.watchtower > 0 && (
-                  <View style={styles.headerBellBadge}>
-                    <Text style={styles.headerBellBadgeText}>{shellController.badges.watchtower}</Text>
-                  </View>
-                )}
-              </Pressable>
-
-              {/* User Avatar */}
-              <Pressable style={styles.headerAvatar} onPress={shellController.openAccountSwitcher}>
-                <Text style={styles.headerAvatarText}>{shellController.userProfile?.initials || '?'}</Text>
-              </Pressable>
-            </View>
-
+    <View style={styles.root}>
+      {/* ── HEADER ── */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={styles.headerIconWrap}>
+            <Feather name="target" size={18} color="#7C3AED" />
+          </View>
+          <View>
+            <Text style={styles.headerTitle}>Intelligence War Room</Text>
+            <Text style={styles.headerSub}>Monitoring competitor signals across content, offers, and positioning</Text>
           </View>
         </View>
 
-        {/* TOOLBAR */}
-        <View style={styles.toolbar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-            <View style={styles.tabs}>
-              {['All Changes', 'High Impact', 'Confirmed', 'First Observation', 'Archived'].map(tab => {
-                const count = state.tabCounts[tab as keyof typeof state.tabCounts];
-                const displayTab = count !== undefined ? `${tab} (${count})` : tab;
-                return (
-                  <Pressable 
-                    key={tab} 
-                    style={[styles.tabContainer, activeTab === tab && styles.activeTabContainer]}
-                    onPress={() => setActiveTab(tab)}
-                  >
-                    <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-                      {displayTab}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+        <View style={styles.headerRight}>
+          {/* Confirmed pill */}
+          {confirmedCount > 0 && (
+            <View style={styles.pillConfirmed}>
+              <View style={styles.pillDot} />
+              <Text style={styles.pillText}>{confirmedCount} confirmed</Text>
             </View>
-          </ScrollView>
-          
-          <View style={[styles.filters, { zIndex: 10 }]}>
-            <FilterDropdown 
-              label="Competitor"
-              selectedValue={selectedCompetitor}
-              defaultOption="All Competitors"
-              options={state.availableFilters.competitors || []}
-              onSelect={setSelectedCompetitor}
-            />
+          )}
+          {/* High impact pill */}
+          {highImpactCount > 0 && (
+            <View style={styles.pillHighImpact}>
+              <Feather name="zap" size={11} color="#EF4444" />
+              <Text style={styles.pillHighText}>{highImpactCount} high impact</Text>
+            </View>
+          )}
 
-            <FilterDropdown 
-              label="Type"
-              selectedValue={selectedType}
-              defaultOption="All Types"
-              options={state.availableFilters.categories || []}
-              onSelect={setSelectedType}
-            />
-
-            <FilterDropdown 
-              label="Impact"
-              selectedValue={selectedImpact}
-              defaultOption="All Impact"
-              options={state.availableFilters.impacts || []}
-              onSelect={setSelectedImpact}
-            />
-
-            <Pressable style={[styles.filterBtn, styles.filterBtnIcon]}>
-              <Feather name="filter" size={14} color="#9CA3AF" />
-              <Text style={styles.filterBtnText}>Filters</Text>
-            </Pressable>
+          {/* Last scan */}
+          <View style={styles.scanBadge}>
+            <Feather name="clock" size={12} color="#6B7280" />
+            <Text style={styles.scanText}>Last scan: {displayLastScan}</Text>
           </View>
-        </View>
 
-        <View style={styles.splitView}>
-          {/* Left Side: Event Feed */}
-          <View style={styles.leftSidebar}>
-            {state.pageState === 'NO_SIGNALS' ? (
-              <View style={styles.emptyState}>
-                <Feather name="shield" size={48} color="#374151" />
-                <Text style={styles.emptyStateTitle}>Market is quiet</Text>
-                <Text style={styles.emptyStateBody}>No Watchtower events detected yet.</Text>
+          {/* Bell */}
+          <Pressable style={styles.iconBtn}>
+            <Feather name="bell" size={16} color="#9CA3AF" />
+            {(shellController.badges.watchtower ?? 0) > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>{shellController.badges.watchtower}</Text>
               </View>
-            ) : state.pageState === 'ERROR' ? (
-              <View style={styles.emptyState}>
-                <Feather name="alert-circle" size={48} color="#DC2626" />
-                <Text style={styles.emptyStateTitle}>System Error</Text>
-                <Text style={styles.emptyStateBody}>{state.error || 'Failed to load intelligence.'}</Text>
-              </View>
-            ) : state.events.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Feather name="filter" size={48} color="#374151" />
-                <Text style={styles.emptyStateTitle}>No results found</Text>
-                <Text style={styles.emptyStateBody}>No events match the selected filters.</Text>
-                <Pressable 
-                  style={{ marginTop: 16, backgroundColor: '#1E2535', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#374151' }}
-                  onPress={() => {
-                    setSelectedCompetitor('All Competitors');
-                    setSelectedType('All Types');
-                    setSelectedImpact('All Impact');
-                  }}
+            )}
+          </Pressable>
+
+          {/* Avatar */}
+          <Pressable style={styles.avatar} onPress={shellController.openAccountSwitcher}>
+            <Text style={styles.avatarText}>{shellController.userProfile?.initials || '?'}</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {/* ── STAT STRIP ── */}
+      <View style={styles.statStrip}>
+        <StatChip icon="activity" label="All Changes" value={state.tabCounts?.['All Changes'] ?? 0} color="#8B5CF6" />
+        <View style={styles.statDivider} />
+        <StatChip icon="zap" label="High Impact" value={highImpactCount} color="#EF4444" />
+        <View style={styles.statDivider} />
+        <StatChip icon="check-circle" label="Confirmed" value={confirmedCount} color="#10B981" />
+        <View style={styles.statDivider} />
+        <StatChip icon="eye" label="First Obs." value={state.tabCounts?.['First Observation'] ?? 0} color="#3B82F6" />
+        <View style={styles.statDivider} />
+        <StatChip icon="archive" label="Archived" value={state.tabCounts?.['Archived'] ?? 0} color="#6B7280" />
+      </View>
+
+      {/* ── TOOLBAR (tabs + filters) ── */}
+      <View style={styles.toolbar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll}>
+          <View style={styles.tabsRow}>
+            {TABS.map((tab) => {
+              const isActive = activeTab === tab;
+              const count = state.tabCounts?.[tab as keyof typeof state.tabCounts];
+              return (
+                <Pressable
+                  key={tab}
+                  style={[styles.tab, isActive && styles.tabActive]}
+                  onPress={() => setActiveTab(tab)}
                 >
-                  <Text style={{ color: '#D1D5DB', fontSize: 13, fontWeight: '500' }}>Clear Filters</Text>
+                  <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
+                    {tab}
+                  </Text>
+                  {count !== undefined && count > 0 && (
+                    <View style={[styles.tabCount, isActive && styles.tabCountActive]}>
+                      <Text style={[styles.tabCountText, isActive && styles.tabCountTextActive]}>
+                        {count}
+                      </Text>
+                    </View>
+                  )}
                 </Pressable>
-              </View>
-            ) : (
-              <ScrollView style={styles.listScroll} contentContainerStyle={styles.listContainer}>
-                {state.events.map(event => (
-                  <WatchtowerEventListItem 
-                    key={event.identity.cardId} 
-                    event={event} 
-                    isSelected={event.identity.cardId === selectedEventId}
-                    onSelect={setSelectedEventId}
-                  />
-                ))}
-              </ScrollView>
-            )}
+              );
+            })}
           </View>
+        </ScrollView>
 
-          {/* Right Side: Detail Panel */}
-          <View style={styles.rightMain}>
-            {selectedEventId && selectedEvent ? (
-              <WatchtowerEventDetail 
-                eventId={selectedEventId}
-                campaignId={campaignId}
-                onClose={() => setSelectedEventId(null)}
-              />
-            ) : (
-              <View style={styles.emptyDetailState}>
-                <Feather name="folder" size={48} color="#374151" />
-                <Text style={styles.emptyStateTitle}>Select a case file to investigate.</Text>
-                <Text style={styles.emptyStateBody}>Click on any market event in the feed to open the Investigation Workspace.</Text>
-              </View>
-            )}
-          </View>
+        <View style={[styles.filtersRow, { zIndex: 100 }]}>
+          <FilterDropdown
+            label="Competitor"
+            selectedValue={selectedCompetitor}
+            defaultOption="All Competitors"
+            options={state.availableFilters?.competitors || []}
+            onSelect={setSelectedCompetitor}
+          />
+          <FilterDropdown
+            label="Type"
+            selectedValue={selectedType}
+            defaultOption="All Types"
+            options={state.availableFilters?.categories || []}
+            onSelect={setSelectedType}
+          />
+          <FilterDropdown
+            label="Impact"
+            selectedValue={selectedImpact}
+            defaultOption="All Impact"
+            options={state.availableFilters?.impacts || []}
+            onSelect={setSelectedImpact}
+          />
+        </View>
+      </View>
+
+      {/* ── SPLIT PANEL ── */}
+      <View style={styles.split}>
+        {/* Left: Event Feed */}
+        <View style={styles.feedCol}>
+          {state.pageState === 'NO_SIGNALS' ? (
+            <EmptyPane
+              icon="shield"
+              title="Market is quiet"
+              body="No Watchtower events detected yet. Scanning continues automatically."
+            />
+          ) : state.pageState === 'ERROR' ? (
+            <EmptyPane
+              icon="alert-circle"
+              title="Could not load signals"
+              body={state.error || 'An error occurred fetching intelligence.'}
+              tint="#EF4444"
+            />
+          ) : state.events.length === 0 ? (
+            <EmptyPane
+              icon="filter"
+              title="No results for these filters"
+              body="Try broadening the competitor, type, or impact filter."
+              action={{
+                label: 'Clear filters',
+                onPress: () => {
+                  setSelectedCompetitor('All Competitors');
+                  setSelectedType('All Types');
+                  setSelectedImpact('All Impact');
+                },
+              }}
+            />
+          ) : (
+            <ScrollView
+              style={styles.feedScroll}
+              contentContainerStyle={styles.feedContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.feedMeta}>
+                {state.events.length} event{state.events.length !== 1 ? 's' : ''} · {activeTab}
+              </Text>
+              {state.events.map((event) => (
+                <WatchtowerEventListItem
+                  key={event.identity.cardId}
+                  event={event}
+                  isSelected={event.identity.cardId === selectedEventId}
+                  onSelect={setSelectedEventId}
+                />
+              ))}
+            </ScrollView>
+          )}
         </View>
 
+        {/* Right: Detail Panel */}
+        <View style={styles.detailCol}>
+          {selectedEventId && selectedEvent ? (
+            <WatchtowerEventDetail
+              eventId={selectedEventId}
+              campaignId={campaignId}
+              onClose={() => setSelectedEventId(null)}
+            />
+          ) : (
+            <EmptyDetail />
+          )}
+        </View>
       </View>
     </View>
   );
 }
 
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+function StatChip({
+  icon, label, value, color,
+}: {
+  icon: string; label: string; value: number; color: string;
+}) {
+  return (
+    <View style={statStyles.chip}>
+      <Feather name={icon as any} size={13} color={color} style={{ marginRight: 6 }} />
+      <Text style={[statStyles.value, { color }]}>{value}</Text>
+      <Text style={statStyles.label}>{label}</Text>
+    </View>
+  );
+}
+
+function EmptyPane({
+  icon, title, body, tint = '#4B5563', action,
+}: {
+  icon: string; title: string; body: string; tint?: string; action?: { label: string; onPress: () => void };
+}) {
+  return (
+    <View style={emptyStyles.wrap}>
+      <View style={[emptyStyles.iconWrap, { backgroundColor: tint + '18', borderColor: tint + '30' }]}>
+        <Feather name={icon as any} size={28} color={tint} />
+      </View>
+      <Text style={emptyStyles.title}>{title}</Text>
+      <Text style={emptyStyles.body}>{body}</Text>
+      {action && (
+        <Pressable style={emptyStyles.btn} onPress={action.onPress}>
+          <Text style={emptyStyles.btnText}>{action.label}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function EmptyDetail() {
+  return (
+    <View style={emptyStyles.detailWrap}>
+      <View style={emptyStyles.detailIcon}>
+        <Feather name="inbox" size={32} color="#374151" />
+      </View>
+      <Text style={emptyStyles.detailTitle}>Select a signal to investigate</Text>
+      <Text style={emptyStyles.detailBody}>
+        Click any event in the feed to open the full investigation workspace — evidence, timeline, and recommended actions.
+      </Text>
+    </View>
+  );
+}
+
+// ── Styles ──────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: '#0F131A',
+    backgroundColor: '#070B12',
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#0F131A',
+    backgroundColor: '#070B12',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    color: '#9CA3AF',
-    fontSize: 14,
-    letterSpacing: 0.5,
-  },
-  pageHeader: {
-    paddingHorizontal: 40,
-    paddingTop: 40,
-    paddingBottom: 32,
-    backgroundColor: '#0F131A',
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center', // changed from flex-start
-    marginBottom: 32, // increased spacing
-  },
-  titleCol: {
-    flex: 1,
-    paddingRight: 32,
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  pageTitle: {
-    fontSize: 32, // increased
-    fontWeight: '900', // increased
-    color: '#FFFFFF',
-    letterSpacing: 0.2,
-  },
-  pageSubtitle: {
-    fontSize: 15,
-    color: '#9CA3AF',
-    flexShrink: 1,
-    lineHeight: 22,
-  },
-  headerControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  headerDropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E2535', // more premium
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24, // highly rounded
-    borderWidth: 1,
-    borderColor: '#2A3347',
     gap: 12,
   },
-  headerDropdownText: {
-    color: '#F9FAFB',
-    fontSize: 13,
-    fontWeight: '600',
+  loadingPulse: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#7C3AED18',
+    borderWidth: 1,
+    borderColor: '#7C3AED30',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
   },
-  headerDate: {
+  loadingTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#F9FAFB',
+  },
+  loadingSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+
+  // Header
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#161B22',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
+    justifyContent: 'space-between',
+    paddingHorizontal: 28,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderColor: '#111827',
+    backgroundColor: '#070B12',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  headerIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#7C3AED18',
+    borderWidth: 1,
+    borderColor: '#7C3AED30',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#F9FAFB',
+    letterSpacing: -0.3,
+  },
+  headerSub: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  pillConfirmed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#10B98118',
+    borderWidth: 1,
+    borderColor: '#10B98130',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  pillDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  pillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#10B981',
+  },
+  pillHighImpact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#EF444418',
+    borderWidth: 1,
+    borderColor: '#EF444430',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  pillHighText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  scanBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#0F1520',
     borderWidth: 1,
     borderColor: '#1E2535',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
-  headerDateText: {
-    color: '#D1D5DB',
-    fontSize: 13,
-    fontWeight: '500',
+  scanText: {
+    fontSize: 12,
+    color: '#6B7280',
   },
-  headerBell: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#161B22',
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#0F1520',
     borderWidth: 1,
     borderColor: '#1E2535',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
-  headerBellBadge: {
+  bellBadge: {
     position: 'absolute',
-    top: -2,
-    right: -2,
+    top: -3,
+    right: -3,
     backgroundColor: '#EF4444',
-    borderRadius: 12,
-    minWidth: 20,
-    height: 20,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
-    borderWidth: 2,
-    borderColor: '#0F131A',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#070B12',
   },
-  headerBellBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
+  bellBadgeText: {
+    fontSize: 9,
     fontWeight: '800',
+    color: '#fff',
   },
-  headerAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#4C1D95',
-    borderWidth: 1,
-    borderColor: '#7C3AED',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  kpiRibbon: {
-    flexDirection: 'row',
-    gap: 20,
-  },
-  kpiCard: {
-    flex: 1,
-    backgroundColor: '#161B22',
-    padding: 24,
-    borderRadius: 16, // softer radius
-    borderWidth: 1,
-    borderColor: '#1E2535',
-    minHeight: 140, // increased height
-    justifyContent: 'space-between',
-    transitionProperty: 'transform, box-shadow, border-color', // Add transition properties for web
-    transitionDuration: '180ms',
-    transitionTimingFunction: 'ease-in-out',
-  },
-  kpiCardHovered: {
-    transform: [{ translateY: -4 }],
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    borderColor: '#2A3347',
-    elevation: 8,
-  },
-  kpiHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16, // more spacing
-    gap: 12,
-  },
-  kpiIcon: {
+  avatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
+    backgroundColor: '#4C1D95',
+    borderWidth: 1.5,
+    borderColor: '#7C3AED50',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  kpiLabel: {
-    fontSize: 14,
-    color: '#9CA3AF', // muted typography
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  kpiValue: {
-    fontSize: 36, // much larger numbers
-    fontWeight: '900',
-    color: '#F9FAFB',
-    marginBottom: 8,
-  },
-  kpiValueDim: {
-    color: '#4B5563',
-    fontSize: 24,
-  },
-  kpiSub: {
+  avatarText: {
     fontSize: 13,
-    fontWeight: '500',
-    letterSpacing: 0.2,
+    fontWeight: '800',
+    color: '#fff',
   },
-  kpiTrendPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    marginTop: 8,
+
+  // Stat strip
+  statStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderColor: '#111827',
+    backgroundColor: '#0A0F18',
+    gap: 0,
   },
-  trendUnavailableText: {
-    fontSize: 13,
-    color: '#6B7280',
-    fontStyle: 'italic',
+  statDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#1E2535',
+    marginHorizontal: 20,
   },
+
+  // Toolbar
   toolbar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingBottom: 0,
+    justifyContent: 'space-between',
+    paddingLeft: 28,
+    paddingRight: 16,
     borderBottomWidth: 1,
-    borderColor: '#1E2535',
-    zIndex: 100, // Elevate toolbar above splitView
+    borderColor: '#111827',
+    backgroundColor: '#070B12',
+    zIndex: 100,
     elevation: 100,
   },
-  tabs: {
+  tabsScroll: {
+    flex: 1,
+  },
+  tabsRow: {
     flexDirection: 'row',
-    gap: 32,
+    gap: 0,
   },
-  tabContainer: {
-    paddingBottom: 20,
-    marginBottom: -1,
-    borderBottomWidth: 3,
-    borderColor: 'transparent',
-  },
-  activeTabContainer: {
-    borderColor: '#8B5CF6',
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#9CA3AF',
-  },
-  activeTabText: {
-    color: '#FFFFFF',
-  },
-  filters: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  filterBtn: {
+  tab: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F131A', // Darker inner color
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#1E2535',
-    gap: 8,
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 2,
+    borderColor: 'transparent',
+    marginBottom: -1,
   },
-  filterBtnIcon: {
-    backgroundColor: 'transparent',
-    borderWidth: 0,
+  tabActive: {
+    borderColor: '#7C3AED',
   },
-  dropdownOverlay: {
-    position: 'absolute',
-    top: 40,
-    left: 0,
-    right: 0,
-    minWidth: 160,
+  tabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  tabTextActive: {
+    color: '#F9FAFB',
+  },
+  tabCount: {
     backgroundColor: '#1E2535',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#374151',
-    maxHeight: 200,
-    zIndex: 1000,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
-  dropdownScroll: {
-    flex: 1,
+  tabCountActive: {
+    backgroundColor: '#7C3AED30',
   },
-  dropdownItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2D3748',
+  tabCountText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6B7280',
   },
-  dropdownItemText: {
-    color: '#D1D5DB',
-    fontSize: 13,
+  tabCountTextActive: {
+    color: '#A78BFA',
   },
-  filterBtnText: {
-    fontSize: 13,
-    color: '#D1D5DB',
+  filtersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
   },
-  splitView: {
+
+  // Split
+  split: {
     flex: 1,
     flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderColor: '#1E2535',
-    zIndex: 1,
-    elevation: 1,
   },
-  leftSidebar: {
-    width: '45%',
-    maxWidth: 550, // Limit width of feed
+  feedCol: {
+    width: '40%',
+    maxWidth: 480,
     borderRightWidth: 1,
-    borderColor: '#1E2535',
+    borderColor: '#111827',
   },
-  listContainer: {
+  feedScroll: {
+    flex: 1,
+  },
+  feedContent: {
     padding: 16,
     paddingBottom: 60,
   },
-  listScroll: {
-    flex: 1,
-  },
-  rightMain: {
-    flex: 1,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-    minHeight: 400,
-  },
-  emptyDetailState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-    backgroundColor: '#0F131A',
-    minHeight: 400,
-  },
-  emptyStateTitle: {
-    fontSize: 18,
+  feedMeta: {
+    fontSize: 11,
     fontWeight: '600',
-    color: '#F9FAFB',
-    marginTop: 16,
-    marginBottom: 8,
+    color: '#4B5563',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
-  emptyStateBody: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    maxWidth: 300,
-    lineHeight: 22,
+  detailCol: {
+    flex: 1,
+    backgroundColor: '#070B12',
   },
-  bottomPanels: {
+});
+
+const statStyles = StyleSheet.create({
+  chip: {
     flexDirection: 'row',
-    padding: 32,
-    gap: 24,
+    alignItems: 'center',
+    gap: 0,
   },
-  bottomPanel: {
-    backgroundColor: '#161B22',
-    borderRadius: 12,
+  value: {
+    fontSize: 18,
+    fontWeight: '800',
+    marginRight: 6,
+  },
+  label: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+});
+
+const emptyStyles = StyleSheet.create({
+  wrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    minHeight: 300,
+    gap: 12,
+  },
+  iconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F9FAFB',
+    textAlign: 'center',
+  },
+  body: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    maxWidth: 280,
+    lineHeight: 20,
+  },
+  btn: {
+    marginTop: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 8,
+    backgroundColor: '#0F1520',
     borderWidth: 1,
     borderColor: '#1E2535',
-    padding: 24,
-    minHeight: 200,
   },
-  bottomPanelTitle: {
-    fontSize: 16,
+  btnText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#F9FAFB',
-    marginBottom: 16,
+    color: '#D1D5DB',
   },
-  bottomPanelContent: {
+  detailWrap: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-  }
+    justifyContent: 'center',
+    padding: 48,
+    gap: 14,
+  },
+  detailIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 24,
+    backgroundColor: '#0F1520',
+    borderWidth: 1,
+    borderColor: '#1E2535',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  detailTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
+  detailBody: {
+    fontSize: 13,
+    color: '#4B5563',
+    textAlign: 'center',
+    maxWidth: 320,
+    lineHeight: 21,
+  },
 });
