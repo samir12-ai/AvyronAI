@@ -1,0 +1,232 @@
+I need one FINAL READ-ONLY FORENSIC INVESTIGATION.
+
+DO NOT MODIFY CODE.
+DO NOT MODIFY THE DATABASE.
+DO NOT DELETE ANYTHING.
+DO NOT INSERT ANYTHING.
+DO NOT FIX ANYTHING.
+
+This is a forensic investigation only.
+
+====================================================
+OBJECTIVE
+====================================================
+
+During the Watchtower cleanup we discovered one anomaly.
+
+There is a CONFIRMED Watchtower event whose:
+
+- baselineSnapshotId is a UUID
+- currentSnapshotId is a UUID
+
+but neither snapshot exists in any snapshot table.
+
+This should never happen in the normal Watchtower lifecycle.
+
+I need to understand EXACTLY how this happened.
+
+Support every conclusion with evidence from:
+
+- source code
+- database
+- runtime behavior
+- migrations
+- git history (if relevant)
+
+Never guess.
+
+====================================================
+1. IDENTIFY THE EVENT
+====================================================
+
+Report:
+
+- event id
+- competitor
+- campaign
+- account
+- kind
+- severity
+- status
+- runId
+- createdAt
+- validatedAt
+- baselineSnapshotId
+- currentSnapshotId
+
+====================================================
+2. TRACE THE CREATION PATH
+====================================================
+
+Determine EXACTLY how this event was created.
+
+Search every possible insertion path:
+
+- Watchtower orchestrator
+- Migration scripts
+- Seed scripts
+- Test harnesses
+- Manual utilities
+- SQL scripts
+- Background workers
+- Any direct INSERT into pipeline_change_events
+
+Identify the exact code path that produced this event.
+
+====================================================
+3. SNAPSHOT FORENSICS
+====================================================
+
+Search EVERY snapshot table.
+
+Verify whether:
+
+- baseline snapshot ever existed
+- current snapshot ever existed
+
+If they existed:
+
+- when
+- how they disappeared
+- what deleted them
+
+If they never existed:
+
+prove it.
+
+====================================================
+4. LIFECYCLE VALIDATION
+====================================================
+
+Verify whether this event actually passed the normal lifecycle.
+
+Did it have:
+
+First Observation
+
+↓
+
+24h wait
+
+↓
+
+Second Fetch
+
+↓
+
+Confirmation
+
+↓
+
+ValidatedAt
+
+Or was any lifecycle step bypassed?
+
+====================================================
+5. STRATEGIC BRIEF
+====================================================
+
+Verify whether the Strategic Brief for this event relies on those snapshots.
+
+Determine:
+
+- did it use Watchtower evidence only?
+- did it use another source?
+- is the brief still trustworthy?
+- would regenerating the brief fail?
+
+====================================================
+6. BEFORE / AFTER IMPACT
+====================================================
+
+If someone opens this event in the future,
+
+will any feature fail because the snapshots are missing?
+
+Check:
+
+- Watchtower Detail
+- Before / After viewer
+- Evidence viewer
+- Strategic Brief
+- Reasoning
+- Future Adaptive layer
+
+====================================================
+7. DATABASE INTEGRITY
+====================================================
+
+Search for ANY other events with the same anomaly.
+
+Specifically find:
+
+confirmed events
+
+where
+
+baselineSnapshotId or currentSnapshotId
+
+does not exist.
+
+Return:
+
+- total count
+- event IDs
+- competitors
+
+====================================================
+8. ROOT CAUSE
+====================================================
+
+Answer with ONE root cause only.
+
+Not theories.
+
+Support it with evidence.
+
+====================================================
+9. RECOMMENDATION
+====================================================
+
+Do NOT implement.
+
+Only answer:
+
+- Is this harmless?
+- Should it be repaired?
+- Can it cause future bugs?
+- Is Watchtower production-safe without fixing it?
+
+====================================================
+10. FINAL HEALTH REPORT
+====================================================
+
+Rate:
+
+Watchtower Lifecycle
+
+Snapshot Integrity
+
+Database Integrity
+
+Evidence Integrity
+
+Strategic Brief Integrity
+
+Reasoning Integrity
+
+Adaptive Readiness
+
+Use only:
+
+PASS
+WARNING
+FAIL
+
+with one-line evidence-based justification.
+
+Do not implement anything.
+
+Do not repair anything.
+
+Only provide the forensic investigation.
