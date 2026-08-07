@@ -1,0 +1,110 @@
+to execute a read-first, production-safe verification, then run the Approved Plan, and finally verify the Performance Loop end-to-end.
+
+Rules
+Use the real MarketMindAI campaign only.
+Never fabricate data.
+Never insert fake records.
+Never bypass lifecycle.
+Never modify historical truth.
+If data is missing, report it instead of inventing it.
+Only generate values where the Performance Loop is explicitly designed to derive or calculate them.
+Phase 1 — Execute Approved Plan
+
+Locate the active Approved Strategy Plan for the MarketMindAI campaign.
+
+Verify:
+
+Approved plan exists.
+Correct version is active.
+All dependent engines can read it.
+Strategy Roots are connected.
+Product Identity is connected.
+Audience & Positioning are connected.
+Business Goals are connected.
+Market Intelligence is connected.
+Memory is connected.
+Watchtower outputs are connected.
+No legacy routes are being used.
+
+Then execute the Approved Plan through the normal production flow.
+
+Do not skip validations.
+
+Phase 2 — Performance Loop Audit
+
+Audit the entire Performance Loop after the plan execution.
+
+Verify:
+
+Performance cycle runner
+Decision engine
+Execution comparator
+Reports
+Verdicts
+Historical storage
+Memory integration
+Business scores
+User metrics
+Revenue
+Goals
+Weekly windows
+Truth submissions
+Adaptive inputs
+
+Confirm every dependency is connected.
+
+Phase 3 — Lead Windows
+
+Inspect every active Performance evaluation window.
+
+If the backend is designed to automatically derive missing lead values from existing evidence (website, CRM, forms, scraping, integrations, business metrics, calculations, etc.), allow it to calculate and populate those values.
+
+If the system cannot truthfully derive them:
+
+DO NOT fabricate numbers.
+Leave them empty.
+Report exactly why they remain empty.
+Phase 4 — Memory Verification
+
+Verify Memory is fully connected.
+
+Confirm the Performance Loop can read:
+
+previous reports
+previous verdicts
+previous business scores
+previous outcomes
+historical comparisons
+historical improvements
+historical failures
+
+Verify nothing falls back to placeholders.
+
+Phase 5 — Final Verification
+
+Produce a PASS / WARNING / FAIL report for:
+
+Approved Plan execution
+Performance Loop
+Business Metrics
+Decision Engine
+Comparator
+Reports
+Verdicts
+Memory
+Historical Tracking
+Adaptive Inputs
+Lead Windows
+API
+Database
+UI connections
+
+Finally answer:
+
+Did the Approved Plan execute successfully?
+Is the Performance Loop fully operational?
+Were any lead values legitimately derived?
+Which fields remain empty because no truthful data exists?
+Is the system now ready for a real end-to-end Performance Loop run using only genuine MarketMindAI data?
+
+Do not fabricate or manually seed any data. Use only the real production lifecycle and evidence already present in the system.

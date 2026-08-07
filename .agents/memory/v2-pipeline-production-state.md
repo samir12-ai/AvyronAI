@@ -1,29 +1,46 @@
 ---
 name: V2 pipeline production state
-description: Production campaign inventory, V2 orchestrator completion state, and known intentional stops as of 2026-07-28
+description: Production campaign inventory, V2 orchestrator completion state, and known blockers as of 2026-08-07
 ---
 
-## Campaign inventory (as of 2026-07-28)
-Only 2 real production campaigns exist in the DB:
-1. `campaign_1775158281356_dy5s6r` — account `c523dfd9` — Maxzi burger, Dubai — strong data (147 posts, 104 comments, 10 competitors)
-2. `campaign_1783438826741_rhc444` — account `d9338c62` — forma jerseys, Istanbul — weak data (35 posts, 0 comments, 3 competitors)
+## Campaign inventory (as of 2026-08-07)
+Only 1 active real production campaign confirmed in the DB at audit time:
+1. `campaign_1773576062201_6t0oxi` — account `a2d87878-a1e9-41ea-a8a5-90beff569673` — **MarketMindAI** (B2B SaaS / AI content marketing tool, Dubai-adjacent, SALES funnel)
 
-Synthetic audit accounts (`intel_audit_v1_*`) are test fixtures, not real campaigns.
+Previous entries for "burger/Dubai" and "forma/Istanbul" campaigns were from an earlier session (2026-07-28) and are no longer the active campaign under audit.
 
-## V2 orchestrator state (C1, audience-confidence-v2 in effect)
-- 13/15 engines complete; strategy_roots row written (ACTIVE, `c07d9d1a`)
-- Stops at Iteration Engine because `primaryKpi` + `dataWindowDays` are user-supplied fields — this is designed product behaviour, not a technical blocker
-- Funnel INTEGRITY_FAILED (grade red) is pre-existing truthful degradation; pipeline continues
+## MarketMindAI V2 orchestrator state (2026-08-07)
 
-## C2 correct behaviour
-- INSUFFICIENT_SIGNALS (35 posts, 0 comments → 0 cluster matches) → SGL BLOCKED
-- Correct conservative behaviour; not a v2 regression
+### What runs:
+- 9/15 engines complete (MI, Audience, Positioning, Differentiation, Mechanism, Offer, Awareness, Funnel, Persuasion)
+- AEL: 5 rootCauses, 4 causalChains, 4 buyingBarriers, quality=PASS
 
-**Why:** Needed to distinguish "pipeline stops here" (designed) vs "pipeline is broken" (bug). The Iteration gate and C2 block are both correct/expected.
+### What blocks:
+1. **OFFER_AUDIENCE_MISALIGNMENT** — Offer Engine output doesn't address audience pains; System Control BLOCKS
+2. **PIPELINE_INCOMPLETE** — downstream engines (channel_selection, statistical_validation, budget_governor, iteration, retention) never reached because system control blocked
+3. **buildPlan LLM timeout** — synthesis call times out 3/3 attempts; plan is always `degraded_ai_failed`
+4. **IDENTITY_DRIFT** — Offer identity ("B2B agency leader...") shares no terms with Audience identity aspiration ("CMO who broke vendor-fatigue...")
 
-## Remaining gaps before full 15-engine completion
-- Iteration: user must set `primaryKpi` + `dataWindowDays` on the campaign
-- C2: needs more scraped data (comments especially) before audience engine can proceed
+### Current plan state:
+- 1 plan: DRAFT v2, `degraded_ai_failed`, execution_status=IDLE (created 2026-07-31)
+- 0 approved plans
+- 5 strategy roots, all SUPERSEDED (consumed by buildPlanLayer on each run)
+- 17 calendar entries from DRAFT plan, all PENDING, no studio items
 
-## Comment inventory (P-6.10 audit, 2026-07-28)
-All 104 stored comments (C1 only, scraped Apr 2–May 12 2026) verified authentic: IG-native comment pks 104/104, 85 distinct real usernames (4/4 live-verified), 0 synthetic/placeholder/fabricated-id rows. Comment-creation `timestamp` is NULL on every row (rung that succeeded carried no created_at). C2's 0 comments = dead transport, not quiet audience (IG reported 1135 comments on its posts). Report: `.local/validation/p6.10-comment-authenticity-audit.md`.
+### Performance loop state:
+- All tables empty (cycle_reports, verdicts, outcomes, memory, truths)
+- 4 organic Instagram posts, all lineage_state=unmatched
+- Correctly empty — no approved plan = no activated execution
+
+**Why:** Two independent blocker paths:
+- Path A — Gate failures: run-to-run the specific BLOCK codes vary (16:30 run: OFFER_AUDIENCE_MISALIGNMENT + PIPELINE_INCOMPLETE; 17:01 run: STALE_SNAPSHOT_EVIDENCE + POSITIONING_HARD_GATE + CONFIDENCE_SPREAD_EXCESSIVE + CONFIDENCE_INTEGRITY_INCOMPLETE). Positioning confidence flips between PASS and hard-gate FAIL across runs depending on which snapshot version is fed in and SGL grounding.
+- Path B — buildPlan LLM timeout: when engines run far enough, the synthesis call times out 3/3 attempts. When gates fire early (17:01 run), buildPlan is never reached.
+Both paths are independent — fixing one surfaces the other.
+
+## Watchtower / market signal state
+- 1 confirmed major signal: metricool ai emotional_trigger_shift CURIOSITY→ASPIRATION (detected 2026-08-06)
+- 11 competitors watched, MI v92 confidence=0.879
+
+## Content DNA write path gap
+- Commercial DNA composition runs (5/5 engines, full=true) but `content_dna` table has 0 rows
+- The composition result is not being persisted — investigate write path in DNA composition layer
