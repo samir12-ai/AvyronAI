@@ -1,0 +1,160 @@
+I need a READ-FIRST ROOT CAUSE INVESTIGATION and then a SURGICAL FIX for the Positioning Engine runtime.
+
+IMPORTANT
+
+The previous three fixes are already implemented.
+
+DO NOT revert them.
+
+DO NOT modify unrelated engines.
+
+DO NOT weaken System Control.
+
+DO NOT fabricate data.
+
+DO NOT bypass any lifecycle.
+
+DO NOT reduce grounding quality.
+
+DO NOT change any thresholds unless the investigation proves they are incorrect.
+
+===========================================================
+PROBLEM
+===========================================================
+
+The latest Real Campaign Run shows:
+
+- Positioning Engine exceeded the orchestrator ENGINE_TIMEOUT (420 seconds).
+- The orchestrator marked the engine as TIMEOUT.
+- Because Positioning never completed in time, downstream snapshots were missing.
+- buildPlan therefore exited with INSUFFICIENT_DATA before reaching its LLM generation path.
+
+The current blocker is NOT buildPlan anymore.
+
+The blocker is the runtime of the Positioning Engine.
+
+===========================================================
+PHASE 1 — FULL RUNTIME TRACE
+===========================================================
+
+Profile the entire Positioning Engine execution.
+
+Measure every stage.
+
+For every step report:
+
+- execution time
+- database reads
+- API calls
+- LLM calls
+- loops
+- retries
+- waiting time
+- prompt construction
+- grounding
+- judge
+- validation
+- persistence
+
+Produce a timing breakdown.
+
+Identify exactly where the 420 seconds are spent.
+
+Support every conclusion with evidence.
+
+===========================================================
+PHASE 2 — ROOT CAUSE
+===========================================================
+
+Determine WHY runtime exceeds 420 seconds.
+
+Possible causes include (verify, don't assume):
+
+- repeated LLM calls
+- duplicated grounding
+- duplicated prompt generation
+- unnecessary retries
+- sequential work that can safely run in parallel
+- repeated DB queries
+- inefficient sorting
+- repeated evidence normalization
+- cache misses
+- oversized prompts
+- blocking waits
+- dead code
+- legacy execution paths
+
+Identify the exact bottleneck.
+
+===========================================================
+PHASE 3 — SAFE OPTIMIZATION
+===========================================================
+
+Only after identifying the root cause:
+
+Implement the smallest possible fix.
+
+Requirements:
+
+- preserve deterministic behavior
+- preserve grounding
+- preserve judge
+- preserve lineage
+- preserve evidence registry
+- preserve outputs
+- preserve confidence calculations
+- preserve System Control
+
+No behavioral changes.
+
+Performance improvements only.
+
+===========================================================
+PHASE 4 — VERIFICATION
+===========================================================
+
+Run a real MarketMindAI campaign.
+
+Verify:
+
+- Positioning completes before the 420-second watchdog.
+- No timeout.
+- Snapshots persist correctly.
+- buildPlan is reached normally.
+- buildPlan executes with the previously implemented timeout fix.
+- Approved Plan can now be generated if no other gates fail.
+
+===========================================================
+REGRESSION
+===========================================================
+
+Verify no regressions in:
+
+- Audience
+- Market Intelligence
+- Watchtower
+- Strategy Plan
+- Reasoning & Evidence
+- Performance Loop
+- Product Identity
+- Judges
+- Grounding
+- Evidence Registry
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Root cause.
+2. Exact bottleneck.
+3. Files modified.
+4. Why runtime exceeded 420 seconds.
+5. Runtime before.
+6. Runtime after.
+7. Verification logs.
+8. Regression results.
+9. PASS / FAIL.
+10. Confirm that no fake data was created.
+11. Confirm that deterministic behavior and grounding remain unchanged.

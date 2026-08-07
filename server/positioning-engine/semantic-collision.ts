@@ -167,47 +167,50 @@ export async function computeSemanticCollisions(args: {
 
   console.log(`[PositioningSemanticCollision] STEP_1 | LLM scoring | territories=${args.territoryClaims.length} | competitors=${args.competitorClaims.length}`);
 
-  const results: SemanticCollisionResult[] = [];
+  // Each territory scoring call is independent: no shared mutable state between calls,
+  // and the competitor list is read-only. Promise.all preserves insertion order so the
+  // returned array matches args.territoryClaims order exactly.
+  const results: SemanticCollisionResult[] = await Promise.all(
+    args.territoryClaims.map(async (territory): Promise<SemanticCollisionResult> => {
+      let scored: Awaited<ReturnType<typeof scoreOneTerritory>> = null;
+      try {
+        scored = await scoreOneTerritory(territory.name, territory.claimText, args.competitorClaims, args.accountId || "system");
+      } catch (e: any) {
+        console.error(`[PositioningSemanticCollision] SCORE_FAILED | territory=${territory.name} | ${e.message}`);
+      }
 
-  for (const territory of args.territoryClaims) {
-    let scored: Awaited<ReturnType<typeof scoreOneTerritory>> = null;
-    try {
-      scored = await scoreOneTerritory(territory.name, territory.claimText, args.competitorClaims, args.accountId || "system");
-    } catch (e: any) {
-      console.error(`[PositioningSemanticCollision] SCORE_FAILED | territory=${territory.name} | ${e.message}`);
-    }
+      const perCompetitor = scored?.perCompetitor || [];
+      const top = perCompetitor[0] || null;
+      const semanticScore = top ? top.score : 0;
+      const jaccard = top ? Math.round(jaccardSimilarity(territory.claimText, top.claim) * 1000) / 1000 : 0;
 
-    const perCompetitor = scored?.perCompetitor || [];
-    const top = perCompetitor[0] || null;
-    const semanticScore = top ? top.score : 0;
-    const jaccard = top ? Math.round(jaccardSimilarity(territory.claimText, top.claim) * 1000) / 1000 : 0;
+      const reasoningSteps: string[] = [
+        `Step 1: territory claim "${territory.claimText.slice(0, 100)}"`,
+        `Step 2: scored against ${args.competitorClaims.length} competitor claims using LLM semantic comparison (gpt-4.1-mini)`,
+        top
+          ? `Step 3: highest-collision competitor is "${top.claim.slice(0, 100)}" from ${top.source} with semantic=${semanticScore.toFixed(3)} (Jaccard=${jaccard.toFixed(3)})`
+          : `Step 3: no competitor scored — see PARSE_FAILED log`,
+        top ? `Step 4: collision rationale — ${top.rationale}` : `Step 4: no rationale available`,
+        `Step 5: interpreted as "${interpretSemanticCollision(semanticScore)}"`,
+        `Step 6: jaccard=${jaccard.toFixed(3)} vs semantic=${semanticScore.toFixed(3)} — ${jaccard < 0.2 && semanticScore >= 0.65 ? "Jaccard underestimated overlap; LLM caught the semantic equivalence." : jaccard >= 0.5 && semanticScore < 0.5 ? "Jaccard overestimated overlap; LLM shows they actually differ in promise." : "Both methods broadly agree."}`,
+      ];
 
-    const reasoningSteps: string[] = [
-      `Step 1: territory claim "${territory.claimText.slice(0, 100)}"`,
-      `Step 2: scored against ${args.competitorClaims.length} competitor claims using LLM semantic comparison (gpt-4.1-mini)`,
-      top
-        ? `Step 3: highest-collision competitor is "${top.claim.slice(0, 100)}" from ${top.source} with semantic=${semanticScore.toFixed(3)} (Jaccard=${jaccard.toFixed(3)})`
-        : `Step 3: no competitor scored — see PARSE_FAILED log`,
-      top ? `Step 4: collision rationale — ${top.rationale}` : `Step 4: no rationale available`,
-      `Step 5: interpreted as "${interpretSemanticCollision(semanticScore)}"`,
-      `Step 6: jaccard=${jaccard.toFixed(3)} vs semantic=${semanticScore.toFixed(3)} — ${jaccard < 0.2 && semanticScore >= 0.65 ? "Jaccard underestimated overlap; LLM caught the semantic equivalence." : jaccard >= 0.5 && semanticScore < 0.5 ? "Jaccard overestimated overlap; LLM shows they actually differ in promise." : "Both methods broadly agree."}`,
-    ];
+      console.log(`[PositioningSemanticCollision] TERRITORY | ${territory.name} | semantic=${semanticScore.toFixed(3)} | jaccard=${jaccard.toFixed(3)} | nearestCompetitor="${(top?.claim || "").slice(0, 80)}" | meaning="${interpretSemanticCollision(semanticScore)}"`);
 
-    results.push({
-      territoryName: territory.name,
-      semanticCollisionScore: Math.round(semanticScore * 1000) / 1000,
-      collisionMeaning: interpretSemanticCollision(semanticScore),
-      competitorEquivalentClaim: top ? top.claim : null,
-      competitorSource: top ? top.source : null,
-      jaccardScore: jaccard,
-      perCompetitor: perCompetitor.slice(0, 5),
-      reasoningSteps,
-      modelUsed: "gpt-4.1-mini",
-      generatedAt: new Date().toISOString(),
-    });
-
-    console.log(`[PositioningSemanticCollision] TERRITORY | ${territory.name} | semantic=${semanticScore.toFixed(3)} | jaccard=${jaccard.toFixed(3)} | nearestCompetitor="${(top?.claim || "").slice(0, 80)}" | meaning="${interpretSemanticCollision(semanticScore)}"`);
-  }
+      return {
+        territoryName: territory.name,
+        semanticCollisionScore: Math.round(semanticScore * 1000) / 1000,
+        collisionMeaning: interpretSemanticCollision(semanticScore),
+        competitorEquivalentClaim: top ? top.claim : null,
+        competitorSource: top ? top.source : null,
+        jaccardScore: jaccard,
+        perCompetitor: perCompetitor.slice(0, 5),
+        reasoningSteps,
+        modelUsed: "gpt-4.1-mini",
+        generatedAt: new Date().toISOString(),
+      };
+    })
+  );
 
   console.log(`[PositioningSemanticCollision] STEP_DONE | ${results.length} territories scored in ${Date.now() - startTs}ms`);
   return results;

@@ -3211,53 +3211,134 @@ CORRECTION REQUIRED:
     console.log(`[PositioningEngine-V3] SIGNAL_DIRECT_COMPOSITION COMPLETE | territories=${finalTerritories.length} | cards=${strategyCards.length}`);
   }
 
-  // ── INTELLIGENCE UPGRADE: Embedding-based Semantic Collision Detection ──
+  // ── INTELLIGENCE UPGRADE: Semantic Collision Detection + Category-Game Strategist ──
+  // These two subsystems are independent of each other:
+  //   • SC reads finalTerritories (claim text) + competitorClaimList — no CG fields used
+  //   • CG reads primaryTerritory, competitors, audienceSnapshot, productDna, etc — no SC fields used
+  // CEL compliance MUST run after SC so it sees semanticCollision attached to each territory.
+  // Running SC and CG concurrently via Promise.all saves ~107 s on a 2-territory run.
+
+  // Prepare SC inputs synchronously (all sources are ready at this point)
+  const territoryClaims = finalTerritories.map(t => ({
+    name: t.name,
+    claimText: [t.name, t.enemyDefinition, t.contrastAxis, t.narrativeDirection].filter(Boolean).join(" — "),
+  }));
+  const competitorClaimList: Array<{ source: string; claim: string }> = [];
+  if (narrativeMap && Object.keys(narrativeMap).length > 0) {
+    for (const [comp, narratives] of Object.entries(narrativeMap)) {
+      for (const narr of (narratives as string[]).slice(0, 3)) {
+        if (narr && narr.length > 5) competitorClaimList.push({ source: comp, claim: narr });
+      }
+    }
+  }
+  if (competitorClaimList.length === 0) {
+    for (const c of competitors.slice(0, 6) as any[]) {
+      const candidate = c.narrativeStyle || c.bio || c.description || c.contentThemes || "";
+      const claim = typeof candidate === "string" ? candidate : JSON.stringify(candidate);
+      if (claim.length > 8) competitorClaimList.push({ source: c.competitorName || c.name || "competitor", claim: claim.slice(0, 240) });
+    }
+  }
+
+  // primaryTerritory is needed by CategoryGame (Arm 2) and all logic below.
+  // finalTerritories is fully constructed before this block — safe to read now.
+  const primaryTerritory = finalTerritories[0] || null;
+
   let semanticCollisions: any[] = [];
-  try {
-    const { computeSemanticCollisions } = await import("./semantic-collision");
-    const territoryClaims = finalTerritories.map(t => ({
-      name: t.name,
-      claimText: [t.name, t.enemyDefinition, t.contrastAxis, t.narrativeDirection].filter(Boolean).join(" — "),
-    }));
-    const competitorClaimList: Array<{ source: string; claim: string }> = [];
-    if (narrativeMap && Object.keys(narrativeMap).length > 0) {
-      for (const [comp, narratives] of Object.entries(narrativeMap)) {
-        for (const narr of (narratives as string[]).slice(0, 3)) {
-          if (narr && narr.length > 5) competitorClaimList.push({ source: comp, claim: narr });
-        }
+  // ── PHASE 2: Category-Game Strategist (commercial reasoning core) ──
+  // Does not change which territory is selected; adds a commercial-game design layer
+  // downstream engines consume via the SSC `gameDimension` signal.
+  // Pipeline and existing fields preserved; on failure, result.categoryGameDesign is absent.
+  let categoryGameDesign: import("./category-game").CategoryGameDesign | undefined;
+
+  [semanticCollisions, categoryGameDesign] = await Promise.all([
+
+    // ── Arm 1: Semantic Collision Detection ──
+    (async (): Promise<any[]> => {
+      try {
+        const { computeSemanticCollisions } = await import("./semantic-collision");
+        return await computeSemanticCollisions({
+          territoryClaims,
+          competitorClaims: competitorClaimList,
+          accountId,
+        });
+      } catch (scErr: any) {
+        console.error(`[PositioningEngine-V3] SEMANTIC_COLLISION_FAILED | ${scErr.message}`);
+        return [];
       }
-    }
-    if (competitorClaimList.length === 0) {
-      for (const c of competitors.slice(0, 6) as any[]) {
-        const candidate = c.narrativeStyle || c.bio || c.description || c.contentThemes || "";
-        const claim = typeof candidate === "string" ? candidate : JSON.stringify(candidate);
-        if (claim.length > 8) competitorClaimList.push({ source: c.competitorName || c.name || "competitor", claim: claim.slice(0, 240) });
+    })(),
+
+    // ── Arm 2: Category-Game Strategist ──
+    (async (): Promise<import("./category-game").CategoryGameDesign | undefined> => {
+      if (!primaryTerritory) return undefined;
+      try {
+        const { designCategoryGame } = await import("./category-game");
+        // Pull competitor positioning text from MI snapshot's multiSourceSignals (richer than ciCompetitors row).
+        const multiSourceForGame = safeJsonParse(activeMiSnapshot.multiSourceSignals, {}) as Record<string, any>;
+        const competitorBriefs = competitors.slice(0, 6).map(c => {
+          const cName = c.name || "(unnamed)";
+          const ms = multiSourceForGame[cName] || multiSourceForGame[(c as any).competitorName] || {};
+          const positioningParts: string[] = [];
+          if (ms?.website?.headlineExtractions?.length) positioningParts.push(ms.website.headlineExtractions.slice(0, 3).join(" | "));
+          if (ms?.website?.positioningLanguage?.length) positioningParts.push(ms.website.positioningLanguage.slice(0, 3).join(" | "));
+          if (!positioningParts.length && c.messagingTone) positioningParts.push(`tone: ${c.messagingTone}`);
+          if (!positioningParts.length && c.hookStyles) positioningParts.push(`hooks: ${c.hookStyles}`);
+          if (!positioningParts.length && c.notes) positioningParts.push(c.notes);
+          if (!positioningParts.length) positioningParts.push(`${c.businessType || "competitor"} — ${c.primaryObjective || "unknown objective"}`);
+          return {
+            name: cName,
+            positioning: positioningParts.join(" || ").slice(0, 240),
+            authority: marketPower.find(m => m.competitorName === cName)?.authorityScore ?? undefined,
+          };
+        });
+        const painSignals = audiencePains.slice(0, 8).map((p: any) => typeof p === "string" ? p : (p?.label || p?.canonical || p?.text || JSON.stringify(p))).filter(Boolean);
+        const desireSignals = audienceDesires.slice(0, 8).map((d: any) => typeof d === "string" ? d : (d?.label || d?.canonical || d?.text || JSON.stringify(d))).filter(Boolean);
+        const objectionsRaw = safeJsonParse(audienceSnapshot.objectionMap, []) as any[];
+        const objections = (Array.isArray(objectionsRaw) ? objectionsRaw : []).slice(0, 6).map((o: any) => typeof o === "string" ? o : (o?.statement || o?.label || o?.text || JSON.stringify(o))).filter(Boolean);
+        const rejectedTerritoryPatterns = finalTerritories.slice(1, 5).map(t => t.name).filter(Boolean);
+        return await designCategoryGame({
+          category,
+          marketDiagnosis: activeMiSnapshot.marketDiagnosis || null,
+          competitorBriefs,
+          audiencePainSignals: painSignals,
+          audienceDesireSignals: desireSignals,
+          audienceObjections: objections,
+          productAdvantage: productDna?.strategicAdvantage || null,
+          productMechanism: productDna?.uniqueMechanism || null,
+          rejectedTerritoryPatterns,
+          accountId,
+        }) || undefined;
+      } catch (cgErr: any) {
+        console.warn(`[PositioningEngine-V3] CATEGORY_GAME_FAILED | ${cgErr.message} — continuing with legacy positioning`);
+        return undefined;
       }
+    })(),
+
+  ]);
+
+  // Attach SemanticCollision results to territories now that Arm 1 is complete.
+  // CEL compliance below reads t.semanticCollision, so this must happen first.
+  for (const result of semanticCollisions) {
+    const t = finalTerritories.find(x => x.name === result.territoryName);
+    if (t) {
+      t.semanticCollision = {
+        semanticCollisionScore: result.semanticCollisionScore,
+        collisionMeaning: result.collisionMeaning,
+        competitorEquivalentClaim: result.competitorEquivalentClaim,
+        competitorSource: result.competitorSource,
+        jaccardScore: result.jaccardScore,
+        perCompetitor: result.perCompetitor,
+        reasoningSteps: result.reasoningSteps,
+        modelUsed: result.modelUsed,
+        generatedAt: result.generatedAt,
+      };
     }
-    semanticCollisions = await computeSemanticCollisions({
-      territoryClaims,
-      competitorClaims: competitorClaimList,
-      accountId,
-    });
-    for (const result of semanticCollisions) {
-      const t = finalTerritories.find(x => x.name === result.territoryName);
-      if (t) {
-        t.semanticCollision = {
-          semanticCollisionScore: result.semanticCollisionScore,
-          collisionMeaning: result.collisionMeaning,
-          competitorEquivalentClaim: result.competitorEquivalentClaim,
-          competitorSource: result.competitorSource,
-          jaccardScore: result.jaccardScore,
-          perCompetitor: result.perCompetitor,
-          reasoningSteps: result.reasoningSteps,
-          modelUsed: result.modelUsed,
-          generatedAt: result.generatedAt,
-        };
-      }
-    }
-    console.log(`[PositioningEngine-V3] SEMANTIC_COLLISIONS_ATTACHED | territories=${semanticCollisions.length} | competitorClaims=${competitorClaimList.length}`);
-  } catch (scErr: any) {
-    console.error(`[PositioningEngine-V3] SEMANTIC_COLLISION_FAILED | ${scErr.message}`);
+  }
+  console.log(`[PositioningEngine-V3] SEMANTIC_COLLISIONS_ATTACHED | territories=${semanticCollisions.length} | competitorClaims=${competitorClaimList.length}`);
+
+  if (categoryGameDesign) {
+    console.log(`[PositioningEngine-V3] CATEGORY_GAME_DESIGNED | dimension="${categoryGameDesign.ourDimension}" | defensibility=${categoryGameDesign.defensibility} | judge=${categoryGameDesign.judgeVerdict} | retries=${categoryGameDesign.retryCount}`);
+  } else if (primaryTerritory) {
+    console.log(`[PositioningEngine-V3] CATEGORY_GAME_SKIPPED — designer returned null (legacy path active)`);
   }
 
   const celCompliance = enforcePositioningCompliance(finalTerritories, analyticalEnrichment || null);
@@ -3273,63 +3354,6 @@ CORRECTION REQUIRED:
 
   if (signalTraceability?.validationPassed) {
     console.log(`[PositioningEngine-V3] SIGNAL_TRACE_PASSED | coverage=${(signalTraceability.signalCoverage * 100).toFixed(1)}% | used=${signalTraceability.signalsUsed.length}/${signalTraceability.totalSignalsAvailable} | unmapped=${signalTraceability.unmappedElements.length}`);
-  }
-
-  const primaryTerritory = finalTerritories[0] || null;
-
-  // ── PHASE 2: Category-Game Strategist (commercial reasoning core) ──
-  // Runs AFTER deterministic territory selection — does not change which territory is
-  // selected, but adds a commercial-game design layer that downstream engines (offer,
-  // persuasion, awareness) can consume via the SSC `gameDimension` signal. Pipeline
-  // and existing fields preserved; on failure, result.categoryGameDesign is simply absent.
-  let categoryGameDesign: import("./category-game").CategoryGameDesign | undefined;
-  try {
-    if (primaryTerritory) {
-      const { designCategoryGame } = await import("./category-game");
-      // Pull competitor positioning text from MI snapshot's multiSourceSignals (richer than ciCompetitors row).
-      const multiSourceForGame = safeJsonParse(activeMiSnapshot.multiSourceSignals, {}) as Record<string, any>;
-      const competitorBriefs = competitors.slice(0, 6).map(c => {
-        const cName = c.name || "(unnamed)";
-        const ms = multiSourceForGame[cName] || multiSourceForGame[(c as any).competitorName] || {};
-        const positioningParts: string[] = [];
-        if (ms?.website?.headlineExtractions?.length) positioningParts.push(ms.website.headlineExtractions.slice(0, 3).join(" | "));
-        if (ms?.website?.positioningLanguage?.length) positioningParts.push(ms.website.positioningLanguage.slice(0, 3).join(" | "));
-        if (!positioningParts.length && c.messagingTone) positioningParts.push(`tone: ${c.messagingTone}`);
-        if (!positioningParts.length && c.hookStyles) positioningParts.push(`hooks: ${c.hookStyles}`);
-        if (!positioningParts.length && c.notes) positioningParts.push(c.notes);
-        if (!positioningParts.length) positioningParts.push(`${c.businessType || "competitor"} — ${c.primaryObjective || "unknown objective"}`);
-        return {
-          name: cName,
-          positioning: positioningParts.join(" || ").slice(0, 240),
-          authority: marketPower.find(m => m.competitorName === cName)?.authorityScore ?? undefined,
-        };
-      });
-      const painSignals = audiencePains.slice(0, 8).map((p: any) => typeof p === "string" ? p : (p?.label || p?.canonical || p?.text || JSON.stringify(p))).filter(Boolean);
-      const desireSignals = audienceDesires.slice(0, 8).map((d: any) => typeof d === "string" ? d : (d?.label || d?.canonical || d?.text || JSON.stringify(d))).filter(Boolean);
-      const objectionsRaw = safeJsonParse(audienceSnapshot.objectionMap, []) as any[];
-      const objections = (Array.isArray(objectionsRaw) ? objectionsRaw : []).slice(0, 6).map((o: any) => typeof o === "string" ? o : (o?.statement || o?.label || o?.text || JSON.stringify(o))).filter(Boolean);
-      const rejectedTerritoryPatterns = finalTerritories.slice(1, 5).map(t => t.name).filter(Boolean);
-
-      categoryGameDesign = await designCategoryGame({
-        category,
-        marketDiagnosis: activeMiSnapshot.marketDiagnosis || null,
-        competitorBriefs,
-        audiencePainSignals: painSignals,
-        audienceDesireSignals: desireSignals,
-        audienceObjections: objections,
-        productAdvantage: productDna?.strategicAdvantage || null,
-        productMechanism: productDna?.uniqueMechanism || null,
-        rejectedTerritoryPatterns,
-        accountId,
-      }) || undefined;
-      if (categoryGameDesign) {
-        console.log(`[PositioningEngine-V3] CATEGORY_GAME_DESIGNED | dimension="${categoryGameDesign.ourDimension}" | defensibility=${categoryGameDesign.defensibility} | judge=${categoryGameDesign.judgeVerdict} | retries=${categoryGameDesign.retryCount}`);
-      } else {
-        console.log(`[PositioningEngine-V3] CATEGORY_GAME_SKIPPED — designer returned null (legacy path active)`);
-      }
-    }
-  } catch (cgErr: any) {
-    console.warn(`[PositioningEngine-V3] CATEGORY_GAME_FAILED | ${cgErr.message} — continuing with legacy positioning`);
   }
 
   const executionTimeMs = Date.now() - startTime;
