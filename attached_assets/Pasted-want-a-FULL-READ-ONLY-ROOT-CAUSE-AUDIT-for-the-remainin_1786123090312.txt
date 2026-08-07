@@ -1,0 +1,156 @@
+want a FULL READ-ONLY ROOT CAUSE AUDIT for the remaining blockers preventing the Performance Loop from starting.
+
+IMPORTANT
+DO NOT modify code.
+DO NOT modify the database.
+DO NOT create migrations.
+DO NOT implement fixes.
+DO NOT fabricate data.
+DO NOT bypass any guards.
+
+I only want a forensic investigation with evidence.
+
+BLOCKER 1 — buildPlan Timeout
+
+Investigate why buildPlan times out.
+
+Trace the entire execution path:
+
+Strategy Engines
+
+↓
+
+Context Assembly
+
+↓
+
+Prompt Construction
+
+↓
+
+LLM Request
+
+↓
+
+Judge
+
+↓
+
+Plan Persistence
+
+Determine exactly:
+
+where time is spent
+prompt token size
+context size
+model being used
+timeout configuration
+retry configuration
+whether timeout comes from OpenAI, application layer, queue, HTTP, or orchestration
+
+Identify the exact bottleneck.
+
+Support everything with:
+
+source files
+functions
+logs
+timings
+
+Do not guess.
+
+BLOCKER 2 — Positioning Confidence Instability
+
+Investigate why identical executions produce different positioning confidence values.
+
+Determine:
+
+every input used
+every MI snapshot used
+every grounding source
+every random element
+every non-deterministic dependency
+cache behavior
+ordering behavior
+database reads
+prompt construction
+
+Answer:
+
+If the exact same campaign is executed twice without changing data,
+
+should the positioning confidence be identical?
+
+If not,
+
+identify exactly why.
+
+Locate the source of the variance.
+
+BLOCKER 3 — Content DNA Persistence
+
+Commercial DNA reports:
+
+full = true
+composition successful
+
+Yet:
+
+content_dna
+
+contains zero rows.
+
+Investigate:
+
+composition engine
+persistence layer
+write function
+transaction
+conditions
+feature flags
+guards
+silent failures
+
+Determine whether:
+
+writing never happens
+writing is skipped
+writing fails
+writing rolls back
+writing targets another table
+
+Follow the complete execution path.
+
+Evidence Requirements
+
+For every blocker include:
+
+execution flow
+source files
+functions
+tables
+APIs
+conditions
+guards
+logs
+evidence
+
+Never speculate.
+
+Final Verdict
+
+For each blocker provide:
+
+PASS / WARNING / FAIL
+
+Then answer:
+
+Which blocker is the highest priority?
+Which blocker prevents Approved Plans?
+Which blocker prevents the Performance Loop?
+Which blocker is only a persistence bug?
+Which fixes are isolated?
+Which fixes could affect other engines?
+Can these three fixes be completed independently without risking the rest of the architecture?
+
+Do not implement anything. Produce only a forensic architectural report backed by evidence.
