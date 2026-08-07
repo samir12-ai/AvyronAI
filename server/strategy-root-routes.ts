@@ -90,7 +90,7 @@ export function registerStrategyRootRoutes(app: Express) {
         return res.json({
           valid: false,
           hasRoot: false,
-          message: "No active Strategy Root. Run the full pipeline (Product DNA → MI → Audience → Positioning → Differentiation → Mechanism) to create one.",
+          message: "No active Strategy Root. Run the full pipeline (Product Identity → MI → Audience → Positioning → Differentiation → Mechanism) to create one.",
         });
       }
 

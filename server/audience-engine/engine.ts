@@ -1493,7 +1493,7 @@ async function constructSegments(
           coreProblemSolved: dnaProblem,
           differentiatingFeature: dnaDifferentiator,
         };
-        console.log(`[AudienceEngine-V3] SEGMENT_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from Product DNA`);
+        console.log(`[AudienceEngine-V3] SEGMENT_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from business context`);
       }
     }
     const priorDecisions = strategic ? strategic.priorDecisions : [];

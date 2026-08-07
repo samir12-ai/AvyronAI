@@ -659,10 +659,10 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
       <View style={[s.goalSection, { borderColor: '#D946EF30' }]}>
         <View style={s.goalSectionHeader}>
           <Ionicons name="flask-outline" size={16} color="#D946EF" />
-          <Text style={[s.goalSectionTitle, { color: colors.text }]}>Product DNA</Text>
+          <Text style={[s.goalSectionTitle, { color: colors.text }]}>Product Details</Text>
         </View>
         <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
-          Define your product identity so all engines generate consistent positioning and offers
+          Define your product so all engines generate consistent positioning and offers
         </Text>
         {renderTextField('productCategory', 'Product Category', 'e.g. Online coaching, SaaS tool, Physical product', 'grid-outline')}
         {renderTextField('coreProblemSolved', 'Core Problem Solved', 'e.g. Small businesses struggle to get consistent leads', 'help-circle-outline', true)}

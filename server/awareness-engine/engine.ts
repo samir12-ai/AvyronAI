@@ -932,7 +932,7 @@ export async function runAwarenessEngine(
     const derivedAnchor = deriveAnchorFromProductDna(productDna);
     if (derivedAnchor) {
       awAnchor = derivedAnchor;
-      console.log("[AwarenessEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from Product DNA (F5a)");
+      console.log("[AwarenessEngine-V3] ANCHOR_FROM_DNA | doctrine anchor absent — prompt anchor derived from business context (F5a)");
     }
   }
   // Explicit if/else source classification — no semantic-fallback chains (D1).
@@ -944,7 +944,7 @@ export async function runAwarenessEngine(
   }
   const awDnaAnchorBlock = awAnchorSource === "dna" && awAnchor
     ? `
-=== PRODUCT ANCHOR (derived from Product DNA — resolve every output to THIS product) ===
+=== PRODUCT ANCHOR (from Product Identity — resolve every output to THIS product) ===
 Product name: ${awAnchor.name}
 Product type: ${awAnchor.type}${awAnchor.keyAttributes.length > 0 ? `\nKey attributes: ${awAnchor.keyAttributes.join("; ")}` : ""}
 Core problem solved: ${awAnchor.coreProblemSolved}

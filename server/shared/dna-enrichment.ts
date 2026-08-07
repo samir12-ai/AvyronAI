@@ -117,7 +117,7 @@ function marshalAelEvidence(ael: AnalyticalPackage | null): {
 }
 
 function describeDna(dna: EnrichmentDnaInput | null): string {
-  if (!dna) return "(no Product DNA available)";
+  if (!dna) return "(no product context available)";
   const parts = [
     dna.name ? `Name: ${dna.name}` : "",
     dna.businessType ? `Type: ${dna.businessType}` : "",
@@ -126,7 +126,7 @@ function describeDna(dna: EnrichmentDnaInput | null): string {
     dna.uniqueMechanism ? `Current unique mechanism: ${dna.uniqueMechanism}` : "",
     dna.strategicAdvantage ? `Current strategic advantage: ${dna.strategicAdvantage}` : "",
   ].filter((p) => p.length > 0);
-  return parts.length > 0 ? parts.join("\n") : "(Product DNA present but empty of differentiators)";
+  return parts.length > 0 ? parts.join("\n") : "(product context present but empty of differentiators)";
 }
 
 function buildEnrichmentPrompt(input: {
@@ -150,7 +150,7 @@ WHY: an interchangeability judge just REJECTED this product's ${kindLabel} as ge
 ${input.rejectionReason}
 """
 
-CURRENT PRODUCT DNA:
+CURRENT PRODUCT IDENTITY / CONTEXT:
 ${describeDna(input.dna)}
 
 AEL CAUSAL EVIDENCE (each line has a stable ID you MUST cite when you use it):

@@ -1698,7 +1698,7 @@ function buildSignalClaimSeeds(
   // Degenerate-contrast guard: when desires are empty, contrastSources can
   // collapse onto the same labels as enemySources, historically producing
   // "X vs current X". Exclude the enemy's lead label from the contrast side;
-  // if nothing distinct remains, phrase the gain from Product DNA instead.
+  // if nothing distinct remains, phrase the gain from business context instead.
   const contrastParts = [...new Set(contrastSources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))]
     .filter(p => p.toLowerCase() !== (enemyParts[0] || "").toLowerCase());
   const dnaGain = (productDna?.coreProblemSolved || productDna?.coreOffer || "").toString().trim();
@@ -1944,7 +1944,7 @@ async function layer11_positioningStatementGeneration(
     if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
     // Grounding contract (shared): resolve the product anchor — the locked
-    // doctrine anchor first, else one derived from Product DNA (never fabricated
+    // doctrine anchor first, else one derived from business context (never fabricated
     // — deriveAnchorFromProductDna returns null when DNA is empty). Then build the
     // additive contract block + a citable [RC#]/[CC#]/[BB#] AEL index. Positioning
     // previously exposed only prose AEL with no citable tags.
@@ -2606,7 +2606,7 @@ export async function runPositioningEngine(
     // clusters via ONE batched grounded-LLM call instead of the static
     // translateToSystemTerritory phrase lookup. This changes ONLY the NAME input —
     // every gate/judge/threshold below is untouched. Resolve the anchor exactly as
-    // layer11 does (locked doctrine anchor, else derived from Product DNA, never
+    // layer11 does (locked doctrine anchor, else derived from business context, never
     // fabricated). Fail-closed: on any failure each territory falls back to
     // translateToSystemTerritory and is explicitly marked template_fallback.
     const namingClusters = [
@@ -2850,7 +2850,7 @@ export async function runPositioningEngine(
         let failedTerritoryName = "";
         let failedGate = "";
         // F5a: when strategic doctrine is absent, derive the judge's product
-        // anchor from Product DNA so the interchangeability judge tests against
+        // anchor from business context so the interchangeability judge tests against
         // THIS product's real differentiator instead of the weaker anchor-free
         // test. Guard: only when a genuine differentiator + core problem exist —
         // an anchor fabricated from empty strings would flip the judge to the
@@ -2875,7 +2875,7 @@ export async function runPositioningEngine(
               coreProblemSolved: dnaProblem,
               differentiatingFeature: dnaDifferentiator,
             };
-            console.log(`[PositioningEngine-V3] BATTERY_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from Product DNA | attempt=${specificityAttempt + 1}`);
+            console.log(`[PositioningEngine-V3] BATTERY_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from business context | attempt=${specificityAttempt + 1}`);
           }
         }
         {

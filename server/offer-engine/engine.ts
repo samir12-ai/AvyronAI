@@ -2684,7 +2684,7 @@ export async function runOfferEngine(
     const derivedOfferAnchor = deriveAnchorFromProductDna(productDna);
     if (derivedOfferAnchor) {
       offerBatteryAnchor = derivedOfferAnchor;
-      console.log(`[OfferEngine-V4] BATTERY_ANCHOR_FROM_DNA | doctrine anchor absent — battery anchor derived from Product DNA`);
+      console.log(`[OfferEngine-V4] BATTERY_ANCHOR_FROM_DNA | doctrine anchor absent — battery anchor derived from business context`);
     }
   }
   // T003: anchor source shared by the battery + value-architect evidence lines.

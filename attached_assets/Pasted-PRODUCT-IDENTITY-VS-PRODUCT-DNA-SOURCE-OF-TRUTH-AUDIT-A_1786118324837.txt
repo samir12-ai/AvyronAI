@@ -1,0 +1,388 @@
+PRODUCT IDENTITY VS PRODUCT DNA — SOURCE-OF-TRUTH AUDIT AND CLEANUP
+
+I need a complete audit of the Business Profile product data architecture.
+
+There are currently two concepts in the product:
+
+- Product Identity
+- Product DNA
+
+The intended source of truth is:
+
+PRODUCT IDENTITY
+
+I want to ensure that all active engines, reports, prompts, APIs, and UI surfaces consume product data from Product Identity, not from Product DNA.
+
+After the audit, remove the Product DNA section from the Business Profile UI if it is confirmed to be redundant or legacy.
+
+IMPORTANT SAFETY RULES
+
+- Do not fabricate data.
+- Do not delete database rows initially.
+- Do not drop tables or columns.
+- Do not overwrite genuine Product Identity data.
+- Do not migrate values blindly.
+- Do not remove Product DNA backend structures until every dependency is audited.
+- Preserve all real MarketMindAI data.
+- Do not change unrelated Business Profile behavior.
+
+===========================================================
+PHASE 1 — IDENTIFY BOTH CONCEPTS
+===========================================================
+
+Find every implementation of:
+
+- Product Identity
+- Product DNA
+- product_identity
+- product_dna
+- productIdentity
+- productDna
+- any equivalent naming
+
+Search across:
+
+- database schema
+- migrations
+- server engines
+- API routes
+- prompts
+- context collectors
+- Strategy Plan
+- Audience
+- Positioning
+- Market Intelligence
+- Performance Loop
+- Reasoning & Evidence
+- Watchtower Strategic Briefs
+- Build Plan
+- Business Profile UI
+- onboarding
+- shared types
+- hooks
+- tests
+- seed scripts
+- legacy files
+
+For each concept report:
+
+- exact file
+- function/component
+- table and columns
+- who writes it
+- who reads it
+- current row count for MarketMindAI
+- freshness
+- whether data is genuine, seeded, legacy, or unknown
+- whether it is currently displayed in the UI
+
+===========================================================
+PHASE 2 — DEFINE THE REAL SOURCE OF TRUTH
+===========================================================
+
+Determine from the current architecture:
+
+1. What exact data is stored under Product Identity?
+2. What exact data is stored under Product DNA?
+3. Are they duplicates?
+4. Does Product DNA contain unique information not represented in Product Identity?
+5. Which one is generated first?
+6. Which one is updated by the active onboarding/business-profile flow?
+7. Which one is versioned and tenant-scoped correctly?
+8. Which one is currently consumed by the main strategic engines?
+
+Do not assume Product Identity is correct merely because the user requested it.
+
+Prove whether it can fully replace Product DNA.
+
+Return a field-by-field mapping:
+
+Product DNA field
+→ matching Product Identity field
+→ exact match / transformed / missing / legacy
+
+If any Product DNA field has no valid Product Identity equivalent, STOP before removal and report it.
+
+===========================================================
+PHASE 3 — CONSUMER AUDIT
+===========================================================
+
+Audit every active consumer of product information.
+
+At minimum inspect:
+
+- Strategy Plan generation
+- Strategy Roots
+- Build Plan
+- Audience Engine
+- Positioning Engine
+- Market Intelligence
+- Content DNA
+- Performance Loop
+- Performance interpretation
+- Strategy-vs-execution comparator
+- Reasoning & Evidence
+- Strategic Brief context builder
+- Watchtower impact interpretation
+- Weekly reports
+- Goal decomposition
+- Business profile APIs
+- onboarding APIs
+- any LLM prompts
+- any deterministic rules
+- any Judge evidence registries
+
+For every consumer report:
+
+- currently reads Product Identity
+- currently reads Product DNA
+- reads both
+- reads neither
+- fallback behavior
+- effect if Product DNA is removed
+
+The target state must be:
+
+All active consumers
+→ Product Identity only
+
+No silent fallback to Product DNA.
+
+===========================================================
+PHASE 4 — MARKETMINDAI DATA INTEGRITY
+===========================================================
+
+Run a read-only audit on the real MarketMindAI campaign.
+
+Report:
+
+- Product Identity row(s)
+- Product DNA row(s)
+- accountId
+- campaignId
+- record IDs
+- timestamps
+- versions
+- content completeness
+- conflicting fields
+- missing fields
+- which record is currently newer
+- which record is currently used by each engine
+
+Do not modify anything yet.
+
+If Product Identity is incomplete but Product DNA contains genuine unique values:
+
+- do not invent replacements
+- do not delete Product DNA
+- produce a safe migration mapping first
+
+If Product Identity already contains all required genuine data:
+
+- continue to implementation
+
+===========================================================
+PHASE 5 — MAKE PRODUCT IDENTITY THE ONLY ACTIVE SOURCE
+===========================================================
+
+After the audit proves the mapping is safe:
+
+Update every active backend consumer to read Product Identity.
+
+Requirements:
+
+- preserve accountId + campaignId tenant scoping
+- preserve record/version lineage
+- preserve freshness timestamps
+- preserve existing labels where Product Identity is already canonical
+- remove Product DNA fallbacks
+- no hardcoded campaign or record IDs
+- no fake defaults
+- no `{}` fallback presented as real data
+- fail truthfully if Product Identity is missing
+
+If Product Identity is missing, return a clear state such as:
+
+PRODUCT_IDENTITY_MISSING
+
+Do not silently read Product DNA.
+
+===========================================================
+PHASE 6 — LLM, RULES, JUDGE, AND LINEAGE
+===========================================================
+
+Ensure all LLM systems receive product facts from Product Identity only.
+
+Every product evidence item must include:
+
+- evidenceId
+- sourceEngine = Business Profile / Product Identity
+- sourceTable
+- sourceRecordId
+- accountId
+- campaignId
+- version
+- capturedAt
+- freshness
+- factType
+- exact included content
+
+Update:
+
+- prompts
+- evidence registries
+- deterministic guards
+- claim-level Judge inputs
+- context fingerprints
+- source version manifests
+
+No report or interpretation may label Product DNA as its source after this change.
+
+===========================================================
+PHASE 7 — REMOVE PRODUCT DNA SECTION FROM THE UI
+===========================================================
+
+Remove the Product DNA section from the Business Profile UI.
+
+This means:
+
+- remove the navigation/card/accordion/section labeled Product DNA
+- remove Product DNA-specific editing controls
+- remove duplicate fields already shown under Product Identity
+- keep Product Identity as the single visible product section
+- preserve all other Business Profile sections
+- preserve responsive behavior
+- preserve saved Product Identity data
+- do not leave empty whitespace or broken navigation
+- do not rename Product Identity to Product DNA
+
+Audit all routes and components so no hidden Product DNA section remains elsewhere.
+
+===========================================================
+PHASE 8 — BACKEND LEGACY HANDLING
+===========================================================
+
+Do not immediately drop Product DNA tables, columns, or historical rows.
+
+Classify backend Product DNA structures as one of:
+
+- historical_read_only
+- deprecated
+- safe_to_remove_later
+- still_required
+
+If no active consumers remain:
+
+- mark the backend path deprecated in code comments/types where appropriate
+- prevent new writes to Product DNA
+- preserve historical data temporarily
+- do not include it in active context or UI
+
+Only propose a later deletion migration after proving:
+
+- zero active writers
+- zero active readers
+- zero unresolved unique fields
+- zero foreign-key dependencies
+- full Product Identity coverage
+
+Do not execute a destructive schema deletion in this task unless explicitly approved later.
+
+===========================================================
+PHASE 9 — LABEL CONSISTENCY
+===========================================================
+
+Canonical user-facing and system-facing label:
+
+Product Identity
+
+Remove active labels such as:
+
+- Product DNA
+- Product Profile, if it refers to the same object
+- Product Core, if it duplicates Product Identity
+- other conflicting aliases
+
+Create or update a shared label map if needed so the same concept does not drift between:
+
+- Business Profile
+- Strategy Plan
+- Reasoning & Evidence
+- Performance
+- APIs
+- LLM prompts
+- evidence lineage
+- reports
+
+===========================================================
+PHASE 10 — TESTS
+===========================================================
+
+Add or update tests proving:
+
+1. Business Profile displays Product Identity.
+2. Business Profile does not display Product DNA.
+3. Saving Product Identity persists correctly.
+4. Strategy Plan reads Product Identity.
+5. Audience reads Product Identity.
+6. Positioning reads Product Identity.
+7. Build Plan reads Product Identity.
+8. Performance Loop reads Product Identity.
+9. Strategic Brief context reads Product Identity.
+10. LLM evidence lineage identifies Product Identity.
+11. Product DNA is never used as an active fallback.
+12. Missing Product Identity produces a truthful missing state.
+13. Same campaign ID across two accounts cannot leak product data.
+14. Existing genuine MarketMindAI Product Identity data is unchanged.
+15. No original product data is deleted.
+
+===========================================================
+PHASE 11 — FINAL MARKETMINDAI VERIFICATION
+===========================================================
+
+Using the real MarketMindAI campaign:
+
+Verify:
+
+- Product Identity loads correctly in Business Profile.
+- Product DNA section is absent.
+- Strategy Plan still loads.
+- Audience still loads.
+- Positioning still loads.
+- Build Plan still loads.
+- Performance page still loads.
+- Reasoning & Evidence still loads.
+- Product evidence points to Product Identity.
+- No Product DNA label appears in active user-facing screens.
+- No active engine queries Product DNA.
+- No original MarketMindAI data was deleted or overwritten.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Product Identity architecture
+2. Product DNA architecture
+3. Field-by-field mapping
+4. Active consumers before
+5. Active consumers after
+6. Files changed
+7. UI section removed
+8. Product Identity data preserved
+9. Product DNA legacy status
+10. Tests and results
+11. MarketMindAI verification
+12. Any unique Product DNA fields still unresolved
+13. Safe to deprecate Product DNA backend later: YES / NO
+14. PASS / FAIL for each phase
+
+Do not declare completion unless:
+
+- Product Identity is the only active source of truth
+- all active consumers use it
+- Product DNA is absent from the Business Profile UI
+- no fake data was created
+- no original data was lost
+- lineage labels Product Identity correctly
