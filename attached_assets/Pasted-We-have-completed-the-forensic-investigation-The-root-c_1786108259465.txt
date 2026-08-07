@@ -1,0 +1,174 @@
+We have completed the forensic investigation.
+
+The root cause has been identified with evidence.
+
+Now implement the repair.
+
+IMPORTANT
+
+Work in Economy mode.
+
+Do NOT redesign anything.
+
+Do NOT refactor unrelated code.
+
+Only repair the verified anomaly.
+
+====================================================
+OBJECTIVE
+====================================================
+
+Remove the fabricated Watchtower event and restore full data integrity.
+
+This is a surgical cleanup.
+
+====================================================
+PHASE 1 — VERIFY BEFORE MODIFYING
+====================================================
+
+Before changing anything verify again:
+
+Event ID:
+
+c4f1cb57-3b2d-4209-9d10-1061ef996a6b
+
+Confirm:
+
+- account_id = default
+- status = confirmed
+- runId does not exist
+- baselineSnapshotId does not exist
+- currentSnapshotId does not exist
+- createdAt == validatedAt
+- no real Watchtower lifecycle created it
+
+If any verification fails,
+
+STOP.
+
+====================================================
+PHASE 2 — REMOVE THE ROUTE HOTFIX
+====================================================
+
+Remove ONLY the special-case block in:
+
+server/perception-routes.ts
+
+that checks:
+
+eventId === "c4f1cb57-3b2d-4209-9d10-1061ef996a6b"
+
+Remove only that workaround.
+
+Do not change any other routing logic.
+
+Do not weaken tenant validation.
+
+====================================================
+PHASE 3 — REMOVE FABRICATED DATA
+====================================================
+
+Delete ONLY:
+
+the fabricated event
+
+AND
+
+its Strategic Brief.
+
+Nothing else.
+
+Do NOT touch:
+
+- genuine confirmed events
+- genuine candidates
+- genuine snapshots
+- genuine briefs
+
+====================================================
+PHASE 4 — VERIFY REASONING
+====================================================
+
+Verify that:
+
+Reasoning & Evidence
+
+no longer loads this fabricated event.
+
+Verify that no fabricated evidence registry remains.
+
+Verify no Strategic Brief references it.
+
+====================================================
+PHASE 5 — VERIFY WATCHTOWER
+====================================================
+
+Verify:
+
+Confirmed events
+
+Candidate events
+
+Scheduler
+
+Lifecycle
+
+Strategic Brief generation
+
+all still operate normally.
+
+====================================================
+PHASE 6 — VERIFY TENANT SECURITY
+====================================================
+
+Verify:
+
+No account can access another account's Watchtower event.
+
+Specifically verify that the removed hardcoded workaround no longer bypasses tenant isolation.
+
+====================================================
+PHASE 7 — VERIFY ADAPTIVE READINESS
+====================================================
+
+Verify that:
+
+Confirmed event bundle
+
+Verified Signal Bundle
+
+Reasoning
+
+Future Adaptive Layer
+
+now consume ONLY genuine Watchtower events.
+
+====================================================
+PHASE 8 — FINAL REPORT
+====================================================
+
+Report:
+
+- files modified
+- database rows deleted
+- route workaround removed
+- strategic brief removed
+- remaining confirmed events
+- remaining strategic briefs
+- tenant validation status
+- reasoning integrity
+- adaptive readiness
+
+Finally answer:
+
+1. Is every remaining confirmed event genuine?
+
+2. Does every remaining confirmed event originate from the real Watchtower lifecycle?
+
+3. Is every remaining Strategic Brief now grounded on genuine evidence?
+
+4. Is Watchtower now free of fabricated production data?
+
+5. Is the backend production-ready from a data-integrity perspective?
+
+Only declare SUCCESS after all verification passes.

@@ -1534,15 +1534,6 @@ export function registerPerceptionRoutes(app: Express) {
         return res.status(404).json({ success: false, error: "EVENT_NOT_FOUND" });
       }
 
-      if (eventId === 'c4f1cb57-3b2d-4209-9d10-1061ef996a6b') {
-        row.event.accountId = accountId;
-        row.event.competitorId = '3a604594-4ef0-454a-90d9-6bf1caeca750';
-        row.competitor = {
-          id: '3a604594-4ef0-454a-90d9-6bf1caeca750',
-          name: 'ocoya'
-        } as any;
-      }
-
       if (row.event.campaignId !== campaignId || row.event.accountId !== accountId) {
         console.error(`${LOG_PREFIX} Cross-tenant access attempt for event ${eventId}`);
         return res.status(404).json({ success: false, error: "EVENT_NOT_FOUND" });
