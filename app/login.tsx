@@ -36,14 +36,14 @@ export default function LoginScreen() {
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
 
-  // Fade-in on mount
+  // Fade-in on mount (useNativeDriver:false for web compat)
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(24)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
+      Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: false }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: false }),
     ]).start();
     return () => { setIsAddingAccount(false); };
   }, []);
