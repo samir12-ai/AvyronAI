@@ -87,6 +87,13 @@ function setupCors(app: express.Application) {
 
     if (process.env.REPLIT_DEV_DOMAIN) {
       origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
+      // Expo web dev server is served from a different subdomain
+      // (*.expo.riker.replit.dev) — allow it so API calls aren't CORS-blocked
+      const expoOrigin = `https://${process.env.REPLIT_DEV_DOMAIN}`.replace(
+        /\.riker\.replit\.dev$/,
+        ".expo.riker.replit.dev",
+      );
+      origins.add(expoOrigin);
     }
 
     if (process.env.REPLIT_DOMAINS) {
