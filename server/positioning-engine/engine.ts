@@ -395,7 +395,9 @@ function layer6_marketPowerAnalysis(miData: any, competitors: any[]): {
     });
   }
 
-  entries.sort((a, b) => b.authorityScore - a.authorityScore);
+  // Stable tiebreaker on competitorName ensures identical ordering across
+  // runs when two entries carry equal authorityScore values.
+  entries.sort((a, b) => b.authorityScore - a.authorityScore || a.competitorName.localeCompare(b.competitorName));
 
   const topAuthority = entries[0]?.authorityScore || 0;
   const avgAuthority = entries.length > 0
@@ -1187,7 +1189,9 @@ function layer7_opportunityGapDetection(
 
   return opportunities
     .filter(o => o.opportunityScore >= POSITIONING_THRESHOLDS.OPPORTUNITY_SCORE_THRESHOLD)
-    .sort((a, b) => b.opportunityScore - a.opportunityScore);
+    // Stable tiebreaker on territory name guarantees identical ordering when
+    // two gaps share the same opportunityScore across runs.
+    .sort((a, b) => b.opportunityScore - a.opportunityScore || a.territory.localeCompare(b.territory));
 }
 
 function layer8_differentiationAxisConstruction(
@@ -1367,7 +1371,9 @@ function layer10_strategicTerritorySelection(
     console.log(`[PositioningEngine] TERRITORY_FILTER: FALLBACK — all ${filtered.length} territories were audience-level, using best available candidates`);
   }
 
-  const sorted = territoriesToSort.sort((a, b) => b.opportunityScore - a.opportunityScore);
+  // Stable tiebreaker on territory name guarantees identical ordering when
+  // two territories share the same opportunityScore across runs.
+  const sorted = territoriesToSort.sort((a, b) => b.opportunityScore - a.opportunityScore || a.name.localeCompare(b.name));
 
   const compressed = compressTerritories(sorted);
 

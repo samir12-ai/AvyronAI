@@ -1,0 +1,187 @@
+Implement the fixes for the three audited blockers.
+
+IMPORTANT
+
+Work only on these three blockers.
+
+Do NOT modify unrelated systems.
+
+Do NOT weaken System Control.
+
+Do NOT bypass guards.
+
+Do NOT fabricate data.
+
+Do NOT change any database data except where the normal production flow writes.
+
+Preserve deterministic behavior.
+
+===========================================================
+BLOCKER 1 — buildPlan Timeout
+===========================================================
+
+Root cause has already been verified.
+
+The Build Plan LLM call always times out because:
+
+- gpt-4.1
+- custom proxy
+- hard client timeout = 45s
+- no timeout override
+- 3 immediate retries
+
+Implement the safest solution.
+
+Requirements:
+
+- Fix ONLY the Build Plan call.
+- Do NOT increase the global timeout for all AI calls.
+- Use the existing timeout override mechanism if appropriate.
+- Preserve all existing retries and error handling.
+- If prompt size is the bottleneck, reduce prompt footprint intelligently without removing grounded evidence.
+- Preserve grounding and judge quality.
+- No hidden fallback models.
+- No silent degradation.
+
+Verify:
+
+- buildPlan reaches completion.
+- timeout no longer occurs.
+- other AI engines remain unchanged.
+
+===========================================================
+BLOCKER 2 — Positioning Determinism
+===========================================================
+
+The audit proved:
+
+temperature = 0.4
+
+no seed
+
+Same campaign sometimes produces different territory counts.
+
+The Positioning Engine must become deterministic.
+
+Requirements:
+
+- Same campaign
+- Same data
+- Same snapshots
+- Same inputs
+
+must always produce identical positioning confidence.
+
+Do NOT weaken the engine.
+
+Do NOT remove the judge.
+
+Do NOT bypass gates.
+
+Implement deterministic inference using the existing architecture.
+
+If AIChat already supports seed, wire it correctly.
+
+Review any additional non-deterministic behavior:
+
+- ordering
+- map iteration
+- sorting
+- cache
+- snapshot selection
+
+Ensure identical execution always produces identical confidence.
+
+===========================================================
+BLOCKER 3 — Content DNA Persistence
+===========================================================
+
+Commercial DNA composition works.
+
+Content DNA persistence is simply disconnected.
+
+Do NOT redesign the architecture.
+
+Instead:
+
+Find the correct production lifecycle location where Content DNA generation belongs.
+
+Wire the existing Content DNA generation into that lifecycle.
+
+Requirements:
+
+- Never generate before prerequisites exist.
+- Never duplicate rows.
+- Preserve tenant isolation.
+- Preserve versioning.
+- Preserve lineage.
+- Preserve idempotency.
+- Preserve grounding.
+- Do not introduce background loops that repeatedly regenerate DNA.
+
+The write should occur exactly once during the correct lifecycle stage.
+
+===========================================================
+VERIFICATION
+===========================================================
+
+Run verification after implementation.
+
+For Blocker 1:
+
+- buildPlan succeeds
+- Approved Plan can be produced
+- no timeout
+- no regression
+
+For Blocker 2:
+
+Execute the same campaign multiple times using identical inputs.
+
+Verify:
+
+- positioning confidence is identical
+- territory count is identical
+- gate decision is identical
+
+For Blocker 3:
+
+Verify:
+
+- Commercial DNA composes
+- Content DNA row is written
+- exactly one version exists
+- reruns are idempotent
+
+===========================================================
+REGRESSION
+===========================================================
+
+Confirm no regressions in:
+
+- Watchtower
+- Reasoning & Evidence
+- Strategy Plan
+- Audience
+- Market Intelligence
+- Performance Loop
+- Product Identity
+- System Control
+- Judge
+- Evidence Registry
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Files changed
+2. Root cause confirmation
+3. Exact implementation
+4. Verification evidence
+5. Regression results
+6. PASS / FAIL for each blocker
+7. Confirm that no fake data was created
+8. Confirm that deterministic behavior has been preserved
+9. Confirm that grounding and judge behavior remain unchanged.

@@ -8,7 +8,9 @@ import {
   calendarEntries,
   studioItems,
   businessDataLayer,
+  contentDna,
 } from "@shared/schema";
+import { generateContentDna } from "../content-dna-routes";
 import { eq, and, sql, ne, inArray } from "drizzle-orm";
 import { createAttributionEntries } from "../decision-attribution";
 import { logAudit } from "../audit";
@@ -473,6 +475,33 @@ export function registerExecutionRoutes(app: Express) {
         }).catch((err) => {
           console.error(`[ExecutionActivation] AUTO_TRIGGER_CRASH | planId=${plan.id} | error=${err.message}`);
         });
+
+        // Trigger Content DNA generation exactly once when a plan is approved.
+        // Fire-and-forget (same pattern as activateExecution above) so the
+        // approval HTTP response is never delayed by LLM latency.
+        // Idempotency guard: skip if a content_dna row already exists for
+        // this plan, preventing duplicate rows on reapproval or retries.
+        (async () => {
+          try {
+            const existing = await db
+              .select({ id: contentDna.id })
+              .from(contentDna)
+              .where(and(eq(contentDna.campaignId, plan.campaignId), eq(contentDna.planId, plan.id)))
+              .limit(1);
+
+            if (existing.length > 0) {
+              console.log(`[ContentDNA] SKIP_IDEMPOTENT | planId=${plan.id} | existing=${existing[0].id}`);
+              return;
+            }
+
+            console.log(`[ContentDNA] GENERATING | planId=${plan.id} | campaignId=${plan.campaignId}`);
+            await generateContentDna(plan.campaignId, plan.accountId, plan.id, null, null);
+            console.log(`[ContentDNA] GENERATED | planId=${plan.id} | campaignId=${plan.campaignId}`);
+          } catch (dnaErr: any) {
+            // Non-blocking: log but never fail the approval lifecycle.
+            console.error(`[ContentDNA] GENERATION_FAILED | planId=${plan.id} | error=${dnaErr?.message ?? String(dnaErr)}`);
+          }
+        })();
 
         res.json({ success: true, planId: plan.id, status: "APPROVED", executionActivation: "TRIGGERED" });
       } catch (err: any) {

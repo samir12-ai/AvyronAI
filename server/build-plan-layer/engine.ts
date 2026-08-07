@@ -808,6 +808,11 @@ export async function runBuildPlanLayer(
         messages: [{ role: "user", content: prompt }],
         max_tokens: 1500,
         temperature: 0.3,
+        // buildPlan uses gpt-4.1 through the custom proxy which reliably
+        // exceeds the 45 s HARD_TIMEOUT_MS instance default.  Pass an
+        // explicit per-call override so only this call gets a larger budget;
+        // the global client timeout (and all other engines) remain unchanged.
+        timeoutMs: 120_000,
         accountId,
         endpoint: "build-plan-layer",
       });
