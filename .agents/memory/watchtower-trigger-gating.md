@@ -10,5 +10,6 @@ description: Why Watchtower, change events, and the performance loop can be sile
 **How to apply:**
 - When a signal/event surface is empty, check the trigger chain's gating condition (approved plan? anchored window?) before suspecting detection logic.
 - `pipeline_change_events` has 3 writers (Watchtower, competitor-lane acceptChangeEvent, integrity harness) — all but the harness are boss-run-gated, so 0 boss runs ⇒ 0 events regardless of writer.
+- The mi refresh scheduler cycle (`runSchedulerCycle` → `startFetchJob`) only fetches + persists `mi_snapshots`; it never runs change detection. `runWatchtowerOrchestrator`'s ONLY call site is the boss competitor lane (`server/boss/run.ts`). Making a schedule due (`next_refresh_at = NOW()`) is the clean way to trigger one real fetch cycle in dev (scheduler ticks every 30s).
 - `strategy_memory` emptiness is weak evidence about any single writer (perf loop, memory-mutation, strategy routes all write it); prove loop inactivity via cycle reports/verdicts instead.
 - Performance loop runs only from the user-truth submit path — no truth window submitted ⇒ loop never runs.
