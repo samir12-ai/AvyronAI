@@ -15,6 +15,7 @@ export interface SavedAccount {
 interface User {
   id: string;
   email: string;
+  username?: string;
   name: string;
   subscriptionStatus: 'trial' | 'active' | 'expired';
   planType: 'trial' | 'paid';
@@ -90,11 +91,11 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 function userToSavedAccount(user: User, token: string): SavedAccount {
   return {
     userId: user.id,
-    email: user.email,
+    email: user.email || (user as any).username || 'unknown@avyron.test',
     token,
-    subscriptionStatus: user.subscriptionStatus,
-    planType: user.planType,
-    videoCredits: user.videoCredits,
+    subscriptionStatus: user.subscriptionStatus || 'trial',
+    planType: user.planType || 'trial',
+    videoCredits: user.videoCredits || 0,
   };
 }
 

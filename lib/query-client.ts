@@ -41,12 +41,14 @@ export function getApiUrl(path?: string): string {
     throw new Error("EXPO_PUBLIC_DOMAIN is not set");
   }
 
-  const base = `https://${host}`;
+  const protocol = host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";
+  const base = `${protocol}://${host}`;
 
   if (path) {
     const cleanPath = path.startsWith("/") ? path : `/${path}`;
     return `${base}${cleanPath}`;
   }
+
 
   return base;
 }

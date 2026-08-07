@@ -4,6 +4,7 @@ import { ciCompetitors } from "@shared/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { getCompetitorDataCoverage } from "./data-acquisition";
+import { initializeCompetitorMonitoring } from "../watchtower/scheduler";
 
 import { resolveAccountId } from "../auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
@@ -188,6 +189,8 @@ export function registerCiCompetitorRoutes(app: Express) {
         commentsCollected: 0,
         dataFreshnessDays: null,
       }).returning();
+
+      await initializeCompetitorMonitoring(accountId, campaignId, competitor.id);
 
       // Seal #5 / F8.1 (architect-#10 fix): the post-insert raw SQL update
       // previously used the UNSANITIZED `tiktokUrl`/`googleMapsUrl` from the

@@ -288,7 +288,7 @@ export function _resetActiveJobsCountersForTest(): void {
 
 const creationLocks = new Set<string>();
 
-export async function startFetchJob(accountId: string, campaignId: string): Promise<string> {
+export async function startFetchJob(accountId: string, campaignId: string, targetCompetitorIds?: string[]): Promise<string> {
   const lockKey = `${accountId}:${campaignId}`;
 
   if (creationLocks.has(lockKey)) {
@@ -309,7 +309,7 @@ export async function startFetchJob(accountId: string, campaignId: string): Prom
 
   creationLocks.add(lockKey);
   try {
-    return await _createAndStartJob(accountId, campaignId, lockKey);
+    return await _createAndStartJob(accountId, campaignId, lockKey, targetCompetitorIds);
   } finally {
     creationLocks.delete(lockKey);
   }
@@ -324,9 +324,13 @@ export async function getRunningJobCountForAccount(accountId: string): Promise<n
   return Number(result[0]?.count ?? 0);
 }
 
-async function _createAndStartJob(accountId: string, campaignId: string, lockKey: string): Promise<string> {
-  const competitors = await db.select().from(ciCompetitors)
+async function _createAndStartJob(accountId: string, campaignId: string, lockKey: string, targetCompetitorIds?: string[]): Promise<string> {
+  let competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
+
+  if (targetCompetitorIds && targetCompetitorIds.length > 0) {
+    competitors = competitors.filter(c => targetCompetitorIds.includes(c.id));
+  }
 
   if (competitors.length === 0) {
     throw new Error("No active competitors found for this campaign");
@@ -1051,7 +1055,8 @@ async function executeFetchJob(
       const willRunDeepPass = anyFetchExecuted && !allCooldown;
       const fastPassDataStatus = willRunDeepPass ? "LIVE" : "COMPLETE";
       try {
-        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE", coverageRatio, transportSuccesses > 0);
+        const targetCompetitorIds = competitors.map(c => c.id);
+        await persistSnapshotAfterFetch(accountId, campaignId, isPartialCoverage, stopReason, snapshotSourceType, anyFetchExecuted, fastPassDataStatus as "LIVE" | "ENRICHING" | "COMPLETE", coverageRatio, transportSuccesses > 0, targetCompetitorIds);
         console.log(`[FetchOrch] Snapshot persisted for ${accountId}/${campaignId} | partial=${isPartialCoverage} | allCooldown=${allCooldown} | snapshotSource=${snapshotSourceType} | fetchExecuted=${anyFetchExecuted} | dataStatus=${fastPassDataStatus} | coverageRatio=${coverageRatio.toFixed(2)}`);
       } catch (err: any) {
         console.error(`[FetchOrch] Snapshot persistence failed:`, err.message);
@@ -1254,9 +1259,19 @@ function classifyBlockReason(result: FetchResult): "RATE_LIMIT" | "PROXY_BLOCKED
   return "ERROR";
 }
 
-async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE", coverageRatio: number = 1.0, transportSucceeded: boolean = false): Promise<void> {
-  const competitors = await db.select().from(ciCompetitors)
+async function persistSnapshotAfterFetch(accountId: string, campaignId: string, isPartialCoverage: boolean = false, jobStopReason: StopReason = "COMPLETE", snapshotSource: "FRESH_DATA" | "CACHED_DATA" = "FRESH_DATA", fetchExecuted: boolean = true, dataStatus: "LIVE" | "ENRICHING" | "COMPLETE" = "LIVE", coverageRatio: number = 1.0, transportSucceeded: boolean = false, targetCompetitorIds?: string[]): Promise<void> {
+  let competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
+
+  if (targetCompetitorIds && targetCompetitorIds.length > 0) {
+    if (targetCompetitorIds.length < competitors.length) {
+      isPartialCoverage = true;
+    } else {
+      // It's the full campaign, no need to store includedCompetitorIds
+      targetCompetitorIds = undefined;
+    }
+    competitors = competitors.filter(c => targetCompetitorIds ? targetCompetitorIds.includes(c.id) : true);
+  }
 
   if (competitors.length === 0) return;
 
@@ -1543,6 +1558,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     competitorHash,
     competitorContentHash,
     version: newVersion,
+    includedCompetitorIds: targetCompetitorIds ? JSON.stringify(targetCompetitorIds) : null,
     competitorData: JSON.stringify(competitorInputs.map(c => ({ id: c.id, name: c.name }))),
     signalData: JSON.stringify(signalResults),
     intentData: JSON.stringify(intents),

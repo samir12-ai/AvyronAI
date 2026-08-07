@@ -42,3 +42,50 @@ yarn-error.*
 
 # Replit agent working files
 .local/
+
+# Database dumps
+*.dump
+neon_backup.dump
+
+# Logs and debug payloads
+logfile
+*.log
+payload.json
+
+# Temporary scripts and work folders
+scratch/
+archived/
+/check.js
+/check_db*.js
+/check_keys.js
+/check_ownership.js
+/audit_live*.js
+/find_*.js
+/fix_*.js
+/insert_selection.js
+/investigate_*.js
+/run_migration.js
+/test_*.js
+/update_ael.js
+/*.txt
+/dev_inserts.sql
+/clean.ps1
+app_tabs_index_*.tsx
+StrategicNarrativeCard.tsx
+avyron ai - Replit production data base_files/
+run_marketmind.ts
+scripts/inject-route.js
+scripts/test-watchtower-integrity.ts
+server/audit2.ts
+server/auth_test.mjs
+server/run_audit.ts
+server/run_wt_e2e_test.ts
+server/tests/validate-synthesis-grounding.js
+server/wt_e2e.mjs
+test_strategic_brief_e2e.ts
+test_synthesis.ts
+.npmrc
+/uploads/
+
+
+

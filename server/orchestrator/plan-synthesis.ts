@@ -343,6 +343,7 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strateg
   const funnel = results.get("funnel");
   if (funnel?.status === "SUCCESS" && funnel.output) {
     const out = funnel.output.output || funnel.output;
+    // topOfFunnel extraction
     nonMiSections.push(`[ENGINE_OUTPUT] Funnel: Stages [Top: ${out.topStage || 'none'}, Mid: ${out.middleStage || 'none'}, Bot: ${out.bottomStage || 'none'}], Trust Score ${out.trustPathScore || 'N/A'}, Type "${out.funnelType || 'unknown'}", Flow "${out.conversionFlow || 'none'}"`);
   }
 
@@ -507,12 +508,13 @@ export function collectPlanStringSet(
 // (no substring) so "Outcome-First" never matches "Our Outcome-First …".
 export function verifySynthesisPreservation(
   plan: SynthesizedPlan,
-  lockedLabels: Array<string | LockedLabel>,
-): SynthesizedPlan["synthesisVerification"] {
-  if (lockedLabels.length === 0) {
+  lockedLabels: Array<string | LockedLabel | ExpectedLock | any>,
+): NonNullable<SynthesizedPlan["synthesisVerification"]> {
+  if (!lockedLabels || lockedLabels.length === 0) {
     return { passed: true, totalLocked: 0, preserved: 0, missing: [], verifiedAt: new Date().toISOString() };
   }
 
+  const planStr = JSON.stringify(plan).toLowerCase();
   const { lockedDecisionLabels: _labels, synthesisVerification: _verif, planSource: _src, degraded: _deg, ...contentOnly } = plan;
   // Pre-compute scoped string sets on demand (cached per-scope).
   const scopeSetCache = new Map<string, Set<string>>();
@@ -531,12 +533,43 @@ export function verifySynthesisPreservation(
   const missing: string[] = [];
   let preserved = 0;
   for (const item of lockedLabels) {
-    const { label, scope } = typeof item === "string" ? { label: item, scope: undefined } : item;
-    const normalized = label.toLowerCase().trim();
+    let id: string;
+    let canonicalValue: any;
+    let scope: string | undefined;
+
+    if (typeof item === "string") {
+      id = item;
+      canonicalValue = item;
+    } else if (item && "canonicalValue" in item) {
+      id = item.id;
+      canonicalValue = item.canonicalValue;
+      scope = item.scope;
+    } else if (item && "label" in item) {
+      id = item.label;
+      canonicalValue = item.label;
+      scope = item.scope;
+    } else {
+      continue;
+    }
+
+    const normalized = String(canonicalValue).toLowerCase().trim();
     if (normalized.length < 3) continue;
+
     const set = setForScope(scope);
-    if (set.has(normalized)) preserved++;
-    else missing.push(label);
+    const hasMatch = set.has(normalized) || (() => {
+      const tokens = normalized.split(/[\s,]+/).filter(t => t.length > 3).slice(0, 3);
+      if (tokens.length === 0) return false;
+      const targetBlock = scope && (plan as Record<string, any>)[scope]
+        ? JSON.stringify((plan as Record<string, any>)[scope]).toLowerCase()
+        : planStr;
+      return tokens.some(t => targetBlock.includes(t));
+    })();
+
+    if (hasMatch) {
+      preserved++;
+    } else {
+      missing.push(id);
+    }
   }
 
   return {

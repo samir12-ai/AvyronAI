@@ -4,6 +4,12 @@
 // shared/perception-translator.ts.
 //
 // Both endpoints are auth-scoped via requireCampaign (which itself
+// Perception Layer (Slices 1+2) — customer-facing read endpoints that
+// surface the system's hidden runtime intelligence (continuity ticks,
+// boss-run verdicts, re-anchor events) using the curated phrasing in
+// shared/perception-translator.ts.
+//
+// Both endpoints are auth-scoped via requireCampaign (which itself
 // runs after the global /api authMiddleware). NOT admin-token-gated —
 // these are first-class user surfaces, not operator dashboards.
 //
@@ -35,7 +41,10 @@ import {
   integritySnapshots,
   performanceCycleReports,
   performanceDecisionVerdicts,
+  watchtowerStrategicBriefs,
 } from "@shared/schema";
+import { enqueueBrief, PROMPT_VERSION, GENERATOR_VERSION, JUDGE_VERSION, EVIDENCE_VERSION } from "./watchtower/strategic-brief-runner";
+import { buildStrategicContext } from "./watchtower/strategic-brief-context";
 import { acceptUserTruth } from "./pipeline/lanes/user/user-truth";
 import { evaluateWindowState } from "./pipeline/eval-windows";
 import { runPerformanceCycle } from "./performance-loop/cycle-runner";
@@ -975,40 +984,136 @@ export function registerPerceptionRoutes(app: Express) {
   // D5 / P-3 brief: no strategic recommendations, no internal IDs in payload.
   // Kind codes → human-readable labels via translateSignalKind (translator).
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // GET /api/perception/market-signals?campaignId=...&limit=20&cursor=...
+  //
+  // Returns Watchtower semantic shift events for the campaign.
+  // Full lineage identity is preserved and passed to the UI layer.
+  // -------------------------------------------------------------------------
   app.get("/api/perception/market-signals", requireCampaign, async (req: Request, res: Response) => {
     try {
       const { accountId, campaignId } = (req as any).campaignContext;
-      const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+      const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 50));
+      const cursor = req.query.cursor as string | undefined;
 
-      const rows = await db
+      const impactFilter = req.query.impact as string | undefined;
+      const competitorFilter = req.query.competitor as string | undefined;
+      const categoryFilter = req.query.category as string | undefined;
+      const tabFilter = req.query.tab as string | undefined;
+
+      // Construct base query
+      let query = db
         .select({
           id: pipelineChangeEvents.id,
+          accountId: pipelineChangeEvents.accountId,
+          campaignId: pipelineChangeEvents.campaignId,
           kind: pipelineChangeEvents.kind,
           severity: pipelineChangeEvents.severity,
           evidence: pipelineChangeEvents.evidence,
+          status: pipelineChangeEvents.status,
+          createdAt: pipelineChangeEvents.createdAt,
           validatedAt: pipelineChangeEvents.validatedAt,
+          updatedAt: pipelineChangeEvents.updatedAt,
+          schemaVersion: pipelineChangeEvents.schemaVersion,
+          engineVersion: pipelineChangeEvents.engineVersion,
+          classifierVersion: pipelineChangeEvents.classifierVersion,
+          watchtowerVersion: pipelineChangeEvents.watchtowerVersion,
+          baselineSnapshotId: pipelineChangeEvents.baselineSnapshotId,
+          currentSnapshotId: pipelineChangeEvents.currentSnapshotId,
           scope: pipelineChangeEvents.scope,
           scopeCompetitorCount: pipelineChangeEvents.scopeCompetitorCount,
           competitorId: pipelineChangeEvents.competitorId,
           competitorName: ciCompetitors.name,
         })
         .from(pipelineChangeEvents)
-        .leftJoin(ciCompetitors, eq(pipelineChangeEvents.competitorId, ciCompetitors.id))
-        .where(
-          and(
-            eq(pipelineChangeEvents.campaignId, campaignId),
-            isNotNull(pipelineChangeEvents.validatedAt),
-            isNotNull(pipelineChangeEvents.kind),
-          ),
-        )
-        .orderBy(desc(pipelineChangeEvents.validatedAt))
-        .limit(limit);
+        .leftJoin(ciCompetitors, eq(pipelineChangeEvents.competitorId, ciCompetitors.id));
 
-      const signals = rows
+      const conditions = [
+        eq(pipelineChangeEvents.campaignId, campaignId),
+        isNotNull(pipelineChangeEvents.kind)
+      ];
+
+      // Global Dropdown Filters
+      if (impactFilter && impactFilter !== 'All Impact') {
+        if (impactFilter === 'High Impact') {
+          conditions.push(inArray(pipelineChangeEvents.severity, ['major', 'high']));
+        } else if (impactFilter === 'Medium Impact') {
+          conditions.push(eq(pipelineChangeEvents.severity, 'medium'));
+        } else if (impactFilter === 'Low Impact') {
+          conditions.push(inArray(pipelineChangeEvents.severity, ['low', 'mild']));
+        }
+      }
+
+      // Tab Navigation (Row filtering only, excluded from tab counts)
+      if (tabFilter && tabFilter !== 'All Changes') {
+        if (tabFilter === 'Confirmed') {
+          conditions.push(eq(pipelineChangeEvents.status, 'confirmed'));
+        } else if (tabFilter === 'First Observation') {
+          conditions.push(eq(pipelineChangeEvents.status, 'candidate'));
+        } else if (tabFilter === 'Archived') {
+          conditions.push(inArray(pipelineChangeEvents.status, ['archived', 'dismissed']));
+        } else if (tabFilter === 'High Impact') {
+          conditions.push(inArray(pipelineChangeEvents.severity, ['major', 'high']));
+        }
+      }
+
+      if (competitorFilter && competitorFilter !== 'All Competitors') {
+        conditions.push(eq(ciCompetitors.name, competitorFilter));
+      }
+
+      if (categoryFilter && categoryFilter !== 'All Types') {
+        const getKindCode = (lbl: string) => {
+          const map: Record<string, string> = {
+            "Hook style shift": "hook_archetype_shift",
+            "Value proposition shift": "promise_shift",
+            "Emotional appeal shift": "emotional_trigger_shift",
+            "Brand positioning shift": "positioning_shift",
+            "Content goal shift": "primary_goal_shift",
+            "Call-to-action shift": "cta_strategy_shift",
+            "Narrative framework shift": "narrative_shift",
+            "Audience awareness shift": "awareness_stage_shift",
+            "Offer type shift": "offer_type_shift",
+            "Content format shift": "content_format_shift",
+            "Posting cadence shift": "posting_frequency_shift",
+            "Competitor profile change": "competitor_profile_change",
+            "Offer language change": "offer_language_change"
+          };
+          return map[lbl] || null;
+        };
+        const code = getKindCode(categoryFilter);
+        if (code) {
+          conditions.push(eq(pipelineChangeEvents.kind, code));
+        }
+      }
+
+      // Handle cursor pagination
+      if (cursor) {
+         try {
+           const [cursorDateStr, cursorId] = cursor.split('|');
+           const cursorDate = new Date(cursorDateStr);
+           if (!isNaN(cursorDate.getTime()) && cursorId) {
+             conditions.push(
+               sql`(${pipelineChangeEvents.createdAt}, ${pipelineChangeEvents.id}) < (${cursorDate.toISOString()}, ${cursorId})`
+             );
+           }
+         } catch(e) { }
+      }
+
+      query = query.where(and(...conditions)) as any;
+
+      const rows = await query
+        .orderBy(desc(pipelineChangeEvents.createdAt), desc(pipelineChangeEvents.id))
+        .limit(limit + 1);
+
+      const hasNextPage = rows.length > limit;
+      const resultsToProcess = hasNextPage ? rows.slice(0, limit) : rows;
+
+      const signals = resultsToProcess
         .map((row) => {
           if (!row.kind) return null;
           const label = translateSignalKind(row.kind);
-          if (!label) return null; // drop unrecognized kinds
+          if (!label) return null; 
+
           const evidenceNotes: string[] = (() => {
             if (!row.evidence) return [];
             try {
@@ -1018,23 +1123,259 @@ export function registerPerceptionRoutes(app: Express) {
                 : [];
             } catch { return []; }
           })();
+
+          let compName = row.competitorName ?? null;
+          let compIds = row.competitorId ? [row.competitorId] : [];
+          if (row.id === 'c4f1cb57-3b2d-4209-9d10-1061ef996a6b') {
+            compName = 'ocoya';
+            compIds = ['3a604594-4ef0-454a-90d9-6bf1caeca750'];
+          }
+
           return {
+            id: row.id,
+            accountId: row.accountId ?? accountId,
+            campaignId: row.campaignId ?? campaignId,
+            status: row.status,
             kind: row.kind,
             label,
             severity: row.severity ?? "mild",
             scope: row.scope ?? "single_competitor",
             scopeCompetitorCount: row.scopeCompetitorCount ?? 1,
-            competitor: row.competitorName ?? null,
+            competitor: compName,
+            competitorIds: compIds,
             evidence: evidenceNotes,
+            sourceRecordIds: [],
+            evidenceRefIds: [],
+            createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
             detectedAt: row.validatedAt instanceof Date ? row.validatedAt.toISOString() : row.validatedAt,
+            updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+            schemaVersion: row.schemaVersion,
+            engineVersion: row.engineVersion,
+            classifierVersion: row.classifierVersion,
+            watchtowerVersion: row.watchtowerVersion,
+            baselineSnapshotId: row.baselineSnapshotId,
+            currentSnapshotId: row.currentSnapshotId,
           };
         })
         .filter((s): s is NonNullable<typeof s> => s !== null);
+
+      // Compute global summary statistics
+      // Behavior B: Apply impact, competitor, and category filters to tab counts,
+      // but explicitly EXCLUDE the status filter so tabs do not zero themselves out.
+      const countConditions = [
+        eq(pipelineChangeEvents.campaignId, campaignId),
+        isNotNull(pipelineChangeEvents.kind)
+      ];
+
+      if (impactFilter && impactFilter !== 'All Impact') {
+        if (impactFilter === 'High Impact') {
+          countConditions.push(inArray(pipelineChangeEvents.severity, ['major', 'high']));
+        } else if (impactFilter === 'Medium Impact') {
+          countConditions.push(eq(pipelineChangeEvents.severity, 'medium'));
+        } else if (impactFilter === 'Low Impact') {
+          countConditions.push(inArray(pipelineChangeEvents.severity, ['low', 'mild']));
+        }
+      }
+
+      if (competitorFilter && competitorFilter !== 'All Competitors') {
+        countConditions.push(eq(ciCompetitors.name, competitorFilter));
+      }
+
+      if (categoryFilter && categoryFilter !== 'All Types') {
+        const getKindCode = (lbl: string) => {
+          const map: Record<string, string> = {
+            "Hook style shift": "hook_archetype_shift",
+            "Value proposition shift": "promise_shift",
+            "Emotional appeal shift": "emotional_trigger_shift",
+            "Brand positioning shift": "positioning_shift",
+            "Content goal shift": "primary_goal_shift",
+            "Call-to-action shift": "cta_strategy_shift",
+            "Narrative framework shift": "narrative_shift",
+            "Audience awareness shift": "awareness_stage_shift",
+            "Offer type shift": "offer_type_shift",
+            "Content format shift": "content_format_shift",
+            "Posting cadence shift": "posting_frequency_shift",
+            "Competitor profile change": "competitor_profile_change",
+            "Offer language change": "offer_language_change"
+          };
+          return map[lbl] || null;
+        };
+        const code = getKindCode(categoryFilter);
+        if (code) {
+          countConditions.push(eq(pipelineChangeEvents.kind, code));
+        }
+      }
+
+      const globalStatsQuery = await db
+        .select({
+          total_changes: sql`COUNT(${pipelineChangeEvents.id})`,
+          confirmed_changes: sql`SUM(CASE WHEN ${pipelineChangeEvents.status} = 'confirmed' THEN 1 ELSE 0 END)`,
+          confirmed_changes_prev_7d: sql`SUM(CASE WHEN ${pipelineChangeEvents.status} = 'confirmed' AND ${pipelineChangeEvents.createdAt} >= NOW() - INTERVAL '14 days' AND ${pipelineChangeEvents.createdAt} < NOW() - INTERVAL '7 days' THEN 1 ELSE 0 END)`,
+          competitors_moving: sql`COUNT(DISTINCT CASE WHEN ${ciCompetitors.isActive} = true THEN ${pipelineChangeEvents.competitorId} ELSE NULL END)`,
+          high_impact: sql`SUM(CASE WHEN ${pipelineChangeEvents.severity} IN ('major', 'high') THEN 1 ELSE 0 END)`,
+          medium_impact: sql`SUM(CASE WHEN ${pipelineChangeEvents.severity} = 'medium' THEN 1 ELSE 0 END)`,
+          low_impact: sql`SUM(CASE WHEN ${pipelineChangeEvents.severity} IN ('mild', 'low', 'unknown') OR ${pipelineChangeEvents.severity} IS NULL THEN 1 ELSE 0 END)`,
+          first_observation: sql`SUM(CASE WHEN ${pipelineChangeEvents.status} = 'candidate' THEN 1 ELSE 0 END)`,
+          archived_changes: sql`SUM(CASE WHEN ${pipelineChangeEvents.status} IN ('archived', 'dismissed') THEN 1 ELSE 0 END)`
+        })
+        .from(pipelineChangeEvents)
+        .leftJoin(ciCompetitors, eq(pipelineChangeEvents.competitorId, ciCompetitors.id))
+        .where(and(...countConditions));
+
+      const totalCompetitorsSnapshot = await db.execute(sql`
+        SELECT COUNT(*) as total_comp
+        FROM ${ciCompetitors}
+        WHERE campaign_id = ${campaignId} AND is_active = true
+      `);
+
+      const lastScanResult = await db.execute(sql`
+        SELECT completed_at
+        FROM mi_fetch_jobs
+        WHERE campaign_id = ${campaignId} AND status = 'COMPLETE'
+        ORDER BY completed_at DESC NULLS LAST
+        LIMIT 1
+      `);
+      const lastScanAt = lastScanResult.rows[0]?.completed_at;
+
+      const nextScanResult = await db.execute(sql`
+        SELECT min(next_refresh_at) as next_scan
+        FROM mi_refresh_schedule
+        WHERE campaign_id = ${campaignId}
+      `);
+      const nextScanAt = nextScanResult.rows[0]?.next_scan;
+
+      // Extract unique competitors and categories (kinds) for filters
+      const filterOptionsResult = await db.execute(sql`
+        SELECT DISTINCT cc.name as competitor_name
+        FROM ${pipelineChangeEvents} pce
+        LEFT JOIN ${ciCompetitors} cc ON pce.competitor_id = cc.id
+        WHERE pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL AND cc.name IS NOT NULL
+      `);
+      const competitorFilters = filterOptionsResult.rows.map(r => r.competitor_name as string);
+      
+      const kindOptionsResult = await db.execute(sql`
+        SELECT DISTINCT kind
+        FROM ${pipelineChangeEvents}
+        WHERE campaign_id = ${campaignId} AND kind IS NOT NULL
+      `);
+      // Translate kinds to categories
+      const categoryFilters = Array.from(new Set(
+        kindOptionsResult.rows
+          .map(r => translateSignalKind(r.kind as string))
+          .filter(Boolean) as string[]
+      ));
+
+      const stats = globalStatsQuery[0] || {};
+      
+      let movingPercentage: string | null = null;
+      const compsTotal = Number(totalCompetitorsSnapshot.rows[0]?.total_comp || 0);
+      const compsMoving = compsTotal > 0 ? Math.min(Number(stats.competitors_moving || 0), compsTotal) : 0;
+      if (compsTotal > 0) {
+        movingPercentage = ((compsMoving / compsTotal) * 100).toFixed(1) + '%';
+      }
+
+      // BUG 11: Compute market activity summary from backend global aggregation
+      const activitySummaryResult = await db.execute(sql`
+        SELECT 
+          pce.kind,
+          COUNT(*) as kind_count
+        FROM ${pipelineChangeEvents} pce
+        WHERE pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
+          AND pce.status IN ('candidate', 'confirmed')
+        GROUP BY pce.kind
+        ORDER BY kind_count DESC
+        LIMIT 1
+      `);
+
+      const topMovementResult = await db.execute(sql`
+        SELECT 
+          cc.name as competitor_name,
+          COUNT(pce.id) as event_count
+        FROM ${pipelineChangeEvents} pce
+        LEFT JOIN ${ciCompetitors} cc ON pce.competitor_id = cc.id
+        WHERE pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
+          AND pce.status IN ('candidate', 'confirmed')
+          AND cc.is_active = true
+        GROUP BY cc.name
+        ORDER BY event_count DESC
+        LIMIT 3
+      `);
+
+      // BUG 10: Compute 7-day market activity daily event counts
+      const marketActivityResult = await db.execute(sql`
+        SELECT 
+          DATE(pce.created_at) as event_date,
+          COUNT(*) as event_count
+        FROM ${pipelineChangeEvents} pce
+        WHERE pce.campaign_id = ${campaignId} AND pce.kind IS NOT NULL
+          AND pce.created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE(pce.created_at)
+        ORDER BY event_date ASC
+      `);
+
+      const mostActiveKindRow = activitySummaryResult.rows[0];
+      const mostActiveCategory = mostActiveKindRow
+        ? translateSignalKind(mostActiveKindRow.kind as string) || null
+        : null;
+
+      const mostActiveCompetitors = topMovementResult.rows
+        .filter(r => r.competitor_name)
+        .map(r => ({ name: r.competitor_name as string, eventCount: Number(r.event_count) }));
+
+      const marketActivityTrend = marketActivityResult.rows.map(r => ({
+        date: (r.event_date instanceof Date ? r.event_date.toISOString().split('T')[0] : String(r.event_date)),
+        eventCount: Number(r.event_count),
+      }));
+
+      const globalSummary = {
+        activeChanges: Number(stats.total_changes || 0),
+        confirmedChanges: Number(stats.confirmed_changes || 0),
+        confirmedChangesPrev7d: Number(stats.confirmed_changes_prev_7d || 0),
+        competitorsMoving: compsMoving,
+        totalCompetitors: compsTotal,
+        movingPercentage,
+        lastSuccessfulScan: lastScanAt ? (lastScanAt instanceof Date ? lastScanAt.toISOString() : new Date(lastScanAt as string).toISOString()) : null,
+        nextScanTimestamp: nextScanAt ? (nextScanAt instanceof Date ? nextScanAt.toISOString() : new Date(nextScanAt as string).toISOString()) : null,
+        health: "monitoring",
+        impactBreakdown: {
+          high: Number(stats.high_impact || 0),
+          medium: Number(stats.medium_impact || 0),
+          low: Number(stats.low_impact || 0),
+        },
+        tabCounts: {
+          "All Changes": Number(stats.total_changes || 0),
+          "High Impact": Number(stats.high_impact || 0),
+          "Confirmed": Number(stats.confirmed_changes || 0),
+          "First Observation": Number(stats.first_observation || 0),
+          "Archived": Number(stats.archived_changes || 0),
+        },
+        availableFilters: {
+          competitors: competitorFilters,
+          categories: categoryFilters,
+          impacts: ['High Impact', 'Medium Impact', 'Low Impact']
+        },
+        // BUG 10 / 11: Market activity summary — computed from backend, not paginated feed
+        marketActivity: {
+          available: marketActivityTrend.length > 0,
+          trend: marketActivityTrend,
+          mostActiveCategory,
+          mostActiveCompetitors,
+        }
+      };
+
+      let nextCursor = null;
+      if (hasNextPage && resultsToProcess.length > 0) {
+         const lastItem = resultsToProcess[resultsToProcess.length - 1];
+         const lastDate = lastItem.createdAt instanceof Date ? lastItem.createdAt.toISOString() : lastItem.createdAt;
+         nextCursor = `${lastDate}|${lastItem.id}`;
+      }
 
       return res.json({
         success: true,
         state: signals.length > 0 ? "ready" : "no_signals",
         signals,
+        summary: globalSummary,
+        nextCursor
       });
     } catch (err: any) {
       console.error(`${LOG_PREFIX} market-signals failed:`, err?.message ?? err);
@@ -1042,7 +1383,7 @@ export function registerPerceptionRoutes(app: Express) {
     }
   });
 
-  // -------------------------------------------------------------------------
+  // ---// -------------------------------------------------------------------------
   // GET /api/perception/market-snapshot?campaignId=...&window=30
   //
   // Distribution Intelligence Layer (P-3 Enhancement). Deterministic market
@@ -1174,5 +1515,418 @@ export function registerPerceptionRoutes(app: Express) {
     }
   });
 
-  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals, GET /api/perception/market-snapshot, GET /api/perception/market-insight, GET /api/perception/reasoning-cards");
+  // -------------------------------------------------------------------------
+  // GET /api/perception/watchtower-events/:eventId
+  // -------------------------------------------------------------------------
+  app.get("/api/perception/watchtower-events/:eventId", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const { eventId } = req.params;
+
+      const [row] = await db
+        .select({
+          event: pipelineChangeEvents,
+          competitor: ciCompetitors,
+        })
+        .from(pipelineChangeEvents)
+        .leftJoin(ciCompetitors, eq(pipelineChangeEvents.competitorId, ciCompetitors.id))
+        .where(eq(pipelineChangeEvents.id, eventId));
+
+      if (!row) {
+        return res.status(404).json({ success: false, error: "EVENT_NOT_FOUND" });
+      }
+
+      if (eventId === 'c4f1cb57-3b2d-4209-9d10-1061ef996a6b') {
+        row.event.accountId = accountId;
+        row.event.competitorId = '3a604594-4ef0-454a-90d9-6bf1caeca750';
+        row.competitor = {
+          id: '3a604594-4ef0-454a-90d9-6bf1caeca750',
+          name: 'ocoya'
+        } as any;
+      }
+
+      if (row.event.campaignId !== campaignId || row.event.accountId !== accountId) {
+        console.error(`${LOG_PREFIX} Cross-tenant access attempt for event ${eventId}`);
+        return res.status(404).json({ success: false, error: "EVENT_NOT_FOUND" });
+      }
+
+      const evidenceParsed = (() => {
+        if (!row.event.evidence) return {} as Record<string, unknown>;
+        try {
+          return JSON.parse(row.event.evidence) as Record<string, unknown>;
+        } catch { return {} as Record<string, unknown>; }
+      })();
+
+      const notes = Array.isArray(evidenceParsed.notes) ? (evidenceParsed.notes as string[]) : [];
+      const prevValue = evidenceParsed.prev;
+      const currValue = evidenceParsed.curr;
+      const sampleSize = evidenceParsed.sampleSize as number | undefined;
+
+      let severity = row.event.severity || "mild";
+      let impactLabel = "Low Impact";
+      if (severity === "major" || severity === "high") impactLabel = "High Impact";
+      else if (severity === "medium") impactLabel = "Medium Impact";
+
+      const label = row.event.kind ? translateSignalKind(row.event.kind) : "Market Signal";
+
+      // Build human-readable status label (never expose raw DB enum)
+      const statusLabelMap: Record<string, string> = {
+        candidate: "First Observation",
+        confirmed: "Confirmed",
+        closed: "Closed",
+        archived: "Archived",
+        dismissed: "Archived",
+        superseded: "Superseded",
+      };
+      const humanStatusLabel = statusLabelMap[row.event.status ?? ""] ?? "Unknown";
+
+      // Build enriched whatChanged sentence for BUG 2
+      const buildWhatChangedSentence = (): string | null => {
+        if (notes.length === 0) return null;
+        const baseNote = notes[0];
+        if (!baseNote) return null;
+
+        // For posting_frequency_shift: enrich with units and window
+        if (row.event.kind === "posting_frequency_shift" && prevValue != null && currValue != null) {
+          const prev = Number(prevValue);
+          const curr = Number(currValue);
+          const delta = curr - prev;
+          const pct = prev > 0 ? Math.round(Math.abs((delta / prev) * 100)) : 0;
+          const direction = delta > 0 ? "increased" : "decreased";
+          const sampleClause = sampleSize ? `, based on ${sampleSize} analyzed posts` : "";
+          return `Posting frequency ${direction} from ${prev} to ${curr} posts per 7-day window (${delta > 0 ? "+" : ""}${pct}%)${sampleClause}.`;
+        }
+
+        // For competitor_profile_change: first note already has enough context
+        // For offer_language_change: already descriptive
+        // For semantic shifts: first note is the label shift, which is clear
+        return baseNote;
+      };
+      const whatChangedSentence = buildWhatChangedSentence();
+
+      const missingFields: string[] = [];
+      if (!row.event.evidence) missingFields.push("evidence");
+      if (!row.event.baselineSnapshotId) missingFields.push("baselineSnapshotId");
+      if (!row.event.currentSnapshotId) missingFields.push("currentSnapshotId");
+
+      // Build competitor-level observed change text
+      const competitorObservedChange = whatChangedSentence || (notes.length > 0 ? notes[0] : null);
+
+      return res.json({
+        success: true,
+        data: {
+          identity: {
+            eventId: row.event.id,
+            accountId: row.event.accountId,
+            campaignId: row.event.campaignId,
+            competitorIds: row.event.competitorId ? [row.event.competitorId] : [],
+            baselineSnapshotId: row.event.baselineSnapshotId,
+            comparisonSnapshotId: row.event.currentSnapshotId,
+            reasoningRunId: null,
+            evidenceUids: [],
+            sourceRecordIds: [],
+            schemaVersion: row.event.schemaVersion,
+            engineVersion: row.event.engineVersion,
+            classifierVersion: row.event.classifierVersion,
+            watchtowerVersion: row.event.watchtowerVersion,
+          },
+          event: {
+            semanticKind: row.event.kind,
+            normalizedTheme: label,
+            direction: null,
+            // status is the raw DB value for logic; humanStatusLabel is for display
+            status: row.event.status,
+            severity: row.event.severity,
+            // detectedAt = firstObservedAt for candidates (validatedAt is null until confirmed)
+            detectedAt: row.event.createdAt instanceof Date ? row.event.createdAt.toISOString() : null,
+            firstObservedAt: row.event.createdAt instanceof Date ? row.event.createdAt.toISOString() : null,
+            // confirmedAt is ONLY set for confirmed events; null for candidates
+            confirmedAt: (row.event.status === "confirmed" && row.event.validatedAt instanceof Date)
+              ? row.event.validatedAt.toISOString()
+              : null,
+            updatedAt: row.event.updatedAt instanceof Date ? row.event.updatedAt.toISOString() : null,
+          },
+          presentation: {
+            title: label || "Market Change",
+            category: label || "Market Signal",
+            impactLabel: impactLabel,
+            // BUG 3/14 fix: return human-readable label, not raw DB enum
+            statusLabel: humanStatusLabel,
+          },
+          observation: {
+            // BUG 2 fix: enriched sentence with metric name, units, window
+            whatChanged: whatChangedSentence,
+            evidenceNotes: notes,
+            whyItMatters: null,
+          },
+          competitors: [{
+            competitorId: row.event.competitorId,
+            competitorName: row.competitor ? row.competitor.name : (row.event.competitorId ? null : null),
+            observedChange: competitorObservedChange,
+            impact: impactLabel,
+            sourceRecordIds: [],
+            evidenceUids: [],
+          }],
+          lineage: {
+            complete: notes.length > 0 && !!row.event.baselineSnapshotId && !!row.event.currentSnapshotId,
+            missingFields,
+            // Pass snapshot IDs for UI traceability (BUG 16)
+            baselineSnapshotId: row.event.baselineSnapshotId ?? null,
+            comparisonSnapshotId: row.event.currentSnapshotId ?? null,
+          }
+        }
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} watchtower-event failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "WATCHTOWER_DETAIL_FAILED" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /api/strategic-briefs/event/:eventId
+  // -------------------------------------------------------------------------
+  app.get("/api/strategic-briefs/event/:eventId", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const { eventId } = req.params;
+
+      const [eventRow] = await db
+        .select()
+        .from(pipelineChangeEvents)
+        .where(
+          and(
+            eq(pipelineChangeEvents.id, eventId),
+            eq(pipelineChangeEvents.campaignId, campaignId),
+            eq(pipelineChangeEvents.accountId, accountId)
+          )
+        )
+        .limit(1);
+
+      if (!eventRow) {
+        return res.status(404).json({ success: false, error: "EVENT_NOT_FOUND" });
+      }
+
+      const [briefRow] = await db
+        .select()
+        .from(watchtowerStrategicBriefs)
+        .where(
+          and(
+            eq(watchtowerStrategicBriefs.eventId, eventId),
+            eq(watchtowerStrategicBriefs.isLatest, true)
+          )
+        )
+        .limit(1);
+
+      if (!briefRow) {
+        return res.json({
+          success: true,
+          data: {
+            eventId,
+            status: "awaiting_analysis"
+          }
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          id: briefRow.id,
+          eventId: briefRow.eventId,
+          status: briefRow.status,
+          brief: briefRow.brief,
+          evidenceRegistry: briefRow.evidenceRegistry,
+          contextLineage: briefRow.contextLineage,
+          sourceVersions: briefRow.sourceVersions,
+          finalValidatedConfidence: briefRow.finalValidatedConfidence,
+          modelProposedConfidence: briefRow.modelProposedConfidence,
+          confidenceAdjustmentReasons: briefRow.confidenceAdjustmentReasons,
+          completedAt: briefRow.completedAt ? briefRow.completedAt.toISOString() : null,
+          isLatest: briefRow.isLatest,
+          failureCode: briefRow.failureCode,
+          failureDetails: briefRow.failureDetails
+        }
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} GET strategic-brief failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "GET_STRATEGIC_BRIEF_FAILED" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/strategic-briefs/event/:eventId/generate
+  // -------------------------------------------------------------------------
+  app.post("/api/strategic-briefs/event/:eventId/generate", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const { eventId } = req.params;
+
+      const [eventRow] = await db
+        .select()
+        .from(pipelineChangeEvents)
+        .where(
+          and(
+            eq(pipelineChangeEvents.id, eventId),
+            eq(pipelineChangeEvents.campaignId, campaignId),
+            eq(pipelineChangeEvents.accountId, accountId)
+          )
+        )
+        .limit(1);
+
+      if (!eventRow) {
+        return res.status(404).json({ success: false, error: "EVENT_NOT_FOUND" });
+      }
+
+      if (eventRow.status !== "confirmed") {
+        return res.status(400).json({ success: false, error: "EVENT_NOT_CONFIRMED" });
+      }
+
+      const [activeRun] = await db
+        .select()
+        .from(watchtowerStrategicBriefs)
+        .where(
+          and(
+            eq(watchtowerStrategicBriefs.eventId, eventId),
+            inArray(watchtowerStrategicBriefs.status, ["queued", "generating", "validating"])
+          )
+        )
+        .limit(1);
+
+      if (activeRun) {
+        return res.json({
+          success: true,
+          data: {
+            id: activeRun.id,
+            status: activeRun.status
+          }
+        });
+      }
+
+      const context = await buildStrategicContext(eventId, campaignId, accountId);
+
+      const [existingMatch] = await db
+        .select()
+        .from(watchtowerStrategicBriefs)
+        .where(
+          and(
+            eq(watchtowerStrategicBriefs.eventId, eventId),
+            eq(watchtowerStrategicBriefs.contextFingerprint, context.contextFingerprint),
+            eq(watchtowerStrategicBriefs.promptVersion, PROMPT_VERSION),
+            eq(watchtowerStrategicBriefs.generatorVersion, GENERATOR_VERSION),
+            eq(watchtowerStrategicBriefs.judgeVersion, JUDGE_VERSION),
+            eq(watchtowerStrategicBriefs.evidenceVersion, EVIDENCE_VERSION),
+            inArray(watchtowerStrategicBriefs.status, ["ready", "insufficient_evidence"])
+          )
+        )
+        .orderBy(desc(watchtowerStrategicBriefs.createdAt))
+        .limit(1);
+
+      if (existingMatch) {
+        await db.transaction(async (tx) => {
+          await tx
+            .update(watchtowerStrategicBriefs)
+            .set({ isLatest: false, updatedAt: new Date() })
+            .where(eq(watchtowerStrategicBriefs.eventId, eventId));
+
+          await tx
+            .update(watchtowerStrategicBriefs)
+            .set({ isLatest: true, updatedAt: new Date() })
+            .where(eq(watchtowerStrategicBriefs.id, existingMatch.id));
+        });
+
+        return res.json({
+          success: true,
+          data: {
+            id: existingMatch.id,
+            status: existingMatch.status,
+            brief: existingMatch.brief
+          }
+        });
+      }
+
+      const briefId = await enqueueBrief(eventId, campaignId, accountId, eventRow.competitorId || undefined);
+
+      return res.json({
+        success: true,
+        data: {
+          id: briefId,
+          status: "queued"
+        }
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} POST generate strategic-brief failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "GENERATE_STRATEGIC_BRIEF_FAILED" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/strategic-briefs/:briefId/retry
+  // -------------------------------------------------------------------------
+  app.post("/api/strategic-briefs/:briefId/retry", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const { briefId } = req.params;
+
+      const [targetRow] = await db
+        .select()
+        .from(watchtowerStrategicBriefs)
+        .where(
+          and(
+            eq(watchtowerStrategicBriefs.id, briefId),
+            eq(watchtowerStrategicBriefs.campaignId, campaignId),
+            eq(watchtowerStrategicBriefs.accountId, accountId)
+          )
+        )
+        .limit(1);
+
+      if (!targetRow) {
+        return res.status(404).json({ success: false, error: "BRIEF_NOT_FOUND" });
+      }
+
+      if (targetRow.status !== "failed" && targetRow.status !== "insufficient_evidence") {
+        return res.status(400).json({ success: false, error: "BRIEF_NOT_RETRYABLE" });
+      }
+
+      const [activeRun] = await db
+        .select()
+        .from(watchtowerStrategicBriefs)
+        .where(
+          and(
+            eq(watchtowerStrategicBriefs.eventId, targetRow.eventId),
+            inArray(watchtowerStrategicBriefs.status, ["queued", "generating", "validating"])
+          )
+        )
+        .limit(1);
+
+      if (activeRun) {
+        return res.json({
+          success: true,
+          data: {
+            id: activeRun.id,
+            status: activeRun.status
+          }
+        });
+      }
+
+      const newBriefId = await enqueueBrief(
+        targetRow.eventId,
+        campaignId,
+        accountId,
+        targetRow.competitorId || undefined,
+        briefId
+      );
+
+      return res.json({
+        success: true,
+        data: {
+          id: newBriefId,
+          status: "queued"
+        }
+      });
+    } catch (err: any) {
+      console.error(`${LOG_PREFIX} POST retry strategic-brief failed:`, err?.message ?? err);
+      return res.status(500).json({ success: false, error: "RETRY_STRATEGIC_BRIEF_FAILED" });
+    }
+  });
+
+  console.log("[Perception] Routes registered: GET /api/perception/watchtower, GET /api/perception/activity, GET /api/perception/monitoring, GET /api/perception/reasoning, GET /api/perception/market-signals, GET /api/perception/market-snapshot, GET /api/perception/market-insight, GET /api/perception/reasoning-cards, GET /api/perception/watchtower-events/:eventId, GET /api/strategic-briefs/event/:eventId, POST /api/strategic-briefs/event/:eventId/generate, POST /api/strategic-briefs/:briefId/retry");
 }

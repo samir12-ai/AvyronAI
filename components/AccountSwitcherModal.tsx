@@ -16,7 +16,8 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useAuth, SavedAccount } from '@/context/AuthContext';
 
-function getInitials(email: string): string {
+function getInitials(email?: string): string {
+  if (!email) return '??';
   const parts = email.split('@')[0].split(/[._-]/);
   if (parts.length >= 2) {
     return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -24,7 +25,8 @@ function getInitials(email: string): string {
   return email.slice(0, 2).toUpperCase();
 }
 
-function getAvatarColor(email: string): string {
+function getAvatarColor(email?: string): string {
+  if (!email) return '#7C3AED';
   const colors = ['#7C3AED', '#2563EB', '#059669', '#D97706', '#DC2626', '#7C3AED', '#0891B2'];
   let hash = 0;
   for (let i = 0; i < email.length; i++) {
@@ -213,7 +215,7 @@ function AccountRow({
 
       <View style={styles.rowContent}>
         <Text style={[styles.rowEmail, { color: colors.text }]} numberOfLines={1}>
-          {account.email}
+          {account.email || 'Unknown User'}
         </Text>
         <View style={styles.rowMeta}>
           <View style={[styles.badge, { backgroundColor: badge.bg }]}>

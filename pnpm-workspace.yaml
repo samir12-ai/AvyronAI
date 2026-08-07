@@ -1,0 +1,6 @@
+allowBuilds:
+  '@google/genai': true
+  esbuild: true
+  playwright-chromium: true
+  protobufjs: true
+  unrs-resolver: true

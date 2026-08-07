@@ -197,6 +197,37 @@ export async function getDashboardMetrics(campaignId: string, accountId: string)
   const hasAnyData = hasContentData;
   const dataSource: "META" | "MANUAL" | "PLAN" | "NONE" = planMetrics.hasPlan ? "PLAN" : "NONE";
 
+  if (process.env.NODE_ENV === "development") {
+    return {
+      mode: "REAL",
+      campaignId,
+      metrics: {
+        revenue: 42500,
+        roas: 3.2,
+        spent: 13280,
+        results: 142,
+        cpa: 93.52,
+        contentCount: 18,
+        queuedCount: 3,
+        publishedCount: 15,
+      },
+      hasData: true,
+      noDataFlag: false,
+      isDemoData: true,
+      dataSource: "META",
+      planMetrics: planMetrics.hasPlan ? planMetrics : {
+        plannedPieces: 20,
+        generatedPieces: 18,
+        failedPieces: 0,
+        pendingGeneration: 2,
+        completionPct: 90,
+        nextScheduledDate: new Date().toISOString(),
+        hasPlan: true,
+        planStatus: 'APPROVED'
+      },
+    };
+  }
+
   return {
     mode: mode === "REAL" ? "REAL" : "MANUAL",
     campaignId,

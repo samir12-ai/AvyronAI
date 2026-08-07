@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { getApiUrl, authFetch } from "@/lib/query-client";
 import type { WatchtowerLine, ActivityEvent, BlockedReason } from "@shared/perception-translator";
 export type { WatchtowerLine, ActivityEvent, BlockedReason } from "@shared/perception-translator";
@@ -128,12 +128,15 @@ export interface DnaEnrichmentPendingResponse {
 
 // ── Market signals (confirmed Watchtower semantic shift events) ───────────────
 export interface MarketSignal {
+  id: string;
+  status: string;
   kind: string;
   label: string;
   severity: "mild" | "medium" | "major";
   scope: "single_competitor" | "several_competitors" | "market_wide";
   scopeCompetitorCount: number;
   competitor: string | null;
+  competitorIds?: string[];
   evidence: string[];
   detectedAt: string | null;
 }
@@ -286,13 +289,117 @@ export function useMarketSnapshot(campaignId: string | null | undefined, windowD
   });
 }
 
-export function useDnaEnrichment(campaignId: string | null | undefined) {
+// ── Strategic Briefs (Watchtower Strategic Interpretation Layer) ────────────────
+export interface StrategicBriefResponse {
+  success: boolean;
+  data: {
+    id?: string;
+    eventId: string;
+    status: "awaiting_analysis" | "queued" | "generating" | "validating" | "ready" | "insufficient_evidence" | "failed";
+    brief?: {
+      eventId: string;
+      executiveSummary: string;
+      strategicInterpretation: string;
+      likelyStrategicObjective: string;
+      directionOfMovement: string;
+      affectedStrategyAreas: string[];
+      impactOnOurStrategy: string;
+      marketSignificance: string;
+      strategicImportance: "low" | "medium" | "high";
+      recommendation: "ignore" | "monitor" | "review";
+      modelProposedConfidence: number;
+      evidenceRefs: string[];
+      missingEvidence: string[];
+      assumptions: string[];
+      claims: Array<{
+        claimId: string;
+        claimText: string;
+        claimType: string;
+        evidenceRefs: string[];
+        criticality: "critical" | "secondary";
+        factuality: "observed" | "calculated" | "inferred";
+      }>;
+    };
+    evidenceRegistry?: Array<{
+      ref: string;
+      origin: string;
+      timestamp: string;
+      engine: string;
+      table: string;
+      recordId: string | null;
+      factType: "observed" | "calculated" | "inferred";
+      age: string;
+      freshnessStatus: string;
+      confidence: string | null;
+      relevanceScore: number;
+      inclusionReason: string;
+      detail: string;
+      label: string;
+    }>;
+    contextLineage?: Array<{
+      recordId: string;
+      table: string;
+      engine: string;
+      verdict: "included" | "excluded";
+      exclusionReason: string | null;
+      relevanceScore: number;
+      freshnessState: string;
+      tokenCostEstimate: number;
+    }>;
+    sourceVersions?: Record<string, string>;
+    finalValidatedConfidence?: number;
+    modelProposedConfidence?: number;
+    confidenceAdjustmentReasons?: string[];
+    completedAt?: string | null;
+    isLatest?: boolean;
+    failureCode?: string | null;
+    failureDetails?: {
+      stage: string;
+      message: string;
+      retryability: boolean;
+      timestamp: string;
+      category: string;
+    } | null;
+  };
+}
+
+async function postJson<T>(path: string, body?: any): Promise<T> {
+  const res = await authFetch(new URL(path, getApiUrl()).toString(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  const data = await res.json();
+  if (!data?.success) throw new Error(`${path} not-success`);
+  return data as T;
+}
+
+export function useStrategicBrief(campaignId: string | null | undefined, eventId: string | null | undefined) {
   const active = useIsAppActive();
-  return useQuery<DnaEnrichmentPendingResponse>({
-    queryKey: ["/api/dna-enrichment/pending", campaignId],
-    queryFn: () => fetchJson<DnaEnrichmentPendingResponse>(`/api/dna-enrichment/pending?campaignId=${campaignId}`),
-    enabled: !!campaignId,
-    staleTime: 2 * 60_000,
-    refetchInterval: active ? 2 * 60_000 : false,
+  return useQuery<StrategicBriefResponse>({
+    queryKey: ["/api/strategic-briefs/event", campaignId, eventId],
+    queryFn: () => fetchJson<StrategicBriefResponse>(`/api/strategic-briefs/event/${eventId}?campaignId=${campaignId}`),
+    enabled: !!campaignId && !!eventId,
+    staleTime: 10 * 1000, // Poll more frequently while building
+    refetchInterval: (data) => {
+      const status = data?.data?.status;
+      if (status === "queued" || status === "generating" || status === "validating") {
+        return active ? 3000 : false; // Poll every 3s if app active and job in progress
+      }
+      return false; // Stop polling when in final state
+    },
+  });
+}
+
+export function useGenerateStrategicBrief(campaignId: string | null | undefined, eventId: string | null | undefined) {
+  return useMutation<any, Error, void>({
+    mutationFn: () => postJson<any>(`/api/strategic-briefs/event/${eventId}/generate?campaignId=${campaignId}`),
+  });
+}
+
+export function useRetryStrategicBrief(campaignId: string | null | undefined, briefId: string | null | undefined) {
+  return useMutation<any, Error, void>({
+    mutationFn: () => postJson<any>(`/api/strategic-briefs/${briefId}/retry?campaignId=${campaignId}`),
   });
 }

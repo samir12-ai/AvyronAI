@@ -89,7 +89,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       if (!inIntro) {
         router.replace('/intro');
       }
-    } else if (!isAccessActive) {
+    } else if (!isAccessActive && process.env.NODE_ENV !== "development") {
       if (!inUpgrade) {
         router.replace('/upgrade');
       }

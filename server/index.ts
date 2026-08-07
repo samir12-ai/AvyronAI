@@ -24,6 +24,7 @@ import {
 } from "./continuity";
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startRevisitScheduler, stopRevisitScheduler } from "./revisit-scheduler";
+import { startWatchtowerScheduler, stopWatchtowerScheduler } from "./watchtower/scheduler";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { stopQueueProcessor as stopMiQueueProcessor } from "./market-intelligence-v3/fetch-orchestrator";
 import { runAllHealthChecks } from "./meta-token-manager";
@@ -1602,6 +1603,7 @@ function setupErrorHandler(app: express.Application) {
     captureException(err, { phase: "boot-migrations" });
     // Pass-11: explicit flush instead of arbitrary 500ms wait — guarantees
     // the boot-failure event reaches Sentry before the process dies.
+    stopWatchtowerScheduler();
     await flushSentry(2000);
     process.exit(1);
   }
@@ -1620,6 +1622,10 @@ function setupErrorHandler(app: express.Application) {
       // snapshots). Lives outside autonomous-worker on purpose: revisits must
       // run regardless of autopilot state. REVISIT_SCHEDULER_DISABLED=true to disable.
       startRevisitScheduler();
+      
+      // Watchtower Phase 2 - Continuous Monitoring Scheduler
+      startWatchtowerScheduler();
+
       startSnapshotCleanupWorker();
       // Seal #13 / Track #1 — operational continuity heartbeat. Hourly
       // tick + idempotent runBoss invocation per campaign. First tick
@@ -1802,6 +1808,7 @@ function setupErrorHandler(app: express.Application) {
     stopAutonomousWorker();
     await stopPublishWorker();
     await stopRevisitScheduler();
+    stopWatchtowerScheduler();
     stopSnapshotCleanupWorker();
     await stopContinuityScheduler();
     await stopContinuitySupervisor();

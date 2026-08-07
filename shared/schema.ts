@@ -1938,6 +1938,7 @@ export const miSnapshots = pgTable("mi_snapshots", {
   jobId: varchar("job_id").notNull(),
   competitorHash: varchar("competitor_hash", { length: 16 }),
   version: integer("version").notNull().default(1),
+  includedCompetitorIds: text("included_competitor_ids"),
   competitorData: text("competitor_data"),
   signalData: text("signal_data"),
   intentData: text("intent_data"),
@@ -2010,8 +2011,18 @@ export const miRefreshSchedule = pgTable("mi_refresh_schedule", {
   volatilityIndex: doublePrecision("volatility_index").default(0),
   lastRefreshAt: timestamp("last_refresh_at"),
   refreshReason: text("refresh_reason"),
+  retryCount: integer("retry_count").notNull().default(0),
+  status: text("status").notNull().default("active"),
+  claimedAt: timestamp("claimed_at"),
+  claimedBy: text("claimed_by"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  uniqueCompetitorSchedule: uniqueIndex("mi_refresh_schedule_unique_idx").on(
+    table.accountId,
+    table.campaignId,
+    table.competitorId
+  )
+}));
 
 export type MiRefreshSchedule = typeof miRefreshSchedule.$inferSelect;
 
@@ -3393,6 +3404,12 @@ export const pipelineChangeEvents = pgTable("pipeline_change_events", {
   // Required so market scope counts only competitors moving toward the SAME destination,
   // not merely the same change kind.
   toValue: text("to_value"),
+  // Architectural Finalization fields:
+  status: text("status").notNull().default("candidate"), // first_observation, candidate, confirmed, archived, dismissed, superseded
+  updatedAt: timestamp("updated_at").defaultNow(),
+  engineVersion: text("engine_version").notNull().default("v1"),
+  classifierVersion: text("classifier_version").notNull().default("v1"),
+  watchtowerVersion: text("watchtower_version").notNull().default("v1"),
 });
 
 export type PipelineChangeEvent = typeof pipelineChangeEvents.$inferSelect;
@@ -3910,3 +3927,57 @@ export const ciCompetitorRevisions = pgTable(
   }),
 );
 export type CiCompetitorRevisionRow = typeof ciCompetitorRevisions.$inferSelect;
+
+export const watchtowerStrategicBriefs = pgTable(
+  "watchtower_strategic_briefs",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    eventId: varchar("event_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    competitorId: varchar("competitor_id"),
+    status: varchar("status").notNull(), // 'queued' | 'generating' | 'validating' | 'ready' | 'insufficient_evidence' | 'failed'
+    brief: jsonb("brief"),
+    evidenceRegistry: jsonb("evidence_registry"),
+    contextLineage: jsonb("context_lineage"),
+    sourceVersions: jsonb("source_versions"),
+    deterministicViolations: jsonb("deterministic_violations"),
+    judgeResult: jsonb("judge_result"),
+    modelProposedConfidence: doublePrecision("model_proposed_confidence"),
+    finalValidatedConfidence: doublePrecision("final_validated_confidence"),
+    confidenceAdjustmentReasons: jsonb("confidence_adjustment_reasons"),
+    contextFingerprint: varchar("context_fingerprint"),
+    generatorVersion: varchar("generator_version").notNull().default("v1"),
+    promptVersion: varchar("prompt_version").notNull().default("v1"),
+    judgeVersion: varchar("judge_version").notNull().default("v1"),
+    evidenceVersion: varchar("evidence_version").notNull().default("v1"),
+    failureCode: varchar("failure_code"),
+    failureDetails: jsonb("failure_details"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    isLatest: boolean("is_latest").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    supersedesBriefId: varchar("supersedes_brief_id"),
+  },
+  (table) => ({
+    eventIdIdx: index("idx_wtsb_event_id").on(table.eventId),
+    tenantIdx: index("idx_wtsb_tenant").on(table.accountId, table.campaignId),
+    statusIdx: index("idx_wtsb_status").on(table.status),
+    latestIdx: index("idx_wtsb_latest").on(table.eventId, table.isLatest),
+    uqIdempotency: uniqueIndex("uq_wtsb_idempotency").on(
+      table.eventId,
+      table.contextFingerprint,
+      table.promptVersion,
+      table.generatorVersion,
+      table.judgeVersion,
+      table.evidenceVersion
+    ),
+    uqOneLatest: uniqueIndex("uq_wtsb_one_latest_per_event").on(table.eventId).where(sql`is_latest = TRUE`),
+  })
+);
+
+export type WatchtowerStrategicBriefRow = typeof watchtowerStrategicBriefs.$inferSelect;
+export type WatchtowerStrategicBriefInsert = typeof watchtowerStrategicBriefs.$inferInsert;
+

@@ -8,20 +8,25 @@
  * validation gating.
  *
  * Hard rules:
- *   - Snapshot reuse (isCacheHit=true) does NOT count as a fresh fetch.
  *   - Two-fetch gate: a candidate (validated_at=null) is promoted ONLY when a
- *     LATER independent fresh fetch re-detects the same kind of change against
- *     the candidate's ORIGINAL BASELINE snapshot. Because every fresh fetch
- *     appends a new snapshot, comparing only the newest consecutive pair would
- *     make promotion unreachable for a persisting change (the persisted state
- *     diffs clean against itself). Confirmation therefore re-classifies
- *     current-state vs candidate-baseline.
- *   - Same-snapshot re-execution NEVER confirms: the confirming snapshot ID
- *     must differ from the candidate's original current_snapshot_id.
- *   - Reversion before confirmation NEVER promotes: if the current state no
- *     longer differs from the candidate's baseline (or a frequency shift
- *     flipped direction), the candidate is closed (deleted with a log line),
- *     mirroring the INVARIANT-RETRY claim-row deletion pattern.
+ *     LATER independent fetch execution re-detects the same kind of change
+ *     against the candidate's ORIGINAL BASELINE snapshot.
+ *   - Independence is proven by runId, not snapshot identity. A cache-hit
+ *     fetch that reuses the same snapshot IS a valid confirming observation
+ *     because it represents a separate successful execution that found the
+ *     same persisted market state. Snapshot deduplication is a storage
+ *     optimisation; fetch independence is an execution property.
+ *   - Same-run re-execution NEVER confirms: the confirming runId must differ
+ *     from the candidate's original runId.
+ *   - Confirmation delay: the candidate must have been created at least
+ *     CONFIRMATION_DELAY_HOURS ago before a confirming run can promote it.
+ *   - Reversion before confirmation archives the candidate (not deletes):
+ *     if the current state no longer differs from the candidate's baseline
+ *     (or a frequency shift flipped direction), the candidate is archived
+ *     with a deterministic reason code preserving historical lineage.
+ *   - Cache-hit fetches participate in Phase A (candidate maintenance) but
+ *     are excluded from Phase B (new candidate creation) to prevent
+ *     redundant duplicate events from identical payloads.
  *   - Candidate creation is idempotent at the DB level: unique partial index
  *     uq_pce_open_candidate on (competitor_id, campaign_id, kind) WHERE
  *     validated_at IS NULL, insert via onConflictDoNothing (migration 043).
@@ -35,6 +40,8 @@
 import { db } from "../db";
 import { pipelineSnapshots, pipelineChangeEvents, competitorPostClassifications, ciCompetitorPosts, ciCompetitors } from "@shared/schema";
 import { and, eq, isNull, isNotNull, desc, sql, count, ne } from "drizzle-orm";
+import { scheduleConfirmationFetch, CONFIRMATION_DELAY_HOURS } from "./scheduler";
+import { enqueueBrief } from "./strategic-brief-runner";
 
 const LOG_PREFIX = "[Watchtower]";
 
@@ -241,6 +248,8 @@ async function classifySemanticChanges(
     const beforeShare = semanticShare(beforeDist, beforeTop);
     const afterShare  = semanticShare(afterDist,  afterTop);
 
+    console.log(`[DEBUG] dim=${dim.label} prevSnap=${previousSnapTime.toISOString()} currSnap=${currentSnapTime.toISOString()} beforeRows=${beforeRows.length} afterRows=${afterRows.length}`);
+
     if (beforeTop !== afterTop) {
       // Top value completely changed — highest signal.
       const beforeShareOfNew = semanticShare(beforeDist, afterTop);
@@ -309,6 +318,26 @@ interface WatchtowerEvidence {
   curr: unknown;
   /** Set at promotion time — the snapshot that confirmed the candidate. */
   confirmedBySnapshotId?: string;
+  /** Run ID of the original observation that created this candidate. */
+  originalRunId?: string;
+  /** Run ID of the confirming fetch execution. */
+  confirmedByRunId?: string;
+  /** Whether the confirming fetch reused a cached snapshot. */
+  confirmedByCacheHit?: boolean;
+  /** Decision code explaining the confirmation outcome. */
+  confirmationDecision?: string;
+  /** Human-readable reason for the confirmation decision. */
+  confirmationDecisionReason?: string;
+  /** ISO timestamp of the original candidate creation. */
+  originalObservationTimestamp?: string;
+  /** ISO timestamp of the confirming fetch. */
+  confirmationTimestamp?: string;
+  /** Archive/rejection reason code when a candidate is closed. */
+  archiveReason?: string;
+  /** Run ID that caused archive/rejection. */
+  archivedByRunId?: string;
+  /** For reversion events — ID of the prior confirmed event being reverted. */
+  revertedFromEventId?: string;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -454,9 +483,12 @@ export function classifyWatchtowerChanges(
   return changes;
 }
 
-// ── Phase A: candidate maintenance (promotion / reversion) ───────────────────
+// ── Phase A: candidate maintenance (promotion / reversion / archival) ────────
 
-const CANDIDATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+export const CANDIDATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+/** Minimum elapsed time before a confirming run can promote a candidate.
+ *  Derived from the scheduler's CONFIRMATION_DELAY_HOURS configuration. */
+const CONFIRMATION_DELAY_MS = CONFIRMATION_DELAY_HOURS * 60 * 60 * 1000;
 
 interface OpenCandidateRow {
   id: string;
@@ -465,6 +497,10 @@ interface OpenCandidateRow {
   currentSnapshotId: string | null;
   evidence: string | null;
   createdAt: Date | null;
+  /** Run ID of the fetch execution that created this candidate. */
+  runId: string;
+  /** Current lifecycle status of the candidate. */
+  status: string;
 }
 
 /**
@@ -484,7 +520,7 @@ interface OpenCandidateRow {
  */
 async function maintainOpenCandidates(
   input: WatchtowerOrchestratorInput,
-  currentSnap: { id: string; createdAt: Date | null },
+  currentSnap: { id: string; collectedAt: Date | null },
   currentPayload: Record<string, unknown>,
 ): Promise<void> {
   const { campaignId, competitorId } = input;
@@ -500,6 +536,8 @@ async function maintainOpenCandidates(
         currentSnapshotId: pipelineChangeEvents.currentSnapshotId,
         evidence: pipelineChangeEvents.evidence,
         createdAt: pipelineChangeEvents.createdAt,
+        runId: pipelineChangeEvents.runId,
+        status: pipelineChangeEvents.status,
       })
       .from(pipelineChangeEvents)
       .where(
@@ -507,6 +545,7 @@ async function maintainOpenCandidates(
           eq(pipelineChangeEvents.competitorId, competitorId),
           eq(pipelineChangeEvents.campaignId, campaignId),
           isNotNull(pipelineChangeEvents.kind),
+          eq(pipelineChangeEvents.status, "candidate"),
           isNull(pipelineChangeEvents.validatedAt),
         ),
       );
@@ -529,26 +568,39 @@ async function maintainOpenCandidates(
     // Close it to release the uq_pce_open_candidate slot — otherwise every
     // future detection of this kind dedupes into silence.
     if (candidate.createdAt && candidate.createdAt < windowStart) {
-      await closeCandidate(candidate.id, candidate.kind, competitorId, "expired_unconfirmed_30d");
+      await archiveCandidate(candidate.id, candidate.kind, competitorId, "expired_unconfirmed_30d");
       continue;
     }
 
-    // Independence: the confirming observation must come from a NEWER snapshot
-    // than the one that created the candidate. Re-running over the same
-    // snapshot is not a second fetch (W-1 §D).
-    if (candidate.currentSnapshotId === currentSnap.id) {
+    // Independence: the confirming observation must come from a SEPARATE FETCH EXECUTION
+    // than the one that created the candidate. Re-running the exact same runId is not a second fetch.
+    if (candidate.runId === input.runId) {
       console.log(
-        `${LOG_PREFIX} CANDIDATE_SAME_SNAPSHOT_SKIPPED eventId=${candidate.id} kind=${candidate.kind} snapshotId=${currentSnap.id}`,
+        `${LOG_PREFIX} CANDIDATE_SAME_RUN_SKIPPED eventId=${candidate.id} kind=${candidate.kind} runId=${input.runId}`,
       );
       continue;
     }
 
+    // Delay constraint: The new fetch must have occurred sufficiently after the candidate was created.
+    if (candidate.createdAt && Date.now() - candidate.createdAt.getTime() < CONFIRMATION_DELAY_MS) {
+       console.log(
+         `${LOG_PREFIX} CANDIDATE_DELAY_NOT_MET eventId=${candidate.id} kind=${candidate.kind}`
+       );
+       continue;
+    }
+
+    if (input.isCacheHit) {
+      console.log(
+        `${LOG_PREFIX} CANDIDATE_CACHE_HIT_REUSED eventId=${candidate.id} kind=${candidate.kind} runId=${input.runId}`
+      );
+    }
+
     // Load the candidate's original baseline snapshot.
-    // createdAt is needed for semantic candidate re-classification (time windows).
-    let baselineRow: { id: string; payload: string | null; createdAt: Date | null } | undefined;
+    // collectedAt is needed for semantic candidate re-classification (time windows).
+    let baselineRow: { id: string; payload: string | null; collectedAt: Date | null } | undefined;
     try {
       [baselineRow] = await db
-        .select({ id: pipelineSnapshots.id, payload: pipelineSnapshots.payload, createdAt: pipelineSnapshots.createdAt })
+        .select({ id: pipelineSnapshots.id, payload: pipelineSnapshots.payload, collectedAt: pipelineSnapshots.collectedAt })
         .from(pipelineSnapshots)
         .where(eq(pipelineSnapshots.id, candidate.baselineSnapshotId))
         .limit(1);
@@ -563,9 +615,9 @@ async function maintainOpenCandidates(
     // distributions across the two time windows — they don't use snapshot payloads.
     let vsBaseline: WatchtowerChange[];
     if (SEMANTIC_CHANGE_KINDS.has(candidate.kind)) {
-      const baselineCreatedAt = baselineRow?.createdAt;
-      const currentCreatedAt = currentSnap.createdAt;
-      if (!baselineCreatedAt || !currentCreatedAt) {
+      const baselineCollectedAt = baselineRow?.collectedAt;
+      const currentCollectedAt = currentSnap.collectedAt;
+      if (!baselineCollectedAt || !currentCollectedAt) {
         console.error(
           `${LOG_PREFIX} SEMANTIC_CANDIDATE_TIMESTAMPS_MISSING eventId=${candidate.id} kind=${candidate.kind} — leaving open to expire`,
         );
@@ -574,8 +626,8 @@ async function maintainOpenCandidates(
       try {
         vsBaseline = await classifySemanticChanges(
           competitorId,
-          baselineCreatedAt,
-          currentCreatedAt,
+          baselineCollectedAt,
+          currentCollectedAt,
           candidate.baselineSnapshotId,
           currentSnap.id,
         );
@@ -617,7 +669,7 @@ async function maintainOpenCandidates(
 
     if (!match) {
       // State reverted to baseline before confirmation → close, never promote.
-      await closeCandidate(candidate.id, candidate.kind, competitorId, "reverted_to_baseline");
+      await archiveCandidate(candidate.id, candidate.kind, competitorId, "reverted_to_baseline", input.runId);
       continue;
     }
 
@@ -636,7 +688,7 @@ async function maintainOpenCandidates(
       const candidateSign = Math.sign(storedCurr - storedPrev);
       const confirmingSign = Math.sign((match.currValue as number) - (match.prevValue as number));
       if (candidateSign !== confirmingSign) {
-        await closeCandidate(candidate.id, candidate.kind, competitorId, "direction_flipped");
+        await archiveCandidate(candidate.id, candidate.kind, competitorId, "direction_flipped", input.runId);
         continue;
       }
     }
@@ -703,10 +755,17 @@ async function maintainOpenCandidates(
         prev: match.prevValue,
         curr: match.currValue,
         confirmedBySnapshotId: currentSnap.id,
+        originalRunId: candidate.runId,
+        confirmedByRunId: input.runId,
+        confirmedByCacheHit: input.isCacheHit,
+        confirmationDecision: "CONFIRMED",
+        originalObservationTimestamp: candidate.createdAt?.toISOString(),
+        confirmationTimestamp: new Date().toISOString(),
       };
       await db
         .update(pipelineChangeEvents)
         .set({
+          status: "confirmed",
           validatedAt: new Date(),
           severity: match.severity,
           evidence: JSON.stringify(confirmedEvidence),
@@ -715,10 +774,20 @@ async function maintainOpenCandidates(
           scopeCompetitorCount: totalConfirmedCount,
           toValue: toValueStr,
         })
-        .where(and(eq(pipelineChangeEvents.id, candidate.id), isNull(pipelineChangeEvents.validatedAt)));
+        .where(and(eq(pipelineChangeEvents.id, candidate.id), eq(pipelineChangeEvents.status, "candidate")));
       console.log(
         `${LOG_PREFIX} MARKET_EVENT_CONFIRMED eventId=${candidate.id} competitorId=${competitorId} kind=${candidate.kind} campaign=${input.campaignId} confirmedBy=${currentSnap.id} scope=${scope} scopeCount=${totalConfirmedCount} toValue=${toValueStr ?? "null"}`,
       );
+
+      // Auto-generate strategic brief if configured
+      const sev = (match.severity || "").toLowerCase();
+      const scp = (scope || "").toLowerCase();
+      if (sev === "high" || sev === "major" || scp === "market_wide") {
+        console.log(`${LOG_PREFIX} Auto-generating strategic brief for event ${candidate.id}`);
+        enqueueBrief(candidate.id, input.campaignId, input.accountId, competitorId).catch((err) => {
+          console.error(`${LOG_PREFIX} Auto-generation failed for event ${candidate.id}:`, err);
+        });
+      }
     } catch (err) {
       console.error(
         `${LOG_PREFIX} MARKET_EVENT_PERSIST_FAILED eventId=${candidate.id} reason=confirmation_update_failed detail=${(err as Error).message}`,
@@ -727,22 +796,42 @@ async function maintainOpenCandidates(
   }
 }
 
-async function closeCandidate(
+async function archiveCandidate(
   eventId: string,
   kind: string,
   competitorId: string,
   reason: string,
+  runId?: string
 ): Promise<void> {
   try {
+    // Update the evidence to persist why it was archived and when.
+    // Fetch current evidence to preserve it.
+    const [row] = await db
+      .select({ evidence: pipelineChangeEvents.evidence })
+      .from(pipelineChangeEvents)
+      .where(eq(pipelineChangeEvents.id, eventId));
+      
+    let ev: WatchtowerEvidence = parseEvidence(row?.evidence) || { notes: [], prev: null, curr: null };
+    ev.archiveReason = reason;
+    ev.archivedByRunId = runId;
+    ev.confirmationDecision = "REJECTED";
+    ev.confirmationDecisionReason = reason;
+    ev.confirmationTimestamp = new Date().toISOString();
+
     await db
-      .delete(pipelineChangeEvents)
-      .where(and(eq(pipelineChangeEvents.id, eventId), isNull(pipelineChangeEvents.validatedAt)));
+      .update(pipelineChangeEvents)
+      .set({
+        status: "archived",
+        evidence: JSON.stringify(ev),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(pipelineChangeEvents.id, eventId), eq(pipelineChangeEvents.status, "candidate")));
     console.log(
-      `${LOG_PREFIX} MARKET_EVENT_CANDIDATE_CLOSED eventId=${eventId} kind=${kind} competitorId=${competitorId} reason=${reason}`,
+      `${LOG_PREFIX} MARKET_EVENT_CANDIDATE_ARCHIVED eventId=${eventId} kind=${kind} competitorId=${competitorId} reason=${reason}`,
     );
   } catch (err) {
     console.error(
-      `${LOG_PREFIX} MARKET_EVENT_PERSIST_FAILED eventId=${eventId} reason=candidate_close_failed detail=${(err as Error).message}`,
+      `${LOG_PREFIX} MARKET_EVENT_PERSIST_FAILED eventId=${eventId} reason=candidate_archive_failed detail=${(err as Error).message}`,
     );
   }
 }
@@ -761,6 +850,55 @@ async function createCandidate(
       prev: change.prevValue,
       curr: change.currValue,
     };
+
+    // Reversion Memory Audit: Check if this new change reverts to a historically confirmed state.
+    try {
+      const [lastConfirmed] = await db
+        .select({ id: pipelineChangeEvents.id, evidence: pipelineChangeEvents.evidence })
+        .from(pipelineChangeEvents)
+        .where(
+          and(
+            eq(pipelineChangeEvents.competitorId, competitorId),
+            eq(pipelineChangeEvents.campaignId, campaignId),
+            eq(pipelineChangeEvents.kind, change.kind),
+            eq(pipelineChangeEvents.status, "confirmed")
+          )
+        )
+        .orderBy(desc(pipelineChangeEvents.createdAt))
+        .limit(1);
+
+      if (lastConfirmed) {
+        const lastEv = parseEvidence(lastConfirmed.evidence);
+        let isReversion = false;
+        if (lastEv) {
+          if (SEMANTIC_CHANGE_KINDS.has(change.kind)) {
+            // Semantic reversion: the new current top value matches the previous top value.
+            const prevTop = (lastEv.prev as any)?.top;
+            const currTop = (change.currValue as any)?.top;
+            if (prevTop && currTop && prevTop === currTop) {
+              isReversion = true;
+            }
+          } else {
+            // Payload-based reversion: strict equality of values/arrays.
+            if (JSON.stringify(lastEv.prev) === JSON.stringify(change.currValue)) {
+              isReversion = true;
+            }
+          }
+        }
+
+        if (isReversion) {
+          evidence.revertedFromEventId = lastConfirmed.id;
+          // We can prepend a note to explicitly flag it in the UI/payload if needed.
+          evidence.notes = [`Reverted to previous state`, ...evidence.notes];
+          console.log(
+            `${LOG_PREFIX} REVERSION_CANDIDATE_DETECTED competitorId=${competitorId} kind=${change.kind} revertedFrom=${lastConfirmed.id}`,
+          );
+        }
+      }
+    } catch (err) {
+      console.error(`${LOG_PREFIX} REVERSION_CHECK_FAILED detail=${(err as Error).message}`);
+    }
+
     const inserted = await db
       .insert(pipelineChangeEvents)
       .values({
@@ -794,6 +932,9 @@ async function createCandidate(
     console.log(
       `${LOG_PREFIX} MARKET_EVENT_CANDIDATE_CREATED competitorId=${competitorId} kind=${change.kind} severity=${change.severity} campaign=${campaignId}`,
     );
+
+    // Watchtower Phase 2 - Confirmation Loop
+    await scheduleConfirmationFetch(accountId, campaignId, competitorId);
   } catch (err) {
     console.error(
       `${LOG_PREFIX} MARKET_EVENT_PERSIST_FAILED competitorId=${competitorId} kind=${change.kind} reason=insert_failed detail=${(err as Error).message}`,
@@ -808,22 +949,21 @@ export async function runWatchtowerOrchestrator(
 ): Promise<void> {
   const { campaignId, competitorId, isCacheHit } = input;
 
-  // Snapshot reuse does not count as an independent observation (W-1 §D).
-  if (isCacheHit) {
-    console.log(
-      `${LOG_PREFIX} SCRAPING_SNAPSHOT_REUSED competitorId=${competitorId} campaign=${campaignId} — skipping diff`,
-    );
-    return;
-  }
+  // 1. Snapshot reuse (isCacheHit=true) does NOT count as an independent 
+  // observation for NEW candidate creation (Phase B). However, it IS allowed 
+  // to evaluate EXISTING candidates (Phase A) because a cache hit proves the 
+  // original state persisted successfully.
+  // We shifted this early-return from the top of the function to sit between 
+  // Phase A and Phase B.
 
   // Load the two most recent pipeline_snapshots for this competitor.
-  let snapshots: Array<{ id: string; payload: string | null; createdAt: Date | null }>;
+  let snapshots: Array<{ id: string; payload: string | null; collectedAt: Date | null }>;
   try {
     snapshots = await db
       .select({
         id: pipelineSnapshots.id,
         payload: pipelineSnapshots.payload,
-        createdAt: pipelineSnapshots.createdAt,
+        collectedAt: pipelineSnapshots.collectedAt,
       })
       .from(pipelineSnapshots)
       .where(
@@ -833,7 +973,7 @@ export async function runWatchtowerOrchestrator(
           eq(pipelineSnapshots.lane, "competitor"),
         ),
       )
-      .orderBy(desc(pipelineSnapshots.createdAt))
+      .orderBy(desc(pipelineSnapshots.collectedAt))
       .limit(2);
   } catch (err) {
     console.error(
@@ -861,10 +1001,20 @@ export async function runWatchtowerOrchestrator(
   // Phase A — maintain open candidates against the fresh state (promotion,
   // reversion-close, direction-flip-close). Runs before Phase B so a promoted
   // candidate is no longer "open" when new pairwise changes are considered.
+  // We pass the new execution metadata to guarantee fetch independence.
   await maintainOpenCandidates(input, currentSnap, currentPayload);
 
   // Phase B — pairwise detection between the two newest snapshots creates NEW
-  // candidates. Requires a previous snapshot.
+  // candidates. 
+  // Cache hits are excluded from Phase B to prevent redundant events.
+  if (isCacheHit) {
+    console.log(
+      `${LOG_PREFIX} SCRAPING_SNAPSHOT_REUSED competitorId=${competitorId} campaign=${campaignId} — skipping diff for new candidates`,
+    );
+    return;
+  }
+
+  // Requires a previous snapshot for new diffs.
   if (snapshots.length < 2) {
     console.log(
       `${LOG_PREFIX} FIRST_OBSERVATION competitorId=${competitorId} campaign=${campaignId} snapshotCount=1`,
@@ -901,12 +1051,12 @@ export async function runWatchtowerOrchestrator(
   // goal, CTA strategy — driven by competitor_post_classifications distributions.
   // Non-blocking: a failure produces [] so the payload-based changes still emit.
   let semanticChanges: WatchtowerChange[] = [];
-  if (currentSnap.createdAt && previousSnap.createdAt) {
+  if (currentSnap.collectedAt && previousSnap.collectedAt) {
     try {
       semanticChanges = await classifySemanticChanges(
         competitorId,
-        previousSnap.createdAt,
-        currentSnap.createdAt,
+        previousSnap.collectedAt,
+        currentSnap.collectedAt,
         previousSnap.id,
         currentSnap.id,
       );
