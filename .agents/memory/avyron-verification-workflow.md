@@ -32,6 +32,12 @@ description: How to typecheck and how to verify orchestrator/engine behaviour in
 - Several suites pin **source shapes** (literal call-signature strings read via `readFileSync` on scraper files). Any intentional signature change must update those pin assertions in lockstep — a red pin test after a refactor is usually the pin, not the code.
 - The boot-hardening **cascade-drift sentinel** (account_id tables vs CASCADE_TABLES∪CASCADE_EXEMPT) can be red from drift that predates your change. Prove pre-existence by replaying its regex against `git show HEAD:shared/schema.ts` before touching anything. Deletion-by-default (CASCADE_TABLES) is the GDPR-safe classification; CASCADE_EXEMPT is legal-hold only. Nullable account_id rows survive the `WHERE account_id=$1` delete automatically.
 
+# UI verification (Expo web)
+
+- Frontend serves on port 8081 (Expo web), backend on 5000; the backend dev-proxies non-API routes to Expo.
+- For Playwright/testing-subagent UI runs, log in with the dev preview backdoor: `dev@avyron.test` / `preview` (maps to the MarketMindAI dev account) — no real credentials needed.
+- For API-level verification, mint a JWT with `.local/scripts/mint-jwt.ts` (signed with SESSION_SECRET, aud `avyron-ai`, iss `avyron-auth`).
+
 # Synthetic-audit harness gotchas (Audit Runner)
 
 - Background bash processes do NOT survive between tool calls (even `setsid`/`nohup` — killed, 0-byte logs). Long runs MUST go through the `Audit Runner` workflow; full logs land at `/tmp/logs/Audit_Runner_*.log` after `refresh_all_logs`.

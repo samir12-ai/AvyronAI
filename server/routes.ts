@@ -42,6 +42,7 @@ import { registerAgentRoutes } from "./agent/routes";
 import { registerChatRoutes } from "./replit_integrations/chat";
 import { registerContentDnaRoutes } from "./content-dna-routes";
 import { registerPerformanceFeedbackRoutes } from "./performance-feedback/routes";
+import { registerPerformanceConsoleRoute } from "./performance-loop/console-route";
 import { registerRootBundleRoutes } from "./root-bundle";
 import { registerGoalMathRoutes } from "./goal-math";
 import { registerPlanGateRoutes } from "./plan-gate";
@@ -1545,6 +1546,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerChatRoutes(app);
   registerContentDnaRoutes(app);
   registerPerformanceFeedbackRoutes(app);
+  registerPerformanceConsoleRoute(app);
   registerRootBundleRoutes(app);
   registerGoalMathRoutes(app);
   registerPlanGateRoutes(app);

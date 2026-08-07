@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { revenueEntries, adSpendEntries, leads, conversionEvents } from "@shared/schema";
-import { eq, desc, sql, gte } from "drizzle-orm";
+import { and, eq, desc, sql, gte } from "drizzle-orm";
 import { featureFlagService } from "../feature-flags";
 import { logAudit } from "../audit";
 import { requireCampaign } from "../campaign-routes";
@@ -11,13 +11,19 @@ import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 export function registerRevenueAttributionRoutes(app: Express) {
   app.get("/api/revenue", requireCampaign, async (req, res) => {
     try {
-      const accountId = resolveAccountId(req);
+      const { accountId, campaignId } = (req as any).campaignContext;
       const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
       if (!check.enabled) {
         return res.json({ entries: [], disabled: true });
       }
+      // Campaign isolation: reads are scoped to the authenticated campaign,
+      // not just the account. Legacy campaign-less rows are deliberately
+      // excluded (same doctrine as weekly_reports tenant closure).
       const result = await db.select().from(revenueEntries)
-        .where(eq(revenueEntries.accountId, accountId))
+        .where(and(
+          eq(revenueEntries.accountId, accountId),
+          eq(revenueEntries.campaignId, campaignId),
+        ))
         .orderBy(desc(revenueEntries.createdAt))
         .limit(100);
       res.json({ entries: result, safeMode: check.safeMode });
@@ -26,20 +32,25 @@ export function registerRevenueAttributionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/revenue", async (req, res) => {
+  app.post("/api/revenue", requireCampaign, async (req, res) => {
     try {
-      const accountId = resolveAccountId(req);
+      const { accountId, campaignId: contextCampaignId } = (req as any).campaignContext;
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.status(403).json({ error: "Revenue Attribution is not enabled" });
       }
-      const { leadId, amount, source, postId, campaignId, ctaVariantId, funnelStage, notes } = req.body;
+      const { leadId, amount, source, postId, ctaVariantId, funnelStage, notes } = req.body;
+      // Campaign isolation: writes bind to the authenticated campaign
+      // context. A body campaignId that disagrees with the context is
+      // rejected loudly — no silent cross-campaign write escape, even
+      // within the same account.
+      if (req.body.campaignId && req.body.campaignId !== contextCampaignId) {
+        return res.status(400).json({
+          error: "campaignId mismatch: request body names a different campaign than the authenticated campaign context",
+        });
+      }
+      const campaignId = contextCampaignId;
       if (!amount) {
         return res.status(400).json({ error: "amount is required" });
-      }
-      // Doctrine W5: campaignId is an optional FK tag; if supplied, validate.
-      if (campaignId) {
-        try { await assertCampaignBelongsTo(accountId, campaignId); }
-        catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       }
 
       const inserted = await db.insert(revenueEntries).values({

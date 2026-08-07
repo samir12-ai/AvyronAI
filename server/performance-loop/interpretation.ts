@@ -525,6 +525,211 @@ Return ONLY valid JSON matching exactly this shape (no commentary):
 
 export type InterpretationStatus = "AVAILABLE" | "UNAVAILABLE";
 
+// ---------------------------------------------------------------------------
+// Performance evidence registry — every fact handed to the LLM gets a stable
+// evidence id pointing at the persisted row it came from. Built
+// deterministically from the same PerformanceFacts object that feeds the
+// prompt, so registry and prompt can never drift.
+// ---------------------------------------------------------------------------
+
+export interface PerformanceEvidenceEntry {
+  evidenceId: string;
+  category:
+    | "CONTENT_SCORE"
+    | "BUSINESS_SCORE"
+    | "OWNED_POST"
+    | "WATCHTOWER"
+    | "MARKET_CONTEXT"
+    | "STRATEGY";
+  sourceEngine: string;
+  sourceTable: string;
+  sourceRecordId: string | null;
+  factType: "observed" | "calculated" | "inferred" | "user_entered";
+  capturedAt: string | null;
+  confidence: number | null;
+  inclusionReason: string;
+  summary: string;
+}
+
+export function buildPerformanceEvidenceRegistry(facts: PerformanceFacts): PerformanceEvidenceEntry[] {
+  const entries: PerformanceEvidenceEntry[] = [];
+  for (const r of facts.contentScores) {
+    entries.push({
+      evidenceId: `ev_cs_${r.id}`,
+      category: "CONTENT_SCORE",
+      sourceEngine: "content-scorer",
+      sourceTable: "owned_content_scores",
+      sourceRecordId: r.id,
+      factType: "calculated",
+      capturedAt: r.scoredAt ? new Date(r.scoredAt).toISOString() : null,
+      confidence: r.confidence,
+      inclusionReason: "deterministic content verdict for a plan-derived dimension in the evaluated window",
+      summary: `${r.dimension}=${r.dimensionValue} → ${r.verdict} (${r.primaryMetric ?? "no metric"}, n=${r.sampleSize}, maturity=${r.maturity})`,
+    });
+  }
+  if (facts.businessScore) {
+    const b = facts.businessScore;
+    entries.push({
+      evidenceId: `ev_bs_${b.id}`,
+      category: "BUSINESS_SCORE",
+      sourceEngine: "business-outcome-scorer",
+      sourceTable: "weekly_business_scores",
+      sourceRecordId: b.id,
+      factType: "calculated",
+      capturedAt: b.scoredAt ? new Date(b.scoredAt).toISOString() : null,
+      confidence: null,
+      inclusionReason: "weekly business verdict computed from user-entered truth (never engagement)",
+      summary: `businessVerdict=${b.businessVerdict} attribution=${b.attributionConfidence} payingCustomers=${b.payingCustomers ?? "null"}`,
+    });
+  }
+  for (const p of facts.evidencePosts) {
+    entries.push({
+      evidenceId: `ev_op_${p.ownedPostId}`,
+      category: "OWNED_POST",
+      sourceEngine: "user-channel-scraper",
+      sourceTable: "owned_posts",
+      sourceRecordId: p.ownedPostId,
+      factType: "observed",
+      capturedAt: p.postedAt,
+      confidence: null,
+      inclusionReason: "scraped owned post cited by a deterministic content score",
+      summary: `owned post ${p.ownedPostId}${p.hookText ? ` hook="${p.hookText.slice(0, 60)}"` : ""}`,
+    });
+  }
+  facts.watchtowerEvents.forEach((e, i) => {
+    entries.push({
+      evidenceId: `ev_wt_${i}`,
+      category: "WATCHTOWER",
+      sourceEngine: "watchtower",
+      sourceTable: "pipeline_change_events",
+      sourceRecordId: null,
+      factType: "observed",
+      capturedAt: e.createdAt,
+      confidence: null,
+      inclusionReason: "market event overlapping the evaluation period (confounder context)",
+      summary: `${e.kind} (${e.severity})`,
+    });
+  });
+  if (facts.productAnchor) {
+    entries.push({
+      evidenceId: "ev_anchor_product",
+      category: "MARKET_CONTEXT",
+      sourceEngine: "product-anchor",
+      sourceTable: "campaigns",
+      sourceRecordId: null,
+      factType: "observed",
+      capturedAt: null,
+      confidence: null,
+      inclusionReason: "campaign product anchor grounding specificity checks",
+      summary: `${facts.productAnchor.name} (${facts.productAnchor.type})`,
+    });
+  }
+  return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Claim-level judge records — synthesized deterministically from the gates
+// that actually ran: gate 1 (deterministic evidence judge) verified verdict
+// preservation + citations, gate 2 (interchangeability judge) validated the
+// interpretive text. No claim is marked supported unless both gates passed.
+// ---------------------------------------------------------------------------
+
+export interface PerformanceJudgeClaim {
+  claimId: string;
+  claimText: string;
+  claimType: "content_verdict" | "business_verdict" | "correlation" | "hypothesis" | "next_experiment" | "specificity";
+  criticality: "critical" | "secondary";
+  evidenceRefs: string[];
+  verdict: "supported" | "partially_supported" | "unsupported" | "contradicted";
+  violations: string[];
+  judgeReason: string;
+}
+
+export function buildJudgeClaims(
+  facts: PerformanceFacts,
+  interpretation: PerformanceInterpretation,
+): PerformanceJudgeClaim[] {
+  const claims: PerformanceJudgeClaim[] = [];
+  const scoreByKey = new Map(facts.contentScores.map((r) => [`${r.dimension}::${r.dimensionValue.toLowerCase()}`, r]));
+  interpretation.proven.contentVerdicts.forEach((cv, i) => {
+    const row = scoreByKey.get(`${cv.dimension}::${cv.dimensionValue.toLowerCase()}`);
+    claims.push({
+      claimId: `claim_cv_${i}`,
+      claimText: `${cv.dimension}=${cv.dimensionValue} → ${cv.verdict} (n=${cv.sampleSize}, ${cv.maturity})`,
+      claimType: "content_verdict",
+      criticality: "critical",
+      evidenceRefs: [
+        ...(row ? [`ev_cs_${row.id}`] : []),
+        ...cv.evidencePostIds.map((id) => `ev_op_${id}`),
+      ],
+      verdict: "supported",
+      violations: [],
+      judgeReason: "gate-1 deterministic judge verified this verdict is repeated verbatim from the persisted score row and cites only real post ids",
+    });
+  });
+  if (interpretation.proven.businessVerdict) {
+    // Grounding rule: a claim may only be "supported" when it cites at least
+    // one resolvable evidence id from the registry. Empty refs → unsupported.
+    const bvRefs = facts.businessScore ? [`ev_bs_${facts.businessScore.id}`] : [];
+    claims.push({
+      claimId: "claim_bv",
+      claimText: `business verdict ${interpretation.proven.businessVerdict} (attribution ${interpretation.proven.attributionConfidence ?? "UNKNOWN"})`,
+      claimType: "business_verdict",
+      criticality: "critical",
+      evidenceRefs: bvRefs,
+      verdict: bvRefs.length > 0 ? "supported" : "unsupported",
+      violations: bvRefs.length > 0 ? [] : ["no citable business-score evidence row"],
+      judgeReason: bvRefs.length > 0
+        ? "gate-1 deterministic judge verified the business verdict and attribution are preserved from the weekly business score row"
+        : "business verdict present but no persisted weekly business score row to cite — cannot be marked supported",
+    });
+  }
+  const corrRefs = facts.businessScore ? [`ev_bs_${facts.businessScore.id}`] : [];
+  claims.push({
+    claimId: "claim_corr",
+    claimText: interpretation.correlated.timingRelationship,
+    claimType: "correlation",
+    criticality: "secondary",
+    evidenceRefs: corrRefs,
+    verdict: corrRefs.length > 0 ? "supported" : "unsupported",
+    violations: corrRefs.length > 0 ? [] : ["no citable business-score evidence row"],
+    judgeReason: corrRefs.length > 0
+      ? "gate-1 causal-language guard confirmed this is framed as correlation (causation requires DIRECT attribution)"
+      : "correlation text passed the causal-language guard but has no citable business evidence — cannot be marked supported",
+  });
+  interpretation.hypotheses.forEach((h, i) => {
+    claims.push({
+      claimId: `claim_hyp_${i}`,
+      claimText: h.statement,
+      claimType: "hypothesis",
+      criticality: "secondary",
+      evidenceRefs: [],
+      verdict: "unsupported",
+      violations: ["hypothesis carries no direct evidence refs by definition"],
+      judgeReason: `explicitly labeled hypothesis — motivated by evidence ("${h.basis.slice(0, 100)}") but unproven; rendered as unsupported by design, never as a finding`,
+    });
+  });
+  // Next experiment is only "supported" when its target dimension/value
+  // resolves to a real persisted content-score row in the registry.
+  const expTargetRow = scoreByKey.get(
+    `${interpretation.nextExperiment.targetDimension}::${interpretation.nextExperiment.targetValue.toLowerCase()}`,
+  );
+  const expRefs = expTargetRow ? [`ev_cs_${expTargetRow.id}`] : [];
+  claims.push({
+    claimId: "claim_next_exp",
+    claimText: `next experiment: change ${interpretation.nextExperiment.changedVariable}, target ${interpretation.nextExperiment.targetDimension}=${interpretation.nextExperiment.targetValue}, measure ${interpretation.nextExperiment.contentMetric} at ${interpretation.nextExperiment.measurementCheckpoint}`,
+    claimType: "next_experiment",
+    criticality: "secondary",
+    evidenceRefs: expRefs,
+    verdict: expRefs.length > 0 ? "supported" : "unsupported",
+    violations: expRefs.length > 0 ? [] : ["experiment target does not resolve to a persisted content-score evidence row"],
+    judgeReason: expRefs.length > 0
+      ? "gate-1 experiment guard verified the target dimension/value and metric exist in the deterministic evidence; gate-2 interchangeability judge accepted campaign specificity"
+      : "experiment guard passed structurally, but the target dimension/value has no persisted score row to cite — cannot be marked supported",
+  });
+  return claims;
+}
+
 export interface PerformanceInterpretationResult {
   status: InterpretationStatus;
   interpretation: PerformanceInterpretation | null;
@@ -532,6 +737,10 @@ export interface PerformanceInterpretationResult {
   attempts: number;
   rejections: Array<{ attempt: number; reasons: string[] }>;
   unavailableReason: string | null;
+  /** Every fact handed to the LLM, with evidence ids (built even when interpretation is unavailable). */
+  evidenceRegistry: PerformanceEvidenceEntry[];
+  /** Claim-level judge records — empty unless an interpretation was ACCEPTED. */
+  judgeClaims: PerformanceJudgeClaim[];
 }
 
 type ChatFn = typeof aiChat;
@@ -550,6 +759,7 @@ export async function runPerformanceInterpretation(params: {
   const tag = `campaign=${campaignId} platform=${platform}`;
 
   const facts = await assemblePerformanceFacts({ accountId, campaignId, platform });
+  const evidenceRegistry = buildPerformanceEvidenceRegistry(facts);
 
   if (facts.contentScores.length === 0 && facts.businessScore === null) {
     console.log(`${LOG} PERFORMANCE_INTERPRETATION_UNAVAILABLE ${tag} reason=no_deterministic_scores`);
@@ -560,6 +770,8 @@ export async function runPerformanceInterpretation(params: {
       attempts: 0,
       rejections: [],
       unavailableReason: "no deterministic scores exist yet — nothing to interpret",
+      evidenceRegistry,
+      judgeClaims: [],
     };
   }
 
@@ -635,6 +847,8 @@ export async function runPerformanceInterpretation(params: {
       attempts: attempt,
       rejections,
       unavailableReason: null,
+      evidenceRegistry,
+      judgeClaims: buildJudgeClaims(facts, parsed),
     };
   }
 
@@ -650,5 +864,7 @@ export async function runPerformanceInterpretation(params: {
     attempts: maxAttempts,
     rejections,
     unavailableReason: "all interpretation attempts were rejected or failed — deterministic scores remain available",
+    evidenceRegistry,
+    judgeClaims: [],
   };
 }

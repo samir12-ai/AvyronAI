@@ -1,0 +1,1140 @@
+BUILD THE COMPLETE AVYRON PERFORMANCE LOOP
+
+This is a FULL IMPLEMENTATION task.
+
+Do not build a cosmetic analytics dashboard.
+
+Do not create empty template cards.
+
+Do not show any metric, chart, score, verdict, or insight unless a real backend source exists behind it.
+
+Do not fabricate data.
+
+Do not seed demo performance rows.
+
+Do not delete or overwrite genuine MarketMindAI data.
+
+The target page is:
+
+app/(tabs)/performance.tsx
+
+===========================================================
+0. CORE PRODUCT PURPOSE
+===========================================================
+
+The center of the Performance Loop is NOT generic business analytics.
+
+Its primary responsibility is to verify whether the user executed the exact strategy Avyron prescribed.
+
+The complete required flow is:
+
+Active Strategy Plan
+→ Strategy Decisions
+→ Build Plan Tasks
+→ Planned / Studio Content
+→ User Publishes on Real Channel
+→ Avyron Scrapes the User’s Real Channel
+→ Scraped Owned Post
+→ Owned-Post Lineage Resolution
+→ Owned-Post Classification
+→ Planned Strategy vs Actual Execution Comparison
+→ Metric Checkpoints Over Time
+→ Deterministic Content Scoring
+→ User-Submitted Business Truth
+→ Deterministic Business Outcome Scoring
+→ Decision Attribution
+→ Performance LLM Interpretation
+→ Deterministic Guards
+→ Claim-Level Judge
+→ Performance Cycle Report
+→ Strategy Memory
+→ Future Strategy Input
+
+The Performance page must answer:
+
+1. What did Avyron tell the user to do?
+2. What did the user actually publish?
+3. Which planned actions were executed?
+4. Which were partially executed?
+5. Which were not executed?
+6. Which cannot yet be verified?
+7. Which content decisions performed well?
+8. Which content decisions performed poorly?
+9. Did real business outcomes improve?
+10. Was weak performance caused by the strategy or by poor execution?
+11. What should be preserved?
+12. What should be monitored?
+13. What should be reviewed?
+14. What did Avyron learn and store for future cycles?
+
+===========================================================
+1. ABSOLUTE DATA SAFETY
+===========================================================
+
+DO NOT:
+
+- delete genuine performance history
+- reset evaluation windows
+- overwrite user truth submissions
+- overwrite valid cycle reports
+- delete valid decision verdicts
+- delete valid owned posts
+- delete valid post snapshots
+- delete valid strategy memory
+- fabricate views, reach, likes, comments, leads, customers, revenue, ROAS, or conversions
+- fabricate owned posts
+- fabricate classifications
+- fabricate execution status
+- create demo reports
+- manually insert synthetic performance rows
+- change historical timestamps
+- bypass application lifecycle with raw SQL
+
+Only proven synthetic or test artifacts may be removed.
+
+Before deleting any row:
+
+1. Perform a forensic audit.
+2. Prove the row is synthetic or test-owned.
+3. Verify no dependency exists.
+4. Create a rollback manifest.
+5. Delete by exact verified ID only.
+6. Re-run integrity checks.
+
+Preserve all original MarketMindAI data.
+
+===========================================================
+2. PREFLIGHT REPOSITORY AND RUNTIME AUDIT
+===========================================================
+
+Before implementing, audit the current code and real MarketMindAI database.
+
+Inspect at minimum:
+
+Backend:
+- server/performance-loop/cycle-runner.ts
+- server/performance-loop/content-scorer.ts
+- server/performance-loop/business-outcome-scorer.ts
+- server/performance-loop/interpretation.ts
+- server/performance-loop/owned-post-tracker.ts
+- server/performance-loop/lineage-resolver.ts
+- server/performance-loop/scoring-config.ts
+- server/user-channel-scraper.ts
+- server/competitor-post-classifier/
+- server/watchtower/ai-market-analyst.ts
+- strategy plan loading
+- build plan loading
+- strategy roots loading
+- goal loading
+- memory writers/readers
+- performance APIs
+- revenue and ad-spend APIs
+
+Frontend:
+- app/(tabs)/performance.tsx
+- components/TruthSubmissionCard.tsx
+- components/BusinessDataForm.tsx
+- hooks/usePerformanceCycle.ts
+- lib/verdict-colors.ts
+- every existing performance card, chart, hook, form, or report elsewhere in the app
+
+Database:
+- pipeline_eval_windows
+- pipeline_user_truth
+- weekly_business_scores
+- performance_cycle_reports
+- performance_decision_verdicts
+- owned_posts
+- owned_post_snapshots
+- owned_content_scores
+- strategy_memory
+- decision_outcomes
+- weekly_reports
+- revenue_entries
+- ad_spend_entries
+- manual_campaign_metrics
+- manual_retention_metrics
+- published_posts
+- studio_items
+- user_public_profiles
+- any owned-post classification table
+- any post-classification table reused by the user side
+
+Classify every component as:
+
+- ACTIVE
+- WORKING BUT DATA-STARVED
+- DISCONNECTED
+- BROKEN
+- LEGACY
+- TEST-ONLY
+- MISSING
+
+Do not classify something as ACTIVE merely because a file or table exists.
+
+Prove:
+
+- who calls it
+- when it runs
+- what it writes
+- what reads its output
+- whether MarketMindAI has real rows
+
+===========================================================
+3. FIX ALL VERIFIED AUDIT PROBLEMS
+===========================================================
+
+The audit identified these problems.
+
+Investigate and fix them where the evidence confirms the defect.
+
+A. Performance page is only a placeholder.
+
+B. strategy_memory has zero rows even though the cycle runner is supposedly wired to write memory.
+
+C. decision_outcomes has no active writer.
+
+D. owned_content_scores has zero live rows.
+
+E. Performance interpretation returns UNAVAILABLE because content scores are missing.
+
+F. Revenue and ad-spend tables are empty and UI is disconnected.
+
+G. Historical weekly reports are not triggered.
+
+H. GET /api/strategy/weekly-reports may lack campaign scoping.
+
+I. Legacy performance tables may still exist without active writers.
+
+J. User-channel scraping or user profile configuration may be missing.
+
+K. Owned-post classification may not be connected to the same strategic taxonomy used by the Strategy Plan.
+
+L. Strategy-to-execution comparison may not exist end-to-end.
+
+For each issue:
+
+1. Prove the exact cause.
+2. Fix only the verified cause.
+3. Test the fix.
+4. Preserve original data.
+5. Document before/after behavior.
+
+===========================================================
+4. USER CHANNEL SCRAPING — HIGH PRIORITY
+===========================================================
+
+Audit and verify the complete owned-channel scraping flow.
+
+The system must know what the user actually published.
+
+Required chain:
+
+User Public Profile
+→ Connected Channel
+→ Scheduler
+→ User Channel Scraper
+→ Owned Post Discovery
+→ Owned Post Persistence
+→ Metric Snapshot Persistence
+→ Checkpoint Maturity
+→ Lineage Resolution
+→ Classification
+→ Content Scoring
+
+Verify:
+
+- user_public_profiles configuration
+- supported platforms
+- profile handles
+- scheduler registration
+- last scrape
+- next scrape
+- scrape provider
+- scrape success/failure
+- retries
+- owned_posts writes
+- owned_post_snapshots writes
+- post deduplication
+- metric freshness
+- post metric checkpoints
+- supported public metrics
+- lineage status
+- scrape health logs
+
+If no profile is configured:
+
+- show a truthful setup state in the UI
+- do not fabricate data
+- use an existing onboarding/configuration route if available
+- do not manually seed a profile
+
+If scraping is wired but not running:
+
+- fix the actual scheduler/writer/connector bug
+- verify with a real user channel
+- confirm real owned posts are persisted
+
+The Performance page must show:
+
+- Connected channel
+- Handle
+- Last successful scrape
+- Next scrape
+- Posts discovered
+- Posts with lineage
+- Posts awaiting lineage
+- Posts with mature checkpoints
+- Posts ready for scoring
+- Scrape failure reason
+- Data freshness
+
+===========================================================
+5. OWNED-POST LINEAGE
+===========================================================
+
+This is mandatory.
+
+The system must connect:
+
+Strategy Decision
+→ Build Plan Task
+→ Studio / Planned Content
+→ Published Post
+→ Scraped Owned Post
+
+Audit:
+
+- published_posts
+- studio_items
+- owned_posts
+- lineage resolver
+- caption similarity
+- platform post IDs
+- timestamps
+- planned post IDs
+- strategy decision IDs
+- build task IDs
+
+Every owned post must have one of these lineage states:
+
+- exact_match
+- high_confidence_match
+- probable_match
+- unmatched
+- ambiguous
+- manual_confirmation_required
+
+Do not claim execution unless lineage is sufficiently strong.
+
+The UI must show:
+
+- planned item
+- actual post
+- match confidence
+- match method
+- evidence IDs
+- publication timestamp
+- classification status
+- metric maturity
+
+===========================================================
+6. USER-OWNED POST CLASSIFICATION
+===========================================================
+
+The user’s real posts must be classified using the same strategic language used by the Strategy Plan.
+
+Required dimensions:
+
+- hook archetype
+- primary hook
+- primary angle
+- narrative
+- CTA type
+- offer type
+- emotional trigger
+- awareness stage
+- positioning style
+- content format
+- primary goal
+- content intent
+
+Audit whether the existing competitor classifier can be reused safely.
+
+Do not create a duplicate classifier if the existing structured classifier can support owned posts.
+
+If an adapter is required, create the smallest safe adapter.
+
+Every classification must preserve:
+
+- post ID
+- classifier version
+- model version
+- prompt version
+- confidence
+- timestamp
+- raw source reference
+- observed/calculated label
+- failure reason if classification fails
+
+The classifier must:
+
+- use strict enums
+- self-correct invalid enum output
+- never fabricate post content
+- fail closed on missing content
+- not block the entire scrape when one post fails
+
+The Performance page must show:
+
+- classified posts
+- unclassified posts
+- failed classifications
+- classification confidence
+- classifier freshness
+- strategic dimensions extracted
+
+===========================================================
+7. STRATEGY VS ACTUAL EXECUTION COMPARISON
+===========================================================
+
+This is the heart of the Performance Loop.
+
+Build a deterministic execution-comparison layer.
+
+For every active Strategy Plan decision and Build Plan task, compare:
+
+What Avyron prescribed
+vs
+What the user actually executed
+
+Sources:
+
+- Active Strategy Plan
+- Active Strategy Root
+- Build Plan
+- Studio content
+- Published posts
+- Scraped owned posts
+- Owned-post lineage
+- Owned-post classifications
+- User-confirmed actions if supported
+
+Execution statuses:
+
+- EXECUTED
+- PARTIALLY_EXECUTED
+- NOT_EXECUTED
+- UNVERIFIED
+- BLOCKED
+- NOT_YET_DUE
+
+For every execution verdict preserve:
+
+- strategy plan ID/version
+- strategy root ID/version
+- build plan snapshot ID
+- strategy decision ID
+- task ID
+- expected dimension/value
+- observed dimension/value
+- post evidence IDs
+- lineage confidence
+- classification confidence
+- execution status
+- deterministic reason
+- evaluatedAt
+- freshness
+
+Examples:
+
+Planned:
+Use question hooks in carousel posts.
+
+Observed:
+3 matched posts.
+2 use question hooks.
+1 uses a how-to hook.
+
+Execution:
+PARTIALLY_EXECUTED
+
+Evidence:
+POST-12, POST-14, POST-18
+
+Do not allow the LLM to determine execution status from freeform text.
+
+The LLM may explain the deterministic execution result, but code decides the status.
+
+===========================================================
+8. CONTENT CHECKPOINT SCORING
+===========================================================
+
+Audit why owned_content_scores is empty.
+
+Do not assume it only needs time.
+
+Prove whether the blocker is:
+
+- no profile
+- scraper missing
+- no posts
+- no snapshots
+- no lineage
+- no classifications
+- checkpoint not mature
+- unsupported metrics
+- scheduling issue
+- scorer bug
+- plan mapping issue
+
+Fix the verified blocker.
+
+The content scorer remains deterministic.
+
+For every scored post decision show:
+
+- post ID
+- planned decision
+- classification dimension
+- checkpoint used
+- metric snapshot IDs
+- metric values
+- baseline/comparison method
+- score
+- evidence strength
+- eligibility
+- freshness
+- final verdict
+
+If checkpoint data is not mature, show:
+
+AWAITING_CHECKPOINT_MATURITY
+
+Do not fabricate a score.
+
+===========================================================
+9. BUSINESS OUTCOME SCORING
+===========================================================
+
+Preserve the existing deterministic scorer.
+
+Inputs must come only from authorized sources:
+
+- pipeline_user_truth
+- verified integration
+- authorized revenue entry
+- authorized ad spend entry
+- manual campaign metrics
+- manual retention metrics
+
+Never infer business outcomes from engagement.
+
+Show:
+
+- total leads
+- qualified leads
+- booked calls
+- paid active
+- paying customers
+- conversion rates
+- week-over-week movement
+- revenue if entered
+- ad spend if entered
+- CPL if computable
+- CPA if computable
+- ROAS if computable
+
+Null is not zero.
+
+Missing is not failure.
+
+Attribution levels:
+
+- DIRECT
+- SUPPORTED
+- CORRELATED
+- UNKNOWN
+
+Business verdicts:
+
+- WORKING
+- DRIFTING
+- UNKNOWN
+
+Every number must show:
+
+- source
+- time period
+- freshness
+- user-entered/integration label
+
+===========================================================
+10. DECISION OUTCOMES
+===========================================================
+
+The audit found decision_outcomes has no active writer.
+
+Implement the missing end-to-end writer only after confirming the intended schema and lifecycle.
+
+For every Strategy Decision, store:
+
+- decision ID
+- plan ID/version
+- cycle ID
+- expected action
+- execution status
+- pre-period metrics
+- post-period metrics
+- content evidence
+- business evidence
+- attribution level
+- outcome:
+  - POSITIVE
+  - NEGATIVE
+  - MIXED
+  - INCONCLUSIVE
+  - NOT_EXECUTED
+- confidence
+- evaluatedAt
+
+Do not create an outcome when execution is unverified.
+
+Do not claim causality when only correlation exists.
+
+===========================================================
+11. PERFORMANCE LLM INTERPRETATION
+===========================================================
+
+Use the standard Avyron reasoning architecture:
+
+Deterministic Facts
+→ Evidence Registry
+→ LLM Interpretation
+→ Deterministic Guards
+→ Claim-Level Judge
+→ Validated Report
+
+Do not let the LLM calculate metrics.
+
+Do not let the LLM classify execution.
+
+Do not let the LLM decide verdicts without deterministic inputs.
+
+The LLM must interpret:
+
+- what was executed
+- what was not executed
+- what performed well
+- what underperformed
+- whether the strategy or execution is the likely issue
+- how business outcomes moved
+- what patterns appear across cycles
+- what evidence is missing
+- what should be preserved, monitored, or reviewed
+
+Generate one interpretation only.
+
+No alternative hypotheses.
+
+If evidence is insufficient, return:
+
+INSUFFICIENT_EVIDENCE
+
+===========================================================
+12. PERFORMANCE EVIDENCE REGISTRY
+===========================================================
+
+Every fact supplied to the LLM must have an evidence ID.
+
+Required metadata:
+
+- evidenceId
+- sourceEngine
+- sourceTable
+- sourceRecordId
+- campaignId
+- accountId
+- planId if relevant
+- decisionId if relevant
+- postId if relevant
+- factType:
+  - observed
+  - calculated
+  - inferred
+  - user_entered
+- capturedAt
+- freshness
+- confidence
+- relevance score
+- inclusion reason
+- safe content
+
+Evidence categories should include:
+
+- STRATEGY
+- BUILD
+- EXECUTION
+- OWNED_POST
+- CLASSIFICATION
+- CONTENT_SCORE
+- BUSINESS_TRUTH
+- BUSINESS_SCORE
+- DECISION_OUTCOME
+- HISTORY
+- MEMORY
+- WATCHTOWER
+- MARKET_CONTEXT
+
+No claim may appear without evidence references.
+
+===========================================================
+13. DETERMINISTIC GUARDS
+===========================================================
+
+Reject or self-correct:
+
+- unknown evidence refs
+- fabricated numbers
+- numbers absent from evidence
+- unsupported causal language
+- execution claims without lineage
+- success claims without checkpoint evidence
+- business outcome claims based on engagement only
+- stale evidence treated as current
+- cross-tenant data
+- wrong plan version
+- duplicate claims
+- generic recommendations
+- recommendation outside:
+  - preserve
+  - monitor
+  - review
+  - test
+- output based on synthetic/test data
+- mismatched labels between backend and UI
+
+Persist guard results.
+
+===========================================================
+14. CLAIM-LEVEL JUDGE
+===========================================================
+
+Judge every material claim.
+
+For each claim return:
+
+- claimId
+- claimText
+- claimType
+- criticality
+- factuality
+- evidenceRefs
+- verdict:
+  - supported
+  - partially_supported
+  - unsupported
+  - contradicted
+- violations
+- judgeReason
+
+Critical claims require SUPPORTED.
+
+Secondary claims may be PARTIALLY_SUPPORTED only with explicit limitation and reduced confidence.
+
+Unsupported claims must be removed or the report fails.
+
+A Ready report must never display unsupported claims.
+
+===========================================================
+15. PERFORMANCE MEMORY — HIGHEST PRIORITY
+===========================================================
+
+The audit found strategy_memory has zero rows despite existing wiring.
+
+This must be investigated and fixed before the Performance Loop is considered complete.
+
+The system must remember across cycles:
+
+- which strategy decisions were prescribed
+- whether the user executed them
+- whether execution was complete
+- which content dimensions performed well
+- which decisions failed
+- which results are repeated
+- confidence over time
+- which conclusions decayed
+- which outcomes were inconclusive
+- which patterns were confirmed across multiple cycles
+
+Audit:
+
+- current strategy_memory schema
+- writer in cycle-runner
+- write gates
+- silent failures
+- transaction behavior
+- required fields
+- foreign keys
+- deduplication
+- confidence decay
+- reader paths
+- plan generator consumption
+- reasoning consumption
+
+Fix the verified cause of zero rows.
+
+Do not manually insert memory.
+
+Memory must be written only by a completed genuine cycle.
+
+Required memory lineage:
+
+Cycle Report
+→ Decision Verdict
+→ Decision Outcome
+→ Evidence IDs
+→ Strategy Memory Record
+→ Future Plan Consumer
+
+Every memory item must include:
+
+- memory ID
+- campaign/account
+- source cycle
+- source plan version
+- source decision
+- outcome
+- evidence refs
+- confidence
+- validation count
+- first observed
+- last validated
+- decay rate
+- status:
+  - active
+  - weak
+  - contradicted
+  - superseded
+  - expired
+
+The system must never confuse:
+
+- one-week result
+with
+- validated long-term memory
+
+A single cycle may create a provisional memory.
+
+Repeated cycles may strengthen it.
+
+Contradictory cycles must weaken or supersede it.
+
+===========================================================
+16. FUTURE STRATEGY CONSUMPTION
+===========================================================
+
+Verify that future Strategy Plans can consume Performance Memory.
+
+The next Strategy Plan should know:
+
+- which decisions worked
+- which were not executed
+- which failed
+- which outcomes are uncertain
+- which content dimensions repeatedly perform
+- whether business outcomes improved
+- which lessons are stale
+
+Do not automatically rewrite the live plan in this task.
+
+Only verify that memory is safely persisted and available to plan generation.
+
+Adaptive remains out of scope unless required for existing memory consumption.
+
+===========================================================
+17. PERFORMANCE PAGE UI
+===========================================================
+
+Build a premium Performance Operations Console.
+
+Do not use a generic analytics template.
+
+Suggested structure:
+
+TOP — Performance Status Ribbon
+
+Show:
+
+- cycle state
+- business verdict
+- execution coverage
+- content evidence status
+- business truth freshness
+- owned scraping health
+- memory status
+- latest completed cycle
+
+LEFT — Execution & Inputs
+
+- Weekly Truth Submission
+- User channel connection/scrape health
+- Strategy execution tracker
+- Revenue/ad spend inputs
+- Missing setup/actions
+
+CENTER — Performance Intelligence
+
+- Latest cycle executive summary
+- Strategy vs execution comparison
+- Content performance
+- Business outcome movement
+- Decision verdicts
+- What worked
+- What drifted
+- Next cycle recommendation
+- Historical cycle timeline
+
+RIGHT — Trust, Lineage & Memory
+
+- validated confidence
+- claim-level Judge
+- evidence registry
+- source freshness
+- plan version
+- post lineage
+- classification versions
+- memory records
+- memory confidence/decay
+
+Responsive behavior:
+
+- desktop: three-column console
+- tablet: collapsible trust rail
+- mobile: stacked sections/drawers
+
+Every section must have truthful states:
+
+- ready
+- awaiting user truth
+- awaiting scrape
+- awaiting classification
+- awaiting lineage
+- awaiting checkpoint maturity
+- insufficient evidence
+- failed
+- stale
+- unavailable
+
+===========================================================
+18. LABEL CONSISTENCY
+===========================================================
+
+Create one shared label map for Performance concepts.
+
+Labels must not drift between:
+
+- backend
+- API
+- hooks
+- routes
+- Performance page
+- Strategy Plan
+- Reasoning & Evidence
+- Watchtower
+
+Canonical labels include:
+
+- User Truth
+- Evaluation Window
+- Weekly Business Score
+- Owned Post
+- Owned Post Snapshot
+- Content Score
+- Execution Status
+- Decision Verdict
+- Decision Outcome
+- Performance Cycle
+- Strategy Memory
+- Attribution Confidence
+- Business Verdict
+- Interpretation Status
+
+Do not rename the same object across routes.
+
+===========================================================
+19. API AND TENANT SAFETY
+===========================================================
+
+Audit and fix tenant scoping in every Performance route.
+
+Every query must use:
+
+accountId + campaignId
+
+Fix the observed weekly-reports campaign-filter issue if confirmed.
+
+Do not allow:
+
+- same campaign ID across accounts to leak data
+- account-only revenue writes without campaign validation
+- cross-campaign memory reads
+- cross-tenant cycle reports
+- user-owned posts from another account
+
+Add regression tests.
+
+===========================================================
+20. VERSIONED STORAGE
+===========================================================
+
+Preserve historical versions.
+
+Do not overwrite previous cycle reports.
+
+Do not overwrite previous decision outcomes.
+
+Do not overwrite previous memory records without explicit supersession lineage.
+
+Store:
+
+- cycle version
+- generator version
+- prompt version
+- judge version
+- evidence version
+- classifier version
+- plan version
+- context fingerprint
+- createdAt
+- completedAt
+- supersedes ID if applicable
+
+===========================================================
+21. PHASE-BY-PHASE IMPLEMENTATION
+===========================================================
+
+Do not implement everything at once.
+
+Required phases:
+
+A. Preflight audit and data classification
+B. User profile and owned scraping verification
+C. Owned post persistence and snapshots
+D. Lineage resolution
+E. Owned-post classification
+F. Strategy-vs-execution comparison
+G. Content checkpoint scoring
+H. Business outcome scoring verification
+I. Decision outcomes writer
+J. LLM interpretation
+K. Deterministic guards
+L. Claim-level Judge
+M. Strategy memory writer and readers
+N. API consolidation and tenant safety
+O. Performance UI
+P. MarketMindAI end-to-end test
+
+After every phase:
+
+1. Implement.
+2. Test.
+3. Fix defects.
+4. Verify real data.
+5. Record evidence.
+6. Continue only after PASS.
+
+===========================================================
+22. MARKETMINDAI FINAL E2E
+===========================================================
+
+Use the real MarketMindAI campaign safely.
+
+Do not seed fake data.
+
+Do not delete real history.
+
+Do not modify historical timestamps.
+
+Verify the complete real flow:
+
+Active Strategy Plan
+→ Build Plan Task
+→ User’s Real Published Post
+→ Scraped Owned Post
+→ Lineage Match
+→ Classification
+→ Metric Checkpoints
+→ Content Score
+→ User Truth
+→ Business Score
+→ Execution Verdict
+→ Decision Outcome
+→ LLM Interpretation
+→ Guards
+→ Judge
+→ Cycle Report
+→ Strategy Memory
+→ Performance UI
+
+Provide proof of:
+
+- connected channel
+- scrape run
+- owned posts
+- lineage
+- classifications
+- strategy comparison
+- checkpoint scores
+- user truth
+- business scoring
+- verdicts
+- decision outcomes
+- judge results
+- report persistence
+- memory persistence
+- no duplicate cycle
+- no fake data
+- no cross-tenant records
+- no original data loss
+
+===========================================================
+23. FINAL REPORT
+===========================================================
+
+Return:
+
+1. Preflight architecture map
+2. Files changed
+3. Problems fixed from the audit
+4. User scraping status
+5. Owned-post lineage status
+6. Classification status
+7. Strategy-vs-execution comparison status
+8. Content scoring status
+9. Business scoring status
+10. Decision outcome status
+11. LLM interpretation behavior
+12. Guard behavior
+13. Judge behavior
+14. Memory write/read behavior
+15. API and tenant safety
+16. UI sections and screenshots
+17. MarketMindAI E2E evidence
+18. Before/after database counts
+19. Original data preservation proof
+20. PASS/FAIL by phase
+21. Remaining limitations
+
+Do not declare completion unless:
+
+- real user posts are scraped
+- real posts are linked to strategy
+- real posts are classified
+- real checkpoint performance is scored
+- business truth is processed
+- decisions receive grounded verdicts
+- memory is persisted
+- every visible claim has evidence lineage
+- no fake data exists
+- the Performance page works end-to-end

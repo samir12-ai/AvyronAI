@@ -368,6 +368,9 @@ export const weeklyReports = pgTable("weekly_reports", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  /** Tenant columns added in migration 058 — nullable for legacy rows; readers filter on them. */
+  accountId: varchar("account_id"),
+  campaignId: varchar("campaign_id"),
   weekStart: timestamp("week_start").notNull(),
   weekEnd: timestamp("week_end").notNull(),
   summary: text("summary"),
@@ -3209,6 +3212,15 @@ export const performanceCycleReports = pgTable("performance_cycle_reports", {
   sevenAnswers: text("seven_answers").notNull().default("{}"),
   testLabel: text("test_label"),
   cycleVersion: text("cycle_version").notNull(),
+  /** JSON array — performance evidence registry snapshot (every fact given to the LLM, with evidence ids). */
+  evidenceRegistry: text("evidence_registry"),
+  /** JSON — deterministic guard results per attempt (violations, pass/fail). */
+  guardResults: text("guard_results"),
+  /** JSON array — claim-level judge results ({claimId, verdict, ...}). */
+  judgeClaims: text("judge_claims"),
+  /** JSON — {cycle, generator, prompt, judge, evidence, classifier, plan, contextFingerprint} version stamps. */
+  versions: text("versions"),
+  completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => ({
   uniqWindow: uniqueIndex("perf_cycle_reports_window_uniq").on(table.campaignId, table.windowId),
@@ -3980,4 +3992,176 @@ export const watchtowerStrategicBriefs = pgTable(
 
 export type WatchtowerStrategicBriefRow = typeof watchtowerStrategicBriefs.$inferSelect;
 export type WatchtowerStrategicBriefInsert = typeof watchtowerStrategicBriefs.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Performance Loop completion (migration 057)
+//
+// Three new tables + trust columns on performance_cycle_reports:
+//   1. owned_post_classifications — strategic-language classification of the
+//      user's OWN scraped posts, produced by the smallest safe adapter over
+//      the competitor post classifier (pure classifyCompetitorPost reuse).
+//      Deliberately a SEPARATE table from competitor_post_classifications:
+//      that table's rows are keyed to ci_competitor_posts and consumed by
+//      Content DNA / MI pipelines — mixing row classes would force fencing
+//      every reader.
+//   2. execution_comparisons — deterministic strategy-vs-actual execution
+//      layer. Code decides the status, never the LLM. Append-only per
+//      comparison run.
+//   3. performance_decision_outcomes — per-decision outcome rows written in
+//      the same transaction as cycle verdicts. Deliberately NOT the legacy
+//      `decision_outcomes` table: that one is the ads outcome-tracker's
+//      (CPA/ROAS/CTR/spend lifecycle with two active readers).
+// ---------------------------------------------------------------------------
+
+export const OWNED_CLASSIFICATION_STATUSES = ["classified", "failed"] as const;
+export type OwnedClassificationStatus = (typeof OWNED_CLASSIFICATION_STATUSES)[number];
+
+export const ownedPostClassifications = pgTable(
+  "owned_post_classifications",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    ownedPostId: varchar("owned_post_id").notNull(),
+    platform: text("platform").notNull(),
+    /** 'classified' | 'failed' — a failed attempt is persisted with its reason, never silently dropped. */
+    status: text("status").notNull(),
+    failureReason: text("failure_reason"),
+    primaryHook: text("primary_hook"),
+    hookArchetype: text("hook_archetype"),
+    primaryAngle: text("primary_angle"),
+    narrative: text("narrative"),
+    ctaType: text("cta_type"),
+    offerType: text("offer_type"),
+    emotionalTrigger: text("emotional_trigger"),
+    awarenessStage: text("awareness_stage"),
+    positioningStyle: text("positioning_style"),
+    contentFormatIntent: text("content_format_intent"),
+    primaryGoal: text("primary_goal"),
+    coreMarketingPromise: text("core_marketing_promise"),
+    confidenceScore: doublePrecision("confidence_score"),
+    classifierVersion: text("classifier_version").notNull(),
+    modelVersion: text("model_version").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    /** Raw source reference: sha256 of the exact caption text that was classified. */
+    sourceCaptionHash: text("source_caption_hash"),
+    classifiedAt: timestamp("classified_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    uniqPostVersion: uniqueIndex("owned_post_classifications_post_version_uniq").on(
+      table.ownedPostId,
+      table.classifierVersion,
+    ),
+    tenantIdx: index("owned_post_classifications_tenant_idx").on(table.accountId, table.campaignId),
+  }),
+);
+
+export type OwnedPostClassification = typeof ownedPostClassifications.$inferSelect;
+
+export const EXECUTION_STATUSES = [
+  "EXECUTED",
+  "PARTIALLY_EXECUTED",
+  "NOT_EXECUTED",
+  "UNVERIFIED",
+  "BLOCKED",
+  "NOT_YET_DUE",
+] as const;
+export type ExecutionStatus = (typeof EXECUTION_STATUSES)[number];
+
+export const executionComparisons = pgTable(
+  "execution_comparisons",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    comparisonRunId: varchar("comparison_run_id").notNull(),
+    planId: varchar("plan_id").notNull(),
+    planVersion: text("plan_version"),
+    strategyRootId: varchar("strategy_root_id"),
+    buildPlanSnapshotId: varchar("build_plan_snapshot_id"),
+    /** Null for live (pre-window-close) comparisons run for the UI tracker. */
+    windowId: varchar("window_id"),
+    decisionDimension: text("decision_dimension").notNull(),
+    decisionValue: text("decision_value").notNull(),
+    decisionSource: text("decision_source").notNull(),
+    expectedSummary: text("expected_summary"),
+    observedSummary: text("observed_summary"),
+    /** EXECUTED | PARTIALLY_EXECUTED | NOT_EXECUTED | UNVERIFIED | BLOCKED | NOT_YET_DUE — decided by code only. */
+    executionStatus: text("execution_status").notNull(),
+    deterministicReason: text("deterministic_reason").notNull(),
+    /** JSON array of owned_posts ids used as evidence. */
+    evidencePostIds: text("evidence_post_ids").notNull().default("[]"),
+    /** JSON array of {postId, lineageState, matchConfidence}. */
+    lineageEvidence: text("lineage_evidence").notNull().default("[]"),
+    /** JSON array of {postId, classificationId, confidence}. */
+    classificationEvidence: text("classification_evidence").notNull().default("[]"),
+    matchedPostCount: integer("matched_post_count").notNull().default(0),
+    windowPostCount: integer("window_post_count").notNull().default(0),
+    freshness: text("freshness"),
+    comparatorVersion: text("comparator_version").notNull(),
+    evaluatedAt: timestamp("evaluated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("execution_comparisons_tenant_idx").on(table.accountId, table.campaignId, table.evaluatedAt),
+    runIdx: index("execution_comparisons_run_idx").on(table.comparisonRunId),
+  }),
+);
+
+export type ExecutionComparison = typeof executionComparisons.$inferSelect;
+
+export const DECISION_OUTCOME_VALUES = [
+  "POSITIVE",
+  "NEGATIVE",
+  "MIXED",
+  "INCONCLUSIVE",
+  "NOT_EXECUTED",
+] as const;
+export type DecisionOutcomeValue = (typeof DECISION_OUTCOME_VALUES)[number];
+
+export const performanceDecisionOutcomes = pgTable(
+  "performance_decision_outcomes",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    cycleReportId: varchar("cycle_report_id").notNull(),
+    cycleRunId: varchar("cycle_run_id").notNull(),
+    verdictId: varchar("verdict_id").notNull(),
+    windowId: varchar("window_id").notNull(),
+    windowIndex: integer("window_index").notNull(),
+    planId: varchar("plan_id").notNull(),
+    planVersion: text("plan_version"),
+    decisionDimension: text("decision_dimension").notNull(),
+    decisionValue: text("decision_value").notNull(),
+    decisionSource: text("decision_source").notNull(),
+    expectedAction: text("expected_action").notNull(),
+    executionStatus: text("execution_status").notNull(),
+    /** JSON: {payingCustomersBefore, windowStart, ...} — NULL fields stay null, never coerced to 0. */
+    preMetrics: text("pre_metrics"),
+    postMetrics: text("post_metrics"),
+    /** JSON arrays of evidence ids (owned post ids / content score ids, truth ids / business score ids). */
+    contentEvidenceIds: text("content_evidence_ids").notNull().default("[]"),
+    businessEvidenceIds: text("business_evidence_ids").notNull().default("[]"),
+    attributionLevel: text("attribution_level"),
+    /** POSITIVE | NEGATIVE | MIXED | INCONCLUSIVE | NOT_EXECUTED */
+    outcome: text("outcome").notNull(),
+    confidence: doublePrecision("confidence"),
+    outcomeVersion: text("outcome_version").notNull(),
+    evaluatedAt: timestamp("evaluated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    uniqDecisionWindow: uniqueIndex("perf_decision_outcomes_window_uniq").on(
+      table.campaignId,
+      table.windowId,
+      table.decisionDimension,
+      table.decisionValue,
+    ),
+    tenantIdx: index("perf_decision_outcomes_tenant_idx").on(table.accountId, table.campaignId),
+  }),
+);
+
+export type PerformanceDecisionOutcome = typeof performanceDecisionOutcomes.$inferSelect;
 

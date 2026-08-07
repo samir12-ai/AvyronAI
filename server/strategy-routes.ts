@@ -633,6 +633,8 @@ Return JSON:
       }
 
       const [savedReport] = await db.insert(weeklyReports).values({
+        accountId,
+        campaignId,
         weekStart: weekAgo,
         weekEnd: now,
         summary: report.summary,
@@ -689,7 +691,11 @@ Return JSON:
 
   app.get("/api/strategy/weekly-reports", requireCampaign, async (req, res) => {
     try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      // Tenant scope (migration 058): legacy rows without tenant columns are
+      // deliberately excluded — unattributable data must not leak cross-tenant.
       const reports = await db.select().from(weeklyReports)
+        .where(and(eq(weeklyReports.accountId, accountId), eq(weeklyReports.campaignId, campaignId)))
         .orderBy(desc(weeklyReports.createdAt)).limit(12);
       res.json(reports);
     } catch (error) {

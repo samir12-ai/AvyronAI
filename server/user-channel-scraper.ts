@@ -553,6 +553,14 @@ export async function scrapeUserChannels(accountId: string, campaignId: string):
             `[UserChannelScraper] Lineage resolved for ${lineage.processed} owned post(s): ` +
             Object.entries(lineage.byState).filter(([, n]) => n > 0).map(([s, n]) => `${s}=${n}`).join(" "),
           );
+          // Classification runs after lineage; a classification failure never
+          // fails the scrape (per-post failures are persisted with reasons).
+          try {
+            const { classifyOwnedPosts } = await import("./performance-loop/owned-post-classifier");
+            await classifyOwnedPosts({ accountId, campaignId, ownedPostIds: tracked.ownedPostIds });
+          } catch (classifyErr: any) {
+            console.error(`[UserChannelScraper] Owned-post classification batch failed:`, classifyErr?.message ?? classifyErr);
+          }
         }
       }
     } catch (err: any) {

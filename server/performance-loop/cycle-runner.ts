@@ -45,12 +45,16 @@ import {
   weeklyBusinessScores,
   performanceDecisionVerdicts,
   performanceCycleReports,
+  performanceDecisionOutcomes,
   CONTENT_SCORE_DIMENSIONS,
   type ContentScoreDimension,
   type DecisionVerdict,
   type EvidenceStrength,
   type PerformanceDecisionVerdict,
   type PerformanceCycleReport,
+  type PerformanceDecisionOutcome,
+  type DecisionOutcomeValue,
+  type ExecutionStatus,
   type PipelineEvalWindow,
   type PipelineUserTruth,
 } from "@shared/schema";
@@ -61,10 +65,13 @@ import { runBusinessOutcomeScoring } from "./business-outcome-scorer";
 import {
   assemblePerformanceFacts,
   runPerformanceInterpretation,
+  buildPerformanceEvidenceRegistry,
   type PerformanceFacts,
   type PerformanceInterpretationResult,
 } from "./interpretation";
 import { upsertByFingerprint } from "../memory-system/store";
+import { runExecutionComparison, persistComparisonResult, COMPARATOR_VERSION, type ExecutionComparisonResult } from "./execution-comparator";
+import { OWNED_CLASSIFIER_VERSION } from "./owned-post-classifier";
 
 const LOG = "[PerformanceCycle]";
 export const CYCLE_VERSION = "p2-cycle-runner-v1";
@@ -76,11 +83,9 @@ const SCORABLE_LINEAGE = ["planned_direct", "planned_matched", "manual_matched"]
 // Types
 // ---------------------------------------------------------------------------
 
-export interface RecommendedDecision {
-  dimension: ContentScoreDimension;
-  value: string;
-  source: "planned_artifact";
-}
+import { loadRecommendedDecisions } from "./plan-decisions";
+import type { RecommendedDecision } from "./plan-decisions";
+export type { RecommendedDecision } from "./plan-decisions";
 
 export interface DecisionEvaluation {
   decision: RecommendedDecision;
@@ -308,63 +313,11 @@ export function evaluateDecision(inputs: VerdictInputs): Omit<DecisionEvaluation
 }
 
 // ---------------------------------------------------------------------------
-// Recommended-decision extraction (planned artifacts = the operationalized plan)
+// Recommended-decision extraction — moved to ./plan-decisions so the
+// execution comparator can share it without a circular import. Re-exported
+// here so existing consumers keep working.
 // ---------------------------------------------------------------------------
-
-/**
- * The plan's standing recommendations = distinct dimension values carried by
- * planned artifacts (published_posts + studio_items rows bound to the plan).
- * Free-text plan_json pillars are NOT fuzzy-matched — only vocabulary that can
- * be honestly compared against owned-post lineage dimensions counts.
- */
-export async function loadRecommendedDecisions(
-  accountId: string,
-  campaignId: string,
-  planId: string,
-): Promise<RecommendedDecision[]> {
-  const [pubRows, studioRows] = await Promise.all([
-    db
-      .select({ hookStyle: publishedPosts.hookStyle, contentAngle: publishedPosts.contentAngle })
-      .from(publishedPosts)
-      .where(and(
-        eq(publishedPosts.accountId, accountId),
-        eq(publishedPosts.campaignId, campaignId),
-        eq(publishedPosts.planId, planId),
-      )),
-    db
-      .select({ contentAngle: studioItems.contentAngle, contentType: studioItems.contentType })
-      .from(studioItems)
-      .where(and(
-        eq(studioItems.accountId, accountId),
-        eq(studioItems.campaignId, campaignId),
-        eq(studioItems.planId, planId),
-      )),
-  ]);
-
-  const byDimension = new Map<ContentScoreDimension, Set<string>>();
-  const add = (dim: ContentScoreDimension, value: string | null) => {
-    const v = (value ?? "").trim();
-    if (!v) return;
-    if (!byDimension.has(dim)) byDimension.set(dim, new Set());
-    byDimension.get(dim)!.add(v);
-  };
-  for (const r of pubRows) {
-    add("hook_style", r.hookStyle);
-    add("content_angle", r.contentAngle);
-  }
-  for (const r of studioRows) {
-    add("content_angle", r.contentAngle);
-    add("content_type", r.contentType);
-  }
-
-  const decisions: RecommendedDecision[] = [];
-  for (const dim of CONTENT_SCORE_DIMENSIONS) {
-    for (const value of byDimension.get(dim) ?? []) {
-      decisions.push({ dimension: dim, value, source: "planned_artifact" });
-    }
-  }
-  return decisions;
-}
+export { loadRecommendedDecisions };
 
 // ---------------------------------------------------------------------------
 // Window + truth resolution
@@ -678,6 +631,53 @@ export async function runPerformanceCycle(params: RunPerformanceCycleParams): Pr
     q7_next_step: JSON.parse(nextCycleRecommendation),
   });
 
+  // 10b) Deterministic execution comparison (plan vs actual). Computed BEFORE
+  //      the persist transaction (read-only here); the SAME result object is
+  //      frozen to execution_comparisons after the cycle wins the persist
+  //      race (11b), keyed by this cycleRunId. Failure never blocks the
+  //      cycle report itself, but decision OUTCOMES are then skipped
+  //      entirely — comparator failure is absence of execution knowledge,
+  //      never a license to fall back to legacy lineage flags.
+  let execComparison: ExecutionComparisonResult | null = null;
+  try {
+    execComparison = await runExecutionComparison({
+      accountId,
+      campaignId,
+      planId: window.planId,
+      windowId: window.id,
+      persist: false,
+      comparisonRunId: cycleRunId,
+    });
+  } catch (err: any) {
+    reasons.push(`execution_comparison_failed: ${err?.message ?? err}`);
+    console.error(`${LOG} execution comparison failed campaign=${campaignId}:`, err?.message ?? err);
+  }
+  const execStatusByDecision = new Map<string, ExecutionStatus>();
+  for (const row of execComparison?.rows ?? []) {
+    execStatusByDecision.set(`${row.decision.dimension}::${row.decision.value.toLowerCase()}`, row.executionStatus);
+  }
+
+  // Trust payloads frozen onto the report row (spec: evidence registry,
+  // guard results, judge claims, versions). Registry falls back to the
+  // deterministic facts even when interpretation was skipped/unavailable.
+  const evidenceRegistryJson = JSON.stringify(
+    interpretation?.evidenceRegistry ?? buildPerformanceEvidenceRegistry(facts),
+  );
+  const guardResultsJson = JSON.stringify({
+    interpretationStatus,
+    attempts: interpretation?.attempts ?? 0,
+    rejections: interpretation?.rejections ?? [],
+    unavailableReason: interpretation?.unavailableReason ?? null,
+  });
+  const judgeClaimsJson = JSON.stringify(interpretation?.judgeClaims ?? []);
+  const versionsJson = JSON.stringify({
+    cycle: CYCLE_VERSION,
+    comparator: COMPARATOR_VERSION,
+    ownedClassifier: OWNED_CLASSIFIER_VERSION,
+    interpretationModel: "gpt-4.1",
+    planId: window.planId,
+  });
+
   // 11) ATOMIC PERSIST — verdicts + report in one transaction, serialized
   //     per window by an advisory lock. Inside the lock we re-check both
   //     invariants this run computed under:
@@ -689,7 +689,7 @@ export async function runPerformanceCycle(params: RunPerformanceCycleParams): Pr
   if (params._beforePersist) await params._beforePersist();
 
   type PersistOutcome =
-    | { kind: "COMPLETE"; inserted: PerformanceDecisionVerdict[]; report: PerformanceCycleReport }
+    | { kind: "COMPLETE"; inserted: PerformanceDecisionVerdict[]; report: PerformanceCycleReport; outcomes: PerformanceDecisionOutcome[] }
     | { kind: "FROZEN" }
     | { kind: "TRUTH_CHANGED" };
 
@@ -784,6 +784,11 @@ export async function runPerformanceCycle(params: RunPerformanceCycleParams): Pr
         sevenAnswers,
         testLabel: params.testLabel ?? null,
         cycleVersion: CYCLE_VERSION,
+        evidenceRegistry: evidenceRegistryJson,
+        guardResults: guardResultsJson,
+        judgeClaims: judgeClaimsJson,
+        versions: versionsJson,
+        completedAt: new Date(),
       })
       .onConflictDoNothing({
         target: [performanceCycleReports.campaignId, performanceCycleReports.windowId],
@@ -791,7 +796,69 @@ export async function runPerformanceCycle(params: RunPerformanceCycleParams): Pr
       .returning();
     const report = reportRows[0];
     if (!report) return { kind: "FROZEN" as const }; // unreachable under the lock; belt only
-    return { kind: "COMPLETE" as const, inserted, report };
+
+    // Decision outcomes — the durable POSITIVE/NEGATIVE/... record per
+    // decision, written in the SAME transaction as the report so a cycle can
+    // never be COMPLETE with missing outcomes. Skipped when the execution
+    // comparator says the decision was UNVERIFIED/BLOCKED — an unobserved
+    // decision must not accrue an outcome (absence of observation is not
+    // absence of execution).
+    const outcomes: PerformanceDecisionOutcome[] = [];
+    for (const row of inserted) {
+      // Outcomes are strictly comparator-driven. No comparator row for this
+      // decision (comparator failed, or vocabulary drift) = no execution
+      // knowledge = no outcome row. Never fall back to legacy lineage flags.
+      const execStatus =
+        execStatusByDecision.get(`${row.decisionDimension}::${row.decisionValue.toLowerCase()}`);
+      if (!execStatus) continue;
+      if (execStatus === "UNVERIFIED" || execStatus === "BLOCKED") continue;
+      const outcomeValue: DecisionOutcomeValue =
+        row.verdict === "WINNER" ? "POSITIVE"
+        : row.verdict === "LOSER" ? "NEGATIVE"
+        : row.verdict === "NOT_EXECUTED" ? "NOT_EXECUTED"
+        : "INCONCLUSIVE";
+      const compRow = (execComparison?.rows ?? []).find(
+        (r) => r.decision.dimension === row.decisionDimension &&
+               r.decision.value.toLowerCase() === row.decisionValue.toLowerCase(),
+      );
+      const outRows = await tx
+        .insert(performanceDecisionOutcomes)
+        .values({
+          accountId,
+          campaignId,
+          cycleReportId: report.id,
+          cycleRunId,
+          verdictId: row.id,
+          windowId: window.id,
+          windowIndex: window.windowIndex,
+          planId: window.planId!,
+          decisionDimension: row.decisionDimension,
+          decisionValue: row.decisionValue,
+          decisionSource: row.decisionSource,
+          expectedAction: compRow?.expectedSummary ??
+            `Publish content carrying ${row.decisionDimension}=${row.decisionValue} (plan ${window.planId})`,
+          executionStatus: execStatus,
+          preMetrics: JSON.stringify({ payingCustomers: salesBefore, windowIndex: window.windowIndex - 1 }),
+          postMetrics: JSON.stringify({ payingCustomers: salesAfter, windowIndex: window.windowIndex, relativeDelta: relDelta }),
+          contentEvidenceIds: JSON.stringify(compRow?.evidencePostIds ?? []),
+          businessEvidenceIds: JSON.stringify([truth.id, ...(windowBiz ? [windowBiz.id] : [])]),
+          attributionLevel: attributionConfidence,
+          outcome: outcomeValue,
+          confidence: row.confidence,
+          outcomeVersion: CYCLE_VERSION,
+        })
+        .onConflictDoNothing({
+          target: [
+            performanceDecisionOutcomes.campaignId,
+            performanceDecisionOutcomes.windowId,
+            performanceDecisionOutcomes.decisionDimension,
+            performanceDecisionOutcomes.decisionValue,
+          ],
+        })
+        .returning();
+      if (outRows[0]) outcomes.push(outRows[0]);
+    }
+    return { kind: "COMPLETE" as const, inserted, report, outcomes };
   });
 
   if (outcome.kind === "FROZEN") {
@@ -823,14 +890,30 @@ export async function runPerformanceCycle(params: RunPerformanceCycleParams): Pr
     console.log(`${LOG} TRUTH_CHANGED campaign=${campaignId} window=${window.id}`);
     return { status: "TRUTH_CHANGED", reasons, cycleRunId: null, report: null, verdicts: [], interpretationStatus };
   }
-  const { inserted } = outcome;
+  const { inserted, outcomes } = outcome;
   const report = outcome.report;
+
+  // 11b) Freeze the execution comparison batch (append-only, keyed by this
+  //      cycleRunId) — only after the persist race is won, so losers never
+  //      write comparison rows for a window they didn't report. Persists the
+  //      EXACT result computed in 10b (never recomputed — a scrape or post
+  //      landing between 10b and here must not make the frozen history
+  //      disagree with the outcome rows).
+  if (execComparison && execComparison.status === "OK") {
+    try {
+      await persistComparisonResult({ accountId, campaignId }, execComparison);
+    } catch (err: any) {
+      reasons.push(`execution_comparison_persist_failed: ${err?.message ?? err}`);
+      console.error(`${LOG} execution comparison persist failed campaign=${campaignId}:`, err?.message ?? err);
+    }
+  }
 
   // 12) Strategic-memory write-through — WINNER→reinforce, LOSER→avoid.
   //     Only for rows inserted by THIS run (idempotency), via the canonical
   //     policy-gated store. The loop's learning persists into the same
   //     strategy_memory the plan generator already consumes. Runs AFTER the
   //     commit — memory must never reference verdicts that failed to land.
+  const outcomeByVerdictId = new Map(outcomes.map((o) => [o.verdictId, o]));
   for (const row of inserted) {
     if (row.verdict !== "WINNER" && row.verdict !== "LOSER") continue;
     let memoryWriteStatus: string;
@@ -851,6 +934,7 @@ export async function runPerformanceCycle(params: RunPerformanceCycleParams): Pr
         planId: row.planId,
         provenanceOrigin: "outcome",
         platform,
+        sourceOutcomeId: outcomeByVerdictId.get(row.id)?.id ?? null,
       });
       memoryWriteStatus = result.allowed ? "written" : `blocked:${result.reason}`;
     } catch (err: any) {

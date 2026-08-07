@@ -1,6 +1,105 @@
-import React from 'react';
-import PlaceholderScreen from '@/components/PlaceholderScreen';
+import React, { useState } from 'react';
+import { Feather } from '@expo/vector-icons';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useAppShellController } from '@/hooks/useAppShellController';
+import { usePerformanceConsole, type ConsoleContentScore, type ConsoleExecutionRow } from '@/hooks/usePerformanceConsole';
+import TruthSubmissionCard from '@/components/TruthSubmissionCard';
+import { SECTION_STATE_LABELS, LINEAGE_STATE_LABELS, DECISION_VERDICT_LABELS, DECISION_OUTCOME_LABELS, EXECUTION_STATUS_LABELS, ATTRIBUTION_CONFIDENCE_LABELS, BUSINESS_VERDICT_LABELS, INTERPRETATION_STATUS_LABELS } from '@/shared/performance-labels';
+import { SectionStateCard, StateBadge, stateTone } from '@/components/performance/SectionStateCard';
+import { Panel, Metric, ExpandRow, DetailText, colors, formatEnum, verdictTone, labelMaps } from '@/components/performance/PerformancePrimitives';
+
+const C = colors;
 
 export default function PerformanceScreen() {
-  return <PlaceholderScreen title="Performance" />;
+  const shell = useAppShellController();
+  // Truthful campaign resolution: no hardcoded fallback. When no workspace
+  // is active the console says so instead of silently querying someone
+  // else's campaign.
+  const campaignId = shell.activeWorkspace?.id ?? null;
+  const query = usePerformanceConsole(campaignId);
+  const { width } = useWindowDimensions();
+  const router = useRouter();
+  const wide = width >= 1024;
+  const tablet = width >= 700;
+  const [trustOpen, setTrustOpen] = useState(wide);
+  const data = query.data;
+  const setupAction = () => router.push('/settings' as never);
+
+  if (!campaignId) return <NoWorkspaceState />;
+  if (query.isLoading && !data) return <LoadingState />;
+  if (query.isError && !data) return <ErrorState onRetry={() => query.refetch()} />;
+  if (!data) return null;
+
+  return (
+    <View style={styles.root}>
+      <View style={styles.header}>
+        <View style={styles.headerIcon}><Feather name="activity" size={18} color={C.purple} /></View>
+        <View style={styles.headerCopy}><Text style={styles.kicker}>WEEKLY PERFORMANCE LOOP</Text><Text style={styles.title}>Performance console</Text><Text style={styles.subtitle}>What the plan said. What shipped. What moved. What we can honestly learn.</Text></View>
+        <View style={styles.headerRight}><Text style={styles.generated}>{formatTime(data.generatedAt)}</Text><View style={styles.live}><View style={styles.liveDot} /><Text style={styles.liveText}>Polling</Text></View></View>
+      </View>
+      <View style={styles.toolbar}><View><Text style={styles.workspace}>{shell.activeWorkspace?.name || 'Active workspace'}</Text><Text style={styles.toolbarSub}>Campaign evidence, not estimates</Text></View>{!wide ? <Pressable onPress={() => setTrustOpen(v => !v)} style={styles.trustToggle}><Feather name="shield" size={14} color={C.purple} /><Text style={styles.trustToggleText}>{trustOpen ? 'Hide trust rail' : 'Show trust rail'}</Text></Pressable> : null}</View>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={query.isFetching && !query.isLoading} onRefresh={() => query.refetch()} tintColor={C.purple} />}>
+        <View style={[styles.columns, tablet && !wide ? styles.tabletColumns : null]}>
+          <View style={[styles.left, wide ? { width: '25%' } : null]}>
+            <ColumnLabel text="OBSERVATION" />
+            <Panel title="Setup & scrape health" icon="radio">
+              <SectionStateCard title="Channel connection" icon="link-2" state={data.setup.state} reason={data.setup.state === 'not_configured' ? 'Connect your social channel in Settings to observe execution and content results.' : undefined} action={data.setup.state === 'not_configured' ? { label: 'Open channel settings', onPress: setupAction } : undefined} />
+              <HealthLine label="Approved plan" value={data.setup.approvedPlanId ? 'Linked' : 'Not linked'} tone={data.setup.approvedPlanId ? C.green : C.amber} />
+              <HealthLine label="Last channel scan" value={data.setup.lastScrapeAt ? formatDate(data.setup.lastScrapeAt) : 'No scan yet'} />
+              <HealthLine label="Next scan due" value={data.setup.nextScrapeDueAt ? formatDate(data.setup.nextScrapeDueAt) : 'Not scheduled'} />
+            </Panel>
+            <Panel title="Execution tracker" icon="check-square">
+              {data.execution.state !== 'ready' ? <SectionStateCard title="Execution evidence" state={data.execution.state} reason={data.execution.reason} icon="eye" /> : data.execution.comparison?.rows.length ? data.execution.comparison.rows.map((row, i) => <ExecutionRow key={`${row.dimension}-${i}`} row={row} />) : <SectionStateCard title="No execution rows" state="insufficient_evidence" icon="eye" />}
+            </Panel>
+            <Panel title="Observed posts" icon="layers" right={<StateBadge state={data.posts.state} />}>
+              <View style={styles.metrics}><Metric label="Total observed" value={data.posts.total} /><Metric label="Classified" value={data.posts.classification.classified} tone={C.green} /><Metric label="Pending" value={data.posts.classification.pending} tone={data.posts.classification.pending ? C.amber : C.text} /></View>
+              {data.posts.state !== 'ready' ? <SectionStateCard title="Post evidence layer" state={data.posts.state} icon="database" /> : data.posts.recent.slice(0, 4).map(post => <ExpandRow key={post.id} title={post.caption?.slice(0, 56) || `${post.platform} post`} meta={`${post.postedAt ? formatDate(post.postedAt) : 'Date unavailable'} · ${formatEnum(LINEAGE_STATE_LABELS, post.lineageState)}`} tone={stateTone(post.lineageState === 'pending' ? 'awaiting_lineage' : 'ready')}><DetailText>{post.classification ? `${post.classification.contentFormatIntent || 'Format unrecorded'} · ${post.classification.primaryGoal || 'Goal unrecorded'}` : 'Classification is not available yet.'}</DetailText><DetailText>{post.snapshotCount} snapshot{post.snapshotCount === 1 ? '' : 's'} collected</DetailText></ExpandRow>)}
+            </Panel>
+          </View>
+          <View style={[styles.middle, wide ? { width: '47%' } : null]}>
+            <ColumnLabel text="INTERPRETATION" />
+            <Panel title="Content performance" icon="bar-chart-2" right={<StateBadge state={data.contentScores.state} />}>
+              {data.contentScores.state !== 'ready' ? <SectionStateCard title="Content scores" state={data.contentScores.state} icon="bar-chart-2" /> : data.contentScores.scores.length ? data.contentScores.scores.map((score, i) => <ScoreRow key={`${score.dimension}-${i}`} score={score} />) : <SectionStateCard title="No scores to compare" state="insufficient_evidence" icon="bar-chart-2" /> }
+            </Panel>
+            <Panel title="Business movement" icon="trending-up" right={<StateBadge state={data.business.state} />}>
+              {data.business.state === 'awaiting_user_truth' ? <TruthSubmissionCard campaignId={campaignId} isDark onSubmitted={() => query.refetch()} /> : data.business.state !== 'ready' ? <SectionStateCard title="Business truth" state={data.business.state} icon="edit-3" /> : <BusinessSummary business={data.business} />}
+            </Panel>
+            <Panel title="Decision verdicts & outcomes" icon="git-merge">
+              {data.cycle.verdicts.length ? data.cycle.verdicts.map((v, i) => <ExpandRow key={`${v.dimension}-${i}`} title={`${v.dimension}: ${v.value}`} meta={`${formatEnum(DECISION_VERDICT_LABELS, v.verdict)} · ${v.executed ? `${v.executedPostCount ?? 0} posts executed` : 'Not carried out'}`} tone={verdictTone(v.verdict)}><DetailText>{v.reason || DECISION_VERDICT_LABELS[v.verdict]?.description || 'No reason recorded.'}</DetailText>{v.evidenceStrength ? <DetailText>Evidence strength: {v.evidenceStrength}</DetailText> : null}{v.confounders.length ? <DetailText>Confounders: {v.confounders.join(', ')}</DetailText> : null}</ExpandRow>) : <SectionStateCard title="No decisions judged" state={data.cycle.state} icon="git-merge" />}
+              {data.cycle.outcomes.map((o, i) => <ExpandRow key={`outcome-${i}`} title={`${o.dimension}: ${formatEnum(DECISION_OUTCOME_LABELS, o.outcome)}`} meta={`${formatEnum(EXECUTION_STATUS_LABELS, o.executionStatus)} · ${formatEnum(ATTRIBUTION_CONFIDENCE_LABELS, o.attributionLevel)}`} tone={verdictTone(o.outcome)}><DetailText>Evaluated {o.evaluatedAt ? formatDate(o.evaluatedAt) : 'date unavailable'}.</DetailText></ExpandRow>)}
+            </Panel>
+            <Panel title="Next-cycle recommendation" icon="compass">
+              {data.cycle.report?.nextCycleRecommendation && Object.keys(data.cycle.report.nextCycleRecommendation).length ? <Recommendation values={data.cycle.report.nextCycleRecommendation} /> : <SectionStateCard title="Recommendation not available" state={data.cycle.state} icon="compass" />}
+            </Panel>
+            <Panel title="Cycle history" icon="clock">
+              {data.cycle.history.length ? data.cycle.history.map((h, i) => <ExpandRow key={`${h.windowIndex}-${i}`} title={`Window ${h.windowIndex}`} meta={`${formatEnum(BUSINESS_VERDICT_LABELS, h.businessVerdict)} · ${h.createdAt ? formatDate(h.createdAt) : 'Date unavailable'}`} tone={verdictTone(h.businessVerdict)}><DetailText>{h.salesBefore !== null && h.salesAfter !== null ? `Sales: ${h.salesBefore} → ${h.salesAfter}` : 'Sales movement was not recorded.'}</DetailText></ExpandRow>) : <SectionStateCard title="No completed cycles" state="insufficient_evidence" icon="clock" />}
+            </Panel>
+          </View>
+          {wide || trustOpen ? <View style={[styles.right, wide ? { width: '28%' } : null]}><ColumnLabel text="TRUST RAIL" /><TrustRail data={data} /></View> : null}
+        </View>
+      </ScrollView>
+    </View>
+  );
 }
+
+function TrustRail({ data }: { data: NonNullable<ReturnType<typeof usePerformanceConsole>['data']> }) {
+  return <><Panel title="Validation status" icon="shield"><SectionStateCard title="Trust layer" state={data.trust.state} icon="shield" /><HealthLine label="Interpretation" value={formatEnum(INTERPRETATION_STATUS_LABELS, data.trust.interpretationStatus)} tone={data.trust.interpretationStatus === 'AVAILABLE' ? C.green : C.muted} /></Panel><Panel title="Claim-level judge" icon="check-circle">{data.trust.judgeClaims.length ? data.trust.judgeClaims.map((claim, i) => <ExpandRow key={claim.claimId || `claim-${i}`} title={claim.claimText || 'Claim text unavailable'} meta={claim.verdict === 'supported' ? 'Supported' : claim.verdict === 'partially_supported' ? 'Partially supported' : claim.verdict === 'contradicted' ? 'Contradicted' : 'Unsupported'} tone={verdictTone(claim.verdict)}><DetailText>Criticality: {claim.criticality || 'unrecorded'}</DetailText><DetailText>Evidence: {(claim.evidenceRefs ?? []).length ? (claim.evidenceRefs ?? []).join(', ') : 'None registered'}</DetailText>{claim.judgeReason ? <DetailText>{claim.judgeReason}</DetailText> : null}</ExpandRow>) : <SectionStateCard title="No claims judged" state={data.trust.state} icon="check-circle" />}</Panel><Panel title="Evidence registry" icon="book-open">{data.trust.evidenceRegistry.length ? data.trust.evidenceRegistry.map((e, i) => <View key={e.evidenceId || `ev-${i}`} style={styles.registry}><Text style={styles.registryId}>{e.evidenceId || 'id unavailable'}</Text><Text style={styles.registryText}>{e.summary || 'Summary unavailable'}</Text><Text style={styles.registryKind}>{e.category || 'uncategorized'}</Text></View>) : <SectionStateCard title="No evidence registered" state={data.trust.state} icon="book-open" />}</Panel><Panel title="Versions & lineage" icon="git-branch"><VersionList values={data.trust.versions} /><HealthLine label="Lineage summary" value={`${data.posts.lineageCounts.planned_direct || 0} direct · ${data.posts.lineageCounts.planned_matched || 0} matched`} /></Panel><Panel title="Strategy memory" icon="archive"><StateBadge state={data.memory.state} />{data.memory.records.map((m, i) => <ExpandRow key={`${m.label}-${i}`} title={m.label} meta={`${m.direction || 'Direction unrecorded'} · ${m.confidence !== null ? `${Math.round(m.confidence * 100)}% confidence` : 'Confidence unknown'}`} tone={verdictTone(m.direction)}><DetailText>{m.details || 'No detail recorded.'}</DetailText><DetailText>{m.validationCount ?? 0} validations · {m.provenanceOrigin || 'Origin unavailable'}</DetailText></ExpandRow>)}</Panel></>;
+}
+
+function ExecutionRow({ row }: { row: ConsoleExecutionRow }) { const label = formatEnum(EXECUTION_STATUS_LABELS, row.executionStatus); return <ExpandRow title={`${row.dimension}: ${row.value}`} meta={`${label} · ${row.matchedPostCount}/${row.windowPostCount} posts`} tone={verdictTone(row.executionStatus)}><DetailText>{row.reason}</DetailText>{row.evidencePostIds.length ? <DetailText>Evidence posts: {row.evidencePostIds.join(', ')}</DetailText> : null}</ExpandRow>; }
+function ScoreRow({ score }: { score: ConsoleContentScore }) { return <ExpandRow title={`${score.dimension}: ${score.dimensionValue}`} meta={`${score.primaryMetric || 'Metric unavailable'} · ${score.sampleSize} sample${score.sampleSize === 1 ? '' : 's'}`} tone={verdictTone(score.verdict)}><View style={styles.scoreLine}><Text style={[styles.scoreVerdict, { color: verdictTone(score.verdict) }]}>{formatEnum(DECISION_VERDICT_LABELS, score.verdict)}</Text>{score.relativeDelta !== null ? <Text style={styles.delta}>{score.relativeDelta > 0 ? '+' : ''}{(score.relativeDelta * 100).toFixed(1)}%</Text> : null}</View><DetailText>{score.measuredValue !== null && score.baselineValue !== null ? `Measured ${score.measuredValue} vs baseline ${score.baselineValue}.` : 'A comparable metric is not available.'}</DetailText><DetailText>Maturity: {score.maturity} · Confidence: {score.confidence !== null ? `${Math.round(score.confidence * 100)}%` : 'unknown'}</DetailText></ExpandRow>; }
+function BusinessSummary({ business }: { business: any }) { const score = business.weeklyScore; return score ? <><View style={styles.metrics}><Metric label="Leads" value={score.leads ?? '—'} /><Metric label="Qualified" value={score.qualified ?? '—'} /><Metric label="Booked" value={score.booked ?? '—'} /><Metric label="Paying" value={score.payingCustomers ?? '—'} /></View><View style={styles.businessVerdict}><Text style={[styles.bigVerdict, { color: verdictTone(score.businessVerdict) }]}>{formatEnum(BUSINESS_VERDICT_LABELS, score.businessVerdict)}</Text><Text style={styles.muted}>{score.verdictReason || 'No business verdict reason recorded.'}</Text><Text style={styles.muted}>Attribution: {formatEnum(ATTRIBUTION_CONFIDENCE_LABELS, score.attributionConfidence)}</Text></View></> : <SectionStateCard title="Weekly score not ready" state="insufficient_evidence" icon="trending-up" />; }
+function Recommendation({ values }: { values: Record<string, unknown> }) { return <View style={styles.recommendation}>{Object.entries(values).slice(0, 6).map(([key, value]) => <View key={key}><Text style={styles.recKey}>{key.replace(/_/g, ' ')}</Text><Text style={styles.recValue}>{typeof value === 'string' ? value : JSON.stringify(value)}</Text></View>)}</View>; }
+function VersionList({ values }: { values: Record<string, unknown> | null }) { return values ? <>{Object.entries(values).map(([k, v]) => <HealthLine key={k} label={k.replace(/_/g, ' ')} value={String(v)} />)}</> : <Text style={styles.muted}>Version registry unavailable.</Text>; }
+function HealthLine({ label, value, tone = C.muted }: { label: string; value: string; tone?: string }) { return <View style={styles.health}><Text style={styles.healthLabel}>{label}</Text><Text style={[styles.healthValue, { color: tone }]}>{value}</Text></View>; }
+function ColumnLabel({ text }: { text: string }) { return <Text style={styles.columnLabel}>{text}</Text>; }
+function NoWorkspaceState() { return <View style={styles.center}><Feather name="briefcase" size={28} color={C.muted} /><Text style={styles.centerTitle}>No active workspace</Text><Text style={styles.centerBody}>Select a campaign workspace to open its performance console. Nothing is shown until a campaign is active — this console never guesses.</Text></View>; }
+function LoadingState() { return <View style={styles.center}><View style={styles.loadingIcon}><Feather name="activity" size={24} color={C.purple} /></View><Text style={styles.centerTitle}>Building the performance console</Text><Text style={styles.centerBody}>Checking plan execution, channel evidence, and business truth.</Text></View>; }
+function ErrorState({ onRetry }: { onRetry: () => void }) { return <View style={styles.center}><Feather name="alert-triangle" size={28} color={C.red} /><Text style={styles.centerTitle}>Performance data unavailable</Text><Text style={styles.centerBody}>The console could not read this campaign's evidence layer.</Text><Pressable onPress={onRetry} style={styles.retry}><Text style={styles.retryText}>Try again</Text></Pressable></View>; }
+function formatDate(value: string) { const d = new Date(value); return Number.isNaN(d.getTime()) ? 'Date unavailable' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+function formatTime(value: string) { const d = new Date(value); return Number.isNaN(d.getTime()) ? 'Updated recently' : `Updated ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`; }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#080C10' }, header: { paddingHorizontal: 28, paddingTop: 22, paddingBottom: 18, flexDirection: 'row', alignItems: 'flex-start', gap: 14, borderBottomWidth: 1, borderColor: C.border }, headerIcon: { width: 38, height: 38, borderRadius: 11, backgroundColor: '#8B5CF618', borderWidth: 1, borderColor: '#8B5CF640', alignItems: 'center', justifyContent: 'center' }, headerCopy: { flex: 1 }, kicker: { color: C.purple, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }, title: { color: C.text, fontSize: 23, fontWeight: '800', marginTop: 3, letterSpacing: -.5 }, subtitle: { color: C.muted, fontSize: 12, marginTop: 5 }, headerRight: { alignItems: 'flex-end', gap: 8 }, generated: { color: C.faint, fontSize: 11 }, live: { flexDirection: 'row', alignItems: 'center', gap: 5 }, liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.green }, liveText: { color: C.green, fontSize: 10, fontWeight: '700' }, toolbar: { paddingHorizontal: 28, paddingVertical: 13, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderColor: C.border }, workspace: { color: C.text, fontSize: 13, fontWeight: '700' }, toolbarSub: { color: C.faint, fontSize: 11, marginTop: 2 }, trustToggle: { flexDirection: 'row', gap: 6, alignItems: 'center', padding: 9, borderRadius: 9, borderWidth: 1, borderColor: '#8B5CF655' }, trustToggleText: { color: C.purple, fontSize: 11, fontWeight: '700' }, scroll: { flex: 1 }, content: { padding: 18, paddingBottom: 60 }, columns: { flexDirection: 'column', gap: 14 }, tabletColumns: { flexDirection: 'row', flexWrap: 'wrap' }, left: { gap: 14 }, middle: { gap: 14 }, right: { gap: 14 }, columnLabel: { color: C.faint, fontSize: 10, fontWeight: '800', letterSpacing: 1.6, marginTop: 3, marginBottom: -3 }, metrics: { flexDirection: 'row', gap: 12, paddingVertical: 4 }, health: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, borderTopWidth: 1, borderTopColor: C.border }, healthLabel: { color: C.muted, fontSize: 11, textTransform: 'capitalize' }, healthValue: { fontSize: 11, fontWeight: '700', maxWidth: '55%', textAlign: 'right' }, scoreLine: { flexDirection: 'row', justifyContent: 'space-between' }, scoreVerdict: { fontSize: 11, fontWeight: '800' }, delta: { color: C.text, fontSize: 12, fontWeight: '800' }, businessVerdict: { gap: 6, paddingTop: 7 }, bigVerdict: { fontSize: 20, fontWeight: '800' }, muted: { color: C.muted, fontSize: 11, lineHeight: 17 }, recommendation: { gap: 10 }, recKey: { color: C.faint, fontSize: 10, textTransform: 'uppercase', letterSpacing: .8 }, recValue: { color: C.text, fontSize: 12, lineHeight: 18, marginTop: 2 }, registry: { paddingVertical: 9, borderTopWidth: 1, borderTopColor: C.border, gap: 3 }, registryId: { color: C.purple, fontSize: 10, fontWeight: '800' }, registryText: { color: C.text, fontSize: 11, lineHeight: 16 }, registryKind: { color: C.faint, fontSize: 10 }, center: { flex: 1, backgroundColor: '#080C10', alignItems: 'center', justifyContent: 'center', padding: 30, gap: 10 }, loadingIcon: { width: 58, height: 58, borderRadius: 18, backgroundColor: '#8B5CF618', alignItems: 'center', justifyContent: 'center' }, centerTitle: { color: C.text, fontSize: 16, fontWeight: '800', textAlign: 'center' }, centerBody: { color: C.muted, fontSize: 12, textAlign: 'center', maxWidth: 300, lineHeight: 18 }, retry: { marginTop: 8, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 9, backgroundColor: C.purple }, retryText: { color: '#FFF', fontSize: 12, fontWeight: '800' },
+});
