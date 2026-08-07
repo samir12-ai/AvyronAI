@@ -1,0 +1,223 @@
+I need a COMPLETE READ-ONLY Watchtower lifecycle audit for the REAL MarketMindAI campaign.
+
+DO NOT MODIFY ANY CODE.
+DO NOT MODIFY THE DATABASE.
+DO NOT CREATE TEST DATA.
+DO NOT RE-RUN THE PIPELINE.
+ONLY INSPECT AND REPORT.
+
+====================================================
+OBJECTIVE
+====================================================
+
+The MarketMindAI campaign currently shows:
+
+- 29 First Observation events
+- Only 1 Confirmed event
+
+I need to determine whether this is the expected behavior or whether there is a lifecycle problem preventing confirmations.
+
+Support every conclusion using the actual code, database state, scheduler state, snapshots, and lifecycle logic.
+
+Do not guess.
+
+====================================================
+1. WATCHTOWER EVENT BREAKDOWN
+====================================================
+
+For the MarketMindAI campaign report:
+
+- Total pipeline_change_events
+- candidate count
+- confirmed count
+- archived count
+- expired count
+- failed count
+
+Group them by status.
+
+====================================================
+2. CANDIDATE ANALYSIS
+====================================================
+
+Inspect every candidate event.
+
+For each candidate report:
+
+- event id
+- competitor
+- event kind
+- created_at
+- age
+- runId
+- baselineSnapshotId
+- currentSnapshotId
+- next scheduled confirmation
+- current lifecycle stage
+
+Determine WHY it is still a candidate.
+
+Possible reasons include:
+
+- still waiting for 24h
+- second fetch not executed yet
+- reverted
+- baseline missing
+- runId mismatch
+- confirmation skipped
+- scheduler delay
+- another lifecycle rule
+
+Use the actual reason from the code.
+
+====================================================
+3. COMPETITOR COVERAGE
+====================================================
+
+Inspect every competitor in MarketMindAI.
+
+For each competitor report:
+
+- active
+- monitoring enabled
+- last fetch
+- next fetch
+- scheduler state
+- last successful scrape
+- latest snapshot timestamp
+
+Verify that every competitor is still being monitored.
+
+Identify any competitor that has stopped producing snapshots.
+
+====================================================
+4. SCRAPING HEALTH
+====================================================
+
+Verify:
+
+Instagram
+
+Website
+
+Market Intelligence
+
+Snapshot generation
+
+Classification
+
+Watchtower ingestion
+
+Are all collectors producing fresh data?
+
+Identify any collector that is blocked or stale.
+
+====================================================
+5. CONFIRMATION PIPELINE
+====================================================
+
+Verify that the complete confirmation lifecycle still works.
+
+Check:
+
+Scheduler
+
+24h confirmation scheduling
+
+Second fetch
+
+Snapshot comparison
+
+maintainOpenCandidates()
+
+Promotion to confirmed
+
+Archive logic
+
+Determine whether any stage is blocked.
+
+====================================================
+6. WHY ONLY ONE CONFIRMED EVENT?
+====================================================
+
+Determine the exact reason.
+
+Is it because:
+
+A)
+
+The competitors genuinely haven't made any persistent changes?
+
+OR
+
+B)
+
+The lifecycle is blocked?
+
+OR
+
+C)
+
+The scheduler isn't reaching them?
+
+OR
+
+D)
+
+The scraper stopped updating?
+
+OR
+
+E)
+
+Another verified reason.
+
+Support the answer with evidence.
+
+====================================================
+7. WATCHTOWER HEALTH
+====================================================
+
+Give PASS / WARNING / FAIL for:
+
+Scheduler
+
+Scraping
+
+Snapshots
+
+Classification
+
+Candidate creation
+
+Confirmation
+
+Archiving
+
+Lifecycle
+
+Database
+
+MarketMindAI monitoring
+
+====================================================
+8. FINAL VERDICT
+====================================================
+
+Answer these questions explicitly:
+
+1. Is Watchtower healthy?
+
+2. Are all competitors still being monitored?
+
+3. Is only one confirmed event expected?
+
+4. Is there any bug preventing future confirmations?
+
+5. If I leave the system running, will future confirmed events appear automatically?
+
+6. Is there anything that requires fixing before trusting Watchtower in production?
+
+Do not implement anything.
+
+Only provide a complete evidence-based report.
