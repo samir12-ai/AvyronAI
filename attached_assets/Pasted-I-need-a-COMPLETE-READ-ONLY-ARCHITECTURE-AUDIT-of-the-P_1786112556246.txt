@@ -1,0 +1,397 @@
+I need a COMPLETE READ-ONLY ARCHITECTURE AUDIT of the Performance Loop subsystem.
+
+IMPORTANT
+
+This is an investigation only.
+
+DO NOT modify code.
+DO NOT modify the database.
+DO NOT create migrations.
+DO NOT create UI.
+DO NOT implement anything.
+
+I only want to understand the current architecture and determine what already exists.
+
+Everything related to the Performance Loop UI will later be moved into the dedicated Performance page:
+
+app/(tabs)/performance.tsx
+
+The current page is mostly empty, so I want to know everything that belongs there.
+
+===========================================================
+OBJECTIVE
+===========================================================
+
+Audit the COMPLETE Performance Loop architecture.
+
+Do not focus only on one engine.
+
+Discover every subsystem that contributes to measuring, evaluating, validating, learning, or improving business performance.
+
+Support every answer using:
+
+- source files
+- functions
+- database tables
+- API routes
+- execution flow
+
+Never guess.
+
+===========================================================
+1. PERFORMANCE LOOP ARCHITECTURE
+===========================================================
+
+Explain the entire lifecycle.
+
+Where does it start?
+
+Where does it end?
+
+Draw the complete flow from:
+
+User metrics
+
+↓
+
+Business score updates
+
+↓
+
+Performance reports
+
+↓
+
+Decision engine
+
+↓
+
+Verdicts
+
+↓
+
+Historical storage
+
+↓
+
+Future strategy inputs
+
+Identify every step.
+
+===========================================================
+2. DATABASE AUDIT
+===========================================================
+
+List every table related to Performance.
+
+For each table explain:
+
+- purpose
+- who writes it
+- who reads it
+- lifecycle
+- current usage
+- whether it is active or legacy
+
+===========================================================
+3. PERFORMANCE ENGINES
+===========================================================
+
+Audit every engine related to performance.
+
+Examples include:
+
+Performance Reports
+
+Performance Decision Verdicts
+
+Weekly Business Scores
+
+User Channel Snapshots
+
+Business Metrics
+
+Business Health
+
+Score calculations
+
+Goal tracking
+
+Outcome tracking
+
+Historical trend analysis
+
+Anything else.
+
+Explain:
+
+- responsibility
+- inputs
+- outputs
+- dependencies
+
+===========================================================
+4. USER INPUT FLOW
+===========================================================
+
+Determine exactly how user data enters the system.
+
+Examples:
+
+Weekly metrics
+
+Manual inputs
+
+Integrations
+
+Channel metrics
+
+Business scores
+
+Revenue
+
+Leads
+
+Followers
+
+Reach
+
+Conversions
+
+Anything else.
+
+Explain:
+
+Where does each metric come from?
+
+===========================================================
+5. CURRENT API
+===========================================================
+
+Audit every API endpoint used by the Performance Loop.
+
+Explain:
+
+Purpose
+
+Input
+
+Output
+
+Frontend usage
+
+===========================================================
+6. UI MAPPING
+===========================================================
+
+This is extremely important.
+
+I want to move EVERYTHING related to Performance into:
+
+app/(tabs)/performance.tsx
+
+Audit the current frontend.
+
+Find every:
+
+Component
+
+Card
+
+Chart
+
+Widget
+
+Hook
+
+API call
+
+Performance visualization
+
+Business health indicator
+
+Progress tracker
+
+Score card
+
+Trend graph
+
+Historical report
+
+Recommendation panel
+
+Performance insight
+
+No matter where it currently lives.
+
+Create a migration map showing what belongs inside the Performance page.
+
+===========================================================
+7. RELATIONSHIP WITH OTHER ENGINES
+===========================================================
+
+Explain how Performance interacts with:
+
+Strategy Plan
+
+Watchtower
+
+Reasoning & Evidence
+
+Audience
+
+Positioning
+
+Market Intelligence
+
+Business Profile
+
+Goals
+
+Build Up Plan
+
+Adaptive (future)
+
+Which engines feed Performance?
+
+Which engines consume Performance?
+
+===========================================================
+8. PERFORMANCE MEMORY
+===========================================================
+
+Determine how the system currently learns.
+
+Does it remember:
+
+previous weeks
+
+previous decisions
+
+business improvements
+
+failed experiments
+
+successful experiments
+
+strategy outcomes
+
+historical trends
+
+Explain everything.
+
+===========================================================
+9. MISSING PIECES
+===========================================================
+
+Identify what already exists.
+
+Identify what is partially implemented.
+
+Identify placeholders.
+
+Identify dead code.
+
+Identify unfinished architecture.
+
+Identify legacy code.
+
+Do NOT propose implementations.
+
+===========================================================
+10. FRONTEND REDESIGN READINESS
+===========================================================
+
+Without implementing anything,
+
+describe what the dedicated Performance page SHOULD contain based ONLY on the existing backend.
+
+Group it into logical sections.
+
+For each section explain which existing backend engine powers it.
+
+Do not invent new features.
+
+===========================================================
+11. END-TO-END VERIFICATION
+===========================================================
+
+Verify the complete execution path.
+
+From user metrics
+
+↓
+
+database
+
+↓
+
+performance engines
+
+↓
+
+reports
+
+↓
+
+API
+
+↓
+
+frontend
+
+Confirm which parts already work.
+
+Confirm which parts are disconnected.
+
+===========================================================
+12. FINAL REPORT
+===========================================================
+
+Rate each subsystem:
+
+Performance Data Collection
+
+Business Metrics
+
+Score Calculation
+
+Historical Tracking
+
+Decision Engine
+
+Performance Reports
+
+Verdicts
+
+Learning Loop
+
+Frontend
+
+API
+
+Database
+
+Use only:
+
+PASS
+
+WARNING
+
+FAIL
+
+with evidence.
+
+Finally answer:
+
+1. Is the Performance Loop architecture fundamentally complete?
+
+2. What percentage is already implemented?
+
+3. What percentage is only disconnected from the UI?
+
+4. What percentage is completely missing?
+
+5. Is the backend already strong enough to build a premium Performance page without creating new engines?
+
+Support every answer with evidence only.
