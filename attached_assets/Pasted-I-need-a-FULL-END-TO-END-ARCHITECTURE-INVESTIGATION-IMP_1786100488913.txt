@@ -1,0 +1,321 @@
+I need a FULL END-TO-END ARCHITECTURE INVESTIGATION.
+
+IMPORTANT:
+Use POWER mode.
+
+Do NOT modify code.
+Do NOT create files.
+Do NOT run migrations.
+Do NOT fix anything.
+This is a READ-ONLY investigation.
+
+The Reasoning & Evidence page is stuck forever on:
+
+QUEUED FOR ANALYSIS...
+
+The investigation must determine the SINGLE root cause.
+
+=================================================
+OBJECTIVE
+=================================================
+
+Trace the complete execution path from:
+
+Confirmed Watchtower Event
+
+↓
+
+Strategic Brief Queue
+
+↓
+
+Context Collection
+
+↓
+
+LLM
+
+↓
+
+Deterministic Guards
+
+↓
+
+Judge
+
+↓
+
+Persistence
+
+↓
+
+API
+
+↓
+
+Frontend Rendering
+
+Identify exactly where execution stops.
+
+Every conclusion must be supported by:
+
+- source file
+- function name
+- runtime logs
+- database state
+- code path
+
+Do not guess.
+
+=================================================
+1. WATCHTOWER LIFECYCLE
+=================================================
+
+Verify that the Watchtower backend is fully operational.
+
+Inspect:
+
+- Scheduler
+- Fetch orchestration
+- Snapshot creation
+- Diff engine
+- Candidate creation
+- Confirmation lifecycle
+- Event promotion
+- Trigger into Strategic Brief generation
+
+Confirm whether the trigger is actually executed.
+
+=================================================
+2. STRATEGIC BRIEF DATABASE
+=================================================
+
+Inspect:
+
+watchtower_strategic_briefs
+
+Report every record.
+
+For each one show:
+
+- id
+- event_id
+- status
+- attempt_count
+- created_at
+- started_at
+- completed_at
+- failure_code
+- failure_details
+
+Determine whether jobs are actually being consumed.
+
+=================================================
+3. BACKGROUND WORKER
+=================================================
+
+Trace:
+
+strategic-brief-runner.ts
+
+Determine:
+
+Who starts it?
+
+When?
+
+How?
+
+Does it actually run?
+
+Is it registered during backend startup?
+
+Does it ever poll queued jobs?
+
+Does it stop immediately?
+
+Is the scheduler alive?
+
+Prove every answer.
+
+=================================================
+4. CONTEXT COLLECTION
+=================================================
+
+Inspect every context adapter.
+
+Verify data retrieval from:
+
+- Watchtower
+- Strategy
+- Audience
+- Positioning
+- Market Intelligence
+- Competitor DNA
+- Performance
+- Business Profile
+- Goals
+- Historical Events
+
+Determine whether any adapter blocks generation.
+
+=================================================
+5. LLM EXECUTION
+=================================================
+
+Inspect:
+
+strategic-brief-generator.ts
+
+Verify:
+
+- aiChat
+- retries
+- timeout
+- JSON parsing
+- structured output
+
+Determine:
+
+Is the LLM ever called?
+
+If not,
+
+show exactly why.
+
+=================================================
+6. DETERMINISTIC GUARDS
+=================================================
+
+Inspect every validation.
+
+Determine whether any guard blocks execution.
+
+Check:
+
+- evidence refs
+- numbers
+- scope
+- recommendations
+- token budget
+- JSON validation
+
+=================================================
+7. JUDGE
+=================================================
+
+Verify:
+
+Does the Judge execute?
+
+Does it reject?
+
+Does it retry?
+
+Does it return?
+
+=================================================
+8. API
+=================================================
+
+Inspect:
+
+GET strategic brief
+
+POST generate
+
+Determine:
+
+Does the backend return READY?
+
+Or does it remain QUEUED forever?
+
+=================================================
+9. FRONTEND
+=================================================
+
+Inspect the Reasoning & Evidence page.
+
+Determine:
+
+- polling interval
+- refresh logic
+- cache
+- state updates
+
+Determine whether READY is received but never rendered.
+
+=================================================
+10. MARKETMINDAI
+=================================================
+
+Run the investigation against the REAL MarketMindAI campaign.
+
+Use existing confirmed events.
+
+Do not seed data.
+
+Do not modify production data.
+
+=================================================
+11. FINAL DIAGNOSIS
+=================================================
+
+I do NOT want multiple theories.
+
+Give exactly ONE root cause.
+
+Support it with evidence from the codebase.
+
+=================================================
+12. PROPOSED FIX
+=================================================
+
+Do NOT implement.
+
+Only describe:
+
+- smallest fix
+- affected files
+- expected behaviour after the fix
+- implementation risk
+
+=================================================
+13. FINAL HEALTH REPORT
+=================================================
+
+Rate each subsystem:
+
+Watchtower Scheduler
+
+Fetch Pipeline
+
+Classification
+
+Confirmation Lifecycle
+
+Strategic Brief Queue
+
+Context Collection
+
+LLM
+
+Deterministic Guards
+
+Judge
+
+Persistence
+
+REST API
+
+Frontend
+
+Use only:
+
+PASS
+WARNING
+FAIL
+
+with one-line justification for each.
+
+The report must be evidence-based only.
