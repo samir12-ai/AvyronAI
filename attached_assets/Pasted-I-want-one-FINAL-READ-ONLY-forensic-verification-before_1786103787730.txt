@@ -1,0 +1,183 @@
+I want one FINAL READ-ONLY forensic verification before we delete anything.
+
+DO NOT MODIFY CODE.
+DO NOT MODIFY THE DATABASE.
+DO NOT DELETE ANY ROWS.
+DO NOT RUN FIXES.
+
+This is a verification only.
+
+====================================================
+OBJECTIVE
+====================================================
+
+The previous audit concluded that 28 candidate events are synthetic artifacts created by Migration 043.
+
+Before deleting anything, I want absolute proof.
+
+Every conclusion must be backed by evidence from:
+
+- the code
+- the migration
+- the database
+- runtime behavior
+
+Do not guess.
+
+====================================================
+1. TRACE THEIR ORIGIN
+====================================================
+
+For every one of the 28 candidate events prove:
+
+- Who created it?
+- Which migration?
+- Which file?
+- Which function?
+- Which SQL statement?
+- Which timestamp?
+
+Show exactly where the synthetic values came from.
+
+====================================================
+2. PROVE THEY ARE NOT REAL WATCHTOWER EVENTS
+====================================================
+
+For each orphan candidate verify:
+
+- Was it ever produced by the Watchtower orchestrator?
+- Was it produced by a fetch run?
+- Was it produced from a real snapshot comparison?
+- Does it belong to a real scheduler execution?
+
+If the answer is NO, prove why.
+
+====================================================
+3. VERIFY THE SNAPSHOTS
+====================================================
+
+For every baseline_snapshot_id and current_snapshot_id:
+
+Prove that
+
+- the snapshot does not exist
+- never existed
+OR
+- existed and was deleted
+
+Show the evidence.
+
+====================================================
+4. CHECK REFERENCES
+====================================================
+
+Before deleting anything verify whether these candidate rows are referenced anywhere else.
+
+Inspect:
+
+- watchtower_strategic_briefs
+- adaptive engines
+- strategy engines
+- reasoning engine
+- performance loop
+- reports
+- UI
+- analytics
+- foreign keys
+- any table referencing pipeline_change_events
+
+Report every dependency.
+
+====================================================
+5. IMPACT ANALYSIS
+====================================================
+
+If the 28 rows are deleted,
+
+what changes?
+
+Answer separately for:
+
+Watchtower
+
+Scheduler
+
+Confirmation
+
+History
+
+Reports
+
+Reasoning
+
+Strategic Briefs
+
+Adaptive
+
+Performance
+
+Dashboard counts
+
+Database integrity
+
+====================================================
+6. SAFETY CHECK
+====================================================
+
+Determine whether deleting these rows could accidentally remove:
+
+- genuine observations
+- confirmed history
+- strategic briefs
+- evidence lineage
+- audit history
+
+If there is ANY risk, explain it.
+
+====================================================
+7. REGENERATION
+====================================================
+
+After deleting them,
+
+explain exactly what happens.
+
+Will Watchtower automatically create new candidates?
+
+From where?
+
+Using which snapshots?
+
+Will they use REAL baselineSnapshotIds?
+
+Will they confirm normally after the next lifecycle?
+
+Explain the exact execution path.
+
+====================================================
+8. FINAL VERDICT
+====================================================
+
+Answer ONLY these questions:
+
+1. Are these 28 rows 100% migration artifacts?
+
+2. Are they safe to delete?
+
+3. Will deleting them remove any real business data?
+
+4. Will deleting them improve Watchtower?
+
+5. Will deleting them immediately free the unique constraint slots?
+
+6. Will new real candidates start appearing automatically afterwards?
+
+7. Is there ANY reason NOT to delete them?
+
+Support every answer with evidence.
+
+Do not implement anything.
+
+Do not generate SQL.
+
+Only provide the forensic verification report.
