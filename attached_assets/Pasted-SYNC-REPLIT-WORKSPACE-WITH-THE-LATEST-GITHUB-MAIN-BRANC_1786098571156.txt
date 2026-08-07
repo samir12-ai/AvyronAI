@@ -1,0 +1,162 @@
+SYNC REPLIT WORKSPACE WITH THE LATEST GITHUB MAIN BRANCH
+
+The latest complete Avyron project is already pushed to GitHub.
+
+Repository:
+samir12-ai/AvyronAI
+
+Target branch:
+main
+
+Expected latest commit:
+95c6e9f
+Complete Watchtower and Strategic Interpretation implementation
+
+Your task is to update this Replit workspace to match GitHub main exactly.
+
+IMPORTANT RULES
+
+- Do not implement new features.
+- Do not refactor code.
+- Do not modify application logic.
+- Do not delete database data.
+- Do not reset or overwrite environment variables.
+- Do not print secrets.
+- Do not run destructive tests.
+- Do not push anything back to GitHub yet.
+
+STEP 1 — Inspect current Replit Git state
+
+Run:
+
+git status
+git branch --show-current
+git log -3 --oneline
+git remote -v
+
+Report whether the workspace has any local changes or unpushed commits.
+
+STEP 2 — Protect any existing Replit local work
+
+If the working tree is not clean:
+
+- Do not discard anything.
+- Do not run git reset --hard.
+- Do not overwrite files.
+- Create a backup branch or stash only after clearly reporting what local changes exist.
+- Stop and explain before continuing if those local changes appear important.
+
+If the working tree is clean, continue.
+
+STEP 3 — Fetch the latest GitHub state
+
+Run:
+
+git fetch origin
+
+Verify that:
+
+origin/main points to commit 95c6e9f.
+
+STEP 4 — Update the workspace
+
+Switch to main:
+
+git switch main
+
+Then update using fast-forward only:
+
+git merge --ff-only origin/main
+
+Do not create a merge commit.
+
+If fast-forward is impossible, stop and explain the divergence. Do not force, rebase, or reset without approval.
+
+STEP 5 — Verify synchronization
+
+Run:
+
+git status
+git log -3 --oneline
+git rev-parse HEAD
+git rev-parse origin/main
+
+Confirm:
+
+- Current branch is main.
+- HEAD equals origin/main.
+- Latest commit is 95c6e9f.
+- Working tree is clean.
+- No commits or files are missing.
+
+STEP 6 — Install dependencies safely
+
+Inspect the repository package manager files first.
+
+Use the package manager defined by the project. Prefer pnpm if pnpm-lock.yaml is present.
+
+Run the appropriate install command without changing package versions unnecessarily.
+
+Do not delete the lockfile.
+
+STEP 7 — Environment audit
+
+Check which required environment variables are missing.
+
+Only print variable names and status:
+
+PRESENT
+or
+MISSING
+
+Never print values.
+
+Do not replace existing Replit secrets.
+
+STEP 8 — Migration readiness
+
+Inspect:
+
+server/migrations/runner.ts
+server/migrations/sql/055_snapshot_included_competitors.sql
+server/migrations/sql/056_watchtower_strategic_briefs.sql
+
+Report:
+
+- Current required schema version.
+- Current database schema version.
+- Whether migrations are pending.
+
+Do not run migrations until you confirm the database connection points to the intended active Neon database and no destructive migration exists.
+
+STEP 9 — Startup verification
+
+Start the backend and frontend using the existing project commands.
+
+Verify:
+
+- Backend starts.
+- Frontend starts.
+- Database connects.
+- MarketMindAI campaign loads.
+- Watchtower page loads.
+- Reasoning & Evidence page loads.
+- No critical startup errors occur.
+
+STEP 10 — Final report
+
+Return:
+
+1. Previous Replit commit hash.
+2. New local commit hash.
+3. origin/main hash.
+4. Working tree status.
+5. Dependency installation result.
+6. Missing environment variable names.
+7. Migration status.
+8. Backend startup status.
+9. Frontend startup status.
+10. Database connectivity status.
+11. SAFE TO CONTINUE DEVELOPMENT ON REPLIT: YES or NO.
+
+Do not make any feature changes until this synchronization and verification are complete.
