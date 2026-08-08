@@ -797,27 +797,6 @@ export function checkUnresolvedCriticalProblems(ssc: SharedStrategicContext | nu
   return pass("unresolved_critical_problems", "No unresolved critical problems");
 }
 
-export function checkConfidenceChainIntegrity(ssc: SharedStrategicContext | null): StructuralCheck {
-  if (!ssc || ssc.confidenceChain.length === 0) {
-    return unknown("confidence_chain_integrity", "no confidence chain data — cannot verify integrity");
-  }
-
-  const violations: string[] = [];
-
-  for (const entry of ssc.confidenceChain) {
-    const entryFloor = entry.inheritedFloor;
-    const maxAllowed = entryFloor + 0.20;
-    if (entry.combinedConfidence > maxAllowed && entryFloor < 1.0) {
-      violations.push(`${entry.engineId}: combined=${entry.combinedConfidence.toFixed(2)} > floor(${entryFloor.toFixed(2)})+0.20=${maxAllowed.toFixed(2)}`);
-    }
-  }
-
-  if (violations.length > 0) {
-    return fail("confidence_chain_integrity", `${violations.length} engine(s) exceed confidence floor+0.20: ${violations.join("; ")}`);
-  }
-
-  return pass("confidence_chain_integrity", `All ${ssc.confidenceChain.length} engines within their inherited floor+0.20 bound`);
-}
 
 export function checkPositioningHardGate(ssc: SharedStrategicContext | null): StructuralCheck {
   if (!ssc || ssc.confidenceChain.length === 0) {
@@ -842,41 +821,6 @@ export function checkPositioningHardGate(ssc: SharedStrategicContext | null): St
   );
 }
 
-export function checkConfidenceSpread(ssc: SharedStrategicContext | null): StructuralCheck {
-  if (!ssc || ssc.confidenceChain.length < 2) {
-    return unknown("confidence_spread", "insufficient confidence chain data — at least 2 engines required");
-  }
-
-  // statistical_validation emits a *grounding quality* score (lineage
-  // composition + signal origin ratios) rather than a self-evaluated engine
-  // confidence. Excluded from spread for the same reasons documented prior.
-  const comparableEntries = ssc.confidenceChain.filter(
-    e => e.engineId !== "statistical_validation",
-  );
-  if (comparableEntries.length < 2) {
-    return unknown("confidence_spread", "insufficient comparable confidence chain data — at least 2 non-statistical engines required");
-  }
-
-  const scores = comparableEntries.map(e => e.combinedConfidence);
-  const maxScore = Math.max(...scores);
-  const minScore = Math.min(...scores);
-  const spread = maxScore - minScore;
-  const SPREAD_THRESHOLD = 0.50;
-
-  if (spread > SPREAD_THRESHOLD) {
-    const maxEngine = comparableEntries.find(e => e.combinedConfidence === maxScore)?.engineId ?? "unknown";
-    const minEngine = comparableEntries.find(e => e.combinedConfidence === minScore)?.engineId ?? "unknown";
-    return fail(
-      "confidence_spread",
-      `Confidence spread=${spread.toFixed(2)} exceeds ${SPREAD_THRESHOLD.toFixed(2)} threshold — highest: ${maxEngine}(${maxScore.toFixed(2)}) lowest: ${minEngine}(${minScore.toFixed(2)})`,
-    );
-  }
-
-  return pass(
-    "confidence_spread",
-    `Confidence spread=${spread.toFixed(2)} within ${SPREAD_THRESHOLD.toFixed(2)} threshold (statistical_validation grounding-quality score excluded)`,
-  );
-}
 
 export function checkBudgetOverrideZeroConfidence(ssc: SharedStrategicContext | null, results: Map<EngineId, EngineStepResult>): StructuralCheck {
   if (!ssc) {
@@ -1001,14 +945,8 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
       case "unresolved_critical_problems":
         blocks.push({ code: "UNRESOLVED_CRITICAL_PROBLEMS", description: check.details, source: "ssc_problem_registry", severity: "critical" });
         break;
-      case "confidence_chain_integrity":
-        blocks.push({ code: "CONFIDENCE_CHAIN_VIOLATION", description: check.details, source: "ssc_confidence_chain", severity: "critical" });
-        break;
       case "positioning_hard_gate":
         blocks.push({ code: "POSITIONING_HARD_GATE", description: check.details, source: "ssc_confidence_chain", severity: "critical" });
-        break;
-      case "confidence_spread":
-        blocks.push({ code: "CONFIDENCE_SPREAD_EXCESSIVE", description: check.details, source: "ssc_confidence_chain", severity: "high" });
         break;
       case "budget_override_zero_confidence":
         blocks.push({ code: "BUDGET_OVERRIDE_ZERO_CONFIDENCE", description: check.details, source: "ssc_budget_guard", severity: "critical" });

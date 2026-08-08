@@ -43,3 +43,4 @@
 - [Mechanism Axis Guard fix](mechanism-axis-guard-fix.md) — engine failure / identical-after-normalise → DEGRADED_CONTINUE + 10% penalty, NOT hard-reject; hard-reject cascades offerStrength=0 → killFlag=true → channel abort.
 - [Channel confidence fix](channel-confidence-fix.md) — competitorValidity must use evidenceStrength (~0.74) not claimConfidenceScore (~0.35); runGuardLayer must not abort on killFlag=true.
 - [CEL compliance forensic audit](cel-compliance-forensic.md) — two bugs caused COMPLIANCE_FAILURE: missing /evidence/i in TRUST_OPACITY_RULE + duplicate orchestrator-level differentiation eval using shallow text; both fixed 2026-08-08.
+- [Confidence architecture redesign](confidence-architecture-redesign.md) — cross-engine inheritance (ceiling, rolling-floor cap, zero-cascade) + CONFIDENCE_SPREAD_EXCESSIVE/CHAIN_VIOLATION removed 2026-08-08; each engine owns its own score; quality enforced via CEL, hard gates, lineage, integrity.

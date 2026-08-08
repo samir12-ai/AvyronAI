@@ -35,9 +35,7 @@ export type BlockCode =
   | "ZERO_OBJECTION_COVERAGE"
   | "CHANNEL_CONFIDENCE_BELOW_MINIMUM"
   | "UNRESOLVED_CRITICAL_PROBLEMS"
-  | "CONFIDENCE_CHAIN_VIOLATION"
   | "POSITIONING_HARD_GATE"
-  | "CONFIDENCE_SPREAD_EXCESSIVE"
   | "BUDGET_OVERRIDE_ZERO_CONFIDENCE"
   // Phase R reliability blocks
   | "PIPELINE_INCOMPLETE"           // one or more required checks could not be evaluated (NOT_REACHED/TIMEOUT/STALE/UNKNOWN)
@@ -180,8 +178,6 @@ export type RepairActionCode =
   // v1 Actionable Block Recovery (May 2026) — pure-mutation repairs.
   // Single-pass, idempotent, provenance-stamped, downgrade-only,
   // risk-reducing only. No engine reruns. No retry loops.
-  | "CAP_CONFIDENCE_AT_FLOOR_PLUS_DELTA"
-  | "CLAMP_TO_LOWER_CONFIDENCE"
   | "FORCE_BUDGET_HOLD_ON_ZERO_FLOOR"
   | "MODE_DOWNGRADE_TO_CHANNEL_VALIDATION";
 

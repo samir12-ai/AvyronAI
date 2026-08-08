@@ -1,0 +1,599 @@
+We are going to do a focused Avyron stabilization pass before returning to the Performance Loop.
+
+I want you to resolve the remaining technical debt we discovered during the real campaign runs, AND redesign the role of "confidence" across Avyron.
+
+IMPORTANT:
+
+Do NOT blindly delete every field or variable named confidence.
+
+The goal is NOT:
+"remove all confidence numbers."
+
+The goal is:
+
+REMOVE GLOBAL / CROSS-ENGINE / INHERITED CONFIDENCE AS A STRATEGIC AUTHORITY
+
+while PRESERVING local scores that have a real deterministic purpose inside individual engines.
+
+Avyron should trust:
+
+REAL DATA
+→ LINEAGE
+→ GROUNDING
+→ CEL
+→ JUDGES
+→ COMPLETENESS
+→ FRESHNESS
+→ HARD VALIDATION GUARDS
+→ REAL PERFORMANCE OUTCOMES
+
+rather than pretending that heterogeneous engine confidence percentages are directly comparable.
+
+===========================================================
+WHY WE ARE DOING THIS
+===========================================================
+
+The recent MarketMindAI real runs exposed a structural problem.
+
+Different engines use "confidence" to mean different things.
+
+Examples already discovered:
+
+- Market Intelligence confidence can represent evidence/data quality.
+- Positioning has engineConfidence and confidenceScore with different semantics.
+- Territory confidence can represent territory maturity/evidence strength.
+- Mechanism had strong local structural quality (~0.95) but was capped to ~0.20 through an upstream inherited-confidence ceiling.
+- Downstream engines could inherit/carry low confidence.
+- System Control then compared heterogeneous values through CONFIDENCE_SPREAD_EXCESSIVE.
+
+This produced a false block:
+
+MI ≈ 0.92
+Mechanism ≈ 0.20
+spread ≈ 0.72
+threshold = 0.50
+→ BLOCK
+
+But the 0.20 did NOT mean Mechanism itself was poor.
+
+Therefore we no longer want one generic cross-engine "confidence" doctrine controlling the strategic pipeline.
+
+Also consider UX:
+
+A user seeing "Confidence 70%" cannot know whether that means:
+
+- probability the strategy succeeds
+- AI certainty
+- evidence quality
+- data completeness
+- grounding quality
+- territory maturity
+- structural output quality
+
+If the number cannot be interpreted consistently, it should not be presented as a universal strategic truth.
+
+===========================================================
+PHASE 1 — COMPLETE CONFIDENCE IMPACT AUDIT
+===========================================================
+
+Before modifying anything, map every confidence-related field and calculation across Avyron.
+
+Search the entire active codebase.
+
+For every confidence/score identify:
+
+- field name
+- engine/subsystem
+- source file
+- calculation
+- semantic meaning
+- consumers
+- persistence
+- API exposure
+- UI exposure
+- whether another engine consumes it
+- whether System Control consumes it
+- whether it affects PASS/BLOCK
+- whether it is local or inherited
+- whether it is deterministic or LLM-derived
+
+Classify every occurrence into exactly one category:
+
+A. LOCAL_USEFUL_SCORE
+
+Example:
+A score used internally to rank Positioning territories.
+
+KEEP these if they serve a real local purpose.
+
+B. EVIDENCE_QUALITY_SIGNAL
+
+Example:
+MI evidence strength/coverage.
+
+KEEP the underlying concept if useful, but do not automatically treat it as globally comparable "confidence."
+
+C. GLOBAL_CROSS_ENGINE_CONFIDENCE
+
+A generic confidence value compared across unrelated engines.
+
+TARGET FOR REMOVAL from strategic authority.
+
+D. INHERITED / UPSTREAM CONFIDENCE
+
+Examples:
+
+min(upstream confidence) + ceiling
+rolling confidence floor
+downstream confidence caps
+
+TARGET FOR REMOVAL.
+
+E. VALIDATION / GUARD SCORE
+
+A deterministic score used by a specific validator/judge with defined semantics.
+
+KEEP if its semantics are explicit and it has a legitimate guard purpose.
+
+F. USER-FACING AMBIGUOUS CONFIDENCE
+
+Generic UI percentages such as "Confidence 68%" where the user cannot understand what the percentage actually represents.
+
+Identify these for redesign/removal from UI.
+
+DO NOT MODIFY ANYTHING until this map is complete.
+
+===========================================================
+PHASE 2 — REMOVE UPSTREAM CONFIDENCE CASCADES
+===========================================================
+
+Once Phase 1 proves the dependency graph, remove the architecture where one engine's generic confidence numerically caps another engine.
+
+Specifically investigate and remove, where confirmed:
+
+- inheritedConfidence ceilings
+- rolling confidence floors
+- downstream generic confidence caps
+- cross-engine confidence propagation
+- generic confidence penalties whose only purpose is carrying upstream uncertainty forward
+
+Each engine should evaluate the quality of ITS OWN work.
+
+If an upstream dependency is actually invalid, stale, incomplete, unsupported, or missing, that must still matter.
+
+But represent it truthfully through existing mechanisms such as:
+
+- lineage validation
+- evidence availability
+- provenance
+- freshness
+- completeness
+- dependency state
+- CEL
+- grounding
+- judge verdict
+- explicit DEGRADED state
+- hard validation gate
+
+Do NOT turn:
+
+"upstream evidence is weak"
+
+into:
+
+"this engine's own confidence is 20%"
+
+unless that score genuinely measures the engine's own output.
+
+===========================================================
+PHASE 3 — SYSTEM CONTROL
+===========================================================
+
+Audit System Control after removing inherited confidence semantics.
+
+CONFIDENCE_SPREAD_EXCESSIVE currently compares heterogeneous values.
+
+If Phase 1 confirms the forensic findings, remove this gate as a global strategic blocker rather than continuing to patch it engine-by-engine.
+
+Do NOT simply raise its threshold.
+
+Do NOT replace 0.50 with another arbitrary number.
+
+Do NOT create another universal confidence formula.
+
+Preserve the REAL System Control guards.
+
+System Control should continue blocking for concrete reasons such as:
+
+- missing evidence
+- invalid lineage
+- stale critical evidence
+- unsupported causal claims
+- CEL failure
+- grounding failure
+- required engine failure
+- offer/audience contradiction
+- actual integrity violation
+- missing required inputs
+- invalid provenance where prohibited
+- genuine hard compliance failures
+
+The goal is NOT to make plans easier to approve.
+
+The goal is to make BLOCK mean something concrete and explainable.
+
+===========================================================
+PHASE 4 — POSITIONING CONFIDENCE CLEANUP
+===========================================================
+
+Audit Positioning specifically.
+
+We know it has at least:
+
+engineConfidence
+confidenceScore
+territory-level scoring
+
+Do NOT delete useful territory ranking.
+
+Determine exactly what each score means.
+
+If territory scores are used to rank candidate territories, KEEP them locally.
+
+If engineConfidence is a structural validator score with real purpose, KEEP it locally if needed.
+
+But prevent territory maturity/evidence scores from masquerading as universal Positioning confidence or becoming downstream caps.
+
+No downstream engine should inherit a Positioning territory-ranking score as if it represented overall strategic reliability.
+
+===========================================================
+PHASE 5 — USER-FACING CONFIDENCE
+===========================================================
+
+Audit all UI surfaces showing generic confidence percentages.
+
+Do not remove meaningful information.
+
+Where the UI currently exposes an ambiguous percentage, prefer existing concrete states where backend support already exists, such as:
+
+- Evidence: Validated / Partial / Missing
+- Grounding: PASS / FAIL
+- Freshness: Current / Stale
+- Lineage: Complete / Incomplete
+- Claim support: Supported / Partial / Unsupported
+- Data coverage
+- Judge verdict
+- explicit reason for DEGRADED/BLOCKED
+
+Do not invent backend states just for UI.
+
+If a percentage has a precise, defensible meaning, it may remain — but label what it actually measures.
+
+Example:
+
+"Evidence Coverage: 82%"
+
+is acceptable if it literally measures evidence coverage.
+
+"Strategic Confidence: 82%"
+
+is not acceptable unless that concept has a mathematically consistent meaning across the system.
+
+===========================================================
+PHASE 6 — PRESERVE CRITICAL GUARDRAILS
+===========================================================
+
+THIS IS CRITICAL.
+
+Do NOT remove or weaken:
+
+- Evidence Registry
+- data lineage
+- tenant isolation
+- snapshot/run integrity
+- provenance validation
+- freshness validation
+- grounding contracts
+- CEL
+- claim-level judges
+- deterministic evidence-ID verification
+- System Control hard gates that represent concrete failures
+- completeness checks
+- no-fabricated-data doctrine
+- no-silent-fallback doctrine
+- fail-closed behavior where appropriate
+- execution lineage
+- Performance truth data
+- strategy memory lineage
+- outcome validation
+
+Confidence removal must NEVER become guardrail removal.
+
+===========================================================
+PHASE 7 — FIX THE REMAINING DISCOVERED TASKS
+===========================================================
+
+During this stabilization pass, resolve the previously discovered technical issues that remain relevant.
+
+DO NOT work on Business Profile cleanup yet.
+We will return to Business Profile separately.
+
+Resolve the remaining engineering tasks discovered during the previous audits/runs, including where still applicable:
+
+1. CEL deterministic architecture cleanup
+
+Verify and fix the double-evaluation / mismatched-text problem.
+
+Engines must not be evaluated once with rich engine-native text and again with a narrower generic representation that creates false violations.
+
+Specifically re-check:
+
+- Funnel
+- Differentiation
+- Positioning
+- Awareness
+
+Use current source, not assumptions from previous reports.
+
+Preserve CEL strictness.
+
+Do NOT weaken thresholds to make tests pass.
+
+2. CEL text propagation / lineage issues
+
+Fix confirmed cases where:
+
+- groundedJourneyRationale or equivalent grounded reasoning is omitted before CEL
+- nested root-cause reasoning is lost during text conversion
+- pillar descriptions/mechanism reasoning are omitted from CEL input
+- rootCauseRefs are available but not propagated
+- CEL receives an incomplete representation of the actual engine output
+
+Only fix proven propagation problems.
+
+Do not fabricate missing evidence.
+
+3. Awareness / Funnel / Differentiation residual lineage
+
+Audit the previously observed rootCauseRefs=0 / residual lineage findings.
+
+If the underlying evidence/root-cause linkage genuinely exists but is not persisted/propagated, fix the propagation.
+
+If the linkage genuinely does NOT exist, leave it unsupported.
+
+Never synthesize lineage merely to satisfy a validator.
+
+4. server_dist / runtime-source mismatch
+
+This is important.
+
+Previous forensic work found that compiled server_dist behavior could differ from current source.
+
+Make runtime truth unambiguous.
+
+Determine:
+
+- what code production/dev real runs actually execute
+- whether server_dist is stale
+- whether source changes are being tested against old compiled artifacts
+- build/restart lifecycle
+- whether verification harnesses execute source or compiled code
+
+Fix the workflow so a "real run" cannot silently test stale compiled logic while we believe it is testing current source.
+
+Do not hide the issue by manually editing compiled output.
+
+Fix the source/build/runtime contract correctly.
+
+5. Confidence architecture
+
+Implement the confidence changes from Phases 1–5 only after the impact audit proves the safe removal surface.
+
+6. Existing relevant regression gaps
+
+Review the previously created task list around these exact issues.
+
+If a previous task is already fixed, verify it and mark it complete.
+
+If still broken, fix it.
+
+Do NOT expand scope into unrelated product work.
+
+EXPLICITLY EXCLUDED FOR NOW:
+
+- Business Profile cleanup/redesign
+- Product Details final-touch work
+- unrelated UI polish
+- new features
+- Performance Loop redesign
+- Hybrid CEL implementation unless absolutely required by an already-confirmed bug
+- arbitrary architecture rewrites
+
+===========================================================
+PHASE 8 — PARALLEL EXECUTION / BACKGROUND WORK
+===========================================================
+
+I want to save time.
+
+After the dependency audit is complete, split independent workstreams and execute them in parallel/background agents IF the environment supports it.
+
+Examples of independent workstreams:
+
+WORKSTREAM A
+Confidence architecture + System Control
+
+WORKSTREAM B
+CEL text propagation + duplicate evaluation + residual lineage
+
+WORKSTREAM C
+Runtime/source/server_dist consistency
+
+WORKSTREAM D
+Regression test coverage and verification preparation
+
+IMPORTANT:
+
+Parallel does NOT mean unsafe.
+
+Tasks that depend on another task's result must wait.
+
+Do not allow parallel agents to modify the same file concurrently without coordination.
+
+Before merging workstreams:
+
+- review diffs
+- resolve overlaps
+- run integration tests
+- verify no agent weakened another subsystem's guardrails
+
+The final real campaign run must happen only AFTER all relevant fixes are integrated.
+
+===========================================================
+PHASE 9 — TESTS
+===========================================================
+
+Add/extend regression coverage for the bugs actually fixed.
+
+At minimum verify:
+
+1. Strong local engine output is not numerically destroyed by unrelated upstream generic confidence.
+
+2. One low local ranking/maturity score does not cascade through downstream engine confidence.
+
+3. System Control does not block solely because heterogeneous engine confidence percentages differ.
+
+4. Real evidence weakness STILL blocks where an existing hard guard requires it.
+
+5. CEL still rejects genuinely unsupported causal claims.
+
+6. Fake evidence IDs still fail.
+
+7. Missing lineage still fails where lineage is mandatory.
+
+8. Stale evidence still triggers the appropriate existing guard.
+
+9. Funnel/Differentiation/Awareness CEL receive the complete intended grounded representation.
+
+10. Runtime verification executes the exact source/build being tested.
+
+11. No cross-tenant regression.
+
+12. No fake data.
+
+13. No silent fallback introduced.
+
+===========================================================
+PHASE 10 — REAL MARKETMINDAI RUN
+===========================================================
+
+After all fixes and regression tests pass:
+
+Run ONE fresh real MarketMindAI campaign run through the normal production lifecycle.
+
+No manual DB insertion.
+No synthetic snapshots.
+No fabricated evidence.
+No forced PASS.
+No manual status edits.
+No bypassing System Control.
+
+Verify:
+
+- all 15 engines execute
+- current source/build is actually running
+- no timeout cascade
+- CEL results
+- grounding results
+- lineage
+- System Control
+- Build Plan
+- final status
+- snapshots persisted
+- no stale cross-run mixing
+
+If System Control blocks again, report ONLY the concrete remaining blocker.
+
+Do not automatically start another architecture project.
+
+===========================================================
+PHASE 11 — PERFORMANCE LOOP READINESS
+===========================================================
+
+Remember why we started this work.
+
+The goal is to return to the Performance Loop.
+
+If the real run produces a valid plan through the normal lifecycle:
+
+- verify plan state
+- approve only through the legitimate existing approval path if approval is appropriate under existing rules
+- activate only through the legitimate activation path
+- verify Performance Loop prerequisites
+
+Do NOT fabricate:
+
+- posts
+- user metrics
+- leads
+- revenue
+- conversions
+- truth submissions
+- performance history
+
+If Performance cannot run because real user data is missing, report exactly what real input is required.
+
+Do not invent it.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Give me ONE consolidated report, not scattered mini-reports.
+
+Include:
+
+1. Confidence architecture before.
+2. Every confidence field audited.
+3. Which scores were kept and WHY.
+4. Which global/inherited confidence mechanisms were removed and WHY.
+5. Which user-facing confidence displays were removed/renamed.
+6. System Control changes.
+7. CEL fixes completed.
+8. Residual lineage fixes completed.
+9. Runtime/server_dist issue and final resolution.
+10. Previously discovered tasks:
+   - fixed
+   - already fixed
+   - intentionally deferred
+11. Exact files changed.
+12. Exact DB migrations, if any.
+13. Regression test results.
+14. TypeScript baseline vs after.
+15. Real MarketMindAI run results.
+16. Final System Control verdict.
+17. Approved/Activated state if legitimately reached.
+18. Performance Loop readiness.
+
+Then answer:
+
+A. Does every engine now own the evaluation of its own work instead of inheriting arbitrary confidence ceilings?
+
+B. Are useful LOCAL scores preserved?
+
+C. Is global heterogeneous confidence no longer a false strategic authority?
+
+D. Are evidence/lineage/CEL/judges/freshness/completeness guards still intact?
+
+E. Can a new first-run user reach a legitimate plan without being trapped by a confidence bootstrap deadlock?
+
+F. Is the exact runtime/source contract now trustworthy?
+
+G. Are the previously discovered CEL/lineage issues resolved?
+
+H. What, if anything, still blocks us from returning to the Performance Loop?
+
+Do the work systematically.
+
+Do not optimize for making the campaign PASS.
+
+Optimize for making Avyron truthful, deterministic where truth can be deterministic, evidence-grounded, explainable, and safe from fabricated strategic certainty.

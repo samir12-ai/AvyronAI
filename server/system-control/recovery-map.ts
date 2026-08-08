@@ -38,8 +38,6 @@ export const BLOCK_METADATA: Record<BlockCode | "UNKNOWN_BLOCK", { retrySafe: bo
   NO_CONVERSION_PATH:               { retrySafe: true,  resolverActor: "system" },
   SCALE_WITHOUT_REAL_DATA:          { retrySafe: true,  resolverActor: "system" },
   // v1 pure-mutation repairs
-  CONFIDENCE_CHAIN_VIOLATION:       { retrySafe: true,  resolverActor: "system" },
-  CONFIDENCE_SPREAD_EXCESSIVE:      { retrySafe: true,  resolverActor: "system" },
   BUDGET_OVERRIDE_ZERO_CONFIDENCE:  { retrySafe: true,  resolverActor: "system" },
   CHANNEL_CONFIDENCE_BELOW_MINIMUM: { retrySafe: true,  resolverActor: "system" },
   // Engine-rerun-required (system-driven, not safe inside system-control loop)
@@ -66,6 +64,10 @@ export const BLOCK_METADATA: Record<BlockCode | "UNKNOWN_BLOCK", { retrySafe: bo
   STALE_SNAPSHOT_EVIDENCE:          { retrySafe: false, resolverActor: "system" },
   ENGINE_TIMEOUT:                   { retrySafe: false, resolverActor: "system" },
   UNRESOLVED_CONTRADICTION:         { retrySafe: false, resolverActor: "user" },
+  // Runtime Truth Track (May 2026) — downgrade-or-block signals
+  ANALYTICAL_ENRICHMENT_PARTIAL:    { retrySafe: false, resolverActor: "system" },
+  SIGNAL_LINEAGE_UNKNOWN_DOMINANT:  { retrySafe: false, resolverActor: "system" },
+  CONFIDENCE_INTEGRITY_INCOMPLETE:  { retrySafe: false, resolverActor: "system" },
   // Unknown — escalate to human
   UNKNOWN_BLOCK:                    { retrySafe: false, resolverActor: "user" },
 };
@@ -401,46 +403,6 @@ export const RECOVERY_MAP: Partial<Record<BlockCode | "UNKNOWN_BLOCK", RecoveryM
     requiredProof: ["SSC snapshot with confidenceFloor > 0.30"],
     allowedNextModes: ["HUMAN_REVIEW_REQUIRED", "PROOF_COLLECTION", "HALTED"],
     defaultNextMode: "HUMAN_REVIEW_REQUIRED",
-  },
-
-  CONFIDENCE_CHAIN_VIOLATION: {
-    meaning: "An engine reported confidence > 0.20 above its inherited floor — a logical leap not supported by upstream signal.",
-    severity: "critical",
-    ownerEngine: "Orchestrator (SSC)",
-    rootCauseCategory: "validation_issue",
-    repairOrderRank: RANK.VALIDATION,
-    repairPatterns: [
-      "Identify the violating engine and cap its confidence at floor + 0.20",
-      "Re-run the violating engine with explicit confidence-bound seeds",
-      "If violation persists, route to REVIEW_REQUIRED",
-    ],
-    successCriteria: [
-      "All engine confidences within (floor, floor + 0.20)",
-      "No SSC violation logs on rerun",
-    ],
-    requiredProof: ["Orchestrator run log with no confidence-chain violations"],
-    allowedNextModes: ["RESTRICTED_EXECUTION", "REVIEW_REQUIRED", "TEST_ONLY"],
-    defaultNextMode: "REVIEW_REQUIRED",
-  },
-
-  CONFIDENCE_SPREAD_EXCESSIVE: {
-    meaning: "Spread between highest and lowest engine confidence exceeds 0.50, indicating internal disagreement.",
-    severity: "critical",
-    ownerEngine: "Orchestrator (SSC)",
-    rootCauseCategory: "validation_issue",
-    repairOrderRank: RANK.VALIDATION,
-    repairPatterns: [
-      "Identify the high-confidence and low-confidence engines and surface the contradiction",
-      "Force both engines to the lower confidence value and re-run downstream",
-      "If disagreement is structural, route to HUMAN_REVIEW_REQUIRED",
-    ],
-    successCriteria: [
-      "Engine confidence spread ≤ 0.50",
-      "No active contradictions in SSC",
-    ],
-    requiredProof: ["SSC snapshot with confidence spread ≤ 0.50"],
-    allowedNextModes: ["RESTRICTED_EXECUTION", "REVIEW_REQUIRED", "HUMAN_REVIEW_REQUIRED"],
-    defaultNextMode: "REVIEW_REQUIRED",
   },
 
   UNRESOLVED_CRITICAL_PROBLEMS: {

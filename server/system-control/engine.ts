@@ -28,9 +28,7 @@ import {
   checkZeroObjectionCoverage,
   checkChannelConfidenceMinimum,
   checkUnresolvedCriticalProblems,
-  checkConfidenceChainIntegrity,
   checkPositioningHardGate,
-  checkConfidenceSpread,
   checkBudgetOverrideZeroConfidence,
   checkAnalyticalEnrichmentIntegrity,
   checkMiGateRejections,
@@ -81,9 +79,14 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkChannelConfidenceMinimum(input.results));
 
   structuralChecks.push(checkUnresolvedCriticalProblems(input.ssc));
-  structuralChecks.push(checkConfidenceChainIntegrity(input.ssc));
+  // checkConfidenceChainIntegrity and checkConfidenceSpread removed:
+  // those checks validated the rolling-floor cascade (inherited confidence
+  // ceilings) which has been removed. Cross-engine confidence spread is not a
+  // meaningful signal when engine confidence scores measure heterogeneous
+  // concepts (data evidence quality, territory maturity, structural output
+  // quality). Trust is now enforced exclusively via lineage, CEL, grounding,
+  // hard gates, and DEGRADED states — not heterogeneous numeric comparisons.
   structuralChecks.push(checkPositioningHardGate(input.ssc));
-  structuralChecks.push(checkConfidenceSpread(input.ssc));
   structuralChecks.push(checkBudgetOverrideZeroConfidence(input.ssc, input.results));
   // Runtime Truth Track (May 2026):
   //   T3.B — AEL partial-build gate (analytical-enrichment integrity)
@@ -260,12 +263,8 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
         // v1 Actionable Block Recovery (May 2026): re-verify the structural
         // check whose target the pure-mutation repair just clamped. SSC was
         // mutated in place; re-checks read the post-mutation state.
-        if (resolvedCodes.has("CONFIDENCE_CHAIN_VIOLATION")) {
-          recheck.push(checkConfidenceChainIntegrity(input.ssc));
-        }
-        if (resolvedCodes.has("CONFIDENCE_SPREAD_EXCESSIVE")) {
-          recheck.push(checkConfidenceSpread(input.ssc));
-        }
+        // (CONFIDENCE_CHAIN_VIOLATION and CONFIDENCE_SPREAD_EXCESSIVE removed —
+        // those checks validated the rolling-floor cascade which has been removed.)
         if (resolvedCodes.has("BUDGET_OVERRIDE_ZERO_CONFIDENCE")) {
           recheck.push(checkBudgetOverrideZeroConfidence(input.ssc, input.results));
         }
@@ -293,8 +292,6 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
           conversion_path: "NO_CONVERSION_PATH",
           funnel_structural_completeness: "NO_CONVERSION_PATH",
           signal_grounding: "SCALE_WITHOUT_REAL_DATA",
-          confidence_chain_integrity: "CONFIDENCE_CHAIN_VIOLATION",
-          confidence_spread: "CONFIDENCE_SPREAD_EXCESSIVE",
           budget_override_zero_confidence: "BUDGET_OVERRIDE_ZERO_CONFIDENCE",
           channel_confidence_minimum: "CHANNEL_CONFIDENCE_BELOW_MINIMUM",
         };

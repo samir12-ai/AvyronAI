@@ -548,23 +548,18 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
       const depthPenaltyFactor = celDepth.passed ? 1.0 : Math.max(0.5, celDepth.score);
       const rawLLMConfidence = clamp(rawConfidence * depthPenaltyFactor);
 
-      // T002 v2: confidence inheritance — mechanism cannot exceed upstream ceiling
-      // Ceiling = min(positioning.confidence, differentiation.confidence) + 0.05 margin
-      // (small margin allows mechanism to add a sliver of value, but cannot mask weak inputs)
-      const posConf = typeof positioning.confidenceScore === "number" ? positioning.confidenceScore : null;
-      const diffConf = typeof differentiation.confidenceScore === "number" ? differentiation.confidenceScore : null;
-      let inheritedConfidence: number;
-      if (posConf !== null && diffConf !== null) {
-        inheritedConfidence = clamp(Math.min(posConf, diffConf) + 0.05);
-      } else if (posConf !== null) {
-        inheritedConfidence = clamp(posConf + 0.05);
-      } else if (diffConf !== null) {
-        inheritedConfidence = clamp(diffConf + 0.05);
-      } else {
-        inheritedConfidence = 1.0; // no upstream confidence — no ceiling effect
-      }
-      const confidence = Math.min(rawLLMConfidence, inheritedConfidence);
-      const confidencePenalty = Math.max(0, rawLLMConfidence - confidence);
+      // Mechanism evaluates the quality of ITS OWN output only.
+      // Upstream engines (positioning, differentiation) may be weak — that is
+      // represented via lineage, CEL, grounding, and hard validation guards,
+      // NOT by numerically capping this engine's self-assessment.
+      // The former inherited-confidence ceiling (min(pos,diff)+0.05) has been
+      // removed because it conflated positioning territory-ranking maturity
+      // scores with mechanism structural quality — structurally incomparable
+      // metrics that produced a false CONFIDENCE_SPREAD_EXCESSIVE boot-strap
+      // deadlock on every first real campaign run.
+      const confidence = rawLLMConfidence;
+      const inheritedConfidence = rawLLMConfidence; // retained for audit trail only — no longer a cap
+      const confidencePenalty = 0;                  // retained for audit trail only
 
       const depthGateResult = buildDepthGateResult(celDepth, depthAttempt, depthGateMaxAttempts, depthGateLog, celSourceTexts);
 
@@ -580,7 +575,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
         }))
         .slice(0, 3);
 
-      console.log(`[MechanismEngine-v2] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | rawConf=${rawLLMConfidence.toFixed(2)} | ceiling=${inheritedConfidence.toFixed(2)} | finalConf=${confidence.toFixed(2)} | penalty=${confidencePenalty.toFixed(2)} | posConf=${posConf?.toFixed(2) ?? "null"} | diffConf=${diffConf?.toFixed(2) ?? "null"} | depthScore=${celDepth.causalDepthScore} | depthAttempts=${depthAttempt} | hasWhyItWorks=${!!primaryMech.whyItWorks} | failureModes=${(primaryMech.failureModes || []).length} | causalChainSteps=${(primaryMech.causalChain || []).length}`);
+      console.log(`[MechanismEngine-v2] COMPLETE | mechanism="${primaryMech.mechanismName}" | axis=${primaryAxis} | consistent=${finalValidation.consistent} | rawConf=${rawLLMConfidence.toFixed(2)} | finalConf=${confidence.toFixed(2)} | depthScore=${celDepth.causalDepthScore} | depthAttempts=${depthAttempt} | hasWhyItWorks=${!!primaryMech.whyItWorks} | failureModes=${(primaryMech.failureModes || []).length} | causalChainSteps=${(primaryMech.causalChain || []).length}`);
 
       return {
         status: finalValidation.consistent ? STATUS.COMPLETE : STATUS.AXIS_REJECTED,

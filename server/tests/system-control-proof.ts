@@ -1139,6 +1139,8 @@ async function runPhase4Tests() {
   console.log("─".repeat(80));
 
   {
+    // Rolling-floor cascade removed. Engines with heterogeneous confidence no
+    // longer produce CONFIDENCE_CHAIN_VIOLATION — each engine owns its own score.
     const ssc = createEmptySSC("test_campaign", "test_account");
     updateConfidenceChain(ssc, "market_intelligence" as any, 0.50, 0.50, 0.50);
     updateConfidenceChain(ssc, "audience" as any, 0.50, 0.50, 0.50);
@@ -1146,20 +1148,8 @@ async function runPhase4Tests() {
     const input = makeBaseInput();
     input.ssc = ssc;
     const verdict = evaluateSystemControl(input);
-    const hasChainViolation = verdict.blockReasons.some(b => b.code === "CONFIDENCE_CHAIN_VIOLATION");
-    assert("Engines within floor+0.20 → no chain violation", !hasChainViolation);
-  }
-
-  {
-    const ssc = createEmptySSC("test_campaign", "test_account");
-    updateConfidenceChain(ssc, "market_intelligence" as any, 0.50, 0.50, 0.50);
-    updateConfidenceChain(ssc, "audience" as any, 0.20, 0.20, 0.20);
-    updateConfidenceChain(ssc, "positioning" as any, 0.50, 0.50, 0.50);
-    const input = makeBaseInput();
-    input.ssc = ssc;
-    const verdict = evaluateSystemControl(input);
-    const hasChainViolation = verdict.blockReasons.some(b => b.code === "CONFIDENCE_CHAIN_VIOLATION");
-    assert("Engine exceeds floor+0.20 → CONFIDENCE_CHAIN_VIOLATION", hasChainViolation);
+    assert("No inherited-confidence block fires (CONFIDENCE_CHAIN_VIOLATION removed)",
+      !verdict.blockReasons.some(b => (b.code as string) === "CONFIDENCE_CHAIN_VIOLATION"));
   }
 
   console.log("\n" + "─".repeat(80));
@@ -1190,30 +1180,12 @@ async function runPhase4Tests() {
   }
 
   console.log("\n" + "─".repeat(80));
-  console.log("SECTION 47: Phase 3 — Confidence Spread");
+  console.log("SECTION 47: Phase 3 — Confidence Spread (REMOVED)");
   console.log("─".repeat(80));
-
-  {
-    const ssc = createEmptySSC("test_campaign", "test_account");
-    updateConfidenceChain(ssc, "market_intelligence" as any, 0.90, 0.90, 0.90);
-    updateConfidenceChain(ssc, "audience" as any, 0.30, 0.30, 0.30);
-    const input = makeBaseInput();
-    input.ssc = ssc;
-    const verdict = evaluateSystemControl(input);
-    assert("Spread 0.60 → CONFIDENCE_SPREAD_EXCESSIVE",
-      verdict.blockReasons.some(b => b.code === "CONFIDENCE_SPREAD_EXCESSIVE"));
-  }
-
-  {
-    const ssc = createEmptySSC("test_campaign", "test_account");
-    updateConfidenceChain(ssc, "market_intelligence" as any, 0.60, 0.60, 0.60);
-    updateConfidenceChain(ssc, "audience" as any, 0.50, 0.50, 0.50);
-    const input = makeBaseInput();
-    input.ssc = ssc;
-    const verdict = evaluateSystemControl(input);
-    const hasSpread = verdict.blockReasons.some(b => b.code === "CONFIDENCE_SPREAD_EXCESSIVE");
-    assert("Spread 0.10 → no spread block", !hasSpread);
-  }
+  console.log("  [SKIP] CONFIDENCE_SPREAD_EXCESSIVE check removed — heterogeneous engine");
+  console.log("  confidence scores (data evidence quality, territory maturity, structural");
+  console.log("  output quality) are semantically incomparable. Trust is now enforced");
+  console.log("  via lineage, CEL, grounding, hard gates, and DEGRADED states.");
 
   console.log("\n" + "─".repeat(80));
   console.log("SECTION 48: Phase 3 — Budget Governor Zero-Confidence Guard");
@@ -1318,9 +1290,7 @@ async function runPhase4Tests() {
     assert("Multiple SSC block reasons", verdict.blockReasons.filter(b =>
       b.code === "UNRESOLVED_CRITICAL_PROBLEMS" ||
       b.code === "POSITIONING_HARD_GATE" ||
-      b.code === "BUDGET_OVERRIDE_ZERO_CONFIDENCE" ||
-      b.code === "CONFIDENCE_CHAIN_VIOLATION" ||
-      b.code === "CONFIDENCE_SPREAD_EXCESSIVE"
+      b.code === "BUDGET_OVERRIDE_ZERO_CONFIDENCE"
     ).length >= 3);
   }
 

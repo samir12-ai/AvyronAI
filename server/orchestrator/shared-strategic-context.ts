@@ -472,8 +472,6 @@ export function addReasonTrace(
   });
 }
 
-export const MAX_CONFIDENCE_AMPLIFICATION = 0.20;
-
 export function updateConfidenceChain(
   ssc: SharedStrategicContext,
   engineId: EngineId,
@@ -481,19 +479,22 @@ export function updateConfidenceChain(
   engineConfidence: number,
   combinedConfidence: number
 ): void {
+  // Each engine's combinedConfidence records its own local score only.
+  // There is no rolling floor cap: upstream confidence weakness is expressed
+  // via lineage, CEL, grounding, hard gates, and DEGRADED states — not by
+  // numerically crushing downstream self-assessments.
+  // confidenceFloor tracks the minimum observed across all engines and is
+  // retained for checkBudgetOverrideZeroConfidence (blocks scale/test budget
+  // actions when any engine genuinely emitted 0 combined confidence).
   const floorBeforeThisEngine = ssc.confidenceFloor;
-  const localCombined = combinedConfidence;
-  const rolledUp = floorBeforeThisEngine >= 1.0
-    ? localCombined
-    : Math.min(localCombined, floorBeforeThisEngine + MAX_CONFIDENCE_AMPLIFICATION);
-  ssc.confidenceFloor = Math.min(ssc.confidenceFloor, rolledUp);
+  ssc.confidenceFloor = Math.min(ssc.confidenceFloor, combinedConfidence);
   ssc.confidenceChain.push({
     engineId,
     dataConfidence,
     engineConfidence,
-    combinedConfidence: rolledUp,
-    localCombined,
-    inheritedFloor: floorBeforeThisEngine,
+    combinedConfidence,
+    localCombined: combinedConfidence,
+    inheritedFloor: floorBeforeThisEngine, // diagnostic record only — no longer a cap
   });
 }
 

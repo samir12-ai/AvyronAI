@@ -1340,17 +1340,13 @@ function updateSSCAfterEngine(
     extractEngineConfidenceWithProvenance(engineId, output);
   if (provenanceLog) provenanceLog.push(provenance);
 
-  const cappedCombined = Math.min(combined, ssc.confidenceFloor === 0 ? 0 : combined);
-  const cappedEngine = ssc.confidenceFloor === 0 ? 0 : engineConfidence;
-  const cappedData = ssc.confidenceFloor === 0 ? 0 : dataConfidence;
+  // Pass raw local values — no zero-floor cascade. Each engine's confidence
+  // reflects its own work only. Cross-engine trust is enforced by CEL,
+  // grounding, lineage, and hard gates in System Control.
+  updateConfidenceChain(ssc, engineId as EngineIdType, dataConfidence, engineConfidence, combined);
 
-  updateConfidenceChain(ssc, engineId as EngineIdType, cappedData, cappedEngine, cappedCombined);
-
-  if (ssc.confidenceFloor === 0 && combined > 0) {
-    console.warn(`[Orchestrator] SSC_CONFIDENCE_CAPPED | engine=${engineId} | raw=${combined.toFixed(2)} | capped=0.00 | reason=floor_is_zero_after_rejection`);
-  }
   console.log(
-    `[Orchestrator] SSC_CONFIDENCE | engine=${engineId} | data=${cappedData.toFixed(2)} | engine=${cappedEngine.toFixed(2)} | combined=${cappedCombined.toFixed(2)} | floor=${ssc.confidenceFloor.toFixed(2)} | dataProv=${provenance.dataConfidence.provenance} | engineProv=${provenance.engineConfidence.provenance} | verdict=${provenance.combinedProvenance}`
+    `[Orchestrator] SSC_CONFIDENCE | engine=${engineId} | data=${dataConfidence.toFixed(2)} | engine=${engineConfidence.toFixed(2)} | combined=${combined.toFixed(2)} | floor=${ssc.confidenceFloor.toFixed(2)} | dataProv=${provenance.dataConfidence.provenance} | engineProv=${provenance.engineConfidence.provenance} | verdict=${provenance.combinedProvenance}`
   );
 }
 
@@ -1890,7 +1886,14 @@ async function executeEngine(
         }
 
         if (ctx.analyticalEnrichment && result.territories) {
-          const posTexts = result.territories.map((t: any) => `${t.name} ${t.contrastAxis} ${t.narrativeDirection}`);
+          // Include enemyDefinition so the orchestrator generic-alignment check
+          // uses the same rich territory fields the engine's own
+          // enforcePositioningCompliance call sees. Omitting enemyDefinition
+          // previously caused false generic-CEL violations when the evidence
+          // lived in that field rather than contrastAxis/narrativeDirection.
+          const posTexts = result.territories.map((t: any) =>
+            `${t.name} ${t.contrastAxis} ${t.narrativeDirection} ${t.enemyDefinition ?? ""}`.trim()
+          );
           const celResult = enforceGenericEngineCompliance("positioning", posTexts, ctx.analyticalEnrichment);
           // Phase 3 fix — persist per-engine CEL ComplianceResult.
           { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }

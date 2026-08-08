@@ -254,9 +254,7 @@ console.log("─".repeat(80));
 
   const input = makeBaseControlInput(ssc);
   const verdict = evaluateSystemControl(input);
-  const hasChainBlock = verdict.blockReasons.some(b =>
-    b.code === "CONFIDENCE_CHAIN_VIOLATION" || b.code === "POSITIONING_HARD_GATE"
-  );
+  const hasChainBlock = verdict.blockReasons.some(b => b.code === "POSITIONING_HARD_GATE");
   assert("Weak data + strong logic → no confidence-based block", !hasChainBlock);
   console.log(`  [evidence] confidenceChain: ${ssc.confidenceChain.map(e => `${e.engineId}(data=${e.dataConfidence},engine=${e.engineConfidence},combined=${e.combinedConfidence})`).join(" → ")}`);
   console.log(`  [evidence] floor=${ssc.confidenceFloor} | verdict=${verdict.verdict}`);
@@ -316,21 +314,23 @@ console.log("─".repeat(80));
 }
 
 console.log("\n" + "─".repeat(80));
-console.log("2.4: Confidence chain integrity — no engine exceeds floor+0.20");
+console.log("2.4: Confidence chain — each engine owns its own score (no cascade)");
 console.log("─".repeat(80));
 
 {
+  // Rolling-floor cascade removed. Engine scores are independent.
+  // A high-confidence engine after a low-confidence engine no longer violates
+  // any inherited ceiling — there is no ceiling.
   const ssc = createEmptySSC("val_campaign", "val_account");
 
   updateConfidenceChain(ssc, "market_intelligence" as EngineIdType, 0.50, 0.50, 0.50);
   updateConfidenceChain(ssc, "audience" as EngineIdType, 0.30, 0.30, 0.30);
   updateConfidenceChain(ssc, "positioning" as EngineIdType, 0.55, 0.55, 0.55);
 
-  const input = makeBaseControlInput(ssc);
-  const verdict = evaluateSystemControl(input);
-  const hasChainViolation = verdict.blockReasons.some(b => b.code === "CONFIDENCE_CHAIN_VIOLATION");
-  assert("Engine at 0.55 with floor 0.30 → exceeds floor+0.20=0.50 → VIOLATION", hasChainViolation);
-  console.log(`  [evidence] floor=${ssc.confidenceFloor} | positioning combined=0.55 > floor(0.30)+0.20=0.50`);
+  assert("Floor tracks minimum engine combined (0.30)", ssc.confidenceFloor === 0.30);
+  assert("Positioning combinedConfidence stored as-is (0.55) — no cap",
+    ssc.confidenceChain.find(e => e.engineId === "positioning")?.combinedConfidence === 0.55);
+  console.log(`  [evidence] floor=${ssc.confidenceFloor} | positioning combined=0.55 — no ceiling applied`);
 }
 
 {
@@ -340,10 +340,8 @@ console.log("─".repeat(80));
   updateConfidenceChain(ssc, "audience" as EngineIdType, 0.45, 0.45, 0.45);
   updateConfidenceChain(ssc, "positioning" as EngineIdType, 0.50, 0.50, 0.50);
 
-  const input = makeBaseControlInput(ssc);
-  const verdict = evaluateSystemControl(input);
-  const hasChainViolation = verdict.blockReasons.some(b => b.code === "CONFIDENCE_CHAIN_VIOLATION");
-  assert("All engines within floor+0.20 → no violation", !hasChainViolation);
+  assert("Floor = min of engine combined scores (0.45)", ssc.confidenceFloor === 0.45);
+  console.log(`  [evidence] floor=${ssc.confidenceFloor} — floor tracks minimum, no cascade`);
 }
 
 console.log("\n" + "═".repeat(80));
@@ -422,8 +420,13 @@ console.log("─".repeat(80));
 
   const input = makeBaseControlInput(ssc);
   const verdict = evaluateSystemControl(input);
-  assert("Spread 0.60 → CONFIDENCE_SPREAD_EXCESSIVE", verdict.blockReasons.some(b => b.code === "CONFIDENCE_SPREAD_EXCESSIVE"));
-  console.log(`  [evidence] max=0.90 min=0.30 spread=0.60 > 0.50`);
+  // CONFIDENCE_SPREAD_EXCESSIVE removed — heterogeneous engine confidence scores
+  // are semantically incomparable; cross-engine spread is no longer a System
+  // Control gate. A high-MI / low-mechanism run (e.g. spread 0.72) is now
+  // correctly handled by CEL, lineage, and grounding gates, not a numeric diff.
+  assert("Spread 0.60 → no CONFIDENCE_SPREAD_EXCESSIVE (check removed)",
+    !verdict.blockReasons.some(b => (b.code as string) === "CONFIDENCE_SPREAD_EXCESSIVE"));
+  console.log(`  [evidence] max=0.90 min=0.30 spread=0.60 — CONFIDENCE_SPREAD_EXCESSIVE no longer fires (by design)`);
 }
 
 console.log("\n" + "═".repeat(80));
@@ -590,8 +593,9 @@ console.log("─".repeat(80));
   const verdict = evaluateSystemControl(input);
 
   assert("Weak data scenario: no positioning hard gate (0.40 meets threshold)", !verdict.blockReasons.some(b => b.code === "POSITIONING_HARD_GATE"));
-  assert("Weak data scenario: no confidence chain violation (all within floor+0.20)", !verdict.blockReasons.some(b => b.code === "CONFIDENCE_CHAIN_VIOLATION"));
-  assert("Weak data scenario: no spread violation (spread=0.00)", !verdict.blockReasons.some(b => b.code === "CONFIDENCE_SPREAD_EXCESSIVE"));
+  // CONFIDENCE_CHAIN_VIOLATION and CONFIDENCE_SPREAD_EXCESSIVE removed — engines
+  // evaluate their own output only; heterogeneous spread is not a gate.
+  assert("Weak data scenario: no positioning hard gate", !verdict.blockReasons.some(b => b.code === "POSITIONING_HARD_GATE"));
   console.log(`  [evidence] floor=${ssc.confidenceFloor} | verdict=${verdict.verdict} | blocks=${verdict.blockReasons.length}`);
   console.log(`  [evidence] System continues — weak data does NOT block when logic is sound`);
 }
@@ -611,13 +615,13 @@ console.log("─".repeat(80));
   const verdict = evaluateSystemControl(input);
 
   const sscBlocks = verdict.blockReasons.filter(b =>
-    ["UNRESOLVED_CRITICAL_PROBLEMS", "CONFIDENCE_CHAIN_VIOLATION", "POSITIONING_HARD_GATE",
-     "CONFIDENCE_SPREAD_EXCESSIVE", "BUDGET_OVERRIDE_ZERO_CONFIDENCE"].includes(b.code));
+    ["UNRESOLVED_CRITICAL_PROBLEMS", "POSITIONING_HARD_GATE",
+     "BUDGET_OVERRIDE_ZERO_CONFIDENCE"].includes(b.code));
   assert("Strong scenario: zero SSC-based blocks", sscBlocks.length === 0);
   assert("Strong scenario: all SSC checks pass",
     verdict.structuralChecks.filter(c =>
-      c.check.startsWith("unresolved_critical") || c.check.startsWith("confidence_chain") ||
-      c.check.startsWith("positioning_hard") || c.check.startsWith("confidence_spread") ||
+      c.check.startsWith("unresolved_critical") ||
+      c.check.startsWith("positioning_hard") ||
       c.check.startsWith("budget_override")
     ).every(c => c.passed));
   console.log(`  [evidence] floor=${ssc.confidenceFloor} | verdict=${verdict.verdict} | SSC blocks=0 | all SSC checks pass`);
@@ -640,10 +644,11 @@ console.log("─".repeat(80));
   const verdict = evaluateSystemControl(input);
 
   assert("Contradictory: POSITIONING_HARD_GATE fires", verdict.blockReasons.some(b => b.code === "POSITIONING_HARD_GATE"));
-  assert("Contradictory: CONFIDENCE_SPREAD_EXCESSIVE fires (0.80-0.20=0.60)", verdict.blockReasons.some(b => b.code === "CONFIDENCE_SPREAD_EXCESSIVE"));
+  // CONFIDENCE_SPREAD_EXCESSIVE removed — spread is no longer a gate. The
+  // positioning=0.20 scenario is correctly blocked by POSITIONING_HARD_GATE.
   assert("Contradictory: UNRESOLVED_CRITICAL_PROBLEMS fires", verdict.blockReasons.some(b => b.code === "UNRESOLVED_CRITICAL_PROBLEMS"));
   assert("Contradictory: verdict = BLOCK", verdict.verdict === "BLOCK");
-  console.log(`  [evidence] spread=${0.80 - 0.20} | positioning=0.20 | critical_problems=1 | verdict=${verdict.verdict}`);
+  console.log(`  [evidence] positioning=0.20 → POSITIONING_HARD_GATE | critical_problems=1 | verdict=${verdict.verdict}`);
   console.log(`  [evidence] blocks=${verdict.blockReasons.map(b => b.code).join(", ")}`);
 }
 
