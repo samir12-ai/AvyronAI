@@ -1,0 +1,418 @@
+TASK — FORENSIC AUDIT OF OFFER_AUDIENCE_MISALIGNMENT
+
+The execution pipeline is now technically healthy.
+
+Latest real MarketMindAI run:
+
+- 15/15 engines genuinely completed
+- Differentiation completed normally (~77.9s)
+- no execution timeout blocker
+- current snapshots belong to the current run
+- Task #154 run-bound persistence/preview protections are already in place
+
+The remaining result is:
+
+SYSTEM CONTROL = BLOCKED
+Block code = OFFER_AUDIENCE_MISALIGNMENT
+
+This task has ONE purpose:
+
+Determine whether OFFER_AUDIENCE_MISALIGNMENT is:
+
+A. a TRUE strategic contradiction that should block the plan
+
+or
+
+B. a FALSE block caused by a validator, mapping, lineage, representation, or comparison bug.
+
+DO NOT optimize for PASS.
+
+If the Offer is genuinely misaligned with the Audience, leave the BLOCK exactly as it is.
+
+===========================================================
+PHASE 1 — READ-ONLY FORENSIC AUDIT
+===========================================================
+
+Do not modify code first.
+
+Use the exact latest real run:
+
+campaign_1773576062201_6t0oxi_realrun_1786197905115
+
+Identify the exact:
+
+- Audience snapshot
+- Offer snapshot
+- Positioning snapshot if used
+- Product Identity
+- AEL/root causes
+- evidence registry references
+- System Control input
+- OFFER_AUDIENCE_MISALIGNMENT result
+
+Everything must come from this exact run where applicable.
+
+Do not substitute older snapshots.
+
+===========================================================
+PHASE 2 — SHOW ME WHAT AUDIENCE ACTUALLY SAID
+===========================================================
+
+Extract the exact structured Audience output that matters to Offer alignment.
+
+Report:
+
+- primary audience
+- audience segment(s)
+- pains
+- desires
+- objections
+- purchase barriers
+- motivations
+- jobs-to-be-done if present
+- root causes
+- awareness state if relevant
+- evidence IDs supporting these claims
+- confidence/local scores only if relevant to the validator
+
+Then resolve the evidence IDs.
+
+Verify that the Audience claims are actually grounded in real Market Intelligence evidence.
+
+Do not summarize away important distinctions.
+
+===========================================================
+PHASE 3 — SHOW ME WHAT OFFER ACTUALLY SAID
+===========================================================
+
+Extract the exact structured Offer output used by System Control.
+
+Report:
+
+- core offer
+- promised outcome
+- value proposition
+- mechanism
+- pain addressed
+- desire addressed
+- objection handling
+- risk reversal
+- proof
+- CTA
+- offer strength
+- audience references
+- rootCauseRefs
+- evidence references
+- any explicit alignment fields
+
+Resolve its evidence/lineage.
+
+Determine what Audience information the Offer Engine actually received.
+
+===========================================================
+PHASE 4 — REPRODUCE THE BLOCK
+===========================================================
+
+Find the exact code that emits:
+
+OFFER_AUDIENCE_MISALIGNMENT
+
+Trace:
+
+Audience output
+→ transformation/mapping
+→ Offer output
+→ transformation/mapping
+→ validator
+→ comparison
+→ threshold/rule
+→ block code
+
+Show the exact values that caused the block.
+
+I want a concrete explanation such as:
+
+Audience primary pain:
+X
+
+Offer addresses:
+Y
+
+Validator expected:
+Z
+
+Actual comparison:
+...
+
+Result:
+FAIL
+
+Do not merely say "they were misaligned."
+
+Reproduce the decision from source and persisted data.
+
+===========================================================
+PHASE 5 — AUDIT THE VALIDATOR ITSELF
+===========================================================
+
+Determine exactly HOW alignment is evaluated.
+
+Is it:
+
+- deterministic field matching?
+- string matching?
+- keyword matching?
+- cosine similarity?
+- embeddings?
+- LLM judge?
+- CEL?
+- root-cause references?
+- evidence overlap?
+- hardcoded semantic rules?
+- combination of these?
+
+Inspect for known failure modes:
+
+- synonyms treated as different concepts
+- paraphrases treated as mismatch
+- nested fields omitted
+- Audience field mapped incorrectly
+- Offer field mapped incorrectly
+- wrong audience segment selected
+- old snapshot used
+- cross-run data
+- missing rootCauseRefs despite real lineage
+- text truncation
+- empty field fallback
+- generic Offer wording losing explicit Audience terminology
+- validator reading a different field than the Offer Engine actually optimized
+- threshold inconsistent with the score semantics
+
+===========================================================
+PHASE 6 — TRACE OFFER GENERATION
+===========================================================
+
+This is important.
+
+Determine whether the Offer Engine itself was instructed to solve the primary Audience problem.
+
+Trace its inputs.
+
+Did it receive:
+
+- primary Audience pain?
+- primary desire?
+- objections?
+- Product Identity?
+- Positioning?
+- Differentiation?
+- Mechanism?
+- AEL/root causes?
+- MI evidence?
+
+Then inspect its prompt/contract.
+
+Does the Offer Engine explicitly require the generated offer to align with the Audience?
+
+If yes:
+
+Determine why it produced an apparently misaligned result.
+
+If no:
+
+That may be an ENGINE CONTRACT GAP rather than a System Control validator bug.
+
+===========================================================
+PHASE 7 — CLASSIFY THE ROOT CAUSE
+===========================================================
+
+Choose exactly one primary classification:
+
+TRUE_STRATEGIC_MISALIGNMENT
+
+The Offer genuinely fails to address the Audience evidence.
+
+VALIDATOR_BUG
+
+The Offer is semantically aligned but the validator fails to recognize it.
+
+LINEAGE_MAPPING_BUG
+
+The correct relationship exists but required references/fields are lost between engines.
+
+OFFER_ENGINE_CONTRACT_BUG
+
+The Offer Engine receives Audience truth but is not sufficiently constrained to use it.
+
+UPSTREAM_AUDIENCE_BUG
+
+The Audience representation fed to Offer/System Control is incorrect.
+
+STALE_OR_CROSS_RUN_DATA
+
+Different runs are being compared.
+
+OTHER_PROVEN_BUG
+
+Only with exact evidence.
+
+===========================================================
+PHASE 8 — DECISION BEFORE MODIFICATION
+===========================================================
+
+STOP and reason from the evidence.
+
+If TRUE_STRATEGIC_MISALIGNMENT:
+
+DO NOT CHANGE CODE.
+
+The guard is doing its job.
+
+Report exactly what the generated Offer failed to address.
+
+Do not weaken the guard.
+
+Do not force a new plan.
+
+If a CODE/ARCHITECTURE BUG is proven:
+
+implement the smallest correct fix.
+
+===========================================================
+PHASE 9 — RULES FOR ANY FIX
+===========================================================
+
+If fixing a bug:
+
+DO NOT:
+
+- lower the alignment threshold merely to pass
+- remove OFFER_AUDIENCE_MISALIGNMENT
+- weaken System Control
+- fabricate Audience evidence
+- fabricate Offer evidence
+- inject MarketMindAI-specific text
+- hardcode current Audience pains
+- hardcode current Offer wording
+- reuse an old snapshot
+- manually mark alignment PASS
+
+The solution must generalize to a brand-new user.
+
+Examples of legitimate fixes:
+
+- propagate an existing Audience field that was being dropped
+- preserve rootCauseRefs
+- compare the correct semantic fields
+- include required Audience inputs in Offer generation
+- correct stale-run selection
+- correct a proven validator representation bug
+
+===========================================================
+PHASE 10 — REGRESSION TEST
+===========================================================
+
+If a bug is fixed, add tests for BOTH sides.
+
+TRUE ALIGNMENT:
+
+Audience:
+"Businesses fear paying for generic marketing strategy with no evidence."
+
+Offer:
+"Evidence-grounded strategy tied to the customer's actual market."
+
+Expected:
+PASS
+
+TRUE MISALIGNMENT:
+
+Audience:
+"Businesses need evidence-backed strategic guidance."
+
+Offer:
+"Generate social media images faster."
+
+Expected:
+OFFER_AUDIENCE_MISALIGNMENT
+
+Use the actual architecture/fields, not these literal strings if the production contract differs.
+
+The important requirement is:
+
+semantically aligned offer → PASS
+
+genuinely unrelated offer → BLOCK
+
+Also verify:
+
+- exact run lineage
+- tenant isolation
+- no fake evidence
+- no stale snapshot fallback
+
+===========================================================
+PHASE 11 — FRESH RUN ONLY IF A REAL BUG WAS FIXED
+===========================================================
+
+Do NOT automatically spend another full real run if the guard is proven correct.
+
+If TRUE_STRATEGIC_MISALIGNMENT:
+
+STOP after the audit.
+
+If a real code bug was fixed:
+
+run ONE fresh real MarketMindAI campaign through the normal pipeline.
+
+Verify:
+
+15/15
+→ CEL
+→ Grounding
+→ System Control
+→ Build Plan if legitimately allowed
+→ persistence
+→ exact-run Preview
+
+Do not force PASS.
+
+If OFFER_AUDIENCE_MISALIGNMENT fires again for a genuinely different strategic reason, report it and stop.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Keep the report focused.
+
+Give me:
+
+1. Exact Audience proposition/pain used.
+2. Exact Offer proposition/outcome used.
+3. Exact alignment rule.
+4. Exact reason the rule fired.
+5. Evidence supporting the Audience.
+6. Evidence/lineage supporting the Offer.
+7. Whether both came from the exact same run.
+8. Root-cause classification.
+9. Whether this is a real strategic problem or software bug.
+10. Code changed, if any.
+11. Tests, if any.
+12. Fresh-run result ONLY if a real bug required a fix.
+
+Finally answer:
+
+A. Is the Offer genuinely misaligned with the Audience?
+
+B. Is OFFER_AUDIENCE_MISALIGNMENT behaving correctly?
+
+C. If it is a bug, what exactly is broken?
+
+D. If it is not a bug, what exactly did Avyron correctly reject?
+
+E. Do we need code changes?
+
+F. Are we still dealing with pipeline execution bugs, or is Avyron now correctly rejecting a strategically invalid output?
+
+Do not open another task automatically.
+Do not modify unrelated systems.
