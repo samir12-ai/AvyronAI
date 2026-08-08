@@ -1,0 +1,804 @@
+TASK — AUTHORITATIVE PAIN CLASSIFICATION + CONTEXTUAL DOMINANCE + NO-PAIN-MERGING ENFORCEMENT
+
+We identified a foundational architecture problem in the Audience → Strategy pipeline.
+
+Current risk:
+
+Raw negative signals can become "pains" without enough semantic classification.
+
+Then downstream engines may:
+
+- treat a post-purchase complaint as a purchase motivation
+- let refund/support issues hijack positioning or the Offer
+- independently reinterpret the same pain
+- select different meanings for the same evidence
+- merge several unrelated pains into one artificial statement merely to satisfy alignment/compliance guards
+- discard useful secondary pains because only one "primary pain" is propagated
+
+We need to replace this behavior with an authoritative classified Pain Registry and CONTEXTUAL DOMINANCE.
+
+CORE PRINCIPLE:
+
+DO NOT choose one pain for the entire strategy.
+
+DO NOT merge all pains together.
+
+Instead:
+
+CLASSIFY → VERIFY → RANK → ROUTE → ENFORCE.
+
+Every pain keeps its own identity and ID.
+
+Each engine selects the highest-priority ELIGIBLE pain for that engine's specific strategic responsibility.
+
+Example:
+
+A purchase motivation such as:
+
+"Businesses are overwhelmed by fragmented marketing tools and lack strategic direction"
+
+may dominate:
+
+Positioning
+Differentiation
+Mechanism
+Offer
+
+while:
+
+"Fear of paying for unclear ROI"
+
+may be used by:
+
+Offer
+Funnel
+Persuasion
+Risk Reversal
+
+and:
+
+"Refund delays / poor support"
+
+may be used by:
+
+Retention
+Customer Experience
+Trust Safeguards
+
+Refund friction must NOT become core positioning merely because it has strong negative evidence.
+
+===========================================================
+PHASE 1 — ARCHITECTURE AUDIT FIRST
+===========================================================
+
+DO NOT implement immediately.
+
+Audit the existing architecture for:
+
+- Audience pains
+- AEL/root causes
+- signal roots
+- evidence registry
+- evidence IDs
+- Audience classifications
+- doctrine/domain policies
+- engine dominance instructions
+- Strategy Root
+- System Control
+- CEL
+- Offer alignment
+- existing pain IDs
+- existing pain ranking
+- existing provenance/lineage
+
+Determine what infrastructure already exists.
+
+IMPORTANT:
+
+Prefer extending existing authoritative structures.
+
+Do NOT create a parallel Pain system if AEL, signal roots, Audience entities, Strategy Root, or another existing domain structure can correctly own this responsibility.
+
+Return an architecture map before implementation.
+
+Then implement the smallest coherent architecture.
+
+===========================================================
+PHASE 2 — AUTHORITATIVE PAIN CLASSIFICATION
+===========================================================
+
+Every meaningful Audience pain/signal must receive a stable authoritative identity.
+
+Conceptually:
+
+PainSignal {
+  id
+  statement
+  normalizedStatement
+
+  classification
+  strategicRole
+
+  evidenceIds[]
+  sourceTypes[]
+
+  evidenceStrength
+  sourceDiversity
+  prevalence
+
+  productFit
+
+  allowedUses[]
+  prohibitedUses[]
+
+  eligibleForCoreStrategy
+
+  rootCauseIds[]
+  signalRootIds[]
+
+  classificationReason
+  classifierVersion
+}
+
+Adapt this to existing schemas rather than blindly creating this exact interface.
+
+Required semantic classifications should cover at minimum:
+
+PURCHASE_MOTIVATION
+UNDERLYING_UNMET_OUTCOME
+PRE_PURCHASE_OBJECTION
+POST_PURCHASE_FRICTION
+ASPIRATION
+NOISE
+
+If the existing taxonomy already has better equivalent concepts, reuse/extend it.
+
+===========================================================
+PHASE 3 — LLM SEMANTIC CLASSIFIER
+===========================================================
+
+Use an LLM where semantic interpretation is actually necessary.
+
+The classifier should determine:
+
+"What role does this signal play in the customer's relationship with the product/category?"
+
+It must distinguish examples such as:
+
+"I don't know what marketing strategy to follow."
+
+→ PURCHASE_MOTIVATION / UNDERLYING_UNMET_OUTCOME
+
+from:
+
+"I am worried this won't produce ROI."
+
+→ PRE_PURCHASE_OBJECTION
+
+from:
+
+"My refund took three weeks."
+
+→ POST_PURCHASE_FRICTION
+
+from:
+
+"I want to become the market leader."
+
+→ ASPIRATION
+
+The LLM MUST NOT create new pains.
+
+It may classify ONLY evidence-backed signals supplied to it.
+
+Require structured output.
+
+Every classification must preserve the original pain/signal ID and evidence IDs.
+
+===========================================================
+PHASE 4 — DETERMINISTIC CLASSIFICATION JUDGE
+===========================================================
+
+The LLM classifier is NOT the final authority.
+
+Add deterministic/code enforcement after classification.
+
+Verify:
+
+- pain ID exists
+- evidence IDs exist
+- evidence belongs to the same tenant/campaign/run where required
+- no fabricated evidence
+- classification refers to the supplied signal
+- source type is preserved
+- direct customer evidence is distinguished from competitor messaging
+- product capability is respected
+- no new pain statement was invented
+- no unsupported causal relationship was introduced
+
+If classification cannot be trusted:
+
+do not silently promote the pain.
+
+Return review/degraded/unknown according to existing architecture.
+
+===========================================================
+PHASE 5 — EVIDENCE ROLE MATTERS
+===========================================================
+
+Frequency alone must NOT determine strategic importance.
+
+Examples:
+
+100 refund complaints
+
+does NOT automatically mean:
+
+refund = primary purchase motivation.
+
+It may mean:
+
+strong POST_PURCHASE_FRICTION.
+
+Similarly:
+
+competitor marketing copy repeating "save time"
+
+does not automatically prove customers experience "lack of time" as their strongest pain.
+
+Ranking must consider:
+
+- classification
+- evidence quality
+- evidence diversity
+- prevalence
+- causal depth
+- purchase relevance
+- product fit
+- strategic role
+
+===========================================================
+PHASE 6 — CONTEXTUAL DOMINANCE
+===========================================================
+
+THIS IS THE MOST IMPORTANT REQUIREMENT.
+
+Replace global pain dominance with CONTEXTUAL DOMINANCE.
+
+There must NOT be:
+
+ONE PRIMARY PAIN
+→ forced into every engine.
+
+Instead:
+
+Each engine receives the authoritative Pain Registry and selects/ranks only pains ELIGIBLE for that engine's responsibility.
+
+Conceptual routing:
+
+POSITIONING:
+Prefer:
+- PURCHASE_MOTIVATION
+- UNDERLYING_UNMET_OUTCOME
+
+Avoid as core:
+- POST_PURCHASE_FRICTION
+
+DIFFERENTIATION:
+Prefer pains revealing:
+- unmet category outcome
+- failure of existing alternatives
+- meaningful customer dissatisfaction the product can uniquely solve
+
+MECHANISM:
+Use pains/root causes that explain WHY the primary strategic problem persists and that the product mechanism genuinely resolves.
+
+OFFER:
+Prefer:
+- PURCHASE_MOTIVATION
+- UNDERLYING_UNMET_OUTCOME
+
+May additionally use:
+- PRE_PURCHASE_OBJECTION
+
+Example:
+
+Core Offer:
+solve fragmented tools / lack of strategic direction
+
+Risk reversal:
+address ROI uncertainty
+
+Do NOT make refund support the core Offer unless evidence/classification genuinely proves it is the purchase motivation.
+
+AWARENESS:
+Use pains appropriate to the customer's awareness state.
+
+FUNNEL:
+Prefer:
+- PRE_PURCHASE_OBJECTION
+- conversion barriers
+- trust barriers
+- uncertainty
+
+PERSUASION:
+Use:
+- motivations
+- objections
+- proof requirements
+- desired outcomes
+
+RETENTION:
+Prefer:
+- POST_PURCHASE_FRICTION
+- support issues
+- onboarding issues
+- refund/cancellation friction
+- continued-value problems
+
+CONTENT:
+May use multiple pains across different content pieces.
+
+But each content angle/item must preserve which pain ID it addresses.
+
+===========================================================
+PHASE 7 — NO PAIN MERGING
+===========================================================
+
+Add explicit enforcement:
+
+ROUTE PAINS.
+DO NOT BLEND PAINS.
+
+Engines must NOT merge unrelated pains merely to satisfy:
+
+- alignment guards
+- CEL
+- grounding
+- System Control
+- Offer validation
+- dominance requirements
+
+For example, do NOT transform:
+
+Pain A:
+"Businesses are overwhelmed by fragmented marketing tools."
+
+Pain B:
+"Customers complain about slow refunds."
+
+into:
+
+"Businesses suffer from fragmented marketing refund complexity."
+
+That is synthetic strategic nonsense.
+
+Each pain keeps:
+
+- its ID
+- its meaning
+- its classification
+- its evidence
+- its strategic role
+
+An engine may use multiple pains ONLY when their roles are explicit.
+
+Example:
+
+Offer:
+
+corePainId = pain_001
+objectionPainId = pain_004
+
+NOT:
+
+mergedPain = pain_001 + pain_004
+
+===========================================================
+PHASE 8 — DO NOT DROP SECONDARY PAINS
+===========================================================
+
+Contextual dominance does NOT mean deleting lower-ranked pains.
+
+All validated pains remain available.
+
+The system should distinguish:
+
+CORE
+SUPPORTING
+OBJECTION
+RISK
+RETENTION
+CONTENT
+NOT_ELIGIBLE_FOR_THIS_ENGINE
+
+Example:
+
+pain_001:
+fragmented tools / lack of direction
+role for Offer = CORE
+
+pain_002:
+ROI uncertainty
+role for Offer = OBJECTION
+
+pain_003:
+refund delays
+role for Offer = NOT_CORE
+role for Retention = CORE/SUPPORTING
+
+Nothing gets lost.
+
+It gets ROUTED.
+
+===========================================================
+PHASE 9 — ENGINE DOMINANCE CONTRACT
+===========================================================
+
+Every relevant engine must receive explicit dominance instructions.
+
+Conceptually:
+
+"You are receiving an authoritative classified Pain Registry.
+
+Do not reinterpret pain classification.
+
+Do not invent pains.
+
+Do not merge unrelated pains.
+
+Select the highest-ranked pain eligible for YOUR engine role.
+
+Use secondary pains only according to their allowed strategic roles.
+
+Preserve pain IDs in your output.
+
+If you choose a lower-ranked eligible pain over a higher-ranked one, provide an explicit evidence-backed reason."
+
+The LLM does not get to silently override classification.
+
+===========================================================
+PHASE 10 — DETERMINISTIC ENGINE JUDGE
+===========================================================
+
+After each relevant engine runs, code must validate its pain usage.
+
+Verify:
+
+1. Referenced pain IDs exist.
+
+2. Classification matches authoritative registry.
+
+3. Pain is allowed for this engine.
+
+4. Core pain is eligible for core use.
+
+5. Highest-priority eligible pain was used OR a valid explicit reason exists.
+
+6. Secondary pains are used only in allowed roles.
+
+7. No unrelated pains were merged.
+
+8. No pain was invented.
+
+9. Evidence lineage remains intact.
+
+10. Product capability can genuinely address the selected pain.
+
+If an engine violates the contract:
+
+reject/regenerate using precise feedback.
+
+Do not silently repair the text after generation.
+
+===========================================================
+PHASE 11 — PRODUCT FIT ENFORCEMENT
+===========================================================
+
+A pain can be:
+
+REAL
+
+but still:
+
+NOT SOLVABLE BY THIS PRODUCT.
+
+That distinction is mandatory.
+
+Example:
+
+A customer's accounting problem may be real and heavily evidenced.
+
+If the product is an AI marketing strategy platform:
+
+that does not make accounting an eligible core strategic promise.
+
+Therefore core strategy eligibility requires:
+
+REAL CUSTOMER PAIN
++
+CORRECT CLASSIFICATION
++
+STRATEGIC RELEVANCE
++
+PRODUCT CAPABILITY FIT
+
+===========================================================
+PHASE 12 — STRATEGY ROOT / PLAN LINEAGE
+===========================================================
+
+The final strategy must preserve pain lineage.
+
+Every major strategic decision should be traceable where appropriate:
+
+Positioning
+→ pain IDs
+
+Differentiation
+→ pain IDs
+
+Mechanism
+→ pain/root-cause IDs
+
+Offer
+→ corePainId
+→ objectionPainIds
+
+Funnel
+→ objectionPainIds
+
+Retention
+→ postPurchasePainIds
+
+Content angle
+→ addressedPainIds
+
+The Strategic Plan must not flatten everything back into anonymous text.
+
+===========================================================
+PHASE 13 — FINAL STRATEGY ENFORCEMENT
+===========================================================
+
+Before accepting the final plan, verify:
+
+- Positioning is based on an eligible core strategic pain.
+- Offer addresses an eligible purchase pain.
+- Funnel addresses appropriate objections/barriers.
+- Retention uses post-purchase friction appropriately.
+- No post-purchase complaint hijacked the entire strategy.
+- No aspiration was presented as a pain.
+- No competitor message became customer truth.
+- No unsupported pain was invented.
+- No unrelated pains were merged merely to pass compliance.
+- Every major pain-dependent strategic claim resolves to authoritative pain IDs.
+
+===========================================================
+PHASE 14 — EXAMPLE EXPECTED BEHAVIOR
+===========================================================
+
+Suppose Audience discovers:
+
+PAIN_001
+"Businesses are overwhelmed by fragmented marketing tools and don't know what strategy to follow."
+
+classification:
+PURCHASE_MOTIVATION
+
+eligibleForCoreStrategy:
+true
+
+
+PAIN_002
+"Businesses fear paying for another tool without clear ROI."
+
+classification:
+PRE_PURCHASE_OBJECTION
+
+eligibleForCoreStrategy:
+false as primary positioning
+allowed for Offer/Funnel/Persuasion
+
+
+PAIN_003
+"Customers complain about refund delays."
+
+classification:
+POST_PURCHASE_FRICTION
+
+eligibleForCoreStrategy:
+false
+
+allowed for:
+RETENTION
+TRUST_SAFEGUARD
+CUSTOMER_EXPERIENCE
+
+
+Expected routing:
+
+Positioning
+→ PAIN_001
+
+Differentiation
+→ PAIN_001
+
+Mechanism
+→ root causes behind PAIN_001
+
+Offer core
+→ PAIN_001
+
+Offer objection/risk reversal
+→ PAIN_002
+
+Funnel
+→ PAIN_002
+
+Persuasion
+→ PAIN_001 + PAIN_002 with explicit separate roles
+
+Retention
+→ PAIN_003
+
+This is CORRECT.
+
+The following is WRONG:
+
+Positioning
+→ PAIN_003 because refund complaints were frequent
+
+or:
+
+Offer
+→ merge PAIN_001 + PAIN_002 + PAIN_003 into one artificial mega-pain
+
+===========================================================
+PHASE 15 — MIGRATION / BACKWARD COMPATIBILITY
+===========================================================
+
+Audit existing Audience data before schema changes.
+
+Do not destroy historical pain data.
+
+If migration is required:
+
+- preserve original statements
+- preserve evidence IDs
+- classify existing pains safely
+- mark uncertain classifications appropriately
+- do not fabricate missing evidence
+- maintain tenant isolation
+
+===========================================================
+PHASE 16 — TESTS
+===========================================================
+
+Add strong tests.
+
+Test at minimum:
+
+1. Refund complaint classified POST_PURCHASE_FRICTION.
+
+2. Lack of strategic direction classified PURCHASE_MOTIVATION or appropriate unmet outcome.
+
+3. ROI fear classified PRE_PURCHASE_OBJECTION.
+
+4. Aspiration does not become pain.
+
+5. Competitor marketing copy alone does not become direct customer pain.
+
+6. LLM cannot invent a new pain.
+
+7. Invalid evidence ID rejected.
+
+8. Cross-tenant evidence rejected.
+
+9. Positioning cannot use POST_PURCHASE_FRICTION as core pain.
+
+10. Retention CAN use POST_PURCHASE_FRICTION.
+
+11. Offer selects highest eligible purchase pain.
+
+12. Offer can separately use objection pain.
+
+13. Offer cannot merge unrelated pain IDs into synthetic pain.
+
+14. Funnel prioritizes objections/conversion barriers.
+
+15. Retention prioritizes post-purchase friction.
+
+16. Secondary pains remain available and are not discarded.
+
+17. Lower-ranked pain selection requires explicit valid justification.
+
+18. Product-fit failure prevents core strategy use.
+
+19. Final plan preserves pain IDs.
+
+20. Existing grounding/CEL/System Control behavior remains intact.
+
+21. Task #154 run lineage remains intact.
+
+22. Task #157 Offer alignment enforcement remains intact.
+
+23. No fake evidence.
+
+24. No hardcoded MarketMindAI-specific pain wording.
+
+===========================================================
+PHASE 17 — DO NOT RUN THE EXPENSIVE PIPELINE IMMEDIATELY
+===========================================================
+
+First:
+
+- architecture audit
+- implementation
+- migrations if required
+- targeted classifier tests
+- deterministic judge tests
+- engine routing tests
+- regression tests
+
+Only after those pass should we consider ONE fresh real campaign run.
+
+Do not repeatedly run the full 15-engine pipeline while developing this architecture.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Report:
+
+1. Existing pain architecture discovered.
+2. Existing structures reused.
+3. New/extended schema.
+4. Classification taxonomy.
+5. LLM classifier contract.
+6. Deterministic classifier judge.
+7. Pain ranking logic.
+8. Contextual dominance logic.
+9. Engine-specific routing rules.
+10. No-pain-merging enforcement.
+11. Product-fit enforcement.
+12. Pain ID lineage architecture.
+13. Final strategy enforcement.
+14. Files changed.
+15. Migrations.
+16. Tests and results.
+17. TypeScript baseline vs after.
+18. Proof existing data was preserved.
+19. Proof no fake pains/evidence were created.
+
+Finally answer:
+
+A. Does every validated pain now have an authoritative identity and classification?
+
+B. Can the LLM invent a new pain?
+
+C. Can refund/post-purchase friction become core positioning merely because it is frequent?
+
+D. Does each engine now select the most important ELIGIBLE pain for its own job?
+
+E. Are secondary pains preserved and routed rather than discarded?
+
+F. Can engines merge unrelated pains merely to satisfy guards?
+
+G. Can Offer use one pain as CORE and another separately as OBJECTION without blending them?
+
+H. Can Retention legitimately prioritize refund/support friction while Positioning ignores it as a core pain?
+
+I. Does the final Strategic Plan preserve pain IDs and their roles?
+
+J. Is the architecture generic for every future Avyron customer rather than hardcoded for MarketMindAI?
+
+Do not optimize for passing guards.
+
+Build an authoritative pain-routing architecture where:
+
+LLM = semantic classifier/reasoner
+Code = authority/judge
+Pain IDs = lineage
+Classification = strategic meaning
+Contextual Dominance = engine-specific priority
+Routing = correct use
+No-Pain-Merging = enforced invariant
