@@ -1,0 +1,350 @@
+AUDIT AND SURGICALLY FIX THE REMAINING CEL / COMPLIANCE_FAILURE
+
+Context:
+
+The latest REAL MarketMindAI production run completed successfully:
+
+- 15/15 engines completed
+- Wall time: 688s
+- Offer strength = 0.82
+- Budget killFlag = false
+- Channel overallReliability = 0.934
+- Confidence persistence fixed
+- Per-engine timeout policy working
+- No timeout cascade
+- DEPTH_CASCADE_BLOCKED = 0
+- SIGNAL_BLOCKED = 0
+- DEPTH_FAILED = 0
+
+Final result:
+
+ORCH_STATUS = BLOCKED
+Reason = COMPLIANCE_FAILURE
+
+The report says CEL causal-chain violations exist in 5 engines.
+
+This is now a QUALITY / GROUNDING investigation.
+
+Do NOT weaken CEL.
+Do NOT lower thresholds.
+Do NOT bypass System Control.
+Do NOT approve the plan manually.
+Do NOT fabricate evidence.
+Do NOT invent causal chains.
+Do NOT change outputs merely to make the pipeline PASS.
+
+===========================================================
+PHASE 1 — FREEZE THE EXACT REAL RUN
+===========================================================
+
+Audit the exact completed run only:
+
+campaign_1773576062201_6t0oxi
+
+Use the exact snapshots and outputs belonging to the latest verified real run.
+
+Do not accidentally mix snapshots from previous runs.
+
+Build a read-only manifest containing:
+
+- run ID
+- engine
+- snapshot ID/version
+- engine output
+- CEL input
+- CEL result
+- evidence refs
+- causal chains
+- provenance
+- confidence
+
+===========================================================
+PHASE 2 — IDENTIFY THE 5 FAILING ENGINES
+===========================================================
+
+List exactly which 5 engines caused COMPLIANCE_FAILURE.
+
+For each engine provide:
+
+Engine
+CEL verdict
+Failed rule
+Failed claim
+Failed causal chain
+Evidence refs
+Missing evidence refs
+Provenance
+Whether required evidence actually exists elsewhere
+
+Do not summarize them together.
+
+Investigate each failure individually.
+
+===========================================================
+PHASE 3 — RECONSTRUCT EACH CAUSAL CHAIN
+===========================================================
+
+For every failed engine reconstruct:
+
+SOURCE EVIDENCE
+→ OBSERVATION
+→ INTERPRETATION
+→ CAUSAL CLAIM
+→ STRATEGIC CONCLUSION
+
+Then identify exactly where the chain breaks.
+
+Classify each failure as ONE of:
+
+1. REAL_EVIDENCE_GAP
+2. UNSUPPORTED_CAUSAL_CLAIM
+3. EVIDENCE_EXISTS_BUT_NOT_PROPAGATED
+4. WRONG_EVIDENCE_REF
+5. LINEAGE_MAPPING_BUG
+6. CEL_VALIDATOR_BUG
+7. ENGINE_OUTPUT_CONTRACT_BUG
+8. SNAPSHOT_VERSION_MISMATCH
+9. PROVENANCE_CLASSIFICATION_BUG
+10. OTHER — explain with evidence
+
+This classification is critical.
+
+===========================================================
+PHASE 4 — CHECK WHETHER THE EVIDENCE ALREADY EXISTS
+===========================================================
+
+Before declaring any evidence missing, search the existing real architecture.
+
+Check:
+
+- Product Identity
+- Business context
+- Business Goals
+- Market Intelligence
+- competitor scraping
+- competitor classifications
+- Audience evidence
+- AEL
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Awareness
+- Funnel
+- Persuasion
+- Channel Selection
+- user KPI/truth data
+- Performance data if available
+- Watchtower confirmed evidence
+- upstream snapshots
+
+For every failed causal link answer:
+
+Does the required evidence genuinely NOT exist?
+
+OR
+
+Does it exist but fail to reach the engine/CEL?
+
+Never create replacement evidence.
+
+===========================================================
+PHASE 5 — AUDIT CEL ITSELF
+===========================================================
+
+Audit the CEL validator architecture.
+
+Verify:
+
+- required causal-chain schema
+- evidence resolution
+- evidence ID matching
+- snapshot lookup
+- source-version matching
+- provenance handling
+- confidence handling
+- null/undefined handling
+- ordering
+- deduplication
+- stale evidence rules
+- inferred vs observed handling
+
+Determine whether CEL is correctly rejecting unsupported claims or incorrectly rejecting properly grounded claims.
+
+Do NOT modify CEL rules unless a validator implementation bug is proven.
+
+===========================================================
+PHASE 6 — CROSS-ENGINE LINEAGE
+===========================================================
+
+This is especially important.
+
+Verify the lineage between:
+
+Audience
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Awareness
+→ Funnel
+→ Persuasion
+→ Channel Selection
+
+For every failed engine verify:
+
+upstream evidence
+→ adapter
+→ engine prompt/input
+→ engine output
+→ evidence registry
+→ CEL input
+→ CEL verdict
+
+Identify any place where real evidence disappears or changes identity.
+
+===========================================================
+PHASE 7 — DETERMINE BUGS VS TRUTHFUL FAILURES
+===========================================================
+
+Produce a table:
+
+Engine
+CEL Failure
+Evidence Exists?
+Propagation Correct?
+CEL Correct?
+Classification
+Fix Required?
+
+The most important distinction is:
+
+A real unsupported strategic claim MUST remain blocked.
+
+A claim with valid evidence that was lost due to a wiring/lineage bug MUST be repaired.
+
+Do not make a truthful failure disappear just to obtain APPROVED status.
+
+===========================================================
+PHASE 8 — SURGICAL FIXES ONLY
+===========================================================
+
+Only after the forensic audit is complete:
+
+Implement fixes ONLY for proven software/lineage bugs.
+
+Allowed examples:
+
+- propagate an existing evidence ref correctly
+- fix wrong evidence ID mapping
+- fix snapshot/version lookup
+- fix malformed causal-chain serialization
+- fix engine → CEL contract mismatch
+- fix provenance mapping
+- fix validator implementation bug
+
+NOT allowed:
+
+- invent evidence
+- manufacture causal chains
+- lower CEL requirements
+- mark inferred claims as observed
+- raise confidence manually
+- disable failed CEL checks
+- bypass COMPLIANCE_FAILURE
+
+If a failure is a genuine evidence gap, leave it untouched and report it.
+
+===========================================================
+PHASE 9 — TARGETED REGRESSION TESTS
+===========================================================
+
+For every software bug fixed, add a regression test.
+
+Tests must prove:
+
+- supported causal chain → PASS
+- unsupported causal chain → FAIL
+- missing evidence → FAIL
+- wrong evidence ref → FAIL
+- valid propagated evidence → PASS
+- inferred evidence is not upgraded to observed
+- cross-tenant evidence cannot resolve
+- stale/wrong-version evidence cannot silently validate a claim
+
+===========================================================
+PHASE 10 — NEW REAL MARKETMINDAI RUN
+===========================================================
+
+After fixes:
+
+Run ONE new real MarketMindAI campaign.
+
+Use only real production data.
+
+No seeded evidence.
+No synthetic rows.
+No manual DB inserts.
+No manual approval.
+No gate bypass.
+
+Capture:
+
+- 15 engine statuses
+- CEL verdict for every engine
+- all remaining CEL violations
+- grounding contract results
+- confidence values
+- Offer strength
+- Channel reliability
+- System Control verdict
+- Build Plan status
+- final ORCH_STATUS
+
+===========================================================
+FINAL DECISION
+===========================================================
+
+There are two acceptable outcomes:
+
+A) ORCH_STATUS becomes PASS/APPROVABLE because the previous CEL failures were caused by proven software/lineage bugs.
+
+OR
+
+B) ORCH_STATUS remains BLOCKED because genuine unsupported causal claims or real evidence gaps remain.
+
+B is NOT a failed implementation.
+
+It is the correct result if CEL is truthfully protecting the system.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. The exact 5 failing engines.
+2. Every failed CEL rule.
+3. Every broken causal chain.
+4. Evidence available for each claim.
+5. Evidence genuinely missing.
+6. Lineage bugs found.
+7. CEL validator bugs found.
+8. Engine contract bugs found.
+9. Files changed.
+10. Regression tests added.
+11. New real-run results.
+12. CEL failures before vs after.
+13. Final System Control verdict.
+14. Whether remaining BLOCK reasons are genuine.
+15. Proof that no fake data was created.
+
+Finally answer:
+
+"After removing all proven implementation bugs, is Avyron's CEL now making the correct decision for MarketMindAI?"
+
+Answer YES or NO with evidence.
+
+Do not optimize for getting APPROVED.
+
+Optimize for making the verdict TRUE.
