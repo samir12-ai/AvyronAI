@@ -1,0 +1,379 @@
+I want a STRICT READ-ONLY FORENSIC AUDIT of:
+
+CONFIDENCE_SPREAD_EXCESSIVE
+
+This is currently the ONLY blocker I want investigated.
+
+IMPORTANT:
+
+DO NOT modify code.
+DO NOT modify database rows.
+DO NOT change confidence thresholds.
+DO NOT change engine formulas.
+DO NOT weaken System Control.
+DO NOT approve the plan.
+DO NOT implement Hybrid CEL.
+DO NOT investigate unrelated CEL/rootCauseRefs issues.
+DO NOT create synthetic data.
+
+We are trying to answer ONE question:
+
+Is CONFIDENCE_SPREAD_EXCESSIVE a truthful strategic/data-quality warning,
+or is it caused by an implementation/calculation/normalization bug?
+
+===========================================================
+1. FREEZE THE LATEST REAL RUN
+===========================================================
+
+Use the latest FULL MarketMindAI real campaign run where:
+
+- 15/15 engines completed
+- CEL compliance passed
+- no timeout cascade occurred
+- Offer strength was healthy
+- final blocking reason included CONFIDENCE_SPREAD_EXCESSIVE
+
+Identify the exact:
+
+- run ID
+- account ID
+- campaign ID
+- snapshot IDs
+- snapshot versions
+- engine outputs
+- persisted confidence values
+- System Control input
+
+Do NOT mix data from different runs.
+
+Also verify whether the real run executed current source code or stale compiled server_dist code.
+
+If source/runtime mismatch exists, report it clearly before trusting the run.
+
+===========================================================
+2. EXTRACT ALL 15 CONFIDENCES
+===========================================================
+
+For every engine return:
+
+Engine
+Raw confidence
+Persisted confidence
+Confidence field used by System Control
+Provenance
+Status
+Degraded?
+Source file/function calculating it
+
+Include all 15 engines:
+
+1. Market Intelligence
+2. Audience
+3. Positioning
+4. Differentiation
+5. Mechanism
+6. Offer
+7. Awareness
+8. Funnel
+9. Persuasion
+10. Integrity
+11. Statistical Validation
+12. Budget Governor
+13. Channel Selection
+14. Iteration
+15. Retention
+
+Do not substitute missing values.
+
+Show null/undefined/missing explicitly.
+
+===========================================================
+3. REPRODUCE CONFIDENCE SPREAD
+===========================================================
+
+Find the exact System Control implementation that generates:
+
+CONFIDENCE_SPREAD_EXCESSIVE
+
+Show the formula.
+
+Then independently recalculate from persisted real-run data:
+
+MAX confidence
+MIN confidence
+SPREAD
+configured threshold
+result
+
+Identify exactly which engine is MAX.
+
+Identify exactly which engine is MIN.
+
+Prove that the persisted numbers reproduce the System Control verdict.
+
+===========================================================
+4. ARE THESE CONFIDENCES ACTUALLY COMPARABLE?
+===========================================================
+
+This is the most important part.
+
+Audit how EACH engine defines "confidence."
+
+Determine whether all 15 confidence values represent the same semantic concept.
+
+For example, determine whether an engine confidence represents:
+
+- evidence quality
+- model certainty
+- judge confidence
+- output completeness
+- grounding quality
+- statistical confidence
+- recommendation reliability
+- business-data availability
+- composite score
+
+Create a table:
+
+Engine
+Meaning of confidence
+Range
+Formula
+Inputs
+Penalties
+Comparable cross-engine? YES/NO/PARTIAL
+
+If System Control is comparing fundamentally different metrics as if they are identical, identify that as an architectural problem.
+
+===========================================================
+5. TRACE THE MINIMUM CONFIDENCE
+===========================================================
+
+Take the engine producing the minimum value.
+
+Trace the number completely:
+
+real inputs
+→ engine calculation
+→ penalties
+→ judge
+→ normalization
+→ persistence
+→ adapter
+→ System Control
+
+Determine WHY it is low.
+
+Classify the reason:
+
+REAL_DATA_GAP
+REAL_STRATEGIC_WEAKNESS
+ENGINE_DEGRADED
+LLM_FAILURE
+TIMEOUT_FALLBACK
+MISSING_FIELD
+NULL_TO_ZERO
+BOOLEAN_COERCION
+WRONG_CONFIDENCE_FIELD
+NORMALIZATION_BUG
+STALE_SNAPSHOT
+VERSION_MISMATCH
+INCOMPARABLE_METRIC
+OTHER
+
+Do the same for the maximum confidence.
+
+===========================================================
+6. CHECK FOR FALSE ZEROS / FALLBACK VALUES
+===========================================================
+
+Audit every confidence extraction path for:
+
+- `|| 0`
+- `?? 0`
+- boolean coercion
+- `Number(...)`
+- parseFloat
+- default confidence
+- failed engine fallback
+- degraded fallback
+- missing-field fallback
+- undefined → zero
+- null → zero
+
+Determine whether the minimum confidence is a REAL calculated number or merely a fallback.
+
+Also verify the recently-fixed numeric confidence persistence is active in this exact runtime.
+
+===========================================================
+7. SNAPSHOT / RUN INTEGRITY
+===========================================================
+
+Verify every confidence used in the spread belongs to:
+
+SAME campaign
+SAME account
+SAME orchestrator run
+CORRECT engine snapshot
+CORRECT snapshot version
+
+Check whether System Control can accidentally combine:
+
+new MI snapshot
++
+old Offer snapshot
++
+old Channel snapshot
+
+or any other cross-run mixture.
+
+If yes, identify exactly where.
+
+===========================================================
+8. DEGRADED OUTPUT SEMANTICS
+===========================================================
+
+Determine how System Control treats degraded engines.
+
+Example:
+
+If an engine successfully produces useful output but marks itself degraded,
+does its confidence become 0.20?
+
+If so, should that 0.20 participate directly in a global confidence spread?
+
+Do NOT change behavior.
+
+Just determine what currently happens.
+
+Specifically check whether:
+
+ENGINE_DEGRADED
+
+is being interpreted as:
+
+STRATEGIC_CONFIDENCE_LOW
+
+even when those concepts are not equivalent.
+
+===========================================================
+9. PROVENANCE EFFECT
+===========================================================
+
+The previous real run showed a mixture of direct and inferred provenance.
+
+Audit whether provenance modifies confidence.
+
+For each engine show:
+
+provenance
+base confidence
+provenance penalty
+final confidence
+
+Determine whether inferred_synthesis engines are systematically creating the spread.
+
+Again: do not change anything.
+
+===========================================================
+10. HISTORICAL COMPARISON
+===========================================================
+
+Compare the confidence values across the last few FULL real runs only.
+
+Do not use synthetic/test rows.
+
+Determine:
+
+- Is the same engine consistently the minimum?
+- Is the same engine consistently the maximum?
+- Does the spread change dramatically with identical/similar inputs?
+- Are confidence values deterministic enough for this gate?
+
+If one engine jumps from e.g. 0.2 → 0.9 without meaningful evidence changes, investigate why.
+
+===========================================================
+11. CLASSIFY THE BLOCK
+===========================================================
+
+After the audit classify CONFIDENCE_SPREAD_EXCESSIVE as exactly ONE primary category:
+
+A. TRUE_DATA_QUALITY_BLOCK
+
+B. TRUE_STRATEGIC_DISAGREEMENT
+
+C. CONFIDENCE_EXTRACTION_BUG
+
+D. CONFIDENCE_NORMALIZATION_BUG
+
+E. SNAPSHOT/RUN_MIXING_BUG
+
+F. INCOMPARABLE_CONFIDENCE_ARCHITECTURE
+
+G. DEGRADED_STATE_SEMANTICS_BUG
+
+H. STALE_RUNTIME / server_dist ISSUE
+
+I. OTHER — evidence required
+
+If multiple secondary issues exist, list them separately.
+
+===========================================================
+12. BOOTSTRAP CHECK
+===========================================================
+
+Check whether the low confidence is caused by information that Avyron cannot possibly have before the first approved/activated plan.
+
+For example:
+
+No performance history
+→ engine confidence low
+→ confidence spread block
+→ plan cannot activate
+→ performance history can never be generated
+
+If this circular dependency exists, prove it from code.
+
+If it does not exist, say so.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Give me:
+
+1. Exact run audited.
+2. All 15 confidence values.
+3. MAX engine/value.
+4. MIN engine/value.
+5. Exact spread.
+6. Exact threshold.
+7. Exact System Control formula.
+8. Why the maximum is high.
+9. Why the minimum is low.
+10. Whether either value is fake/fallback/default.
+11. Whether all 15 confidence values are semantically comparable.
+12. Whether snapshots are from the same run.
+13. Whether degraded-state semantics distort the spread.
+14. Whether provenance distorts the spread.
+15. Whether a first-run bootstrap deadlock exists.
+16. Primary classification of CONFIDENCE_SPREAD_EXCESSIVE.
+17. Any secondary bugs discovered.
+
+Then answer these three questions very clearly:
+
+A) Should MarketMindAI currently be BLOCKED because of confidence spread: YES or NO?
+
+B) Is CONFIDENCE_SPREAD_EXCESSIVE itself correctly designed: YES or NO?
+
+C) What is the SMALLEST correct fix, if any?
+
+Do NOT implement the fix.
+
+Do NOT propose unrelated work.
+
+Do NOT reopen CEL.
+
+Do NOT touch Performance Loop yet.
+
+Audit only.
