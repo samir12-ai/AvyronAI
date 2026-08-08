@@ -1,0 +1,317 @@
+INCREASE TIMEOUT BUDGETS FOR ALL 15 ENGINES AND RUN ONE FRESH REAL MARKETMINDAI CAMPAIGN
+
+We have confirmed that engine runtime is variable because of:
+
+- variable LLM latency
+- bounded retries
+- multiple sequential judge/model calls
+- heavy engines such as Audience and Positioning sometimes legitimately approaching or exceeding 420 seconds
+
+The current fixed 420-second watchdog is too close to normal worst-case runtime and is causing valid engines to be marked TIMEOUT even while they are still progressing.
+
+This task has TWO objectives:
+
+1. Increase timeout budgets across the full 15-engine pipeline.
+2. Run ONE fresh real MarketMindAI campaign and verify the complete pipeline plus the new Offer contract.
+
+IMPORTANT:
+
+Do NOT weaken judges.
+Do NOT skip CEL.
+Do NOT skip grounding.
+Do NOT fabricate data.
+Do NOT force success.
+Do NOT reuse old snapshots.
+Do NOT manually insert plans.
+Do NOT change System Control thresholds.
+Do NOT reopen confidence architecture.
+Do NOT modify Business Profile.
+Do NOT start the Performance Loop yet.
+
+===========================================================
+PART 1 — AUDIT CURRENT TIMEOUT SOURCES
+===========================================================
+
+Before changing code, find every timeout that can affect engine execution:
+
+- orchestrator watchdog
+- per-engine timeout map
+- global engine timeout
+- real-run harness timeout
+- retry timeout
+- gate retry timeout
+- aiChat timeoutMs
+- OpenAI client hard timeout
+- workflow/process timeout
+
+Create a table:
+
+Engine
+Current orchestrator timeout
+Internal AI timeout
+Retry count
+Recent observed runtime
+Risk
+
+Verify there is no stale hardcoded 420-second timeout in:
+
+- normal orchestrator
+- real campaign runner
+- retries
+- gate retries
+- legacy execution path
+
+===========================================================
+PART 2 — NEW TIMEOUT POLICY
+===========================================================
+
+Implement a centralized explicit timeout budget for all 15 engines.
+
+Use a safe but practical policy:
+
+1. Market Intelligence — 300 seconds
+2. Audience — 900 seconds
+3. Positioning — 900 seconds
+4. Differentiation — 600 seconds
+5. Mechanism — 600 seconds
+6. Offer — 600 seconds
+7. Awareness — 600 seconds
+8. Funnel — 300 seconds
+9. Persuasion — 600 seconds
+10. Integrity — 180 seconds
+11. Statistical Validation — 300 seconds
+12. Budget Governor — 180 seconds
+13. Channel Selection — 600 seconds
+14. Iteration — 300 seconds
+15. Retention — 300 seconds
+
+Build Plan synthesis — 180 seconds unless its existing dedicated timeout is already higher and proven necessary.
+
+Requirements:
+
+- one central timeout configuration map
+- engine name → explicit timeout
+- retries use the same engine budget correctly
+- every timer is cleared on success, failure, retry, and cancellation
+- no retroactive timeout
+- no hidden 420-second fallback
+- log warning at 80% of the configured budget
+- timeout log must include:
+  - engine
+  - elapsed time
+  - configured budget
+  - attempt
+  - current stage if available
+
+Do NOT set every engine to 900 seconds.
+
+===========================================================
+PART 3 — WORKFLOW SAFETY CEILING
+===========================================================
+
+Add or verify a high-level total pipeline safety ceiling so a truly stuck run cannot run forever.
+
+Suggested total ceiling:
+
+45 minutes
+
+This is only a last-resort workflow safety limit.
+
+It must not replace per-engine budgets.
+
+===========================================================
+PART 4 — PRESERVE FAIL-CLOSED BEHAVIOR
+===========================================================
+
+If an engine genuinely exceeds its configured budget:
+
+- mark it TIMEOUT
+- persist truthful status
+- do not reuse an old snapshot
+- do not mark COMPLETE
+- do not allow downstream engines to pretend the dependency exists
+- System Control must receive the truthful incomplete state
+
+Increasing timeout must not become silent failure masking.
+
+===========================================================
+PART 5 — REGRESSION TESTS
+===========================================================
+
+Add tests proving:
+
+1. Every engine resolves to the intended timeout budget.
+
+2. Audience and Positioning receive 900 seconds.
+
+3. Differentiation, Mechanism, Offer, Awareness, Persuasion, and Channel receive 600 seconds.
+
+4. No legacy 420-second watchdog overrides the central map.
+
+5. Retry paths clear timeout handles correctly.
+
+6. Completed engines cannot later receive retroactive TIMEOUT.
+
+7. A genuinely stuck engine still times out.
+
+8. Old snapshots are never reused after timeout.
+
+9. Task #154 exact-run plan/preview lineage behavior remains intact.
+
+10. Task #157 Offer contract tests still pass.
+
+11. No fake data is created.
+
+===========================================================
+PART 6 — RESTART RUNTIME
+===========================================================
+
+Prove the real campaign runner executes the updated source.
+
+Restart the backend and any required workflow process.
+
+Do not manually edit compiled output.
+
+Verify logs show the new timeout budgets at startup or engine dispatch.
+
+===========================================================
+PART 7 — ONE FRESH REAL RUN
+===========================================================
+
+Run exactly ONE fresh real MarketMindAI campaign:
+
+campaign_1773576062201_6t0oxi
+
+Use only real data.
+
+No synthetic snapshots.
+No manual DB edits.
+No old snapshot fallback.
+No forced PASS.
+No approval.
+No activation.
+
+Capture:
+
+- runId
+- jobId
+- start time
+- timeout policy revision
+- runtime per engine
+- attempts per engine
+- status per engine
+
+===========================================================
+PART 8 — VERIFY ALL 15 ENGINES
+===========================================================
+
+Report for each engine:
+
+Engine
+Configured timeout
+Observed runtime
+Attempts
+Final status
+Snapshot ID
+Exact run/job lineage
+
+Success criterion:
+
+15/15 genuinely execute from the fresh run.
+
+No old snapshot may count.
+
+===========================================================
+PART 9 — VERIFY OFFER CONTRACT LIVE
+===========================================================
+
+The new Offer contract from Task #157 must be exercised.
+
+Verify:
+
+- Audience primary pain
+- Offer title
+- Offer core outcome
+- primaryAudiencePainUsed
+- painResolutionStatement
+- purchaseBarrierReduced
+- evidenceRefs
+- final pain-alignment result
+- persisted Offer status
+- persisted diagnostics
+- status_message
+
+If the Offer remains misaligned:
+
+- persist non-complete state
+- keep OFFER_AUDIENCE_MISALIGNMENT
+- do not create an approvable plan
+
+If aligned:
+
+- continue normally through System Control
+
+===========================================================
+PART 10 — PLAN + PREVIEW VERIFICATION
+===========================================================
+
+If System Control allows plan construction:
+
+Verify:
+
+NEW RUN
+→ NEW snapshots
+→ NEW strategic plan
+→ exact job/run lineage
+→ run-scoped API
+→ Preview
+
+The Preview must display the exact fresh run.
+
+No section may show older-run data.
+
+Do not approve or activate.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Timeout sources found.
+2. Old timeout policy.
+3. New timeout map.
+4. Files changed.
+5. Regression test results.
+6. Runtime/source verification.
+7. Fresh run ID.
+8. Fresh job ID.
+9. Runtime and status for all 15 engines.
+10. Whether any engine timed out.
+11. Offer contract live result.
+12. Offer persisted status and diagnostics.
+13. System Control verdict.
+14. Build Plan result.
+15. New plan ID if produced.
+16. Preview lineage result.
+17. Proof no fake data was created.
+
+Finally answer:
+
+A. Are all engines now using explicit higher timeout budgets?
+
+B. Did all 15 engines complete in the fresh run?
+
+C. Did the Offer contract execute live?
+
+D. Was the Offer genuinely aligned or truthfully rejected?
+
+E. Did the fresh run persist its own plan if allowed?
+
+F. Is the Preview showing the exact fresh run?
+
+G. Can we now stop debugging pipeline execution?
+
+STOP before approval.
+STOP before activation.
+STOP before Performance Loop.
