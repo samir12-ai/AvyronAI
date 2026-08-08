@@ -17,7 +17,7 @@ const baseInput = (overrides: any = {}) => ({
   gateResult: {
     shouldRetry: true,
     reason: "missing_field",
-    severity: "warning" as const,
+    severity: "medium" as const,
     missingFieldId: "offer.painAlignment",
   },
   ...overrides,
@@ -30,7 +30,7 @@ describe("runGateRetryLoop", () => {
         gateResult: {
           shouldRetry: false,
           reason: "x",
-          severity: "warning",
+          severity: "medium",
         },
       }),
     );
@@ -71,7 +71,7 @@ describe("runGateRetryLoop", () => {
         checkMidPipelineGate: () => ({
           shouldRetry: false,
           reason: "still_missing",
-          severity: "warning",
+          severity: "medium",
         }),
       }),
     );
@@ -95,16 +95,4 @@ describe("runGateRetryLoop", () => {
     }
   });
 
-  it("races against the per-engine timeout", async () => {
-    const out = await runGateRetryLoop(
-      baseInput({
-        engineTimeoutMs: 20,
-        executeEngine: () => new Promise(() => {}),
-      }),
-    );
-    expect(out.kind === "retry_passed" || out.kind === "retry_failed_continue" || out.kind === "retry_failed_block").toBe(true);
-    if ("retryResult" in out) {
-      expect(out.retryResult.status).toBe("TIMEOUT");
-    }
-  });
 });

@@ -89,17 +89,17 @@ import {
   type EngineStepResult,
   type NeedsInputPayload,
 } from "./priority-matrix";
-import {
-  PIPELINE_TOTAL_TIMEOUT_MS,
-  getEngineTimeoutMs,
-} from "./timeout-policy";
-import { runEngineAttemptWithWatchdog } from "./timeout-watchdog";
 // Task #67 / T-S5-C4 + T-S5-C6: single owner of in-flight registry
 // lifecycle + retry-aware expectedCompleteBy.
 import {
   computeExpectedCompleteBy,
   createInFlightCleanupTracker,
 } from "./in-flight-lifecycle";
+import {
+  PIPELINE_TOTAL_TIMEOUT_MS,
+  getEngineTimeoutMs,
+  runWithEngineTimeout,
+} from "./engine-timeout-policy";
 // Task #67 / T-S5-C9: pure ledger entry for system-control budget downgrades.
 // Task #70 / Phase 7: BudgetDecisionLedger three-writer view (B1 fix).
 import {
@@ -4098,11 +4098,6 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     ? ENGINE_PRIORITY_ORDER.findIndex(e => e.id === config.resumeFromEngine)
     : 0;
 
-  // Per-engine budgets are intentionally centralized in timeout-policy.ts.
-  // ENGINE_TIMEOUT_MS_OVERRIDE is no longer read here: a global floor makes
-  // short, deterministic engines silently inherit a much larger ceiling.
-  const pipelineDeadlineMs = startTime + PIPELINE_TOTAL_TIMEOUT_MS;
-
   // When scopedEngines is provided, execute ONLY those engines (selective rerun).
   // Loop starts at the earliest requested engine; per-loop check skips any engine NOT in the set.
   // Scoped reruns rely on DB-stored snapshots from the previous full run for non-scoped context.
@@ -4272,17 +4267,31 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       preEngineProblems = logRelevantProblems(ctx.ssc, engineDef.id);
     }
 
+    // Per-engine budgets are centralized in engine-timeout-policy.ts. The
+    // 45-minute pipeline ceiling is a last-resort cap on the remaining budget
+    // of an individual attempt — it never replaces engine-specific budgets.
     const _engineTimeoutMs = Math.min(
       getEngineTimeoutMs(engineDef.id),
-      Math.max(0, pipelineDeadlineMs - Date.now()),
+      Math.max(0, startTime + PIPELINE_TOTAL_TIMEOUT_MS - Date.now()),
     );
-    let stepResult = _engineTimeoutMs > 0
-      ? await runEngineAttemptWithWatchdog({
+    let stepResult: EngineStepResult = _engineTimeoutMs > 0
+      ? await runWithEngineTimeout<EngineStepResult>({
           engineId: engineDef.id,
           engineName: engineDef.name,
           attempt: 1,
-          budgetMs: _engineTimeoutMs,
-          execute: () => executeEngine(engineDef.id, ctx, config, results, jobId),
+          configuredBudgetMs: _engineTimeoutMs,
+          currentStage: () => "initial_engine_run",
+          run: () => executeEngine(engineDef.id, ctx, config, results, jobId),
+          onTimeout: () => {
+            console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${_engineTimeoutMs / 1000}s — marking TIMEOUT`);
+            return {
+              engineId: engineDef.id,
+              status: "TIMEOUT",
+              output: null,
+              durationMs: _engineTimeoutMs,
+              error: `Engine timed out after ${_engineTimeoutMs / 1000}s`,
+            };
+          },
         })
       : {
           engineId: engineDef.id,
@@ -4362,15 +4371,23 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason} | policy=${retryDecision.rationale}`);
           const retryBudgetMs = Math.min(
             getEngineTimeoutMs(engineDef.id),
-            Math.max(0, pipelineDeadlineMs - Date.now()),
+            Math.max(0, startTime + PIPELINE_TOTAL_TIMEOUT_MS - Date.now()),
           );
-          const retryResult = retryBudgetMs > 0
-            ? await runEngineAttemptWithWatchdog({
+          const retryResult: EngineStepResult = retryBudgetMs > 0
+            ? await runWithEngineTimeout<EngineStepResult>({
                 engineId: engineDef.id,
                 engineName: engineDef.name,
                 attempt: 2,
-                budgetMs: retryBudgetMs,
-                execute: () => executeEngine(engineDef.id, ctx, config, results, jobId),
+                configuredBudgetMs: retryBudgetMs,
+                currentStage: () => "mid_pipeline_gate_retry",
+                run: () => executeEngine(engineDef.id, ctx, config, results, jobId),
+                onTimeout: () => ({
+                  engineId: engineDef.id,
+                  status: "TIMEOUT" as const,
+                  output: null,
+                  durationMs: retryBudgetMs,
+                  error: `Retry timed out after ${retryBudgetMs / 1000}s`,
+                }),
               })
             : {
                 engineId: engineDef.id,

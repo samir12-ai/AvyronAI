@@ -26,51 +26,60 @@
 import { db } from "../db";
 import { inFlightJobs } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { ENGINE_TIMEOUT_BUDGET_MS } from "./engine-timeout-policy";
 
 /**
  * Returns the wall-clock cutoff that should be persisted into
  * `in_flight_jobs.expected_complete_by`.
  *
- * Math (deliberately conservative — we'd rather a stale-recovery sweep wait
- * a few extra minutes than re-claim a still-running job):
+ * Math is capped by the 45-minute last-resort pipeline ceiling. That ceiling
+ * is not an engine timeout; individual attempts still resolve exclusively
+ * through ENGINE_TIMEOUT_BUDGET_MS.
  *
  *   wallClockBudget =
- *     engineCount * engineTimeoutMs                // worst-case per-engine
- *   + retryEligibleEngineCount * engineTimeoutMs   // one mid-pipeline retry per gate-retry-eligible engine
+ *     sum(engine budgets)                          // one attempt per engine
+ *   + retryBudgetMs                                // bounded gate-retry allowance
  *   + synthesisBudgetMs                            // plan synthesis + persist + memory write
  *   + slackMs                                      // process-scheduling / DB jitter
  *
  * Defaults match the constants in `server/orchestrator/index.ts`:
  *   - engineCount = 15 (ENGINE_PRIORITY_ORDER.length)
- *   - engineTimeoutMs = 120_000 (ENGINE_TIMEOUT_MS)
+ *   - engine budgets come from ENGINE_TIMEOUT_BUDGET_MS
  *   - retryEligibleEngineCount = 5 (the engines with `checkMidPipelineGate`
  *     hooks today: audience, offer, funnel, persuasion, integrity)
  *   - synthesisBudgetMs = 5 * 60_000 (plan synthesis + memory mutation)
  *   - slackMs = 2 * 60_000
  *
- * With defaults the budget is roughly 47min — vs the prior 30min hard ceiling
- * which a run with two retries could legitimately exceed.
+ * The persisted deadline may never exceed the separate 45-minute ceiling.
  */
 export function computeExpectedCompleteBy(opts?: {
   now?: number;
   engineCount?: number;
   engineTimeoutMs?: number;
   retryEligibleEngineCount?: number;
+  retryBudgetMs?: number;
   synthesisBudgetMs?: number;
   slackMs?: number;
 }): Date {
   const now = opts?.now ?? Date.now();
-  const engineCount = opts?.engineCount ?? 15;
-  const engineTimeoutMs = opts?.engineTimeoutMs ?? 120_000;
+  const engineCount = opts?.engineCount ?? Object.keys(ENGINE_TIMEOUT_BUDGET_MS).length;
+  const engineTimeoutMs = opts?.engineTimeoutMs ?? 0;
   const retryEligibleEngineCount = opts?.retryEligibleEngineCount ?? 5;
+  const engineBudgetTotal = opts?.engineTimeoutMs === undefined
+    ? Object.values(ENGINE_TIMEOUT_BUDGET_MS).reduce((total, budget) => total + budget, 0)
+    : engineCount * engineTimeoutMs;
+  const retryBudgetMs = opts?.retryBudgetMs
+    ?? [...Object.values(ENGINE_TIMEOUT_BUDGET_MS)]
+      .sort((a, b) => b - a)
+      .slice(0, retryEligibleEngineCount)
+      .reduce((total, budget) => total + budget, 0);
   const synthesisBudgetMs = opts?.synthesisBudgetMs ?? 5 * 60_000;
   const slackMs = opts?.slackMs ?? 2 * 60_000;
 
-  const wallClockBudget =
-    engineCount * engineTimeoutMs +
-    retryEligibleEngineCount * engineTimeoutMs +
-    synthesisBudgetMs +
-    slackMs;
+  const wallClockBudget = Math.min(
+    engineBudgetTotal + retryBudgetMs + synthesisBudgetMs + slackMs,
+    45 * 60_000,
+  );
 
   return new Date(now + wallClockBudget);
 }

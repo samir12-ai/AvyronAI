@@ -25,13 +25,14 @@
 
 import { planRetry } from "../../decision-policy/retry-policy";
 import type { EngineStepResult } from "../priority-matrix";
+import { getEngineTimeoutMs, runWithEngineTimeout } from "../engine-timeout-policy";
 
 export type EngineTimeoutMs = number;
 
 export interface MidPipelineGate {
   shouldRetry: boolean;
   reason: string;
-  severity: "critical" | "warning" | "info";
+  severity: "critical" | "high" | "medium";
   missingFieldId?: string;
   setConfidenceFloor?: number;
 }
@@ -41,7 +42,8 @@ export interface GateRetryInput {
   engineName: string;
   engineIndex: number;
   gateResult: MidPipelineGate;
-  engineTimeoutMs: EngineTimeoutMs;
+  /** Deprecated compatibility input. The canonical policy always wins. */
+  engineTimeoutMs?: EngineTimeoutMs;
   executeEngine: () => Promise<EngineStepResult>;
   checkMidPipelineGate: (engineId: string, retryResult: EngineStepResult) => MidPipelineGate | null;
 }
@@ -101,25 +103,22 @@ export async function runGateRetryLoop(input: GateRetryInput): Promise<GateRetry
     };
   }
 
-  const timeoutMs = input.engineTimeoutMs;
-  let _grlTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  const retryResult = await Promise.race<EngineStepResult>([
-    input.executeEngine(),
-    new Promise<EngineStepResult>((resolve) => {
-      _grlTimeoutHandle = setTimeout(
-        () =>
-          resolve({
-            engineId: input.engineId,
-            status: "TIMEOUT",
-            output: null,
-            durationMs: timeoutMs,
-            error: `Retry timed out after ${timeoutMs / 1000}s`,
-          }),
-        timeoutMs,
-      );
+  const timeoutMs = getEngineTimeoutMs(input.engineId as import("../priority-matrix").EngineId);
+  const retryResult = await runWithEngineTimeout<EngineStepResult>({
+    engineId: input.engineId,
+    engineName: input.engineName,
+    attempt: 2,
+    configuredBudgetMs: timeoutMs,
+    currentStage: () => "mid_pipeline_gate_retry",
+    run: input.executeEngine,
+    onTimeout: () => ({
+      engineId: input.engineId as import("../priority-matrix").EngineId,
+      status: "TIMEOUT",
+      output: null,
+      durationMs: timeoutMs,
+      error: `Retry timed out after ${timeoutMs / 1000}s`,
     }),
-  ]);
-  if (_grlTimeoutHandle !== null) clearTimeout(_grlTimeoutHandle);
+  });
 
   const retryGate = input.checkMidPipelineGate(input.engineId, retryResult);
 
