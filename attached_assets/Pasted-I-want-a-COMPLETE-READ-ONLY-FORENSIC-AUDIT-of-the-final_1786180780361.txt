@@ -1,0 +1,383 @@
+I want a COMPLETE READ-ONLY FORENSIC AUDIT of the final System Control BLOCK from the latest REAL MarketMindAI campaign run.
+
+IMPORTANT:
+
+The latest production run successfully completed ALL 15/15 engines.
+
+This means we are no longer debugging pipeline execution.
+
+DO NOT:
+- approve the blocked plan
+- bypass System Control
+- weaken gates
+- lower thresholds
+- fabricate data
+- insert synthetic evidence
+- modify historical records
+- modify code yet
+
+The purpose of this audit is to determine whether ORCH_STATUS=BLOCKED is:
+
+A) a CORRECT truthful verdict caused by genuinely insufficient/weak real evidence
+
+OR
+
+B) an INCORRECT verdict caused by confidence calculation, provenance, lineage, propagation, stale snapshots, or another implementation bug.
+
+===========================================================
+PHASE 1 — FREEZE THE EXACT RUN
+===========================================================
+
+Audit ONLY the completed real run:
+
+campaign_1773576062201_6t0oxi_realrun_1786179618018
+
+Identify and preserve the exact:
+
+- campaign
+- account
+- run ID
+- 15 engine outputs
+- snapshot IDs
+- snapshot versions
+- evidence versions
+- source versions
+- confidence values
+- provenance labels
+- System Control inputs
+- System Control output
+- Build Plan output
+
+Do not accidentally analyze a newer/older snapshot.
+
+Create a read-only run manifest for the investigation.
+
+===========================================================
+PHASE 2 — RECONSTRUCT SYSTEM CONTROL
+===========================================================
+
+Trace exactly how:
+
+ORCH_STATUS=BLOCKED
+
+was calculated.
+
+For every blocking rule show:
+
+INPUT
+→ CALCULATION
+→ THRESHOLD
+→ RESULT
+→ FINAL EFFECT
+
+List every System Control rule evaluated, not only the rules that failed.
+
+Clearly distinguish:
+
+PASS
+WARNING
+BLOCK
+
+I want to know whether the final BLOCK can be reproduced deterministically from the persisted run data.
+
+===========================================================
+PHASE 3 — OFFER CONFIDENCE = 0.00
+===========================================================
+
+This is extremely important.
+
+The latest run reported approximately:
+
+MI confidence = 0.92
+Offer confidence = 0.00
+
+Investigate why Offer became exactly 0.00.
+
+Trace:
+
+Audience
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+
+Inspect:
+
+- Offer Engine raw output
+- grounding
+- evidence refs
+- judge results
+- CEL/AEL results
+- confidence calculation
+- penalties
+- provenance
+- snapshot persistence
+- confidence normalization
+- System Control extraction
+
+Determine whether 0.00 was genuinely produced by the Offer Engine or introduced later by mapping/default/fallback logic.
+
+Answer:
+
+Is Offer confidence 0.00 truthful?
+
+If yes, show exactly why.
+
+If no, identify the exact bug.
+
+===========================================================
+PHASE 4 — CHANNEL SELECTION = 0.35
+===========================================================
+
+Trace Channel Selection confidence from source evidence to final System Control value.
+
+Inspect:
+
+- inputs from Strategy
+- Audience
+- Positioning
+- Offer
+- Funnel
+- business goals
+- available channel evidence
+- performance history
+- user/channel data
+- competitor evidence
+
+Determine exactly why confidence is 0.35.
+
+Is it genuinely low because real evidence is missing?
+
+Or is valid existing evidence failing to reach Channel Selection?
+
+Check lineage and propagation.
+
+===========================================================
+PHASE 5 — 9/15 inferred_synthesis
+===========================================================
+
+The report says 9/15 engines have:
+
+provenance = inferred_synthesis
+
+Audit EVERY engine individually.
+
+Produce a table:
+
+Engine
+Provenance
+Direct evidence available?
+Evidence actually consumed?
+Evidence refs valid?
+Why inferred_synthesis?
+Correct classification?
+
+This is critical.
+
+We already have substantial MarketMindAI data:
+
+- Product Identity
+- Business context
+- Business goals
+- Market Intelligence
+- competitor scraping
+- classifications
+- Audience
+- Positioning
+- Watchtower
+- manual KPI data
+- Iteration/Retention inputs
+
+Determine whether the system genuinely lacks direct evidence OR whether existing real evidence is being lost between engines.
+
+Do not assume inferred_synthesis is correct just because it is persisted.
+
+===========================================================
+PHASE 6 — CONFIDENCE SPREAD = 0.92
+===========================================================
+
+Recalculate the confidence spread independently from the persisted outputs.
+
+Show all 15 confidence values.
+
+Determine:
+
+max confidence
+min confidence
+spread
+threshold
+
+Then determine whether comparing all these confidence values directly is architecturally valid.
+
+Check for:
+
+- different confidence scales
+- missing values becoming zero
+- degraded outputs becoming zero
+- undefined/null normalization
+- incompatible confidence semantics
+- stale snapshot values
+- fallback values
+- serialization issues
+
+Do NOT change the formula.
+
+Audit it only.
+
+===========================================================
+PHASE 7 — DATA SUFFICIENCY
+===========================================================
+
+If the BLOCK is genuinely caused by insufficient real data, identify EXACTLY what is missing.
+
+Do not say vague things like:
+
+"needs more data"
+"needs more history"
+"needs more scrapes"
+
+Give concrete gaps.
+
+For example:
+
+Missing:
+- X successful owned-post execution comparisons
+- Y weeks of performance history
+- specific KPI field
+- specific competitor evidence
+- specific channel metric
+- specific source required by a confidence rule
+
+For every missing input show:
+
+Which engine needs it?
+Which confidence/gate does it affect?
+Where should it naturally come from?
+Can the system collect it automatically?
+Or must the user provide it?
+
+===========================================================
+PHASE 8 — LINEAGE AUDIT
+===========================================================
+
+Trace evidence through the full chain:
+
+Product Identity
+Business Goals
+Market Intelligence
+Competitor Scraping
+Competitor Classifications
+Audience
+AEL
+Positioning
+Differentiation
+Mechanism
+Offer
+Awareness
+Funnel
+Persuasion
+Integrity
+Statistical Validation
+Budget Governor
+Channel Selection
+Iteration
+Retention
+System Control
+Build Plan
+
+Verify real evidence is not disappearing between stages.
+
+For each major transition verify:
+
+source record
+→ adapter
+→ engine input
+→ evidence ref
+→ output
+→ persisted snapshot
+→ downstream consumer
+
+Flag any lineage break.
+
+===========================================================
+PHASE 9 — DISTINGUISH PRODUCT MATURITY FROM BUGS
+===========================================================
+
+Classify every reason for the BLOCK into exactly one category:
+
+1. REAL_DATA_GAP
+2. CORRECT_STRATEGIC_WARNING
+3. CONFIDENCE_CALCULATION_BUG
+4. LINEAGE_PROPAGATION_BUG
+5. PROVENANCE_CLASSIFICATION_BUG
+6. SNAPSHOT_VERSION_BUG
+7. NORMALIZATION_OR_MAPPING_BUG
+8. LEGACY_ARCHITECTURE
+9. OTHER — evidence required
+
+This distinction is extremely important.
+
+Do not treat legitimate lack of historical Performance data as a software bug.
+
+Do not treat a software propagation bug as "needs more data."
+
+===========================================================
+PHASE 10 — PERFORMANCE LOOP BOOTSTRAP QUESTION
+===========================================================
+
+There is an architectural dependency that must be examined:
+
+Performance Loop needs an Approved/Activated Plan.
+
+But System Control may be penalizing the campaign because historical performance evidence does not yet exist.
+
+Determine whether there is a bootstrap deadlock:
+
+No performance history
+→ confidence reduced
+→ plan BLOCKED
+→ cannot activate plan
+→ cannot generate performance history
+→ confidence can never improve
+
+Verify from CODE whether this circular dependency exists.
+
+If it does NOT exist, prove why.
+
+If it DOES exist, identify the exact gates creating it.
+
+Do not fix it yet.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Exact reason ORCH_STATUS=BLOCKED.
+2. Whether the BLOCK is TRUE or FALSE.
+3. Offer 0.00 root cause.
+4. Channel Selection 0.35 root cause.
+5. Explanation for every inferred_synthesis engine.
+6. Recalculated confidence spread.
+7. Any lineage breaks.
+8. Any snapshot/version inconsistencies.
+9. Exact real-data gaps.
+10. Whether a Performance Loop bootstrap deadlock exists.
+11. Which findings are bugs versus legitimate data-quality warnings.
+
+Give each subsystem:
+
+PASS / WARNING / FAIL
+
+Finally answer ONE critical question:
+
+"Should this MarketMindAI plan remain BLOCKED based on the real evidence currently available?"
+
+Answer YES or NO and prove it from the architecture and persisted data.
+
+DO NOT approve the plan.
+DO NOT implement fixes yet.
+DO NOT weaken System Control.
+
+If bugs are found, provide a surgical repair plan only.
