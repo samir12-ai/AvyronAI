@@ -89,6 +89,11 @@ import {
   type EngineStepResult,
   type NeedsInputPayload,
 } from "./priority-matrix";
+import {
+  PIPELINE_TOTAL_TIMEOUT_MS,
+  getEngineTimeoutMs,
+} from "./timeout-policy";
+import { runEngineAttemptWithWatchdog } from "./timeout-watchdog";
 // Task #67 / T-S5-C4 + T-S5-C6: single owner of in-flight registry
 // lifecycle + retry-aware expectedCompleteBy.
 import {
@@ -4093,59 +4098,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     ? ENGINE_PRIORITY_ORDER.findIndex(e => e.id === config.resumeFromEngine)
     : 0;
 
-  // ─── Per-engine timeout policy (2026-08-08) ─────────────────────────────────
-  // Before this change, all 15 engines shared a single 300s ceiling.  A
-  // sequential LLM engine (mechanism) that took 420s would time out, write
-  // axisConsistency.consistent=false, and cascade a false AXIS_MISMATCH through
-  // the offer engine — killing 9 downstream engines in a full run.
-  //
-  // Tiers:
-  //   LIGHT   (~60-180s): deterministic computation or a single small LLM call
-  //   MEDIUM  (~300s)  : standard LLM engine with judge + CEL gate
-  //   HEAVY   (~600s)  : sequential multi-step LLM with depth-gate retries
-  //
-  // `ENGINE_TIMEOUT_MS_OVERRIDE` raises the global floor (useful for the
-  // synthetic audit harness). Per-engine tiers take precedence over the 300s
-  // default; the override only "wins" when it exceeds the tier ceiling (e.g.
-  // setting it to 900s stresses all engines above their tier).
-  // ─────────────────────────────────────────────────────────────────────────────
-  const ENGINE_GLOBAL_TIMEOUT_MS = (() => {
-    const raw = process.env.ENGINE_TIMEOUT_MS_OVERRIDE;
-    if (raw) {
-      const n = Number.parseInt(raw, 10);
-      if (Number.isFinite(n) && n >= 60_000 && n <= 1_800_000) return n;
-    }
-    return 300_000;
-  })();
-
-  const ENGINE_TIMEOUT_POLICY: Partial<Record<string, number>> = {
-    budget_governor:        60_000,   // LIGHT  — pure deterministic computation (~1ms observed)
-    statistical_validation: 120_000,  // LIGHT  — small LLM cross-check
-    channel_selection:      120_000,  // LIGHT  — deterministic scoring, no LLM
-    audience:               150_000,  // LIGHT  — structured analysis + small LLM
-    market_intelligence:    180_000,  // LIGHT  — multi-scrape + analysis pass
-    differentiation:        300_000,  // MEDIUM — 1-2 LLM calls + CEL judge
-    offer:                  300_000,  // MEDIUM — 1-2 LLM calls + judge (~84s observed)
-    awareness:              300_000,  // MEDIUM — route scoring + LLM
-    funnel:                 300_000,  // MEDIUM — strategy analysis LLM
-    persuasion:             300_000,  // MEDIUM — route scoring + LLM
-    integrity:              300_000,  // MEDIUM — cross-engine consistency LLM
-    positioning:            360_000,  // MEDIUM+ — parallelised SC+CG (~154s observed peak)
-    iteration:              300_000,  // MEDIUM — iteration planning LLM
-    retention:              300_000,  // MEDIUM — retention strategy LLM
-    mechanism:              600_000,  // HEAVY  — sequential multi-step LLM, no internal parallelism
-  };
-
-  // Take the larger of the per-engine tier and the global floor.
-  // This lets the harness raise all engines via override while still giving
-  // mechanism its 600s budget when the global default is only 300s.
-  const getEngineTimeoutMs = (engineId: string): number => {
-    const tier = ENGINE_TIMEOUT_POLICY[engineId];
-    return tier !== undefined ? Math.max(tier, ENGINE_GLOBAL_TIMEOUT_MS) : ENGINE_GLOBAL_TIMEOUT_MS;
-  };
-
-  // Backwards-compatible alias — used in log messages and a few inline paths below.
-  const ENGINE_TIMEOUT_MS = ENGINE_GLOBAL_TIMEOUT_MS;
+  // Per-engine budgets are intentionally centralized in timeout-policy.ts.
+  // ENGINE_TIMEOUT_MS_OVERRIDE is no longer read here: a global floor makes
+  // short, deterministic engines silently inherit a much larger ceiling.
+  const pipelineDeadlineMs = startTime + PIPELINE_TOTAL_TIMEOUT_MS;
 
   // When scopedEngines is provided, execute ONLY those engines (selective rerun).
   // Loop starts at the earliest requested engine; per-loop check skips any engine NOT in the set.
@@ -4316,24 +4272,25 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       preEngineProblems = logRelevantProblems(ctx.ssc, engineDef.id);
     }
 
-    const _engineTimeoutMs = getEngineTimeoutMs(engineDef.id);
-    let _stepTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
-    let stepResult = await Promise.race([
-      executeEngine(engineDef.id, ctx, config, results, jobId),
-      new Promise<EngineStepResult>((resolve) => {
-        _stepTimeoutHandle = setTimeout(() => {
-          console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${_engineTimeoutMs / 1000}s — marking TIMEOUT`);
-          resolve({
-            engineId: engineDef.id,
-            status: "TIMEOUT",
-            output: null,
-            durationMs: _engineTimeoutMs,
-            error: `Engine timed out after ${_engineTimeoutMs / 1000}s`,
-          });
-        }, _engineTimeoutMs);
-      }),
-    ]);
-    if (_stepTimeoutHandle !== null) clearTimeout(_stepTimeoutHandle);
+    const _engineTimeoutMs = Math.min(
+      getEngineTimeoutMs(engineDef.id),
+      Math.max(0, pipelineDeadlineMs - Date.now()),
+    );
+    let stepResult = _engineTimeoutMs > 0
+      ? await runEngineAttemptWithWatchdog({
+          engineId: engineDef.id,
+          engineName: engineDef.name,
+          attempt: 1,
+          budgetMs: _engineTimeoutMs,
+          execute: () => executeEngine(engineDef.id, ctx, config, results, jobId),
+        })
+      : {
+          engineId: engineDef.id,
+          status: "TIMEOUT" as const,
+          output: null,
+          durationMs: 0,
+          error: `Pipeline exceeded ${PIPELINE_TOTAL_TIMEOUT_MS / 60_000} minute safety ceiling`,
+        };
 
     if (ctx.ssc && (stepResult.status === "SUCCESS" || stepResult.status === "PARTIAL")) {
       updateSSCAfterEngine(ctx.ssc, engineDef.id, stepResult, i, runConfidenceProvenanceLog);
@@ -4403,18 +4360,25 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           // shapes (blocked_by_integrity, error) still take precedence.
           __gateRetryFired = true;
           console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason} | policy=${retryDecision.rationale}`);
-          // _engineTimeoutMs is declared earlier in this loop iteration for the first-attempt watchdog.
-          let _retryTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
-          const retryResult = await Promise.race([
-            executeEngine(engineDef.id, ctx, config, results, jobId),
-            new Promise<EngineStepResult>((resolve) => {
-              _retryTimeoutHandle = setTimeout(() => resolve({
-                engineId: engineDef.id, status: "TIMEOUT", output: null, durationMs: _engineTimeoutMs,
-                error: `Retry timed out after ${_engineTimeoutMs / 1000}s`,
-              }), _engineTimeoutMs);
-            }),
-          ]);
-          if (_retryTimeoutHandle !== null) clearTimeout(_retryTimeoutHandle);
+          const retryBudgetMs = Math.min(
+            getEngineTimeoutMs(engineDef.id),
+            Math.max(0, pipelineDeadlineMs - Date.now()),
+          );
+          const retryResult = retryBudgetMs > 0
+            ? await runEngineAttemptWithWatchdog({
+                engineId: engineDef.id,
+                engineName: engineDef.name,
+                attempt: 2,
+                budgetMs: retryBudgetMs,
+                execute: () => executeEngine(engineDef.id, ctx, config, results, jobId),
+              })
+            : {
+                engineId: engineDef.id,
+                status: "TIMEOUT" as const,
+                output: null,
+                durationMs: 0,
+                error: `Pipeline exceeded ${PIPELINE_TOTAL_TIMEOUT_MS / 60_000} minute safety ceiling before retry`,
+              };
 
           const retryGate = checkMidPipelineGate(engineDef.id, retryResult, ctx);
           if (retryGate?.gateFailed) {
