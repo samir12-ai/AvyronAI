@@ -100,7 +100,7 @@ const CAUSAL_CONSTRAINT_RULES: CausalConstraintRule[] = [
   {
     id: "TRUST_OPACITY_RULE",
     rootCausePattern: /trust|opaci|transparen|hidden|unclear|confus|deceiv|mislead|skeptic|credibil|believab/i,
-    requiredAxisPatterns: [/transparen/i, /trust/i, /clarit/i, /predict/i, /proof/i, /honest/i, /verif/i, /accountab/i, /credib/i, /open/i],
+    requiredAxisPatterns: [/transparen/i, /trust/i, /clarit/i, /predict/i, /proof/i, /honest/i, /verif/i, /accountab/i, /credib/i, /open/i, /evidence/i],
     blockedAxisPatterns: [/^simplicity$/i, /^ease$/i, /^simplicity.and.ease$/i, /^convenience$/i],
     description: "When root cause involves trust/opacity/confusion, positioning must reflect transparency/trust/clarity — NOT generic simplicity",
   },

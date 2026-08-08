@@ -1982,16 +1982,33 @@ async function executeEngine(
         }
         }  // end if(!diffReused)
 
-        if (!diffReused && ctx.analyticalEnrichment) {
-          const diffTexts = (result.claims || result.claimStructures || []).map((c: any) => typeof c === "string" ? c : c.claim || c.title || JSON.stringify(c));
-          const celResult = enforceGenericEngineCompliance("differentiation", diffTexts, ctx.analyticalEnrichment);
-          { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celResult }); }
-          if (!ctx.celResults) ctx.celResults = [];
-          ctx.celResults.push(celResult);
-          if (celResult.violations.length > 0) {
-            console.log(`[Orchestrator] CEL_DIFFERENTIATION | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
+        // CEL_DIFFERENTIATION ALIGNMENT: Enforce required-axis alignment using the complete
+        // differentiation output (pillar name+description, claim text, mechanism description).
+        // This mirrors the engine's own celSourceTexts construction (engine.ts:1532-1536) so
+        // the same full content that passes the depth gate also reaches the alignment check.
+        // Previous version used only .claim strings — which missed pillar descriptions and
+        // mechanism text where TRUST_OPACITY patterns (transparent, evidence-linked, etc.) appear,
+        // producing spurious missing_alignment violations (LINEAGE_MAPPING_BUG, 2026-08-08).
+        if (ctx.analyticalEnrichment && result) {
+          const _diffPillars = ((result as any).pillars || (result as any).differentiationPillars || []) as any[];
+          const _diffClaims = ((result as any).claimStructures || (result as any).claims || []) as any[];
+          const _diffMechDesc = ((result as any).mechanismFraming as any)?.description || '';
+          const diffFullTexts = [
+            ..._diffPillars.map((p: any) => `${p.name || ''} ${p.description || ''}`),
+            ..._diffClaims.map((c: any) => c.claim || ''),
+            _diffMechDesc,
+          ].filter((t: string) => t.trim().length > 0);
+          if (diffFullTexts.length > 0) {
+            const celDiffResult = enforceGenericEngineCompliance("differentiation", diffFullTexts, ctx.analyticalEnrichment);
+            { const _j = config.preassignedJobId || (ctx.config as any)?.currentJobId || ""; if (_j) await persistCELComplianceResult({ accountId: config.accountId, campaignId: config.campaignId, jobId: _j, result: celDiffResult }); }
+            if (!ctx.celResults) ctx.celResults = [];
+            ctx.celResults.push(celDiffResult);
+            if (celDiffResult.violations.length > 0) {
+              console.log(`[Orchestrator] CEL_DIFFERENTIATION | violations=${celDiffResult.violations.length} | score=${celDiffResult.score.toFixed(2)} | passed=${celDiffResult.passed}`);
+            }
           }
         }
+        // Engine's depth check (root-cause / causal-chain grounding) is a separate CEL axis.
         if (result.celDepthCompliance) {
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(result.celDepthCompliance);
