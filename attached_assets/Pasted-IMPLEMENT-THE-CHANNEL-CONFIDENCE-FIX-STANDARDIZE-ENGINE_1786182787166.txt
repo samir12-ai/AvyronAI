@@ -1,0 +1,304 @@
+IMPLEMENT THE CHANNEL CONFIDENCE FIX, STANDARDIZE ENGINE TIMEOUTS, THEN RUN A NEW REAL CAMPAIGN TEST
+
+This is an implementation task.
+
+IMPORTANT:
+
+Do NOT create a new Learning Mode.
+Do NOT create a new Plan type.
+Do NOT create new Memory architecture.
+Do NOT weaken System Control.
+Do NOT fabricate conversion history.
+Do NOT invent channel performance.
+Do NOT bypass gates.
+Do NOT lower thresholds blindly.
+
+Use the existing architecture only.
+
+===========================================================
+PART 1 — FIX BUG A FIRST
+===========================================================
+
+The forensic audit proved a critical bug in the Offer Engine:
+
+Mechanism timeout
+→ axisConsistency.consistent = false
+→ Offer misreads it as a real axis mismatch
+→ Offer confidence becomes 0
+→ Budget Kill / Halt / Pipeline Incomplete / excessive spread
+
+Fix this surgically.
+
+File:
+server/offer-engine/engine.ts
+
+Requirements:
+
+- Distinguish ENGINE_FAILURE / TIMEOUT from a real AXIS_MISMATCH.
+- Only issue AXIS_MISMATCH when the actual normalized axis values differ.
+- If mechanism failed due to timeout or technical failure, do not fabricate a mismatch.
+- Preserve the real generated offer if its own judge and evidence passed.
+- Mark mechanism dependency as unavailable/degraded truthfully.
+- Do not convert “unable to verify” into “verified mismatch.”
+- Preserve all existing grounding, Judge, CEL, lineage, and System Control behavior.
+
+Add regression tests for:
+
+1. Same axes + mechanism timeout → must NOT return AXIS_MISMATCH.
+2. Different axes + healthy mechanism → must return AXIS_MISMATCH.
+3. Same axes + healthy mechanism → must pass axis guard.
+4. Technical failure must never force offerStrengthScore to 0 if the offer itself was successfully generated and judged.
+
+===========================================================
+PART 2 — FIX CHANNEL CONFIDENCE USING OPTION 1
+===========================================================
+
+The Channel Selection Engine currently gives confidence 0.35 mainly because no historical conversion data exists.
+
+This is a first-run campaign.
+
+Historical conversion evidence must remain valuable when available, but it must not be the only basis for channel confidence.
+
+Do NOT add a new state or new lifecycle.
+
+Change the existing confidence calculation so it measures:
+
+“Strength of all currently available channel evidence”
+
+instead of:
+
+“Amount of historical conversion evidence.”
+
+The engine should use existing real inputs such as:
+
+- Product Identity
+- Business model
+- Core offer
+- Price range
+- Target decision maker
+- Audience behavior
+- Audience platform usage
+- Funnel objective
+- Primary conversion channel
+- Website / form / WhatsApp / booking assets
+- Market Intelligence
+- Competitor channel usage
+- Channel-role fit
+- Funnel-stage fit
+- Content production capability
+- Manual campaign metrics
+- Historical conversion evidence, when available
+
+Requirements:
+
+- Historical conversion evidence remains a positive confidence factor.
+- Its absence may reduce confidence, but must not automatically make the recommendation invalid.
+- Missing historical evidence must not be treated as contradictory evidence.
+- Confidence must be deterministic.
+- Same inputs must produce the same confidence.
+- No fake conversions.
+- No invented CPA, ROAS, CTR, or conversion rates.
+- Preserve the existing confidence scale and thresholds unless the audit proves the calculation is mathematically incompatible with first-run campaigns.
+- Show the exact contribution of every confidence factor in logs and persisted lineage.
+- Keep channel selection grounded in existing evidence.
+
+Before changing the formula:
+
+1. Audit the current 0.35 calculation.
+2. Print every contributing factor and penalty.
+3. Identify which existing real inputs are currently ignored.
+4. Implement the smallest correction.
+
+Add tests proving:
+
+- No conversion history + strong strategic evidence can produce a valid non-zero recommendation above the current minimum when justified.
+- No conversion history + weak strategic evidence still remains low confidence.
+- Real conversion history improves confidence.
+- Contradictory conversion evidence lowers confidence.
+- Missing evidence is not treated as negative evidence.
+- Cross-tenant data cannot influence channel confidence.
+
+===========================================================
+PART 3 — FIX BUG B
+===========================================================
+
+The forensic audit found:
+
+confidenceNormalized: !!(result as any).confidenceNormalized
+
+This stores booleans instead of numeric confidence values.
+
+Fix the affected persistence paths.
+
+Requirements:
+
+- Persist the actual numeric confidence.
+- Preserve null when no numeric confidence exists.
+- Do not coerce undefined to false.
+- Confirm awareness and persuasion snapshot values are numeric.
+- Audit all other engine persistence paths for the same boolean-coercion bug.
+- Fix only confirmed instances.
+
+Add regression tests for numeric persistence.
+
+===========================================================
+PART 4 — SYSTEM-WIDE ENGINE TIMEOUT POLICY
+===========================================================
+
+We have repeatedly discovered engine-specific timeout failures.
+
+Implement a centralized per-engine timeout policy for all 15 engines.
+
+Do NOT use one blind global timeout.
+
+Audit every engine and assign a timeout based on real runtime evidence.
+
+Suggested starting tiers:
+
+- LIGHT: 120 seconds
+- MEDIUM: 300 seconds
+- HEAVY: 600 seconds
+- VERY_HEAVY: 900 seconds only if runtime evidence proves it is necessary
+
+At minimum audit:
+
+1. Market Intelligence
+2. Audience
+3. Positioning
+4. Differentiation
+5. Mechanism
+6. Offer
+7. Awareness
+8. Funnel
+9. Persuasion
+10. Integrity
+11. Statistical Validation
+12. Budget Governor
+13. Channel Selection
+14. Iteration
+15. Retention
+16. Build Plan synthesis if managed separately
+
+Requirements:
+
+- Explicit timeout per engine.
+- Central configuration map.
+- No timer leak.
+- Every timeout handle cleared on success, failure, retry, or cancellation.
+- No retroactive timeout after an engine completes.
+- Warning log at 80% of budget.
+- Hard timeout log with engine name, stage, attempt, elapsed time, and configured budget.
+- Retry logic must use the same engine-specific policy.
+- Gate retry loops must also clear timers.
+- Preserve grounding, Judge, CEL, System Control, and engine outputs.
+- Do not simply raise all engines to 900 seconds.
+
+For each engine report:
+
+- old timeout
+- observed runtime
+- new timeout
+- reason
+- number of LLM calls
+- retry count
+- sequential bottlenecks
+- safely parallelizable steps
+
+===========================================================
+PART 5 — MECHANISM RUNTIME AUDIT AND FIX
+===========================================================
+
+The Mechanism Engine timed out in the prior run.
+
+Before relying only on a larger timeout, profile it.
+
+Measure:
+
+- every LLM call
+- every Judge call
+- retries
+- prompt size
+- DB reads
+- sequential independent work
+- parser retries
+- grounding
+- CEL
+- persistence
+
+If independent work can safely run in parallel, optimize it.
+
+Do not change output quality.
+
+The final Mechanism timeout allocation should reflect the optimized real runtime, not hide an avoidable bottleneck.
+
+===========================================================
+PART 6 — RUN A NEW REAL MARKETMINDAI CAMPAIGN
+===========================================================
+
+After all fixes pass targeted tests:
+
+Run one new production-safe MarketMindAI campaign.
+
+Use only real data.
+
+Do not seed anything.
+
+Do not manually approve a blocked plan.
+
+Do not bypass System Control.
+
+Capture:
+
+- all 15 engine statuses
+- runtime per engine
+- configured timeout per engine
+- retries
+- confidence values
+- provenance
+- Offer strength
+- Mechanism status
+- Channel confidence
+- System Control block/warning codes
+- Build Plan status
+- final ORCH_STATUS
+
+===========================================================
+PART 7 — FINAL VERIFICATION
+===========================================================
+
+Verify:
+
+1. Mechanism timeout does not become a fake AXIS_MISMATCH.
+2. Offer strength is not incorrectly forced to 0.
+3. Channel confidence uses all available real evidence.
+4. Missing conversion history is treated as missing, not negative.
+5. Numeric confidences persist correctly.
+6. No engine suffers a false or retroactive timeout.
+7. Every timer is cleared correctly.
+8. Build Plan is reached.
+9. System Control receives correct engine values.
+10. Any remaining BLOCK is based only on genuine strategic or data-quality issues.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Files changed.
+2. Bug A fix.
+3. Channel confidence formula before and after.
+4. Evidence factors used by Channel Selection.
+5. Bug B fix.
+6. Timeout policy table for all engines.
+7. Mechanism runtime profile and optimization.
+8. Targeted test results.
+9. Real MarketMindAI run results.
+10. Offer confidence before/after.
+11. Channel confidence before/after.
+12. Final System Control verdict.
+13. Remaining genuine data gaps.
+14. Proof no fake data was created.
+15. PASS / WARNING / FAIL for every phase.
+
+Do not declare success unless the new real run proves the corrected values reach System Control.

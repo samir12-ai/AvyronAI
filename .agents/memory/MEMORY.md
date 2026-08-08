@@ -40,3 +40,5 @@
 - [Positioning Engine 420s orchestrator timeout](positioning-engine-orchestrator-timeout.md) — FIXED: SC territories parallelized (Promise.all in semantic-collision.ts) + SC and CG run concurrently (Promise.all in engine.ts); engine dropped from 530s → 154s; CEL compliance must still run after SC resolves (ordering preserved).
 - [AEL JSON parse repair — thinking-token artifact](ael-json-parse-repair.md) — LLM `\'` escape in AEL JSON → empty root_causes → DEPTH_FAILED cascade blocks engines 4–15; fix = 4-stage repair IIFE before throwing.
 - [Orchestrator watchdog clearTimeout required](orchestrator-watchdog-cleartimeout.md) — setTimeout handles after Promise.race must be cleared or they fire retroactively and cascade-block all downstream engines.
+- [Mechanism Axis Guard fix](mechanism-axis-guard-fix.md) — engine failure / identical-after-normalise → DEGRADED_CONTINUE + 10% penalty, NOT hard-reject; hard-reject cascades offerStrength=0 → killFlag=true → channel abort.
+- [Channel confidence fix](channel-confidence-fix.md) — competitorValidity must use evidenceStrength (~0.74) not claimConfidenceScore (~0.35); runGuardLayer must not abort on killFlag=true.

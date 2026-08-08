@@ -2444,7 +2444,10 @@ async function executeEngine(
             structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
             boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
             dataReliability: JSON.stringify((result as any).dataReliability || null),
-            confidenceNormalized: !!(result as any).confidenceNormalized,
+            // T008 [DEPRECATED 2026-05-03]: confidence_normalized is a legacy boolean column
+            // that no awareness engine version has ever populated.  The previous `!!` coercion
+            // stored false for every run.  We drop the field from the INSERT so the DB default
+            // (false) is applied implicitly, avoiding the misleading boolean-for-numeric cast.
             awarenessStrengthScore: (result as any).primaryRoute?.awarenessStrengthScore ?? null,
             executionTimeMs: (result as any).executionTimeMs ?? null,
             inputHash: awarenessInputHash,
@@ -2774,7 +2777,7 @@ async function executeEngine(
             structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
             boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
             dataReliability: JSON.stringify((result as any).dataReliability || null),
-            confidenceNormalized: !!(result as any).confidenceNormalized,
+            // T008 [DEPRECATED 2026-05-03]: confidence_normalized — see awareness snapshot above.
             persuasionStrengthScore: (result as any).primaryRoute?.persuasionStrengthScore ?? null,
             executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __persStart),
             inputHash: persuasionInputHash,
@@ -4069,17 +4072,59 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     ? ENGINE_PRIORITY_ORDER.findIndex(e => e.id === config.resumeFromEngine)
     : 0;
 
-  // 5-minute hard ceiling per engine (raised from 180s: Judge + Grounding + Evidence validation added
-  // post-CLP-01 push the real-campaign budget past 180s; 300s gives headroom without open-ending it).
-  // `ENGINE_TIMEOUT_MS_OVERRIDE` env knob lets the synthetic audit harness override the ceiling without
-  // affecting production wiring. Honored ONLY when NODE_ENV !== "production" so prod stays at 300s.
-  const ENGINE_TIMEOUT_MS = (() => {
-    if (process.env.NODE_ENV === "production") return 300_000;
+  // ─── Per-engine timeout policy (2026-08-08) ─────────────────────────────────
+  // Before this change, all 15 engines shared a single 300s ceiling.  A
+  // sequential LLM engine (mechanism) that took 420s would time out, write
+  // axisConsistency.consistent=false, and cascade a false AXIS_MISMATCH through
+  // the offer engine — killing 9 downstream engines in a full run.
+  //
+  // Tiers:
+  //   LIGHT   (~60-180s): deterministic computation or a single small LLM call
+  //   MEDIUM  (~300s)  : standard LLM engine with judge + CEL gate
+  //   HEAVY   (~600s)  : sequential multi-step LLM with depth-gate retries
+  //
+  // `ENGINE_TIMEOUT_MS_OVERRIDE` raises the global floor (useful for the
+  // synthetic audit harness). Per-engine tiers take precedence over the 300s
+  // default; the override only "wins" when it exceeds the tier ceiling (e.g.
+  // setting it to 900s stresses all engines above their tier).
+  // ─────────────────────────────────────────────────────────────────────────────
+  const ENGINE_GLOBAL_TIMEOUT_MS = (() => {
     const raw = process.env.ENGINE_TIMEOUT_MS_OVERRIDE;
-    if (!raw) return 300_000;
-    const n = Number.parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 60_000 && n <= 1_800_000 ? n : 300_000;
+    if (raw) {
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n) && n >= 60_000 && n <= 1_800_000) return n;
+    }
+    return 300_000;
   })();
+
+  const ENGINE_TIMEOUT_POLICY: Partial<Record<string, number>> = {
+    budget_governor:        60_000,   // LIGHT  — pure deterministic computation (~1ms observed)
+    statistical_validation: 120_000,  // LIGHT  — small LLM cross-check
+    channel_selection:      120_000,  // LIGHT  — deterministic scoring, no LLM
+    audience:               150_000,  // LIGHT  — structured analysis + small LLM
+    market_intelligence:    180_000,  // LIGHT  — multi-scrape + analysis pass
+    differentiation:        300_000,  // MEDIUM — 1-2 LLM calls + CEL judge
+    offer:                  300_000,  // MEDIUM — 1-2 LLM calls + judge (~84s observed)
+    awareness:              300_000,  // MEDIUM — route scoring + LLM
+    funnel:                 300_000,  // MEDIUM — strategy analysis LLM
+    persuasion:             300_000,  // MEDIUM — route scoring + LLM
+    integrity:              300_000,  // MEDIUM — cross-engine consistency LLM
+    positioning:            360_000,  // MEDIUM+ — parallelised SC+CG (~154s observed peak)
+    iteration:              300_000,  // MEDIUM — iteration planning LLM
+    retention:              300_000,  // MEDIUM — retention strategy LLM
+    mechanism:              600_000,  // HEAVY  — sequential multi-step LLM, no internal parallelism
+  };
+
+  // Take the larger of the per-engine tier and the global floor.
+  // This lets the harness raise all engines via override while still giving
+  // mechanism its 600s budget when the global default is only 300s.
+  const getEngineTimeoutMs = (engineId: string): number => {
+    const tier = ENGINE_TIMEOUT_POLICY[engineId];
+    return tier !== undefined ? Math.max(tier, ENGINE_GLOBAL_TIMEOUT_MS) : ENGINE_GLOBAL_TIMEOUT_MS;
+  };
+
+  // Backwards-compatible alias — used in log messages and a few inline paths below.
+  const ENGINE_TIMEOUT_MS = ENGINE_GLOBAL_TIMEOUT_MS;
 
   // When scopedEngines is provided, execute ONLY those engines (selective rerun).
   // Loop starts at the earliest requested engine; per-loop check skips any engine NOT in the set.
@@ -4250,20 +4295,21 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       preEngineProblems = logRelevantProblems(ctx.ssc, engineDef.id);
     }
 
+    const _engineTimeoutMs = getEngineTimeoutMs(engineDef.id);
     let _stepTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
     let stepResult = await Promise.race([
       executeEngine(engineDef.id, ctx, config, results, jobId),
       new Promise<EngineStepResult>((resolve) => {
         _stepTimeoutHandle = setTimeout(() => {
-          console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${ENGINE_TIMEOUT_MS / 1000}s — marking TIMEOUT`);
+          console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${_engineTimeoutMs / 1000}s — marking TIMEOUT`);
           resolve({
             engineId: engineDef.id,
             status: "TIMEOUT",
             output: null,
-            durationMs: ENGINE_TIMEOUT_MS,
-            error: `Engine timed out after ${ENGINE_TIMEOUT_MS / 1000}s`,
+            durationMs: _engineTimeoutMs,
+            error: `Engine timed out after ${_engineTimeoutMs / 1000}s`,
           });
-        }, ENGINE_TIMEOUT_MS);
+        }, _engineTimeoutMs);
       }),
     ]);
     if (_stepTimeoutHandle !== null) clearTimeout(_stepTimeoutHandle);
@@ -4336,14 +4382,15 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           // shapes (blocked_by_integrity, error) still take precedence.
           __gateRetryFired = true;
           console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason} | policy=${retryDecision.rationale}`);
+          // _engineTimeoutMs is declared earlier in this loop iteration for the first-attempt watchdog.
           let _retryTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
           const retryResult = await Promise.race([
             executeEngine(engineDef.id, ctx, config, results, jobId),
             new Promise<EngineStepResult>((resolve) => {
               _retryTimeoutHandle = setTimeout(() => resolve({
-                engineId: engineDef.id, status: "TIMEOUT", output: null, durationMs: ENGINE_TIMEOUT_MS,
-                error: `Retry timed out after ${ENGINE_TIMEOUT_MS / 1000}s`,
-              }), ENGINE_TIMEOUT_MS);
+                engineId: engineDef.id, status: "TIMEOUT", output: null, durationMs: _engineTimeoutMs,
+                error: `Retry timed out after ${_engineTimeoutMs / 1000}s`,
+              }), _engineTimeoutMs);
             }),
           ]);
           if (_retryTimeoutHandle !== null) clearTimeout(_retryTimeoutHandle);

@@ -94,18 +94,54 @@ function assessDataReliability(
   const narrativeStability = (hasAwareness ? 0.5 : 0) + (hasPersuasion ? 0.5 : 0);
   if (narrativeStability < 0.5) advisories.push("Weak upstream stability: awareness or persuasion data missing");
 
-  const validationConfidence = validation ? safeNumber(validation.claimConfidenceScore, 0.5) : 0.5;
-  const competitorValidity = clamp(validationConfidence, 0, 1);
+  // ─── Channel confidence fix (2026-08-08) ────────────────────────────────────
+  // Previous code used validation.claimConfidenceScore (cross-engine consistency
+  // from the statistical validation engine) as a proxy for "competitor validity."
+  // claimConfidenceScore=0.35 means the claims are weakly corroborated by
+  // multiple engines — it does NOT mean competitor data is poor.  Using it here
+  // caused a spiral where a first-run with no conversion history received a
+  // reliability=0.30 and was immediately gated exploratory, suppressing all
+  // channel confidence to 0.35.
+  //
+  // Fix: use validation.evidenceStrength (actual evidence quality) for the
+  // competitor validity factor; default to a neutral 0.5 when absent rather than
+  // 0 (absence ≠ negative evidence).  Add offerStrengthFactor so a strong offer
+  // positively contributes to reliability even when history is absent.
+  // ─────────────────────────────────────────────────────────────────────────────
+  const evidenceQuality = validation ? safeNumber(validation.evidenceStrength, 0.5) : 0.5;
+  const competitorValidity = clamp(evidenceQuality, 0, 1);
+
+  // Offer strength factor: a strong available offer signals strategic evidence
+  // even when conversion history is missing.  Defaults to 0.5 (neutral) when
+  // no offer data is present.
+  const offerStrengthFactor = offer ? clamp(safeNumber(offer.offerStrengthScore, 0.5), 0, 1) : 0.5;
 
   const maturity = safeNumber(audience.maturityIndex, 0.5);
   const marketMaturityConfidence = maturity > 0.1 ? clamp(0.5 + maturity * 0.5, 0, 1) : 0.3;
 
+  // Weights sum to 1.00.  Compared to the previous formula (density×0.25,
+  // diversity×0.20, stability×0.20, competitor×0.20, maturity×0.15), the
+  // redistribution adds offer strength (×0.10) by shaving each other factor
+  // proportionally (density×0.22, diversity×0.18, stability×0.18,
+  // competitor×0.18, maturity×0.14).
   const overallReliability =
-    signalDensity * 0.25 +
-    signalDiversity * 0.20 +
-    narrativeStability * 0.20 +
-    competitorValidity * 0.20 +
-    marketMaturityConfidence * 0.15;
+    signalDensity        * 0.22 +
+    signalDiversity      * 0.18 +
+    narrativeStability   * 0.18 +
+    competitorValidity   * 0.18 +
+    marketMaturityConfidence * 0.14 +
+    offerStrengthFactor  * 0.10;
+
+  console.log(
+    `[ChannelSelectionEngine] DATA_RELIABILITY_FACTORS` +
+    ` | signalDensity=${signalDensity.toFixed(3)}×0.22` +
+    ` | signalDiversity=${signalDiversity.toFixed(3)}×0.18` +
+    ` | narrativeStability=${narrativeStability.toFixed(3)}×0.18` +
+    ` | competitorValidity(evidenceStrength)=${competitorValidity.toFixed(3)}×0.18` +
+    ` | maturity=${marketMaturityConfidence.toFixed(3)}×0.14` +
+    ` | offerStrength=${offerStrengthFactor.toFixed(3)}×0.10` +
+    ` | overallReliability=${overallReliability.toFixed(3)}`
+  );
 
   const isWeak = overallReliability < 0.45;
   if (isWeak) advisories.push(`Data reliability WEAK (${overallReliability.toFixed(2)}) — confidence scores capped`);
@@ -459,8 +495,21 @@ function runGuardLayer(
   }
 
   if (budget && budget.killFlag) {
-    passed = false;
-    findings.push("GUARD: Budget kill flag active — channel blocked from scaling");
+    // ─── Channel confidence fix (2026-08-08) ────────────────────────────────
+    // killFlag means budget is frozen, NOT that the channel is strategically
+    // incompatible.  Guard layer scores channel-audience-strategy fit; budget
+    // availability is already measured by checkBudgetConstraint (the budget
+    // layer).  Hard-failing the guard here caused the decision gate to classify
+    // every channel as "exploratory" (cap=0.35) whenever budget was frozen —
+    // including on first runs where the only reason for the freeze was a
+    // cascaded offer-confidence bug (Bug A).
+    //
+    // Fix: surface as a warning that flows into the channel's score, but do
+    // not set passed=false.  The budget layer's passed=false already propagates
+    // the freeze signal through the decision gate as a soft violation.
+    // ─────────────────────────────────────────────────────────────────────────
+    findings.push("GUARD: Budget kill flag active — spend expansion frozen (strategy evaluation continues)");
+    warnings.push("Budget kill flag is active — channel is strategy-viable but spend-frozen pending resolution");
   }
 
   const paidChannels = ["social_paid", "search_paid"];

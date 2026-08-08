@@ -2956,23 +2956,86 @@ export async function runOfferEngine(
   if (mechanismEngineOutput?.axisConsistency) {
     const mechAxisCheck = mechanismEngineOutput.axisConsistency;
     diagnostics.mechanismAxisConsistency = mechAxisCheck;
+
     if (!mechAxisCheck.consistent) {
-      console.log(`[OfferEngine-V4] MECHANISM_AXIS_GUARD | mechanism axis "${mechAxisCheck.mechanismAxis}" does not match positioning axis "${mechAxisCheck.primaryAxis}" — HARD REJECT`);
-      return {
-        status: "AXIS_MISMATCH",
-        statusMessage: `Mechanism axis "${mechAxisCheck.mechanismAxis}" does not match positioning axis "${mechAxisCheck.primaryAxis}". Re-run Mechanism Engine to resolve.`,
-        primaryOffer,
-        alternativeOffer: null,
-        rejectedOffer: null,
-        offerStrengthScore: 0,
-        positioningConsistency: null,
-        hookMechanismAlignment: null,
-        boundaryCheck: null,
-        confidenceScore: 0,
-        executionTimeMs: Date.now() - startTime,
-        diagnostics,
-      } as any;
+      // ─── Bug-A fix (2026-08-08) ──────────────────────────────────────────────
+      // The mechanism engine sets consistent=false in ALL failure paths (timeout,
+      // DEPTH_FAILED, parse failure, insufficient data) — not only when axes
+      // actually differ.  Before this fix the offer engine read only the boolean
+      // flag and issued a HARD REJECT even when both primaryAxis and mechanismAxis
+      // were the identical string, producing status=AXIS_MISMATCH and
+      // offerStrengthScore=0 for every mechanism timeout.
+      //
+      // Correct policy:
+      //  1. If the failure array contains a technical-failure marker → engine
+      //     failed, NOT a real mismatch.  Skip the guard; apply a small penalty.
+      //  2. If the normalised axis values actually differ → real mismatch.
+      //     Hard reject only in this case.
+      //  3. If consistent=false but axes are the same string → guard would have
+      //     fired spuriously; skip it with a penalty (same as case 1).
+      // ─────────────────────────────────────────────────────────────────────────
+      const ENGINE_FAILURE_MARKERS = [
+        "timed out", "timeout", "DEPTH_FAILED",
+        "insufficient positioning", "AI generation", "request timed out",
+      ];
+      const failures: string[] = mechAxisCheck.failures ?? [];
+      const isEngineTechnicalFailure = failures.some((f: string) =>
+        ENGINE_FAILURE_MARKERS.some(marker => f.toLowerCase().includes(marker.toLowerCase()))
+      );
+
+      const normalise = (s: string) => (s || "").replace(/_/g, " ").toLowerCase().trim();
+      const normPrimary   = normalise(mechAxisCheck.primaryAxis);
+      const normMechanism = normalise(mechAxisCheck.mechanismAxis);
+      const axesActuallyDiffer =
+        normPrimary.length > 0 && normMechanism.length > 0 && normPrimary !== normMechanism;
+
+      if (axesActuallyDiffer && !isEngineTechnicalFailure) {
+        // Case 2 — genuine axis mismatch: hard reject.
+        console.log(`[OfferEngine-V4] MECHANISM_AXIS_GUARD | mechanism axis "${mechAxisCheck.mechanismAxis}" does not match positioning axis "${mechAxisCheck.primaryAxis}" — HARD REJECT`);
+        return {
+          status: "AXIS_MISMATCH",
+          statusMessage: `Mechanism axis "${mechAxisCheck.mechanismAxis}" does not match positioning axis "${mechAxisCheck.primaryAxis}". Re-run Mechanism Engine to resolve.`,
+          primaryOffer,
+          alternativeOffer: null,
+          rejectedOffer: null,
+          offerStrengthScore: 0,
+          positioningConsistency: null,
+          hookMechanismAlignment: null,
+          boundaryCheck: null,
+          confidenceScore: 0,
+          executionTimeMs: Date.now() - startTime,
+          diagnostics,
+        } as any;
+      }
+
+      // Cases 1 & 3 — engine failed or axes are the same string.
+      // Continue with the generated offer; apply a 10% confidence penalty to
+      // reflect that mechanism-axis verification was unavailable.
+      const skipReason = isEngineTechnicalFailure
+        ? `engine_technical_failure: ${failures.join("; ") || "unknown"}`
+        : "axes_identical_after_normalization";
+      console.log(
+        `[OfferEngine-V4] MECHANISM_AXIS_DEGRADED | guard skipped` +
+        ` | skipReason=${skipReason}` +
+        ` | primaryAxis="${mechAxisCheck.primaryAxis}"` +
+        ` | mechanismAxis="${mechAxisCheck.mechanismAxis}"` +
+        ` | failures=[${failures.join(", ")}]` +
+        ` | continuing with generated offer`
+      );
+      diagnostics.mechanismAxisConsistency = {
+        ...mechAxisCheck,
+        guardSkipped: true,
+        skipReason,
+      };
+      primaryOffer.offerStrengthScore = clamp(primaryOffer.offerStrengthScore * 0.90);
+      console.log(
+        `[OfferEngine-V4] MECHANISM_AXIS_PENALTY | offerStrengthScore penalized 10%` +
+        ` for unverified mechanism axis | new=${primaryOffer.offerStrengthScore.toFixed(3)}`
+      );
     }
+
+    // Axis-reference warning check — runs for consistent=true AND for the
+    // degraded-but-continuing cases above.
     const offerMechText = (primaryOffer.mechanismDescription || "").toLowerCase();
     const mechPrimaryAxis = (mechAxisCheck.primaryAxis || "").replace(/_/g, " ").toLowerCase();
     const axisTokens = mechPrimaryAxis.split(/\s+/).filter((t: string) => t.length > 3);
