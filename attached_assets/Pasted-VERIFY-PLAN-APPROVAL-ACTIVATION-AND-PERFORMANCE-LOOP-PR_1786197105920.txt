@@ -1,0 +1,335 @@
+VERIFY PLAN APPROVAL, ACTIVATION, AND PERFORMANCE LOOP PREREQUISITES
+
+This is a READ-FIRST, PRODUCTION-SAFE task.
+
+Do NOT modify anything until the verification phases are complete.
+
+Do NOT fabricate data.
+Do NOT insert fake KPI values.
+Do NOT create synthetic posts.
+Do NOT bypass System Control.
+Do NOT manually change plan status in the database.
+Do NOT approve a plan unless the existing approval flow legitimately allows it.
+Do NOT assume primaryKpi or dataWindowDays are required until the code proves it.
+
+Use the real MarketMindAI campaign only:
+
+campaign_1773576062201_6t0oxi
+
+===========================================================
+PHASE 1 — IDENTIFY THE EXACT LATEST PLAN
+===========================================================
+
+Locate the plan produced by the latest successful real run where:
+
+- 15/15 engines completed
+- CEL passed
+- zero block codes fired
+- System Control verdict was DOWNGRADE / review_required
+- Build Plan succeeded
+
+Report:
+
+- plan ID
+- run ID
+- campaign ID
+- account ID
+- plan status
+- plan version
+- createdAt
+- System Control verdict
+- approval eligibility
+- activation eligibility
+- exact reason it is not yet APPROVED
+- exact reason it is not yet ACTIVE
+
+Verify the plan is tied to the latest real run and not an older cached or draft plan.
+
+===========================================================
+PHASE 2 — APPROVAL FLOW AUDIT
+===========================================================
+
+Audit the real approval path from code.
+
+Find:
+
+- approval API route
+- approval service/function
+- required guards
+- System Control checks
+- review_required handling
+- tenant checks
+- version checks
+- plan state transitions
+- side effects
+- Content DNA generation hook
+- scheduler/execution hooks
+
+Answer:
+
+1. Can a plan with DOWNGRADE / review_required be manually approved through the normal UI/API flow?
+2. Is this expected behavior by design?
+3. What conditions must pass before approval?
+4. Would approval preserve all warnings and provenance?
+5. Does approval require any unsupported override or bypass?
+
+Do not approve anything yet.
+
+===========================================================
+PHASE 3 — ACTIVATION FLOW AUDIT
+===========================================================
+
+Audit the activation path.
+
+Find:
+
+- activation API route
+- activation service/function
+- required plan status
+- required campaign state
+- scheduler registration
+- execution activation records
+- eval window creation
+- content calendar/publishing dependencies
+- Performance Loop dependencies
+
+Answer:
+
+1. What exact state transition occurs on activation?
+2. What records are created?
+3. What schedulers/jobs become active?
+4. What Performance Loop prerequisites are created automatically?
+5. What still requires real user action?
+
+Do not activate yet.
+
+===========================================================
+PHASE 4 — PERFORMANCE LOOP PREREQUISITE AUDIT
+===========================================================
+
+Verify from code, not assumptions, whether these are actually required:
+
+- primaryKpi
+- dataWindowDays
+- approved plan
+- activated plan
+- owned posts
+- owned post lineage
+- owned post classifications
+- evaluation windows
+- weekly truth submission
+- revenue/ad-spend data
+- user channel connection
+- real performance metrics
+
+For each prerequisite report:
+
+- required before approval?
+- required before activation?
+- required before first Performance Cycle?
+- optional?
+- automatically created?
+- user-provided?
+- exact source file/function enforcing it
+
+Specifically investigate the claim:
+
+"Performance Loop cannot start because primaryKpi and dataWindowDays are missing."
+
+Prove whether this is TRUE or FALSE.
+
+If these fields already exist in:
+
+- iteration_gate_inputs
+- retention_gate_inputs
+- campaign goals
+- BDL
+- eval windows
+- another source
+
+report the exact values and source.
+
+===========================================================
+PHASE 5 — REAL MARKETMINDAI DATA CHECK
+===========================================================
+
+Read-only inspect the current real campaign data.
+
+Report:
+
+- primaryKpi current value
+- dataWindowDays current value
+- iteration gate inputs
+- retention gate inputs
+- open evaluation windows
+- truth submissions
+- manual campaign metrics
+- manual retention metrics
+- owned posts
+- owned post snapshots
+- owned post classifications
+- execution comparisons
+- performance cycle reports
+- decision outcomes
+- strategy memory
+
+Classify every row as:
+
+- genuine
+- test
+- synthetic
+- legacy
+- unknown
+
+Do not modify anything yet.
+
+===========================================================
+PHASE 6 — DECISION GATE
+===========================================================
+
+Only continue if ALL of the following are true:
+
+- latest plan is correctly identified
+- zero System Control BLOCK codes
+- plan is eligible for manual review approval
+- approval does not bypass any guard
+- tenant/account checks pass
+- no stale/cross-run plan mismatch
+- no fake data is required
+
+If any condition fails:
+
+STOP.
+
+Report the blocker.
+
+Do not approve or activate.
+
+===========================================================
+PHASE 7 — APPROVE THROUGH NORMAL FLOW
+===========================================================
+
+If Phase 6 passes:
+
+Approve the plan using the existing production approval API/service.
+
+Do not update the database directly.
+
+Verify:
+
+- plan status becomes APPROVED
+- approval timestamp/version is correct
+- warning/review metadata is preserved
+- no unrelated plan is modified
+- Content DNA generation is idempotent
+- no duplicate Content DNA row is created
+- audit trail is preserved
+
+===========================================================
+PHASE 8 — ACTIVATE THROUGH NORMAL FLOW
+===========================================================
+
+After approval succeeds:
+
+Activate the plan using the existing production activation API/service.
+
+Do not update the database directly.
+
+Verify:
+
+- plan/campaign activation state
+- execution activation record
+- scheduler registration
+- evaluation window creation
+- Performance Loop readiness state
+- no duplicate activation
+- no duplicate eval windows
+- no cross-tenant writes
+
+===========================================================
+PHASE 9 — PERFORMANCE LOOP READINESS CHECK
+===========================================================
+
+After activation, verify the actual end-to-end prerequisites.
+
+The full intended chain is:
+
+Approved Plan
+→ Activated Plan
+→ Strategy Decisions / Build Plan Tasks
+→ User Publishes
+→ Owned Channel Scrape
+→ Owned Post
+→ Lineage
+→ Classification
+→ Metric Checkpoints
+→ User Truth
+→ Business Scoring
+→ Execution Comparison
+→ Decision Outcome
+→ Performance Report
+→ Strategy Memory
+
+For every stage report:
+
+READY
+WAITING_FOR_USER
+WAITING_FOR_DATA
+BLOCKED_BY_BUG
+NOT_APPLICABLE
+
+Do not fabricate the missing stages.
+
+===========================================================
+PHASE 10 — DO NOT INVENT LEAD VALUES
+===========================================================
+
+If the Performance Loop requires lead/truth values:
+
+- use existing genuine user-submitted or integration data only
+- derive values only where existing deterministic code explicitly supports derivation
+- do not manually insert numbers
+- do not treat business goals as actual performance
+- do not treat social engagement as leads/conversions
+
+If no truthful lead data exists, leave it empty and report:
+
+AWAITING_USER_TRUTH
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return one concise report with:
+
+1. Latest plan ID and status.
+2. Approval eligibility.
+3. Activation eligibility.
+4. Exact approval route used.
+5. Exact activation route used.
+6. Approval result.
+7. Activation result.
+8. Whether primaryKpi exists.
+9. Whether dataWindowDays exists.
+10. Whether the earlier claim about missing KPI/window was correct.
+11. Evaluation windows created/present.
+12. Current Performance Loop readiness by stage.
+13. Exact real user input still required.
+14. Any bug found.
+15. Proof no fake data was created.
+16. Proof no lifecycle was bypassed.
+
+Finally answer:
+
+A. Is the plan now APPROVED?
+
+B. Is the plan now ACTIVE?
+
+C. Is the Performance Loop backend ready?
+
+D. What exact real-world action must happen next for the first genuine Performance Cycle?
+
+Do not open unrelated architecture tasks.
+Do not revisit CEL.
+Do not revisit confidence architecture.
+Focus only on approval, activation, and Performance Loop readiness.
