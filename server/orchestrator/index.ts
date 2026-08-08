@@ -2316,6 +2316,7 @@ async function executeEngine(
             boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
             confidenceScore: (result as any).confidenceScore ?? null,
             structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
+            layerDiagnostics: JSON.stringify((result as any).layerDiagnostics || {}),
             executionTimeMs: (result as any).executionTimeMs ?? null,
             inputHash: offerInputHash,
           }).returning({ id: offerSnapshots.id });

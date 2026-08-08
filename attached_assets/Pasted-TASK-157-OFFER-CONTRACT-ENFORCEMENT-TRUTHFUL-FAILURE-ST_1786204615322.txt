@@ -1,0 +1,441 @@
+TASK #157 — OFFER CONTRACT ENFORCEMENT, TRUTHFUL FAILURE STATE, AND FRESH REAL-RUN VERIFICATION
+
+Context:
+
+The latest real MarketMindAI run completed the full 15/15 engine pipeline successfully.
+
+System Control correctly blocked the plan with:
+
+OFFER_AUDIENCE_MISALIGNMENT
+
+The forensic audit proved:
+
+- Audience primary pain was cost and affordability concerns.
+- Supporting causes included unclear ROI, refund delays, distrust in pricing fairness, and purchase hesitation.
+- The final Offer title mentioned cost and affordability.
+- But the final core outcome pivoted to refund/access workflow complexity.
+- The Offer engine logged PAIN_ECHO_REJECTED.
+- System Control correctly blocked the output.
+- However, the Offer snapshot was persisted as COMPLETE with null status_message and null layerDiagnostics.
+
+This task has TWO goals:
+
+1. Make the Offer Engine preserve failure truthfully.
+2. Strengthen the LLM contract so it must directly solve the selected Audience pain instead of merely echoing it in the title.
+
+IMPORTANT:
+
+Do NOT remove or weaken OFFER_AUDIENCE_MISALIGNMENT.
+Do NOT lower pain-alignment requirements.
+Do NOT fabricate Audience evidence.
+Do NOT hardcode MarketMindAI-specific wording.
+Do NOT force System Control to PASS.
+Do NOT manually edit snapshot status.
+Do NOT reuse old Offer snapshots.
+Do NOT bypass retries or judges.
+
+===========================================================
+PHASE 1 — RECONFIRM THE CURRENT OFFER FLOW
+===========================================================
+
+Before modifying code, trace the exact Offer generation lifecycle:
+
+Audience input
+→ selected primary pain
+→ Offer prompt
+→ candidate generation
+→ alignment validation
+→ interchangeability judge
+→ retries
+→ final candidate selection
+→ status construction
+→ snapshot persistence
+→ System Control
+
+Identify exactly:
+
+- where primary Audience pain is selected
+- which Audience pain fields reach the LLM
+- which fields must be echoed in the Offer
+- how the core outcome is validated
+- what happens after retries are exhausted
+- why a failed final candidate can still return COMPLETE
+- why status_message and layerDiagnostics are lost during persistence
+
+Do not change anything until the contract and persistence gap are proven.
+
+===========================================================
+PHASE 2 — DEFINE THE OFFER CONTRACT
+===========================================================
+
+The Offer Engine must produce an Offer that addresses the selected Audience pain in substance, not only in the title.
+
+The contract must distinguish:
+
+TITLE ALIGNMENT
+and
+CORE OUTCOME ALIGNMENT
+
+A valid Offer must satisfy BOTH.
+
+The generated core outcome must clearly include:
+
+1. The primary Audience pain or an approved semantic equivalent.
+2. The specific customer consequence caused by that pain.
+3. The promised business/customer change.
+4. The relevant mechanism or delivery path.
+5. The reason the promise reduces the identified purchase barrier.
+
+The Offer must not pass merely because:
+
+- the title repeats the pain
+- the mechanism is related to a secondary symptom
+- generic words such as fairness, growth, clarity, trust, or results appear
+- the Offer solves a neighboring operational issue while ignoring the primary conversion barrier
+
+===========================================================
+PHASE 3 — STRENGTHEN THE LLM PROMPT
+===========================================================
+
+Update the Offer LLM prompt/contract so it receives a structured Audience alignment block.
+
+The prompt should include exact structured fields such as:
+
+PRIMARY_AUDIENCE_PAIN
+PRIMARY_CAUSAL_DRIVER
+PURCHASE_BARRIER
+CONVERSION_EFFECT
+DESIRED_OUTCOME
+REQUIRED_EVIDENCE_REFS
+
+The LLM must be explicitly instructed:
+
+- The core outcome must directly solve PRIMARY_AUDIENCE_PAIN.
+- The core outcome must name the pain or a validator-approved semantic equivalent.
+- The title alone does not satisfy alignment.
+- The mechanism may address a sub-problem, but the outcome must return to the primary pain and desired result.
+- Do not replace the primary pain with a related but narrower symptom.
+- Do not invent evidence or claim unsupported financial outcomes.
+- Preserve all required evidenceRefs.
+- Return strict structured JSON only.
+
+Require explicit structured fields in the candidate output:
+
+{
+  "primaryAudiencePainUsed": "...",
+  "painResolutionStatement": "...",
+  "purchaseBarrierReduced": "...",
+  "coreOutcome": "...",
+  "mechanism": "...",
+  "evidenceRefs": ["..."],
+  "alignmentExplanation": "..."
+}
+
+Adapt this conceptual schema to the existing production types rather than inventing a parallel architecture.
+
+===========================================================
+PHASE 4 — DETERMINISTIC PRE-PERSISTENCE ENFORCEMENT
+===========================================================
+
+Before an Offer can be returned as COMPLETE, enforce deterministic validation.
+
+A candidate may be COMPLETE only if all required conditions pass:
+
+- primary pain exists
+- core outcome contains the primary pain or approved semantic equivalent
+- purchase barrier is addressed
+- evidenceRefs resolve
+- same account/campaign/run
+- no stale snapshot
+- alignment validator passes
+- interchangeability judge passes or the existing allowed degraded path applies
+- no unresolved critical contract failure
+
+Do not allow:
+
+PAIN_ECHO_REJECTED
++
+status = COMPLETE
+
+If the final candidate fails required alignment after bounded retries:
+
+return a non-complete state such as the existing closest compatible status, for example:
+
+ALIGNMENT_FAILED
+OFFER_CONTRACT_FAILED
+REJECTED
+DEGRADED_FAILED
+
+Use the existing status architecture where possible.
+
+Do not invent a new state if an existing one correctly represents the failure.
+
+===========================================================
+PHASE 5 — RETRY ENFORCEMENT
+===========================================================
+
+When a candidate fails pain alignment, the retry prompt must include the exact failure.
+
+Example structure:
+
+FAILED RULE:
+coreOutcome does not directly address PRIMARY_AUDIENCE_PAIN
+
+PRIMARY_AUDIENCE_PAIN:
+cost and affordability concerns
+
+MISSING FROM CORE OUTCOME:
+cost / affordability / ROI risk / pricing trust
+
+INVALID DRIFT:
+refund/access workflow complexity replaced the primary pain
+
+REQUIRED CORRECTION:
+rewrite the core outcome so it explicitly resolves the validated primary pain and purchase barrier
+
+The retry must not receive a vague message such as:
+
+"Improve alignment."
+
+It must receive:
+
+- failed field
+- expected semantic target
+- actual mismatch
+- required correction
+- preserved evidenceRefs
+
+Bound retries as currently designed.
+
+Do not add infinite retries.
+
+===========================================================
+PHASE 6 — FINAL CANDIDATE SELECTION
+===========================================================
+
+Audit the logic that retains a previous candidate when the latest retry is not an improvement.
+
+The retained candidate must still satisfy all hard Offer contract requirements.
+
+Do not retain a candidate as COMPLETE solely because:
+
+- it scored better than the latest attempt
+- its title aligned
+- its interchangeability score was stronger
+
+If no candidate satisfies the required pain-alignment contract:
+
+return failure truthfully.
+
+A "best available invalid candidate" may be retained for diagnostics, but must not be marked COMPLETE or approvable.
+
+===========================================================
+PHASE 7 — SNAPSHOT PERSISTENCE
+===========================================================
+
+Persist the true Offer state.
+
+The Offer snapshot must preserve:
+
+- final status
+- status_message
+- layerDiagnostics
+- pain-alignment verdict
+- exact failed rules
+- Audience snapshot ID
+- Positioning snapshot ID
+- Differentiation snapshot ID
+- Strategy Root ID
+- job/run lineage
+- evidenceRefs
+- retry attempts
+- retained candidate diagnostics
+- whether the final candidate was valid, degraded, or rejected
+
+If alignment fails:
+
+- snapshot must not appear COMPLETE
+- diagnostics must not be null
+- status_message must explain the failure
+- System Control must receive the same state that the snapshot persists
+
+The persisted snapshot and in-memory result must not contradict each other.
+
+===========================================================
+PHASE 8 — SYSTEM CONTROL CONSISTENCY
+===========================================================
+
+Preserve the existing System Control block.
+
+Verify:
+
+If Offer alignment fails:
+→ Offer state is non-complete
+→ System Control emits OFFER_AUDIENCE_MISALIGNMENT
+→ no approvable strategic plan is persisted
+
+If Offer alignment passes:
+→ Offer state is complete
+→ System Control evaluates the remaining guards normally
+
+Do not change the alignment threshold merely to make the run pass.
+
+===========================================================
+PHASE 9 — REGRESSION TESTS
+===========================================================
+
+Add focused tests covering:
+
+1. Title aligned, core outcome misaligned:
+   → FAIL
+   → non-complete Offer state
+   → diagnostics persisted
+
+2. Core outcome directly addresses primary Audience pain:
+   → PASS
+
+3. Related symptom replaces primary pain:
+   → FAIL
+
+4. Semantic equivalent genuinely resolves the same pain:
+   → PASS only if the existing semantic validation supports it
+
+5. Missing evidenceRefs:
+   → FAIL
+
+6. Hallucinated evidenceRefs:
+   → FAIL
+
+7. Cross-tenant evidence:
+   → FAIL
+
+8. Stale/cross-run Audience snapshot:
+   → FAIL
+
+9. Retry receives exact failed rule and required correction.
+
+10. Retry exhaustion:
+    → never returns COMPLETE with unresolved alignment failure.
+
+11. Persisted snapshot status matches in-memory Offer result.
+
+12. System Control still emits OFFER_AUDIENCE_MISALIGNMENT for genuine mismatch.
+
+13. A genuinely aligned Offer does not trigger OFFER_AUDIENCE_MISALIGNMENT.
+
+14. No fake data or hardcoded campaign wording.
+
+===========================================================
+PHASE 10 — TARGETED LOCAL VERIFICATION
+===========================================================
+
+Before another full run, test the current MarketMindAI Audience/Offer inputs through the Offer Engine only if the architecture supports a production-safe isolated execution.
+
+Use real current-run evidence.
+
+Do not manually insert the result into production tables unless the normal engine path does so.
+
+Verify the new contract forces the core outcome to address:
+
+- cost
+- affordability
+- unclear ROI
+- pricing fairness/trust
+- financial purchase risk
+
+The exact wording may vary, but the meaning must remain grounded in the primary Audience pain.
+
+===========================================================
+PHASE 11 — ONE FRESH REAL RUN
+===========================================================
+
+After targeted tests pass:
+
+Run ONE fresh real MarketMindAI campaign through the normal pipeline.
+
+Use only real data.
+
+No synthetic snapshots.
+No manual plan insertion.
+No old Offer reuse.
+No forced PASS.
+No hardcoded pain text.
+
+Verify:
+
+- 15/15 engines
+- Audience snapshot
+- Offer snapshot
+- Offer contract state
+- Offer core outcome
+- alignment diagnostics
+- CEL
+- grounding
+- System Control
+- Build Plan
+- plan persistence if legitimately allowed
+- exact-run Preview lineage
+
+===========================================================
+PHASE 12 — STOP BEFORE APPROVAL
+===========================================================
+
+If the fresh run produces an aligned Offer and a plan:
+
+STOP before approval.
+
+Do not activate.
+Do not start Performance Loop.
+
+I want to inspect the new Audience, Offer, and Strategic Plan in Preview first.
+
+If the Offer remains misaligned:
+
+leave the BLOCK.
+
+Report the exact remaining mismatch.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Root cause of COMPLETE despite failed alignment.
+2. Exact Offer contract before.
+3. Exact Offer contract after.
+4. LLM prompt enforcement added.
+5. Deterministic validation added.
+6. Retry enforcement added.
+7. Final candidate selection fix.
+8. Persistence fix.
+9. Files changed.
+10. Tests added and results.
+11. Fresh run ID.
+12. Audience primary pain.
+13. Fresh Offer title.
+14. Fresh Offer core outcome.
+15. Pain-alignment result.
+16. Offer persisted status.
+17. System Control verdict.
+18. Plan persistence result.
+19. Preview lineage result.
+20. Proof no fake data was created.
+
+Finally answer:
+
+A. Can an Offer with a pain-aligned title but misaligned core outcome still be marked COMPLETE?
+
+B. Does the Offer LLM now have an explicit, enforceable obligation to solve the selected Audience pain?
+
+C. Are failed alignment diagnostics persisted truthfully?
+
+D. Does System Control still block genuinely misaligned Offers?
+
+E. Did the fresh real run produce a genuinely aligned Offer?
+
+F. Is the pipeline now producing strategically valid outputs rather than merely technically complete outputs?
+
+Do not weaken the guard.
+Do not optimize for PASS.
+Optimize for truthful Offer–Audience alignment.

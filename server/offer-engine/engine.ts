@@ -225,6 +225,25 @@ function fuzzyTokenMatch(sourceTokens: string[], targetText: string): boolean {
   });
 }
 
+function audiencePainText(pain: any): string {
+  return typeof pain === "string"
+    ? pain
+    : (pain?.canonical || pain?.text || pain?.canonicalText || pain?.pain || pain?.name || pain?.label || pain?.description || "");
+}
+
+function buildAudienceAlignmentContext(audience: OfferAudienceInput): {
+  primaryPain: string;
+  painWords: string[];
+} {
+  const primaryPain = audiencePainText((audience.audiencePains || [])[0]).trim();
+  const painWords = primaryPain
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.replace(/[^a-z0-9]/g, ""))
+    .filter((word) => word.length > 3);
+  return { primaryPain, painWords: Array.from(new Set(painWords)) };
+}
+
 function extractAxisLabel(contrastAxis: string): string | null {
   if (!contrastAxis) return null;
 
@@ -1347,12 +1366,7 @@ export function validateOfferAlignment(
     const outcomeOnly = (offer.coreOutcome || "").toLowerCase();
     // Identical probe order to integrity l2 (canonical first — audience v3
     // emits structured pains as { canonical, frequency, evidence }).
-    const l2PainTexts = pains.slice(0, 5).map((p: any) =>
-      (typeof p === "string"
-        ? p
-        : (p?.canonical || p?.text || p?.canonicalText || p?.pain || p?.name || p?.label || p?.description || "")
-      ).toLowerCase()
-    );
+    const l2PainTexts = pains.slice(0, 5).map((p: any) => audiencePainText(p).toLowerCase());
     const painEchoMet = l2PainTexts.some((pt: string) => {
       const words = pt.split(/\s+/).filter((w: string) => w.length > 3);
       return words.some((w: string) => outcomeOnly.includes(w));
@@ -2082,6 +2096,9 @@ Return JSON:
       }
     }
   }
+  const audienceAlignment = buildAudienceAlignmentContext(audience);
+  const selectedPain = audienceAlignment.primaryPain || "No primary audience pain available";
+  const selectedPainWords = audienceAlignment.painWords;
 
   const deliverableSteps = hasMechanismCore
     ? core!.mechanismSteps.map((step, i) => `  Step ${i + 1}: "${step}"`).join("\n")
@@ -2141,6 +2158,11 @@ Outcomes MUST be specific, measurable, and market-relevant.
 NEVER use vague outcomes like "financial improvement", "measurable improvement", "better results", "business growth".
 ${painEchoPromptWords.length > 0 ? `The "outcome" field of EVERY offer MUST contain at least one of these exact audience pain words: ${painEchoPromptWords.slice(0, 8).join(", ")}. Name the pain the offer eliminates inside the outcome sentence itself — pain words appearing only in the mechanism or deliverables do NOT count.` : ""}
 
+═══ SECTION 2B: PRIMARY PAIN CONTRACT (NON-NEGOTIABLE) ═══
+PRIMARY_AUDIENCE_PAIN: "${selectedPain}"
+PRIMARY_PAIN_WORDS: ${JSON.stringify(selectedPainWords)}
+The title does NOT satisfy this contract on its own. The primary "outcome" must directly address PRIMARY_AUDIENCE_PAIN, name that pain or one of PRIMARY_PAIN_WORDS, state the purchase barrier it reduces, and explain the customer change delivered through the mechanism. Do not substitute a neighboring symptom, generic fairness/trust/growth/clarity language, or an operational issue for the primary conversion barrier. Do not invent evidence or unsupported financial outcomes.
+
 ═══ SECTION 3: MECHANISM (single source of truth) ═══
 ${hasMechanismCore ? `Mechanism Name: "${core!.mechanismName}"
 Mechanism Type: ${core!.mechanismType}
@@ -2171,7 +2193,7 @@ ${positioning.contrastAxis ? `- Contrast Axis: ${positioning.contrastAxis}` : ""
 
 Return JSON:
 {
-  "primary": { "name": "Offer name", "outcome": "Specific measurable impact", "mechanism": "How ${hasMechanismCore ? `the ${core!.mechanismName}` : "the mechanism"} delivers it", "deliverables": ["Deliverable 1", "Deliverable 2"] },
+  "primary": { "name": "Offer name", "primaryAudiencePainUsed": "${selectedPain}", "painResolutionStatement": "How the outcome resolves the primary pain", "purchaseBarrierReduced": "The purchase barrier reduced", "outcome": "Specific measurable impact that directly names the primary pain", "mechanism": "How ${hasMechanismCore ? `the ${core!.mechanismName}` : "the mechanism"} delivers it", "evidenceRefs": ["Upstream signal IDs only"], "alignmentExplanation": "Why the outcome solves the primary pain rather than a neighboring symptom", "deliverables": ["Deliverable 1", "Deliverable 2"] },
   "alternative": { "name": "Alternative offer", "outcome": "Different impact angle", "mechanism": "Alternative delivery", "deliverables": ["Alt deliverable 1"] },
   "rejected": { "name": "Rejected offer", "outcome": "Why it seems appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
 }`;
@@ -3186,6 +3208,14 @@ export async function runOfferEngine(
     const combinedFailures = offerBattery.passed
       ? offerAlignmentValidation.failures
       : [...offerAlignmentValidation.failures, `Rejected by ${offerBattery.failedGate ? offerBattery.failedGate : "battery"} gate: ${offerBattery.rejectionFeedback}`];
+    if (!offerAlignmentValidation.aligned) {
+      const context = buildAudienceAlignmentContext(audience);
+      combinedFailures.unshift(
+        `FAILED FIELD: primary.outcome. PRIMARY_AUDIENCE_PAIN: "${context.primaryPain || "unavailable"}". ` +
+        `MISSING FROM CORE OUTCOME: ${context.painWords.join(", ") || "validated pain language"}. ` +
+        "REQUIRED CORRECTION: rewrite the outcome so it directly resolves the primary audience pain and its purchase barrier; title-only alignment and a neighboring symptom do not satisfy this rule.",
+      );
+    }
     // DNA Enrichment (Path A): on interchangeability failure, append grounded
     // differentiator candidates to the retry feedback (candidate-only, no bypass).
     if (!offerBattery.passed && offerBattery.failedGate === "interchangeability") {
@@ -3283,8 +3313,8 @@ export async function runOfferEngine(
     structuralWarnings.push(...offerAlignmentValidation.failures);
     console.log(`[OfferEngine-V4] ALIGNMENT_VALIDATION_FAILED | ${offerAlignmentValidation.failures.join("; ")}`);
     if (status === STATUS.COMPLETE) {
-      status = STATUS.INTEGRITY_FAILED;
-      statusMessage = `Pre-save alignment validation failed: ${offerAlignmentValidation.failures.join("; ")}`;
+      status = STATUS.AUDIENCE_MISALIGNMENT;
+      statusMessage = `Offer contract failed after bounded alignment retries: ${offerAlignmentValidation.failures.join("; ")}`;
     }
   }
 
@@ -3509,9 +3539,11 @@ export async function runOfferEngine(
     const axisInHook = axisTokensForCheck.length === 0 || axisTokensForCheck.some((t: string) => offerHookText.includes(t));
     // eslint-disable-next-line semantic/no-semantic-fallback
     // painInOutcomeFlag is an internal boolean integrity check (not a canonical verdict/outcome field).
-    const painInOutcomeFlag = diagnostics.sourceContext?.selectedPain
-      ? offerOutcomeText.includes(diagnostics.sourceContext.selectedPain.toLowerCase().substring(0, 15))
-      : false;
+    const finalOutcomeAlignment = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
+    diagnostics.offerAlignmentValidation = finalOutcomeAlignment;
+    const finalPrimaryPain = buildAudienceAlignmentContext(audience);
+    const painInOutcomeFlag = finalPrimaryPain.painWords.length === 0 ||
+      finalPrimaryPain.painWords.some((word) => offerOutcomeText.includes(word));
     const mechInOffer = rootMechNameCheck.length === 0 || offerMechText.includes(rootMechNameCheck.substring(0, Math.min(rootMechNameCheck.length, 20)));
     const proofInOffer = (primaryOffer.proofAlignment || []).length > 0;
 
@@ -3523,6 +3555,21 @@ export async function runOfferEngine(
       proofAligned: proofInOffer,
       integrityPassed: axisInHook && painInOutcomeFlag && mechInOffer && proofInOffer,
     };
+    diagnostics.audienceAlignmentContract = {
+      primaryAudiencePain: finalPrimaryPain.primaryPain || null,
+      primaryPainWords: finalPrimaryPain.painWords,
+      coreOutcomeAligned: painInOutcomeFlag,
+      finalValidatorAligned: finalOutcomeAlignment.aligned,
+      failedRules: finalOutcomeAlignment.failures,
+    };
+
+    if (!finalOutcomeAlignment.aligned && status === STATUS.COMPLETE) {
+      const failure = finalOutcomeAlignment.failures.join("; ");
+      structuralWarnings.push(...finalOutcomeAlignment.failures);
+      status = STATUS.AUDIENCE_MISALIGNMENT;
+      statusMessage = `Offer contract failed after bounded alignment retries: ${failure}`;
+      console.log(`[OfferEngine-V4] FINAL_AUDIENCE_ALIGNMENT_FAILED | COMPLETE → ${STATUS.AUDIENCE_MISALIGNMENT} | ${failure}`);
+    }
   }
 
   console.log(`[OfferEngine-V4] Complete | status=${status} | strength=${primaryOffer.offerStrengthScore.toFixed(2)} | confidence=${confidenceScore.toFixed(2)} | grade=${acceptability.grade} | generic=${primaryOffer.genericFlag} | boundary=${boundaryCheck.clean} | alignmentWarnings=${structuralWarnings.length} | grounded=${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims}${diagnostics.integrityChecks ? ` | integrity=${diagnostics.integrityChecks.integrityPassed}` : ""}`);
