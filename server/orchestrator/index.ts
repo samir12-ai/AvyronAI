@@ -4250,10 +4250,11 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       preEngineProblems = logRelevantProblems(ctx.ssc, engineDef.id);
     }
 
+    let _stepTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
     let stepResult = await Promise.race([
       executeEngine(engineDef.id, ctx, config, results, jobId),
-      new Promise<EngineStepResult>((resolve) =>
-        setTimeout(() => {
+      new Promise<EngineStepResult>((resolve) => {
+        _stepTimeoutHandle = setTimeout(() => {
           console.warn(`[Orchestrator] ENGINE_TIMEOUT | ${engineDef.name} exceeded ${ENGINE_TIMEOUT_MS / 1000}s — marking TIMEOUT`);
           resolve({
             engineId: engineDef.id,
@@ -4262,9 +4263,10 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
             durationMs: ENGINE_TIMEOUT_MS,
             error: `Engine timed out after ${ENGINE_TIMEOUT_MS / 1000}s`,
           });
-        }, ENGINE_TIMEOUT_MS)
-      ),
+        }, ENGINE_TIMEOUT_MS);
+      }),
     ]);
+    if (_stepTimeoutHandle !== null) clearTimeout(_stepTimeoutHandle);
 
     if (ctx.ssc && (stepResult.status === "SUCCESS" || stepResult.status === "PARTIAL")) {
       updateSSCAfterEngine(ctx.ssc, engineDef.id, stepResult, i, runConfidenceProvenanceLog);
@@ -4334,15 +4336,17 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           // shapes (blocked_by_integrity, error) still take precedence.
           __gateRetryFired = true;
           console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason} | policy=${retryDecision.rationale}`);
+          let _retryTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
           const retryResult = await Promise.race([
             executeEngine(engineDef.id, ctx, config, results, jobId),
-            new Promise<EngineStepResult>((resolve) =>
-              setTimeout(() => resolve({
+            new Promise<EngineStepResult>((resolve) => {
+              _retryTimeoutHandle = setTimeout(() => resolve({
                 engineId: engineDef.id, status: "TIMEOUT", output: null, durationMs: ENGINE_TIMEOUT_MS,
                 error: `Retry timed out after ${ENGINE_TIMEOUT_MS / 1000}s`,
-              }), ENGINE_TIMEOUT_MS)
-            ),
+              }), ENGINE_TIMEOUT_MS);
+            }),
           ]);
+          if (_retryTimeoutHandle !== null) clearTimeout(_retryTimeoutHandle);
 
           const retryGate = checkMidPipelineGate(engineDef.id, retryResult, ctx);
           if (retryGate?.gateFailed) {

@@ -302,7 +302,23 @@ Return ONLY valid JSON matching the specified format. No markdown, no explanatio
       return { ...EMPTY_ANALYTICAL_PACKAGE, status: "INCOMPLETE", generatedAt: new Date().toISOString(), inputSummary, isPartial: true, partialReason: notePartialReason("AEL_PARSE_FAILURE"), partialDetail: "AEL response contained no parseable JSON" };
     }
 
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = (() => {
+      const raw = jsonMatch[0];
+      // First attempt: direct parse
+      try { return JSON.parse(raw); } catch (_) {}
+      // Repair: replace invalid \' escape sequences (not valid JSON) with plain '
+      const repaired1 = raw.replace(/\\'/g, "'");
+      try { return JSON.parse(repaired1); } catch (_) {}
+      // Repair: strip "thinking" fields that leak into the JSON
+      const repaired2 = repaired1.replace(/"thinking"\s*:\s*"(?:[^"\\]|\\.)*"\s*,?\s*/g, "");
+      try { return JSON.parse(repaired2); } catch (_) {}
+      // Repair: normalize other common LLM escape artifacts (\") at start of string values
+      const repaired3 = repaired2.replace(/:\s*\\"([^"]*?)\\"/g, (_m: string, p1: string) => `: "${p1}"`);
+      try { return JSON.parse(repaired3); } catch (finalErr: any) {
+        console.warn(logSafe(`${LOG_PREFIX} PARSE_REPAIR_EXHAUSTED | tried 4 strategies | last_error=${finalErr.message?.slice(0, 80)}`));
+        throw finalErr;
+      }
+    })();
     const elapsed = Date.now() - startTime;
 
     const pkg: AnalyticalPackage = {

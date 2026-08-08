@@ -102,10 +102,11 @@ export async function runGateRetryLoop(input: GateRetryInput): Promise<GateRetry
   }
 
   const timeoutMs = input.engineTimeoutMs;
+  let _grlTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   const retryResult = await Promise.race<EngineStepResult>([
     input.executeEngine(),
-    new Promise<EngineStepResult>((resolve) =>
-      setTimeout(
+    new Promise<EngineStepResult>((resolve) => {
+      _grlTimeoutHandle = setTimeout(
         () =>
           resolve({
             engineId: input.engineId,
@@ -115,9 +116,10 @@ export async function runGateRetryLoop(input: GateRetryInput): Promise<GateRetry
             error: `Retry timed out after ${timeoutMs / 1000}s`,
           }),
         timeoutMs,
-      ),
-    ),
+      );
+    }),
   ]);
+  if (_grlTimeoutHandle !== null) clearTimeout(_grlTimeoutHandle);
 
   const retryGate = input.checkMidPipelineGate(input.engineId, retryResult);
 
