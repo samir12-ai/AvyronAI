@@ -1,0 +1,533 @@
+TASK #155 — DIFFERENTIATION TIMEOUT ROOT-CAUSE FIX + FINAL FRESH-RUN ACCEPTANCE
+
+We now have ONE remaining blocker before returning to the Performance Loop.
+
+Task #154 is COMPLETE and review-approved:
+
+- plan persistence is run/job-bound
+- strategic plans preserve exact orchestrator lineage
+- PASS and review_required plans persist
+- BLOCK runs do not create approvable plans
+- Preview reads fail closed
+- no fallback to older campaign plans
+- all relevant Preview surfaces are run-scoped
+- late/cross-run responses are rejected
+- CURRENT_RUN_PLAN_NOT_PERSISTED works correctly
+- 22 regression tests pass
+- zero net-new TypeScript errors
+
+DO NOT reopen Task #154.
+
+The latest fresh real run correctly exercised the new fail-closed behavior, but it was BLOCKED because:
+
+Differentiation Engine exceeded its 420-second execution timeout.
+
+We previously solved similar timeout problems in Positioning and adjusted per-engine timeout architecture.
+
+Therefore:
+
+DO NOT simply increase 420s blindly.
+
+First determine WHY Differentiation took >420s in this specific run.
+
+===========================================================
+PHASE 1 — FORENSIC TIMING AUDIT
+===========================================================
+
+READ ONLY FIRST.
+
+Trace the exact latest failed real run.
+
+Identify:
+
+- runId
+- jobId
+- Differentiation start time
+- timeout time
+- last successful Differentiation log marker
+- every internal stage executed before timeout
+- every LLM call
+- model
+- prompt size if measurable
+- max tokens
+- timeoutMs
+- retries
+- sequential loops
+- judges
+- CEL calls
+- grounding calls
+- evidence resolution
+- database operations
+- external dependencies
+
+Produce an internal timing map:
+
+Differentiation start
+→ stage A
+→ stage B
+→ LLM call
+→ judge
+→ ...
+→ watchdog at 420s
+
+Determine whether the 420s came from:
+
+A. one slow LLM call
+B. multiple sequential LLM calls
+C. retry amplification
+D. sequential independent work
+E. external/API latency
+F. DB wait
+G. deadlock/hang
+H. orchestrator timeout too small for legitimate worst-case execution
+I. stale compiled/runtime code
+J. another proven cause
+
+Do not guess.
+
+===========================================================
+PHASE 2 — COMPARE AGAINST PREVIOUS SUCCESSFUL RUN
+===========================================================
+
+We already had a previous real run where Differentiation completed successfully in approximately 20 seconds.
+
+Compare that successful execution against the >420s execution.
+
+Compare:
+
+- inputs
+- snapshot versions
+- number of territories
+- number of competitors
+- evidence count
+- AEL/root causes
+- prompt size
+- model calls
+- retry count
+- CEL
+- judges
+- execution branch
+- runtime source/build version
+
+Explain why the same engine changed from roughly:
+
+20s
+
+to:
+
+>420s
+
+This difference is important.
+
+Do not treat the timeout as normal until this comparison is complete.
+
+===========================================================
+PHASE 3 — AUDIT TIMEOUT ARCHITECTURE
+===========================================================
+
+Review the timeout work already completed across Avyron.
+
+We previously wanted sensible per-engine budgets instead of repeatedly discovering:
+
+Audience timeout
+→ Positioning timeout
+→ Mechanism timeout
+→ Differentiation timeout
+→ next engine tomorrow
+
+Verify the CURRENT timeout architecture for ALL 15 engines.
+
+Create a table:
+
+Engine
+Configured watchdog
+Internal AI timeout
+Retry policy
+Observed recent runtime
+Timeout risk
+
+Confirm whether Differentiation is actually using the intended timeout tier.
+
+If the architecture already defines a HEAVY tier such as 600s and Differentiation is still being killed at 420s, find why.
+
+Possible examples:
+
+- wrong timeout mapping
+- old hardcoded watchdog
+- stale runtime artifact
+- real-run harness using different timeout
+- orchestrator using old timeout configuration
+
+If this is the bug, fix the mapping rather than adding another arbitrary timeout.
+
+===========================================================
+PHASE 4 — OPTIMIZE ONLY PROVEN BOTTLENECKS
+===========================================================
+
+If independent expensive operations are unnecessarily sequential, safely parallelize them.
+
+ONLY parallelize when you prove:
+
+- no output dependency
+- no shared mutable state
+- deterministic ordering can be preserved
+- judges do not depend on previous results
+- lineage/evidence semantics remain identical
+
+Use the successful Positioning optimization as the architectural reference:
+
+independent work
+→ Promise.all
+→ wait for all results
+→ continue validation/persistence
+
+Do NOT:
+
+- remove judges
+- skip CEL
+- skip grounding
+- reduce evidence
+- weaken validation
+- reduce analysis quality merely to make the engine faster
+
+===========================================================
+PHASE 5 — LLM TIMEOUT / RETRY BEHAVIOR
+===========================================================
+
+Audit every Differentiation aiChat call.
+
+For each call verify:
+
+- model
+- timeoutMs
+- global timeout interaction
+- max retries
+- engine-level retries
+- retry delay
+- possibility of repeated identical 120s/180s waits
+
+Prevent pathological behavior such as:
+
+slow call
+→ timeout
+→ immediate identical retry
+→ timeout
+→ identical retry
+→ engine watchdog
+
+If retries exist, they must have a justified purpose.
+
+Do not globally modify all AI behavior unless a global bug is proven.
+
+===========================================================
+PHASE 6 — RUNTIME SOURCE TRUTH
+===========================================================
+
+Task #154 already exposed the danger of stale runtime behavior.
+
+Before verification prove:
+
+the real campaign runner
+=
+the source code just modified
+
+Verify:
+
+source
+→ build/runtime
+→ backend restart
+→ exact code executed
+
+Do not manually edit server_dist.
+
+Do not test stale compiled artifacts.
+
+===========================================================
+PHASE 7 — SURGICAL FIX
+===========================================================
+
+Implement the smallest correct fix based on the proven root cause.
+
+Acceptable examples:
+
+- correct Differentiation timeout-tier mapping
+- remove a stale 420s hardcoded watchdog
+- safely parallelize independent expensive operations
+- correct retry amplification
+- add a legitimate per-call timeout override
+- correct stale runtime/build behavior
+
+NOT acceptable:
+
+- force SUCCESS
+- catch timeout and pretend COMPLETE
+- fabricate Differentiation output
+- reuse an old Differentiation snapshot
+- weaken CEL
+- weaken judges
+- weaken grounding
+- skip evidence validation
+- silently fall back to previous-run data
+
+If Differentiation genuinely cannot complete:
+
+FAIL CLOSED.
+
+===========================================================
+PHASE 8 — REGRESSION TESTS
+===========================================================
+
+Add focused regression tests proving the actual bug cannot return.
+
+At minimum verify:
+
+1. Differentiation receives the intended engine timeout tier.
+
+2. No obsolete 420s watchdog overrides the intended configuration if that is the bug.
+
+3. Independent parallelized operations preserve deterministic result ordering if parallelization is used.
+
+4. Retry behavior cannot amplify one slow request into an unnecessary engine timeout.
+
+5. Timeout never causes reuse of an older Differentiation snapshot.
+
+6. A failed Differentiation run fails closed.
+
+7. Tenant isolation remains intact.
+
+8. Run lineage remains exact.
+
+9. Task #154 plan/snapshot fail-closed behavior remains intact.
+
+10. No fake data or fallback output is introduced.
+
+Run the existing Task #154 regression suite too.
+
+Do not fix unrelated TypeScript baseline errors.
+
+Report baseline vs after.
+
+===========================================================
+PHASE 9 — ONE FINAL FRESH REAL RUN
+===========================================================
+
+After the fix is integrated, backend restarted, and tests pass:
+
+Run ONE completely fresh real MarketMindAI campaign.
+
+Campaign:
+
+campaign_1773576062201_6t0oxi
+
+No synthetic data.
+No manual snapshots.
+No old snapshot substitution.
+No manual plan insertion.
+No forced PASS.
+No lifecycle bypass.
+
+Capture BEFORE execution:
+
+- runId
+- jobId
+- start timestamp
+- source/build revision if available
+
+Then execute the complete pipeline.
+
+===========================================================
+PHASE 10 — VERIFY ALL 15 ENGINES
+===========================================================
+
+For each engine report:
+
+- status
+- runtime
+- snapshot ID
+- snapshot run/job lineage
+- local validation result
+
+Expected chain:
+
+1. Market Intelligence
+2. Audience
+3. Positioning
+4. Differentiation
+5. Mechanism
+6. Offer
+7. Awareness
+8. Funnel
+9. Persuasion
+10. Integrity
+11. Statistical Validation
+12. Budget Governor
+13. Channel Selection
+14. Iteration
+15. Retention
+
+Success criterion:
+
+15/15 genuinely execute.
+
+No previous-run snapshot may count toward 15/15.
+
+===========================================================
+PHASE 11 — SYSTEM CONTROL + BUILD PLAN
+===========================================================
+
+After 15/15:
+
+Verify:
+
+CEL
+grounding
+lineage
+System Control
+Build Plan
+
+Do not optimize for PASS.
+
+If a genuine guard blocks the campaign, report it truthfully.
+
+But distinguish clearly:
+
+PIPELINE EXECUTION FAILURE
+
+from:
+
+TRUTHFUL STRATEGIC/VALIDATION VERDICT
+
+If System Control permits plan construction:
+
+Build Plan must execute normally.
+
+===========================================================
+PHASE 12 — VERIFY TASK #154 IN THE REAL SUCCESS CASE
+===========================================================
+
+This is extremely important.
+
+Task #154 passed regression review, but its final fresh run was BLOCKED before plan creation.
+
+Now we need its successful live acceptance case.
+
+If the new run produces a plan, prove:
+
+NEW_RUN_ID
+→ NEW engine snapshots
+→ Build Plan
+→ NEW strategic_plans row
+→ exact job/run lineage
+→ API
+→ Preview
+
+Capture:
+
+- strategic plan ID
+- plan jobId
+- plan run lineage
+- createdAt
+- status
+- review metadata
+
+Prove it is NOT an older plan.
+
+===========================================================
+PHASE 13 — VERIFY THE ACTUAL PREVIEW
+===========================================================
+
+Open the real Preview after the run.
+
+Do not only inspect the database.
+
+Verify the UI displays the exact latest run.
+
+Check at minimum:
+
+- Market Intelligence
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Awareness
+- Funnel
+- Strategic Plan
+
+For each displayed section:
+
+displayed data lineage
+=
+NEW_RUN_ID / NEW_JOB_ID
+
+Verify no section displays an older snapshot.
+
+Verify the displayed Strategic Plan is the newly persisted plan.
+
+Verify refresh/cache invalidation works.
+
+The Preview I see must represent the exact fresh run we just executed.
+
+===========================================================
+PHASE 14 — STOP BEFORE APPROVAL
+===========================================================
+
+If everything succeeds:
+
+STOP.
+
+Do NOT approve the plan.
+Do NOT activate the plan.
+Do NOT start the Performance Loop.
+
+I want to inspect the fresh plan and snapshots in Preview first.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Give me ONE report.
+
+Include:
+
+1. Exact Differentiation timeout root cause.
+2. Why previous Differentiation took ~20s but latest exceeded 420s.
+3. Whether 420s was legitimate or architectural.
+4. Exact fix.
+5. Files changed.
+6. Timeout architecture for all 15 engines.
+7. Regression test results.
+8. Task #154 regression status.
+9. TypeScript baseline vs after.
+10. Fresh run ID.
+11. Fresh job ID.
+12. Runtime of every engine.
+13. Differentiation runtime.
+14. 15/15 execution result.
+15. CEL result.
+16. Grounding result.
+17. System Control verdict.
+18. Build Plan result.
+19. New strategic plan ID, if produced.
+20. Proof the plan belongs to this exact run.
+21. Proof all relevant Preview sections belong to this exact run.
+22. Whether any stale/cross-run data was displayed.
+23. Proof no fake data was created.
+
+Finally answer exactly:
+
+A. Is the Differentiation timeout bug fixed?
+
+B. Did all 15 engines genuinely execute in the fresh run?
+
+C. Did the fresh run create and persist its own strategic plan?
+
+D. Is the Preview displaying the exact fresh run and its newest snapshots?
+
+E. Is any old-run data still visible as if it belongs to the fresh run?
+
+F. Is the pipeline now technically stable enough to stop debugging execution and proceed to manual plan inspection?
+
+Do not open new architecture tasks automatically.
+
+If something fails, identify the ONE concrete blocker and stop.
