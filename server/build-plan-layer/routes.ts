@@ -69,13 +69,14 @@ export function registerBuildPlanLayerRoutes(app: Express) {
             id: snapId,
             accountId,
             campaignId,
+            jobId: sourceJobId,
             status: result.status,
             plan: result.plan ? JSON.stringify(result.plan) : null,
             actionabilityScore: result.actionabilityScore,
             failedBlocks: JSON.stringify(result.failedBlocks),
             attempts: result.attempts,
           });
-          console.log(`[BuildPlanLayer] Snapshot saved | id=${snapId} | status=${result.status}`);
+          console.log(`[BuildPlanLayer] Snapshot saved | id=${snapId} | job=${sourceJobId} | status=${result.status}`);
         } catch (snapErr: any) {
           console.warn("[BuildPlanLayer] Snapshot save failed (non-blocking):", snapErr.message);
         }
@@ -88,7 +89,8 @@ export function registerBuildPlanLayerRoutes(app: Express) {
         console.warn("[BuildPlanLayer] Narrative generation failed (non-blocking):", narrativeErr?.message);
       }
 
-      res.json({ ...result, narrative });
+      // Include the exact source job so the client can carry run lineage.
+      res.json({ ...result, jobId: sourceJobId, narrative });
     } catch (err: any) {
       console.error("[BuildPlanLayer] Route error:", err.message);
       res.status(500).json({
@@ -107,37 +109,19 @@ export function registerBuildPlanLayerRoutes(app: Express) {
         return res.status(400).json({ error: "campaignId query parameter required" });
       }
 
-      const [stored] = await db
-        .select()
-        .from(buildPlanSnapshots)
-        .where(and(eq(buildPlanSnapshots.accountId, accountId), eq(buildPlanSnapshots.campaignId, campaignId)))
-        .orderBy(desc(buildPlanSnapshots.createdAt))
-        .limit(1);
-
-      if (stored) {
-        console.log(`[BuildPlanLayer] Serving stored snapshot | id=${stored.id} | status=${stored.status}`);
-        return res.json({
-          status: stored.status,
-          plan: stored.plan ? JSON.parse(stored.plan) : null,
-          actionabilityScore: stored.actionabilityScore ?? 0,
-          failedBlocks: stored.failedBlocks ? JSON.parse(stored.failedBlocks) : [],
-          attempts: stored.attempts ?? 1,
-          fromCache: true,
-          cachedAt: stored.createdAt,
+      const requestedJobId = typeof req.query.jobId === "string" ? req.query.jobId : null;
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, requestedJobId);
+      } catch (resolveErr: any) {
+        return res.status(404).json({
+          status: "RUN_NOT_FOUND",
+          error: resolveErr?.message ?? "RUN_NOT_FOUND",
+          plan: null,
         });
       }
 
-      console.log("[BuildPlanLayer] No stored snapshot found, generating fresh...");
-      let sourceJobId: string | null = null;
-      try {
-        const resolved = await resolveRunId(campaignId, accountId, null);
-        sourceJobId = resolved.runId ?? null;
-      } catch (resolveErr: any) {
-        console.warn(
-          `[BuildPlanLayer] Run resolve failed for campaign ${campaignId}: ${resolveErr?.message ?? resolveErr}`,
-        );
-      }
-      if (!sourceJobId) {
+      if (!resolved.runId) {
         return res.json({
           status: "NEEDS_STRATEGY_RUN",
           plan: null,
@@ -148,8 +132,61 @@ export function registerBuildPlanLayerRoutes(app: Express) {
             "We need a completed strategy run before we can build a plan. Run the strategy engines, then try again.",
         });
       }
-      const result = await runBuildPlanLayer(accountId, campaignId, undefined, sourceJobId);
-      res.json(result);
+
+      // When a newer failed/running/cancelled run shadows the last resolvable run
+      // AND the caller did not pin an explicit jobId, serving the older snapshot
+      // would silently present stale data as fresh. Fail closed instead so the
+      // client can inform the user to wait for the new run to complete.
+      if (resolved.isStale && !requestedJobId) {
+        return res.json({
+          jobId: null,
+          shadowedByRun: resolved.newerNonResolvableRun?.runId ?? null,
+          status: "CURRENT_RUN_PLAN_NOT_PERSISTED",
+          plan: null,
+          actionabilityScore: 0,
+          failedBlocks: [],
+          attempts: 0,
+          message:
+            "A more recent run attempt is in progress or failed — the previous plan is no longer current. Wait for the run to complete, then reload.",
+        });
+      }
+
+      const [stored] = await db
+        .select()
+        .from(buildPlanSnapshots)
+        .where(and(
+          eq(buildPlanSnapshots.accountId, accountId),
+          eq(buildPlanSnapshots.campaignId, campaignId),
+          eq(buildPlanSnapshots.jobId, resolved.runId),
+        ))
+        .orderBy(desc(buildPlanSnapshots.createdAt))
+        .limit(1);
+
+      if (stored) {
+        console.log(`[BuildPlanLayer] Serving stored snapshot | id=${stored.id} | job=${stored.jobId} | status=${stored.status}`);
+        return res.json({
+          jobId: stored.jobId,
+          status: stored.status,
+          plan: stored.plan ? JSON.parse(stored.plan) : null,
+          actionabilityScore: stored.actionabilityScore ?? 0,
+          failedBlocks: stored.failedBlocks ? JSON.parse(stored.failedBlocks) : [],
+          attempts: stored.attempts ?? 1,
+          fromCache: true,
+          cachedAt: stored.createdAt,
+        });
+      }
+
+      // A GET must never synthesize an unpersisted result. The caller either
+      // receives the exact run-bound snapshot or an explicit absence; silently
+      // generating here made refreshes race and obscured persistence failures.
+      return res.json({
+        jobId: resolved.runId,
+        status: "CURRENT_RUN_PLAN_NOT_PERSISTED",
+        plan: null,
+        actionabilityScore: 0,
+        failedBlocks: [],
+        attempts: 0,
+      });
     } catch (err: any) {
       console.error("[BuildPlanLayer] Latest route error:", err.message);
       res.status(500).json({

@@ -3235,6 +3235,10 @@ export const buildPlanSnapshots = pgTable("build_plan_snapshots", {
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
+  // The exact orchestrator run whose engine snapshots were used to build
+  // this result. A campaign can have many runs; reads must never select a
+  // build plan from a different run just because it is newer.
+  jobId: varchar("job_id").notNull(),
   status: text("status").notNull().default("SUCCESS"),
   plan: text("plan"),
   actionabilityScore: doublePrecision("actionability_score").default(0),

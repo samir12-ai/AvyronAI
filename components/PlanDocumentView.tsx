@@ -33,10 +33,12 @@ const FEASIBILITY_COLORS: Record<string, { bg: string; text: string; darkBg: str
 interface PlanDocumentViewProps {
   planId?: string;
   blueprintId?: string;
+  campaignId?: string;
+  jobId?: string;
   onClose?: () => void;
 }
 
-export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanDocumentViewProps) {
+export default function PlanDocumentView({ planId, blueprintId, campaignId: campaignIdProp, jobId, onClose }: PlanDocumentViewProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const colors = isDark ? Colors.dark : Colors.light;
@@ -59,19 +61,24 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
     setLoading(true);
     setError(null);
     try {
-      const campaignId = selectedCampaign?.selectedCampaignId || '';
+      const campaignId = campaignIdProp || selectedCampaign?.selectedCampaignId || '';
       if (!campaignId) {
         setError('No campaign selected.');
         setLoading(false);
         return;
       }
 
-      const activeUrl = getApiUrl(`/api/plans/active/${encodeURIComponent(campaignId)}`);
+      const activeUrl = getApiUrl(`/api/plans/active/${encodeURIComponent(campaignId)}${jobId ? `?runId=${encodeURIComponent(jobId)}` : ''}`);
       const activeRes = await authFetch(activeUrl);
       const activeData = await safeApiJson(activeRes);
 
       if (!activeRes.ok || !activeData.hasPlan) {
         setError('No active plan found. Build a plan first.');
+        setLoading(false);
+        return;
+      }
+      if ((jobId && activeData.runId !== jobId) || (planId && activeData.plan?.id !== planId)) {
+        setError('The selected plan no longer matches this campaign run. Refresh and try again.');
         setLoading(false);
         return;
       }
@@ -95,7 +102,7 @@ export default function PlanDocumentView({ planId, blueprintId, onClose }: PlanD
     } finally {
       setLoading(false);
     }
-  }, [selectedCampaign]);
+  }, [campaignIdProp, jobId, planId, selectedCampaign]);
 
   useEffect(() => { fetchPlan(); }, [fetchPlan]);
 

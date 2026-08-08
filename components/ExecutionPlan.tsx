@@ -91,6 +91,8 @@ interface BuildPlanResponse {
   attempts: number;
   error?: string;
   message?: string;
+  /** Exact orchestrator job the served plan belongs to (run lineage). */
+  jobId?: string | null;
 }
 
 // Last-mile safety net: scrub any raw orchestration / lineage / gate jargon
@@ -386,9 +388,13 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
   const router = useRouter();
   const { selectedCampaignId } = useCampaign();
   const [plan, setPlan] = useState<BuildPlanData | null>(null);
+  const [planJobId, setPlanJobId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  // Monotonic request token: a late response from a previous campaign/load
+  // must never clobber the state of the current one.
+  const loadSeqRef = useRef(0);
   const bg = isDark ? '#0D1117' : '#F8FAFB';
   const textPrimary = isDark ? '#E8ECF0' : '#1A2332';
   const textSecondary = isDark ? '#8892A4' : '#546478';
@@ -397,14 +403,17 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
 
   const loadLatestPlan = useCallback(async () => {
     if (!selectedCampaignId) return;
+    const seq = ++loadSeqRef.current;
     try {
       const url = new URL('/api/build-plan-layer/latest', getApiUrl());
       url.searchParams.set('campaignId', selectedCampaignId);
       const resp = await authFetch(url.toString());
       if (!resp.ok) return;
       const data: BuildPlanResponse = await resp.json();
+      if (seq !== loadSeqRef.current) return; // stale response — a newer load superseded this one
       if ((data.status === 'SUCCESS' || data.status === 'ACTIONABILITY_FAILED') && data.plan) {
         setPlan(data.plan);
+        setPlanJobId(data.jobId ?? null);
         setStatus(data.status);
         if (data.status === 'ACTIONABILITY_FAILED') {
           setError(summarizeFailedBlocks(data.failedBlocks));
@@ -417,11 +426,30 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
             'Run the strategy engines first, then we can build your plan.',
           ),
         );
+      } else if (data.status === 'CURRENT_RUN_PLAN_NOT_PERSISTED') {
+        // The current run has no saved plan (or a newer run attempt shadows
+        // the previous one). Never show an older run's plan here — surface a
+        // customer-safe actionable state instead.
+        setPlan(null);
+        setPlanJobId(null);
+        setStatus(data.status);
+        setError(
+          toCustomerSafeMessage(
+            data.message,
+            "This run doesn't have a saved plan yet. Generate the plan below, or wait for the current strategy run to finish and reload.",
+          ),
+        );
       }
     } catch {}
   }, [selectedCampaignId]);
 
   useEffect(() => {
+    // Campaign switched: clear plan state from the previous campaign before
+    // loading so a slow response can't be mistaken for the new campaign's plan.
+    setPlan(null);
+    setPlanJobId(null);
+    setStatus(null);
+    setError(null);
     if (selectedCampaignId) {
       loadLatestPlan();
     }
@@ -432,6 +460,7 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
     setLoading(true);
     setError(null);
     setPlan(null);
+    setPlanJobId(null);
     setStatus(null);
 
     try {
@@ -451,14 +480,23 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
 
       if (data.status === 'SUCCESS' && data.plan) {
         setPlan(data.plan);
+        setPlanJobId(data.jobId ?? null);
         if (Platform.OS !== 'web') {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
         onPlanGenerated?.();
       } else if (data.status === 'ACTIONABILITY_FAILED' && data.plan) {
         setPlan(data.plan);
+        setPlanJobId(data.jobId ?? null);
         setError(summarizeFailedBlocks(data.failedBlocks));
         onPlanGenerated?.();
+      } else if (data.status === 'CURRENT_RUN_PLAN_NOT_PERSISTED') {
+        setError(
+          toCustomerSafeMessage(
+            data.message,
+            "This run doesn't have a saved plan yet. Wait for the current strategy run to finish, then try again.",
+          ),
+        );
       } else if (data.status === 'NEEDS_STRATEGY_RUN') {
         setError(
           toCustomerSafeMessage(
@@ -552,7 +590,9 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
       )}
 
       {plan && (
-        <View style={s.planCards}>
+        // Keyed by run lineage: switching to a different run's plan fully
+        // remounts the cards so no stale sub-state survives across runs.
+        <View key={planJobId ?? 'no-run'} style={s.planCards}>
           {PLAN_CARDS.map(cardConfig => (
             <PlanCard key={cardConfig.key} config={cardConfig} plan={plan} isDark={isDark} />
           ))}

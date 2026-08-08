@@ -74,6 +74,7 @@ interface EngineSection {
 interface OrchestratorJob {
   hasRun: boolean;
   id?: string;
+  campaignId?: string;
   status?: string;
   planId?: string;
   durationMs?: number;
@@ -169,6 +170,11 @@ interface ControlVerdict {
 }
 
 interface ActivePlan {
+  /** Exact orchestrator run this response is scoped to (lineage guard). */
+  runId?: string | null;
+  isLatest?: boolean;
+  isStale?: boolean;
+  completedAt?: string | null;
   hasPlan: boolean;
   plan?: {
     id: string;
@@ -375,13 +381,22 @@ export default function OrchestratorPanel() {
   const textSec = isDark ? P.textDarkSec : P.textLightSec;
   const textMuted = isDark ? P.textDarkMuted : P.textLightMuted;
 
-  const fetchLatest = useCallback(async () => {
-    if (!selectedCampaignId) return;
+  // Monotonic fetch-cycle guard: only the newest cycle may commit job or
+  // active-plan state, so a delayed response from an older cycle can never
+  // resurrect a previous run's plan next to a newer run's status.
+  const fetchSeqRef = useRef(0);
+  // Run identity currently rendered — when it changes we clear the previous
+  // run's plan immediately instead of letting it linger as a stale substitute.
+  const shownRunIdRef = useRef<string | null>(null);
+
+  const fetchLatest = useCallback(async (seq: number): Promise<string | null> => {
+    if (!selectedCampaignId) return null;
     try {
       const url = getApiUrl(`/api/orchestrator/latest/${encodeURIComponent(selectedCampaignId)}`);
       const res = await authFetch(url);
-      if (!res.ok) return;
+      if (!res.ok) return null;
       const data: OrchestratorJob = await res.json();
+      if (seq !== fetchSeqRef.current) return null; // superseded cycle — drop
 
       const hasSummariesInSections = (data.sections || []).some((s: any) => !!s.summary);
       if (!hasSummariesInSections && data.status === 'COMPLETED') {
@@ -401,25 +416,46 @@ export default function OrchestratorPanel() {
           }
         } catch {}
       }
+      if (seq !== fetchSeqRef.current) return null; // superseded during summaries fetch
+
+      // A different run just became current: the previously shown plan belongs
+      // to the old run. Fail closed (clear it) rather than substitute it.
+      if (data.id && shownRunIdRef.current !== data.id) {
+        shownRunIdRef.current = data.id;
+        setActivePlan(null);
+      }
 
       setJob(data);
       const terminalStatuses = ['COMPLETED', 'FAILED', 'PARTIAL', 'BLOCKED', 'ERROR'];
-      if (terminalStatuses.includes(data.status)) {
+      if (data.status && terminalStatuses.includes(data.status)) {
         setRunning(false);
       }
-    } catch {}
+      return data.id ?? null;
+    } catch { return null; }
   }, [selectedCampaignId]);
 
-  const fetchActivePlan = useCallback(async () => {
+  const fetchActivePlan = useCallback(async (runId: string | null, seq: number) => {
     if (!selectedCampaignId) return;
     try {
       const u = new URL(getApiUrl(`/api/plans/active/${encodeURIComponent(selectedCampaignId)}`));
+      if (runId) u.searchParams.set('runId', runId);
       const res = await authFetch(u.toString());
       if (!res.ok) return;
       const data: ActivePlan = await res.json();
+      if (seq !== fetchSeqRef.current) return; // superseded cycle — drop
+      if (runId && data.runId !== runId) return; // response for another run — drop
       setActivePlan(data);
     } catch {}
   }, [selectedCampaignId]);
+
+  // One coherent refresh cycle: resolve the current run FIRST, then fetch the
+  // active plan pinned to exactly that run ID. Never uses a run ID captured by
+  // a prior render, so plan and run state cannot come from different runs.
+  const refreshRunState = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
+    const runId = await fetchLatest(seq);
+    await fetchActivePlan(runId, seq);
+  }, [fetchLatest, fetchActivePlan]);
 
   const fetchControlVerdict = useCallback(async () => {
     if (!selectedCampaignId) return;
@@ -435,28 +471,37 @@ export default function OrchestratorPanel() {
   useEffect(() => {
     if (!selectedCampaignId) { setLoading(false); return; }
     setLoading(true);
-    Promise.all([fetchLatest(), fetchActivePlan(), fetchControlVerdict()]).finally(() => setLoading(false));
+    // Campaign switched: invalidate in-flight cycles and clear cross-campaign state.
+    fetchSeqRef.current++;
+    shownRunIdRef.current = null;
+    setJob(null);
+    setActivePlan(null);
+    Promise.all([refreshRunState(), fetchControlVerdict()]).finally(() => setLoading(false));
   }, [selectedCampaignId]);
 
   useEffect(() => {
     if (running) {
       pollRef.current = setInterval(async () => {
-        await fetchLatest();
-        await fetchActivePlan();
+        await refreshRunState();
         await fetchControlVerdict();
       }, 3000);
     } else {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [running, fetchLatest, fetchActivePlan, fetchControlVerdict]);
+  }, [running, refreshRunState, fetchControlVerdict]);
 
   const handleRunPipeline = useCallback(async () => {
     if (!selectedCampaignId || running) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setRunning(true);
     setRunStartedAt(Date.now());
+    // New run starting: invalidate in-flight fetch cycles and drop the previous
+    // run's job + plan so the old plan can never appear next to the new run.
+    fetchSeqRef.current++;
+    shownRunIdRef.current = null;
     setJob(null);
+    setActivePlan(null);
     try {
       const url = getApiUrl('/api/orchestrator/run');
       await authFetch(url, {
@@ -1329,6 +1374,7 @@ export default function OrchestratorPanel() {
         visible={showTable}
         onClose={() => setShowTable(false)}
         campaignId={selectedCampaignId || ''}
+        jobId={job?.id || null}
       />
 
       <Modal visible={showPlan} animationType="slide" presentationStyle="pageSheet">
@@ -1340,7 +1386,12 @@ export default function OrchestratorPanel() {
             </Pressable>
           </View>
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-            <PlanDocumentView onClose={() => setShowPlan(false)} />
+            <PlanDocumentView
+              planId={activePlan?.plan?.id}
+              campaignId={selectedCampaignId || undefined}
+              jobId={job?.id}
+              onClose={() => setShowPlan(false)}
+            />
           </ScrollView>
         </View>
       </Modal>

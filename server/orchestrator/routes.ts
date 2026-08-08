@@ -154,7 +154,22 @@ export function registerOrchestratorV2Routes(app: Express) {
         if (handleOwnershipError(e, res)) return;
         throw e;
       }
-      const job = await getLatestOrchestratorRun(accountId, req.params.campaignId);
+      const requestedRunId = typeof req.query.runId === "string" ? req.query.runId : null;
+      let resolved;
+      try {
+        resolved = await resolveRunId(req.params.campaignId, accountId, requestedRunId);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message });
+      }
+      if (!resolved.runId) {
+        return res.json({ hasRun: false });
+      }
+      const status = await getOrchestratorStatus(resolved.runId, accountId);
+      const job = status ? await db.select().from(orchestratorJobs).where(and(
+        eq(orchestratorJobs.id, resolved.runId),
+        eq(orchestratorJobs.accountId, accountId),
+        eq(orchestratorJobs.campaignId, req.params.campaignId),
+      )).limit(1).then(rows => rows[0] ?? null) : null;
       if (!job) {
         return res.json({ hasRun: false });
       }
@@ -201,7 +216,7 @@ export function registerOrchestratorV2Routes(app: Express) {
         return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
       }
 
-      const [latestJob] = await db
+      const [selectedJob] = await db
         .select({
           id: orchestratorJobs.id,
           status: orchestratorJobs.status,
@@ -211,13 +226,11 @@ export function registerOrchestratorV2Routes(app: Express) {
           createdAt: orchestratorJobs.createdAt,
         })
         .from(orchestratorJobs)
-        .where(
-          and(
-            eq(orchestratorJobs.campaignId, req.params.campaignId),
-            eq(orchestratorJobs.accountId, accountId)
-          )
-        )
-        .orderBy(desc(orchestratorJobs.createdAt))
+        .where(and(
+          eq(orchestratorJobs.id, resolved.runId!),
+          eq(orchestratorJobs.campaignId, req.params.campaignId),
+          eq(orchestratorJobs.accountId, accountId),
+        ))
         .limit(1);
 
       let plan: any = null;
@@ -237,17 +250,17 @@ export function registerOrchestratorV2Routes(app: Express) {
       }
 
       // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): defensive null coalesce on optional jobId field — no semantic substitution
-      const pipelineStatus = latestJob?.status || null;
+      const pipelineStatus = selectedJob?.status || null;
       const pipelineBlocked = pipelineStatus === "BLOCKED";
       const pipelineFailed = pipelineStatus === "FAILED" || pipelineStatus === "ERROR";
-      const pipelineBlockReason = pipelineBlocked ? (latestJob?.error || null) : null;
-      const isPlanFromLatestRun = plan && latestJob?.planId ? (plan.id === latestJob.planId) : false;
-      const isPlanStale = plan && (pipelineBlocked || pipelineFailed) && !isPlanFromLatestRun;
+      const pipelineBlockReason = pipelineBlocked ? (selectedJob?.error || null) : null;
+      const isPlanFromSelectedRun = plan && selectedJob?.planId ? (plan.id === selectedJob.planId) : false;
+      const isPlanStale = plan && !isPlanFromSelectedRun;
 
       let completedEngines: string[] = [];
       let blockedEngines: string[] = [];
       try {
-        const sections = latestJob?.sectionStatuses ? JSON.parse(latestJob.sectionStatuses) : [];
+        const sections = selectedJob?.sectionStatuses ? JSON.parse(selectedJob.sectionStatuses) : [];
         completedEngines = sections.filter((s: any) => s.status === "SUCCESS").map((s: any) => s.id);
         blockedEngines = sections.filter((s: any) => s.status === "BLOCKED" || s.status === "DEPTH_CASCADE_BLOCKED").map((s: any) => s.id);
       } catch {}
@@ -259,14 +272,14 @@ export function registerOrchestratorV2Routes(app: Express) {
           isStale: resolved.isStale,
           completedAt: resolved.completedAt,
           hasPlan: false,
-          pipelineState: latestJob ? {
+          pipelineState: selectedJob ? {
             status: pipelineStatus,
             isBlocked: pipelineBlocked,
             isFailed: pipelineFailed,
             blockReason: pipelineBlockReason,
             completedEngines,
             blockedEngines,
-            lastRunAt: latestJob.createdAt,
+            lastRunAt: selectedJob.createdAt,
           } : null,
         });
       }
@@ -428,11 +441,11 @@ export function registerOrchestratorV2Routes(app: Express) {
           isBlocked: pipelineBlocked,
           isFailed: pipelineFailed,
           blockReason: pipelineBlockReason,
-          isPlanFromLatestRun,
+          isPlanFromLatestRun: isPlanFromSelectedRun,
           isPlanStale,
           completedEngines,
           blockedEngines,
-          lastRunAt: latestJob?.createdAt || null,
+          lastRunAt: selectedJob?.createdAt || null,
         },
       });
     } catch (error: any) {
@@ -852,7 +865,21 @@ export function registerOrchestratorV2Routes(app: Express) {
         if (handleOwnershipError(e, res)) return;
         throw e;
       }
-      const job = await getLatestOrchestratorRun(accountId, campaignId);
+      const requestedRunId = typeof req.query.runId === "string" ? req.query.runId : null;
+      let resolved;
+      try {
+        resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+      } catch (e: any) {
+        return res.status(404).json({ error: e.message });
+      }
+      if (!resolved.runId) {
+        return res.json({ hasSummaries: false, engines: [] });
+      }
+      const [job] = await db.select().from(orchestratorJobs).where(and(
+        eq(orchestratorJobs.id, resolved.runId),
+        eq(orchestratorJobs.accountId, accountId),
+        eq(orchestratorJobs.campaignId, campaignId),
+      )).limit(1);
       if (!job) {
         return res.json({ hasSummaries: false, engines: [] });
       }
@@ -862,73 +889,9 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       let hasSummaries = sections.some(s => s.summary && s.summary !== "Pending");
 
-      if (!hasSummaries && sections.some(s => s.status === "SUCCESS")) {
-        const { summarizeEngine } = await import("../agent/summarizers");
-        const base = `http://localhost:${process.env.PORT || 5000}`;
-        const q = `?campaignId=${encodeURIComponent(campaignId)}`;
-        async function safe(url: string) {
-          try { const r = await fetch(url); if (!r.ok) return null; return r.json(); } catch { return null; }
-        }
-
-        const engineApiMap: Record<string, string> = {
-          audience: `/api/audience-engine/latest${q}`,
-          positioning: `/api/positioning-engine/latest${q}`,
-          differentiation: `/api/differentiation-engine/latest${q}`,
-          mechanism: `/api/mechanism-engine/latest${q}`,
-          offer: `/api/offer-engine/latest${q}`,
-          awareness: `/api/awareness-engine/latest${q}`,
-          funnel: `/api/funnel-engine/latest${q}`,
-          persuasion: `/api/persuasion-engine/latest${q}`,
-          integrity: `/api/integrity-engine/latest${q}`,
-          statistical_validation: `/api/strategy/statistical-validation/latest${q}`,
-          budget_governor: `/api/strategy/budget-governor/latest${q}`,
-          channel_selection: `/api/strategy/channel-selection/latest${q}`,
-          iteration: `/api/strategy/iteration-engine/latest${q}`,
-          retention: `/api/strategy/retention-engine/latest${q}`,
-        };
-
-        const snapshotResults = await Promise.all(
-          sections.filter(s => s.status === "SUCCESS" && engineApiMap[s.id])
-            .map(async s => {
-              const data = await safe(`${base}${engineApiMap[s.id]}`);
-              return { id: s.id, data };
-            })
-        );
-
-        let miOutput: any = null;
-        try {
-          // F2.1: tenant filter (defense-in-depth on top of boundary assert).
-          const miRes = await db.execute(
-            sql`SELECT competitor_data, signal_data, market_state, overall_confidence, dominance_data
-                FROM mi_snapshots
-                WHERE campaign_id = ${campaignId} AND account_id = ${accountId}
-                ORDER BY created_at DESC LIMIT 1`
-          );
-          const row = miRes.rows?.[0];
-          if (row) {
-            const safeP = (v: any) => { try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; } };
-            const competitors = safeP(row.competitor_data);
-            miOutput = {
-              competitors: Array.isArray(competitors) ? competitors : [],
-              marketState: row.market_state,
-              angleSaturation: undefined,
-            };
-          }
-        } catch {}
-
-        const outputMap: Record<string, any> = {};
-        if (miOutput) outputMap.market_intelligence = miOutput;
-        for (const { id, data } of snapshotResults) {
-          if (data) outputMap[id] = { output: data };
-        }
-
-        for (const sec of sections) {
-          if (sec.status === "SUCCESS" && !sec.summary && outputMap[sec.id]) {
-            sec.summary = summarizeEngine(sec.id as any, outputMap[sec.id], sec.status);
-          }
-        }
-        hasSummaries = sections.some(s => !!s.summary);
-      }
+      // Section summaries are persisted with the job. Do not query per-engine
+      // "/latest" endpoints here: those endpoints can point to a later run and
+      // would blend its snapshots into this selected job's preview.
 
       const engines = sections.map(sec => ({
         id: sec.id,
@@ -939,7 +902,7 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       res.json({
         hasSummaries,
-        jobId: job.id,
+        jobId: resolved.runId,
         jobStatus: job.status,
         durationMs: job.durationMs,
         createdAt: job.createdAt,

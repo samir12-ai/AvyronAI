@@ -67,6 +67,7 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   campaignId: string;
+  jobId?: string | null;
 }
 
 interface EngineEntry {
@@ -130,7 +131,7 @@ function gradeColor(grade?: string): string {
   return '#8892A4';
 }
 
-export default function EngineTableModal({ visible, onClose, campaignId }: Props) {
+export default function EngineTableModal({ visible, onClose, campaignId, jobId }: Props) {
   const isDark = useColorScheme() === 'dark';
   const [engines, setEngines] = useState<EngineEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -148,14 +149,24 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
 
   useEffect(() => {
     if (!visible || !campaignId) return;
+    let cancelled = false;
     setLoading(true);
+    setEngines([]);
+    setExecutionStatus(null);
+    setLegacyStatus('');
+    setTotalDuration(0);
     const latestUrl = new URL(`/api/orchestrator/latest/${campaignId}`, getApiUrl());
     const summariesUrl = new URL(`/api/orchestrator/summaries/${campaignId}`, getApiUrl());
+    if (jobId) {
+      latestUrl.searchParams.set('runId', jobId);
+      summariesUrl.searchParams.set('runId', jobId);
+    }
     Promise.all([
       authFetch(latestUrl.toString()).then(r => r.json()).catch(() => null),
       authFetch(summariesUrl.toString()).then(r => r.json()).catch(() => null),
     ])
       .then(([data, summData]) => {
+        if (cancelled || (jobId && data?.id !== jobId) || (jobId && summData?.jobId !== jobId)) return;
         const sections = data?.sections || data?.engines || [];
         const summMap: Record<string, string> = {};
         if (summData?.engines) {
@@ -179,9 +190,10 @@ export default function EngineTableModal({ visible, onClose, campaignId }: Props
         setLegacyStatus(data?.status || '');
         setTotalDuration(data?.durationMs || 0);
       })
-      .catch(() => setEngines([]))
-      .finally(() => setLoading(false));
-  }, [visible, campaignId]);
+      .catch(() => { if (!cancelled) setEngines([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [visible, campaignId, jobId]);
 
   // Count only canonical COMPLETED — legacy SUCCESS no longer earns "completed"
   // status here (D4: legacy fields cannot satisfy live decisions / counters).

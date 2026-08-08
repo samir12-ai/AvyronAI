@@ -637,6 +637,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const [isFallbackPlan, setIsFallbackPlan] = useState(false);
   const [fallbackReason, setFallbackReason] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const activePollJobRef = useRef<string | null>(null);
   const [sectionStatuses, setSectionStatuses] = useState<Record<string, string> | null>(null);
 
   const [needsInputPayload, setNeedsInputPayload] = useState<{ engine: string; missingFields: string[]; prefillableFields?: Record<string, any> } | null>(null);
@@ -669,6 +670,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
   const pollJobStatus = useCallback(async (jId: string) => {
     try {
+      if (activePollJobRef.current !== jId) return;
       if (Date.now() - pollingStartRef.current > POLLING_TIMEOUT_MS) {
         stopPolling();
         setLoading(false);
@@ -679,6 +681,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
       const res = await authFetch(getApiUrl(`/api/orchestrator/status/${jId}`));
       const data = await safeApiJson(res);
+      if (activePollJobRef.current !== jId || data?.id !== jId || data?.campaignId !== blueprint?.campaignContext?.campaignId) return;
 
       if (data.sections && Array.isArray(data.sections)) {
         const mapped: Record<string, string> = {};
@@ -704,14 +707,16 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
       const isComplete = data.status === 'COMPLETED' || data.status === 'PARTIAL' || data.status === 'COMPLETE';
       if (isComplete && data.planId) {
-        const planRes = await authFetch(getApiUrl(`/api/plans/active/${data.campaignId || blueprint?.campaignContext?.campaignId}`));
+        const planRes = await authFetch(getApiUrl(`/api/plans/active/${data.campaignId}?runId=${encodeURIComponent(jId)}`));
         const planData = await safeApiJson(planRes);
+        if (activePollJobRef.current !== jId || planData?.runId !== jId || planData?.plan?.id !== data.planId) return;
         const rawPlan = planData?.plan?.sections || null;
         const plan = mapV2PlanToLegacyKeys(rawPlan);
 
         stopPolling();
         setLoading(false);
         setJobId(null);
+        activePollJobRef.current = null;
         setPausedJobId(null);
         setNeedsInputPayload(null);
 
@@ -744,6 +749,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
   useEffect(() => {
     stopPolling();
+    activePollJobRef.current = null;
     setJobId(null);
     setSectionStatuses(null);
   }, [blueprint?.id, stopPolling]);
@@ -770,6 +776,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
       if (!res.ok) {
         if (res.status === 409 && data.jobId) {
+          activePollJobRef.current = data.jobId;
           setJobId(data.jobId);
           setLastRequestId(data.jobId);
           pollingStartRef.current = Date.now();
@@ -783,6 +790,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
 
       const jId = data.jobId;
       if (jId) {
+        activePollJobRef.current = jId;
         setJobId(jId);
         setLastRequestId(jId);
         pollingStartRef.current = Date.now();
@@ -890,6 +898,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
       });
       const data = await safeApiJson(res);
       const jId = data.jobId || pausedJobId;
+      activePollJobRef.current = jId;
       setPausedJobId(null);
       setJobId(jId);
       pollingStartRef.current = Date.now();

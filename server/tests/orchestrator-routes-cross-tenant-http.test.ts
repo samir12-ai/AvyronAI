@@ -67,7 +67,16 @@ vi.mock("../orchestrator/agent-context", () => ({
   loadSystemContext: vi.fn(),
   buildSystemPrompt: vi.fn(),
 }));
-vi.mock("../orchestrator/run-resolver", () => ({ resolveRunId: vi.fn(async () => null) }));
+vi.mock("../orchestrator/run-resolver", () => ({
+  resolveRunId: vi.fn(async () => ({
+    runId: null,
+    isLatest: true,
+    isStale: false,
+    completedAt: null,
+    status: null,
+    planId: null,
+  })),
+}));
 vi.mock("../root-bundle", () => ({
   validateRootIntegrity: vi.fn(),
   detectStaleness: vi.fn(),
@@ -164,7 +173,7 @@ describe("Seal #4 F2.1 — orchestrator routes reject cross-tenant access at HTT
         accountId: OWNER_ACCOUNT,
       });
       expect(r.status).toBe(200);
-      // getLatestOrchestratorRun mocked → null → response is hasSummaries:false
+        // No resolved run → response is hasSummaries:false.
       expect(r.body).toEqual({ hasSummaries: false, engines: [] });
     });
 
