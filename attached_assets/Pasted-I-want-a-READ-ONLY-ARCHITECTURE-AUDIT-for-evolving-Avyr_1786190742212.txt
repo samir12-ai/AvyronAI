@@ -1,0 +1,369 @@
+I want a READ-ONLY ARCHITECTURE AUDIT for evolving Avyron CEL into a HYBRID LLM + DETERMINISTIC VALIDATOR.
+
+DO NOT implement anything yet.
+DO NOT modify CEL.
+DO NOT modify prompts.
+DO NOT modify thresholds.
+DO NOT modify the database.
+DO NOT weaken System Control.
+
+===========================================================
+OBJECTIVE
+===========================================================
+
+We have repeatedly found CEL failures where the strategic reasoning/evidence existed, but deterministic text/pattern matching failed to recognize it correctly.
+
+Examples from recent real runs included:
+
+- evidence existed but CEL pattern recognition missed the wording
+- full engine output contained alignment evidence but CEL received a narrower representation
+- nested reasoning/evidence could be lost during text conversion
+- execution ordering could cause CEL to evaluate before grounded rationale was attached
+
+I want to determine whether CEL should evolve from primarily pattern/text-based validation into:
+
+LLM semantic interpretation
++
+deterministic evidence/lineage verification
++
+deterministic final PASS/FAIL enforcement
+
+The LLM must NEVER become the final authority.
+
+===========================================================
+1. AUDIT CURRENT CEL
+===========================================================
+
+Map the complete current CEL architecture.
+
+Identify:
+
+- CEL files
+- validators
+- rules
+- regex/pattern matching
+- similarity matching
+- causal-chain validation
+- root-cause validation
+- alignment validation
+- evidence resolution
+- lineage checks
+- confidence checks
+- provenance checks
+- System Control integration
+
+For every rule classify it as:
+
+A. MUST_REMAIN_DETERMINISTIC
+B. SEMANTIC_REASONING_CANDIDATE
+C. HYBRID
+D. LEGACY / REDUNDANT
+
+Support everything with exact source files/functions.
+
+===========================================================
+2. IDENTIFY CURRENT FAILURE MODES
+===========================================================
+
+Use the recent MarketMindAI real runs and CEL fixes.
+
+Determine which failures were caused by:
+
+- missing real evidence
+- unsupported reasoning
+- wording differences
+- regex limitations
+- text flattening
+- nested objects
+- incomplete engine payloads
+- evidence propagation
+- execution ordering
+- actual CEL validator bugs
+
+I want evidence showing whether semantic interpretation would actually have prevented the false failures.
+
+===========================================================
+3. DESIGN THE HYBRID MODEL
+===========================================================
+
+Evaluate this architecture:
+
+ENGINE OUTPUT
++
+EVIDENCE REGISTRY
++
+UPSTREAM ROOT CAUSES
++
+LINEAGE
+        ↓
+LLM SEMANTIC JUDGE
+        ↓
+Structured Claim → Evidence Mapping
+        ↓
+DETERMINISTIC VALIDATOR
+        ↓
+FINAL CEL PASS / FAIL
+
+The LLM should answer questions such as:
+
+- What claims is this engine making?
+- Which claims are causal?
+- Which evidence refs support each claim?
+- Does the stated reasoning connect evidence → observation → implication → recommendation?
+- Is the engine merely hypothesizing something?
+- Is a claim unsupported?
+
+Require STRICT structured JSON.
+
+Example conceptual output:
+
+{
+  "claims": [
+    {
+      "claimId": "...",
+      "claimText": "...",
+      "type": "observed | inferred | causal | recommendation | hypothesis",
+      "evidenceRefs": ["..."],
+      "causalParents": ["..."],
+      "semanticSupport": "supported | partial | unsupported"
+    }
+  ]
+}
+
+This is conceptual only.
+
+Determine the correct schema from Avyron's existing architecture.
+
+===========================================================
+4. DETERMINISTIC CODE MUST REMAIN THE AUTHORITY
+===========================================================
+
+Design how code verifies everything the LLM returns.
+
+For every evidenceRef:
+
+- Does it exist?
+- Same account?
+- Same campaign?
+- Correct run?
+- Correct snapshot/version?
+- Fresh enough?
+- Correct source?
+- Allowed provenance?
+- Actually available to the engine?
+- Was it fabricated by the LLM?
+
+The LLM MUST NOT be able to create evidence.
+
+Unknown evidence ID
+→ deterministic rejection.
+
+The LLM MUST NOT be able to upgrade:
+
+inferred → observed
+
+The LLM MUST NOT decide final compliance by itself.
+
+===========================================================
+5. CAUSAL CHAIN VALIDATION
+===========================================================
+
+Pay special attention to causal reasoning.
+
+Determine whether Hybrid CEL could validate:
+
+REAL EVIDENCE
+→ OBSERVATION
+→ ROOT CAUSE / INTERPRETATION
+→ STRATEGIC IMPLICATION
+→ RECOMMENDATION
+
+without depending on exact wording.
+
+The LLM may understand semantic relationships.
+
+But deterministic code must verify that the referenced evidence and lineage actually exist.
+
+Design how we prevent:
+
+"LLM thinks this sounds logical"
+
+from becoming:
+
+"therefore this is proven."
+
+===========================================================
+6. KEEP OR REMOVE CURRENT CEL RULES
+===========================================================
+
+Do NOT propose replacing everything with an LLM.
+
+For every current CEL rule tell me:
+
+KEEP
+REPLACE WITH SEMANTIC JUDGE
+HYBRIDIZE
+REMOVE
+
+For example, I expect things like these to remain deterministic:
+
+- evidence ID existence
+- tenant isolation
+- snapshot lineage
+- freshness
+- version integrity
+- required fields
+- provenance restrictions
+- confidence numeric integrity
+
+While semantic concepts may benefit from LLM interpretation:
+
+- claim meaning
+- alignment meaning
+- causal relationship interpretation
+- whether different wording expresses the same strategic concept
+
+Verify this from the actual code.
+
+===========================================================
+7. JUDGE-OF-JUDGE PROBLEM
+===========================================================
+
+Avyron already uses LLMs in multiple engines and judges.
+
+Audit whether adding an LLM inside CEL creates:
+
+LLM generates strategy
+→ LLM validates strategy
+→ artificial agreement
+
+Design safeguards against this.
+
+Investigate:
+
+- independent prompt
+- evidence-only context
+- no access to original generation rationale where unnecessary
+- deterministic evidence verification
+- claim-level validation
+- disagreement handling
+- fail-closed behavior
+- retry/self-correction policy
+
+===========================================================
+8. FAILURE BEHAVIOR
+===========================================================
+
+Define what happens if:
+
+- CEL LLM times out
+- invalid JSON
+- evidence refs hallucinated
+- LLM says supported but deterministic validator disagrees
+- LLM says unsupported
+- evidence is partial
+- evidence is stale
+- semantic judge is uncertain
+
+CEL must FAIL CLOSED where appropriate.
+
+No silent PASS.
+
+===========================================================
+9. PERFORMANCE / COST
+===========================================================
+
+CEL runs across many engines.
+
+Estimate from the current architecture:
+
+- number of additional LLM calls per full run
+- latency
+- token footprint
+- whether one CEL judge can evaluate multiple claims
+- whether independent CEL evaluations can run concurrently
+- caching opportunities using snapshot fingerprints
+- whether we can avoid evaluating deterministic-only rules with LLM
+
+Do not create an architecture that adds another 10-minute pipeline stage.
+
+===========================================================
+10. MIGRATION WITHOUT BREAKING AVYRON
+===========================================================
+
+If Hybrid CEL is recommended, design the smallest safe migration.
+
+I strongly prefer:
+
+existing CEL
+→ semantic interpretation layer
+→ existing deterministic guarantees
+
+rather than rewriting the whole compliance architecture.
+
+Identify exact files/functions that would change.
+
+Identify what can remain untouched.
+
+No implementation yet.
+
+===========================================================
+11. TEST AGAINST REAL MARKETMINDAI FAILURES
+===========================================================
+
+Replay conceptually the CEL violations from the recent real MarketMindAI runs.
+
+For every previous violation answer:
+
+Current CEL result
+Hybrid CEL expected result
+Why
+Evidence used
+Deterministic verification
+Would final verdict change?
+
+This is critical.
+
+I want proof that Hybrid CEL solves actual problems we experienced, not an imaginary architecture problem.
+
+===========================================================
+FINAL VERDICT
+===========================================================
+
+Answer clearly:
+
+1. Is current CEL too dependent on textual/pattern matching?
+
+2. Would Hybrid LLM + deterministic CEL materially improve Avyron?
+
+3. Which parts should use LLM?
+
+4. Which parts must NEVER use LLM?
+
+5. Can this be added without weakening the no-fabricated-data doctrine?
+
+6. Would it reduce the false COMPLIANCE_FAILURE problems we experienced?
+
+7. What new risks would it introduce?
+
+8. Estimated latency/cost impact per full 15-engine run.
+
+9. Exact migration surface.
+
+10. Should we implement it now?
+
+Give final recommendation:
+
+KEEP CURRENT CEL
+
+or
+
+HYBRID CEL RECOMMENDED
+
+or
+
+HYBRID CEL NOT JUSTIFIED
+
+Support the verdict entirely from the existing Avyron code and real-run evidence.
+
+Do not implement anything during this audit.
