@@ -1,0 +1,966 @@
+TASK — BUILD-A-PLAN SOURCE-OF-TRUTH AUDIT + AUTHORITATIVE AUDIENCE PAIN ROUTING ARCHITECTURE
+
+We have completed the pipeline execution stabilization.
+
+Current verified state:
+
+- 15/15 engines SUCCESS
+- centralized timeout architecture is working
+- no false engine timeouts
+- CEL 11/11 PASS
+- Offer alignment contract executed successfully
+- System Control produced zero BLOCK reasons
+- fresh strategic plan persisted with exact job lineage
+- run/snapshot lineage is healthy
+
+DO NOT reopen timeout architecture.
+DO NOT reopen confidence architecture.
+DO NOT modify Business Profile UI in this task.
+DO NOT approve or activate a plan.
+DO NOT start Performance Loop yet.
+
+This task has TWO ordered objectives:
+
+OBJECTIVE A:
+Audit Build a Plan / Preview source-of-truth and prove that the strategic plan is synthesized from the actual engine analyses rather than directly from Business Context / Business Data Layer.
+
+OBJECTIVE B:
+After that audit is resolved, implement the authoritative Audience Pain Classification + Contextual Dominance architecture.
+
+===========================================================
+PART A — BUILD A PLAN SOURCE-OF-TRUTH AUDIT
+===========================================================
+
+DO THIS FIRST.
+
+Before touching the pain architecture, trace exactly how the current Build a Plan shown in Preview is produced.
+
+Start from the actual latest successful run and trace:
+
+15 engine snapshots
+→ validated engine outputs
+→ Build Plan input bundle
+→ synthesis prompt
+→ generated strategic plan
+→ strategic_plans persistence
+→ Build a Plan API
+→ Preview
+
+I want exact source-level proof.
+
+===========================================================
+A1 — IDENTIFY EVERY INPUT TO BUILD PLAN
+===========================================================
+
+Inspect:
+
+- collectValidatedEngineOutputs
+- buildEngineContext
+- buildBuildPlanPrompt
+- runBuildPlanLayer
+- Strategy Root inputs
+- doctrine
+- Product Identity
+- Business Context / business_data_layer
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Awareness
+- Funnel
+- Persuasion
+- Channel Selection
+- Iteration
+- Retention
+- any fallback paths
+
+Produce a source map showing exactly what information reaches Build Plan.
+
+For every input classify it as:
+
+ENGINE_OUTPUT
+PRODUCT_IDENTITY
+BUSINESS_CONTEXT
+SYSTEM_METADATA
+FALLBACK
+LEGACY
+UNKNOWN
+
+===========================================================
+A2 — CRITICAL SOURCE-OF-TRUTH RULE
+===========================================================
+
+The final Strategic Plan must be synthesized primarily from the validated outputs of the strategic engines.
+
+Expected architecture:
+
+Product Identity
++
+Business factual context where legitimately needed
+        ↓
+UPSTREAM ENGINES
+        ↓
+Audience
+Positioning
+Differentiation
+Mechanism
+Offer
+Awareness
+Funnel
+Persuasion
+Channel
+etc.
+        ↓
+BUILD A PLAN
+        ↓
+Strategic Plan
+
+NOT:
+
+Business Context
+        ↓
+BUILD A PLAN independently invents strategy again
+
+Build Plan is a SYNTHESIS layer.
+
+It should compose the strategy already reasoned by the engines.
+
+It must NOT become another independent strategy engine.
+
+===========================================================
+A3 — BUSINESS CONTEXT IS NOT STRATEGIC AUTHORITY
+===========================================================
+
+Audit especially for direct Business Context / business_data_layer injection.
+
+Business Context may contain factual information useful to the system.
+
+But it must NOT override or independently determine:
+
+- primary audience pain
+- positioning
+- differentiation
+- mechanism
+- offer
+- awareness strategy
+- funnel strategy
+- persuasion strategy
+- channel strategy
+
+Those strategic decisions must come from the corresponding validated engine outputs.
+
+If Business Context reaches Build Plan only as legitimate factual/product context:
+
+LEAVE IT ALONE.
+
+Do not remove useful context merely because it exists.
+
+If Build Plan is directly deriving strategic conclusions from Business Context instead of engine outputs:
+
+FIX THAT PATH.
+
+===========================================================
+A4 — PRODUCT IDENTITY
+===========================================================
+
+Preserve the earlier Product Identity architecture.
+
+Product Identity is:
+
+growth_campaigns.product_anchor
+
+It remains authoritative product truth.
+
+Do not confuse:
+
+Product Identity
+
+with:
+
+legacy Product DNA / supplementary Business Context.
+
+Product Identity may legitimately constrain the plan so the system does not promise capabilities the product does not have.
+
+But strategic decisions should still come from engine analyses.
+
+===========================================================
+A5 — NO SECOND STRATEGY GENERATION
+===========================================================
+
+Inspect the Build Plan LLM prompt carefully.
+
+It must be instructed conceptually:
+
+"You are synthesizing an already-reasoned strategy.
+
+Do not independently rediscover the audience.
+Do not invent a new pain.
+Do not invent new positioning.
+Do not replace the selected differentiation.
+Do not invent a new mechanism.
+Do not invent a new offer.
+Do not merge unrelated pains.
+Do not override validated engine decisions.
+
+Compose the final plan from validated engine outputs while preserving their lineage."
+
+If this contract already exists and is enforced:
+
+DO NOT rewrite it unnecessarily.
+
+If it does not:
+
+add the smallest correct enforcement.
+
+===========================================================
+A6 — PREVIEW VERIFICATION
+===========================================================
+
+Also verify that the Build a Plan section visible in Preview is showing:
+
+the persisted Strategic Plan generated from the exact current run.
+
+Trace:
+
+Preview
+→ API
+→ strategic plan
+→ jobId
+→ Build Plan
+→ engine snapshots
+
+Task #154 already implemented exact-run protections.
+
+Do not rewrite that architecture.
+
+Just verify it remains correct.
+
+Prove the latest plan does NOT come from:
+
+- an older plan
+- Business Context directly
+- a legacy fallback
+- another run
+- cached stale synthesis
+
+If correct:
+
+LEAVE IT UNCHANGED.
+
+===========================================================
+A7 — DECISION GATE
+===========================================================
+
+At the end of Part A classify the Build Plan architecture:
+
+CORRECT_ENGINE_SYNTHESIS
+
+or
+
+BUSINESS_CONTEXT_STRATEGY_LEAK
+
+or
+
+LEGACY_FALLBACK_LEAK
+
+or
+
+CROSS_RUN_SOURCE_LEAK
+
+or
+
+OTHER_PROVEN_SOURCE_BUG
+
+If:
+
+CORRECT_ENGINE_SYNTHESIS
+
+→ do not change Build Plan architecture.
+
+Proceed directly to Part B.
+
+If a proven source bug exists:
+
+→ make the smallest fix
+→ add regression coverage
+→ then proceed to Part B.
+
+Do NOT redesign Build Plan without evidence.
+
+===========================================================
+PART B — AUTHORITATIVE AUDIENCE PAIN ARCHITECTURE
+===========================================================
+
+Now implement the architecture we already designed.
+
+CORE PRINCIPLE:
+
+CLASSIFY → VERIFY → RANK → ROUTE → ENFORCE.
+
+The current problem is not that Avyron lacks Audience evidence.
+
+The problem is that a real negative signal can be interpreted as the wrong strategic TYPE.
+
+Example:
+
+"refund delays"
+
+may be a completely real customer complaint.
+
+But it is usually:
+
+POST_PURCHASE_FRICTION
+
+not automatically:
+
+PRIMARY_PURCHASE_MOTIVATION.
+
+A real pain is not automatically a core strategy pain.
+
+===========================================================
+B1 — REUSE EXISTING ARCHITECTURE
+===========================================================
+
+Before creating schema, inspect and reuse:
+
+- Audience structured signals
+- signal roots
+- evidence registry
+- AEL
+- root causes
+- Strategy Root
+- existing Audience IDs
+- existing lineage IDs
+- existing domain/doctrine policy infrastructure
+
+Do NOT create a disconnected parallel Pain system.
+
+Extend the existing authoritative chain.
+
+===========================================================
+B2 — AUTHORITATIVE PAIN OBJECTS
+===========================================================
+
+Every validated Audience pain must have a stable identity.
+
+Conceptually each pain needs:
+
+painId
+statement
+normalizedStatement
+
+classification
+strategicRole
+
+evidenceIds[]
+sourceTypes[]
+
+evidenceStrength
+sourceDiversity
+prevalence
+
+productFit
+
+allowedUses[]
+prohibitedUses[]
+
+eligibleForCoreStrategy
+
+rootCauseIds[]
+signalRootIds[]
+
+classificationReason
+classifierVersion
+
+Adapt this to existing schemas.
+
+Do not blindly create duplicate fields if equivalents already exist.
+
+===========================================================
+B3 — SEMANTIC CLASSIFICATION TAXONOMY
+===========================================================
+
+At minimum distinguish:
+
+PURCHASE_MOTIVATION
+
+UNDERLYING_UNMET_OUTCOME
+
+PRE_PURCHASE_OBJECTION
+
+POST_PURCHASE_FRICTION
+
+ASPIRATION
+
+NOISE
+
+Reuse existing equivalent taxonomy where appropriate.
+
+The purpose is to determine:
+
+WHAT STRATEGIC ROLE DOES THIS PAIN ACTUALLY PLAY?
+
+Not merely:
+
+HOW NEGATIVE OR FREQUENT IS IT?
+
+===========================================================
+B4 — LLM CLASSIFIER
+===========================================================
+
+Use the LLM for semantic classification.
+
+The LLM receives ONLY existing evidence-backed signals.
+
+It may:
+
+- interpret
+- classify
+- explain classification
+- identify strategic role
+
+It may NOT:
+
+- invent a new pain
+- invent evidence
+- merge unrelated pains
+- change evidence IDs
+- silently rewrite the original signal into a different problem
+
+Example:
+
+"I don't know which marketing strategy to follow."
+
+→ PURCHASE_MOTIVATION / UNDERLYING_UNMET_OUTCOME
+
+"I don't know if this is worth the money."
+
+→ PRE_PURCHASE_OBJECTION
+
+"My refund took three weeks."
+
+→ POST_PURCHASE_FRICTION
+
+"I want to dominate my market."
+
+→ ASPIRATION
+
+===========================================================
+B5 — CODE JUDGE / AUTHORITY
+===========================================================
+
+The LLM is NOT the final authority.
+
+After LLM classification, deterministic code must verify:
+
+- painId exists
+- original signal exists
+- evidence IDs exist
+- evidence belongs to correct tenant/campaign/run
+- evidence source type is preserved
+- classification references the supplied signal
+- no pain was invented
+- no evidence was invented
+- no unsupported causal claim was created
+- customer evidence is distinguished from competitor messaging
+- product fit is respected
+
+The authoritative Pain Registry is created only after this validation.
+
+===========================================================
+B6 — PAIN IDs MUST TRAVEL DOWNSTREAM
+===========================================================
+
+Once classified, engines must NOT reinterpret pains independently.
+
+The same authoritative pain IDs must travel through:
+
+Audience
+→ AEL / signal roots
+→ Strategy Root
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Awareness
+→ Funnel
+→ Persuasion
+→ Channel
+→ Retention
+→ Build Plan
+
+Where an engine makes a pain-dependent strategic decision, preserve the pain ID.
+
+===========================================================
+B7 — CONTEXTUAL DOMINANCE
+===========================================================
+
+THIS IS CRITICAL.
+
+There must NOT be one global primary pain forced into every engine.
+
+Each engine must select:
+
+THE HIGHEST-PRIORITY ELIGIBLE PAIN FOR ITS OWN JOB.
+
+Contextual dominance.
+
+POSITIONING:
+
+Prefer:
+PURCHASE_MOTIVATION
+UNDERLYING_UNMET_OUTCOME
+
+Do not normally allow:
+POST_PURCHASE_FRICTION as core positioning.
+
+DIFFERENTIATION:
+
+Prefer pains showing:
+- failure of alternatives
+- unmet category outcome
+- strategically important customer dissatisfaction
+- product-solvable gap
+
+MECHANISM:
+
+Use root causes behind the selected core strategic problem that the product can actually resolve.
+
+OFFER:
+
+Core:
+PURCHASE_MOTIVATION / UNDERLYING_UNMET_OUTCOME
+
+Supporting:
+PRE_PURCHASE_OBJECTION
+
+Example:
+
+CORE:
+"Businesses are overwhelmed by fragmented tools and lack strategic direction."
+
+OBJECTION:
+"They fear paying for another tool without clear ROI."
+
+Offer may use BOTH.
+
+But with separate roles.
+
+FUNNEL:
+
+Prefer:
+PRE_PURCHASE_OBJECTION
+trust barriers
+conversion barriers
+uncertainty
+
+PERSUASION:
+
+Use:
+motivations
+objections
+proof requirements
+desired outcomes
+
+RETENTION:
+
+Prefer:
+POST_PURCHASE_FRICTION
+
+Examples:
+refund
+support
+onboarding
+access
+cancellation
+continued-value problems
+
+===========================================================
+B8 — ROUTE PAINS, DO NOT BLEND THEM
+===========================================================
+
+This is an invariant.
+
+NO PAIN MERGING TO SATISFY COMPLIANCE.
+
+Engines must NOT combine unrelated pains into an artificial mega-pain.
+
+WRONG:
+
+Pain A:
+"Fragmented marketing tools"
+
+Pain B:
+"Refund delays"
+
+Generated:
+"Fragmented refund marketing complexity"
+
+That is prohibited.
+
+Instead:
+
+pain_A:
+role = CORE
+
+pain_B:
+role = RETENTION_FRICTION
+
+Preserve both separately.
+
+===========================================================
+B9 — DO NOT DISCARD SECONDARY PAINS
+===========================================================
+
+Contextual dominance does NOT mean:
+
+pick one pain and delete everything else.
+
+All validated pains remain available.
+
+They are ROUTED.
+
+Possible roles:
+
+CORE
+SUPPORTING
+OBJECTION
+RISK
+PROOF_REQUIREMENT
+RETENTION
+CONTENT
+NOT_ELIGIBLE_FOR_THIS_ENGINE
+
+Example:
+
+pain_001
+fragmented tools / lack of strategic direction
+
+Offer role:
+CORE
+
+pain_002
+ROI uncertainty
+
+Offer role:
+OBJECTION
+
+pain_003
+refund delay
+
+Offer role:
+NOT_CORE
+
+Retention role:
+CORE/SUPPORTING
+
+===========================================================
+B10 — ENGINE DOMINANCE ENFORCEMENT
+===========================================================
+
+Every relevant engine must receive an explicit contract:
+
+"You are receiving an authoritative classified Pain Registry.
+
+Do not invent pains.
+
+Do not reinterpret pain classifications.
+
+Do not merge unrelated pains.
+
+Select the highest-ranked pain eligible for YOUR strategic responsibility.
+
+Use secondary pains only according to their allowed roles.
+
+Preserve pain IDs in your output.
+
+If selecting a lower-ranked eligible pain, provide an explicit evidence-backed reason."
+
+===========================================================
+B11 — DETERMINISTIC ENGINE JUDGE
+===========================================================
+
+After each relevant engine generates output, code validates:
+
+1. Referenced pain IDs exist.
+
+2. Classification matches registry.
+
+3. Pain is allowed for this engine.
+
+4. Core pain is eligible for core use.
+
+5. Highest-priority eligible pain was selected OR explicit valid justification exists.
+
+6. Supporting pains are used only in allowed roles.
+
+7. No unrelated pains were merged.
+
+8. No pain was invented.
+
+9. Evidence lineage resolves.
+
+10. Product capability can address the selected pain.
+
+If invalid:
+
+reject/regenerate with precise feedback.
+
+Do NOT silently rewrite the strategy afterward.
+
+===========================================================
+B12 — PRODUCT FIT
+===========================================================
+
+A pain can be real but strategically unusable for this product.
+
+Therefore:
+
+REAL PAIN
+≠
+ELIGIBLE CORE STRATEGY
+
+Core eligibility requires:
+
+REAL EVIDENCE
++
+CORRECT CLASSIFICATION
++
+STRATEGIC RELEVANCE
++
+PRODUCT CAPABILITY FIT
+
+Do not let Avyron promise to solve something the Product Identity does not support.
+
+===========================================================
+B13 — OFFER CONTRACT INTEGRATION
+===========================================================
+
+Preserve Task #157 Offer enforcement.
+
+But update it to consume authoritative pain IDs.
+
+Offer should explicitly preserve:
+
+corePainId
+
+objectionPainIds[]
+
+supportingPainIds[]
+
+The Offer validator should verify the appropriate pain ROLE, not merely force every Audience pain into the core outcome.
+
+This is important.
+
+Do NOT solve the previous Offer alignment problem by concatenating every Audience pain into the Offer.
+
+The Offer must address its CORE eligible purchase pain.
+
+Objections remain objections.
+
+Retention pains remain retention pains.
+
+===========================================================
+B14 — BUILD PLAN MUST PRESERVE THIS ROUTING
+===========================================================
+
+Build Plan must consume the engine decisions.
+
+It must NOT flatten the Pain Registry back into one giant list and independently choose another "primary pain."
+
+Example final lineage:
+
+Positioning
+→ corePainId = pain_001
+
+Differentiation
+→ corePainId = pain_001
+
+Offer
+→ corePainId = pain_001
+→ objectionPainIds = [pain_002]
+
+Funnel
+→ objectionPainIds = [pain_002]
+
+Retention
+→ retentionPainIds = [pain_003]
+
+Build Plan must preserve those roles.
+
+It must not transform them into:
+
+primaryPain =
+pain_001 + pain_002 + pain_003
+
+===========================================================
+B15 — FINAL STRATEGY JUDGE
+===========================================================
+
+Before accepting the final strategy verify:
+
+- Positioning uses eligible core pain.
+- Differentiation uses an appropriate strategic gap.
+- Mechanism resolves relevant root cause.
+- Offer addresses eligible purchase pain.
+- Funnel addresses objections.
+- Retention addresses post-purchase friction.
+- No refund/support complaint hijacked core positioning.
+- No aspiration became a pain.
+- No competitor message became direct customer truth.
+- No unsupported pain was invented.
+- No unrelated pains were merged.
+- Product Identity supports core promises.
+- pain IDs remain traceable.
+
+===========================================================
+B16 — TESTS BEFORE REAL RUN
+===========================================================
+
+Do NOT immediately run another 39-minute pipeline.
+
+First add targeted tests covering at minimum:
+
+1. Refund delay → POST_PURCHASE_FRICTION.
+
+2. Lack of strategic direction → PURCHASE_MOTIVATION / UNDERLYING_UNMET_OUTCOME.
+
+3. ROI fear → PRE_PURCHASE_OBJECTION.
+
+4. Aspiration does not become pain.
+
+5. Competitor copy alone does not become customer pain.
+
+6. LLM cannot invent pain.
+
+7. LLM cannot invent evidence ID.
+
+8. Cross-tenant evidence rejected.
+
+9. Positioning cannot use refund friction as core.
+
+10. Retention can use refund friction.
+
+11. Offer chooses highest eligible purchase pain.
+
+12. Offer may separately use objection pain.
+
+13. Offer cannot blend unrelated pains.
+
+14. Funnel prioritizes objections.
+
+15. Secondary pains are preserved.
+
+16. Product-fit failure blocks core use.
+
+17. Lower-ranked selection requires valid justification.
+
+18. Pain IDs survive downstream lineage.
+
+19. Build Plan preserves engine-selected pain roles.
+
+20. Build Plan cannot independently replace engine pain decisions from Business Context.
+
+21. Task #154 exact-run lineage still passes.
+
+22. Task #157 Offer alignment still passes.
+
+23. Timeout Task #158 tests remain green.
+
+24. No fake data.
+
+===========================================================
+B17 — STOP AFTER IMPLEMENTATION + TESTS
+===========================================================
+
+For this task:
+
+DO NOT run the expensive full campaign automatically after implementation.
+
+Finish:
+
+architecture
+→ migration if needed
+→ classifier
+→ code judge
+→ contextual dominance
+→ engine routing
+→ no-merging enforcement
+→ Build Plan preservation
+→ targeted tests
+→ regression tests
+
+Then STOP.
+
+We will inspect the implementation report before spending another full real run.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Give me:
+
+PART A:
+
+1. Exact Build Plan input architecture.
+2. Whether Business Context directly influences strategy synthesis.
+3. Whether Build Plan is truly synthesizing engine outputs.
+4. Any legacy/fallback leak found.
+5. Preview source path.
+6. Whether changes were necessary.
+7. Exact changes if necessary.
+
+PART B:
+
+8. Existing pain infrastructure reused.
+9. Authoritative Pain object/schema.
+10. Classification taxonomy.
+11. LLM classifier contract.
+12. Deterministic classification judge.
+13. Ranking model.
+14. Contextual dominance rules.
+15. Engine-specific routing.
+16. No-pain-merging enforcement.
+17. Product-fit enforcement.
+18. Pain-ID lineage.
+19. Offer integration.
+20. Build Plan integration.
+21. Final strategy judge.
+22. Files changed.
+23. Migration details.
+24. Tests/results.
+25. TypeScript baseline vs after.
+26. Proof existing data was preserved.
+27. Proof no fake pains/evidence were created.
+
+Finally answer:
+
+A. Is Build a Plan currently synthesizing validated engine outputs rather than independently building strategy from Business Context?
+
+B. If it was already correct, did you leave it unchanged?
+
+C. Does every validated Audience pain now receive an authoritative identity and classification?
+
+D. Can the LLM invent a new pain?
+
+E. Can refund/support friction become core positioning simply because it is frequent?
+
+F. Does each engine select the highest-priority ELIGIBLE pain for its own job?
+
+G. Are secondary pains preserved and routed rather than discarded?
+
+H. Can engines merge unrelated pains to satisfy guards?
+
+I. Can Offer use one pain as CORE and another separately as OBJECTION?
+
+J. Can Retention prioritize refund/support while Positioning uses a different core pain?
+
+K. Does Build Plan preserve those engine-selected pain roles instead of reinterpreting them?
+
+L. Is this architecture generic for every future Avyron customer?
+
+Do not start another full real campaign.
+Do not approve.
+Do not activate.
+Do not start Performance Loop.
