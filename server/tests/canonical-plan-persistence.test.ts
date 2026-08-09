@@ -40,7 +40,9 @@ describe("canonical plan persistence", () => {
       buildPlanRoutes.lastIndexOf("\n});"),
     );
     expect(latestHandler).toMatch(/resolveRunId\(campaignId, accountId, requestedJobId\)/);
-    expect(latestHandler).toMatch(/eq\(buildPlanSnapshots\.jobId, resolved\.runId\)/);
+    // The snapshot read is job-scoped via the shared fetch helper.
+    expect(latestHandler).toMatch(/fetchStoredSnapshot\(accountId, campaignId, resolved\.runId\)/);
+    expect(buildPlanRoutes).toMatch(/eq\(buildPlanSnapshots\.jobId, jobId\)/);
     expect(latestHandler).toContain('status: "CURRENT_RUN_PLAN_NOT_PERSISTED"');
     expect(latestHandler).not.toContain("generating fresh");
   });
@@ -50,20 +52,30 @@ describe("canonical plan persistence", () => {
       buildPlanRoutes.indexOf('app.get("/api/build-plan-layer/latest"'),
       buildPlanRoutes.lastIndexOf("\n});"),
     );
-    // Stale-shadow guard must run BEFORE the snapshot query so the older plan
-    // can never be read, and must only apply to unpinned requests.
+    // Task #171 — the stale-shadow guard must run BEFORE the current-run
+    // snapshot read, and may only surface the older plan explicitly labeled
+    // as previousPlan (never as `plan`), with shadowKind attached.
     const guardIdx = latestHandler.indexOf("resolved.isStale && !requestedJobId");
-    const queryIdx = latestHandler.indexOf("eq(buildPlanSnapshots.jobId, resolved.runId)");
+    const currentReadIdx = latestHandler.indexOf("fetchStoredSnapshot(accountId, campaignId, resolved.runId)");
     expect(guardIdx).toBeGreaterThan(-1);
-    expect(guardIdx).toBeLessThan(queryIdx);
+    expect(guardIdx).toBeLessThan(currentReadIdx);
     expect(latestHandler).toContain("shadowedByRun");
+    expect(latestHandler).toContain("shadowKind");
+    expect(latestHandler).toMatch(/previousPlan:\s*previousSnapshot\?\.plan \?\? null/);
+    // The shadow branch must never present the older plan as current.
+    const shadowBranch = latestHandler.slice(guardIdx, currentReadIdx);
+    expect(shadowBranch).toMatch(/plan:\s*null/);
   });
 
   it("ExecutionPlan carries run lineage and renders CURRENT_RUN_PLAN_NOT_PERSISTED customer-safe", () => {
     // Handles the fail-closed status on both the load and generate paths.
     expect(executionPlan.match(/CURRENT_RUN_PLAN_NOT_PERSISTED/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    // Never leaves the previous run's plan on screen for the fail-closed state.
-    expect(executionPlan).toMatch(/CURRENT_RUN_PLAN_NOT_PERSISTED'\)\s*\{\s*\/\/[\s\S]*?setPlan\(null\)/);
+    // Task #171 — the fail-closed state renders the previous plan ONLY when
+    // the server explicitly labels it (previousPlan + shadowKind); otherwise
+    // the plan is cleared. Never treats data.plan as current in this state.
+    expect(executionPlan).toMatch(/data\.previousPlan && data\.shadowKind/);
+    expect(executionPlan).toMatch(/setPlanJobId\(data\.previousPlanJobId \?\? null\)/);
+    expect(executionPlan).toMatch(/setPlan\(null\)/);
     // Customer-safe translation — the raw status token is never rendered.
     expect(executionPlan).toMatch(/toCustomerSafeMessage\(\s*data\.message,\s*"This run doesn't have a saved plan yet/);
     // Carries the exact source job of the displayed plan.

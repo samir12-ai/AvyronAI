@@ -7,6 +7,50 @@ import { buildPlanSnapshots } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { resolveRunId } from "../orchestrator/run-resolver";
 
+/**
+ * Fetch the most recent persisted build-plan snapshot for a given jobId.
+ * Returns the parsed snapshot or null when nothing is stored yet.
+ */
+async function fetchStoredSnapshot(
+  accountId: string,
+  campaignId: string,
+  jobId: string,
+): Promise<{
+  jobId: string | null;
+  status: string;
+  plan: unknown | null;
+  actionabilityScore: number;
+  failedBlocks: string[];
+  attempts: number;
+  fromCache: boolean;
+  cachedAt: Date | null;
+} | null> {
+  const [row] = await db
+    .select()
+    .from(buildPlanSnapshots)
+    .where(
+      and(
+        eq(buildPlanSnapshots.accountId, accountId),
+        eq(buildPlanSnapshots.campaignId, campaignId),
+        eq(buildPlanSnapshots.jobId, jobId),
+      ),
+    )
+    .orderBy(desc(buildPlanSnapshots.createdAt))
+    .limit(1);
+
+  if (!row) return null;
+  return {
+    jobId: row.jobId ?? null,
+    status: row.status ?? "UNKNOWN",
+    plan: row.plan ? JSON.parse(row.plan) : null,
+    actionabilityScore: row.actionabilityScore ?? 0,
+    failedBlocks: row.failedBlocks ? JSON.parse(row.failedBlocks) : [],
+    attempts: row.attempts ?? 1,
+    fromCache: true,
+    cachedAt: row.createdAt ?? null,
+  };
+}
+
 export function registerBuildPlanLayerRoutes(app: Express) {
   app.post("/api/build-plan-layer/generate", async (req, res) => {
     try {
@@ -42,16 +86,32 @@ export function registerBuildPlanLayerRoutes(app: Express) {
         }
       }
 
+      // Task #171 — when a newer run shadows the last resolvable one, expose
+      // the previous plan so the UI can show it (labeled) instead of blocking.
       if (resolved?.isStale && !requestedJobId) {
+        const shadow = resolved.newerNonResolvableRun;
+        const shadowKind = shadow?.shadowKind ?? "FAILED";
+        const previousJobId = resolved.runId;
+        let previousSnapshot = null;
+        if (previousJobId) {
+          previousSnapshot = await fetchStoredSnapshot(accountId, campaignId, previousJobId).catch(() => null);
+        }
+        const message =
+          shadowKind === "IN_PROGRESS"
+            ? "A new strategy analysis is running. Your previous plan is shown below — it will update when the run completes."
+            : "The most recent run did not complete successfully. Your last successful plan is shown below.";
         return res.json({
           jobId: null,
-          shadowedByRun: resolved.newerNonResolvableRun?.runId ?? null,
+          shadowedByRun: shadow?.runId ?? null,
+          shadowKind,
           status: "CURRENT_RUN_PLAN_NOT_PERSISTED",
           plan: null,
+          previousPlan: previousSnapshot?.plan ?? null,
+          previousPlanJobId: previousJobId ?? null,
           actionabilityScore: 0,
           failedBlocks: [],
           attempts: 0,
-          message: "A more recent run attempt is in progress or failed. Wait for it to complete before building a new plan.",
+          message,
         });
       }
 
@@ -158,47 +218,41 @@ export function registerBuildPlanLayerRoutes(app: Express) {
         });
       }
 
-      // When a newer failed/running/cancelled run shadows the last resolvable run
-      // AND the caller did not pin an explicit jobId, serving the older snapshot
-      // would silently present stale data as fresh. Fail closed instead so the
-      // client can inform the user to wait for the new run to complete.
+      // Task #171 — when a newer run shadows the last resolvable run and the
+      // caller did not pin an explicit jobId, include the previous plan so the
+      // UI can display it (clearly labeled) rather than showing a hard block.
       if (resolved.isStale && !requestedJobId) {
+        const shadow = resolved.newerNonResolvableRun;
+        const shadowKind = shadow?.shadowKind ?? "FAILED";
+        const previousJobId = resolved.runId;
+        let previousSnapshot = null;
+        if (previousJobId) {
+          previousSnapshot = await fetchStoredSnapshot(accountId, campaignId, previousJobId).catch(() => null);
+        }
+        const message =
+          shadowKind === "IN_PROGRESS"
+            ? "A new strategy analysis is running. Your previous plan is shown below — it will update when the run completes."
+            : "The most recent run did not complete successfully. Your last successful plan is shown below.";
         return res.json({
           jobId: null,
-          shadowedByRun: resolved.newerNonResolvableRun?.runId ?? null,
+          shadowedByRun: shadow?.runId ?? null,
+          shadowKind,
           status: "CURRENT_RUN_PLAN_NOT_PERSISTED",
           plan: null,
+          previousPlan: previousSnapshot?.plan ?? null,
+          previousPlanJobId: previousJobId ?? null,
           actionabilityScore: 0,
           failedBlocks: [],
           attempts: 0,
-          message:
-            "A more recent run attempt is in progress or failed — the previous plan is no longer current. Wait for the run to complete, then reload.",
+          message,
         });
       }
 
-      const [stored] = await db
-        .select()
-        .from(buildPlanSnapshots)
-        .where(and(
-          eq(buildPlanSnapshots.accountId, accountId),
-          eq(buildPlanSnapshots.campaignId, campaignId),
-          eq(buildPlanSnapshots.jobId, resolved.runId),
-        ))
-        .orderBy(desc(buildPlanSnapshots.createdAt))
-        .limit(1);
+      const stored = await fetchStoredSnapshot(accountId, campaignId, resolved.runId);
 
       if (stored) {
-        console.log(`[BuildPlanLayer] Serving stored snapshot | id=${stored.id} | job=${stored.jobId} | status=${stored.status}`);
-        return res.json({
-          jobId: stored.jobId,
-          status: stored.status,
-          plan: stored.plan ? JSON.parse(stored.plan) : null,
-          actionabilityScore: stored.actionabilityScore ?? 0,
-          failedBlocks: stored.failedBlocks ? JSON.parse(stored.failedBlocks) : [],
-          attempts: stored.attempts ?? 1,
-          fromCache: true,
-          cachedAt: stored.createdAt,
-        });
+        console.log(`[BuildPlanLayer] Serving stored snapshot | job=${stored.jobId} | status=${stored.status}`);
+        return res.json(stored);
       }
 
       // A GET must never synthesize an unpersisted result. The caller either

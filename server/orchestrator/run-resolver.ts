@@ -35,6 +35,13 @@ export interface ResolvedRun {
   newerNonResolvableRun?: {
     runId: string;
     status: string;
+    /**
+     * Task #171 — distinguishes a genuinely in-progress run (fresh RUNNING)
+     * from a terminal failure (FAILED / TIMED_OUT / CANCELLED). Consumers use
+     * this to decide whether to show "run in progress — previous plan still
+     * viewable" vs "previous run failed — previous plan still viewable".
+     */
+    shadowKind: "IN_PROGRESS" | "FAILED";
     createdAt: Date | null;
     completedAt: Date | null;
   } | null;
@@ -51,16 +58,22 @@ export interface ResolvedRun {
  * This is the gate that prevents the dashboard / API from claiming an older
  * COMPLETED run is the active state when in reality a newer run failed.
  */
+/** Task #171 — classify the shadow run's state for consumers. */
+function shadowKindForStatus(status: string): "IN_PROGRESS" | "FAILED" {
+  return status === "RUNNING" ? "IN_PROGRESS" : "FAILED";
+}
+
 export function detectNewerNonResolvableRun(
   resolved: { id: string; createdAt: Date | null; completedAt: Date | null } | null,
   latestAnyStatus: { id: string; status: string; createdAt: Date | null; completedAt: Date | null } | null,
-): { runId: string; status: string; createdAt: Date | null; completedAt: Date | null } | null {
+): { runId: string; status: string; shadowKind: "IN_PROGRESS" | "FAILED"; createdAt: Date | null; completedAt: Date | null } | null {
   if (!latestAnyStatus) return null;
   if (RESOLVABLE_STATUSES.includes(latestAnyStatus.status)) return null;
   if (!resolved) {
     return {
       runId: latestAnyStatus.id,
       status: latestAnyStatus.status,
+      shadowKind: shadowKindForStatus(latestAnyStatus.status),
       createdAt: latestAnyStatus.createdAt,
       completedAt: latestAnyStatus.completedAt,
     };
@@ -73,6 +86,7 @@ export function detectNewerNonResolvableRun(
   return {
     runId: latestAnyStatus.id,
     status: latestAnyStatus.status,
+    shadowKind: shadowKindForStatus(latestAnyStatus.status),
     createdAt: latestAnyStatus.createdAt,
     completedAt: latestAnyStatus.completedAt,
   };

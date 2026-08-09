@@ -93,6 +93,19 @@ interface BuildPlanResponse {
   message?: string;
   /** Exact orchestrator job the served plan belongs to (run lineage). */
   jobId?: string | null;
+  /**
+   * Task #171 — present when a newer run shadows the last resolvable one.
+   * "IN_PROGRESS" = a fresh RUNNING run is in flight.
+   * "FAILED" = the newer run ended in a terminal failure (FAILED / TIMED_OUT).
+   */
+  shadowKind?: 'IN_PROGRESS' | 'FAILED';
+  /**
+   * Task #171 — the last successfully persisted plan from the run being
+   * shadowed. Included so the UI can show it (clearly labeled as previous)
+   * instead of a hard blocking error.
+   */
+  previousPlan?: BuildPlanData | null;
+  previousPlanJobId?: string | null;
 }
 
 // Last-mile safety net: scrub any raw orchestration / lineage / gate jargon
@@ -392,6 +405,15 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  /**
+   * Task #171 — when a newer run shadows the last resolvable one, the API
+   * returns the previous run's plan as `previousPlan`. We render it with a
+   * labeled banner so the user can see their last plan while waiting.
+   */
+  const [shadowBanner, setShadowBanner] = useState<{
+    kind: 'IN_PROGRESS' | 'FAILED';
+    message: string;
+  } | null>(null);
   // Monotonic request token: a late response from a previous campaign/load
   // must never clobber the state of the current one.
   const loadSeqRef = useRef(0);
@@ -412,6 +434,10 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
       const data: BuildPlanResponse = await resp.json();
       if (seq !== loadSeqRef.current) return; // stale response — a newer load superseded this one
       if ((data.status === 'SUCCESS' || data.status === 'ACTIONABILITY_FAILED') && data.plan) {
+        // A current plan is being rendered — any stale in-progress/previous
+        // banner or error from an earlier shadowed state must be cleared.
+        setShadowBanner(null);
+        setError(null);
         setPlan(data.plan);
         setPlanJobId(data.jobId ?? null);
         setStatus(data.status);
@@ -427,18 +453,34 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
           ),
         );
       } else if (data.status === 'CURRENT_RUN_PLAN_NOT_PERSISTED') {
-        // The current run has no saved plan (or a newer run attempt shadows
-        // the previous one). Never show an older run's plan here — surface a
-        // customer-safe actionable state instead.
-        setPlan(null);
-        setPlanJobId(null);
         setStatus(data.status);
-        setError(
-          toCustomerSafeMessage(
-            data.message,
-            "This run doesn't have a saved plan yet. Generate the plan below, or wait for the current strategy run to finish and reload.",
-          ),
-        );
+        if (data.previousPlan && data.shadowKind) {
+          // Task #171 — a newer run shadows the last plan. Show the previous
+          // plan (clearly labeled) instead of a blocking error.
+          setPlan(data.previousPlan);
+          setPlanJobId(data.previousPlanJobId ?? null);
+          setError(null);
+          setShadowBanner({
+            kind: data.shadowKind,
+            message: toCustomerSafeMessage(
+              data.message,
+              data.shadowKind === 'IN_PROGRESS'
+                ? 'A new analysis is running. This is your previous plan — it will update when the run completes.'
+                : 'The most recent run did not complete. This is your last successful plan.',
+            ),
+          });
+        } else {
+          // No previous plan available — surface a customer-safe actionable state.
+          setPlan(null);
+          setPlanJobId(null);
+          setShadowBanner(null);
+          setError(
+            toCustomerSafeMessage(
+              data.message,
+              "This run doesn't have a saved plan yet. Generate the plan below, or wait for the current strategy run to finish and reload.",
+            ),
+          );
+        }
       }
     } catch {}
   }, [selectedCampaignId]);
@@ -450,6 +492,7 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
     setPlanJobId(null);
     setStatus(null);
     setError(null);
+    setShadowBanner(null);
     if (selectedCampaignId) {
       loadLatestPlan();
     }
@@ -462,6 +505,7 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
     setPlan(null);
     setPlanJobId(null);
     setStatus(null);
+    setShadowBanner(null);
 
     try {
       if (Platform.OS !== 'web') {
@@ -479,6 +523,7 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
       setStatus(data.status);
 
       if (data.status === 'SUCCESS' && data.plan) {
+        setShadowBanner(null);
         setPlan(data.plan);
         setPlanJobId(data.jobId ?? null);
         if (Platform.OS !== 'web') {
@@ -486,17 +531,32 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
         }
         onPlanGenerated?.();
       } else if (data.status === 'ACTIONABILITY_FAILED' && data.plan) {
+        setShadowBanner(null);
         setPlan(data.plan);
         setPlanJobId(data.jobId ?? null);
         setError(summarizeFailedBlocks(data.failedBlocks));
         onPlanGenerated?.();
       } else if (data.status === 'CURRENT_RUN_PLAN_NOT_PERSISTED') {
-        setError(
-          toCustomerSafeMessage(
-            data.message,
-            "This run doesn't have a saved plan yet. Wait for the current strategy run to finish, then try again.",
-          ),
-        );
+        if (data.previousPlan && data.shadowKind) {
+          setPlan(data.previousPlan);
+          setPlanJobId(data.previousPlanJobId ?? null);
+          setShadowBanner({
+            kind: data.shadowKind,
+            message: toCustomerSafeMessage(
+              data.message,
+              data.shadowKind === 'IN_PROGRESS'
+                ? 'A new analysis is running. This is your previous plan — it will update when the run completes.'
+                : 'The most recent run did not complete. This is your last successful plan.',
+            ),
+          });
+        } else {
+          setError(
+            toCustomerSafeMessage(
+              data.message,
+              "This run doesn't have a saved plan yet. Wait for the current strategy run to finish, then try again.",
+            ),
+          );
+        }
       } else if (data.status === 'NEEDS_STRATEGY_RUN') {
         setError(
           toCustomerSafeMessage(
@@ -574,6 +634,37 @@ export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: (
         <View style={[s.loadingState, { backgroundColor: surfaceBg, borderColor }]}>
           <ActivityIndicator size="large" color={P.purple} />
           <Text style={[s.loadingText, { color: textSecondary }]}>Building execution plan from engine outputs...</Text>
+        </View>
+      )}
+
+      {shadowBanner && plan && (
+        <View
+          style={[
+            s.shadowBanner,
+            {
+              backgroundColor: shadowBanner.kind === 'IN_PROGRESS'
+                ? (isDark ? '#0F1826' : '#EFF6FF')
+                : (isDark ? '#241A0F' : '#FFFBEB'),
+              borderColor: shadowBanner.kind === 'IN_PROGRESS' ? P.blue + '40' : P.orange + '40',
+            },
+          ]}
+        >
+          {shadowBanner.kind === 'IN_PROGRESS' ? (
+            <ActivityIndicator size="small" color={P.blue} />
+          ) : (
+            <Ionicons name="information-circle-outline" size={18} color={P.orange} />
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={[s.shadowBannerTitle, { color: shadowBanner.kind === 'IN_PROGRESS' ? P.blue : P.orange }]}>
+              {shadowBanner.kind === 'IN_PROGRESS' ? 'New analysis in progress' : 'Showing previous plan'}
+            </Text>
+            <Text style={[s.shadowBannerText, { color: textSecondary }]}>{shadowBanner.message}</Text>
+          </View>
+          {shadowBanner.kind === 'IN_PROGRESS' && (
+            <Pressable onPress={loadLatestPlan} style={s.retryBtn}>
+              <Text style={[s.retryText, { color: P.blue }]}>Refresh</Text>
+            </Pressable>
+          )}
         </View>
       )}
 
@@ -695,6 +786,9 @@ const s = StyleSheet.create({
   loadingState: { margin: 16, padding: 32, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 12 },
   loadingText: { fontSize: 13 },
   errorState: { margin: 16, padding: 16, borderRadius: 12, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  shadowBanner: { marginHorizontal: 16, marginTop: 12, padding: 14, borderRadius: 12, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  shadowBannerTitle: { fontSize: 13, fontWeight: '700' as const, marginBottom: 2 },
+  shadowBannerText: { fontSize: 12, lineHeight: 17 },
   errorText: { fontSize: 13, flex: 1 },
   retryBtn: { paddingHorizontal: 12, paddingVertical: 6 },
   retryText: { fontSize: 13, fontWeight: '600' as const },

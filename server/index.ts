@@ -25,6 +25,7 @@ import {
 import { startPublishWorker, stopPublishWorker } from "./publish-worker";
 import { startRevisitScheduler, stopRevisitScheduler } from "./revisit-scheduler";
 import { startWatchtowerScheduler, stopWatchtowerScheduler } from "./watchtower/scheduler";
+import { startStrandedRunSweeper, stopStrandedRunSweeper } from "./orchestrator/stranded-run-sweeper";
 import { recoverStaleBriefJobs } from "./watchtower/strategic-brief-runner";
 import { startSnapshotCleanupWorker, stopSnapshotCleanupWorker } from "./snapshot-cleanup-worker";
 import { stopQueueProcessor as stopMiQueueProcessor } from "./market-intelligence-v3/fetch-orchestrator";
@@ -1642,6 +1643,10 @@ function setupErrorHandler(app: express.Application) {
       startWatchtowerScheduler();
 
       startSnapshotCleanupWorker();
+      // Task #171 — stranded-run recovery: marks orchestrator jobs stuck in
+      // RUNNING past the staleness threshold as TIMED_OUT (boot sweep +
+      // 10-minute interval) so zombie rows never shadow completed runs.
+      startStrandedRunSweeper();
       // Seal #13 / Track #1 — operational continuity heartbeat. Hourly
       // tick + idempotent runBoss invocation per campaign. First tick
       // 60s post-listen so other workers are up first. Disabled by
@@ -1825,6 +1830,7 @@ function setupErrorHandler(app: express.Application) {
     await stopRevisitScheduler();
     stopWatchtowerScheduler();
     stopSnapshotCleanupWorker();
+    stopStrandedRunSweeper();
     await stopContinuityScheduler();
     await stopContinuitySupervisor();
     // Task #91 / Phase 4-C — clear parity scheduler timers.

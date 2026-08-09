@@ -153,25 +153,45 @@ describe("GET /api/build-plan-layer/latest run binding", () => {
     expect(res.body.plan).toBeNull();
   });
 
-  it("fails closed when a newer failed run shadows the last resolvable run (unpinned)", async () => {
-    // Completed run OLD_JOB exists with a snapshot, but a newer FAILED run
-    // shadows it. An unpinned request must NOT be served the older plan.
+  it("surfaces the previous plan (labeled) when a newer failed run shadows the last resolvable run (unpinned)", async () => {
+    // Task #171 — completed run OLD_JOB exists with a snapshot, but a newer
+    // FAILED run shadows it. An unpinned request must NOT present the older
+    // plan as CURRENT, but it MUST expose it as previousPlan with shadowKind
+    // so the UI can render "showing previous plan" instead of a hard block.
     resolveRunIdMock.mockResolvedValue({
       runId: OLD_JOB,
       isLatest: true,
       isStale: true,
-      newerNonResolvableRun: { runId: NEW_JOB, status: "FAILED" },
+      newerNonResolvableRun: { runId: NEW_JOB, status: "FAILED", shadowKind: "FAILED" },
     });
-    snapshotRows = [{ id: "snap-old", jobId: OLD_JOB, status: "SUCCESS", plan: "{}", failedBlocks: "[]" }];
+    snapshotRows = [{ id: "snap-old", jobId: OLD_JOB, status: "SUCCESS", plan: JSON.stringify({ positioning: "prev" }), failedBlocks: "[]" }];
 
     const res = await get(LATEST);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("CURRENT_RUN_PLAN_NOT_PERSISTED");
-    expect(res.body.plan).toBeNull();
+    expect(res.body.plan).toBeNull(); // never presented as the current plan
     expect(res.body.jobId).toBeNull();
     expect(res.body.shadowedByRun).toBe(NEW_JOB);
-    // The snapshot query must never even run — no chance of leaking the old plan.
-    expect(dbSelectSpy).not.toHaveBeenCalled();
+    expect(res.body.shadowKind).toBe("FAILED");
+    expect(res.body.previousPlan.positioning).toBe("prev");
+    expect(res.body.previousPlanJobId).toBe(OLD_JOB);
+  });
+
+  it("marks an in-flight RUNNING shadow as IN_PROGRESS with the previous plan attached", async () => {
+    resolveRunIdMock.mockResolvedValue({
+      runId: OLD_JOB,
+      isLatest: true,
+      isStale: true,
+      newerNonResolvableRun: { runId: NEW_JOB, status: "RUNNING", shadowKind: "IN_PROGRESS" },
+    });
+    snapshotRows = [{ id: "snap-old", jobId: OLD_JOB, status: "SUCCESS", plan: JSON.stringify({ positioning: "prev" }), failedBlocks: "[]" }];
+
+    const res = await get(LATEST);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("CURRENT_RUN_PLAN_NOT_PERSISTED");
+    expect(res.body.shadowKind).toBe("IN_PROGRESS");
+    expect(res.body.previousPlan.positioning).toBe("prev");
+    expect(res.body.previousPlanJobId).toBe(OLD_JOB);
   });
 
   it("still serves an explicitly pinned jobId even when a newer run exists", async () => {
@@ -179,7 +199,7 @@ describe("GET /api/build-plan-layer/latest run binding", () => {
       runId: OLD_JOB,
       isLatest: false,
       isStale: true,
-      newerNonResolvableRun: { runId: NEW_JOB, status: "RUNNING" },
+      newerNonResolvableRun: { runId: NEW_JOB, status: "RUNNING", shadowKind: "IN_PROGRESS" },
     });
     snapshotRows = [{
       id: "snap-old",
@@ -214,12 +234,15 @@ describe("POST /api/build-plan-layer/generate run binding", () => {
   it("fails closed instead of regenerating an older run under a stale shadow", async () => {
     resolveRunIdMock.mockResolvedValue({
       runId: OLD_JOB, isLatest: true, isStale: true,
-      newerNonResolvableRun: { runId: NEW_JOB, status: "FAILED" },
+      newerNonResolvableRun: { runId: NEW_JOB, status: "FAILED", shadowKind: "FAILED" },
     });
+    snapshotRows = [{ id: "snap-old", jobId: OLD_JOB, status: "SUCCESS", plan: JSON.stringify({ positioning: "prev" }), failedBlocks: "[]" }];
     const res = await post("/api/build-plan-layer/generate", { campaignId: CAMPAIGN });
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("CURRENT_RUN_PLAN_NOT_PERSISTED");
     expect(res.body.shadowedByRun).toBe(NEW_JOB);
+    expect(res.body.shadowKind).toBe("FAILED");
+    expect(res.body.previousPlan.positioning).toBe("prev");
     expect(runBuildPlanLayerMock).not.toHaveBeenCalled();
   });
 
