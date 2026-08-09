@@ -39,7 +39,10 @@ import { MI_CONFIDENCE, ENGINE_VERSION, INSTAGRAM_API_CEILING } from "./constant
 import { validateEngineIsolation, validateNoStrategyWrite } from "./isolation-guard";
 import { logAudit } from "../audit";
 import { computeCompetitorHash, computeCompetitorContentHash, parseJsonSafe } from "./utils";
-import { getStoredPostsForMIv3, getStoredCommentsForMIv3, getStoredTikTokPostsForMIv3, getStoredTikTokCommentsForMIv3, getStoredReviewsForMIv3 } from "../competitive-intelligence/data-acquisition";
+import { getStoredPostsForMIv3, getStoredCommentsForMIv3, getStoredTikTokPostsForMIv3, getStoredTikTokCommentsForMIv3, getStoredReviewsForMIv3, getStoredCommentsForCustomerEvidence } from "../competitive-intelligence/data-acquisition";
+import { extractHandleFromUrl } from "../competitive-intelligence/profile-scraper";
+import { buildCustomerEvidence, type ApprovedPainLineageRef, type CustomerCommentCandidate } from "./evidence-origin";
+import { strategyRoots } from "@shared/schema";
 import { logSignalDiagnostics, detectNarrativeOverlap } from "../engine-hardening";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { qualifyTikTokPosts, type TikTokQualificationResult } from "./tiktok-qualification";
@@ -1121,11 +1124,55 @@ export class MarketIntelligenceV3 {
         signalConfidence: 0,
       };
 
+      // Aug 2026 — source-agnostic CUSTOMER_ORIGIN evidence path. Load the
+      // actual comment artifacts (with acquisition-time authorType) and
+      // promote only provenance-validated customer voices as `real`
+      // evidence. Formal reviews stay optional; the platform is secondary.
+      let customerEvidenceArtifacts: import("./evidence-origin").CustomerEvidenceArtifact[] = [];
+      try {
+        const commentCandidates: CustomerCommentCandidate[] = [];
+        for (const comp of competitors) {
+          const rows = await getStoredCommentsForCustomerEvidence(comp.id, accountId);
+          commentCandidates.push(...rows);
+        }
+        const ownerHandles = competitors
+          .map(c => c.profileLink ? extractHandleFromUrl(c.profileLink) : "")
+          .filter(Boolean);
+
+        // Pain Registry lineage (tag-only): approved pains' evidenceUids let
+        // artifacts carry painId lineage. Pains themselves are interpreted
+        // objects and are NEVER ingested as evidence (circularity ban).
+        let approvedPains: ApprovedPainLineageRef[] = [];
+        try {
+          const [root] = await db.select({ pains: strategyRoots.approvedAudiencePains })
+            .from(strategyRoots)
+            .where(and(eq(strategyRoots.campaignId, campaignId), eq(strategyRoots.accountId, accountId)))
+            .orderBy(desc(strategyRoots.createdAt))
+            .limit(1);
+          const parsed = root?.pains ? JSON.parse(root.pains) : null;
+          if (Array.isArray(parsed)) {
+            approvedPains = parsed
+              .filter((p: any) => p?.painId && Array.isArray(p?.evidenceUids))
+              .map((p: any) => ({ painId: p.painId, evidenceUids: p.evidenceUids }));
+          }
+        } catch {
+          // Lineage tagging is optional enrichment — absence never blocks evidence.
+        }
+
+        const built = buildCustomerEvidence(commentCandidates, { ownerHandles, approvedPains });
+        customerEvidenceArtifacts = built.artifacts;
+        console.log(`[MIv3] CUSTOMER_EVIDENCE | candidates=${built.stats.candidates} | eligible=${built.stats.eligible} | voices=${new Set(built.artifacts.map(a => a.voiceKey)).size} | linkedToPains=${built.stats.linkedToPains} | dedupedCrossPost=${built.stats.dedupedCrossPost} | rejected=${JSON.stringify(built.stats.rejectedByReason)}`);
+      } catch (ceErr: any) {
+        console.error(`[MIv3] Customer-evidence build failed (fail-closed, continuing without): ${ceErr.message}`);
+        customerEvidenceArtifacts = [];
+      }
+
       crossSignalDecisions = runCrossSignalDecisionLayer(
         multiSourceForDecision,
         narrativeObjectionMap,
         reviewsIntelligence,
         tiktokQualification,
+        customerEvidenceArtifacts,
       );
 
       console.log(`[MIv3] CROSS_SIGNAL_DECISIONS | total=${crossSignalDecisions.decisions.length} | VALIDATED_PAIN=${crossSignalDecisions.validatedPains.length} | VALIDATED_HOOK=${crossSignalDecisions.validatedHooks.length} | CONFIRMED_OBJECTION=${crossSignalDecisions.confirmedObjections.length} | WEAK=${crossSignalDecisions.weakSignals.length} | coverage=${(crossSignalDecisions.sourceCoverage.coverageRatio * 100).toFixed(0)}% | aggregateConfidence=${crossSignalDecisions.aggregateConfidence}`);

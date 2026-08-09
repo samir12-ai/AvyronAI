@@ -3,6 +3,8 @@ import type { NarrativeObjectionMap, NarrativeObjectionItem } from "./narrative-
 import type { ReviewsIntelligenceResult } from "./reviews-intelligence";
 import type { TikTokQualificationResult, BaselineReliability } from "./tiktok-qualification";
 import type { ReviewsReliabilityGuard } from "./reviews-intelligence";
+import type { CustomerEvidenceArtifact } from "./evidence-origin";
+import { isCtaMetadataLabel } from "./evidence-origin";
 
 export type DecisionType =
   | "VALIDATED_PAIN"
@@ -45,7 +47,11 @@ export interface ConfidenceFactor {
  * computed `realRatio`) instead of silently degrading to `unknown`.
  *
  * Mapping (see `extractAllSignals`):
- *   - `real`       → reviews (direct customer testimony) + reviewsIntel pains
+ *   - `real`       → CUSTOMER_ORIGIN evidence: reviews (direct customer
+ *                    testimony), reviewsIntel pains, AND provenance-validated
+ *                    customer social comments (see evidence-origin.ts). The
+ *                    platform is secondary — the semantic origin is what
+ *                    matters (source-agnostic customer evidence, Aug 2026).
  *   - `inferred`   → narrative-objection AI extractions; instagram
  *                    `painInferences` (the field name itself signals
  *                    inference); website `proofStructure`
@@ -82,8 +88,15 @@ export interface CrossSignalDecision {
   matchedEvidence: MatchedEvidence[];
   /** T1.A — origin classification (real | inferred | competitor | mixed | unknown). */
   originType: DecisionOriginType;
-  /** T1.A — fraction of group members tagged `real` (0..1). 0 = no real-grounded evidence. */
+  /**
+   * T1.A — fraction of group members tagged `real` (0..1). 0 = no
+   * customer-origin evidence. Since Aug 2026 `real` means CUSTOMER_ORIGIN
+   * (reviews OR validated customer comments) — i.e. this IS the
+   * customer-origin ratio; formal review platforms are not required.
+   */
   realRatio: number;
+  /** Count of independent voices (distinct customer authors + distinct non-customer platforms) backing the decision. */
+  independentVoiceCount?: number;
   /** T1.A — true iff the group contains members from ≥2 distinct origin types. */
   mixedLineage: boolean;
   /** T1.A — full origin breakdown for downstream audit. */
@@ -118,6 +131,22 @@ const SOURCE_ROLE_WEIGHTS: Record<SourceType, Record<string, number>> = {
   website: { pain: 0.3, objection: 0.4, trust: 0.5, hook: 0.3, content: 0.4 },
   blog: { pain: 0.2, objection: 0.2, trust: 0.3, hook: 0.2, content: 0.3 },
 };
+
+/**
+ * Aug 2026 — role weights follow the SEMANTIC ORIGIN, not the website.
+ * CUSTOMER_ORIGIN evidence (validated comments, reviews, testimonials) gets
+ * the same role profile regardless of platform: direct customer testimony is
+ * primary evidence for pains/objections/trust wherever it was expressed.
+ * Non-customer signals keep their platform-role weights.
+ */
+const CUSTOMER_ORIGIN_ROLE_WEIGHTS: Record<string, number> = { pain: 0.9, objection: 0.85, trust: 0.85, hook: 0.2, content: 0.1 };
+
+function roleWeightFor(signal: { source: SourceType; category: string; originType: SignalOriginType }): number {
+  if (signal.originType === "real") {
+    return CUSTOMER_ORIGIN_ROLE_WEIGHTS[signal.category] ?? 0.3;
+  }
+  return SOURCE_ROLE_WEIGHTS[signal.source]?.[signal.category] ?? 0.3;
+}
 
 const HIGH_CONFIDENCE_THRESHOLD = 0.7;
 const MEDIUM_CONFIDENCE_THRESHOLD = 0.45;
@@ -302,6 +331,35 @@ interface ExtractedSignal {
   rawConfidence: number;
   /** T1.A — lineage origin tag set at extraction time. Preserved through synthesis. */
   originType: SignalOriginType;
+  /**
+   * Independent-voice identity (Aug 2026). Customer artifacts carry
+   * `customer:<author>`; competitor/inferred signals default to their
+   * platform. Independence = distinct voices, NOT platform count:
+   * cross-posted identical competitor content is ONE voice, while three
+   * different customer authors on one platform are THREE voices.
+   */
+  voiceKey?: string;
+}
+
+/**
+ * Aug 2026 — cross-post/pseudo-corroboration guard. Identical normalized
+ * competitor-origin text appearing on multiple platforms (same entity
+ * cross-posting IG↔TikTok) is ONE independent voice: keep the
+ * highest-confidence copy, drop the rest. Customer-origin artifacts are
+ * deduplicated upstream by author+text (buildCustomerEvidence) and are
+ * never collapsed across different authors here.
+ */
+function dedupeCrossPostedCompetitorSignals(signals: ExtractedSignal[]): { deduped: ExtractedSignal[]; dropped: number } {
+  const best = new Map<string, ExtractedSignal>();
+  const passthrough: ExtractedSignal[] = [];
+  for (const s of signals) {
+    if (s.originType !== "competitor") { passthrough.push(s); continue; }
+    const key = `${s.category}::${s.text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim()}`;
+    const existing = best.get(key);
+    if (!existing || s.rawConfidence > existing.rawConfidence) best.set(key, s);
+  }
+  const deduped = [...passthrough, ...best.values()];
+  return { deduped, dropped: signals.length - deduped.length };
 }
 
 function extractAllSignals(
@@ -309,6 +367,7 @@ function extractAllSignals(
   narrativeObjections: NarrativeObjectionMap | null,
   reviewsIntel: ReviewsIntelligenceResult | null,
   tiktokQual: TikTokQualificationResult | null,
+  customerEvidence: CustomerEvidenceArtifact[] = [],
 ): ExtractedSignal[] {
   const signals: ExtractedSignal[] = [];
 
@@ -326,9 +385,12 @@ function extractAllSignals(
     for (const hook of multiSource.instagram.hooks) {
       signals.push({ text: hook, source: "instagram", category: "hook", rawConfidence: 0.65, originType: "competitor" });
     }
-    for (const cta of multiSource.instagram.ctaPatterns) {
-      signals.push({ text: cta, source: "instagram", category: "content", rawConfidence: 0.5, originType: "competitor" });
-    }
+    // Aug 2026 — CTA-pattern labels ("LinkInBio", "Download", …) are
+    // Avyron-generated METADATA from the CTA detector, not market language.
+    // They remain available as structured competitor-behavior analytics on
+    // ci_competitors.ctaPatterns but are NEVER extracted as standalone
+    // strategic content signals (forensic audit: 8/30 weak decisions were
+    // re-ingested detector labels).
   }
 
   if (multiSource.tiktok) {
@@ -388,7 +450,34 @@ function extractAllSignals(
     }
   }
 
-  return signals;
+  // Aug 2026 — source-agnostic CUSTOMER_ORIGIN evidence. Provenance-validated
+  // customer comments (buildCustomerEvidence, fail-closed) participate as
+  // `real` evidence exactly like formal reviews. NOTE the circularity ban:
+  // only the raw artifacts enter here — Pain Registry statements themselves
+  // are interpreted objects and are never extracted as evidence, so a pain
+  // can never corroborate its own underlying comment.
+  const seenCustomerTexts = new Set(signals.filter(s => s.originType === "real").map(s => s.text.toLowerCase().trim()));
+  for (const art of customerEvidence) {
+    if (seenCustomerTexts.has(art.text.toLowerCase().trim())) continue; // evidence-ID/text dedup vs reviews
+    signals.push({
+      text: art.text,
+      source: art.platform,
+      category: art.category,
+      rawConfidence: 0.75,
+      originType: "real",
+      voiceKey: art.voiceKey,
+    });
+  }
+
+  // Defense-in-depth noise gate: never let Avyron-generated CTA labels or
+  // non-semantic fragments (<2 meaningful tokens) become candidate decisions.
+  const cleaned = signals.filter(s => {
+    if (isCtaMetadataLabel(s.text)) return false;
+    const tokens = s.text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(w => w.length > 1);
+    return tokens.length >= 2;
+  });
+
+  return dedupeCrossPostedCompetitorSignals(cleaned).deduped;
 }
 
 /**
@@ -453,7 +542,7 @@ function findSemanticGroups(signals: ExtractedSignal[]): Map<string, { members: 
       source: signals[i].source,
       text: signals[i].text,
       rawConfidence: signals[i].rawConfidence,
-      roleWeight: SOURCE_ROLE_WEIGHTS[signals[i].source]?.[signals[i].category] ?? 0.3,
+      roleWeight: roleWeightFor(signals[i]),
       matchMethod: "exact_keyword",
       matchScore: 1.0,
     }];
@@ -477,7 +566,7 @@ function findSemanticGroups(signals: ExtractedSignal[]): Map<string, { members: 
         group.push(signals[j]);
         assigned.add(j);
 
-        const roleWeight = SOURCE_ROLE_WEIGHTS[signals[j].source]?.[signals[j].category] ?? 0.3;
+        const roleWeight = roleWeightFor(signals[j]);
         evidenceTrail.push({
           source: signals[j].source,
           text: signals[j].text,
@@ -514,21 +603,30 @@ function agreementRank(type: AgreementType): number {
   }
 }
 
+/**
+ * Aug 2026 — validation counts INDEPENDENT VOICES, not platforms.
+ * A voice is a distinct customer author or a distinct non-customer platform.
+ * Cross-posted identical competitor content was already collapsed to one
+ * signal upstream, so it contributes one voice. Three different customer
+ * authors on one platform are three voices. Thresholds are UNCHANGED
+ * (≥3 voices + ≥0.70 for HIGH-tier validation, ≥2 voices + ≥0.45 for
+ * MEDIUM-tier) — only the independence model changed.
+ */
 function classifyDecision(
   category: string,
-  sources: SourceType[],
+  independentVoiceCount: number,
   agreementType: AgreementType,
   confidence: number,
 ): DecisionType {
   if (agreementType === "CONFLICT") return "CONFLICTED_SIGNAL";
 
-  if (sources.length >= 3 && confidence >= HIGH_CONFIDENCE_THRESHOLD && (agreementType === "DIRECT_AGREEMENT" || agreementType === "INDIRECT_AGREEMENT")) {
+  if (independentVoiceCount >= 3 && confidence >= HIGH_CONFIDENCE_THRESHOLD && (agreementType === "DIRECT_AGREEMENT" || agreementType === "INDIRECT_AGREEMENT")) {
     if (category === "pain") return "VALIDATED_PAIN";
     if (category === "hook") return "VALIDATED_HOOK";
     if (category === "objection" || category === "trust") return "CONFIRMED_OBJECTION";
   }
 
-  if (sources.length >= 2 && confidence >= MEDIUM_CONFIDENCE_THRESHOLD && agreementType !== "SINGLE_SOURCE") {
+  if (independentVoiceCount >= 2 && confidence >= MEDIUM_CONFIDENCE_THRESHOLD && agreementType !== "SINGLE_SOURCE") {
     if (category === "pain") return "VALIDATED_PAIN";
     if (category === "hook") return "VALIDATED_HOOK";
     if (category === "objection" || category === "trust") return "CONFIRMED_OBJECTION";
@@ -646,6 +744,7 @@ export function runCrossSignalDecisionLayer(
   narrativeObjections: NarrativeObjectionMap | null,
   reviewsIntel: ReviewsIntelligenceResult | null,
   tiktokQual: TikTokQualificationResult | null,
+  customerEvidence: CustomerEvidenceArtifact[] = [],
 ): CrossSignalDecisionResult {
   const allSources: SourceType[] = ["instagram", "website", "blog", "tiktok", "reviews"];
   const availableSources = multiSource.sourceAvailability.availableSources;
@@ -663,7 +762,14 @@ export function runCrossSignalDecisionLayer(
     fallbackNotes.push("Single-source mode: all decisions classified as WEAK_SIGNAL due to no cross-validation");
   }
   if (!availableSources.includes("reviews")) {
-    fallbackNotes.push("No reviews data — pain validation limited to comment-derived signals");
+    fallbackNotes.push(
+      customerEvidence.length > 0
+        ? `No formal reviews — customer grounding provided by ${customerEvidence.length} validated customer comment artifact(s) (source-agnostic customer evidence)`
+        : "No reviews data and no validated customer comments — decisions cannot reach customer-origin grounding",
+    );
+  }
+  if (customerEvidence.length > 0) {
+    fallbackNotes.push(`CUSTOMER_ORIGIN artifacts in play: ${customerEvidence.length} (independent voices: ${new Set(customerEvidence.map(a => a.voiceKey)).size})`);
   }
   if (!availableSources.includes("tiktok")) {
     fallbackNotes.push("No TikTok data — content validation based on Instagram only");
@@ -675,7 +781,7 @@ export function runCrossSignalDecisionLayer(
     fallbackNotes.push(`Reviews volume INSUFFICIENT (${reviewsReliability.totalVolume} reviews) — review signals heavily downgraded`);
   }
 
-  const rawSignals = extractAllSignals(multiSource, narrativeObjections, reviewsIntel, tiktokQual);
+  const rawSignals = extractAllSignals(multiSource, narrativeObjections, reviewsIntel, tiktokQual, customerEvidence);
   const semanticGroups = findSemanticGroups(rawSignals);
 
   const decisions: CrossSignalDecision[] = [];
@@ -690,8 +796,9 @@ export function runCrossSignalDecisionLayer(
     let totalWeight = 0;
 
     for (const src of uniqueSources) {
-      const roleWeight = SOURCE_ROLE_WEIGHTS[src]?.[category] ?? 0.3;
-      const maxConfInSource = Math.max(...group.filter(s => s.source === src).map(s => s.rawConfidence));
+      const inSource = group.filter(s => s.source === src);
+      const roleWeight = Math.max(...inSource.map(s => roleWeightFor(s)));
+      const maxConfInSource = Math.max(...inSource.map(s => s.rawConfidence));
       sourceWeightsApplied[src] = roleWeight;
 
       let effectiveConfidence = maxConfInSource;
@@ -750,8 +857,14 @@ export function runCrossSignalDecisionLayer(
     const realGroundingFloor = 0.65 + 0.35 * lineagePreview(group).realRatio;
     confidence *= realGroundingFloor;
 
-    const agreementType = uniqueSources.length === 1 ? "SINGLE_SOURCE" as AgreementType : bestAgreement;
-    const type = classifyDecision(category, uniqueSources, agreementType, confidence);
+    // Aug 2026 — independence model: distinct voices, not platforms.
+    // Customer artifacts carry author-based voiceKeys; everything else
+    // contributes its platform as one voice.
+    const voices = new Set(group.map(s => s.voiceKey ?? `platform:${s.source}`));
+    const independentVoiceCount = voices.size;
+
+    const agreementType = independentVoiceCount === 1 ? "SINGLE_SOURCE" as AgreementType : bestAgreement;
+    const type = classifyDecision(category, independentVoiceCount, agreementType, confidence);
     const confidenceLevel = getConfidenceLevel(confidence);
     void __preLineagePenalty;
 
@@ -785,6 +898,7 @@ export function runCrossSignalDecisionLayer(
       matchedEvidence: evidenceTrail.slice(0, 10),
       originType: lineage.originType,
       realRatio: lineage.realRatio,
+      independentVoiceCount,
       mixedLineage: lineage.mixedLineage,
       originBreakdown: lineage.originBreakdown,
     });

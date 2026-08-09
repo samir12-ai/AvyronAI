@@ -1489,6 +1489,33 @@ export async function getStoredTikTokCommentsForMIv3(competitorId: string, accou
   }));
 }
 
+/**
+ * Aug 2026 — provenance-rich comment rows for the source-agnostic
+ * CUSTOMER_ORIGIN evidence path (evidence-origin.ts). Returns BOTH
+ * Instagram and TikTok comment rows with the acquisition-time authorType
+ * so the customer-evidence validator can fail closed on owner/unknown
+ * authors. Synthetic rows are excluded — never customer evidence.
+ */
+export async function getStoredCommentsForCustomerEvidence(competitorId: string, accountId: string) {
+  const comments = await db.select().from(ciCompetitorComments)
+    .where(and(
+      eq(ciCompetitorComments.competitorId, competitorId),
+      eq(ciCompetitorComments.accountId, accountId),
+      eq(ciCompetitorComments.isSynthetic, false),
+    ))
+    .orderBy(desc(ciCompetitorComments.createdAt))
+    .limit(300);
+
+  return comments.map(c => ({
+    commentId: c.commentId || c.id,
+    username: c.username || null,
+    text: c.commentText || "",
+    authorType: c.authorType ?? null,
+    platform: (c.source || "").startsWith("tiktok") ? "tiktok" as const : "instagram" as const,
+    competitorId: c.competitorId,
+  }));
+}
+
 export async function getStoredReviewsForMIv3(competitorId: string, accountId: string) {
   const reviews = await db.select().from(ciCompetitorReviews)
     .where(and(

@@ -1,0 +1,657 @@
+TASK — CHANGE CROSS-SIGNAL EVIDENCE PHILOSOPHY TO USE AVYRON'S EXISTING CUSTOMER EVIDENCE
+
+We completed the forensic audit of `degraded_no_decisions`.
+
+The audit proved:
+
+- The 30 current cross-signal decisions were correctly rejected under the CURRENT rules.
+- `LinkInBio` and similar CTA labels are metadata leakage.
+- Cross-posted identical competitor captions can create pseudo-corroboration.
+- The current cross-signal layer effectively requires a `real` customer-origin source to validate market decisions.
+- Reviews were missing in the audited campaign.
+- However, the SAME campaign already has an authoritative Audience/Pain architecture with 13 approved evidence-backed pains.
+- Those pains successfully powered Audience, Strategy Root, Positioning, Offer, and downstream strategy.
+- That evidence currently travels through a parallel path and is NOT available to the cross-signal decision layer.
+
+The current philosophy needs to change.
+
+IMPORTANT:
+
+Avyron targets startups and SMBs.
+
+Many customers will enter competitors that:
+
+- have no Trustpilot presence
+- have no G2 presence
+- have very few formal reviews
+- are local businesses/startups
+- have customer discussion mainly in comments/social channels
+
+Therefore:
+
+FORMAL REVIEWS MUST NOT BE A REQUIRED CONDITION FOR VALIDATED MARKET INTELLIGENCE.
+
+Trustpilot, G2, Google Reviews, etc. may remain useful OPTIONAL sources.
+
+They must NOT be architectural prerequisites.
+
+===========================================================
+NEW CORE PHILOSOPHY
+===========================================================
+
+The system should be:
+
+CUSTOMER-EVIDENCE DRIVEN
+
+NOT:
+
+REVIEW-PLATFORM DRIVEN
+
+A source is valuable because of WHAT the evidence represents, not because of WHICH WEBSITE it came from.
+
+The system should reason in terms of semantic evidence roles:
+
+CUSTOMER_ORIGIN_EVIDENCE
+COMPETITOR_BEHAVIOR
+COMPETITOR_MESSAGING
+INFERRED_SYNTHESIS
+METADATA
+NOISE
+
+NOT simply:
+
+reviews = real
+everything else = not real
+
+===========================================================
+1 — REUSE WHAT AVYRON ALREADY KNOWS
+===========================================================
+
+DO NOT create another Audience discovery system.
+
+DO NOT rediscover the pains.
+
+DO NOT create a second Pain Registry.
+
+Task 163 already established:
+
+Audience evidence
+→ validated pains
+→ authoritative Pain Registry
+→ Strategy Root
+→ contextual engine routing
+
+Reuse that architecture.
+
+The cross-signal layer should be able to consume validated customer-origin evidence that Avyron ALREADY possesses.
+
+===========================================================
+2 — CUSTOMER EVIDENCE IS SOURCE-AGNOSTIC
+===========================================================
+
+A valid customer-origin signal may come from:
+
+- Instagram comments
+- TikTok comments
+- YouTube comments if supported later
+- Reddit/community discussions if supported
+- Google Reviews
+- Trustpilot
+- G2
+- Capterra
+- app reviews
+- testimonials where provenance is trustworthy
+- other verified customer/user-origin sources
+
+The PLATFORM is secondary.
+
+The semantic origin is what matters.
+
+Example:
+
+Competitor Instagram post:
+
+"Save 10 hours every week with our AI."
+
+This is:
+
+COMPETITOR_MESSAGING
+
+NOT customer evidence.
+
+Instagram comment:
+
+"I tried three tools and still don't know what marketing strategy I should follow."
+
+If provenance confirms this is a user/customer-origin comment, this may be:
+
+CUSTOMER_ORIGIN_EVIDENCE
+
+The fact that both came from Instagram does NOT make them the same evidence type.
+
+===========================================================
+3 — AUDIT EXISTING AUDIENCE EVIDENCE FIRST
+===========================================================
+
+Before implementation, trace the 13 approved pains from the audited campaign.
+
+For each pain determine:
+
+painId
+evidenceIds
+original evidence text
+platform/source
+evidence origin
+whether it came from:
+- customer comment
+- formal review
+- competitor post
+- AI inference
+- other
+
+Determine how Task 163 validated those pains.
+
+Do not blindly promote all Pain Registry entries into cross-signal market truth.
+
+We need to identify which underlying evidence is genuinely CUSTOMER_ORIGIN_EVIDENCE.
+
+===========================================================
+4 — CREATE A CANONICAL EVIDENCE-ORIGIN CONTRACT
+===========================================================
+
+There should be one reusable semantic evidence-origin model.
+
+Conceptually:
+
+CUSTOMER_ORIGIN
+COMPETITOR_BEHAVIOR
+COMPETITOR_MESSAGING
+INFERRED
+METADATA
+NOISE
+
+Reuse existing enums/contracts if equivalents already exist.
+
+Do not create duplicate taxonomy unnecessarily.
+
+The classification must be based on provenance.
+
+Examples:
+
+Instagram competitor caption
+→ COMPETITOR_MESSAGING
+
+Competitor posting frequency
+→ COMPETITOR_BEHAVIOR
+
+Instagram user comment describing a problem
+→ CUSTOMER_ORIGIN
+
+Trustpilot review
+→ CUSTOMER_ORIGIN
+
+G2 review
+→ CUSTOMER_ORIGIN
+
+LLM-created interpretation of several signals
+→ INFERRED
+
+LinkInBio
+→ METADATA
+
+navigation text / usernames / boilerplate
+→ METADATA or NOISE
+
+===========================================================
+5 — IMPORTANT: COMMENTS ARE NOT AUTOMATICALLY CUSTOMER TRUTH
+===========================================================
+
+Do NOT simply change:
+
+Instagram comment = real
+
+That would weaken the architecture.
+
+A comment can qualify as customer-origin evidence only when provenance and content pass deterministic validation.
+
+At minimum verify:
+
+- source artifact exists
+- comment is actually a comment/reply, not competitor caption
+- campaign/tenant lineage matches
+- author is not the competitor account where detectable
+- text contains substantive customer/user expression
+- not obvious spam
+- not CTA metadata
+- not boilerplate
+- not empty/generic reaction
+- not AI-generated evidence
+- evidence ID resolves
+- original text is preserved
+
+If uncertain:
+
+do NOT promote it to customer-origin truth.
+
+Fail closed.
+
+===========================================================
+6 — REUSE PAIN REGISTRY EVIDENCE
+===========================================================
+
+The Pain Registry already contains evidence lineage.
+
+Extend the cross-signal decision layer so it can consume eligible underlying evidence referenced by validated Pain Registry entries.
+
+Architecture should become conceptually:
+
+Raw evidence
+      ↓
+Audience validation
+      ↓
+Authoritative Pain Registry
+      ↓
+eligible underlying CUSTOMER_ORIGIN evidence
+      ↓
+Cross-Signal Decision Layer
+
+alongside:
+
+Competitor evidence
+      ↓
+Cross-Signal Decision Layer
+
+The Cross-Signal layer can then ask:
+
+Do customer-origin signals corroborate competitor behavior/messaging?
+
+instead of:
+
+Do I have a Trustpilot review?
+
+===========================================================
+7 — DO NOT TURN PAINS THEMSELVES INTO FAKE RAW EVIDENCE
+===========================================================
+
+Critical distinction:
+
+The Pain Registry entry is an interpreted strategic object.
+
+Its underlying evidence is the evidence.
+
+Do NOT count:
+
+pain statement
++
+its own underlying comment
+
+as two independent sources.
+
+Do NOT create circular corroboration:
+
+comment
+→ pain
+→ pain counted as another source confirming comment
+
+That is prohibited.
+
+Use evidence IDs and lineage to deduplicate.
+
+===========================================================
+8 — INDEPENDENCE MATTERS
+===========================================================
+
+Validation should care about independent voices, not platforms.
+
+Current bug:
+
+same competitor posts identical caption on Instagram + TikTok
+→ system may count 2 sources.
+
+That is wrong.
+
+Same normalized content
++
+same competitor/entity
++
+cross-posted platforms
+
+should generally count as ONE independent voice.
+
+Conversely:
+
+three different customer comments from independent users
+on the same platform
+
+may represent THREE independent customer artifacts, subject to deduplication and provenance validation.
+
+Therefore:
+
+SOURCE DIVERSITY ≠ PLATFORM COUNT
+
+Think in terms of:
+
+independent evidence artifacts
+independent authors/voices where available
+independent competitors
+semantic source roles
+
+===========================================================
+9 — FIX CTA/METADATA LEAKAGE
+===========================================================
+
+The forensic audit proved that labels such as:
+
+LinkInBio
+Download
+Book
+Try
+SeeHow
+StartYour
+ClickAction
+HowToGuide
+
+are generated by Avyron's own CTA detector and then re-ingested as content signals.
+
+Fix this.
+
+These may remain useful structured competitor CTA metadata.
+
+But they must NOT become standalone market-language evidence or candidate market decisions.
+
+Preserve them for appropriate competitor behavior analysis.
+
+Do not delete useful CTA analytics.
+
+Only stop treating the categorical labels themselves as strategic content evidence.
+
+===========================================================
+10 — FILTER RAW CAPTION NOISE
+===========================================================
+
+Do not automatically treat every competitor caption as a strategic signal.
+
+Preserve useful competitor messaging/behavior.
+
+But candidate strategic decisions should reject or down-rank:
+
+- unrelated memes
+- irrelevant hashtags
+- generic promotional boilerplate
+- navigation text
+- non-semantic CTA fragments
+- duplicate cross-posts
+- obvious off-topic content
+
+Do not over-filter legitimate competitor messaging.
+
+===========================================================
+11 — CROSS-SIGNAL VALIDATION SHOULD USE SEMANTIC ROLES
+===========================================================
+
+A strong cross-signal decision could conceptually be:
+
+CUSTOMER_ORIGIN evidence:
+"Managing five different marketing tools is exhausting."
+
++
+
+COMPETITOR_BEHAVIOR:
+multiple competitors launching all-in-one workflows
+
++
+
+COMPETITOR_MESSAGING:
+multiple competitors positioning around consolidation
+
+→ potentially VALIDATED market decision
+
+Another example:
+
+CUSTOMER_ORIGIN:
+"I don't understand which strategy I should follow."
+
++
+
+Pain Registry:
+same underlying pain classification, same evidence lineage
+
++
+
+Competitor messaging:
+multiple competitors increasingly selling guidance/strategy
+
+→ potentially useful strategic decision
+
+But remember:
+
+Pain Registry interpretation does NOT count as a second independent source from its own evidence.
+
+===========================================================
+12 — DO NOT WEAKEN THE GUARDS
+===========================================================
+
+DO NOT simply:
+
+- lower 0.45
+- remove the real-grounding requirement
+- inflate confidence
+- convert competitor evidence into customer evidence
+- count inferred synthesis as direct evidence
+- count duplicate cross-posts as independent
+- automatically trust every social comment
+
+The purpose is NOT to make decisions pass.
+
+The purpose is to give the decision layer access to the correct evidence Avyron already possesses.
+
+If after that a decision is still weak:
+
+KEEP IT WEAK.
+
+===========================================================
+13 — REVISIT THE CONFIDENCE FORMULA SEMANTICALLY
+===========================================================
+
+Audit whether the current `realRatio` terminology should become something like:
+
+customerOriginRatio
+directEvidenceRatio
+groundedCustomerRatio
+
+Use the existing architecture where possible.
+
+The important concept is:
+
+Does this decision have direct independent evidence from the market/customer?
+
+NOT:
+
+Did this evidence come specifically from a review website?
+
+If the current formula already supports this after origin normalization, preserve it.
+
+Do not rewrite math unnecessarily.
+
+===========================================================
+14 — TEST THE EXISTING CAMPAIGN DATA
+===========================================================
+
+Before another expensive full pipeline run, create deterministic tests using existing evidence shapes.
+
+Required cases:
+
+1. Trustpilot review
+→ CUSTOMER_ORIGIN
+
+2. G2 review
+→ CUSTOMER_ORIGIN
+
+3. Instagram substantive user comment
+→ CUSTOMER_ORIGIN when provenance validates
+
+4. TikTok substantive user comment
+→ CUSTOMER_ORIGIN when provenance validates
+
+5. Competitor Instagram caption
+→ COMPETITOR_MESSAGING
+
+6. Competitor TikTok caption
+→ COMPETITOR_MESSAGING
+
+7. LinkInBio
+→ METADATA, never standalone strategic signal
+
+8. CTA labels remain available as competitor metadata
+
+9. Same competitor identical IG/TikTok caption
+→ one independent voice
+
+10. Different independent customer comments on same platform
+→ independent artifacts when provenance allows
+
+11. AI inference
+→ INFERRED, not customer-origin
+
+12. Pain Registry entry cannot double-count its own underlying evidence
+
+13. Cross-tenant evidence rejected
+
+14. Wrong-run evidence rejected
+
+15. Spam/generic comment rejected as customer evidence
+
+16. Real customer comment with valid pain lineage can participate in cross-signal validation
+
+17. Customer evidence alone does not automatically force VALIDATED status
+
+18. Competitor evidence alone does not become customer truth
+
+19. Existing WEAK_SIGNAL guard still rejects genuinely weak cases
+
+20. No threshold weakening
+
+===========================================================
+15 — VERIFY AGAINST THE 13 EXISTING PAINS
+===========================================================
+
+After implementation, inspect the existing campaign's 13 Pain Registry entries.
+
+Report:
+
+- how many have genuine customer-origin evidence
+- how many rely only on competitor/inferred evidence
+- how many underlying evidence artifacts are eligible for cross-signal use
+- how many are duplicates
+- how many are uncertain and therefore excluded
+
+This will tell us whether the existing data is sufficient.
+
+DO NOT fabricate missing customer evidence.
+
+===========================================================
+16 — BUILD PLAN SEMANTICS
+===========================================================
+
+Preserve the truthful distinction:
+
+`degraded_no_decisions`
+
+means:
+
+"No validated cross-signal market decisions were available."
+
+It must NOT mean:
+
+"No strategic evidence exists."
+
+The plan may still have:
+
+Audience evidence
+Pain Registry
+Positioning
+Offer
+etc.
+
+Do not remove the degraded marker merely because Pain Registry exists.
+
+Only remove it naturally when legitimate validated cross-signal decisions exist.
+
+===========================================================
+17 — IMPLEMENTATION ORDER
+===========================================================
+
+Proceed in this order:
+
+1. Audit existing Audience/Pain evidence provenance.
+2. Define/reuse canonical evidence-origin semantics.
+3. Validate customer-origin social comments.
+4. Remove CTA labels from strategic content signals.
+5. Deduplicate cross-posted identical competitor content.
+6. Expose eligible existing customer evidence to cross-signal decisions.
+7. Preserve evidence-ID deduplication.
+8. Update confidence inputs only if required by the semantic-origin change.
+9. Add targeted tests.
+10. Run regression tests.
+
+DO NOT run the full 15-engine campaign yet.
+
+Stop after implementation + tests + analysis of the existing 13 pains.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Existing evidence-origin architecture before.
+2. Exact philosophical problem.
+3. Evidence-origin architecture after.
+4. How customer-origin evidence is determined.
+5. How social comments are validated.
+6. How formal reviews are treated.
+7. How competitor messaging is treated.
+8. How competitor behavior is treated.
+9. How inferred evidence is treated.
+10. How metadata/noise is treated.
+11. CTA leakage fix.
+12. Cross-post deduplication.
+13. Pain Registry evidence integration.
+14. Circular/double-count prevention.
+15. Independence/source-diversity model.
+16. Any confidence-formula changes.
+17. Tests and results.
+18. Regression results.
+19. TypeScript baseline vs final.
+20. Existing campaign's 13 pains:
+    - customer-origin backed
+    - non-customer backed
+    - eligible evidence artifacts
+    - excluded/uncertain
+21. Whether the existing campaign now has enough legitimate evidence to potentially create validated cross-signal decisions.
+22. Remaining limitations.
+
+Finally answer:
+
+A. Does Avyron still require Trustpilot/G2/formal reviews to validate market intelligence?
+
+B. Can validated customer-origin social comments now serve as direct customer evidence?
+
+C. Can competitor captions ever be mislabeled as customer truth?
+
+D. Can LinkInBio become a strategic market signal?
+
+E. Can identical cross-posts count as independent corroboration?
+
+F. Does the system reuse the evidence already behind the authoritative Pain Registry?
+
+G. Can the Pain Registry double-count its own evidence?
+
+H. Were any thresholds weakened?
+
+I. Is the architecture now appropriate for startups/SMBs whose competitors may have little or no formal review presence?
+
+DO NOT RUN A FULL CAMPAIGN YET.
+DO NOT REGENERATE THE PLAN YET.
+DO NOT APPROVE OR ACTIVATE.
+DO NOT START PERFORMANCE LOOP.
