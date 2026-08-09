@@ -34,6 +34,7 @@ import {
   type ProductDnaLike,
 } from "../shared/strategic-doctrine";
 import { buildGroundingContract } from "../shared/grounding-contract";
+import { selectPainsForUse } from "../shared/audience-pain-registry";
 import {
   enforceEngineDepthCompliance,
   applyDepthPenalty,
@@ -2583,5 +2584,26 @@ export async function runPersuasionEngine(
   strategic?: RunStrategicContext | null,
   productDna?: ProductDnaLike | null,
 ): Promise<PersuasionResult> {
-  return analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment, _accountId, strategic, productDna);
+  const result = await analyzePersuasion(mi, audience, positioning, differentiation, offer, funnel, integrity, awareness, upstreamLineage, analyticalEnrichment, _accountId, strategic, productDna);
+  // Authoritative pain routing (Task 163): persuasion distinguishes purchase
+  // motivations (CORE_PURCHASE) from pre-purchase objections (OBJECTION) —
+  // both roles preserved verbatim; POST_PURCHASE_FRICTION never carries the
+  // `persuasion` use. Entry wrapper ⇒ attached on EVERY return path.
+  if (Array.isArray(audience?.painRegistry) && audience.painRegistry.length > 0) {
+    const persuasionEligible = selectPainsForUse(audience.painRegistry, "persuasion");
+    const motivations = persuasionEligible.filter((pain) => pain.classification === "CORE_PURCHASE");
+    const objections = persuasionEligible.filter((pain) => pain.classification === "OBJECTION");
+    if (motivations.length > 0 || objections.length > 0) {
+      console.log(`[PersuasionEngine] PERSUASION_PAINS_SELECTED | motivations=${motivations.length} | objections=${objections.length}`);
+    }
+    (result as any).selectedPainRoles = {
+      motivations: motivations.map((pain) => ({
+        painId: pain.painId, canonical: pain.canonical, rank: pain.rank, role: "purchase_motivation" as const, classification: pain.classification,
+      })),
+      objections: objections.map((pain) => ({
+        painId: pain.painId, canonical: pain.canonical, rank: pain.rank, role: "pre_purchase_objection" as const, classification: pain.classification,
+      })),
+    };
+  }
+  return result;
 }

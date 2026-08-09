@@ -20,6 +20,7 @@ import { buildDoctrineBlock, deriveAnchorFromProductDna, type ProductAnchor, typ
 import { buildGroundingContract, buildAelReferenceIndex, checkGroundingContract } from "../shared/grounding-contract";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
+import { selectPainForUse } from "../shared/audience-pain-registry";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
@@ -2424,6 +2425,38 @@ function safeJsonParse(data: string | null | undefined, fallback: any): any {
 }
 
 export async function runPositioningEngine(
+  accountId: string,
+  campaignId: string,
+  miSnapshotId: string,
+  audienceSnapshotId: string,
+  analyticalEnrichment?: any,
+  jobId?: string,
+  strategic?: RunStrategicContext,
+  painRegistry?: any[],
+): Promise<PositioningEngineResult> {
+  const result = await runPositioningEngineInternal(
+    accountId, campaignId, miSnapshotId, audienceSnapshotId, analyticalEnrichment, jobId, strategic,
+  );
+  // Authoritative pain routing (Task 163): positioning may only anchor on a
+  // purchase-motivation pain — POST_PURCHASE_FRICTION never carries the
+  // `positioning` use, so it is structurally excluded from the core role.
+  // Wrapping the entry point attaches the selected role on EVERY return
+  // path (early empties, degraded results, and the final result alike).
+  if (Array.isArray(painRegistry) && painRegistry.length > 0) {
+    const corePain = selectPainForUse(painRegistry, "positioning");
+    if (corePain) {
+      console.log(`[PositioningEngine-V3] POSITIONING_PAIN_SELECTED | painId=${corePain.painId} | class=${corePain.classification} | rank=${corePain.rank}`);
+    }
+    (result as any).selectedPainRoles = {
+      core: corePain
+        ? { painId: corePain.painId, canonical: corePain.canonical, rank: corePain.rank, role: "purchase_motivation" as const, classification: corePain.classification }
+        : null,
+    };
+  }
+  return result;
+}
+
+async function runPositioningEngineInternal(
   accountId: string,
   campaignId: string,
   miSnapshotId: string,

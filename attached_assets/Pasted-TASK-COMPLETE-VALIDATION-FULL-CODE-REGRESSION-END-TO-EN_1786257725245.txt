@@ -1,0 +1,741 @@
+TASK — COMPLETE VALIDATION, FULL-CODE REGRESSION, END-TO-END RUN, AND FIX EVERYTHING BROKEN BY TASK 163
+
+You previously ended Task 163 before completing the full validation and without waiting for explicit confirmation.
+
+This task is NOT a new architecture project.
+
+Your job now is to validate EVERYTHING implemented in Task 163, complete any unfinished in-scope work, run comprehensive tests across the affected codebase, execute one full real end-to-end campaign run, and fix every proven regression or defect that appears.
+
+IMPORTANT:
+
+DO NOT mark the task complete early.
+
+DO NOT stop after unit tests.
+
+DO NOT stop after TypeScript checks.
+
+DO NOT stop after backend boot.
+
+DO NOT stop after one subsystem passes.
+
+DO NOT declare success until every acceptance criterion in this prompt is verified.
+
+If a defect appears:
+
+- investigate it
+- identify the root cause
+- fix it
+- rerun the relevant tests
+- rerun the integration path
+- continue until the complete system passes or a genuine external blocker is proven
+
+Do not ask me to approve every small fix.
+
+You have authorization to repair all bugs directly caused by or exposed through Task 163, as long as you stay within the scope below.
+
+===========================================================
+SCOPE
+===========================================================
+
+Validate and complete all work related to:
+
+1. Build Plan source-of-truth
+2. Build Plan run/job lineage
+3. Build Plan persistence durability
+4. Narrative run binding
+5. Authoritative Pain Registry
+6. Pain classification
+7. Evidence-bound pain validation
+8. Contextual dominance
+9. Engine-specific pain routing
+10. No-pain-merging enforcement
+11. Product-fit enforcement
+12. Offer pain-role routing
+13. Retention pain-role routing
+14. Pain IDs through downstream engines
+15. Pain-role preservation in final Plan synthesis
+16. Final strategy validation
+17. Preview exact-run rendering
+18. Task #154 lineage protections
+19. Task #157 Offer contract enforcement
+20. Task #158 timeout architecture compatibility
+
+Explicitly excluded:
+
+- Business Profile redesign
+- unrelated UI redesign
+- new product features
+- Performance Loop implementation
+- manual approval
+- activation
+- synthetic performance data
+
+===========================================================
+PHASE 1 — RECONSTRUCT EXACTLY WHAT TASK 163 CHANGED
+===========================================================
+
+Before testing, inspect the complete diff and current source.
+
+Produce a change map:
+
+File
+Function
+Purpose
+Input
+Output
+Persistence impact
+Downstream consumers
+Tests covering it
+Known unfinished section
+
+Identify anything that was:
+
+- partially implemented
+- left commented
+- added but not wired
+- typed but not persisted
+- persisted but not consumed
+- consumed without validation
+- added to one path but missing from another path
+- added to Offer but not Retention
+- added to engines but not Build Plan
+- added to source but missing from runtime
+- covered by tests only at source-pattern level
+
+Do not assume the previous completion message was accurate.
+
+===========================================================
+PHASE 2 — BUILD PLAN SOURCE-OF-TRUTH VERIFICATION
+===========================================================
+
+Prove that Build Plan is a synthesis layer over validated engine outputs.
+
+Trace:
+
+Product Identity
+→ Audience
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Awareness
+→ Funnel
+→ Persuasion
+→ Channel
+→ Iteration
+→ Retention
+→ Build Plan
+→ strategic_plans
+→ Preview
+
+Verify:
+
+- Build Plan uses engine outputs as strategic authority
+- Business Context is only factual/supporting context
+- Build Plan cannot independently invent:
+  - a new audience pain
+  - new positioning
+  - new differentiation
+  - new mechanism
+  - new Offer
+  - new pain ranking
+- no legacy fallback bypasses engine outputs
+- no caller-supplied runId can select another run
+- no success is returned before persistence is durable
+- narrative generation is bound to the exact sourceJobId
+- exact-run plan persistence is enforced
+- stale or shadowed runs fail closed
+
+If any path violates this, fix it.
+
+===========================================================
+PHASE 3 — AUTHORITATIVE PAIN REGISTRY VALIDATION
+===========================================================
+
+Verify that every validated pain has:
+
+- stable pain ID
+- original statement
+- normalized statement
+- classification
+- strategic role
+- evidence IDs
+- source types
+- evidence strength
+- product-fit status
+- allowed uses
+- prohibited uses
+- core-strategy eligibility
+- root-cause IDs where applicable
+- classifier version
+- classification reason
+
+Verify:
+
+- the registry is anchored in existing Strategy Root / Audience lineage
+- no disconnected parallel source of truth exists
+- no pain can exist without evidence lineage
+- no LLM-created pain can enter the registry
+- cross-tenant evidence cannot validate a pain
+- competitor promotional copy cannot become direct customer truth
+- uncertain classifications remain uncertain instead of being promoted
+
+Fix any incomplete contract.
+
+===========================================================
+PHASE 4 — CLASSIFIER + CODE JUDGE
+===========================================================
+
+Test the LLM classifier and deterministic judge separately.
+
+LLM may:
+
+- classify
+- explain
+- rank semantically
+
+LLM may NOT:
+
+- invent pain IDs
+- invent evidence
+- rewrite a signal into another pain
+- merge unrelated pains
+- change tenant/run lineage
+- promote a post-purchase complaint into purchase motivation without evidence
+
+Code must verify:
+
+- supplied pain ID exists
+- evidence IDs resolve
+- source types match
+- same tenant/campaign/run
+- classification is compatible with the supplied evidence
+- product-fit is valid
+- allowed/prohibited uses are deterministic
+- no unsupported causal relationship is introduced
+
+If the classifier output is invalid:
+
+FAIL CLOSED or mark uncertain according to existing architecture.
+
+===========================================================
+PHASE 5 — CONTEXTUAL DOMINANCE TESTS
+===========================================================
+
+Verify each engine selects the highest-priority ELIGIBLE pain for its own responsibility.
+
+Test every relevant engine:
+
+POSITIONING
+- PURCHASE_MOTIVATION
+- UNDERLYING_UNMET_OUTCOME
+- must reject POST_PURCHASE_FRICTION as core
+
+DIFFERENTIATION
+- must use eligible category/product-solvable pains
+- must not use service friction as core without explicit valid justification
+
+MECHANISM
+- must use root causes behind the selected core pain
+- must preserve pain/root-cause lineage
+
+OFFER
+- corePainId must be eligible purchase pain
+- objectionPainIds must remain separate
+- supporting pains must not replace core pain
+- must preserve Task #157 alignment enforcement
+
+FUNNEL
+- must prioritize pre-purchase objections and conversion barriers
+
+PERSUASION
+- may use motivations and objections separately
+
+RETENTION
+- must prioritize POST_PURCHASE_FRICTION where applicable
+- refund/support/onboarding/access pains must be routed here
+- retention pain must not overwrite Positioning/Offer core pain
+
+CONTENT
+- multiple pains allowed across different content items
+- every content item must preserve addressedPainIds
+
+===========================================================
+PHASE 6 — NO-PAIN-MERGING ENFORCEMENT
+===========================================================
+
+This must be tested as a hard invariant.
+
+The system must reject artificial merged pains such as:
+
+"fragmented marketing refund complexity"
+
+when the sources are:
+
+- fragmented tools
+- refund delays
+
+Verify:
+
+- engines cannot concatenate unrelated pains
+- Build Plan cannot flatten all pains into one mega-pain
+- Offer cannot satisfy alignment by inserting every pain phrase
+- final strategy cannot hide routing errors through broad generic wording
+
+Allowed:
+
+corePainId = pain_A
+objectionPainIds = [pain_B]
+retentionPainIds = [pain_C]
+
+Not allowed:
+
+mergedPain = pain_A + pain_B + pain_C
+
+Fix any missing enforcement.
+
+===========================================================
+PHASE 7 — PRODUCT-FIT ENFORCEMENT
+===========================================================
+
+Test:
+
+REAL PAIN
++
+WRONG PRODUCT CAPABILITY
+=
+NOT ELIGIBLE FOR CORE STRATEGY
+
+Examples:
+
+- accounting pain for marketing intelligence product
+- logistics pain for content strategy product
+- refund operation pain when product does not provide refund operations
+
+Verify Product Identity is authoritative.
+
+Build Plan and engines must not promise unsupported product capabilities.
+
+===========================================================
+PHASE 8 — PAIN ID LINEAGE THROUGH THE ENTIRE PIPELINE
+===========================================================
+
+Trace pain IDs end-to-end:
+
+Audience
+→ Strategy Root
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Awareness
+→ Funnel
+→ Persuasion
+→ Channel
+→ Retention
+→ Build Plan
+→ strategic_plans
+→ Preview
+
+For every major output verify:
+
+- selectedPainIds
+- role of each pain
+- evidence lineage
+- same run/job
+- no text-only replacement
+- no missing IDs
+- no IDs from another campaign
+- no unresolved references
+
+Fix all proven lineage breaks.
+
+===========================================================
+PHASE 9 — RETENTION COMPLETION
+===========================================================
+
+The prior work appeared unfinished around Retention.
+
+Verify and complete:
+
+- Retention consumes authoritative registry
+- selects retention-eligible pains
+- prefers POST_PURCHASE_FRICTION when supported
+- preserves selected pain IDs
+- validates evidence
+- does not reinterpret pain classification
+- does not use purchase motivation as retention friction without reason
+- returns explicit pain-role metadata
+- persists metadata
+- Build Plan receives and preserves it
+
+Add tests specifically proving:
+
+- refund pain is rejected as Positioning core
+- same refund pain is accepted as Retention input
+- pain ID remains the same in both contexts
+- classification does not change across engines
+
+===========================================================
+PHASE 10 — BUILD PLAN ROLE PRESERVATION
+===========================================================
+
+Verify the final plan preserves the engine-selected roles:
+
+Positioning:
+corePainIds
+
+Differentiation:
+corePainIds / failureOfAlternativePainIds
+
+Offer:
+corePainId
+objectionPainIds
+supportingPainIds
+
+Funnel:
+objectionPainIds
+
+Retention:
+retentionPainIds
+
+Content:
+addressedPainIds
+
+Build Plan must NOT:
+
+- reselect pain from Business Context
+- invent pain
+- merge pain roles
+- change classification
+- drop IDs
+- replace engine decisions with free-form narrative
+
+Fix any failure.
+
+===========================================================
+PHASE 11 — FINAL STRATEGY VALIDATOR
+===========================================================
+
+Verify the deterministic final validator rejects:
+
+- Positioning based on POST_PURCHASE_FRICTION
+- Positioning based only on PRE_PURCHASE_OBJECTION
+- aspiration presented as pain
+- competitor marketing claim presented as customer truth
+- weak isolated signal dominating stronger eligible evidence
+- unsupported product promise
+- invented pain
+- merged pain
+- missing pain lineage
+- Build Plan contradicting engine-selected roles
+
+Verify valid routing passes:
+
+- Positioning uses purchase motivation
+- Offer uses same core pain plus separate objection
+- Funnel uses objection
+- Retention uses refund/support friction
+- final plan preserves all IDs
+
+===========================================================
+PHASE 12 — FULL REGRESSION TEST PASS
+===========================================================
+
+Run all relevant existing tests, not only new Task 163 tests.
+
+At minimum:
+
+- Task #154 exact-run plan/preview lineage
+- Task #157 Offer alignment enforcement
+- Task #158 timeout policy and retry cleanup
+- CEL tests
+- System Control tests
+- Strategy Root tests
+- Audience tests
+- Offer tests
+- Retention tests
+- Build Plan tests
+- plan synthesis grounding tests
+- tenant isolation tests
+- evidence registry tests
+- stale snapshot tests
+
+Create missing tests where needed.
+
+Minimum required scenarios:
+
+1. Refund complaint → POST_PURCHASE_FRICTION
+2. Strategic confusion → PURCHASE_MOTIVATION
+3. ROI fear → PRE_PURCHASE_OBJECTION
+4. Aspiration ≠ pain
+5. Competitor copy ≠ direct customer pain
+6. LLM cannot invent pain
+7. LLM cannot invent evidence
+8. Invalid evidence rejected
+9. Cross-tenant evidence rejected
+10. Positioning cannot use refund friction
+11. Retention can use refund friction
+12. Offer core and objection remain separate
+13. No pain merging
+14. Product-fit mismatch blocks core use
+15. Lower-ranked pain needs valid justification
+16. Pain IDs persist through plan synthesis
+17. Build Plan cannot reselect from Business Context
+18. Exact-run plan lineage
+19. Preview exact-run lineage
+20. Timeout tests remain green
+21. CEL still rejects unsupported claims
+22. System Control still blocks genuine violations
+23. No fake data
+24. No hardcoded MarketMindAI-specific logic
+
+===========================================================
+PHASE 13 — FULL CODE HEALTH CHECK
+===========================================================
+
+Run:
+
+- focused unit tests
+- integration tests
+- route tests
+- database contract tests
+- TypeScript check
+- backend startup
+- migration check
+- API smoke tests
+- frontend/Preview smoke test
+
+Report:
+
+- baseline TypeScript errors
+- final TypeScript errors
+- net-new errors
+- test count
+- pass/fail count
+- skipped tests
+- flaky tests
+- known unrelated failures
+
+Fix every error introduced by Task 163.
+
+Do not attempt to fix unrelated historical baseline errors unless they block this task.
+
+===========================================================
+PHASE 14 — ONE FULL REAL END-TO-END RUN
+===========================================================
+
+Only after ALL targeted and regression tests pass:
+
+Run ONE fresh real MarketMindAI campaign through the complete pipeline.
+
+Campaign:
+
+campaign_1773576062201_6t0oxi
+
+Use only real data.
+
+Do NOT:
+
+- seed fake pains
+- insert fake evidence
+- manually insert snapshots
+- manually insert plan
+- force PASS
+- approve
+- activate
+- start Performance Loop
+
+Capture exact:
+
+- runId
+- jobId
+- start time
+- source revision
+- timeout policy revision
+
+===========================================================
+PHASE 15 — VERIFY ALL 15 ENGINES
+===========================================================
+
+For each engine report:
+
+- status
+- runtime
+- snapshot ID
+- run/job lineage
+- selected pain IDs
+- pain roles
+- validation result
+
+Expected:
+
+15/15 genuine execution.
+
+No old snapshot may count.
+
+===========================================================
+PHASE 16 — VERIFY REAL PAIN ROUTING
+===========================================================
+
+Using the fresh run, prove:
+
+- refund/support complaints are classified as POST_PURCHASE_FRICTION
+- they do not dominate Positioning
+- they do not become the Offer core unless genuinely eligible
+- they are available to Retention
+- the core strategic pain is a purchase motivation or unmet outcome
+- Offer uses separate core and objection roles
+- no merged pain appears
+- product-fit checks pass
+- pain IDs resolve to real evidence
+
+Compare old and new behavior explicitly.
+
+===========================================================
+PHASE 17 — VERIFY BUILD PLAN + PREVIEW
+===========================================================
+
+If System Control allows a plan:
+
+Verify:
+
+Fresh run
+→ fresh snapshots
+→ pain roles
+→ Build Plan
+→ persisted strategic plan
+→ exact job lineage
+→ run-scoped API
+→ Preview
+
+Open the actual Preview.
+
+Verify visible:
+
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Funnel
+- Retention
+- Strategic Plan
+
+All must belong to the exact new run.
+
+The plan must preserve pain IDs and roles.
+
+No section may display old-run data.
+
+===========================================================
+PHASE 18 — REPAIR LOOP
+===========================================================
+
+If any test or real-run stage fails:
+
+1. Identify exact root cause.
+2. Fix only the proven issue.
+3. Rerun the failed tests.
+4. Rerun all impacted regression tests.
+5. If the full run failed because of the fix, rerun one final full run after repair.
+
+Do not stop at the first failure.
+
+Do not declare the task complete while any in-scope issue remains broken.
+
+===========================================================
+PHASE 19 — STOP CONDITIONS
+===========================================================
+
+You may stop only when one of these is true:
+
+SUCCESS:
+
+- all Task 163 implementation is complete
+- all focused tests pass
+- all regression tests pass
+- no net-new TS errors
+- backend starts cleanly
+- fresh full run completes
+- pain routing is proven live
+- Build Plan preserves engine decisions
+- Preview shows exact current run
+- no fake data
+- no approval/activation performed
+
+OR
+
+PROVEN EXTERNAL BLOCKER:
+
+- an external service/platform failure prevents completion
+- blocker is outside code control
+- exact evidence is provided
+- all local code/tests still pass
+
+Do not stop because the task is long.
+
+Do not stop because one tool call failed.
+
+Do not stop because a test needs repair.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return ONE consolidated final report.
+
+Include:
+
+1. What Task 163 had already implemented.
+2. What was incomplete.
+3. Bugs found.
+4. Bugs fixed.
+5. Files changed.
+6. Schema/migration changes.
+7. Pain registry architecture.
+8. Classifier and judge architecture.
+9. Contextual dominance.
+10. Engine-specific routing.
+11. Retention routing.
+12. No-pain-merging enforcement.
+13. Product-fit enforcement.
+14. Build Plan source-of-truth.
+15. Build Plan pain-role preservation.
+16. Final strategy validator.
+17. Tests run and results.
+18. TypeScript baseline vs final.
+19. Backend/API/frontend verification.
+20. Fresh run ID/job ID.
+21. 15-engine result.
+22. Real pain classification result.
+23. Real engine routing result.
+24. New strategic plan lineage.
+25. Preview lineage.
+26. Remaining issues, if any.
+27. Proof no fake data was created.
+28. Proof no lifecycle was bypassed.
+
+Finally answer clearly:
+
+A. Is Task 163 fully implemented?
+
+B. Did every relevant engine consume authoritative pain IDs?
+
+C. Did Retention correctly receive post-purchase friction?
+
+D. Did Positioning avoid refund/support friction as core strategy?
+
+E. Did Offer preserve core and objection pains separately?
+
+F. Did Build Plan preserve engine-selected pain roles?
+
+G. Did any engine merge unrelated pains?
+
+H. Did the full real run complete successfully?
+
+I. Does the Preview show the exact latest run?
+
+J. Is the system now safe to move to manual plan review?
+
+Do not mark complete before satisfying these conditions.

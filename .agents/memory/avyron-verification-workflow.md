@@ -36,7 +36,10 @@ description: How to typecheck and how to verify orchestrator/engine behaviour in
 
 - Frontend serves on port 8081 (Expo web), backend on 5000; the backend dev-proxies non-API routes to Expo.
 - For Playwright/testing-subagent UI runs, log in with the dev preview backdoor: `dev@avyron.test` / `preview` (maps to the MarketMindAI dev account) — no real credentials needed.
+- The backdoor user has NO users row — every auth-adjacent endpoint that looks up `users` by id needs its own backdoor branch (login/register/`/api/auth/me` have one as of 2026-08-09). Symptom of a missing branch: login works, then AuthGate bounces every navigation to /login after the next `/me` refetch. Note: the backdoor is NOT NODE_ENV-gated — gate it before production hardening.
+- The testing subagent often cannot read JSON bodies of the app's own authenticated fetches (and its manual fetches lack the bearer header → 401). Verify API lineage via the backend HTTP request logs (structured log lines include the response body) instead of asking the tester to extract JSON.
 - For API-level verification, mint a JWT with `.local/scripts/mint-jwt.ts` (signed with SESSION_SECRET, aud `avyron-ai`, iss `avyron-auth`).
+- Architect (code-review) subagent runs can fail repeatedly with RUN_FAILED when `includeGitDiff: true` and the working tree carries a large uncommitted diff — retry without the diff and list `relevantFiles` explicitly.
 
 # Synthetic-audit harness gotchas (Audit Runner)
 

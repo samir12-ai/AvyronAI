@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { selectPainForUse } from "../shared/audience-pain-registry";
 import {
   buildDoctrineBlock,
   deriveAnchorFromProductDna,
@@ -112,6 +113,43 @@ function validateMechanismAxisAlignment(
 }
 
 export async function runMechanismEngine(
+  positioning: MechanismEnginePositioningInput,
+  differentiation: MechanismEngineDifferentiationInput,
+  accountId: string,
+  analyticalEnrichment?: any,
+  strategic?: RunStrategicContext,
+  productDna?: ProductDnaLike | null,
+  painRegistry?: any[],
+): Promise<MechanismEngineResult> {
+  const result = await runMechanismEngineInternal(
+    positioning, differentiation, accountId, analyticalEnrichment, strategic, productDna,
+  );
+  // Authoritative pain routing (Task 163): mechanism explains the root cause
+  // of the CORE purchase pain — never a post-purchase complaint (the
+  // `mechanism` use is only carried by CORE_PURCHASE). Entry wrapper ⇒ the
+  // selected role rides EVERY return path, including degraded ones.
+  if (Array.isArray(painRegistry) && painRegistry.length > 0) {
+    const corePain = selectPainForUse(painRegistry, "mechanism");
+    if (corePain) {
+      console.log(`[MechanismEngine] MECHANISM_PAIN_SELECTED | painId=${corePain.painId} | class=${corePain.classification} | rank=${corePain.rank} | rootCauses=${(corePain.rootCauseIds || []).length}`);
+    }
+    (result as any).selectedPainRoles = {
+      core: corePain
+        ? {
+            painId: corePain.painId,
+            canonical: corePain.canonical,
+            rank: corePain.rank,
+            role: "mechanism_root_cause" as const,
+            classification: corePain.classification,
+            rootCauseIds: corePain.rootCauseIds || [],
+          }
+        : null,
+    };
+  }
+  return result;
+}
+
+async function runMechanismEngineInternal(
   positioning: MechanismEnginePositioningInput,
   differentiation: MechanismEngineDifferentiationInput,
   accountId: string,

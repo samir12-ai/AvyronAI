@@ -39,6 +39,12 @@ export interface PersuasionAudienceInput {
   audiencePains: any[];
   desireMap: Record<string, any>;
   audienceSegments: any[];
+  /**
+   * Authoritative pain registry from the orchestrator run context (Task 163).
+   * Optional — legacy `audiencePains` stays untouched as the raw input; the
+   * registry is the validated routing layer (classification + allowedUses).
+   */
+  painRegistry?: any[];
 }
 
 export interface PersuasionPositioningInput {

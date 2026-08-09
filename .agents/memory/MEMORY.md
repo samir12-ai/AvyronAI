@@ -48,3 +48,5 @@
 - [Build Plan snapshot persistence](build-plan-snapshot-persistence.md) — build_plan_snapshots rows are written ONLY by the HTTP route; direct runBuildPlanLayer calls leave no row, so a null job-bound snapshot on a healthy harness run is expected, not a lineage failure.
 - [Task-agent run evidence](task-agent-run-evidence.md) — task agents share the DB but not the filesystem; verify their real runs via orchestrator_jobs/job_id-bound snapshot rows, never via .local artifact dirs.
 - [Audience pain registry & role routing](audience-pain-registry.md) — approvedAudiencePains IS the registry; engines emit selectedPainRoles on every path; synthesis preserves verbatim, never merges/reselects.
+- [Wrapper guarantees vs reuse paths](wrapper-guarantees-bypass-paths.md) — entry-wrapper-attached metadata is dropped by snapshot-reuse branches; audit every result-producing path, share one attach helper.
+- [JSON-text column normalization](json-text-column-normalization.md) — text-stored JSON crashes .map readers the first time a column goes non-null; normalize at load site with type-appropriate defaults ([]/null).

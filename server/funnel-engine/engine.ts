@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { selectPainsForUse } from "../shared/audience-pain-registry";
 import {
   buildDoctrineBlock,
   deriveAnchorFromProductDna,
@@ -1356,6 +1357,45 @@ export interface FunnelAwarenessInput {
 }
 
 export async function runFunnelEngine(
+  mi: FunnelMIInput,
+  audience: FunnelAudienceInput,
+  offer: FunnelOfferInput,
+  positioning: FunnelPositioningInput,
+  differentiation: FunnelDifferentiationInput,
+  accountId: string,
+  awareness?: FunnelAwarenessInput | null,
+  analyticalEnrichment?: any,
+  strategic?: RunStrategicContext,
+  productDna?: ProductDnaLike | null,
+): Promise<FunnelResult> {
+  const result = await runFunnelEngineInternal(
+    mi, audience, offer, positioning, differentiation, accountId, awareness, analyticalEnrichment, strategic, productDna,
+  );
+  // Authoritative pain routing (Task 163): the funnel prioritizes
+  // pre-purchase conversion barriers — the primary role is the
+  // highest-priority OBJECTION eligible for the `funnel` use, with the core
+  // purchase pain as fallback anchor; POST_PURCHASE_FRICTION never carries
+  // the `funnel` use. Entry wrapper ⇒ attached on EVERY return path.
+  if (Array.isArray(audience?.painRegistry) && audience.painRegistry.length > 0) {
+    const funnelEligible = selectPainsForUse(audience.painRegistry, "funnel");
+    const objections = funnelEligible.filter((pain) => pain.classification === "OBJECTION");
+    const primary = objections[0] ?? funnelEligible[0] ?? null;
+    if (primary) {
+      console.log(`[FunnelEngine] FUNNEL_PAIN_SELECTED | painId=${primary.painId} | class=${primary.classification} | rank=${primary.rank} | objections=${objections.length}`);
+    }
+    (result as any).selectedPainRoles = {
+      primary: primary
+        ? { painId: primary.painId, canonical: primary.canonical, rank: primary.rank, role: "conversion_barrier" as const, classification: primary.classification }
+        : null,
+      objections: objections.map((pain) => ({
+        painId: pain.painId, canonical: pain.canonical, rank: pain.rank, role: "conversion_barrier" as const, classification: pain.classification,
+      })),
+    };
+  }
+  return result;
+}
+
+async function runFunnelEngineInternal(
   mi: FunnelMIInput,
   audience: FunnelAudienceInput,
   offer: FunnelOfferInput,

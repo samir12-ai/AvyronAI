@@ -427,6 +427,13 @@ export interface AudiencePainRolePreservation {
     core?: { painId: string; source: "offer" };
     objections?: Array<{ painId: string; source: "offer" }>;
     retention?: { painId: string; classification?: string; source: "retention" };
+    positioningCore?: { painId: string; classification?: string; source: "positioning" };
+    differentiationCore?: { painId: string; classification?: string; source: "differentiation" };
+    mechanismCore?: { painId: string; classification?: string; rootCauseIds?: string[]; source: "mechanism" };
+    funnelPrimary?: { painId: string; classification?: string; source: "funnel" };
+    funnelObjections?: Array<{ painId: string; classification?: string; source: "funnel" }>;
+    persuasionMotivations?: Array<{ painId: string; classification?: string; source: "persuasion" }>;
+    persuasionObjections?: Array<{ painId: string; classification?: string; source: "persuasion" }>;
   } | null;
   violations: string[];
 }
@@ -482,7 +489,83 @@ export function extractAudiencePainRoles(
     }
   }
 
-  const hasAny = !!(roles.core || roles.retention || roles.objections?.length);
+  // ── Acquisition-engine roles (Task 163 completion) ──
+  // Each engine's selectedPainRoles is preserved VERBATIM. A core/anchor role
+  // classified POST_PURCHASE_FRICTION is a structural violation (allowedUses
+  // makes it impossible via selectPainForUse, so seeing one means the engine
+  // output was tampered with or the registry was bypassed) — never repaired.
+  const engineOut = (id: string): any => {
+    const step = results.get(id as EngineId);
+    return step?.status === "SUCCESS" && step.output ? (step.output.output || step.output) : null;
+  };
+
+  const positioningCore = engineOut("positioning")?.selectedPainRoles?.core;
+  if (positioningCore?.painId) {
+    if (positioningCore.classification === "POST_PURCHASE_FRICTION") {
+      violations.push("POSITIONING_CORE_POST_PURCHASE_FORBIDDEN");
+    } else {
+      roles.positioningCore = { painId: positioningCore.painId, classification: positioningCore.classification, source: "positioning" };
+    }
+  }
+
+  const differentiationCore = engineOut("differentiation")?.selectedPainRoles?.core;
+  if (differentiationCore?.painId) {
+    if (differentiationCore.classification === "POST_PURCHASE_FRICTION") {
+      violations.push("DIFFERENTIATION_CORE_POST_PURCHASE_FORBIDDEN");
+    } else {
+      roles.differentiationCore = { painId: differentiationCore.painId, classification: differentiationCore.classification, source: "differentiation" };
+    }
+  }
+
+  const mechanismCore = engineOut("mechanism")?.selectedPainRoles?.core;
+  if (mechanismCore?.painId) {
+    if (mechanismCore.classification === "POST_PURCHASE_FRICTION") {
+      violations.push("MECHANISM_CORE_POST_PURCHASE_FORBIDDEN");
+    } else {
+      roles.mechanismCore = {
+        painId: mechanismCore.painId,
+        classification: mechanismCore.classification,
+        rootCauseIds: Array.isArray(mechanismCore.rootCauseIds) ? mechanismCore.rootCauseIds : undefined,
+        source: "mechanism",
+      };
+    }
+  }
+
+  const funnelRoles = engineOut("funnel")?.selectedPainRoles;
+  if (funnelRoles?.primary?.painId) {
+    if (funnelRoles.primary.classification === "POST_PURCHASE_FRICTION") {
+      violations.push("FUNNEL_PRIMARY_POST_PURCHASE_FORBIDDEN");
+    } else {
+      roles.funnelPrimary = { painId: funnelRoles.primary.painId, classification: funnelRoles.primary.classification, source: "funnel" };
+    }
+  }
+  if (Array.isArray(funnelRoles?.objections)) {
+    const funnelObjections = funnelRoles.objections
+      .filter((o: any) => typeof o?.painId === "string" && o.painId.length > 0)
+      .map((o: any) => ({ painId: o.painId, classification: o.classification, source: "funnel" as const }));
+    if (funnelObjections.length > 0) roles.funnelObjections = funnelObjections;
+  }
+
+  const persuasionRoles = engineOut("persuasion")?.selectedPainRoles;
+  if (Array.isArray(persuasionRoles?.motivations)) {
+    const motivations = persuasionRoles.motivations
+      .filter((m: any) => typeof m?.painId === "string" && m.painId.length > 0)
+      .map((m: any) => ({ painId: m.painId, classification: m.classification, source: "persuasion" as const }));
+    if (motivations.length > 0) roles.persuasionMotivations = motivations;
+  }
+  if (Array.isArray(persuasionRoles?.objections)) {
+    const persuasionObjections = persuasionRoles.objections
+      .filter((o: any) => typeof o?.painId === "string" && o.painId.length > 0)
+      .map((o: any) => ({ painId: o.painId, classification: o.classification, source: "persuasion" as const }));
+    if (persuasionObjections.length > 0) roles.persuasionObjections = persuasionObjections;
+  }
+
+  const hasAny = !!(
+    roles.core || roles.retention || roles.objections?.length ||
+    roles.positioningCore || roles.differentiationCore || roles.mechanismCore ||
+    roles.funnelPrimary || roles.funnelObjections?.length ||
+    roles.persuasionMotivations?.length || roles.persuasionObjections?.length
+  );
   return { roles: hasAny ? roles : null, violations };
 }
 
@@ -1434,6 +1517,49 @@ export async function synthesizePlan(
     activeStrategyRoot = await getActiveRoot(config.campaignId, config.accountId);
     if (activeStrategyRoot) {
       console.log(`[PlanSynthesis] STRATEGY_ROOT_LOADED | rootId=${activeStrategyRoot.id} | hash=${activeStrategyRoot.rootHash}`);
+      // Persisted strategy_roots rows store JSON fields as text. Parse them
+      // once here so every downstream read site in synthesis sees the parsed
+      // shape. (Other modules parse per-site; this module assumed arrays and
+      // crashed with ".map is not a function" the first time approvedObjections
+      // was non-null.) On MALFORMED JSON text we normalize to the field's
+      // type-appropriate safe default ([] / null) instead of keeping the raw
+      // string — downstream reads call .map on the array fields and would
+      // crash on a leaked string. The warning keeps the degradation truthful.
+      const parseMaybe = (v: any, fallback: any) => {
+        if (typeof v !== "string") return v;
+        try { return JSON.parse(v); } catch {
+          console.warn(`[PlanSynthesis] STRATEGY_ROOT_FIELD_MALFORMED_JSON | using safe default`);
+          return fallback;
+        }
+      };
+      const jsonTextFields: Array<[string, any]> = [
+        ["approvedMechanism", null],
+        ["approvedAudiencePains", []],
+        ["approvedDesires", []],
+        ["approvedClaims", []],
+        ["approvedObjections", []],
+        ["approvedProofTypes", []],
+        ["approvedPositioningContext", null],
+      ];
+      for (const [key, fallback] of jsonTextFields) {
+        activeStrategyRoot[key] = parseMaybe(activeStrategyRoot[key], fallback);
+      }
+      // Read-path aliases: synthesis prompts reference field names that never
+      // existed on the persisted row (silent empty output until now). Map them
+      // from the real columns so the locked-decision grounding works as designed.
+      if (!Array.isArray(activeStrategyRoot.approvedPains)) {
+        activeStrategyRoot.approvedPains = Array.isArray(activeStrategyRoot.approvedAudiencePains)
+          ? activeStrategyRoot.approvedAudiencePains.map((p: any) =>
+              typeof p === "string" ? p : (p?.originalStatement || p?.pain || p?.normalizedStatement || ""))
+              .filter((s: string) => s.length > 0)
+          : [];
+      }
+      if (activeStrategyRoot.approvedTransformationAxis === undefined) {
+        activeStrategyRoot.approvedTransformationAxis = activeStrategyRoot.approvedTransformation ?? null;
+      }
+      if (activeStrategyRoot.contrastAxis === undefined) {
+        activeStrategyRoot.contrastAxis = activeStrategyRoot.contrastAxisText ?? null;
+      }
     } else {
       console.warn(`[PlanSynthesis] NO_ACTIVE_STRATEGY_ROOT | campaign=${config.campaignId}`);
     }

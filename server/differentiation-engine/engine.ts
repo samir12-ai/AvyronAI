@@ -1,4 +1,5 @@
 import { aiChat } from "../ai-client";
+import { selectPainForUse } from "../shared/audience-pain-registry";
 import {
   buildDoctrineBlock,
   deriveAnchorFromProductDna,
@@ -1355,6 +1356,36 @@ function safeJsonParse(text: any): any {
 }
 
 export async function runDifferentiationEngine(
+  mi: MIInput,
+  audience: AudienceInput,
+  positioning: PositioningInput,
+  accountId: string,
+  profile?: ProfileInput | null,
+  analyticalEnrichment?: any,
+  strategic?: RunStrategicContext,
+  productDna?: ProductDnaLike | null,
+): Promise<DifferentiationResult> {
+  const result = await runDifferentiationEngineInternal(
+    mi, audience, positioning, accountId, profile, analyticalEnrichment, strategic, productDna,
+  );
+  // Authoritative pain routing (Task 163): differentiation anchors on the
+  // highest-priority pain carrying the `differentiation` use (CORE_PURCHASE
+  // only). Attached via entry wrapper so EVERY return path carries the role.
+  if (Array.isArray(audience?.painRegistry) && audience.painRegistry.length > 0) {
+    const corePain = selectPainForUse(audience.painRegistry, "differentiation");
+    if (corePain) {
+      console.log(`[DifferentiationEngine] DIFFERENTIATION_PAIN_SELECTED | painId=${corePain.painId} | class=${corePain.classification} | rank=${corePain.rank}`);
+    }
+    (result as any).selectedPainRoles = {
+      core: corePain
+        ? { painId: corePain.painId, canonical: corePain.canonical, rank: corePain.rank, role: "core_differentiation" as const, classification: corePain.classification }
+        : null,
+    };
+  }
+  return result;
+}
+
+async function runDifferentiationEngineInternal(
   mi: MIInput,
   audience: AudienceInput,
   positioning: PositioningInput,

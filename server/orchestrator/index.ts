@@ -117,6 +117,8 @@ import {
 // out of scope (boundary enforced by server/tests/retry-policy-boundary.test.ts).
 import { planRetry, computeShadowRetryRecommendation } from "../decision-policy/retry-policy";
 import { synthesizePlan } from "./plan-synthesis";
+import { buildAudiencePainRegistry, attachSelectedPainRoles } from "../shared/audience-pain-registry";
+import { refineAudiencePainRegistry } from "../shared/pain-classifier";
 import {
   buildMemoryContext,
   serializeMemoryContextForPrompt,
@@ -273,6 +275,16 @@ interface EngineContext {
   integritySnapshotId?: string;
   miSnapshotId?: string;
   audienceSnapshotId?: string;
+  /**
+   * Authoritative Audience pain registry (Task 163 completion). Built once,
+   * immediately after the Audience engine resolves (fresh OR reuse path),
+   * from the canonicalized audiencePains: deterministic build → judged LLM
+   * classification → evidence-ownership validation. Threaded read-only into
+   * positioning/differentiation/mechanism/funnel/persuasion inputs and passed
+   * verbatim into Strategy Root assembly so the persisted registry is the
+   * IDENTICAL record set (single source of truth, no parallel rebuild drift).
+   */
+  painRegistry?: any[];
   positioningSnapshotId?: string;
   differentiationSnapshotId?: string;
   analyticalEnrichment?: any;
@@ -1654,6 +1666,46 @@ async function executeEngine(
         // so without this later engines would have no prior to defend).
         appendAudienceDecision(ctx, (result as any)?.audienceSegments);
 
+        // ── AUTHORITATIVE PAIN REGISTRY (Task 163 completion) ──
+        // Built ONCE here — the earliest point where the canonical pains and
+        // their audience snapshot lineage both exist — then threaded into
+        // every downstream engine and, unchanged, into Strategy Root
+        // assembly. Deterministic build → judged LLM classification (LLM may
+        // classify/explain/rank; deterministic judge verifies; rejected
+        // records keep the deterministic classification) → evidence-ownership
+        // validation (cross-tenant evidence can never validate a pain).
+        // Failure here is non-fatal: engines fall back to legacy pain
+        // handling and the root assembler rebuilds deterministically.
+        try {
+          const painsForRegistry = (ctx.audience as any)?.audiencePains;
+          if (Array.isArray(painsForRegistry) && painsForRegistry.length > 0 && ctx.audienceSnapshotId) {
+            const deterministicRegistry = buildAudiencePainRegistry(painsForRegistry, {
+              accountId: config.accountId,
+              audienceSnapshotId: ctx.audienceSnapshotId,
+            });
+            const anchorForFit = runStrategicContextOf(ctx)?.doctrine?.productAnchor ?? null;
+            const productCapabilities = anchorForFit
+              ? `Product: ${anchorForFit.name} (${anchorForFit.type}). Solves: ${anchorForFit.coreProblemSolved}. Differentiator: ${anchorForFit.differentiatingFeature}. Attributes: ${(anchorForFit.keyAttributes || []).join(", ")}`
+              : null;
+            const refined = await refineAudiencePainRegistry(deterministicRegistry, {
+              accountId: config.accountId,
+              campaignId: config.campaignId,
+              productCapabilities,
+              llmEnabled: process.env.SYNTHETIC_AUDIT_MODE !== "1",
+            });
+            ctx.painRegistry = refined.registry;
+            console.log(`[Orchestrator] PAIN_REGISTRY_BUILT | pains=${refined.registry.length} | classifier=${refined.classifierUsed} | judgeRejections=${refined.judgeRejections.length} | evidenceIssues=${refined.evidenceIssues.length}`);
+            if (refined.judgeRejections.length > 0) {
+              console.log(`[Orchestrator] PAIN_JUDGE_REJECTIONS | ${refined.judgeRejections.join(", ")}`);
+            }
+            if (refined.evidenceIssues.length > 0) {
+              console.warn(`[Orchestrator] PAIN_EVIDENCE_ISSUES | ${refined.evidenceIssues.join(", ")}`);
+            }
+          }
+        } catch (painErr: any) {
+          console.warn(`[Orchestrator] PAIN_REGISTRY_BUILD_FAILED | ${painErr.message} — downstream engines fall back to legacy pain handling`);
+        }
+
         // ── COMMERCIAL SIGNAL EMISSION: buyerPsychology (Phase 4 marketing-logic upgrade) ──
         // Audience runs first in pipeline, so this signal is available to ALL downstream
         // engines (positioning, offer, awareness, persuasion).
@@ -1829,6 +1881,9 @@ async function executeEngine(
             logReuseHit("positioning", reused.snap.id, posInputHash);
             result = reused.hydrated;
             markEngineReused(result);
+            // Reuse skips the engine entry wrapper — re-derive pain roles so
+            // reuse runs carry the same routing a fresh run would.
+            attachSelectedPainRoles("positioning", result, ctx.painRegistry);
           } else {
             logReuseMiss("positioning", posInputHash);
           }
@@ -1842,6 +1897,7 @@ async function executeEngine(
             ctx.analyticalEnrichment,
             jobId,
             runStrategicContextOf(ctx),
+            ctx.painRegistry,
           );
           if (result?.snapshotId) {
             try {
@@ -1930,6 +1986,8 @@ async function executeEngine(
             logReuseHit("differentiation", reused.snap.id, diffInputHash);
             result = reused.hydrated;
             diffReused = true;
+            // Reuse skips the engine entry wrapper — re-derive pain roles.
+            attachSelectedPainRoles("differentiation", result, ctx.painRegistry);
             ctx.differentiation = result;
             ctx.differentiationSnapshotId = reused.snap.id;
             snapshotId = reused.snap.id;
@@ -1944,7 +2002,7 @@ async function executeEngine(
         const posInput = extractPositioningInput(ctx.positioning);
         result = await runDifferentiationEngine(
           miInput,
-          audInput,
+          { ...audInput, painRegistry: ctx.painRegistry },
           posInput,
           config.accountId,
           undefined,
@@ -2053,7 +2111,9 @@ async function executeEngine(
           if (reused) {
             logReuseHit("mechanism", reused.snap.id, mechInputHash);
             output = reused.hydrated;
-            ctx.mechanism = reused.hydrated;
+            // Reuse skips the engine entry wrapper — re-derive pain roles.
+            attachSelectedPainRoles("mechanism", output, ctx.painRegistry);
+            ctx.mechanism = output;
             ctx.mechanismSnapshotId = reused.snap.id;
             snapshotId = reused.snap.id;
             ctx.depthGateStatus!.mechanism = "DEPTH_PASSED";
@@ -2089,7 +2149,7 @@ async function executeEngine(
           // T002 v2: confidence flows downstream
           confidenceScore: typeof ctx.differentiation?.confidenceScore === "number" ? ctx.differentiation.confidenceScore : null,
         };
-        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment, runStrategicContextOf(ctx), (ctx.audience as any)?.productDna || null);
+        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment, runStrategicContextOf(ctx), (ctx.audience as any)?.productDna || null, ctx.painRegistry);
         output = result;
         ctx.mechanism = result;
 
@@ -2169,6 +2229,7 @@ async function executeEngine(
               positioningSnapshot: positioningSnapshotForAssembler,
               differentiationContext,
               audienceOverride: ctx.audience,
+              painRegistry: ctx.painRegistry,
             });
 
             console.log(`[Orchestrator] STRATEGY_ROOT_CLAIMS | claimsCount=${(rootInput.approvedClaims as any[])?.length || 0} | topClaim="${String(rootInput.approvedClaim || "").substring(0, 80)}" | painsCount=${(rootInput.approvedAudiencePains as any[])?.length || 0}`);
@@ -2525,7 +2586,9 @@ async function executeEngine(
           if (reused) {
             logReuseHit("funnel", reused.snap.id, funnelInputHash);
             output = reused.hydrated;
-            ctx.funnel = reused.hydrated;
+            // Reuse skips the engine entry wrapper — re-derive pain roles.
+            attachSelectedPainRoles("funnel", output, ctx.painRegistry);
+            ctx.funnel = output;
             snapshotId = reused.snap.id;
             ctx.depthGateStatus!.funnel = "DEPTH_PASSED";
             break;
@@ -2556,7 +2619,7 @@ async function executeEngine(
         } : null;
         const __funnelStart = Date.now();
         const result = await runFunnelEngine(
-          miInput, audInput, offerInput, posInput, diffInput,
+          miInput, { ...audInput, painRegistry: ctx.painRegistry }, offerInput, posInput, diffInput,
           config.accountId, awarenessInput,
           ctx.analyticalEnrichment,
           runStrategicContextOf(ctx),
@@ -2724,7 +2787,9 @@ async function executeEngine(
           if (reused) {
             logReuseHit("persuasion", reused.snap.id, persuasionInputHash);
             output = reused.hydrated;
-            ctx.persuasion = reused.hydrated;
+            // Reuse skips the engine entry wrapper — re-derive pain roles.
+            attachSelectedPainRoles("persuasion", output, ctx.painRegistry);
+            ctx.persuasion = output;
             snapshotId = reused.snap.id;
             break;
           }
@@ -2750,7 +2815,7 @@ async function executeEngine(
         const persuasionLineage = buildUpstreamLineage(ctx);
         const __persStart = Date.now();
         const result = await runPersuasionEngine(
-          miInput, audInput, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
+          miInput, { ...audInput, painRegistry: ctx.painRegistry }, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
           config.accountId, persuasionLineage,
           ctx.analyticalEnrichment,
           runStrategicContextOf(ctx),

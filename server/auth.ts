@@ -857,6 +857,28 @@ export function registerAuthRoutes(app: Router) {
       return res.status(401).json({ error: "Invalid token" });
     }
 
+    // --- DEV PREVIEW BACKDOOR (matches the login/register backdoor blocks) ---
+    // The backdoor token carries userId "dev-user-mock-uuid" which has no users
+    // row; without this branch /me returns 404, the client flips to
+    // unauthenticated, and AuthGate bounces every navigation to /login.
+    if (payload.userId === "dev-user-mock-uuid") {
+      return res.json({
+        user: {
+          id: payload.userId,
+          email: "dev@avyron.test",
+          name: "dev",
+          subscriptionStatus: "active",
+          planType: "trial",
+          videoCredits: 100,
+          trialEnd: null,
+          hasSeenIntro: true,
+          accountId: payload.accountId,
+          isAdmin: false,
+        },
+      });
+    }
+    // --- END DEV PREVIEW BACKDOOR ---
+
     try {
       const [user] = await db.select().from(users).where(eq(users.id, payload.userId)).limit(1);
       if (!user) {

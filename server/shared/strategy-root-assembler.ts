@@ -89,6 +89,16 @@ interface AssemblerArgs {
   /** Optional: pre-loaded audience object — avoids a re-read when the caller
    *  already has a normalized copy in memory (e.g. orchestrator ctx.audience). */
   audienceOverride?: any;
+  /**
+   * Pre-built authoritative pain registry from the orchestrator run context
+   * (deterministic build + judged LLM classification + evidence-ownership
+   * validation). When supplied AND its lineage matches this root's
+   * account/audience snapshot, it is persisted VERBATIM — the root must hold
+   * the identical records the engines were routed with, never a parallel
+   * rebuild. Lineage mismatch or absence falls back to the deterministic
+   * build below (direct-route callers have no run registry).
+   */
+  painRegistry?: any[];
 }
 
 /**
@@ -111,6 +121,7 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
     positioningSnapshot,
     differentiationContext,
     audienceOverride,
+    painRegistry,
   } = args;
 
   // ---- Audience: prefer in-memory override; fall back to DB read by id ----
@@ -136,7 +147,13 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
     const [audSnap] = await db
       .select()
       .from(audienceSnapshots)
-      .where(and(eq(audienceSnapshots.id, audienceSnapshotId), eq(audienceSnapshots.campaignId, campaignId)))
+      // Fail closed on cross-tenant / mis-associated snapshots: the fallback
+      // hydration must be scoped by account, not just snapshot+campaign IDs.
+      .where(and(
+        eq(audienceSnapshots.id, audienceSnapshotId),
+        eq(audienceSnapshots.campaignId, campaignId),
+        eq(audienceSnapshots.accountId, accountId),
+      ))
       .limit(1);
     if (audSnap) {
       audiencePains = safeJsonParse<any[]>(audSnap.audiencePains, []);
@@ -188,12 +205,18 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
     primaryAxis: primaryMech?.axisAlignment?.primaryAxis || positioningSnapshot?.contrastAxis || null,
     contrastAxisText: positioningSnapshot?.contrastAxis || null,
     approvedMechanism: primaryMech || null,
-    // The root is the authority boundary for pains. Preserve the source
-    // records, but make IDs, rank, product-fit and permitted roles explicit.
-    approvedAudiencePains: buildAudiencePainRegistry(audiencePains, {
-      accountId,
-      audienceSnapshotId,
-    }),
+    // The root is the authority boundary for pains. Prefer the run's
+    // pre-built registry VERBATIM (identical records the engines routed
+    // with, including LLM-judged classifications) when its lineage matches;
+    // otherwise rebuild deterministically from the source pains.
+    approvedAudiencePains:
+      Array.isArray(painRegistry) && painRegistry.length > 0 &&
+      painRegistry.every((p: any) => p?.lineage?.accountId === accountId && p?.lineage?.audienceSnapshotId === audienceSnapshotId)
+        ? painRegistry
+        : buildAudiencePainRegistry(audiencePains, {
+            accountId,
+            audienceSnapshotId,
+          }),
     approvedDesires: audienceDesires,
     approvedTransformation: audienceTransformation,
     approvedClaim: mechClaim,
