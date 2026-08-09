@@ -225,10 +225,27 @@ function fuzzyTokenMatch(sourceTokens: string[], targetText: string): boolean {
   });
 }
 
+// Scaffolding prefixes fabricated by the audience engine for derived registry
+// entries ("Problem behind objection: X", "Unresolved need: Y"). They are
+// presentation labels, NOT customer pain language. If they leak into the pain
+// CONTRACT, the echo requirement demands meta-tokens ("problem", "behind",
+// "objection") and the LLM converges on template text that carries zero AEL
+// root-cause semantics — the exact failure that produced a truthful-looking
+// but input-poisoned DEPTH_FAILED "No Offer". Strip the prefix at every pain
+// text derivation site so the contract stays on real market words. The
+// downstream integrity layer2 probe reads the RAW canonical, but the cleaned
+// word set is a strict subset of the raw one, so any outcome satisfying the
+// cleaned contract still satisfies integrity l2 (never the reverse).
+const PAIN_SCAFFOLDING_PREFIX = /^\s*(problem behind objection|unresolved need)\s*:\s*/i;
+export function cleanPainScaffolding(text: string): string {
+  return (text || "").replace(PAIN_SCAFFOLDING_PREFIX, "").trim();
+}
+
 function audiencePainText(pain: any): string {
-  return typeof pain === "string"
+  const raw = typeof pain === "string"
     ? pain
     : (pain?.canonical || pain?.text || pain?.canonicalText || pain?.pain || pain?.name || pain?.label || pain?.description || "");
+  return cleanPainScaffolding(raw);
 }
 
 function buildAudienceAlignmentContext(audience: OfferAudienceInput): {
@@ -638,10 +655,10 @@ export function layer1_outcomeConstruction(
   if (!rawPainPhrase && pains.length === 0) {
     throw new Error("OFFER_INPUT_INSUFFICIENT: layer1_outcomeConstruction reached with no pain signals — runOfferEngine guard bypassed");
   }
-  const primaryPain = coerceText(
+  const primaryPain = cleanPainScaffolding(coerceText(
     rawPainPhrase || (pains.length > 0 ? pains[0] : null),
     "",
-  );
+  ));
   // Synthetic-key resolution (FIX-INPUTS): desireMap keys can be synthetic
   // index tokens ("desire_0", "0") when the map arrives keyed by position.
   // The KEY must never leak into customer-visible prose ("deliver desire_0
@@ -1692,7 +1709,7 @@ function buildDeterministicOfferSkeletons(
   const coreRegistryPain = selectPainForUse(registryPains, "offer_core");
   const objectionRegistryPains = registryPains.filter((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_objection"));
   const painsList: string[] = (() => {
-    if (coreRegistryPain) return [coreRegistryPain.canonical];
+    if (coreRegistryPain) return [cleanPainScaffolding(coreRegistryPain.canonical)];
     if (rootPains && Array.isArray(rootPains)) {
       const arr = safeLabelArray(rootPains.slice(0, 5), "skeleton.painsList.root");
       if (arr.length > 0) return arr;
@@ -1746,8 +1763,10 @@ function buildDeterministicOfferSkeletons(
     return safeLabelArray((differentiation.proofArchitecture || []).slice(0, 6), "skeleton.proofTypesList.diff");
   })();
 
-  const primaryPain = coreRegistryPain?.canonical || painsList[0] || null;
-  const altPain = painsList[1] || painsList[0] || null;
+  const primaryPainRaw = coreRegistryPain?.canonical || painsList[0] || null;
+  const primaryPain = primaryPainRaw ? cleanPainScaffolding(primaryPainRaw) : null;
+  const altPainRaw = painsList[1] || painsList[0] || null;
+  const altPain = altPainRaw ? cleanPainScaffolding(altPainRaw) : null;
   const primaryDesire = desiresList[0] || null;
   const altDesire = desiresList[1] || desiresList[0] || null;
 
@@ -1801,7 +1820,22 @@ function buildDeterministicOfferSkeletons(
   );
   // eslint-disable-next-line semantic/no-semantic-fallback
   // primaryOutcomeText is a CONTENT field for offer generation (not a canonical verdict/outcome field).
-  const primaryOutcomeText = _primaryOutcome ? _primaryOutcome : `${axisPhrase} outcome (degraded — upstream data missing)`;
+  let primaryOutcomeText = _primaryOutcome ? _primaryOutcome : `${axisPhrase} outcome (degraded — upstream data missing)`;
+  // PAIN-ECHO SELF-CONSISTENCY: the engine's own alignment contract (mirroring
+  // integrity layer2) requires the OUTCOME text alone to carry >=1 verbatim
+  // pain word. The cascade above prefers claim/transformation text, so the
+  // deterministic skeleton could emit an outcome that its own validator must
+  // reject (guaranteed AUDIENCE_MISALIGNMENT on every AI-fallback run). Weave
+  // the core pain in deterministically when no pain word survived the cascade.
+  if (primaryPain) {
+    const outcomeLower = primaryOutcomeText.toLowerCase();
+    const painWordMet = primaryPain.toLowerCase().split(/\s+/)
+      .filter((w) => w.length > 3)
+      .some((w) => outcomeLower.includes(w));
+    if (!painWordMet) {
+      primaryOutcomeText = `${primaryOutcomeText} — eliminating the pain that ${primaryPain}`;
+    }
+  }
   const _altOutcome = cascade(
     altClaimDigest.benefit,
     mechPromise,
@@ -2110,10 +2144,7 @@ Return JSON:
   // instead of relying on alignment retries.
   const painEchoPromptWords: string[] = [];
   for (const p of pains.slice(0, 5) as any[]) {
-    const painEchoText = (typeof p === "string"
-      ? p
-      : (p?.canonical || p?.text || p?.canonicalText || p?.pain || p?.name || p?.label || p?.description || "")
-    ).toLowerCase();
+    const painEchoText = audiencePainText(p).toLowerCase();
     for (const w of painEchoText.split(/\s+/)) {
       if (w.length > 3 && !painEchoPromptWords.includes(w)) {
         painEchoPromptWords.push(w);
@@ -2204,7 +2235,7 @@ ${qualifyingSignals && qualifyingSignals.length > 0 ? `Every claim must be deriv
 ${qualifyingSignals.slice(0, 10).map((s, i) => `  [${s.signalId}] (${s.originEngine}/${s.category}): "${s.text}"`).join("\n")}` : "No qualifying signals provided — generate conservatively."}
 
 ═══ SECTION 5: CONTEXT ═══
-- Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => typeof p === "string" ? p : (p?.canonical || p?.pain || p?.name || "")).filter((t: string) => t.length > 0))}
+- Top Pains: ${JSON.stringify(pains.slice(0, 5).map((p: any) => cleanPainScaffolding(typeof p === "string" ? p : (p?.canonical || p?.pain || p?.name || ""))).filter((t: string) => t.length > 0))}
 - Top Desires: ${JSON.stringify(desires.slice(0, 5).map(([k, v]: [string, any]) => {
     if (/^(desire_)?\d+$/.test(k)) {
       const resolved = v && typeof v === "object" ? (v.canonical || v.text || v.label || v.name || "") : "";
@@ -2960,6 +2991,31 @@ export async function runOfferEngine(
     audience, differentiation, mi, positioning,
   );
 
+  // ROOT-AXIS SELF-CONSISTENCY: clampOfferToAxis satisfies itself on ANY
+  // posLock token (e.g. "platform"), but the downstream post-gen validator
+  // (validatePostGeneration in shared/strategy-root.ts) requires the root's
+  // primaryAxis tokens specifically (same stem predicate). When they disagree
+  // the offer is guaranteed INVALID_ROOT_BINDING with no retry. Mirror the
+  // post-gen predicate byte-for-byte and deterministically weave the axis
+  // phrase in when it is missing — the validator itself is untouched.
+  const ensureRootAxisReference = (offer: { offerName: string; coreOutcome: string; mechanismDescription: string; outcomeLayer?: any }): void => {
+    const axis = (strategyRoot?.primaryAxis || "").replace(/_/g, " ").trim();
+    if (!axis) return;
+    const axisTokens = axis.toLowerCase().split(/\s+/).filter((t: string) => t.length > 3);
+    if (axisTokens.length === 0) return;
+    const combined = `${offer.offerName} ${offer.coreOutcome} ${offer.mechanismDescription}`.toLowerCase();
+    const hasAxisRef = axisTokens.some((t: string) => {
+      if (combined.includes(t)) return true;
+      const stem = t.replace(/(ity|ness|ment|tion|sion|ance|ence|able|ible|ful|less|ing|ous|ive|ical|ally|ized|ise|ize)$/, "");
+      return stem.length >= 3 && combined.includes(stem);
+    });
+    if (!hasAxisRef) {
+      offer.coreOutcome = `${offer.coreOutcome} — grounded in ${axis}`;
+      if (offer.outcomeLayer) offer.outcomeLayer.primaryOutcome = offer.coreOutcome;
+      console.log(`[OfferEngine-V4] ROOT_AXIS_CLAMP | appended root axis "${axis}" to coreOutcome (post-gen predicate would have failed)`);
+    }
+  };
+
   if (posLock.locked) {
     const primaryClamp = clampOfferToAxis(primaryOffer.offerName, primaryOffer.coreOutcome, primaryOffer.mechanismDescription, posLock);
     if (primaryClamp.clamped) {
@@ -2983,6 +3039,11 @@ export async function runOfferEngine(
       diagnostics.altAxisClamp = altClamp.clampActions;
     }
   }
+
+  // Root-axis self-consistency runs regardless of posLock state — the
+  // post-gen validator checks the root axis whenever a strategy root exists.
+  ensureRootAxisReference(primaryOffer);
+  ensureRootAxisReference(alternativeOffer);
 
   const posConsistency = checkPositioningConsistency(primaryOffer, positioning, differentiation);
   diagnostics.positioningConsistency = posConsistency;
@@ -3372,11 +3433,16 @@ export async function runOfferEngine(
       if (alignmentAccept) {
         console.log(`[OfferEngine-V4] ALIGNMENT_RETRY_SUCCESS | Attempt ${alignmentAttempt} ${retryValidation.aligned ? "passed" : "improved"} validation | battery=${retryBattery.passed ? "passed" : "failed"}`);
         Object.assign(primaryOffer, retryPrimary);
+        // Retry replacement path must honor the same root-axis contract as the
+        // initial build — otherwise an accepted retry candidate silently drops
+        // the axis clamp and guarantees INVALID_ROOT_BINDING at post-gen.
+        ensureRootAxisReference(primaryOffer);
         offerAlignmentValidation = retryValidation;
         offerBattery = retryBattery;
       } else if (batteryOnlyImproved) {
         console.log(`[OfferEngine-V4] BATTERY_RETRY_SUCCESS | Attempt ${alignmentAttempt} cleared the doctrine battery without alignment regression`);
         Object.assign(primaryOffer, retryPrimary);
+        ensureRootAxisReference(primaryOffer);
         offerAlignmentValidation = retryValidation;
         offerBattery = retryBattery;
       } else if (alignmentImproved && batteryRegressed) {
@@ -3492,6 +3558,11 @@ export async function runOfferEngine(
       primaryOffer.offerName || "",
       primaryOffer.coreOutcome || "",
       primaryOffer.mechanismDescription || "",
+      // problemStatement is where the skeleton and the depth-retry LLM place
+      // root-cause language ("pain — root cause: X"); omitting it makes the
+      // depth gate score a truncated representation of the offer and fail
+      // truthfully-looking on content the offer actually carries.
+      (primaryOffer as any).problemStatement || "",
       ...(primaryOffer.deliverables || []).map((d: any) => typeof d === "string" ? d : `${d.name || ""} ${d.description || ""}`),
     ];
     let celDepth = enforceEngineDepthCompliance(
@@ -3520,6 +3591,7 @@ export async function runOfferEngine(
         aiOffers.primary?.name || "",
         aiOffers.primary?.outcome || "",
         aiOffers.primary?.mechanism || "",
+        (aiOffers.primary as any)?.problemStatement || "",
         ...(aiOffers.primary?.deliverables || []),
       ];
       /* eslint-enable semantic/no-semantic-fallback */

@@ -1,0 +1,471 @@
+TASK — OFFER ENGINE ONLY: ROOT-CAUSE AND FIX THE REAL "NO OFFER" FAILURE
+
+We now have a clean fresh end-to-end real run:
+
+jobId:
+campaign_1773576062201_6t0oxi_realrun_1786269207908
+
+Important verified facts:
+
+- 15/15 engines executed successfully
+- Customer Evidence path worked:
+  350 candidates → 171 eligible
+- Pain Registry = 13 validated pains
+- pain routing violations = 0
+- unresolvedPainIds = 0
+- Cross-signal decisions:
+  107 total
+  10 eligible
+  - 1 VALIDATED_PAIN
+  - 6 VALIDATED_HOOK
+  - 3 CONFIRMED_OBJECTION
+- Build Plan synthesis itself succeeded
+- System Control blocked the run because Offer failed
+- No technical pipeline bug was found
+
+The ONLY problem to investigate now is:
+
+Offer Engine
+→ 2/2 depth attempts failed
+→ depthScore = 0.1
+→ "No Offer"
+→ offerStrength = 0
+→ Budget kill/halt
+→ System Control BLOCK
+→ fresh plan not persisted
+
+DO NOT reopen the rest of the pipeline.
+
+==================================================
+PHASE 1 — FORENSIC TRACE OF THE EXACT OFFER
+==================================================
+
+Use ONLY the exact run above.
+
+Trace the Offer Engine from input to final failure.
+
+Capture exactly what Offer received from:
+
+- Audience
+- Pain Registry
+- selectedPainRoles
+- Strategy Root
+- Positioning
+- Differentiation
+- Mechanism
+- Awareness if applicable
+- customer-origin evidence
+- cross-signal decisions if Offer consumes them
+- objections
+- desires
+- proof/evidence
+
+Show the exact selected pain IDs and their statements.
+
+Then show:
+
+- attempt 1 generated Offer
+- attempt 1 validation results
+- exact failed depth dimensions
+- attempt 2 generated Offer
+- attempt 2 validation results
+- exact failed depth dimensions
+- why the final result became "No Offer"
+
+Do not summarize this as simply "depthScore 0.1."
+
+Find the actual causal failure.
+
+==================================================
+PHASE 2 — DETERMINE WHICH COMPONENT IS WRONG
+==================================================
+
+Classify the root cause.
+
+Possible classifications:
+
+OFFER_GENERATION_PROMPT_BUG
+OFFER_INPUT_MAPPING_BUG
+PAIN_ROUTING_BUG
+MECHANISM_HANDOFF_BUG
+POSITIONING_HANDOFF_BUG
+DIFFERENTIATION_HANDOFF_BUG
+EVIDENCE_HANDOFF_BUG
+OFFER_DEPTH_VALIDATOR_BUG
+OFFER_RETRY_BUG
+OFFER_CONTRACT_BUG
+LLM_GENERATION_FAILURE
+GENUINELY_NO_VALID_OFFER
+OTHER_PROVEN_CAUSE
+
+Do NOT assume the validator is wrong.
+
+Do NOT assume the LLM is wrong.
+
+Prove it.
+
+==================================================
+PHASE 3 — IMPORTANT SANITY CHECK
+==================================================
+
+The current run has:
+
+13 validated pains
+171 eligible customer-origin evidence artifacts
+10 validated/confirmed cross-signal decisions
+valid Positioning
+valid Differentiation
+valid Mechanism
+valid Funnel
+valid Persuasion
+
+Therefore investigate this question explicitly:
+
+Is it actually reasonable that Avyron cannot formulate ANY valid Offer?
+
+If the upstream strategy contains sufficient material for a valid Offer, then "No Offer" may indicate a generation/contract/handoff problem.
+
+If the evidence genuinely cannot support an Offer, preserve the rejection.
+
+Do not force an Offer merely because we want the pipeline to pass.
+
+==================================================
+PHASE 4 — AUDIT THE DEPTH CONTRACT
+==================================================
+
+Inspect exactly how Offer depth is calculated.
+
+For every depth requirement report:
+
+requirement
+input/value evaluated
+PASS/FAIL
+why
+source lineage
+
+Determine whether the validator evaluates the actual semantic Offer or relies on brittle:
+
+- lexical matching
+- missing fields
+- wrong property names
+- stale fields
+- narrow text assembly
+- formatting
+- null/default values
+- pre-transformation output
+- wrong retry candidate
+- incorrect pain IDs
+
+We previously encountered this class of problem with CEL, so verify the actual evaluated representation.
+
+Do NOT weaken depth thresholds.
+
+==================================================
+PHASE 5 — AUDIT GENERATION INSTRUCTIONS
+==================================================
+
+Inspect the actual LLM prompt sent to Offer.
+
+Determine whether it clearly tells the model:
+
+- which pain is primary
+- which pains are secondary
+- which objections matter
+- Positioning
+- Differentiation
+- approved Mechanism
+- required transformation
+- evidence constraints
+- what constitutes a depth-passing Offer
+
+Task 163 dominance rules remain authoritative.
+
+The LLM must NOT:
+
+- choose a random pain
+- merge all pains into one Offer
+- invent a new pain
+- replace the approved Mechanism
+- ignore Positioning
+- ignore Differentiation
+- optimize merely for lexical validator tricks
+
+The Offer should synthesize the appropriate strategy inputs into a commercially coherent Offer.
+
+==================================================
+PHASE 6 — AUDIT RETRY BEHAVIOR
+==================================================
+
+The engine received two attempts.
+
+Determine:
+
+Did attempt 2 receive the exact failure diagnostics from attempt 1?
+
+Example:
+
+Attempt 1 fails because transformation is weak.
+
+Attempt 2 should explicitly be told:
+
+"Preserve X/Y/Z, but strengthen the transformation because requirement Q failed."
+
+It should NOT simply regenerate blindly.
+
+Check whether retries:
+
+- preserve valid portions
+- receive validator feedback
+- target failed dimensions
+- maintain exact pain IDs
+- maintain Mechanism
+- maintain lineage
+
+If retry #2 discarded a better candidate or regressed, identify it.
+
+==================================================
+PHASE 7 — FIX ONLY THE PROVEN CAUSE
+==================================================
+
+Once root cause is proven, implement the smallest correct fix.
+
+Examples:
+
+If generation prompt lacks required structured inputs:
+→ fix input/prompt mapping.
+
+If validator reads wrong representation:
+→ fix validator input.
+
+If retry does not receive failure diagnostics:
+→ repair retry feedback.
+
+If a valid candidate is discarded because of state handling:
+→ repair candidate selection.
+
+If LLM output contract is ambiguous:
+→ enforce the existing strategic contract more explicitly.
+
+DO NOT:
+
+- lower depth thresholds
+- bypass depth validation
+- hardcode an Offer
+- manually edit DB
+- fake evidence
+- remove System Control checks
+- change Budget Governor
+- change Pain Registry
+- change customer evidence architecture
+- change CEL
+- change confidence architecture
+- modify unrelated engines
+
+==================================================
+PHASE 8 — ENFORCEMENT ON THE LLM
+==================================================
+
+If the root cause involves Offer generation, strengthen enforcement.
+
+The Offer LLM must be given authoritative structured inputs.
+
+Conceptually:
+
+PRIMARY_PAIN:
+<exact selected pain ID + statement>
+
+SECONDARY_RELEVANT_PAINS:
+<only pains routed to Offer>
+
+POSITIONING:
+<approved current-run output>
+
+DIFFERENTIATION:
+<approved current-run output>
+
+MECHANISM:
+<approved current-run mechanism>
+
+OBJECTIONS:
+<validated relevant objections>
+
+CUSTOMER_EVIDENCE:
+<relevant evidence references>
+
+Then explicitly instruct:
+
+You are NOT selecting the strategy.
+
+You are synthesizing an Offer from already-approved strategic decisions.
+
+You MUST preserve:
+- primary pain meaning
+- Positioning
+- Differentiation
+- Mechanism
+
+You MUST NOT:
+- invent a new pain
+- substitute a different mechanism
+- merge unrelated pains
+- produce generic marketing language
+- claim unsupported outcomes
+
+A valid Offer must clearly answer:
+
+WHO is this for?
+WHAT painful situation does it solve?
+WHAT outcome/transformation is promised?
+HOW does the approved mechanism create that transformation?
+WHY is this meaningfully different?
+WHY should the audience believe it?
+WHAT objections prevent purchase?
+HOW does the Offer reduce those objections?
+
+Do not make the prompt longer for its own sake.
+Use structured authoritative context.
+
+==================================================
+PHASE 9 — TEST BEFORE REAL EXECUTION
+==================================================
+
+Add focused regression tests for the proven failure.
+
+At minimum cover:
+
+1. Valid routed pain reaches Offer generation.
+2. Pain ID preserved.
+3. Positioning preserved.
+4. Differentiation preserved.
+5. Mechanism preserved.
+6. Offer cannot invent an authoritative pain.
+7. Offer cannot silently replace Mechanism.
+8. Valid candidate can pass depth.
+9. Genuine shallow candidate still fails.
+10. Retry receives exact failed dimensions.
+11. Retry preserves already-valid dimensions.
+12. Retry cannot regress to unrelated pain.
+13. Final state cannot say COMPLETE if unresolved depth failure remains.
+14. "No Offer" remains possible when evidence genuinely cannot support one.
+15. System Control still blocks genuine Offer failure.
+
+Run adjacent Offer/Pain/Strategy Root regression tests.
+
+Confirm zero net-new TypeScript errors against baseline.
+
+==================================================
+PHASE 10 — VERIFY USING THE EXISTING RUN FIRST
+==================================================
+
+Do NOT immediately rerun all 15 engines.
+
+If technically possible, replay/regenerate ONLY the Offer Engine using the persisted exact-run inputs from:
+
+campaign_1773576062201_6t0oxi_realrun_1786269207908
+
+This is preferable because we already know the upstream inputs are valid.
+
+The replay must use:
+
+same Audience
+same Pain Registry
+same Strategy Root
+same Positioning
+same Differentiation
+same Mechanism
+same evidence lineage
+
+Do not mix runs.
+
+Do not manually inject an Offer.
+
+If Offer replay cannot safely be performed independently, explain why before running another full campaign.
+
+==================================================
+SUCCESS CRITERIA
+==================================================
+
+Success does NOT mean "make Offer pass."
+
+Success means:
+
+The Offer Engine receives the correct authoritative inputs,
+generates against the correct strategic contract,
+is evaluated against the correct representation,
+gets useful bounded retry feedback,
+and truthfully either:
+
+A. produces a depth-passing Offer
+
+OR
+
+B. returns a genuine evidence-supported "No Offer".
+
+If A occurs, capture:
+
+Offer
+primary pain ID
+core outcome
+mechanism
+differentiation
+depth score
+depth dimensions
+offerStrength
+retry count
+
+If B occurs, prove why no supported Offer can exist.
+
+==================================================
+FINAL REPORT — KEEP IT CONCISE
+==================================================
+
+Return:
+
+ROOT CAUSE:
+<one precise explanation>
+
+ATTEMPT 1:
+what generated
+what failed
+why
+
+ATTEMPT 2:
+what changed
+what failed
+why
+
+FIX:
+exact code/contract change
+
+TESTS:
+pass/fail count
+net-new TS errors
+
+REPLAY:
+PASS / NO OFFER
+depthScore
+offerStrength
+selected pain IDs
+lineage status
+
+Then answer:
+
+A. Was "No Offer" caused by genuinely insufficient strategy/evidence or by an Offer Engine defect?
+
+B. Was the exact defect fixed?
+
+C. Were any strategic thresholds or guards weakened?
+
+D. Does Offer now obey the authoritative Pain Registry + Positioning + Differentiation + Mechanism?
+
+E. Can genuine bad Offers still be rejected?
+
+F. Is there any remaining Offer Engine technical blocker?
+
+STOP THERE.
+
+Do NOT touch Build Plan.
+Do NOT rerun the full campaign unless technically required.
+Do NOT Approve.
+Do NOT Activate.
+Do NOT start Performance Loop.
