@@ -1,0 +1,484 @@
+TASK — STOP AUTO REAL-RUNS + FIX REFUND DOMINANCE AT THE SOURCE
+
+We now have a conclusive frontend audit.
+
+The frontend is correct.
+
+The newest plan genuinely contains the refund-centered strategy.
+
+Latest observed run:
+campaign_1773576062201_6t0oxi_realrun_1786279157677
+
+Latest plan:
+fae632d2...
+
+The important finding:
+
+"Refund & Access Pipeline Failure"
+is still becoming a central Mechanism / Offer / Build Plan concept.
+
+This is happening even after the new authoritative Pain Registry and contextual pain-routing architecture.
+
+Therefore this task has TWO tightly scoped objectives:
+
+1. STOP unintended real campaign runs.
+2. Find and fix why refund/post-purchase evidence is becoming core acquisition strategy.
+
+Do not touch the frontend.
+
+==================================================
+PART 1 — STOP AUTOMATIC REAL CAMPAIGN RUNS FIRST
+==================================================
+
+This is mandatory before any other work.
+
+The Real Campaign Run workflow has been re-firing when the workspace/backend restarts.
+
+That caused multiple expensive real runs without explicit user intent.
+
+Find exactly what launches:
+
+.local/scripts/run-real-campaign.ts
+or the equivalent real-run workflow.
+
+Trace:
+
+workspace start
+backend restart
+workflow restart
+dev command
+package script
+process supervisor
+→ real campaign runner
+
+Fix it so:
+
+REAL CAMPAIGN EXECUTION IS EXPLICIT-ONLY.
+
+Backend restart must NOT run a campaign.
+
+Frontend restart must NOT run a campaign.
+
+Workspace restart must NOT run a campaign.
+
+Test execution must NOT run a campaign.
+
+A real campaign may start only through an explicit operator/user action.
+
+Do not delete the real-run script.
+
+Preserve it as a manual verification tool.
+
+Add a hard safety guard if appropriate, for example requiring an explicit invocation flag/environment variable.
+
+Verify by restarting the normal backend/workspace path and proving:
+
+realCampaignRunsStarted = 0
+
+==================================================
+PART 2 — FORENSIC TRACE OF REFUND DOMINANCE
+==================================================
+
+DO NOT run another campaign.
+
+Use the already-persisted newest run:
+
+campaign_1773576062201_6t0oxi_realrun_1786279157677
+
+Trace the exact concept:
+
+"Refund & Access Pipeline Failure"
+
+backwards.
+
+I want the exact lineage:
+
+Build Plan
+← Offer
+← Mechanism
+← Differentiation
+← Positioning
+← Strategy Root
+← Pain Registry
+← Audience evidence
+← original comments/posts/evidence
+
+Identify the FIRST point where refund/access becomes a CORE strategic problem.
+
+Do not start from the Build Plan and guess.
+
+Find the exact pain ID(s), classifications, role assignments, selectedPainRoles, evidence UIDs and source statements.
+
+==================================================
+THE ARCHITECTURAL RULE WE INTENDED
+==================================================
+
+The Pain Registry contains multiple valid pains.
+
+They must NOT all compete globally for every engine.
+
+Each engine consumes pains appropriate to its responsibility.
+
+For example:
+
+CORE PURCHASE / ACQUISITION pains
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+
+CONVERSION / OBJECTION pains
+→ Funnel
+→ Persuasion
+→ Offer where relevant
+
+POST_PURCHASE_FRICTION
+such as:
+- refunds
+- refund delays
+- cancellation problems
+- access problems
+- support failures after purchase
+
+→ primarily Retention
+→ trust/risk-reversal context where appropriate
+
+They must NOT automatically become the central:
+
+Positioning
+Mechanism
+Differentiation
+Offer promise
+
+unless there is explicit evidence that the customer's actual product is designed to solve that problem.
+
+This distinction is critical.
+
+A pain can be REAL without being strategically appropriate for every engine.
+
+==================================================
+CHECK THE PRODUCT-FIT CONTRACT
+==================================================
+
+We already added productFit / allowedUses / role classification concepts.
+
+Audit whether they are actually enforced.
+
+For the refund pain answer:
+
+painId
+statement
+classification
+role
+productFit
+allowedUses
+evidenceStrength
+source evidence
+
+Then show which engines selected it.
+
+If a POST_PURCHASE_FRICTION pain reached Mechanism or became Offer's primary transformation:
+
+explain exactly WHY the selector allowed it.
+
+Possible causes include:
+
+PAIN_CLASSIFICATION_BUG
+PAIN_ROLE_ROUTING_BUG
+PRODUCT_FIT_BUG
+ALLOWED_USES_NOT_ENFORCED
+ENGINE_SELECTOR_BUG
+STRATEGY_ROOT_MAPPING_BUG
+DOMINANCE_RULE_BUG
+LLM_RESELECTED_PAIN
+LEGACY_FIRST_PAIN_SELECTION
+FALLBACK_BYPASSED_ROUTING
+OTHER_PROVEN_CAUSE
+
+Prove the classification.
+
+==================================================
+IMPORTANT SEMANTIC DISTINCTION
+==================================================
+
+Do NOT delete refund evidence.
+
+The comments may be completely real.
+
+The system should retain them.
+
+The question is NOT:
+
+"Are refunds a real pain?"
+
+The question is:
+
+"Is solving refunds part of THIS customer's product value proposition?"
+
+For a marketing-strategy product, competitor customers complaining about refunds may indicate:
+
+- trust friction
+- purchase risk
+- retention friction
+- competitor weakness
+- objection/risk-reversal opportunity
+
+That does NOT automatically mean:
+
+"Our product solves refund pipelines."
+
+Evidence truth and strategic relevance are separate concepts.
+
+==================================================
+AUDIT PAIN DOMINANCE
+==================================================
+
+Inspect how pains are ranked.
+
+Check whether dominance currently overweights:
+
+- frequency
+- comment count
+- emotional severity
+- evidence volume
+
+while ignoring:
+
+- product fit
+- engine responsibility
+- buying stage
+- causal relevance
+- allowedUses
+
+The intended logic is conceptually:
+
+eligible pains for THIS engine
+FIRST
+
+then rank those eligible pains by importance.
+
+NOT:
+
+rank every pain globally
+→ give the highest one to every engine.
+
+Verify what the code actually does.
+
+==================================================
+AUDIT EACH RELEVANT ENGINE
+==================================================
+
+Specifically inspect:
+
+Positioning
+Differentiation
+Mechanism
+Offer
+Funnel
+Persuasion
+Retention
+
+For each show:
+
+eligible pain IDs
+selected pain IDs
+rejected pain IDs
+rejection reasons
+
+Then answer:
+
+Could POST_PURCHASE_FRICTION become primary here?
+
+YES/NO and why.
+
+==================================================
+LLM ENFORCEMENT
+==================================================
+
+The deterministic selector must choose the eligible pain set.
+
+The LLM may reason WITHIN that set.
+
+The LLM must NOT override routing.
+
+The LLM must NOT promote an ineligible pain because it sounds stronger.
+
+The LLM must NOT merge unrelated pains into a new authoritative pain.
+
+The LLM must NOT reinterpret competitor operational complaints as capabilities of the customer's product.
+
+If the prompt currently exposes all pains and lets the LLM choose freely, fix that.
+
+Pass only:
+
+PRIMARY_ROUTED_PAIN
+SECONDARY_ALLOWED_PAINS
+RELEVANT_OBJECTIONS
+RELEVANT_POST_PURCHASE_CONTEXT
+
+with pain IDs and roles.
+
+==================================================
+FIX POLICY
+==================================================
+
+Fix ONLY the earliest proven cause.
+
+Do not hardcode:
+
+"refund is retention only"
+
+because another customer's product may genuinely be a refund-management product.
+
+The solution must be generic.
+
+Routing should depend on:
+
+pain classification
++
+productFit
++
+allowedUses
++
+engine responsibility
+
+Do not hardcode Avyron-specific rules.
+
+Do not delete evidence.
+
+Do not lower thresholds.
+
+Do not modify the frontend.
+
+Do not modify Build Plan merely to hide refund language.
+
+Do not weaken judges.
+
+==================================================
+REGRESSION TESTS
+==================================================
+
+Add tests proving at minimum:
+
+1. A real POST_PURCHASE_FRICTION pain remains in the registry.
+
+2. It can route to Retention.
+
+3. It can contribute to appropriate trust/risk-reversal context.
+
+4. It cannot become primary Mechanism merely because it has high evidence volume.
+
+5. It cannot become primary Positioning when productFit does not support that use.
+
+6. Offer cannot turn an operational competitor complaint into the customer's core product promise.
+
+7. A refund-management product CAN use refund pain as CORE_PURCHASE when productFit genuinely supports it.
+
+8. Engine eligibility is applied BEFORE pain ranking.
+
+9. LLM cannot select a pain outside the deterministic eligible set.
+
+10. selectedPainIds all resolve to the authoritative registry.
+
+11. no evidence is deleted.
+
+12. no cross-run data is introduced.
+
+==================================================
+VERIFY WITHOUT A FULL CAMPAIGN
+==================================================
+
+Do NOT launch another full real campaign.
+
+Use persisted exact-run data to replay only the minimum affected chain.
+
+Prefer:
+
+Pain Registry routing
+→ first affected engine
+→ downstream Mechanism
+→ Offer
+→ Build Plan synthesis in non-persisting verification mode if available
+
+Show what the corrected strategy would center on.
+
+Specifically verify whether:
+
+"Refund & Access Pipeline Failure"
+
+disappears from the CORE strategy because it is ineligible,
+
+while refund evidence remains available to Retention / objections / trust context.
+
+Do NOT force it to disappear if the deterministic product-fit contract proves it genuinely belongs there.
+
+==================================================
+FINAL REPORT — SHORT
+==================================================
+
+AUTO-RUN:
+root cause
+fix
+restart verification
+unintended runs started = ?
+
+REFUND PAIN:
+painId
+classification
+productFit
+allowedUses
+
+FIRST BROKEN POINT:
+exact engine/function
+why refund became core
+
+FIX:
+exact routing/selection change
+
+AFTER FIX:
+
+Positioning primary pain:
+...
+
+Mechanism primary pain:
+...
+
+Offer primary pain:
+...
+
+Retention pain:
+...
+
+Refund evidence still preserved:
+YES/NO
+
+TESTS:
+pass count
+net-new TS errors
+
+FINAL ANSWERS:
+
+A. Why did refund become the center of the strategy?
+
+B. Was it a real pain but routed to the wrong strategic responsibility?
+
+C. Is engine eligibility now enforced before importance ranking?
+
+D. Can the LLM still promote an ineligible pain?
+
+E. Can a product genuinely solving refunds still use refund as a core pain?
+
+F. Did we preserve the original refund evidence?
+
+G. Are automatic real campaign runs now impossible without explicit invocation?
+
+H. Is another full campaign required right now?
+
+STOP.
+
+Do NOT start another real campaign.
+Do NOT modify Frontend.
+Do NOT Approve.
+Do NOT Activate.
+Do NOT start Performance Loop.
+Do NOT create follow-up tasks.

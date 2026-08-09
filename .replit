@@ -70,10 +70,6 @@ args = "Phase A Validation"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Real Campaign Run"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "TSC Check"
 
 [[workflows.workflow]]

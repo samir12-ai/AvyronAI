@@ -1,0 +1,330 @@
+STOP THE CURRENT REVERSE-SEARCH APPROACH.
+
+You are over-focusing on finding where the literal phrase
+"Refund & Access Pipeline Failure"
+was previously written.
+
+That is NOT the primary forensic question.
+
+The phrase may have been synthesized by an LLM and may never exist verbatim in raw evidence.
+
+I want a FORWARD CAUSAL ATTRIBUTION AUDIT.
+
+Do not change code yet.
+Do not run another campaign.
+Do not modify DB data.
+
+Use the latest persisted run and reconstruct exactly how the final refund-centered strategy was CREATED.
+
+==================================================
+1. START FROM THE ACTUAL ROOT INPUTS
+==================================================
+
+Begin with the evidence that was actually selected for this run.
+
+Trace:
+
+RAW EVIDENCE
+→ Audience
+→ Pain Registry
+→ Strategy Root
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Build Plan
+
+Do NOT begin from the phrase and search backwards for literal string matches.
+
+At every stage identify the exact IDs and fields that were consumed.
+
+==================================================
+2. AUDIENCE ROOTS
+==================================================
+
+Show the authoritative pains/root causes that actually entered Strategy Root.
+
+For every pain:
+
+painId
+originalStatement
+normalizedStatement
+classification
+role
+productFit
+allowedUses
+evidenceStrength
+evidenceUids
+rootCauseIds
+
+Then rank them by the actual importance/dominance logic used by the system.
+
+I want to know:
+
+Which pains SHOULD have dominated acquisition strategy?
+
+Which pains were post-purchase?
+
+Which pains were objections?
+
+Which pains were core purchase pains?
+
+==================================================
+3. ENGINE-BY-ENGINE ATTRIBUTION
+==================================================
+
+For each:
+
+Positioning
+Differentiation
+Mechanism
+Offer
+Funnel
+Persuasion
+Retention
+
+report:
+
+INPUT PAIN IDS
+INPUT ROOT CAUSE IDS
+INPUT BUSINESS CONTEXT
+INPUT PRODUCT DNA
+INPUT PREVIOUS ENGINE OUTPUTS
+
+then:
+
+SELECTED PAINS
+REJECTED PAINS
+OUTPUT CONCLUSION
+
+Most importantly:
+
+WHY did this engine produce that conclusion?
+
+Was the conclusion primarily driven by:
+
+AUDIENCE_EVIDENCE
+PAIN_ROUTING
+PREVIOUS_ENGINE_OUTPUT
+BUSINESS_CONTEXT
+PRODUCT_DNA
+LLM_SYNTHESIS
+FALLBACK
+LEGACY_CONTEXT
+
+Do not guess. Derive this from actual prompts, deterministic selectors, persisted lineage and code.
+
+==================================================
+4. BUSINESS CONTEXT VS MARKET EVIDENCE
+==================================================
+
+This is critical.
+
+Quantify or clearly characterize how much authority Business Context has at every strategic engine.
+
+Business Context / Product DNA should answer:
+
+"WHAT can this product genuinely do?"
+
+Audience evidence should answer:
+
+"WHAT problem does the market/customer have?"
+
+The system must not allow Business Context to invent a customer pain.
+
+And Audience evidence must not make the system claim the product solves something it does not solve.
+
+Audit whether these responsibilities are actually separated.
+
+For each engine answer:
+
+Can Business Context select the pain?
+
+Can Business Context only constrain the solution?
+
+Can previous engine text override Pain Registry routing?
+
+Can the LLM create a new problem statement?
+
+==================================================
+5. RECONSTRUCT THE REFUND STRATEGY CREATION
+==================================================
+
+Now reconstruct exactly how:
+
+"Refund & Access Pipeline Failure"
+
+was created.
+
+Do NOT require a literal upstream match.
+
+Break the phrase semantically into concepts:
+
+REFUND
+ACCESS
+PIPELINE
+FAILURE
+
+For each concept identify its source.
+
+Example only:
+
+REFUND
+← pain_XXX / customer evidence
+
+ACCESS
+← pain_YYY / evidence
+
+PIPELINE
+← Product DNA / LLM synthesis / previous engine
+
+FAILURE
+← positioning/mechanism framing
+
+I want the ACTUAL result from this run.
+
+Then identify the FIRST engine where those concepts were combined into the strategic thesis.
+
+That is the causal origin.
+
+==================================================
+6. DETERMINE WHETHER THE STRATEGY WAS LOGICALLY VALID
+==================================================
+
+Ask:
+
+Even if refund complaints are real,
+WHY did Avyron conclude that the customer's PRODUCT should solve refunds?
+
+Check whether the selected pain was eligible for that engine.
+
+Check:
+
+classification
+productFit
+allowedUses
+engine responsibility
+
+Eligibility must happen BEFORE importance ranking.
+
+If refund is POST_PURCHASE_FRICTION and productFit does not support a refund-management solution, it may inform:
+
+Retention
+Trust
+Risk reversal
+Objections
+
+but must not become the core Mechanism/Offer merely because it has strong evidence.
+
+Do not hardcode this rule specifically for refunds.
+
+It must work generically for every product.
+
+==================================================
+7. DETERMINE THE FIRST BROKEN DECISION
+==================================================
+
+I want ONE earliest causal failure.
+
+Examples:
+
+AUDIENCE_CLASSIFIED_WRONG
+PAIN_ROLE_WRONG
+PRODUCT_FIT_WRONG
+DOMINANCE_RANKING_BEFORE_ELIGIBILITY
+POSITIONING_SELECTED_INELIGIBLE_PAIN
+PREVIOUS_ENGINE_TEXT_OVERRIDES_REGISTRY
+MECHANISM_REFRAMED_CONTEXT_AS_PAIN
+OFFER_PROMOTED_SECONDARY_PAIN
+BUSINESS_CONTEXT_POISONING
+LLM_CREATED_UNAUTHORIZED_PROBLEM
+OTHER
+
+Do not chase downstream symptoms until this is established.
+
+==================================================
+8. PRODUCT ANCHOR INVESTIGATION — SECONDARY ONLY
+==================================================
+
+Only after the causal chain is reconstructed:
+
+check whether Product Anchor / Business Context contributed to the bad conclusion.
+
+If the anchor contains refund language, determine whether it ACTUALLY influenced the relevant engine prompt/output.
+
+A suspicious database string alone is not proof of causation.
+
+Prove:
+
+anchor field
+→ prompt/input
+→ engine reasoning
+→ output
+
+If that chain does not exist, do not classify it as the root cause.
+
+==================================================
+FINAL REPORT
+==================================================
+
+Give me a compact causal map:
+
+RAW EVIDENCE
+↓
+AUDIENCE:
+primary pains = ...
+
+↓
+PAIN REGISTRY:
+core purchase = ...
+objection = ...
+post purchase = ...
+
+↓
+POSITIONING:
+selected pain = ...
+business-context influence = ...
+result = ...
+
+↓
+DIFFERENTIATION:
+...
+
+↓
+MECHANISM:
+...
+
+↓
+OFFER:
+...
+
+↓
+BUILD PLAN:
+refund strategy appears as ...
+
+Then answer:
+
+A. What exact root/pain caused the refund-centered strategy?
+
+B. Was that pain correctly classified?
+
+C. Was it actually eligible for Positioning/Mechanism/Offer?
+
+D. Which engine FIRST turned it into the central strategy?
+
+E. How much did Business Context/Product DNA influence that decision?
+
+F. Did Business Context merely constrain the solution, or did it improperly create/select the problem?
+
+G. Did any previous engine output override the authoritative Pain Registry?
+
+H. Is Product Anchor poisoning actually causal, or merely correlated?
+
+I. What is the earliest proven defect?
+
+STOP AFTER THE FORENSIC REPORT.
+
+NO CODE CHANGES.
+NO DB WRITES.
+NO CAMPAIGN RUN.
+NO FOLLOW-UP TASKS.
