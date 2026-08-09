@@ -1,0 +1,481 @@
+FINAL FULL RUN + ALL-ENGINE JUDGE CONSISTENCY AUDIT
+
+We have now fixed two important classes of defects:
+
+1. POSITIONING
+The LLM territory-naming call was under-budgeted:
+- 45s hard timeout
+- 800-token ceiling
+- large ~16-cluster batch
+
+This caused the valid specific Product DNA to collapse into generic static fallback territory names such as:
+"platform capability transformation validation gap"
+
+That generic output then contaminated:
+Positioning → Differentiation → Mechanism → Strategy Root → Offer.
+
+The fix now uses batch-sized timeout/token budgets, bounded retry, and finish_reason="length" handling.
+
+2. OFFER
+The Offer Engine had several judge/generation inconsistencies:
+- scaffolded pain text leaked into generation/validation
+- skeleton pain echo was internally inconsistent
+- clamp predicate differed from final validator predicate
+- retry could drop the corrected clamp
+- depth judge evaluated a truncated representation that omitted problemStatement
+
+These were fixed WITHOUT weakening judges or thresholds.
+
+Offer replay now reaches COMPLETE with depthScore ~0.8.
+
+==================================================
+GOAL
+==================================================
+
+Now perform ONE fresh complete real campaign run and simultaneously audit ALL 15 engines for the SAME CLASSES OF DEFECTS.
+
+I do NOT want a broad architecture redesign.
+
+The question is:
+
+Are any other engines passing/failing based on:
+- generic fallback output
+- undersized LLM timeout/token budgets
+- truncated judge representation
+- validator/generator contract mismatch
+- retry losing corrections
+- wrong/stale field mapping
+- judge evaluating different text than the engine actually generated?
+
+If YES:
+prove it, fix the smallest responsible code path, add regression coverage, and continue.
+
+If NO:
+leave the engine untouched.
+
+==================================================
+PHASE 1 — PRE-RUN
+==================================================
+
+Before the real run:
+
+- backend boots cleanly
+- migrations current
+- recently affected focused tests pass
+- zero net-new TypeScript errors vs baseline
+- confirm Positioning naming fix is active
+- confirm Offer fixes are active
+- confirm centralized timeout policy remains active
+
+Do not perform another speculative architecture audit.
+
+Then start ONE NEW real run for:
+
+campaign_1773576062201_6t0oxi
+
+Use real acquisition and current production code.
+
+==================================================
+PHASE 2 — FULL 15-ENGINE RUN
+==================================================
+
+Execute naturally:
+
+Market Intelligence
+→ Audience
+→ Pain Registry / AEL / Strategy Root
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Awareness
+→ Funnel
+→ Persuasion
+→ Integrity
+→ Statistical Validation
+→ Budget Governor
+→ Channel Selection
+→ Iteration
+→ Retention
+→ System Control
+→ Build Plan
+→ Preview
+
+Do not reuse old outputs as if they belong to this run.
+
+Everything must remain exact-job-bound.
+
+==================================================
+PHASE 3 — JUDGE AUDIT FOR EVERY ENGINE
+==================================================
+
+For EACH engine that has a judge, validator, depth gate, grounding gate, CEL check, or post-generation validation:
+
+audit the complete contract:
+
+GENERATION INPUT
+→ GENERATED OUTPUT
+→ TEXT/STRUCTURE GIVEN TO JUDGE
+→ JUDGE RESULT
+→ RETRY FEEDBACK
+→ FINAL PERSISTED OUTPUT
+
+For every engine answer:
+
+1. What exactly did the engine generate?
+
+2. What exact representation did its judge evaluate?
+
+3. Are all strategically important fields included?
+
+4. Is the judge evaluating the SAME semantic artifact the engine generated?
+
+5. Are any fields omitted like Offer's missing problemStatement was?
+
+6. Are generator and validator predicates identical where they are supposed to enforce the same contract?
+
+7. Does a clamp/repair satisfy the exact predicate later checked by the validator?
+
+8. If retry occurs, does it receive the exact failed dimensions?
+
+9. Does retry preserve already-correct fields?
+
+10. After retry, are required clamps/normalizations reapplied?
+
+11. Is the FINAL persisted candidate the same candidate that passed validation?
+
+12. Can an engine return COMPLETE while its own required judge failed?
+
+==================================================
+PHASE 4 — GENERIC FALLBACK AUDIT
+==================================================
+
+Search all 15 engine execution paths for the Positioning failure pattern.
+
+Specifically identify:
+
+LLM call fails/times out/truncates
+→ generic deterministic fallback
+→ fallback marked as valid
+→ generic text propagates downstream.
+
+Inspect fallbacks actually reachable in the real execution path.
+
+For every fallback determine:
+
+- what triggers it
+- whether it is specific or generic
+- whether provenance records fallback usage
+- whether downstream judges know fallback was used
+- whether it can silently masquerade as high-quality strategic output
+
+DO NOT remove useful fail-closed fallbacks.
+
+But a generic fallback must not silently become authoritative strategy.
+
+==================================================
+PHASE 5 — LLM BUDGET AUDIT
+==================================================
+
+Positioning proved that orchestration timeout alone is insufficient if an internal LLM call still has a much smaller client timeout/token ceiling.
+
+For every LLM-backed engine inspect the ACTUAL internal calls used by this run:
+
+- timeout
+- max output tokens
+- input/batch size
+- retry count
+- finish_reason handling
+- JSON truncation handling
+
+Look specifically for:
+
+large prompt/batch
++
+small fixed timeout/token ceiling
++
+fallback on failure.
+
+Do NOT arbitrarily increase every timeout.
+
+Only change a budget when the actual workload proves the current budget can truncate/timeout valid work.
+
+==================================================
+PHASE 6 — INTERCHANGEABILITY / GENERICNESS
+==================================================
+
+We discovered that generic Positioning DNA could pass upstream and only be caught later by Offer.
+
+Check whether engines responsible for creating strategic concepts have an appropriate way to prevent obviously interchangeable output.
+
+Especially inspect:
+
+Positioning
+Differentiation
+Mechanism
+Offer
+Awareness
+Funnel
+Persuasion
+
+Important:
+
+Do NOT blindly copy the Offer interchangeability judge into every engine.
+
+First determine what each engine is responsible for.
+
+But if an engine is authoritative for creating a strategic concept and can emit something obviously generic that downstream systems treat as approved, identify that gap.
+
+Example test:
+
+"If the company/product name were removed, could this output apply unchanged to dozens of unrelated SaaS products?"
+
+This is diagnostic only unless the engine's responsibility requires specificity.
+
+==================================================
+PHASE 7 — REPRESENTATION CONSISTENCY
+==================================================
+
+This is extremely important.
+
+We already found multiple bugs where rich engine output existed, but the judge evaluated a narrower representation.
+
+For each engine compare:
+
+FULL OUTPUT
+vs
+JUDGE INPUT
+vs
+CEL INPUT
+vs
+SYSTEM CONTROL INPUT
+vs
+PERSISTED SNAPSHOT
+
+Report any strategically meaningful information lost between these representations.
+
+No judge should fail because the relevant evidence exists in the engine output but was omitted from its evaluation text.
+
+Likewise, no judge should PASS because it evaluated a richer/different temporary representation than what was ultimately persisted.
+
+==================================================
+PHASE 8 — FIX POLICY
+==================================================
+
+If you find a PROVEN defect:
+
+1. identify the first broken point
+2. fix only that point
+3. add a focused regression test
+4. rerun the affected engine/chain if safe
+5. continue the same overall verification
+
+Allowed fixes include:
+
+- incorrect field mapping
+- missing judge input field
+- generic fallback leakage
+- internal timeout/token sizing bug
+- retry feedback loss
+- retry clamp loss
+- persisted-candidate mismatch
+- generator/validator predicate drift
+- incorrect status after failed validation
+
+DO NOT:
+
+- lower strategic thresholds
+- remove judges merely to obtain PASS
+- weaken evidence requirements
+- hardcode Avyron-specific strategy
+- fabricate evidence
+- manually edit strategic DB outputs
+- change Pain Registry philosophy
+- change customer-evidence philosophy
+- change confidence architecture
+- redesign System Control
+- redesign Build Plan
+- create speculative tasks
+
+==================================================
+PHASE 9 — DISTINGUISH BUG FROM STRATEGIC FAILURE
+==================================================
+
+A judge rejecting genuinely weak output is NOT a bug.
+
+Examples:
+
+generic mechanism genuinely unsupported by Product DNA
+unsupported claim
+weak evidence
+real pain misalignment
+real objection failure
+real interchangeability
+
+Those should remain rejected.
+
+We are auditing whether the judge and engine CONTRACT is correct — not trying to force every engine to PASS.
+
+==================================================
+PHASE 10 — END-TO-END LINEAGE
+==================================================
+
+For the final fresh run verify:
+
+- 15/15 engine execution status
+- every engine snapshot belongs to exact jobId
+- Strategy Root belongs to exact jobId
+- Pain Registry belongs to current root/run
+- selectedPainIds all resolve
+- unresolvedPainIds = 0
+- no stale snapshot fallback
+- System Control evaluates this exact run
+- Build Plan uses this exact run
+- Preview resolves this exact plan/run
+
+==================================================
+PHASE 11 — BUILD PLAN + PREVIEW
+==================================================
+
+If System Control permits persistence:
+
+Generate and persist the full Build Plan.
+
+Verify:
+
+- full synthesis
+- no degraded_ai_failed
+- correct sourceJobId
+- correct Strategy Root
+- current engine outputs
+- pain roles preserved
+- no Business Context replacing engine conclusions
+- no stale plan fallback
+
+Then open the actual Preview/Roadmap Document and verify visually that the newest plan is displayed.
+
+If System Control truthfully BLOCKS:
+
+do not bypass it.
+
+Report the exact strategic reason and whether the judge-contract audit proved it legitimate.
+
+==================================================
+TEST REQUIREMENTS
+==================================================
+
+For every bug actually fixed, add regression coverage reproducing that exact failure.
+
+At minimum, across the audit ensure coverage exists for:
+
+- judge sees complete strategic representation
+- generator/validator predicate consistency
+- retry receives failed dimensions
+- retry preserves valid dimensions
+- final persisted candidate = validated candidate
+- generic fallback cannot silently masquerade as authoritative high-quality output
+- truncated LLM output is not accepted as complete
+- internal timeout does not contradict the intended engine workload
+- genuine weak output can still fail
+- exact-run lineage remains intact
+
+Confirm:
+
+focused tests PASS
+adjacent regression tests PASS
+zero net-new TypeScript errors vs baseline
+
+==================================================
+IMPORTANT STOP RULE
+==================================================
+
+Do NOT turn findings into an endless chain of new audits.
+
+This task exists specifically to close the repeated pattern we found in Positioning and Offer.
+
+Fix all PROVEN instances of these SAME defect classes found in the 15-engine production path.
+
+Do not investigate unrelated theoretical improvements.
+
+Once:
+
+- the full run completes,
+- judge contracts are coherent,
+- proven defects are fixed,
+- tests pass,
+- lineage is correct,
+- and the resulting plan/Preview is verified or truthfully blocked,
+
+STOP.
+
+==================================================
+FINAL REPORT
+==================================================
+
+Keep the final report practical.
+
+RUN
+- jobId
+- runtime
+- engines SUCCESS/FAILED
+
+ALL-ENGINE JUDGE AUDIT
+For each engine:
+- judge/validator present? YES/NO
+- representation consistent? YES/NO
+- fallback issue? YES/NO
+- retry issue? YES/NO
+- budget issue? YES/NO
+- verdict: HEALTHY / FIXED / TRUTHFUL_REJECTION
+
+BUGS FOUND
+For each actual bug:
+- engine
+- root cause
+- exact fix
+- regression test
+
+SYSTEM CONTROL
+- PASS / DOWNGRADE / BLOCK
+- exact reasons
+- legitimate or implementation defect?
+
+BUILD PLAN
+- planId
+- sourceJobId
+- full/degraded
+- lineage correct YES/NO
+
+PREVIEW
+- newest run displayed YES/NO
+- newest plan displayed YES/NO
+- visually verified YES/NO
+
+TESTS
+- focused pass count
+- regression status
+- net-new TS errors
+
+FINAL ANSWERS
+
+A. Did all 15 engines execute?
+
+B. Did any other engine contain the same class of bug we found in Positioning or Offer?
+
+C. Were all proven instances fixed?
+
+D. Are judges now evaluating the actual complete outputs they are supposed to judge?
+
+E. Can genuinely weak strategy still be rejected?
+
+F. Did the final Build Plan come entirely from the fresh run's validated engine outputs?
+
+G. Is Preview showing exactly that plan?
+
+H. Is there any PROVEN technical blocker left in the strategy pipeline?
+
+Do not create another task.
+Do not Approve.
+Do not Activate.
+Do not start Performance Loop.
+STOP.
