@@ -1,0 +1,492 @@
+```text
+TASK — FORENSIC AUDIT ONLY: WHY BUILD PLAN HAS `degraded_no_decisions`
+
+READ-ONLY AUDIT.
+
+DO NOT MODIFY CODE.
+DO NOT MODIFY DATABASE DATA.
+DO NOT CHANGE THRESHOLDS.
+DO NOT CHANGE GUARDS.
+DO NOT CREATE MIGRATIONS.
+DO NOT REGENERATE BUILD PLAN.
+DO NOT RUN A NEW CAMPAIGN.
+DO NOT APPROVE OR ACTIVATE ANY PLAN.
+DO NOT START PERFORMANCE LOOP.
+
+We already fixed the Build Plan synthesis truncation issue.
+
+The latest successful regeneration proved:
+
+- same validated 15-engine run reused
+- Build Plan AI synthesis succeeded
+- gpt-4.1-mini
+- 5,524 output tokens
+- full JSON returned
+- 9/9 locked decisions preserved
+- Pain Registry / contextual routing preserved
+- zero pain-role violations
+- exact-run lineage preserved
+- plan persisted successfully
+- Preview/API resolve the correct plan
+
+However, the resulting plan carries:
+
+`degraded_no_decisions`
+
+The reported reason is that all ~30 cross-signal market decisions were rejected/policy-blocked as `WEAK_SIGNAL`.
+
+Some candidate inputs appear suspiciously raw, including values such as:
+
+`LinkInBio`
+
+and raw scraped captions.
+
+Your ONLY job is to determine exactly WHY this happened.
+
+===========================================================
+1 — TRACE THE FULL DECISION PIPELINE
+===========================================================
+
+Trace the exact architecture that produces the market decisions consumed by Build Plan.
+
+Start from raw evidence and follow it end-to-end:
+
+raw scrape
+→ normalized evidence
+→ classification
+→ signals
+→ cross-signal aggregation
+→ candidate market decision
+→ evidence/strength calculation
+→ policy/guard validation
+→ accepted/rejected decision
+→ Build Plan input
+
+Identify the exact files/functions/tables involved at every stage.
+
+Produce a concrete architecture map.
+
+Do not infer from names alone.
+
+Read the actual implementation.
+
+===========================================================
+2 — AUDIT THE EXACT RUN
+===========================================================
+
+Audit the exact source run used by the successful regenerated plan.
+
+Identify:
+
+- source job ID
+- Strategy Root ID/version
+- MI snapshot
+- Audience snapshot
+- relevant classification records
+- signal records
+- candidate decision records
+- accepted decision records
+- rejected decision records
+
+Determine exactly how many decisions were:
+
+- generated
+- accepted
+- rejected
+- marked WEAK_SIGNAL
+- blocked for another reason
+
+Do not use another run as evidence.
+
+===========================================================
+3 — INSPECT ALL ~30 DECISIONS
+===========================================================
+
+For every candidate decision, produce a compact forensic table containing:
+
+decision ID
+decision statement
+decision type
+source signal IDs
+evidence IDs
+evidence source types
+competitor/customer source
+classification
+evidence strength
+source diversity
+frequency/prevalence if applicable
+confidence if applicable
+policy result
+rejection reason
+
+Then group them into failure patterns.
+
+I do NOT need 30 repetitive paragraphs.
+
+I need the patterns responsible for the failures.
+
+===========================================================
+4 — WHY IS `LinkInBio` REACHING THIS LAYER?
+===========================================================
+
+This is especially important.
+
+Trace examples such as:
+
+`LinkInBio`
+
+from their original scraped source all the way to the candidate decision layer.
+
+Determine whether it is:
+
+A. legitimate evidence incorrectly classified
+
+B. scraping noise that should have been removed earlier
+
+C. metadata mistaken for content
+
+D. a classification failure
+
+E. a normalization failure
+
+F. a signal extraction failure
+
+G. a cross-signal aggregation failure
+
+H. expected low-quality evidence correctly rejected downstream
+
+I want the exact answer from the code + stored evidence.
+
+===========================================================
+5 — DETERMINE WHETHER WEAK_SIGNAL IS CORRECT
+===========================================================
+
+Do NOT assume `WEAK_SIGNAL` is a bug.
+
+For each major failure pattern determine:
+
+TRUE_WEAK_SIGNAL
+or
+FALSE_WEAK_SIGNAL
+
+TRUE_WEAK_SIGNAL means:
+
+the evidence genuinely does not justify a strategic market decision and the guard is correctly protecting the system.
+
+FALSE_WEAK_SIGNAL means:
+
+good evidence exists upstream, but the system loses, misclassifies, underweights, or fails to aggregate it before the decision guard.
+
+This distinction is critical.
+
+===========================================================
+6 — AUDIT SIGNAL QUALITY VS DECISION QUALITY
+===========================================================
+
+Determine where information quality is actually being lost.
+
+Possible stages:
+
+RAW_DATA_QUALITY
+
+NORMALIZATION
+
+CLASSIFICATION
+
+SIGNAL_EXTRACTION
+
+EVIDENCE_LINEAGE
+
+CROSS_SIGNAL_AGGREGATION
+
+DECISION_GENERATION
+
+EVIDENCE_STRENGTH_CALCULATION
+
+SOURCE_DIVERSITY_CALCULATION
+
+POLICY_VALIDATION
+
+BUILD_PLAN_INPUT_MAPPING
+
+OTHER
+
+Quantify the contribution of each proven failure class.
+
+Example:
+
+12/30 = raw scraping noise
+8/30 = classification failure
+6/30 = aggregation failure
+4/30 = genuinely weak evidence
+
+Do not invent percentages. Derive them from the actual run.
+
+===========================================================
+7 — CHECK WHETHER GOOD SIGNALS EXIST BUT ARE BEING LOST
+===========================================================
+
+This is one of the most important questions.
+
+Compare:
+
+MI evidence
+Audience evidence
+Pain Registry evidence
+AEL/root causes
+competitor classifications
+
+against the cross-signal decision inputs.
+
+We already know the same campaign produced enough grounded information for:
+
+- Audience
+- Pain Registry
+- Positioning
+- Offer
+- other engines
+
+So determine:
+
+Are strong strategic signals present elsewhere but failing to reach the cross-signal decision layer?
+
+If yes, identify the exact broken handoff.
+
+For example:
+
+good evidence
+→ valid Audience pain
+→ valid Strategy Root
+BUT
+→ decision builder receives raw caption instead
+
+would indicate an architecture/mapping problem rather than insufficient market evidence.
+
+Prove or refute this.
+
+===========================================================
+8 — AUDIT SOURCE SEMANTICS
+===========================================================
+
+Check whether the decision system distinguishes correctly between:
+
+CUSTOMER_EVIDENCE
+COMPETITOR_BEHAVIOR
+COMPETITOR_MESSAGING
+COMPETITOR_METADATA
+OWNED_BRAND_DATA
+INFERRED_SYNTHESIS
+NOISE
+
+A competitor caption is not automatically customer truth.
+
+A UI label such as `LinkInBio` is not automatically a market signal.
+
+A repeated competitor message may still be strategically relevant as competitor behavior, but must not be mislabeled as customer demand.
+
+Determine whether semantic source roles are being lost.
+
+===========================================================
+9 — AUDIT CROSS-SIGNAL REQUIREMENTS
+===========================================================
+
+Determine exactly what qualifies as a "cross-signal market decision."
+
+Inspect:
+
+- minimum evidence requirements
+- source diversity requirements
+- corroboration requirements
+- signal count requirements
+- evidence-strength formula
+- classification requirements
+- policy thresholds
+- provenance requirements
+
+Explain WHY each requirement exists.
+
+Then determine whether the current run fails because:
+
+the requirements are correct and evidence is weak
+
+OR
+
+the requirements are correct but upstream mapping is broken
+
+OR
+
+the requirements themselves compare incompatible signal types
+
+OR
+
+another proven architectural defect exists.
+
+Do not recommend weakening thresholds merely to obtain PASS.
+
+===========================================================
+10 — CHECK FOR RAW-DATA LEAKAGE
+===========================================================
+
+Search specifically for paths where raw scraped values can bypass:
+
+normalization
+classification
+semantic validation
+evidence typing
+
+and reach:
+
+signal generation
+cross-signal decisions
+Build Plan
+
+Look for:
+
+- raw captions
+- CTA labels
+- LinkInBio
+- usernames
+- hashtags
+- boilerplate
+- navigation text
+- scraped metadata
+- duplicated posts
+- empty/generic strings
+
+Determine whether these are filtered correctly.
+
+===========================================================
+11 — CHECK AGGREGATION
+===========================================================
+
+Determine whether semantically equivalent evidence is fragmented.
+
+Example:
+
+"too many marketing tools"
+
+"switching between multiple platforms"
+
+"fragmented workflow"
+
+"tool overload"
+
+may represent one coherent market signal.
+
+If the system treats them as four isolated weak signals, that could create false WEAK_SIGNAL results.
+
+Audit:
+
+normalization
+semantic grouping
+deduplication
+signal clustering
+cross-source corroboration
+
+But do NOT propose merging unrelated pains/signals.
+
+This audit must respect the Task 163 no-merging architecture.
+
+===========================================================
+12 — CHECK WHETHER THE BUILD PLAN FLAG IS CORRECT
+===========================================================
+
+Finally inspect the logic that produces:
+
+`degraded_no_decisions`
+
+Determine whether:
+
+A. there truly are zero validated market decisions
+
+or
+
+B. validated decisions exist but Build Plan fails to retrieve them
+
+or
+
+C. decisions are rejected earlier incorrectly
+
+or
+
+D. the flag is being set from stale/wrong-run data
+
+Verify exact job/run lineage.
+
+===========================================================
+13 — NO IMPLEMENTATION
+===========================================================
+
+At the end of the audit:
+
+DO NOT FIX ANYTHING.
+
+Even if the root cause is obvious.
+
+I want the forensic evidence first.
+
+You may propose the smallest correct repair, but do not implement it.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return one report containing:
+
+1. Exact architecture of the market-decision pipeline.
+2. Exact run/job audited.
+3. Number of candidate decisions.
+4. Number accepted.
+5. Number rejected.
+6. Number rejected as WEAK_SIGNAL.
+7. Failure-pattern breakdown.
+8. Exact reason `LinkInBio` reached the decision layer.
+9. Whether raw scraped noise is leaking.
+10. Whether classification is working correctly.
+11. Whether semantic source roles are preserved.
+12. Whether good MI/Audience/Pain evidence is being lost.
+13. Whether cross-signal aggregation is working correctly.
+14. Whether evidence-strength calculation is correct.
+15. Whether source-diversity calculation is correct.
+16. Whether WEAK_SIGNAL guards are behaving correctly.
+17. Whether Build Plan retrieves decisions from the exact run.
+18. Whether `degraded_no_decisions` is truthful.
+19. Root-cause classification.
+20. Smallest recommended repair — DO NOT IMPLEMENT.
+
+Classify the primary root cause as one or more of:
+
+RAW_SCRAPE_NOISE
+NORMALIZATION_BUG
+CLASSIFICATION_BUG
+SOURCE_SEMANTICS_BUG
+SIGNAL_EXTRACTION_BUG
+EVIDENCE_LINEAGE_BUG
+AGGREGATION_BUG
+EVIDENCE_STRENGTH_BUG
+POLICY_GUARD_BUG
+BUILD_PLAN_MAPPING_BUG
+GENUINELY_INSUFFICIENT_EVIDENCE
+OTHER_PROVEN_CAUSE
+
+Finally answer:
+
+A. Are the 30 decisions genuinely weak?
+
+B. Is Avyron correctly rejecting bad evidence, or is good evidence being lost upstream?
+
+C. Why exactly does data like `LinkInBio` reach the strategic decision layer?
+
+D. Does strong evidence already exist elsewhere in the same run?
+
+E. Where exactly is that evidence lost or degraded?
+
+F. Is `degraded_no_decisions` currently a truthful verdict?
+
+G. What is the smallest correct architectural repair?
+
+NO CODE CHANGES.
+NO NEW RUN.
+NO PLAN REGENERATION.
+AUDIT ONLY.
+```
