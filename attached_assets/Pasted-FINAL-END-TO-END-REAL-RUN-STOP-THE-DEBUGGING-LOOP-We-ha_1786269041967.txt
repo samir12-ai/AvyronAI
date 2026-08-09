@@ -1,0 +1,342 @@
+FINAL END-TO-END REAL RUN — STOP THE DEBUGGING LOOP
+
+We have spent enough time auditing and redesigning individual pipeline components.
+
+The major architecture work is already complete:
+
+- centralized engine timeout budgets
+- 15-engine execution stability
+- exact-run snapshot lineage
+- exact-run Build Plan persistence
+- Preview freshness protection
+- Audience Pain Registry
+- contextual pain routing
+- customer-evidence semantic origin
+- CTA metadata containment
+- cross-post deduplication
+- Build Plan synthesis truncation/retry fix
+- existing strategic guards remain intact
+
+I DO NOT want another speculative audit.
+
+The goal now is simple:
+
+RUN AVYRON END TO END AS A REAL CUSTOMER WOULD EXPERIENCE IT.
+
+==================================================
+1. PRE-RUN CHECK
+==================================================
+
+Before the run, perform ONLY quick mechanical checks:
+
+- backend starts cleanly
+- latest migrations applied
+- focused tests for recently changed paths pass
+- no net-new TypeScript errors versus baseline
+
+Do not start another architecture investigation.
+
+If these checks pass, immediately proceed.
+
+==================================================
+2. RUN ONE FRESH REAL CAMPAIGN
+==================================================
+
+Run the existing real campaign:
+
+campaign_1773576062201_6t0oxi
+
+Use real acquisition and the current production code path.
+
+This must be a NEW job/run.
+
+Do not reuse an old Build Plan.
+
+Do not use synthetic evidence.
+
+Do not manually modify DB results.
+
+Let the complete pipeline execute naturally.
+
+Expected path:
+
+Market Intelligence
+→ Audience
+→ Pain Registry / Strategy Root
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Awareness
+→ Funnel
+→ Persuasion
+→ Integrity
+→ Statistical Validation
+→ Budget Governor
+→ Channel Selection
+→ Iteration
+→ Retention
+→ System Control
+→ Build Plan
+→ Preview
+
+==================================================
+3. DO NOT INTERRUPT HEALTHY ENGINES
+==================================================
+
+The timeout architecture has already been fixed.
+
+Respect the centralized per-engine budgets.
+
+A slow engine is NOT automatically a bug.
+
+Do not restart the campaign merely because an engine takes several minutes.
+
+Only intervene if there is a proven execution failure.
+
+==================================================
+4. CUSTOMER EVIDENCE
+==================================================
+
+Allow the newly implemented customer-evidence architecture to operate naturally.
+
+Capture the `CUSTOMER_EVIDENCE` diagnostics:
+
+- candidates
+- eligible
+- rejected
+- rejection reasons
+- customer-origin artifacts
+- linked pain IDs
+
+Do NOT require Trustpilot/G2.
+
+Do NOT manually promote comments.
+
+Do NOT weaken evidence requirements.
+
+If zero customer comments qualify, report that truthfully.
+
+==================================================
+5. PAIN ROUTING
+==================================================
+
+Verify during the real run that the authoritative Pain Registry is used.
+
+Check that engines use pains according to responsibility.
+
+Examples:
+
+Positioning / Differentiation / Mechanism
+→ appropriate CORE_PURCHASE pains
+
+Offer
+→ appropriate purchase pain + objections
+
+Funnel
+→ conversion objections/friction
+
+Persuasion
+→ motivations/objections
+
+Retention
+→ POST_PURCHASE_FRICTION
+
+No engine may invent a new authoritative pain.
+
+No arbitrary pain merging.
+
+All selected pain IDs must resolve to the current run's registry.
+
+Required:
+
+unresolvedPainIds = 0
+
+==================================================
+6. IF A REAL BUG APPEARS
+==================================================
+
+This is important.
+
+If the run exposes a REAL SOFTWARE BUG:
+
+STOP only at that bug.
+
+Prove the immediate root cause.
+
+Fix the smallest responsible code path.
+
+Add a regression test.
+
+Then continue/retry the affected stage when technically possible.
+
+Do NOT turn one bug into another broad architecture audit.
+
+Do NOT create a chain of speculative tasks.
+
+Do NOT redesign unrelated systems.
+
+Do NOT change healthy components.
+
+Do NOT weaken strategic guards simply to obtain PASS.
+
+Bug → smallest fix → test → continue.
+
+==================================================
+7. STRATEGIC REJECTIONS ARE NOT SOFTWARE BUGS
+==================================================
+
+If System Control truthfully rejects an output because it is strategically invalid:
+
+do NOT automatically "fix" the guard.
+
+Examples:
+
+genuinely weak evidence
+genuine Offer misalignment
+real missing lineage
+real unsupported claim
+real insufficient evidence
+
+Report the rejection clearly.
+
+Only modify code if the rejection is proven to be caused by incorrect implementation.
+
+==================================================
+8. BUILD PLAN
+==================================================
+
+If the pipeline reaches Build Plan:
+
+Generate the FULL plan through the real synthesis path.
+
+Verify:
+
+- not `degraded_ai_failed`
+- valid complete JSON
+- exact sourceJobId
+- exact Strategy Root
+- exact engine snapshots
+- pain roles preserved
+- unresolvedPainIds = 0
+- no stale plan fallback
+- no Business Context replacing engine strategy
+
+If:
+
+`degraded_no_decisions`
+
+appears, DO NOT start another architecture project.
+
+Simply report:
+
+- how many cross-signal decisions were generated
+- how many became eligible
+- customer evidence eligible/rejected counts
+- why the flag remained
+
+The plan can still be inspected if its strategy was correctly synthesized from the validated engines and Strategy Root.
+
+==================================================
+9. PREVIEW IS THE FINAL ACCEPTANCE TARGET
+==================================================
+
+After the run finishes, open the actual customer Preview.
+
+Navigate to the actual Build Plan / Roadmap Document view.
+
+Verify visually AND through API lineage:
+
+- newest run selected
+- newest plan selected
+- exact job ID
+- correct plan version
+- `isLatest=true`
+- no previous-run plan displayed
+- Audience from current run
+- Positioning from current run
+- Differentiation from current run
+- Mechanism from current run
+- Offer from current run
+- Funnel from current run
+- Retention from current run
+- full Build Plan visible
+
+Capture the Preview if possible.
+
+==================================================
+10. DO NOT APPROVE
+==================================================
+
+STOP before:
+
+Approve
+Activate
+Performance Loop
+
+I want to personally inspect the resulting strategy first.
+
+==================================================
+FINAL REPORT — KEEP IT SIMPLE
+==================================================
+
+Do NOT give me another huge theoretical architecture report.
+
+Return a concise operational report:
+
+RUN:
+jobId
+runtime
+15 engines status
+
+CUSTOMER EVIDENCE:
+eligible / rejected
+
+PAINS:
+registry count
+routing violations
+unresolved IDs
+
+SYSTEM CONTROL:
+PASS / DOWNGRADE / BLOCK
+exact reason if not PASS
+
+BUILD PLAN:
+planId
+version
+planSource
+degraded or full
+cross-signal eligible decisions
+
+PREVIEW:
+correct current run? YES/NO
+correct current plan? YES/NO
+visually verified? YES/NO
+
+BUGS FOUND:
+only actual bugs encountered during this run
+and exactly what was fixed
+
+FINAL ANSWERS:
+
+A. Did all 15 engines execute successfully?
+
+B. Did the new customer-evidence path work in real execution?
+
+C. Did pain routing remain correct?
+
+D. Did System Control behave truthfully?
+
+E. Was a complete Build Plan produced?
+
+F. Is Preview displaying exactly that fresh run?
+
+G. Is there any REAL technical blocker remaining before I manually inspect the plan?
+
+STOP.
+
+Do not create another task unless an actual blocking software defect is proven.
+
+Do not Approve.
+Do not Activate.
+Do not start Performance Loop.
