@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { db } from "../db";
 import { strategyRoots, offerSnapshots, funnelSnapshots, integritySnapshots } from "@shared/schema";
 import { eq, and, desc, ne, sql } from "drizzle-orm";
+import { validateAudiencePainRegistry } from "./audience-pain-registry";
 
 export interface StrategyRootInput {
   campaignId: string;
@@ -65,6 +66,12 @@ export function assertCompleteRoot(subject: any, phase: "build" | "consume" = "b
   const pains = typeof rawPains === "string" ? safeJsonParse(rawPains) : rawPains;
   if (!pains || !Array.isArray(pains) || pains.length === 0) {
     missing.push("approved_audience_pains");
+  } else if (pains.some((pain: any) => pain && typeof pain === "object" && "painId" in pain)) {
+    const registry = validateAudiencePainRegistry(pains, {
+      accountId: subject.accountId,
+      audienceSnapshotId: subject.audienceSnapshotId,
+    });
+    missing.push(...registry.issues.map((issue) => `pain_registry:${issue}`));
   }
 
   return missing;
@@ -86,6 +93,7 @@ export function computeRootHash(input: StrategyRootInput): string {
     proofTypes: input.approvedProofTypes ? JSON.stringify(input.approvedProofTypes) : null,
     posContext: input.approvedPositioningContext ? JSON.stringify(input.approvedPositioningContext) : null,
     claims: claimsKey,
+    pains: input.approvedAudiencePains,
   };
   return crypto.createHash("sha256").update(JSON.stringify(hashPayload)).digest("hex").substring(0, 16);
 }
@@ -392,6 +400,15 @@ export function validatePostGeneration(
   }
 
   const rootPains = safeJsonParse(activeRoot.approvedAudiencePains);
+  const corePain = Array.isArray(rootPains)
+    ? rootPains.find((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_core"))
+    : null;
+  if (corePain && generatedOffer.selectedPainRoles?.core?.painId !== corePain.painId) {
+    issues.push(`audience_pain_role_mismatch: offer must preserve approved core pain ${corePain.painId}`);
+  }
+  if (generatedOffer.selectedPainRoles?.core?.mergedPainIds?.length > 1) {
+    issues.push("audience_pain_merge_forbidden: an offer core pain must reference exactly one approved pain");
+  }
   if (rootPains && Array.isArray(rootPains) && rootPains.length > 0 && generatedOffer.coreOutcome) {
     const outcomeLC = generatedOffer.coreOutcome.toLowerCase();
     const painTokens = rootPains.slice(0, 8).flatMap((p: any) => {

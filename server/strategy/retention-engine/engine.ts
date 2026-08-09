@@ -14,6 +14,7 @@ import {
   createEmptyReliability,
 } from "../../engine-hardening";
 import { assessStrategyAcceptability } from "../../shared/strategy-acceptability";
+import { selectPainForUse } from "../../shared/audience-pain-registry";
 import { deduplicateWarnings } from "../dependency-validation";
 import type {
   RetentionInput,
@@ -226,6 +227,11 @@ Respond ONLY with a JSON object (no markdown, no explanation) with this exact st
   ]
 }`;
 
+  const authoritativePain = selectPainForUse(input.painRegistry || [], "retention");
+  if (authoritativePain) {
+    prompt += `\n\nAUTHORITATIVE POST-PURCHASE PAIN (highest-priority validated Audience pain eligible for Retention — anchor churn risks and retention loops to it; do NOT merge it with unrelated pains or restate it as a purchase pain):\n- [${authoritativePain.painId}] ${authoritativePain.canonical}`;
+  }
+
   if (input.memoryContext) {
     prompt += `\n\n${input.memoryContext}\n`;
   }
@@ -329,6 +335,31 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
   const startTime = Date.now();
   const warnings: string[] = [];
 
+  // Authoritative pain routing: deterministically select the highest-priority
+  // registry pain eligible for the `retention` use (POST_PURCHASE_FRICTION).
+  // The selected role is preserved on EVERY return path — including fallbacks —
+  // so plan synthesis can preserve it without reselection. Absence of an
+  // eligible pain is legitimate (legacy roots, no post-purchase friction).
+  const retentionPain = selectPainForUse(input.painRegistry || [], "retention");
+  if (retentionPain) {
+    console.log(`[RetentionEngine] RETENTION_PAIN_SELECTED | painId=${retentionPain.painId} | class=${retentionPain.classification} | rank=${retentionPain.rank}`);
+  }
+  const withPainRoles = (result: RetentionResult): RetentionResult =>
+    retentionPain
+      ? {
+          ...result,
+          selectedPainRoles: {
+            retention: {
+              painId: retentionPain.painId,
+              canonical: retentionPain.canonical,
+              rank: retentionPain.rank,
+              role: "post_purchase_friction" as const,
+              classification: retentionPain.classification,
+            },
+          },
+        }
+      : result;
+
   const guardResult = runGuardLayer(input);
 
   // Short-circuit when there is no real data — skip the AI call entirely
@@ -342,11 +373,11 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
   );
   if (hasAnySparseData) {
     console.log("[RetentionEngine] No real data provided — returning fallback without AI call");
-    return buildFallbackResult(input, guardResult, startTime);
+    return withPainRoles(buildFallbackResult(input, guardResult, startTime));
   }
 
   if (!guardResult.passed && guardResult.flags.length >= 2) {
-    return buildFallbackResult(input, guardResult, startTime);
+    return withPainRoles(buildFallbackResult(input, guardResult, startTime));
   }
 
   if (!guardResult.passed) {
@@ -458,12 +489,12 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
         : [];
     } else {
       warnings.push("Failed to parse AI response — using fallback outputs");
-      return buildFallbackResult(input, guardResult, startTime);
+      return withPainRoles(buildFallbackResult(input, guardResult, startTime));
     }
   } catch (error: any) {
     console.error(`[RetentionEngine] AI call failed: ${error.message}`);
     warnings.push(`AI processing error: ${error.message}`);
-    return buildFallbackResult(input, guardResult, startTime);
+    return withPainRoles(buildFallbackResult(input, guardResult, startTime));
   }
 
   if (retentionLoops.length === 0) {
@@ -511,7 +542,7 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
 
   if (!finalBoundaryCheck.clean) {
     const fallback = buildFallbackResult(input, guardResult, startTime);
-    return {
+    return withPainRoles({
       ...fallback,
       status: STATUS.GUARD_BLOCKED,
       statusMessage: "Retention analysis blocked — boundary violations in AI output, safe baseline mechanisms provided",
@@ -519,7 +550,7 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
       structuralWarnings: [...deduplicateWarnings(warnings), "Guard blocked original output — replaced with safe baseline retention mechanisms"],
       confidenceScore: 0.15,
       strategyAcceptability: assessStrategyAcceptability(0.15, 0, 5, false, warnings),
-    };
+    });
   }
 
   // Seal #9 (F10.2 / D1 documented exemption): canonical F1 execution-status
@@ -531,7 +562,7 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
   const status = guardResult.passed ? STATUS.COMPLETE : STATUS.PROVISIONAL;
   const dedupedWarnings = deduplicateWarnings(warnings);
 
-  return {
+  return withPainRoles({
     status,
     statusMessage: guardResult.passed
       ? "Retention analysis complete with validated outputs"
@@ -552,5 +583,5 @@ export async function runRetentionEngine(input: RetentionInput): Promise<Retenti
       advisories: reliability.advisories,
     },
     strategyAcceptability: acceptability,
-  };
+  });
 }

@@ -25,6 +25,8 @@ export interface OfferAudienceInput {
   audiencePains: any[];
   desireMap: Record<string, any>;
   audienceSegments: any[];
+  /** Strategy Root pain-registry records when the root is available. */
+  painRegistry?: any[];
 }
 
 export interface OfferPositioningInput {
@@ -143,6 +145,10 @@ export interface OfferCandidate {
   depthScores: OfferDepthScores;
   identityReasoning?: OfferIdentityReasoning;
   valueArchitecture?: OfferValueArchitecture;
+  selectedPainRoles?: {
+    core?: { painId: string; role: "core_purchase"; mergedPainIds?: string[] };
+    objections?: Array<{ painId: string; role: "objection" }>;
+  };
 }
 
 export interface OfferDepthScores {

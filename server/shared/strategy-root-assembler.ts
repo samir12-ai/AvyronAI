@@ -19,6 +19,7 @@ import { db } from "../db";
 import { audienceSnapshots } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import type { StrategyRootInput } from "./strategy-root";
+import { buildAudiencePainRegistry } from "./audience-pain-registry";
 
 function safeJsonParse<T = any>(text: any, fallback: T): T {
   if (text == null) return fallback;
@@ -187,7 +188,12 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
     primaryAxis: primaryMech?.axisAlignment?.primaryAxis || positioningSnapshot?.contrastAxis || null,
     contrastAxisText: positioningSnapshot?.contrastAxis || null,
     approvedMechanism: primaryMech || null,
-    approvedAudiencePains: audiencePains,
+    // The root is the authority boundary for pains. Preserve the source
+    // records, but make IDs, rank, product-fit and permitted roles explicit.
+    approvedAudiencePains: buildAudiencePainRegistry(audiencePains, {
+      accountId,
+      audienceSnapshotId,
+    }),
     approvedDesires: audienceDesires,
     approvedTransformation: audienceTransformation,
     approvedClaim: mechClaim,

@@ -90,6 +90,18 @@ export interface SynthesizedPlan {
     weeklyDnaApplication?: string;
   };
   signalComposition?: import("../shared/signal-lineage").SignalComposition;
+  /**
+   * Engine-selected authoritative Audience pain roles, preserved verbatim
+   * from Offer (core/objections) and Retention (post-purchase friction).
+   * Synthesis NEVER reselects, flattens, or merges these — violations are
+   * recorded, not silently repaired.
+   */
+  audiencePainRoles?: {
+    core?: { painId: string; source: "offer" };
+    objections?: Array<{ painId: string; source: "offer" }>;
+    retention?: { painId: string; classification?: string; source: "retention" };
+    violations: string[];
+  };
   memoryOverrides?: Array<{ field: string; originalValue: number; correctedValue: number; memoryLabel: string }>;
   explorationPlan?: {
     explorationPercent: number;
@@ -408,6 +420,70 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strateg
 
   sections.push(...nonMiSections);
   return sections.join("\n");
+}
+
+export interface AudiencePainRolePreservation {
+  roles: {
+    core?: { painId: string; source: "offer" };
+    objections?: Array<{ painId: string; source: "offer" }>;
+    retention?: { painId: string; classification?: string; source: "retention" };
+  } | null;
+  violations: string[];
+}
+
+/**
+ * Preserve engine-selected authoritative pain roles for the final plan.
+ * Pure and deterministic: reads `selectedPainRoles` emitted by the Offer
+ * engine (core purchase + objection pains) and the Retention engine
+ * (post-purchase friction) and carries them into the synthesized plan
+ * WITHOUT reselecting, flattening, or merging. Violations detected here
+ * (merged core pains, a retention pain claiming the core slot) are
+ * surfaced as explicit violation codes — never silently repaired.
+ */
+export function extractAudiencePainRoles(
+  results: Map<EngineId, EngineStepResult>,
+): AudiencePainRolePreservation {
+  const violations: string[] = [];
+  const roles: NonNullable<AudiencePainRolePreservation["roles"]> = {};
+
+  const offer = results.get("offer" as EngineId);
+  const offerOut = offer?.status === "SUCCESS" && offer.output
+    ? (offer.output.output || offer.output)
+    : null;
+  const offerRoles = offerOut?.selectedPainRoles;
+  if (offerRoles?.core?.painId) {
+    if (Array.isArray(offerRoles.core.mergedPainIds) && offerRoles.core.mergedPainIds.length > 1) {
+      violations.push("OFFER_CORE_PAIN_MERGED");
+    } else {
+      roles.core = { painId: offerRoles.core.painId, source: "offer" };
+    }
+  }
+  if (Array.isArray(offerRoles?.objections)) {
+    const objections = offerRoles.objections
+      .filter((o: any) => typeof o?.painId === "string" && o.painId.length > 0)
+      .map((o: any) => ({ painId: o.painId, source: "offer" as const }));
+    if (objections.length > 0) roles.objections = objections;
+  }
+
+  const retention = results.get("retention" as EngineId);
+  const retentionOut = retention?.status === "SUCCESS" && retention.output
+    ? (retention.output.output || retention.output)
+    : null;
+  const retentionRole = retentionOut?.selectedPainRoles?.retention;
+  if (retentionRole?.painId) {
+    if (roles.core?.painId === retentionRole.painId) {
+      violations.push("RETENTION_PAIN_CONFLICTS_WITH_CORE");
+    } else {
+      roles.retention = {
+        painId: retentionRole.painId,
+        classification: retentionRole.classification,
+        source: "retention",
+      };
+    }
+  }
+
+  const hasAny = !!(roles.core || roles.retention || roles.objections?.length);
+  return { roles: hasAny ? roles : null, violations };
 }
 
 export interface LockedLabel {
@@ -1564,6 +1640,19 @@ export async function synthesizePlan(
       };
       console.log(`[PlanSynthesis] RETENTION_INSIGHTS_INJECTED | ${churnRisks.length} churn risks attached to plan`);
     }
+  }
+
+  // Preserve engine-selected authoritative pain roles verbatim — synthesis
+  // must not flatten or reselect pains (Offer owns core/objection roles,
+  // Retention owns post-purchase friction). Violations are surfaced on the
+  // plan, never silently repaired.
+  const painRolePreservation = extractAudiencePainRoles(results);
+  if (painRolePreservation.roles || painRolePreservation.violations.length > 0) {
+    synthesized.audiencePainRoles = {
+      ...(painRolePreservation.roles || {}),
+      violations: painRolePreservation.violations,
+    };
+    console.log(`[PlanSynthesis] AUDIENCE_PAIN_ROLES_PRESERVED | core=${painRolePreservation.roles?.core?.painId || "none"} | objections=${painRolePreservation.roles?.objections?.length || 0} | retention=${painRolePreservation.roles?.retention?.painId || "none"} | violations=${painRolePreservation.violations.join(",") || "none"}`);
   }
 
   if (memoryBlock && (memoryBlock.reinforceSlots.length > 0 || memoryBlock.avoidSlots.length > 0)) {

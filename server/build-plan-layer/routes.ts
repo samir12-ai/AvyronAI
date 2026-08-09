@@ -27,10 +27,12 @@ export function registerBuildPlanLayerRoutes(app: Express) {
       // so build-plan synthesis is bound to a single coherent run (the
       // engine hard-blocks with STALE_LINEAGE when sourceJobId is missing).
       // Body-supplied `sourceJobId` wins (operator path); otherwise resolve.
-      let sourceJobId: string | null = (req.body?.sourceJobId as string) || null;
+      const requestedJobId: string | null = (req.body?.sourceJobId as string) || null;
+      let sourceJobId: string | null = requestedJobId;
+      let resolved: Awaited<ReturnType<typeof resolveRunId>> | null = null;
       if (!sourceJobId) {
         try {
-          const resolved = await resolveRunId(campaignId, accountId, null);
+          resolved = await resolveRunId(campaignId, accountId, null);
           sourceJobId = resolved.runId ?? null;
         } catch (resolveErr: any) {
           console.warn(
@@ -38,6 +40,19 @@ export function registerBuildPlanLayerRoutes(app: Express) {
           );
           sourceJobId = null;
         }
+      }
+
+      if (resolved?.isStale && !requestedJobId) {
+        return res.json({
+          jobId: null,
+          shadowedByRun: resolved.newerNonResolvableRun?.runId ?? null,
+          status: "CURRENT_RUN_PLAN_NOT_PERSISTED",
+          plan: null,
+          actionabilityScore: 0,
+          failedBlocks: [],
+          attempts: 0,
+          message: "A more recent run attempt is in progress or failed. Wait for it to complete before building a new plan.",
+        });
       }
 
       if (!sourceJobId) {
@@ -78,13 +93,23 @@ export function registerBuildPlanLayerRoutes(app: Express) {
           });
           console.log(`[BuildPlanLayer] Snapshot saved | id=${snapId} | job=${sourceJobId} | status=${result.status}`);
         } catch (snapErr: any) {
-          console.warn("[BuildPlanLayer] Snapshot save failed (non-blocking):", snapErr.message);
+          console.error("[BuildPlanLayer] Snapshot save failed:", snapErr.message);
+          return res.status(500).json({
+            status: "ERROR",
+            error: "PLAN_PERSIST_FAILED",
+            plan: null,
+            actionabilityScore: 0,
+            failedBlocks: [],
+            attempts: result.attempts,
+            jobId: sourceJobId,
+            message: "Your plan was not saved, so we will not show an unverified result. Please try again.",
+          });
         }
       }
 
       let narrative = null;
       try {
-        narrative = await buildCausalNarrative(campaignId, accountId);
+        narrative = await buildCausalNarrative(campaignId, accountId, sourceJobId);
       } catch (narrativeErr: any) {
         console.warn("[BuildPlanLayer] Narrative generation failed (non-blocking):", narrativeErr?.message);
       }

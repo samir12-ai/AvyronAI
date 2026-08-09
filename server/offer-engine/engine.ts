@@ -235,7 +235,8 @@ function buildAudienceAlignmentContext(audience: OfferAudienceInput): {
   primaryPain: string;
   painWords: string[];
 } {
-  const primaryPain = audiencePainText((audience.audiencePains || [])[0]).trim();
+  const selected = selectPainForUse(audience.painRegistry || [], "offer_core");
+  const primaryPain = audiencePainText(selected || (audience.audiencePains || [])[0]).trim();
   const painWords = primaryPain
     .toLowerCase()
     .split(/\s+/)
@@ -323,6 +324,7 @@ import type {
   OfferDepthScores,
   OfferResult,
 } from "./types";
+import { selectPainForUse } from "../shared/audience-pain-registry";
 
 function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
@@ -340,7 +342,8 @@ export function buildMarketLanguageMap(audience: OfferAudienceInput): MarketLang
   const emotionalLanguage: string[] = [];
   const objectionLanguage: string[] = [];
 
-  const pains = audience.audiencePains || [];
+  const selectedCorePain = selectPainForUse(audience.painRegistry || [], "offer_core");
+  const pains = selectedCorePain ? [selectedCorePain] : audience.audiencePains || [];
   for (const pain of pains) {
     if (typeof pain === "string") {
       rawPainPhrases.push(pain);
@@ -608,7 +611,8 @@ export function layer1_outcomeConstruction(
   differentiation: OfferDifferentiationInput,
   marketLanguage?: MarketLanguageMap,
 ): OutcomeLayer {
-  const pains = audience.audiencePains || [];
+  const selectedCorePain = selectPainForUse(audience.painRegistry || [], "offer_core");
+  const pains = selectedCorePain ? [selectedCorePain] : audience.audiencePains || [];
   const desires = Object.entries(audience.desireMap || {});
   const territories = positioning.territories || [];
   const pillars = differentiation.pillars || [];
@@ -1327,6 +1331,19 @@ export function validateOfferAlignment(
   }
 
   const pains = audience.audiencePains || [];
+  const selectedCorePain = selectPainForUse(audience.painRegistry || [], "offer_core");
+  if (audience.painRegistry?.length && !selectedCorePain) {
+    failures.push("No eligible authoritative core purchase pain is available for Offer");
+  }
+  if (offer.selectedPainRoles?.core) {
+    if (!selectedCorePain || offer.selectedPainRoles.core.painId !== selectedCorePain.painId) {
+      failures.push("Offer selected an unapproved or lower-priority core pain");
+    }
+    if ((offer.selectedPainRoles.core.mergedPainIds?.length ?? 1) > 1) {
+      failures.push("Offer core outcome must not merge unrelated audience pains");
+    }
+  }
+  const eligiblePains = selectedCorePain ? [selectedCorePain] : pains;
   const desires = Object.entries(audience.desireMap || {});
   if (pains.length > 0 || desires.length > 0) {
     const nameText = (offer.offerName || "").toLowerCase();
@@ -1335,7 +1352,7 @@ export function validateOfferAlignment(
     const delivText = (offer.deliverables || []).join(" ").toLowerCase();
     const combinedText = `${nameText} ${outcomeText} ${mechText} ${delivText}`;
 
-    const hasPainRef = pains.some((p: any) => {
+    const hasPainRef = eligiblePains.some((p: any) => {
       const painText = (typeof p === "string" ? p : p?.pain || p?.name || p?.canonical || "");
       const tokens = extractRobustTokens(painText);
       return tokens.length > 0 && fuzzyTokenMatch(tokens, combinedText);
@@ -1362,11 +1379,11 @@ export function validateOfferAlignment(
   // byte-for-byte so such candidates are rejected NOW, while the existing
   // bounded alignment retry loop can still regenerate them. The integrity
   // gate itself is untouched.
-  if (pains.length > 0) {
+  if (eligiblePains.length > 0) {
     const outcomeOnly = (offer.coreOutcome || "").toLowerCase();
     // Identical probe order to integrity l2 (canonical first — audience v3
     // emits structured pains as { canonical, frequency, evidence }).
-    const l2PainTexts = pains.slice(0, 5).map((p: any) => audiencePainText(p).toLowerCase());
+    const l2PainTexts = eligiblePains.slice(0, 5).map((p: any) => audiencePainText(p).toLowerCase());
     const painEchoMet = l2PainTexts.some((pt: string) => {
       const words = pt.split(/\s+/).filter((w: string) => w.length > 3);
       return words.some((w: string) => outcomeOnly.includes(w));
@@ -1671,7 +1688,11 @@ function buildDeterministicOfferSkeletons(
   // STRICT label coercion (no String(obj) fallback). Items that cannot be
   // coerced to a human-readable string are dropped and recorded as contract
   // violations in layerDiagnostics.
+  const registryPains = Array.isArray(rootPains) ? rootPains : audience.painRegistry || [];
+  const coreRegistryPain = selectPainForUse(registryPains, "offer_core");
+  const objectionRegistryPains = registryPains.filter((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_objection"));
   const painsList: string[] = (() => {
+    if (coreRegistryPain) return [coreRegistryPain.canonical];
     if (rootPains && Array.isArray(rootPains)) {
       const arr = safeLabelArray(rootPains.slice(0, 5), "skeleton.painsList.root");
       if (arr.length > 0) return arr;
@@ -1698,6 +1719,9 @@ function buildDeterministicOfferSkeletons(
   })();
 
   const objectionsList: string[] = (() => {
+    if (objectionRegistryPains.length > 0) {
+      return safeLabelArray(objectionRegistryPains.slice(0, 5), "skeleton.objectionsList.registry");
+    }
     if (rootObjections) {
       if (Array.isArray(rootObjections)) {
         const arr = safeLabelArray(rootObjections.slice(0, 5), "skeleton.objectionsList.root");
@@ -1722,7 +1746,7 @@ function buildDeterministicOfferSkeletons(
     return safeLabelArray((differentiation.proofArchitecture || []).slice(0, 6), "skeleton.proofTypesList.diff");
   })();
 
-  const primaryPain = painsList[0] || null;
+  const primaryPain = coreRegistryPain?.canonical || painsList[0] || null;
   const altPain = painsList[1] || painsList[0] || null;
   const primaryDesire = desiresList[0] || null;
   const altDesire = desiresList[1] || desiresList[0] || null;
@@ -2273,6 +2297,59 @@ export async function runOfferEngine(
   const aelAck = acknowledgeAelInput("OfferEngine-V4", analyticalEnrichment, accountId);
   const diagnostics: Record<string, any> = {};
 
+  // Strategy Root is the authority boundary for selected pains. Hydrate the
+  // registry here rather than trusting each caller to thread it through; this
+  // keeps direct and orchestrated Offer runs on the same pain contract.
+  const rootPainRegistry = strategyRoot?.approvedAudiencePains
+    ? safeJsonParse(strategyRoot.approvedAudiencePains)
+    : null;
+  if (Array.isArray(rootPainRegistry) && rootPainRegistry.some((pain: any) => pain?.painId)) {
+    audience = {
+      ...audience,
+      audiencePains: rootPainRegistry,
+      painRegistry: rootPainRegistry,
+    };
+    diagnostics.authoritativePainRegistry = {
+      source: "strategy_root",
+      count: rootPainRegistry.length,
+      corePainId: selectPainForUse(rootPainRegistry, "offer_core")?.painId ?? null,
+      objectionPainIds: rootPainRegistry
+        .filter((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_objection"))
+        .map((pain: any) => pain.painId),
+    };
+  }
+
+  // Contract invariant: the Offer engine emits its selected pain roles on
+  // EVERY return path — success, fallback, and early-return alike. Roles are
+  // derived ONCE from the hydrated authoritative registry (never from offer
+  // text) so failure paths remain auditable and post-generation validation
+  // never mistakes a truthful early return for a dropped core pain.
+  const authoritativeOfferCorePain = selectPainForUse(audience.painRegistry || [], "offer_core");
+  const authoritativeOfferObjectionPains = (audience.painRegistry || [])
+    .filter((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_objection"));
+  const buildOfferPainRoles = () =>
+    authoritativeOfferCorePain
+      ? {
+          core: {
+            painId: authoritativeOfferCorePain.painId,
+            role: "core_purchase" as const,
+            mergedPainIds: [authoritativeOfferCorePain.painId],
+          },
+          objections: authoritativeOfferObjectionPains.map((pain: any) => ({
+            painId: pain.painId,
+            role: "objection" as const,
+          })),
+        }
+      : null;
+  const withOfferPainRoles = <T extends OfferResult>(result: T): T => {
+    const roles = buildOfferPainRoles();
+    if (!roles) return result;
+    for (const candidate of [result.primaryOffer, result.alternativeOffer, result.rejectedOffer?.offer]) {
+      if (candidate && !candidate.selectedPainRoles) candidate.selectedPainRoles = roles;
+    }
+    return result;
+  };
+
   if (mechanismEngineOutput?.primaryMechanism) {
     const mechOut = mechanismEngineOutput.primaryMechanism;
     const mechAxis = mechOut.axisAlignment?.primaryAxis;
@@ -2390,7 +2467,7 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V4] SIGNAL_INSUFFICIENT | qualifying=${qualifyingSignals.length} < min=${MIN_QUALIFYING_SIGNALS} — cannot generate grounded claims`);
     const emptyOffer = buildEmptyOffer();
     const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["Insufficient upstream signals for grounded claim generation"]);
-    return {
+    return withOfferPainRoles({
       status: STATUS.INSUFFICIENT_SIGNALS,
       statusMessage: `Signal-insufficient: only ${qualifyingSignals.length} qualifying upstream signals found (minimum ${MIN_QUALIFYING_SIGNALS} required). Run MI and Audience engines first to generate source signals.`,
       primaryOffer: emptyOffer,
@@ -2406,7 +2483,7 @@ export async function runOfferEngine(
       engineVersion: ENGINE_VERSION,
       layerDiagnostics: diagnostics,
       strategyAcceptability: acceptability,
-    };
+    });
   }
 
   const pillars = differentiation.pillars || [];
@@ -2432,7 +2509,7 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V4] Insufficient differentiation data — returning red-grade adaptive fallback`);
     const emptyOffer = buildEmptyOffer();
     const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["Differentiation data insufficient"]);
-    return {
+    return withOfferPainRoles({
       status: STATUS.INSUFFICIENT_SIGNALS,
       statusMessage: "Differentiation data insufficient to construct meaningful offer",
       primaryOffer: emptyOffer,
@@ -2448,7 +2525,7 @@ export async function runOfferEngine(
       engineVersion: ENGINE_VERSION,
       layerDiagnostics: diagnostics,
       strategyAcceptability: acceptability,
-    };
+    });
   }
 
   const marketLanguage = buildMarketLanguageMap(audience);
@@ -2495,7 +2572,7 @@ export async function runOfferEngine(
     const acceptability = assessStrategyAcceptability(0, 0, 5, false, [
       "Offer cannot run without at least one audience pain or market pain phrase",
     ]);
-    return {
+    return withOfferPainRoles({
       status: STATUS.INSUFFICIENT_SIGNALS,
       statusMessage:
         "OFFER_INPUT_INSUFFICIENT: Audience produced 0 pain signals and MarketLanguageMap has 0 raw pain phrases. " +
@@ -2513,7 +2590,7 @@ export async function runOfferEngine(
       engineVersion: ENGINE_VERSION,
       layerDiagnostics: { ...diagnostics, blockCode: "OFFER_INPUT_INSUFFICIENT" },
       strategyAcceptability: acceptability,
-    };
+    });
   }
 
   const l1Outcome = layer1_outcomeConstruction(audience, positioning, differentiation, marketLanguage);
@@ -2603,7 +2680,7 @@ export async function runOfferEngine(
     console.log(`[OfferEngine-V4] GROUNDING_FAILED | ratio=${primaryGrounding.groundingRatio.toFixed(2)} < floor=${GROUNDING_RATIO_FLOOR} — returning SIGNAL_INSUFFICIENT`);
     const emptyOffer = buildEmptyOffer();
     const acceptability = assessStrategyAcceptability(0, 0, 5, false, ["AI-generated claims failed signal grounding"]);
-    return {
+    return withOfferPainRoles({
       status: STATUS.INSUFFICIENT_SIGNALS,
       statusMessage: `Signal grounding failed: only ${primaryGrounding.groundedClaims}/${primaryGrounding.totalClaims} claims are signal-anchored (${Math.round(primaryGrounding.groundingRatio * 100)}% < ${Math.round(GROUNDING_RATIO_FLOOR * 100)}% minimum). Claims cannot be generated without signal backing.`,
       primaryOffer: emptyOffer,
@@ -2625,7 +2702,7 @@ export async function runOfferEngine(
         groundingRatio: primaryGrounding.groundingRatio,
         strippedClaims: primaryGrounding.strippedClaims,
       },
-    };
+    });
   }
 
   aiOffers.primary.deliverables = aiOffers.primary.deliverables.filter(d =>
@@ -2694,6 +2771,10 @@ export async function runOfferEngine(
     audience, differentiation, mi, positioning,
     { problemStatement: aiOffers.primary.problemStatement, proofPath: aiOffers.primary.proofPath, objectionHandling: aiOffers.primary.objectionHandling },
   );
+  const primaryOfferPainRoles = buildOfferPainRoles();
+  if (primaryOfferPainRoles) {
+    primaryOffer.selectedPainRoles = primaryOfferPainRoles;
+  }
 
   // F5a (Fix 1): when the strategic doctrine's anchor is absent, derive the
   // battery anchor from Product DNA (mirrors positioning + audience). Explicit
@@ -3459,7 +3540,7 @@ export async function runOfferEngine(
         offerDepthGateLog.push(`Attempt ${offerDepthAttempt}: FINAL FAILURE (depthScore=${celDepth.causalDepthScore})`);
         const depthGateResult = buildDepthGateResult(celDepth, offerDepthAttempt, offerDepthGateMaxAttempts, offerDepthGateLog, celSourceTexts);
         console.log(`[OfferEngine-V4] DEPTH_GATE: FINAL FAILURE after ${offerDepthGateMaxAttempts} attempts — returning DEPTH_FAILED`);
-        return applyPartialAelDowngrade("OfferEngine-V4", {
+        return withOfferPainRoles(applyPartialAelDowngrade("OfferEngine-V4", {
           status: "DEPTH_FAILED",
           statusMessage: `Depth gate failed after ${offerDepthGateMaxAttempts} attempts: depthScore=${celDepth.causalDepthScore}`,
           primaryOffer: buildEmptyOffer(),
@@ -3478,7 +3559,7 @@ export async function runOfferEngine(
           signalGrounding: { groundedClaims: 0, totalClaims: 0, groundingRatio: 0, strippedClaims: [] },
           celDepthCompliance: celDepth,
           depthGateResult,
-        } as any, aelAck);
+        } as any, aelAck));
       }
     }
   }
@@ -3606,7 +3687,7 @@ export async function runOfferEngine(
     depthGateResult: depthGateResultOffer,
     dnaEnrichment: offerDnaEnrichmentSignal,
   };
-  return applyPartialAelDowngrade("OfferEngine-V4", __offerResult, aelAck);
+  return withOfferPainRoles(applyPartialAelDowngrade("OfferEngine-V4", __offerResult, aelAck));
 }
 
 // T001: Final guard — strip/flag any "[object Object]" residue that slipped past safeLabel.

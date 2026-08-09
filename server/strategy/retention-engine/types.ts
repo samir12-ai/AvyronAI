@@ -6,6 +6,19 @@ export interface RetentionInput {
   campaignId: string;
   accountId: string;
   memoryContext?: string;
+  /**
+   * Optional authoritative Audience pain records from the validated Strategy
+   * Root. Retention may only select a post-purchase pain explicitly eligible
+   * for its responsibility; acquisition pains must not be repurposed here.
+   */
+  painRegistry?: Array<{
+    painId: string;
+    canonical: string;
+    rank: number;
+    eligible: boolean;
+    allowedUses: string[];
+    classification: string;
+  }>;
 }
 
 export interface CustomerJourneyData {
@@ -112,4 +125,19 @@ export interface RetentionResult {
   };
   strategyAcceptability?: import("../../shared/strategy-acceptability").StrategyAcceptability;
   commercialRetentionEconomics?: import("./retention-economics").RetentionEconomics | null;
+  /**
+   * Preserved authoritative pain role. Set whenever a registry pain
+   * eligible for the `retention` use was supplied; downstream plan
+   * synthesis must preserve this verbatim, never reselect or merge.
+   */
+  selectedPainRoles?: {
+    retention?: {
+      painId: string;
+      canonical?: string;
+      rank?: number;
+      role?: "post_purchase_friction";
+      classification?: string;
+      mergedPainIds?: string[];
+    };
+  };
 }

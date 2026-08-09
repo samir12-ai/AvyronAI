@@ -3530,6 +3530,27 @@ async function executeEngine(
 
         console.log(`[Orchestrator] RETENTION_INPUT_SYNTHESIS | touchpoints=${touchpoints.length} from funnel stages | postPurchaseObjections=${postPurchaseObjections.length} from audience | motivations=${purchaseMotivations.length}`);
 
+        // Authoritative pain routing: pass the Strategy Root pain registry so
+        // Retention can prioritize POST_PURCHASE_FRICTION pains without them
+        // ever becoming an Offer core pain. Only enriched registry records
+        // (painId present) are forwarded — legacy pains are omitted rather
+        // than reconstructed ad hoc, so lineage validation stays truthful.
+        let retentionPainRegistry: any[] | undefined;
+        try {
+          const rootForRetention = await getActiveRoot(config.campaignId, config.accountId);
+          const rootPains = rootForRetention?.approvedAudiencePains
+            ? (typeof rootForRetention.approvedAudiencePains === "string"
+                ? JSON.parse(rootForRetention.approvedAudiencePains)
+                : rootForRetention.approvedAudiencePains)
+            : null;
+          if (Array.isArray(rootPains) && rootPains.some((p: any) => p && typeof p === "object" && "painId" in p)) {
+            retentionPainRegistry = rootPains;
+            console.log(`[Orchestrator] RETENTION_PAIN_REGISTRY_HYDRATED | pains=${rootPains.length}`);
+          }
+        } catch (rootErr: any) {
+          console.warn(`[Orchestrator] RETENTION_PAIN_REGISTRY_UNAVAILABLE | ${rootErr.message}`);
+        }
+
         const result = await runRetentionEngine({
           customerJourneyData: {
             touchpoints,
@@ -3553,6 +3574,7 @@ async function executeEngine(
           campaignId: config.campaignId,
           accountId: config.accountId,
           memoryContext: ctx.memoryContext || undefined,
+          painRegistry: retentionPainRegistry,
         });
         output = result;
         ctx.retention = result;

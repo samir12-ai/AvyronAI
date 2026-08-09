@@ -24,6 +24,8 @@ vi.mock("../auth", () => ({
 }));
 
 const resolveRunIdMock = vi.fn();
+const runBuildPlanLayerMock = vi.fn();
+const buildCausalNarrativeMock = vi.fn(async () => null);
 vi.mock("../orchestrator/run-resolver", () => ({
   resolveRunId: (...args: any[]) => resolveRunIdMock(...args),
 }));
@@ -48,8 +50,8 @@ vi.mock("../db", () => {
 });
 
 // Heavy deps stubbed — only the /latest read boundary is under test.
-vi.mock("../build-plan-layer/engine", () => ({ runBuildPlanLayer: vi.fn() }));
-vi.mock("../narrative-layer", () => ({ buildCausalNarrative: vi.fn(async () => null) }));
+vi.mock("../build-plan-layer/engine", () => ({ runBuildPlanLayer: (...args: any[]) => (runBuildPlanLayerMock as any)(...args) }));
+vi.mock("../narrative-layer", () => ({ buildCausalNarrative: (...args: any[]) => (buildCausalNarrativeMock as any)(...args) }));
 
 let server: http.Server;
 let port: number;
@@ -73,6 +75,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   resolveRunIdMock.mockReset();
+  runBuildPlanLayerMock.mockReset();
+  buildCausalNarrativeMock.mockClear();
   dbSelectSpy.mockClear();
   snapshotRows = [];
 });
@@ -95,6 +99,22 @@ function get(path: string) {
     );
     req.on("error", reject);
     req.end();
+  });
+}
+
+function post(path: string, body: any) {
+  const raw = JSON.stringify(body);
+  return new Promise<{ status: number; body: any }>((resolve, reject) => {
+    const req = http.request(
+      { hostname: "127.0.0.1", port, path, method: "POST", headers: { "x-account-id": ACCOUNT, "content-type": "application/json", "content-length": Buffer.byteLength(raw) } },
+      (res) => {
+        let response = "";
+        res.on("data", (c) => (response += c));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: response ? JSON.parse(response) : null }));
+      },
+    );
+    req.on("error", reject);
+    req.end(raw);
   });
 }
 
@@ -187,5 +207,30 @@ describe("GET /api/build-plan-layer/latest run binding", () => {
     expect(res.status).toBe(404);
     expect(res.body.status).toBe("RUN_NOT_FOUND");
     expect(res.body.plan).toBeNull();
+  });
+});
+
+describe("POST /api/build-plan-layer/generate run binding", () => {
+  it("fails closed instead of regenerating an older run under a stale shadow", async () => {
+    resolveRunIdMock.mockResolvedValue({
+      runId: OLD_JOB, isLatest: true, isStale: true,
+      newerNonResolvableRun: { runId: NEW_JOB, status: "FAILED" },
+    });
+    const res = await post("/api/build-plan-layer/generate", { campaignId: CAMPAIGN });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("CURRENT_RUN_PLAN_NOT_PERSISTED");
+    expect(res.body.shadowedByRun).toBe(NEW_JOB);
+    expect(runBuildPlanLayerMock).not.toHaveBeenCalled();
+  });
+
+  it("binds narrative generation to the same resolved run as persistence", async () => {
+    resolveRunIdMock.mockResolvedValue({ runId: NEW_JOB, isLatest: true, isStale: false });
+    runBuildPlanLayerMock.mockResolvedValue({
+      status: "SUCCESS", plan: { positioning: "p" }, actionabilityScore: 1, failedBlocks: [], attempts: 1,
+    });
+    const res = await post("/api/build-plan-layer/generate", { campaignId: CAMPAIGN });
+    expect(res.status).toBe(200);
+    expect(res.body.jobId).toBe(NEW_JOB);
+    expect(buildCausalNarrativeMock).toHaveBeenCalledWith(CAMPAIGN, ACCOUNT, NEW_JOB);
   });
 });
