@@ -1,0 +1,1181 @@
+TASK — IMPLEMENT SYSTEM-WIDE STRATEGIC ANGLE SELECTION + FULL TEST + REAL-RUN VERIFICATION
+
+We completed the forensic audit of strategic angle selection.
+
+The audit proved that Avyron currently has strong systems for:
+
+- evidence grounding
+- pain eligibility
+- Product Capability validation
+- absolute quality checks
+- lineage
+- System Control
+
+But it lacks a reliable process for choosing the BEST strategic angle when multiple valid and eligible truths exist.
+
+The current dominant pattern is:
+
+eligible candidates
+→ frequency/rank/score
+→ sort
+→ first item / argmax
+→ judge validates only the winner
+
+This caused a weak Community / Peer Validation angle to defeat a stronger evidence-grounded clarity / strategic-direction angle.
+
+The Community angle won because:
+
+- frequency saturated the scoring formula
+- a minor confidence difference broke the tie
+- array position committed the winner
+- no serious alternatives were compared
+- judges asked whether the winner was acceptable, not whether it was superior
+- the LLM expanded community/belonging into peer validation without supporting evidence
+- the candidate required a product capability Avyron does not possess
+
+This defect is not Positioning-only.
+
+The audit found related selection risks in:
+
+- Audience
+- Pain Registry consumers
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Awareness
+- Funnel
+- Persuasion
+- Channel Selection
+- Iteration
+- Retention
+
+Do NOT modify clean preservers/validators unnecessarily:
+
+- AEL
+- Strategy Root
+- Integrity
+- Statistical Validation
+- Budget Governor
+- Build Plan, except to preserve selection diagnostics and selected winners
+
+===========================================================
+PRIMARY GOAL
+===========================================================
+
+Implement one general strategic-selection contract across every PROVEN affected engine.
+
+The new behavior must be:
+
+CANDIDATES
+→ ELIGIBILITY
+→ EVIDENCE ENTAILMENT
+→ PRODUCT CAPABILITY FIT
+→ ENGINE-RESPONSIBILITY FIT
+→ SERIOUS-ALTERNATIVE COMPARISON
+→ WINNER
+→ COMPARATIVE JUDGE
+→ PERSISTED SELECTION TRACE
+
+Not:
+
+frequency/rank
+→ sort
+→ first item
+→ absolute judge
+
+Do not hardcode:
+
+- Community is weak
+- strategic direction is strong
+- Avyron-specific desired wording
+- any fixed winning pain
+
+The architecture must work for every future customer.
+
+===========================================================
+GLOBAL DOMINANCE CONTRACT
+===========================================================
+
+Every affected engine must receive this dominance rule:
+
+Your task is not to select the highest-ranked, most frequent, first eligible, or first-present truth.
+
+Your task is to:
+
+1. Identify all serious evidence-grounded alternatives relevant to your engine responsibility.
+
+2. Remove candidates that:
+   - are not eligible for this engine
+   - require unsupported semantic expansion
+   - require unsupported product capabilities
+   - do not resolve to authoritative evidence
+   - contradict Product Identity
+   - are merely high-frequency but strategically irrelevant
+
+3. Compare the remaining serious candidates according to your engine’s responsibility.
+
+4. Select a winner only if it is demonstrably stronger than its alternatives.
+
+5. Preserve uncertainty when no candidate clearly dominates.
+
+Frequency, rank, confidence, array order, and prevalence are evidence inputs.
+
+They are NOT winner-selection authority.
+
+===========================================================
+PHASE 1 — IMPLEMENT A SHARED STRATEGIC SELECTION CONTRACT
+===========================================================
+
+Create or extend a shared selection architecture.
+
+Do not build unrelated parallel systems.
+
+Conceptually, each strategic candidate should include:
+
+candidateId
+engineId
+candidateType
+statement
+
+sourcePainIds[]
+sourceSegmentIds[]
+sourceDesireIds[]
+sourceObjectionIds[]
+sourceRootCauseIds[]
+sourceEvidenceIds[]
+
+requiredCapabilityIds[]
+supportedCapabilityIds[]
+
+evidenceStrength
+purchaseRelevance
+engineResponsibilityFit
+productFit
+semanticEntailment
+differentiationPotential
+causalDepth
+unsupportedAssumptions[]
+semanticExpansionSteps[]
+confidence
+
+eligibilityStatus
+rejectionReasons[]
+
+The exact schema may differ based on existing architecture.
+
+Reuse existing IDs, lineage, Pain Registry, Product Capability Registry, AEL and engine contracts.
+
+===========================================================
+PHASE 2 — ENGINE RESPONSIBILITY CONTRACTS
+===========================================================
+
+Define explicitly what each engine is selecting.
+
+AUDIENCE
+
+Responsibility:
+identify materially distinct audience realities and prioritize segments without allowing frequency/array order to silently determine the primary target.
+
+Serious alternatives may come from:
+- pains
+- desires
+- objections
+- behaviors
+- causal evidence
+- segment candidates
+- customer-origin evidence
+
+POSITIONING
+
+Responsibility:
+select the strongest defensible market position explaining why the customer should choose this product rather than alternatives.
+
+Must consider:
+- authoritative pains
+- Audience segments
+- desires
+- root causes
+- alternative failures
+- validated product capabilities
+- market/category evidence
+
+DIFFERENTIATION
+
+Responsibility:
+select the most meaningful product-supported gap between what customers need and what existing alternatives provide.
+
+MECHANISM
+
+Responsibility:
+select the strongest causal explanation connecting an eligible strategic problem to a real validated product capability.
+
+OFFER
+
+Responsibility:
+select the strongest purchasable transformation using:
+- one eligible core purchase pain
+- separate objections
+- approved positioning
+- approved differentiation
+- approved mechanism
+- real product capability
+
+AWARENESS
+
+Responsibility:
+select the most relevant belief/problem framing for the audience’s awareness stage.
+
+FUNNEL
+
+Responsibility:
+select the strongest conversion barrier for each stage, not merely inherit the globally dominant pain.
+
+PERSUASION
+
+Responsibility:
+select the belief, objection, proof requirement or desire that most affects commitment.
+
+CHANNEL SELECTION
+
+Responsibility:
+select channels based on audience behavior, evidence quality, product motion and execution fit—not only a numeric argmax when alternatives are materially close.
+
+ITERATION
+
+Responsibility:
+select the most decision-relevant hypothesis based on observed performance truth and strategic importance.
+
+RETENTION
+
+Responsibility:
+select the strongest post-purchase friction or continued-value problem relevant to retention.
+
+BUILD PLAN
+
+Responsibility:
+preserve the winning decisions from each engine.
+
+It must not independently reselect the strategic angles.
+
+===========================================================
+PHASE 3 — SERIOUS CANDIDATE POOL
+===========================================================
+
+Each affected engine must build a serious candidate pool before committing.
+
+The pool must include all materially relevant inputs for that engine.
+
+Do not consume only a reduced pain ranking if major strategic insights exist elsewhere.
+
+For Positioning specifically, candidate generation must inspect:
+
+- eligible Pain Registry entries
+- Audience segments
+- Audience desires
+- objections where positioning-relevant
+- AEL/root causes
+- customer behaviors
+- competitor/category patterns
+- Product Capability Registry
+- existing validated market decisions
+
+Avoid duplicate candidates that express the same underlying idea.
+
+Do not merge unrelated meanings.
+
+===========================================================
+PHASE 4 — ELIGIBILITY BEFORE COMPARISON
+===========================================================
+
+Eligibility must happen before importance ranking.
+
+Required sequence:
+
+ALL CANDIDATES
+→ authoritative source validation
+→ engine allowed-use validation
+→ product-fit validation
+→ evidence-lineage validation
+→ semantic-entailment validation
+→ serious candidate set
+→ comparative selection
+
+Reject candidates before comparison when they:
+
+- use a pain not allowed for the engine
+- require a capability absent from Product Identity
+- originate from unverified/inferred text without support
+- require unsupported psychological interpretation
+- combine unrelated pains
+- depend on stale/cross-run data
+
+===========================================================
+PHASE 5 — SEMANTIC ENTAILMENT GUARD
+===========================================================
+
+Implement a semantic-entailment contract.
+
+The question is:
+
+Does the proposed strategic meaning follow from the source evidence?
+
+Allowed:
+
+Evidence:
+"Owners feel overwhelmed by fragmented marketing tools."
+
+Candidate:
+"Replace fragmented tools with one evidence-grounded strategic direction."
+
+Possible result:
+ENTAILED or SUPPORTED, if Product Identity supports the solution.
+
+Not allowed:
+
+Evidence:
+"Users value community and belonging."
+
+Candidate:
+"Founders require peers to validate their marketing strategy."
+
+Result:
+UNSUPPORTED_SEMANTIC_EXPANSION unless direct evidence establishes peer validation.
+
+The guard must detect unsupported additions such as:
+
+- new psychological need
+- new buying motive
+- new causal relationship
+- new market problem
+- new product capability
+- new solution category
+
+The LLM may rephrase.
+
+It may not change the underlying meaning.
+
+Use deterministic checks where possible and an LLM judge only where semantic reasoning is genuinely required.
+
+The semantic judge must receive:
+
+- original evidence
+- normalized source meaning
+- candidate meaning
+- claimed transformation
+- referenced capabilities
+- required IDs
+
+It must return structured results:
+
+ENTAILED
+PARTIALLY_ENTAILED
+UNSUPPORTED_EXPANSION
+CONTRADICTED
+
+with exact unsupported additions.
+
+===========================================================
+PHASE 6 — PRODUCT CAPABILITY FIT BEFORE SELECTION
+===========================================================
+
+A candidate cannot win if it requires a capability the product does not possess.
+
+For each candidate identify:
+
+requiredCapabilityIds
+validatedCapabilityIds
+unsupportedCapabilityClaims
+
+Reject before comparison if unsupported.
+
+Example:
+
+Community / Peer Validation
+
+requires:
+- peers
+- community validation
+- human review or social proof system
+
+If Product Identity does not contain those capabilities:
+
+candidate is ineligible.
+
+But for a product that genuinely operates a peer community:
+
+the same candidate may remain eligible.
+
+No Avyron-specific hardcoding.
+
+===========================================================
+PHASE 7 — COMPARATIVE SELECTION
+===========================================================
+
+After eligibility, compare the serious alternatives.
+
+Do NOT merely create a weighted arithmetic score and call it solved.
+
+A score may support comparison, but the selection must remain auditable and resistant to one saturated variable.
+
+The comparison must answer:
+
+1. Which candidate is most causally relevant to this engine’s responsibility?
+
+2. Which has the strongest evidence for its exact meaning?
+
+3. Which is most connected to an actual purchase or behavior decision where appropriate?
+
+4. Which is genuinely solvable by validated product capabilities?
+
+5. Which requires the fewest unsupported assumptions?
+
+6. Which can create meaningful differentiation?
+
+7. Which is corroborated across relevant Audience intelligence?
+
+8. Which candidate remains strong if array order changes?
+
+9. Is the margin strong enough to commit?
+
+Each candidate must receive:
+
+strengths[]
+weaknesses[]
+whyItCouldWin
+whyItShouldLose
+comparisonAgainst[]
+
+The winner must include:
+
+winnerReason
+seriousAlternativesConsidered[]
+whyAlternativesLost[]
+
+===========================================================
+PHASE 8 — COMPARATIVE JUDGE
+===========================================================
+
+Judges must no longer only ask:
+
+"Is this candidate acceptable?"
+
+For affected selection points, add a comparative judge that sees:
+
+- engine responsibility
+- serious eligible candidates
+- source evidence
+- Product Capability Registry
+- candidate transformations
+- proposed winner
+- reasons for selection
+- rejected alternatives
+
+The judge must verify:
+
+- winner is eligible
+- source meaning is preserved
+- product capability exists
+- winner is superior for THIS engine’s responsibility
+- no materially stronger alternative was ignored
+- winner did not win because of frequency/rank/order alone
+- reasons for rejecting alternatives are evidence-backed
+
+The judge returns:
+
+ACCEPT_WINNER
+RESELECT
+NO_CLEAR_WINNER
+
+If RESELECT:
+
+return exact reasons and the candidate(s) that should be reconsidered.
+
+If NO_CLEAR_WINNER:
+
+preserve uncertainty.
+
+Do not fabricate certainty.
+
+===========================================================
+PHASE 9 — NO-CLEAR-WINNER BEHAVIOR
+===========================================================
+
+When two or more candidates are materially close:
+
+do not force one into false certainty.
+
+Use the existing closest compatible status or add structured uncertainty metadata such as:
+
+selectionStatus = CLOSE_ALTERNATIVES
+
+primaryCandidate
+alternativeCandidates[]
+decisionMargin
+uncertaintyReason
+
+Downstream engines may receive the primary plus serious alternatives where appropriate.
+
+Build Plan should truthfully present the strategic choice as provisional/review-required if needed.
+
+Do not block the whole pipeline unless the architecture requires it.
+
+===========================================================
+PHASE 10 — REMOVE FIRST-ITEM AND ARRAY-ORDER AUTHORITY
+===========================================================
+
+Audit and fix proven winner-selection paths such as:
+
+- `[0]`
+- `find()` first eligible
+- score-sort then first
+- first vector
+- first accepted candidate
+- input-order-sensitive prompts
+
+Array order must not determine the winner.
+
+Add order-invariance tests.
+
+Reversing candidates must not change the outcome unless the underlying evidence changes.
+
+===========================================================
+PHASE 11 — FREQUENCY / RANK ROLE
+===========================================================
+
+Frequency and rank remain useful.
+
+But enforce:
+
+frequency contributes evidence prevalence
+
+frequency does not establish:
+- purchase relevance
+- engine fit
+- product capability
+- differentiation
+- semantic entailment
+
+Prevent saturation from making strategic fit irrelevant.
+
+Audit current formulas where:
+
+frequency reaches a cap
+→ all candidates become equal
+→ confidence noise decides the strategy
+
+Do not blindly replace formulas.
+
+Correct only proven affected formulas.
+
+===========================================================
+PHASE 12 — ENGINE-BY-ENGINE IMPLEMENTATION
+===========================================================
+
+Implement this contract in every engine proven affected by the audit.
+
+Required minimum:
+
+Audience
+Pain Registry selection consumers
+Positioning
+Differentiation
+Mechanism
+Offer
+Awareness
+Funnel
+Persuasion
+Channel Selection
+Iteration
+Retention
+
+Do not modify AEL, Strategy Root, Integrity, Statistical Validation, Budget Governor or Build Plan selection logic unless required for:
+
+- carrying candidate alternatives
+- preserving selection diagnostics
+- validating lineage
+
+Build Plan must remain a preserver/synthesizer.
+
+===========================================================
+PHASE 13 — PERSISTED SELECTION TRACE
+===========================================================
+
+Every affected engine must persist a Selection Trace.
+
+At minimum:
+
+engineId
+runId/jobId
+
+candidatePool[]
+eligibleCandidates[]
+rejectedCandidates[]
+
+winnerCandidateId
+selectionStatus
+decisionMargin
+
+winnerReason
+whyAlternativesLost[]
+
+semanticEntailmentResults[]
+productCapabilityChecks[]
+comparativeJudgeVerdict
+
+frequencyContribution
+rankContribution
+other decision factors
+
+The trace must allow us to answer after the run:
+
+"What alternatives existed, why did this win, and why did the others lose?"
+
+Do not rely only on transient logs.
+
+===========================================================
+PHASE 14 — BUILD PLAN PRESERVATION
+===========================================================
+
+Build Plan must preserve:
+
+- winner from each engine
+- selectionStatus
+- serious alternatives where relevant
+- pain IDs
+- capability IDs
+- winner reasons
+- comparative judge result
+
+It must not:
+
+- run another angle selection
+- re-rank candidates
+- choose another pain from Business Context
+- merge alternatives
+- omit uncertainty
+
+===========================================================
+PHASE 15 — REQUIRED DETERMINISTIC TESTS
+===========================================================
+
+Add tests for the general behavior.
+
+CASE 1 — Community frequent but strategically weak
+
+Evidence:
+community/belonging frequent
+
+No evidence:
+peer strategy validation
+
+No product capability:
+peer validation/community service
+
+Stronger candidate:
+evidence-grounded strategic clarity
+
+Expected:
+Community does not win.
+
+CASE 2 — Community genuinely strong
+
+Evidence explicitly shows customers seek peer validation.
+
+Product actually provides peer review/community validation.
+
+Expected:
+Community can win.
+
+CASE 3 — Lower-frequency but purchase-relevant
+
+Lower-frequency candidate has:
+- strong buying relevance
+- strong product fit
+- direct evidence
+
+Higher-frequency candidate is peripheral.
+
+Expected:
+lower-frequency candidate may win.
+
+CASE 4 — Highest-ranked eligible is not best
+
+Expected:
+rank does not automatically win.
+
+CASE 5 — Unsupported semantic expansion
+
+community
+→ peer validation
+
+without direct evidence.
+
+Expected:
+UNSUPPORTED_EXPANSION.
+
+CASE 6 — Supported semantic interpretation
+
+Evidence explicitly describes needing peers to validate decisions.
+
+Expected:
+allowed.
+
+CASE 7 — Unsupported capability
+
+Candidate requires a capability absent from Product Identity.
+
+Expected:
+ineligible before comparison.
+
+CASE 8 — Product-supported capability
+
+Same candidate with validated capability.
+
+Expected:
+eligible.
+
+CASE 9 — Array-order invariance
+
+Reverse candidate order.
+
+Expected:
+same winner.
+
+CASE 10 — Segment insight survives handoff
+
+Strong Audience Segment insight is not highly ranked in pain list.
+
+Expected:
+Positioning candidate pool still includes it.
+
+CASE 11 — Different engine responsibilities
+
+Same facts provided to Positioning and Retention.
+
+Expected:
+different appropriate winners.
+
+CASE 12 — No clear winner
+
+Two candidates equally supported.
+
+Expected:
+CLOSE_ALTERNATIVES / uncertainty, not fabricated certainty.
+
+CASE 13 — Absolute-valid but comparatively inferior
+
+Candidate passes grounding and validity.
+
+A materially stronger alternative exists.
+
+Expected:
+comparative judge rejects the inferior winner.
+
+CASE 14 — Frequency saturation
+
+Multiple candidates exceed the frequency cap.
+
+Expected:
+selection is not decided by minor confidence noise alone.
+
+CASE 15 — LLM cannot invent candidate source meaning
+
+Expected:
+rejected with exact unsupported additions.
+
+CASE 16 — Winner lineage
+
+All source IDs and capability IDs resolve.
+
+CASE 17 — Cross-tenant/cross-run candidates rejected.
+
+CASE 18 — Build Plan preserves winner and alternatives without reselecting.
+
+===========================================================
+PHASE 16 — ENGINE-SPECIFIC TEST COVERAGE
+===========================================================
+
+Add focused tests for:
+
+Audience primary segment selection
+Pain Registry consumer selection
+Positioning territory selection
+Differentiation pillar selection
+Mechanism axis/claim selection
+Offer angle/core transformation
+Awareness framing
+Funnel barrier selection
+Persuasion belief/objection selection
+Channel selection
+Iteration hypothesis selection
+Retention priority selection
+
+Verify each engine:
+
+- considers alternatives
+- uses its responsibility contract
+- prevents unsupported expansion
+- prevents unsupported capability
+- persists Selection Trace
+
+===========================================================
+PHASE 17 — FULL REGRESSION TEST
+===========================================================
+
+Run:
+
+- new strategic-selection tests
+- Audience tests
+- Pain Registry tests
+- Positioning tests
+- Differentiation tests
+- Mechanism tests
+- Offer tests
+- Awareness tests
+- Funnel tests
+- Persuasion tests
+- Channel Selection tests
+- Iteration tests
+- Retention tests
+- authority-separation tests
+- grounding tests
+- CEL tests
+- System Control tests
+- exact-run lineage tests
+- timeout-policy tests
+- Build Plan tests
+- tenant isolation tests
+
+Report:
+
+- total passed
+- total failed
+- baseline failures
+- net-new failures
+- TypeScript baseline vs final
+
+Fix all net-new defects.
+
+===========================================================
+PHASE 18 — TARGETED REPLAY BEFORE FULL RUN
+===========================================================
+
+Before another full campaign:
+
+Use persisted inputs from:
+
+campaign_1773576062201_6t0oxi_realrun_1786285706968
+
+Replay affected strategic selection without changing original data.
+
+For Positioning, the serious candidate pool must include at least:
+
+- strategic direction
+- generic advice / personalization
+- evidence-grounded clarity
+- continuous market adaptation
+- community / belonging
+- complexity / workflow
+- any additional materially supported candidate
+
+Do not manually select the winner.
+
+Capture the complete Selection Trace.
+
+Verify:
+
+- Community does not win merely because of frequency.
+- Community can only use peer-validation meaning if evidence supports it.
+- Candidate capabilities resolve to Product Identity.
+- Audience Segment intelligence is included.
+- array-order reversal produces same winner.
+- no serious alternative is silently omitted.
+
+Then replay downstream affected chain:
+
+Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Awareness
+→ Funnel
+→ Persuasion
+→ Retention
+→ Build Plan verification
+
+Confirm each affected engine selects according to its own responsibility.
+
+===========================================================
+PHASE 19 — TARGETED REPLAY ACCEPTANCE GATE
+===========================================================
+
+Do not start the expensive full campaign until:
+
+- all tests pass
+- Selection Trace is complete
+- no unauthorized semantic expansions
+- no unsupported capabilities
+- order invariance proven
+- comparative judge passes
+- Build Plan preserves decisions
+- no net-new TypeScript errors
+
+If targeted replay reveals a proven bug:
+
+fix it
+add test
+rerun replay
+
+===========================================================
+PHASE 20 — ONE FULL REAL CAMPAIGN
+===========================================================
+
+After acceptance gate passes:
+
+Run ONE explicitly armed fresh real campaign:
+
+campaign_1773576062201_6t0oxi
+
+No automatic run.
+
+Use real acquisition.
+
+Run all 15 engines.
+
+Capture:
+
+- jobId
+- runtime
+- source revision
+- candidate traces
+- winner traces
+- judge results
+- snapshots
+- Strategy Root
+- Build Plan
+
+===========================================================
+PHASE 21 — FULL-RUN SELECTION AUDIT
+===========================================================
+
+For every affected engine report:
+
+- engine responsibility
+- candidate count
+- eligible count
+- serious alternatives
+- winner
+- decision margin
+- why winner won
+- why alternatives lost
+- semantic entailment result
+- capability-fit result
+- comparative judge result
+- selectionStatus
+
+Verify:
+
+- no frequency-only winner
+- no first-item winner
+- no prompt-order winner
+- no unsupported semantic expansion
+- no unsupported capability
+- no ignored major Audience segment insight
+- no stale/cross-run candidate
+- no hidden fallback becoming strategy
+
+===========================================================
+PHASE 22 — SYSTEM CONTROL + BUILD PLAN
+===========================================================
+
+Let all guards run naturally.
+
+Do not force PASS.
+
+If System Control allows:
+
+persist the new Build Plan.
+
+Verify:
+
+- exact sourceJobId
+- exact Strategy Root
+- exact engine snapshots
+- selected winners preserved
+- serious alternatives preserved where required
+- pain/capability lineage resolves
+- no independent Build Plan reselection
+- no degraded_ai_failed
+
+If System Control rejects:
+
+classify whether it is:
+- truthful strategic rejection
+- implementation defect
+
+Fix only proven implementation defects.
+
+===========================================================
+PHASE 23 — PREVIEW VERIFICATION
+===========================================================
+
+Open actual Preview / Roadmap Document.
+
+Verify via API and UI:
+
+- newest jobId
+- newest planId
+- isLatest=true
+- isStale=false
+- all engine sections from same run
+- Build Plan from same run
+
+Visually inspect:
+
+- core Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Funnel
+- Retention
+- final strategic thesis
+
+Confirm the displayed winner matches the persisted Selection Trace.
+
+No old content.
+No fallback strategy.
+No stale mixed run.
+
+Capture screenshot evidence if possible.
+
+===========================================================
+STOP RULE
+===========================================================
+
+Do not create follow-up tasks.
+
+Do not stop after unit tests.
+
+Do not stop after targeted replay.
+
+Do not stop until:
+
+- system-wide selection contract implemented
+- all affected engines wired
+- tests pass
+- targeted replay passes
+- one fresh full run completes
+- Build Plan is produced or truthfully rejected
+- Preview is verified
+
+Do not Approve.
+Do not Activate.
+Do not start Performance Loop.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return one concise but complete report.
+
+ROOT CAUSE
+
+What was structurally wrong with angle selection?
+
+AFFECTED ENGINES
+
+Which engines were fixed?
+Which engines were left unchanged?
+
+SELECTION CONTRACT
+
+How does an engine now choose?
+
+SEMANTIC ENTAILMENT
+
+How is unsupported expansion prevented?
+
+COMPARATIVE JUDGE
+
+What does it compare?
+
+TESTS
+
+Focused tests:
+Regression tests:
+Baseline failures:
+Net-new failures:
+TypeScript baseline/final:
+
+TARGETED REPLAY
+
+Positioning candidates:
+Winner:
+Why it won:
+Why Community lost:
+Order-invariance:
+Semantic violations:
+Capability violations:
+
+FULL REAL RUN
+
+jobId:
+runtime:
+15-engine result:
+
+ENGINE SELECTION SUMMARY
+
+For every affected engine:
+responsibility
+winner
+alternatives
+why winner won
+judge verdict
+
+SYSTEM CONTROL
+
+PASS / DOWNGRADE / BLOCK
+reason
+
+BUILD PLAN
+
+planId
+sourceJobId
+planSource
+selection traces preserved
+lineage correct
+
+PREVIEW
+
+latest run displayed YES/NO
+latest plan displayed YES/NO
+visually verified YES/NO
+
+FINAL ANSWERS
+
+A. Is strategic selection no longer controlled by frequency/rank/array order alone?
+
+B. Are serious alternatives considered before commitment?
+
+C. Can Community become peer validation without supporting evidence?
+
+D. Can an engine choose a candidate requiring a capability the product lacks?
+
+E. Can different engines choose different truths from the same intelligence?
+
+F. Does the system preserve uncertainty when no candidate clearly dominates?
+
+G. Did the corrected Positioning independently choose the strongest supported angle?
+
+H. Why did that winner beat Community and the other alternatives?
+
+I. Did all 15 engines complete?
+
+J. Did Build Plan preserve the selected angles?
+
+K. Does Preview display the exact corrected newest plan?
+
+L. Is any proven technical blocker left?
+
+STOP BEFORE APPROVAL / ACTIVATION / PERFORMANCE LOOP.
