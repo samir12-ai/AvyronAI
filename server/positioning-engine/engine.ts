@@ -1029,22 +1029,45 @@ NAMING RULES:
 
 Return ONLY a JSON array: [{ "id": "<cluster id exactly as given>", "territory": "<name>", "groundingRefs": ["RC1"] }]`;
 
+  // Sized budgets for a batched call: 16 clusters routinely exceeded the
+  // client's default 45s hard timeout and a flat 800-token ceiling, so the
+  // call deterministically failed and EVERY territory silently fell back to
+  // the generic template phrase (the exact interchangeable DNA the judge
+  // rejects downstream). Budget scales with batch size; one retry is allowed
+  // because a timeout here degrades the whole strategy chain, while the
+  // fail-closed template fallback remains for genuine unavailability.
+  const namingTimeoutMs = Math.min(180_000, 60_000 + clusters.length * 5_000);
+  const namingMaxTokens = Math.min(2_000, 300 + clusters.length * 80);
+  const MAX_NAMING_ATTEMPTS = 2;
+
+  for (let attempt = 1; attempt <= MAX_NAMING_ATTEMPTS; attempt++) {
   try {
     const response = await aiChat({
       model: "gpt-4.1-mini",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.4,
-      max_tokens: 800,
+      max_tokens: namingMaxTokens,
       seed: 42,
       endpoint: "positioning-engine-v3-territory-naming",
       accountId,
+      timeoutMs: namingTimeoutMs,
     });
+
+    const finishReason = response.choices[0]?.finish_reason;
+    if (finishReason === "length") {
+      // Truncated JSON is unusable — treat as a retryable failure, never
+      // parse a partial array into a partial name map silently.
+      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=TRUNCATED_LENGTH | attempt=${attempt}/${MAX_NAMING_ATTEMPTS} | clusters=${clusters.length} | account=${accountId}`);
+      if (attempt < MAX_NAMING_ATTEMPTS) continue;
+      return null;
+    }
 
     const content = response.choices[0]?.message?.content?.trim() || "[]";
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned) as any[];
     if (!Array.isArray(parsed)) {
-      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=NON_ARRAY_RESPONSE | clusters=${clusters.length} | account=${accountId}`);
+      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=NON_ARRAY_RESPONSE | attempt=${attempt}/${MAX_NAMING_ATTEMPTS} | clusters=${clusters.length} | account=${accountId}`);
+      if (attempt < MAX_NAMING_ATTEMPTS) continue;
       return null;
     }
 
@@ -1069,16 +1092,20 @@ Return ONLY a JSON array: [{ "id": "<cluster id exactly as given>", "territory":
     });
 
     if (names.size === 0) {
-      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=NO_NAMES_PARSED | clusters=${clusters.length} | account=${accountId}`);
+      console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=NO_NAMES_PARSED | attempt=${attempt}/${MAX_NAMING_ATTEMPTS} | clusters=${clusters.length} | account=${accountId}`);
+      if (attempt < MAX_NAMING_ATTEMPTS) continue;
       return null;
     }
 
-    console.log(`[PositioningEngine-V3] TERRITORY_NAMES_GENERATED | named=${names.size}/${clusters.length} | account=${accountId}`);
+    console.log(`[PositioningEngine-V3] TERRITORY_NAMES_GENERATED | named=${names.size}/${clusters.length} | attempt=${attempt} | account=${accountId}`);
     return names;
   } catch (err: any) {
-    console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=${err?.message || "unknown"} | clusters=${clusters.length} | account=${accountId}`);
+    console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=${err?.message || "unknown"} | attempt=${attempt}/${MAX_NAMING_ATTEMPTS} | clusters=${clusters.length} | account=${accountId}`);
+    if (attempt < MAX_NAMING_ATTEMPTS) continue;
     return null;
   }
+  }
+  return null;
 }
 
 function inferDomainNoun(

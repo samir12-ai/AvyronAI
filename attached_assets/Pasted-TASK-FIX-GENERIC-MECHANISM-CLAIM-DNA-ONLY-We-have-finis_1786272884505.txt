@@ -1,0 +1,260 @@
+TASK — FIX GENERIC MECHANISM / CLAIM DNA ONLY
+
+We have finished the Offer Engine bug fixes.
+
+Do NOT reopen Offer architecture.
+
+The latest AEL-threaded replay proved that Offer is now receiving the correct pains and behaving correctly, but still truthfully returns:
+
+DNA_ENRICHMENT_REQUIRED
+
+because the Strategy Root / Mechanism / Claim DNA reaching Offer is too generic/interchangeable.
+
+Example:
+
+"platform capability transformation validation gap"
+
+The interchangeability judge rejected 3/3 candidates for the same reason.
+
+This task is ONLY about finding and fixing why the upstream Mechanism / Claim DNA became generic.
+
+==================================================
+1. TRACE THE EXACT VALUE BACKWARD
+==================================================
+
+Using the SAME validated run/root, trace:
+
+"platform capability transformation validation gap"
+
+backward through:
+
+Offer input
+← Strategy Root
+← Mechanism
+← Differentiation
+← Positioning
+← Business/Product DNA
+
+Find exactly where this generic phrase first appears.
+
+Do not assume Mechanism generated it.
+
+Show:
+
+original upstream value
+→ transformation/mapping
+→ next value
+→ final Strategy Root value
+→ Offer input
+
+==================================================
+2. DETERMINE THE REAL ROOT CAUSE
+==================================================
+
+Classify it as:
+
+PRODUCT_DNA_INPUT_WEAK
+BUSINESS_PROFILE_MAPPING_BUG
+POSITIONING_HANDOFF_BUG
+DIFFERENTIATION_HANDOFF_BUG
+MECHANISM_GENERATION_BUG
+STRATEGY_ROOT_MAPPING_BUG
+GENERIC_FALLBACK_LEAK
+LLM_PROMPT_BUG
+OTHER_PROVEN_CAUSE
+
+Important:
+
+If Avyron already has specific product/business information and it is being lost or generalized downstream, FIX THE HANDOFF.
+
+Do NOT ask for new user information unnecessarily.
+
+If the existing Business/Product DNA genuinely contains no specific mechanism/capability information, report that truthfully.
+
+==================================================
+3. WHAT A VALID MECHANISM MUST REPRESENT
+==================================================
+
+Mechanism must explain something specific to THIS product:
+
+WHAT Avyron actually does
++
+HOW that capability solves the selected pain
++
+WHY that path is meaningfully different from generic AI marketing tools
+
+It must derive from existing validated product/strategy information.
+
+It must NOT invent capabilities.
+
+It must NOT merely produce abstract phrases such as:
+
+"platform capability transformation validation gap"
+"AI-powered optimization system"
+"strategic intelligence framework"
+
+unless those phrases are grounded in specific product behavior.
+
+==================================================
+4. CHECK EXISTING AVYRON PRODUCT DNA
+==================================================
+
+Before changing anything, inspect what the current Business/Product DNA already knows.
+
+Specifically check whether it already contains concrete Avyron capabilities such as:
+
+- competitor intelligence
+- audience evidence
+- Pain Registry
+- strategy generation
+- evidence-linked recommendations
+- market monitoring
+- competitor change detection
+- strategy adaptation
+
+These are examples only.
+
+USE ONLY capabilities actually present in the stored product/business context.
+
+Then determine:
+
+Are those specifics available upstream but disappearing before Mechanism?
+
+YES → fix the loss/mapping/generation bug.
+
+NO → report PRODUCT_DNA_INPUT_WEAK.
+
+Do not fabricate missing capabilities.
+
+==================================================
+5. FIX ONLY THE FIRST BROKEN POINT
+==================================================
+
+Once proven, repair the earliest responsible point.
+
+Do NOT patch generic wording independently in:
+
+Positioning
+Differentiation
+Mechanism
+Offer
+Build Plan
+
+all at once.
+
+Fix the SOURCE of the degradation so downstream engines naturally receive better DNA.
+
+No hardcoded Avyron-specific strings.
+
+The solution must work for every customer/product.
+
+==================================================
+6. PRESERVE AUTHORITIES
+==================================================
+
+Do not change:
+
+Pain Registry
+pain routing
+customer-evidence architecture
+Offer fixes
+CEL
+confidence
+System Control
+Budget Governor
+timeout architecture
+Build Plan
+Preview
+
+Do not weaken the interchangeability judge.
+
+The judge correctly rejected generic DNA.
+
+==================================================
+7. TEST
+==================================================
+
+Add focused regression tests proving:
+
+- specific Product DNA remains specific downstream
+- Strategy Root does not replace concrete mechanism information with generic fallback text
+- Mechanism remains grounded in real product capabilities
+- no capabilities are invented
+- generic input can still trigger DNA_ENRICHMENT_REQUIRED
+- interchangeability guard remains unchanged
+- exact-run/root lineage remains intact
+
+Run relevant adjacent tests.
+
+Confirm zero net-new TypeScript errors vs baseline.
+
+==================================================
+8. REPLAY ONLY WHAT IS NECESSARY
+==================================================
+
+Do NOT run the full 15-engine campaign.
+
+After the fix, replay only the minimum chain necessary.
+
+Prefer:
+
+affected upstream engine(s)
+→ Mechanism
+→ Offer
+
+using the exact persisted run/root inputs where safe.
+
+Then verify:
+
+Mechanism is product-specific
+Offer receives it
+interchangeability judge result
+Offer depth result
+
+==================================================
+FINAL REPORT — SHORT
+==================================================
+
+Return only:
+
+ROOT CAUSE:
+Where did the generic DNA first appear and why?
+
+EXISTING PRODUCT DNA:
+Was specific product information already available? YES/NO
+Give the relevant examples.
+
+FIX:
+What exact source/handoff was changed?
+
+MECHANISM AFTER FIX:
+Show the resulting mechanism.
+
+OFFER REPLAY:
+PASS / DNA_ENRICHMENT_REQUIRED / other
+depthScore
+interchangeability result
+
+TESTS:
+pass count
+net-new TS errors
+
+Then answer:
+
+A. Was the problem missing Product DNA or loss/generalization of existing DNA?
+
+B. Is the first broken point fixed?
+
+C. Is Mechanism now specific to the customer's actual product?
+
+D. Were any capabilities invented?
+
+E. Did Offer pass using the corrected Mechanism?
+
+F. Is there any remaining REAL blocker?
+
+STOP THERE.
+
+Do not create another task.
+Do not run the full campaign.
+Do not touch unrelated systems.
