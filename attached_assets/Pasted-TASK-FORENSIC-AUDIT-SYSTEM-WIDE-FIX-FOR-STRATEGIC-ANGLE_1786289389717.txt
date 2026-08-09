@@ -1,0 +1,764 @@
+TASK — FORENSIC AUDIT + SYSTEM-WIDE FIX FOR STRATEGIC ANGLE SELECTION
+
+We discovered a deeper strategic reasoning defect.
+
+DO NOT treat this as a Positioning-only bug.
+
+The recent case exposed the defect in Positioning, but the same selection behavior may exist in Audience, Differentiation, Mechanism, Offer, Awareness, Funnel, Persuasion, Channel Selection, Iteration, Retention, and Build Plan synthesis.
+
+===========================================================
+KNOWN FAILURE CASE
+===========================================================
+
+Audience contained several strong, grounded strategic truths, including themes such as:
+
+- lack of strategic direction
+- generic/non-personalized marketing advice
+- need for clarity grounded in actual market evidence
+- need to adapt as competitors/market conditions change
+
+But Positioning centered on:
+
+Community / Peer Validation
+
+because community-related evidence was frequent / highly ranked / eligible for Positioning.
+
+This was strategically wrong.
+
+The evidence did NOT establish:
+
+"business owners need peers to validate their strategy"
+
+and Avyron does NOT provide peer strategy validation.
+
+The engine transformed a broad community/belonging signal into a new strategic meaning:
+
+community
+→ peer validation
+→ peer-validated strategy
+
+That semantic expansion was unsupported.
+
+So the problem is NOT simply:
+
+"wrong pain classification"
+
+and NOT simply:
+
+"wrong Product Anchor"
+
+Those protections already improved.
+
+The deeper question is:
+
+HOW DOES EACH ENGINE CHOOSE THE STRATEGIC ANGLE IT WILL BUILD AROUND WHEN MULTIPLE VALID, ELIGIBLE, EVIDENCE-GROUNDED TRUTHS ARE AVAILABLE?
+
+We currently do not trust that selection behavior.
+
+===========================================================
+DO NOT IMPLEMENT A PREDETERMINED SOLUTION YET
+===========================================================
+
+Do NOT immediately add:
+
+- another arbitrary weighted score
+- "highest frequency wins"
+- "highest ranked pain wins"
+- hardcoded preferred pains
+- hardcoded Avyron themes
+- a generic "choose the most relevant" prompt
+- an LLM judge that simply chooses what sounds best
+
+First prove how selection currently works across the system.
+
+The goal is to discover the correct general selection architecture.
+
+===========================================================
+PHASE 1 — TRACE EVERY STRATEGIC ANGLE SELECTION POINT
+===========================================================
+
+Audit every engine and every intermediate strategic layer.
+
+At minimum:
+
+Audience
+Pain Registry
+AEL
+Strategy Root
+Positioning
+Differentiation
+Mechanism
+Offer
+Awareness
+Funnel
+Persuasion
+Integrity
+Statistical Validation
+Budget Governor
+Channel Selection
+Iteration
+Retention
+Build Plan
+
+For EACH engine answer:
+
+1. What strategic decision is this engine responsible for?
+
+2. What candidate truths can it choose from?
+
+Examples:
+
+- pains
+- desires
+- objections
+- root causes
+- audience segments
+- behaviors
+- competitor patterns
+- market signals
+- positioning territories
+- previous-engine conclusions
+- product capabilities
+- validated market decisions
+
+3. Where do those candidates come from?
+
+4. How are candidates filtered?
+
+5. How are they ranked?
+
+6. What actually selects the winner?
+
+Explicitly identify whether selection is driven by:
+
+- frequency
+- rank
+- confidence
+- evidence strength
+- allowedUses
+- array order
+- first eligible item
+- LLM choice
+- deterministic scoring
+- previous engine
+- Product Anchor
+- Business Context
+- fallback
+- arbitrary prompt emphasis
+
+7. Does the engine compare alternatives before committing?
+
+8. Does it know WHY candidate A is better for its specific strategic responsibility than candidates B/C/D?
+
+9. Does it inspect all relevant Audience intelligence or only one reduced structure such as pain rankings?
+
+10. Can a lower-quality candidate win simply because it appears earlier or has higher frequency?
+
+Produce a table:
+
+ENGINE
+→ DECISION RESPONSIBILITY
+→ CANDIDATE SOURCES
+→ FILTER
+→ RANKING
+→ WINNER SELECTION
+→ ALTERNATIVES COMPARED?
+→ DEFECT RISK
+
+===========================================================
+PHASE 2 — REPRODUCE THE COMMUNITY FAILURE EXACTLY
+===========================================================
+
+Use the exact persisted run where Community / Peer Validation won.
+
+Do NOT regenerate data.
+
+Trace:
+
+raw evidence
+→ Audience outputs
+→ segments
+→ Pain Registry
+→ classifications
+→ rankings
+→ Positioning inputs
+→ candidate construction
+→ winner selection
+→ judge
+→ persisted Positioning
+
+Determine exactly:
+
+WHY did Community win?
+
+I want the actual causal answer from code/data.
+
+Was it:
+
+- frequency?
+- rank?
+- first eligible?
+- prompt ordering?
+- LLM preference?
+- Product Anchor interaction?
+- missing alternative comparison?
+- information lost when Audience was compressed?
+- judge only checking validity rather than comparative superiority?
+- combination of these?
+
+Then compare Community against the stronger alternatives that existed in the SAME run.
+
+For each competing angle show:
+
+EVIDENCE
+PURCHASE RELEVANCE
+PRODUCT CONNECTION
+SEMANTIC DISTANCE FROM EVIDENCE
+UNSUPPORTED ASSUMPTIONS REQUIRED
+DIFFERENTIATION POTENTIAL
+WHY IT WON/LOST UNDER CURRENT CODE
+
+Do NOT assume beforehand that "strategic direction" must win.
+
+Prove what the strongest candidate should have been from the available evidence and real Avyron capabilities.
+
+===========================================================
+PHASE 3 — AUDIT SEMANTIC EXPANSION
+===========================================================
+
+This is critical.
+
+Find every place where an engine can transform:
+
+Evidence meaning A
+→ strategic interpretation B
+
+Examples:
+
+community/belonging
+→ peer validation
+
+cost concern
+→ pricing strategy problem
+
+competitor complaint
+→ customer purchase pain
+
+desire for clarity
+→ human expert validation
+
+monitoring capability
+→ predictive intelligence
+
+For every engine determine:
+
+Can the generated strategic interpretation introduce meaning that is NOT entailed by its source evidence?
+
+We need a distinction between:
+
+ALLOWED SYNTHESIS:
+reframing evidence without changing its meaning
+
+and
+
+UNAUTHORIZED SEMANTIC EXPANSION:
+adding a new psychological need, causal claim, market problem, product capability, or buying motive that the evidence did not establish.
+
+Find where this can happen today.
+
+===========================================================
+PHASE 4 — AUDIT COMPARATIVE JUDGING
+===========================================================
+
+Inspect every relevant judge.
+
+We already have many judges, but answer this:
+
+Are they judging:
+
+"Is this candidate acceptable?"
+
+or:
+
+"Is this candidate the BEST strategic choice among the credible alternatives available to this engine?"
+
+These are completely different.
+
+A Community positioning can be internally coherent and still be much worse than another available positioning.
+
+Determine which judges currently perform:
+
+ABSOLUTE VALIDATION
+
+versus:
+
+COMPARATIVE SELECTION
+
+For each engine report whether the judge sees:
+
+- chosen candidate
+- rejected alternatives
+- evidence behind each
+- product capabilities
+- Audience insights
+- reason each candidate was selected/rejected
+
+If the judge only sees the final answer, flag that explicitly.
+
+===========================================================
+PHASE 5 — IDENTIFY THE GENERAL DEFECT CLASS
+===========================================================
+
+After auditing all engines, determine whether there is one common architectural defect or several.
+
+Possible examples only — DO NOT assume these are the answer:
+
+SELECTION_BY_RANK_WITHOUT_STRATEGIC_FIT
+
+FIRST_ELIGIBLE_BIAS
+
+FREQUENCY_DOMINANCE
+
+LOSSY_AUDIENCE_HANDOFF
+
+ABSOLUTE_JUDGE_WITHOUT_COMPARATIVE_JUDGE
+
+UNBOUNDED_SEMANTIC_EXPANSION
+
+ENGINE_RESPONSIBILITY_NOT_ENCODED
+
+PRODUCT_FIT_CHECK_TOO_LATE
+
+PREVIOUS_ENGINE_DOMINANCE
+
+PROMPT_ORDER_BIAS
+
+You may identify another defect class.
+
+I want the first broken reasoning boundary, not the final bad sentence.
+
+===========================================================
+PHASE 6 — DESIGN ONE GENERAL SELECTION CONTRACT
+===========================================================
+
+Only AFTER the forensic audit, design the smallest general architecture that fixes the proven defect classes.
+
+The architecture must work across engines.
+
+The core requirement is:
+
+An engine must not commit to a strategic angle merely because that angle is valid, eligible, frequent, highly ranked, or presented first.
+
+When multiple plausible truths exist, the engine must have a deterministic/controlled process for deciding which truth is most appropriate for THAT ENGINE'S strategic responsibility.
+
+The solution must preserve the existing authority model:
+
+Pain Registry
+= what validated customer problems exist and allowed uses.
+
+Product Capability authority
+= what Avyron can actually do.
+
+Evidence lineage
+= what the market evidence actually supports.
+
+Engine
+= strategic transformation within its responsibility.
+
+Judge
+= verifies the transformation.
+
+But add whatever selection layer is actually required by the forensic findings.
+
+===========================================================
+PHASE 7 — REQUIRED PROPERTIES OF THE FIX
+===========================================================
+
+Whatever architecture you choose must guarantee:
+
+1. ELIGIBILITY IS NOT WINNER SELECTION
+
+"Allowed for Positioning" does not mean "best Positioning."
+
+2. FREQUENCY IS NOT STRATEGIC IMPORTANCE
+
+Frequency may contribute evidence strength but cannot alone choose an angle.
+
+3. NO FIRST-ITEM / ARRAY-ORDER BIAS
+
+Candidate order must not determine strategy.
+
+4. ALTERNATIVES MUST BE CONSIDERED
+
+When multiple materially different credible angles exist, the system must compare them before committing.
+
+5. SOURCE MEANING MUST BE PRESERVED
+
+community/belonging cannot become peer strategy validation unless evidence actually establishes that relationship.
+
+6. PRODUCT REALITY MUST BE PRESERVED
+
+No candidate may depend on a capability Avyron does not possess.
+
+7. ENGINE RESPONSIBILITY MUST MATTER
+
+The winning truth for Retention does not have to be the winning truth for Positioning.
+
+8. STRONG AUDIENCE INTELLIGENCE MUST NOT DISAPPEAR
+
+If strategically important ideas exist in:
+
+- Audience pains
+- segments
+- desires
+- objections
+- causal evidence
+- behaviors
+- AEL/root causes
+
+the selection architecture must not accidentally ignore them because only one reduced list is consumed downstream.
+
+9. JUDGES MUST VERIFY SELECTION QUALITY
+
+Where appropriate, the judge must know the serious alternatives and verify why the winner is superior for that engine's responsibility.
+
+10. NO HARDCODING THIS CASE
+
+Do not encode:
+
+"community is weak"
+
+or:
+
+"strategic direction is strong"
+
+The same architecture must work for a business where community genuinely IS the strongest buying driver and the product genuinely provides it.
+
+===========================================================
+PHASE 8 — IMPLEMENT ACROSS ALL PROVEN AFFECTED ENGINES
+===========================================================
+
+Do not fix only Positioning.
+
+Using the Phase 1 audit, identify every engine containing the same defect class.
+
+Implement the corrected selection behavior in ALL proven affected engines.
+
+Do not modify engines that do not have the defect merely for symmetry.
+
+Preserve:
+
+- Pain Registry authority
+- Product Capability authority
+- existing lineage
+- timeout architecture
+- System Control
+- CEL
+- evidence grounding
+- tenant isolation
+- exact-run binding
+
+===========================================================
+PHASE 9 — SELECTION TRACE
+===========================================================
+
+Every affected engine should persist enough diagnostics to answer:
+
+AVAILABLE CANDIDATES
+
+ELIGIBLE CANDIDATES
+
+SERIOUS ALTERNATIVES
+
+WINNING CANDIDATE
+
+WHY IT WON
+
+WHY EACH SERIOUS ALTERNATIVE LOST
+
+EVIDENCE USED
+
+PRODUCT CAPABILITIES USED
+
+SEMANTIC TRANSFORMATIONS
+
+JUDGE VERDICT
+
+This must be auditable after the run.
+
+Do not rely only on ephemeral logs.
+
+===========================================================
+PHASE 10 — TEST THE GENERAL BEHAVIOR
+===========================================================
+
+Create deterministic regression cases.
+
+At minimum:
+
+CASE A
+Community is frequent but weakly connected to purchase/product.
+A stronger strategic-direction angle exists.
+→ Community must NOT win.
+
+CASE B
+Community is strongly evidenced as a buying driver AND the product genuinely provides community/peer validation.
+→ Community CAN win.
+
+CASE C
+Lower-frequency pain has much stronger causal purchase relevance.
+→ frequency alone must not defeat it.
+
+CASE D
+Highest-ranked eligible pain is weak for the engine responsibility.
+→ engine must choose another candidate.
+
+CASE E
+Candidate requires semantic expansion:
+community → peer validation
+without supporting evidence.
+→ reject.
+
+CASE F
+Same transformation WITH direct evidence of peer validation need.
+→ allow.
+
+CASE G
+Candidate requires unsupported product capability.
+→ reject.
+
+CASE H
+Candidate is grounded and product-supported but inferior to a materially stronger alternative.
+→ comparative selection must reject or downgrade it.
+
+CASE I
+Array order is reversed.
+→ winner must remain unchanged.
+
+CASE J
+Audience Segment contains a major strategic insight not represented strongly in pain ranking.
+→ downstream engine must still be able to consider it where appropriate.
+
+CASE K
+Retention and Positioning receive same candidate pool.
+→ they may correctly select different truths because responsibilities differ.
+
+CASE L
+No candidate clearly dominates.
+→ system must preserve uncertainty / close alternatives rather than fabricate certainty.
+
+===========================================================
+PHASE 11 — CROSS-ENGINE REGRESSION AUDIT
+===========================================================
+
+After implementation run focused tests across:
+
+Audience
+Positioning
+Differentiation
+Mechanism
+Offer
+Awareness
+Funnel
+Persuasion
+Channel Selection
+Iteration
+Retention
+Build Plan
+
+Verify no regression in:
+
+- authority separation
+- Pain Registry routing
+- Product Capability enforcement
+- grounding contracts
+- Offer depth
+- Positioning interchangeability
+- exact-run lineage
+- timeout policy
+- Build Plan binding
+
+Zero net-new TypeScript errors.
+
+===========================================================
+PHASE 12 — TARGETED REPLAY
+===========================================================
+
+Before another expensive full campaign run, replay the affected strategic chain using persisted inputs.
+
+For each affected engine output the Selection Trace.
+
+For Positioning specifically show ALL serious alternatives from the audited Audience result.
+
+I want to see why the winner beat:
+
+- strategic direction
+- generic advice/personalization
+- evidence-based clarity
+- continuous adaptation
+- community/belonging
+- any other serious candidate discovered from the actual run
+
+Do not manually choose the winner.
+
+Let the corrected architecture choose.
+
+Then inspect whether the result is actually supported by evidence and real Avyron capabilities.
+
+===========================================================
+PHASE 13 — ONE FULL REAL RUN
+===========================================================
+
+Only after targeted replay and tests pass:
+
+Run ONE explicitly armed real campaign.
+
+No automatic run.
+
+Run all 15 engines.
+
+Then audit the Selection Trace for every affected engine.
+
+Verify:
+
+- no first-item bias
+- no frequency-only winner
+- no unsupported semantic expansion
+- no invented capabilities
+- no ignored major Audience insight
+- no unauthorized pain
+- no stale lineage
+- no hidden fallback determining strategy
+
+===========================================================
+PHASE 14 — BUILD PLAN + PREVIEW
+===========================================================
+
+Verify the final Build Plan preserves the actual winning strategic angles selected by the corrected engines.
+
+The Build Plan must not independently reselect another angle.
+
+Verify via API and Preview:
+
+- exact newest job
+- exact newest plan
+- isLatest=true
+- isStale=false
+- exact Strategy Root
+- current engine snapshots
+- no old strategy mixed in
+
+Visually inspect the plan.
+
+Do NOT judge success based on whether it matches our preferred wording.
+
+Judge success based on whether:
+
+1. the chosen strategic thesis beat credible alternatives through the corrected selection architecture,
+2. the evidence supports its meaning,
+3. Avyron genuinely supports the promised capability,
+4. the reasoning is auditable.
+
+===========================================================
+FIX POLICY
+===========================================================
+
+If a proven defect appears:
+
+1. locate the FIRST broken reasoning boundary
+2. fix that boundary
+3. add regression coverage
+4. replay the affected chain
+5. continue verification
+
+Do not patch final copy.
+
+Do not hardcode Avyron's desired answer.
+
+Do not weaken gates.
+
+Do not invent evidence.
+
+Do not create follow-up tasks instead of completing in-scope fixes.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Keep it concise but evidence-based.
+
+1. GENERAL ROOT CAUSE
+
+What was fundamentally wrong with strategic angle selection?
+
+2. ENGINE MAP
+
+Which engines had the same defect?
+Which did not?
+
+3. COMMUNITY CASE
+
+Exactly why did Community / Peer Validation win before?
+
+4. SELECTION ARCHITECTURE
+
+What now determines the winner?
+
+5. SEMANTIC ENTAILMENT
+
+How do we prevent evidence meaning from being expanded into invented strategy?
+
+6. COMPARATIVE JUDGING
+
+Which engines now compare serious alternatives?
+
+7. REAL RUN
+
+jobId
+15-engine result
+System Control result
+
+8. POSITIONING SELECTION TRACE
+
+Show the serious candidates, winner, and why each alternative lost.
+
+9. OTHER ENGINE SELECTION TRACES
+
+Show that each affected engine selected according to its own responsibility.
+
+10. BUILD PLAN / PREVIEW
+
+planId
+jobId
+lineage
+isLatest
+isStale
+visual result
+
+FINAL ANSWERS:
+
+A. Was this actually a system-wide selection defect?
+
+B. Which engines were affected?
+
+C. Can highest frequency/rank still automatically determine the winner?
+
+D. Can an engine still turn "community" into "peer validation" without evidence?
+
+E. Can an engine select an angle requiring a capability the product does not have?
+
+F. Are serious alternatives compared before committing?
+
+G. Can different engines correctly choose different truths from the same evidence?
+
+H. Did the corrected system independently choose the strongest Positioning angle in the real run?
+
+I. Why did that angle beat the alternatives?
+
+J. Did all 15 engines complete?
+
+K. Does Build Plan preserve those decisions?
+
+L. Does Preview display the exact corrected newest plan?
+
+STOP BEFORE APPROVAL / ACTIVATION / PERFORMANCE LOOP.
