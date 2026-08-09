@@ -1,0 +1,444 @@
+TASK — FIX BUILD PLAN SYNTHESIS TRUNCATION AND PRODUCE A FULL NON-DEGRADED PLAN
+
+Task 163 is complete and validated.
+
+DO NOT reopen:
+- Audience Pain Registry
+- pain classification
+- contextual dominance
+- engine pain routing
+- Offer routing
+- Retention routing
+- timeout architecture
+- CEL
+- confidence architecture
+- engine execution
+- Task 154 lineage architecture
+
+The latest verified real run is:
+
+campaign_1773576062201_6t0oxi_realrun_1786260591209
+
+It completed:
+
+15/15 engines successfully.
+
+Pain routing is valid.
+Pain lineage closure = 0 unresolved.
+Build Plan exact-run lineage is valid.
+Preview displays the correct latest run.
+
+However, one remaining issue exists:
+
+planSource = degraded_ai_failed
+
+The Build Plan synthesis LLM returned truncated/invalid JSON, causing the system to fall back to a degraded plan.
+
+The degraded fallback was correctly and truthfully labeled.
+
+The problem is NOT lineage.
+The problem is NOT engine execution.
+The problem is NOT pain routing.
+
+The problem to investigate is:
+
+WHY DID BUILD PLAN SYNTHESIS FAIL TO PRODUCE A COMPLETE VALID OUTPUT?
+
+===========================================================
+PHASE 1 — FORENSIC AUDIT BEFORE CHANGING CODE
+===========================================================
+
+Trace the exact Build Plan synthesis attempt for:
+
+jobId:
+campaign_1773576062201_6t0oxi_realrun_1786260591209
+
+plan:
+df558d0d-c863-4818-8a40-a58bd6d94350
+
+Determine exactly:
+
+1. Which model was called.
+2. Exact token/input size.
+3. Configured output token limit.
+4. Actual response size.
+5. finish_reason / termination reason if available.
+6. Whether response was truncated by:
+   - model output-token ceiling
+   - AI client timeout
+   - Build Plan timeout
+   - transport interruption
+   - JSON parser
+   - schema validator
+   - prompt size
+   - retry policy
+   - another proven cause.
+
+Inspect the raw response if it was persisted/logged.
+
+Do NOT assume "truncated JSON" automatically means max tokens.
+
+Prove the root cause.
+
+===========================================================
+PHASE 2 — AUDIT THE BUILD PLAN OUTPUT CONTRACT
+===========================================================
+
+Inspect:
+
+buildBuildPlanPrompt
+runBuildPlanLayer
+plan synthesis
+JSON parsing
+schema validation
+AI client
+retry behavior
+fallback behavior
+
+Determine whether the LLM is being asked to generate an unnecessarily huge JSON object.
+
+The successful degraded plan currently contains approximately:
+
+104 calendar entries
+129 tasks
+
+Check whether the LLM is expected to generate all of this in one response.
+
+If yes, determine whether this is structurally causing output truncation.
+
+Do NOT reduce strategic quality simply to make JSON smaller.
+
+===========================================================
+PHASE 3 — CHOOSE THE SMALLEST CORRECT FIX
+===========================================================
+
+Fix according to the proven root cause.
+
+Possible fixes may include, ONLY IF EVIDENCE SUPPORTS THEM:
+
+A. Increase Build Plan output-token allowance.
+
+B. Increase the Build Plan AI-call timeout if the AI call itself is being terminated prematurely.
+
+C. Use structured output / schema enforcement if supported by the existing provider.
+
+D. Repair JSON retry logic so a truncated response triggers a proper bounded regeneration instead of immediately degrading.
+
+E. Split generation into deterministic stages if one giant response is inherently too large.
+
+For example:
+
+Strategic synthesis
+→ core strategic plan
+
+then
+
+core plan
+→ execution calendar/tasks
+
+rather than forcing the model to generate the entire strategy + 100+ calendar entries + 100+ tasks in one JSON response.
+
+BUT:
+
+Do not redesign the architecture unless the evidence proves the single-response contract is the root cause.
+
+===========================================================
+CRITICAL ARCHITECTURAL RULE
+===========================================================
+
+Build Plan remains a SYNTHESIS layer.
+
+It must continue consuming the exact validated outputs from:
+
+Audience
+Positioning
+Differentiation
+Mechanism
+Offer
+Awareness
+Funnel
+Persuasion
+Channel
+Iteration
+Retention
+Strategy Root
+Pain Registry
+
+It must NOT independently rediscover strategy.
+
+It must NOT:
+
+- invent new pains
+- change pain classifications
+- replace corePainIds
+- merge unrelated pains
+- re-rank authoritative pains
+- invent positioning
+- replace differentiation
+- invent a different mechanism
+- create a different Offer
+- use Business Context as an independent strategy source
+
+Preserve all Task 163 guarantees.
+
+===========================================================
+PAIN ROLE PRESERVATION
+===========================================================
+
+The repaired full plan must preserve:
+
+audiencePainRoles
+
+including:
+
+Positioning core pain IDs
+Differentiation pain IDs
+Mechanism pain IDs
+Offer core pain
+Offer objections
+Funnel objections
+Persuasion motivations/objections
+Retention post-purchase pain IDs
+
+All IDs must resolve against the exact active Strategy Root Pain Registry.
+
+Required:
+
+unresolvedPainIds = 0
+
+===========================================================
+EXACT-RUN REQUIREMENT
+===========================================================
+
+Do NOT run all 15 engines again unless technically unavoidable.
+
+We already have a successful validated engine run.
+
+Prefer regenerating ONLY the Build Plan synthesis from:
+
+campaign_1773576062201_6t0oxi_realrun_1786260591209
+
+using its persisted:
+
+- engine snapshots
+- Strategy Root
+- Pain Registry
+- validated lineage
+
+The regeneration MUST remain bound to this exact job.
+
+Do not silently create a new campaign run.
+
+Do not use snapshots from another run.
+
+Do not substitute an older Strategy Root.
+
+===========================================================
+PERSISTENCE
+===========================================================
+
+A successful regenerated plan must:
+
+- persist durably
+- remain bound to the exact source job
+- preserve root lineage
+- preserve pain lineage
+- have planSource indicating the real successful synthesis path
+- NOT be marked degraded
+- replace/supersede the degraded plan according to existing versioning semantics
+
+Do NOT manually edit the database to fake a successful plan.
+
+The plan must be generated through the real Build Plan path.
+
+===========================================================
+TESTS BEFORE REGENERATION
+===========================================================
+
+Before calling the real LLM again, add focused regression tests for the proven failure.
+
+At minimum test:
+
+1. Complete valid JSON → accepted.
+
+2. Truncated JSON → never silently accepted as successful.
+
+3. Truncated JSON → bounded retry/repair behavior executes correctly.
+
+4. Retry success → full plan persisted.
+
+5. Retry exhaustion → degraded fallback remains truthfully labeled.
+
+6. Build Plan timeout remains independent from engine timeouts.
+
+7. Exact sourceJobId preserved through retry.
+
+8. Strategy Root cannot drift between attempts.
+
+9. Pain IDs preserved through retry.
+
+10. Business Context cannot replace engine strategy during regeneration.
+
+11. No stale plan fallback.
+
+12. Task 154 exact-run protections remain green.
+
+13. Task 163 pain-role tests remain green.
+
+14. Task 158 timeout tests remain green.
+
+No fake campaign data.
+
+===========================================================
+REAL REGENERATION
+===========================================================
+
+Only after tests pass:
+
+Regenerate Build Plan ONCE from the existing successful run.
+
+Do NOT rerun the 15 engines unless the Build Plan architecture absolutely requires it.
+
+Capture:
+
+sourceJobId
+strategyRootId
+engine snapshot IDs
+pain registry hash/version
+model
+input tokens
+output tokens
+finish reason
+AI runtime
+Build Plan runtime
+retry count
+plan ID/version
+planSource
+
+===========================================================
+VERIFY THE RESULT
+===========================================================
+
+The regenerated plan must satisfy:
+
+planSource != degraded_ai_failed
+
+Build Plan = SUCCESS
+
+pain-role violations = 0
+
+unresolved pain IDs = 0
+
+same sourceJobId
+
+same Strategy Root lineage
+
+same validated engine lineage
+
+no stale snapshots
+
+no fake evidence
+
+no manually injected content
+
+===========================================================
+PREVIEW VERIFICATION
+===========================================================
+
+Then open:
+
+Roadmap → Document
+
+Verify the actual Preview shows the newly generated FULL plan.
+
+Confirm through both API and UI:
+
+- correct campaign
+- correct source run
+- correct plan version
+- isLatest=true
+- hasPlan=true
+- planSource is NOT degraded
+- no "Degraded plan" banner
+- full strategic narrative renders
+- pain roles preserved
+- no older plan is visible
+
+Also verify:
+
+Audience
+Positioning
+Differentiation
+Mechanism
+Offer
+Funnel
+Retention
+
+still correspond to the same successful engine run.
+
+===========================================================
+DO NOT
+===========================================================
+
+Do NOT approve the plan.
+
+Do NOT activate it.
+
+Do NOT start Performance Loop.
+
+Do NOT weaken validation.
+
+Do NOT remove degraded fallback.
+
+The degraded fallback is valuable and behaved correctly.
+
+We are fixing WHY normal synthesis failed, not hiding the failure.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Return:
+
+1. Exact root cause of truncated JSON.
+2. Model/token/runtime evidence.
+3. Why the previous synthesis degraded.
+4. Code changes made.
+5. Whether architecture needed redesign or only a surgical fix.
+6. Tests added.
+7. Regression results.
+8. TypeScript baseline vs final.
+9. Source job used for regeneration.
+10. Strategy Root used.
+11. Pain Registry verification.
+12. Regenerated plan ID/version.
+13. planSource.
+14. Build Plan runtime.
+15. Retry count.
+16. Pain-role validation result.
+17. Lineage closure result.
+18. Preview verification.
+19. Screenshot/path if captured.
+20. Any remaining issue.
+
+Finally answer:
+
+A. Was the exact truncation root cause proven?
+
+B. Is Build Plan now producing a complete non-degraded synthesis?
+
+C. Did regeneration reuse the existing successful 15-engine run rather than rerun strategy?
+
+D. Did all Task 163 pain roles remain intact?
+
+E. Did Build Plan remain a synthesis layer rather than independently rebuilding strategy?
+
+F. Is the Preview displaying the new full plan from the exact source run?
+
+G. Is the plan now ready for MY manual review?
+
+STOP THERE.
+
+Do not Approve.
+Do not Activate.
+Do not start Performance Loop.

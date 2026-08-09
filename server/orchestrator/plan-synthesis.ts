@@ -1044,27 +1044,87 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
   }
 }`;
 
-  try {
-    const response = await aiChat({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
-      max_tokens: 2000,
-      accountId: accountId,
-      endpoint: "orchestrator-plan-synthesis",
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) throw new Error("Empty AI response");
-    return JSON.parse(content) as SynthesizedPlan;
-  } catch (err: any) {
-    console.error(
-      `[PlanSynthesis] SYNTHESIS_DEGRADED_AI_FAILED | AI synthesis failed: ${err.message}. ` +
-      `Falling back to degraded plan — plan will be EXPLICITLY MARKED as degraded. ` +
-      `No raw signals or hardcoded generic defaults will silently substitute for decisions.`,
-    );
-    return buildDeterministicPlan(businessData, campaign, objective, campaignId, accountId);
+  const attemptResult = await requestSynthesizedPlanJson({ prompt, accountId });
+  if (attemptResult.ok) {
+    return attemptResult.plan;
   }
+  console.error(
+    `[PlanSynthesis] SYNTHESIS_DEGRADED_AI_FAILED | AI synthesis failed: ${attemptResult.lastError}. ` +
+    `attempts=${attemptResult.attempts}/${PLAN_SYNTHESIS_MAX_ATTEMPTS}. ` +
+    `Falling back to degraded plan — plan will be EXPLICITLY MARKED as degraded. ` +
+    `No raw signals or hardcoded generic defaults will silently substitute for decisions.`,
+  );
+  return buildDeterministicPlan(businessData, campaign, objective, campaignId, accountId);
+}
+
+/**
+ * Task — Build Plan synthesis truncation fix (forensic root cause:
+ * orchestrator-plan-synthesis previously used max_tokens: 2000 for a 9-section
+ * JSON contract; the completion hit the output-token ceiling mid-string
+ * ("Unterminated string in JSON at position 9725") and a single parse failure
+ * immediately degraded the plan with NO retry).
+ *
+ * Fix (surgical, no architecture change):
+ *  - output ceiling raised to PLAN_SYNTHESIS_MAX_TOKENS (the 9-section
+ *    contract measured ~2.4k tokens; 6000 gives >2x headroom without inviting
+ *    unbounded rambling — response_format json_object still constrains shape);
+ *  - bounded retry loop (PLAN_SYNTHESIS_MAX_ATTEMPTS): truncation/malformed
+ *    JSON triggers a fresh regeneration attempt instead of instant degrade;
+ *  - finish_reason ("length" = provider-confirmed truncation) is logged per
+ *    attempt so future truncations are provable from logs alone;
+ *  - retry exhaustion still falls through to the EXPLICITLY-LABELED degraded
+ *    fallback — the fallback is preserved, not weakened.
+ *
+ * `chatFn` is injectable for regression tests; production callers omit it.
+ */
+export const PLAN_SYNTHESIS_MAX_TOKENS = 6000;
+export const PLAN_SYNTHESIS_MAX_ATTEMPTS = 3;
+
+export type SynthesisAttemptOutcome =
+  | { ok: true; plan: SynthesizedPlan; attempts: number }
+  | { ok: false; attempts: number; lastError: string };
+
+export async function requestSynthesizedPlanJson(opts: {
+  prompt: string;
+  accountId: string;
+  chatFn?: typeof aiChat;
+}): Promise<SynthesisAttemptOutcome> {
+  const chat = opts.chatFn ?? aiChat;
+  let lastError = "no attempt executed";
+  for (let attempt = 1; attempt <= PLAN_SYNTHESIS_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await chat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: opts.prompt }],
+        response_format: { type: "json_object" },
+        max_tokens: PLAN_SYNTHESIS_MAX_TOKENS,
+        accountId: opts.accountId,
+        endpoint: "orchestrator-plan-synthesis",
+      });
+
+      const choice = response.choices?.[0];
+      const finishReason = (choice as any)?.finish_reason ?? "unknown";
+      const content = choice?.message?.content;
+      if (!content) throw new Error(`Empty AI response (finish_reason=${finishReason})`);
+      if (finishReason === "length") {
+        // Provider-confirmed truncation: the completion hit the output-token
+        // ceiling. Do NOT attempt to parse a known-truncated payload as if it
+        // could be complete — retry with a fresh generation.
+        throw new Error(`TRUNCATED_BY_TOKEN_CEILING (finish_reason=length, max_tokens=${PLAN_SYNTHESIS_MAX_TOKENS})`);
+      }
+      const plan = JSON.parse(content) as SynthesizedPlan;
+      if (attempt > 1) {
+        console.log(`[PlanSynthesis] SYNTHESIS_RETRY_RECOVERED | attempt=${attempt}/${PLAN_SYNTHESIS_MAX_ATTEMPTS}`);
+      }
+      return { ok: true, plan, attempts: attempt };
+    } catch (err: any) {
+      lastError = err?.message ?? String(err);
+      console.warn(
+        `[PlanSynthesis] SYNTHESIS_ATTEMPT_FAILED | attempt=${attempt}/${PLAN_SYNTHESIS_MAX_ATTEMPTS} | ${lastError}`,
+      );
+    }
+  }
+  return { ok: false, attempts: PLAN_SYNTHESIS_MAX_ATTEMPTS, lastError };
 }
 
 async function buildDeterministicPlan(businessData: any, campaign: any, objective: string, campaignId: string, accountId: string): Promise<SynthesizedPlan> {

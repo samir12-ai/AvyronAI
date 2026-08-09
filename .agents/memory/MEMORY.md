@@ -49,4 +49,5 @@
 - [Task-agent run evidence](task-agent-run-evidence.md) — task agents share the DB but not the filesystem; verify their real runs via orchestrator_jobs/job_id-bound snapshot rows, never via .local artifact dirs.
 - [Audience pain registry & role routing](audience-pain-registry.md) — approvedAudiencePains IS the registry; engines emit selectedPainRoles on every path; synthesis preserves verbatim, never merges/reselects.
 - [Wrapper guarantees vs reuse paths](wrapper-guarantees-bypass-paths.md) — entry-wrapper-attached metadata is dropped by snapshot-reuse branches; audit every result-producing path, share one attach helper.
+- [Plan synthesis truncation & snapshot-replay regen](plan-synthesis-truncation.md) — big-JSON LLM calls need sized token ceiling + finish_reason:"length" rejection + retries; synthesis-only regen replays job-bound snapshots into synthesizePlan; degraded_no_decisions is truthful when policy blocks all signals.
 - [JSON-text column normalization](json-text-column-normalization.md) — text-stored JSON crashes .map readers the first time a column goes non-null; normalize at load site with type-appropriate defaults ([]/null).
