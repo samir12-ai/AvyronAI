@@ -1,0 +1,306 @@
+TASK — FRONTEND / PREVIEW FORENSIC AUDIT ONLY
+
+We completed the backend and pipeline fixes, but the Preview still appears to show the same refund-centered strategy.
+
+I want a STRICT FRONTEND / PREVIEW AUDIT.
+
+DO NOT modify engines.
+DO NOT modify Audience.
+DO NOT modify Pain Registry.
+DO NOT modify Positioning.
+DO NOT modify Mechanism.
+DO NOT modify Offer.
+DO NOT rerun the campaign.
+DO NOT regenerate the plan.
+DO NOT change System Control.
+DO NOT approve or activate anything.
+
+Your only job is to determine:
+
+Is the Frontend showing the exact newest plan and newest engine outputs,
+or is it displaying stale / cached / fallback / old-run content?
+
+Use the latest successful run:
+
+jobId:
+campaign_1773576062201_6t0oxi_realrun_1786275443934
+
+planId:
+9acff9fa-6357-4da3-975c-b1d8c78f74db
+
+==================================================
+1. TRACE THE PREVIEW READ PATH
+==================================================
+
+Trace exactly:
+
+Preview screen
+→ component
+→ hook
+→ API request
+→ backend route
+→ DB query
+→ plan / snapshot row
+
+Cover all visible strategic sections:
+
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Funnel
+- Persuasion
+- Retention
+- Build Plan / Roadmap Document
+
+For each section report:
+
+- component name
+- API endpoint
+- campaignId
+- runId/jobId sent
+- response runId/jobId
+- snapshot ID / plan ID
+- whether it is exact-run or latest-by-campaign
+- whether fallback exists
+- whether cache/local state exists
+
+==================================================
+2. VERIFY EXACT IDS
+==================================================
+
+The Frontend must show only records belonging to:
+
+jobId:
+campaign_1773576062201_6t0oxi_realrun_1786275443934
+
+planId:
+9acff9fa-6357-4da3-975c-b1d8c78f74db
+
+For every visible section verify:
+
+displayed result jobId
+=
+latest successful jobId
+
+If any section belongs to an older run:
+
+classify it as STALE_FRONTEND_DATA.
+
+Do not infer from timestamps alone.
+Verify IDs.
+
+==================================================
+3. INSPECT THE ACTUAL NEW PLAN CONTENT
+==================================================
+
+Read the persisted `plan_json` for plan:
+
+9acff9fa-6357-4da3-975c-b1d8c78f74db
+
+Search for:
+
+- refund
+- refunds
+- cancellation
+- access issue
+- support problem
+- affordability
+- pricing
+- trust
+- strategic direction
+- fragmented tools
+- generic advice
+- marketing strategy
+
+Determine:
+
+A. Is refund-centered language genuinely present in the newest plan JSON?
+
+or
+
+B. Is the newest plan different, but the Frontend is rendering old content?
+
+This distinction is critical.
+
+==================================================
+4. COMPARE BACKEND VS UI
+==================================================
+
+For every visible refund-centered sentence:
+
+- copy the exact UI text
+- identify the source field
+- identify the plan/snapshot ID
+- identify the jobId
+- show whether the same text exists in the latest backend payload
+
+Classify each sentence as:
+
+CURRENT_PLAN_CONTENT
+OLD_PLAN_CONTENT
+OLD_ENGINE_SNAPSHOT
+FRONTEND_FALLBACK_TEXT
+HARDCODED_PLACEHOLDER
+LOCAL_CACHE
+UNKNOWN
+
+==================================================
+5. CHECK CACHE / STATE
+==================================================
+
+Audit:
+
+- React Query keys
+- staleTime
+- cache invalidation
+- local component state
+- persisted storage
+- route params
+- selected run state
+- late-response guards
+- fallback plan state
+- dashboard polling
+- navigation between runs
+
+Specifically test:
+
+new run selected
+→ old response arrives late
+→ can old content overwrite new content?
+
+Verify Task #154 protections are active on every Preview component.
+
+==================================================
+6. CHECK HARDCODED / LEGACY TEXT
+==================================================
+
+Search the Frontend for:
+
+- refund
+- cancellation
+- access
+- affordability
+- generic placeholder strategy
+- demo content
+- fallback copy
+- hardcoded MarketMindAI text
+
+Determine whether any text is embedded directly in components or mock data.
+
+If found, report the exact file and component.
+
+Do not delete it unless it is proven to be displayed in the real Preview.
+
+==================================================
+7. VISUAL VERIFICATION
+==================================================
+
+Open the actual Preview as the user sees it.
+
+Navigate to:
+
+Roadmap → Document
+
+Also inspect the major engine sections.
+
+Capture screenshots if available.
+
+For each visible section record:
+
+- visible title
+- visible primary pain
+- visible positioning
+- visible mechanism
+- visible Offer
+- visible plan ID/run ID if exposed
+- backend source ID
+
+==================================================
+8. FIX ONLY PROVEN FRONTEND ISSUES
+==================================================
+
+If the Frontend is showing stale/old/fallback content:
+
+fix only the proven read/cache/rendering issue.
+
+Allowed fixes:
+
+- pass exact jobId
+- correct query key
+- invalidate stale cache
+- reject late response
+- remove proven old fallback
+- bind component to exact plan ID
+- remove displayed hardcoded placeholder
+
+Do NOT modify backend strategy generation.
+
+If the newest backend plan itself contains the refund strategy:
+
+DO NOT change the Frontend.
+
+Report:
+
+FRONTEND IS CORRECT — CURRENT PLAN ITSELF IS REFUND-CENTERED
+
+==================================================
+9. TESTS
+==================================================
+
+If a Frontend bug is fixed, add tests proving:
+
+- exact-run plan is rendered
+- old plan cannot overwrite new plan
+- late response is ignored
+- cache key includes campaign + run/job
+- fallback cannot display another run
+- current plan text matches API payload
+- no hardcoded refund placeholder renders
+
+==================================================
+FINAL REPORT — SHORT
+==================================================
+
+Return:
+
+LATEST RUN:
+jobId
+
+LATEST PLAN:
+planId
+
+FRONTEND STATUS:
+CORRECT / STALE / MIXED / FALLBACK
+
+REFUND TEXT SOURCE:
+current plan / old plan / old snapshot / hardcoded / cache
+
+SECTIONS CHECKED:
+Audience
+Positioning
+Mechanism
+Offer
+Build Plan
+
+BUGS FOUND:
+exact file + exact fix
+
+FINAL ANSWERS:
+
+A. Is the Frontend showing the exact newest run?
+
+B. Is the Frontend showing plan 9acff9fa?
+
+C. Is the refund-centered strategy actually inside the newest plan JSON?
+
+D. Is any old-run content mixed into the Preview?
+
+E. Is there any hardcoded/fallback refund content?
+
+F. Does the Frontend need a fix, or is the backend plan itself the real issue?
+
+Do not rerun the pipeline.
+Do not modify strategic engines.
+Audit the Frontend only.
