@@ -56,4 +56,5 @@
 - [Run code vintage check](run-code-vintage.md) — before auditing a run's outputs, verify the run executed the fixed code (git timestamps vs run window); pre-fix runs make fixed defects look live.
 - [Stranded-run recovery & shadow semantics](stranded-run-shadow-recovery.md) — no heartbeat col on orchestrator_jobs; boot+periodic sweep TIMED_OUTs stale RUNNING rows; shadows carry shadowKind + labeled previousPlan, never as `plan`.
 - [JSON-text column normalization](json-text-column-normalization.md) — text-stored JSON crashes .map readers the first time a column goes non-null; normalize at load site with type-appropriate defaults ([]/null).
+- [Authority namespace separation](authority-namespace-separation.md) — Pain Registry = problem authority, capability registry = capability authority; audited anchor writer + gate-0 validator; real-run script has its own single-shot arm guard.
 - [Anchor poisoning × RULE 1](anchor-poisoning-grounding-contract.md) — poisoned differentiatingFeature saturates ALL engines via grounding contract while pain routing stays correct; prove via anchor n-gram fingerprints; jsonb cols need JSON.stringify not String().

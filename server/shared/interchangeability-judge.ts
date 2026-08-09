@@ -137,7 +137,40 @@ function anchorReference(anchor: ProductAnchor | null): string {
   ].join("\n");
 }
 
-function buildJudgePrompt(kind: JudgeKind, candidate: string, anchor: ProductAnchor | null): string {
+export interface JudgeAuthorityContext {
+  selectedPains?: Array<{ painId: string; canonical: string }>;
+  capabilities?: Array<{ capabilityId: string; statement: string }>;
+}
+
+function authoritySection(authority: JudgeAuthorityContext | null | undefined): string {
+  if (!authority) return "";
+  const parts: string[] = [];
+  const pains = authority.selectedPains ?? [];
+  const caps = authority.capabilities ?? [];
+  if (pains.length === 0 && caps.length === 0) return "";
+  parts.push("AUTHORITY BOUNDARIES (also REJECT on any of these):");
+  if (pains.length > 0) {
+    parts.push(
+      `- AUTHORIZED CUSTOMER PROBLEMS (the ONLY problems the output may center): ${pains.map((p) => `"${p.canonical}"`).join("; ")}. REJECT if the output's central customer problem is a different problem, an invented problem, or product-capability/competitor-weakness language reframed as the customer's problem.`,
+    );
+  }
+  if (caps.length > 0) {
+    parts.push(
+      `- VALIDATED PRODUCT CAPABILITIES (the ONLY capabilities the output may claim): ${caps.map((c) => `"${c.statement}"`).join("; ")}. REJECT if the output claims a product capability not covered by these.`,
+    );
+  }
+  parts.push(
+    "- REJECT if the output merges a capability with evidence fragments into a new authoritative-sounding problem or capability that exists in neither list.",
+  );
+  return parts.join("\n") + "\n\n";
+}
+
+function buildJudgePrompt(
+  kind: JudgeKind,
+  candidate: string,
+  anchor: ProductAnchor | null,
+  authority?: JudgeAuthorityContext | null,
+): string {
   const k = KIND_TEST[kind];
   return `You are a hostile INTERCHANGEABILITY reviewer for a marketing-strategy engine. You have read thousands of generic marketing documents and you reject anything that could belong to a competitor unchanged.
 
@@ -148,7 +181,7 @@ ${k.examples}
 
 ${anchorReference(anchor)}
 
-${k.label} TO REVIEW:
+${authoritySection(authority)}${k.label} TO REVIEW:
 """
 ${candidate}
 """
@@ -168,8 +201,10 @@ export async function judgeInterchangeability(input: {
   candidate: string;
   productAnchor: ProductAnchor | null;
   accountId: string;
+  /** Optional authority boundaries (selected pains / validated capabilities) the judge also enforces. */
+  authority?: JudgeAuthorityContext | null;
 }): Promise<InterchangeabilityVerdict> {
-  const { kind, candidate, productAnchor, accountId } = input;
+  const { kind, candidate, productAnchor, accountId, authority } = input;
 
   // Empty candidate is a caller bug, not a judgeable output. Explicit NOT_RUN
   // (never silently ACCEPTED) so the caller retries or degrades visibly.
@@ -181,7 +216,7 @@ export async function judgeInterchangeability(input: {
   let raw: string | null = null;
   try {
     const resp = await aiChat({
-      messages: [{ role: "user", content: buildJudgePrompt(kind, candidate, productAnchor) }],
+      messages: [{ role: "user", content: buildJudgePrompt(kind, candidate, productAnchor, authority) }],
       model: "gpt-4.1-mini",
       temperature: 0.1,
       max_tokens: 300,

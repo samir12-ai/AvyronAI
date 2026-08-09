@@ -1,3 +1,4 @@
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { db } from "../db";
 import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorReviews, growthCampaigns } from "@shared/schema";
 import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
@@ -1511,7 +1512,7 @@ async function constructSegments(
     // RULE 1 (name the differentiating feature) and RULE 3 (interchangeability
     // self-check) still reinforce the existing gate battery. Additive only.
     const audEffectiveAnchor = (strategic && strategic.doctrine.productAnchor) ? strategic.doctrine.productAnchor : (productAnchor || null);
-    const audGroundingContract = buildGroundingContract(audEffectiveAnchor as any, null);
+    const audGroundingContract = buildGroundingContract(audEffectiveAnchor as any, null, { capabilities: deriveValidatedCapabilities((audEffectiveAnchor ?? null) as any, ((businessContext as any).productDna ?? null)) });
 
     const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
 ${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${audGroundingContract ? `\n${audGroundingContract}\n` : ""}

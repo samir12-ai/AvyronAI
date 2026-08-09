@@ -37,6 +37,7 @@
 import { z } from "zod";
 import type { AnalyticalPackage } from "../analytical-enrichment-layer/types";
 import type { ProductAnchor } from "./strategic-doctrine";
+import type { ValidatedCapability } from "./capability-registry";
 
 /**
  * Zod fragment for the structured output field. `.optional()` (never required) so
@@ -98,27 +99,61 @@ export function buildAelReferenceIndex(ael: AnalyticalPackage | null | undefined
  * are rendered honestly: an absent differentiatingFeature or empty AEL produces
  * the truthful "state it / cite nothing" branch rather than a fabricated demand.
  */
+export interface GroundingContractAuthority {
+  /** Validated capability registry (CAPABILITY_NAMESPACE). */
+  capabilities?: ValidatedCapability[];
+  /** The engine's deterministically selected authoritative pains (PROBLEM_NAMESPACE). */
+  selectedPains?: Array<{ painId: string; canonical: string; role?: string }>;
+}
+
 export function buildGroundingContract(
   anchor: ProductAnchor | null | undefined,
   ael: AnalyticalPackage | null | undefined,
+  authority?: GroundingContractAuthority,
 ): string {
   const availableRefs = extractAvailableAelRefs(ael);
   const hasRefs = availableRefs.length > 0;
   const rawFeature = anchor && typeof anchor.differentiatingFeature === "string" ? anchor.differentiatingFeature.trim() : "";
   const hasFeature = rawFeature.length > 0;
+  const caps = authority?.capabilities ?? [];
+  const pains = authority?.selectedPains ?? [];
 
   const lines: string[] = [];
   lines.push("\n═══ GROUNDING CONTRACT (output-contract rules — additive; the unchanged gates remain the sole enforcement authority) ═══");
+  lines.push(
+    "AUTHORITY MODEL: The PAIN REGISTRY decides WHAT PROBLEM exists. The PRODUCT ANCHOR decides WHAT THE PRODUCT CAN DO. You decide only HOW a validated capability addresses the selected problem. Never move truth between these namespaces.",
+  );
 
-  if (hasFeature) {
+  // --- PROBLEM GROUNDING (PROBLEM_NAMESPACE) ---
+  if (pains.length > 0) {
     lines.push(
-      `RULE 1 — MECHANISM NAMING: Your output MUST reference this product's differentiating mechanism concretely by name: "${rawFeature}". Name the specific capability — do NOT paraphrase it into an abstract category (e.g. "a validation gap", "a transformation capability"). Every core claim must trace to this named mechanism.`,
+      `RULE P — PROBLEM GROUNDING: The central customer problem(s) of your output MUST be exactly the selected authoritative pain(s) below. Do NOT reselect the problem from business context, product identity, or competitor weaknesses. Do NOT invent, merge, or replace pains.\n${pains.map((p) => `  • ${p.painId}${p.role ? ` [${p.role}]` : ""}: "${p.canonical}"`).join("\n")}`,
     );
   } else {
     lines.push(
-      'RULE 1 — MECHANISM NAMING: No differentiating feature is set for this product. Do NOT invent one. State "no differentiating feature set" in your grounding metadata and ground your claims in the AEL evidence and audience pain language instead.',
+      "RULE P — PROBLEM GROUNDING: Ground customer problems ONLY in the real audience pain evidence provided in this prompt. Product capabilities, product identity language, and competitor weaknesses are NOT customer problems — never frame them as the customer's problem.",
     );
   }
+
+  // --- CAPABILITY GROUNDING (CAPABILITY_NAMESPACE) ---
+  if (caps.length > 0) {
+    lines.push(
+      `RULE 1 — CAPABILITY GROUNDING: Every product-capability claim MUST resolve to one of these VALIDATED PRODUCT CAPABILITIES (cite their IDs in a structured "capabilityRefs": string[] field when your output schema allows it):\n${caps.map((c) => `  [${c.capabilityId}] ${c.statement}`).join("\n")}\nReference the differentiating mechanism concretely by name — do NOT paraphrase it into an abstract category — and do NOT invent, extend, or merge capabilities. The mechanism describes the SOLUTION; it must NEVER be used to define or select the customer's problem.`,
+    );
+  } else if (hasFeature) {
+    lines.push(
+      `RULE 1 — CAPABILITY GROUNDING: Your product claims must stay within this product's actual differentiating mechanism: "${rawFeature}". Name it concretely — do NOT paraphrase it into an abstract category and do NOT invent capabilities beyond it. The mechanism describes the SOLUTION; it must NEVER be used to define or select the customer's problem.`,
+    );
+  } else {
+    lines.push(
+      'RULE 1 — CAPABILITY GROUNDING: No differentiating feature is set for this product. Do NOT invent one. State "no differentiating feature set" in your grounding metadata and ground your claims in the AEL evidence and audience pain language instead.',
+    );
+  }
+
+  // --- SYNTHESIS GROUNDING (SYNTHESIS_NAMESPACE) ---
+  lines.push(
+    "RULE S — SYNTHESIS GROUNDING: Your strategic contribution is the CONNECTION: explain concretely how a validated capability addresses the selected problem. You may be creative in the connection, but you may not change the meaning of either the problem or the capability, and you may not synthesize a new 'problem' by combining capability language with evidence fragments.",
+  );
 
   if (hasRefs) {
     lines.push(

@@ -14,6 +14,7 @@ import {
   type ProductAnchor,
   type RunStrategicContext,
 } from "../shared/strategic-doctrine";
+import { checkAnchorAuditConsistency } from "../shared/product-anchor-writer";
 
 /**
  * Phase 0 (AI Proposes / Code Validates) — doctrine seeding + prior-decision
@@ -103,6 +104,10 @@ export async function seedDoctrine(
   console.log(
     `[Doctrine] SEEDED | campaign=${campaignId} | resolution=${doctrine.resolution} | anchorHash=${doctrine.anchorHash || "none"} | version=${doctrine.version}`,
   );
+
+  // Authority-model protection: DETECT anchor writes that bypassed the audited
+  // writer (direct SQL / legacy paths). Loud log only — never blocks the run.
+  await checkAnchorAuditConsistency(campaignId, productAnchor);
 }
 
 /**

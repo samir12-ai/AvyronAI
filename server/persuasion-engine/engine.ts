@@ -1,3 +1,4 @@
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import {
   ENGINE_VERSION,
   STATUS,
@@ -2450,7 +2451,7 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
     ? "\nANCHOR GROUNDING: Every trust mechanism and persuasion principle MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.\n"
     : "";
   const psAnchorBlockText = `${psDoctrineBlock}${psDnaAnchorBlock}${psAnchorGroundingRule}`;
-  const psGroundingContract = buildGroundingContract(psAnchor, ((mi as any).analyticalEnrichment || null) as any);
+  const psGroundingContract = buildGroundingContract(psAnchor, ((mi as any).analyticalEnrichment || null) as any, { capabilities: deriveValidatedCapabilities(psAnchor, productDna) });
 
   try {
     const { designTrustTransfer } = await import("./trust-transfer");

@@ -267,6 +267,9 @@ export function buildDoctrineBlock(ctx: RunStrategicContext): string {
     }
     lines.push(`Core problem solved: ${a.coreProblemSolved}`);
     lines.push(`Differentiating feature: ${a.differentiatingFeature}`);
+    lines.push(
+      "AUTHORITY BOUNDARY: this anchor is the authority for WHAT THE PRODUCT CAN DO — it is NOT the authority for what problem the customer has. Never select, invent, or reframe the customer's problem from anchor language; the customer problem comes only from the authoritative audience pain data provided elsewhere in this prompt.",
+    );
   } else {
     // business_level_degraded — omit anchor specifics cleanly; provide only
     // the business-level context that genuinely exists.

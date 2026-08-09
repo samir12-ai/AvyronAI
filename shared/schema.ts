@@ -340,6 +340,24 @@ export const growthCampaigns = pgTable("growth_campaigns", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Product Anchor write audit trail (authority-model protection): every anchor
+// write preserves writer, source, reason, previous/new value, and the
+// validation decision. Direct unaudited writes are DETECTED at doctrine-seed
+// time by comparing the live anchor hash against the newest audit row.
+export const productAnchorAudit = pgTable("product_anchor_audit", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull(),
+  accountId: varchar("account_id").notNull(),
+  writer: text("writer").notNull(),
+  source: text("source").notNull(),
+  reason: text("reason").notNull(),
+  previousValue: jsonb("previous_value"),
+  newValue: jsonb("new_value"),
+  validationDecision: text("validation_decision").notNull(),
+  anchorHash: text("anchor_hash").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("product_anchor_audit_campaign_idx").on(t.campaignId, t.createdAt)]);
+
 // DNA Enrichment Gate (Path B): campaign-scoped operator prompt raised when the
 // interchangeability judge rejects positioning/offer as generic and auto-enrichment
 // cannot ground a passing candidate. Resolve appends the confirmed differentiator

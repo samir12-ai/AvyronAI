@@ -40,15 +40,38 @@ import {
   type ContradictionVerdict,
 } from "./contradiction-judge";
 import type { ProductAnchor, EngineDecisionSummary } from "./strategic-doctrine";
+import {
+  validateAuthorityBoundaries,
+  type AuthorityCheckResult,
+  type SelectedPainLike,
+} from "./authority-validator";
+import type { ValidatedCapability } from "./capability-registry";
+import type { JudgeAuthorityContext } from "./interchangeability-judge";
 
 /** Which gate rejected the candidate (null when it passed all gates). */
-export type FailedGate = "breadth" | "interchangeability" | "contradiction";
+export type FailedGate = "authority" | "breadth" | "interchangeability" | "contradiction";
+
+/**
+ * Optional authority context (Pain Registry + validated capability registry).
+ * When supplied, the deterministic authority gate runs FIRST (free) and the
+ * interchangeability judge additionally enforces the same boundaries.
+ */
+export interface GateAuthorityInput {
+  selectedPains: SelectedPainLike[];
+  capabilities: ValidatedCapability[];
+  /** Output fields that claim a CENTRAL customer problem (caller-designated). */
+  centralProblemTexts: string[];
+  /** Structured capabilityRefs the LLM emitted, when the schema carries one. */
+  capabilityRefs?: unknown;
+}
 
 export interface GateBatteryResult {
   /** true only when NO gate rejected the candidate. Explicit, never `??`-merged. */
   passed: boolean;
   /** The first gate that rejected the candidate; null when passed. */
   failedGate: FailedGate | null;
+  /** Deterministic authority verdict (null when no authority context supplied). */
+  authority: AuthorityCheckResult | null;
   /** Deterministic breadth verdict (always populated — the floor always runs). */
   breadth: BreadthResult;
   /** Interchangeability judge verdict (NOT_RUN when skipped or abstained). */
@@ -93,8 +116,36 @@ export async function runCandidateGateBattery(input: {
   productAnchor: ProductAnchor | null;
   priorDecisions: EngineDecisionSummary[];
   accountId: string;
+  /** Optional Pain-Registry/capability authority context (see GateAuthorityInput). */
+  authority?: GateAuthorityInput | null;
 }): Promise<GateBatteryResult> {
   const { kind, candidateText, productAnchor, priorDecisions, accountId } = input;
+
+  // GATE 0 — authority boundaries (deterministic, free). Runs FIRST when the
+  // caller supplied the selected pains / validated capabilities: an output
+  // whose central problem or capability claims violate the authority model is
+  // rejected with precise retry feedback before any LLM judge is spent.
+  let authorityResult: AuthorityCheckResult | null = null;
+  if (input.authority) {
+    authorityResult = validateAuthorityBoundaries({
+      engineId: kind,
+      centralProblemTexts: input.authority.centralProblemTexts,
+      capabilityRefs: input.authority.capabilityRefs,
+      selectedPains: input.authority.selectedPains,
+      capabilities: input.authority.capabilities,
+    });
+    if (!authorityResult.passed) {
+      return {
+        passed: false,
+        failedGate: "authority",
+        authority: authorityResult,
+        breadth: checkBreadth(candidateText),
+        interchangeability: skippedInterchangeability(kind),
+        contradiction: skippedContradiction(kind),
+        rejectionFeedback: authorityResult.violations.map((v) => v.retryFeedback).join(" "),
+      };
+    }
+  }
 
   // GATE 1 — breadth (deterministic, free). Catches empties + broad boilerplate.
   const breadth = checkBreadth(candidateText);
@@ -102,6 +153,7 @@ export async function runCandidateGateBattery(input: {
     return {
       passed: false,
       failedGate: "breadth",
+      authority: authorityResult,
       breadth,
       interchangeability: skippedInterchangeability(kind),
       contradiction: skippedContradiction(kind),
@@ -111,17 +163,28 @@ export async function runCandidateGateBattery(input: {
 
   // GATE 2 — interchangeability (LLM). REJECTED short-circuits (skips gate 3 to
   // cap judge calls). ACCEPTED and NOT_RUN both proceed — NOT_RUN is recorded.
+  const judgeAuthority: JudgeAuthorityContext | null = input.authority
+    ? {
+        selectedPains: input.authority.selectedPains,
+        capabilities: input.authority.capabilities.map((c) => ({
+          capabilityId: c.capabilityId,
+          statement: c.statement,
+        })),
+      }
+    : null;
   const interchangeability = await judgeInterchangeability({
     kind,
     candidate: candidateText,
     productAnchor,
     accountId,
+    authority: judgeAuthority,
   });
   if (interchangeability.verdict === "REJECTED") {
     const fix = interchangeability.fix ? ` Fix: ${interchangeability.fix}` : "";
     return {
       passed: false,
       failedGate: "interchangeability",
+      authority: authorityResult,
       breadth,
       interchangeability,
       contradiction: skippedContradiction(kind),
@@ -146,6 +209,7 @@ export async function runCandidateGateBattery(input: {
     return {
       passed: false,
       failedGate: "contradiction",
+      authority: authorityResult,
       breadth,
       interchangeability,
       contradiction,
@@ -158,6 +222,7 @@ export async function runCandidateGateBattery(input: {
   return {
     passed: true,
     failedGate: null,
+    authority: authorityResult,
     breadth,
     interchangeability,
     contradiction,

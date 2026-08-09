@@ -1,3 +1,4 @@
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { aiChat } from "../ai-client";
 import { selectPainForUse } from "../shared/audience-pain-registry";
 import {
@@ -1085,7 +1086,7 @@ Differentiating feature: ${diffAnchor.differentiatingFeature}
   const anchorGroundingRule = diffAnchor
     ? "\nANCHOR GROUNDING: Every refined pillar and claim MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the AEL causal grounding rules below; it never replaces the [RC#]/[BB#]/[CC#] requirements.\n"
     : "";
-  const groundingContractBlock = buildGroundingContract(diffAnchor, analyticalEnrichment || null);
+  const groundingContractBlock = buildGroundingContract(diffAnchor, analyticalEnrichment || null, { capabilities: deriveValidatedCapabilities(diffAnchor, productDna) });
   console.log(`[DifferentiationEngine-V3] ANCHOR_EVIDENCE | engine=differentiation | site=first_prompt | attempt=${attemptNumber ?? 1} | present=${diffAnchor ? "yes" : "no"} | source=${diffAnchorSource}`);
 
   const mechanismCoreBlock = mechanismCore && mechanismCore.mechanismSteps.length > 0

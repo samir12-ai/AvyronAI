@@ -6,6 +6,8 @@ import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDas
 
 import { resolveAccountId } from "./auth";
 import { ProductAnchorSchema, parseProductAnchor, deriveAnchorFromProductDna } from "./shared/strategic-doctrine";
+import { writeProductAnchorAudited } from "./shared/product-anchor-writer";
+import { validateCapabilityCandidate } from "./shared/capability-registry";
 import { loadProductDNA } from "./shared/product-dna";
 import { getOpenEnrichmentRequests, getOpenEnrichmentRequest, markEnrichmentResolved } from "./dna-enrichment/store";
 const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING"] as const;
@@ -111,13 +113,16 @@ export function registerCampaignRoutes(app: Express) {
       // created here only when an anchor is set). Tenant-safe: the campaignId was
       // just minted for this account's campaignSelections row above.
       if (resolvedAnchor) {
-        await db
-          .insert(growthCampaigns)
-          .values({ id: campaignId, name: campaignName, productAnchor: resolvedAnchor })
-          .onConflictDoUpdate({
-            target: growthCampaigns.id,
-            set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
-          });
+        await writeProductAnchorAudited({
+          campaignId,
+          campaignName,
+          accountId,
+          writer: "POST /api/campaigns/create",
+          source: "campaign_create",
+          reason: "user supplied product anchor at campaign creation",
+          newAnchor: resolvedAnchor,
+          validationDecision: "SCHEMA_VALID",
+        });
         console.log(`[Campaigns] Product anchor set: campaign=${campaignId}`);
       }
 
@@ -208,10 +213,16 @@ export function registerCampaignRoutes(app: Express) {
 
       // Explicit clear.
       if (productAnchor === null) {
-        await db
-          .update(growthCampaigns)
-          .set({ productAnchor: null, updatedAt: new Date() })
-          .where(eq(growthCampaigns.id, campaignId));
+        await writeProductAnchorAudited({
+          campaignId,
+          campaignName: owned.name,
+          accountId,
+          writer: "PUT /api/campaigns/:campaignId/product-anchor",
+          source: "user_clear",
+          reason: typeof req.body.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : "user cleared product anchor",
+          newAnchor: null,
+          validationDecision: "CLEARED",
+        });
         console.log(`[Campaigns] Product anchor cleared: campaign=${campaignId} account=${accountId}`);
         return res.json({ success: true, productAnchor: null, requestId });
       }
@@ -230,13 +241,16 @@ export function registerCampaignRoutes(app: Express) {
       }
       const resolvedAnchor = anchorResult.data;
 
-      await db
-        .insert(growthCampaigns)
-        .values({ id: campaignId, name: owned.name, productAnchor: resolvedAnchor })
-        .onConflictDoUpdate({
-          target: growthCampaigns.id,
-          set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
-        });
+      await writeProductAnchorAudited({
+        campaignId,
+        campaignName: owned.name,
+        accountId,
+        writer: "PUT /api/campaigns/:campaignId/product-anchor",
+        source: "user_edit",
+        reason: typeof req.body.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : "user edited product anchor",
+        newAnchor: resolvedAnchor,
+        validationDecision: "USER_CONFIRMED",
+      });
       console.log(`[Campaigns] Product anchor updated: campaign=${campaignId} account=${accountId}`);
 
       res.json({ success: true, productAnchor: resolvedAnchor, requestId });
@@ -366,13 +380,53 @@ export function registerCampaignRoutes(app: Express) {
       }
       const resolvedAnchor = anchorResult.data;
 
-      await db
-        .insert(growthCampaigns)
-        .values({ id: campaignId, name: owned.name, productAnchor: resolvedAnchor })
-        .onConflictDoUpdate({
-          target: growthCampaigns.id,
-          set: { productAnchor: resolvedAnchor, updatedAt: new Date() },
+      // AUTHORITY-MODEL LIFECYCLE: a derived strategic inference is only a
+      // CANDIDATE capability. Before it can become Product Identity it is
+      // compared against authoritative product/business evidence:
+      //   ACCEPT → write; REJECT / NEEDS_USER_CONFIRMATION → the operator must
+      //   explicitly re-confirm with confirmUnverified=true (recorded in the
+      //   audit trail as USER_CONFIRMED_UNVERIFIED). No automatic promotion of
+      //   strategy-derived language into the capability namespace.
+      const dnaForValidation = await loadProductDNA(campaignId, accountId);
+      const candidateValidation = validateCapabilityCandidate({
+        candidate: confirmed,
+        authoritativeFields: {
+          "dna.uniqueMechanism": dnaForValidation?.uniqueMechanism ?? null,
+          "dna.strategicAdvantage": dnaForValidation?.strategicAdvantage ?? null,
+          "dna.coreOffer": dnaForValidation?.coreOffer ?? null,
+          "dna.coreProblemSolved": dnaForValidation?.coreProblemSolved ?? null,
+          "dna.productCategory": dnaForValidation?.productCategory ?? null,
+          "anchor.name": baseAnchor.name,
+          "anchor.type": baseAnchor.type,
+          "anchor.keyAttributes": (baseAnchor.keyAttributes ?? []).join(" "),
+          "anchor.coreProblemSolved": baseAnchor.coreProblemSolved,
+        },
+      });
+      const confirmUnverified = req.body.confirmUnverified === true;
+      if (candidateValidation.decision !== "ACCEPT" && !confirmUnverified) {
+        console.log(
+          `[DnaEnrichment] CANDIDATE_${candidateValidation.decision} | campaign=${campaignId} | engine=${engineKind} | support=${candidateValidation.supportScore} | ${candidateValidation.reason}`,
+        );
+        return res.status(409).json({
+          code: "CAPABILITY_CANDIDATE_UNVERIFIED",
+          decision: candidateValidation.decision,
+          supportScore: candidateValidation.supportScore,
+          message: `This differentiator is not sufficiently supported by authoritative product evidence (${candidateValidation.reason}). If it is genuinely true of your product, resubmit with confirmUnverified=true to record your explicit confirmation.`,
+          requestId,
         });
+      }
+
+      await writeProductAnchorAudited({
+        campaignId,
+        campaignName: owned.name,
+        accountId,
+        writer: "POST /api/dna-enrichment/resolve",
+        source: "dna_enrichment_resolve",
+        reason: `operator confirmed ${engineKind} enrichment differentiator (support=${candidateValidation.supportScore}; ${candidateValidation.reason})`,
+        newAnchor: resolvedAnchor,
+        validationDecision:
+          candidateValidation.decision === "ACCEPT" ? "ACCEPT" : "USER_CONFIRMED_UNVERIFIED",
+      });
 
       await markEnrichmentResolved({ accountId, campaignId, engineKind });
       console.log(`[DnaEnrichment] RESOLVED | campaign=${campaignId} | engine=${engineKind} | account=${accountId}`);

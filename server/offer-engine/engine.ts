@@ -342,6 +342,7 @@ import type {
   OfferResult,
 } from "./types";
 import { selectPainForUse } from "../shared/audience-pain-registry";
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 
 function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v));
@@ -3283,12 +3284,25 @@ export async function runOfferEngine(
   // retry loop), so total generations stay bounded at ≤3.
   const offerBatteryAttempts: BatteryAttemptLike[] = [];
   console.log(`[OfferEngine-V4] ANCHOR_EVIDENCE | engine=offer | site=judge | attempt=1 | present=${offerBatteryAnchor ? "yes" : "no"} | source=${offerAnchorSource}`);
+  // AUTHORITY MODEL: the offer's central problem must resolve to the selected
+  // offer_core pain; capability claims must stay within the validated registry.
+  const offerCorePainForAuthority = selectPainForUse(audience.painRegistry || [], "offer_core");
+  const offerAuthorityCaps = deriveValidatedCapabilities(offerBatteryAnchor, productDna);
+  const buildOfferAuthority = (candidate: { problemStatement?: string }) =>
+    offerCorePainForAuthority
+      ? {
+          selectedPains: [{ painId: offerCorePainForAuthority.painId, canonical: offerCorePainForAuthority.canonical }],
+          capabilities: offerAuthorityCaps,
+          centralProblemTexts: candidate.problemStatement ? [candidate.problemStatement] : [],
+        }
+      : null;
   let offerBattery = await runCandidateGateBattery({
     kind: "offer",
     candidateText: `${primaryOffer.offerName}: ${primaryOffer.coreOutcome} — ${primaryOffer.mechanismDescription}`,
     productAnchor: offerBatteryAnchor,
     priorDecisions: strategic ? strategic.priorDecisions : [],
     accountId,
+    authority: buildOfferAuthority(primaryOffer),
   });
   diagnostics.offerBattery = { passed: offerBattery.passed, failedGate: offerBattery.failedGate };
   offerBatteryAttempts.push(offerBattery);
@@ -3415,6 +3429,7 @@ export async function runOfferEngine(
         productAnchor: offerBatteryAnchor,
         priorDecisions: strategic ? strategic.priorDecisions : [],
         accountId,
+        authority: buildOfferAuthority(retryPrimary),
       });
       offerBatteryAttempts.push(retryBattery);
 

@@ -1,3 +1,4 @@
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { aiChat } from "../ai-client";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import type { OfferIdentityReasoning } from "./types";
@@ -28,7 +29,7 @@ function buildPrompt(args: {
   const rcBlock = args.rootCauses.length ? args.rootCauses.map(rc => `${rc.id}: ${rc.description}`).join("\n") : "(none)";
   const rejectedBlock = args.rejectedClaimPatterns.length ? args.rejectedClaimPatterns.slice(0, 6).map(r => `- ${r}`).join("\n") : "(none)";
   const aelRefIndex = buildAelReferenceIndex(args.analyticalEnrichment || null);
-  const groundingContractBlock = buildGroundingContract(args.productAnchor || null, args.analyticalEnrichment || null);
+  const groundingContractBlock = buildGroundingContract(args.productAnchor || null, args.analyticalEnrichment || null, { capabilities: deriveValidatedCapabilities(args.productAnchor || null, null) });
 
   return `You are an Offer-Identity Strategist. Your job is to add the missing reasoning layer to a finished offer:
 identity payoff, commercial reasoning, and value translation. You do NOT change the offer's mechanism or outcome.

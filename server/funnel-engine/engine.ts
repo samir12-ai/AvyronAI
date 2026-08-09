@@ -1,3 +1,4 @@
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { aiChat } from "../ai-client";
 import { selectPainsForUse } from "../shared/audience-pain-registry";
 import {
@@ -1158,7 +1159,7 @@ Differentiating feature: ${funnelAnchor.differentiatingFeature}
   // contract compelling the model to name the anchor's differentiating feature
   // and cite AEL evidence via groundingRefs. Funnel previously had prose AEL only.
   const aelRefIndex = buildAelReferenceIndex(analyticalEnrichment || null);
-  const groundingContractBlock = buildGroundingContract(funnelAnchor, analyticalEnrichment || null);
+  const groundingContractBlock = buildGroundingContract(funnelAnchor, analyticalEnrichment || null, { capabilities: deriveValidatedCapabilities(funnelAnchor, productDna) });
 
   const prompt = `You are a Funnel Architect. Generate three funnel concepts based on the market intelligence below.
 ${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${dnaAnchorBlock}${anchorGroundingRule}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}

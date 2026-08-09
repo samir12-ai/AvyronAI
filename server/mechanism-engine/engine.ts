@@ -1,3 +1,4 @@
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { aiChat } from "../ai-client";
 import { selectPainForUse } from "../shared/audience-pain-registry";
 import {
@@ -232,7 +233,7 @@ Differentiating feature: ${mechAnchor.differentiatingFeature}
   const anchorGroundingRule = mechAnchor
     ? "\nANCHOR GROUNDING: The mechanism name, steps, promise, and logic MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the AEL causal grounding rules below; it never replaces the [RC#]/[BB#]/[CC#] requirements.\n"
     : "";
-  const groundingContractBlock = buildGroundingContract(mechAnchor, analyticalEnrichment || null);
+  const groundingContractBlock = buildGroundingContract(mechAnchor, analyticalEnrichment || null, { capabilities: deriveValidatedCapabilities(mechAnchor, productDna) });
 
   const pillarSummary = pillars.slice(0, 5).map((p: any) => `"${p.name || p.territory}": ${p.description || ""}`.slice(0, 120)).join("\n");
 

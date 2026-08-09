@@ -1,3 +1,4 @@
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import {
   ENGINE_VERSION,
   STATUS,
@@ -955,7 +956,7 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
     ? "\nANCHOR GROUNDING: Every belief contradiction and narrative reframe MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.\n"
     : "";
   const awAnchorBlockText = `${awDoctrineBlock}${awDnaAnchorBlock}${awAnchorGroundingRule}`;
-  const awGroundingContract = buildGroundingContract(awAnchor, (analyticalEnrichment ?? null) as any);
+  const awGroundingContract = buildGroundingContract(awAnchor, (analyticalEnrichment ?? null) as any, { capabilities: deriveValidatedCapabilities(awAnchor, productDna) });
 
   // ── INTELLIGENCE UPGRADE: Myth-breaker reasoning ──
   try {

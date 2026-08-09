@@ -1,4 +1,7 @@
 import { aiChat } from "../ai-client";
+import { validateAuthorityBoundaries, type AuthorityCheckResult } from "../shared/authority-validator";
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
+import { loadCampaignProductAnchor } from "../orchestrator/doctrine-seed";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import { logSafe } from "../log-redact";
 import { wrapUntrustedText, UNTRUSTED_INPUT_SYSTEM_RULE } from "../market-intelligence-v3/prompt-safety";
@@ -64,7 +67,7 @@ export interface BuildPlanOutput {
   memoryOverrides?: MemoryOverride[];
 }
 
-export type BuildPlanBlockReason = "STALE_LINEAGE" | "AI_RESPONSE_INVALID";
+export type BuildPlanBlockReason = "STALE_LINEAGE" | "AI_RESPONSE_INVALID" | "AUTHORITY_VIOLATION";
 
 export interface BuildPlanResult {
   status: "SUCCESS" | "ACTIONABILITY_FAILED" | "INSUFFICIENT_DATA" | "BLOCKED" | "INCOMPLETE" | "ERROR";
@@ -255,6 +258,7 @@ export function _getBuildPlanLayerStats(): {
   };
 }
 
+// (authority-scan imports live at top of file)
 async function collectValidatedEngineOutputs(
   accountId: string,
   campaignId: string,
@@ -726,6 +730,64 @@ async function loadPersistedAel(
   }
 }
 
+/**
+ * FINAL AUTHORITY VALIDATION (deterministic, no LLM) for the synthesized plan:
+ * - central problem framing must resolve to the run's selected audience pains
+ *   (Pain Registry = sole problem authority);
+ * - structured capabilityRefs must resolve to the validated capability
+ *   registry derived from the Product Anchor (capability authority).
+ * When the audience snapshot carries no pain registry, the problem check is
+ * skipped truthfully (no pains → no problem-namespace authority to enforce);
+ * this is logged, never silently passed off as a full validation.
+ */
+async function runPlanAuthorityScan(
+  plan: any,
+  snapshots: EngineSnapshot[],
+  accountId: string,
+  campaignId: string,
+): Promise<AuthorityCheckResult> {
+  const audienceSnap = snapshots.find((s) => s.engineId === "audience");
+  const rawRegistry = (audienceSnap?.data as any)?.painRegistry ?? (audienceSnap?.data as any)?.data?.painRegistry ?? null;
+  const registry: any[] = typeof rawRegistry === "string" ? (() => { try { return JSON.parse(rawRegistry); } catch { return []; } })() : Array.isArray(rawRegistry) ? rawRegistry : [];
+  const selectedPains = registry
+    .filter((p: any) => p && typeof p.painId === "string" && typeof p.canonical === "string")
+    .map((p: any) => ({ painId: p.painId, canonical: p.canonical }));
+
+  const anchor = await loadCampaignProductAnchor(campaignId, accountId);
+  const capabilities = deriveValidatedCapabilities(anchor, null);
+
+  // Collect central problem texts + capabilityRefs from the plan JSON.
+  const centralProblemTexts: string[] = [];
+  const capabilityRefs: string[] = [];
+  const walk = (node: any, keyPath: string) => {
+    if (node == null) return;
+    if (Array.isArray(node)) { node.forEach((v, i) => walk(v, `${keyPath}[${i}]`)); return; }
+    if (typeof node === "object") {
+      for (const [k, v] of Object.entries(node)) {
+        if (/capabilityRefs/i.test(k) && Array.isArray(v)) {
+          for (const r of v) if (typeof r === "string") capabilityRefs.push(r);
+        } else if (/(centralProblem|problemStatement|coreProblem)/i.test(k) && typeof v === "string") {
+          centralProblemTexts.push(v);
+        } else {
+          walk(v, `${keyPath}.${k}`);
+        }
+      }
+    }
+  };
+  walk(plan, "plan");
+
+  if (selectedPains.length === 0) {
+    console.log(logSafe(`[BuildPlanLayer] AUTHORITY_SCAN_PARTIAL | no pain registry on audience snapshot — problem-namespace check skipped truthfully`));
+  }
+  return validateAuthorityBoundaries({
+    engineId: "build_plan",
+    centralProblemTexts: selectedPains.length > 0 ? centralProblemTexts : [],
+    capabilityRefs,
+    selectedPains,
+    capabilities,
+  });
+}
+
 export async function runBuildPlanLayer(
   accountId: string,
   campaignId: string,
@@ -865,6 +927,27 @@ export async function runBuildPlanLayer(
       console.log(logSafe(`[BuildPlanLayer] Attempt ${attempt}: actionability=${actionability.score.toFixed(2)}, passed=${actionability.passed}, failed=${actionability.failedBlocks.join(",")}`));
 
       if (actionability.passed) {
+        // FINAL AUTHORITY VALIDATION: before the plan can succeed, its
+        // problem framing must resolve to the run's selected audience pains
+        // and any structured capabilityRefs must resolve to validated
+        // capabilities. Deterministic — no LLM. A violation retries the
+        // synthesis with exact feedback (bounded by the same MAX_ATTEMPTS).
+        const authorityCheck = await runPlanAuthorityScan(plan, snapshots, accountId, campaignId);
+        if (!authorityCheck.passed) {
+          console.warn(logSafe(`[BuildPlanLayer] AUTHORITY_VIOLATION | attempt=${attempt} | ${authorityCheck.violations.map((v) => v.kind).join(",")}`));
+          lastFailedBlocks = authorityCheck.violations.map((v) => `AUTHORITY:${v.kind}: ${v.retryFeedback}`);
+          if (attempt === MAX_ATTEMPTS) {
+            return applyPartialAelDowngrade("BuildPlanLayer", {
+              status: "ACTIONABILITY_FAILED",
+              reason: "AUTHORITY_VIOLATION",
+              plan,
+              actionabilityScore: actionability.score,
+              failedBlocks: lastFailedBlocks,
+              attempts: attempt,
+            } as BuildPlanResult, aelAck);
+          }
+          continue;
+        }
         const successResult: BuildPlanResult = {
           status: "SUCCESS",
           plan,

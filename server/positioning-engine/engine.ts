@@ -21,6 +21,7 @@ import { buildGroundingContract, buildAelReferenceIndex, checkGroundingContract 
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { selectPainForUse } from "../shared/audience-pain-registry";
+import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
@@ -1002,7 +1003,7 @@ export async function generateGroundedTerritoryNames(
 ): Promise<Map<string, string> | null> {
   if (clusters.length === 0) return null;
 
-  const groundingContractBlock = buildGroundingContract(anchor, ael);
+  const groundingContractBlock = buildGroundingContract(anchor, ael, { capabilities: deriveValidatedCapabilities(anchor ?? null, productDna) });
   const aelRefIndex = buildAelReferenceIndex(ael);
   const domainNoun = inferDomainNoun(productDna);
   const productBlock = productDna
@@ -2462,7 +2463,7 @@ export async function runPositioningEngine(
   painRegistry?: any[],
 ): Promise<PositioningEngineResult> {
   const result = await runPositioningEngineInternal(
-    accountId, campaignId, miSnapshotId, audienceSnapshotId, analyticalEnrichment, jobId, strategic,
+    accountId, campaignId, miSnapshotId, audienceSnapshotId, analyticalEnrichment, jobId, strategic, painRegistry,
   );
   // Authoritative pain routing (Task 163): positioning may only anchor on a
   // purchase-motivation pain — POST_PURCHASE_FRICTION never carries the
@@ -2491,6 +2492,7 @@ async function runPositioningEngineInternal(
   analyticalEnrichment?: any,
   jobId?: string,
   strategic?: RunStrategicContext,
+  painRegistry?: any[],
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
   const aelAck = acknowledgeAelInput("PositioningEngine-V3", analyticalEnrichment, accountId);
@@ -2953,6 +2955,20 @@ async function runPositioningEngineInternal(
           }
           console.log(`[PositioningEngine-V3] ANCHOR_EVIDENCE | engine=positioning | site=judge | attempt=${specificityAttempt + 1} | present=${batteryAnchor ? "yes" : "no"} | source=${posJudgeAnchorSource}`);
         }
+        // AUTHORITY MODEL: when the pain registry is threaded, the battery's
+        // deterministic authority gate + judge enforce that the territory's
+        // problem framing resolves to the selected positioning pain and that
+        // capability claims stay within the validated registry.
+        const posSelectedPain = Array.isArray(painRegistry) && painRegistry.length > 0
+          ? selectPainForUse(painRegistry, "positioning")
+          : null;
+        const posAuthority = posSelectedPain
+          ? {
+              selectedPains: [{ painId: posSelectedPain.painId, canonical: posSelectedPain.canonical }],
+              capabilities: deriveValidatedCapabilities(batteryAnchor, productDna),
+              centralProblemTexts: [] as string[],
+            }
+          : null;
         for (const t of generatedTerritories) {
           const battery = await runCandidateGateBattery({
             kind: "positioning_claim",
@@ -2960,6 +2976,7 @@ async function runPositioningEngineInternal(
             productAnchor: batteryAnchor,
             priorDecisions: strategic ? strategic.priorDecisions : [],
             accountId,
+            authority: posAuthority ? { ...posAuthority, centralProblemTexts: [t.enemyDefinition || ""] } : null,
           });
           if (!battery.passed) {
             failedTerritoryName = t.name;

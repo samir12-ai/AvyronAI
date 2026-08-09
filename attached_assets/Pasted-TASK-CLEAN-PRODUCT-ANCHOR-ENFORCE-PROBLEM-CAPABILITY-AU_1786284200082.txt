@@ -1,0 +1,821 @@
+TASK — CLEAN PRODUCT ANCHOR, ENFORCE PROBLEM/CAPABILITY AUTHORITY IN ALL ENGINES AND JUDGES, THEN RUN FULL E2E VERIFICATION
+
+We have proven the real root cause of the repeated refund-centered strategy.
+
+The Pain Registry was functioning correctly.
+
+The authoritative core purchase pain was:
+
+"Most marketing lacks strategic direction"
+
+There was no authoritative refund pain.
+
+Refund-related competitor complaints were real but minor operational/post-purchase evidence.
+
+The actual defect was BUSINESS_CONTEXT_POISONING:
+
+A historical LLM-generated strategic phrase:
+
+"Refund & Access Pipeline Failure"
+
+was promoted into Product Anchor / Product Identity as if it were a verified product capability.
+
+The grounding contract then forced Audience, Positioning, Offer, Awareness, Persuasion, and Build Plan to repeatedly center outputs around that poisoned capability.
+
+We now need to:
+
+1. Clean the poisoned Product Anchor safely.
+2. Prevent derived strategy from becoming Product Identity.
+3. Enforce the correct authority model across all strategic engines.
+4. Enforce the same model in all judges/validators.
+5. Run comprehensive tests.
+6. Run one fresh full real campaign.
+7. Verify that Preview displays the correct new strategy from the exact new run.
+
+IMPORTANT:
+
+Do not hardcode MarketMindAI or refunds.
+Do not weaken judges.
+Do not delete real market evidence.
+Do not modify the frontend merely to hide bad strategy.
+Do not approve or activate the final plan.
+Do not start Performance Loop.
+
+===========================================================
+GLOBAL AUTHORITY MODEL
+===========================================================
+
+This is the permanent system rule:
+
+PAIN REGISTRY
+= authority for WHAT PROBLEM EXISTS
+and which problem is eligible for each engine.
+
+PRODUCT ANCHOR / PRODUCT IDENTITY
+= authority for WHAT THE PRODUCT CAN ACTUALLY DO.
+
+ENGINE
+= authority only for HOW an eligible problem can be addressed using validated product capabilities.
+
+JUDGE
+= verifies that the engine respected all three boundaries.
+
+In simple form:
+
+Pain Registry:
+WHAT PROBLEM?
+
+Product Anchor:
+WHAT CAN THE PRODUCT DO?
+
+Engine:
+HOW CAN A REAL CAPABILITY ADDRESS THIS ELIGIBLE PROBLEM?
+
+Judge:
+DID THE ENGINE PRESERVE BOTH AUTHORITIES WITHOUT INVENTING OR MERGING?
+
+These namespaces must remain separate:
+
+PROBLEM_NAMESPACE
+→ Pain Registry
+
+CAPABILITY_NAMESPACE
+→ Product Anchor
+
+SYNTHESIS_NAMESPACE
+→ Engine output
+
+No namespace may silently create authoritative truth inside another namespace.
+
+===========================================================
+PHASE 1 — STOP UNINTENDED REAL RUNS
+===========================================================
+
+Before any work, verify that backend/workspace restarts cannot automatically launch the real campaign runner.
+
+The following must start zero campaigns:
+
+- backend restart
+- frontend restart
+- workspace restart
+- test execution
+- normal development command
+
+A real campaign run must require explicit operator invocation.
+
+Preserve the real-run script as a manual tool.
+
+Add an explicit safety guard if not already present.
+
+Restart the normal workflows and prove:
+
+unintendedRealRunsStarted = 0
+
+===========================================================
+PHASE 2 — AUDIT AND CLEAN THE CURRENT PRODUCT ANCHOR
+===========================================================
+
+Inspect the current Product Anchor field-by-field.
+
+For every field/value report:
+
+- current value
+- authoritative source
+- provenance
+- whether it represents a real product capability
+- whether it originated from generated strategy or market inference
+- VALID / INVALID / UNCERTAIN
+- reason
+
+Specifically investigate:
+
+- Refund & Access Pipeline Failure
+- preempt refund triggers
+- refund-solving capability claims
+- any other strategy-derived capability language
+
+Remove or invalidate only unsupported Product Identity claims.
+
+Do not delete legitimate market evidence.
+
+Do not blindly remove words by keyword.
+
+Preserve actual product capabilities supported by existing Product Identity / Business Context, such as where genuinely stored:
+
+- competitor intelligence
+- audience intelligence
+- evidence-grounded strategic reasoning
+- Live Market Mirror
+- market monitoring
+- competitor-change detection
+- strategy generation
+- other verified capabilities
+
+Before writing, produce:
+
+OLD ANCHOR
+→ SOURCE
+→ VALIDATION RESULT
+→ CLEANED ANCHOR
+
+Use the normal tenant-scoped Product Anchor write path.
+
+Do not use direct SQL unless the architecture has no legitimate write service and that limitation is explicitly documented.
+
+===========================================================
+PHASE 3 — VALIDATED PRODUCT CAPABILITY CONTRACT
+===========================================================
+
+Create or strengthen an authoritative product-capability contract.
+
+Every capability available to strategic engines must have, where compatible with existing architecture:
+
+- capabilityId
+- statement
+- source/provenance
+- source reference
+- validation status
+- allowed claim scope
+
+Allowed capability sources must be genuine product/business inputs.
+
+These are not automatically authoritative capabilities:
+
+- Audience inference
+- competitor complaint
+- Positioning output
+- Differentiation output
+- Mechanism output
+- Offer output
+- Build Plan text
+- previous strategy
+- LLM enrichment proposal
+
+A derived strategic idea may be proposed as a candidate, but it cannot become Product Identity until validated against authoritative product information.
+
+===========================================================
+PHASE 4 — PREVENT FUTURE PRODUCT-IDENTITY POISONING
+===========================================================
+
+Audit every Product Anchor / DNA enrichment write path.
+
+Prevent this feedback loop permanently:
+
+competitor complaint
+→ Audience/strategy inference
+→ Mechanism phrase
+→ DNA enrichment
+→ Product Identity
+→ future strategy truth
+
+Required lifecycle:
+
+DERIVED STRATEGIC INFERENCE
+→ candidate capability
+→ compare with authoritative product/business evidence
+→ ACCEPT / REJECT / NEEDS_USER_CONFIRMATION
+→ only accepted capabilities enter Product Anchor
+
+No automatic promotion from strategic output to Product Identity.
+
+Every Product Anchor write must preserve:
+
+- writer
+- source
+- timestamp
+- campaign/account
+- reason
+- previous value
+- new value
+- validation decision
+
+Direct unaudited writes must be prevented or detected.
+
+===========================================================
+PHASE 5 — GLOBAL ENGINE DOMINANCE RULE
+===========================================================
+
+Apply the authority model to every relevant strategic engine:
+
+- Audience
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Awareness
+- Funnel
+- Persuasion
+- Channel Selection
+- Iteration
+- Retention
+- Build Plan synthesis
+
+Before each engine call, determine deterministically:
+
+- selectedPainIds
+- selectedPainRoles
+- allowedCapabilityIds
+- supporting evidence IDs
+- prohibited pain uses
+- prohibited capability claims
+
+The LLM receives those authoritative sets.
+
+The LLM must not reselect the problem from raw Business Context.
+
+The LLM must not invent a product capability.
+
+The LLM may creatively connect:
+
+eligible pain
++
+validated capability
+
+but may not change either authority.
+
+===========================================================
+PHASE 6 — CONTEXTUAL PAIN DOMINANCE
+===========================================================
+
+Do not force one global pain into all engines.
+
+Eligibility must happen before ranking.
+
+Required sequence:
+
+ALL PAINS
+→ classification
+→ product fit
+→ allowed uses
+→ engine eligibility
+→ priority/ranking
+→ selected pain IDs
+
+Engine-specific routing remains:
+
+POSITIONING
+→ core purchase / unmet outcome pains
+
+DIFFERENTIATION
+→ eligible market/category failure pains
+
+MECHANISM
+→ root causes connected to eligible core pain and validated capabilities
+
+OFFER
+→ core purchase pain
++ separately routed objections
+
+FUNNEL
+→ conversion objections/barriers
+
+PERSUASION
+→ motivations and objections as separate roles
+
+RETENTION
+→ post-purchase friction
+
+A post-purchase pain may become core only when:
+
+- its classification allows that use
+- Product Identity proves the product genuinely solves it
+- product fit is validated
+
+Do not hardcode refund-specific behavior.
+
+A genuine refund-management product must still be able to use refund pain as core strategy.
+
+===========================================================
+PHASE 7 — GROUNDING CONTRACT CORRECTION
+===========================================================
+
+Audit `buildGroundingContract`, doctrine blocks, and equivalent prompt rules.
+
+The old behavior effectively forced every core claim to reference the Product Anchor differentiating feature, allowing the anchor to create the problem framing.
+
+Replace this with separate grounding requirements:
+
+PROBLEM GROUNDING:
+Central customer problems must resolve to the engine's selected authoritative pain IDs.
+
+CAPABILITY GROUNDING:
+Product claims must resolve to validated capability IDs.
+
+SYNTHESIS GROUNDING:
+The strategic connection must explain how a validated capability addresses the selected problem.
+
+Product Anchor must not:
+
+- create/select a customer pain
+- override selectedPainIds
+- promote post-purchase friction
+- transform competitor weakness into the customer's core problem
+
+Pain Registry must not:
+
+- invent product capabilities
+- imply the product solves unsupported problems
+
+===========================================================
+PHASE 8 — JUDGE / VALIDATOR ENFORCEMENT
+===========================================================
+
+This rule must also be enforced by every relevant judge.
+
+Do not add prompt text only.
+
+For every engine judge, validator, depth gate, CEL adapter, grounding validator, and post-generation check, verify:
+
+1. PROBLEM CHECK
+
+Does every central problem claim resolve to an authorized selectedPainId?
+
+2. CAPABILITY CHECK
+
+Does every product capability claim resolve to a validated capabilityId or authoritative Product Identity field?
+
+3. CONNECTION CHECK
+
+Does the output connect the selected problem to the validated capability without changing either meaning?
+
+4. INVENTION CHECK
+
+Did the LLM introduce a new authoritative pain or unsupported capability?
+
+5. MERGING CHECK
+
+Did the LLM synthesize unrelated pains/capabilities into a fake new problem?
+
+6. REPRESENTATION CHECK
+
+Is the judge evaluating the complete actual output, including all strategically important fields?
+
+7. PERSISTENCE CHECK
+
+Is the final persisted candidate the same candidate that passed the judge?
+
+If an unauthorized problem/capability is detected:
+
+- reject
+- give precise retry feedback
+- preserve already valid fields
+- rerun within existing bounded retry policy
+
+Do not silently rewrite after validation.
+
+===========================================================
+PHASE 9 — NO PAIN/CAPABILITY MERGING
+===========================================================
+
+Generated framing is not automatically authoritative truth.
+
+Example prohibited transformation:
+
+refund complaint
++
+product has a pipeline
++
+LLM synthesis
+=
+"Refund & Access Pipeline Failure"
+
+The LLM may describe a solution, but that new phrase cannot become:
+
+- a new Pain Registry entry
+- a Product Identity capability
+- a core strategic authority
+
+unless separately validated in the correct namespace.
+
+===========================================================
+PHASE 10 — BUILD PLAN ENFORCEMENT
+===========================================================
+
+Build Plan remains a synthesis layer.
+
+It must preserve:
+
+- selected pain IDs
+- pain roles
+- validated capability IDs
+- Positioning
+- Differentiation
+- Mechanism
+- Offer
+- Funnel
+- Retention
+- exact run/root lineage
+
+It must not:
+
+- reselect problems from Business Context
+- create new capabilities
+- merge pains
+- convert Product Anchor language into a new customer problem
+- replace engine conclusions with independent strategy generation
+
+Add a final plan-level authority validation:
+
+Every core problem in the plan
+→ selected Pain Registry lineage
+
+Every product capability claim
+→ validated Product Anchor lineage
+
+Every strategic mechanism
+→ explicit connection between the two
+
+===========================================================
+PHASE 11 — TARGETED REGRESSION TESTS
+===========================================================
+
+Before a real run, add comprehensive tests.
+
+At minimum:
+
+1. Real post-purchase pain remains in the registry.
+
+2. Post-purchase pain routes to Retention.
+
+3. Post-purchase pain may inform trust/risk reversal.
+
+4. It cannot become Positioning/Mechanism core without valid product fit.
+
+5. A product genuinely designed to solve that pain may use it as core.
+
+6. Eligibility occurs before ranking.
+
+7. Product Anchor cannot select a customer pain.
+
+8. Pain Registry cannot invent a capability.
+
+9. LLM cannot select pain outside selectedPainIds.
+
+10. LLM cannot claim capability outside allowedCapabilityIds.
+
+11. LLM cannot merge pain + capability into new authoritative problem.
+
+12. Judge rejects unauthorized problem.
+
+13. Judge rejects unsupported capability.
+
+14. Judge accepts valid pain-capability connection.
+
+15. Retry receives exact authority violation.
+
+16. Retry preserves valid pain IDs/capability IDs.
+
+17. Persisted output equals judged output.
+
+18. Strategy-derived inference cannot auto-write Product Anchor.
+
+19. Product Anchor writes require provenance/audit.
+
+20. Historical poisoned anchor is cleaned without deleting valid capabilities.
+
+21. Build Plan preserves authority namespaces.
+
+22. No refund-centered language appears as core unless supported by routed pain + product fit.
+
+23. Task 154 exact-run lineage remains green.
+
+24. Task 158 timeout architecture remains green.
+
+25. Task 163 Pain Registry/routing remains green.
+
+26. Offer/Positioning judge representation tests remain green.
+
+27. No hardcoded MarketMindAI logic.
+
+28. No fake evidence.
+
+Run focused and adjacent regression suites.
+
+Confirm:
+
+- zero net-new TypeScript errors
+- no new test regressions
+- backend boots cleanly
+
+===========================================================
+PHASE 12 — TARGETED REPLAY BEFORE FULL RUN
+===========================================================
+
+Before spending a full campaign run, use the latest persisted run inputs for a non-destructive targeted replay.
+
+Replay the minimum affected chain:
+
+Clean Product Anchor
+→ Audience/Positioning authority validation where needed
+→ Positioning
+→ Differentiation
+→ Mechanism
+→ Offer
+→ Build Plan verification mode
+
+Verify:
+
+- selected pain remains strategic-direction pain
+- Product Anchor supplies only real capabilities
+- refund evidence remains preserved
+- refund may appear only in an allowed supporting role
+- no Refund & Access Pipeline Failure core framing
+- no unauthorized new pain
+- no unsupported capability
+- judge violations = 0
+- unresolved pain/capability IDs = 0
+
+If targeted replay fails due to a proven bug:
+
+fix it
+add regression test
+repeat targeted replay
+
+Do not launch the full run until targeted replay passes.
+
+===========================================================
+PHASE 13 — ONE FRESH FULL REAL RUN
+===========================================================
+
+After all tests and targeted replay pass, run ONE explicit full real campaign:
+
+campaign_1773576062201_6t0oxi
+
+No automatic restart-triggered execution.
+No synthetic evidence.
+No manual snapshots.
+No manual plan insertion.
+No old-run fallback.
+No forced PASS.
+
+Capture:
+
+- jobId
+- start/end time
+- source revision
+- Product Anchor version/hash
+- capability registry version/hash
+- Pain Registry version/hash
+
+Run all 15 engines.
+
+===========================================================
+PHASE 14 — FULL-RUN AUTHORITY AUDIT
+===========================================================
+
+For every engine report:
+
+- selectedPainIds
+- selectedPainRoles
+- allowedCapabilityIds
+- central problem claims
+- product capability claims
+- judge result
+- authority violations
+- snapshot ID/job lineage
+
+Required:
+
+- 15/15 engine execution
+- unresolved pain IDs = 0
+- unresolved capability IDs = 0
+- unauthorized problem claims = 0
+- unsupported capability claims = 0
+- pain/capability merge violations = 0
+
+Specifically search current-run outputs for:
+
+- Refund & Access Pipeline Failure
+- preempt refund triggers
+- refund-centered Positioning
+- refund-centered Mechanism
+- refund-centered Offer
+- refund-centered plan thesis
+
+Classify every refund mention as:
+
+- customer evidence
+- objection/risk context
+- retention context
+- competitor weakness
+- unauthorized core strategy
+
+Required unauthorized core strategy count:
+
+0
+
+===========================================================
+PHASE 15 — SYSTEM CONTROL + BUILD PLAN
+===========================================================
+
+Allow System Control to judge naturally.
+
+Do not weaken gates.
+
+If System Control permits:
+
+generate and persist the full plan.
+
+Verify:
+
+- not degraded_ai_failed
+- exact sourceJobId
+- exact Strategy Root
+- exact Pain Registry
+- exact Product Anchor/capability lineage
+- all pain/capability roles preserved
+- full strategy JSON
+- no stale fallback
+
+If System Control blocks:
+
+report the exact reason and determine whether it is a genuine strategic issue or implementation defect.
+
+Fix only proven implementation defects.
+
+===========================================================
+PHASE 16 — PREVIEW VERIFICATION
+===========================================================
+
+Open the real Preview / Roadmap Document.
+
+Verify through UI and API:
+
+- exact newest run
+- exact newest plan
+- isLatest=true
+- isStale=false
+- correct plan ID
+- no old plan mixed in
+- current Audience
+- current Positioning
+- current Differentiation
+- current Mechanism
+- current Offer
+- current Funnel
+- current Retention
+- full Build Plan
+
+Visually inspect the strategy.
+
+Confirm:
+
+- core problem is the authoritative selected purchase pain
+- product capability is real and specific
+- strategy connects them correctly
+- refund is not the core thesis unless legitimately authorized
+- no poisoned anchor language appears
+
+Capture screenshot evidence if possible.
+
+===========================================================
+PHASE 17 — FIX LOOP
+===========================================================
+
+If any actual software defect appears during tests or the full run:
+
+1. prove the exact first broken point
+2. fix only that point
+3. add a regression test
+4. rerun affected tests
+5. replay affected chain
+6. continue the same full verification
+
+Do not open speculative architecture projects.
+
+Do not stop at the first in-scope bug.
+
+===========================================================
+FINAL REPORT
+===========================================================
+
+Keep the report operational.
+
+AUTO-RUN SAFETY
+- root cause
+- fix
+- unintended runs after restart
+
+PRODUCT ANCHOR
+- old poisoned fields
+- cleaned fields
+- preserved valid capabilities
+- write/audit protections
+
+AUTHORITY MODEL
+- Pain Registry authority
+- Product capability authority
+- Engine synthesis authority
+- Judge enforcement
+
+TESTS
+- pass count
+- regression status
+- TypeScript baseline vs final
+
+TARGETED REPLAY
+- selected core pain
+- capabilities used
+- Positioning
+- Mechanism
+- Offer
+- authority violations
+
+FULL RUN
+- jobId
+- runtime
+- 15-engine result
+
+REFUND AUDIT
+- total current-run mentions
+- allowed/supporting mentions
+- unauthorized core mentions
+
+SYSTEM CONTROL
+- PASS / DOWNGRADE / BLOCK
+- exact reason
+
+BUILD PLAN
+- planId
+- planSource
+- full/degraded
+- problem/capability lineage
+
+PREVIEW
+- exact current run shown
+- exact current plan shown
+- visually verified
+- refund-centered strategy removed from core
+
+FINAL ANSWERS
+
+A. Is Pain Registry now the only authority for problem selection?
+
+B. Is Product Anchor now limited to verified capability truth?
+
+C. Can Product Anchor create or select a customer pain?
+
+D. Can engines invent unauthorized pains or capabilities?
+
+E. Do judges enforce the same authority boundaries?
+
+F. Was the poisoned Product Anchor cleaned safely?
+
+G. Is future self-poisoning prevented?
+
+H. Did all 15 engines complete?
+
+I. Is the final plan centered on the correct eligible pain?
+
+J. Is refund retained only in valid supporting roles?
+
+K. Does Preview display exactly the corrected newest plan?
+
+L. Is any proven technical blocker left?
+
+STOP BEFORE APPROVAL.
+
+Do not Approve.
+Do not Activate.
+Do not start Performance Loop.
+Do not create follow-up tasks.
