@@ -127,7 +127,7 @@ interface BuildThePlanProps {
 
 export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onOpenProfile }: BuildThePlanProps) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const { metaConnection } = useApp();
   const { refreshCampaigns, refreshSelection, selectedCampaign } = useCampaign();

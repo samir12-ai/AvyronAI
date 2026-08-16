@@ -1,5 +1,6 @@
 import type { CompetitorInput, CompetitorSignalResult, CompetitorLifecycle, SignalData, PostData, CommentData, EngagementQuality, SampleBiasResult, SemanticSignal, SemanticSignalCategory, SignalCluster } from "./types";
 import { MI_THRESHOLDS, MI_COST_LIMITS, MI_AUTHORITY_WEIGHT, MI_SAMPLE_BIAS, MI_LIFECYCLE } from "./constants";
+import { sanitizeCaption } from "../shared/text-sanitizer";
 
 function clamp(v: number, min = -1, max = 1): number {
   return Math.max(min, Math.min(max, v));
@@ -371,7 +372,6 @@ const SEMANTIC_PATTERNS: Record<SemanticSignalCategory, RegExp[]> = {
 };
 
 export function extractSemanticSignals(posts: PostData[]): SemanticSignal[] {
-  const { sanitizeCaption } = require("../shared/text-sanitizer");
   const signals: SemanticSignal[] = [];
   const seenSnippets = new Set<string>();
   let sanitizedCount = 0;
@@ -476,10 +476,15 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
   const postCommentCounts = posts.reduce((s, p) => s + (p.comments || 0), 0);
 
   const missingFields: string[] = [];
-  if (posts.length === 0) missingFields.push("posts (none available)");
+  if (posts.length === 0) {
+    missingFields.push("posts (none available)");
+  } else if (posts.length < MI_THRESHOLDS.MIN_POSTS_PER_COMPETITOR) {
+    missingFields.push("posts (sparse data)");
+  }
   if (!competitor.contentTypeRatio) missingFields.push("contentTypeRatio");
   if (!competitor.ctaPatterns) missingFields.push("ctaPatterns");
   if (!competitor.profileLink) missingFields.push("profileLink (bio/CTA detection)");
+  if (!competitor.pricingHints) missingFields.push("pricingHints");
 
   const hasCommentSignal = comments.length > 0 || postCommentCounts > 0;
 
@@ -551,6 +556,8 @@ export function aggregateMissingFlags(signalResults: CompetitorSignalResult[]): 
   }
   if (signalResults.length === 0) {
     flags.add(`No competitors available for analysis`);
+  } else if (signalResults.length < MI_THRESHOLDS.MIN_COMPETITORS) {
+    flags.add(`Insufficient competitors (have ${signalResults.length}, need ${MI_THRESHOLDS.MIN_COMPETITORS})`);
   }
   return Array.from(flags);
 }

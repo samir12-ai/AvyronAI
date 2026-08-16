@@ -13,6 +13,8 @@ export function registerFeatureFlagRoutes(app: Express) {
   app.get("/api/feature-flags", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       const flags = await featureFlagService.getAllFlags(accountId);
       res.json({ flags });
     } catch (error: any) {
@@ -28,6 +30,8 @@ export function registerFeatureFlagRoutes(app: Express) {
       }
       const { enabled, userId, reason } = req.body;
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (typeof enabled !== "boolean") {
         return res.status(400).json({ error: "enabled must be a boolean" });
       }
@@ -42,6 +46,8 @@ export function registerFeatureFlagRoutes(app: Express) {
   app.get("/api/feature-flags/audit", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       const limit = parseInt(req.query.limit as string) || 50;
       const history = await featureFlagService.getFlagAuditHistory(accountId, limit);
       res.json({ history });
@@ -53,6 +59,8 @@ export function registerFeatureFlagRoutes(app: Express) {
   app.post("/api/feature-flags/global-kill", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       const { userId, reason } = req.body;
       await featureFlagService.setFlag("lead_engine_global_off", true, accountId, userId, reason || "Emergency global kill switch activated");
       res.json({ success: true, message: "Lead engine globally disabled" });
@@ -64,6 +72,8 @@ export function registerFeatureFlagRoutes(app: Express) {
   app.post("/api/feature-flags/global-resume", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       const { userId, reason } = req.body;
       await featureFlagService.setFlag("lead_engine_global_off", false, accountId, userId, reason || "Global kill switch deactivated");
       res.json({ success: true, message: "Lead engine globally re-enabled" });

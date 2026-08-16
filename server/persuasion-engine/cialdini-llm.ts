@@ -1,4 +1,6 @@
 import { aiChat } from "../ai-client";
+import { generateWithRepair, LLMReliabilityError } from "../shared/llm-reliability/reliability-runner";
+import type { JudgeResult } from "../shared/llm-reliability/types";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import { checkGroundingContract } from "../shared/grounding-contract";
 import type { CialdiniReasoning, CialdiniPrinciple, TrustTransferDesign } from "./types";

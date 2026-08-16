@@ -11,11 +11,13 @@ export function registerLeadMagnetRoutes(app: Express) {
   app.get("/api/lead-magnets", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_magnet_enabled", accountId))) {
         return res.json({ magnets: [], disabled: true });
       }
       const result = await db.select().from(leadMagnets)
-        .where(eq(leadMagnets.accountId, accountId))
+        .where(and(eq(leadMagnets.accountId, accountId), eq(leadMagnets.campaignId, campaignId)))
         .orderBy(desc(leadMagnets.createdAt));
       res.json({ magnets: result });
     } catch (error: any) {
@@ -26,6 +28,8 @@ export function registerLeadMagnetRoutes(app: Express) {
   app.post("/api/lead-magnets/generate", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_magnet_enabled", accountId))) {
         return res.status(403).json({ error: "Lead Magnet Generator is not enabled" });
       }

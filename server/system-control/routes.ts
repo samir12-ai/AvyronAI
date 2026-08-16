@@ -74,7 +74,7 @@ export function registerSystemControlRoutes(app: Express) {
   app.get("/api/system-control/verdicts/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId as string;
       try { await assertCampaignBelongsTo(accountId, campaignId); }
       catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
       const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
@@ -102,7 +102,7 @@ export function registerSystemControlRoutes(app: Express) {
   app.get("/api/system-control/latest/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId as string;
       try { await assertCampaignBelongsTo(accountId, campaignId); }
       catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
@@ -129,7 +129,7 @@ export function registerSystemControlRoutes(app: Express) {
   app.get("/api/system-control/stats/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId as string;
       try { await assertCampaignBelongsTo(accountId, campaignId); }
       catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
@@ -182,7 +182,7 @@ export function registerSystemControlRoutes(app: Express) {
   app.get("/api/system-control/recovery/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId as string;
       try { await assertCampaignBelongsTo(accountId, campaignId); }
       catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
@@ -237,7 +237,7 @@ export function registerSystemControlRoutes(app: Express) {
   app.get("/api/system-control/run-truthfulness/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId as string;
       try { await assertCampaignBelongsTo(accountId, campaignId); }
       catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
 
@@ -246,7 +246,7 @@ export function registerSystemControlRoutes(app: Express) {
       // it does NOT throw. Therefore we deliberately do NOT catch here:
       // a thrown error means a real DB/runtime failure that must surface
       // as 500, not be silently downgraded to a green-ish "no_run" state.
-      const resolved: any = await resolveRunId(campaignId, accountId, null);
+      const resolved: any = await resolveRunId(campaignId as string, accountId, null);
 
       // Latest stored verdict for the campaign (may belong to a different run
       // than `resolved.runId` if the most recent run failed before producing

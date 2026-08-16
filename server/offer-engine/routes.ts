@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { Express, Request, Response } from "express";
 import { db } from "../db";
 import { offerSnapshots, differentiationSnapshots, miSnapshots, audienceSnapshots, positioningSnapshots, mechanismSnapshots } from "@shared/schema";

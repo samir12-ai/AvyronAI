@@ -12,12 +12,14 @@ export function registerCtaEngineRoutes(app: Express) {
   app.post("/api/cta-variants/generate", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId);
       if (!check.enabled) {
         return res.status(403).json({ error: "CTA Engine is not enabled" });
       }
 
-      const { postId, campaignId, contentContext, brandTone, count } = req.body;
+      const { postId, contentContext, brandTone, count } = req.body;
       // Doctrine W5: campaignId is an optional FK tag; if supplied, validate.
       if (campaignId) {
         try { await assertCampaignBelongsTo(accountId, campaignId); }
@@ -81,6 +83,8 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
   app.get("/api/cta-variants", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("cta_engine_enabled", accountId))) {
         return res.json({ variants: [], disabled: true });
       }
@@ -89,11 +93,11 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
       let result;
       if (postId) {
         result = await db.select().from(ctaVariants)
-          .where(and(eq(ctaVariants.accountId, accountId), eq(ctaVariants.postId, postId)))
+          .where(and(and(eq(ctaVariants.accountId, accountId), eq(ctaVariants.campaignId, campaignId)), eq(ctaVariants.postId, postId)))
           .orderBy(desc(ctaVariants.conversionRate));
       } else {
         result = await db.select().from(ctaVariants)
-          .where(eq(ctaVariants.accountId, accountId))
+          .where(and(eq(ctaVariants.accountId, accountId), eq(ctaVariants.campaignId, campaignId)))
           .orderBy(desc(ctaVariants.createdAt))
           .limit(100);
       }
@@ -179,6 +183,8 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
   app.post("/api/cta-variants/auto-promote", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       const check = await featureFlagService.checkWithDependencies("cta_engine_enabled", accountId);
       if (!check.enabled) {
         return res.status(403).json({ error: "CTA Engine is not enabled" });
@@ -195,7 +201,7 @@ Return a JSON array of objects with fields: "text" (the CTA text), "type" (link/
 
       const variants = await db.select().from(ctaVariants)
         .where(and(
-          eq(ctaVariants.accountId, accountId),
+          and(eq(ctaVariants.accountId, accountId), eq(ctaVariants.campaignId, campaignId)),
           ...(postId ? [eq(ctaVariants.postId, postId)] : []),
           eq(ctaVariants.isActive, true),
         ));

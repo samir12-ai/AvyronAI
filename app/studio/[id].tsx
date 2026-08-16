@@ -57,7 +57,7 @@ function StudioItemDetailScreenFull() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
 
@@ -447,3 +447,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
 });
+

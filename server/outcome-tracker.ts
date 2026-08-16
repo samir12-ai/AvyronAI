@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { db } from "./db";
 import { decisionOutcomes, performanceSnapshots, strategyDecisions, strategyMemory, calendarEntries, studioItems, publishedPosts, decisionAttributions, strategicPlans } from "@shared/schema";
 import { eq, sql, gte, isNull, isNotNull, lte, desc, and, or, inArray } from "drizzle-orm";

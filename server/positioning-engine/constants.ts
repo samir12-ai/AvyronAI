@@ -105,6 +105,7 @@ export interface Territory {
   proofRequirement?: string;
   provenance?: "system_default" | "mi_traced" | "orphaned" | "partial_traced" | "fully_traced";
   degraded?: boolean;
+  laneRelevance?: Record<string, string>;
   _systemMapped?: boolean;
   semanticCollision?: {
     semanticCollisionScore: number;

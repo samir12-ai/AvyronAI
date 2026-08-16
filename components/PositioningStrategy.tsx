@@ -98,7 +98,7 @@ interface PositioningSnapshot {
 
 export default function PositioningStrategy({ isActive }: { isActive?: boolean }) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const { selectedCampaignId } = useCampaign();
   // Phase 8 defense-in-depth: this component is mounted by the customer-pivot

@@ -1,8 +1,9 @@
 import type { EngineId, EngineStepResult } from "../orchestrator/priority-matrix";
 import type { IntegrityReport } from "../system-integrity/types";
-import type { ComplianceResult } from "../causal-enforcement-layer/engine";
+import type { ComplianceResult } from "../causal-enforcement-layer/types";
 import type { SignalComposition } from "../shared/signal-lineage";
 import type { SharedStrategicContext } from "../orchestrator/shared-strategic-context";
+import type { Contradiction } from "../shared/contradictions";
 
 export type SystemVerdict = "PASS" | "DOWNGRADE" | "REPAIR" | "BLOCK";
 
@@ -37,6 +38,7 @@ export type BlockCode =
   | "UNRESOLVED_CRITICAL_PROBLEMS"
   | "POSITIONING_HARD_GATE"
   | "BUDGET_OVERRIDE_ZERO_CONFIDENCE"
+  | "LOW_SIGNAL_TRUST"
   // Phase R reliability blocks
   | "PIPELINE_INCOMPLETE"           // one or more required checks could not be evaluated (NOT_REACHED/TIMEOUT/STALE/UNKNOWN)
   | "STALE_SNAPSHOT_EVIDENCE"       // a check was forced to use a snapshot from a prior run

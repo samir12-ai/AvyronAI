@@ -482,7 +482,7 @@ function CELCompliancePanel({ campaignId, isDark }: { campaignId: string; isDark
 
 export default function AELDebugPanel() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const { activeCampaign } = useCampaign();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);

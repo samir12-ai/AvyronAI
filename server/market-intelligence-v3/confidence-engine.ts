@@ -92,7 +92,10 @@ export function getConfidenceLevel(confidence: number): ConfidenceLevel {
   return "INSUFFICIENT";
 }
 
-export function evaluateSignalStabilityGuard(signalResults: CompetitorSignalResult[], contentPrimaryMode: boolean = false): SignalStabilityGuard {
+export function evaluateSignalStabilityGuard(
+  signalResults: CompetitorSignalResult[],
+  contentPrimaryMode: boolean = false
+): SignalStabilityGuard {
   const avgCoverage = mean(signalResults.map(r => r.signalCoverageScore));
   const avgReliability = mean(signalResults.map(r => r.sourceReliabilityScore));
   const totalSampleSize = signalResults.reduce((s, r) => s + r.sampleSize, 0);
@@ -102,24 +105,66 @@ export function evaluateSignalStabilityGuard(signalResults: CompetitorSignalResu
   const allMissing = signalResults.flatMap(r => r.missingFields);
 
   const reasons: string[] = [];
-  const decision: GuardDecision = "PROCEED";
+  let decision: GuardDecision = "PROCEED";
 
-  if (avgCoverage < MI_CONFIDENCE.BLOCK_COVERAGE) {
-    reasons.push(`Signal coverage low: ${avgCoverage.toFixed(2)} (advisory only)`);
+  const sampleSizes = signalResults.map(r => r.sampleSize);
+  const activeCompetitorsWithData = signalResults.filter(r => r.sampleSize > 0).length;
+
+  // BLOCK CONDITIONS (Extreme low data or absolute lack of cross-competitor representation)
+  if (avgCoverage < 0.35) {
+    decision = "BLOCK";
+    reasons.push(`BLOCK: Extremely low average signal coverage (${(avgCoverage * 100).toFixed(0)}% < 35%).`);
   }
 
-  if (avgReliability < MI_CONFIDENCE.BLOCK_RELIABILITY) {
-    reasons.push(`Source reliability low: ${avgReliability.toFixed(2)} (advisory only)`);
+  if (totalSampleSize < 12) {
+    decision = "BLOCK";
+    reasons.push(`BLOCK: Total post sample size (${totalSampleSize} < 12) is insufficient for cross-source verification.`);
   }
 
-  const effectiveDominantThreshold = contentPrimaryMode ? 0.75 : MI_CONFIDENCE.DOWNGRADE_DOMINANT_SOURCE;
-  if (maxDominantRatio > effectiveDominantThreshold) {
-    reasons.push(`Dominant source ratio high: ${maxDominantRatio.toFixed(2)} > ${effectiveDominantThreshold}${contentPrimaryMode ? " (content-primary mode)" : ""} (advisory only)`);
+  if (activeCompetitorsWithData < 2 && signalResults.length >= 2) {
+    decision = "BLOCK";
+    reasons.push(`BLOCK: Only ${activeCompetitorsWithData} competitor has data. Cross-source representation is absent.`);
   }
 
-  const minSample = MI_THRESHOLDS.MIN_POSTS_API_CEILING * signalResults.length;
-  if (totalSampleSize < minSample) {
-    reasons.push(`Sample size note: ${totalSampleSize} < ${minSample} (using available data)`);
+  // Evaluate extreme concentration skew
+  if (decision !== "BLOCK" && totalSampleSize > 0) {
+    const sortedSizes = [...sampleSizes].sort((a, b) => b - a);
+    const maxSample = sortedSizes[0] || 0;
+    const concentrationRatio = maxSample / totalSampleSize;
+
+    if (concentrationRatio > 0.85) {
+      const othersMax = sortedSizes[1] || 0;
+      if (othersMax < 3) {
+        decision = "BLOCK";
+        reasons.push(`BLOCK: Extreme sample concentration (${(concentrationRatio * 100).toFixed(0)}% of evidence in a single competitor, other competitors have < 3 posts).`);
+      }
+    }
+  }
+
+  // DOWNGRADE CONDITIONS (Low confidence, or concentration that leaves other sources under-represented)
+  if (decision === "PROCEED") {
+    if (avgCoverage < 0.55) {
+      decision = "DOWNGRADE";
+      reasons.push(`DOWNGRADE: Low average signal coverage (${(avgCoverage * 100).toFixed(0)}% < 55%).`);
+    }
+
+    const sortedSizes = [...sampleSizes].sort((a, b) => b - a);
+    const maxSample = sortedSizes[0] || 0;
+    const concentrationRatio = totalSampleSize > 0 ? maxSample / totalSampleSize : 0;
+    
+    if (concentrationRatio > 0.75) {
+      const others = sortedSizes.slice(1);
+      const poorlyRepresentedCount = others.filter(size => size < 6).length;
+      if (poorlyRepresentedCount > 0 && others.length > 0) {
+        decision = "DOWNGRADE";
+        reasons.push(`DOWNGRADE: High competitor source concentration (${(concentrationRatio * 100).toFixed(0)}%) leaving ${poorlyRepresentedCount} competitor(s) with < 6 posts.`);
+      }
+    }
+
+    if (avgReliability < 0.50) {
+      decision = "DOWNGRADE";
+      reasons.push(`DOWNGRADE: Low average source reliability (${avgReliability.toFixed(2)} < 0.50).`);
+    }
   }
 
   return {
@@ -140,6 +185,7 @@ export function computeConfidence(
   dataAgeDays: number,
   realDataRatio: number = 1.0,
   contentPrimaryMode: boolean = false,
+  freshnessState: "FRESH" | "PARTIALLY_FRESH" | "STALE" | "INSUFFICIENT_DATA" = "STALE"
 ): ConfidenceResult {
   const factors = computeConfidenceFactors(signalResults, dataAgeDays);
 
@@ -164,9 +210,10 @@ export function computeConfidence(
   const guardReasons = [...guard.reasons];
 
   if (dataAgeDays > MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS) {
-    guardReasons.push(`DATA_STALE_ADVISORY: data older than ${MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS} days (age: ${dataAgeDays}d) — proceeding with available data`);
+    guardDecision = "BLOCK";
+    guardReasons.push(`DATA_STALE_HARD_GATE: data older than ${MI_CONFIDENCE.FRESHNESS_HARD_GATE_DAYS} days (age: ${dataAgeDays}d)`);
   }
-  if (overall < MI_CONFIDENCE.BLOCK_THRESHOLD) {
+  if (overall < MI_CONFIDENCE.BLOCK_THRESHOLD && guardDecision !== "BLOCK") {
     guardReasons.push(`Low confidence advisory: ${overall} < ${MI_CONFIDENCE.BLOCK_THRESHOLD} — proceeding with available data`);
   }
 
@@ -176,5 +223,6 @@ export function computeConfidence(
     factors,
     guardDecision,
     guardReasons,
+    freshnessState
   };
 }

@@ -147,6 +147,7 @@ export interface ConfidenceResult {
   factors: ConfidenceFactors;
   guardDecision: GuardDecision;
   guardReasons: string[];
+  freshnessState?: "FRESH" | "PARTIALLY_FRESH" | "STALE" | "INSUFFICIENT_DATA";
 }
 
 export interface SignalStabilityGuard {

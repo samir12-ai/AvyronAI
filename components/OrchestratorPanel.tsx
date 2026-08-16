@@ -360,7 +360,7 @@ function ElapsedTimer({ startedAt, running }: { startedAt: number; running: bool
 
 export default function OrchestratorPanel() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const { selectedCampaignId } = useCampaign();
 
   const [job, setJob] = useState<OrchestratorJob | null>(null);

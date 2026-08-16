@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { WEB_TOP_INSET } from '@/lib/insets';
 import AvyronLogo from '@/components/AvyronLogo';
+import { GlobalHeader } from '@/components/GlobalHeader';
 import Colors from '@/constants/colors';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -217,7 +218,7 @@ function DashboardActive({ campaignId, isDark, narrativeRefreshKey }: {
 
 export default function DashboardScreen() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { metaConnection } = useApp();
@@ -328,7 +329,7 @@ export default function DashboardScreen() {
       setMetrics(data.metrics);
       setDataSource(data.dataSource || 'NONE');
       setPlanMetrics(data.planMetrics || null);
-      setMetricsState(data.dataSource === 'PLAN' ? 'no_data' : (data.hasData ? 'success' : 'no_data'));
+      setMetricsState('no_data');
       setMetricsError(null);
     } catch {
       if (activeCampaignRef.current !== requestCampaign) return;
@@ -473,7 +474,7 @@ export default function DashboardScreen() {
 
   const confColor = confidenceStatus === 'Stable' ? P.mint : confidenceStatus === 'Caution' ? P.orange : P.coral;
 
-  const bg = isDark ? P.darkBg : P.lightBg;
+  const bg = '#0F0F13';
   const textPrimary = isDark ? P.textDarkPrimary : P.textLightPrimary;
   const textSecondary = isDark ? P.textDarkSec : P.textLightSec;
   const textMuted = isDark ? P.textDarkMuted : P.textLightMuted;
@@ -604,64 +605,30 @@ export default function DashboardScreen() {
       );
     }
 
-    const m = metrics!;
-    return (
-      <LinearGradient
-        colors={isDark ? ['#0A2F1F', '#0C1A14', '#0F1419'] : ['#E8F5E9', '#F1F8E9', '#FFFFFF']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[s.heroCard, { borderColor: isDark ? P.mint + '18' : P.mint + '20' }]}
-      >
-        <View style={s.heroTop}>
-          <View>
-            <Text style={[s.heroLabel, { color: isDark ? P.mint : P.mintDark }]}>TOTAL REVENUE</Text>
-            <Text style={[s.heroValue, { color: textPrimary }]}>{formatCurrency(m.revenue)}</Text>
-          </View>
-          <View style={[s.heroGrowth, { backgroundColor: P.mint + '15' }]}>
-            <Ionicons name="arrow-up" size={14} color={P.mint} />
-            <Text style={[s.heroGrowthText, { color: P.mint }]}>
-              {m.roas > 0 ? `${m.roas.toFixed(1)}x` : '0x'}
-            </Text>
-            <Text style={[s.heroGrowthLabel, { color: textMuted }]}>ROAS</Text>
-          </View>
-        </View>
-        <View style={[s.heroDivider, { backgroundColor: isDark ? P.mint + '12' : P.mint + '15' }]} />
-        <View style={s.heroStats}>
-          <View style={s.heroStat}>
-            <View style={[s.heroStatIcon, { backgroundColor: P.blue + '15' }]}>
-              <Ionicons name="wallet-outline" size={14} color={P.blue} />
-            </View>
-            <Text style={[s.heroStatValue, { color: textPrimary }]}>{formatCurrency(m.spent)}</Text>
-            <Text style={[s.heroStatLabel, { color: textMuted }]}>Spent</Text>
-          </View>
-          <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
-          <View style={s.heroStat}>
-            <View style={[s.heroStatIcon, { backgroundColor: P.mint + '15' }]}>
-              <Ionicons name="flash-outline" size={14} color={P.mint} />
-            </View>
-            <Text style={[s.heroStatValue, { color: textPrimary }]}>{formatNumber(m.results)}</Text>
-            <Text style={[s.heroStatLabel, { color: textMuted }]}>Results</Text>
-          </View>
-          <View style={[s.heroStatDivider, { backgroundColor: isDark ? '#1A2530' : '#E5EBE7' }]} />
-          <View style={s.heroStat}>
-            <View style={[s.heroStatIcon, { backgroundColor: P.orange + '15' }]}>
-              <Ionicons name="pricetag-outline" size={14} color={P.orange} />
-            </View>
-            <Text style={[s.heroStatValue, { color: m.cpa < 15 ? P.mint : P.orange }]}>{formatCurrency(m.cpa)}</Text>
-            <Text style={[s.heroStatLabel, { color: textMuted }]}>CPA</Text>
-          </View>
-        </View>
-      </LinearGradient>
-    );
+    return null;
   };
 
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
+      <GlobalHeader 
+        title="AI INTELLIGENCE" 
+        rightElement={
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <ProfileButton />
+            <Pressable 
+              onPress={() => router.push('/(tabs)/ai-management')}
+              style={[s.headerBtn, { backgroundColor: isDark ? P.darkSurface : P.lightSurface }]}
+            >
+              <Feather name="sliders" size={18} color={textSecondary} />
+            </Pressable>
+          </View>
+        }
+      />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           s.scrollContent,
-          { paddingTop: Platform.OS === 'web' ? WEB_TOP_INSET + 8 : insets.top + 8 },
+          { paddingTop: Platform.OS === 'web' ? WEB_TOP_INSET + 8 : 8 },
         ]}
         refreshControl={
           <RefreshControl 
@@ -671,35 +638,6 @@ export default function DashboardScreen() {
           />
         }
       >
-        {dataMode === 'MANUAL' && (
-          <View style={[s.manualBanner, { backgroundColor: P.mint + '18', borderColor: P.mint + '30' }]}>
-            <Ionicons name="create-outline" size={16} color={P.mint} />
-            <Text style={[s.manualBannerText, { color: P.mint }]}>Manual Data — Enter metrics in Settings</Text>
-          </View>
-        )}
-
-        <RNAnimated.View style={{ opacity: headerFade }}>
-          <View style={s.headerRow}>
-            <View style={s.headerLeft}>
-              <View style={s.logoImage}>
-                <AvyronLogo size={26} />
-              </View>
-              <View>
-                <Text style={[s.brandName, { color: textPrimary }]}>Avyron</Text>
-                <Text style={[s.brandSub, { color: P.mint }]}>AI INTELLIGENCE</Text>
-              </View>
-            </View>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <ProfileButton />
-              <Pressable 
-                onPress={() => router.push('/(tabs)/ai-management')}
-                style={[s.headerBtn, { backgroundColor: isDark ? P.darkSurface : P.lightSurface }]}
-              >
-                <Feather name="sliders" size={18} color={textSecondary} />
-              </Pressable>
-            </View>
-          </View>
-        </RNAnimated.View>
 
         {subscriptionStatus === 'trial' && trialDaysRemaining > 0 && (
           <View style={[s.trialBanner, { backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(139,92,246,0.06)', borderColor: isDark ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.12)' }]}>
@@ -754,55 +692,7 @@ export default function DashboardScreen() {
           <ActivityTimeline campaignId={selectedCampaignId} isDark={isDark} />
         ) : null}
 
-        {metricsState === 'success' && metrics ? (
-          <>
-            <Pressable 
-              onPress={() => { setShowInsights(!showInsights); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} 
-              style={[s.insightsToggle, { 
-                backgroundColor: cardBg, 
-                borderColor: showInsights ? P.mint + '30' : cardBorder,
-              }]}
-            >
-              <View style={s.insightsToggleLeft}>
-                <View style={[s.insightsIcon, { backgroundColor: isDark ? '#0F2518' : '#E8F5E9' }]}>
-                  <Feather name="bar-chart-2" size={14} color={P.mint} />
-                </View>
-                <Text style={[s.insightsToggleText, { color: textSecondary }]}>Advanced Insights</Text>
-              </View>
-              <Ionicons 
-                name={showInsights ? 'chevron-up' : 'chevron-down'} 
-                size={16} 
-                color={textMuted} 
-              />
-            </Pressable>
 
-            {showInsights && (
-              <View style={s.insightsSection}>
-                <View style={s.metricsGrid}>
-                  <View style={s.metricsRow}>
-                    <MetricCard
-                      title="Total Reach"
-                      value={formatNumber(metrics.reach)}
-                      change={0}
-                      icon="eye-outline"
-                      isGradient
-                      integrityVerdict={metricVerdict}
-                      provenance={metricProvenance}
-                    />
-                    <MetricCard
-                      title="Engagement"
-                      value={formatNumber(metrics.engagement)}
-                      change={0}
-                      icon="heart-outline"
-                      integrityVerdict={metricVerdict}
-                      provenance={metricProvenance}
-                    />
-                  </View>
-                </View>
-              </View>
-            )}
-          </>
-        ) : null}
 
 
         <View style={{ height: Platform.OS === 'web' ? 34 + 60 : 100 }} />

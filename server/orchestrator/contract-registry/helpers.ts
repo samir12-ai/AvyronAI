@@ -14,6 +14,7 @@
  * rule and the ts-morph CI verifier (plan §6).
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { ZodSchema } from "zod";
 import type { EngineId, EngineStepResult } from "../priority-matrix";
 import { ENGINE_CONTRACT_REGISTRY } from "./registry";
@@ -225,14 +226,17 @@ export function validateContractCompleteness(
 // Phase 6 / Task #69 step 9 — legacyPath hit counter. Per-(engine,field,legacyIndex)
 // counter so the operator surface can prove a legacy fallback is dead (counter==0
 // over a 7-day shadow) before D4 sunsets it. Map key: `${engineId}.${fieldId}.${legacyIndex}`.
-const _legacyPathHits = new Map<string, number>();
+export const legacyPathStorage = new AsyncLocalStorage<Map<string, number>>();
 export function _getLegacyPathHitCounters(): Array<{ key: string; hits: number }> {
-  return Array.from(_legacyPathHits.entries())
+  const store = legacyPathStorage.getStore();
+  if (!store) return [];
+  return Array.from(store.entries())
     .map(([key, hits]) => ({ key, hits }))
     .sort((a, b) => b.hits - a.hits);
 }
 export function _resetLegacyPathHitCountersForTest(): void {
-  _legacyPathHits.clear();
+  const store = legacyPathStorage.getStore();
+  if (store) store.clear();
 }
 
 /**
@@ -252,9 +256,10 @@ function resolveFromAllPaths(output: unknown, field: ContractField, engineId?: s
     if (v !== undefined) {
       const tag = engineId ? `${engineId}.${field.id}` : field.id;
       const counterKey = `${tag}.${i}`;
-      _legacyPathHits.set(counterKey, (_legacyPathHits.get(counterKey) ?? 0) + 1);
+      const store = legacyPathStorage.getStore();
+      if (store) store.set(counterKey, (store.get(counterKey) ?? 0) + 1);
       console.warn(
-        `[ContractAudit] LEGACY_HIT | ${tag} | canonicalPath=${JSON.stringify(field.path)} | legacyPathHit=${JSON.stringify(lp)} | legacyIndex=${i} | hits=${_legacyPathHits.get(counterKey)}`
+        `[ContractAudit] LEGACY_HIT | ${tag} | canonicalPath=${JSON.stringify(field.path)} | legacyPathHit=${JSON.stringify(lp)} | legacyIndex=${i} | hits=${legacyPathStorage.getStore()?.get(counterKey) ?? 1}`
       );
       return v;
     }

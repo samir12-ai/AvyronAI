@@ -38,7 +38,7 @@ function computeEffectiveConfidenceFromRow(row: any): number {
   return baseConfidence * Math.pow(decayRate, periodsElapsed);
 }
 
-function parseJson<T>(raw: string | null | undefined, fallback: T): T {
+function parseJson(raw: string | null | undefined, fallback: any): any {
   if (!raw) return fallback;
   try { return JSON.parse(raw); } catch { return fallback; }
 }
@@ -786,7 +786,7 @@ export function registerFullReportRoutes(app: Express) {
   app.get("/api/system/full-report/:campaignId", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId as string;
       try {
         const { assertCampaignBelongsTo, handleOwnershipError } = await import("../auth-helpers");
         await assertCampaignBelongsTo(accountId, campaignId);

@@ -13,6 +13,7 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
 import { useAppShellController } from '@/hooks/useAppShellController';
+import { GlobalHeader } from '@/components/GlobalHeader';
 import {
   useMarketSignals,
   useStrategicBrief,
@@ -120,6 +121,7 @@ export default function ReasoningEvidenceScreen() {
 
   return (
     <View style={styles.root}>
+      <GlobalHeader title="REASONING EVIDENCE" />
 
       {/* ── HEADER ── */}
       <View style={styles.header}>
@@ -609,7 +611,7 @@ function ProgressStep({ label, active, done }: { label: string; active: boolean;
 // ── StyleSheets ──────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#070B12' },
+  root: { flex: 1, backgroundColor: '#0F0F13' },
 
   header: {
     flexDirection: 'row',

@@ -86,6 +86,20 @@ export function computeDemandPressure(
   const metadataCommentCount = commentCount ?? 0;
   const commentIntensity = clamp01(metadataCommentCount / MI_DEMAND_PRESSURE.COMMENT_INTENSITY_NORMALIZATION);
 
+  if (comments.length === 0 && metadataCommentCount === 0) {
+    return {
+      score: 0,
+      level: "LOW",
+      components: {
+        engagementDensity: 0,
+        commentIntensity: 0,
+        intentSignalStrength: 0,
+        objectionDensity: 0,
+        purchaseIntentDensity: 0,
+      },
+    };
+  }
+
   if (comments.length === 0) {
     const intentSignalStrength = clamp01(audienceIntentSignals.length / MI_DEMAND_PRESSURE.INTENT_SIGNAL_NORMALIZATION * 0.5);
     const score = clamp01(

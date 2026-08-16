@@ -11,6 +11,7 @@ import { requireIntegrityVerdict } from "./integrity-verdict";
 const REPAIRABLE_BLOCKS: Record<BlockCode, RepairActionCode | null> = {
   NO_CONVERSION_PATH: "INJECT_FALLBACK_CONVERSION",
   SCALE_WITHOUT_REAL_DATA: "DOWNGRADE_SCALE_TO_TEST",
+  LOW_SIGNAL_TRUST: null,
   INTEGRITY_FAILURE: "REVALIDATE_INTEGRITY",
   COMPLIANCE_FAILURE: null,
   BUDGET_KILL: null,

@@ -15,6 +15,34 @@
       "when": 1785748404887,
       "tag": "0001_opposite_pandemic",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786702926860,
+      "tag": "0002_tan_mister_sinister",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786798903667,
+      "tag": "0003_curvy_leader",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786800246658,
+      "tag": "0004_tiny_goblin_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786889299215,
+      "tag": "0005_orange_tomas",
+      "breakpoints": true
     }
   ]
 }

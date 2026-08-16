@@ -33,6 +33,8 @@
  * picks) is RECORDED on gateTrace — an abstention is never an implicit pass.
  */
 import { aiChat } from "../../ai-client";
+import { generateWithRepair, LLMReliabilityError } from "../../shared/llm-reliability/reliability-runner";
+import type { JudgeResult } from "../../shared/llm-reliability/types";
 import {
   safeJsonParse,
   buildDoctrineBlock,
@@ -164,6 +166,26 @@ async function callProposer(
  * viable channel names form the whitelist — a pick outside it is a recorded,
  * counted attempt (never accepted).
  */
+async function callProposerRaw(
+  prompt: string,
+  temperature: number,
+  accountId: string,
+): Promise<string | null> {
+  try {
+    const resp = await aiChat({
+      model: MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature,
+      max_tokens: 500,
+      endpoint: "channel-ai-proposer",
+      accountId,
+    });
+    return resp.choices?.[0]?.message?.content?.trim() ?? null;
+  } catch (err) {
+    return null;
+  }
+}
+
 async function proposeAndValidate(input: {
   strategic: RunStrategicContext;
   /** F5a (Fix 3): resolved by the caller — doctrine anchor, else DNA-derived, else null. */

@@ -97,7 +97,7 @@ async function apiFetch(path: string, method = 'GET', body?: any) {
 
 export default function ControlCenter() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
 
   const [refreshing, setRefreshing] = useState(false);

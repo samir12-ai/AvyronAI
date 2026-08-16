@@ -10,11 +10,13 @@ export function registerLandingPageRoutes(app: Express) {
   app.get("/api/landing-pages", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("landing_pages_enabled", accountId))) {
         return res.json({ pages: [], disabled: true });
       }
       const result = await db.select().from(landingPages)
-        .where(eq(landingPages.accountId, accountId))
+        .where(and(eq(landingPages.accountId, accountId), eq(landingPages.campaignId, campaignId)))
         .orderBy(desc(landingPages.createdAt));
       res.json({ pages: result });
     } catch (error: any) {
@@ -25,6 +27,8 @@ export function registerLandingPageRoutes(app: Express) {
   app.post("/api/landing-pages", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("landing_pages_enabled", accountId))) {
         return res.status(403).json({ error: "Landing Pages module is not enabled" });
       }

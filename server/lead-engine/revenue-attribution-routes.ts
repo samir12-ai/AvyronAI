@@ -21,7 +21,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
       // excluded (same doctrine as weekly_reports tenant closure).
       const result = await db.select().from(revenueEntries)
         .where(and(
-          eq(revenueEntries.accountId, accountId),
+          and(eq(revenueEntries.accountId, accountId), eq(revenueEntries.campaignId, campaignId)),
           eq(revenueEntries.campaignId, campaignId),
         ))
         .orderBy(desc(revenueEntries.createdAt))
@@ -83,10 +83,12 @@ export function registerRevenueAttributionRoutes(app: Express) {
   app.post("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.status(403).json({ error: "Revenue Attribution is not enabled" });
       }
-      const { amount, platform, campaignId, period, notes } = req.body;
+      const { amount, platform, period, notes } = req.body;
       if (!amount) {
         return res.status(400).json({ error: "amount is required" });
       }
@@ -107,11 +109,13 @@ export function registerRevenueAttributionRoutes(app: Express) {
   app.get("/api/ad-spend", requireCampaign, async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("revenue_attribution_enabled", accountId))) {
         return res.json({ entries: [], disabled: true });
       }
       const result = await db.select().from(adSpendEntries)
-        .where(eq(adSpendEntries.accountId, accountId))
+        .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)))
         .orderBy(desc(adSpendEntries.createdAt));
       res.json({ entries: result });
     } catch (error: any) {
@@ -122,6 +126,8 @@ export function registerRevenueAttributionRoutes(app: Express) {
   app.get("/api/revenue/stats", requireCampaign, async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       const check = await featureFlagService.checkWithDependencies("revenue_attribution_enabled", accountId);
       if (!check.enabled) {
         return res.json({ stats: null, disabled: true });
@@ -131,11 +137,11 @@ export function registerRevenueAttributionRoutes(app: Express) {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
       const allRevenue = await db.select().from(revenueEntries)
-        .where(eq(revenueEntries.accountId, accountId));
+        .where(and(eq(revenueEntries.accountId, accountId), eq(revenueEntries.campaignId, campaignId)));
       const monthRevenue = allRevenue.filter(r => r.createdAt && r.createdAt >= monthStart);
 
       const allSpend = await db.select().from(adSpendEntries)
-        .where(eq(adSpendEntries.accountId, accountId));
+        .where(and(eq(adSpendEntries.accountId, accountId), eq(adSpendEntries.campaignId, campaignId)));
       const monthSpend = allSpend.filter(s => s.createdAt && s.createdAt >= monthStart);
 
       const totalRevenue = allRevenue.reduce((sum, r) => sum + (r.amount || 0), 0);
@@ -143,7 +149,7 @@ export function registerRevenueAttributionRoutes(app: Express) {
       const totalSpend = allSpend.reduce((sum, s) => sum + (s.amount || 0), 0);
       const monthTotalSpend = monthSpend.reduce((sum, s) => sum + (s.amount || 0), 0);
 
-      const allLeads = await db.select().from(leads).where(eq(leads.accountId, accountId));
+      const allLeads = await db.select().from(leads).where(and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId)));
       const monthLeads = allLeads.filter(l => l.createdAt && l.createdAt >= monthStart);
       const costPerLead = monthLeads.length > 0 ? (monthTotalSpend / monthLeads.length).toFixed(2) : "0";
 

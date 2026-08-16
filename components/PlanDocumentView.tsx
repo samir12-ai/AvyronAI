@@ -40,7 +40,7 @@ interface PlanDocumentViewProps {
 
 export default function PlanDocumentView({ planId, blueprintId, campaignId: campaignIdProp, jobId, onClose }: PlanDocumentViewProps) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const { selectedCampaign } = useCampaign();
 
@@ -880,6 +880,99 @@ export default function PlanDocumentView({ planId, blueprintId, campaignId: camp
     );
   };
 
+
+  const renderStrategyPlan = () => {
+    const sections = (plan as any)?.sections || {};
+    const businessRep = sections.businessRepresentation;
+    const stratSummary = sections.strategicSummary;
+    const isExpanded = expandedSections.strategyPlan;
+
+    if (!stratSummary && !businessRep) return null;
+
+    return (
+      <View style={[st.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <Pressable onPress={() => toggle('strategyPlan')} style={st.sectionHead}>
+          <Ionicons name="bulb-outline" size={18} color={C.mint} />
+          <Text style={[st.sectionTitle, { color: textPrimary, flex: 1 }]}>Strategy Plan</Text>
+          <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={textSecondary} />
+        </Pressable>
+
+        {isExpanded && (
+          <View style={st.expandedBody}>
+            {businessRep && (
+              <View style={{ marginBottom: 16 }}>
+                <Text style={[st.subLabel, { color: C.mint }]}>Business Language Representation</Text>
+                
+                {businessRep.strategicSummary && (
+                  <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: cardBorder }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Growth Strategy</Text>
+                    <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18, marginBottom: 8 }}>{businessRep.strategicSummary.strategy}</Text>
+                    
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Target Audience</Text>
+                    <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18, marginBottom: 8 }}>{businessRep.strategicSummary.targetAudience}</Text>
+
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Growth Objective</Text>
+                    <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18, marginBottom: 8 }}>{businessRep.strategicSummary.growthObjective}</Text>
+
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Rationale</Text>
+                    <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18 }}>{businessRep.strategicSummary.rationale}</Text>
+                  </View>
+                )}
+
+                {businessRep.contentDistribution && (
+                  <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: cardBorder }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Content Distribution Rationale</Text>
+                    <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18 }}>{businessRep.contentDistribution.rationale}</Text>
+                  </View>
+                )}
+
+                {businessRep.executionBlueprintDnaLink && (
+                  <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: cardBorder }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Weekly Content Execution</Text>
+                    <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18 }}>{businessRep.executionBlueprintDnaLink.weeklyDnaApplication}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            <View>
+              <Text style={[st.subLabel, { color: C.mint }]}>Canonical Decisions (Source of Truth)</Text>
+
+              {stratSummary && (
+                <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: cardBorder }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Strategy Statement</Text>
+                  <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18, marginBottom: 8 }}>{stratSummary.strategy}</Text>
+
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Target Segment</Text>
+                  <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18, marginBottom: 8 }}>{stratSummary.targetAudience}</Text>
+
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Objective</Text>
+                  <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18, marginBottom: 8 }}>{stratSummary.growthObjective}</Text>
+
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 4 }}>Strategic Rationale</Text>
+                  <Text style={{ fontSize: 12, color: textSecondary, lineHeight: 18 }}>{stratSummary.rationale}</Text>
+                </View>
+              )}
+
+              {plan.lockedDecisionLabels && plan.lockedDecisionLabels.length > 0 && (
+                <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: cardBorder }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 6 }}>Locked Core Strategic Parameters</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {plan.lockedDecisionLabels.map((lbl: string, idx: number) => (
+                      <View key={idx} style={{ backgroundColor: '#8B5CF620', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#8B5CF640' }}>
+                        <Text style={{ fontSize: 10, color: '#8B5CF6', fontWeight: '600' }}>{lbl}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+      </View>
+    );
+  };
+
   return (
     <View>
       {onClose && (
@@ -1051,6 +1144,7 @@ export default function PlanDocumentView({ planId, blueprintId, campaignId: camp
 
       {renderGoalBlock()}
       {renderWhyThisPlan()}
+      {renderStrategyPlan()}
       {renderNumbersThatMatter()}
       {renderGrowthSimulation()}
       {renderContentDistribution()}

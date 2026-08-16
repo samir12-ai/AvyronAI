@@ -72,7 +72,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
   };
 
   it('should return 404 if event is deleted or not found', async () => {
-    (db.where as any).mockResolvedValueOnce([]); // No row
+    (db as any).where.mockResolvedValueOnce([]); // No row
     
     await runRoute('event-123');
     expect(statusMock).toHaveBeenCalledWith(404);
@@ -80,7 +80,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
   });
 
   it('should return 404 on unauthorized cross-tenant access', async () => {
-    (db.where as any).mockResolvedValueOnce([{
+    (db as any).where.mockResolvedValueOnce([{
       event: { id: 'event-123', campaignId: 'campaign-2', accountId: 'tenant-b' },
       competitor: null
     }]);
@@ -93,7 +93,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
   it('should map the typed contract strictly', async () => {
     const mockDate = new Date('2026-08-01T12:00:00Z');
     
-    (db.where as any).mockResolvedValueOnce([{
+    (db as any).where.mockResolvedValueOnce([{
       event: { 
         id: 'evt-1', 
         campaignId: 'campaign-1', 
@@ -141,7 +141,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
   });
 
   it('should return missing evidence state when evidence is empty', async () => {
-    (db.where as any).mockResolvedValueOnce([{
+    (db as any).where.mockResolvedValueOnce([{
       event: { 
         id: 'evt-2', 
         campaignId: 'campaign-1', 

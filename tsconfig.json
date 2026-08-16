@@ -17,5 +17,23 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "app",
+    "scratch",
+    "lib/translations",
+    "check_db2.ts",
+    "test-bll.ts",
+    "p613-harness.ts",
+    "components/AELDebugPanel.tsx",
+    "components/IntegrityEngine.tsx",
+    "components/MarketMindAgent.tsx",
+    "components/PositioningStrategy.tsx",
+    "components/SystemIntegrityPanel.tsx",
+    "hooks/useAppShellController.ts",
+    "shared/models",
+    "shared/schema.ts",
+    "server/tests"
   ]
 }

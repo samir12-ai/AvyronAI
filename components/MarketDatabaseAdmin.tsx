@@ -118,7 +118,7 @@ async function adminFetch(path: string) {
 
 export default function MarketDatabaseAdmin() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
 
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');

@@ -26,8 +26,10 @@
 import { createHash } from "crypto";
 import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { db } from "../db";
-import { pipelineChangeEvents, ciCompetitors } from "../../shared/schema";
+import { pipelineChangeEvents, ciCompetitors, businessDataLayer } from "../../shared/schema";
 import { aiChat } from "../ai-client";
+import { generateWithRepair, LLMReliabilityError } from "../shared/llm-reliability/reliability-runner";
+import { pruneIrrelevantContext } from "../core/semantic-pruner";
 import {
   computeMarketDistributionSnapshot,
   type MarketDistributionSnapshot,
@@ -517,12 +519,6 @@ function fingerprintBundle(bundle: VerifiedSignalBundle): string {
   return createHash("sha256").update(JSON.stringify(content)).digest("hex");
 }
 
-/**
- * Full pipeline: verified signals → trigger gate → analyst → guards → judge →
- * customer insight (or deterministic summary). Never throws on LLM/judge
- * problems — those degrade to the deterministic summary with an internal
- * reason. DB failures DO propagate (no-silent-fallback for infrastructure).
- */
 export async function getMarketInsight(
   campaignId: string,
   accountId: string,
@@ -550,7 +546,21 @@ export async function getMarketInsight(
     insight = { ...buildDeterministicSummary(bundle), deterministicReason: "no_trigger" };
   } else {
     try {
-      const interp = await runMarketAnalyst(bundle, accountId);
+      const bizRows = await db.select().from(businessDataLayer).where(and(eq(businessDataLayer.campaignId, campaignId), eq(businessDataLayer.accountId, accountId))).limit(1);
+      let dynamicFocus = "Market Insight & Competitor Intelligence";
+      if (bizRows.length > 0) {
+        const root = bizRows[0] as any;
+        dynamicFocus = root.businessModel === 'product' ? `Product: ${root.heroProduct}. Specs: ${root.productSpecs}` : `Service: ${root.coreOffer}`;
+      }
+      const prunedSignal = await pruneIrrelevantContext(JSON.stringify(bundle), dynamicFocus);
+      let newBundle: VerifiedSignalBundle;
+      try {
+        newBundle = JSON.parse(prunedSignal) as VerifiedSignalBundle;
+      } catch (e) {
+        newBundle = bundle; // Fallback to raw if JSON parsing fails after pruning
+      }
+
+      const interp = await runMarketAnalyst(newBundle, accountId);
       const guards = runDeterministicGuards(bundle, interp);
       if (!guards.ok) {
         console.warn(`${LOG} GUARDS_REJECTED campaign=${campaignId} violations=${JSON.stringify(guards.violations)}`);

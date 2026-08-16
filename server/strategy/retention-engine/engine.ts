@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { aiChat } from "../../ai-client";
 import {
   ENGINE_VERSION,

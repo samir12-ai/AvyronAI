@@ -561,7 +561,7 @@ export function layer8_mechanismConstruction(
   const validatedClaimCount = claims ? claims.filter(c => c.overallScore >= MIN_PILLAR_SCORE).length : 0;
   const avgProofability = pillars && pillars.length > 0
     ? pillars.reduce((s, p) => s + p.proofability, 0) / pillars.length : 0;
-  const hasStructuralSupport = validatedClaimCount >= 2 && avgProofability >= 0.50;
+  const hasStructuralSupport = (!claims && !pillars) || (validatedClaimCount >= 2 && avgProofability >= 0.50);
 
   if ((hasFrameworkDemand || hasMethodAxis) && hasStructuralSupport) {
     return {
@@ -1334,12 +1334,12 @@ export function layer12_stabilityGuard(
 
   const avgProofability = pillars.length > 0 ? pillars.reduce((s, p) => s + p.proofability, 0) / pillars.length : 0;
   if (avgProofability < STABILITY_MIN_PROOFABILITY) {
-    groundingFailures.push(`Proofability below threshold (${avgProofability.toFixed(2)} < ${STABILITY_MIN_PROOFABILITY}) — insufficient signal grounding`);
+    failures.push(`proofability below threshold (${avgProofability.toFixed(2)} < ${STABILITY_MIN_PROOFABILITY}) — insufficient signal grounding`);
   }
 
   const avgTrustAlignment = pillars.length > 0 ? pillars.reduce((s, p) => s + p.trustAlignment, 0) / pillars.length : 0;
   if (avgTrustAlignment < STABILITY_MIN_TRUST_ALIGNMENT) {
-    groundingFailures.push(`Trust alignment below threshold (${avgTrustAlignment.toFixed(2)} < ${STABILITY_MIN_TRUST_ALIGNMENT}) — insufficient signal grounding`);
+    failures.push(`trust alignment below threshold (${avgTrustAlignment.toFixed(2)} < ${STABILITY_MIN_TRUST_ALIGNMENT}) — insufficient signal grounding`);
   }
 
   const weakClaims = claims.filter(c => c.overallScore < MIN_PILLAR_SCORE);

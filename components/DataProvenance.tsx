@@ -21,7 +21,7 @@ const META: Record<ProvenanceKind, { labelKey: string; icon: keyof typeof Ionico
 
 export function DataProvenance({ kind, compact }: DataProvenanceProps) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const meta = META[kind];
   const { t } = useLanguage();

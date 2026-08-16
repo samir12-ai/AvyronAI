@@ -1,4 +1,6 @@
 import { aiChat } from "../ai-client";
+import { generateWithRepair, LLMReliabilityError } from "../shared/llm-reliability/reliability-runner";
+import type { JudgeResult } from "../shared/llm-reliability/types";
 import { validateAuthorityBoundaries, type AuthorityCheckResult } from "../shared/authority-validator";
 import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { loadCampaignProductAnchor } from "../orchestrator/doctrine-seed";
@@ -524,6 +526,8 @@ Return ONLY valid JSON. No markdown, no code blocks, no explanation.`;
 // invalid response yields a structured ValidationError so the caller can
 // distinguish "AI returned malformed JSON" from "no response".
 import { z } from "zod";
+import { SystemValidationFlagSchema } from "../shared/llm-reliability/system-validation";
+
 
 const BuildPlanResponseSchema = z.object({
   positioning: z.string().min(1),
@@ -560,7 +564,7 @@ const BuildPlanResponseSchema = z.object({
     weekly: z.array(z.any()).optional(),
     biweekly: z.array(z.any()).optional(),
   }).optional().default(() => ({ daily: [], weekly: [], biweekly: [] })),
-});
+}).extend({ _system_validation: SystemValidationFlagSchema.optional() });
 
 type BuildPlanResponse = z.infer<typeof BuildPlanResponseSchema>;
 type ParseAIResult =
@@ -824,6 +828,16 @@ export async function runBuildPlanLayer(
   // resolution, not a D1 semantic fallback. Missing/NULL/unparseable →
   // undefined/null → the existing D5 CONTRACT_INCOMPLETE / AEL-absent
   // degradation fires downstream (never a fabricated pass).
+  const anchor = await loadCampaignProductAnchor(campaignId, accountId);
+  if (!anchor) {
+    throw new LLMReliabilityError(
+      "EVIDENCE_FAILURE: Upstream Strategy Root is entirely missing. Plan Synthesis requires an anchor.",
+      "EVIDENCE_FAILURE",
+      [],
+      { engine: "build_plan", touchpoint: "synthesis", attempts: 0, finalVerdict: "HONEST_FAIL", repairLog: [] }
+    );
+  }
+
   let resolvedDepthGate = depthGateStatus;
   if (!resolvedDepthGate) {
     resolvedDepthGate = await loadPersistedDepthGateStatus(accountId, sourceJobId);

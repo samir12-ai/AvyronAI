@@ -39,6 +39,11 @@ const GOAL_TIMELINES = [
 ] as const;
 
 interface BusinessData {
+  businessModel: 'service' | 'product';
+  heroProduct: string;
+  productSpecs: string;
+  endConsumerUseCase: string;
+  replacedCompetitor: string;
   businessLocation: string;
   businessType: string;
   coreOffer: string;
@@ -59,6 +64,11 @@ interface BusinessData {
 }
 
 const EMPTY_DATA: BusinessData = {
+  businessModel: 'service',
+  heroProduct: '',
+  productSpecs: '',
+  endConsumerUseCase: '',
+  replacedCompetitor: '',
   businessLocation: '',
   businessType: '',
   coreOffer: '',
@@ -353,7 +363,7 @@ interface Props {
 
 export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const { selectedCampaign } = useCampaign();
 
@@ -371,14 +381,20 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
   const campaignId = selectedCampaign?.selectedCampaignId;
 
   const CORE_FIELDS: (keyof BusinessData)[] = [
-    'businessLocation', 'businessType', 'coreOffer', 'priceRange',
+    'businessLocation', 'businessType', 'priceRange',
     'targetAudienceAge', 'targetAudienceSegment', 'monthlyBudget',
     'funnelObjective', 'primaryConversionChannel',
   ];
   const GOAL_FIELDS: (keyof BusinessData)[] = ['goalTarget', 'goalTimeline', 'goalDescription'];
 
   const isComplete = useCallback(() => {
-    return CORE_FIELDS.every(f => data[f].trim().length > 0);
+    const baseComplete = CORE_FIELDS.every(f => data[f].trim().length > 0);
+    if (!baseComplete) return false;
+    if (data.businessModel === 'product') {
+      return data.heroProduct.trim().length > 0 && data.productSpecs.trim().length > 0;
+    } else {
+      return data.coreOffer.trim().length > 0;
+    }
   }, [data]);
 
   const goalsFilled = GOAL_FIELDS.filter(f => data[f].trim().length > 0).length;
@@ -397,6 +413,11 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
         if (!cancelled && json.exists && json.data) {
           const d = json.data;
           setData({
+            businessModel: d.businessModel || 'service',
+            heroProduct: d.heroProduct || '',
+            productSpecs: d.productSpecs || '',
+            endConsumerUseCase: d.endConsumerUseCase || '',
+            replacedCompetitor: d.replacedCompetitor || '',
             businessLocation: d.businessLocation || '',
             businessType: d.businessType || '',
             coreOffer: d.coreOffer || '',
@@ -645,9 +666,39 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
         </View>
       )}
 
+      <View style={[s.fieldWrap, { marginBottom: 16 }]}>
+        <Text style={[s.fieldLabel, { color: colors.text, marginBottom: 8 }]}>Business Model</Text>
+        <View style={{ flexDirection: 'row', backgroundColor: colors.inputBackground, borderRadius: 8, padding: 4, borderWidth: 1, borderColor: colors.inputBorder }}>
+          <Pressable
+            onPress={() => updateField('businessModel', 'service')}
+            style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6, backgroundColor: data.businessModel === 'service' ? colors.primary + '20' : 'transparent' }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: data.businessModel === 'service' ? colors.primary : colors.textMuted }}>Service</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => updateField('businessModel', 'product')}
+            style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6, backgroundColor: data.businessModel === 'product' ? colors.primary + '20' : 'transparent' }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: data.businessModel === 'product' ? colors.primary : colors.textMuted }}>Product</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {data.businessModel === 'product' ? (
+        <>
+          {renderTextField('heroProduct', 'Hero Product', 'e.g. Smart Watch Pro, Organic Coffee Beans', 'cube-outline')}
+          {renderTextField('productSpecs', 'Product Specs / Features', 'e.g. 48hr battery, AMOLED display...', 'list-outline', true)}
+          {renderTextField('endConsumerUseCase', 'End Consumer Use Case', 'e.g. Fitness tracking, morning energy...', 'person-outline', true)}
+          {renderTextField('replacedCompetitor', 'Replaced Competitor', 'e.g. Apple Watch, Starbucks', 'swap-horizontal-outline')}
+        </>
+      ) : (
+        <>
+          {renderTextField('coreOffer', 'Core Offer', 'e.g. Premium photography packages', 'pricetag-outline', true)}
+        </>
+      )}
+
       {renderTextField('businessLocation', 'Business Location', 'e.g. Dubai, UAE', 'location-outline')}
       {renderTextField('businessType', 'Business Type', 'e.g. E-commerce, SaaS, Agency', 'briefcase-outline')}
-      {renderTextField('coreOffer', 'Core Offer', 'e.g. Premium photography packages', 'pricetag-outline', true)}
       {renderTextField('priceRange', 'Price Range', 'e.g. $500 - $2,000', 'cash-outline')}
       {renderTextField('targetAudienceAge', 'Target Audience Age', 'e.g. 25-45', 'people-outline')}
       {renderTextField('targetAudienceSegment', 'Target Audience Segment', 'e.g. Small business owners, new mothers', 'person-outline', true)}

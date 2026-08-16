@@ -24,10 +24,10 @@ const REQUIRED_FIELDS = [
 // P1-22 (W4.1 launch-closure): Zod schema replaces ad-hoc string-walk
 // validation. Required fields enforced as non-empty strings; enum fields
 // enforced via z.enum; optional descriptive fields kept as plain strings.
-const businessDataPutSchema = z.object({
+const baseBusinessSchema = z.object({
   businessLocation: z.string().trim().min(1),
   businessType: z.string().trim().min(1),
-  coreOffer: z.string().trim().min(1),
+  coreOffer: z.string().trim().min(1).optional(), // Made optional for Product mode
   priceRange: z.string().trim().min(1),
   targetAudienceAge: z.string().trim().min(1),
   targetAudienceSegment: z.string().trim().min(1),
@@ -42,7 +42,30 @@ const businessDataPutSchema = z.object({
   goalTarget: z.string().optional(),
   goalTimeline: z.string().optional(),
   goalDescription: z.string().optional(),
-}).strict();
+});
+
+const businessDataPutSchema = baseBusinessSchema.and(
+  z.object({
+    businessModel: z.enum(["service", "product"]).default("service"),
+    heroProduct: z.string().optional(),
+    productSpecs: z.string().optional(),
+    endConsumerUseCase: z.string().optional(),
+    replacedCompetitor: z.string().optional(),
+  })
+).superRefine((data, ctx) => {
+  if (data.businessModel === 'product') {
+    if (!data.heroProduct || data.heroProduct.trim().length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hero Product is required for Product models", path: ["heroProduct"] });
+    }
+    if (!data.productSpecs || data.productSpecs.trim().length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Product Specs are required for Product models", path: ["productSpecs"] });
+    }
+  } else if (data.businessModel === 'service') {
+    if (!data.coreOffer || data.coreOffer.trim().length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Core Offer is required for Service models", path: ["coreOffer"] });
+    }
+  }
+});
 
 export function registerBusinessDataRoutes(app: Express) {
   app.get("/api/business-data/:campaignId", async (req: Request, res: Response) => {

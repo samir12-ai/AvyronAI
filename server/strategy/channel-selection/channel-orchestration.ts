@@ -1,4 +1,6 @@
 import { aiChat } from "../../ai-client";
+import { generateWithRepair, LLMReliabilityError } from "../../shared/llm-reliability/reliability-runner";
+import type { JudgeResult } from "../../shared/llm-reliability/types";
 import {
   deriveAnchorFromProductDna,
   type ProductAnchor,

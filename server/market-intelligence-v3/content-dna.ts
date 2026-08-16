@@ -95,6 +95,36 @@ const CTA_PATTERNS: Record<CTAFramework, RegExp[]> = {
   ],
 };
 
+const CANONICAL_HOOK_MAPPING: Record<string, HookArchetype> = {
+  QUESTION: "question",
+  BOLD_CLAIM: "authority",
+  PAIN_AGITATION: "problem",
+  SOCIAL_PROOF: "statistic",
+  CURIOSITY_GAP: "curiosity",
+  HOW_TO: "authority",
+  STORY_OPEN: "story",
+};
+
+const CANONICAL_NARRATIVE_MAPPING: Record<string, NarrativeFramework> = {
+  PROBLEM_SOLUTION: "problem_solution",
+  BEFORE_AFTER: "before_after",
+  TRANSFORMATION: "before_after",
+  STORY_LESSON: "story_lesson",
+  MISTAKE_FIX: "mistake_fix",
+  HOW_TO_LIST: "listicle",
+  SOCIAL_PROOF_NARRATIVE: "story_lesson",
+};
+
+const CANONICAL_CTA_MAPPING: Record<string, CTAFramework> = {
+  LINK_IN_BIO: "explicit",
+  SHOP_NOW: "explicit",
+  BOOK_NOW: "explicit",
+  DM_US: "soft",
+  SAVE_THIS: "soft",
+  COMMENT_BELOW: "soft",
+  FOLLOW_FOR_MORE: "soft",
+};
+
 function truncateSnippet(text: string, maxLen = 50): string {
   if (text.length <= maxLen) return text;
   return text.substring(0, maxLen - 3) + "...";
@@ -107,6 +137,22 @@ function detectHookArchetypes(posts: PostData[]): { archetypes: HookArchetype[];
     const caption = (post.caption || "").trim();
     if (caption.length < MIN_CAPTION_LENGTH) continue;
 
+    // 1. Try canonical classification first
+    const canonical = (post as any).hookArchetype;
+    if (canonical && canonical !== "UNKNOWN") {
+      const mapped = CANONICAL_HOOK_MAPPING[canonical];
+      if (mapped) {
+        if (!found.has(mapped)) found.set(mapped, []);
+        found.get(mapped)!.push({
+          postId: post.id,
+          snippet: truncateSnippet(caption),
+          detectedType: `hook:${mapped}`,
+        });
+        continue;
+      }
+    }
+
+    // 2. Fallback to regex patterns if unclassified or unknown
     for (const [archetype, patterns] of Object.entries(HOOK_PATTERNS) as [HookArchetype, RegExp[]][]) {
       for (const pattern of patterns) {
         if (pattern.test(caption)) {
@@ -137,6 +183,22 @@ function detectNarrativeFrameworks(posts: PostData[]): { frameworks: NarrativeFr
     const caption = (post.caption || "").trim();
     if (caption.length < MIN_CAPTION_LENGTH) continue;
 
+    // 1. Try canonical classification first
+    const canonical = (post as any).narrative;
+    if (canonical && canonical !== "UNKNOWN") {
+      const mapped = CANONICAL_NARRATIVE_MAPPING[canonical];
+      if (mapped) {
+        if (!found.has(mapped)) found.set(mapped, []);
+        found.get(mapped)!.push({
+          postId: post.id,
+          snippet: truncateSnippet(caption),
+          detectedType: `narrative:${mapped}`,
+        });
+        continue;
+      }
+    }
+
+    // 2. Fallback to regex patterns if unclassified or unknown
     for (const [framework, patterns] of Object.entries(NARRATIVE_PATTERNS) as [NarrativeFramework, RegExp[]][]) {
       for (const pattern of patterns) {
         if (pattern.test(caption)) {
@@ -167,6 +229,22 @@ function detectCTAFrameworks(posts: PostData[]): { frameworks: CTAFramework[]; e
     const caption = (post.caption || "").trim();
     if (caption.length < MIN_CAPTION_LENGTH) continue;
 
+    // 1. Try canonical classification first
+    const canonical = (post as any).ctaType;
+    if (canonical && canonical !== "UNKNOWN") {
+      const mapped = CANONICAL_CTA_MAPPING[canonical];
+      if (mapped) {
+        if (!found.has(mapped)) found.set(mapped, []);
+        found.get(mapped)!.push({
+          postId: post.id,
+          snippet: truncateSnippet(caption),
+          detectedType: `cta:${mapped}`,
+        });
+        continue;
+      }
+    }
+
+    // 2. Fallback to regex patterns if unclassified or unknown
     for (const [ctaType, patterns] of Object.entries(CTA_PATTERNS) as [CTAFramework, RegExp[]][]) {
       for (const pattern of patterns) {
         if (pattern.test(caption)) {

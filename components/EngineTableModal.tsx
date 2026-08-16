@@ -132,7 +132,7 @@ function gradeColor(grade?: string): string {
 }
 
 export default function EngineTableModal({ visible, onClose, campaignId, jobId }: Props) {
-  const isDark = useColorScheme() === 'dark';
+  const isDark = true; // forced dark mode
   const [engines, setEngines] = useState<EngineEntry[]>([]);
   const [loading, setLoading] = useState(false);
   // Canonical execution status (Seal #6 / D2). The legacy `status` is kept

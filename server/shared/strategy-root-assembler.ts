@@ -99,6 +99,8 @@ interface AssemblerArgs {
    * build below (direct-route callers have no run registry).
    */
   painRegistry?: any[];
+  brandSpine?: any;
+  approvedLanes?: any[];
 }
 
 /**
@@ -122,6 +124,8 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
     differentiationContext,
     audienceOverride,
     painRegistry,
+    brandSpine,
+    approvedLanes,
   } = args;
 
   // ---- Audience: prefer in-memory override; fall back to DB read by id ----
@@ -225,5 +229,7 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
     approvedObjections: audienceObjections,
     approvedProofTypes: proofTypes,
     approvedPositioningContext: positioningContext,
+    brandSpine: brandSpine || null,
+    approvedLanes: approvedLanes || null,
   };
 }

@@ -1,6 +1,6 @@
 import type { EngineId, EngineStepResult } from "../orchestrator/priority-matrix";
 import type { IntegrityReport } from "../system-integrity/types";
-import type { ComplianceResult } from "../causal-enforcement-layer/engine";
+import type { ComplianceResult } from "../causal-enforcement-layer/types";
 import type { SignalComposition } from "../shared/signal-lineage";
 import type { SharedStrategicContext } from "../orchestrator/shared-strategic-context";
 import type { StructuralCheck, BlockReason, Downgrade, BlockCode, DowngradeCode, CheckStatus } from "./types";

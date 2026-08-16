@@ -6,23 +6,23 @@
  * into one coherent business interpretation, expressed as evidence-cited
  * Reasoning Cards.
  *
- *   Watchtower Market Insights (market_memory — validated, deduped)
+ *   Watchtower Market Insights (market_memory â€” validated, deduped)
  *   Performance Loop outcomes  (performance_cycle_reports / decision_verdicts)
  *   Historical Performance Memory (strategy_memory)
  *   Historical Market Memory   (market_memory, 12-month horizon)
  *   Company profile            (business_data_layer)
  *   Business objectives        (goal_decompositions, active)
  *   Competitor context         (ci_competitors)
- *        ↓
+ *        â†“
  *   Deterministic historical analysis (recurrence, resemblance, momentum)
- *        ↓
- *   LLM reasoning (interpretation ONLY) → code guards → LLM judge
- *        ↓
- *   Reasoning Cards — every card cites evidence refs; rejected output is
+ *        â†“
+ *   LLM reasoning (interpretation ONLY) â†’ code guards â†’ LLM judge
+ *        â†“
+ *   Reasoning Cards â€” every card cites evidence refs; rejected output is
  *   replaced by deterministic cards and never exposed.
  *
  * Doctrine (same as the P-3 grounded-interpretation layer):
- *   - No raw posts, no raw classifications — only verified upstream outputs.
+ *   - No raw posts, no raw classifications â€” only verified upstream outputs.
  *   - The LLM never calculates or discovers; all numbers and historical
  *     comparisons are computed deterministically first.
  *   - Every card must cite evidence refs that exist in the evidence registry
@@ -55,6 +55,7 @@ import {
   type RegistryEntry,
   type EvidenceKind,
 } from "./evidence-registry";
+import { generateWithRepair, LLMReliabilityError } from "../shared/llm-reliability/reliability-runner";
 
 const LOG = "[StrategicReasoning]";
 const REASONER_MODEL = "gpt-4.1-mini";
@@ -62,7 +63,7 @@ const JUDGE_MODEL = "gpt-4.1-mini";
 const CARDS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CARDS_CACHE_MAX = 100;
 
-// ── card & evidence model ─────────────────────────────────────────────────────
+// â”€â”€ card & evidence model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const CARD_TYPES = [
   "market_direction",
@@ -88,7 +89,7 @@ export interface EvidenceItem {
     | "objective"
     | "competitor"
     | "historical_analysis";
-  dbId: string | null;               // underlying row id (internal only — never serialized to customers)
+  dbId: string | null;               // underlying row id (internal only â€” never serialized to customers)
   label: string;                     // short customer-safe description
   detail: string;                    // verified facts the LLM may interpret
   /** Coverage time for registry registration (P-5); defaults to now at persist. */
@@ -109,11 +110,11 @@ export interface ReasoningResult {
   cards: ReasoningCard[];
   evidence: Array<{ ref: string; type: EvidenceItem["type"]; label: string }>;
   generatedAt: string;
-  /** Internal telemetry — never serialized to customers. */
+  /** Internal telemetry â€” never serialized to customers. */
   deterministicReason?: "no_trigger" | "guards_rejected" | "judge_rejected" | "llm_failed";
 }
 
-// ── context assembly (deterministic) ─────────────────────────────────────────
+// â”€â”€ context assembly (deterministic) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface MarketHistoryFindings {
   recurring: Array<{ dimension: string; value: string; occurrences: number; firstSeen: string; lastSeen: string; memoryRefs: string[] }>;
@@ -153,13 +154,13 @@ const monthLabel = (d: Date) => d.toLocaleDateString("en-US", { month: "long", y
 function analyzeHistory(current: MarketMemoryRow, history: MarketMemoryRow[], refFor: (row: MarketMemoryRow) => string): MarketHistoryFindings {
   const currentEmerging = parseThemes(current.emergingThemes);
   // All temporal comparisons use windowTo (what the data actually covers),
-  // never createdAt (when the row happened to be written — backfills would
+  // never createdAt (when the row happened to be written â€” backfills would
   // corrupt spacing). Recurrence/resemblance/momentum only compare rows of
   // the SAME window granularity: a 30d emerging theme and a 90d emerging
   // theme are not the same observation and must not be double-counted.
   const sameWindowHistory = history.filter((r) => r.windowDays === current.windowDays);
 
-  // Recurrence: a theme that emerged in ≥2 same-window memory rows spaced ≥14 days apart.
+  // Recurrence: a theme that emerged in â‰¥2 same-window memory rows spaced â‰¥14 days apart.
   const occurrences = new Map<string, { theme: StoredTheme; rows: MarketMemoryRow[] }>();
   for (const row of [current, ...sameWindowHistory]) {
     for (const t of parseThemes(row.emergingThemes)) {
@@ -189,7 +190,7 @@ function analyzeHistory(current: MarketMemoryRow, history: MarketMemoryRow[], re
     .sort((a, b) => b.occurrences - a.occurrences)
     .slice(0, 5);
 
-  // Resemblance: strongest emerging-theme overlap with a past (≥21 days old,
+  // Resemblance: strongest emerging-theme overlap with a past (â‰¥21 days old,
   // same-window) state.
   let resemblance: HistoricalFindings["resemblance"] = null;
   if (currentEmerging.length > 0) {
@@ -213,7 +214,7 @@ function analyzeHistory(current: MarketMemoryRow, history: MarketMemoryRow[], re
   const momentum: HistoricalFindings["momentum"] = [];
   const sameWindow = [current, ...sameWindowHistory]
     .sort((a, b) => b.windowTo.getTime() - a.windowTo.getTime())
-    .slice(0, 4); // newest → oldest
+    .slice(0, 4); // newest â†’ oldest
   for (const t of parseThemes(current.dominantThemes).slice(0, 6)) {
     const shares: number[] = [];
     for (const row of sameWindow) {
@@ -296,8 +297,8 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref,
       type: "market_insight",
       dbId: row.id,
-      observedAt: row.windowTo, // coverage time — matches reader ordering (P-5)
-      label: `Market insight · ${monthLabel(row.windowTo)} (${row.windowDays}-day view)`,
+      observedAt: row.windowTo, // coverage time â€” matches reader ordering (P-5)
+      label: `Market insight Â· ${monthLabel(row.windowTo)} (${row.windowDays}-day view)`,
       detail: `[${row.windowTo.toISOString().slice(0, 10)}, window=${row.windowDays}d, confidence=${row.confidence}, dataStatus=${row.dataStatus}, basedOn=${row.basedOn}] ${row.headline}. ${row.narrative} | Dominant: ${dominant.join("; ") || "none"} | Emerging: ${emerging.join("; ") || "none"} | Declining: ${declining.join("; ") || "none"}`,
     });
   });
@@ -307,8 +308,8 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref: `PR-${i + 1}`,
       type: "performance_report",
       dbId: r.id,
-      label: `Performance cycle report · ${monthLabel(r.createdAt)}`,
-      detail: `[${r.createdAt.toISOString().slice(0, 10)}, platform=${r.platform}, status=${r.status}] businessVerdict=${r.businessVerdict ?? "n/a"}, sales ${r.salesBefore ?? "n/a"} → ${r.salesAfter ?? "n/a"}, decisions=${r.decisionsTotal}, attributionConfidence=${r.attributionConfidence ?? "n/a"}`,
+      label: `Performance cycle report Â· ${monthLabel(r.createdAt)}`,
+      detail: `[${r.createdAt.toISOString().slice(0, 10)}, platform=${r.platform}, status=${r.status}] businessVerdict=${r.businessVerdict ?? "n/a"}, sales ${r.salesBefore ?? "n/a"} â†’ ${r.salesAfter ?? "n/a"}, decisions=${r.decisionsTotal}, attributionConfidence=${r.attributionConfidence ?? "n/a"}`,
     });
   });
 
@@ -317,8 +318,8 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref: `PDV-${i + 1}`,
       type: "performance_verdict",
       dbId: v.id,
-      label: `Performance verdict · ${v.decisionDimension}`,
-      detail: `[${v.createdAt.toISOString().slice(0, 10)}] ${v.decisionDimension}="${v.decisionValue}" → ${v.verdict} (${v.evidenceStrength}${v.confidence != null ? `, confidence=${v.confidence}` : ""}); executed=${v.executed}; reason: ${v.verdictReason}`,
+      label: `Performance verdict Â· ${v.decisionDimension}`,
+      detail: `[${v.createdAt.toISOString().slice(0, 10)}] ${v.decisionDimension}="${v.decisionValue}" â†’ ${v.verdict} (${v.evidenceStrength}${v.confidence != null ? `, confidence=${v.confidence}` : ""}); executed=${v.executed}; reason: ${v.verdictReason}`,
     });
   });
 
@@ -327,7 +328,7 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref: `SM-${i + 1}`,
       type: "performance_memory",
       dbId: m.id,
-      label: `Performance memory · ${m.label}`,
+      label: `Performance memory Â· ${m.label}`,
       detail: `type=${m.memoryType}, label="${m.label}", direction=${m.direction ?? "n/a"}, score=${m.score ?? 0}, confidence=${m.confidenceScore ?? "n/a"}, winner=${m.isWinner ?? false}, validations=${m.validationCount ?? 0}`,
     });
   });
@@ -349,8 +350,8 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref: "GOAL-1",
       type: "objective",
       dbId: g.id,
-      label: `Business objective · ${g.goalType}`,
-      detail: `goal=${g.goalType}${g.goalTarget != null ? ` target=${g.goalTarget}` : ""}${g.goalLabel ? ` (“${g.goalLabel}”)` : ""}, horizon=${g.timeHorizonDays}d, feasibility=${g.feasibility}${g.feasibilityScore != null ? ` (${g.feasibilityScore})` : ""}`,
+      label: `Business objective Â· ${g.goalType}`,
+      detail: `goal=${g.goalType}${g.goalTarget != null ? ` target=${g.goalTarget}` : ""}${g.goalLabel ? ` (â€œ${g.goalLabel}â€)` : ""}, horizon=${g.timeHorizonDays}d, feasibility=${g.feasibility}${g.feasibilityScore != null ? ` (${g.feasibilityScore})` : ""}`,
     });
   }
 
@@ -359,7 +360,7 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref: `COMP-${i + 1}`,
       type: "competitor",
       dbId: c.id,
-      label: `Competitor · ${c.name}`,
+      label: `Competitor Â· ${c.name}`,
       detail: `${c.name}: type=${c.businessType}, objective=${c.primaryObjective}, tone=${c.messagingTone ?? "n/a"}`,
     });
   });
@@ -371,7 +372,7 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
     : { recurring: [], resemblance: null, momentum: [] };
 
   // P-5 M3: deterministic pattern retrieval over the append-only belief
-  // histories. All values are verbatim from revision rows — no computation
+  // histories. All values are verbatim from revision rows â€” no computation
   // beyond formatting, so everything stays guard-compatible evidence.
   const parseJsonArray = (s: string): string[] => {
     try { const v = JSON.parse(s); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
@@ -381,7 +382,7 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
   };
   const fmtVal = (v: unknown): string => {
     const s = v == null ? "not set" : typeof v === "string" ? v : JSON.stringify(v);
-    return s.length > 80 ? `${s.slice(0, 77)}…` : s;
+    return s.length > 80 ? `${s.slice(0, 77)}â€¦` : s;
   };
 
   const bizRevsTop = bizRevs.slice(0, 3);
@@ -392,7 +393,7 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
 
   const latestCompRev = new Map<string, (typeof compRevs)[number]>();
   for (const r of compRevs) {
-    if (!latestCompRev.has(r.competitorId)) latestCompRev.set(r.competitorId, r); // desc order → first is latest
+    if (!latestCompRev.has(r.competitorId)) latestCompRev.set(r.competitorId, r); // desc order â†’ first is latest
   }
   const compNameById = new Map(competitors.map((c) => [c.id, c.name]));
   const compRevsTop = [...latestCompRev.values()].slice(0, 5);
@@ -403,7 +404,7 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
     return {
       when: monthLabel(r.createdAt),
       competitor: compNameById.get(r.competitorId) ?? "a tracked competitor",
-      changes: fields.map((f) => `${f}: "${fmtVal(prev[f])}" → "${fmtVal(curr[f])}"`),
+      changes: fields.map((f) => `${f}: "${fmtVal(prev[f])}" â†’ "${fmtVal(curr[f])}"`),
     };
   });
 
@@ -415,7 +416,7 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref: `HIST-R${i + 1}`,
       type: "historical_analysis",
       dbId: null,
-      label: `Recurring pattern · ${r.value}`,
+      label: `Recurring pattern Â· ${r.value}`,
       detail: `"${r.dimension}: ${r.value}" emerged ${r.occurrences} times between ${r.firstSeen} and ${r.lastSeen} (memory: ${r.memoryRefs.join(", ")})`,
     });
   });
@@ -433,8 +434,8 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref: `HIST-M${i + 1}`,
       type: "historical_analysis",
       dbId: null,
-      label: `Momentum · ${m.value} ${m.direction}`,
-      detail: `"${m.dimension}: ${m.value}" has been ${m.direction} across ${m.consecutiveWindows} consecutive ${currentInsight?.windowDays ?? 30}-day views (shares newest→oldest: ${m.shares.join("%, ")}%)`,
+      label: `Momentum Â· ${m.value} ${m.direction}`,
+      detail: `"${m.dimension}: ${m.value}" has been ${m.direction} across ${m.consecutiveWindows} consecutive ${currentInsight?.windowDays ?? 30}-day views (shares newestâ†’oldest: ${m.shares.join("%, ")}%)`,
     });
   });
   // Absence is a finding too: register it as citable evidence so cards that
@@ -450,13 +451,13 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
       ref: "HIST-0",
       type: "historical_analysis",
       dbId: null,
-      label: "Historical comparison — no patterns yet",
+      label: "Historical comparison â€” no patterns yet",
       detail: `${memoryRows.length} stored market snapshot(s) analyzed: no recurring themes, no resemblance to past states, and no sustained momentum detected yet. Historical reasoning strengthens as memory accumulates.`,
     });
   }
 
   // P-5 M3: belief-history findings are citable evidence like any other
-  // finding — they point at their real revision rows.
+  // finding â€” they point at their real revision rows.
   businessChanges.forEach((c, i) => {
     evidence.push({
       ref: `HIST-B${i + 1}`,
@@ -481,117 +482,18 @@ export async function buildReasoningContext(campaignId: string, accountId: strin
   return { campaignId, currentInsight, historyCount: memoryRows.length, evidence, findings };
 }
 
-// ── deterministic fallback cards ─────────────────────────────────────────────
 
-export function buildDeterministicCards(ctx: ReasoningContext): ReasoningCard[] {
-  const cards: ReasoningCard[] = [];
-  const cur = ctx.currentInsight;
-  if (!cur) return cards;
-  const curRef = "MM-1";
-  const emerging = parseThemes(cur.emergingThemes);
-  const declining = parseThemes(cur.decliningThemes);
-  const conf = (cur.confidence as ReasoningCard["confidence"]) ?? "low";
 
-  cards.push({
-    cardType: "market_direction",
-    title: cur.headline,
-    body: cur.narrative,
-    evidenceRefs: [curRef],
-    confidence: conf,
-  });
-
-  const momentumBody = ctx.findings.momentum.length > 0
-    ? ctx.findings.momentum.map((m) => `"${m.value}" (${m.dimension.toLowerCase()}) is ${m.direction} across ${m.consecutiveWindows} consecutive periods (${m.shares.join("% → ")}%).`).join(" ")
-    : emerging.length > 0
-      ? emerging.slice(0, 3).map((t) => `${t.dimension}: "${t.value}" moved to ${t.share}%${t.deltaPp !== null ? ` (${t.deltaPp > 0 ? "+" : ""}${t.deltaPp}pp)` : ""}.`).join(" ")
-      : "No sustained momentum measurable yet — more history is needed.";
-  cards.push({
-    cardType: "market_momentum",
-    title: ctx.findings.momentum.length > 0 ? "Sustained movement detected" : "Momentum still forming",
-    body: momentumBody,
-    evidenceRefs: [curRef, ...ctx.findings.momentum.map((_, i) => `HIST-M${i + 1}`)],
-    confidence: ctx.findings.momentum.length > 0 ? conf : "low",
-  });
-
-  cards.push({
-    cardType: "recurring_pattern",
-    title: ctx.findings.recurring.length > 0 ? "This has happened before" : "No recurring behavior yet",
-    body: ctx.findings.recurring.length > 0
-      ? ctx.findings.recurring.map((r) => `"${r.value}" (${r.dimension.toLowerCase()}) emerged ${r.occurrences} times between ${r.firstSeen} and ${r.lastSeen}.`).join(" ")
-      : `Across ${ctx.historyCount} stored market snapshots, no theme has recurred yet — recurrence detection strengthens as history accumulates.`,
-    evidenceRefs: ctx.findings.recurring.length > 0 ? ctx.findings.recurring.map((_, i) => `HIST-R${i + 1}`) : [curRef],
-    confidence: ctx.findings.recurring.length > 0 ? "medium" : "low",
-  });
-
-  const biz = ctx.evidence.find((e) => e.ref === "BIZ-1");
-  const goal = ctx.evidence.find((e) => e.ref === "GOAL-1");
-  cards.push({
-    cardType: "strategic_context",
-    title: "How this relates to your business",
-    body: [
-      biz ? `Your profile: ${biz.detail.split(", ").slice(0, 3).join(", ")}.` : "No company profile stored yet.",
-      goal ? `Active objective: ${goal.detail}.` : "",
-      `The current market movement (${cur.headline.toLowerCase()}) is observed in your competitive set${emerging.length > 0 ? `, most visibly in ${emerging[0].dimension.toLowerCase()}` : ""}.`,
-    ].filter(Boolean).join(" "),
-    evidenceRefs: [curRef, ...(biz ? ["BIZ-1"] : []), ...(goal ? ["GOAL-1"] : [])],
-    confidence: biz ? conf : "low",
-  });
-
-  const shifts = (() => { try { const v = JSON.parse(cur.confirmedShifts); return Array.isArray(v) ? v : []; } catch { return []; } })();
-  const compRefs = ctx.evidence.filter((e) => e.type === "competitor").slice(0, 3).map((e) => e.ref);
-  cards.push({
-    cardType: "competitive_pressure",
-    title: shifts.length > 0 ? "Confirmed competitor shifts this period" : "No confirmed competitor shifts this period",
-    body: shifts.length > 0
-      ? shifts.slice(0, 3).map((s: any) => `${s.label} (${String(s.severity).toLowerCase()}, ${String(s.scope).toLowerCase()}${s.competitor ? `, ${s.competitor}` : ""}).`).join(" ")
-      : `No two-fetch-confirmed competitor shifts in this window; pressure is currently expressed through gradual pattern movement${declining.length > 0 ? ` and the decline of ${declining[0].value.toLowerCase()} messaging` : ""}.`,
-    evidenceRefs: [curRef, ...compRefs],
-    confidence: shifts.length > 0 ? "high" : conf,
-  });
-
-  const counts = new Map<string, number>();
-  for (const e of ctx.evidence) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
-  cards.push({
-    cardType: "evidence_summary",
-    title: "What this reasoning is built on",
-    body: [...counts.entries()].map(([t, n]) => `${n} ${t.replace(/_/g, " ")}${n > 1 ? "s" : ""}`).join(", ") + ".",
-    evidenceRefs: ctx.evidence.slice(0, 8).map((e) => e.ref),
-    confidence: "high",
-  });
-
-  cards.push({
-    cardType: "confidence",
-    title: `Overall confidence: ${conf}`,
-    body: `Current market view is based on ${JSON.parse(cur.basedOn || "{}").posts ?? "n/a"} classified posts across ${JSON.parse(cur.basedOn || "{}").competitors ?? "n/a"} competitors (data status: ${cur.dataStatus}), with ${ctx.historyCount} historical snapshots available for comparison.`,
-    evidenceRefs: [curRef],
-    confidence: conf,
-  });
-
-  const uncertainties: string[] = [];
-  if (cur.dataStatus === "thin") uncertainties.push("the current window has thin classified-post coverage");
-  if (ctx.historyCount < 3) uncertainties.push("historical memory is still shallow, so recurrence and momentum reads are early");
-  if (ctx.evidence.filter((e) => e.type === "performance_verdict").length === 0) uncertainties.push("no performance verdicts yet connect market movement to your own results");
-  cards.push({
-    cardType: "uncertainty",
-    title: "What remains uncertain",
-    body: uncertainties.length > 0 ? uncertainties.join("; ") + "." : "No major structural uncertainty beyond normal sampling limits.",
-    evidenceRefs: [curRef],
-    confidence: "high",
-  });
-
-  return cards;
-}
-
-// ── LLM reasoning (interpretation only) ──────────────────────────────────────
+// â”€â”€ LLM reasoning (interpretation only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const REASONER_SYSTEM_PROMPT = `You are a strategic reasoning engine for a business owner. You receive an EVIDENCE REGISTRY of verified intelligence (market insights, performance outcomes, historical analysis, company profile, objectives, competitors) plus deterministic historical findings.
 
-Your job: connect these sources into coherent, evidence-cited REASONING CARDS that answer — why does this matter, why now, who is affected, has this happened before, is it temporary or recurring, is it relevant to THIS company, which signals reinforce each other.
+Your job: connect these sources into coherent, evidence-cited REASONING CARDS that answer â€” why does this matter, why now, who is affected, has this happened before, is it temporary or recurring, is it relevant to THIS company, which signals reinforce each other.
 
 STRICT RULES:
 1. Use ONLY facts present in the evidence registry. Never invent numbers, competitors, events, or history.
-2. Every card MUST cite the evidence refs (e.g. "MM-1", "HIST-R1", "BIZ-1") it draws from in evidenceRefs. Cite only refs that appear in the evidence registry. The historicalFindings block is context only — cite it through its corresponding HIST-* registry entries; NEVER cite "historicalFindings" or any other non-registry string. If no HIST-* entries exist, ground historical statements in MM-* entries instead. A card reporting ABSENCE (no recurrence found, no confirmed shifts, shallow history) still needs evidence: cite the MM-* entries whose data establishes that absence.
-3. Historical comparisons may ONLY use the HIST-* findings and MM-* entries — never remembered or assumed history.
+2. Every card MUST cite the evidence refs (e.g. "MM-1", "HIST-R1", "BIZ-1") it draws from in evidenceRefs. Cite only refs that appear in the evidence registry. The historicalFindings block is context only â€” cite it through its corresponding HIST-* registry entries; NEVER cite "historicalFindings" or any other non-registry string. If no HIST-* entries exist, ground historical statements in MM-* entries instead. A card reporting ABSENCE (no recurrence found, no confirmed shifts, shallow history) still needs evidence: cite the MM-* entries whose data establishes that absence.
+3. Historical comparisons may ONLY use the HIST-* findings and MM-* entries â€” never remembered or assumed history.
 4. All calculations are already done. Never derive new percentages or counts.
 5. Observations and context ONLY. NEVER recommend actions or strategy ("should", "recommend", "opportunity to" are forbidden).
 6. Causation: hedged framing only ("consistent with", "might explain"); never proven causation about business outcomes.
@@ -603,54 +505,37 @@ Produce EXACTLY one card per type: market_direction, market_momentum, recurring_
 Respond ONLY with JSON:
 { "cards": [ { "cardType": "...", "title": "short specific title", "body": "2-4 sentences", "evidenceRefs": ["MM-1"], "confidence": "high|medium|low" } ] }`;
 
-export async function runReasoner(ctx: ReasoningContext, accountId: string): Promise<ReasoningCard[]> {
+async function generateReasonerCandidate(ctx: ReasoningContext, accountId: string, lastError: string = ""): Promise<{ cards: ReasoningCard[] }> {
   const payload = {
     historicalFindings: ctx.findings,
     evidenceRegistry: ctx.evidence.map(({ ref, type, label, detail }) => ({ ref, type, label, detail })),
   };
-  let lastError = "";
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const userContent =
-      attempt === 1
-        ? `Evidence:\n${JSON.stringify(payload, null, 2)}`
-        : `Evidence:\n${JSON.stringify(payload, null, 2)}\n\n[SELF-CORRECTION] Your previous response failed: ${lastError}. Return ONLY complete valid JSON with exactly one card per required type. Keep bodies concise.`;
-    const response = await aiChat({
-      model: REASONER_MODEL,
-      max_tokens: 1800,
-      temperature: 0.2,
-      timeoutMs: 90_000,
-      accountId,
-      endpoint: "strategic-reasoning-cards",
-      messages: [
-        { role: "system", content: REASONER_SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ],
-    });
-    const raw = response.choices?.[0]?.message?.content ?? "";
-    try {
-      const match = raw.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("no JSON object in response");
-      const parsed = JSON.parse(match[0]) as { cards?: unknown };
-      if (!Array.isArray(parsed.cards)) throw new Error("missing cards array");
-      const cards = parsed.cards.filter(
-        (c): c is ReasoningCard =>
-          !!c && typeof (c as any).cardType === "string" && CARD_TYPES.includes((c as any).cardType) &&
-          typeof (c as any).title === "string" && typeof (c as any).body === "string" &&
-          Array.isArray((c as any).evidenceRefs) &&
-          ["high", "medium", "low"].includes((c as any).confidence),
-      );
-      const missing = CARD_TYPES.filter((t) => !cards.some((c) => c.cardType === t));
-      if (missing.length > 0) throw new Error(`missing card types: ${missing.join(", ")}`);
-      return CARD_TYPES.map((t) => cards.find((c) => c.cardType === t)!);
-    } catch (err) {
-      lastError = (err as Error).message;
-      console.warn(`${LOG} REASONER_PARSE_RETRY attempt=${attempt} detail=${lastError}`);
-    }
-  }
-  throw new Error(`Reasoner failed after 2 attempts: ${lastError}`);
+
+  const userContent = lastError
+    ? `Evidence:\n${JSON.stringify(payload, null, 2)}\n\n[SELF-CORRECTION] Your previous response failed: ${lastError}. Return ONLY complete valid JSON with exactly one card per required type. Keep bodies concise.`
+    : `Evidence:\n${JSON.stringify(payload, null, 2)}`;
+
+  const response = await aiChat({
+    model: REASONER_MODEL,
+    max_tokens: 1800,
+    temperature: 0.2,
+    timeoutMs: 90_000,
+    accountId,
+    endpoint: "strategic-reasoning-cards",
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: REASONER_SYSTEM_PROMPT },
+      { role: "user", content: userContent },
+    ],
+  });
+
+  const raw = response.choices?.[0]?.message?.content ?? "{}";
+  const match = raw.match(/\{[\s\S]*\}/);
+  const jsonStr = match ? match[0] : "{}";
+  return JSON.parse(jsonStr);
 }
 
-// ── deterministic guards ──────────────────────────────────────────────────────
+// â”€â”€ deterministic guards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const RECOMMENDATION_PATTERNS = [
   /\byou should\b/i, /\bwe recommend\b/i, /\brecommendation\b/i, /\bconsider (?:adopting|shifting|using|adding|investing)\b/i,
@@ -686,14 +571,14 @@ export function runCardGuards(ctx: ReasoningContext, cards: ReasoningCard[]): { 
   const allowedNumbers = collectAllowedNumbers(ctx);
 
   for (const card of cards) {
-    // 1. Every cited ref must exist — the core grounding contract.
+    // 1. Every cited ref must exist â€” the core grounding contract.
     for (const ref of card.evidenceRefs) {
       if (!validRefs.has(ref)) violations.push(`${card.cardType}: cites nonexistent evidence "${ref}"`);
     }
     if (card.evidenceRefs.length === 0) violations.push(`${card.cardType}: cites no evidence`);
 
     const text = `${card.title} ${card.body}`;
-    // 2. Numbers must come from the evidence registry (years excluded — month
+    // 2. Numbers must come from the evidence registry (years excluded â€” month
     //    labels like "March 2026" are legitimate evidence citations).
     for (const m of text.matchAll(/\d+(?:\.\d+)?/g)) {
       const n = Math.abs(parseFloat(m[0]));
@@ -711,7 +596,7 @@ export function runCardGuards(ctx: ReasoningContext, cards: ReasoningCard[]): { 
   return { ok: violations.length === 0, violations };
 }
 
-// ── LLM judge ─────────────────────────────────────────────────────────────────
+// â”€â”€ LLM judge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const JUDGE_SYSTEM_PROMPT = `You are a strict grounding judge. You receive (a) a verified EVIDENCE REGISTRY with deterministic historical findings and (b) AI-written reasoning cards, each citing evidence refs.
 
@@ -720,7 +605,7 @@ REJECT if ANY card:
 2. Names a competitor, theme, or time period absent from the registry.
 3. Asserts proven causation about business OUTCOMES (sales, revenue, results) or definitively that one signal caused another. NOTE: describing signals as connected, reinforcing, coexisting, or part of one movement is REQUIRED reasoning and NOT a violation when the cited evidence moves in compatible directions; noting that competitor objectives or postures are consistent with observed messaging trends is descriptive grouping, not causation. Hedged language ("suggesting", "consistent with", "may", "might") is always acceptable. Only flag definitive unhedged claims that something CAUSED a business outcome.
 4. Gives strategic advice or recommendations (what the business should do).
-5. Overstates confidence — flag only clear overstatement, e.g. certainty language ("definitely", "proves") over evidence marked low-confidence or thin. A card's confidence field reflecting the strength of its cited pattern is the intended design, not a violation.
+5. Overstates confidence â€” flag only clear overstatement, e.g. certainty language ("definitely", "proves") over evidence marked low-confidence or thin. A card's confidence field reflecting the strength of its cited pattern is the intended design, not a violation.
 6. Is generic filler that ignores the company-specific evidence.
 
 Otherwise PASS. Judge substance, not style.
@@ -758,7 +643,7 @@ export async function judgeCards(ctx: ReasoningContext, cards: ReasoningCard[], 
   };
 }
 
-// ── orchestration + cache ─────────────────────────────────────────────────────
+// â”€â”€ orchestration + cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const cardsCache = new Map<string, { at: number; fingerprint: string; result: ReasoningResult }>();
 
@@ -778,14 +663,7 @@ export async function getReasoningCards(
   const ctx = await buildReasoningContext(campaignId, accountId);
 
   if (!ctx.currentInsight) {
-    return {
-      state: "no_history",
-      source: "deterministic",
-      cards: [],
-      evidence: [],
-      generatedAt: new Date().toISOString(),
-      deterministicReason: "no_trigger",
-    };
+    throw new LLMReliabilityError("EVIDENCE_FAILURE: Missing current market insight", "EVIDENCE_FAILURE");
   }
 
   const cacheKey = `${accountId}:${campaignId}`; // tenant-safe cache key
@@ -799,33 +677,72 @@ export async function getReasoningCards(
 
   const evidencePublic = ctx.evidence.map(({ ref, type, label }) => ({ ref, type, label }));
   let result: ReasoningResult;
-  // P-5: rejected AI output is persisted to reasoning_runs (accuracy learning),
-  // NEVER served. Captured here, written by persistReasoningRun below.
   let rejectedCards: ReasoningCard[] | null = null;
   let rejectionReasons: string[] | null = null;
+
   try {
-    const cards = await runReasoner(ctx, accountId);
-    const guards = runCardGuards(ctx, cards);
-    if (!guards.ok) {
-      console.warn(`${LOG} GUARDS_REJECTED campaign=${campaignId} violations=${JSON.stringify(guards.violations)}`);
-      rejectedCards = cards;
-      rejectionReasons = guards.violations;
-      result = { state: "ready", source: "deterministic", cards: buildDeterministicCards(ctx), evidence: evidencePublic, generatedAt: new Date().toISOString(), deterministicReason: "guards_rejected" };
-    } else {
-      const judge = await judgeCards(ctx, cards, accountId);
-      if (judge.verdict !== "PASS") {
-        console.warn(`${LOG} JUDGE_REJECTED campaign=${campaignId} violations=${JSON.stringify(judge.violations)}`);
-        rejectedCards = cards;
-        rejectionReasons = judge.violations;
-        result = { state: "ready", source: "deterministic", cards: buildDeterministicCards(ctx), evidence: evidencePublic, generatedAt: new Date().toISOString(), deterministicReason: "judge_rejected" };
-      } else {
-        result = { state: "ready", source: "ai", cards, evidence: evidencePublic, generatedAt: new Date().toISOString() };
+    const { result: candidate } = await generateWithRepair<{ ctx: ReasoningContext, accountId: string }, { cards: ReasoningCard[] }>({
+      engineName: "StrategicReasoning",
+      touchpointName: "ReasoningCards",
+      authoritativeInput: { ctx, accountId },
+      generate: async (input) => generateReasonerCandidate(input.ctx, input.accountId),
+      judge: async (input, parsed) => {
+        if (!parsed || !Array.isArray(parsed.cards)) {
+          return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: [{ reason: "missing cards array", rule: "schema_validation" }] };
+        }
+        const cards = parsed.cards;
+        const missing = CARD_TYPES.filter((t) => !cards.some((c) => c.cardType === t));
+        if (missing.length > 0) {
+          return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: [{ reason: `missing card types: ${missing.join(", ")}`, rule: "schema_validation" }] };
+        }
+        
+        const validShape = cards.every(
+          (c): c is ReasoningCard =>
+            !!c && typeof c.cardType === "string" && CARD_TYPES.includes(c.cardType as any) &&
+            typeof c.title === "string" && typeof c.body === "string" &&
+            Array.isArray(c.evidenceRefs) &&
+            ["high", "medium", "low"].includes(c.confidence)
+        );
+        if (!validShape) {
+          return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: [{ reason: "malformed cards array", rule: "schema_validation" }] };
+        }
+
+        const guards = runCardGuards(input.ctx, cards);
+        if (!guards.ok) {
+          return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: guards.violations.map(v => ({ reason: v, rule: "code_guards" })) };
+        }
+
+        const judge = await judgeCards(input.ctx, cards, input.accountId);
+        if (judge.verdict !== "PASS") {
+          return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: judge.violations.map(v => ({ reason: v, rule: "llm_judge" })) };
+        }
+
+        return { valid: true };
+      },
+      repair: async (input, _, rejections) => {
+        const errs = rejections.map(r => r.reason).join("; ");
+        return generateReasonerCandidate(input.ctx, input.accountId, errs);
       }
+    });
+
+    let finalCards = (candidate.cards || []);
+    if (Array.isArray(finalCards)) {
+       finalCards = CARD_TYPES.map((t) => finalCards.find((c) => c.cardType === t)).filter(Boolean) as ReasoningCard[];
     }
-  } catch (err) {
-    console.error(`${LOG} LLM_FAILED campaign=${campaignId} detail=${(err as Error).message}`);
-    rejectionReasons = [(err as Error).message];
-    result = { state: "ready", source: "deterministic", cards: buildDeterministicCards(ctx), evidence: evidencePublic, generatedAt: new Date().toISOString(), deterministicReason: "llm_failed" };
+
+    result = { state: "ready", source: "ai", cards: finalCards, evidence: evidencePublic, generatedAt: new Date().toISOString() };
+    
+    if ((candidate as any)._system_validation) {
+       (result as any)._system_validation = (candidate as any)._system_validation;
+       rejectedCards = finalCards;
+       rejectionReasons = [(candidate as any)._system_validation.reason];
+       console.log(`${LOG} REASONER_SOFT_FAIL campaign=${campaignId} detail=${(candidate as any)._system_validation.reason}`);
+    }
+  } catch (err: any) {
+    if (err instanceof LLMReliabilityError && err.failureClass === "EVIDENCE_FAILURE") {
+      throw err;
+    }
+    throw err;
   }
 
   const nowMs = Date.now();
@@ -849,7 +766,7 @@ export async function getReasoningCards(
   return result;
 }
 
-// ── P-5 run persistence + evidence registration ──────────────────────────────
+// â”€â”€ P-5 run persistence + evidence registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const KIND_BY_TYPE: Record<EvidenceItem["type"], EvidenceKind> = {
   market_insight: "market_insight",
@@ -878,7 +795,7 @@ function toRegistryEntry(e: EvidenceItem): RegistryEntry {
   // findings (no backing row) get a content-hash source id. Row-backed ids
   // are content-versioned (`<rowId>@<hash>`) so evidence from a MUTABLE row
   // (business_data_layer, ci_competitors, strategy_memory) becomes NEW
-  // registry evidence when the row changes — old citations keep resolving to
+  // registry evidence when the row changes â€” old citations keep resolving to
   // the text that existed at run time. Immutable rows hash stably.
   let sourceTable = TABLE_BY_TYPE[e.type];
   if (e.ref.startsWith("HIST-B")) sourceTable = "business_data_revisions";
@@ -895,9 +812,9 @@ function toRegistryEntry(e: EvidenceItem): RegistryEntry {
 
 /**
  * Persist one fresh reasoning run: register the evidence the served cards
- * cite (lazy — only cited facts enter the registry) and record the run with
+ * cite (lazy â€” only cited facts enter the registry) and record the run with
  * status, cited UIDs, and any rejected AI output + reasons. `no_history`
- * early-returns are not recorded — nothing was interpreted. Never throws.
+ * early-returns are not recorded â€” nothing was interpreted. Never throws.
  */
 async function persistReasoningRun(
   ctx: ReasoningContext,
@@ -933,7 +850,7 @@ async function persistReasoningRun(
   }
 }
 
-/** Customer-safe projection — strips internal telemetry; the route serializes ONLY this. */
+/** Customer-safe projection â€” strips internal telemetry; the route serializes ONLY this. */
 export function toCustomerReasoningPayload(result: ReasoningResult): {
   state: "ready" | "no_history";
   source: "ai" | "deterministic";

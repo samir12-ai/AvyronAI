@@ -46,8 +46,12 @@ export function validateHandle(raw: unknown): string {
 
 export function validateUserUrl(raw: unknown): string {
   if (typeof raw !== "string") throw new Error("URL must be a string");
+  let str = raw.trim();
+  if (!str.startsWith("http://") && !str.startsWith("https://")) {
+    str = "https://" + str;
+  }
   let parsed: URL;
-  try { parsed = new URL(raw.trim()); }
+  try { parsed = new URL(str); }
   catch { throw new Error("Invalid URL"); }
   if (parsed.protocol !== "https:") throw new Error("Only https URLs allowed");
   return parsed.toString();

@@ -1,11 +1,3 @@
-import type { Express } from "express";
-import { db } from "../db";
-import { funnelDefinitions, funnelContentMap, leads, conversionEvents } from "@shared/schema";
-import { eq, and, sql, desc } from "drizzle-orm";
-import { featureFlagService } from "../feature-flags";
-import { logAudit } from "../audit";
-import { aiChat } from "../ai-client";
-
 import { resolveAccountId } from "../auth";
 const DEFAULT_FUNNEL_STAGES = JSON.stringify([
   { name: "awareness", label: "Awareness", order: 1, description: "First touchpoint - brand discovery" },
@@ -18,11 +10,13 @@ export function registerFunnelLogicRoutes(app: Express) {
   app.get("/api/funnels", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.json({ funnels: [], disabled: true });
       }
       const result = await db.select().from(funnelDefinitions)
-        .where(eq(funnelDefinitions.accountId, accountId))
+        .where(and(eq(funnelDefinitions.accountId, accountId), eq(funnelDefinitions.campaignId, campaignId)))
         .orderBy(desc(funnelDefinitions.createdAt));
 
       if (result.length === 0) {
@@ -41,6 +35,8 @@ export function registerFunnelLogicRoutes(app: Express) {
   app.post("/api/funnels", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
@@ -61,6 +57,8 @@ export function registerFunnelLogicRoutes(app: Express) {
   app.post("/api/funnels/map-content", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }
@@ -87,16 +85,18 @@ export function registerFunnelLogicRoutes(app: Express) {
   app.get("/api/funnels/health", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.json({ health: null, disabled: true });
       }
 
-      const allLeads = await db.select().from(leads).where(eq(leads.accountId, accountId));
+      const allLeads = await db.select().from(leads).where(and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId)));
       const stages = {
         awareness: 0, engagement: 0, lead: 0, customer: 0,
       };
 
-      const events = await db.select().from(conversionEvents).where(eq(conversionEvents.accountId, accountId));
+      const events = await db.select().from(conversionEvents).where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)));
       stages.awareness = events.filter(e => e.eventType === "page_view" || e.eventType === "link_click").length;
       stages.engagement = events.filter(e => e.eventType === "cta_click" || e.eventType === "whatsapp_click").length;
       stages.lead = allLeads.filter(l => ["new", "contacted", "qualified"].includes(l.status || "")).length;
@@ -136,6 +136,8 @@ export function registerFunnelLogicRoutes(app: Express) {
   app.post("/api/funnels/ai-suggestions", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("funnel_logic_enabled", accountId))) {
         return res.status(403).json({ error: "Funnel Logic is not enabled" });
       }

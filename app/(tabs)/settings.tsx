@@ -24,6 +24,7 @@ import { useCampaign } from '@/context/CampaignContext';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
+import { GlobalHeader } from '@/components/GlobalHeader';
 import { PlatformConnection } from '@/components/PlatformConnection';
 import { BusinessProfileModal } from '@/components/BusinessProfile';
 import { getApiUrl, apiRequest , authFetch } from '@/lib/query-client';
@@ -88,7 +89,7 @@ const platformIcons: Record<string, { icon: keyof typeof Ionicons.glyphMap; colo
 
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { 
@@ -535,19 +536,16 @@ export default function SettingsScreen() {
   const connectedCount = platformConnections.filter(p => p.isConnected).length;
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: '#0F0F13' }]}>
+      <GlobalHeader title="SETTINGS" />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: Platform.OS === 'web' ? 67 + 16 : insets.top + 16 },
+          { paddingTop: Platform.OS === 'web' ? 67 + 16 : 16 },
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[styles.title, { color: colors.text }]}>{t('settings.title')}</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          {t('settings.subtitle')}
-        </Text>
 
         {user && (
           <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -888,302 +886,6 @@ export default function SettingsScreen() {
           ) : null}
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardTitleRow}>
-              <Ionicons name="stats-chart" size={20} color={colors.primary} />
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Campaign Performance</Text>
-            </View>
-            <View style={[styles.badge, { backgroundColor: isMetaConnected ? (colors.success + '20') : (colors.primary + '20') }]}>
-              <Text style={[styles.badgeText, { color: isMetaConnected ? colors.success : colors.primary }]}>
-                {isMetaConnected ? 'Meta Live' : 'Manual Input'}
-              </Text>
-            </View>
-          </View>
-          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Enter your real campaign numbers. We use them to tune what to test next, your spending guardrails, channel mix, evidence strength, and your live plan.
-          </Text>
-
-          {!selectedCampaignId ? (
-            <View style={{ padding: 16, alignItems: 'center' }}>
-              <Text style={{ color: colors.textMuted, fontSize: 14 }}>Select a campaign first to enter performance metrics</Text>
-            </View>
-          ) : (
-            <View style={{ marginTop: 12, gap: 10 }}>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Spend ($)</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualSpend}
-                    onChangeText={setManualSpend}
-                    placeholder="e.g. 1500"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
-                    testID="manual-metric-spend"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Revenue ($)</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualRevenue}
-                    onChangeText={setManualRevenue}
-                    placeholder="e.g. 4200"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
-                    testID="manual-metric-revenue"
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Leads</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualLeads}
-                    onChangeText={setManualLeads}
-                    placeholder="e.g. 80"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                    testID="manual-metric-leads"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Conversions</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualConversions}
-                    onChangeText={setManualConversions}
-                    placeholder="e.g. 24"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                    testID="manual-metric-conversions"
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Impressions</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualImpressions}
-                    onChangeText={setManualImpressions}
-                    placeholder="e.g. 50000"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                    testID="manual-metric-impressions"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Clicks</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={manualClicks}
-                    onChangeText={setManualClicks}
-                    placeholder="e.g. 1200"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                    testID="manual-metric-clicks"
-                  />
-                </View>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4, padding: 10, borderRadius: 8, backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.cardBorder }}>
-                <View style={{ flex: 1, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: '600' as const }}>CPA (Cost / Conversion)</Text>
-                  <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' as const, marginTop: 2 }}>
-                    ${manualDerived.cpa.toFixed(2)}
-                  </Text>
-                </View>
-                <View style={{ width: 1, backgroundColor: colors.cardBorder }} />
-                <View style={{ flex: 1, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: '600' as const }}>ROAS (Revenue / Spend)</Text>
-                  <Text style={{ color: manualDerived.roas >= 1 ? colors.success : colors.text, fontSize: 16, fontWeight: '700' as const, marginTop: 2 }}>
-                    {manualDerived.roas.toFixed(2)}x
-                  </Text>
-                </View>
-              </View>
-
-              <Pressable
-                onPress={handleSaveManualMetrics}
-                disabled={manualSaving}
-                testID="save-manual-metrics"
-                style={({ pressed }) => [{
-                  marginTop: 8,
-                  padding: 14,
-                  borderRadius: 10,
-                  backgroundColor: colors.primary,
-                  alignItems: 'center',
-                  opacity: (pressed || manualSaving) ? 0.7 : 1,
-                }]}
-              >
-                {manualSaving ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={{ color: '#fff', fontWeight: '600' as const, fontSize: 15 }}>Save Campaign Metrics</Text>
-                )}
-              </Pressable>
-            </View>
-          )}
-        </View>
-
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardTitleRow}>
-              <Ionicons name="repeat" size={20} color="#8B5CF6" />
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Retention Metrics</Text>
-            </View>
-            <View style={[styles.badge, { backgroundColor: '#8B5CF6' + '20' }]}>
-              <Text style={[styles.badgeText, { color: '#8B5CF6' }]}>Engine Input</Text>
-            </View>
-          </View>
-          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-            Enter raw business numbers. The system automatically computes retention rate, LTV, churn risk, and retention strength.
-          </Text>
-
-          {!selectedCampaignId ? (
-            <View style={{ padding: 16, alignItems: 'center' }}>
-              <Text style={{ color: colors.textMuted, fontSize: 14 }}>Select a campaign first to enter retention data</Text>
-            </View>
-          ) : (
-            <View style={{ marginTop: 12, gap: 10 }}>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Total Customers *</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retTotalCustomers}
-                    onChangeText={setRetTotalCustomers}
-                    placeholder="e.g. 500"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Total Purchases *</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retTotalPurchases}
-                    onChangeText={setRetTotalPurchases}
-                    placeholder="e.g. 750"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Returning Customers *</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retReturningCustomers}
-                    onChangeText={setRetReturningCustomers}
-                    placeholder="e.g. 120"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Avg Order Value ($)</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retAvgOrderValue}
-                    onChangeText={setRetAvgOrderValue}
-                    placeholder="e.g. 45"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Refund Count</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retRefundCount}
-                    onChangeText={setRetRefundCount}
-                    placeholder="e.g. 15"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Monthly Active</Text>
-                  <TextInput
-                    style={[styles.textInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.cardBorder }]}
-                    value={retMonthlyCustomers}
-                    onChangeText={setRetMonthlyCustomers}
-                    placeholder="e.g. 200"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="number-pad"
-                  />
-                </View>
-              </View>
-
-              <View style={{ marginTop: 4 }}>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary, marginBottom: 6 }]}>Time Window</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {[{ label: '30 Days', value: '30' }, { label: '60 Days', value: '60' }, { label: '90 Days', value: '90' }].map(w => (
-                    <Pressable
-                      key={w.value}
-                      onPress={() => setRetDataWindow(w.value)}
-                      style={{
-                        flex: 1,
-                        padding: 10,
-                        borderRadius: 8,
-                        borderWidth: 1,
-                        borderColor: retDataWindow === w.value ? '#8B5CF6' : colors.cardBorder,
-                        backgroundColor: retDataWindow === w.value ? '#8B5CF6' + '15' : 'transparent',
-                        alignItems: 'center' as const,
-                      }}
-                    >
-                      <Text style={{ color: retDataWindow === w.value ? '#8B5CF6' : colors.textSecondary, fontSize: 13, fontWeight: '500' as const }}>{w.label}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                <View style={[styles.derivedMetric, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Repeat Rate</Text>
-                  <Text style={{ color: '#8B5CF6', fontSize: 16, fontWeight: '700' as const }}>{(retDerived.repeatPurchaseRate * 100).toFixed(0)}%</Text>
-                </View>
-                <View style={[styles.derivedMetric, { backgroundColor: '#8B5CF6' + '10', borderColor: '#8B5CF6' + '30' }]}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Est. LTV</Text>
-                  <Text style={{ color: '#8B5CF6', fontSize: 16, fontWeight: '700' as const }}>${retDerived.ltv.toFixed(0)}</Text>
-                </View>
-                <View style={[styles.derivedMetric, { backgroundColor: (retDerived.churnRisk > 0.5 ? '#EF4444' : '#10B981') + '10', borderColor: (retDerived.churnRisk > 0.5 ? '#EF4444' : '#10B981') + '30' }]}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Churn Risk</Text>
-                  <Text style={{ color: retDerived.churnRisk > 0.5 ? '#EF4444' : '#10B981', fontSize: 16, fontWeight: '700' as const }}>{(retDerived.churnRisk * 100).toFixed(0)}%</Text>
-                </View>
-                <View style={[styles.derivedMetric, { backgroundColor: '#3B82F6' + '10', borderColor: '#3B82F6' + '30' }]}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Retention</Text>
-                  <Text style={{ color: '#3B82F6', fontSize: 16, fontWeight: '700' as const }}>{(retDerived.retentionStrength * 100).toFixed(0)}%</Text>
-                </View>
-              </View>
-
-              <Pressable
-                onPress={handleSaveRetentionMetrics}
-                disabled={retSaving}
-                style={({ pressed }) => [{
-                  backgroundColor: '#8B5CF6',
-                  padding: 14,
-                  borderRadius: 10,
-                  alignItems: 'center' as const,
-                  marginTop: 6,
-                  opacity: (pressed || retSaving) ? 0.7 : 1,
-                }]}
-              >
-                {retSaving ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={{ color: '#fff', fontWeight: '600' as const, fontSize: 15 }}>Save Retention Data</Text>
-                )}
-              </Pressable>
-            </View>
-          )}
-        </View>
 
         <Pressable
           onPress={() => {

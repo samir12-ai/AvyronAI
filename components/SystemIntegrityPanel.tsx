@@ -172,7 +172,7 @@ function EngineCheckRow({ check, isDark }: { check: EngineCheck; isDark: boolean
 
 export default function SystemIntegrityPanel() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const { activeCampaignId } = useCampaign();
   const [report, setReport] = useState<IntegrityReport | null>(null);
   const [loading, setLoading] = useState(false);

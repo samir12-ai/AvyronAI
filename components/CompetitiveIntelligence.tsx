@@ -11,6 +11,8 @@ import {
   Alert,
   useColorScheme,
   Platform,
+  FlatList,
+  LayoutAnimation,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DataFreshnessWarning from '@/components/DataFreshnessWarning';
@@ -18,11 +20,163 @@ import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useCreativeContext } from '@/context/CreativeContext';
 import { useApp } from '@/context/AppContext';
 import { useCampaign } from '@/context/CampaignContext';
 import { normalizeEngineSnapshot } from '@/lib/engine-snapshot';
+
+export interface EvidenceItem {
+  source: string;
+  signal: string;
+  competitor: string;
+  raw_metric: string;
+}
+
+export interface StrategicInsight {
+  insight: string;
+  why: string;
+  evidence_summary: EvidenceItem[];
+  action_item: string;
+}
+
+export const StrategicInsightCard = React.memo(({ insight, isDark, getPulseColor }: { insight: StrategicInsight; isDark: boolean; getPulseColor: (pulse: string) => string }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  const toggleExpand = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded(!expanded);
+  };
+
+  return (
+    <View style={[cardStyles.card, { backgroundColor: isDark ? '#1A1A24' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.05)' : '#E2E8E4' }]}>
+      <View style={cardStyles.accentStrip} />
+      <View style={cardStyles.cardContent}>
+        <Text style={cardStyles.cardHeader}>Insight</Text>
+        <Text style={[cardStyles.insightText, { color: isDark ? '#FFFFFF' : '#111' }]}>
+          {insight.insight}
+        </Text>
+
+        <Text style={[cardStyles.cardHeader, { marginTop: 12, color: '#3B82F6' }]}>Action Item</Text>
+        <Text style={[cardStyles.actionText, { color: isDark ? '#E5E7EB' : '#333' }]}>
+          {insight.action_item}
+        </Text>
+
+        <Pressable onPress={toggleExpand} style={cardStyles.expandButton}>
+          <Text style={cardStyles.expandButtonText}>
+            {expanded ? 'Hide Evidence ▲' : 'View Evidence ▾'}
+          </Text>
+        </Pressable>
+
+        {expanded && (
+          <View style={cardStyles.expandedContent}>
+            <Text style={cardStyles.cardHeader}>Why</Text>
+            <Text style={[cardStyles.whyText, { color: isDark ? '#D1D5DB' : '#444' }]}>
+              {insight.why}
+            </Text>
+
+            <Text style={[cardStyles.cardHeader, { marginTop: 12 }]}>Evidence</Text>
+            {insight.evidence_summary?.map((ev, idx) => (
+              <View key={idx} style={cardStyles.evidenceItem}>
+                <View style={cardStyles.evidenceBullet} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[cardStyles.evidenceText, { color: isDark ? '#E5E7EB' : '#333' }]}>
+                    <Text style={{ fontWeight: 'bold' }}>{ev.competitor}: </Text>
+                    {ev.signal}
+                  </Text>
+                  <Text style={cardStyles.rawMetricText}>
+                    [{ev.source}] {ev.raw_metric}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    </View>
+  );
+});
+
+const cardStyles = StyleSheet.create({
+  card: {
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 16,
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  accentStrip: {
+    width: 6,
+    backgroundColor: '#8B5CF6',
+  },
+  cardContent: {
+    flex: 1,
+    padding: 16,
+  },
+  cardHeader: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  insightText: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    lineHeight: 22,
+  },
+  actionText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  expandButton: {
+    marginTop: 14,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    borderRadius: 8,
+  },
+  expandButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8B5CF6',
+  },
+  expandedContent: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  whyText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  evidenceItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 6,
+  },
+  evidenceBullet: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#22C55E',
+    marginTop: 6,
+    marginRight: 8,
+  },
+  evidenceText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  rawMetricText: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    marginTop: 2,
+    fontFamily: 'monospace',
+  },
+});
 
 interface DataCoverage {
   analysisLevel: string;
@@ -73,7 +227,7 @@ interface Competitor {
 
 
 
-type CIView = 'overview' | 'competitors' | 'threats' | 'timeline';
+type CIView = 'overview' | 'competitors' | 'content_messaging' | 'market_dynamics' | 'changes';
 
 
 export default function CompetitiveIntelligence() {
@@ -94,6 +248,7 @@ export default function CompetitiveIntelligence() {
   const [addAndFetch, setAddAndFetch] = useState(false);
   const [miv3Override, setMiv3Override] = useState<any>(null);
   const [editingCompetitorId, setEditingCompetitorId] = useState<string | null>(null);
+  const [localExecutiveSummary, setLocalExecutiveSummary] = useState<any>(null);
 
   const emptyComp = {
     name: '', profileLink: '', businessType: '', primaryObjective: '',
@@ -122,6 +277,7 @@ export default function CompetitiveIntelligence() {
     queryKey: ['mi-v3-snapshot', activeCampaignId],
     enabled: !!activeCampaignId,
     gcTime: 30 * 60 * 1000,
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       const snap = query.state.data;
       if (snap?.dataStatus === 'ENRICHING') return 30000;
@@ -130,10 +286,11 @@ export default function CompetitiveIntelligence() {
     queryFn: async () => {
       const res = await authFetch(new URL(`/api/ci/mi-v3/snapshot/${activeCampaignId}`, baseUrl).toString());
       const data = await safeApiJson(res);
+      console.log('MI Payload received:', data);
       const normalized = normalizeEngineSnapshot(data, 'mi');
       if (normalized && data.output) return { ...data, snapshot: normalized.snapshot };
       if (data.snapshot && data.output) return data;
-      return null;
+      return data;
     },
   });
 
@@ -167,6 +324,46 @@ export default function CompetitiveIntelligence() {
   }, [activeCampaignId]);
 
   const miv3Result = miv3Override || cachedSnapshot || null;
+
+  // ── Stale-While-Revalidate: localExecutiveSummary state update ──
+  useEffect(() => {
+    if (miv3Result) {
+      let extracted: any = null;
+      if (miv3Result.snapshot?.executiveSummaryData) {
+        try {
+          extracted = typeof miv3Result.snapshot.executiveSummaryData === 'string'
+            ? JSON.parse(miv3Result.snapshot.executiveSummaryData)
+            : miv3Result.snapshot.executiveSummaryData;
+        } catch {}
+      } else if (miv3Result.executiveSummaryData) {
+        try {
+          extracted = typeof miv3Result.executiveSummaryData === 'string'
+            ? JSON.parse(miv3Result.executiveSummaryData)
+            : miv3Result.executiveSummaryData;
+        } catch {}
+      } else if (miv3Result.envelope?.data?.executiveSummaryData) {
+        extracted = miv3Result.envelope.data.executiveSummaryData;
+      }
+      
+      // ONLY overwrite local state when the payload is successfully received and parsed
+      if (extracted && Array.isArray(extracted.insights)) {
+        setLocalExecutiveSummary(extracted);
+      }
+    }
+  }, [miv3Result]);
+
+  useEffect(() => {
+    setLocalExecutiveSummary(null);
+  }, [activeCampaignId]);
+
+  const getPulseColor = (pulse: string) => {
+    switch (pulse) {
+      case 'Stable': return '#10B981';
+      case 'Aggressive': return '#F59E0B';
+      case 'Vulnerable': return '#EF4444';
+      default: return '#9CA3AF';
+    }
+  };
 
   const { data: timelineData } = useQuery({
     queryKey: ['ci-miv3-history', activeCampaignId],
@@ -383,9 +580,10 @@ export default function CompetitiveIntelligence() {
     <View style={[s.subTabBar, { backgroundColor: isDark ? '#0A0E14' : '#F5F7FA', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
       {[
         { key: 'overview' as CIView, icon: 'eye-outline' as const, label: 'Overview' },
-        { key: 'competitors' as CIView, icon: 'trophy-outline' as const, label: 'Dominance' },
-        { key: 'threats' as CIView, icon: 'shield-outline' as const, label: 'Threats' },
-        { key: 'timeline' as CIView, icon: 'time-outline' as const, label: 'History' },
+        { key: 'competitors' as CIView, icon: 'trophy-outline' as const, label: 'Competitors' },
+        { key: 'content_messaging' as CIView, icon: 'chatbubble-ellipses-outline' as const, label: 'Content' },
+        { key: 'market_dynamics' as CIView, icon: 'trending-up-outline' as const, label: 'Dynamics' },
+        { key: 'changes' as CIView, icon: 'time-outline' as const, label: 'History' },
       ].map(tab => (
         <Pressable
           key={tab.key}
@@ -888,7 +1086,7 @@ export default function CompetitiveIntelligence() {
           {competitors.length > 0 ? (
             <View style={s.actionRow}>
               <Pressable
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(); }}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(undefined); }}
                 disabled={analyzeMutation.isPending}
                 style={[s.analyzeBtn, { opacity: analyzeMutation.isPending ? 0.6 : 1 }]}
               >
@@ -941,282 +1139,222 @@ export default function CompetitiveIntelligence() {
 
     return (
       <View>
-        {renderCompetitorsList()}
-        {miv3Result && (
-          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <View style={s.cardHeader}>
-              <Ionicons name="shield-checkmark-outline" size={18} color="#8B5CF6" />
-              <Text style={[s.cardTitle, { color: colors.text }]}>MI V3</Text>
-              <View style={[s.intensityBadge, { backgroundColor: dataStatusColor + '20' }]}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: dataStatusColor }}>{dataStatusLabel}</Text>
-              </View>
-              {dataStatus === 'ENRICHING' && (
-                <ActivityIndicator size={12} color={dataStatusColor} />
+        {/* ── BLL Executive Summary Cards (Top 3 Insights via FlatList) ── */}
+        {localExecutiveSummary && Array.isArray(localExecutiveSummary.insights) && (
+          <View style={{ marginBottom: 16 }}>
+            <Text style={[s.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Strategic Insights</Text>
+            <FlatList
+              data={localExecutiveSummary.insights.slice(0, 3)}
+              keyExtractor={(item, index) => item.id || index.toString()}
+              scrollEnabled={false}
+              renderItem={({ item }) => (
+                <StrategicInsightCard
+                  insight={item}
+                  isDark={isDark}
+                  getPulseColor={getPulseColor}
+                />
               )}
-              {miv3Result.snapshotStatus === 'PARTIAL' && (
-                <View style={[s.intensityBadge, { backgroundColor: '#F59E0B20' }]}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B' }}>PARTIAL</Text>
-                </View>
-              )}
-              <View style={[s.intensityBadge, { backgroundColor: miv3Result.executionMode === 'FULL' ? '#10B981' + '20' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' + '20' : '#6B7280' + '20' }]}>
-                <Text style={{ fontSize: 10, fontWeight: '600', color: miv3Result.executionMode === 'FULL' ? '#10B981' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' : '#6B7280' }}>
-                  {miv3Result.executionMode}
-                </Text>
-              </View>
-            </View>
-
-            <DataFreshnessWarning
-              freshnessMetadata={miv3Result?.freshnessMetadata}
-              onRefresh={() => analyzeMutation.mutate({ forceRefresh: true })}
             />
-
-            <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textMuted }}>Evidence Coverage</Text>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: coveragePct >= 70 ? '#10B981' : coveragePct >= 40 ? '#F59E0B' : '#EF4444' }}>{coveragePct}%</Text>
-              </View>
-              <View style={[s.qualityBar, { marginVertical: 0, height: 5 }]}>
-                <View style={[s.qualityFill, { width: `${coveragePct}%`, backgroundColor: coveragePct >= 70 ? '#10B981' : coveragePct >= 40 ? '#F59E0B' : '#EF4444' }]} />
-              </View>
-
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textMuted }}>Confidence</Text>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: confColor }}>{confScore} / 100</Text>
-              </View>
-              <View style={[s.qualityBar, { marginVertical: 0, height: 5 }]}>
-                <View style={[s.qualityFill, { width: `${confScore}%`, backgroundColor: confColor }]} />
-              </View>
-
-              {updatedAgo && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Ionicons name="time-outline" size={12} color={colors.textMuted} />
-                  <Text style={{ fontSize: 10, color: colors.textMuted }}>Updated {updatedAgo}</Text>
-                </View>
-              )}
-            </View>
-
-            {(marketActivity != null || demandConf != null) && (
-              <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 2 }}>MARKET SIGNALS</Text>
-                {marketActivity != null && (
-                  <View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Market Activity (posting freq.)</Text>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>{Math.round(marketActivity * 100)}%</Text>
-                    </View>
-                    <View style={[s.qualityBar, { marginVertical: 0, height: 4 }]}>
-                      <View style={[s.qualityFill, { width: `${Math.round(marketActivity * 100)}%`, backgroundColor: '#3B82F6' }]} />
-                    </View>
-                  </View>
-                )}
-                {demandConf != null && (
-                  <View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Market Demand (intent quality)</Text>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>{Math.round(demandConf * 100)}%</Text>
-                    </View>
-                    <View style={[s.qualityBar, { marginVertical: 0, height: 4 }]}>
-                      <View style={[s.qualityFill, { width: `${Math.round(demandConf * 100)}%`, backgroundColor: '#10B981' }]} />
-                    </View>
-                  </View>
-                )}
-              </View>
-            )}
-
-            {intentSignals.length > 0 && (
-              <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 6 }}>AUDIENCE INTENT SIGNALS</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {intentSignals.map((sig: string, idx: number) => (
-                    <View key={idx} style={{ backgroundColor: '#8B5CF6' + '15', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '600', color: '#8B5CF6' }}>{sig.replace(/_/g, ' ')}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            )}
-            {miv3Result.cacheInvalidationReason === 'ENGINE_UPGRADE' && (
-              <View style={{ backgroundColor: '#3B82F615', borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6' }}>Analysis refreshed due to engine upgrade.</Text>
-              </View>
-            )}
-            {miv3Result.snapshotStatus === 'PARTIAL' && (
-              <View style={{ backgroundColor: '#F59E0B15', borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B' }}>Analysis based on available data — additional data sources may improve accuracy.</Text>
-              </View>
-            )}
-
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
-                <Text style={{ fontSize: 10, color: colors.textMuted }}>Market State</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{miv3Result.output?.marketState || 'N/A'}</Text>
-              </View>
-              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
-                <Text style={{ fontSize: 10, color: colors.textMuted }}>Trajectory</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{miv3Result.output?.trajectoryDirection || 'N/A'}</Text>
-              </View>
-              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
-                <Text style={{ fontSize: 10, color: colors.textMuted }}>Confidence</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: (miv3Result.output?.confidence?.level === 'STRONG' || miv3Result.output?.confidence?.level === 'MODERATE') ? '#10B981' : miv3Result.output?.confidence?.level === 'LOW' ? '#F59E0B' : '#EF4444' }}>
-                  {miv3Result.output?.confidence?.level || 'N/A'} ({Math.round((miv3Result.output?.confidence?.overall || 0) * 100)}%)
-                </Text>
-              </View>
-              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
-                <Text style={{ fontSize: 10, color: colors.textMuted }}>Dominant Intent</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{miv3Result.output?.dominantIntentType || 'N/A'}</Text>
-              </View>
-              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
-                <Text style={{ fontSize: 10, color: colors.textMuted }}>Volatility</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{((miv3Result.output?.volatilityIndex || 0) * 100).toFixed(0)}%</Text>
-              </View>
-              <View style={[s.miv3Stat, { backgroundColor: isDark ? '#1A2030' : '#F8F9FA' }]}>
-                <Text style={{ fontSize: 10, color: colors.textMuted }}>Freshness</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{miv3Result.output?.dataFreshnessDays || 0}d</Text>
-              </View>
-            </View>
-
-            {(() => {
-              const cl = miv3Result.output?.confidence?.level || 'MODERATE';
-              const clColor = cl === 'STRONG' ? '#10B981' : cl === 'MODERATE' ? '#3B82F6' : '#F59E0B';
-              const clLabel = cl === 'STRONG' ? 'HIGH' : cl === 'MODERATE' ? 'MEDIUM' : 'LOW';
-              const reasons = (miv3Result.output?.confidence?.guardReasons || [])
-                .filter((r: string) => r.includes('advisory') || r.includes('ADVISORY') || r.includes('proceeding'))
-                .map((r: string) => r.replace(/ \(advisory only\)$/, '').replace(/— proceeding with available data$/, '').trim());
-              return (
-                <View style={{ backgroundColor: clColor + '10', borderRadius: 8, padding: 10, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: clColor }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: clColor }}>PROCEED — {clLabel} CONFIDENCE</Text>
-                  {reasons.length > 0 && reasons.map((reason: string, i: number) => (
-                    <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>• {reason}</Text>
-                  ))}
-                </View>
-              );
-            })()}
-
-            {miv3Result.output?.marketDiagnosis && !miv3Result.output.marketDiagnosis.includes('Exploratory assessment') && (
-              <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 2 }}>Market Diagnosis</Text>
-                <Text style={{ fontSize: 11, color: colors.textSecondary }}>{miv3Result.output.marketDiagnosis}</Text>
-              </View>
-            )}
-
-            {miv3Result.output?.threatSignals?.length > 0 && (
-              <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444', marginBottom: 2 }}>Threat Signals</Text>
-                {miv3Result.output.threatSignals.map((threat: string, i: number) => (
-                  <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {threat}</Text>
-                ))}
-              </View>
-            )}
-
-            {(() => {
-              const flags = (miv3Result.output?.missingSignalFlags || []).filter((f: string) => !f.includes('need '));
-              return flags.length > 0 ? (
-                <View style={{ marginBottom: 8 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B', marginBottom: 2 }}>Signal Gaps</Text>
-                  {flags.slice(0, 5).map((flag: string, i: number) => (
-                    <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {flag}</Text>
-                  ))}
-                  {flags.length > 5 && (
-                    <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>...and {flags.length - 5} more</Text>
-                  )}
-                </View>
-              ) : null;
-            })()}
-
-            {!miv3Result.twoRunStatus?.isConfirmed && (
-              <View style={{ backgroundColor: '#3B82F6' + '15', borderRadius: 6, padding: 8, marginBottom: 4 }}>
-                <Text style={{ fontSize: 10, fontWeight: '600', color: '#3B82F6' }}>
-                  Two-Run Confirmation: {miv3Result.twoRunStatus?.confirmedRuns || 0}/2 runs completed
-                </Text>
-                <Text style={{ fontSize: 9, color: colors.textMuted }}>
-                  Direction verdict requires 2 independent runs for confirmation
-                </Text>
-              </View>
-            )}
-
-            <View style={{ paddingTop: 4 }}>
-              <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-                snapshot: {miv3Result.snapshotId?.slice(0, 8)} | cached: {miv3Result.cached ? 'yes' : 'no'} | competitors: {miv3Result.telemetry?.competitorsCount || 0}
-              </Text>
-            </View>
           </View>
         )}
 
-        {miv3Result?.dominanceData?.length > 0 && (
-          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <View style={s.cardHeader}>
-              <Ionicons name="trophy-outline" size={18} color="#F59E0B" />
-              <Text style={[s.cardTitle, { color: colors.text }]}>Dominance Analysis</Text>
-            </View>
-            {miv3Result.dominanceData.map((dom: any, i: number) => (
-              <View key={i} style={[s.breakdownItem, i < miv3Result.dominanceData.length - 1 && { borderBottomWidth: 1, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }]}>
-                <View style={s.breakdownHeader}>
-                  <Text style={[s.breakdownName, { color: colors.text }]}>{dom.competitorName}</Text>
-                  <View style={[s.threatBadge, { backgroundColor: dom.dominanceLevel === 'DOMINANT' ? '#EF4444' + '20' : dom.dominanceLevel === 'STRUCTURALLY_STRONG' ? '#F59E0B' + '20' : '#10B981' + '20' }]}>
-                    <Text style={{ fontSize: 10, fontWeight: '600', color: dom.dominanceLevel === 'DOMINANT' ? '#EF4444' : dom.dominanceLevel === 'STRUCTURALLY_STRONG' ? '#F59E0B' : '#10B981' }}>
-                      {dom.dominanceLevel} ({dom.dominanceScore})
+        {renderCompetitorsList()}
+
+        <>
+          {miv3Result && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="shield-checkmark-outline" size={18} color="#8B5CF6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>MI V3</Text>
+                  <View style={[s.intensityBadge, { backgroundColor: dataStatusColor + '20' }]}>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: dataStatusColor }}>{dataStatusLabel}</Text>
+                  </View>
+                  {dataStatus === 'ENRICHING' && (
+                    <ActivityIndicator size={12} color={dataStatusColor} />
+                  )}
+                  {miv3Result.snapshotStatus === 'PARTIAL' && (
+                    <View style={[s.intensityBadge, { backgroundColor: '#F59E0B20' }]}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B' }}>PARTIAL</Text>
+                    </View>
+                  )}
+                  <View style={[s.intensityBadge, { backgroundColor: miv3Result.executionMode === 'FULL' ? '#10B981' + '20' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' + '20' : '#6B7280' + '20' }]}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: miv3Result.executionMode === 'FULL' ? '#10B981' : miv3Result.executionMode === 'REDUCED' ? '#F59E0B' : '#6B7280' }}>
+                      {miv3Result.executionMode}
                     </Text>
                   </View>
                 </View>
-                {dom.strengths?.length > 0 && (
-                  <View style={{ marginTop: 4 }}>
-                    {dom.strengths.map((s2: string, j: number) => (
-                      <Text key={j} style={{ fontSize: 10, color: '#10B981' }}>+ {s2}</Text>
+
+                <DataFreshnessWarning
+                  freshnessMetadata={miv3Result?.freshnessMetadata}
+                  onRefresh={() => analyzeMutation.mutate({ forceRefresh: true })}
+                />
+
+                <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textMuted }}>Evidence Coverage</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: coveragePct >= 70 ? '#10B981' : coveragePct >= 40 ? '#F59E0B' : '#EF4444' }}>{coveragePct}%</Text>
+                  </View>
+                  <View style={[s.qualityBar, { marginVertical: 0, height: 5 }]}>
+                    <View style={[s.qualityFill, { width: `${coveragePct}%`, backgroundColor: coveragePct >= 70 ? '#10B981' : coveragePct >= 40 ? '#F59E0B' : '#EF4444' }]} />
+                  </View>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textMuted }}>Confidence</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: confColor }}>{confScore} / 100</Text>
+                  </View>
+                  <View style={[s.qualityBar, { marginVertical: 0, height: 5 }]}>
+                    <View style={[s.qualityFill, { width: `${confScore}%`, backgroundColor: confColor }]} />
+                  </View>
+
+                  {updatedAgo && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="time-outline" size={12} color={colors.textMuted} />
+                      <Text style={{ fontSize: 10, color: colors.textMuted }}>Updated {updatedAgo}</Text>
+                    </View>
+                  )}
+                </View>
+
+                {(marketActivity != null || demandConf != null) && (
+                  <View style={{ backgroundColor: isDark ? '#1A2030' : '#F8F9FA', borderRadius: 10, padding: 12, marginBottom: 10, gap: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 2 }}>MARKET SIGNALS</Text>
+                    {marketActivity != null && (
+                      <View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                          <Text style={{ fontSize: 11, color: colors.textMuted }}>Market Activity (posting freq.)</Text>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: colors.text }}>{Math.round(marketActivity * 100)}%</Text>
+                        </View>
+                        <View style={[s.qualityBar, { marginVertical: 0, height: 4 }]}>
+                          <View style={[s.qualityFill, { width: `${marketActivity * 100}%`, backgroundColor: '#8B5CF6' }]} />
+                        </View>
+                      </View>
+                    )}
+                    {demandConf != null && (
+                      <View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                          <Text style={{ fontSize: 11, color: colors.textMuted }}>Demand Pressure (comments)</Text>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: colors.text }}>{Math.round(demandConf * 100)}%</Text>
+                        </View>
+                        <View style={[s.qualityBar, { marginVertical: 0, height: 4 }]}>
+                          <View style={[s.qualityFill, { width: `${demandConf * 100}%`, backgroundColor: '#8B5CF6' }]} />
+                        </View>
+                      </View>
+                    )}
+                    {intentSignals.length > 0 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                        {intentSignals.map((sig: string, i: number) => (
+                          <View key={i} style={{ backgroundColor: '#8B5CF6' + '15', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            <Text style={{ fontSize: 9, color: '#8B5CF6', fontWeight: '600' }}>{sig}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {miv3Result.cacheInvalidationReason && (
+                  <View style={{ backgroundColor: '#EF4444' + '15', borderRadius: 8, padding: 10, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="alert-circle-outline" size={14} color="#EF4444" />
+                    <Text style={{ fontSize: 10, color: '#EF4444', fontWeight: '600', flex: 1 }}>
+                      Cache invalidated: {miv3Result.cacheInvalidationReason}
+                    </Text>
+                  </View>
+                )}
+
+                {(() => {
+                  const cl = miv3Result.output?.confidence;
+                  if (!cl) return null;
+                  const decision = cl.guardDecision || 'PROCEED';
+                  const clColor = decision === 'PROCEED' ? '#10B981' : decision === 'DOWNGRADE' ? '#F59E0B' : '#EF4444';
+                  const clLabel = cl.level || 'UNKNOWN';
+                  const reasons = cl.guardReasons || [];
+                  return (
+                    <View style={{ backgroundColor: clColor + '10', borderRadius: 8, padding: 10, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: clColor }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: clColor }}>PROCEED — {clLabel} CONFIDENCE</Text>
+                      {reasons.length > 0 && reasons.map((reason: string, i: number) => (
+                        <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>• {reason}</Text>
+                      ))}
+                    </View>
+                  );
+                })()}
+
+                {miv3Result.output?.marketDiagnosis && !miv3Result.output.marketDiagnosis.includes('Exploratory assessment') && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 2 }}>Market Diagnosis</Text>
+                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>{miv3Result.output.marketDiagnosis}</Text>
+                  </View>
+                )}
+
+                {miv3Result.output?.threatSignals?.length > 0 && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#EF4444', marginBottom: 2 }}>Threat Signals</Text>
+                    {miv3Result.output.threatSignals.map((threat: string, i: number) => (
+                      <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {threat}</Text>
                     ))}
                   </View>
                 )}
-                {dom.weaknesses?.length > 0 && (
-                  <View style={{ marginTop: 2 }}>
-                    {dom.weaknesses.map((w: string, j: number) => (
-                      <Text key={j} style={{ fontSize: 10, color: '#EF4444' }}>- {w}</Text>
-                    ))}
+
+                {(() => {
+                  const flags = (miv3Result.output?.missingSignalFlags || []).filter((f: string) => !f.includes('need '));
+                  return flags.length > 0 ? (
+                    <View style={{ marginBottom: 8 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B', marginBottom: 2 }}>Signal Gaps</Text>
+                      {flags.slice(0, 5).map((flag: string, i: number) => (
+                        <Text key={i} style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>• {flag}</Text>
+                      ))}
+                      {flags.length > 5 && (
+                        <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>...and {flags.length - 5} more</Text>
+                      )}
+                    </View>
+                  ) : null;
+                })()}
+
+                {!miv3Result.twoRunStatus?.isConfirmed && (
+                  <View style={{ backgroundColor: '#3B82F6' + '15', borderRadius: 6, padding: 8, marginBottom: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#3B82F6' }}>
+                      Two-Run Confirmation: {miv3Result.twoRunStatus?.confirmedRuns || 0}/2 runs completed
+                    </Text>
+                    <Text style={{ fontSize: 9, color: colors.textMuted }}>
+                      Direction verdict requires 2 independent runs for confirmation
+                    </Text>
                   </View>
                 )}
-              </View>
-            ))}
-          </View>
-        )}
 
-        {miv3Result?.deltaReport && miv3Result.deltaReport.hasMeaningfulChanges && (
-          <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
-            <View style={s.cardHeader}>
-              <Ionicons name="git-compare-outline" size={18} color="#3B82F6" />
-              <Text style={[s.cardTitle, { color: colors.text }]}>What Changed</Text>
-              <View style={[s.intensityBadge, { backgroundColor: '#3B82F6' + '20' }]}>
-                <Text style={{ fontSize: 10, fontWeight: '600', color: '#3B82F6' }}>DELTA</Text>
-              </View>
-            </View>
-
-            {miv3Result.deltaReport.intentChanges?.filter((c: any) => c.changed).length > 0 && (
-              <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B', marginBottom: 4 }}>Intent Changes</Text>
-                {miv3Result.deltaReport.intentChanges.filter((c: any) => c.changed).map((c: any, i: number) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{c.competitorName}</Text>
-                    <Text style={{ fontSize: 10, color: '#EF4444' }}>{c.previousIntent?.replace(/_/g, ' ')}</Text>
-                    <Ionicons name="arrow-forward" size={10} color={colors.textMuted} />
-                    <Text style={{ fontSize: 10, color: '#10B981' }}>{c.currentIntent?.replace(/_/g, ' ')}</Text>
-                  </View>
-                ))}
+                <View style={{ paddingTop: 4 }}>
+                  <Text style={{ fontSize: 9, color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                    snapshot: {miv3Result.snapshotId?.slice(0, 8)} | cached: {miv3Result.cached ? 'yes' : 'no'} | competitors: {miv3Result.telemetry?.competitorsCount || 0}
+                  </Text>
+                </View>
               </View>
             )}
 
-            {miv3Result.deltaReport.dominanceChanges?.filter((c: any) => c.levelChanged || Math.abs(c.scoreDelta) >= 1).length > 0 && (
-              <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 4 }}>Dominance Shifts</Text>
-                {miv3Result.deltaReport.dominanceChanges.filter((c: any) => c.levelChanged || Math.abs(c.scoreDelta) >= 1).map((c: any, i: number) => (
-                  <View key={i} style={{ marginBottom: 4 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{c.competitorName}</Text>
-                      <Text style={{ fontSize: 10, color: c.scoreDelta > 0 ? '#EF4444' : '#10B981', fontWeight: '700' }}>
-                        {c.scoreDelta > 0 ? '+' : ''}{c.scoreDelta.toFixed(0)}
-                      </Text>
+            {miv3Result?.dominanceData?.length > 0 && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="trophy-outline" size={18} color="#F59E0B" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Dominance Analysis</Text>
+                </View>
+                {miv3Result.dominanceData.map((dom: any, i: number) => (
+                  <View key={i} style={[s.breakdownItem, i < miv3Result.dominanceData.length - 1 && { borderBottomWidth: 1, borderBottomColor: isDark ? '#1A2030' : '#F0F0F0' }]}>
+                    <View style={s.breakdownHeader}>
+                      <Text style={[s.breakdownName, { color: colors.text }]}>{dom.competitorName}</Text>
+                      <View style={[s.threatBadge, { backgroundColor: dom.dominanceLevel === 'DOMINANT' ? '#EF4444' + '20' : dom.dominanceLevel === 'STRUCTURALLY_STRONG' ? '#F59E0B' + '20' : '#10B981' + '20' }]}>
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: dom.dominanceLevel === 'DOMINANT' ? '#EF4444' : dom.dominanceLevel === 'STRUCTURALLY_STRONG' ? '#F59E0B' : '#10B981' }}>
+                          {dom.dominanceLevel} ({dom.dominanceScore})
+                        </Text>
+                      </View>
                     </View>
-                    {c.levelChanged && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                        <Text style={{ fontSize: 9, color: colors.textMuted }}>{c.previousLevel}</Text>
-                        <Ionicons name="arrow-forward" size={8} color={colors.textMuted} />
-                        <Text style={{ fontSize: 9, color: colors.textMuted }}>{c.currentLevel}</Text>
+                    {dom.strengths?.length > 0 && (
+                      <View style={{ marginTop: 4 }}>
+                        {dom.strengths.map((s2: string, j: number) => (
+                          <Text key={j} style={{ fontSize: 10, color: '#10B981' }}>+ {s2}</Text>
+                        ))}
+                      </View>
+                    )}
+                    {dom.weaknesses?.length > 0 && (
+                      <View style={{ marginTop: 2 }}>
+                        {dom.weaknesses.map((w: string, j: number) => (
+                          <Text key={j} style={{ fontSize: 10, color: '#EF4444' }}>- {w}</Text>
+                        ))}
                       </View>
                     )}
                   </View>
@@ -1224,97 +1362,145 @@ export default function CompetitiveIntelligence() {
               </View>
             )}
 
-            {miv3Result.deltaReport.trajectoryDeltas?.length > 0 && (
-              <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6', marginBottom: 4 }}>Trajectory Shifts</Text>
-                {miv3Result.deltaReport.trajectoryDeltas.map((t: any, i: number) => (
-                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <Text style={{ fontSize: 10, color: colors.textMuted }}>{t.field.replace(/([A-Z])/g, ' $1').trim()}</Text>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: t.delta > 0 ? '#EF4444' : '#10B981' }}>
-                      {t.delta > 0 ? '+' : ''}{(t.delta * 100).toFixed(0)}%
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {miv3Result.deltaReport.signalDeltas?.length > 0 && (
-              <View>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#6B7280', marginBottom: 4 }}>Signal Changes ({miv3Result.deltaReport.signalDeltas.length})</Text>
-                {miv3Result.deltaReport.signalDeltas.slice(0, 6).map((sd: any, i: number) => (
-                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <Text style={{ fontSize: 9, color: colors.textMuted, flex: 1 }}>{sd.competitorName} — {sd.signalField}</Text>
-                    <Text style={{ fontSize: 9, fontWeight: '700', color: sd.delta > 0 ? '#EF4444' : '#10B981' }}>
-                      {sd.delta > 0 ? '+' : ''}{sd.delta.toFixed(3)}
-                    </Text>
-                  </View>
-                ))}
-                {miv3Result.deltaReport.signalDeltas.length > 6 && (
-                  <Text style={{ fontSize: 9, color: colors.textMuted, marginTop: 2 }}>...and {miv3Result.deltaReport.signalDeltas.length - 6} more</Text>
-                )}
-              </View>
-            )}
-          </View>
-        )}
-
-        {miv3Result?.contentDnaData && miv3Result.contentDnaData.length > 0 && (
-          <View style={[s.card, { backgroundColor: colors.card, marginBottom: 12 }]}>  
-            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 8 }}>Content DNA</Text>
-            {miv3Result.contentDnaData.map((dna: any, idx: number) => (
-              <View key={dna.competitorId || idx} style={{ marginBottom: idx < miv3Result.contentDnaData.length - 1 ? 10 : 0 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text, flex: 1 }}>{dna.competitorName}</Text>
-                  <View style={{ backgroundColor: dna.dnaConfidence > 0.7 ? '#22C55E' : dna.dnaConfidence > 0.4 ? '#F59E0B' : '#EF4444', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
-                    <Text style={{ fontSize: 9, fontWeight: '700', color: '#fff' }}>{Math.round(dna.dnaConfidence * 100)}%</Text>
+            {miv3Result?.deltaReport && miv3Result.deltaReport.hasMeaningfulChanges && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="git-compare-outline" size={18} color="#3B82F6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>What Changed</Text>
+                  <View style={[s.intensityBadge, { backgroundColor: '#3B82F6' + '20' }]}>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#3B82F6' }}>DELTA</Text>
                   </View>
                 </View>
-                {dna.hookArchetypes?.length > 0 && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>Hooks</Text>
-                    {dna.hookArchetypes.map((h: string, i: number) => (
-                      <View key={i} style={{ backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
-                        <Text style={{ fontSize: 9, color: '#3B82F6', fontWeight: '600' }}>{h}</Text>
+
+                {miv3Result.deltaReport.intentChanges?.filter((c: any) => c.changed).length > 0 && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#F59E0B', marginBottom: 4 }}>Intent Changes</Text>
+                    {miv3Result.deltaReport.intentChanges.filter((c: any) => c.changed).map((c: any, i: number) => (
+                      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{c.competitorName}</Text>
+                        <Text style={{ fontSize: 10, color: '#EF4444' }}>{c.previousIntent?.replace(/_/g, ' ')}</Text>
+                        <Ionicons name="arrow-forward" size={10} color={colors.textMuted} />
+                        <Text style={{ fontSize: 10, color: '#10B981' }}>{c.currentIntent?.replace(/_/g, ' ')}</Text>
                       </View>
                     ))}
                   </View>
                 )}
-                {dna.narrativeFrameworks?.length > 0 && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>Narrative</Text>
-                    {dna.narrativeFrameworks.map((n: string, i: number) => (
-                      <View key={i} style={{ backgroundColor: '#F0FDF4', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
-                        <Text style={{ fontSize: 9, color: '#22C55E', fontWeight: '600' }}>{n.replace(/_/g, ' → ')}</Text>
+
+                {miv3Result.deltaReport.dominanceChanges?.filter((c: any) => c.levelChanged || Math.abs(c.scoreDelta) >= 1).length > 0 && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 4 }}>Dominance Shifts</Text>
+                    {miv3Result.deltaReport.dominanceChanges.filter((c: any) => c.levelChanged || Math.abs(c.scoreDelta) >= 1).map((c: any, i: number) => (
+                      <View key={i} style={{ marginBottom: 4 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text }}>{c.competitorName}</Text>
+                          <Text style={{ fontSize: 10, color: c.scoreDelta > 0 ? '#EF4444' : '#10B981', fontWeight: '700' }}>
+                            {c.scoreDelta > 0 ? '+' : ''}{c.scoreDelta.toFixed(0)}
+                          </Text>
+                        </View>
+                        {c.levelChanged && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                            <Text style={{ fontSize: 9, color: colors.textMuted }}>{c.previousLevel}</Text>
+                            <Ionicons name="arrow-forward" size={8} color={colors.textMuted} />
+                            <Text style={{ fontSize: 9, color: colors.textMuted }}>{c.currentLevel}</Text>
+                          </View>
+                        )}
                       </View>
                     ))}
                   </View>
                 )}
-                {dna.ctaFrameworks?.length > 0 && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>CTA Style</Text>
-                    {dna.ctaFrameworks.map((c: string, i: number) => (
-                      <View key={i} style={{ backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
-                        <Text style={{ fontSize: 9, color: '#D97706', fontWeight: '600' }}>{c}</Text>
+
+                {miv3Result.deltaReport.trajectoryDeltas?.length > 0 && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6', marginBottom: 4 }}>Trajectory Shifts</Text>
+                    {miv3Result.deltaReport.trajectoryDeltas.map((t: any, i: number) => (
+                      <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <Text style={{ fontSize: 10, color: colors.textMuted }}>{t.field.replace(/([A-Z])/g, ' $1').trim()}</Text>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: t.delta > 0 ? '#EF4444' : '#10B981' }}>
+                          {t.delta > 0 ? '+' : ''}{(t.delta * 100).toFixed(0)}%
+                        </Text>
                       </View>
                     ))}
                   </View>
                 )}
-                {dna.missingSignalFlags?.length > 0 && (
-                  <Text style={{ fontSize: 9, color: '#EF4444', fontStyle: 'italic', marginTop: 2 }}>
-                    {dna.missingSignalFlags[0]}
-                  </Text>
+
+                {miv3Result.deltaReport.signalDeltas?.length > 0 && (
+                  <View>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#6B7280', marginBottom: 4 }}>Signal Changes ({miv3Result.deltaReport.signalDeltas.length})</Text>
+                    {miv3Result.deltaReport.signalDeltas.slice(0, 6).map((sd: any, i: number) => (
+                      <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <Text style={{ fontSize: 9, color: colors.textMuted, flex: 1 }}>{sd.competitorName} — {sd.signalField}</Text>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: sd.delta > 0 ? '#EF4444' : '#10B981' }}>
+                          {sd.delta > 0 ? '+' : ''}{sd.delta.toFixed(3)}
+                        </Text>
+                      </View>
+                    ))}
+                    {miv3Result.deltaReport.signalDeltas.length > 6 && (
+                      <Text style={{ fontSize: 9, color: colors.textMuted, marginTop: 2 }}>...and {miv3Result.deltaReport.signalDeltas.length - 6} more</Text>
+                    )}
+                  </View>
                 )}
               </View>
-            ))}
-          </View>
-        )}
+            )}
 
-        {renderInsightCards()}
-        {renderSimilarityCard()}
-        {renderGoalModeCard()}
+            {miv3Result?.contentDnaData && miv3Result.contentDnaData.length > 0 && (
+              <View style={[s.card, { backgroundColor: colors.card, marginBottom: 12 }]}>  
+                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 8 }}>Content DNA</Text>
+                {miv3Result.contentDnaData.map((dna: any, idx: number) => (
+                  <View key={dna.competitorId || idx} style={{ marginBottom: idx < miv3Result.contentDnaData.length - 1 ? 10 : 0 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text, flex: 1 }}>{dna.competitorName}</Text>
+                      <View style={{ backgroundColor: dna.dnaConfidence > 0.7 ? '#22C55E' : dna.dnaConfidence > 0.4 ? '#F59E0B' : '#EF4444', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: '#fff' }}>{Math.round(dna.dnaConfidence * 100)}%</Text>
+                      </View>
+                    </View>
+                    {dna.hookArchetypes?.length > 0 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>Hooks</Text>
+                        {dna.hookArchetypes.map((h: string, i: number) => (
+                          <View key={i} style={{ backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            <Text style={{ fontSize: 9, color: '#3B82F6', fontWeight: '600' }}>{h}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    {dna.narrativeFrameworks?.length > 0 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>Narrative</Text>
+                        {dna.narrativeFrameworks.map((n: string, i: number) => (
+                          <View key={i} style={{ backgroundColor: '#F0FDF4', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            <Text style={{ fontSize: 9, color: '#22C55E', fontWeight: '600' }}>{n.replace(/_/g, ' → ')}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    {dna.ctaFrameworks?.length > 0 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: '#6B7280', width: '100%' }}>CTA Style</Text>
+                        {dna.ctaFrameworks.map((c: string, i: number) => (
+                          <View key={i} style={{ backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            <Text style={{ fontSize: 9, color: '#D97706', fontWeight: '600' }}>{c}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    {dna.missingSignalFlags?.length > 0 && (
+                      <Text style={{ fontSize: 9, color: '#EF4444', fontStyle: 'italic', marginTop: 2 }}>
+                        {dna.missingSignalFlags[0]}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {renderInsightCards()}
+            {renderSimilarityCard()}
+            {renderGoalModeCard()}
+          </>
 
         <View style={s.actionRow}>
           <Pressable
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(); }}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); analyzeMutation.mutate(undefined); }}
             style={[s.analyzeBtn, { opacity: analyzeMutation.isPending ? 0.6 : 1 }]}
             disabled={analyzeMutation.isPending}
           >
@@ -1733,6 +1919,157 @@ export default function CompetitiveIntelligence() {
     );
   };
 
+  const renderContentMessaging = () => {
+    const contentDna = miv3Result?.contentDnaData || [];
+    const output = miv3Result?.output;
+    const intentMap = output?.competitorIntentMap || [];
+
+    const formatDnaList = (items: string[]) => items.length > 0 ? items.map((s: string) => s.replace(/_/g, ' ')).join(', ') : 'Not detected';
+
+    return (
+      <View>
+        <View style={s.sectionHeader}>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>Content & Messaging DNA</Text>
+        </View>
+
+        {!miv3Result ? (
+          <View style={s.emptyState}>
+            <Ionicons name="chatbubble-ellipses-outline" size={40} color={colors.textMuted} />
+            <Text style={[s.emptyTitle, { color: colors.text }]}>No Content DNA Data</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run MI V3 from the Overview tab to extract Competitor Content DNA</Text>
+          </View>
+        ) : (
+          <View>
+            {contentDna.length === 0 ? (
+              <View style={s.emptyState}>
+                <Ionicons name="alert-circle-outline" size={40} color={colors.textMuted} />
+                <Text style={[s.emptyTitle, { color: colors.text }]}>No Competitor DNA Detected</Text>
+                <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Insufficient post data available to analyze Content DNA.</Text>
+              </View>
+            ) : (
+              contentDna.map((dna: any, i: number) => {
+                const intent = intentMap.find((im: any) => im.competitorId === dna.competitorId);
+                const intentColor = intent?.intentCategory === 'AGGRESSIVE_SCALING' || intent?.intentCategory === 'PRICE_WAR' ? '#EF4444' : intent?.intentCategory === 'DEFENSIVE' ? '#F59E0B' : '#3B82F6';
+                
+                return (
+                  <View key={dna.competitorId || i} style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                    <View style={s.breakdownHeader}>
+                      <Text style={[s.breakdownName, { color: colors.text }]}>{dna.competitorName}</Text>
+                      {intent && (
+                        <View style={[s.threatBadge, { backgroundColor: intentColor + '20' }]}>
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: intentColor }}>{intent.intentCategory?.replace(/_/g, ' ')}</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={{ marginTop: 8, gap: 6 }}>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                        <Text style={{ fontWeight: '700', color: colors.text }}>Hook Archetypes: </Text>
+                        {formatDnaList(dna.hookArchetypes || [])}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                        <Text style={{ fontWeight: '700', color: colors.text }}>Narrative Frameworks: </Text>
+                        {formatDnaList(dna.narrativeFrameworks || [])}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                        <Text style={{ fontWeight: '700', color: colors.text }}>CTA Frameworks: </Text>
+                        {formatDnaList(dna.ctaFrameworks || [])}
+                      </Text>
+                    </View>
+
+                    {dna.evidence?.length > 0 && (
+                      <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: isDark ? '#1A2030' : '#F0F0F0' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: '#8B5CF6', marginBottom: 4 }}>Supporting Evidence Snippets</Text>
+                        {dna.evidence.slice(0, 3).map((ev: any, idx: number) => (
+                          <View key={idx} style={{ marginBottom: 4 }}>
+                            <Text style={{ fontSize: 10, color: colors.textMuted, fontStyle: 'italic' }}>
+                              "{ev.snippet}" <Text style={{ fontWeight: '700', fontStyle: 'normal' }}>[{ev.detectedType?.replace('hook:', '').replace('narrative:', '').replace('cta:', '')}]</Text>
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderMarketDynamics = () => {
+    const trajectory = miv3Result?.trajectoryData;
+    const output = miv3Result?.output;
+    const marketDiagnosis = output?.marketDiagnosis;
+
+    return (
+      <View>
+        <View style={s.sectionHeader}>
+          <Text style={[s.sectionTitle, { color: colors.text }]}>Market Dynamics</Text>
+        </View>
+
+        {!miv3Result ? (
+          <View style={s.emptyState}>
+            <Ionicons name="trending-up-outline" size={40} color={colors.textMuted} />
+            <Text style={[s.emptyTitle, { color: colors.text }]}>No Dynamics Data</Text>
+            <Text style={[s.emptyDesc, { color: colors.textMuted }]}>Run MI V3 from the Overview tab to view market trajectory indices</Text>
+          </View>
+        ) : (
+          <View>
+            {marketDiagnosis && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="pulse-outline" size={18} color="#8B5CF6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Market Diagnosis</Text>
+                </View>
+                <Text style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 20 }}>{marketDiagnosis}</Text>
+              </View>
+            )}
+
+            {trajectory && (
+              <View style={[s.card, { backgroundColor: isDark ? '#0F1419' : '#fff', borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}>
+                <View style={s.cardHeader}>
+                  <Ionicons name="trending-up-outline" size={18} color="#8B5CF6" />
+                  <Text style={[s.cardTitle, { color: colors.text }]}>Market Trajectory Indices</Text>
+                </View>
+                {[
+                  { label: 'Market Heating', value: trajectory.marketHeatingIndex, color: '#EF4444' },
+                  { label: 'Narrative Convergence', value: trajectory.narrativeConvergenceScore, color: '#F59E0B' },
+                  { label: 'Offer Compression', value: trajectory.offerCompressionIndex, color: '#3B82F6' },
+                  { label: 'Angle Saturation', value: trajectory.angleSaturationLevel, color: '#8B5CF6' },
+                  { label: 'Revival Potential', value: trajectory.revivalPotential, color: '#10B981' },
+                ].map((idx, i) => (
+                  <View key={i} style={{ marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>{idx.label}</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: idx.color }}>{((idx.value || 0) * 100).toFixed(0)}%</Text>
+                    </View>
+                    <View style={[s.qualityBar]}>
+                      <View style={[s.qualityFill, { width: `${(idx.value || 0) * 100}%`, backgroundColor: idx.color }]} />
+                    </View>
+                    <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
+                      → {getIndexInterpretation(idx.label, idx.value || 0)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderChanges = () => {
+    return (
+      <View style={{ gap: 16 }}>
+        {renderTimeline()}
+      </View>
+    );
+  };
+
   if (loadingCompetitors) {
     return (
       <View style={s.loadingWrap}>
@@ -1747,8 +2084,9 @@ export default function CompetitiveIntelligence() {
       {renderSubTabs()}
       {activeView === 'overview' && renderOverview()}
       {activeView === 'competitors' && renderCompetitors()}
-      {activeView === 'threats' && renderThreats()}
-      {activeView === 'timeline' && renderTimeline()}
+      {activeView === 'content_messaging' && renderContentMessaging()}
+      {activeView === 'market_dynamics' && renderMarketDynamics()}
+      {activeView === 'changes' && renderChanges()}
 
       <Modal visible={showAddCompetitor} animationType="slide" transparent onRequestClose={() => { setShowAddCompetitor(false); setEditingCompetitorId(null); setNewComp(emptyComp); }}>
         <View style={s.modalOverlay}>

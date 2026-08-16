@@ -397,7 +397,7 @@ function KpiRow({ icon, label, value, textColor, subColor }: { icon: keyof typeo
 }
 
 export default function ExecutionPlan({ onPlanGenerated }: { onPlanGenerated?: () => void } = {}) {
-  const isDark = useColorScheme() === 'dark';
+  const isDark = true; // forced dark mode
   const router = useRouter();
   const { selectedCampaignId } = useCampaign();
   const [plan, setPlan] = useState<BuildPlanData | null>(null);

@@ -8,7 +8,7 @@ export const STUDIO_COMING_SOON = true;
 
 export default function StudioComingSoon() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
 

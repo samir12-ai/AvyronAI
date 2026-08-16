@@ -94,7 +94,7 @@ function formatTimeAgo(dateStr: string): string {
 
 export default function AgentScreen() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const baseUrl = getApiUrl();

@@ -259,6 +259,21 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
       console.log(`[MIv3] SNAPSHOT_COMPLETION_CONTRACT_VIOLATED | caller=${caller} | failures=${completionCheck.failures.join(", ")}`);
       snapshotPayload.status = "PARTIAL";
     }
+
+    // [BLL Translation] Translate complex engine data to executive summary
+    try {
+      const { translateToBusinessLanguage } = await import("../core/business-language-layer");
+      const summary = await translateToBusinessLanguage(snapshotPayload, snapshotPayload.accountId || "system");
+      if (summary) {
+        let diag: any = {};
+        try { diag = snapshotPayload.diagnosticsData ? JSON.parse(snapshotPayload.diagnosticsData) : {}; } catch(e){}
+        diag.executiveSummaryData = summary;
+        diag.executiveSummaryId = snapshotPayload.id;
+        snapshotPayload.diagnosticsData = JSON.stringify(diag);
+      }
+    } catch (e: any) {
+      console.error(`[MIv3] BLL_TRANSLATION_FAILED | error=${e.message}`);
+    }
   }
 
   if (snapshotPayload.accountId && snapshotPayload.campaignId) {
@@ -394,54 +409,92 @@ async function getCachedSnapshot(accountId: string, campaignId: string, competit
   return { snapshot, invalidationReason: null };
 }
 
-export function computeDataFreshnessDays(competitors: CompetitorInput[]): number {
-  if (competitors.length === 0) return 999;
+export function computeEvidenceFreshness(
+  competitors: CompetitorInput[],
+  allReviews: Array<{ competitorId: string; reviews: any[] }>
+): { dataFreshnessDays: number; freshnessState: "FRESH" | "PARTIALLY_FRESH" | "STALE" | "INSUFFICIENT_DATA" } {
   const now = Date.now();
-  let newest = 0;
+  let newestTime = 0;
+  let oldestTime = now;
+  let totalCount = 0;
+  let sumTime = 0;
+
   for (const c of competitors) {
     for (const p of c.posts || []) {
       const t = new Date(p.timestamp).getTime();
-      if (!isNaN(t) && t > newest) newest = t;
+      if (!isNaN(t)) {
+        if (t > newestTime) newestTime = t;
+        if (t < oldestTime) oldestTime = t;
+        sumTime += t;
+        totalCount++;
+      }
     }
     for (const cm of c.comments || []) {
       const t = new Date(cm.timestamp).getTime();
-      if (!isNaN(t) && t > newest) newest = t;
+      if (!isNaN(t)) {
+        if (t > newestTime) newestTime = t;
+        if (t < oldestTime) oldestTime = t;
+        sumTime += t;
+        totalCount++;
+      }
     }
   }
-  if (newest === 0) return 999;
-  const days = Math.max(0, Math.round((now - newest) / (1000 * 60 * 60 * 24)));
-  if (days > 365) {
-    let recentSignalExists = false;
-    const recentThreshold = now - 365 * 24 * 60 * 60 * 1000;
-    for (const c of competitors) {
-      for (const p of c.posts || []) {
-        const t = new Date(p.timestamp).getTime();
-        if (!isNaN(t) && t > recentThreshold) { recentSignalExists = true; break; }
+
+  for (const r of allReviews) {
+    for (const rev of r.reviews) {
+      const t = new Date(rev.reviewDate || rev.createdAt).getTime();
+      if (!isNaN(t)) {
+        if (t > newestTime) newestTime = t;
+        if (t < oldestTime) oldestTime = t;
+        sumTime += t;
+        totalCount++;
       }
-      if (recentSignalExists) break;
-      for (const cm of c.comments || []) {
-        const t = new Date(cm.timestamp).getTime();
-        if (!isNaN(t) && t > recentThreshold) { recentSignalExists = true; break; }
-      }
-      if (recentSignalExists) break;
-    }
-    if (recentSignalExists) {
-      console.log(`[MIv3] FRESHNESS_ANOMALY_GUARD: computed ${days}d but recent signals exist — recomputing`);
-      let corrected = 0;
-      for (const c of competitors) {
-        for (const p of c.posts || []) {
-          const t = new Date(p.timestamp).getTime();
-          if (!isNaN(t) && t > corrected && t <= now) corrected = t;
-        }
-        for (const cm of c.comments || []) {
-          const t = new Date(cm.timestamp).getTime();
-          if (!isNaN(t) && t > corrected && t <= now) corrected = t;
-        }
-      }
-      if (corrected > 0) return Math.round((now - corrected) / (1000 * 60 * 60 * 24));
     }
   }
-  return days;
+
+  const hasWebSignals = competitors.some(c => !!(c.websiteUrl || c.blogUrl || c.pricingHints || c.manualNotes));
+
+  if (totalCount === 0) {
+    if (hasWebSignals) {
+      return { dataFreshnessDays: 30, freshnessState: "PARTIALLY_FRESH" };
+    }
+    return { dataFreshnessDays: 999, freshnessState: "INSUFFICIENT_DATA" };
+  }
+
+  const dataFreshnessDays = Math.max(0, Math.round((now - newestTime) / (1000 * 60 * 60 * 24)));
+  const avgAgeDays = Math.max(0, Math.round((now - (sumTime / totalCount)) / (1000 * 60 * 60 * 24)));
+
+  // Calculate dynamic typical publishing interval G
+  const intervals: number[] = [];
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  for (const c of competitors) {
+    if (!c.posts || c.posts.length < 2) continue;
+    const sorted = [...c.posts].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    for (let i = 1; i < sorted.length; i++) {
+      const diffMs = new Date(sorted[i].timestamp).getTime() - new Date(sorted[i - 1].timestamp).getTime();
+      const diffDays = diffMs / DAY_MS;
+      if (diffDays > 0.01) {
+        intervals.push(diffDays);
+      }
+    }
+  }
+
+  let G = 7; // default G
+  if (intervals.length > 0) {
+    const avgInterval = intervals.reduce((s, v) => s + v, 0) / intervals.length;
+    G = Math.max(3, Math.min(30, avgInterval)); // clamp G between 3 and 30 days
+  }
+
+  let freshnessState: "FRESH" | "PARTIALLY_FRESH" | "STALE" | "INSUFFICIENT_DATA" = "STALE";
+  if (dataFreshnessDays <= G && avgAgeDays <= 4 * G) {
+    freshnessState = "FRESH";
+  } else if (dataFreshnessDays <= 2 * G && avgAgeDays <= 8 * G) {
+    freshnessState = "PARTIALLY_FRESH";
+  } else {
+    freshnessState = "STALE";
+  }
+
+  return { dataFreshnessDays, freshnessState };
 }
 
 export function computeVolatilityIndex(signalResults: any[]): number {
@@ -498,6 +551,11 @@ export function buildThreatSignals(confidence: any, trajectory: any, intents: an
 
   if (confidence.guardDecision === "BLOCK") {
     threats.push("INSUFFICIENT DATA: Cannot assess threat landscape reliably");
+    return threats;
+  }
+
+  if (baselineCalibrated === false) {
+    threats.push("BASELINE CALIBRATION IN PROGRESS: threat signals will activate once calibration is established");
     return threats;
   }
 
@@ -579,6 +637,11 @@ export function buildOpportunitySignals(confidence: any, trajectory: any, intent
   const opportunities: string[] = [];
 
   if (confidence.guardDecision === "BLOCK") {
+    return opportunities;
+  }
+
+  if (baselineCalibrated === false) {
+    opportunities.push("BASELINE CALIBRATION IN PROGRESS: opportunity signals will activate once calibration is established");
     return opportunities;
   }
 
@@ -895,6 +958,25 @@ export class MarketIntelligenceV3 {
       const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash, competitorContentHash);
       if (cacheResult.snapshot) {
         const cached = cacheResult.snapshot;
+        
+        const diag = cached.diagnosticsData ? JSON.parse(cached.diagnosticsData as string) : {};
+        if (!diag.executiveSummaryData || diag.executiveSummaryData.the_bottom_line?.includes("Data is currently being processed")) {
+          console.log(`[MIv3] Cached snapshot ${cached.id} missing executive summary. Running BLL translation on-the-fly to repair snapshot.`);
+          const { translateToBusinessLanguage } = await import("../core/business-language-layer");
+          const summary = await translateToBusinessLanguage(cached as any, accountId || "system");
+          if (summary) {
+            const diag = cached.diagnosticsData ? JSON.parse(cached.diagnosticsData as string) : {};
+            diag.executiveSummaryData = summary;
+            diag.executiveSummaryId = cached.id;
+            cached.diagnosticsData = JSON.stringify(diag);
+            const { db } = await import("../db");
+            const { miSnapshots } = await import("../../shared/schema");
+            const { eq } = await import("drizzle-orm");
+            await db.update(miSnapshots).set({ diagnosticsData: cached.diagnosticsData }).where(eq(miSnapshots.id, cached.id));
+            console.log(`[MIv3] Successfully repaired cached snapshot ${cached.id} with new executive summary.`);
+          }
+        }
+
         if (jobId && cached.jobId !== jobId) {
           const { id: _omitId, createdAt: _omitCreatedAt, ...cloneable } = cached as any;
           const [stamped] = await db.insert(miSnapshots).values({
@@ -912,6 +994,16 @@ export class MarketIntelligenceV3 {
 
     const totalPosts = competitors.reduce((s, c) => s + (c.posts?.length || 0), 0);
     const totalComments = competitors.reduce((s, c) => s + (c.comments?.length || 0), 0);
+
+    // Load reviews early to include in evidence freshness and data sufficiency checks
+    const allReviews: Array<{ competitorId: string; reviews: any[] }> = [];
+    for (const comp of competitors) {
+      const reviews = await getStoredReviewsForMIv3(comp.id, accountId);
+      if (reviews.length > 0) {
+        allReviews.push({ competitorId: comp.id, reviews });
+      }
+    }
+
     // Seal #11 / Task #29 / F6.1 — read-through persistence keyed by
     // (jobId, "mi-v3"). On crash-restart the recomputed budget is replaced
     // by the originally-persisted projection so selectedMode is stable.
@@ -932,7 +1024,7 @@ export class MarketIntelligenceV3 {
 
     const signalResults = computeAllSignals(competitors);
     const contentDnaResults = computeAllContentDNA(competitors);
-    const dataFreshnessDays = computeDataFreshnessDays(competitors);
+    const { dataFreshnessDays, freshnessState } = computeEvidenceFreshness(competitors, allReviews);
     const intents = classifyAllIntents(signalResults);
     const authorityWeightMap: Record<string, number> = {};
     for (const sr of signalResults) {
@@ -962,7 +1054,7 @@ export class MarketIntelligenceV3 {
       console.log(`[MIv3] ECHO_CHAMBER_PENALTY_APPLIED | saturation=${trajectory.angleSaturationLevel.toFixed(3)} | convergence=${trajectory.narrativeConvergenceScore.toFixed(3)}`);
     }
     const contentPrimaryMode = allComments.length === 0 && allPosts.length > 0;
-    const confidence = computeConfidence(signalResults, dataFreshnessDays, realDataRatio, contentPrimaryMode);
+    const confidence = computeConfidence(signalResults, dataFreshnessDays, realDataRatio, contentPrimaryMode, freshnessState);
     const dominanceResults = computeAllDominance(signalResults, confidence, goalMode);
     const missingFlags = aggregateMissingFlags(signalResults);
     const volatilityIndex = computeVolatilityIndex(signalResults);
@@ -1054,17 +1146,14 @@ export class MarketIntelligenceV3 {
     try {
       const allTikTokPosts: Array<{ competitorId: string; posts: Awaited<ReturnType<typeof getStoredTikTokPostsForMIv3>> }> = [];
       const allTikTokComments: Array<{ postId: string; text: string; sentiment: number | null }> = [];
-      const allReviews: Array<{ competitorId: string; reviews: Awaited<ReturnType<typeof getStoredReviewsForMIv3>> }> = [];
 
       for (const comp of competitors) {
-        const [tiktokPosts, tiktokComments, reviews] = await Promise.all([
+        const [tiktokPosts, tiktokComments] = await Promise.all([
           getStoredTikTokPostsForMIv3(comp.id, accountId),
           getStoredTikTokCommentsForMIv3(comp.id, accountId),
-          getStoredReviewsForMIv3(comp.id, accountId),
         ]);
         if (tiktokPosts.length > 0) allTikTokPosts.push({ competitorId: comp.id, posts: tiktokPosts });
         if (tiktokComments.length > 0) allTikTokComments.push(...tiktokComments);
-        if (reviews.length > 0) allReviews.push({ competitorId: comp.id, reviews });
       }
 
       const totalTikTokPosts = allTikTokPosts.reduce((s, t) => s + t.posts.length, 0);
@@ -1342,7 +1431,8 @@ export class MarketIntelligenceV3 {
     });
     console.log(`[MIv3] LINEAGE_GENERATED | entries=${miLineage.length} | originType=competitor | opportunities=${opportunitySignals.length} | threats=${threatSignals.length} | narrativeObj=${narObjections.length}`);
 
-    const snapshotPayload = {
+    const snapshotPayload: any = {
+      id: require('crypto').randomUUID(),
       accountId,
       campaignId,
       jobId,

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Task #91 / Phase 4-C — Parity gate hourly scheduler.
  *

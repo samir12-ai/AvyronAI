@@ -203,10 +203,14 @@ export function registerFunnelEngineRoutes(app: Express) {
         sourceAvailability: miSnapshot.sourceAvailability || null,
       };
 
+      const activeRoot = await getActiveRoot(campaignId, accountId);
+
       const audienceInput = {
-        objectionMap: safeJsonParse(audSnapshot.objectionMap) || {},
+        objectionMap: (activeRoot && activeRoot.approvedObjections)
+          ? (typeof activeRoot.approvedObjections === "string" ? safeJsonParse(activeRoot.approvedObjections) : activeRoot.approvedObjections)
+          : (safeJsonParse(audSnapshot.objectionMap) || {}),
         emotionalDrivers: safeJsonParse(audSnapshot.emotionalDrivers) || [],
-        maturityIndex: audSnapshot.maturityIndex,
+        maturityIndex: audSnapshot.maturityIndex ? Number(audSnapshot.maturityIndex) : null,
         awarenessLevel: audSnapshot.awarenessLevel,
         audiencePains: safeJsonParse(audSnapshot.audiencePains) || [],
         desireMap: safeJsonParse(audSnapshot.desireMap) || {},
@@ -314,7 +318,6 @@ export function registerFunnelEngineRoutes(app: Express) {
         }
       }
 
-      const activeRoot = await getActiveRoot(campaignId, accountId);
       let strategyRootId: string | null = null;
 
       if (activeRoot) {

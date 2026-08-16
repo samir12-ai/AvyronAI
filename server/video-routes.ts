@@ -539,7 +539,7 @@ Based on the creative brief above, create an edit plan that fulfills the client'
   app.get("/api/video/projects/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const accountId = resolveAccountId(req);
-      const project = await loadOwnedProject(req.params.id, accountId);
+      const project = await loadOwnedProject(req.params.id as string, accountId);
       if (!project) return res.status(404).json({ error: "Project not found" });
       res.json(project);
     } catch (error) {
@@ -739,7 +739,7 @@ Suggest the best publishing metadata for this content.`,
       const accountId = resolveAccountId(req);
       const result = await db
         .delete(videoProjects)
-        .where(and(eq(videoProjects.id, req.params.id), eq(videoProjects.accountId, accountId)))
+        .where(and(eq(videoProjects.id, req.params.id as string), eq(videoProjects.accountId, accountId)))
         .returning({ id: videoProjects.id });
       if (result.length === 0) return res.status(404).json({ error: "Project not found" });
       res.json({ success: true });

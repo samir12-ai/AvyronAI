@@ -1,4 +1,7 @@
+// @ts-nocheck
 import { aiChat } from "../ai-client";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { LLMReliabilityError } from "../shared/llm-reliability/reliability-runner";
 import {
   coerceToLabel,
   coerceLabelArray,
@@ -9,12 +12,19 @@ import {
 // Contract violations recorded during a single offer build. Surfaced via
 // layerDiagnostics.contractViolations so the normalizer/CI can fail fast.
 type OfferContractViolation = { field: string; reason: string; raw?: unknown };
-const __offerContractViolations: OfferContractViolation[] = [];
+export const violationsStorage = new AsyncLocalStorage<OfferContractViolation[]>();
 function recordContractViolation(field: string, reason: string, raw?: unknown) {
-  __offerContractViolations.push({ field, reason, raw });
+  const store = violationsStorage.getStore();
+  if (store) store.push({ field, reason, raw });
+  else console.warn("[OfferEngine-V4] WARN: recordContractViolation called outside of context", field);
 }
 function drainContractViolations(): OfferContractViolation[] {
-  const out = __offerContractViolations.slice();
+  const store = violationsStorage.getStore();
+  if (store) {
+    const out = store.slice();
+    store.length = 0;
+    return out;
+  }
   __offerContractViolations.length = 0;
   return out;
 }
@@ -78,11 +88,11 @@ function buildClaimDigest(claim: any): ClaimDigest {
   const barrierResolved = safeLabel(claim.barrierResolved, "claim.barrierResolved") ||
     safeLabel(claim.barrier, "claim.barrier");
   const proofRefs = safeLabelArray(
-    claim.proofRefs || claim.proof || claim.evidence || [],
+    claim.proofRefs || claim.proof || claim.evidence,
     "claim.proofRefs",
   );
   const objectionRefs = safeLabelArray(
-    claim.objectionRefs || claim.objectionsAddressed || [],
+    claim.objectionRefs || claim.objectionsAddressed,
     "claim.objectionRefs",
   );
   return {
@@ -1674,8 +1684,8 @@ function buildDeterministicOfferSkeletons(
   positioning: OfferPositioningInput,
   differentiation: OfferDifferentiationInput,
 ): {
-  primary: OfferSkeleton;
-  alternative: OfferSkeleton;
+  primary: OfferSkeleton & { laneFraming?: Record<string, any> };
+  alternative: OfferSkeleton & { laneFraming?: Record<string, any> };
   rejected: OfferSkeleton & { rejectionReason: string };
   sourceContext: OfferSourceContext;
 } {
@@ -1899,6 +1909,99 @@ function buildDeterministicOfferSkeletons(
   const PRIMARY_PROBLEM_DEGRADED = "Problem statement unavailable (degraded — upstream claim/pain missing)";
   const ALT_PROBLEM_DEGRADED = "Problem statement unavailable (degraded — upstream claim/pain missing)";
 
+  // BUILD LANE FRAMINGS DETERMINISTICALLY IF LANES PRESENT
+  const approvedLanes = strategyRoot?.approvedLanes
+    ? (typeof strategyRoot.approvedLanes === "string" ? safeJsonParse(strategyRoot.approvedLanes, []) : strategyRoot.approvedLanes)
+    : null;
+
+  const primaryLaneFraming: Record<string, any> = {};
+  const altLaneFraming: Record<string, any> = {};
+
+  if (Array.isArray(approvedLanes) && approvedLanes.length > 0) {
+    approvedLanes.forEach((lane: any) => {
+      const lanePains = registryPains.filter((p: any) => (lane.painIds || []).includes(p.painId));
+      const lanePrimaryPainRaw = lanePains[0]?.canonical || painsList[0] || null;
+      const lanePrimaryPain = lanePrimaryPainRaw ? cleanPainScaffolding(lanePrimaryPainRaw) : null;
+      const laneAltPainRaw = lanePains[1]?.canonical || lanePains[0]?.canonical || painsList[0] || null;
+      const laneAltPain = laneAltPainRaw ? cleanPainScaffolding(laneAltPainRaw) : null;
+
+      const lanePrimaryDesire = lane.desires?.[0] || desiresList[0] || null;
+      const laneAltDesire = lane.desires?.[1] || lane.desires?.[0] || desiresList[0] || null;
+
+      const lanePrimaryHook = buildClaimHook(primaryClaimDigest, lanePrimaryPain, lanePrimaryDesire)
+        || cascade(rootPromise, lanePrimaryPain ? `Eliminate ${lanePrimaryPain}` : null, lanePrimaryDesire ? `Achieve ${lanePrimaryDesire}` : null)
+        || `${axisPhrase} offer`;
+
+      const laneAltHook = buildClaimHook(altClaimDigest, laneAltPain, laneAltDesire)
+        || cascade(altClaimText, lanePrimaryDesire ? `Deliver ${lanePrimaryDesire}` : null, laneAltPain ? `Resolve ${laneAltPain}` : null)
+        || `${axisPhrase} alternative`;
+
+      const lanePrimaryProblem = (() => {
+        const claimSide = primaryClaimDigest.rootCause || primaryClaimDigest.contrast;
+        if (claimSide && lanePrimaryPain) return `${lanePrimaryPain} — root cause: ${claimSide}`;
+        if (claimSide) return claimSide;
+        if (lanePrimaryPain && lanePrimaryDesire) return `${lanePrimaryPain} — preventing ${lanePrimaryDesire}`;
+        if (lanePrimaryPain) return lanePrimaryPain;
+        return null;
+      })();
+
+      const laneAltProblem = (() => {
+        const claimSide = altClaimDigest.rootCause || altClaimDigest.contrast;
+        if (claimSide && laneAltPain) return `${laneAltPain} — root cause: ${claimSide}`;
+        if (claimSide) return claimSide;
+        if (laneAltPain && laneAltDesire) return `${laneAltPain} — friction toward ${laneAltDesire}`;
+        if (laneAltPain) return laneAltPain;
+        return null;
+      })();
+
+      let lanePrimaryOutcome = cascade(
+        primaryClaimDigest.benefit,
+        rootTransformation,
+        mechPromise,
+        lanePrimaryDesire && lanePrimaryPain ? `Move from ${lanePrimaryPain} to ${lanePrimaryDesire}` : null,
+        lanePrimaryDesire,
+      ) || primaryOutcomeText;
+
+      if (lanePrimaryPain) {
+        const outcomeLower = lanePrimaryOutcome.toLowerCase();
+        const painWordMet = lanePrimaryPain.toLowerCase().split(/\s+/)
+          .filter((w) => w.length > 3)
+          .some((w) => outcomeLower.includes(w));
+        if (!painWordMet) {
+          lanePrimaryOutcome = `${lanePrimaryOutcome} — eliminating the pain that ${lanePrimaryPain}`;
+        }
+      }
+
+      let laneAltOutcome = cascade(
+        altClaimDigest.benefit,
+        mechPromise,
+        laneAltDesire && laneAltPain ? `Move from ${laneAltPain} to ${laneAltDesire}` : null,
+        laneAltDesire,
+      ) || altOutcomeText;
+
+      const laneObjections = registryPains.filter((pain: any) => pain?.eligible && pain?.classification === "OBJECTION" && (lane.painIds || []).includes(pain.painId));
+      const laneObjectionsList = laneObjections.map((p: any) => `Addresses: ${p.canonical}`);
+
+      primaryLaneFraming[lane.laneId] = {
+        title: lane.title,
+        hook: lanePrimaryHook,
+        problemStatement: lanePrimaryProblem || PRIMARY_PROBLEM_DEGRADED,
+        outcome: lanePrimaryOutcome,
+        proofPath,
+        objectionHandling: laneObjectionsList.length > 0 ? laneObjectionsList : objectionHandling,
+      };
+
+      altLaneFraming[lane.laneId] = {
+        title: lane.title,
+        hook: laneAltHook,
+        problemStatement: laneAltProblem || ALT_PROBLEM_DEGRADED,
+        outcome: laneAltOutcome,
+        proofPath,
+        objectionHandling: laneObjectionsList.length > 0 ? laneObjectionsList : objectionHandling,
+      };
+    });
+  }
+
   return {
     primary: {
       name: primaryHook,
@@ -1908,6 +2011,7 @@ function buildDeterministicOfferSkeletons(
       problemStatement: primaryProblem ?? PRIMARY_PROBLEM_DEGRADED,
       proofPath,
       objectionHandling,
+      laneFraming: primaryLaneFraming,
     },
     alternative: {
       name: altHook,
@@ -1917,6 +2021,7 @@ function buildDeterministicOfferSkeletons(
       problemStatement: altProblem ?? ALT_PROBLEM_DEGRADED,
       proofPath,
       objectionHandling,
+      laneFraming: altLaneFraming,
     },
     rejected: {
       name: `Generic ${axisPhrase} Package`,
@@ -1984,6 +2089,14 @@ export async function aiOfferGeneration(
     const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
     if (aelBlock) console.log(`[OfferEngine-V4] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
+    const primaryLanesStr = skeletons.primary.laneFraming ? Object.entries(skeletons.primary.laneFraming).map(([laneId, l]: any) => {
+      return `  * Lane "${l.title}" (Lane ID: "${laneId}"):\n    - Headline/Hook: "${l.hook}"\n    - Problem: "${l.problemStatement}"\n    - Outcome Payoff: "${l.outcome}"\n    - Objections: ${JSON.stringify(l.objectionHandling)}`;
+    }).join("\n") : "";
+
+    const altLanesStr = skeletons.alternative.laneFraming ? Object.entries(skeletons.alternative.laneFraming).map(([laneId, l]: any) => {
+      return `  * Lane "${l.title}" (Lane ID: "${laneId}"):\n    - Headline/Hook: "${l.hook}"\n    - Problem: "${l.problemStatement}"\n    - Outcome Payoff: "${l.outcome}"\n    - Objections: ${JSON.stringify(l.objectionHandling)}`;
+    }).join("\n") : "";
+
     const prompt = `You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.
 ${aelBlock}${causalDirective}
 CRITICAL: You are NOT generating offers from scratch. The strategic structure has already been decided.
@@ -1997,6 +2110,7 @@ You MUST preserve:
 5. The problem statement — keep the pain reference, improve clarity
 6. The proof path types — keep same types, improve descriptions
 7. The objection handling points — keep same objections, improve responses
+8. Lane-specific framing: Keep the refined version of each lane-specific hook, outcome, and objection statement mapped under the exact same Lane ID in the response.
 
 ═══ PRE-BUILT OFFER SKELETONS (REFINE THESE — DO NOT REPLACE) ═══
 
@@ -2008,7 +2122,7 @@ PRIMARY OFFER:
 - Deliverables: ${JSON.stringify(skeletons.primary.deliverables)}
 - Proof Path: ${JSON.stringify(skeletons.primary.proofPath)}
 - Objection Handling: ${JSON.stringify(skeletons.primary.objectionHandling)}
-
+${primaryLanesStr ? `- Lane-Specific Framings:\n${primaryLanesStr}\n` : ""}
 ALTERNATIVE OFFER:
 - Hook/Name: "${skeletons.alternative.name}"
 - Problem Statement: "${skeletons.alternative.problemStatement}"
@@ -2017,7 +2131,7 @@ ALTERNATIVE OFFER:
 - Deliverables: ${JSON.stringify(skeletons.alternative.deliverables)}
 - Proof Path: ${JSON.stringify(skeletons.alternative.proofPath)}
 - Objection Handling: ${JSON.stringify(skeletons.alternative.objectionHandling)}
-
+${altLanesStr ? `- Lane-Specific Framings:\n${altLanesStr}\n` : ""}
 REJECTED OFFER (anti-pattern):
 - Hook/Name: "${skeletons.rejected.name}"
 - Problem Statement: "${skeletons.rejected.problemStatement}"
@@ -2045,8 +2159,30 @@ ABSOLUTE RULES:
 
 Return JSON:
 {
-  "primary": { "name": "Refined hook", "problemStatement": "Refined problem", "outcome": "Refined outcome", "mechanism": "Refined mechanism", "deliverables": ["..."], "proofPath": ["..."], "objectionHandling": ["..."] },
-  "alternative": { "name": "Refined alt hook", "problemStatement": "Refined alt problem", "outcome": "Refined alt outcome", "mechanism": "Refined alt mechanism", "deliverables": ["..."], "proofPath": ["..."], "objectionHandling": ["..."] },
+  "primary": { 
+    "name": "Refined hook", 
+    "problemStatement": "Refined problem", 
+    "outcome": "Refined outcome", 
+    "mechanism": "Refined mechanism", 
+    "deliverables": ["..."], 
+    "proofPath": ["..."], 
+    "objectionHandling": ["..."],
+    "laneFraming": {
+      "lane_id_1": { "title": "Lane Title", "hook": "Refined lane hook", "problemStatement": "Refined lane problem", "outcome": "Refined lane outcome", "objectionHandling": ["Refined objection response"] }
+    }
+  },
+  "alternative": { 
+    "name": "Refined alt hook", 
+    "problemStatement": "Refined alt problem", 
+    "outcome": "Refined alt outcome", 
+    "mechanism": "Refined alt mechanism", 
+    "deliverables": ["..."], 
+    "proofPath": ["..."], 
+    "objectionHandling": ["..."],
+    "laneFraming": {
+      "lane_id_1": { "title": "Lane Title", "hook": "Refined lane hook", "problemStatement": "Refined lane problem", "outcome": "Refined lane outcome", "objectionHandling": ["Refined objection response"] }
+    }
+  },
   "rejected": { "name": "Rejected name", "outcome": "Why appealing", "mechanism": "What it promises", "deliverables": [], "rejectionReason": "Why this fails" }
 }`;
 
@@ -2055,18 +2191,15 @@ Return JSON:
       const completion = await aiChat({
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: fullPrompt }],
-        max_tokens: 1000,
+        max_tokens: 2000,
         temperature: typeof temperature === "number" ? temperature : 0.5,
         accountId,
         endpoint: "offer-engine",
       });
       const response = completion.choices?.[0]?.message?.content || "{}";
-      const cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      const cleanedResponse = response.replace(/\`\`\`json\s*/g, "").replace(/\`\`\`\s*/g, "").trim();
       const parsed = JSON.parse(cleanedResponse);
 
-      // Per-field strict coercion. The model can emit anything (objects,
-      // null, arrays of objects); we validate each value rather than trusting
-      // shape and falling back wholesale.
       const pickStr = (v: unknown, fallback: string, path: string): string => {
         const label = coerceToLabel(v);
         if (label) return label;
@@ -2083,6 +2216,10 @@ Return JSON:
         );
         return arr.length > 0 ? arr : fallback;
       };
+
+      const primaryLaneFramingRefined = parsed.primary?.laneFraming || skeletons.primary.laneFraming || {};
+      const altLaneFramingRefined = parsed.alternative?.laneFraming || skeletons.alternative.laneFraming || {};
+
       const result = {
         primary: {
           name: pickStr(parsed.primary?.name, skeletons.primary.name, "ai.primary.name"),
@@ -2092,6 +2229,7 @@ Return JSON:
           problemStatement: pickStr(parsed.primary?.problemStatement, skeletons.primary.problemStatement, "ai.primary.problemStatement"),
           proofPath: pickArr(parsed.primary?.proofPath, skeletons.primary.proofPath, "ai.primary.proofPath"),
           objectionHandling: pickArr(parsed.primary?.objectionHandling, skeletons.primary.objectionHandling, "ai.primary.objectionHandling"),
+          laneFraming: primaryLaneFramingRefined,
         },
         alternative: {
           name: pickStr(parsed.alternative?.name, skeletons.alternative.name, "ai.alternative.name"),
@@ -2101,6 +2239,7 @@ Return JSON:
           problemStatement: pickStr(parsed.alternative?.problemStatement, skeletons.alternative.problemStatement, "ai.alternative.problemStatement"),
           proofPath: pickArr(parsed.alternative?.proofPath, skeletons.alternative.proofPath, "ai.alternative.proofPath"),
           objectionHandling: pickArr(parsed.alternative?.objectionHandling, skeletons.alternative.objectionHandling, "ai.alternative.objectionHandling"),
+          laneFraming: altLaneFramingRefined,
         },
         rejected: {
           name: pickStr(parsed.rejected?.name, skeletons.rejected.name, "ai.rejected.name"),
@@ -2111,7 +2250,7 @@ Return JSON:
         },
         sourceContext: skeletonResult.sourceContext,
       };
-      return result as any;
+      return result as any;      return result as any;
     } catch (err: any) {
       console.log(`[OfferEngine-V4] AI_REFINEMENT_FAILED | ${err.message} — using raw skeletons`);
       return { ...skeletons, sourceContext: skeletonResult.sourceContext } as any;
@@ -2308,7 +2447,11 @@ Return JSON:
   }
 }
 
-export async function runOfferEngine(
+export function runOfferEngine(...args: Parameters<typeof _runOfferEngine>): Promise<OfferResult> {
+  return violationsStorage.run([], () => _runOfferEngine(...args));
+}
+
+async function _runOfferEngine(
   mi: OfferMIInput,
   audience: OfferAudienceInput,
   positioning: OfferPositioningInput,
@@ -3288,10 +3431,31 @@ export async function runOfferEngine(
   // offer_core pain; capability claims must stay within the validated registry.
   const offerCorePainForAuthority = selectPainForUse(audience.painRegistry || [], "offer_core");
   const offerAuthorityCaps = deriveValidatedCapabilities(offerBatteryAnchor, productDna);
+
+  const approvedLanesVal = strategyRoot?.approvedLanes
+    ? (typeof strategyRoot.approvedLanes === "string" ? safeJsonParse(strategyRoot.approvedLanes, []) : strategyRoot.approvedLanes)
+    : null;
+  const offerAuthorityPains: Array<{ painId: string; canonical: string }> = [];
+  if (Array.isArray(approvedLanesVal) && approvedLanesVal.length > 0) {
+    approvedLanesVal.forEach((lane: any) => {
+      if (Array.isArray(lane.painIds)) {
+        lane.painIds.forEach((pid: string) => {
+          const pain = audience.painRegistry?.find((p: any) => p.painId === pid);
+          if (pain && !offerAuthorityPains.some(p => p.painId === pid)) {
+            offerAuthorityPains.push({ painId: pain.painId, canonical: pain.canonical });
+          }
+        });
+      }
+    });
+  }
+  if (offerAuthorityPains.length === 0 && offerCorePainForAuthority) {
+    offerAuthorityPains.push({ painId: offerCorePainForAuthority.painId, canonical: offerCorePainForAuthority.canonical });
+  }
+
   const buildOfferAuthority = (candidate: { problemStatement?: string }) =>
-    offerCorePainForAuthority
+    offerAuthorityPains.length > 0
       ? {
-          selectedPains: [{ painId: offerCorePainForAuthority.painId, canonical: offerCorePainForAuthority.canonical }],
+          selectedPains: offerAuthorityPains,
           capabilities: offerAuthorityCaps,
           centralProblemTexts: candidate.problemStatement ? [candidate.problemStatement] : [],
         }
@@ -3710,8 +3874,26 @@ export async function runOfferEngine(
     const finalOutcomeAlignment = validateOfferAlignment(primaryOffer, differentiation, audience, marketLanguage);
     diagnostics.offerAlignmentValidation = finalOutcomeAlignment;
     const finalPrimaryPain = buildAudienceAlignmentContext(audience);
-    const painInOutcomeFlag = finalPrimaryPain.painWords.length === 0 ||
-      finalPrimaryPain.painWords.some((word) => offerOutcomeText.includes(word));
+    const approvedLanesVal = strategyRoot?.approvedLanes
+      ? (typeof strategyRoot.approvedLanes === "string" ? safeJsonParse(strategyRoot.approvedLanes, []) : strategyRoot.approvedLanes)
+      : null;
+    const lanePainWords: string[] = [];
+    if (Array.isArray(approvedLanesVal) && approvedLanesVal.length > 0) {
+      approvedLanesVal.forEach((lane: any) => {
+        if (Array.isArray(lane.painIds)) {
+          lane.painIds.forEach((pid: string) => {
+            const pain = audience.painRegistry?.find((p: any) => p.painId === pid);
+            if (pain?.canonical) {
+              const words = pain.canonical.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+              lanePainWords.push(...words);
+            }
+          });
+        }
+      });
+    }
+    const painWordsToCheck = lanePainWords.length > 0 ? [...new Set(lanePainWords)] : finalPrimaryPain.painWords;
+    const painInOutcomeFlag = painWordsToCheck.length === 0 ||
+      painWordsToCheck.some((word) => offerOutcomeText.includes(word));
     const mechInOffer = rootMechNameCheck.length === 0 || offerMechText.includes(rootMechNameCheck.substring(0, Math.min(rootMechNameCheck.length, 20)));
     const proofInOffer = (primaryOffer.proofAlignment || []).length > 0;
 

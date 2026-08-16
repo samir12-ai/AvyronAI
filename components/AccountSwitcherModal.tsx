@@ -47,7 +47,7 @@ function planBadge(account: SavedAccount): { label: string; color: string; bg: s
 
 export function AccountSwitcherModal() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const insets = useSafeAreaInsets();
   const { user, savedAccounts, showAccountSwitcher, closeAccountSwitcher, switchToAccount, removeSavedAccount, setIsAddingAccount } = useAuth();
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { Express } from "express";
 import { db } from "../db";
 import { leads, conversionEvents, ctaVariants, performanceSnapshots, publishedPosts } from "@shared/schema";

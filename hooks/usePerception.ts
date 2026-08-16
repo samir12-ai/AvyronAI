@@ -406,3 +406,22 @@ export function useRetryStrategicBrief(campaignId: string | null | undefined, br
     mutationFn: () => postJson<any>(`/api/strategic-briefs/${briefId}/retry?campaignId=${campaignId}`),
   });
 }
+
+export function useDnaEnrichment(campaignId: string | null | undefined) {
+  const baseUrl = getApiUrl();
+  return useQuery<DnaEnrichmentPendingResponse>({
+    queryKey: ["/api/dna-enrichment/pending", campaignId],
+    queryFn: async () => {
+      const url = new URL("/api/dna-enrichment/pending", baseUrl);
+      if (campaignId) url.searchParams.set("campaignId", campaignId);
+      const res = await authFetch(url.toString());
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to fetch DNA enrichment requests");
+      }
+      return res.json();
+    },
+    enabled: !!campaignId,
+  });
+}
+

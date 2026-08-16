@@ -32,7 +32,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
     buttonText: "#FFFFFF",
   };
 
-  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isModalVisible, setIsModalVisible] = useState(true);
 
   const handleRestart = async () => {
     try {
@@ -59,7 +59,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {__DEV__ ? (
+      {true ? (
         <Pressable
           onPress={() => setIsModalVisible(true)}
           accessibilityLabel="View error details"
@@ -103,7 +103,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
         </Pressable>
       </View>
 
-      {__DEV__ ? (
+      {true ? (
         <Modal
           visible={isModalVisible}
           animationType="slide"

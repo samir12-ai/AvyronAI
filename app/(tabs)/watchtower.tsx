@@ -17,6 +17,7 @@ import FilterDropdown from '@/components/watchtower/FilterDropdown';
 import { Feather } from '@expo/vector-icons';
 import { useAppShellController } from '@/hooks/useAppShellController';
 import { formatWatchtowerDate } from '@/utils/watchtower-date-formatter';
+import { GlobalHeader } from '@/components/GlobalHeader';
 
 const TABS = ['All Changes', 'High Impact', 'Confirmed', 'First Observation', 'Archived'] as const;
 
@@ -79,7 +80,8 @@ export default function WatchtowerPage() {
 
   return (
     <View style={styles.root}>
-      {/* ── HEADER ── */}
+      {/* 🚀 HEADER 🚀 */}
+      <GlobalHeader title="WATCHTOWER" />
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.headerIconWrap}>
@@ -322,7 +324,7 @@ function EmptyDetail() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#070B12',
+    backgroundColor: '#0F0F13',
   },
   loadingContainer: {
     flex: 1,

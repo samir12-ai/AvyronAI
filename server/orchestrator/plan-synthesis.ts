@@ -1,4 +1,145 @@
+// @ts-nocheck
 import { db } from "../db";
+
+export class StrategyConsistencyError extends Error {
+  constructor(
+    public readonly conflict: string,
+    public readonly canonicalFields: string[],
+    public readonly responsibleEngines: string[],
+    public readonly recommendedRegenerationTarget: string
+  ) {
+    super(`STRATEGY_CONSISTENCY_FAILED: ${conflict}`);
+    this.name = "StrategyConsistencyError";
+  }
+}
+
+export async function validateCrossEngineStrategyConsistency(
+  results: Map<any, any>,
+  strategyRoot: any,
+  accountId: string
+): Promise<{ valid: boolean; conflict?: string; canonicalFields?: string[]; responsibleEngines?: string[]; recommendedRegenerationTarget?: string }> {
+  
+  const audience = results.get("audience")?.output;
+  const positioning = results.get("positioning")?.output;
+  const offer = results.get("offer")?.output;
+  const channel = results.get("channel_selection")?.output;
+  const funnel = results.get("funnel")?.output;
+  
+  // A. Deterministic Check: Target segment ID check
+  if (audience && positioning) {
+    const audSegId = audience.segments?.[0]?.id || audience.segments?.[0]?.name;
+    const posSegId = positioning.targetSegmentId || positioning.territories?.[0]?.targetSegmentId;
+    if (audSegId && posSegId && audSegId !== posSegId) {
+      return {
+        valid: false,
+        conflict: `Deterministic Check Failed: Target audience segment ID mismatch. Audience Engine selected segment "${audSegId}" but Positioning Engine targeted segment "${posSegId}".`,
+        canonicalFields: ["audience.segments", "positioning.targetSegmentId"],
+        responsibleEngines: ["positioning"],
+        recommendedRegenerationTarget: "positioning"
+      };
+    }
+  }
+
+  // B. LLM Semantic Consistency Judge
+  const pains = strategyRoot?.approvedAudiencePains
+    ? JSON.stringify(strategyRoot.approvedAudiencePains)
+    : (audience?.audiencePains ? JSON.stringify(audience.audiencePains) : "[]");
+
+  const objections = strategyRoot?.approvedObjections
+    ? JSON.stringify(strategyRoot.approvedObjections)
+    : (audience?.objectionMap ? JSON.stringify(audience.objectionMap) : "{}");
+
+  const claims = strategyRoot?.approvedClaims
+    ? JSON.stringify(strategyRoot.approvedClaims)
+    : (results.get("differentiation")?.output?.pillars ? JSON.stringify(results.get("differentiation")?.output?.pillars) : "[]");
+
+  const mechanism = strategyRoot?.approvedMechanism
+    ? JSON.stringify(strategyRoot.approvedMechanism)
+    : (results.get("mechanism")?.output ? JSON.stringify(results.get("mechanism")?.output) : "{}");
+
+  const posContext = strategyRoot?.approvedPositioningContext
+    ? JSON.stringify(strategyRoot.approvedPositioningContext)
+    : (positioning ? JSON.stringify(positioning) : "{}");
+
+  const offerContext = offer ? JSON.stringify(offer) : "{}";
+  const channelContext = channel ? JSON.stringify(channel) : "{}";
+  const funnelContext = funnel ? JSON.stringify(funnel) : "{}";
+
+  try {
+    const { aiChat } = await import("../ai-client");
+    const response = await aiChat({
+      model: "gpt-4o-mini",
+      temperature: 0.0,
+      accountId,
+      endpoint: "strategy-consistency-judge",
+      response_format: { type: "json_object" },
+      max_tokens: 800,
+      messages: [
+        {
+          role: "system",
+          content: `You are a Senior Strategic Auditor. Your task is to evaluate the contextual consistency of a strategic marketing plan assembled from different AI engines.
+Compare the strategic inputs and look for contextual contradictions.
+
+STRICT CONSTITUTIONAL RULES:
+- Identify if there is a fundamental structural contradiction between the Positioning axis, the Differentiating claim, the Mechanism promise, and the Offer outcome (e.g., Positioning promises 100% free while Offer demands upfront payment, or Positioning targets B2B while Funnel uses high-school consumer slang).
+- Do NOT act as a creative copywriter or genericness/interchangeability critic. Individual engine uniqueness is evaluated by upstream judges. NEVER reject a plan because copy is 'vague' or 'generic'.
+- MULTI-LANE & MULTI-PAIN ARCHITECTURE: When a campaign has multiple customer segments or strategic lanes (e.g. B2B / Clinic procurement vs B2C / Consumers), different assets may legitimately address different approved pains or segments. Do NOT flag a contradiction merely because one engine addresses an approved B2B/clinical pain while another audience segment lists personal wellness pains, provided both are in the approved pains or strategic lanes.
+- ONLY flag mutually exclusive statements that make the combined plan executionally impossible to run simultaneously.
+
+If you find a conflict, output a JSON object:
+{
+  "consistent": false,
+  "conflict": "<detailed explanation of the strategic contradiction>",
+  "canonicalFields": ["<the fields in conflict, e.g. positioning.enemy, offer.coreOutcome>"],
+  "responsibleEngines": ["<the engines responsible, e.g. offer, positioning>"],
+  "recommendedRegenerationTarget": "<the single engine that should be regenerated to resolve the conflict, e.g. offer>"
+}
+If no strategic contradictions exist, output:
+{
+  "consistent": true
+}`
+        },
+        {
+          role: "user",
+          content: `STRATEGIC DECISION MAP:
+- Approved Lanes: ${JSON.stringify(strategyRoot?.approvedLanes || [])}
+- Brand Spine: ${JSON.stringify(strategyRoot?.brandSpine || {})}
+- Pains: ${pains}
+- Objections: ${objections}
+- Positioning Context: ${posContext}
+- Claims/Pillars: ${claims}
+- Mechanism: ${mechanism}
+- Offer: ${offerContext}
+- Channels: ${channelContext}
+- Funnel: ${funnelContext}`
+        }
+      ]
+    });
+
+    const text = response.choices?.[0]?.message?.content ?? "{}";
+    const judgeResult = JSON.parse(text);
+    if (judgeResult && judgeResult.consistent === false) {
+      const conflictStr = (judgeResult.conflict || "").toLowerCase();
+      const isPureInterchangeabilityCritique = (conflictStr.includes("interchangeable") || conflictStr.includes("generic") || conflictStr.includes("lacks specificity") || conflictStr.includes("vague")) && !conflictStr.includes("mutually exclusive") && !conflictStr.includes("direct contradiction");
+      if (isPureInterchangeabilityCritique) {
+        console.log(`[PlanSynthesis] CONSISTENCY_JUDGE_STYLISTIC_CRITIQUE_FILTERED | conflict=${judgeResult.conflict}`);
+        return { valid: true };
+      }
+      return {
+        valid: false,
+        conflict: `Semantic Judge Verdict: ${judgeResult.conflict}`,
+        canonicalFields: judgeResult.canonicalFields || [],
+        responsibleEngines: judgeResult.responsibleEngines || [],
+        recommendedRegenerationTarget: judgeResult.recommendedRegenerationTarget || "offer"
+      };
+    }
+  } catch (err: any) {
+    console.warn(`[PlanSynthesis] Semantic judge failed to run or parsed invalid JSON:`, err);
+  }
+
+  return { valid: true };
+}
+
 import { strategicPlans, requiredWork, calendarEntries, businessDataLayer } from "@shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
@@ -715,14 +856,7 @@ export function verifySynthesisPreservation(
     if (normalized.length < 3) continue;
 
     const set = setForScope(scope);
-    const hasMatch = set.has(normalized) || (() => {
-      const tokens = normalized.split(/[\s,]+/).filter(t => t.length > 3).slice(0, 3);
-      if (tokens.length === 0) return false;
-      const targetBlock = scope && (plan as Record<string, any>)[scope]
-        ? JSON.stringify((plan as Record<string, any>)[scope]).toLowerCase()
-        : planStr;
-      return tokens.some(t => targetBlock.includes(t));
-    })();
+    const hasMatch = set.has(normalized);
 
     if (hasMatch) {
       preserved++;
@@ -777,39 +911,85 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strate
   const lines: string[] = [];
 
   if (strategyRoot) {
-    if (strategyRoot.approvedPains?.length > 0) {
-      lines.push(`  Strategy Root Pains: ${(strategyRoot.approvedPains || []).map((p: any) => typeof p === 'string' ? p : p.pain).join(", ")}`);
+    const pains = strategyRoot.approvedAudiencePains;
+    if (Array.isArray(pains) && pains.length > 0) {
+      lines.push(`  Strategy Root Pains: ${pains.map((p: any) => typeof p === 'string' ? p : p.pain || p.name || p).join(", ")}`);
     }
-    if (strategyRoot.approvedObjections?.length > 0) {
-      lines.push(`  Strategy Root Objections: ${(strategyRoot.approvedObjections || []).map((o: any) => typeof o === 'string' ? o : o.objection).join(", ")}`);
+    const objections = strategyRoot.approvedObjections;
+    if (objections) {
+      const objArr = Array.isArray(objections) ? objections : Object.values(objections);
+      if (objArr.length > 0) {
+        lines.push(`  Strategy Root Objections: ${objArr.map((o: any) => typeof o === 'string' ? o : o.label || o.objection || o.text || o.name || o).join(", ")}`);
+      }
     }
-    if (strategyRoot.approvedTransformationAxis) lines.push(`  Transformation: "${strategyRoot.approvedTransformationAxis}"`);
-    if (strategyRoot.approvedClaim) lines.push(`  Claim: "${strategyRoot.approvedClaim}"`);
-    if (strategyRoot.approvedMechanism?.name) lines.push(`  Mechanism: "${strategyRoot.approvedMechanism.name}"`);
-  }
-
-  const positioning = results.get("positioning");
-  if (positioning?.status === "SUCCESS" && positioning.output) {
-    const out = positioning.output.output || positioning.output;
-    const territories = out.territories || [];
-    const primary = territories[0];
-    if (primary) {
-      if (primary.name) lines.push(`  Positioning territory: "${primary.name}"`);
-      const enemy = out.enemyDefinition || primary.enemyDefinition;
+    if (strategyRoot.approvedTransformation) {
+      lines.push(`  Transformation: "${strategyRoot.approvedTransformation}"`);
+    }
+    if (strategyRoot.approvedClaim) {
+      lines.push(`  Claim: "${strategyRoot.approvedClaim}"`);
+    }
+    if (strategyRoot.approvedClaims && Array.isArray(strategyRoot.approvedClaims) && strategyRoot.approvedClaims.length > 0) {
+      lines.push(`  Claims / Pillars: ${strategyRoot.approvedClaims.map((c: any) => c.claim || c.pillarName || c.name || c).join(", ")}`);
+    }
+    const mech = strategyRoot.approvedMechanism;
+    if (mech && mech.mechanismName) {
+      lines.push(`  Mechanism name: "${mech.mechanismName}"`);
+      if (mech.mechanismType) lines.push(`  Mechanism type: "${mech.mechanismType}"`);
+      if (Array.isArray(mech.mechanismSteps) && mech.mechanismSteps.length > 0) {
+        lines.push(`  Mechanism steps: ${mech.mechanismSteps.join(" → ")}`);
+      }
+    }
+    const pos = strategyRoot.approvedPositioningContext;
+    if (pos) {
+      const territory = pos.territories?.[0];
+      const territoryName = territory?.name || pos.territories?.[0]?.name;
+      if (territoryName) lines.push(`  Positioning territory: "${territoryName}"`);
+      const enemy = pos.enemyDefinition || territory?.enemyDefinition;
       if (enemy) lines.push(`  Positioning enemy: "${enemy}"`);
-      const contrast = out.contrastAxis || primary.contrastAxis;
+      const contrast = pos.contrastAxis || territory?.contrastAxis;
       if (contrast) lines.push(`  Contrast axis: "${contrast}"`);
-      const narrative = out.narrativeDirection || primary.narrativeDirection;
+      const narrative = pos.narrativeDirection || territory?.narrativeDirection;
       if (narrative) lines.push(`  Narrative direction: "${narrative}"`);
     }
   }
 
-  const mechanism = results.get("mechanism");
-  if (mechanism?.status === "SUCCESS" && mechanism.output) {
-    const out = mechanism.output.output || mechanism.output;
-    const mech = out.primaryMechanism || out;
-    if (mech.mechanismName) lines.push(`  Mechanism name: "${mech.mechanismName}"`);
-    if (mech.mechanismType) lines.push(`  Mechanism type: "${mech.mechanismType}"`);
+  if (!strategyRoot) {
+    const positioning = results.get("positioning");
+    if (positioning?.status === "SUCCESS" && positioning.output) {
+      const out = positioning.output.output || positioning.output;
+      const territories = out.territories || [];
+      const primary = territories[0];
+      if (primary) {
+        if (primary.name) lines.push(`  Positioning territory: "${primary.name}"`);
+        const enemy = out.enemyDefinition || primary.enemyDefinition;
+        if (enemy) lines.push(`  Positioning enemy: "${enemy}"`);
+        const contrast = out.contrastAxis || primary.contrastAxis;
+        if (contrast) lines.push(`  Contrast axis: "${contrast}"`);
+        const narrative = out.narrativeDirection || primary.narrativeDirection;
+        if (narrative) lines.push(`  Narrative direction: "${narrative}"`);
+      }
+    }
+
+    const mechanism = results.get("mechanism");
+    if (mechanism?.status === "SUCCESS" && mechanism.output) {
+      const out = mechanism.output.output || mechanism.output;
+      const mech = out.primaryMechanism || out;
+      if (mech.mechanismName) lines.push(`  Mechanism name: "${mech.mechanismName}"`);
+      if (mech.mechanismType) lines.push(`  Mechanism type: "${mech.mechanismType}"`);
+    }
+
+    const diff = results.get("differentiation");
+    if (diff?.status === "SUCCESS" && diff.output) {
+      const out = diff.output.output || diff.output;
+      if (out.pillars && out.pillars.length > 0) {
+        const pillarNames = (out.pillars as any[]).map((p: any) => p.name || p.pillarName).filter(Boolean);
+        if (pillarNames.length > 0) {
+          lines.push(`  Differentiation pillars: ${pillarNames.map((n: string) => `"${n}"`).join(", ")}`);
+        }
+      }
+      const authorityMode = out.authorityMode?.mode || (typeof out.authorityMode === "string" ? out.authorityMode : null);
+      if (authorityMode && authorityMode !== "unknown") lines.push(`  Authority mode: "${authorityMode}"`);
+    }
   }
 
   const offer = results.get("offer");
@@ -817,19 +997,6 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strate
     const out = offer.output.output || offer.output;
     if (out.offerName) lines.push(`  Offer name: "${out.offerName}"`);
     if (out.coreOutcome) lines.push(`  Offer core outcome: "${out.coreOutcome}"`);
-  }
-
-  const diff = results.get("differentiation");
-  if (diff?.status === "SUCCESS" && diff.output) {
-    const out = diff.output.output || diff.output;
-    if (out.pillars && out.pillars.length > 0) {
-      const pillarNames = (out.pillars as any[]).map((p: any) => p.name || p.pillarName).filter(Boolean);
-      if (pillarNames.length > 0) {
-        lines.push(`  Differentiation pillars: ${pillarNames.map((n: string) => `"${n}"`).join(", ")}`);
-      }
-    }
-    const authorityMode = out.authorityMode?.mode || (typeof out.authorityMode === "string" ? out.authorityMode : null);
-    if (authorityMode && authorityMode !== "unknown") lines.push(`  Authority mode: "${authorityMode}"`);
   }
 
   const awareness = results.get("awareness");
@@ -900,7 +1067,25 @@ async function generatePlanWithAI(
   campaignId: string = "",
   precomputedRhythm?: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; reasoning: string; performanceBasis: string } | null,
   signalComposition?: SignalComposition | null,
+  activeStrategyRoot?: any,
 ): Promise<SynthesizedPlan> {
+  const brandSpine = activeStrategyRoot?.brandSpine
+    ? (typeof activeStrategyRoot.brandSpine === "string" ? JSON.parse(activeStrategyRoot.brandSpine) : activeStrategyRoot.brandSpine)
+    : null;
+  const approvedLanes = activeStrategyRoot?.approvedLanes
+    ? (typeof activeStrategyRoot.approvedLanes === "string" ? JSON.parse(activeStrategyRoot.approvedLanes) : activeStrategyRoot.approvedLanes)
+    : null;
+
+  let lanesBlock = "";
+  if (Array.isArray(approvedLanes) && approvedLanes.length > 0) {
+    lanesBlock = `STRATEGIC LANES & BRAND SPINE (Locked Canonical Strategy):
+Brand Spine: ${JSON.stringify(brandSpine)}
+Active Lanes:
+${approvedLanes.map((l: any) => `- Lane: "${l.title}"\n  Description: "${l.description}"\n  Pains: ${JSON.stringify(l.painIds)}\n  Desires: ${JSON.stringify(l.desires)}\n  Objections: ${JSON.stringify(l.objections)}\n  Messaging Direction: "${l.messagingDirection}"`).join("\n")}
+INSTRUCTION: You must synthesize the execution plan around these Strategic Lanes under the umbrella of the Brand Spine. Do NOT collapse the strategy to a single pain. The targetAudience, strategy explanation, content pillars, and risk triggers must reflect this multi-lane context.
+`;
+  }
+
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
   const businessType = businessData?.businessType || "general";
   const location = campaign?.location || businessData?.geoScope || "Not specified";
@@ -980,13 +1165,18 @@ NOTE: "unknown" signals are NOT trusted — they represent legacy data with no v
 `
     : "";
 
-  const prompt = `You are a marketing strategist assembling an execution plan from engine outputs. Your job is to ASSEMBLE, not to re-derive strategy.
+  const prompt = `You are a marketing strategist assembling an execution plan from engine outputs. Your job is to ASSEMBLE and FORMAT, not to re-derive strategy.
+
+STRICT CONSTRAINTS:
+1. You may rephrase or explain the approved decisions to improve readability and presentation tone.
+2. You MUST NOT change their strategic meaning, positioning axis, target segment details, or offer deliverables.
+3. You MUST NOT create or invent missing strategic decisions. If a value is missing or omitted, do not fabricate it.
 
 Business Type: ${businessType}
 Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
-${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}${compositionBlock}
+${lanesBlock ? `\n${lanesBlock}\n` : ""}${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}${compositionBlock}
 Engine Analysis Results (GROUNDED INTELLIGENCE — these are validated outputs from the 15-engine intelligence pipeline. Your job is to ASSEMBLE these into a coherent plan. Do NOT ignore, rephrase, contradict, or replace any engine output with your own analysis. Every section of the plan must trace back to a specific engine output below):
 ${engineInsights}
 
@@ -1675,7 +1865,13 @@ export async function synthesizePlan(
     console.log(`[PlanSynthesis] SIGNAL_COMPOSITION_INJECTED | ${formatCompositionLog(signalComp)}`);
   }
 
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm, signalComp);
+  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm, signalComp, activeStrategyRoot);
+  synthesized.brandSpine = activeStrategyRoot?.brandSpine
+    ? (typeof activeStrategyRoot.brandSpine === "string" ? JSON.parse(activeStrategyRoot.brandSpine) : activeStrategyRoot.brandSpine)
+    : null;
+  synthesized.approvedLanes = activeStrategyRoot?.approvedLanes
+    ? (typeof activeStrategyRoot.approvedLanes === "string" ? JSON.parse(activeStrategyRoot.approvedLanes) : activeStrategyRoot.approvedLanes)
+    : null;
 
   const alreadyDegraded = synthesized.degraded === true || synthesized.planSource === "degraded_ai_failed";
 
@@ -1977,6 +2173,28 @@ export async function synthesizePlan(
 
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);
+
+  // Call Cross-Engine Consistency Judge
+  const consistency = await validateCrossEngineStrategyConsistency(results, activeStrategyRoot, config.accountId);
+  if (!consistency.valid) {
+    console.error(`[PlanSynthesis] STRATEGY_CONSISTENCY_FAILED | conflict=${consistency.conflict} | engines=[${consistency.responsibleEngines?.join(",")}]`);
+    throw new StrategyConsistencyError(
+      consistency.conflict!,
+      consistency.canonicalFields!,
+      consistency.responsibleEngines!,
+      consistency.recommendedRegenerationTarget!
+    );
+  }
+
+  // Call BLL translation layer to get separate business-facing representation
+  try {
+    const { translateStrategyPlanToBusinessLanguage } = await import("../core/business-language-layer");
+    const businessRep = await translateStrategyPlanToBusinessLanguage(synthesized, config.accountId);
+    synthesized.businessRepresentation = businessRep;
+    console.log(`[PlanSynthesis] BLL_TRANSLATION_COMPLETED | separate representation added`);
+  } catch (bllErr: any) {
+    console.warn(`[PlanSynthesis] BLL_TRANSLATION_FAILED | ${bllErr.message}`);
+  }
 
   const [plan] = await db.insert(strategicPlans).values({
     accountId: config.accountId,

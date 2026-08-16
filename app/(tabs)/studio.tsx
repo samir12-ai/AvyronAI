@@ -29,6 +29,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { normalizeMediaType } from '@/lib/media-types';
 import StudioComingSoon, { STUDIO_COMING_SOON } from '@/components/StudioComingSoon';
 import type { MediaItem } from '@/lib/types';
+import { GlobalHeader } from '@/components/GlobalHeader';
 
 interface AutoAnalysisData {
   id: string;
@@ -106,7 +107,7 @@ export default function StudioScreen() {
 
 function StudioScreenFull() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { mediaItems, addMediaItem, removeMediaItem, updateMediaItem } = useApp();
@@ -833,12 +834,23 @@ function StudioScreenFull() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: '#0F0F13' }]}>
+      <GlobalHeader 
+        title="STUDIO"
+        rightElement={
+          <Pressable
+            onPress={handleAddMedia}
+            style={[styles.addButton, { backgroundColor: colors.primary }]}
+          >
+            <Ionicons name="add" size={24} color="#fff" />
+          </Pressable>
+        }
+      />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: Platform.OS === 'web' ? 67 + 16 : insets.top + 16 },
+          { paddingTop: Platform.OS === 'web' ? 67 + 16 : 16 },
         ]}
       >
         {draftRestored && (
@@ -854,25 +866,12 @@ function StudioScreenFull() {
           </View>
         )}
         {isSaving && (
-          <View style={[styles.draftBanner, { backgroundColor: colors.textMuted + '10' }]}>
-            <Ionicons name="cloud-upload-outline" size={14} color={colors.textMuted} />
+          <View style={[styles.draftBanner, { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1 }]}>
+            <ActivityIndicator size="small" color={colors.textMuted} />
             <Text style={[styles.draftBannerText, { color: colors.textMuted }]}>Saving draft...</Text>
           </View>
         )}
-        <View style={styles.header}>
-          <View>
-            <Text style={[styles.title, { color: colors.text }]}>{t('studio.title')}</Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              {t('studio.subtitle')}
-            </Text>
-          </View>
-          <Pressable
-            onPress={handleAddMedia}
-            style={[styles.addButton, { backgroundColor: colors.primary }]}
-          >
-            <Ionicons name="add" size={24} color="#fff" />
-          </Pressable>
-        </View>
+
 
         <View>
             <View style={[styles.statsRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>

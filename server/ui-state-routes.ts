@@ -11,7 +11,7 @@ export function registerUIStateRoutes(app: Express) {
   app.get("/api/ui-state/:moduleKey", requireCampaign, async (req: Request, res: Response) => {
     try {
       const { accountId, campaignId } = (req as any).campaignContext;
-      const { moduleKey } = req.params;
+      const moduleKey = req.params.moduleKey as string;
 
       if (!VALID_MODULES.includes(moduleKey)) {
         return res.status(400).json({ success: false, code: 400, message: `Invalid moduleKey: ${moduleKey}` });
@@ -55,7 +55,7 @@ export function registerUIStateRoutes(app: Express) {
   app.put("/api/ui-state/:moduleKey", requireCampaign, async (req: Request, res: Response) => {
     try {
       const { accountId, campaignId } = (req as any).campaignContext;
-      const { moduleKey } = req.params;
+      const moduleKey = req.params.moduleKey as string;
       const { stateData } = req.body;
 
       if (!VALID_MODULES.includes(moduleKey)) {
@@ -108,7 +108,7 @@ export function registerUIStateRoutes(app: Express) {
   app.delete("/api/ui-state/:moduleKey", requireCampaign, async (req: Request, res: Response) => {
     try {
       const { accountId, campaignId } = (req as any).campaignContext;
-      const { moduleKey } = req.params;
+      const moduleKey = req.params.moduleKey as string;
 
       if (!VALID_MODULES.includes(moduleKey)) {
         return res.status(400).json({ success: false, code: 400, message: `Invalid moduleKey: ${moduleKey}` });

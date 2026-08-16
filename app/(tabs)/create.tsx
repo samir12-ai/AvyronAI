@@ -49,6 +49,7 @@ import { useAuth } from '@/context/AuthContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ContentItem, MediaItem } from '@/lib/types';
+import { GlobalHeader } from '@/components/GlobalHeader';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -173,7 +174,7 @@ const defaultCreateState: CreatePersistedState = {
 function DesignerLoadingOverlay({ isVisible }: { isVisible: boolean }) {
   const pulse = useSharedValue(0.6);
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
 
   React.useEffect(() => {
@@ -283,7 +284,7 @@ function ReferencePhotoSlot({ photo, index, onPick, onRemove, colors }: {
 
 export default function CreateScreen() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { brandProfile, addContentItem, addMediaItem } = useApp();
@@ -1171,16 +1172,25 @@ export default function CreateScreen() {
       style={{ flex: 1 }} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.container, { backgroundColor: '#0F0F13' }]}>
+        <GlobalHeader 
+          title="CONTENT & CREATIVE"
+          rightElement={
+            isSaving && (
+              <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <ActivityIndicator size="small" color={colors.textMuted} />
+              </Animated.View>
+            )
+          }
+        />
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: Platform.OS === 'web' ? 67 + 16 : insets.top + 16 },
+            { paddingTop: Platform.OS === 'web' ? 67 + 16 : 16 },
           ]}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={[styles.title, { color: colors.text }]}>{t('create.title')}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               {t('create.subtitle')}

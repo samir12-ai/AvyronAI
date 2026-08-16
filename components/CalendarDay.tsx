@@ -13,7 +13,7 @@ interface CalendarDayProps {
 
 export function CalendarDay({ date, isToday, isSelected, hasContent, onPress }: CalendarDayProps) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
 
   const handlePress = () => {

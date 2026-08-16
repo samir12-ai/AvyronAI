@@ -23,9 +23,9 @@ export function registerIntegrityRoutes(app: Express) {
       // campaignId can never reach another tenant's report (the lookup misses).
       // Explicit assert is defense-in-depth — produces a 404 instead of a
       // {hasReport:false} which can be used to probe campaign-id existence.
-      try { await assertCampaignBelongsTo(accountId, req.params.campaignId); }
+      try { await assertCampaignBelongsTo(accountId, req.params.campaignId as string); }
       catch (e) { if (handleOwnershipError(e, res)) return; throw e; }
-      const key = `${accountId}:${req.params.campaignId}`;
+      const key = `${accountId}:${req.params.campaignId as string}`;
       const report = integrityReports.get(key);
       if (!report) {
         return res.json({ hasReport: false });

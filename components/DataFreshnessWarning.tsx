@@ -22,7 +22,7 @@ interface DataFreshnessWarningProps {
 
 export default function DataFreshnessWarning({ freshnessMetadata, onRefresh, compact = false }: DataFreshnessWarningProps) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
 
   if (!freshnessMetadata) return null;

@@ -25,7 +25,7 @@ import { getApiUrl, authFetch } from '@/lib/query-client';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import ExecutionPlan from '@/components/ExecutionPlan';
 import OrchestratorPanel from '@/components/OrchestratorPanel';
-import CompetitiveIntelligence from '@/components/CompetitiveIntelligence';
+
 import ControlCenter from '@/components/ControlCenter';
 import AudienceEngine, { type AudienceEngineSnapshot } from '@/components/AudienceEngine';
 import { EnvelopeBadge } from '@/components/EnvelopeBadge';
@@ -49,6 +49,7 @@ import AELDebugPanel from '@/components/AELDebugPanel';
 import SignalFlowPanel from '@/components/SignalFlowPanel';
 import SystemIntegrityPanel from '@/components/SystemIntegrityPanel';
 import { useOperatorSurface } from '@/hooks/useOperatorSurface';
+import { GlobalHeader } from '@/components/GlobalHeader';
 // Task #71 / Phase 8 — operator engine labels live in a separate module
 // so the vocab CI gate can scan this file itself for customer-surface
 // regressions without flagging the operator-only branch.
@@ -71,7 +72,7 @@ interface AIAudience {
   reasoning: string;
 }
 
-type TabView = 'buildplan' | 'intelligence' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience';
+type TabView = 'buildplan' | 'strategies' | 'positioning' | 'differentiation' | 'mechanism' | 'offers' | 'funnels' | 'integrity' | 'awareness' | 'persuasion' | 'statistical_validation' | 'budget_governor' | 'channel_selection' | 'iteration' | 'retention' | 'control' | 'marketdb' | 'publisher' | 'audience';
 
 interface AIMgmtPersistedState {
   activeTab: TabView;
@@ -115,7 +116,7 @@ function PulseRing({ color }: { color: string }) {
 
 export default function AIManagementScreen() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -129,7 +130,7 @@ export default function AIManagementScreen() {
   const operator = useOperatorSurface();
   const { state: ps, updateState, isLoading: psLoading, isSaving, saveError, hydrationVersion } = usePersistedState('ai-management', defaultAIMgmtState);
 
-  const validTabs: Set<string> = new Set(['buildplan', 'intelligence', 'strategies', 'positioning', 'differentiation', 'mechanism', 'offers', 'funnels', 'integrity', 'awareness', 'persuasion', 'statistical_validation', 'budget_governor', 'channel_selection', 'iteration', 'retention', 'control', 'marketdb', 'publisher', 'audience']);
+  const validTabs: Set<string> = new Set(['buildplan', 'strategies', 'positioning', 'differentiation', 'mechanism', 'offers', 'funnels', 'integrity', 'awareness', 'persuasion', 'statistical_validation', 'budget_governor', 'channel_selection', 'iteration', 'retention', 'control', 'marketdb', 'publisher', 'audience']);
   const safeTab = (t: string): TabView => validTabs.has(t) ? t as TabView : 'buildplan';
 
   const [activeTab, setActiveTab] = useState<TabView>(safeTab(ps.activeTab));
@@ -424,11 +425,7 @@ export default function AIManagementScreen() {
     </View>
   );
 
-  const renderIntelligence = () => (
-    <View style={styles.tabContent}>
-      <CompetitiveIntelligence />
-    </View>
-  );
+
 
   const renderControlCenter = () => (
     <View style={styles.tabContent}>
@@ -1003,33 +1000,31 @@ export default function AIManagementScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: '#0F0F13' }]}>
+      <GlobalHeader 
+        title="AI CONTROL CENTER" 
+        rightElement={
+          <>
+            {isSaving && (
+              <View style={styles.saveIndicator}>
+                <ActivityIndicator size="small" color={colors.textMuted} />
+              </View>
+            )}
+            {saveError && !isSaving && (
+              <View style={styles.saveIndicator}>
+                <Ionicons name="cloud-offline-outline" size={16} color={colors.error} />
+              </View>
+            )}
+          </>
+        }
+      />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: Platform.OS === 'web' ? 67 + 16 : insets.top + 16 },
+          { paddingTop: Platform.OS === 'web' ? 67 + 16 : 16 },
         ]}
       >
-        <View style={styles.header}>
-          <View>
-            <Text style={[styles.title, { color: colors.text }]}>AI Control Center</Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Your AI agency at work
-            </Text>
-          </View>
-          {isSaving && (
-            <View style={styles.saveIndicator}>
-              <ActivityIndicator size="small" color={colors.textMuted} />
-            </View>
-          )}
-          {saveError && !isSaving && (
-            <View style={styles.saveIndicator}>
-              <Ionicons name="cloud-offline-outline" size={16} color={colors.error} />
-            </View>
-          )}
-        </View>
-
         <CampaignBar />
 
         {isCampaignSelected && (
@@ -1058,7 +1053,7 @@ export default function AIManagementScreen() {
             // 4-screen pivot naming. Content rendering per tab is
             // unchanged (still gated by operator.enabled where applicable).
             { key: 'buildplan' as TabView, icon: 'construct-outline' as const, label: 'Build Plan', color: '#EC4899', advanced: false },
-            { key: 'intelligence' as TabView, icon: 'telescope-outline' as const, label: 'Intelligence', color: '#3B82F6', advanced: false },
+
             { key: 'strategies' as TabView, icon: 'map-outline' as const, label: 'Strategies', color: '#F97316', advanced: false },
             { key: 'control' as TabView, icon: 'shield-checkmark-outline' as const, label: 'Control', color: '#8B5CF6', advanced: false },
             { key: 'marketdb' as TabView, icon: 'server-outline' as const, label: 'Market DB', color: '#F97316', advanced: false },
@@ -1084,7 +1079,7 @@ export default function AIManagementScreen() {
         </ScrollView>
 
         {activeTab === 'buildplan' && (operator.enabled ? <OrchestratorPanel /> : <ExecutionPlan />)}
-        {activeTab === 'intelligence' && renderIntelligence()}
+
         {activeTab === 'strategies' && (
           <>
             {renderStrategiesBranch()}
@@ -1098,7 +1093,7 @@ export default function AIManagementScreen() {
           </>
         )}
         {activeTab === 'control' && renderControlCenter()}
-        {activeTab === 'marketdb' && (operator.enabled ? <MarketDatabaseAdmin /> : renderIntelligence())}
+        {activeTab === 'marketdb' && (operator.enabled ? <MarketDatabaseAdmin /> : null)}
         {activeTab === 'publisher' && renderPublisher()}
         {activeTab === 'audience' && <CampaignGuard>{renderAudienceManager()}</CampaignGuard>}
 

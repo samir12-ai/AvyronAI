@@ -25,6 +25,8 @@ export interface StrategyRootInput {
   approvedObjections: any;
   approvedProofTypes: any;
   approvedPositioningContext: any;
+  brandSpine?: any;
+  approvedLanes?: any[];
 }
 
 /**
@@ -184,6 +186,8 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
       approvedObjections: JSON.stringify(input.approvedObjections),
       approvedProofTypes: JSON.stringify(input.approvedProofTypes),
       approvedPositioningContext: JSON.stringify(input.approvedPositioningContext),
+      brandSpine: input.brandSpine ? JSON.stringify(input.brandSpine) : null,
+      approvedLanes: input.approvedLanes ? JSON.stringify(input.approvedLanes) : null,
       miSnapshotId: input.miSnapshotId,
       audienceSnapshotId: input.audienceSnapshotId,
       positioningSnapshotId: input.positioningSnapshotId,

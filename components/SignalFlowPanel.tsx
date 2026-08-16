@@ -156,7 +156,7 @@ function TraceabilitySummary({ trace, isDark }: { trace: SignalTraceability; isD
 
 export default function SignalFlowPanel() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const { selectedCampaignId } = useCampaign();
   const [expanded, setExpanded] = useState(false);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);

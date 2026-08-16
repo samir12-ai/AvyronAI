@@ -62,7 +62,7 @@ const ChannelCandidateSchema = z.object({
   ]),
   fitScore: z.number().min(0).max(1),
   audienceDensityScore: z.number().min(0).max(1),
-}).passthrough();
+}).extend({ _system_validation: SystemValidationFlagSchema.optional() });
 
 /**
  * FunnelStageAssignment — see server/strategy/channel-selection/types.ts:137.
@@ -73,7 +73,7 @@ const FunnelStageAssignmentSchema = z.object({
   channelName: z.string(),
   channelKey: z.string(),
   assignedRole: z.enum(["awareness", "nurture", "conversion"]),
-}).passthrough();
+}).extend({ _system_validation: SystemValidationFlagSchema.optional() });
 
 const FunnelStagesSchema = z.object({
   awareness: z.array(FunnelStageAssignmentSchema),
@@ -87,10 +87,10 @@ const DecisionGateScoringSchema = z.object({
   budgetRealism: z.number(),
   channelScalability: z.number(),
   compositeGateScore: z.number(),
-}).passthrough();
+}).extend({ _system_validation: SystemValidationFlagSchema.optional() });
 
 /** FunnelCandidate (loose — full shape lives in funnel-engine/types.ts). */
-const FunnelCandidateSchema = z.object({}).passthrough();
+const FunnelCandidateSchema = z.object({}).passthrough().extend({ _system_validation: SystemValidationFlagSchema.optional() });
 
 /**
  * FunnelStageObject — funnel-engine stage shape.
@@ -113,13 +113,13 @@ const FunnelStageObjectSchema = z.object({
     "nurture",
     "conversion",
   ]).optional(),
-}).passthrough();
+}).extend({ _system_validation: SystemValidationFlagSchema.optional() });
 
 const TrustPathAnalysisSchema = z.object({
   score: z.number(),
   steps: z.number(),
   gaps: z.array(z.string()),
-}).passthrough();
+}).extend({ _system_validation: SystemValidationFlagSchema.optional() });
 
 // ────────────────────────────────────────────────────────────────────────────
 // Engine version imports — single source of truth for version-pinning. We
@@ -158,6 +158,8 @@ import {
 } from "../../awareness-engine/constants";
 import { AUTHORITY_MODES } from "../../differentiation-engine/constants";
 import { PERSUASION_MODES } from "../../persuasion-engine/constants";
+import { SystemValidationFlagSchema } from "../../shared/llm-reliability/system-validation";
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // C2 shared schemas — kept loose on purpose. The shadow-audit goal is
@@ -167,7 +169,7 @@ import { PERSUASION_MODES } from "../../persuasion-engine/constants";
 // per engine after shadow data confirms the real shape is stable.
 // ────────────────────────────────────────────────────────────────────────────
 
-const LooseObjectSchema = z.object({}).passthrough();
+const LooseObjectSchema = z.object({}).passthrough().extend({ _system_validation: SystemValidationFlagSchema.optional() });
 const NumberZeroToOneSchema = z.number().min(0).max(1);
 const StringArraySchema = z.array(z.string());
 const SignalItemArraySchema = z.array(z.any()); // SignalItem shape varies across audience modes

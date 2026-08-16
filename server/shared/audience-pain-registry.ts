@@ -41,6 +41,10 @@ export interface AuthoritativeAudiencePain {
   evidenceStrength: number;
   /** AEL root-cause identifiers behind this pain, where the Audience engine supplied them. */
   rootCauseIds: string[];
+  /** Dynamic target audience segments associated with this pain. */
+  segmentIds: string[];
+  /** Strategic role designation (e.g. CORE_BUYER, CORE_USER, OBJECTION) */
+  strategicRole?: string;
   /** Which classifier produced `classification` (deterministic_v1 | llm_v1+judge_v1). */
   classifierVersion: string;
   /** Human-auditable reason for the classification decision. */
@@ -121,7 +125,20 @@ function values(value: any): string[] {
 export function buildAudiencePainRegistry(
   pains: any[],
   lineage: { accountId: string; audienceSnapshotId: string },
+  segments?: any[],
 ): AuthoritativeAudiencePain[] {
+  const segmentIdByName = new Map<string, string>();
+  if (Array.isArray(segments)) {
+    segments.forEach((seg: any) => {
+      if (seg?.name) {
+        const cleanName = seg.name.trim();
+        const derivedId = `seg_${crypto.createHash("sha256").update(cleanName).digest("hex").slice(0, 16)}`;
+        segmentIdByName.set(cleanName.toLowerCase(), derivedId);
+        seg.id = seg.id || derivedId;
+      }
+    });
+  }
+
   return pains.map((raw, index) => {
     const canonical = painText(raw);
     const suppliedClass = raw?.classification && Object.hasOwn(USES_BY_CLASS, raw.classification)
@@ -141,6 +158,44 @@ export function buildAudiencePainRegistry(
     const sourceSignalIds = values(raw?.sourceSignalIds ?? raw?.signalIds ?? raw?.sourceSignals ?? raw?.parentSignalId);
     const sourceTypes = values(raw?.sourceTypes ?? raw?.sourceType);
     const rootCauseIds = values(raw?.rootCauseIds ?? raw?.rootCauses ?? raw?.deepCauseIds);
+    const segmentIds: string[] = [];
+    const rawSegIds = values(raw?.segmentIds ?? raw?.segments ?? raw?.audienceSegmentIds ?? raw?.targetSegmentIds ?? raw?.segmentId);
+    if (rawSegIds.length > 0) {
+      segmentIds.push(...rawSegIds);
+    } else if (Array.isArray(segments)) {
+      segments.forEach((seg: any) => {
+        if (seg?.name) {
+          const segId = segmentIdByName.get(seg.name.toLowerCase().trim());
+          if (segId) {
+            const profiles = [
+              ...(Array.isArray(seg.painProfile) ? seg.painProfile : []),
+              ...(Array.isArray(seg.objectionProfile) ? seg.objectionProfile : []),
+              ...(Array.isArray(seg.motivationProfile) ? seg.motivationProfile : []),
+              ...(Array.isArray(seg.desireProfile) ? seg.desireProfile : []),
+            ].map(p => String(p).toLowerCase().trim());
+            const canonicalLC = canonical.toLowerCase().trim();
+            const match = profiles.some(profileText => {
+              if (profileText === canonicalLC) return true;
+              if (canonicalLC.includes(profileText) || profileText.includes(canonicalLC)) return true;
+              const words1 = canonicalLC.split(/[^a-z0-9]+/).filter(w => w.length > 4);
+              const words2 = profileText.split(/[^a-z0-9]+/).filter(w => w.length > 4);
+              return words1.some(w => words2.includes(w));
+            });
+            if (match) {
+              segmentIds.push(segId);
+            }
+          }
+        }
+      });
+    }
+    if (segmentIds.length === 0 && Array.isArray(segments) && segments.length > 0) {
+      const firstSeg = segments[0];
+      if (firstSeg?.name) {
+        const segId = segmentIdByName.get(firstSeg.name.toLowerCase().trim());
+        if (segId) segmentIds.push(segId);
+      }
+    }
+    const strategicRole = typeof raw?.strategicRole === "string" ? raw.strategicRole : undefined;
     const evidenceStrength = Number.isFinite(raw?.evidenceStrength)
       ? Math.max(0, Math.min(1, raw.evidenceStrength))
       : Math.min(1, (evidenceUids.length + sourceSignalIds.length) / 4);
@@ -170,6 +225,8 @@ export function buildAudiencePainRegistry(
       sourceTypes,
       evidenceStrength,
       rootCauseIds,
+      segmentIds,
+      strategicRole,
       classifierVersion,
       classificationReason,
       lineage,

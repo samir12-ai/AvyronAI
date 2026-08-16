@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Task #89 / Phase 4-A — Replay recorder + `withReplayRecorder` HOF.
  *

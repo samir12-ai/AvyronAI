@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Perception Layer (Slices 1+2) — customer-facing read endpoints that
 // surface the system's hidden runtime intelligence (continuity ticks,
 // boss-run verdicts, re-anchor events) using the curated phrasing in

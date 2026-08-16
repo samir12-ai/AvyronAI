@@ -27,7 +27,7 @@ const statusColors: Record<string, string> = {
 
 export function ContentCard({ item, onPress, onDelete }: ContentCardProps) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
 
   const handleDelete = () => {

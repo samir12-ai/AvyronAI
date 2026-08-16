@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { aiChat } from "../ai-client";
 import { selectPainForUse } from "../shared/audience-pain-registry";

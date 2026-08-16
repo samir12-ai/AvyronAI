@@ -1,5 +1,8 @@
 import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { aiChat } from "../ai-client";
+import { generateWithRepair, LLMReliabilityError } from "../shared/llm-reliability/reliability-runner";
+import type { JudgeResult } from "../shared/llm-reliability/types";
+
 import { selectPainsForUse } from "../shared/audience-pain-registry";
 import {
   buildDoctrineBlock,
@@ -546,7 +549,9 @@ export function layerEntryTriggerDetection(
     };
   }
 
-  const route = awarenessInput.awarenessRoute || "";
+  const rawRoute = awarenessInput.awarenessRoute || awarenessInput.entryMechanism || "";
+  const normalizedRoute = rawRoute.toLowerCase().replace(/\s+awareness\s+route/i, "").replace(/[\s-]+/g, "_");
+  const route = AWARENESS_ROUTE_TO_ENTRY_MECHANISMS[rawRoute] ? rawRoute : (AWARENESS_ROUTE_TO_ENTRY_MECHANISMS[normalizedRoute] ? normalizedRoute : rawRoute);
   const triggerClass = awarenessInput.triggerClass || "";
   const trustStateLabel = awarenessInput.trustState || "";
   const awarenessStage = awarenessInput.awarenessStage || "";
@@ -1039,9 +1044,9 @@ function buildFunnelCandidate(
   return candidate;
 }
 
-function buildEmptyFunnel(): FunnelCandidate {
+function buildEmptyFunnel(name?: string): FunnelCandidate {
   return {
-    funnelName: "No Funnel",
+    funnelName: name || "No Funnel",
     funnelType: "none",
     stageMap: [],
     trustPath: [],
@@ -1180,7 +1185,16 @@ Market Context:
 - Mechanism: ${core?.mechanismLogic || mechanism.description || "No validated mechanism"}
 - Enemy: ${positioning.enemyDefinition || "Not defined"}
 - Narrative: ${positioning.narrativeDirection || "Not defined"}
-- Offer Strength: ${(offer.offerStrengthScore || 0).toFixed(2)}
+- Offer Strength: ${(offer.offerStrengthScore || 0).toFixed(2)}${(() => {
+  const aelRootCauses = Array.isArray(analyticalEnrichment?.root_causes) ? analyticalEnrichment.root_causes : [];
+  const aelBuyingBarriers = Array.isArray(analyticalEnrichment?.buying_barriers) ? analyticalEnrichment.buying_barriers : [];
+  const aelCausalChains = Array.isArray(analyticalEnrichment?.causal_chains) ? analyticalEnrichment.causal_chains : [];
+  let s = "";
+  if (aelBuyingBarriers.length > 0) s += `\n- Key Buying Barriers: ${JSON.stringify(aelBuyingBarriers.slice(0, 4).map((b: any) => ({ barrier: b.barrier, rootCause: b.rootCause, userThinking: b.userThinking })))}`;
+  if (aelRootCauses.length > 0) s += `\n- Key Root Causes: ${JSON.stringify(aelRootCauses.slice(0, 4).map((r: any) => ({ deepCause: r.deepCause, surfaceSignal: r.surfaceSignal })))}`;
+  if (aelCausalChains.length > 0) s += `\n- Causal Chains: ${JSON.stringify(aelCausalChains.slice(0, 3).map((c: any) => `${c.pain} → ${c.cause} → ${c.behavior}`))}`;
+  return s;
+})()}
 ${(() => {
   const ms = safeJsonParse(mi?.multiSourceSignals);
   if (!ms || typeof ms !== "object") return "";
@@ -1204,7 +1218,7 @@ ${(() => {
   return section;
 })()}
 
-JOURNEY RATIONALE (primary funnel only): In "primary.journeyRationale", return 3-5 sentences. Each sentence MUST name the specific buying barrier or root cause that one phase of the buyer's journey removes, expressed in the audience's OWN pain language and consistent with the evidence IDs you list in "groundingRefs". Do NOT copy the AEL evidence text verbatim — paraphrase what the buyer feels and how that funnel stage resolves it. Generic journey descriptions that could apply to any product are unacceptable.
+JOURNEY RATIONALE (primary funnel only): In "primary.journeyRationale", return 3-5 sentences describing the buyer's progression through the funnel stages. Across the journey as a whole, clearly explain how the funnel stages transition the audience from their validated pain points, dismantle their underlying buying barriers and root causes, provide the required proof, and move them toward offer commitment. Express this in the audience's specific market context and pain language. Do NOT copy the AEL evidence text verbatim — explain what the buyer experiences and how that stage resolves it.
 
 Return JSON:
 {
@@ -1215,66 +1229,98 @@ Return JSON:
 }`;
 
   const fullPrompt = depthRejectionContext ? `${prompt}\n\n${depthRejectionContext}` : prompt;
-  try {
-    let completion = await aiChat({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: fullPrompt }],
-      max_tokens: 1200,
-      temperature: 0.7,
-      accountId,
-      endpoint: "funnel-engine",
-    });
-    let response = completion.choices?.[0]?.message?.content || "{}";
-    let cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-
-    // Criterion C (retry with specific feedback): one strict-format retry when
-    // the response is unparseable or missing required fields — mirrors the
-    // MechanismEngine parse-retry. The retry prompt names the EXACT defect.
-    // Still fail-closed: a second malformed response throws (no fabrication).
-    const validateParsed = (p: any): string[] => {
-      const missing: string[] = [];
-      if (!p?.primary?.name) missing.push("primary.name");
-      if (!p?.primary?.type) missing.push("primary.type");
-      if (!p?.alternative?.name) missing.push("alternative.name");
-      if (!p?.alternative?.type) missing.push("alternative.type");
-      if (!p?.rejected?.name) missing.push("rejected.name");
-      if (!p?.rejected?.type) missing.push("rejected.type");
-      if (!p?.rejected?.rejectionReason) missing.push("rejected.rejectionReason");
-      const jr = Array.isArray(p?.primary?.journeyRationale)
-        ? p.primary.journeyRationale.filter((s: any) => typeof s === "string" && s.trim().length > 0)
-        : [];
-      if (jr.length < 3) missing.push("primary.journeyRationale(>=3 non-empty sentences)");
-      return missing;
-    };
-    let parsed = safeJsonParse(cleanedResponse);
-    let missing = parsed ? validateParsed(parsed) : ["<unparseable JSON>"];
-    if (missing.length > 0) {
-      const defect = parsed ? `missing required fields: ${missing.join(", ")}` : "previous response was not parseable JSON";
-      console.log(`[FunnelEngine-V3] AI_PARSE_RETRY | defect="${defect}"`);
-      const strictPrompt = `${fullPrompt}\n\n═══ STRICT OUTPUT FORMAT (PREVIOUS RESPONSE WAS MALFORMED: ${defect}) ═══\nRespond with EXACTLY ONE valid JSON object and NOTHING else. No markdown, no preamble. Start with "{" and end with "}". The object MUST contain "primary" {name,type,journeyRationale}, "alternative" {name,type}, and "rejected" {name,type,rejectionReason} — every field non-empty. "primary.journeyRationale" MUST be an array of 3-5 non-empty sentences, each naming a specific buying barrier/root cause a journey phase removes in the buyer's own pain language (paraphrased, never copied from the evidence text).`;
-      completion = await aiChat({
+    const result = await generateWithRepair<string, string>({
+    engineName: "funnel-engine",
+    touchpointName: "concept_generation",
+    authoritativeInput: fullPrompt,
+    generate: async (promptText) => {
+      const completion = await aiChat({
         model: "gpt-4.1-mini",
-        messages: [{ role: "user", content: strictPrompt }],
+        messages: [{ role: "user", content: promptText }],
         max_tokens: 1200,
-        temperature: 0.3,
+        temperature: 0.7,
         accountId,
         endpoint: "funnel-engine",
       });
-      response = completion.choices?.[0]?.message?.content || "{}";
-      cleanedResponse = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-      parsed = safeJsonParse(cleanedResponse);
-      missing = parsed ? validateParsed(parsed) : ["<unparseable JSON>"];
-    }
+      return completion.choices?.[0]?.message?.content || "{}";
+    },
+    judge: (async (input: string, candidateStr: string): Promise<JudgeResult<string>> => {
+      const cleaned = (typeof candidateStr === 'string' ? candidateStr : JSON.stringify(candidateStr)).replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      const parsed = safeJsonParse(cleaned);
+      if (!parsed) {
+        return { valid: false, failureClass: "CONTRACT_FAILURE", rejections: [{ rule: "Valid JSON", reason: "Response must be valid JSON" }] };
+      }
+      
+      const missing: string[] = [];
+      if (!parsed?.primary?.name) missing.push("primary.name");
+      if (!parsed?.primary?.type) missing.push("primary.type");
+      if (!parsed?.alternative?.name) missing.push("alternative.name");
+      if (!parsed?.alternative?.type) missing.push("alternative.type");
+      if (!parsed?.rejected?.name) missing.push("rejected.name");
+      if (!parsed?.rejected?.type) missing.push("rejected.type");
+      if (!parsed?.rejected?.rejectionReason) missing.push("rejected.rejectionReason");
+      const jr = Array.isArray(parsed?.primary?.journeyRationale)
+        ? parsed.primary.journeyRationale.filter((s: any) => typeof s === "string" && s.trim().length > 0)
+        : [];
+      if (jr.length < 3) missing.push("primary.journeyRationale(>=3 non-empty sentences)");
+      
+      if (missing.length > 0) {
+        return { valid: false, failureClass: "CONTRACT_FAILURE", rejections: [{ rule: "Missing fields", reason: `Missing required fields: ${missing.join(", ")}` }] };
+      }
 
-    // CLP-03 / CLP-05: NO baked-English `||` fallbacks. If the AI omitted a
-    // required field after the strict retry, the response is malformed —
-    // throw and let the outer catch surface STATUS.AI_DEGRADED rather than
-    // substituting fake names.
-    if (missing.length > 0) {
-      throw new Error(`AI response missing required fields after strict retry: ${missing.join(", ")}`);
-    }
+      // Semantic Judge: Ensure Executor philosophy (no strategy drift)
+      const rationaleText = jr.join(" ").toLowerCase();
+      
+      // We explicitly check if the funnel hallucinates "discount" or "free trial" if it's not in the offer
+      const offerOutcome = (offer.coreOutcome || "").toLowerCase();
+      if (!offerOutcome.includes("discount") && rationaleText.includes("discount")) {
+        return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: [{ rule: "No Invention", reason: "Hallucinated 'discount' which is not in the approved core offer."}] };
+      }
+      if (!offerOutcome.includes("free trial") && rationaleText.includes("free trial")) {
+        return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: [{ rule: "No Invention", reason: "Hallucinated 'free trial' which is not in the approved core offer."}] };
+      }
+      
+      return { valid: true, recoveredValue: candidateStr };
+    }) as (input: string, candidate: string) => Promise<JudgeResult<string>>,
+    repair: async (input: string, failedCandidate: string, rejections: any[]) => {
+      const defect = rejections.map(r => r.reason).join(" | ");
+      const repairPromptText = `You are the Strategic Repair Module for Avyron AI. 
+Your previous generation was rejected by the validation judge.
 
-    const funnelGroundingRefs: string[] = Array.isArray(parsed.groundingRefs)
+--- REJECTION REASON ---
+${defect}
+
+--- YOUR TASK ---
+Regenerate the output to fix the EXACT issue mentioned above. 
+
+CRITICAL: When fixing structural or formatting errors (like JSON parsing), LLMs often default to writing generic, shallow marketing copy. You MUST NOT do this. You must maintain maximum strategic depth.
+
+--- CAUSAL DEPTH & GROUNDING CHECKLIST ---
+To pass the validation gate on this attempt, your new output MUST satisfy the following rules. The judge will check these exactly:
+1. [ ] CAPABILITY LINK: You must explicitly build the offer around at least one verified capability from this registry. (See initial prompt for capability context).
+2. [ ] PAIN RESOLUTION: The offer must directly target and resolve a validated audience problem. (See initial prompt for audience evidence).
+3. [ ] NO INVENTION: Do not hallucinate features, discounts, or metrics that are not explicitly present in the data.
+
+Fix the error, strictly follow the checklist, and output ONLY valid JSON matching the originally requested schema.
+
+--- ORIGINAL PROMPT CONTEXT ---
+${input}`;
+
+      const completion = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: repairPromptText }],
+        max_tokens: 1200,
+        temperature: 0.3,
+        accountId,
+        endpoint: "funnel-engine-repair",
+      });
+      return completion.choices?.[0]?.message?.content || "{}";
+    }
+  });
+
+  const parsed = JSON.parse(result.result) as any;
+  
+  const funnelGroundingRefs: string[] = Array.isArray(parsed.groundingRefs)
       ? parsed.groundingRefs.filter((r: any) => typeof r === "string" && r.trim().length > 0).map((r: string) => r.trim())
       : [];
     checkGroundingContract({
@@ -1286,13 +1332,6 @@ Return JSON:
       attemptNumber,
     });
 
-    // FIX-C: the grounded buyer-journey rationale is the funnel's OWN generated
-    // prose that names the specific barriers/root causes each journey phase
-    // removes. It flows onto FunnelCandidate.groundedJourneyRationale →
-    // collectFunnelText → the depth gate, so the gate scores real per-run
-    // grounded content (mirrors the awareness engine's myth-breaker prose) — NOT
-    // a copy of the AEL (that would score the AEL against itself). The unchanged
-    // gates remain the sole enforcement authority; this only enriches their INPUT.
     const journeyRationale: string[] = Array.isArray(parsed.primary?.journeyRationale)
       ? parsed.primary.journeyRationale
           .filter((s: any) => typeof s === "string" && s.trim().length > 0)
@@ -1300,10 +1339,6 @@ Return JSON:
       : [];
     console.log(`[FunnelEngine-V3] GROUNDED_RATIONALE | segments=${journeyRationale.length} | chars=${journeyRationale.join(" ").length} | attempt=${attemptNumber ?? 1}`);
 
-    // Bypass guard (log-only — NEVER changes a verdict): if the model copied an
-    // AEL deep-cause/barrier text near-verbatim into the rationale, the depth
-    // gate would be scoring the AEL against itself. Flag it loudly for review
-    // (B2/B4); the unchanged gates stay the sole enforcement authority.
     const aelPkg: any = analyticalEnrichment || null;
     if (aelPkg && journeyRationale.length > 0) {
       const aelVerbatimSources: string[] = [];
@@ -1318,34 +1353,23 @@ Return JSON:
       for (const src of aelVerbatimSources) {
         const norm = src.trim().toLowerCase();
         if (norm.length >= 80 && rationaleJoinedLower.includes(norm.slice(0, 80))) {
-          console.error(`[FunnelEngine-V3] FUNNEL_RATIONALE_VERBATIM_SUSPECT | attempt=${attemptNumber ?? 1} | an AEL evidence text appears near-verbatim in journeyRationale — depth grounding may be self-scoring; gates unchanged, review generation prompt`);
+          console.error(`[FunnelEngine-V3] FUNNEL_RATIONALE_VERBATIM_SUSPECT | attempt=${attemptNumber ?? 1} | an AEL evidence text appears near-verbatim in journeyRationale - depth grounding may be self-scoring; gates unchanged, review generation prompt`);
           break;
         }
       }
     }
 
     return {
-      primary: { name: parsed.primary.name, type: parsed.primary.type, journeyRationale },
-      alternative: { name: parsed.alternative.name, type: parsed.alternative.type },
+      primary: { name: parsed.primary?.name, type: parsed.primary?.type, journeyRationale },
+      alternative: { name: parsed.alternative?.name, type: parsed.alternative?.type },
       rejected: {
-        name: parsed.rejected.name,
-        type: parsed.rejected.type,
-        rejectionReason: parsed.rejected.rejectionReason,
+        name: parsed.rejected?.name,
+        type: parsed.rejected?.type,
+        rejectionReason: parsed.rejected?.rejectionReason,
       },
       groundingRefs: funnelGroundingRefs,
-    };
-  } catch (err: any) {
-    // CLP-03 / Phase 1 (May 2026): NO baked English fallback. The prior
-    // implementation returned hand-written funnel names from this catch
-    // block, which were then surfaced to customers as if they were
-    // AI-derived strategy. Re-throw so the outer `runFunnelEngine` catch
-    // surfaces STATUS.AI_DEGRADED with an explicit reason.
-    console.error(`[FunnelEngine] AI_FUNNEL_GENERATION_FAILED: ${err.message}`);
-    const wrapped = new Error(`AI_FUNNEL_GENERATION_FAILED: ${err.message}`);
-    (wrapped as any).code = "AI_FUNNEL_GENERATION_FAILED";
-    (wrapped as any).originalMessage = err.message;
-    throw wrapped;
-  }
+      _system_validation: parsed._system_validation
+    } as any;
 }
 
 export interface FunnelAwarenessInput {
@@ -1396,6 +1420,112 @@ export async function runFunnelEngine(
   return result;
 }
 
+
+export async function aiStageLayoutGeneration(
+  funnelType: string,
+  awarenessStage: string,
+  offer: FunnelOfferInput,
+  accountId: string,
+): Promise<FunnelStage[]> {
+  const prompt = `You are a Funnel Architect for Avyron AI.
+Your task is to generate the Stage Layout for a "${funnelType}" funnel tailored to an audience at the "${awarenessStage}" awareness level.
+
+STRICT RULES:
+- You must strictly execute the upstream strategy. Do NOT invent new capabilities or alter the core offer.
+- Output MUST be exactly 3 to 5 logical stages (e.g., TOFU/MOFU/BOFU equivalents).
+- Offer Name: ${offer.offerName || "Not defined"}
+- Core Outcome: ${offer.coreOutcome || "Not defined"}
+
+Respond with EXACTLY ONE valid JSON array of stage objects, containing no markdown or preamble:
+[
+  {
+    "name": "stage_name (e.g., entry, education, pitch, conversion)",
+    "purpose": "What the stage achieves",
+    "contentType": "Type of content used",
+    "conversionGoal": "The specific micro-commitment"
+  }
+]`;
+
+  const result = await generateWithRepair<string, string>({
+    engineName: "funnel-engine",
+    touchpointName: "stage_layout_generation",
+    authoritativeInput: prompt,
+    generate: async (promptText) => {
+      const completion = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: promptText }],
+        max_tokens: 1000,
+        temperature: 0.5,
+        accountId,
+        endpoint: "funnel-engine",
+      });
+      return completion.choices?.[0]?.message?.content || "[]";
+    },
+    judge: (async (input: string, candidateStr: string): Promise<JudgeResult<string>> => {
+      const cleaned = (typeof candidateStr === 'string' ? candidateStr : JSON.stringify(candidateStr)).replace(/\`\`\`json\s*/g, "").replace(/\`\`\`\s*/g, "").trim();
+      let parsed = safeJsonParse(cleaned);
+      if (!parsed || !Array.isArray(parsed)) {
+        return { valid: false, failureClass: "CONTRACT_FAILURE", rejections: [{ rule: "Array Output", reason: "Output must be a JSON array of stages" }] };
+      }
+      
+      for (const stage of parsed) {
+        if (!stage.name || !stage.purpose || !stage.contentType || !stage.conversionGoal) {
+          return { valid: false, failureClass: "CONTRACT_FAILURE", rejections: [{ rule: "Stage Schema", reason: "Each stage must have name, purpose, contentType, and conversionGoal" }] };
+        }
+      }
+
+      const allText = parsed.map((s: any) => `${s.name} ${s.purpose} ${s.contentType} ${s.conversionGoal}`).join(" ").toLowerCase();
+      
+      // Strict Semantic Judge for Executor philosophy
+      const offerOutcome = (offer.coreOutcome || "").toLowerCase();
+      if (!offerOutcome.includes("discount") && allText.includes("discount")) {
+        return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: [{ rule: "No Invention", reason: "Hallucinated 'discount' in stages which is not in the approved core offer."}] };
+      }
+      if (!offerOutcome.includes("free trial") && allText.includes("free trial")) {
+        return { valid: false, failureClass: "GENERATION_QUALITY_FAILURE", rejections: [{ rule: "No Invention", reason: "Hallucinated 'free trial' in stages which is not in the approved core offer."}] };
+      }
+
+      return { valid: true, recoveredValue: candidateStr };
+    }) as (input: string, candidate: string) => Promise<JudgeResult<string>>,
+    repair: async (input: string, failedCandidate: string, rejections: any[]) => {
+      const defect = rejections.map(r => r.reason).join(" | ");
+      const repairPromptText = `You are the Strategic Repair Module for Avyron AI. 
+Your previous generation was rejected by the validation judge.
+
+--- REJECTION REASON ---
+${defect}
+
+--- YOUR TASK ---
+Regenerate the output to fix the EXACT issue mentioned above. 
+
+CRITICAL: When fixing structural or formatting errors (like JSON parsing), LLMs often default to writing generic, shallow marketing copy. You MUST NOT do this. You must maintain maximum strategic depth.
+
+--- CAUSAL DEPTH & GROUNDING CHECKLIST ---
+To pass the validation gate on this attempt, your new output MUST satisfy the following rules. The judge will check these exactly:
+1. [ ] CAPABILITY LINK: You must explicitly build the offer around at least one verified capability from this registry. (See initial prompt for capability context).
+2. [ ] PAIN RESOLUTION: The offer must directly target and resolve a validated audience problem. (See initial prompt for audience evidence).
+3. [ ] NO INVENTION: Do not hallucinate features, discounts, or metrics that are not explicitly present in the data.
+
+Fix the error, strictly follow the checklist, and output ONLY valid JSON matching the originally requested schema.
+
+--- ORIGINAL PROMPT CONTEXT ---
+${input}`;
+
+      const completion = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: repairPromptText }],
+        max_tokens: 1000,
+        temperature: 0.3,
+        accountId,
+        endpoint: "funnel-engine-repair",
+      });
+      return completion.choices?.[0]?.message?.content || "[]";
+    }
+  });
+
+  return JSON.parse(result.result) as FunnelStage[]; // Soft candidate with _system_validation if failed!
+}
+
 async function runFunnelEngineInternal(
   mi: FunnelMIInput,
   audience: FunnelAudienceInput,
@@ -1410,6 +1540,15 @@ async function runFunnelEngineInternal(
 ): Promise<FunnelResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
+
+  if (!offer || !offer.offerName || !strategic?.doctrine) {
+    throw new LLMReliabilityError(
+      "EVIDENCE_FAILURE: Upstream Strategy Root or Offer data is entirely empty",
+      "EVIDENCE_FAILURE",
+      [],
+      { engine: "funnel", touchpoint: "funnel_generation", attempts: 0, finalVerdict: "HONEST_FAIL", repairLog: [] }
+    );
+  }
 
   console.log(`[FunnelEngine-V3] Starting 8-layer pipeline | awarenessProvided=${!!awareness}`);
 
@@ -1480,7 +1619,7 @@ async function runFunnelEngineInternal(
   diagnostics.layer3 = { frictionPoints: l3Friction.frictionPoints.length, score: l3Friction.audienceFrictionScore };
 
   const awarenessStage = awareness?.awarenessStage || audience.awarenessLevel || "problem_aware";
-  const stageMap = buildStageMap(l2Fit.funnelType, awarenessStage);
+  const stageMap = await aiStageLayoutGeneration(l2Fit.funnelType, awarenessStage, offer, accountId);
 
   const l4Trust = layer4_trustPathConstruction(audience, differentiation, l2Fit.funnelType);
   diagnostics.layer4 = { steps: l4Trust.trustPath.length, score: l4Trust.trustPathScore };
@@ -1787,11 +1926,9 @@ async function runFunnelEngineInternal(
           confidenceScore: 0,
           executionTimeMs: Date.now() - startTime,
           engineVersion: ENGINE_VERSION,
-          layerDiagnostics: { ...diagnostics, depthGate: depthGateResult },
+          layerDiagnostics: diagnostics,
           strategyAcceptability: { grade: "F", acceptable: false, reasons: ["DEPTH_FAILED"] },
-          celDepthCompliance: celDepth,
-          depthGateResult,
-        } as FunnelResult;
+        } as unknown as FunnelResult;
       }
     }
   }
@@ -1872,7 +2009,5 @@ async function runFunnelEngineInternal(
     engineVersion: ENGINE_VERSION,
     layerDiagnostics: diagnostics,
     strategyAcceptability: acceptability,
-    celDepthCompliance: celDepth,
-    depthGateResult: depthGateResultFunnel,
   };
 }

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews } from "@shared/schema";
+import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews, competitorPostClassifications } from "@shared/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { scrapeCommentsForPosts, extractHandleFromUrl } from "./profile-scraper";
 import { scrapeInstagramForCompetitor } from "./instagram-provider";
@@ -1409,23 +1409,49 @@ export async function getCompetitorDataCoverage(competitorId: string, accountId:
 }
 
 export async function getStoredPostsForMIv3(competitorId: string, accountId: string) {
-  const posts = await db.select().from(ciCompetitorPosts)
-    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
-    .orderBy(desc(ciCompetitorPosts.createdAt))
-    .limit(40);
+  const rows = await db.select({
+    post: ciCompetitorPosts,
+    classification: competitorPostClassifications,
+  })
+  .from(ciCompetitorPosts)
+  .leftJoin(
+    competitorPostClassifications,
+    and(
+      eq(ciCompetitorPosts.postId, competitorPostClassifications.postId),
+      eq(competitorPostClassifications.classifierVersion, "competitor-post-v2")
+    )
+  )
+  .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
+  .orderBy(desc(ciCompetitorPosts.createdAt))
+  .limit(40);
 
-  return posts.map(p => ({
-    id: p.postId,
-    caption: p.caption || "",
-    likes: p.likes || 0,
-    comments: p.comments || 0,
-    views: p.views || undefined,
-    mediaType: p.mediaType || "IMAGE",
-    hashtags: p.hashtags ? (() => { try { return JSON.parse(p.hashtags!); } catch { return p.hashtags!.split(/[\s,]+/).filter(Boolean); } })() : [],
-    timestamp: p.timestamp?.toISOString() || new Date().toISOString(),
-    hasCTA: p.hasCTA || false,
-    hasOffer: p.hasOffer || false,
-  }));
+  return rows.map(r => {
+    const p = r.post;
+    const c = r.classification;
+    return {
+      id: p.postId,
+      caption: p.caption || "",
+      likes: p.likes || 0,
+      comments: p.comments || 0,
+      views: p.views || undefined,
+      mediaType: p.mediaType || "IMAGE",
+      hashtags: p.hashtags ? (() => { try { return JSON.parse(p.hashtags!); } catch { return p.hashtags!.split(/[\s,]+/).filter(Boolean); } })() : [],
+      timestamp: p.timestamp?.toISOString() || new Date().toISOString(),
+      hasCTA: p.hasCTA || false,
+      hasOffer: p.hasOffer || false,
+      hookArchetype: c?.hookArchetype || "UNKNOWN",
+      narrative: c?.narrative || "UNKNOWN",
+      ctaType: c?.ctaType || "UNKNOWN",
+      offerType: c?.offerType || "UNKNOWN",
+      emotionalTrigger: c?.emotionalTrigger || "UNKNOWN",
+      awarenessStage: c?.awarenessStage || "UNKNOWN",
+      positioningStyle: c?.positioningStyle || "UNKNOWN",
+      contentFormatIntent: c?.contentFormatIntent || "UNKNOWN",
+      primaryGoal: c?.primaryGoal || "UNKNOWN",
+      primaryHook: c?.primaryHook || null,
+      primaryAngle: c?.primaryAngle || null,
+    };
+  });
 }
 
 export async function getStoredCommentsForMIv3(competitorId: string, accountId: string) {

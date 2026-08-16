@@ -192,6 +192,7 @@ export interface CialdiniReasoning {
    * Trust Transfer Design (the marketing-logic core), not as a standalone label.
    */
   groundedInTrustMechanism?: string;
+  _system_validation?: import("../shared/llm-reliability/types").SystemValidationFlag;
 }
 
 export type RiskSeverity = "low" | "moderate" | "high" | "critical";
@@ -225,6 +226,7 @@ export interface TrustTransferDesign {
   retryCount: number;
   modelUsed: string;
   generatedAt: string;
+  _system_validation?: import("../shared/llm-reliability/types").SystemValidationFlag;
 }
 
 export interface PersuasionRoute {

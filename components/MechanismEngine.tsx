@@ -55,7 +55,7 @@ export default function MechanismEngine({ isActive }: Props) {
   const { selectedCampaignId } = useCampaign();
   const baseUrl = getApiUrl();
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const [analyzing, setAnalyzing] = useState(false);
   const [strategyRoot, setStrategyRoot] = useState<any>(null);
 

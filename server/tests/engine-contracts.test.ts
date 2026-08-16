@@ -2,6 +2,8 @@
 import { describe, it, expect } from "vitest";
 import { checkAnalyticalEnrichmentIntegrity } from "../system-control/structural-checks";
 import { verifySynthesisPreservation } from "../orchestrator/plan-synthesis";
+import { SystemValidationFlagSchema } from "../shared/llm-reliability/system-validation";
+
 
 describe("Seal #10 / F2.3 — checkAnalyticalEnrichmentIntegrity escalates to BLOCK when consumers > 0", () => {
   it("returns PASS when AEL is not partial", () => {
@@ -41,8 +43,8 @@ describe("Seal #10 / F4.3 — build-plan AI response zod schema enforcement", ()
     mechanism: z.object({ name: z.string().min(1), explanation: z.string().min(1) }),
     offer: z.string().min(1),
     funnel: z.object({ top: z.string().min(1), middle: z.string().min(1), bottom: z.string().min(1) }),
-    contentDna: z.object({}).passthrough(),
-    kpiRules: z.object({}).passthrough(),
+    contentDna: z.object({}).extend({ _system_validation: SystemValidationFlagSchema.optional() }),
+    kpiRules: z.object({}).extend({ _system_validation: SystemValidationFlagSchema.optional() }),
   });
 
   it("rejects responses missing required top-level fields", () => {

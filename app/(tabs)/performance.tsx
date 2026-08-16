@@ -8,6 +8,7 @@ import TruthSubmissionCard from '@/components/TruthSubmissionCard';
 import { SECTION_STATE_LABELS, LINEAGE_STATE_LABELS, DECISION_VERDICT_LABELS, DECISION_OUTCOME_LABELS, EXECUTION_STATUS_LABELS, ATTRIBUTION_CONFIDENCE_LABELS, BUSINESS_VERDICT_LABELS, INTERPRETATION_STATUS_LABELS } from '@/shared/performance-labels';
 import { SectionStateCard, StateBadge, stateTone } from '@/components/performance/SectionStateCard';
 import { Panel, Metric, ExpandRow, DetailText, colors, formatEnum, verdictTone, labelMaps } from '@/components/performance/PerformancePrimitives';
+import { GlobalHeader } from '@/components/GlobalHeader';
 
 const C = colors;
 
@@ -32,12 +33,8 @@ export default function PerformanceScreen() {
   if (!data) return null;
 
   return (
-    <View style={styles.root}>
-      <View style={styles.header}>
-        <View style={styles.headerIcon}><Feather name="activity" size={18} color={C.purple} /></View>
-        <View style={styles.headerCopy}><Text style={styles.kicker}>WEEKLY PERFORMANCE LOOP</Text><Text style={styles.title}>Performance console</Text><Text style={styles.subtitle}>What the plan said. What shipped. What moved. What we can honestly learn.</Text></View>
-        <View style={styles.headerRight}><Text style={styles.generated}>{formatTime(data.generatedAt)}</Text><View style={styles.live}><View style={styles.liveDot} /><Text style={styles.liveText}>Polling</Text></View></View>
-      </View>
+    <View style={[styles.root, { backgroundColor: '#0F0F13' }]}>
+      <GlobalHeader title="PERFORMANCE CONSOLE" />
       <View style={styles.toolbar}><View><Text style={styles.workspace}>{shell.activeWorkspace?.name || 'Active workspace'}</Text><Text style={styles.toolbarSub}>Campaign evidence, not estimates</Text></View>{!wide ? <Pressable onPress={() => setTrustOpen(v => !v)} style={styles.trustToggle}><Feather name="shield" size={14} color={C.purple} /><Text style={styles.trustToggleText}>{trustOpen ? 'Hide trust rail' : 'Show trust rail'}</Text></Pressable> : null}</View>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={query.isFetching && !query.isLoading} onRefresh={() => query.refetch()} tintColor={C.purple} />}>
         <View style={[styles.columns, tablet && !wide ? styles.tabletColumns : null]}>

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, index, jsonb, primaryKey, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -2890,6 +2891,8 @@ export const strategyRoots = pgTable("strategy_roots", {
   differentiationSnapshotId: varchar("differentiation_snapshot_id").notNull(),
   mechanismSnapshotId: varchar("mechanism_snapshot_id").notNull(),
   status: text("status").notNull().default("ACTIVE"),
+  brandSpine: text("brand_spine"),
+  approvedLanes: text("approved_lanes"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

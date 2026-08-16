@@ -850,6 +850,10 @@ describe("Market Intelligence V3 - Goal Mode Weighting", () => {
     const reachResult = computeDominanceForCompetitor(signals[0], signals, confidence, "REACH_MODE");
     const stratResult = computeDominanceForCompetitor(signals[0], signals, confidence, "STRATEGY_MODE");
 
+    console.log("VITEST_REACH:", reachResult.dominanceScore, reachResult.dominanceModeMetadata);
+    console.log("VITEST_STRAT:", stratResult.dominanceScore, stratResult.dominanceModeMetadata);
+    console.log("VITEST_CONF:", confidence);
+
     expect(reachResult.dominanceScore).toBeGreaterThanOrEqual(0);
     expect(reachResult.dominanceScore).toBeLessThanOrEqual(100);
     expect(stratResult.dominanceScore).toBeGreaterThanOrEqual(0);
@@ -892,17 +896,17 @@ describe("Post-Deployment Audit Safeguards", () => {
       expect(result.failures.some((f: string) => f.includes("marketState"))).toBe(true);
     });
 
-    it("A3.2) getCachedSnapshot filters by status=COMPLETE (source code verification)", () => {
+    it("A3.2) getCachedSnapshot filters by status=COMPLETE or PARTIAL (source code verification)", () => {
       const fs = require("fs");
       const engineSrc = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
       const cacheFunction = engineSrc.match(/async function getCachedSnapshot[\s\S]*?^}/m)?.[0] || engineSrc;
-      expect(cacheFunction).toContain('eq(miSnapshots.status, "COMPLETE")');
+      expect(cacheFunction).toContain('inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"])');
     });
 
-    it("A3.3) /snapshot route filters by status=COMPLETE (source code verification)", () => {
+    it("A3.3) /snapshot route filters by status=COMPLETE or PARTIAL (source code verification)", () => {
       const fs = require("fs");
       const routesSrc = fs.readFileSync("server/market-intelligence-v3/routes.ts", "utf-8");
-      expect(routesSrc).toContain('eq(miSnapshots.status, "COMPLETE")');
+      expect(routesSrc).toContain('inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"])');
     });
 
     it("A3.4) persistValidatedSnapshot downgrades invalid COMPLETE to PARTIAL", () => {
@@ -957,7 +961,7 @@ describe("Post-Deployment Audit Safeguards", () => {
       const fs = require("fs");
       const engineSrc = fs.readFileSync("server/market-intelligence-v3/engine.ts", "utf-8");
       expect(engineSrc).toContain("dataFreshnessDays");
-      expect(engineSrc).toContain("computeDataFreshnessDays");
+      expect(engineSrc).toContain("computeEvidenceFreshness");
     });
 
     it("A6.3) UI displays data_age with freshness coloring", () => {
@@ -1572,9 +1576,9 @@ describe("Layer-0 Signal-Only Contract", () => {
     expect(a.isDepressed).toBe(b.isDepressed);
   });
 
-  it("ENGINE_VERSION is 15", () => {
+  it("ENGINE_VERSION is 19", () => {
     const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-    expect(source).toContain("export const ENGINE_VERSION = 15;");
+    expect(source).toContain("export const ENGINE_VERSION = 19;");
   });
 
   it("schema uses market_diagnosis and threat_signals columns (not old names)", () => {
@@ -1585,13 +1589,13 @@ describe("Layer-0 Signal-Only Contract", () => {
     expect(source).not.toContain("defensive_risks");
   });
 
-  it("frontend uses threats tab (not actions/recommendations)", () => {
+  it("frontend uses dynamics and changes tabs (not actions/recommendations)", () => {
     const source = require("fs").readFileSync("components/CompetitiveIntelligence.tsx", "utf-8");
-    expect(source).toContain("'threats'");
-    expect(source).toContain("Threats");
+    expect(source).toContain("'changes'");
+    expect(source).toContain("Changes");
     expect(source).not.toContain("'recommendations'");
     expect(source).not.toContain("label: 'Actions'");
-    expect(source).toContain("renderThreats");
+    expect(source).toContain("renderChanges");
     expect(source).not.toContain("renderRecommendations");
   });
 
@@ -1795,9 +1799,9 @@ describe("Layer-0 Signal-Only Contract", () => {
       expect(deriveCompetitionIntensityLevel(intensity)).not.toBe("MINIMAL");
     });
 
-    it("CI-18) ENGINE_VERSION is 15 after demand pressure hardening", () => {
+    it("CI-18) ENGINE_VERSION is 19 after demand pressure hardening", () => {
       const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-      expect(source).toContain("export const ENGINE_VERSION = 15;");
+      expect(source).toContain("export const ENGINE_VERSION = 19;");
     });
   });
 
@@ -2084,9 +2088,9 @@ describe("Layer-0 Signal-Only Contract", () => {
       expect(source).toContain("lifecycle: CompetitorLifecycle");
     });
 
-    it("EC-4) ENGINE_VERSION = 15 matches demand pressure hardening", () => {
+    it("EC-4) ENGINE_VERSION = 19 matches demand pressure hardening", () => {
       const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
-      expect(source).toContain("export const ENGINE_VERSION = 15;");
+      expect(source).toContain("export const ENGINE_VERSION = 19;");
     });
   });
 
@@ -2313,10 +2317,10 @@ describe("Layer-0 Signal-Only Contract", () => {
       expect(source).toContain("MI snapshot version mismatch");
     });
 
-    it("VER-3) Old v14 code replaced — no ENGINE_VERSION = 14 reference in constants", () => {
+    it("VER-3) Old code replaced — no ENGINE_VERSION = 14 or 15 reference in constants", () => {
       const source = require("fs").readFileSync("server/market-intelligence-v3/constants.ts", "utf-8");
       expect(source).not.toContain("export const ENGINE_VERSION = 14;");
-      expect(source).toContain("export const ENGINE_VERSION = 15;");
+      expect(source).toContain("export const ENGINE_VERSION = 19;");
     });
 
     it("VER-4) deriveTrajectoryDirection uses new demand pressure parameter", () => {

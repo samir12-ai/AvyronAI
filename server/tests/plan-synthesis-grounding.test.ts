@@ -436,10 +436,10 @@ describe("verifySynthesisPreservation", () => {
       planSource: "decision_driven" as const,
       degraded: false,
       strategicSummary: {
-        strategy: "Growth using Premium Authority Zone with The Clarity Accelerator",
+        strategy: "Premium Authority Zone",
         targetAudience: "B2B professionals",
         growthObjective: "Lead gen",
-        rationale: "Data-driven",
+        rationale: "The Clarity Accelerator",
       },
       monthlyObjective: { objective: "50 leads", type: "leads", targetMetric: "Leads", targetValue: "50" },
       kpiStructure: {

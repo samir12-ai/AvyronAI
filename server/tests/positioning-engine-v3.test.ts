@@ -28,22 +28,22 @@ describe('Positioning Engine V3 — Layer Tests', () => {
   describe('Layer 1: Category Detection', () => {
     it('should detect fitness category', () => {
       const mi = { marketState: 'Fitness workout gym industry' };
-      expect(layer1_categoryDetection(mi)).toBe('fitness');
+      expect(layer1_categoryDetection(mi).macro).toBe('fitness');
     });
 
     it('should detect marketing category', () => {
       const mi = { marketState: 'Social media marketing brand audience' };
-      expect(layer1_categoryDetection(mi)).toBe('marketing');
+      expect(layer1_categoryDetection(mi).macro).toBe('marketing');
     });
 
     it('should return general for unknown content', () => {
       const mi = { marketState: 'random gibberish xyz' };
-      expect(layer1_categoryDetection(mi)).toBe('general');
+      expect(layer1_categoryDetection(mi).macro).toBe('general');
     });
 
     it('should handle empty data', () => {
       const mi = {};
-      expect(layer1_categoryDetection(mi)).toBe('general');
+      expect(layer1_categoryDetection(mi).macro).toBe('general');
     });
   });
 
@@ -345,7 +345,7 @@ describe('Positioning Engine V3 — Layer Tests', () => {
 
       const cat1 = layer1_categoryDetection(mi);
       const cat2 = layer1_categoryDetection(mi);
-      expect(cat1).toBe(cat2);
+      expect(cat1).toEqual(cat2);
 
       const map1 = layer2_marketNarrativeMap(mi);
       const map2 = layer2_marketNarrativeMap(mi);
@@ -359,7 +359,7 @@ describe('Positioning Engine V3 — Layer Tests', () => {
 
   describe('Adversarial Inputs', () => {
     it('should handle null/undefined fields gracefully', () => {
-      expect(layer1_categoryDetection({})).toBe('general');
+      expect(layer1_categoryDetection({}).macro).toBe('general');
       expect(layer2_marketNarrativeMap({})).toEqual({});
       expect(layer3_narrativeSaturationDetection({})).toEqual({});
 

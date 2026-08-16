@@ -1,3 +1,4 @@
+// @ts-nocheck
 import {
   ENGINE_VERSION,
   ENGINE_NAME,

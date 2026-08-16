@@ -8,6 +8,7 @@ import {
   growthCampaigns,
 } from "../shared/schema";
 import { aiChat } from "./ai-client";
+import { generateWithRepair, LLMReliabilityError } from "./shared/llm-reliability/reliability-runner";
 import { computeStrategyHash } from "./root-bundle";
 
 import { resolveAccountId } from "./auth";
@@ -253,6 +254,31 @@ export function checkFeasibility(
 
   return { verdict, score, explanation, constraints, budgetAdjustment };
 }
+
+import { z } from "zod";
+
+const SimulationCaseSchema = z.object({
+  expectedReach: z.number(),
+  expectedLeads: z.number(),
+  expectedCustomers: z.number(),
+  expectedRevenue: z.number(),
+  expectedCac: z.number(),
+  expectedCpl: z.number(),
+  achievementPct: z.number(),
+  summary: z.string(),
+  lever: z.string(),
+});
+
+const SimulationCandidateSchema = z.object({
+  conservativeCase: SimulationCaseSchema,
+  baseCase: SimulationCaseSchema,
+  upsideCase: SimulationCaseSchema,
+  confidenceScore: z.number(),
+  keyAssumptions: z.array(z.string()),
+  bottleneckAlerts: z.array(z.string()),
+  constraintSimulation: z.record(z.any()),
+  _system_validation: z.object({ passed: z.boolean(), confidence: z.string(), reason: z.string() }).optional()
+});
 
 export async function generateSimulation(
   campaignId: string,

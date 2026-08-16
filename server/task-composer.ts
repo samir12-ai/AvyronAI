@@ -203,13 +203,13 @@ export function registerTaskComposerRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const [plan] = await db.select().from(strategicPlans)
-        .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, req.params.campaignId)))
+        .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, req.params.campaignId as string)))
         .orderBy(desc(strategicPlans.createdAt)).limit(1);
 
       if (!plan) return res.json({ hasTasks: false, tasks: [] });
 
       const tasks = await db.select().from(executionTasks)
-        .where(and(eq(executionTasks.planId, plan.id), eq(executionTasks.campaignId, req.params.campaignId)));
+        .where(and(eq(executionTasks.planId, plan.id), eq(executionTasks.campaignId, req.params.campaignId as string)));
 
       const today = tasks.filter(t => t.dayNumber === 1 || t.priority === "high");
       const thisWeek = tasks.filter(t => t.weekNumber === 1);
@@ -247,7 +247,7 @@ export function registerTaskComposerRoutes(app: Express) {
 
       await db.update(executionTasks)
         .set({ status, updatedAt: new Date() })
-        .where(eq(executionTasks.id, req.params.taskId));
+        .where(eq(executionTasks.id, req.params.taskId as string));
 
       res.json({ success: true, status });
     } catch (err: any) {

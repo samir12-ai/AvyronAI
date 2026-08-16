@@ -16,15 +16,17 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.get("/api/leads", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.json({ leads: [], disabled: true });
       }
       const status = req.query.status as string;
       const limit = parseInt(req.query.limit as string) || 50;
 
-      let query = db.select().from(leads).where(eq(leads.accountId, accountId));
+      let query = db.select().from(leads).where(and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId)));
       if (status) {
-        query = db.select().from(leads).where(and(eq(leads.accountId, accountId), eq(leads.status, status)));
+        query = db.select().from(leads).where(and(and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId)), eq(leads.status, status)));
       }
       const result = await query.orderBy(desc(leads.createdAt)).limit(limit);
       res.json({ leads: result });
@@ -36,10 +38,12 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.post("/api/leads", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
-      const { name, email, phone, customFields, sourceType, sourcePostId, sourceCampaign, sourceCtaVariantId, sourceTrackingId, sourceLandingPageId, sourceLeadMagnetId, campaignId } = req.body;
+      const { name, email, phone, customFields, sourceType, sourcePostId, sourceCampaign, sourceCtaVariantId, sourceTrackingId, sourceLandingPageId, sourceLeadMagnetId } = req.body;
       // Doctrine W5: campaignId is an optional FK tag; if supplied, validate ownership.
       if (campaignId) {
         try { await assertCampaignBelongsTo(accountId, campaignId); }
@@ -66,6 +70,8 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.put("/api/leads/:id/status", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       const { status, notes } = req.body;
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
@@ -74,12 +80,12 @@ export function registerLeadCaptureRoutes(app: Express) {
       if (!validStatuses.includes(status)) {
         return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
       }
-      const existing = await db.select().from(leads).where(and(eq(leads.id, req.params.id), eq(leads.accountId, accountId))).limit(1);
+      const existing = await db.select().from(leads).where(and(eq(leads.id, req.params.id), and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId)))).limit(1);
       if (!existing[0]) return res.status(404).json({ error: "Lead not found" });
 
       const updated = await db.update(leads)
         .set({ status, notes: notes || existing[0].notes, updatedAt: new Date() })
-        .where(and(eq(leads.id, req.params.id), eq(leads.accountId, accountId)))
+        .where(and(eq(leads.id, req.params.id), and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId))))
         .returning();
 
       await logAudit(accountId, "LEAD_STATUS_CHANGED", {
@@ -95,9 +101,11 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.delete("/api/leads/:id", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
-      const existing = await db.select().from(leads).where(and(eq(leads.id, req.params.id), eq(leads.accountId, accountId))).limit(1);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
+      const existing = await db.select().from(leads).where(and(eq(leads.id, req.params.id), and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId)))).limit(1);
       if (!existing[0]) return res.status(404).json({ error: "Lead not found" });
-      await db.delete(leads).where(and(eq(leads.id, req.params.id), eq(leads.accountId, accountId)));
+      await db.delete(leads).where(and(eq(leads.id, req.params.id), and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId))));
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -107,11 +115,13 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.get("/api/lead-forms", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.json({ forms: [], disabled: true });
       }
       const result = await db.select().from(leadForms)
-        .where(eq(leadForms.accountId, accountId))
+        .where(and(eq(leadForms.accountId, accountId), eq(leadForms.campaignId, campaignId)))
         .orderBy(desc(leadForms.createdAt));
       res.json({ forms: result });
     } catch (error: any) {
@@ -122,6 +132,8 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.post("/api/lead-forms", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
@@ -143,7 +155,9 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.put("/api/lead-forms/:id", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
-      const existing = await db.select().from(leadForms).where(and(eq(leadForms.id, req.params.id), eq(leadForms.accountId, accountId))).limit(1);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
+      const existing = await db.select().from(leadForms).where(and(eq(leadForms.id, req.params.id), and(eq(leadForms.accountId, accountId), eq(leadForms.campaignId, campaignId)))).limit(1);
       if (!existing[0]) return res.status(404).json({ error: "Lead form not found" });
       const { name, fields, thankYouMessage, redirectUrl, isActive } = req.body;
       const updated = await db.update(leadForms).set({
@@ -153,7 +167,7 @@ export function registerLeadCaptureRoutes(app: Express) {
         ...(redirectUrl !== undefined && { redirectUrl }),
         ...(isActive !== undefined && { isActive }),
         updatedAt: new Date(),
-      }).where(and(eq(leadForms.id, req.params.id), eq(leadForms.accountId, accountId))).returning();
+      }).where(and(eq(leadForms.id, req.params.id), and(eq(leadForms.accountId, accountId), eq(leadForms.campaignId, campaignId)))).returning();
       res.json({ form: updated[0] });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -220,10 +234,12 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.post("/api/tracking-links", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.status(403).json({ error: "Lead capture is not enabled" });
       }
-      const { destinationUrl, linkType, postId, campaignId, ctaVariantId, whatsappNumber, whatsappMessage } = req.body;
+      const { destinationUrl, linkType, postId, ctaVariantId, whatsappNumber, whatsappMessage } = req.body;
       if (!destinationUrl) {
         return res.status(400).json({ error: "destinationUrl is required" });
       }
@@ -256,11 +272,13 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.get("/api/tracking-links", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.json({ links: [], disabled: true });
       }
       const result = await db.select().from(trackingLinks)
-        .where(eq(trackingLinks.accountId, accountId))
+        .where(and(eq(trackingLinks.accountId, accountId), eq(trackingLinks.campaignId, campaignId)))
         .orderBy(desc(trackingLinks.createdAt));
       res.json({ links: result });
     } catch (error: any) {
@@ -271,13 +289,15 @@ export function registerLeadCaptureRoutes(app: Express) {
   app.get("/api/leads/stats", requireCampaign, async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("lead_capture_enabled", accountId))) {
         return res.json({ stats: null, disabled: true });
       }
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      const allLeads = await db.select().from(leads).where(eq(leads.accountId, accountId));
+      const allLeads = await db.select().from(leads).where(and(eq(leads.accountId, accountId), eq(leads.campaignId, campaignId)));
       const monthLeads = allLeads.filter(l => l.createdAt && l.createdAt >= monthStart);
       const converted = allLeads.filter(l => l.status === "converted");
       const totalRevenue = allLeads.reduce((sum, l) => sum + (l.revenue || 0), 0);

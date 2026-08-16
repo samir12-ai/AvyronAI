@@ -20,7 +20,7 @@ const platforms = [
 
 export function PlatformPicker({ selected, onChange, single }: PlatformPickerProps) {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
 
   const handleToggle = (id: string) => {

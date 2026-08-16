@@ -84,10 +84,12 @@ export function registerConversionTrackingRoutes(app: Express) {
   app.post("/api/conversion-events", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.status(403).json({ error: "Conversion tracking is not enabled" });
       }
-      const { eventType, trackingId, leadId, postId, ctaVariantId, campaignId, landingPageId, leadMagnetId, metadata } = req.body;
+      const { eventType, trackingId, leadId, postId, ctaVariantId, landingPageId, leadMagnetId, metadata } = req.body;
       if (!eventType) {
         return res.status(400).json({ error: "eventType is required" });
       }
@@ -119,6 +121,8 @@ export function registerConversionTrackingRoutes(app: Express) {
   app.get("/api/conversion-events", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.json({ events: [], disabled: true });
       }
@@ -128,11 +132,11 @@ export function registerConversionTrackingRoutes(app: Express) {
       let result;
       if (eventType) {
         result = await db.select().from(conversionEvents)
-          .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.eventType, eventType)))
+          .where(and(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)), eq(conversionEvents.eventType, eventType)))
           .orderBy(desc(conversionEvents.createdAt)).limit(limit);
       } else {
         result = await db.select().from(conversionEvents)
-          .where(eq(conversionEvents.accountId, accountId))
+          .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)))
           .orderBy(desc(conversionEvents.createdAt)).limit(limit);
       }
       res.json({ events: result });
@@ -144,6 +148,8 @@ export function registerConversionTrackingRoutes(app: Express) {
   app.get("/api/conversion-events/stats", requireCampaign, async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const campaignId = req.body.campaignId || req.query.campaignId || req.headers["campaign-id"];
+      if (!campaignId) return res.status(400).json({ error: "campaignId is required" });
       if (!(await featureFlagService.isEnabled("conversion_tracking_enabled", accountId))) {
         return res.json({ stats: null, disabled: true });
       }
@@ -151,7 +157,7 @@ export function registerConversionTrackingRoutes(app: Express) {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
       const allEvents = await db.select().from(conversionEvents)
-        .where(eq(conversionEvents.accountId, accountId));
+        .where(and(eq(conversionEvents.accountId, accountId), eq(conversionEvents.campaignId, campaignId)));
 
       const monthEvents = allEvents.filter(e => e.createdAt && e.createdAt >= monthStart);
 

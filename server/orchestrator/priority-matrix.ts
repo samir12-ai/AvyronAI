@@ -134,7 +134,7 @@ export interface NeedsInputPayload {
 
 export interface EngineStepResult {
   engineId: EngineId;
-  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED" | "NEEDS_INPUT" | "BLOCKED_BY_INTEGRITY" | "TIMEOUT" | "CONTRACT_INCOMPLETE";
+  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "SKIPPED_AWAITING_LIVE_DATA" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED" | "NEEDS_INPUT" | "BLOCKED_BY_INTEGRITY" | "TIMEOUT" | "CONTRACT_INCOMPLETE";
   output: any;
   snapshotId?: string;
   durationMs: number;

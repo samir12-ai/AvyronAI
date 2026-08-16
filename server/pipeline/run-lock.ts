@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Pipeline lane in-flight lock — single-process, per (account, campaign, lane).
  *

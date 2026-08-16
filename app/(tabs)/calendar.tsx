@@ -32,6 +32,7 @@ import { generateId } from '@/lib/storage';
 import { getApiUrl , authFetch } from '@/lib/query-client';
 import { createRouteForContentType } from '@/lib/media-types';
 import type { ScheduledPost } from '@/lib/types';
+import { GlobalHeader } from '@/components/GlobalHeader';
 
 interface DBCalendarEntry {
   id: string;
@@ -98,7 +99,7 @@ function AIPulse({ color }: { color: string }) {
 
 export default function CalendarScreen() {
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const isDark = true; // forced dark mode
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { contentItems, removeContentItem, scheduledPosts, addScheduledPost, removeScheduledPost, mediaItems, brandProfile } = useApp();
@@ -799,28 +800,25 @@ export default function CalendarScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingTop: Platform.OS === 'web' ? 67 + 16 : insets.top + 16 },
-        ]}
-      >
-        <View style={styles.header}>
-          <View>
-            <Text style={[styles.title, { color: colors.text }]}>{t('calendar.title')}</Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              {t('calendar.subtitle')}
-            </Text>
-          </View>
+    <View style={[styles.container, { backgroundColor: '#0F0F13' }]}>
+      <GlobalHeader 
+        title="CALENDAR" 
+        rightElement={
           <Pressable
             onPress={handleAddSchedule}
             style={[styles.addButton, { backgroundColor: colors.primary }]}
           >
             <Ionicons name="add" size={24} color="#fff" />
           </Pressable>
-        </View>
+        }
+      />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: Platform.OS === 'web' ? 67 + 16 : 16 },
+        ]}
+      >
 
         <View style={[styles.aiPlanBanner, { backgroundColor: isDark ? '#10B981' + '10' : '#10B981' + '08', borderColor: '#10B981' + '25' }]}>
           <View style={styles.aiPlanBannerLeft}>

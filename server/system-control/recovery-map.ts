@@ -37,6 +37,7 @@ export const BLOCK_METADATA: Record<BlockCode | "UNKNOWN_BLOCK", { retrySafe: bo
   // Wired-active runtime repairs (pre-v1)
   NO_CONVERSION_PATH:               { retrySafe: true,  resolverActor: "system" },
   SCALE_WITHOUT_REAL_DATA:          { retrySafe: true,  resolverActor: "system" },
+  LOW_SIGNAL_TRUST:                 { retrySafe: true,  resolverActor: "system" },
   // v1 pure-mutation repairs
   BUDGET_OVERRIDE_ZERO_CONFIDENCE:  { retrySafe: true,  resolverActor: "system" },
   CHANNEL_CONFIDENCE_BELOW_MINIMUM: { retrySafe: true,  resolverActor: "system" },

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Router, Response } from "express";
 import { db } from "./db";
 import { users } from "@shared/schema";

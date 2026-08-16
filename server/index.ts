@@ -1627,8 +1627,7 @@ function setupErrorHandler(app: express.Application) {
   server.listen(
     {
       port,
-      host,
-      reusePort: host === "0.0.0.0", // reusePort only valid on non-loopback interfaces
+      host: "127.0.0.1",
     },
     () => {
       log(`express server serving on http://${host}:${port}`);
